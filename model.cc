@@ -2,6 +2,7 @@
 #include "tensorflow/cc/ops/standard_ops.h"
 #include "tensorflow/core/framework/tensor.h"
 #include "tensorflow/cc/framework/gradients.h"
+#include "tensorflow/c/c_api.h"
 
 #include "data_set.h"
 
