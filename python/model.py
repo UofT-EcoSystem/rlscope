@@ -21,15 +21,26 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import sys
 import pandas as pd
 import re
 import numpy as np
-import tensorflow as tf
 import argparse
+import os
+import shutil
+
+from tensorflow import pywrap_tensorflow as pywrap
+
+import tensorflow as tf
+# e.g.
+# https://github.com/tensorflow/tensorflow/blob/master/tensorflow/contrib/quantize/python/graph_matcher_test.py
+from tensorflow.contrib.quantize.python import graph_matcher
 
 from os.path import join as _j, abspath as _a, exists as _e, dirname as _d, basename as _b
 
 DNN_TF_CPP_ROOT = _d(_d(_a(__file__)))
+
+MODEL_PATH = _j(DNN_TF_CPP_ROOT, "checkpoints", "model", "model_checkpoint")
 
 N_DIGITS = 10  # Number of digits.
 X_FEATURE = 'x'  # Name of the input feature.
@@ -147,13 +158,49 @@ class CarExample:
     self.parser = parser
     self.args = args
 
+    self.expected_attrs = [
+      # Placeholder.
+      'features',
+      'labels',
+      # NN output.
+      'predictions',
+      # What we minimize via SGD.
+      'loss',
+      # Single step of SGD.
+      'step',
+    ]
+
+  def _check_model_loaded(self):
+    for attr in self.expected_attrs:
+      assert hasattr(self, attr)
+
+  def read_data(self):
     self.header, self.df = self.read_csv()
     self.batch_size = len(self.df)
-    self.sess = tf.InteractiveSession()
-    self.build_car_model()
+
+  @property
+  def model_exists(self):
+    return _e(_j(self.args.model_path, 'saved_model.pbtxt')) or \
+           _e(_j(self.args.model_path, 'saved_model.pb'))
 
   def run(self):
-    self.training_loop()
+    self.read_data()
+
+    self.sess = tf.InteractiveSession()
+
+    if self.args.rebuild_model and _e(self.args.model_path):
+      # print("> rm({path})".format(path=self.args.model_path))
+      shutil.rmtree(self.args.model_path)
+      # sys.exit(1)
+
+    if not self.model_exists:
+      self.define_model()
+      self.training_loop()
+      self.save_model()
+    else:
+      self.load_model()
+    self._check_model_loaded()
+
     self.inference()
 
   def read_csv(self):
@@ -199,57 +246,187 @@ class CarExample:
     return prediction * (self.md['max_price'] - self.md['min_price']) + self.md['min_price']
 
   @property
-  def features(self):
+  def feature_names(self):
     return self.header[:-1]
 
   @property
   def label(self):
     return self.header[-1]
 
-  def build_car_model(self):
+  def lookup_ops(self, scope=None, sub_scope=None):
+    '''
+    Lookup operation beloning to a given scope.
+    '''
+    assert scope is not None or sub_scope is not None
+
+    if scope is not None:
+      scope_regex = r'^{scope}/'.format(scope=scope)
+    else:
+      scope_regex = r'\b{scope}/'.format(scope=sub_scope)
+
+    return [op for op in tf.get_default_graph().get_operations() \
+            if re.search(scope_regex, op.name)]
+
+  def lookup_predictions(self, scope):
+    """
+    ipdb> self.predictions
+    <tf.Tensor 'outputs/predictions/Tanh:0' shape=(?, 1) dtype=float32>
+    """
+    print("> Lookup predictions")
+    ops = self.lookup_ops(scope=scope)
+    pred_op = ops[-1]
+    tensor = self._tensor_from_ops([pred_op])
+    # Not clear to me if we're guaranteed that pred_op will be the last operation...
+    assert tensor.name == 'outputs/predictions/Tanh:0'
+    return tensor
+
+    # More direct method:
+    # g.get_tensor_by_name('outputs/predictions/Tanh:0')
+
+  def lookup_loss(self, scope):
+    """
+    ipdb> g.get_collection('losses')
+      [<tf.Tensor 'mean_squared_error/value:0' shape=() dtype=float32>]
+    ipdb> pp g.get_collection('regularization_losses')
+      [<tf.Tensor 'dense/kernel/Regularizer/l2_regularizer:0' shape=() dtype=float32>,
+      <tf.Tensor 'dense_1/kernel/Regularizer/l2_regularizer:0' shape=() dtype=float32>,
+      <tf.Tensor 'outputs/predictions/kernel/Regularizer/l2_regularizer:0' shape=() dtype=float32>]
+
+    PROBLEM: What we really want to "get" here is the input to optimizer.minimize(...).
+
+    ipdb> g.get_tensor_by_name('loss/loss:0')
+    <tf.Tensor 'loss/loss:0' shape=() dtype=float32>
+    """
+    print("> Lookup loss")
+
+    ops = self.lookup_ops(scope=scope)
+    # ipdb> self.lookup_ops(scope='loss')
+    # [<tf.Operation 'loss/loss' type=Add>]
+
+    tensor = self._tensor_from_ops(ops)
+    assert tensor.name == 'loss/loss:0'
+
+    return tensor
+
+    # return tf.get_default_graph().get_tensor_by_name('loss/loss:0')
+
+    # More direct method:
+    # g.get_operation_by_name('loss/loss')
+
+  def _tensor_from_ops(self, ops):
+    assert len(ops) == 1
+    op = ops[0]
+    values = op.values()
+    assert len(values) == 1
+    value = values[0]
+    tensor = value
+    return tensor
+
+  def lookup_step(self):
+    print("> Lookup step")
+    # # ['variables', 'update_ops', 'train_op', 'regularization_losses', 'cond_context', 'losses', 'trainable_variables']
+    # assert tf.GraphKeys.TRAIN_OP in tf.get_default_graph().get_all_collection_keys()
+    # coll = tf.get_default_graph().get_collection(tf.GraphKeys.TRAIN_OP)
+    # assert len(coll) == 1
+    # return coll[0]
+
+    # More direct method:
+    tf.get_default_graph().get_operation_by_name('step/step')
+
+  def define_model(self):
+    print("> Define model")
     args = self.args
 
-    self.x = tf.placeholder(tf.float32, shape=(None, len(self.features)), name='features')
-    self.y = tf.placeholder(tf.float32, shape=(None,), name='labels')
+    # with tf.variable_scope('model'):
 
-    # self.x = tf.placeholder(tf.float32, None)
-    # self.y = tf.placeholder(tf.float32, None)
+    with tf.name_scope('inputs'):
+      self.features = tf.placeholder(tf.float32, shape=(None, len(self.feature_names)), name='features')
+      self.labels = tf.placeholder(tf.float32, shape=(None,), name='labels')
 
-    # import ipdb; ipdb.set_trace()
-    net = self.x
+    net = self.features
     act = tf.nn.tanh
     reg = tf.contrib.layers.l2_regularizer(scale=args.regularization_constant)
     net = tf.layers.dense(net, 3, activation=act, kernel_regularizer=reg)
     net = tf.layers.dense(net, 2, activation=act, kernel_regularizer=reg)
-    net = tf.layers.dense(net, 1, activation=act, kernel_regularizer=reg)
-    self.predictions = net
-    # mse_loss = tf.losses.mean_squared_error(self.y[:,np.newaxis], self.predictions)
-    mse_loss = tf.losses.mean_squared_error(self.y, tf.squeeze(self.predictions))
+    with tf.name_scope('outputs'):
+      net = tf.layers.dense(net, 1, activation=act, kernel_regularizer=reg, name='predictions')
+      # <tf.Tensor 'predictions/Tanh:0' shape=(?, 1) dtype=float32>
+      self.predictions = net
+    # mse_loss = tf.losses.mean_squared_error(self.labels[:,np.newaxis], self.predictions)
+    mse_loss = tf.losses.mean_squared_error(self.labels, tf.squeeze(self.predictions))
     # mse_loss = tf.reduce_mean(tf.squeeze(predictions - labels))
     reg_loss = tf.losses.get_regularization_loss()
     optim = tf.train.GradientDescentOptimizer(args.lr)
-    self.loss = mse_loss + reg_loss
-    self.step = optim.minimize(self.loss)
+    with tf.name_scope('loss'):
+      self.loss = tf.add(mse_loss, reg_loss, name='loss')
+    with tf.name_scope('step'):
+      self.step = optim.minimize(self.loss, name='step')
+
+    print("> Model defined.")
 
   def training_loop(self):
+    print("> Training loop")
     args = self.args
     self.sess.run(tf.global_variables_initializer())
-    x_data = self.df[self.features].values
+    x_data = self.df[self.feature_names].values
     y_data = self.df[self.label].values
     for i in range(args.training_steps):
       if i % 100 == 0:
-        loss = self.sess.run(self.loss, {self.x:x_data, self.y:y_data})
+        loss = self.sess.run(self.loss, {self.features:x_data, self.labels:y_data})
         print("Loss after {i} steps = {loss}".format(i=i, loss=loss))
-      self.sess.run(self.step, {self.x:x_data, self.y:y_data})
+      self.sess.run(self.step, {self.features:x_data, self.labels:y_data})
 
   def inference(self):
+    print("> Inference")
     FUEL_DIESEL = 0
     FUEL_GASOLINE = 1
     xs = np.array([110000., FUEL_DIESEL, 7.])
     xs = xs.reshape((1, len(xs)))
-    predictions = self.sess.run(self.predictions, {self.x:xs})
+    predictions = self.sess.run(self.predictions, {self.features:xs})
     predicted_price = self.as_price(np.squeeze(predictions))
     print("Price prediction = {pred} euros".format(pred=predicted_price))
+
+  def save_model(self):
+    # Create a builder
+    print("> Save model to {path}".format(path=self.args.model_path))
+    # os.makedirs(self.args.model_path, exist_ok=True)
+    if os.path.isdir(self.args.model_path) and is_empty_dir(self.args.model_path):
+      os.rmdir(self.args.model_path)
+    builder = tf.saved_model.builder.SavedModelBuilder(self.args.model_path)
+    builder.add_meta_graph_and_variables(self.sess,
+                                         [tf.saved_model.tag_constants.TRAINING],
+                                         signature_def_map=None,
+                                         assets_collection=None)
+    builder.save()
+
+  def load_model(self):
+    print("> Load trained model from {path}".format(path=self.args.model_path))
+    tf.saved_model.loader.load(self.sess,
+                               [tf.saved_model.tag_constants.TRAINING],
+                               self.args.model_path)
+
+    # Sets:
+    # self.features and self.labels.
+    phs = self.get_placeholders()
+    for ph in phs:
+      # Remove scope information
+      placeholder_name = _b(ph.name)
+      ph_tensor = self._tensor_from_ops([ph])
+      setattr(self, placeholder_name, ph_tensor)
+    # More direct method:
+    # g.get_tensor_by_name('inputs/features:0')
+    # g.get_tensor_by_name('inputs/labels:0')
+
+    self.step = self.lookup_step()
+    self.loss = self.lookup_loss('loss')
+    self.predictions = self.lookup_predictions('outputs')
+
+  def get_variables(self):
+    return tf.get_default_graph().get_collection(tf.GraphKeys.VARIABLES)
+
+  def get_placeholders(self):
+    return [op for op in tf.get_default_graph().get_operations() \
+            if op.type == 'Placeholder']
 
 def main():
   parser = argparse.ArgumentParser()
@@ -257,13 +434,23 @@ def main():
   parser.add_argument('--training-steps', type=int, default=5000)
   parser.add_argument('--regularization-constant', type=int, default=0.01)
   parser.add_argument('--lr', type=int, default=0.01)
+  parser.add_argument('--model-path', default=MODEL_PATH)
+  parser.add_argument('--rebuild-model', action='store_true')
+  parser.add_argument('--trace-tf', action='store_true', help="Print C-api calls made by python")
+
   args = parser.parse_args()
+
+  if args.trace_tf:
+    pywrap._wrap_tf_functions(debug_print=True)
 
   car_example = CarExample(parser, args)
 
   car_example.run()
 
   # tf.app.run()
+
+def is_empty_dir(path):
+  return len(os.listdir(path)) == 0
 
 if __name__ == '__main__':
   main()
