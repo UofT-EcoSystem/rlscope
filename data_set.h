@@ -37,6 +37,7 @@ public:
 
   // normalize a human input using the data set metadata
   initializer_list<float> input(float km, Fuel fuel, float age);
+  std::vector<float> input_vector(float km, Fuel fuel, float age);
 
   // convert a price outputted by the DNN to a human price
   float output(float price);

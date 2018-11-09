@@ -39,7 +39,15 @@ void DataSet::ReadCSVFile(string dir, string file_name) {
   data_set_metadata.std_age = metadata[3];
   data_set_metadata.min_price = metadata[4];
   data_set_metadata.max_price = metadata[5];
-  
+
+  cout << "Metadata:" << endl;
+  cout << "  mean_km:" << data_set_metadata.mean_km << endl;
+  cout << "  std_km:" << data_set_metadata.std_km << endl;
+  cout << "  mean_age:" << data_set_metadata.mean_age << endl;
+  cout << "  std_age:" << data_set_metadata.std_age << endl;
+  cout << "  min_price:" << data_set_metadata.min_price << endl;
+  cout << "  max_price:" << data_set_metadata.max_price << endl;
+
   // the other lines contain the features for each car
   for (int i = 2; i < lines.size(); ++i) {
     vector<float> features = ReadCSVLine(lines[i]);
@@ -64,6 +72,13 @@ initializer_list<float> DataSet::input(float km, Fuel fuel, float age) {
   age = (age - data_set_metadata.mean_age) / data_set_metadata.std_age;
   float f = fuel == Fuel::DIESEL ? -1.f : 1.f;
   return {km, f, age};
+}
+
+std::vector<float> DataSet::input_vector(float km, Fuel fuel, float age) {
+  km = (km - data_set_metadata.mean_km) / data_set_metadata.std_km;
+  age = (age - data_set_metadata.mean_age) / data_set_metadata.std_age;
+  float f = fuel == Fuel::DIESEL ? -1.f : 1.f;
+  return std::vector<float>{km, f, age};
 }
 
 float DataSet::output(float price) {

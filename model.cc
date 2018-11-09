@@ -15,6 +15,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <stdio.h>
+#include <string.h>
 #include <stdlib.h>
 
 #include <cstdlib>
@@ -175,6 +176,35 @@ public:
     return op;
   }
 
+  template <typename T>
+  void set_tensor_data(TF_Tensor* tensor, std::vector<T> vec) {
+    T* dst = reinterpret_cast<T*>(TF_TensorData(tensor));
+    const T* src = vec.data();
+    auto src_nbytes = sizeof(T)*vec.size();
+    auto dst_nbytes = TF_TensorByteSize(tensor);
+    assert(src_nbytes == dst_nbytes);
+    memcpy(dst, src, sizeof(T)*dst_nbytes);
+  }
+
+  void print_variables(TF_Session* session) {
+//    <tf.Variable 'dense/bias:0' shape=(3,) dtype=float32_ref>,
+//    <tf.Variable 'dense_1/kernel:0' shape=(3, 2) dtype=float32_ref>,
+//    <tf.Variable 'dense_1/bias:0' shape=(2,) dtype=float32_ref>,
+//    <tf.Variable 'predictions/kernel:0' shape=(2, 1) dtype=float32_ref>,
+//    <tf.Variable 'predictions/bias:0' shape=(1,) dtype=float32_ref>]
+    std::vector<std::string> variables{
+        "dense/kernel/read",
+        "dense/bias/read",
+        "dense_1/kernel/read",
+        "dense_1/bias/read",
+        "predictions/kernel/read",
+        "predictions/bias/read",
+    };
+    for (auto& var : variables) {
+      print_variable(session, var);
+    }
+  }
+
   void LoadModelCAPI() {
     auto path = model_path();
     if (!DirExists(path.c_str())) {
@@ -182,13 +212,12 @@ public:
       exit(EXIT_FAILURE);
     }
     // Load the saved model.
-//    const char kSavedModel[] = "cc/saved_model/testdata/half_plus_two/00000123";
-//    const string saved_model_dir = tensorflow::io::JoinPath(
-//        tensorflow::testing::TensorFlowSrcRoot(), kSavedModel);
     TF_SessionOptions* opt = TF_NewSessionOptions();
     TF_Buffer* run_options = TF_NewBufferFromString("", 0);
     TF_Buffer* metagraph = TF_NewBuffer();
     TF_Status* s = TF_NewStatus();
+    // NOTE: The "tag" used when loading the model must match the tag used when the model was saved.
+    // (e.g. using tag kSavedModelTagServe will result in an error).
     const char* tags[] = {tensorflow::kSavedModelTagTrain};
     TF_Graph* graph = TF_NewGraph();
     TF_Session* session = TF_LoadSessionFromSavedModel(
@@ -206,182 +235,89 @@ public:
     assert(result);
     TF_DeleteBuffer(metagraph);
 
-
     print_graph(graph);
 
-    const auto signature_def_map = metagraph_def.signature_def();
-    LOG(INFO) << "signature_def_map = ";
-    for (auto& it : signature_def_map) {
-      LOG(INFO) << "  key=" << it.first;
-      LOG(INFO) << "    " << it.second.DebugString();
-    }
+    // Doesn't print anything.
+//    const auto signature_def_map = metagraph_def.signature_def();
+//    LOG(INFO) << "signature_def_map = ";
+//    for (auto& it : signature_def_map) {
+//      LOG(INFO) << "  key=" << it.first;
+//      LOG(INFO) << "    " << it.second.DebugString();
+//    }
 
-    // Operations:
-    const string loss_name = "loss/loss";
-    const string step_name = "step/step";
-    // Tensors:
-    const string predictions_name = "outputs/predictions/Tanh";
-    const string features_name = "inputs/features";
-    const string labels_name = "inputs/labels";
-
-
-//    auto lookup_tensor = [graph] (const char* pretty_name, const std::string& name) -> TF_Tensor* {
-////      TF_Operation* op = TF_GraphOperationByName(graph, loss_name.c_str());
-////      MY_ASSERT(op != nullptr);
-////      auto debug_str = op->node.DebugString();
-////      std::cout << "> " << pretty_name << " = " << debug_str << std::endl;
-////      return op;
-//
-//      const tensorflow::string op_name =
-//          std::string(tensorflow::ParseTensorName(name).first);
-//      TF_Operation* input_op =
-//          TF_GraphOperationByName(graph, op_name.c_str());
-//      MY_ASSERT(input_op != nullptr);
-////      csession.SetInputs({{input_op, TF_TensorFromTensor(input, s)}});
-//      TF_Tensor* tensor = TF_TensorFromTensor(input, s);
-//      return tensor;
-//
-//    };
-
-    // JAMES NOTE: TF_Tensor's here are basically numpy arrays...looks like the feed-dict here is more like:
+    // JAMES NOTE: TF_Tensor's here are basically numpy arrays...
+    // Looks like the feed-dict here is more like:
     //   { TF_Operation : TF_Tensor }
     //   unlike in python where its
     //   { get_tensor(op) : nump.array(...) }
 
-    auto loss_op = lookup_op("loss", loss_name, graph);
-    auto step_op = lookup_op("step", step_name, graph);
+    auto loss_op = lookup_op("loss", "loss/loss", graph);
+    auto step_op = lookup_op("step", "step/step", graph);
 
-    auto predictions_op = lookup_op("predictions", predictions_name, graph);
-    auto features_op = lookup_op("features", features_name, graph);
-    auto labels_op = lookup_op("labels", labels_name, graph);
+    auto predictions_op = lookup_op("predictions", "outputs/predictions/Tanh", graph);
+    auto features_op = lookup_op("features", "inputs/features", graph);
+    auto labels_op = lookup_op("labels", "inputs/labels", graph);
 
-
-//    <tf.Variable 'dense/bias:0' shape=(3,) dtype=float32_ref>,
-//    <tf.Variable 'dense_1/kernel:0' shape=(3, 2) dtype=float32_ref>,
-//    <tf.Variable 'dense_1/bias:0' shape=(2,) dtype=float32_ref>,
-//    <tf.Variable 'predictions/kernel:0' shape=(2, 1) dtype=float32_ref>,
-//    <tf.Variable 'predictions/bias:0' shape=(1,) dtype=float32_ref>]
-    std::vector<std::string> variables{
-        "dense/kernel/read",
-        "dense/bias/read",
-        "dense_1/kernel/read",
-        "dense_1/bias/read",
-        "predictions/kernel/read",
-        "predictions/bias/read",
-    };
-    for (auto& var : variables) {
-      print_variable(session, var);
-    }
+    print_variables(session);
 
     // JAMES TODO: How can we create a TF_Tensor with a set of float-values?
 //    exit(EXIT_SUCCESS);
 
     CSession csession(session, /*close_session=*/false);
 
-//    csession.SetInputs({{input_op, TF_TensorFromTensor(input, s)}});
+    vector<float> feature_vector_02 = _data_set.input_vector(110000.f, Fuel::DIESEL, 7.f);
+    LOG(INFO) << "> Features vector 02: " << container_to_string(feature_vector_02);
 
-    tensorflow::Tensor features_tensor = Input::Initializer({_data_set.input(110000.f, Fuel::DIESEL, 7.f)}).tensor;
-    TF_Tensor* tf_features_tensor = TF_TensorFromTensor(features_tensor, s);
+    vector<int64_t> dims{1, static_cast<int64_t>(feature_vector_02.size())};
+    TF_Tensor* tf_features_tensor = TF_AllocateTensor(TF_FLOAT,
+        dims.data(), static_cast<int>(dims.size()),
+        sizeof(float)*feature_vector_02.size());
+    assert(tf_features_tensor != nullptr);
+
+    set_tensor_data(tf_features_tensor, feature_vector_02);
+    LOG(INFO) << "> Features tf_tensor: " << tf_tensor_to_string(tf_features_tensor);
     MY_ASSERT_EQ(TF_OK, TF_GetCode(s), s);
-//    std::vector<std::pair<TF_Operation*, TF_Tensor*>> inputs = {{features_op, &features_tensor}};
     std::vector<std::pair<TF_Operation*, TF_Tensor*>> inputs{{features_op, tf_features_tensor}};
-//    auto pair = std::pair<TF_Operation*, TF_Tensor*>({features_op, &features_tensor});
-//    std::pair<TF_Operation*, TF_Tensor*> pair;
-//    pair = std::make_pair();
-//    std::pair<TF_Operation*, TF_Tensor*> pair{features_op, &features_tensor};
-//    inputs.push_back({features_op, &features_tensor});
-//    inputs.push_back(pair);
     csession.SetInputs(inputs);
-
-//    ASSERT_TRUE(output_op != nullptr);
     csession.SetOutputs({predictions_op});
+
     csession.Run(s);
     MY_ASSERT_EQ(TF_OK, TF_GetCode(s), s);
 
-    TF_Tensor* out = csession.output_tensor(0);
-    MY_ASSERT(out != nullptr);
-    MY_ASSERT(TF_FLOAT == TF_TensorType(out));
+    auto print_prediction = [this, &csession] () {
+      MY_ASSERT(csession.output_values_.size() == 1);
+      TF_Tensor* out = csession.output_tensor(0);
+      MY_ASSERT(out != nullptr);
+      MY_ASSERT(TF_FLOAT == TF_TensorType(out));
 
-    MY_ASSERT(out->shape.num_elements() == 1);
-    auto output_value = reinterpret_cast<float*>(out->buffer->data())[0];
-    LOG(INFO) << "> Output value from neural-network: " << output_value;
-    auto pred_price = _data_set.output(output_value);
-    LOG(INFO) << "> Predicted price: " << pred_price;
+      MY_ASSERT(out->shape.num_elements() == 1);
+      auto output_value = reinterpret_cast<float*>(out->buffer->data())[0];
+      LOG(INFO) << "> Output value from neural-network: " << output_value;
+      auto pred_price = _data_set.output(output_value);
+      LOG(INFO) << "> Predicted price: " << pred_price;
+    };
+    print_prediction();
 
     csession.CloseAndDelete(s);
     MY_ASSERT_EQ(TF_OK, TF_GetCode(s), s);
     TF_DeleteGraph(graph);
-    TF_DeleteStatus(s);
 
     TF_CloseSession(session, s);
     MY_ASSERT_EQ(TF_OK, TF_GetCode(s), s);
     TF_DeleteSession(session, s);
 
-    exit(EXIT_SUCCESS);
+    TF_DeleteStatus(s);
 
-//    [ <tf.Variable 'dense/kernel:0' shape=(3, 3) dtype=float32_ref>,
-////    EXPECT_EQ(TF_OK, TF_GetCode(s)) << TF_Message(s);
-//    TF_CHECK_OK(TF_GetCode(s));
-//    CSession csession(session);
-//
-//    // Retrieve the regression signature from meta graph def.
-//    const auto signature_def_map = metagraph_def.signature_def();
-//    const auto signature_def = signature_def_map.at("regress_x_to_y");
-//
-//    const string input_name = "loss/loss";
-//    const string output_name = "loss/loss";
-////    const string input_name =
-////        signature_def.inputs().at(tensorflow::kRegressInputs).name();
-////    const string output_name =
-////        signature_def.outputs().at(tensorflow::kRegressOutputs).name();
-//
-//    // Write {0, 1, 2, 3} as tensorflow::Example inputs.
-//    Tensor input(tensorflow::DT_STRING, TensorShape({4}));
-//    for (tensorflow::int64 i = 0; i < input.NumElements(); ++i) {
-//      tensorflow::Example example;
-//      auto* feature_map = example.mutable_features()->mutable_feature();
-//      (*feature_map)["x"].mutable_float_list()->add_value(i);
-//      input.flat<string>()(i) = example.SerializeAsString();
-//    }
-//
-//    const tensorflow::string input_op_name =
-//        std::string(tensorflow::ParseTensorName(input_name).first);
-//    TF_Operation* input_op =
-//        TF_GraphOperationByName(graph, input_op_name.c_str());
-//    ASSERT_TRUE(input_op != nullptr);
-//    csession.SetInputs({{input_op, TF_TensorFromTensor(input, s)}});
-//    ASSERT_EQ(TF_OK, TF_GetCode(s)) << TF_Message(s);
-//
-//    const tensorflow::string output_op_name =
-//        std::string(tensorflow::ParseTensorName(output_name).first);
-//    TF_Operation* output_op =
-//        TF_GraphOperationByName(graph, output_op_name.c_str());
-//    ASSERT_TRUE(output_op != nullptr);
-//    csession.SetOutputs({output_op});
-//    csession.Run(s);
-//    ASSERT_EQ(TF_OK, TF_GetCode(s)) << TF_Message(s);
-//
-//    TF_Tensor* out = csession.output_tensor(0);
-//    ASSERT_TRUE(out != nullptr);
-//    EXPECT_EQ(TF_FLOAT, TF_TensorType(out));
-////    EXPECT_EQ(2, TF_NumDims(out));
-////    EXPECT_EQ(4, TF_Dim(out, 0));
-////    EXPECT_EQ(1, TF_Dim(out, 1));
-////    float* values = static_cast<float*>(TF_TensorData(out));
-////    // These values are defined to be (input / 2) + 2.
-////    EXPECT_EQ(2, values[0]);
-////    EXPECT_EQ(2.5, values[1]);
-////    EXPECT_EQ(3, values[2]);
-////    EXPECT_EQ(3.5, values[3]);
-//
-//    csession.CloseAndDelete(s);
-//    EXPECT_EQ(TF_OK, TF_GetCode(s)) << TF_Message(s);
-//    TF_DeleteGraph(graph);
-//    TF_DeleteStatus(s);
+    //
+    // NOTE: CSession was written to manage the lifetime of any SetInputs(Tensor) and output tensors.
+    // Weird, but OK whatever.
+    //
+
+    exit(EXIT_SUCCESS);
 
   }
 
-  std::string tensor_to_string(TF_Tensor* out) {
+  std::string tf_tensor_to_string(TF_Tensor* out) {
     stringstream ss;
     ss << "[";
     for (size_t i = 0; i < out->shape.num_elements(); i++) {
@@ -394,6 +330,38 @@ public:
     ss << "]";
     return ss.str();
   }
+
+  std::string tensor_to_string(Tensor out) {
+    stringstream ss;
+    ss << "[";
+    for (size_t i = 0; i < out.shape().num_elements(); i++) {
+      if (i != 0) {
+        ss << ", ";
+      }
+      auto output_value = out.flat<float>()(i);
+      ss << output_value;
+    }
+    ss << "]";
+    return ss.str();
+  }
+
+  template <class Container>
+  std::string container_to_string(Container& elems) {
+    stringstream ss;
+    ss << "[";
+    int i = 0;
+    for (auto& it : elems) {
+      if (i != 0) {
+        ss << ", ";
+      }
+      ss << it;
+      i += 1;
+    }
+    ss << "]";
+    return ss.str();
+  }
+
+//      input.flat<string>()(i) = example.SerializeAsString();
 
   void print_variable(TF_Session* session, std::string read_op_name) {
 //    [ <tf.Variable 'dense/kernel:0' shape=(3, 3) dtype=float32_ref>,
@@ -416,7 +384,7 @@ public:
     MY_ASSERT(TF_FLOAT == TF_TensorType(out));
 
 //    MY_ASSERT(out->shape.num_elements() == 1);
-    LOG(INFO) << "> Variable " << read_op_name << " = " << tensor_to_string(out);
+    LOG(INFO) << "> Variable " << read_op_name << " = " << tf_tensor_to_string(out);
     csession.CloseAndDelete(s);
     TF_DeleteStatus(s);
   }
@@ -426,8 +394,6 @@ public:
     auto path_01 = model_path() + PATH_SEP + "saved_model.pbtxt";
     auto path_02 = model_path() + PATH_SEP + "saved_model.pb";
     return PathExists(path_01) || PathExists(path_02);
-//    return _e(_j(self.args.model_path, 'saved_model.pbtxt')) or
-//           _e(_j(self.args.model_path, 'saved_model.pb'))
   }
 
   void Run() {
