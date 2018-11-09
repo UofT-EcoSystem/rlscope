@@ -36,6 +36,7 @@ using namespace std;
 #define MY_ASSERT_EQ(a, b, s) ({ \
   if ((a) != (b)) { \
     LOG(INFO) << "ERROR: " << STR(a) << " " << "==" << " " << STR(b) << ": " << TF_Message(s); \
+    exit(EXIT_FAILURE); \
   } \
 })
 #else
@@ -47,6 +48,7 @@ using namespace std;
 #define MY_ASSERT(t) ({ \
   if (!(t)) { \
     LOG(INFO) << "ERROR: " << STR(t) << " failed. "; \
+    exit(EXIT_FAILURE); \
   } \
 })
 
@@ -150,6 +152,29 @@ public:
 
   }
 
+  void print_graph(TF_Graph* graph) {
+    mutex_lock l(graph->mu);
+    LOG(INFO) << "> Print graph; num_nodes = " << graph->name_map.size();
+    int i = 0;
+    for (auto& it : graph->name_map) {
+      LOG(INFO) << "  name_map[" << i << "] = " << it.first;
+      i++;
+    }
+  }
+
+  TF_Operation* lookup_op(const std::string& pretty_name, const std::string& name, TF_Graph* graph) {
+    TF_Operation* op = TF_GraphOperationByName(graph, name.c_str());
+    if (op == nullptr) {
+      print_graph(graph);
+      LOG(WARNING) << "Couldn't find op = " << name;
+      MY_ASSERT(op != nullptr);
+    }
+    MY_ASSERT(op != nullptr);
+//    auto debug_str = op->node.DebugString();
+//    std::cout << "> " << pretty_name << " = " << debug_str << std::endl;
+    return op;
+  }
+
   void LoadModelCAPI() {
     auto path = model_path();
     if (!DirExists(path.c_str())) {
@@ -164,31 +189,41 @@ public:
     TF_Buffer* run_options = TF_NewBufferFromString("", 0);
     TF_Buffer* metagraph = TF_NewBuffer();
     TF_Status* s = TF_NewStatus();
-    const char* tags[] = {tensorflow::kSavedModelTagServe};
+    const char* tags[] = {tensorflow::kSavedModelTagTrain};
     TF_Graph* graph = TF_NewGraph();
     TF_Session* session = TF_LoadSessionFromSavedModel(
         opt, run_options, path.c_str(), tags, 1, graph, metagraph, s);
+    if (TF_OK != TF_GetCode(s)) {
+      LOG(INFO) << "Failed to load model: " << TF_Message(s);
+      exit(EXIT_FAILURE);
+    }
+    assert(session->graph == graph);
     TF_DeleteBuffer(run_options);
     TF_DeleteSessionOptions(opt);
     tensorflow::MetaGraphDef metagraph_def;
-    metagraph_def.ParseFromArray(metagraph->data, metagraph->length);
+    LOG(INFO) << "> Loading model from path = " << path;
+    auto result = metagraph_def.ParseFromArray(metagraph->data, metagraph->length);
+    assert(result);
     TF_DeleteBuffer(metagraph);
+
+
+    print_graph(graph);
+
+    const auto signature_def_map = metagraph_def.signature_def();
+    LOG(INFO) << "signature_def_map = ";
+    for (auto& it : signature_def_map) {
+      LOG(INFO) << "  key=" << it.first;
+      LOG(INFO) << "    " << it.second.DebugString();
+    }
 
     // Operations:
     const string loss_name = "loss/loss";
     const string step_name = "step/step";
     // Tensors:
-    const string predictions_name = "'outputs/predictions/Tanh:0";
-    const string features_name = "inputs/features:0";
-    const string labels_name = "inputs/labels:0";
+    const string predictions_name = "outputs/predictions/Tanh";
+    const string features_name = "inputs/features";
+    const string labels_name = "inputs/labels";
 
-    auto lookup_op = [graph] (const char* pretty_name, const std::string& name) -> TF_Operation* {
-      TF_Operation* op = TF_GraphOperationByName(graph, name.c_str());
-      MY_ASSERT(op != nullptr);
-      auto debug_str = op->node.DebugString();
-      std::cout << "> " << pretty_name << " = " << debug_str << std::endl;
-      return op;
-    };
 
 //    auto lookup_tensor = [graph] (const char* pretty_name, const std::string& name) -> TF_Tensor* {
 ////      TF_Operation* op = TF_GraphOperationByName(graph, loss_name.c_str());
@@ -213,17 +248,35 @@ public:
     //   unlike in python where its
     //   { get_tensor(op) : nump.array(...) }
 
-    auto loss_op = lookup_op("loss", loss_name);
-    auto step_op = lookup_op("step", step_name);
+    auto loss_op = lookup_op("loss", loss_name, graph);
+    auto step_op = lookup_op("step", step_name, graph);
 
-    auto predictions_op = lookup_op("predictions", predictions_name);
-    auto features_op = lookup_op("features", features_name);
-    auto labels_op = lookup_op("labels", labels_name);
+    auto predictions_op = lookup_op("predictions", predictions_name, graph);
+    auto features_op = lookup_op("features", features_name, graph);
+    auto labels_op = lookup_op("labels", labels_name, graph);
+
+
+//    <tf.Variable 'dense/bias:0' shape=(3,) dtype=float32_ref>,
+//    <tf.Variable 'dense_1/kernel:0' shape=(3, 2) dtype=float32_ref>,
+//    <tf.Variable 'dense_1/bias:0' shape=(2,) dtype=float32_ref>,
+//    <tf.Variable 'predictions/kernel:0' shape=(2, 1) dtype=float32_ref>,
+//    <tf.Variable 'predictions/bias:0' shape=(1,) dtype=float32_ref>]
+    std::vector<std::string> variables{
+        "dense/kernel/read",
+        "dense/bias/read",
+        "dense_1/kernel/read",
+        "dense_1/bias/read",
+        "predictions/kernel/read",
+        "predictions/bias/read",
+    };
+    for (auto& var : variables) {
+      print_variable(session, var);
+    }
 
     // JAMES TODO: How can we create a TF_Tensor with a set of float-values?
 //    exit(EXIT_SUCCESS);
 
-    CSession csession(session);
+    CSession csession(session, /*close_session=*/false);
 
 //    csession.SetInputs({{input_op, TF_TensorFromTensor(input, s)}});
 
@@ -249,7 +302,6 @@ public:
     MY_ASSERT(out != nullptr);
     MY_ASSERT(TF_FLOAT == TF_TensorType(out));
 
-    MY_ASSERT(out->shape.MaxDimensions() == 1);
     MY_ASSERT(out->shape.num_elements() == 1);
     auto output_value = reinterpret_cast<float*>(out->buffer->data())[0];
     LOG(INFO) << "> Output value from neural-network: " << output_value;
@@ -261,8 +313,13 @@ public:
     TF_DeleteGraph(graph);
     TF_DeleteStatus(s);
 
+    TF_CloseSession(session, s);
+    MY_ASSERT_EQ(TF_OK, TF_GetCode(s), s);
+    TF_DeleteSession(session, s);
+
     exit(EXIT_SUCCESS);
 
+//    [ <tf.Variable 'dense/kernel:0' shape=(3, 3) dtype=float32_ref>,
 ////    EXPECT_EQ(TF_OK, TF_GetCode(s)) << TF_Message(s);
 //    TF_CHECK_OK(TF_GetCode(s));
 //    CSession csession(session);
@@ -322,6 +379,46 @@ public:
 //    TF_DeleteGraph(graph);
 //    TF_DeleteStatus(s);
 
+  }
+
+  std::string tensor_to_string(TF_Tensor* out) {
+    stringstream ss;
+    ss << "[";
+    for (size_t i = 0; i < out->shape.num_elements(); i++) {
+      if (i != 0) {
+        ss << ", ";
+      }
+      auto output_value = reinterpret_cast<float*>(out->buffer->data())[i];
+      ss << output_value;
+    }
+    ss << "]";
+    return ss.str();
+  }
+
+  void print_variable(TF_Session* session, std::string read_op_name) {
+//    [ <tf.Variable 'dense/kernel:0' shape=(3, 3) dtype=float32_ref>,
+//    <tf.Variable 'dense/bias:0' shape=(3,) dtype=float32_ref>,
+//    <tf.Variable 'dense_1/kernel:0' shape=(3, 2) dtype=float32_ref>,
+//    <tf.Variable 'dense_1/bias:0' shape=(2,) dtype=float32_ref>,
+//    <tf.Variable 'predictions/kernel:0' shape=(2, 1) dtype=float32_ref>,
+//    <tf.Variable 'predictions/bias:0' shape=(1,) dtype=float32_ref>]
+//    operation is: predictions/bias/read
+    TF_Status* s = TF_NewStatus();
+    CSession csession(session, /*close_session=*/false);
+
+    auto read_op = lookup_op(read_op_name, read_op_name, session->graph);
+    csession.SetOutputs({read_op});
+    csession.Run(s);
+    MY_ASSERT_EQ(TF_OK, TF_GetCode(s), s);
+
+    TF_Tensor* out = csession.output_tensor(0);
+    MY_ASSERT(out != nullptr);
+    MY_ASSERT(TF_FLOAT == TF_TensorType(out));
+
+//    MY_ASSERT(out->shape.num_elements() == 1);
+    LOG(INFO) << "> Variable " << read_op_name << " = " << tensor_to_string(out);
+    csession.CloseAndDelete(s);
+    TF_DeleteStatus(s);
   }
 
 

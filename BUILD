@@ -30,6 +30,7 @@ tf_cc_binary(
         "//tensorflow/cc:cc_ops",
         "//tensorflow/cc:client_session",
         "//tensorflow/cc/saved_model:loader",
+        "//tensorflow/cc/saved_model:tag_constants",
         "//tensorflow/core:tensorflow",
         # ":gflags",
         "//third_party/gflags:gflags",
