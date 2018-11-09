@@ -28,6 +28,7 @@ import numpy as np
 import argparse
 import os
 import shutil
+import pprint
 
 from tensorflow import pywrap_tensorflow as pywrap
 
@@ -273,15 +274,17 @@ class CarExample:
     <tf.Tensor 'outputs/predictions/Tanh:0' shape=(?, 1) dtype=float32>
     """
     print("> Lookup predictions")
-    ops = self.lookup_ops(scope=scope)
-    pred_op = ops[-1]
-    tensor = self._tensor_from_ops([pred_op])
-    # Not clear to me if we're guaranteed that pred_op will be the last operation...
-    assert tensor.name == 'outputs/predictions/Tanh:0'
-    return tensor
+
+    # ops = self.lookup_ops(scope=scope)
+    # pred_op = ops[-1]
+    # tensor = self._tensor_from_ops([pred_op])
+    # # Not clear to me if we're guaranteed that pred_op will be the last operation...
+    # assert tensor.name == 'outputs/predictions/Tanh:0'
+    # return tensor
 
     # More direct method:
-    # g.get_tensor_by_name('outputs/predictions/Tanh:0')
+    tensor = tf.get_default_graph().get_tensor_by_name('outputs/predictions/Tanh:0')
+    return tensor
 
   def lookup_loss(self, scope):
     """
@@ -333,6 +336,37 @@ class CarExample:
     # More direct method:
     tf.get_default_graph().get_operation_by_name('step/step')
 
+    # > Trainable variables
+    # { "<tf.Variable 'dense/bias:0' shape=(3,) dtype=float32_ref>": array([-0.10614621,  0.01781176, -0.03666358], dtype=float32),
+    #   "<tf.Variable 'dense/kernel:0' shape=(3, 3) dtype=float32_ref>": array([[-0.04800478, -0.5441852 ,  0.36759377],
+    #                                                                           [ 0.4027491 ,  0.0943684 ,  0.15645161],
+    #                                                                           [-0.42262703,  0.05545909, -0.48662126]], dtype=float32),
+    #   "<tf.Variable 'dense_1/bias:0' shape=(2,) dtype=float32_ref>": array([0.01540005, 0.14128086], dtype=float32),
+    #   "<tf.Variable 'dense_1/kernel:0' shape=(3, 2) dtype=float32_ref>": array([[-0.53406185, -0.55536765],
+    #                                                                             [-0.27319422,  0.22930974],
+    #                                                                             [ 0.12702847, -0.00354132]], dtype=float32),
+    #   "<tf.Variable 'predictions/bias:0' shape=(1,) dtype=float32_ref>": array([0.14161532], dtype=float32),
+    #   "<tf.Variable 'predictions/kernel:0' shape=(2, 1) dtype=float32_ref>": array([[-0.18554956],
+    #                                                                                 [ 0.00688495]], dtype=float32)}
+
+    # Variable dense/bias/read = [-0.106146, 0.0178118, -0.0366636]
+    # Variable dense/kernel/read = [-0.0480048, -0.544185, 0.367594, 0.402749, 0.0943684, 0.156452, -0.422627, 0.0554591, -0.486621]
+    # Variable dense_1/bias/read = [0.0154001, 0.141281]
+    # Variable dense_1/kernel/read = [-0.534062, -0.555368, -0.273194, 0.22931, 0.127028, -0.00354132]
+    # Variable predictions/bias/read = [0.141615]
+    # Variable predictions/kernel/read = [-0.18555, 0.00688495]
+
+  def print_ops(self):
+    ops = tf.get_default_graph().get_operations()
+    print("> Graph operations")
+    pprint.pprint(ops, indent=2)
+
+  def print_vars(self):
+    variables = tf.get_default_graph().get_collection(tf.GraphKeys.TRAINABLE_VARIABLES)
+    print("> Trainable variables")
+    var_dict = dict((str(v), v.eval()) for v in variables)
+    pprint.pprint(var_dict, indent=2)
+
   def define_model(self):
     print("> Define model")
     args = self.args
@@ -383,7 +417,9 @@ class CarExample:
     xs = np.array([110000., FUEL_DIESEL, 7.])
     xs = xs.reshape((1, len(xs)))
     predictions = self.sess.run(self.predictions, {self.features:xs})
-    predicted_price = self.as_price(np.squeeze(predictions))
+    output = np.squeeze(predictions)
+    predicted_price = self.as_price(output)
+    print("Output value from neural-network = {out}".format(out=output))
     print("Price prediction = {pred} euros".format(pred=predicted_price))
 
   def save_model(self):
@@ -420,6 +456,9 @@ class CarExample:
     self.step = self.lookup_step()
     self.loss = self.lookup_loss('loss')
     self.predictions = self.lookup_predictions('outputs')
+
+    self.print_ops()
+    self.print_vars()
 
   def get_variables(self):
     return tf.get_default_graph().get_collection(tf.GraphKeys.VARIABLES)
