@@ -154,6 +154,9 @@ def line_iter(path):
       line = line.rstrip()
       yield line
 
+FUEL_DIESEL = 0
+FUEL_GASOLINE = 1
+
 class CarExample:
   def __init__(self, parser, args):
     self.parser = parser
@@ -231,6 +234,31 @@ class CarExample:
       "min_price":md_line[4],
       "max_price":md_line[5],
     }
+    print("> Metadata")
+    print("    mean_km = {}".format(self.md['mean_km']))
+    print("    std_km = {}".format(self.md['std_km']))
+    print("    mean_age = {}".format(self.md['mean_age']))
+    print("    std_age = {}".format(self.md['std_age']))
+    print("    min_price = {}".format(self.md['min_price']))
+    print("    max_price = {}".format(self.md['max_price']))
+
+    # Python:
+    # > Metadata
+    # mean_km = 104272.93201133145
+    # std_km = 65391.70758258462
+    # mean_age = 6.016883852691218
+    # std_age = 3.40778120276032
+    # min_price = 1500.0
+    # max_price = 124000.0
+
+    # C++: difference is b/c C-float vs python-double?
+    # Metadata:
+    # mean_km:104273
+    # std_km:65391.7
+    # mean_age:6.01688
+    # std_age:3.40778
+    # min_price:1500
+    # max_price:124000
 
     header = read_strings(next(it))
     data = dict()
@@ -245,6 +273,16 @@ class CarExample:
 
   def as_price(self, prediction):
     return prediction * (self.md['max_price'] - self.md['min_price']) + self.md['min_price']
+
+  def normalize_input(self, km, fuel, age):
+    pass
+    km = (km - self.md['mean_km']) / self.md['std_km'];
+    age = (age - self.md['mean_age']) / self.md['std_age'];
+    if fuel == FUEL_DIESEL:
+      f = -1.
+    else:
+      f = 1.
+    return np.array([km, f, age])
 
   @property
   def feature_names(self):
@@ -412,10 +450,25 @@ class CarExample:
 
   def inference(self):
     print("> Inference")
-    FUEL_DIESEL = 0
-    FUEL_GASOLINE = 1
-    xs = np.array([110000., FUEL_DIESEL, 7.])
+    xs = self.normalize_input(km=110000., fuel=FUEL_DIESEL, age=7.)
     xs = xs.reshape((1, len(xs)))
+
+    # C++:
+    #
+    # > Features tensor:
+    # array([[ 0.08758095, -1.        ,  0.28849157]])
+    #
+    # Features tensor: [1.31437e-38, 0, 1.68044e+22]
+    # Output value from neural-network: 0.118596
+    # Predicted price: 16028
+    #
+    # Features tensor: [1.31437e-38, 0, -2.82041e-34]
+    # Output value from neural-network: 0.130695
+    # Predicted price: 17510.2
+
+    print("> Features tensor:")
+    pprint.pprint(xs)
+
     predictions = self.sess.run(self.predictions, {self.features:xs})
     output = np.squeeze(predictions)
     predicted_price = self.as_price(output)
