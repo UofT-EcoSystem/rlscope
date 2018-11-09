@@ -17,29 +17,69 @@ load("//tensorflow:tensorflow.bzl", "tf_cc_binary")
 #   system_provided = 1,
 # )
 
+# BUILD BIG BINARY:
+# tf_cc_binary(
+#     name = "model",
+#     srcs = [
+#         "model.cc",
+#         "data_set.h",
+#         "data_set.cc"
+#     ],
+#     deps = [
+#         "//tensorflow/cc:gradients",
+#         "//tensorflow/cc:grad_ops",
+#         "//tensorflow/cc:cc_ops",
+#         "//tensorflow/cc:client_session",
+#         "//tensorflow/cc/saved_model:loader",
+#         "//tensorflow/cc/saved_model:tag_constants",
+#         "//tensorflow/core:tensorflow",
+#         # ":gflags",
+#         "//third_party/gflags:gflags",
+#         "//tensorflow/c:c_api",
+#         # Import some boiler plate for interacting with the C-API.
+#         "//tensorflow/c:c_test_util_lite",
+#     ],
+#     data = ["normalized_car_features.csv"]
+# )
+
+# cc_binary(
 tf_cc_binary(
     name = "model",
     srcs = [
-        "model.cc",
+        # "model.cc",
+        # "data_set.h",
+        # "data_set.cc"
+
         "data_set.h",
-        "data_set.cc"
+        "model.cc",
+        "data_set.cc",
+        "tensorflow/c/c_api_internal.h",
+        "tensorflow/c/c_test_util.h",
+        "tensorflow/c/c_test_util.cc",
+        "tensorflow/core/platform/platform.h",
+        "tensorflow/core/platform/test_lite.h",
+        "tensorflow/core/platform/macros.h",
+        "tensorflow/core/platform/posix/env_time.cc",
+        "tensorflow/core/platform/env_time.h",
+        "tensorflow/core/platform/types.h",
+        "tensorflow/core/platform/default/logging.cc",
+        "tensorflow/core/platform/default/integral_types.h",
+        "tensorflow/core/platform/default/logging.h",
+        "tensorflow/core/platform/env_time.cc",
+        "tensorflow/core/platform/windows/env_time.cc",
+        "tensorflow/core/platform/logging.h",
+
     ],
     deps = [
-        "//tensorflow/cc:gradients",
-        "//tensorflow/cc:grad_ops",
-        "//tensorflow/cc:cc_ops",
-        "//tensorflow/cc:client_session",
-        "//tensorflow/cc/saved_model:loader",
-        "//tensorflow/cc/saved_model:tag_constants",
-        "//tensorflow/core:tensorflow",
-        # ":gflags",
+        "//tensorflow:libtensorflow.so",
         "//third_party/gflags:gflags",
-        "//tensorflow/c:c_api",
+        # "//tensorflow/c:c_api",
         # Import some boiler plate for interacting with the C-API.
-        "//tensorflow/c:c_test_util_lite",
+        # "//tensorflow/c:c_test_util_lite",
     ],
-    data = ["normalized_car_features.csv"]
+    data = ["normalized_car_features.csv"],
 )
+
 
 # Arcade-Learning-Environment uses cmake.
 # Hack to call cmake from bazel (to avoid maintaining bazel build config for it)

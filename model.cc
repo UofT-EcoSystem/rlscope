@@ -1,16 +1,29 @@
+// If define, then hook into the tensorflow C++ API to allow us to define the model,
+// its layers, and the backprop computation.
+//#define DEFINE_MODEL
+
+#ifdef DEFINE_MODEL
 #include "tensorflow/cc/client/client_session.h"
 #include "tensorflow/cc/ops/standard_ops.h"
 #include "tensorflow/core/framework/tensor.h"
 #include "tensorflow/cc/framework/gradients.h"
-#include "tensorflow/c/c_api.h"
-#include "tensorflow/c/c_api_internal.h"
 #include "tensorflow/cc/saved_model/loader.h"
 #include "tensorflow/cc/saved_model/tag_constants.h"
 #include "tensorflow/cc/framework/ops.h"
 #include "tensorflow/core/platform/logging.h"
-
 #include "tensorflow/core/protobuf/meta_graph.pb.h"
 #include "tensorflow/c/c_test_util.h"
+using namespace tensorflow;
+using namespace tensorflow::ops;
+#else // DEFINE_MODEL
+
+#include "tensorflow/c/c_test_util.h"
+#include "tensorflow/core/platform/logging.h"
+
+#endif // DEFINE_MODEL
+
+#include "tensorflow/c/c_api.h"
+//#include "tensorflow/c/c_api_internal.h"
 
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -21,14 +34,14 @@
 #include <cstdlib>
 #include <string>
 #include <vector>
+#include <cassert>
 #include <utility>
+#include <iostream>
 
 #include "data_set.h"
 
 #include <gflags/gflags.h>
 
-using namespace tensorflow;
-using namespace tensorflow::ops;
 using namespace std;
 
 #define STR(s) #s
@@ -107,6 +120,11 @@ class Model {
 public:
 
 
+//  Placeholder _features;
+//  Placeholder _labels;
+  DataSet _data_set;
+
+#ifdef DEFINE_MODEL
   Scope _scope;
   ClientSession _session;
   std::vector<Output> _init_ops;
@@ -114,26 +132,26 @@ public:
   Output _loss;
   Tensor _x_data;
   Tensor _y_data;
-//  Placeholder _features;
-//  Placeholder _labels;
   Output _features;
   Output _labels;
-  DataSet _data_set;
-
   Output _layer_1;
   Output _layer_2;
   Output _layer_3;
+#endif
 
   Model() :
-      _scope(Scope::NewRootScope())
-      , _session(_scope)
-      , _data_set(
+#ifdef DEFINE_MODEL
+      _scope(Scope::NewRootScope()),
+      _session(_scope),
+#endif
+      _data_set(
           csv_dir_path() + "/",
 //          "tensorflow/cc/models/",
           CSV_BASENAME)
   {
   }
 
+#if DEFINE_MODEL
   void LoadModel() {
     auto path = model_path();
     if (!DirExists(path.c_str())) {
@@ -152,8 +170,10 @@ public:
     // TODO: Set all the Output nodes by querying the loaded computational graph.
 
   }
+#endif // DEFINE_MODEL
 
   void print_graph(TF_Graph* graph) {
+#if DEFINE_MODEL
     mutex_lock l(graph->mu);
     LOG(INFO) << "> Print graph; num_nodes = " << graph->name_map.size();
     int i = 0;
@@ -161,6 +181,7 @@ public:
       LOG(INFO) << "  name_map[" << i << "] = " << it.first;
       i++;
     }
+#endif
   }
 
   TF_Operation* lookup_op(const std::string& pretty_name, const std::string& name, TF_Graph* graph) {
@@ -186,7 +207,7 @@ public:
     memcpy(dst, src, sizeof(T)*dst_nbytes);
   }
 
-  void print_variables(TF_Session* session) {
+  void print_variables(TF_Session* session, TF_Graph* graph) {
 //    <tf.Variable 'dense/bias:0' shape=(3,) dtype=float32_ref>,
 //    <tf.Variable 'dense_1/kernel:0' shape=(3, 2) dtype=float32_ref>,
 //    <tf.Variable 'dense_1/bias:0' shape=(2,) dtype=float32_ref>,
@@ -201,7 +222,7 @@ public:
         "predictions/bias/read",
     };
     for (auto& var : variables) {
-      print_variable(session, var);
+      print_variable(session, graph, var);
     }
   }
 
@@ -212,13 +233,15 @@ public:
       exit(EXIT_FAILURE);
     }
     // Load the saved model.
+    LOG(INFO) << "> Loading model from path = " << path;
     TF_SessionOptions* opt = TF_NewSessionOptions();
     TF_Buffer* run_options = TF_NewBufferFromString("", 0);
     TF_Buffer* metagraph = TF_NewBuffer();
     TF_Status* s = TF_NewStatus();
     // NOTE: The "tag" used when loading the model must match the tag used when the model was saved.
     // (e.g. using tag kSavedModelTagServe will result in an error).
-    const char* tags[] = {tensorflow::kSavedModelTagTrain};
+//    const char* tags[] = {tensorflow::kSavedModelTagTrain};
+    const char* tags[] = {"train"};
     TF_Graph* graph = TF_NewGraph();
     TF_Session* session = TF_LoadSessionFromSavedModel(
         opt, run_options, path.c_str(), tags, 1, graph, metagraph, s);
@@ -226,14 +249,14 @@ public:
       LOG(INFO) << "Failed to load model: " << TF_Message(s);
       exit(EXIT_FAILURE);
     }
-    assert(session->graph == graph);
+//    assert(session->graph == graph);
     TF_DeleteBuffer(run_options);
     TF_DeleteSessionOptions(opt);
-    tensorflow::MetaGraphDef metagraph_def;
-    LOG(INFO) << "> Loading model from path = " << path;
-    auto result = metagraph_def.ParseFromArray(metagraph->data, metagraph->length);
-    assert(result);
-    TF_DeleteBuffer(metagraph);
+
+//    tensorflow::MetaGraphDef metagraph_def;
+//    auto result = metagraph_def.ParseFromArray(metagraph->data, metagraph->length);
+//    assert(result);
+//    TF_DeleteBuffer(metagraph);
 
     print_graph(graph);
 
@@ -258,7 +281,7 @@ public:
     auto features_op = lookup_op("features", "inputs/features", graph);
     auto labels_op = lookup_op("labels", "inputs/labels", graph);
 
-    print_variables(session);
+    print_variables(session, graph);
 
     // JAMES TODO: How can we create a TF_Tensor with a set of float-values?
 //    exit(EXIT_SUCCESS);
@@ -290,8 +313,8 @@ public:
       MY_ASSERT(out != nullptr);
       MY_ASSERT(TF_FLOAT == TF_TensorType(out));
 
-      MY_ASSERT(out->shape.num_elements() == 1);
-      auto output_value = reinterpret_cast<float*>(out->buffer->data())[0];
+      MY_ASSERT(tensor_num_elements(out) == 1);
+      auto output_value = reinterpret_cast<float*>(TF_TensorData(out))[0];
       LOG(INFO) << "> Output value from neural-network: " << output_value;
       auto pred_price = _data_set.output(output_value);
       LOG(INFO) << "> Predicted price: " << pred_price;
@@ -317,20 +340,28 @@ public:
 
   }
 
+  size_t tensor_num_elements(TF_Tensor* tensor) {
+    auto nbytes = TF_TensorByteSize(tensor);
+    auto dt_nbytes = TF_DataTypeSize(TF_TensorType(tensor));
+    auto n_elems = nbytes / dt_nbytes;
+    return n_elems;
+  }
+
   std::string tf_tensor_to_string(TF_Tensor* out) {
     stringstream ss;
     ss << "[";
-    for (size_t i = 0; i < out->shape.num_elements(); i++) {
+    for (size_t i = 0; i < tensor_num_elements(out); i++) {
       if (i != 0) {
         ss << ", ";
       }
-      auto output_value = reinterpret_cast<float*>(out->buffer->data())[i];
+      auto output_value = reinterpret_cast<float*>(TF_TensorData(out))[i];
       ss << output_value;
     }
     ss << "]";
     return ss.str();
   }
 
+#ifdef DEFINE_MODEL
   std::string tensor_to_string(Tensor out) {
     stringstream ss;
     ss << "[";
@@ -344,6 +375,7 @@ public:
     ss << "]";
     return ss.str();
   }
+#endif
 
   template <class Container>
   std::string container_to_string(Container& elems) {
@@ -363,7 +395,7 @@ public:
 
 //      input.flat<string>()(i) = example.SerializeAsString();
 
-  void print_variable(TF_Session* session, std::string read_op_name) {
+  void print_variable(TF_Session* session, TF_Graph* graph, std::string read_op_name) {
 //    [ <tf.Variable 'dense/kernel:0' shape=(3, 3) dtype=float32_ref>,
 //    <tf.Variable 'dense/bias:0' shape=(3,) dtype=float32_ref>,
 //    <tf.Variable 'dense_1/kernel:0' shape=(3, 2) dtype=float32_ref>,
@@ -374,7 +406,7 @@ public:
     TF_Status* s = TF_NewStatus();
     CSession csession(session, /*close_session=*/false);
 
-    auto read_op = lookup_op(read_op_name, read_op_name, session->graph);
+    auto read_op = lookup_op(read_op_name, read_op_name, graph);
     csession.SetOutputs({read_op});
     csession.Run(s);
     MY_ASSERT_EQ(TF_OK, TF_GetCode(s), s);
@@ -402,17 +434,26 @@ public:
       exit(EXIT_SUCCESS);
     }
 
+#ifdef DEFINE_MODEL
     ReadData();
+#endif
     if (!FLAGS_load_model or !model_exists()) {
       MY_ASSERT(!model_exists());
+#ifdef DEFINE_MODEL
       DefineModel();
       TrainModel();
+#else
+      LOG(INFO) << "ERROR: Cannot define model without DEFINE_MODEL set";
+      assert(false);
+#endif
       SaveModel();
     } else {
 //      LoadModel();
       LoadModelCAPI();
     }
+#ifdef DEFINE_MODEL
     Inference();
+#endif
   }
 
   void SaveModel() {
@@ -420,6 +461,7 @@ public:
     MY_ASSERT(false);
   }
 
+#ifdef DEFINE_MODEL
   void ReadData() {
 //    DataSet data_set("tensorflow/cc/models/", "normalized_car_features.csv");
     _x_data = Tensor(DataTypeToEnum<float>::v(),
@@ -434,7 +476,9 @@ public:
 
 
   }
+#endif
 
+#ifdef DEFINE_MODEL
   void DefineModel() {
 
     _features = tensorflow::ops::Placeholder(_scope, DT_FLOAT);
@@ -501,7 +545,9 @@ public:
     _update_ops.push_back(apply_b3);
 
   }
+#endif // DEFINE_MODEL
 
+#ifdef DEFINE_MODEL
   void TrainModel() {
     ClientSession _session(_scope);
     std::vector<Tensor> outputs;
@@ -522,7 +568,9 @@ public:
     }
 
   }
+#endif
 
+#ifdef DEFINE_MODEL
   void Inference() {
     std::vector<Tensor> outputs;
     // prediction using the trained neural net
@@ -540,6 +588,7 @@ public:
     //GraphDef graph_def;
     //TF_ASSERT_OK(_scope.ToGraphDef(&graph_def));
   }
+#endif
 
 };
 
