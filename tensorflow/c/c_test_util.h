@@ -155,8 +155,8 @@ class CSession {
   void DeleteInputValues();
   void ResetOutputValues();
 
-  bool close_session_;
   TF_Session* session_;
+  bool close_session_;
   std::vector<TF_Output> inputs_;
   std::vector<TF_Tensor*> input_values_;
   std::vector<TF_Output> outputs_;

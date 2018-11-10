@@ -49,7 +49,7 @@ void DataSet::ReadCSVFile(string dir, string file_name) {
   cout << "  max_price:" << data_set_metadata.max_price << endl;
 
   // the other lines contain the features for each car
-  for (int i = 2; i < lines.size(); ++i) {
+  for (size_t i = 2; i < lines.size(); ++i) {
     vector<float> features = ReadCSVLine(lines[i]);
     x_.insert(x_.end(), features.begin(), features.begin() + 3);
     y_.push_back(features[3]);

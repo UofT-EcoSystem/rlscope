@@ -3,7 +3,8 @@
 cmake_minimum_required(VERSION 3.0 FATAL_ERROR)
 project(DNN_Tensorflow_CPP LANGUAGES CXX)
 
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 -Wall -Wunused")
+set(IGNORE_ERRORS "-Wno-unused")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 -Wall -Werror ${IGNORE_ERRORS}")
 SET(CMAKE_EXE_LINKER_FLAGS  "${CMAKE_EXE_LINKER_FLAGS} -demangle")
 
 if(MINGW OR CYGWIN)
@@ -16,7 +17,7 @@ if(IS_WINDOWS)
     message("MINGW or CYGWIN is set")
 endif()
 
-if (NOT EXISTS ${PROJECT_SOURCE_DIR}/external_libs/lib)
+if (NOT IS_WINDOWS AND NOT EXISTS ${PROJECT_SOURCE_DIR}/external_libs/lib)
     message(FATAL_ERROR "You need to run setup.sh first.")
 endif()
 
@@ -29,13 +30,23 @@ endif()
 #)
 include_directories(
         ./
+        ./src
         ./external_libs/include
 )
+
+if(NOT IS_WINDOWS)
+    find_package( Boost 1.58 REQUIRED )
+    include_directories( ${Boost_INCLUDE_DIR} )
+#    add_executable( anyExecutable myMain.cpp )
+endif()
+#target_link_libraries( anyExecutable LINK_PUBLIC ${Boost_LIBRARIES} )
 
 set(SOURCES)
 # ( cd ~/clone/dnn_tensorflow_cpp; find -type f | grep --perl-regexp '\.(c|cc|cpp|cxx)$' | xargs -n1 dirname | sort --unique | grep -v CMake; ) | cboard
 set(SRC_DIRS
-        .
+        ./src
+        ./src/dqn
+        ./src/simulator
         ./tensorflow/c
         ./tensorflow/core/platform
         ./tensorflow/core/platform/default
