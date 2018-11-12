@@ -43,8 +43,13 @@ endif()
 
 set(SOURCES)
 # ( cd ~/clone/dnn_tensorflow_cpp; find -type f | grep --perl-regexp '\.(c|cc|cpp|cxx)$' | xargs -n1 dirname | sort --unique | grep -v CMake; ) | cboard
+
 set(SRC_DIRS
         ./src
+        # NOTE: don't include drivers.
+        # ./src/drivers
+        ./src/tf
+        ./src/model
         ./src/dqn
         ./src/simulator
         ./tensorflow/c
@@ -53,21 +58,57 @@ set(SRC_DIRS
         ./tensorflow/core/platform/posix
         )
 
-foreach(direc ${SRC_DIRS})
+set(TEST_DIRS
+        ${SRC_DIRS}
+        ./test
+        ./test/model
+        )
 
-    file(GLOB direc_sources ${direc}/*.c)
-    list(APPEND SOURCES ${direc_sources})
+#TEST(TestApiDef, TestCreateApiDefWithOverwrites) {
+#foreach(direc ${SRC_DIRS})
+#
+#    file(GLOB direc_sources ${direc}/*.c)
+#    list(APPEND SOURCES ${direc_sources})
+#
+#    file(GLOB direc_sources ${direc}/*.cc)
+#    list(APPEND SOURCES ${direc_sources})
+#
+#    file(GLOB direc_sources ${direc}/*.cpp)
+#    list(APPEND SOURCES ${direc_sources})
+#
+#    file(GLOB direc_sources ${direc}/*.cxx)
+#    list(APPEND SOURCES ${direc_sources})
+#
+#endforeach()
 
-    file(GLOB direc_sources ${direc}/*.cc)
-    list(APPEND SOURCES ${direc_sources})
+macro(gather_sources srcs_var directories)
+#    message("Directories = ${${directories}}")
+    foreach(direc ${${directories}})
+#        message("Direc = ${direc}")
 
-    file(GLOB direc_sources ${direc}/*.cpp)
-    list(APPEND SOURCES ${direc_sources})
+        file(GLOB direc_sources ${direc}/*.c)
+        list(APPEND ${srcs_var} ${direc_sources})
+#        list(APPEND ${${srcs_var}} ${direc_sources})
 
-    file(GLOB direc_sources ${direc}/*.cxx)
-    list(APPEND SOURCES ${direc_sources})
+        file(GLOB direc_sources ${direc}/*.cc)
+        list(APPEND ${srcs_var} ${direc_sources})
+#        list(APPEND ${${srcs_var}} ${direc_sources})
 
-endforeach()
+        file(GLOB direc_sources ${direc}/*.cpp)
+        list(APPEND ${srcs_var} ${direc_sources})
+#        list(APPEND ${${srcs_var}} ${direc_sources})
+
+        file(GLOB direc_sources ${direc}/*.cxx)
+        list(APPEND ${srcs_var} ${direc_sources})
+#        list(APPEND ${${srcs_var}} ${direc_sources})
+
+#        message("Sources = ${${srcs_var}}")
+
+    endforeach()
+endmacro()
+
+gather_sources(SOURCES SRC_DIRS)
+gather_sources(TEST_SOURCES TEST_DIRS)
 
 message("Sources = ${SOURCES}")
 
@@ -80,8 +121,14 @@ if(IS_WINDOWS)
     )
 endif()
 
+# BLAZ
+add_executable(model
+        ./src/drivers/run_model.cpp
+        ${SOURCES})
+add_executable(tests
+        ./src/drivers/run_tests.cpp
+        ${TEST_SOURCES})
 
-add_executable(model ${SOURCES})
 if(NOT IS_WINDOWS)
 #    find_library(TENSORFLOW_LIB tensorflow
 #            REQUIRED
@@ -91,12 +138,27 @@ if(NOT IS_WINDOWS)
             HINTS "${PROJECT_SOURCE_DIR}/external_libs/lib")
     message("> TENSORFLOW_LIB = ${TENSORFLOW_LIB}")
     target_link_libraries(model ${TENSORFLOW_LIB})
+    target_link_libraries(tests ${TENSORFLOW_LIB})
 endif()
 
 if(NOT IS_WINDOWS)
     find_library(GFLAGS_LIB gflags REQUIRED)
     message("> GFLAGS_LIB = ${GFLAGS_LIB}")
     target_link_libraries(model ${GFLAGS_LIB})
+endif()
+
+#if(NOT IS_WINDOWS)
+#    find_library(GTEST_LIB gtest REQUIRED)
+#    message("> GTEST_LIB = ${GTEST_LIB}")
+#    target_link_libraries(tests ${GTEST_LIB})
+#endif()
+
+if(NOT IS_WINDOWS)
+    find_package(GTest REQUIRED)
+    include_directories(${GTEST_INCLUDE_DIRS})
+    target_link_libraries(tests ${GTEST_LIBRARY})
+    target_link_libraries(tests pthread)
+    target_link_libraries(model pthread)
 endif()
 
 configure_file(normalized_car_features.csv ${CMAKE_CURRENT_BINARY_DIR}/normalized_car_features.csv COPYONLY)
