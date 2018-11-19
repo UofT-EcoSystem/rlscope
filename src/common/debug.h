@@ -13,7 +13,6 @@
 #define MY_ASSERT_EQ(a, b, s) ({ \
   if ((a) != (b)) { \
     LOG(INFO) << "ERROR: " << STR(a) << " " << "==" << " " << STR(b) << ": " << TF_Message(s); \
-    exit(EXIT_FAILURE); \
     assert((a) == (b)); \
   } \
 })

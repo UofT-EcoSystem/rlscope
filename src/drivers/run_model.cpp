@@ -3,7 +3,7 @@
 //
 
 #include "common/debug.h"
-#include "model/model.h"
+#include "model/CarModel.h"
 #include "tf/wrappers.h"
 
 #include <gflags/gflags.h>
@@ -22,7 +22,9 @@ int main(int argc, char** argv) {
     exit(EXIT_SUCCESS);
   }
 
-  Model model;
+  // WARNING: hyp isn't initialized.
+  DQNHyperparameters hyp;
+  CarModel model(hyp);
   model.LoadModel();
 
   return 0;

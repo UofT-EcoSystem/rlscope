@@ -21,6 +21,7 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import textwrap
 import sys
 import pandas as pd
 import re
@@ -174,6 +175,16 @@ class CarExample:
       'step',
     ]
 
+    # WARNING!
+    # For some reason ( I don't know WHY ), if we don't initialize our session as tf.InteractiveSession()
+    # when we initially train the model (not sure about loading),
+    # then any attempt to load the checkpoint will say it worked, but it will perform like an
+    # uninitialized model in both python and C++.
+    #
+    # I encountered this issue particularly when trying to load a partially trained RL model for
+    # cartpole in C++ and in python/dopamine.
+    self.sess = tf.InteractiveSession()
+
   def _check_model_loaded(self):
     for attr in self.expected_attrs:
       assert hasattr(self, attr)
@@ -190,8 +201,6 @@ class CarExample:
   def run(self):
     self.read_data()
 
-    self.sess = tf.InteractiveSession()
-
     if self.args.rebuild_model and _e(self.args.model_path):
       # print("> rm({path})".format(path=self.args.model_path))
       shutil.rmtree(self.args.model_path)
@@ -202,7 +211,7 @@ class CarExample:
       self.training_loop()
       self.save_model()
     else:
-      self.load_model()
+      self.load_car_model()
     self._check_model_loaded()
 
     self.inference()
@@ -485,7 +494,9 @@ class CarExample:
     builder.add_meta_graph_and_variables(self.sess,
                                          [tf.saved_model.tag_constants.TRAINING],
                                          signature_def_map=None,
-                                         assets_collection=None)
+                                         assets_collection=None,
+                                         # Make it easier to load in C++?
+                                         clear_devices=True)
     builder.save()
 
   def load_model(self):
@@ -506,12 +517,19 @@ class CarExample:
     # g.get_tensor_by_name('inputs/features:0')
     # g.get_tensor_by_name('inputs/labels:0')
 
-    self.step = self.lookup_step()
-    self.loss = self.lookup_loss('loss')
-    self.predictions = self.lookup_predictions('outputs')
+    # self._init_car_ops()
 
     self.print_ops()
     self.print_vars()
+
+  def load_car_model(self):
+    self.load_model()
+    self._init_car_ops()
+
+  def _init_car_ops(self):
+    self.step = self.lookup_step()
+    self.loss = self.lookup_loss('loss')
+    self.predictions = self.lookup_predictions('outputs')
 
   def get_variables(self):
     return tf.get_default_graph().get_collection(tf.GraphKeys.VARIABLES)
@@ -527,15 +545,27 @@ def main():
   parser.add_argument('--regularization-constant', type=int, default=0.01)
   parser.add_argument('--lr', type=int, default=0.01)
   parser.add_argument('--model-path', default=MODEL_PATH)
+  parser.add_argument('--model-path-subdir')
   parser.add_argument('--rebuild-model', action='store_true')
   parser.add_argument('--trace-tf', action='store_true', help="Print C-api calls made by python")
+  parser.add_argument('--print', action='store_true', help=textwrap.dedent("""
+  Just print out information about the loaded model; 
+  don't do anything else.
+  """))
 
   args = parser.parse_args()
+
+  if args.model_path_subdir is not None:
+    args.model_path = _j(DNN_TF_CPP_ROOT, "checkpoints", "model", args.model_path_subdir, "model_checkpoint")
 
   if args.trace_tf:
     pywrap._wrap_tf_functions(debug_print=True)
 
   car_example = CarExample(parser, args)
+
+  if args.print:
+      car_example.load_model()
+      return
 
   car_example.run()
 

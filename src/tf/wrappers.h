@@ -236,4 +236,52 @@ public:
 
 };
 
+
+static void DeviceListDeleter(void *ptr) {
+  TF_DeviceList* device_list = static_cast<TF_DeviceList*>(ptr);
+  if (device_list) {
+    TF_DeleteDeviceList(device_list);
+  }
+}
+
+class TFDeviceList {
+public:
+  std::shared_ptr<TF_DeviceList> _device_list;
+  TFSession _session;
+  TFStatus _status;
+
+  TFDeviceList(TFSession session) :
+      _session(session) {
+    _init();
+  }
+
+  void _init() {
+    _device_list.reset(
+        TF_SessionListDevices(_session.get(), _status.get()),
+        DeviceListDeleter);
+    MY_ASSERT_EQ(TF_OK, TF_GetCode(_status.get()), _status.get());
+  }
+
+  int count() const {
+    assert(get() != nullptr);
+    return TF_DeviceListCount(get());
+  }
+
+  TFDeviceList() :
+      _device_list(nullptr, DeviceListDeleter) {
+  }
+
+  const char* DeviceName(int index) const {
+    assert(index >= 0 && index < count());
+    assert(get() != nullptr);
+    auto ret = TF_DeviceListName(get(), index, _status.get());
+    return ret;
+  }
+
+  TF_DeviceList* get() const {
+    return _device_list.get();
+  }
+
+};
+
 #endif //DNN_TENSORFLOW_CPP_WRAPPERS_H

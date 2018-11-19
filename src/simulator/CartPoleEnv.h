@@ -8,6 +8,8 @@
 #include "Environment.h"
 
 #include <random>
+#include <cassert>
+#include <cstring>
 
 struct CartPoleAction {
   enum Action {
@@ -18,8 +20,24 @@ struct CartPoleAction {
 
     LAST = 1,
   };
+//  Action action;
+//  int64_t action;
+  // The action placeholder variable for baselines DQN uses int32.
+  int32_t action;
 
-  Action action;
+  // STL
+  CartPoleAction() {}
+
+  CartPoleAction(int action_) :
+      action(static_cast<Action>(action_)) {
+    assert(action_ >= static_cast<int>(Action::FIRST) && action_ <= static_cast<int>(Action::LAST));
+  }
+
+  static CartPoleAction Empty() {
+    CartPoleAction action;
+    action.action = LEFT;
+    return action;
+  }
 };
 
 struct CartPoleObservation {
@@ -28,6 +46,7 @@ struct CartPoleObservation {
     x_dot = 1,
     theta = 2,
     theta_dot = 3,
+    LENGTH = 4,
   };
   StateType state[4];
   void Update(
@@ -40,6 +59,20 @@ struct CartPoleObservation {
     state[State::theta] = theta;
     state[State::theta_dot] = theta_dot;
   }
+  /* Number of elements for storing this state in a contiguous minibatch NDArray. */
+  static size_t NumElemsPerEntry() {
+    return LENGTH;
+  }
+  static void CopyToNDArray(int i, const CartPoleObservation& from_obs, std::vector<StateType>& ndarray) {
+    assert(static_cast<size_t>(i) <= ndarray.size() - NumElemsPerEntry());
+    StateType* dst = ndarray.data() + (i * NumElemsPerEntry());
+    memcpy(dst, from_obs.state, sizeof(StateType)*NumElemsPerEntry());
+  }
+  static CartPoleObservation Empty() {
+    CartPoleObservation obs;
+    memset(obs.state, 0, sizeof(StateType)*LENGTH);
+    return obs;
+  }
 };
 
 struct CartPoleStepTuple {
@@ -47,6 +80,14 @@ struct CartPoleStepTuple {
   RewardType reward;
   bool done;
   // info?
+
+  static CartPoleStepTuple Empty() {
+    CartPoleStepTuple tupl;
+    tupl.obs = CartPoleObservation::Empty();
+    tupl.reward = 0;
+    tupl.done = false;
+    return tupl;
+  }
 };
 
 class CartPoleEnv {

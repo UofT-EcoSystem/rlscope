@@ -6,6 +6,7 @@
 
 #include "common/debug.h"
 #include "tf/wrappers.h"
+#include "model/model.h"
 
 #include <cassert>
 #include <memory>

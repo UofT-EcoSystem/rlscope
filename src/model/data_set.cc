@@ -2,7 +2,7 @@
 #include <fstream>
 #include <sstream>
 #include <iostream>
-#include "data_set.h"
+#include "model/data_set.h"
 
 using namespace std;
 

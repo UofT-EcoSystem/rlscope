@@ -34,12 +34,13 @@ include_directories(
         ./external_libs/include
 )
 
-if(NOT IS_WINDOWS)
-    find_package( Boost 1.58 REQUIRED )
-    include_directories( ${Boost_INCLUDE_DIR} )
-#    add_executable( anyExecutable myMain.cpp )
-endif()
-#target_link_libraries( anyExecutable LINK_PUBLIC ${Boost_LIBRARIES} )
+set(EXEC_NAMES
+        tests
+        model
+        cartpole)
+set(GFLAGS_EXEC_NAMES
+        model
+        cartpole)
 
 set(SOURCES)
 # ( cd ~/clone/dnn_tensorflow_cpp; find -type f | grep --perl-regexp '\.(c|cc|cpp|cxx)$' | xargs -n1 dirname | sort --unique | grep -v CMake; ) | cboard
@@ -64,45 +65,20 @@ set(TEST_DIRS
         ./test/model
         )
 
-#TEST(TestApiDef, TestCreateApiDefWithOverwrites) {
-#foreach(direc ${SRC_DIRS})
-#
-#    file(GLOB direc_sources ${direc}/*.c)
-#    list(APPEND SOURCES ${direc_sources})
-#
-#    file(GLOB direc_sources ${direc}/*.cc)
-#    list(APPEND SOURCES ${direc_sources})
-#
-#    file(GLOB direc_sources ${direc}/*.cpp)
-#    list(APPEND SOURCES ${direc_sources})
-#
-#    file(GLOB direc_sources ${direc}/*.cxx)
-#    list(APPEND SOURCES ${direc_sources})
-#
-#endforeach()
-
 macro(gather_sources srcs_var directories)
-#    message("Directories = ${${directories}}")
     foreach(direc ${${directories}})
-#        message("Direc = ${direc}")
 
         file(GLOB direc_sources ${direc}/*.c)
         list(APPEND ${srcs_var} ${direc_sources})
-#        list(APPEND ${${srcs_var}} ${direc_sources})
 
         file(GLOB direc_sources ${direc}/*.cc)
         list(APPEND ${srcs_var} ${direc_sources})
-#        list(APPEND ${${srcs_var}} ${direc_sources})
 
         file(GLOB direc_sources ${direc}/*.cpp)
         list(APPEND ${srcs_var} ${direc_sources})
-#        list(APPEND ${${srcs_var}} ${direc_sources})
 
         file(GLOB direc_sources ${direc}/*.cxx)
         list(APPEND ${srcs_var} ${direc_sources})
-#        list(APPEND ${${srcs_var}} ${direc_sources})
-
-#        message("Sources = ${${srcs_var}}")
 
     endforeach()
 endmacro()
@@ -111,6 +87,7 @@ gather_sources(SOURCES SRC_DIRS)
 gather_sources(TEST_SOURCES TEST_DIRS)
 
 message("Sources = ${SOURCES}")
+message("Test sources = ${TEST_SOURCES}")
 
 #add_executable(dummy ${SOURCES})
 
@@ -125,9 +102,25 @@ endif()
 add_executable(model
         ./src/drivers/run_model.cpp
         ${SOURCES})
+add_executable(cartpole
+        ./src/drivers/run_cartpole.cpp
+        ${SOURCES})
 add_executable(tests
         ./src/drivers/run_tests.cpp
         ${TEST_SOURCES})
+
+if(NOT IS_WINDOWS)
+    find_package( Boost 1.58 REQUIRED
+            COMPONENTS system filesystem)
+    include_directories( ${Boost_INCLUDE_DIR} )
+    foreach(executable ${EXEC_NAMES})
+        target_link_libraries(${executable}
+                ${Boost_LIBRARIES}
+                #                ${Boost_FILESYSTEM_LIBRARY}
+                #                ${Boost_SYSTEM_LIBRARY}
+                )
+    endforeach()
+endif()
 
 if(NOT IS_WINDOWS)
 #    find_library(TENSORFLOW_LIB tensorflow
@@ -137,14 +130,22 @@ if(NOT IS_WINDOWS)
             REQUIRED
             HINTS "${PROJECT_SOURCE_DIR}/external_libs/lib")
     message("> TENSORFLOW_LIB = ${TENSORFLOW_LIB}")
-    target_link_libraries(model ${TENSORFLOW_LIB})
-    target_link_libraries(tests ${TENSORFLOW_LIB})
+    foreach(executable ${EXEC_NAMES})
+        target_link_libraries(${executable} ${TENSORFLOW_LIB})
+    endforeach()
 endif()
 
 if(NOT IS_WINDOWS)
     find_library(GFLAGS_LIB gflags REQUIRED)
     message("> GFLAGS_LIB = ${GFLAGS_LIB}")
-    target_link_libraries(model ${GFLAGS_LIB})
+    foreach(executable ${GFLAGS_EXEC_NAMES})
+        target_link_libraries(${executable} ${GFLAGS_LIB})
+    endforeach()
+endif()
+
+if(NOT IS_WINDOWS)
+    set(JSON_BuildTests OFF CACHE INTERNAL "")
+    add_subdirectory(third_party/json)
 endif()
 
 #if(NOT IS_WINDOWS)
@@ -157,8 +158,10 @@ if(NOT IS_WINDOWS)
     find_package(GTest REQUIRED)
     include_directories(${GTEST_INCLUDE_DIRS})
     target_link_libraries(tests ${GTEST_LIBRARY})
-    target_link_libraries(tests pthread)
-    target_link_libraries(model pthread)
+    foreach(executable ${EXEC_NAMES})
+        target_link_libraries(${executable} pthread)
+        target_link_libraries(${executable} nlohmann_json::nlohmann_json)
+    endforeach()
 endif()
 
 configure_file(normalized_car_features.csv ${CMAKE_CURRENT_BINARY_DIR}/normalized_car_features.csv COPYONLY)

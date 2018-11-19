@@ -6,25 +6,8 @@
 #define DNN_TENSORFLOW_CPP_MODEL_H
 
 
-#ifdef DEFINE_MODEL
-#include "tensorflow/cc/client/client_session.h"
-#include "tensorflow/cc/ops/standard_ops.h"
-#include "tensorflow/core/framework/tensor.h"
-#include "tensorflow/cc/framework/gradients.h"
-#include "tensorflow/cc/saved_model/loader.h"
-#include "tensorflow/cc/saved_model/tag_constants.h"
-#include "tensorflow/cc/framework/ops.h"
-#include "tensorflow/core/platform/logging.h"
-#include "tensorflow/core/protobuf/meta_graph.pb.h"
-#include "tensorflow/c/c_test_util.h"
-using namespace tensorflow;
-using namespace tensorflow::ops;
-#else // DEFINE_MODEL
-
 #include "tensorflow/c/c_test_util.h"
 #include "tensorflow/core/platform/logging.h"
-
-#endif // DEFINE_MODEL
 
 #include "tensorflow/c/c_api.h"
 //#include "tensorflow/c/c_api_internal.h"
@@ -38,11 +21,13 @@ using namespace tensorflow::ops;
 #include <cstdlib>
 #include <string>
 #include <vector>
+#include <initializer_list>
 #include <cassert>
 #include <utility>
 #include <iostream>
 
-#include "data_set.h"
+#include "dqn/Hyperparameters.h"
+#include "model/data_set.h"
 
 #include "tf/wrappers.h"
 
@@ -50,83 +35,77 @@ using namespace tensorflow::ops;
 #define CHECKPOINTS_PATH "checkpoints/model"
 #define CSV_BASENAME "normalized_car_features.csv"
 
-// If define, then hook into the tensorflow C++ API to allow us to define the model,
-// its layers, and the backprop computation.
-//#define DEFINE_MODEL
+//extern const std::string PATH_SEP;
+#define PATH_SEP std::string("/")
 
+std::string get_cartpole_hyp_path();
 std::string model_path();
+std::string get_model_path(const std::string& model_path_subdir);
+std::string csv_dir_path();
 int DirExists(const char *path);
+void print_devices(const TFDeviceList& devices);
 
 class Model {
 public:
 
-  TF_Operation* _loss_op;
-  TF_Operation* _step_op;
-  TF_Operation* _predictions_op;
-  TF_Operation* _features_op;
-  TF_Operation* _labels_op;
-
   TFSession _session;
   std::string _model_path;
+  TFDeviceList _devices;
+  std::vector<std::string> _variables;
+  bool _debug;
+  DQNHyperparameters _hyp;
 
-//  Placeholder _features;
-//  Placeholder _labels;
-  DataSet _data_set;
+  Model(DQNHyperparameters& hyp, const std::string model_path = std::string(""), bool debug = false);
 
-#ifdef DEFINE_MODEL
-  Scope _scope;
-  ClientSession _session;
-  std::vector<Output> _init_ops;
-  std::vector<Output> _update_ops;
-  Output _loss;
-  Tensor _x_data;
-  Tensor _y_data;
-  Output _features;
-  Output _labels;
-  Output _layer_1;
-  Output _layer_2;
-  Output _layer_3;
-#endif
-
-  Model(const std::string model_path = std::string(""));
-
-#if DEFINE_MODEL
-  void LoadModelCPPAPI();
-#endif // DEFINE_MODEL
-
-  void print_graph(TF_Graph* graph);
-
-  TF_Operation* lookup_op(const std::string& pretty_name, const std::string& name, TF_Graph* graph);
+  TF_Operation* lookup_op(const std::string& pretty_name, const std::string& name);
+  void lookup_and_set_op(const std::string& name, TF_Operation** op_member);
 
   template <typename T>
   void set_tensor_data(TF_Tensor* tensor, std::vector<T> vec) {
+    set_tensor_data(tensor, vec.data(), vec.size());
+  }
+
+  template <typename T>
+  void set_tensor_data(TF_Tensor* tensor, const T* src, size_t length) {
     auto data_size = TF_DataTypeSize(TF_TensorType(tensor));
     assert(data_size == sizeof(T));
 
-    auto src_nbytes = sizeof(T)*vec.size();
+    auto src_nbytes = sizeof(T)*length;
     auto dst_nbytes = TF_TensorByteSize(tensor);
     assert(src_nbytes == dst_nbytes);
 
     T* dst = reinterpret_cast<T*>(TF_TensorData(tensor));
-    const T* src = vec.data();
     memcpy(dst, src, dst_nbytes);
   }
 
-  void print_variables();
+  template <typename T>
+  std::string _tensor_to_string(TF_Tensor* out) {
+    auto dtype = TF_TensorType(out);
+    assert(sizeof(T) == TF_DataTypeSize(dtype));
+    std::stringstream ss;
+    ss << "[";
+    for (size_t i = 0; i < tensor_num_elements(out); i++) {
+      if (i != 0) {
+        ss << ", ";
+      }
+      auto output_value = reinterpret_cast<T*>(TF_TensorData(out))[i];
+      ss << output_value;
+    }
+    ss << "]";
+    return ss.str();
+  }
 
-  void LoadModelCAPI();
+
+  void print_variables();
+  void print_devices();
 
   size_t tensor_num_elements(TF_Tensor* tensor);
 
   std::string tf_tensor_to_string(TF_Tensor* out);
 
-#ifdef DEFINE_MODEL
-  std::string tensor_to_string(Tensor out);
-#endif
-
   template <class Container>
   std::string container_to_string(Container& elems) {
-    stringstream ss;
+    std::stringstream ss;
     ss << "[";
     int i = 0;
     for (auto& it : elems) {
@@ -150,12 +129,7 @@ public:
 
   void SaveModel();
 
-#ifdef DEFINE_MODEL
-  void ReadData();
-  void DefineModel();
-  void TrainModel();
-  void Inference();
-#endif
+  virtual void InitOps() = 0;
 
 };
 
