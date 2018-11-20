@@ -32,7 +32,9 @@ struct DQNAlgoStats {
   // Total number of episodes every observed.
   int num_episodes;
 
-  DQNAlgoStats(int num_training_steps, int replay_capacity) :
+  bool debug;
+
+  DQNAlgoStats(int num_training_steps, int replay_capacity, bool debug) :
       num_training_steps(num_training_steps)
 
       , training_iteration(0)
@@ -43,6 +45,8 @@ struct DQNAlgoStats {
 
       , episode_rewards(replay_capacity)
       , num_episodes(0)
+
+      , debug(debug)
   {
   }
 
@@ -53,12 +57,20 @@ struct DQNAlgoStats {
       training_episode += 1;
       num_episodes += 1;
     }
-    episode_rewards.Add(rew);
+//    episode_rewards.Add(rew);
   }
 
   void RecordStats(int t, bool done) {
+    if (done) {
+      if (debug) {
+        LOG(INFO) << "episode reward = " << reward_train_sum;
+      }
+      episode_rewards.Add(reward_train_sum);
+      reward_train_sum = 0;
+    }
     if (training_step >= num_training_steps and done) {
-      RewardType average_reward_train = reward_train_sum / ((RewardType)training_episode);
+//      RewardType average_reward_train = reward_train_sum / ((RewardType)training_episode);
+      auto average_reward_train = Average(episode_rewards);
       LOG(INFO) << "> Save summary: "
                    << "i=" << training_iteration
                    << ", " << "average_reward_train=" << average_reward_train
@@ -70,7 +82,6 @@ struct DQNAlgoStats {
 
       training_step = 0;
       training_episode = 0;
-      reward_train_sum = 0;
     }
   }
 };
@@ -86,13 +97,13 @@ struct DQNAlgoState {
   RewardType saved_mean_reward;
 
   struct DQNAlgoStats stats;
-  DQNAlgoState(DQNHyperparameters& hyp) :
+  DQNAlgoState(DQNHyperparameters& hyp, bool debug) :
       hyp(hyp)
       , done(false)
       , step_count(0)
       , episode_step(0)
       , saved_mean_reward(-1)
-      , stats(hyp.num_training_steps, hyp.replay_capacity)
+      , stats(hyp.num_training_steps, hyp.replay_capacity, debug)
   {
   }
   bool is_done() {
@@ -117,11 +128,17 @@ template <class Model, class EnvironmentType, class ObsType, class ActionType, c
 class DQNAlgorithm {
 public:
 
-  DQNAlgorithm(int seed, DQNHyperparameters& hyp, std::shared_ptr<Model> model, std::shared_ptr<EnvironmentType> env, FuncAddTupleType<ObsType, ActionType, TupleType, CtxType> func_add_tuple) :
+  DQNAlgorithm(int seed,
+      DQNHyperparameters& hyp,
+      std::shared_ptr<Model> model,
+      std::shared_ptr<EnvironmentType> env,
+      FuncAddTupleType<ObsType, ActionType, TupleType, CtxType> func_add_tuple,
+      bool debug) :
   _hyp(hyp)
   , _model(model)
   , _env(env)
   , _seed(seed)
+  , _debug(debug)
   , _buffer(seed, _hyp.replay_capacity, func_add_tuple) {
   }
   void Run(DQNAlgoState<ObsType>& state, CtxType& ctx) {
@@ -131,7 +148,7 @@ public:
     }
   }
   void Setup(DQNAlgoState<ObsType>& state) {
-    state = DQNAlgoState<ObsType>(_hyp);
+    state = DQNAlgoState<ObsType>(_hyp, _debug);
     state.obs = _env->Reset();
   }
   void NextIter(DQNAlgoState<ObsType>& state, CtxType& ctx) {
@@ -145,13 +162,19 @@ public:
     _buffer.Add(/*old_obs=*/state.obs, /*action=*/action, /*(new_obs, rew, done)=*/tupl);
     state.obs = tupl.obs;
 
+//    if (_debug) {
+//      LOG(INFO) << "> Reward = " << tupl.reward;
+//    }
+
     state.stats.UpdateStats(tupl.reward, tupl.done);
     if (tupl.done) {
       state.episode_step = 0;
+      state.obs = _env->Reset();
     }
 
     if (state.step_count > _hyp.min_replay_history && state.step_count % _hyp.update_period == 0) {
       ReplayBufferMinibatch batch = _buffer.Sample(_hyp.batch_size, ctx);
+      _model->TrainingUpdate(batch);
     }
 
     if (state.step_count > _hyp.min_replay_history && state.step_count % _hyp.target_update_period == 0) {
@@ -185,6 +208,7 @@ public:
 
   ActionType SelectAction(const DQNAlgoState<ObsType>& state) {
     auto eps = GetEpsilon(state);
+//    auto eps = _hyp.epsilon_eval;
     ActionType action = _model->Act(/*obs=*/state.obs, /*stochastic=*/true, /*epsilon=*/eps);
     return action;
   }
@@ -202,6 +226,7 @@ public:
   std::shared_ptr<Model> _model;
   std::shared_ptr<EnvironmentType> _env;
   int _seed;
+  bool _debug;
   ReplayBuffer<ObsType, ActionType, TupleType, CtxType> _buffer;
 };
 

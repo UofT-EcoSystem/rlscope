@@ -1,6 +1,6 @@
 {
   "num_iterations":20,
-  "num_training_steps":5000,
+  "num_training_steps":20000,
   "min_replay_history":1000,
   "max_steps_per_episode":200,
   "update_period":1,
@@ -10,5 +10,6 @@
   "replay_capacity":5000,
   "batch_size":32,
   "epsilon_decay_period":10000.0,
-  "epsilon_train":0.02
+  "epsilon_train":0.02,
+  "epsilon_eval":0.001
 }

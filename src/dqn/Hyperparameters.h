@@ -35,6 +35,7 @@ struct DQNHyperparameters {
   int batch_size;
   double epsilon_decay_period;
   double epsilon_train;
+  double epsilon_eval;
 
   static DQNHyperparameters FromJson(std::string path) {
     boost::filesystem::path file(path);
@@ -61,6 +62,7 @@ struct DQNHyperparameters {
     hyp.batch_size = j["batch_size"];
     hyp.epsilon_decay_period = j["epsilon_decay_period"];
     hyp.epsilon_train = j["epsilon_train"];
+    hyp.epsilon_eval = j["epsilon_eval"];
 
     return hyp;
   }

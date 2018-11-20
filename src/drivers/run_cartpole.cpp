@@ -55,7 +55,8 @@ void RunCartpole(std::shared_ptr<CartPoleModel> model, std::shared_ptr<CartPoleE
   for (int64_t t = 0; episode_num < FLAGS_num_episodes; episode_num += 1) {
     auto episode_results = RunEpisode(env, model, &obs, epsilon_eval);
     if (FLAGS_debug) {
-      LOG(INFO) << "episode[" << episode_num << "] reward = " << episode_results.episode_reward;
+      LOG(INFO) << "episode[" << episode_num << "] reward = " << episode_results.episode_reward << ", "
+      << "timesteps = " << episode_results.timesteps;
     }
     episode_rewards.Add(episode_results.episode_reward);
     if (episode_num % FLAGS_print_freq_per_episode == 0) {
@@ -70,10 +71,7 @@ void TrainCartpole(
     DQNHyperparameters& hyp,
     std::shared_ptr<CartPoleModel> model,
     std::shared_ptr<CartPoleEnv> env) {
-  // - Read in hyperparams from json file.
-  // - DQNAlgoState state(hyp_params)
 
-//  FuncAddTupleType<ObsType, ActionType, TupleType, CtxType>
   using ObsType = CartPoleObservation;
   using ActionType = CartPoleAction;
   using TupleType = CartPoleStepTuple;
@@ -85,34 +83,10 @@ void TrainCartpole(
     cartpole_add_tuple(hyp, i, batch, entry, ctx);
   };
 
-//  FuncAddTupleType<ObsType, ActionType, TupleType, CtxType> func_add_tuple = [&hyp]
-//      (ReplayBufferMinibatch& batch, const StorageEntry<ObsType, ActionType, TupleType>& entry, CtxType& ctx) {
-//
-////    _AddFieldToBatch<StateType>(batch, hyp, ctx, entry, "obs_t", [] (const StorageEntryType& entry) { return entry.tupl.obs.state; });
-//    _AddMultiDimFieldToBatch<StateType>(batch, hyp, ctx, entry, "obs_t", ObsType::NumElemsPerEntry(),
-//        [&ctx] (const StorageEntryType& entry, std::vector<StateType>& vec) {
-//      ObsType::CopyToNDArray(ctx.i, entry.tupl.obs, vec);
-//    });
-//    _AddFieldToBatch<RewardType>(batch, hyp, ctx, entry, "reward", [] (const StorageEntryType& entry) { return entry.tupl.reward; });
-////    _AddFieldToBatch<DoneVectorType>(batch, hyp, ctx, entry, "done", [] (const StorageEntryType& entry) { return entry.tupl.done; });
-////    done_mask_ph = tf.placeholder(tf.float32, [None], name="done")
-//    _AddFieldToBatch<float>(batch, hyp, ctx, entry, "done", [] (const StorageEntryType& entry) { return entry.tupl.done; });
-//    _AddFieldToBatch<ActionType>(batch, hyp, ctx, entry, "action", [] (const StorageEntryType& entry) { return entry.action; });
-////    _AddFieldToBatch<StateType>(batch, hyp, ctx, entry, "obs_tp1", [] (const StorageEntryType& entry) { return entry.new_obs.state; });
-//    _AddMultiDimFieldToBatch<StateType>(batch, hyp, ctx, entry, "obs_tp1", ObsType::NumElemsPerEntry(),
-//                                        [&ctx] (const StorageEntryType& entry, std::vector<StateType>& vec) {
-//                                          ObsType::CopyToNDArray(ctx.i, entry.new_obs, vec);
-//                                        });
-//    // TODO: add action, and FIRST state ("obs" is the state after the action is taken.)
-//
-//    ctx.i += 1;
-//
-//  };
-
   DQNAlgorithm<CartPoleModel, CartPoleEnv, CartPoleObservation, CartPoleAction, CartPoleStepTuple, CtxType> algorithm(
-      FLAGS_seed, hyp, model, env, func_add_tuple);
+      FLAGS_seed, hyp, model, env, func_add_tuple, FLAGS_debug);
 
-  DQNAlgoState<CartPoleObservation> state(hyp);
+  DQNAlgoState<CartPoleObservation> state(hyp, FLAGS_debug);
   DQNCtx ctx;
   algorithm.Run(state, ctx);
 }
