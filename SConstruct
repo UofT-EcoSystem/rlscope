@@ -3,6 +3,7 @@
 from __future__ import print_function
 from glob import glob
 import time
+import pprint
 import textwrap
 import sys
 import re
@@ -25,23 +26,35 @@ import py_config
 #   (look at paths in "scons --debug=stree" to debug if you suspect this is happening).
 _ROOT = "."
 
-RULES = ['PythonProfileParser']
+# RULES = ['PythonProfileParser']
+# Not initialized yet.
+RULES = []
 
-AddOption('--srcs-direc',
-    help=textwrap.dedent("""
+AddOption(
+  '--srcs-direc',
+  help=textwrap.dedent("""
     Path to look for source files for running --target.
     """))
-AddOption('--rule',
-          help=textwrap.dedent("""
+AddOption(
+  '--rule',
+  help=textwrap.dedent("""
     Rule to run.
-    """),
-          choices=RULES)
-AddOption('--rebuild',
-      action='store_true',
-      help="force summary.csv to be rebuilt, even if they're up to date")
-AddOption('--dbg',
-    action='store_true',
-    help="debug")
+  """),
+)
+AddOption(
+  '--list-rules',
+  action='store_true',
+  help=textwrap.dedent("""
+    List rules that can be run.
+  """))
+AddOption(
+  '--rebuild',
+  action='store_true',
+  help="force summary.csv to be rebuilt, even if they're up to date")
+AddOption(
+  '--dbg',
+  action='store_true',
+  help="debug")
 
 # Use this --expr-type if the input/output files are found in the given <directory>.
 # NOTE: <directory> is typically a figure name
@@ -120,55 +133,89 @@ class _Main:
   def debug(self):
     return self.opt('dbg')
 
+  @property
+  def list_rules(self):
+    return self.opt('list_rules')
+  @property
+  def rule(self):
+    return self.opt('rule')
+  @property
+  def direc(self):
+    return self.opt('srcs_direc')
+
   def run(self):
     rules = [self.opt('rule')]
+
     for rule in rules:
-      # import ipdb; ipdb.set_trace()
       env_rule = getattr(self.env, rule)
       builder = getattr(self, rule)
-      # import ipdb; ipdb.set_trace()
       src_files = builder.get_source_files()
-      if src_files.has_all_required_paths:
-        targets = builder.get_targets(src_files)
 
-        # builder.run()
-        if self.debug:
-          print(textwrap.dedent("""
-            > Run rule: 
-              rule   = {rule}
-              source = {source}
-              target = {target}
-            """.format(rule=env_rule, source=src_files.all_sources, target=targets)))
-        env_rule(source=src_files.all_sources, target=targets)
-        if self.opt('rebuild'):
-          self.env.AlwaysBuild(targets)
+      if not src_files.has_all_required_paths:
+        print(textwrap.dedent("""
+          > Skip --rule; couldn't find all require source paths: 
+            rule          = {rule}
+            sources found = {source}
+          """.format(rule=env_rule, source=src_files.all_sources)))
+        continue
+
+      targets = builder.get_targets(src_files)
+
+      # builder.run()
+      if self.debug:
+        print(textwrap.dedent("""
+          > Run rule: 
+            rule   = {rule}
+            source = {source}
+            target = {target}
+          """.format(rule=env_rule, source=src_files.all_sources, target=targets)))
+
+      env_rule(source=src_files.all_sources, target=targets)
+      if self.opt('rebuild'):
+        self.env.AlwaysBuild(targets)
 
   def check_args(self):
-    if self.opt('rule') is None:
+    if self.list_rules:
+      print("Valid --rule choices:")
+      pprint.pprint(RULES, indent=2)
+      Exit(0)
+
+    if self.rule is None:
       print("ERROR: --rule must be provided; choices = {rules}".format(rules=RULES))
       Exit(1)
 
-    if self.opt('rule') is not None and self.opt('srcs_direc') is None:
+    if self.rule not in RULES:
+      print("ERROR: unknown --rule={rule}; choices = {rules}".format(
+        rule=self.rule,
+        rules=RULES))
+      Exit(1)
+
+    if self.rule is not None and self.opt('srcs_direc') is None:
       print("ERROR: --srcs-direc must be provided when --rule is provided")
       Exit(1)
 
   def opt(self, name):
     return self.env.GetOption(name)
 
+  def _add_parser(self, ParserKlassName):
+    # self.PythonProfileParser = ProfileParserRunner(benchmark_dqn.PythonProfileParser)
+    # self.builders.append(self.PythonProfileParser)
+    # BUILDERS['PythonProfileParser'] = Builder(action=self.PythonProfileParser)
+    ParserKlass = getattr(benchmark_dqn, ParserKlassName)
+    runner = ProfileParserRunner(ParserKlass)
+    setattr(self, ParserKlassName, runner)
+    self.builders.append(runner)
+    self.env_builders[ParserKlassName] = Builder(action=runner)
+    RULES.append(ParserKlassName)
+
   def _init_env(self):
     self.builders = []
+    self.env_builders = dict()
 
-    BUILDERS = dict()
+    self._add_parser("PythonProfileParser")
+    self._add_parser("CUDASQLiteParser")
 
-    self.PythonProfileParser = ProfileParserRunner(benchmark_dqn.PythonProfileParser)
-    self.builders.append(self.PythonProfileParser)
-    BUILDERS['PythonProfileParser'] = Builder(action=self.PythonProfileParser)
-
-    self.CUDASQLiteParser = ProfileParserRunner(benchmark_dqn.CUDASQLiteParser)
-    self.builders.append(self.CUDASQLiteParser)
-    BUILDERS['CUDASQLiteParser'] = Builder(action=self.CUDASQLiteParser)
-
-    self.env = Environment(BUILDERS=BUILDERS)
+    self.env = Environment(BUILDERS=self.env_builders)
 
     for builder in self.builders:
       builder.main = self
