@@ -55,6 +55,10 @@ AddOption(
   '--dbg',
   action='store_true',
   help="debug")
+AddOption(
+  '--print',
+  action='store_true',
+  help="debug")
 
 # Use this --expr-type if the input/output files are found in the given <directory>.
 # NOTE: <directory> is typically a figure name
@@ -87,31 +91,46 @@ class ProfileParserRunner:
   @property
   def debug(self):
     return self.main.debug
+  @property
+  def bench_name(self):
+    return self.opt('bench_name')
 
-  def shell_cmd(self, debug=None):
+  def shell_cmd(self, srcs, debug=None):
     direc = self.direc
     rule = self.rule
     py = self.py
+
     python = self.python_cmd_str(debug=debug)
-    cmdline = '{python} {py} --directory {direc} --rule {rule}'.format(**locals())
+
+    src_files = self.ParserKlass.as_source_files(srcs)
+    bench_names = src_files.bench_names
+    assert len(bench_names) == 1
+    bench_name = list(bench_names)[0]
+
+    if bench_name is not None:
+      bench_str = "--bench-name {bench_name}".format(bench_name=self.bench_name)
+    else:
+      bench_str = ""
+
+    cmdline = '{python} {py} --directory {direc} --rule {rule} {bench_str}'.format(**locals())
     return cmdline
 
   def get_source_files(self):
-    src_files = self.ParserKlass.get_source_files(self.direc)
+    src_files = self.ParserKlass.get_source_files(self.direc, debug=self.debug)
     return src_files
 
-  def get_targets(self, src_files):
-    targets = self.ParserKlass.get_targets(src_files)
+  def get_targets(self, src_files, bench_name):
+    targets = self.ParserKlass.get_targets(src_files, bench_name)
     return targets
 
   def opt(self, name):
     return self.main.opt(name)
 
   def __call__(self, target, source, env):
-    # srcs = ' '.join([s.abspath for s in source])
+    srcs = [s.abspath for s in source]
     py = py_config.BENCH_DQN_PY
     rule = self.opt('rule')
-    cmd = self.shell_cmd()
+    cmd = self.shell_cmd(srcs)
     cmdline = '{cmd} '.format(**locals())
     check_call(cmdline, shell=True, print_cmd=True)
 
@@ -132,6 +151,9 @@ class _Main:
   @property
   def debug(self):
     return self.opt('dbg')
+  @property
+  def should_print(self):
+    return self.debug or self.opt('print')
 
   @property
   def list_rules(self):
@@ -140,6 +162,9 @@ class _Main:
   def rule(self):
     return self.opt('rule')
   @property
+  def bench_name(self):
+    return self.opt('bench_name')
+  @property
   def direc(self):
     return self.opt('srcs_direc')
 
@@ -147,32 +172,60 @@ class _Main:
     rules = [self.opt('rule')]
 
     for rule in rules:
+      if self.should_print:
+        print("> Rule = {rule}".format(rule=rule))
       env_rule = getattr(self.env, rule)
       builder = getattr(self, rule)
+      if self.should_print:
+        print("  > get_source_files".format(rule=rule))
       src_files = builder.get_source_files()
 
-      if not src_files.has_all_required_paths:
-        print(textwrap.dedent("""
-          > Skip --rule; couldn't find all require source paths: 
-            rule          = {rule}
-            sources found = {source}
-          """.format(rule=env_rule, source=src_files.all_sources)))
-        continue
+      bench_names = src_files.bench_names
+      for bench_name in bench_names:
+        if self.should_print:
+          print("  > bench_name = {bench_name}".format(bench_name=bench_name))
 
-      targets = builder.get_targets(src_files)
+        sources = src_files.all_sources(bench_name)
+        if not src_files.has_all_required_paths:
+          print(textwrap.dedent("""
+            > Skip --rule; couldn't find all require source paths: 
+              rule          = {rule}
+              bench_name    = {bench_name}
+              sources found = {source}
+            """.format(
+            rule=env_rule,
+            bench_name=bench_name,
+            source=sources)))
+          continue
 
-      # builder.run()
-      if self.debug:
-        print(textwrap.dedent("""
-          > Run rule: 
-            rule   = {rule}
-            source = {source}
-            target = {target}
-          """.format(rule=env_rule, source=src_files.all_sources, target=targets)))
+        targets = builder.get_targets(src_files, bench_name)
 
-      env_rule(source=src_files.all_sources, target=targets)
-      if self.opt('rebuild'):
-        self.env.AlwaysBuild(targets)
+        if self.should_print:
+          print(textwrap.dedent("""
+            > Run rule: 
+              rule       = {rule}
+              bench_name = {bench_name}
+              source     = {source}
+              target     = {target}
+            """.format(
+            rule=env_rule,
+            bench_name=bench_name,
+            source=sources,
+            target=targets)))
+
+        # Cannot pass non-path arguments to build-rule:
+        # Options:
+        # - Force to build all bench_names when we call the script.
+        # - Hide additional information in a target path that is never built
+        # - Extract bench_name from source paths (pass --srcs)
+        #   - Already have code to do this; just need to match it match
+        #     over pre-existing files instead of a --directory
+        # - Extract bench_name from target paths (pass --targets)
+        # env_sources = {'srcs':sources, 'bench_name':bench_name}
+
+        env_rule(source=sources, target=targets)
+        if self.opt('rebuild'):
+          self.env.AlwaysBuild(targets)
 
   def check_args(self):
     if self.list_rules:
@@ -214,6 +267,7 @@ class _Main:
 
     self._add_parser("PythonProfileParser")
     self._add_parser("CUDASQLiteParser")
+    self._add_parser("CombinedProfileParser")
 
     self.env = Environment(BUILDERS=self.env_builders)
 
