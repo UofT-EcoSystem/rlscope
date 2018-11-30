@@ -31,10 +31,28 @@ _ROOT = "."
 RULES = []
 
 AddOption(
-  '--srcs-direc',
+  '--src-direc',
   help=textwrap.dedent("""
     Path to look for source files for running --target.
     """))
+# https://stackoverflow.com/questions/4109436/processing-multiple-values-for-one-single-option-using-getopt-optparse
+
+# ListVariable('--src-direcs',
+#            'Path to look for source files for running --target.',
+#            'all',
+#            names = "src_direcs",
+# # list_of_libs
+#            ),
+
+AddOption(
+  '--src-direcs',
+  help=textwrap.dedent("""
+    Path to look for source files for running --target.
+    (Comma-separated list)
+    """),
+  # action='append', type='string',
+)
+
 AddOption(
   '--rule',
   help=textwrap.dedent("""
@@ -70,6 +88,20 @@ DIRECTORY_WITH_REPETITION_COLUMN = set([
   'execution-times',
 ])
 
+def _get_directories(direcs):
+  # direcs = self.opt('src_direcs')
+  if direcs is not None:
+    if re.search(r',', direcs):
+      return ",".split(direcs)
+    return direcs
+  return direcs
+
+def _get_directory(self):
+  direcs = self.directories
+  if direcs is not None:
+    return direcs
+  return self.opt('src_direc')
+
 def timestamp():
   return time.time()
 
@@ -82,7 +114,10 @@ class ProfileParserRunner:
 
   @property
   def direc(self):
-    return self.opt('srcs_direc')
+    return _get_directory(self)
+  @property
+  def directories(self):
+    return _get_directories(self.opt('src_direcs'))
 
   def python_cmd_str(self, debug=None):
     python_cmd = " ".join(self.main.python_cmd(debug))
@@ -90,7 +125,10 @@ class ProfileParserRunner:
 
   @property
   def debug(self):
-    return self.main.debug
+      return self.main.debug
+  @property
+  def should_print(self):
+    return self.main.should_print
   @property
   def bench_name(self):
     return self.opt('bench_name')
@@ -102,24 +140,44 @@ class ProfileParserRunner:
 
     python = self.python_cmd_str(debug=debug)
 
+    # if self.ParserKlass.uses_all_benches():
+    #   src_files = self.ParserKlass.as_source_files_group(srcs)
+    #   bench_names = src_files.bench_names
+    # else:
+    # Need to first group srcs into matching directories,
+    # then call as_source_files(...) on each group of files.
     src_files = self.ParserKlass.as_source_files(srcs)
     bench_names = src_files.bench_names
-    assert len(bench_names) == 1
-    bench_name = list(bench_names)[0]
-
-    if bench_name is not None:
-      bench_str = "--bench-name {bench_name}".format(bench_name=self.bench_name)
+    if not self.ParserKlass.uses_all_benches():
+      assert len(bench_names) == 1
+      bench_name = list(bench_names)[0]
+      if bench_name is not None:
+        bench_str = "--bench-name {bench_name}".format(bench_name=self.bench_name)
+      else:
+        bench_str = ""
     else:
       bench_str = ""
 
-    cmdline = '{python} {py} --directory {direc} --rule {rule} {bench_str}'.format(**locals())
+    debug_str = ""
+    if self.should_print:
+      debug_str = "--debug"
+
+    directory_str = None
+    if src_files.is_group:
+      directory_str = "--directories {directories}".format(
+        directories=" ".join(src_files.directories))
+    else:
+      directory_str = "--directory {direc}".format(
+        direc=direc)
+
+    cmdline = '{python} {py} {directory_str} --rule {rule} {bench_str} {debug_str}'.format(**locals())
     return cmdline
 
   def get_source_files(self):
     src_files = self.ParserKlass.get_source_files(self.direc, debug=self.debug)
     return src_files
 
-  def get_targets(self, src_files, bench_name):
+  def get_targets(self, src_files, bench_name=None):
     targets = self.ParserKlass.get_targets(src_files, bench_name)
     return targets
 
@@ -127,6 +185,25 @@ class ProfileParserRunner:
     return self.main.opt(name)
 
   def __call__(self, target, source, env):
+
+    # Target
+    # ['/mnt/data/james/clone/dnn_tensorflow_cpp/checkpoints/test_call_c/TotalTimeSec.summary.plot_data.txt',
+    #  '/mnt/data/james/clone/dnn_tensorflow_cpp/checkpoints/test_call_c/TotalTimeSec.summary.png',
+    #  '/mnt/data/james/clone/dnn_tensorflow_cpp/checkpoints/test_call_c/CppAndGPUTimeSec.summary.plot_data.txt',
+    #  '/mnt/data/james/clone/dnn_tensorflow_cpp/checkpoints/test_call_c/CppAndGPUTimeSec.summary.png',
+    #  '/mnt/data/james/clone/dnn_tensorflow_cpp/checkpoints/test_call_c/CppTimeSec.summary.plot_data.txt',
+    #  '/mnt/data/james/clone/dnn_tensorflow_cpp/checkpoints/test_call_c/CppTimeSec.summary.png',
+    #  '/mnt/data/james/clone/dnn_tensorflow_cpp/checkpoints/test_call_c/GPUTimeSec.summary.plot_data.txt',
+    #  '/mnt/data/james/clone/dnn_tensorflow_cpp/checkpoints/test_call_c/GPUTimeSec.summary.png',
+    #  '/mnt/data/james/clone/dnn_tensorflow_cpp/checkpoints/test_call_c/TheoreticalSpeedup.summary.plot_data.txt',
+    #  '/mnt/data/james/clone/dnn_tensorflow_cpp/checkpoints/test_call_c/TheoreticalSpeedup.summary.png',
+    #  '/mnt/data/james/clone/dnn_tensorflow_cpp/checkpoints/test_call_c/PercentTimeInPython.summary.plot_data.txt',
+    #  '/mnt/data/james/clone/dnn_tensorflow_cpp/checkpoints/test_call_c/PercentTimeInPython.summary.png',
+    #  '/mnt/data/james/clone/dnn_tensorflow_cpp/checkpoints/test_call_c/PythonTimeSec.summary.plot_data.txt',
+    #  '/mnt/data/james/clone/dnn_tensorflow_cpp/checkpoints/test_call_c/PythonTimeSec.summary.png',
+    #  '/mnt/data/james/clone/dnn_tensorflow_cpp/checkpoints/test_call_c/PythonOverheadPercent.summary.plot_data.txt',
+    #  '/mnt/data/james/clone/dnn_tensorflow_cpp/checkpoints/test_call_c/PythonOverheadPercent.summary.png']
+    # Source: []
     srcs = [s.abspath for s in source]
     py = py_config.BENCH_DQN_PY
     rule = self.opt('rule')
@@ -166,7 +243,103 @@ class _Main:
     return self.opt('bench_name')
   @property
   def direc(self):
-    return self.opt('srcs_direc')
+    return _get_directory(self)
+  @property
+  def directories(self):
+    return _get_directories(self.opt('src_direcs'))
+
+  def build_all_benches_rule(self, src_files, builder, env_rule):
+    sources = src_files.all_sources(all_bench_names=True)
+    # targets = builder.get_targets(src_files, all_bench_names=True)
+    try:
+      pass  # Cmd
+      targets = builder.get_targets(src_files)
+    except Exception as e:
+      import ipdb;
+      ipdb.set_trace()
+      raise e
+
+
+    if self.should_print:
+      print(textwrap.dedent("""
+            > Run rule: 
+              rule       = {rule}
+              source     = {source}
+              target     = {target}
+            """.format(
+        rule=env_rule,
+        source=sources,
+        target=targets)))
+
+    self.check_src_files(src_files, builder)
+    env_rule(source=sources, target=targets)
+    if self.opt('rebuild'):
+      self.env.AlwaysBuild(targets)
+
+  def check_src_files(self, src_files, builder):
+    if not src_files.has_all_required_paths:
+      print(
+        textwrap.dedent("""
+ERROR: Didn't find all required source files in directory={dir} for parser={parser}
+  src_files =
+{src_files}
+  required_files = 
+{required_files}
+            """.format(
+          dir=src_files.directory,
+          parser=builder.ParserKlass.__name__,
+          # src_files=str(src_files),
+          src_files=textwrap.indent(str(src_files), prefix="  "*2),
+          required_files=benchmark_dqn.as_str(builder.ParserKlass.required_source_basename_regexes(), indent=2),
+        )))
+      Exit(1)
+
+  def build_bench_rule(self, bench_name, src_files, builder, env_rule):
+    if self.should_print:
+      print("  > bench_name = {bench_name}".format(bench_name=bench_name))
+
+    sources = src_files.all_sources(bench_name)
+    if not src_files.has_all_required_paths:
+      print(textwrap.dedent("""
+            > Skip --rule; couldn't find all require source paths: 
+              rule          = {rule}
+              bench_name    = {bench_name}
+              sources found = {source}
+            """.format(
+        rule=env_rule,
+        bench_name=bench_name,
+        source=sources)))
+      return
+
+    targets = builder.get_targets(src_files, bench_name)
+
+    if self.should_print:
+      print(textwrap.dedent("""
+            > Run rule: 
+              rule       = {rule}
+              bench_name = {bench_name}
+              source     = {source}
+              target     = {target}
+            """.format(
+        rule=env_rule,
+        bench_name=bench_name,
+        source=sources,
+        target=targets)))
+
+    # Cannot pass non-path arguments to build-rule:
+    # Options:
+    # - Force to build all bench_names when we call the script.
+    # - Hide additional information in a target path that is never built
+    # - Extract bench_name from source paths (pass --srcs)
+    #   - Already have code to do this; just need to match it match
+    #     over pre-existing files instead of a --directory
+    # - Extract bench_name from target paths (pass --targets)
+    # env_sources = {'srcs':sources, 'bench_name':bench_name}
+
+    self.check_src_files(src_files, builder)
+    env_rule(source=sources, target=targets)
+    if self.opt('rebuild'):
+      self.env.AlwaysBuild(targets)
 
   def run(self):
     rules = [self.opt('rule')]
@@ -180,52 +353,15 @@ class _Main:
         print("  > get_source_files".format(rule=rule))
       src_files = builder.get_source_files()
 
+      # TODO: src_files might take all bench_names at once; in that case, should invoke the rule ONCE.
       bench_names = src_files.bench_names
-      for bench_name in bench_names:
-        if self.should_print:
-          print("  > bench_name = {bench_name}".format(bench_name=bench_name))
 
-        sources = src_files.all_sources(bench_name)
-        if not src_files.has_all_required_paths:
-          print(textwrap.dedent("""
-            > Skip --rule; couldn't find all require source paths: 
-              rule          = {rule}
-              bench_name    = {bench_name}
-              sources found = {source}
-            """.format(
-            rule=env_rule,
-            bench_name=bench_name,
-            source=sources)))
-          continue
 
-        targets = builder.get_targets(src_files, bench_name)
-
-        if self.should_print:
-          print(textwrap.dedent("""
-            > Run rule: 
-              rule       = {rule}
-              bench_name = {bench_name}
-              source     = {source}
-              target     = {target}
-            """.format(
-            rule=env_rule,
-            bench_name=bench_name,
-            source=sources,
-            target=targets)))
-
-        # Cannot pass non-path arguments to build-rule:
-        # Options:
-        # - Force to build all bench_names when we call the script.
-        # - Hide additional information in a target path that is never built
-        # - Extract bench_name from source paths (pass --srcs)
-        #   - Already have code to do this; just need to match it match
-        #     over pre-existing files instead of a --directory
-        # - Extract bench_name from target paths (pass --targets)
-        # env_sources = {'srcs':sources, 'bench_name':bench_name}
-
-        env_rule(source=sources, target=targets)
-        if self.opt('rebuild'):
-          self.env.AlwaysBuild(targets)
+      if builder.ParserKlass.uses_all_benches():
+        self.build_all_benches_rule(src_files, builder, env_rule)
+      else:
+        for bench_name in bench_names:
+          self.build_bench_rule(bench_name, src_files, builder, env_rule)
 
   def check_args(self):
     if self.list_rules:
@@ -243,8 +379,8 @@ class _Main:
         rules=RULES))
       Exit(1)
 
-    if self.rule is not None and self.opt('srcs_direc') is None:
-      print("ERROR: --srcs-direc must be provided when --rule is provided")
+    if self.rule is not None and self.opt('src_direc') is None and self.opt('src_direcs') is None:
+      print("ERROR: --src-direc/--src-direcs must be provided when --rule is provided")
       Exit(1)
 
   def opt(self, name):
@@ -268,6 +404,7 @@ class _Main:
     self._add_parser("PythonProfileParser")
     self._add_parser("CUDASQLiteParser")
     self._add_parser("CombinedProfileParser")
+    self._add_parser("PlotSummary")
 
     self.env = Environment(BUILDERS=self.env_builders)
 

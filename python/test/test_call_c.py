@@ -183,6 +183,9 @@ def main():
       default_time_sec = DEFAULT_TIME_SEC
     setattr(args, attr, default_time_sec)
 
+  config_path = _j(args.directory, "config.json")
+  dump_config(config_path)
+
   test_call_c = TestCallC(args, parser)
 
   if not args.nvprof_enabled:
@@ -264,6 +267,21 @@ def args_to_cmdline(parser, args):
       raise NotImplemented
 
   return [str(x) for x in cmdline]
+
+def dump_config(path, **kwargs):
+  config = dict()
+  defaults = {
+    'clock': "monotonic_clock",
+    'device_name': None,
+    'impl_name': None,
+    # For tensorflow: r'(?:built-in.*pywrap_tensorflow)'
+    'c_lib_func_pyprof_pattern':"CLIB__.*",
+    'discard_first_sample':False,
+    'num_calls':1,
+  }
+  config = dict(defaults)
+  config.update(kwargs)
+  do_dump_json(config, path)
 
 def print_cmd(cmd):
   print(textwrap.dedent("""

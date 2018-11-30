@@ -13,8 +13,117 @@ from os.path import join as _j, abspath as _a, exists as _e, dirname as _d, base
 
 import py_config
 
-# JAMES TOOD: where is shared library built?
-py_lib = cdll.LoadLibrary(_j(py_config.BUILD_DIR, 'libpy_interface.so'))
+# https://stackoverflow.com/questions/9386636/profiling-a-system-with-extensively-reused-decorators
+import types
+
+# NOTE: Looks like all the C calls are now being grouped into a single function name.
+#
+#  ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+#       2 3.354368489 1.6771842445 3.354368489 1.6771842445 /mnt/data/james/clone/dnn_tensorflow_cpp/python/test/py_interface.py:43(__call__)
+#       1 0.793662559 0.793662559 1.00004555 1.00004555 /mnt/data/james/clone/dnn_tensorflow_cpp/python/test/test_call_c.py:76(run_python)
+# 3162558 0.20635535400000002 6.524950815131297e-08 0.20635535400000002 6.524950815131297e-08 {built-in method time.time}
+#       2 4.3299e-05 2.16495e-05 4.3299e-05 2.16495e-05 {built-in method builtins.print}
+#       1 2.0474e-05 2.0474e-05 2.3543471250000003 2.3543471250000003 /mnt/data/james/clone/dnn_tensorflow_cpp/python/test/py_interface.py:202(gpu_sleep)
+#       2 1.2456e-05 6.228e-06 1.2456e-05 6.228e-06 {method 'format' of 'str' objects}
+#       1 1.2454000000000001e-05 1.2454000000000001e-05 2.354387697 2.354387697 /mnt/data/james/clone/dnn_tensorflow_cpp/python/test/test_call_c.py:67(run_gpu)
+#       1 1.0382e-05 1.0382e-05 1.0588000000000001e-05 1.0588000000000001e-05 /home/james/clone/clone/baselines/baselines/deepq/simple_refactor.py:3155(stop)
+#       1 7.06e-06 7.06e-06 1.000048898 1.000048898 /mnt/data/james/clone/dnn_tensorflow_cpp/python/test/py_interface.py:205(run_cpp)
+#       1 4.26e-06 4.26e-06 1.000053158 1.000053158 /mnt/data/james/clone/dnn_tensorflow_cpp/python/test/test_call_c.py:72(run_cpp)
+#       1 4.002e-06 4.002e-06 1.4590000000000001e-05 1.4590000000000001e-05 /mnt/data/james/clone/dnn_tensorflow_cpp/python/test/test_call_c.py:110(disable_profiling)
+#       1 2.0600000000000002e-07 2.0600000000000002e-07 2.0600000000000002e-07 2.0600000000000002e-07 {method 'disable' of '_lsprof.Profiler' objects}
+
+# What we really want (separate __call__ into CLIB__gpu_sleep and CLIB__run_cpp):
+#
+# ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+# 1 2.334516991 2.334516991 2.334516991 2.334516991 /mnt/data/james/clone/dnn_tensorflow_cpp/python/test/py_interface.py:55(CLIB__gpu_sleep)
+# 1 1.0000441310000001 1.0000441310000001 1.0000441310000001 1.0000441310000001 /mnt/data/james/clone/dnn_tensorflow_cpp/python/test/py_interface.py:55(CLIB__run_cpp)
+
+class CLibWrapper:
+  def __init__(self, name, LibraryLoader=cdll, prefix="CLIB__"):
+    self.LibraryLoader = LibraryLoader
+    self.lib = self.LibraryLoader.LoadLibrary(name)
+    self.prefix = prefix
+
+    class MyFuncWrapper:
+      def __init__(self, c_func, prefix):
+        # self.c_func = c_func
+        super().__setattr__('c_func', c_func)
+        super().__setattr__('prefix', prefix)
+
+        # # wrapper_02
+        # def call(*args, **kwargs):
+        #   return self.c_func(*args, **kwargs)
+        # print("> call.name = {name}".format(name=c_func.__name__))
+        # call.__name__ = c_func.__name__
+        # super().__setattr__('call', call)
+
+        # wrapper_03
+        def call(*args, **kwargs):
+          return self.c_func(*args, **kwargs)
+        name = self.wrapper_name(c_func.__name__)
+        print("> call.name = {name}".format(name=name))
+        # c = call.func_code
+        # Python3
+        c = call.__code__
+
+        # https://docs.python.org/3.0/whatsnew/3.0.html
+        #
+        # """
+        # The function attributes named func_X have been renamed to use the __X__ form,
+        # freeing up these names in the function attribute namespace for user-defined attributes.
+        # To wit, func_closure, func_code, func_defaults, func_dict, func_doc, func_globals,
+        # func_name were renamed to __closure__, __code__, __defaults__, __dict__, __doc__, __globals__,
+        # __name__, respectively.
+        # """
+
+        new_code = types.CodeType(
+          c.co_argcount, c.co_kwonlyargcount, c.co_nlocals, c.co_stacksize,
+          c.co_flags, c.co_code, c.co_consts,
+          c.co_names, c.co_varnames, c.co_filename,
+          name, c.co_firstlineno, c.co_lnotab,
+          c.co_freevars, c.co_cellvars
+        )
+
+        call = types.FunctionType(
+          new_code, call.__globals__, name, call.__defaults__,
+          call.__closure__)
+        super().__setattr__('call', call)
+
+      def wrapper_name(self, name):
+        return "{prefix}{name}".format(
+          prefix=self.prefix,
+          name=name)
+
+      def __call__(self, *args, **kwargs):
+        return self.call(*args, **kwargs)
+
+      def __setattr__(self, name, value):
+        return setattr(self.c_func, name, value)
+
+      def __getattr__(self, name):
+        return getattr(self.c_func, name)
+
+    self.MyFuncWrapper = MyFuncWrapper
+
+  def __getattr__(self, name):
+    # NOTE: __getattr__ only ever gets called if the object doesn't have the attribute set yet.
+    c_func = getattr(self.lib, name)
+    c_func_wrapper = self.MyFuncWrapper(c_func, self.prefix)
+    # https://stackoverflow.com/questions/13184281/python-dynamic-function-creation-with-custom-names
+    # c_func_wrapper.__call__.__name__ = "MyFuncWrapper__{name}".format(name=c_func.__name__)
+    # wrapper_01
+    # c_func_wrapper.__name__ = "MyFuncWrapper__{name}".format(name=c_func.__name__)
+    setattr(self, name, c_func_wrapper)
+    return c_func_wrapper
+
+  def __getitem__(self, name):
+    return getattr(self, name)
+
+  # def wrap_c_lib(self):
+
+
+# py_lib = cdll.LoadLibrary(_j(py_config.BUILD_DIR, 'libpy_interface.so'))
+py_lib = CLibWrapper(_j(py_config.BUILD_DIR, 'libpy_interface.so'))
 
 py_lib.NewLibHandle.argtypes = None
 py_lib.NewLibHandle.restype = c_void_p
