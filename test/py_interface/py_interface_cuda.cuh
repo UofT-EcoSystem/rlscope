@@ -74,7 +74,7 @@ public:
 
   double freq_mhz(double time_sec);
 
-  static void gpu_sleep(clock_value_t sleep_cycles);
+  static double gpu_sleep(clock_value_t sleep_cycles);
   GPUClockResult run();
 };
 

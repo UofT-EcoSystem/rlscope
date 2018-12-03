@@ -22,12 +22,12 @@ double guess_gpu_freq_mhz(LibHandle *lib){
   return lib->guess_gpu_freq_mhz();
 }
 
-void gpu_sleep(LibHandle *lib, double seconds){
-  lib->gpu_sleep(seconds);
+double gpu_sleep(LibHandle *lib, double seconds){
+  return lib->gpu_sleep(seconds);
 }
 
-void run_cpp(LibHandle *lib, double seconds){
-  lib->run_cpp(seconds);
+double run_cpp(LibHandle *lib, double seconds){
+  return lib->run_cpp(seconds);
 }
 
 void set_gpu_freq_mhz(LibHandle *lib, double mhz){

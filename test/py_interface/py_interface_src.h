@@ -15,8 +15,8 @@ public:
   }
   void call_c();
   double guess_gpu_freq_mhz();
-  void gpu_sleep(double seconds);
-  void run_cpp(double seconds);
+  double gpu_sleep(double seconds);
+  double run_cpp(double seconds);
   void set_gpu_freq_mhz(double mhz);
 };
 

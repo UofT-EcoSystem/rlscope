@@ -67,11 +67,11 @@ class TestCallC:
   def run_gpu(self):
     args = self.args
     print("> Running on GPU for {sec} seconds".format(sec=args.gpu_time_sec))
-    self.lib.gpu_sleep(args.gpu_time_sec)
+    self.time_slept_gpu_sec = self.lib.gpu_sleep(args.gpu_time_sec)
 
   def run_cpp(self):
     args = self.args
-    self.lib.run_cpp(args.cpp_time_sec)
+    self.time_slept_cpp_sec = self.lib.run_cpp(args.cpp_time_sec)
 
   def run_python(self):
     args = self.args
@@ -92,6 +92,16 @@ class TestCallC:
     self.run_gpu()
     self.disable_profiling()
 
+    results_json = _j(self.directory, "test_call_c.json")
+    print("> Dump test_call_c.py results @ {path}".format(path=results_json))
+    results = {
+      'time_gpu_sec':self.time_slept_gpu_sec,
+      'time_python_sec':self.args.python_time_sec,
+      'time_cpp_sec':self.time_slept_cpp_sec,
+      'time_profile_sec':self.profile_time_sec,
+    }
+    do_dump_json(results, results_json)
+
     self.python_profiler.dump()
 
   def enable_profiling(self):
@@ -107,7 +117,12 @@ class TestCallC:
       print("> Start python profiler")
     self.python_profiler.start()
 
+    self.profile_start_sec = time.time()
+
   def disable_profiling(self):
+    self.profile_end_sec = time.time()
+    self.profile_time_sec = self.profile_end_sec - self.profile_start_sec
+
     # if self.profile_python:
     self.python_profiler.stop()
     if self.debug:

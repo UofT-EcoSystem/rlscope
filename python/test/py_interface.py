@@ -59,7 +59,16 @@ class CLibWrapper:
 
         # wrapper_03
         def call(*args, **kwargs):
-          return self.c_func(*args, **kwargs)
+          # NOTE: for some reason, if we don't use a local variable here,
+          # it will return None!  Bug in python3...?
+          ret = self.c_func(*args, **kwargs)
+          return ret
+
+        #
+        # If we comment this out, then "call" returns the gpu_sleep time...
+        # Not sure WHY.
+        #
+
         name = self.wrapper_name(c_func.__name__)
         print("> call.name = {name}".format(name=name))
         # c = call.func_code
@@ -83,10 +92,10 @@ class CLibWrapper:
           name, c.co_firstlineno, c.co_lnotab,
           c.co_freevars, c.co_cellvars
         )
-
         call = types.FunctionType(
           new_code, call.__globals__, name, call.__defaults__,
           call.__closure__)
+
         super().__setattr__('call', call)
 
       def wrapper_name(self, name):
@@ -135,10 +144,10 @@ py_lib.guess_gpu_freq_mhz.argtypes = [c_void_p]
 py_lib.guess_gpu_freq_mhz.restype = c_double
 
 py_lib.gpu_sleep.argtypes = [c_void_p, c_double]
-py_lib.gpu_sleep.restype = None
+py_lib.gpu_sleep.restype = c_double
 
 py_lib.run_cpp.argtypes = [c_void_p, c_double]
-py_lib.run_cpp.restype = None
+py_lib.run_cpp.restype = c_double
 
 py_lib.set_gpu_freq_mhz.argtypes = [c_void_p, c_double]
 py_lib.set_gpu_freq_mhz.restype = None

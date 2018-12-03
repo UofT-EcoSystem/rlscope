@@ -26,29 +26,31 @@ double LibHandle::guess_gpu_freq_mhz() {
   return result.avg_mhz;
 }
 
-void LibHandle::gpu_sleep(double seconds) {
+double LibHandle::gpu_sleep(double seconds) {
   assert(_has_clock_result);
   // cycles = cycles/sec * seconds
   GPUClockFreq::clock_value_t cycles = ceil(_clock_result.avg_mhz * seconds);
-  std::cout << "> Sleeping on GPU for " << seconds << " seconds (" << cycles << " cycles @ " << _clock_result.avg_mhz << " MHz)." << std::endl;
-  auto start_t = GPUClockFreq::now();
-  GPUClockFreq::gpu_sleep(cycles);
-  auto end_t = GPUClockFreq::now();
-  auto time_sec = GPUClockFreq::elapsed_sec(start_t, end_t);
-  GPUClockFreq::gpu_sleep(cycles);
-  std::cout << "> Slept on GPU for " << time_sec << " seconds." << std::endl;
+//  std::cout << "> Sleeping on GPU for " << seconds << " seconds (" << cycles << " cycles @ " << _clock_result.avg_mhz << " MHz)." << std::endl;
+//  auto start_t = GPUClockFreq::now();
+  auto time_sec = GPUClockFreq::gpu_sleep(cycles);
+//  auto end_t = GPUClockFreq::now();
+//  auto time_sec = GPUClockFreq::elapsed_sec(start_t, end_t);
+//  std::cout << "> Slept on GPU for " << time_sec << " seconds." << std::endl;
+  return time_sec;
 }
 
-void LibHandle::run_cpp(double seconds) {
+double LibHandle::run_cpp(double seconds) {
   std::cout << "> Running inside C++ for " << seconds << " seconds" << std::endl;
   auto start_t = GPUClockFreq::now();
+  double time_sec = 0;
   while (true) {
     auto end_t = GPUClockFreq::now();
-    auto time_sec = GPUClockFreq::elapsed_sec(start_t, end_t);
+    time_sec = GPUClockFreq::elapsed_sec(start_t, end_t);
     if (time_sec >= seconds) {
       break;
     }
   }
+  return time_sec;
 }
 void LibHandle::set_gpu_freq_mhz(double mhz) {
   _has_clock_result = true;

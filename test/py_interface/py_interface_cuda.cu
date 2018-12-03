@@ -30,19 +30,27 @@ __global__ void _gpu_sleep(clock_value_t sleep_cycles, int64_t* output)
   while (cycles_elapsed < sleep_cycles);
 }
 
-void GPUClockFreq::gpu_sleep(clock_value_t sleep_cycles) {
+double GPUClockFreq::gpu_sleep(clock_value_t sleep_cycles) {
 //  int64_t output = 0;
   int64_t* output = nullptr;
   cudaError_t err;
   err = cudaMallocHost((void**)&output, sizeof(int64_t));
   CHECK_CUDA(err);
   *output = 0;
-  _gpu_sleep<<<1, 1>>>(sleep_cycles, output);
+
+  auto start_t = GPUClockFreq::now();
+  _gpu_sleep<<<1, 1>>>(sleep_cycles, output); // This line alone is 0.208557334
   err = cudaDeviceSynchronize();
   CHECK_CUDA(err);
-  std::cout << "> gpu_sleep.output=" << *output << ", sleep_cycles=" << sleep_cycles << std::endl;
+  auto end_t = GPUClockFreq::now(); // This whole block is 5.316381218, but we measure it using nvprof as 5.113029
+
+//  std::cout << "> gpu_sleep.output=" << *output << ", sleep_cycles=" << sleep_cycles << std::endl;
+
   err = cudaFreeHost(output);
   CHECK_CUDA(err);
+
+  auto time_sec = GPUClockFreq::elapsed_sec(start_t, end_t);
+  return time_sec;
 }
 
 void GPUClockFreq::guess_cycles() {
