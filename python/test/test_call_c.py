@@ -25,6 +25,11 @@ class TestCallC:
 
     self.python_profiler = python_profiler(python_profile_basename=self.python_profile_path)
     self.cuda_prof = CUDAProfiler()
+    self.profile_time_sec = 0.
+
+    self.time_slept_gpu_sec = 0.
+    self.time_slept_cpp_sec = 0.
+    self.time_run_python_sec = 0.
 
   @property
   def python_profile_path(self):
@@ -66,43 +71,78 @@ class TestCallC:
 
   def run_gpu(self):
     args = self.args
-    print("> Running on GPU for {sec} seconds".format(sec=args.gpu_time_sec))
-    self.time_slept_gpu_sec = self.lib.gpu_sleep(args.gpu_time_sec)
+    if self.debug:
+      print("> Running on GPU for {sec} seconds".format(sec=args.gpu_time_sec))
+    self.time_slept_gpu_sec += self.lib.gpu_sleep(args.gpu_time_sec)
 
   def run_cpp(self):
     args = self.args
-    self.time_slept_cpp_sec = self.lib.run_cpp(args.cpp_time_sec)
+    if self.debug:
+      print("> Running in CPP for {sec} seconds".format(sec=args.gpu_time_sec))
+    self.time_slept_cpp_sec += self.lib.run_cpp(args.cpp_time_sec)
 
   def run_python(self):
     args = self.args
-    print("> Running inside python for {sec} seconds".format(sec=args.python_time_sec))
+    if self.debug:
+      print("> Running inside python for {sec} seconds".format(sec=args.python_time_sec))
     start_t = time.time()
-    while True:
-      end_t = time.time()
-      total_sec = end_t - start_t
-      if total_sec >= args.python_time_sec:
-        break
+    time.sleep(args.python_time_sec)
+
+    # NOTE: This creates huge profiler output because of a lot of function calls...
+    # instead just sleep.
+    #
+    # while True:
+    #   end_t = time.time()
+    #   total_sec = end_t - start_t
+    #   if total_sec >= args.python_time_sec:
+    #     break
+    end_t = time.time()
+    total_sec = end_t - start_t
+    self.time_run_python_sec += total_sec
 
   def run(self):
+    args = self.args
+
     self.init()
 
-    self.enable_profiling()
-    self.run_python()
-    self.run_cpp()
-    self.run_gpu()
-    self.disable_profiling()
+    print(textwrap.dedent("""
+    > Running {r} repetitions, {i} iterations, each iteration is:
+      Run in python for {python_sec} seconds
+      Run in C++ for {cpp_sec} seconds
+      Run in GPU for {gpu_sec} seconds
+    """.format(
+      r=args.repetitions,
+      i=args.iterations,
+      python_sec=args.python_time_sec,
+      cpp_sec=args.cpp_time_sec,
+      gpu_sec=args.gpu_time_sec,
+    )))
+
+    # TODO: try repetitions as well.
+    for r in range(args.repetitions):
+      print("> Repetition {r}".format(r=r))
+      self.enable_profiling()
+      for i in range(args.iterations):
+        self.run_python()
+        self.run_cpp()
+        self.run_gpu()
+      self.disable_profiling()
 
     results_json = _j(self.directory, "test_call_c.json")
     print("> Dump test_call_c.py results @ {path}".format(path=results_json))
     results = {
       'time_gpu_sec':self.time_slept_gpu_sec,
-      'time_python_sec':self.args.python_time_sec,
+      'time_python_sec':self.time_run_python_sec,
       'time_cpp_sec':self.time_slept_cpp_sec,
       'time_profile_sec':self.profile_time_sec,
     }
     do_dump_json(results, results_json)
 
+    print("> Dump python profiler output...")
+    start_python_profiler_dump = time.time()
     self.python_profiler.dump()
+    end_python_profiler_dump = time.time()
+    print("  Took {sec} seconds".format(sec=end_python_profiler_dump - start_python_profiler_dump))
 
   def enable_profiling(self):
     # if self.profile_cuda:
@@ -121,7 +161,7 @@ class TestCallC:
 
   def disable_profiling(self):
     self.profile_end_sec = time.time()
-    self.profile_time_sec = self.profile_end_sec - self.profile_start_sec
+    self.profile_time_sec += self.profile_end_sec - self.profile_start_sec
 
     # if self.profile_python:
     self.python_profiler.stop()
@@ -138,7 +178,8 @@ class TestCallC:
 
 # Default time period for Python/C++/GPU.
 DEFAULT_TIME_SEC = 5
-DEFAULT_TIME_SEC_DEBUG = 1
+# DEFAULT_TIME_SEC_DEBUG = 1
+DEFAULT_TIME_SEC_DEBUG = 5
 def main():
   parser = argparse.ArgumentParser(textwrap.dedent(
     """
@@ -183,7 +224,25 @@ def main():
                       help=textwrap.dedent("""
                         Internal use only.
                         """))
+  parser.add_argument("--iterations",
+                      type=int,
+                      help=textwrap.dedent("""
+                        --num-calls = --iterations * --repetitions
+                        """),
+                      default=1)
+  parser.add_argument("--repetitions",
+                      type=int,
+                      help=textwrap.dedent("""
+                        --num-calls = --iterations * --repetitions
+                        """),
+                      default=1)
+  # parser.add_argument("--num-calls",
+  #                     help=textwrap.dedent("""
+  #                       --num-calls = --iterations * --repetitions
+  #                       """),
+  #                     default=1)
   args = parser.parse_args()
+  num_calls = args.iterations * args.repetitions
 
   if args.directory is None:
     args.directory = _j(py_config.ROOT, "checkpoints", "test_call_c")
@@ -199,7 +258,10 @@ def main():
     setattr(args, attr, default_time_sec)
 
   config_path = _j(args.directory, "config.json")
-  dump_config(config_path)
+  dump_config(config_path,
+              num_calls=num_calls,
+              iterations=args.iterations,
+              repetitions=args.repetitions)
 
   test_call_c = TestCallC(args, parser)
 
@@ -207,6 +269,7 @@ def main():
     test_call_c.reinvoke_with_nvprof()
     return
 
+  args.num_calls = num_calls
   test_call_c.run()
 
 def run_with_nvprof(parser, args):
@@ -292,7 +355,12 @@ def dump_config(path, **kwargs):
     # For tensorflow: r'(?:built-in.*pywrap_tensorflow)'
     'c_lib_func_pyprof_pattern':"CLIB__.*",
     'discard_first_sample':False,
-    'num_calls':1,
+    'num_calls':kwargs['num_calls'],
+    'iterations':kwargs['iterations'],
+    'repetitions':kwargs['repetitions'],
+    # 'bench_name_labels': {
+    #   ...
+    # },
   }
   config = dict(defaults)
   config.update(kwargs)
