@@ -69,6 +69,7 @@ RUN bash cmake-3.13.0-rc3-Linux-x86_64.sh --prefix=/usr --skip-license --exclude
 # I don't quite follow why that's the case... I guess ADD will ADD the file to the docker image?
 # Can't we just rm the file?
 #ADD https://storage.googleapis.com/tensorflow/libtensorflow/libtensorflow-cpu-linux-x86_64-1.12.0.tar.gz -O $CLONE_DIR/
+ENV ROOT /dnn_tensorflow_cpp
 RUN wget -nv https://storage.googleapis.com/tensorflow/libtensorflow/libtensorflow-cpu-linux-x86_64-1.12.0.tar.gz -P $CLONE_DIR/
 WORKDIR $CLONE_DIR
 ENV EXTERNAL_LIB_DIR $ROOT/external_libs
@@ -76,7 +77,6 @@ WORKDIR $EXTERNAL_LIB_DIR
 RUN tar -xf $CLONE_DIR/libtensorflow-cpu-linux-x86_64-1.12.0.tar.gz
 
 # Install json C++ header library (no configure/make required)
-ENV ROOT /dnn_tensorflow_cpp
 RUN mkdir -p $ROOT
 RUN git clone git@github.com:nlohmann/json.git $ROOT/third_party/json
 WORKDIR $ROOT/third_party/json
@@ -99,6 +99,7 @@ RUN mv libg* /usr/lib
 RUN apt-get install -y python
 # For faster build times remove this option; need to run tests to get profiling information used by python build
 #      --enable-optimizations
+WORKDIR $CLONE_DIR/cpython/build
 RUN ../configure \
       --prefix=/usr \
       --enable-loadable-sqlite-extensions \
@@ -126,7 +127,13 @@ RUN pip3 install numpy scipy pandas \
     cxxfilt
 
 RUN pip3 install tf-nightly-gpu
-RUN python3 -c 'import tensorflow; print("> Importing TensorFlow Works!")'
+#RUN python3 -c 'import tensorflow; print("> Importing TensorFlow Works!")'
+# For some reason, this FAILS form the Dockerfile,
+# but it WORKS if we add an entry point here and run it manually...
+# I don't know why
+# FAILS WITH:
+#   ImportError: libcuda.so.1: cannot open shared object file: No such file or directory
+#ENTRYPOINT ["/bin/bash"]
 
 #
 # Add repo src files to container.
@@ -147,7 +154,6 @@ ADD normalized_car_features.csv $ROOT/normalized_car_features.csv
 WORKDIR $ROOT
 RUN mkdir Debug
 WORKDIR Debug
-#ENTRYPOINT ["/bin/bash"]
 RUN cmake -DCMAKE_BUILD_TYPE=Debug ..
 RUN make -j$(nproc)
 
