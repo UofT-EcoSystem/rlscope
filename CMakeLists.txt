@@ -156,10 +156,8 @@ if(NOT IS_WINDOWS)
 endif()
 
 if(NOT IS_WINDOWS)
-#    find_library(TENSORFLOW_LIB tensorflow
-#            REQUIRED
-#            HINTS "${PROJECT_SOURCE_DIR}/external_libs/lib")
-    find_library(TENSORFLOW_LIB tensorflow_framework
+    message("> TENSORFLOW_LIB HINT = ${PROJECT_SOURCE_DIR}/external_libs/lib")
+    find_library(TENSORFLOW_LIB tensorflow
             REQUIRED
             HINTS "${PROJECT_SOURCE_DIR}/external_libs/lib")
     message("> TENSORFLOW_LIB = ${TENSORFLOW_LIB}")
@@ -188,7 +186,9 @@ endif()
 #endif()
 
 if(NOT IS_WINDOWS)
+    message("CMAKE_MODULE_PATH = ${CMAKE_MODULE_PATH}")
     find_package(GTest REQUIRED)
+    # find_package(gtest REQUIRED)
     include_directories(${GTEST_INCLUDE_DIRS})
     target_link_libraries(tests ${GTEST_LIBRARY})
     foreach(executable ${EXEC_NAMES})

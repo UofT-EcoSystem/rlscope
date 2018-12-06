@@ -1,5 +1,13 @@
+# NOTE: we need nvcc / nvprof; need "devel" not "runtime"
 #FROM nvidia/cuda:9.0-cudnn7-runtime-ubuntu16.04
 FROM nvidia/cuda:9.0-cudnn7-devel-ubuntu16.04
+
+# The results I produced were based on the following ( from nvidia-smi ).
+# However, tensorflow from tf-nightly-gpu depends on CUDA 9.0...
+# Must have worked because I built tensorflow from source?
+#
+# Driver Version: 410.66       CUDA Version: 10.0
+#FROM nvidia/cuda:10.0-cudnn7-devel-ubuntu16.04
 
 RUN apt-get update
 
@@ -17,10 +25,6 @@ RUN apt-get install -y build-essential git libexpat1-dev libssl-dev zlib1g-dev \
 
 # Install dependencies for git clone
 RUN apt-get install -y ssh
-
-ENV ROOT /dnn_tensorflow_cpp
-ENV PYENV_ROOT $ROOT/.pyenv
-ENV PATH $PYENV_ROOT/shims:$PYENV_ROOT/bin:$PATH
 
 #
 # setup ssh
@@ -51,11 +55,48 @@ WORKDIR $CLONE_DIR/cpython
 RUN mkdir build
 WORKDIR build
 
+RUN apt-get install -y wget
+
+# Install CMake version manually to support newer features.
+RUN wget -nv https://cmake.org/files/v3.13/cmake-3.13.0-rc3-Linux-x86_64.sh -P $CLONE_DIR/
+#ADD https://cmake.org/files/v3.13/cmake-3.13.0-rc3-Linux-x86_64.sh $CLONE_DIR/
+WORKDIR $CLONE_DIR
+RUN bash cmake-3.13.0-rc3-Linux-x86_64.sh --prefix=/usr --skip-license --exclude-subdir
+#RUN apt-get install -y cmake
+
+#RUN apt-get install -y curl
+# JAMES NOTE: Apparently downloading files using ADD is a bad practice and we should use wget instead?
+# I don't quite follow why that's the case... I guess ADD will ADD the file to the docker image?
+# Can't we just rm the file?
+#ADD https://storage.googleapis.com/tensorflow/libtensorflow/libtensorflow-cpu-linux-x86_64-1.12.0.tar.gz -O $CLONE_DIR/
+RUN wget -nv https://storage.googleapis.com/tensorflow/libtensorflow/libtensorflow-cpu-linux-x86_64-1.12.0.tar.gz -P $CLONE_DIR/
+WORKDIR $CLONE_DIR
+ENV EXTERNAL_LIB_DIR $ROOT/external_libs
+WORKDIR $EXTERNAL_LIB_DIR
+RUN tar -xf $CLONE_DIR/libtensorflow-cpu-linux-x86_64-1.12.0.tar.gz
+
+# Install json C++ header library (no configure/make required)
+ENV ROOT /dnn_tensorflow_cpp
+RUN mkdir -p $ROOT
+RUN git clone git@github.com:nlohmann/json.git $ROOT/third_party/json
+WORKDIR $ROOT/third_party/json
+RUN git checkout v3.4.0
+
+RUN apt-get install -y libboost1.58
+
+RUN apt-get install -y libgflags2v5 libgflags-dev libgtest-dev
+WORKDIR /usr/src/gtest
+ENTRYPOINT ["/bin/bash"]
+RUN cmake . && make -j$(nproc)
+RUN mv libg* /usr/lib
+
+#
+# Build modified python3.
+#
 # Python is needed to build python...?
 # python ../Objects/typeslots.py < ../Include/typeslots.h > Objects/typeslots.inc
 # /bin/sh: 1: python: not found
 RUN apt-get install -y python
-
 # For faster build times remove this option; need to run tests to get profiling information used by python build
 #      --enable-optimizations
 RUN ../configure \
@@ -69,30 +110,23 @@ RUN ../configure \
 RUN make -j$(nproc)
 RUN make install
 
-RUN mkdir -p $ROOT
+# TODO: put before any pip install's
+RUN pip3 install --upgrade pip
 
-# Install CMake version manually to support newer features.
-ADD https://cmake.org/files/v3.13/cmake-3.13.0-rc3-Linux-x86_64.sh $CLONE_DIR/
-WORKDIR $CLONE_DIR
-RUN bash cmake-3.13.0-rc3-Linux-x86_64.sh --prefix=/usr --skip-license --exclude-subdir
-#RUN apt-get install -y cmake
+# JAMES NOTE: my stuff
+# Test out python installation.
+RUN pip3 install ipdb ipython
 
-# Install json C++ header library (no configure/make required)
-RUN git clone git@github.com:nlohmann/json.git $ROOT/third_party/json
-WORKDIR $ROOT/third_party/json
-RUN git checkout v3.4.0
+# run_benchmark.py requirements
+RUN pip3 install numpy scipy pandas \
+    py-cpuinfo \
+    progressbar2 \
+    seaborn \
+    matplotlib \
+    cxxfilt
 
-#RUN apt-get install -y curl
-# JAMES NOTE: Apparently downloading files using ADD is a bad practice and we should use wget instead?
-# I don't quite follow why that's the case... I guess ADD will ADD the file to the docker image?
-# Can't we just rm the file?
-ADD https://storage.googleapis.com/tensorflow/libtensorflow/libtensorflow-cpu-linux-x86_64-1.12.0.tar.gz $CLONE_DIR/
-WORKDIR $CLONE_DIR
-ENV EXTERNAL_LIB_DIR $ROOT/external_libs
-WORKDIR $EXTERNAL_LIB_DIR
-RUN tar -xf $CLONE_DIR/libtensorflow-cpu-linux-x86_64-1.12.0.tar.gz
-
-RUN apt-get install -y libboost1.58
+RUN pip3 install tf-nightly-gpu
+RUN python3 -c 'import tensorflow; print("> Importing TensorFlow Works!")'
 
 #
 # Add repo src files to container.
@@ -113,6 +147,7 @@ ADD normalized_car_features.csv $ROOT/normalized_car_features.csv
 WORKDIR $ROOT
 RUN mkdir Debug
 WORKDIR Debug
+#ENTRYPOINT ["/bin/bash"]
 RUN cmake -DCMAKE_BUILD_TYPE=Debug ..
 RUN make -j$(nproc)
 
@@ -121,10 +156,6 @@ ENV CHECKPOINT_DIR $ROOT/checkpoints
 RUN mkdir -p $CHECKPOINT_DIR
 VOLUME $CHECKPOINT_DIR
 
-
-#ENTRYPOINT ["/bin/bash"]
-#
-#
 ##    python python-pip
 ##RUN apt-get install -y python-setuptools
 ##RUN apt-get install -y python-pip python3-pip virtualenv htop
@@ -143,9 +174,10 @@ VOLUME $CHECKPOINT_DIR
 ##
 ##WORKDIR $HOME/resnet
 ##RUN pip3 install -r official/requirements.txt
-#
-## JAMES NOTE: my stuff
-## Test out python installation.
-#RUN pip3 install ipdb ipython
-#
-#ENTRYPOINT ["/bin/bash"]
+
+#RUN pip3 install virtualenv virtualenvwrapper
+#RUN python3 -m virtualenv -p python3 $HOME/pyenv
+
+ENV PYTHONPATH "${PYTHONPATH}:${ROOT}/python"
+WORKDIR $ROOT
+ENTRYPOINT ["/bin/bash"]
