@@ -902,7 +902,8 @@ class ProfilerParserCommonMixin:
             else:
                 opt_paths = None
 
-            src_files = SrcFiles(req_paths, opt_paths,
+            directory = common_dir(src_paths)
+            src_files = SrcFiles(directory, req_paths, opt_paths,
                                  has_all_required_paths=len(req_paths) == len(req_regexes),
                                  allow_multiple_src_matches=allow_multiple_src_matches)
             return src_files
@@ -1569,9 +1570,13 @@ class PlotSummary(ProfilerParserCommonMixin):
     def uses_all_benches():
         return True
 
+    # @staticmethod
+    # def uses_multiple_dirs():
+    #     return False
+
     @staticmethod
     def uses_multiple_dirs():
-        return False
+        return True
 
     @classmethod
     def get_targets(Klass, src_files, bench_name=NO_BENCH_NAME):
@@ -1598,7 +1603,8 @@ class PlotSummary(ProfilerParserCommonMixin):
 
         fields = self.get_fields()
 
-        for field in fields:
+        # for field in fields:
+        for field in ['PercentTimeInGPU']:
             self.plot_field(field)
 
     def _order_key(self, order, label):
@@ -1718,6 +1724,8 @@ class PlotSummary(ProfilerParserCommonMixin):
             ylabel = r'($\times$) Speedup = $\frac{time(python + C)}{time(C)}$'
         elif field == "PercentTimeInPython":
             ylabel = r'(%) Percent = $\frac{time(python)}{time(python + C)}$'
+        elif field == "PercentTimeInGPU":
+            ylabel = r'(%) Percent'
         elif field == "PythonOverheadPercent":
             ylabel = r"(%) Percent overhead = $\frac{time(python)}{time(C)}$"
         else:
@@ -1744,6 +1752,8 @@ class PlotSummary(ProfilerParserCommonMixin):
             subtitle = r"Theoretical speedup if $time(python) = 0$"
         elif field == "PercentTimeInPython":
             subtitle = r"Percent time in python $= \frac{time(python)}{time(python + C)}$"
+        elif field == "PercentTimeInGPU":
+            subtitle = r"Percent time in GPU $= \frac{time(GPU)}{time(python + C)}$"
         elif field == "PythonTimeSec":
             subtitle = r"Time spent in python $= time(python)$"
         elif field == "PythonOverheadPercent":
@@ -1814,16 +1824,21 @@ class PlotSummary(ProfilerParserCommonMixin):
         if self.is_time_sec_field(field):
             min_length = self._get_min_length([field], device)
             value = self._get_time_value(field, device, min_length)
-        elif field in ['PercentTimeInPython', 'TheoreticalSpeedup', 'PythonOverheadPercent']:
+        elif field in ['PercentTimeInGPU', 'PercentTimeInPython', 'TheoreticalSpeedup', 'PythonOverheadPercent']:
             min_length = self._get_min_length(['CppAndGPUTimeSec', 'PythonTimeSec'], device)
             cpp_and_gpu_times = self._get_time_value('CppAndGPUTimeSec', device, min_length)
             python_times = self._get_time_value('PythonTimeSec', device, min_length)
+            total_times = compute_total_times(cpp_and_gpu_times, python_times)
             if field == 'TheoreticalSpeedup':
                 theoretical_speedup = compute_theoretical_speedup(cpp_and_gpu_times, python_times)
                 value = theoretical_speedup
             elif field == 'PercentTimeInPython':
                 percent_time_in_python = compute_percent_time_in_python(cpp_and_gpu_times, python_times)
                 value = percent_time_in_python
+            elif field == 'PercentTimeInGPU':
+                gpu_times = self._get_time_value('GPUTimeSec', device, min_length)
+                percent_time_in_gpu = compute_percent_time_in_gpu(gpu_times, total_times)
+                value = percent_time_in_gpu
             elif field == 'PythonOverheadPercent':
                 python_overhead_percent = compute_python_overhead_percent(cpp_and_gpu_times, python_times)
                 value = python_overhead_percent
@@ -3522,6 +3537,23 @@ class SrcFilesMixin:
                 targets.extend(ParserKlass.get_targets(self, bench_name))
         return targets
 
+    def check_has_all_required_paths(self, ParserKlass):
+        if not self.has_all_required_paths:
+            print(
+                textwrap.dedent("""
+ERROR: Didn't find all required source files in directory={dir} for parser={parser}
+  src_files =
+{src_files}
+  required_files = 
+{required_files}
+                """.format(
+                    dir=self.directory,
+                    parser=ParserKlass.__name__,
+                    # src_files=str(src_files),
+                    src_files=textwrap.indent(str(self), prefix="  "*2),
+                    required_files=as_str(ParserKlass.required_source_basename_regexes(), indent=2),
+                )))
+
 class SrcFiles(SrcFilesMixin):
     """
     A bunch of files belongining to the same directory matching certain patterns.
@@ -3530,7 +3562,7 @@ class SrcFiles(SrcFilesMixin):
     Each regex has a name associated with it.
     Also, each regex will have a 'bench_name' capturing group.
     """
-    def __init__(self, req_paths, opt_paths, has_all_required_paths, allow_multiple_src_matches):
+    def __init__(self, directory, req_paths, opt_paths, has_all_required_paths, allow_multiple_src_matches):
         # PSEUDOCODE:
         # if uses bench_name:
         #     req_paths['profile_path'][bench_name] = ...
@@ -3540,8 +3572,7 @@ class SrcFiles(SrcFilesMixin):
         self.opt_paths = opt_paths
         self.has_all_required_paths = has_all_required_paths
         self.allow_multiple_src_matches = allow_multiple_src_matches
-        srcs = self.all_sources(all_bench_names=True)
-        self.directory = common_dir(srcs)
+        self.directory = directory
 
     @property
     def bench_names(self):
@@ -4051,6 +4082,7 @@ PLOT_SUMMMARY_FIELDS = [
     "CppTimeSec",
     "FrameworkCppTimeSec",
     "CudaCppTimeSec",
+    "PercentTimeInGPU",
     "GPUTimeSec",
     "GPUAndCudaCppTimeSec",
     "TheoreticalSpeedup",
@@ -4088,6 +4120,10 @@ def compute_percent_time_in_python(cpp_and_gpu_times, python_times):
     total_times = compute_total_times(cpp_and_gpu_times, python_times)
     percent_time_in_python = 100. * python_times / total_times
     return percent_time_in_python
+
+def compute_percent_time_in_gpu(gpu_times, total_times):
+    percent_time_in_gpu = 100. * gpu_times / total_times
+    return percent_time_in_gpu
 
 def compute_python_overhead_percent(cpp_and_gpu_times, python_times):
     python_overhead_percent = 100. * python_times / cpp_and_gpu_times
@@ -4745,10 +4781,12 @@ class CombinedProfileParser(ProfilerParserCommonMixin):
 
         combined = combine(pyprof_json, nvprof_json, keep_len)
         combined_nd = make_json_ndarray(combined)
+        # PercentTimeInGpu
         combined_nd['CppTimeSec'] = combined_nd['CppAndGPUTimeSec'] - combined_nd['GPUTimeSec']
         combined_nd['SanityTotalTimeSec'] = combined_nd['CppTimeSec'] + combined_nd['GPUTimeSec'] + combined_nd['PythonTimeSec']
         # framework_cpp_times = pyprof(gpu_and_cpp_times) - nvprof(gpu_times) - nvprof(cuda_cpp_times)
         combined_nd['FrameworkCppTimeSec'] = combined_nd['CppAndGPUTimeSec'] - combined_nd['GPUTimeSec'] - combined_nd['CudaCppTimeSec']
+        combined_nd['PercentTimeInGPU'] = compute_percent_time_in_gpu(combined_nd['GPUTimeSec'], combined_nd['TotalTimeSec'])
 
         combined = make_json_serializable(combined_nd)
         # combined['CppAndGPUTimeSec']

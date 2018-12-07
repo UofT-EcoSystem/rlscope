@@ -11,7 +11,7 @@ import pprint
 import os
 import subprocess
 import sys
-from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, basename as _b
+from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, basename as _b, isdir
 
 from profiler import run_benchmark
 
@@ -126,9 +126,24 @@ class Run:
             cmd = self._python_cmd() + ["--directories"] + directories + ["--rule", rule] + extra_opts + argv
             return cmd
 
+        BUILD_FAILED = 'build failed'
+        BUILD_SUCCESS = 'build success'
+        BUILD_SKIP = 'build skipped'
         def build(ParserKlass, directories, rebuild):
+            for direc in directories:
+                if not isdir(direc):
+                    print("ERROR: Couldn't find directory={d} when attempting to build parser={parser}".format(
+                        d=direc,
+                        parser=ParserKlass.__name__,
+                    ))
+                    return BUILD_FAILED
             cmd = get_cmd(ParserKlass.__name__, directories)
             src_files = ParserKlass.get_source_files(directories)
+
+            src_files.check_has_all_required_paths(ParserKlass)
+            if not src_files.has_all_required_paths:
+                # Q: Should we just skip this one?
+                return BUILD_FAILED
 
             targets = src_files.all_targets(ParserKlass)
 
@@ -139,10 +154,11 @@ class Run:
                     # trgs=existing_targets,
                 ))
                 pprint.pprint(as_short_list(existing_targets), indent=2)
-                return
+                return BUILD_SKIP
 
             env, added_env = self._cuda_env()
             self.do_cmd(cmd, env=env, added_env=added_env)
+            return BUILD_SUCCESS
 
         def should_rebuild(ParserKlass=None, device=None):
             if args.rebuild:
@@ -153,6 +169,10 @@ class Run:
                 return True
             return False
 
+        def handle_build_ret(ret):
+            if ret == BUILD_FAILED:
+                sys.exit(1)
+
         if args.directory is not None:
             """
             Specify a specific directory to run from.
@@ -160,7 +180,8 @@ class Run:
             """
             for ParserKlass in run_benchmark.PARSER_KLASSES:
                 rebuild = should_rebuild(ParserKlass)
-                build(ParserKlass, [args.directory], rebuild)
+                ret = build(ParserKlass, [args.directory], rebuild)
+                handle_build_ret(ret)
         else:
             all_device_dirs = [get_directory(device) for device in args.devices]
             for ParserKlass in run_benchmark.PARSER_KLASSES:
@@ -169,7 +190,8 @@ class Run:
                     TimeBreakdownPlot takes multiple directories as input.
                     """
                     rebuild = should_rebuild(ParserKlass)
-                    build(ParserKlass, all_device_dirs, rebuild)
+                    ret = build(ParserKlass, all_device_dirs, rebuild)
+                    handle_build_ret(ret)
                 else:
                     """
                     GPUTimeSec.summary.png takes a single directory.
@@ -180,7 +202,8 @@ class Run:
                             print("> Skip processing directory={d}; doesn't exist".format(d=directory))
                             continue
                         rebuild = should_rebuild(ParserKlass, device)
-                        build(ParserKlass, [directory], rebuild)
+                        ret = build(ParserKlass, [directory], rebuild)
+                        handle_build_ret(ret)
 
     def _get_dir(self, subdir):
         return _j(CHECKPOINTS_PONG, subdir, "microbenchmark")
