@@ -23,16 +23,14 @@ class TestCallC:
         self.parser = parser
         self.lib = py_interface.PythonInterface()
 
-        self.profiler = Profiler(python_profile_basename=self.python_profile_path, debug=self.debug)
-        self.profile_time_sec = 0.
+        self.profiler = Profiler(directory=self.directory,
+                                 debug=self.debug,
+                                 num_calls=args.num_calls,
+                                 exit_early=False)
 
         self.time_slept_gpu_sec = 0.
         self.time_slept_cpp_sec = 0.
         self.time_run_python_sec = 0.
-
-    @property
-    def python_profile_path(self):
-        return _j(self.directory, "python_profile")
 
     @property
     def directory(self):
@@ -99,6 +97,11 @@ class TestCallC:
         total_sec = end_t - start_t
         self.time_run_python_sec += total_sec
 
+    def iteration(self):
+        self.run_python()
+        self.run_cpp()
+        self.run_gpu()
+
     def run(self):
         args = self.args
 
@@ -117,15 +120,8 @@ class TestCallC:
             gpu_sec=args.gpu_time_sec,
         )))
 
-        # TODO: try repetitions as well.
-        for r in range(args.repetitions):
-            print("> Repetition {r}".format(r=r))
-            self.profiler.enable_profiling()
-            for i in range(args.iterations):
-                self.run_python()
-                self.run_cpp()
-                self.run_gpu()
-            self.profiler.disable_profiling()
+        # IML:
+        self.profiler.profile(profilers.NO_BENCH_NAME, self.iteration)
 
         results_json = _j(self.directory, "test_call_c.json")
         print("> Dump test_call_c.py results @ {path}".format(path=results_json))
@@ -133,18 +129,9 @@ class TestCallC:
             'time_gpu_sec':self.time_slept_gpu_sec,
             'time_python_sec':self.time_run_python_sec,
             'time_cpp_sec':self.time_slept_cpp_sec,
-            'time_profile_sec':self.profiler.profile_time_sec,
+            'time_profile_sec':self.profiler.profile_time_sec(profilers.NO_BENCH_NAME),
         }
         profilers.dump_json(results, results_json)
-
-        print("> Dump python profiler output...")
-        start_python_profiler_dump = time.time()
-        self.profiler.dump()
-        end_python_profiler_dump = time.time()
-        print("    Took {sec} seconds".format(sec=end_python_profiler_dump - start_python_profiler_dump))
-
-    def reinvoke_with_nvprof(self):
-        profilers.run_with_nvprof(self.parser, self.args)
 
 # Default time period for Python/C++/GPU.
 DEFAULT_TIME_SEC = 5
@@ -177,18 +164,6 @@ def main():
                         help=textwrap.dedent("""
                         Where to store results.
                         """))
-    parser.add_argument("--nvprof-enabled",
-                        action='store_true',
-                        help=textwrap.dedent("""
-                        Internal use only; 
-                        used to determine whether this python script has been invoked using nvprof.
-                        If it hasn't, the script will re-invoke itself with nvprof.
-                        """))
-    parser.add_argument("--nvprof-logfile",
-                        help=textwrap.dedent("""
-                        Internal use only; 
-                        output file for nvprof.
-                        """))
     parser.add_argument("--gpu-clock-freq-json",
                         help=textwrap.dedent("""
                         Internal use only.
@@ -205,6 +180,8 @@ def main():
                         --num-calls = --iterations * --repetitions
                         """),
                         default=1)
+    # IML:
+    profilers.add_iml_arguments(parser)
     args = parser.parse_args()
     num_calls = args.iterations * args.repetitions
 
@@ -221,19 +198,11 @@ def main():
             default_time_sec = DEFAULT_TIME_SEC
         setattr(args, attr, default_time_sec)
 
-    config_path = _j(args.directory, "config.json")
-    profilers.dump_config(config_path,
-                          num_calls=num_calls,
-                          iterations=args.iterations,
-                          repetitions=args.repetitions)
-
-    test_call_c = TestCallC(args, parser)
-
-    if not args.nvprof_enabled:
-        test_call_c.reinvoke_with_nvprof()
-        return
+    # IML:
+    profilers.handle_iml_args(args.directory, parser, args, no_bench_name=True)
 
     args.num_calls = num_calls
+    test_call_c = TestCallC(args, parser)
     test_call_c.run()
 
 if __name__ == '__main__':

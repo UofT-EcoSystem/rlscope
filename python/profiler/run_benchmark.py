@@ -53,6 +53,8 @@ import matplotlib.pyplot as plt
 
 import py_config
 
+from profiler import profilers
+
 CUDA_MICROBENCH_NAMES = [
     'cuda_launch',
     'd2h',
@@ -442,9 +444,21 @@ ERROR: Didn't find all required source files in directory={dir} for parser={pars
         if len(bench_names) == 0:
             bench_names = [NO_BENCH_NAME]
 
-        for bench_name in bench_names:
-            expr = ParserKlass(parser, args, src_files, bench_name=bench_name)
-            expr.run(bench_name)
+        if args.bench_name is not None:
+            if args.bench_name not in bench_names:
+                print(textwrap.dedent("""
+                ERROR: Didn't find --bench-name={b} in --directory={d}
+                """.format(
+                    b=args.bench_name,
+                    d=args.directory,
+                )))
+                sys.exit(1)
+            expr = ParserKlass(parser, args, src_files, bench_name=args.bench_name)
+            expr.run(args.bench_name)
+        else:
+            for bench_name in bench_names:
+                expr = ParserKlass(parser, args, src_files, bench_name=bench_name)
+                expr.run(bench_name)
 
 def main():
     parser = argparse.ArgumentParser("benchmark DQN")
@@ -527,11 +541,6 @@ def main():
                         Internal use only; 
                         used to determine whether this python script has been invoked using nvprof.
                         If it hasn't, the script will re-invoke itself with nvprof.
-                        """))
-    parser.add_argument("--nvprof-logfile",
-                        help=textwrap.dedent("""
-                        Internal use only; 
-                        output file for nvprof.
                         """))
     # parser.add_argument("--c-only",
     #                     action='store_true',
@@ -930,7 +939,7 @@ class ProfilerParserCommonMixin:
     def config_get(Klass, src_files, attr, default):
         config_path = src_files.get('config_json', or_none=True)
         if config_path is None:
-            value = None
+            value = default
         else:
             config_json = load_json(config_path)
             if attr in config_json and config_json[attr] is None:
@@ -1603,8 +1612,7 @@ class PlotSummary(ProfilerParserCommonMixin):
 
         fields = self.get_fields()
 
-        # for field in fields:
-        for field in ['PercentTimeInGPU']:
+        for field in fields:
             self.plot_field(field)
 
     def _order_key(self, order, label):
@@ -2044,7 +2052,9 @@ class BenchmarkDQN:
         should_run_benchmarks = not args.plot and not args.prettify_python_profile and not args.prettify_cuda_profile
 
         if should_run_benchmarks and ( args.profile_cuda and not args.nvprof_enabled ):
-            run_with_nvprof(parser, args)
+            for bench_name in args.benchmarks:
+                profilers.run_with_nvprof(args.directory, parser, args,
+                                          bench_name=bench_name)
             self.postprocessing()
             return
 
@@ -3168,7 +3178,7 @@ COPYKIND_TO_MEMCPY = {
     8:'[CUDA memcpy DtoD]',
 }
 
-def compute_num_calls(bench_data):
+def compute_num_calls_dqn(bench_data):
     # This is the number of times (for e.g.) Forward was called.
     # We expect the number of times a particular CUDA-function/CUDA-API is called to be a multiple of
     # num_calls = iterations*repetitions
@@ -3177,6 +3187,17 @@ def compute_num_calls(bench_data):
 
     num_calls = bench_data['iterations']*bench_data['repetitions'] + 1
     # num_calls = bench_data['iterations']*bench_data['repetitions']
+
+    return num_calls
+
+def compute_num_calls(config):
+    assert ( 'iterations' in config and 'repetitions' in config ) \
+           or 'num_calls' in config
+
+    if 'num_calls' in config:
+        num_calls = config['num_calls']
+    else:
+        num_calls = config['iterations'] * config['repetitions']
 
     return num_calls
 
@@ -3265,9 +3286,9 @@ class CUDASQLiteParser(ProfilerParserCommonMixin):
             data = self.load_microbench(bench_name)
             # bench_data = data[get_nvprof_name(self.bench_name)]
             bench_data = data[self.bench_name]
-            num_calls = compute_num_calls(bench_data)
+            num_calls = compute_num_calls_dqn(bench_data)
         elif 'num_calls' in self.config:
-            num_calls = self.config['num_calls']
+            num_calls = compute_num_calls(self.config)
         else:
             num_calls = 1
 
@@ -4284,12 +4305,10 @@ class PythonProfileParser(ProfilerParser):
                 'clock':'monotonic_clock',
             }
 
-        if not self.is_dqn:
-            assert 'num_calls' in self.config
-
-        if 'num_calls' in self.config:
-            self.num_calls = self.config['num_calls']
+        if not self.is_dqn or 'num_calls' in self.config:
+            self.num_calls = compute_num_calls(self.config)
         else:
+            # Compute later?
             self.num_calls = None
 
         if 'discard_first_sample' in self.config:
@@ -4324,12 +4343,13 @@ class PythonProfileParser(ProfilerParser):
         return {
             'profile_path': r"^python_profile{bench}\.txt$".format(bench=BENCH_SUFFIX_RE),
             'python_call_times':"^python_profile{bench}\.call_times.json$".format(bench=BENCH_SUFFIX_RE),
+            'config_json':r"^config{bench}\.json$".format(bench=BENCH_SUFFIX_RE),
         }
 
     @staticmethod
     def optional_source_basename_regexes():
         return {'microbenchmark_json':r"^microbenchmark.json$",
-                'config_json':r"^config{bench}\.json$".format(bench=BENCH_SUFFIX_RE)}
+                }
 
     @classmethod
     def test_targets(ParserKlass):
@@ -4448,8 +4468,6 @@ class PythonProfileParser(ProfilerParser):
 
     def _parse_num_calls(self, bench_name):
         call_times_path = self._call_times_path(bench_name)
-        # if not _e(call_times_path):
-        #     return
         print("> Parsing call times: {f}".format(f=call_times_path))
         self.call_times = self.load_call_times(bench_name)
         if self.is_dqn:
@@ -4459,11 +4477,10 @@ class PythonProfileParser(ProfilerParser):
             # This is the number of times (for e.g.) Forward was called.
             # We expect the number of times a particular CUDA-function/CUDA-API is called to be a multiple of
             # num_calls = iterations*repetitions
-            self.num_calls = compute_num_calls(bench_data)
+            self.num_calls = compute_num_calls_dqn(bench_data)
         else:
-            assert 'num_calls' in self.config
+            # Already read it from self.config in __init__
             assert self.num_calls is not None
-            # self.num_calls = 1
         print("> num_calls = {num_calls}".format(
             num_calls=self.num_calls))
 
@@ -4480,7 +4497,7 @@ class PythonProfileParser(ProfilerParser):
         # # This is the number of times (for e.g.) Forward was called.
         # # We expect the number of times a particular CUDA-function/CUDA-API is called to be a multiple of
         # # num_calls = iterations*repetitions
-        # self.num_calls = compute_num_calls(bench_data)
+        # self.num_calls = compute_num_calls_dqn(bench_data)
         # print("> num_calls = {num_calls}".format(
         #     num_calls=self.num_calls))
         start_parse_call_times = time.time()
@@ -5351,48 +5368,6 @@ def args_to_cmdline(parser, args):
             raise NotImplemented
 
     return [str(x) for x in cmdline]
-
-def run_with_nvprof(parser, args):
-    print("> Reinvoking script with nvprof.")
-    benchmarks = args.benchmarks
-    args.benchmarks = None
-    assert args.benchmark_type == 'dqn'
-    # TODO: for each benchmark, invoke a separate call to this script ( to ensure we only collect data for a specific part of DQN )
-    # When collecting nvprof data, should we execute calls repeatedly w/ python or with C?
-    # Well, basically it shouldn't matter...but it's probably going to give lower standard
-    # deviation if we call the C function directly repeatedl
-    # TODO: try both, but use the python call for now.
-    for benchmark in benchmarks:
-        args.benchmarks = [benchmark]
-
-        # nvprof_files = glob("{dir}/nvidia.{benchmark}.pid_*.nvprof.txt".format(
-        #     dir=args.directory,
-        #     benchmark=benchmark))
-        nvprof_files = glob("{dir}/nvidia.{benchmark}.nvprof.txt".format(
-            dir=args.directory,
-            benchmark=benchmark))
-        if len(nvprof_files) > 0 and not args.replace:
-            print("> Skip nvprof; {path} already exists".format(path=nvprof_files[0]))
-            continue
-
-        # nvprof_logfile = _j(args.directory, "nvidia.{benchmark}.pid_%p.nvprof.txt".format(
-        #     benchmark=benchmark))
-        nvprof_logfile = _j(args.directory, "nvidia.{benchmark}.nvprof.txt".format(
-            benchmark=benchmark))
-        nvprof_sqlite_file = _j(args.directory, "nvidia.{benchmark}.nvprof".format(
-            benchmark=benchmark))
-        if args.replace and _e(nvprof_sqlite_file):
-            # Nvprof fails if the output file already exists.
-            os.remove(nvprof_sqlite_file)
-        os.makedirs(_d(nvprof_logfile), exist_ok=True)
-        nvprof_args = ["nvprof", "-o", nvprof_sqlite_file, "--log-file", nvprof_logfile,
-                       "--profile-from-start", "off"]
-        cmdline = args_to_cmdline(parser, args)
-        argv_exec = nvprof_args + cmdline + [
-            "--nvprof-enabled",
-            "--nvprof-logfile", nvprof_logfile
-        ]
-        my_call(argv_exec)
 
 def my_call(argv, env=None):
     if env is None:
