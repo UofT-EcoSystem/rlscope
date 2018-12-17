@@ -113,6 +113,31 @@ gather_sources(TEST_SOURCES TEST_DIRS)
 gather_sources(TF_SOURCES TF_SRC_DIRS)
 gather_sources(PY_INTERFACE_LIB_SOURCES PY_INTERFACE_LIB_DIRS)
 
+if(IS_WINDOWS)
+    set(CUPTI_DIRS
+            ./CUPTI/include
+            ./CUPTI/include/GL
+            ./CUPTI/include/openacc
+            ./CUPTI/sample
+            ./CUPTI/sample/activity_trace_async
+            ./CUPTI/sample/callback_event
+            ./CUPTI/sample/callback_metric
+            ./CUPTI/sample/callback_timestamp
+            ./CUPTI/sample/cupti_query
+            ./CUPTI/sample/event_multi_gpu
+            ./CUPTI/sample/event_sampling
+            ./CUPTI/sample/nvlink_bandwidth
+            ./CUPTI/sample/openacc_trace
+            ./CUPTI/sample/pc_sampling
+            ./CUPTI/sample/sass_source_map
+            ./CUPTI/sample/unified_memory
+            )
+#    message("CUPTI_DIRS = ${CUPTI_DIRS}")
+#    message("CUPTI_SOURCES = ${CUPTI_SOURCES}")
+    gather_sources(CUPTI_SOURCES CUPTI_DIRS)
+    add_executable(cupti_dummy ${CUPTI_SOURCES})
+endif()
+
 message("Sources = ${SOURCES}")
 message("Test sources = ${TEST_SOURCES}")
 
@@ -122,6 +147,7 @@ if(IS_WINDOWS)
     # Include copies of headers for libraries that are too annoying to get on windows.
     include_directories(
             windows_includes/
+            CUPTI/include
     )
 endif()
 

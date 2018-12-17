@@ -11,9 +11,7 @@ import re
 import math
 import numpy as np
 
-# global tf
-# global tf_device_lib
-# import tensorflow as tf
+import tensorflow as tf
 from tensorflow.python.client import device_lib as tf_device_lib
 
 # pip install py-cpuinfo
@@ -30,6 +28,18 @@ from profiler import cudaprofile
 NO_BENCH_NAME = "NoBenchName"
 NO_DEVICE_NAME = "NoDeviceName"
 NO_IMPL_NAME = "NoImplName"
+
+_TF_MODIFIED = False
+def modify_tensorflow():
+    if _TF_MODIFIED:
+        return
+    from tensorflow.profiler import profile_context
+    """
+    Usually TensorFlow only measures 100 steps at most.
+    Set a big upper limit so it will measure each iteration we measure.
+    """
+    profile_context.MAX_TRACED_STEPS = 99999999
+    _TF_MODIFIED = True
 
 class Profiler:
     """
@@ -74,11 +84,17 @@ class Profiler:
     def __init__(self, directory,
                  bench_names=[NO_BENCH_NAME], bench_name=NO_BENCH_NAME, num_calls=None, start_measuring_call=None,
                  no_idempotent=False,
+                 tfprof=False,
+                 c_lib_func_pyprof_pattern=None,
+                 # tfprof=True,
                  repetition_time_limit_sec=10.,
                  debug=False, idempotent_bench_names=[NO_BENCH_NAME],
                  exit_early=True):
+        modify_tensorflow()
         self.directory = directory
         self.exit_early = exit_early
+        self.tfprof = tfprof
+        self.c_lib_func_pyprof_pattern = c_lib_func_pyprof_pattern
         self.repetition_time_limit_sec = repetition_time_limit_sec
         self.num_calls = num_calls
         self.bench_names = set(bench_names if bench_names is not None else [])
@@ -87,7 +103,8 @@ class Profiler:
         self.no_idempotent = no_idempotent
         self.debug = debug
         self.python_profiler = PythonProfiler(directory, bench_name=self.bench_name)
-        self.cuda_profiler = CUDAProfiler()
+        if not self.tfprof:
+            self.cuda_profiler = CUDAProfiler()
         def init_bench_dict(default_value):
             return dict((bench_name, default_value) for bench_name in self.bench_names)
         self.idempotent_bench_names = set(idempotent_bench_names) if idempotent_bench_names is not None else set()
@@ -207,9 +224,10 @@ class Profiler:
         return self.python_profiler._prof_path
 
     def _start(self):
-        if self.debug:
-            print("    > Start CUDA profiler")
-        self.cuda_profiler.start()
+        if not self.tfprof:
+            if self.debug:
+                print("    > Start CUDA profiler")
+            self.cuda_profiler.start()
 
         if self.debug:
             print("> Start python profiler")
@@ -220,9 +238,10 @@ class Profiler:
         if self.debug:
             print("> Stop python profiler")
 
-        self.cuda_profiler.stop()
-        if self.debug:
-            print("> Stop CUDA profiler")
+        if not self.tfprof:
+            self.cuda_profiler.stop()
+            if self.debug:
+                print("> Stop CUDA profiler")
 
     def _should_measure_call(self, bench_name=NO_BENCH_NAME):
         # return self.start_measuring_call is None or self.bench_name == bench_name
@@ -298,10 +317,18 @@ class Profiler:
                 self._init_num_calls(bench_name, func, *args, **kwargs)
                 assert self.num_calls is not None
 
+            # with tf.contrib.tfprof.ProfileContext(self.directory) as pctx:
+            if self.tfprof:
+                self.pctx = tf.contrib.tfprof.ProfileContext(self.directory)
+                self.pctx.__enter__()
+
             self.enable_profiling(bench_name)
             for i in range(self.num_calls):
                 ret = func(*args, **kwargs)
             self.disable_profiling(bench_name, num_calls=self.num_calls)
+
+            if self.tfprof:
+                self.pctx.__exit__(None, None, None)
 
             if hasattr(func, 'reset'):
                 # Cleanup anything we did specific to profiling so we can resume
@@ -329,12 +356,16 @@ class Profiler:
         # Q: Should we be calling this again...?  We'd like to update num_calls if it was computed dynamically...
         config_path = _j(self.directory, "config{bench}.json".format(
             bench=bench_suffix(self.bench_name)))
+        if self.c_lib_func_pyprof_pattern is not None and \
+                'c_lib_func_pyprof_pattern' not in config_kwargs:
+            config_kwargs['c_lib_func_pyprof_pattern'] = self.c_lib_func_pyprof_pattern
         dump_config(config_path,
                     num_calls=self.num_calls,
                     start_measuring_call=self.start_measuring_call,
                     **config_kwargs)
 
-        self.cuda_profiler.dump()
+        if not self.tfprof:
+            self.cuda_profiler.dump()
         self.python_profiler.dump()
 
     def _maybe_finish(self):
@@ -511,6 +542,9 @@ def add_iml_arguments(parser):
     parser.add_argument('--iml-no-idempotent', action='store_true', help=textwrap.dedent("""
         IML: don't measure bench_name's iterations all-at-once; measure 1 iteration at each loop-step only.
     """))
+    parser.add_argument('--iml-tfprof', action='store_true', help=textwrap.dedent("""
+        IML: use tfprof TensorFlow profiling utility INSTEAD of nvprof.
+    """))
     parser.add_argument('--iml-num-calls', type=int, help="IML: how many calls should be measured?")
     parser.add_argument('--iml-start-measuring-call', type=int, help="IML: when should measuring begin?")
     parser.add_argument('--iml-bench-name',
@@ -580,7 +614,7 @@ def handle_iml_args(output_directory, parser, args, no_bench_name=False):
         else:
             parser.error("--iml-bench-names must contain the names of all the code-blocks this ML script contains.")
 
-    if not args.iml_nvprof_enabled:
+    if not args.iml_nvprof_enabled and not args.iml_tfprof:
         if args.iml_bench_name is not None:
             # User wants to run specific bench_name.
             run_with_nvprof(output_directory, parser, args,
