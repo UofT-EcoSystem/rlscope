@@ -23,21 +23,85 @@ SEPARATE_CALLS_HEADER = ['Type', 'Time(%)',
 
 
 class KernelTime:
-    def __init__(self, time_usec, start_usec=None, end_usec=None, name=None):
-        self.time_usec = time_usec
-        self.start_usec = start_usec
-        self.end_usec = end_usec
+    """
+    KernelTime(time_usec=..., start_usec=...)
+    KernelTime(start_usec=..., end_usec=...)
+    """
+    def __init__(self, time_usec=None, start_usec=None, end_usec=None, name=None):
         self.name = name
+        if time_usec is None:
+            # KernelTime(start_usec=..., end_usec=...)
+            self.start_usec = start_usec
+            self.end_usec = end_usec
+            self.time_usec = self.end_usec - self.start_usec
+        elif end_usec is None:
+            # KernelTime(time_usec=..., start_usec=...)
+            self.start_usec = start_usec
+            self.time_usec = time_usec
+            self.end_usec = self.start_usec + self.time_usec
+        else:
+            self.start_usec = start_usec
+            self.end_usec = end_usec
+            self.time_usec = time_usec
+            assert self.time_usec == self.end_usec - self.start_usec
+
+    @property
+    def start_time_usec(self):
+        assert self.start_usec is not None
+        return self.start_usec
+
+    @property
+    def end_time_usec(self):
+        assert self.end_usec is not None
+        return self.end_usec
 
     def overlaps(self, ktime_b):
         ktime_a = self
         assert ktime_a.start_usec <= ktime_b.start_usec
-        return ktime_a.end_usec > ktime_b.start_usec
+        # return ktime_a.end_usec > ktime_b.start_usec
+        return ktime_a.end_usec >= ktime_b.start_usec
 
     def overlap(self, ktime_b):
         assert self.overlaps(ktime_b)
         ktime_a = self
         return ktime_b.start_usec - ktime_a.end_usec
+
+    def is_before(self, ktime_b):
+        return self.start_time_usec <= ktime_b.start_time_usec
+        # return self.end_time_usec <= ktime_b.start_time_usec
+
+    def __eq__(self, ktime_b):
+        ktime_a = self
+        return ktime_a.start_usec == ktime_b.start_usec and \
+               ktime_a.end_usec == ktime_b.end_usec
+
+    def merge(self, ktime_b, name=None):
+        """
+        a.k.a. Union
+        """
+        assert self.overlaps(ktime_b)
+        assert self.is_before(ktime_b)
+        start_usec = self.start_time_usec
+        end_usec = ktime_b.end_time_usec
+        if name is None:
+            name = self.name
+        return KernelTime(end_usec - start_usec, start_usec, end_usec, name=name)
+
+    def __str__(self):
+        return "(start={start} us, dur={dur} us)".format(
+            start=self.start_usec, dur=self.time_usec)
+
+    def __repr__(self):
+        return str(self)
+
+    def intersect(self, ktime_b, name=None):
+        assert self.overlaps(ktime_b)
+        assert self.is_before(ktime_b)
+        start_usec = ktime_b.start_time_usec
+        end_usec = min(self.end_time_usec, ktime_b.end_time_usec)
+        if name is None:
+            name = self.name
+        return KernelTime(end_usec - start_usec, start_usec, end_usec, name=name)
 
 class Stat:
     """

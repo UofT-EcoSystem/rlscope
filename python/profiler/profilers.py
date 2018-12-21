@@ -31,15 +31,19 @@ NO_IMPL_NAME = "NoImplName"
 
 _TF_MODIFIED = False
 def modify_tensorflow():
-    if _TF_MODIFIED:
-        return
-    from tensorflow.profiler import profile_context
-    """
-    Usually TensorFlow only measures 100 steps at most.
-    Set a big upper limit so it will measure each iteration we measure.
-    """
-    profile_context.MAX_TRACED_STEPS = 99999999
-    _TF_MODIFIED = True
+    # NOTE: profiling appears to take a really long time when we do this...
+    pass
+
+    # global _TF_MODIFIED
+    # if _TF_MODIFIED:
+    #     return
+    # from tensorflow.python.profiler import profile_context
+    # """
+    # Usually TensorFlow only measures 100 steps at most.
+    # Set a big upper limit so it will measure each iteration we measure.
+    # """
+    # profile_context.MAX_TRACED_STEPS = 99999999
+    # _TF_MODIFIED = True
 
 class Profiler:
     """

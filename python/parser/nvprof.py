@@ -9,10 +9,8 @@ import json
 import codecs
 from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, basename as _b
 
-# from parser.common import as_str, unique, sec_to_us, us_to_sec, pretty_time, NO_BENCH_NAME, NO_DEVICE_NAME, NO_IMPL_NAME, load_json, do_dump_json, MICROSECONDS_IN_SECOND, MILLISECONDS_IN_SECOND, NANOSECONDS_IN_SECOND, float_re, as_value, put_key, store_as, BENCH_SUFFIX_RE, CBID_TO_CUDA_FUNC
 from parser.common import *
 from parser.stats import Stats
-# from parser.common import ProfilerParser, ProfilerParserCommonMixin, Stats
 
 cxxfilt = None
 try:
