@@ -12,8 +12,120 @@ from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, base
 from parser.common import *
 from parser.stats import Stats
 from proto.tensorflow.core.profiler.tfprof_log_pb2 import ProfileProto
+from proto.protobuf.pyprof_pb2 import Pyprof
 
 from parser.stats import KernelTime
+
+class TFProfCategoryTimesReader:
+    def __init__(self, profile_path):
+        self.profile_path = profile_path
+        with open(self.profile_path, 'rb') as f:
+            self.proto = ProfileProto()
+            self.proto.ParseFromString(f.read())
+
+    def parse(self, step):
+
+            # PSEUDOCODE:
+            # Compute [CUDA CPU time | GPU time | CUDA CPU/GPU time] overlap/non-overlap for a single step.
+            #
+            # We want to "group together" the 3 CPU lane thread times.
+            # More when GPU time overlaps with nothing in CPU time,
+            # and CPU time overlaps with nothing in GPU time.
+            #
+            # To get the average stats, we average ACROSS the steps measured.
+            # Would be nice to know CPU is every executing anything else...
+            # thread-pool threads are just blocked, but is the "main" thread doing anything?
+
+            # self.kernel_times()
+            # self.api_times()
+            # print("HELLO PROTO 1")
+            # print(self.proto)
+            # PSEUDOCODE:
+            # for step in steps:
+            #
+            # import ipdb; ipdb.set_trace()
+            # print("HELLO PROTO 2")
+
+        # for step in self.proto.steps:
+        # Categories:
+        # - [CUDA API CPU]
+        # - [GPU]
+        # - Future: [Framework CPU]
+        category_times = dict()
+
+        for node_id, node in self.proto.nodes.items():
+            if step not in node.execs.keys():
+                continue
+            self.add_all_times(category_times, step, node, self.get_accelerator_execs)
+            self.add_all_times(category_times, step, node, self.get_cpu_execs)
+
+        return category_times
+
+    def IsGPUTime(self, device):
+        return re.search('stream:all', device)
+
+    def IsCPUTime(self, device):
+        return re.search(".*/(device:gpu|gpu|device:cpu|cpu|device:sycl):\\d+", device)
+
+    def add_time(self, category_times, device, ktime):
+        if self.IsGPUTime(device):
+            if CATEGORY_GPU not in category_times:
+                category_times[CATEGORY_GPU] = []
+            category_times[CATEGORY_GPU].append(ktime)
+        elif self.IsCPUTime(device):
+            if CATEGORY_CUDA_API_CPU not in category_times:
+                category_times[CATEGORY_CUDA_API_CPU] = []
+            category_times[CATEGORY_CUDA_API_CPU].append(ktime)
+        else:
+            raise NotImplementedError("Not sure what category device={dev} falls under.".format(dev=device))
+
+    def add_all_times(self, category_times, step, node, get_execs):
+        """
+        :param get_execs:
+            ExecProfile -> map<string, ExecTime>
+            Either reteurn accelerator_execs or cpu_execs
+        """
+        exec_profile = node.execs[step]
+        execs = get_execs(exec_profile)
+        for device in execs.keys():
+            for tupl in execs[device].times:
+                start_us, duration_us = tupl.int64_values
+                ktime = KernelTime(start_usec=start_us, time_usec=duration_us)
+                self.add_time(category_times, device, ktime)
+
+    def get_accelerator_execs(self, exec_profile):
+        return exec_profile.accelerator_execs
+
+    def get_cpu_execs(self, exec_profile):
+        return exec_profile.cpu_execs
+
+class PyprofCategoryTimesReader:
+    def __init__(self, profile_path):
+        self.profile_path = profile_path
+        with open(self.profile_path, 'rb') as f:
+            self.proto = Pyprof()
+            self.proto.ParseFromString(f.read())
+
+    def parse(self, step):
+        assert step in self.proto.steps
+
+        category_times = dict()
+
+        category_times[CATEGORY_PYTHON] = []
+        self.add_event_times_to(category_times[CATEGORY_PYTHON], self.proto.python_events[step].events)
+
+        # clib_times = dict()
+        for category, clib_events in self.proto.clibs[step].clibs.items():
+            assert category not in category_times
+            category_times[category] = []
+            self.add_event_times_to(category_times[category], clib_events.events)
+
+        return category_times
+
+    def add_event_times_to(self, ktimes, events):
+        for event in events:
+            ktime = KernelTime(start_usec=event.start_time_us, time_usec=event.duration_us)
+            ktimes.append(ktime)
 
 class ComputeOverlap:
     """
@@ -250,6 +362,7 @@ class ComputeOverlap:
 
         return times
 
+CATEGORY_PYTHON = 'Python'
 CATEGORY_CUDA_API_CPU = 'CUDA API CPU'
 CATEGORY_GPU = 'GPU'
 
@@ -301,7 +414,10 @@ class TFProfParser(ProfilerParserCommonMixin):
 
     @staticmethod
     def required_source_basename_regexes():
-        return {'profile_path': r"^profile_\d+$".format(bench=BENCH_SUFFIX_RE)}
+        return {
+            'tfprof_path': r"^profile_\d+{bench}.proto$".format(bench=BENCH_SUFFIX_RE),
+            'pyprof_path': r"^Pyprof{bench}.proto$".format(bench=BENCH_SUFFIX_RE),
+        }
 
     @staticmethod
     def optional_source_basename_regexes():
@@ -330,14 +446,26 @@ class TFProfParser(ProfilerParserCommonMixin):
             Klass.get_variable_path(src_files, bench_name),
         ]
 
-    def profile_path(self, bench_name):
-        return self.src_files.get('profile_path', self.bench_name)
+    def tfprof_path(self, bench_name):
+        return self.src_files.get('tfprof_path', self.bench_name)
+
+    def pyprof_path(self, bench_name):
+        return self.src_files.get('pyprof_path', self.bench_name)
 
     def get_micro_name(self):
         return self.bench_name
 
+    def read_category_times(self, step, category_times_readers):
+        category_times = dict()
+        for reader in category_times_readers:
+            new_times = reader.parse(step)
+            same_categories = set(new_times.keys()).intersection(set(category_times.keys()))
+            assert len(same_categories) == 0
+            category_times.update(new_times)
+        return category_times
+
     def parse(self, bench_name):
-        with open(self.profile_path(self.bench_name), 'rb') as f:
+        with open(self.tfprof_path(self.bench_name), 'rb') as f:
             self.proto = ProfileProto()
             self.proto.ParseFromString(f.read())
 
@@ -352,68 +480,18 @@ class TFProfParser(ProfilerParserCommonMixin):
         # Would be nice to know CPU is every executing anything else...
         # thread-pool threads are just blocked, but is the "main" thread doing anything?
 
-        # self.kernel_times()
-        # self.api_times()
-        # print("HELLO PROTO 1")
-        # print(self.proto)
-        # PSEUDOCODE:
-        # for step in steps:
-        #
-        # import ipdb; ipdb.set_trace()
-        # print("HELLO PROTO 2")
+        tfprof_path = self.tfprof_path(self.bench_name)
+        tfprof_reader = TFProfCategoryTimesReader(tfprof_path)
 
-        def add_time(device, ktime):
-            if self.IsGPUTime(device):
-                if CATEGORY_GPU not in category_times:
-                    category_times[CATEGORY_GPU] = []
-                category_times[CATEGORY_GPU].append(ktime)
-            elif self.IsCPUTime(device):
-                if CATEGORY_CUDA_API_CPU not in category_times:
-                    category_times[CATEGORY_CUDA_API_CPU] = []
-                category_times[CATEGORY_CUDA_API_CPU].append(ktime)
-            else:
-                raise NotImplementedError("Not sure what category device={dev} falls under.".format(dev=device))
+        pyprof_path = self.pyprof_path(self.bench_name)
+        pyprof_reader = PyprofCategoryTimesReader(pyprof_path)
 
-        def add_all_times(step, get_execs):
-            """
-            :param get_execs:
-                ExecProfile -> map<string, ExecTime>
-                Either reteurn accelerator_execs or cpu_execs
-            """
-            exec_profile = node.execs[step]
-            execs = get_execs(exec_profile)
-            for device in execs.keys():
-                for tupl in execs[device].times:
-                    start_us, duration_us = tupl.int64_values
-                    ktime = KernelTime(start_usec=start_us, time_usec=duration_us)
-                    add_time(device, ktime)
-
-        def get_accelerator_execs(exec_profile):
-            return exec_profile.accelerator_execs
-
-        def get_cpu_execs(exec_profile):
-            return exec_profile.cpu_execs
+        category_times_readers = [tfprof_reader, pyprof_reader]
 
         # Overlap, computed across different "steps".
         overlaps = []
-
         for step in self.proto.steps:
-            # Categories:
-            # - [CUDA API CPU]
-            # - [GPU]
-            # - Future: [Framework CPU]
-            category_times = dict()
-            for node_id, node in self.proto.nodes.items():
-                if step not in node.execs.keys():
-                    continue
-                add_all_times(step, get_accelerator_execs)
-                add_all_times(step, get_cpu_execs)
-                # for device in node.execs[step].accelerator_execs.keys():
-                #     for tupl in node.execs[step].accelerator_execs[device].times:
-                #         start_us, duration_us = tupl.int64_values
-                #         ktime = KernelTime(start_usec=start_us, time_usec=duration_us)
-                #         add_time(device, ktime)
-
+            category_times = self.read_category_times(step, category_times_readers)
             compute_overlap = ComputeOverlap(category_times)
             compute_overlap.compute()
             overlaps.append(compute_overlap.get_category_times())
@@ -487,7 +565,7 @@ class TFProfParser(ProfilerParserCommonMixin):
 
     @classmethod
     def get_profile_json_path(ParseKlass, src_files, bench_name):
-        path = src_files.get('profile_path', bench_name) + '_parsed.json'
+        path = _j(src_files.directory, 'tfprof{bench}.json'.format(bench=bench_suffix(bench_name)))
         return path
 
 def test_compute_overlap():

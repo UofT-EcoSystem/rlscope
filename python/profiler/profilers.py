@@ -8,11 +8,13 @@ import textwrap
 import os
 import time
 import re
+from glob import glob
 import math
 import numpy as np
 
 import tensorflow as tf
 from tensorflow.python.client import device_lib as tf_device_lib
+from tensorflow.python.profiler import profile_context
 
 # pip install py-cpuinfo
 import cpuinfo
@@ -22,6 +24,7 @@ from os import environ as ENV
 from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, basename as _b
 
 from profiler import cudaprofile
+from profiler import clib_wrap
 
 # Avoid using None for no bench_name; doesn't play nice with pandas/numpy
 # (None == NaN in that context).
@@ -106,7 +109,7 @@ class Profiler:
         self.start_measuring_call = start_measuring_call
         self.no_idempotent = no_idempotent
         self.debug = debug
-        self.python_profiler = PythonProfiler(directory, bench_name=self.bench_name)
+        # self.python_profiler = PythonProfiler(directory, bench_name=self.bench_name)
         if not self.tfprof:
             self.cuda_profiler = CUDAProfiler()
         def init_bench_dict(default_value):
@@ -120,6 +123,8 @@ class Profiler:
         # (self.start_measuring_call + self.num_calls) times.
         self.code_count = init_bench_dict(0)
         self.steps = 0
+
+        # clib_wrap.wrap_libs()
 
         # assert ( self.num_calls is None and self.start_measuring_call is None ) or \
         #        ( self.num_calls is not None and self.start_measuring_call is not None )
@@ -224,6 +229,12 @@ class Profiler:
         # self.iterations = iterations
 
     @property
+    def pyprof_proto_path(self):
+        ret = _j(self.directory, "Pyprof{bench}.proto".format(
+            bench=bench_suffix(self.bench_name)))
+        return ret
+
+    @property
     def python_profile_path(self):
         return self.python_profiler._prof_path
 
@@ -233,14 +244,14 @@ class Profiler:
                 print("    > Start CUDA profiler")
             self.cuda_profiler.start()
 
-        if self.debug:
-            print("> Start python profiler")
-        self.python_profiler.start()
+        # if self.debug:
+        #     print("> Start python profiler")
+        # self.python_profiler.start()
 
     def _end(self):
-        self.python_profiler.stop()
-        if self.debug:
-            print("> Stop python profiler")
+        # self.python_profiler.stop()
+        # if self.debug:
+        #     print("> Stop python profiler")
 
         if not self.tfprof:
             self.cuda_profiler.stop()
@@ -258,10 +269,11 @@ class Profiler:
 
     def enable_profiling(self, bench_name=NO_BENCH_NAME):
         if not self._should_measure_call(bench_name):
-            return
+            return False
 
         self.start_t[bench_name] = time.time()
         self._start()
+        return True
 
     def profile_time_sec(self, bench_name):
         return self.time_sec[bench_name]
@@ -323,11 +335,20 @@ class Profiler:
 
             # with tf.contrib.tfprof.ProfileContext(self.directory) as pctx:
             if self.tfprof:
-                self.pctx = tf.contrib.tfprof.ProfileContext(self.directory)
+                # TODO: evenly space 100 (MAX_TRACE_STEPS) samples.
+                from tensorflow.python.profiler import profile_context
+                clib_wrap.wrap_libs()
+                trace_every = math.ceil((self.num_calls - 1)/profile_context.MAX_TRACED_STEPS)
+                trace_steps = range(2, self.num_calls, trace_every)
+                clib_wrap.set_trace_steps(trace_steps)
+                self.pctx = tf.contrib.tfprof.ProfileContext(self.directory, trace_steps=trace_steps)
                 self.pctx.__enter__()
+
+            clib_wrap.clear_pyprof_profiling()
 
             self.enable_profiling(bench_name)
             for i in range(self.num_calls):
+                clib_wrap.set_step(i + 1)
                 ret = func(*args, **kwargs)
             self.disable_profiling(bench_name, num_calls=self.num_calls)
 
@@ -343,7 +364,9 @@ class Profiler:
 
         else:
             # not idempotent.
-            self.enable_profiling(bench_name)
+            profiling_enabled = self.enable_profiling(bench_name)
+            if profiling_enabled:
+                raise NotImplementedError("Haven't implemented support for Pyprof.proto output for non-idempotent operations")
             ret = func(*args, **kwargs)
             self.disable_profiling(bench_name)
         return ret
@@ -370,7 +393,19 @@ class Profiler:
 
         if not self.tfprof:
             self.cuda_profiler.dump()
-        self.python_profiler.dump()
+        # self.python_profiler.dump()
+        clib_wrap.dump_pyprof(self.pyprof_proto_path)
+
+        if self.tfprof:
+            # Rename: profile_100 -> profile_100.q_forward.proto
+            tfprof_protos = [path for path in glob("{dir}/profile_*".format(dir=self.directory))
+                             if re.search(r'^profile_\d+$', _b(path))]
+            assert len(tfprof_protos) == 1
+            tf_proto = tfprof_protos[0]
+            new_tf_proto = "{tfproto}{bench}.proto".format(
+                tfproto=tf_proto,
+                bench=bench_suffix(self.bench_name))
+            os.rename(tf_proto, new_tf_proto)
 
     def _maybe_finish(self):
         if self.done_measuring():

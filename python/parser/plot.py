@@ -25,6 +25,49 @@ fig_width = 2*7
 fig_height = float(fig_width) / aspect_ratio
 FIG_SIZE = (fig_width, fig_height)
 
+DEVICE_ORDER = ['NoDeviceName', 'Quadro K4000', 'Quadro P4000', 'GTX 1080']
+IMPL_NAME_ORDER = ["DQN Python", NO_IMPL_NAME]
+
+DQN_BENCH_NAME_LABELS = {
+    'q_update_target_network':'Update target network',
+    'q_forward':'Q-forward',
+    'q_backward':'Q-backward',
+    'step':'Step',
+    # 'total':'Total',
+}
+
+# Documentation from
+# matplotlib/collections.py @ Collection.set_hatch:
+r"""
+*hatch* can be one of::
+
+  /   - diagonal hatching
+  \   - back diagonal
+  |   - vertical
+  -   - horizontal
+  +   - crossed
+  x   - crossed diagonal
+  o   - small circle
+  O   - large circle
+  .   - dots
+  *   - stars
+
+Letters can be combined, in which case all the specified
+hatchings are done.  If same letter repeats, it increases the
+density of hatching of that pattern.
+
+Hatching is supported in the PostScript, PDF, SVG and Agg
+backends only.
+
+Unlike other properties such as linewidth and colors, hatching
+can only be specified for the collection as a whole, not separately
+for each member.
+
+Parameters
+----------
+hatch : {'/', '\\', '|', '-', '+', 'x', 'o', 'O', '.', '*'}
+"""
+HATCH_STYLES = ['/', '\\', '|', '-', '+', 'x', 'o', 'O', '.', '*']
 
 LINE_COLORS = plt.rcParams['axes.prop_cycle'].by_key()['color']
 LINE_STYLES = ['-','--',':','-.']
@@ -494,6 +537,454 @@ class PlotSummary(ProfilerParserCommonMixin):
         print("> Save plot data to {path}".format(path=plot_data_path))
         g.savefig(png_path)
 
+# Generalize:
+# Instead of just "Python", "C++", "GPU", we want to break down the labels arbitrairily.
+# Also, we want to control the order of the legend labels.
+
+class CategoryOverlapPlot(ProfilerParserCommonMixin):
+    """
+    Create a stacked bar plot.
+    For the list of times to show, see self.category_order.
+    """
+
+    @staticmethod
+    def required_source_basename_regexes():
+        return {
+            'tfprof_json': r"tfprof{bench}.json$".format(bench=BENCH_SUFFIX_RE),
+        }
+
+    @staticmethod
+    def optional_source_basename_regexes():
+        # Same requirement; config_json.
+        return {'config_json':r"^config.json$"}
+
+    @staticmethod
+    def allow_multiple_src_matches():
+        return True
+
+    @staticmethod
+    def uses_all_benches():
+        return True
+
+    @staticmethod
+    def uses_multiple_dirs():
+        return True
+
+    @classmethod
+    def get_targets(Klass, src_files, bench_name=NO_BENCH_NAME):
+        # TODO: get rid of bench_name (if uses_all_benches is set?)
+        # TODO: fields depends on contents of src_files technically... ok to not output a file we say we will output?
+        targets = [
+            Klass.get_plot_data_path(src_files),
+            Klass.get_category_overlap_png(src_files),
+        ]
+        return targets
+
+    @property
+    def _tfprof_json(self):
+        return self.src_files.get('tfprof_json', self.bench_name)
+
+    @property
+    def _category_overlap_png(self):
+        return CategoryOverlapPlot.get_category_overlap_png(self.src_files)
+
+    @staticmethod
+    def get_category_overlap_png(src_files):
+        return _j(src_files.directory, "category_overlap.png")
+
+    @property
+    def _category_overlap_png(self):
+        return CategoryOverlapPlot.get_category_overlap_png(self.src_files)
+
+    @staticmethod
+    def get_plot_data_path(src_files):
+        return _j(src_files.directory, "category_overlap.plot_data.txt")
+
+    @property
+    def _plot_data_path(self):
+        return CategoryOverlapPlot.get_plot_data_path(self.src_files)
+
+    def __init__(self, parser, args, src_files, bench_name=NO_BENCH_NAME, bar_width=0.25, show=False):
+        self.parser = parser
+        self.args = args
+        self.src_files = src_files
+
+        # {
+        #     'GPUTimeSec':"\\",
+        #     'CppTimeSec':"|",
+        #     'PythonTimeSec':"/",
+        # }
+        categories = set()
+        def _combo_name(combo):
+            return " + ".join(combo)
+        tfprof_paths = [src_files.get('tfprof_json', bench) for bench in src_files.bench_names]
+        for tfprof_path in tfprof_paths:
+            js = load_json(tfprof_path)
+            for combo_and_times in js['category_combo_times']:
+                category = _combo_name(combo_and_times['category_combo'])
+                categories.add(category)
+                # self.category_order.append(category)
+                # times_sec = np.array(combo_and_times['times_usec'])/MICROSECONDS_IN_SECOND
+        self.category_order = sorted(categories)
+        self.bench_name_labels = DQN_BENCH_NAME_LABELS
+        self.category_hatch_map = None
+        self.category_labels = None
+        self.impl_name_order = IMPL_NAME_ORDER
+        self.device_order = DEVICE_ORDER
+        self.plotter = StackedBarPlotter(
+            self._category_overlap_png, self._plot_data_path,
+            self.category_order,
+            self.impl_name_order,
+            self.device_order,
+            bench_name_labels=self.bench_name_labels,
+            category_hatch_map=self.category_hatch_map,
+            category_labels=self.category_labels,
+            bar_width=bar_width, show=show,
+            json_reader_klass=TFProfReader,
+        )
+
+    def run(self, bench_name=NO_BENCH_NAME):
+        print("> src_files = ")
+        print(str(self.src_files))
+        for directory in self.src_files.directories:
+            src_files = self.src_files.get_src_files(directory)
+
+            device_name = self.config_get(src_files, 'device_name', NO_DEVICE_NAME)
+            impl_name = self.config_get(src_files, 'impl_name', NO_IMPL_NAME)
+
+            bench_names = src_files.bench_names
+            for bench in bench_names:
+                json_path = src_files.get('tfprof_json', bench)
+                json_data = load_json(json_path)
+                pretty_bench = get_pretty_bench(bench)
+                print(textwrap.dedent("""
+                > add_json_data:
+                  path = {path}
+                  bench = {bench}
+                  device = {device}
+                  impl = {impl}
+                """.format(path=json_path,
+                           bench=bench,
+                           device=device_name,
+                           impl=impl_name)))
+                self.plotter.add_json_data(json_data, bench,
+                                           device_name, impl_name, debug=True)
+        self.plotter.plot()
+
+class StackedBarPlotter:
+    def __init__(self, png, plot_data_path,
+                 category_order,
+                 impl_name_order,
+                 device_order,
+                 bench_name_labels=None,
+                 category_hatch_map=None,
+                 category_labels=None,
+                 bar_width=0.25, show=False,
+                 json_reader_klass=None):
+        self.png = png
+        self.plot_data_path = plot_data_path
+        self.bar_width = bar_width
+        self.show = show
+        assert json_reader_klass is not None
+        self.json_reader_klass = json_reader_klass
+        self.value_field = 'time_sec'
+        self.df_data = {
+            "bench_name":[],
+            "bench_name_order":[],
+            "impl_name":[],
+            "impl_name_order":[],
+            "device":[],
+            "device_order":[],
+            # Name of time: PythonTimeSec, CppTimeSec, etc.
+            "category":[],
+            "category_order":[],
+            # Value for <category>.
+            "time_sec":[],
+        }
+        self.df = None
+
+        self.category_order = category_order
+        if category_labels is None:
+            category_labels = dict((k, k) for k in self.category_order)
+        self.category_labels = category_labels
+        self.impl_name_order = impl_name_order
+        self.device_order = device_order
+
+        self.bench_name_labels = bench_name_labels
+
+        if category_hatch_map is None:
+            # Need enough distinct hash-styles to fit categories.
+            assert len(self.category_order) <= len(HATCH_STYLES)
+            category_hatch_map = dict()
+            for category, hatch_style in zip(self.category_order, HATCH_STYLES):
+                category_hatch_map[category] = hatch_style
+        self.category_hatch_map = category_hatch_map
+        self._check_has_keys(self.category_order, self.category_hatch_map)
+
+        self.category_order_map = as_order_map(self.category_order)
+        self.rev_category_order_map = reverse_dict(self.category_order_map)
+        self._check_has_keys(self.category_order, self.category_labels)
+
+        self.impl_name_order_map = as_order_map(self.impl_name_order)
+        self.rev_impl_name_order_map = reverse_dict(self.impl_name_order_map)
+
+        self.device_order_map = as_order_map(self.device_order)
+        self.rev_device_order_map = reverse_dict(self.device_order_map)
+
+    def _build_bench_name_order(self):
+        # # Delay making this until we know all the bench_name's from add_json_data
+        # self.bench_name_order = ['q_update_target_network', 'q_forward', 'q_backward', 'step']
+        self.bench_name_order = sorted(unique(self.df_data['bench_name']))
+        self.bench_name_order_map = as_order_map(self.bench_name_order)
+        self.rev_bench_name_order_map = reverse_dict(self.bench_name_order_map)
+        self.bench_name_color_map = self.as_color_map(self.bench_name_order)
+        if self.bench_name_labels is None:
+            self.bench_name_labels = dict((k, k) for k in self.bench_name_order)
+        self.df_data['bench_name_order'] = [self.bench_name_order_map[bench_name] for bench_name in self.df_data['bench_name']]
+
+    def plot(self):
+        if self.df is None:
+            self._as_dataframe()
+
+        with open(self.plot_data_path, 'w') as f:
+            DataFrame.print_df(self.mean_df, file=f)
+        print("> DataFrame:")
+        print(self.mean_df)
+
+        fig = plt.figure()
+
+        self._add_lines()
+        self._add_legend()
+        self._add_axis_labels()
+        self._show()
+
+    def _show(self):
+        if self.show:
+            plt.show()
+        else:
+            print("> Save figure to {path}".format(path=self.png))
+            print("> Save plot data to {path}".format(path=self.plot_data_path))
+            plt.savefig(self.png)
+            plt.close()
+
+    def add_json_data(self, json_data, bench_name, device, impl_name, debug=False):
+        # bench_names = self._get_bench_names(json_data)
+        # # device = json_data['attrs']['name']
+        # # impl_name = json_data['attrs']['impl_name']
+        # for bench_name in bench_names:
+        json = self.json_reader_klass(json_data)
+        categories = [k for k in json.get_categories() if k in self.category_order]
+        # categories = self._get_categories(json_data)
+        if debug:
+            print("> json_data = ")
+            pprint.pprint(json_data, indent=2)
+            print("> categories = {c}".format(c=categories))
+        for category in categories:
+            if debug:
+                print("> add category={c}: {times}".format(
+                    c=category,
+                    times=json.get_times(category)))
+                    # times=json_data[category]))
+            for time_sec in json.get_times(category):
+                self.df_data['bench_name'].append(bench_name)
+                # self.df_data['bench_name_order'].append(self.bench_name_order_map[bench_name])
+                self.df_data['impl_name'].append(impl_name)
+                self.df_data['impl_name_order'].append(self.impl_name_order_map[impl_name])
+                self.df_data['device'].append(device)
+                self.df_data['device_order'].append(self.device_order_map[device])
+                self.df_data['category'].append(category)
+                self.df_data['category_order'].append(self.category_order_map[category])
+                self.df_data[self.value_field].append(time_sec)
+
+    def _add_lines(self):
+        for impl_name in self.impl_name_order:
+            bottom = None
+            for bench_name in self.bench_name_order:
+                for category in self.category_order:
+                    rows = self.df[
+                        (self.df['bench_name'] == bench_name)
+                        & (self.df['category'] == category)
+                        ]
+                    if len(rows) == 0:
+                        continue
+                    xvalues = self._get_xvalues(rows['impl_name'], rows['device'])
+                    yvalues = rows['mean'].values
+                    yerr = rows['std'].values
+                    hatch = self.category_hatch_map[category]
+                    color = self.bench_name_color_map[bench_name]
+
+                    if bottom is None:
+                        bottom = np.zeros_like(yvalues)
+
+                    # PROBLEM: if data is missing for step
+                    assert bottom.shape == yvalues.shape
+
+                    plot = plt.bar(xvalues, yvalues, color=color, width=self.bar_width, edgecolor='white', label=bench_name,
+                                   bottom=bottom,
+                                   hatch=hatch,
+                                   yerr=yerr)
+
+                    bottom += yvalues
+
+    def _add_legend(self):
+        self.legend_makers = []
+
+        # We need two groups of lines:
+        #
+        # 1) Hatch-type:
+        #    - Should have the same color
+        #    - # of hash-types = len(category_order = ['GPUTimeSec', 'CppTimeSec', 'PythonTimeSec'])
+        #                      = 3
+        #
+        # 2) Color-type:
+        #    - Should have the same hatch.
+        #    - # of color-types = len(bench_name_order = ['q_forward', 'q_backward', 'step'])
+        #                       = 3
+
+        hatch_legend = LegendMaker(attr_name='hatch',
+                                   field_to_attr_map=self.category_hatch_map,
+                                   field_order=self.category_order,
+                                   labels=self.category_labels,
+                                   legend_kwargs={
+                                       'loc':'upper right',
+                                   })
+        self.legend_makers.append(hatch_legend)
+
+        color_legend = LegendMaker(attr_name='facecolor',
+                                   field_to_attr_map=self.bench_name_color_map,
+                                   field_order=self.bench_name_order,
+                                   labels=self.bench_name_labels,
+                                   edgecolor='white',
+                                   legend_kwargs={
+                                       'loc':'upper left',
+                                   })
+        self.legend_makers.append(color_legend)
+
+        LegendMaker.add_legends(self.legend_makers)
+
+
+    # def _get_categories(self, json_data):
+    #     return list(k for k in json_data.keys() if k in self.category_order)
+
+    def _as_dataframe(self):
+        self._build_bench_name_order()
+
+        # devices = list(data.keys())
+        self.orig_df = pd.DataFrame(self.df_data)
+
+        self.df = DataFrame.get_mean_std(self.orig_df, self.value_field)
+        self.df = self.df.sort_values(by=['impl_name_order', 'device_order', 'bench_name_order', 'category_order'])
+        # groupby_cols = DataFrame.get_groupby_cols(self.orig_df, value_field)
+
+        self.mean_df = self.df
+
+
+    def _add_axis_labels(self):
+        plt.xlabel('DQN implementation', fontweight='bold')
+
+        n_bars = len(self.device_order)
+        xtick_xvalues = self._xtick_xvalues(self.impl_name_order, self.impl_name_order_map, n_bars)
+        plt.xticks(xtick_xvalues, self.impl_name_order)
+
+
+    def _get_xvalue(self, impl_name, device):
+        bench_order = self.impl_name_order_map[impl_name]
+        graphics_order = self.device_order_map[device]
+        return bench_order + graphics_order*self.bar_width
+
+    def _get_xvalues(self, impl_names, devices):
+        return np.array([self._get_xvalue(impl_name, device) \
+                         for impl_name, device in zip(impl_names, devices)])
+
+    # Add xticks on the middle of the group bars
+    def _xtick_xvalues(self, xvalues, order_map, n_bars):
+        idxes = [order_map[xvalue] for xvalue in xvalues]
+        all_bars_width = n_bars * self.bar_width
+        # This may be wrong.
+        center_width = ((n_bars - 1)*self.bar_width)/2
+        return [i*all_bars_width + center_width \
+                for i in idxes]
+
+    def get_color_map(self):
+        cmap = plt.get_cmap('Pastel1')
+        return cmap
+
+    def as_color_map(self, xs):
+        # https://matplotlib.org/examples/color/colormaps_reference.html
+        # https://matplotlib.org/tutorials/colors/colormaps.html
+        color_map = dict()
+        cmap = self.get_color_map()
+        # np.arange(0,1,(1 - 0)/5)
+        for i, x in enumerate(xs):
+            color = cmap(i % cmap.N)
+            color_map[x] = color
+        return color_map
+
+    def _check_has_keys(self, xs, xs_map):
+        for x in xs:
+            assert x in xs_map
+
+class PlotSummaryReader:
+    def __init__(self, json_data):
+        self.json_data = json_data
+
+    def get_categories(self):
+        return list(k for k in self.json_data.keys() if k in self.category_order)
+        return list(k for k in self.json_data.keys())
+
+    def get_times(self, category):
+        return self.json_data[category]
+
+class TFProfReader:
+    """
+    > json_data =
+    { 'categories': ['CUDA API CPU', 'Framework API C', 'GPU', 'Python'],
+      'category_combinations': [ ['CUDA API CPU'],
+                                 ['CUDA API CPU', 'GPU'],
+                                 ['Framework API C'],
+                                 ['Framework API C', 'Python'],
+                                 ['GPU'],
+                                 ['Python']],
+      'category_combo_times': [ { 'category_combo': ['CUDA API CPU', 'GPU'],
+                                  'times_usec': [1697.0, 1706.0, 1909.0, 1567.0]},
+                                { 'category_combo': ['Python'],
+                                  'times_usec': [884.0, 848.0, 921.0, 955.0]},
+                                { 'category_combo': ['CUDA API CPU'],
+                                  'times_usec': [5153.0, 5762.0, 4238.0, 5038.0]},
+                                { 'category_combo': ['Framework API C'],
+                                  'times_usec': [6355.0, 6291.0, 7505.0, 6915.0]},
+                                { 'category_combo': ['Framework API C', 'Python'],
+                                  'times_usec': [0.0, 0.0, 0.0, 0.0]},
+                                { 'category_combo': ['GPU'],
+                                  'times_usec': [1391.0, 1390.0, 1172.0, 1531.0]}]}
+    """
+    def __init__(self, json_data):
+        self.json_data = json_data
+        self.categories = [self._category_str(category_combo)
+                           for category_combo in self.json_data['category_combinations']]
+
+    def get_categories(self):
+        return self.categories
+
+    def _category_str(self, category_combo):
+        assert type(category_combo) in [list, tuple]
+        # for category in category_combo:
+        #     # Otherwise, we cannot do re.split(r' \+ ', ...) to recover the category_combo.
+        #     assert '+' not in category
+        return " + ".join(category_combo)
+
+    def get_times(self, category):
+        for cat_data in self.json_data['category_combo_times']:
+            category_combo = cat_data['category_combo']
+            cat_str = self._category_str(category_combo)
+            times_usec = cat_data['times_usec']
+            # TODO: convert usec to seconds
+            if category == cat_str:
+                return times_usec
+        print("> json_data = ")
+        pprint.pprint(self.json_data, indent=2)
+        raise RuntimeError("Couldn't find category=\"{cat}\"".format(cat=category))
+
 # Refactor this to read in json files.
 # Q: where to record device/impl_name?  Can we add it to json_data?
 # TimeBreakdownPlot.add_json_data(json_data, impl_name=..., device=...)
@@ -503,7 +994,7 @@ class PlotSummary(ProfilerParserCommonMixin):
 class TimeBreakdownPlot(ProfilerParserCommonMixin):
     """
     Create a stacked bar plot.
-    For the list of times to show, see self.time_name_order.
+    For the list of times to show, see self.category_order.
     """
 
     @staticmethod
@@ -562,101 +1053,23 @@ class TimeBreakdownPlot(ProfilerParserCommonMixin):
         return TimeBreakdownPlot.get_plot_data_path(self.src_files)
 
     def __init__(self, parser, args, src_files, bench_name=NO_BENCH_NAME, bar_width=0.25, show=False):
-        # def __init__(self, png_path, bar_width=0.25, show=False):
-        # set width of bar
         self.parser = parser
         self.args = args
         self.src_files = src_files
-        self.bar_width = bar_width
 
-        self.value_field = 'time_sec'
-
-        self.show = show
-        self.df_data = {
-            "bench_name":[],
-            "bench_name_order":[],
-            "impl_name":[],
-            "impl_name_order":[],
-            "device":[],
-            "device_order":[],
-            # Name of time: PythonTimeSec, CppTimeSec, etc.
-            "time_name":[],
-            "time_name_order":[],
-            # Value for <time_name>.
-            "time_sec":[],
-        }
-        self.df = None
-
-        # hatch_size = 3
-        # self.time_name_hatch_map = {
-        #     'GPUTimeSec':".",
-        #     'CudaCppTimeSec':"\\",
-        #     'FrameworkCppTimeSec':"/",
-        #     'PythonTimeSec':"x",
-        # }
-        self.time_name_hatch_map = {
+        self.category_hatch_map = {
             'GPUTimeSec':"\\",
             'CppTimeSec':"|",
             'PythonTimeSec':"/",
         }
-
-        # self.bench_name_order = ['q_update_target_network', 'q_forward', 'q_backward', 'step', 'total']
-
-        # # Delay making this until we know all the bench_name's from add_json_data
-        # self.bench_name_order = ['q_update_target_network', 'q_forward', 'q_backward', 'step']
-        # self.bench_name_order_map = as_order_map(self.bench_name_order)
-        # self.rev_bench_name_order_map = reverse_dict(self.bench_name_order_map)
-        # self.bench_name_color_map = self.as_color_map(self.bench_name_order)
-
-        # self.config_path = src_files.get('config_json', bench_name, or_none=True)
-        # if self.config_path is not None:
-        #     self.config = load_json(self.config_path)
-        #     print("> Found optional config_json @ {f}".format(f=self.config_path))
-        # else:
-        #     self.config = {
-        #         'clock':'monotonic_clock',
-        #     }
-
-        # self.bench_name_labels = {
-        #     'q_update_target_network':'Update target network',
-        #     'q_forward':'Q-forward',
-        #     'q_backward':'Q-backward',
-        #     'step':'Step',
-        #     # 'total':'Total',
-        # }
-        # NOTE: these labels should come from an input file...config_json
-        # self._check_has_keys(self.bench_name_order, self.bench_name_labels)
-
-        self.time_name_order = ['GPUTimeSec', 'CppTimeSec', 'PythonTimeSec']
-        # This works for end-to-end test, but not for DQN benchmark.
-        # self.time_name_order = ['GPUTimeSec', 'CudaCppTimeSec', 'FrameworkCppTimeSec', 'PythonTimeSec']
-        self.time_name_order_map = as_order_map(self.time_name_order)
-        self.rev_time_name_order_map = reverse_dict(self.time_name_order_map)
-        self.time_name_labels = {
+        self.category_order = ['GPUTimeSec', 'CppTimeSec', 'PythonTimeSec']
+        self.category_labels = {
             'GPUTimeSec':'GPU time',
             'CppTimeSec':'C++ time',
             'CudaCppTimeSec':'CUDA C time (API calls, driver)',
             'FrameworkCppTimeSec':'Framework C time',
             'PythonTimeSec':'Python time',
         }
-        self._check_has_keys(self.time_name_order, self.time_name_labels)
-        self._check_has_keys(self.time_name_order, self.time_name_hatch_map)
-
-        self.impl_name_order = ["DQN Python", NO_IMPL_NAME]
-        self.impl_name_order_map = as_order_map(self.impl_name_order)
-        self.rev_impl_name_order_map = reverse_dict(self.impl_name_order_map)
-
-        self.device_order = ['NoDeviceName', 'Quadro K4000', 'Quadro P4000', 'GTX 1080']
-        self.device_order_map = as_order_map(self.device_order)
-        self.rev_device_order_map = reverse_dict(self.device_order_map)
-
-    def _build_bench_name_order(self):
-        # # Delay making this until we know all the bench_name's from add_json_data
-        # self.bench_name_order = ['q_update_target_network', 'q_forward', 'q_backward', 'step']
-        self.bench_name_order = sorted(unique(self.df_data['bench_name']))
-        self.bench_name_order_map = as_order_map(self.bench_name_order)
-        self.rev_bench_name_order_map = reverse_dict(self.bench_name_order_map)
-        self.bench_name_color_map = self.as_color_map(self.bench_name_order)
         self.bench_name_labels = {
             'q_update_target_network':'Update target network',
             'q_forward':'Q-forward',
@@ -664,24 +1077,19 @@ class TimeBreakdownPlot(ProfilerParserCommonMixin):
             'step':'Step',
             # 'total':'Total',
         }
-
-    def add_json_data(self, json_data, bench_name, device, impl_name):
-        # bench_names = self._get_bench_names(json_data)
-        # # device = json_data['attrs']['name']
-        # # impl_name = json_data['attrs']['impl_name']
-        # for bench_name in bench_names:
-        time_names = self._get_time_names(json_data)
-        for time_name in time_names:
-            for time_sec in json_data[time_name]:
-                self.df_data['bench_name'].append(bench_name)
-                # self.df_data['bench_name_order'].append(self.bench_name_order_map[bench_name])
-                self.df_data['impl_name'].append(impl_name)
-                self.df_data['impl_name_order'].append(self.impl_name_order_map[impl_name])
-                self.df_data['device'].append(device)
-                self.df_data['device_order'].append(self.device_order_map[device])
-                self.df_data['time_name'].append(time_name)
-                self.df_data['time_name_order'].append(self.time_name_order_map[time_name])
-                self.df_data['time_sec'].append(time_sec)
+        self.impl_name_order = IMPL_NAME_ORDER
+        self.device_order = DEVICE_ORDER
+        self.plotter = StackedBarPlotter(
+            self._time_breakdown_png, self._plot_data_path,
+            self.category_order,
+            self.impl_name_order,
+            self.device_order,
+            bench_name_labels=self.bench_name_labels,
+            category_hatch_map=self.category_hatch_map,
+            category_labels=self.category_labels,
+            bar_width=bar_width, show=show,
+            json_reader_klass=PlotSummaryReader,
+        )
 
     def run(self, bench_name=NO_BENCH_NAME):
         # for
@@ -702,166 +1110,13 @@ class TimeBreakdownPlot(ProfilerParserCommonMixin):
                 pretty_bench = get_pretty_bench(bench)
                 # assert len(bench_names) == 0
                 # bench = bench_names[0]
-                self.add_json_data(json_data, bench,
-                                   device_name, impl_name)
+                self.plotter.add_json_data(json_data, bench,
+                                           device_name, impl_name)
                 # pretty_bench, device_name)
-        self._build_bench_name_order()
-        self.df_data['bench_name_order'] = [self.bench_name_order_map[bench_name] for bench_name in self.df_data['bench_name']]
-        # self.df_data['bench_name_order'].append(self.bench_name_order_map[bench_name])
-        self.plot()
-
-    def plot(self):
-        if self.df is None:
-            self._as_dataframe()
-
-        with open(self._plot_data_path, 'w') as f:
-            DataFrame.print_df(self.mean_df, file=f)
-        print("> DataFrame:")
-        print(self.mean_df)
-
-        fig = plt.figure()
-
-        self._add_lines()
-        self._add_legend()
-        self._add_axis_labels()
-        self._show()
-
-    def _as_dataframe(self):
-
-        # devices = list(data.keys())
-        self.orig_df = pd.DataFrame(self.df_data)
-
-        self.df = DataFrame.get_mean_std(self.orig_df, self.value_field)
-        self.df = self.df.sort_values(by=['impl_name_order', 'device_order', 'bench_name_order', 'time_name_order'])
-        # groupby_cols = DataFrame.get_groupby_cols(self.orig_df, value_field)
-
-        self.mean_df = self.df
-
-    def _add_legend(self):
-        self.legend_makers = []
-
-        # We need two groups of lines:
-        #
-        # 1) Hatch-type:
-        #    - Should have the same color
-        #    - # of hash-types = len(time_name_order = ['GPUTimeSec', 'CppTimeSec', 'PythonTimeSec'])
-        #                      = 3
-        #
-        # 2) Color-type:
-        #    - Should have the same hatch.
-        #    - # of color-types = len(bench_name_order = ['q_forward', 'q_backward', 'step'])
-        #                       = 3
-
-        hatch_legend = LegendMaker(attr_name='hatch',
-                                   field_to_attr_map=self.time_name_hatch_map,
-                                   field_order=self.time_name_order,
-                                   labels=self.time_name_labels,
-                                   legend_kwargs={
-                                       'loc':'upper right',
-                                   })
-        self.legend_makers.append(hatch_legend)
-
-        color_legend = LegendMaker(attr_name='facecolor',
-                                   field_to_attr_map=self.bench_name_color_map,
-                                   field_order=self.bench_name_order,
-                                   labels=self.bench_name_labels,
-                                   edgecolor='white',
-                                   legend_kwargs={
-                                       'loc':'upper left',
-                                   })
-        self.legend_makers.append(color_legend)
-
-        LegendMaker.add_legends(self.legend_makers)
-
-    def _add_lines(self):
-        for impl_name in self.impl_name_order:
-            bottom = None
-            for bench_name in self.bench_name_order:
-                for time_name in self.time_name_order:
-                    rows = self.df[
-                        (self.df['bench_name'] == bench_name)
-                        & (self.df['time_name'] == time_name)
-                        ]
-                    if len(rows) == 0:
-                        continue
-                    xvalues = self._get_xvalues(rows['impl_name'], rows['device'])
-                    yvalues = rows['mean'].values
-                    yerr = rows['std'].values
-                    hatch = self.time_name_hatch_map[time_name]
-                    color = self.bench_name_color_map[bench_name]
-
-                    if bottom is None:
-                        bottom = np.zeros_like(yvalues)
-
-                    # PROBLEM: if data is missing for step
-                    assert bottom.shape == yvalues.shape
-
-                    plot = plt.bar(xvalues, yvalues, color=color, width=self.bar_width, edgecolor='white', label=bench_name,
-                                   bottom=bottom,
-                                   hatch=hatch,
-                                   yerr=yerr)
-
-                    bottom += yvalues
-
-    def _show(self):
-        if self.show:
-            plt.show()
-        else:
-            print("> Save figure to {path}".format(path=self._time_breakdown_png))
-            print("> Save plot data to {path}".format(path=self._plot_data_path))
-            plt.savefig(self._time_breakdown_png)
-            plt.close()
-
-    def _check_has_keys(self, xs, xs_map):
-        for x in xs:
-            assert x in xs_map
-
-    def get_color_map(self):
-        cmap = plt.get_cmap('Pastel1')
-        return cmap
-
-    def as_color_map(self, xs):
-        # https://matplotlib.org/examples/color/colormaps_reference.html
-        # https://matplotlib.org/tutorials/colors/colormaps.html
-        color_map = dict()
-        cmap = self.get_color_map()
-        # np.arange(0,1,(1 - 0)/5)
-        for i, x in enumerate(xs):
-            color = cmap(i % cmap.N)
-            color_map[x] = color
-        return color_map
-
-    def _add_axis_labels(self):
-        plt.xlabel('DQN implementation', fontweight='bold')
-
-        n_bars = len(self.device_order)
-        xtick_xvalues = self._xtick_xvalues(self.impl_name_order, self.impl_name_order_map, n_bars)
-        plt.xticks(xtick_xvalues, self.impl_name_order)
+        self.plotter.plot()
 
     def _get_bench_names(self, json_data):
         return json_data.keys()
-
-    def _get_time_names(self, json_data):
-        return list(k for k in json_data.keys() if k in self.time_name_order)
-
-    def _get_xvalue(self, impl_name, device):
-        bench_order = self.impl_name_order_map[impl_name]
-        graphics_order = self.device_order_map[device]
-        return bench_order + graphics_order*self.bar_width
-
-    def _get_xvalues(self, impl_names, devices):
-        return np.array([self._get_xvalue(impl_name, device) \
-                         for impl_name, device in zip(impl_names, devices)])
-
-    # Add xticks on the middle of the group bars
-    def _xtick_xvalues(self, xvalues, order_map, n_bars):
-        idxes = [order_map[xvalue] for xvalue in xvalues]
-        all_bars_width = n_bars * self.bar_width
-        # This may be wrong.
-        center_width = ((n_bars - 1)*self.bar_width)/2
-        return [i*all_bars_width + center_width \
-                for i in idxes]
-
 
 class LegendMaker:
     """
