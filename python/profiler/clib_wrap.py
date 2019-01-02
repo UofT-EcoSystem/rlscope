@@ -1,5 +1,6 @@
 import re
 import time
+import pprint
 import importlib
 
 from ctypes import *
@@ -29,14 +30,17 @@ def clear_pyprof_profiling():
 
 _step = None
 def set_step(step):
-    global _step
+    global _step, _trace_steps
     _step = step
-    _pyprof.steps.extend([step])
+    if _step in _trace_steps and _step not in _pyprof.steps:
+        print("> ADD STEP: {s}".format(s=_step))
+        _pyprof.steps.extend([step])
 
 _trace_steps = None
 def set_trace_steps(trace_steps):
     global _trace_steps
     _trace_steps = trace_steps
+    pprint.pprint({'_trace_steps':trace_steps})
 
 def now_us():
     return time.time()*MICROSECONDS_IN_SECOND
@@ -157,6 +161,9 @@ class FuncWrapper:
             # https://developers.google.com/protocol-buffers/docs/reference/python-generated#repeated-message-fields
             _pyprof.python_events[_step].events.extend([python_event])
             _pyprof.clibs[_step].clibs[category].events.extend([category_event])
+            # if _step not in _pyprof.steps:
+            #     print("> ADD STEP: {s}".format(s=_step))
+            #     _pyprof.steps.extend([_step])
 
         _python_start_us = end_us
 
@@ -192,6 +199,8 @@ def unwrap_module(module):
 
 def dump_pyprof(path):
     with open(path, 'wb') as f:
+        print("> dump pyprof.steps:")
+        pprint.pprint({'_pyprof.steps':list(_pyprof.steps)}, indent=2)
         f.write(_pyprof.SerializeToString())
 
 #

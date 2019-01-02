@@ -25,6 +25,7 @@ from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, base
 
 from profiler import cudaprofile
 from profiler import clib_wrap
+from profiler import tensorflow_profile_context
 
 # Avoid using None for no bench_name; doesn't play nice with pandas/numpy
 # (None == NaN in that context).
@@ -123,6 +124,8 @@ class Profiler:
         # (self.start_measuring_call + self.num_calls) times.
         self.code_count = init_bench_dict(0)
         self.steps = 0
+        self.average_time_per_call_sec = None
+        self.average_time_per_call_no_profile_sec = None
 
         # clib_wrap.wrap_libs()
 
@@ -204,6 +207,7 @@ class Profiler:
                 report_decision(total_time_sec, iterations)
                 # self.iterations = iterations
                 self.num_calls = iterations
+                self.average_time_per_call_no_profile_sec = total_time_sec/float(iterations)
                 return
 
             # stdev = np.std(repetition_time_sec)
@@ -318,6 +322,11 @@ class Profiler:
         :return:
         """
         should_measure = self._should_measure_call(bench_name)
+
+        # Only support idempotent operations at the moment, since _maybe_finish is broken.
+        if should_measure:
+            assert self.is_idempotent(bench_name)
+
         if should_measure and not self.no_idempotent and self.is_idempotent(bench_name):
             # idempotent.
             # for i in range(self.start_measuring_call):
@@ -341,16 +350,25 @@ class Profiler:
                 trace_every = math.ceil((self.num_calls - 1)/profile_context.MAX_TRACED_STEPS)
                 trace_steps = range(2, self.num_calls, trace_every)
                 clib_wrap.set_trace_steps(trace_steps)
-                self.pctx = tf.contrib.tfprof.ProfileContext(self.directory, trace_steps=trace_steps)
+                # self.pctx = tf.contrib.tfprof.ProfileContext(self.directory, trace_steps=trace_steps,
+                self.pctx = tensorflow_profile_context.ProfileContext(self.directory, trace_steps=trace_steps,
+                                                                      # Dump everything on the final step.
+                                                                      # NOTE: This is required, otherwise profiler will default to step=100
+                                                                      # and will truncate any steps afterwards.
+                                                                      dump_steps=[max(trace_steps)])
                 self.pctx.__enter__()
 
             clib_wrap.clear_pyprof_profiling()
 
             self.enable_profiling(bench_name)
+            self.start_num_calls_t = time.time()
             for i in range(self.num_calls):
                 clib_wrap.set_step(i + 1)
                 ret = func(*args, **kwargs)
+            self.end_num_calls_t = time.time()
             self.disable_profiling(bench_name, num_calls=self.num_calls)
+
+            self.average_time_per_call_sec = (self.end_num_calls_t - self.start_num_calls_t)/self.num_calls
 
             if self.tfprof:
                 self.pctx.__exit__(None, None, None)
@@ -361,6 +379,8 @@ class Profiler:
                 func.reset(*args, **kwargs)
 
             self._maybe_finish()
+            # We shouldn't return from maybe_finish for idempotent operations.
+            assert False
 
         else:
             # not idempotent.
@@ -389,6 +409,8 @@ class Profiler:
         dump_config(config_path,
                     num_calls=self.num_calls,
                     start_measuring_call=self.start_measuring_call,
+                    average_time_per_call_sec=self.average_time_per_call_sec,
+                    average_time_per_call_no_profile_sec=self.average_time_per_call_no_profile_sec,
                     **config_kwargs)
 
         if not self.tfprof:
@@ -400,22 +422,38 @@ class Profiler:
             # Rename: profile_100 -> profile_100.q_forward.proto
             tfprof_protos = [path for path in glob("{dir}/profile_*".format(dir=self.directory))
                              if re.search(r'^profile_\d+$', _b(path))]
-            assert len(tfprof_protos) == 1
-            tf_proto = tfprof_protos[0]
-            new_tf_proto = "{tfproto}{bench}.proto".format(
-                tfproto=tf_proto,
-                bench=bench_suffix(self.bench_name))
-            os.rename(tf_proto, new_tf_proto)
+            if len(tfprof_protos) > 1:
+                pprint.pprint({'tf_protos':tfprof_protos})
+            assert len(tfprof_protos) <= 1
+            if len(tfprof_protos) > 0:
+                # If the sub-operation doesn't call sess.run(...), a profile_100 file won't be created.
+                tf_proto = tfprof_protos[0]
+                new_tf_proto = "{tfproto}{bench}.proto".format(
+                    tfproto=tf_proto,
+                    bench=bench_suffix(self.bench_name))
+                os.rename(tf_proto, new_tf_proto)
+            else:
+                print(("WARNING: bench_name={bench} did not run session.run(...), "
+                       "so no tfprof output was generated for it").format(bench=self.bench_name))
 
     def _maybe_finish(self):
-        if self.done_measuring():
-            self.finish()
-        if self.should_stop():
-            print("> IML: Stopping training early now that profiler is done")
-            sys.exit(0)
+        # print("> _maybe_finish")
+        # print("  self.num_calls = {n}".format(n=self.num_calls))
+        # print("  self.code_count[bench={b}] = {n}".format(b=self.bench_name, n=self.code_count.get(self.bench_name, None)))
+        # if self.num_calls is not None:
+        #     print("  self.total_calls_to_run = {n}".format(n=self.total_calls_to_run))
+        # print()
+        # print("  done_measuring = {t}".format(t=self.done_measuring()))
+
+        # if self.done_measuring():
+        self.finish()
+        # if self.should_stop():
+        print("> IML: Stopping training early now that profiler is done")
+        sys.exit(0)
 
     def next_step(self):
-        self._maybe_finish()
+        # Not implemented correctly, only supports idempotent operations right now...
+        # self._maybe_finish()
         self.steps += 1
 
     def done_measuring(self):
@@ -426,7 +464,7 @@ class Profiler:
     def total_calls_to_run(self):
         if self.start_measuring_call is None:
             return self.num_calls
-        return self.num_calls + self.start_measuring_call
+        return self.num_calls + self.start_measuring_call - 1
 
     def should_stop(self):
         # If your using the profiler this way, you need to provide self.num_calls!
@@ -652,6 +690,11 @@ def handle_iml_args(output_directory, parser, args, no_bench_name=False):
             args.iml_bench_names = [NO_BENCH_NAME]
         else:
             parser.error("--iml-bench-names must contain the names of all the code-blocks this ML script contains.")
+
+    if args.iml_bench_name is not None and args.iml_bench_name not in args.iml_bench_names:
+        parser.error("--iml-bench-name=\"{b}\" not in available bench names: --iml-bench-names={bs}".format(
+            b=args.iml_bench_name,
+            bs=args.iml_bench_names))
 
     if not args.iml_nvprof_enabled and not args.iml_tfprof:
         if args.iml_bench_name is not None:

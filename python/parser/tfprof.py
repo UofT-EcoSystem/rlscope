@@ -360,6 +360,12 @@ class ComputeOverlap:
 
         assert len(cur_categories) == 0
 
+        for categories_key in list(times.keys()):
+            # We may get artificial overlaps even if two categories are synchronous,
+            # if the next category starts exactly when the last one ends.
+            if times[categories_key] == 0:
+                del times[categories_key]
+
         return times
 
 CATEGORY_PYTHON = 'Python'
@@ -446,8 +452,8 @@ class TFProfParser(ProfilerParserCommonMixin):
             Klass.get_variable_path(src_files, bench_name),
         ]
 
-    def tfprof_path(self, bench_name):
-        return self.src_files.get('tfprof_path', self.bench_name)
+    def tfprof_path(self, bench_name, or_none=True):
+        return self.src_files.get('tfprof_path', self.bench_name, or_none=or_none)
 
     def pyprof_path(self, bench_name):
         return self.src_files.get('pyprof_path', self.bench_name)
@@ -465,9 +471,33 @@ class TFProfParser(ProfilerParserCommonMixin):
         return category_times
 
     def parse(self, bench_name):
-        with open(self.tfprof_path(self.bench_name), 'rb') as f:
-            self.proto = ProfileProto()
-            self.proto.ParseFromString(f.read())
+        self.tf_proto = None
+        if self.tfprof_path(self.bench_name) is not None:
+            with open(self.tfprof_path(self.bench_name), 'rb') as f:
+                self.tf_proto = ProfileProto()
+                self.tf_proto.ParseFromString(f.read())
+
+        with open(self.pyprof_path(self.bench_name), 'rb') as f:
+            self.py_proto = Pyprof()
+            self.py_proto.ParseFromString(f.read())
+
+        if self.tf_proto is not None:
+            steps = list(self.tf_proto.steps)
+            steps_name = "TF_PROTO"
+        else:
+            steps = list(self.py_proto.steps)
+            steps_name = "PY_PROTO"
+
+        print("TFProfParser > steps={name}".format(name=steps_name))
+        print("> steps = ")
+        pprint.pprint({'len(steps)':len(steps),
+                       'steps':steps})
+
+        if self.tf_proto is not None:
+            for tf_step in self.tf_proto.steps:
+                assert tf_step in self.py_proto.steps
+
+        # import ipdb; ipdb.set_trace()
 
         # PSEUDOCODE:
         # Compute [CUDA CPU time | GPU time | CUDA CPU/GPU time] overlap/non-overlap for a single step.
@@ -480,17 +510,21 @@ class TFProfParser(ProfilerParserCommonMixin):
         # Would be nice to know CPU is every executing anything else...
         # thread-pool threads are just blocked, but is the "main" thread doing anything?
 
+        category_times_readers = []
+
         tfprof_path = self.tfprof_path(self.bench_name)
-        tfprof_reader = TFProfCategoryTimesReader(tfprof_path)
+        if tfprof_path is not None:
+            tfprof_reader = TFProfCategoryTimesReader(tfprof_path)
+            category_times_readers.append(tfprof_reader)
 
         pyprof_path = self.pyprof_path(self.bench_name)
         pyprof_reader = PyprofCategoryTimesReader(pyprof_path)
-
-        category_times_readers = [tfprof_reader, pyprof_reader]
+        category_times_readers.append(pyprof_reader)
 
         # Overlap, computed across different "steps".
         overlaps = []
-        for step in self.proto.steps:
+
+        for step in steps:
             category_times = self.read_category_times(step, category_times_readers)
             compute_overlap = ComputeOverlap(category_times)
             compute_overlap.compute()

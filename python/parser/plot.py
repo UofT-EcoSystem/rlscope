@@ -67,7 +67,10 @@ Parameters
 ----------
 hatch : {'/', '\\', '|', '-', '+', 'x', 'o', 'O', '.', '*'}
 """
-HATCH_STYLES = ['/', '\\', '|', '-', '+', 'x', 'o', 'O', '.', '*']
+HATCH_STYLES = ['/', '\\', '|', 'x', 'o', '.', '*']
+# '+',
+# '-',
+# 'O',
 
 LINE_COLORS = plt.rcParams['axes.prop_cycle'].by_key()['color']
 LINE_STYLES = ['-','--',':','-.']
@@ -764,7 +767,7 @@ class StackedBarPlotter:
         else:
             print("> Save figure to {path}".format(path=self.png))
             print("> Save plot data to {path}".format(path=self.plot_data_path))
-            plt.savefig(self.png)
+            plt.savefig(self.png, bbox_inches="tight")
             plt.close()
 
     def add_json_data(self, json_data, bench_name, device, impl_name, debug=False):
@@ -783,9 +786,9 @@ class StackedBarPlotter:
             if debug:
                 print("> add category={c}: {times}".format(
                     c=category,
-                    times=json.get_times(category)))
+                    times=json.get_times_sec(category)))
                     # times=json_data[category]))
-            for time_sec in json.get_times(category):
+            for time_sec in json.get_times_sec(category):
                 self.df_data['bench_name'].append(bench_name)
                 # self.df_data['bench_name_order'].append(self.bench_name_order_map[bench_name])
                 self.df_data['impl_name'].append(impl_name)
@@ -841,6 +844,9 @@ class StackedBarPlotter:
         #    - # of color-types = len(bench_name_order = ['q_forward', 'q_backward', 'step'])
         #                       = 3
 
+        # https://stackoverflow.com/questions/4700614/how-to-put-the-legend-out-of-the-plot
+        legend_kwargs = []
+
         hatch_legend = LegendMaker(attr_name='hatch',
                                    field_to_attr_map=self.category_hatch_map,
                                    field_order=self.category_order,
@@ -848,6 +854,8 @@ class StackedBarPlotter:
                                    legend_kwargs={
                                        'loc':'upper right',
                                    })
+        legend_kwargs.append({'loc': 'upper left',
+                              'bbox_to_anchor': (1.04, 1)})
         self.legend_makers.append(hatch_legend)
 
         color_legend = LegendMaker(attr_name='facecolor',
@@ -858,9 +866,12 @@ class StackedBarPlotter:
                                    legend_kwargs={
                                        'loc':'upper left',
                                    })
+        legend_kwargs.append({'loc': 'lower left',
+                              'bbox_to_anchor': (1.04, 0)})
         self.legend_makers.append(color_legend)
 
-        LegendMaker.add_legends(self.legend_makers)
+        LegendMaker.add_legends(self.legend_makers,
+                                legend_kwargs=legend_kwargs)
 
 
     # def _get_categories(self, json_data):
@@ -932,7 +943,7 @@ class PlotSummaryReader:
         return list(k for k in self.json_data.keys() if k in self.category_order)
         return list(k for k in self.json_data.keys())
 
-    def get_times(self, category):
+    def get_times_sec(self, category):
         return self.json_data[category]
 
 class TFProfReader:
@@ -973,14 +984,13 @@ class TFProfReader:
         #     assert '+' not in category
         return " + ".join(category_combo)
 
-    def get_times(self, category):
+    def get_times_sec(self, category):
         for cat_data in self.json_data['category_combo_times']:
             category_combo = cat_data['category_combo']
             cat_str = self._category_str(category_combo)
-            times_usec = cat_data['times_usec']
-            # TODO: convert usec to seconds
+            times_sec = np.array(cat_data['times_usec'])/MICROSECONDS_IN_SECOND
             if category == cat_str:
-                return times_usec
+                return times_sec
         print("> json_data = ")
         pprint.pprint(self.json_data, indent=2)
         raise RuntimeError("Couldn't find category=\"{cat}\"".format(cat=category))
@@ -1167,10 +1177,14 @@ class LegendMaker:
         return self.legend
 
     @staticmethod
-    def add_legends(legend_makers):
+    def add_legends(legend_makers, legend_kwargs=[]):
         legends = []
-        for legend_maker in legend_makers:
-            legend = legend_maker.get_legend()
+        for i, legend_maker in enumerate(legend_makers):
+            if i < len(legend_kwargs):
+                legend_kwarg = legend_kwargs[i]
+            else:
+                legend_kwarg = dict()
+            legend = legend_maker.get_legend(**legend_kwarg)
             legends.append(legend)
         for legend in legends:
             plt.gca().add_artist(legend)
