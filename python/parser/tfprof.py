@@ -117,8 +117,6 @@ class TFProfCategoryTimesReader:
         for device in execs.keys():
             for tupl in execs[device].times:
                 start_us, duration_us = tupl.int64_values
-                if node.name == "_arg_deepq_1/obs_t_0_2/_31":
-                    import ipdb; ipdb.set_trace()
                 ktime = KernelTime(start_usec=start_us, time_usec=duration_us, name=node.name)
                 self.add_time(category_times, device, ktime, group_by_device)
 
@@ -154,7 +152,11 @@ class PyprofCategoryTimesReader:
 
     def add_event_times_to(self, ktimes, events):
         for event in events:
-            ktime = KernelTime(start_usec=event.start_time_us, time_usec=event.duration_us)
+            if hasattr(event, 'name'):
+                name = event.name
+            else:
+                name = None
+            ktime = KernelTime(start_usec=event.start_time_us, time_usec=event.duration_us, name=name)
             ktimes.append(ktime)
 
 class ComputeOverlap:
@@ -401,6 +403,7 @@ class ComputeOverlap:
 CATEGORY_PYTHON = 'Python'
 CATEGORY_CUDA_API_CPU = 'CUDA API CPU'
 CATEGORY_GPU = 'GPU'
+CATEGORY_DUMMY_EVENT = 'Dummy event'
 
 class TotalTimeParser(ProfilerParserCommonMixin):
 
@@ -593,7 +596,7 @@ class TraceEventsParser(ProfilerParserCommonMixin):
 
         self._next_pid = 0
         self.category_to_pid = dict()
-        self.reproduce_tfprof = True
+        self.reproduce_tfprof = False
 
     @staticmethod
     def required_source_basename_regexes():
@@ -647,6 +650,15 @@ class TraceEventsParser(ProfilerParserCommonMixin):
         path = _j(src_files.directory, 'tfprof{bench}.proto.txt'.format(bench=bench_suffix(bench_name)))
         return path
 
+    @property
+    def _pyprof_txt_path(self):
+        return self.get_pyprof_txt_path(self.src_files, self.bench_name)
+
+    @classmethod
+    def get_pyprof_txt_path(ParseKlass, src_files, bench_name):
+        path = _j(src_files.directory, 'pyprof{bench}.proto.txt'.format(bench=bench_suffix(bench_name)))
+        return path
+
     def parse(self, bench_name):
         category_times_readers = []
 
@@ -666,6 +678,9 @@ class TraceEventsParser(ProfilerParserCommonMixin):
 
         with open(self._tfprof_txt_path, 'w') as f:
             print(tfprof_reader.proto, file=f)
+
+        with open(self._pyprof_txt_path, 'w') as f:
+            print(pyprof_reader.proto, file=f)
 
         # Just default to outputting the first step...
         category_times = read_category_times(step, category_times_readers, group_by_device=True)
@@ -741,7 +756,11 @@ class TraceEventsParser(ProfilerParserCommonMixin):
                 category_name = category
                 self.js_add_section(category_name)
                 for time in times:
-                    self.js_add_time(time.name, category, time, tid=0)
+                    if time.name is not None:
+                        name = time.name
+                    else:
+                        name = 'unknown'
+                    self.js_add_time(name, category, time, tid=0)
             # else:
             #     raise NotImplementedError("Not sure how to handle category={c}".format(
             #         c=category))
@@ -779,10 +798,6 @@ class TraceEventsParser(ProfilerParserCommonMixin):
                 allocated_tids.append(tid)
                 next_tid += 1
                 tid_times[tid] = []
-
-            if time.name == "_arg_deepq_1/obs_t_0_2/_31":
-                # gets added to CATEGORY_CUDA_API_CPU
-                import ipdb; ipdb.set_trace()
 
             tid_times[tid].append(time)
 

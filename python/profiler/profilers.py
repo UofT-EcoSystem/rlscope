@@ -26,6 +26,7 @@ from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, base
 from profiler import cudaprofile
 from profiler import clib_wrap
 from profiler import tensorflow_profile_context
+from parser.tfprof import CATEGORY_DUMMY_EVENT
 
 # Avoid using None for no bench_name; doesn't play nice with pandas/numpy
 # (None == NaN in that context).
@@ -367,7 +368,15 @@ class Profiler:
             self.start_num_calls_t = time.time()
             for i in range(self.num_calls):
                 clib_wrap.set_step(i + 1)
+                start_call_us = clib_wrap.now_us()
+                start_tf_call_us = tensorflow_profile_context.now_in_usec()
                 ret = func(*args, **kwargs)
+                end_tf_call_us = tensorflow_profile_context.now_in_usec()
+                end_call_us = clib_wrap.now_us()
+                clib_wrap.record_event(CATEGORY_DUMMY_EVENT, 'Start call', start_call_us, start_call_us + 1)
+                clib_wrap.record_event(CATEGORY_DUMMY_EVENT, 'End call', end_call_us, end_call_us + 1)
+                clib_wrap.record_event(CATEGORY_DUMMY_EVENT, 'Start TF call', start_tf_call_us, start_tf_call_us + 1)
+                clib_wrap.record_event(CATEGORY_DUMMY_EVENT, 'End TF call', end_tf_call_us, end_tf_call_us + 1)
             self.end_num_calls_t = time.time()
             self.disable_profiling(bench_name, num_calls=self.num_calls)
 

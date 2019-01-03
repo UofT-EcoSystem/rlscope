@@ -149,14 +149,17 @@ class FuncWrapper:
             # We are about to call from python into a C++ API.
             # That means we stopping executing python while C++ runs.
             # So, we must add a python execution and C++ execution event.
+            name = self.c_func.__name__
             python_event = Event(
                 start_time_us=int(_python_start_us),
                 duration_us=int(start_us - _python_start_us),
-                thread_id=tid)
+                thread_id=tid,
+                name=name)
             category_event = Event(
                 start_time_us=int(start_us),
                 duration_us=int(end_us - start_us),
-                thread_id=tid)
+                thread_id=tid,
+                name=name)
 
             # category = self.__getattr__('category')
             category = self.category
@@ -177,6 +180,17 @@ class FuncWrapper:
 
     def __getattr__(self, name):
         return getattr(self.c_func, name)
+
+def record_event(category, name, start_us, end_us):
+    global _step, _trace_steps
+    if _trace_steps is not None and _step in _trace_steps:
+        tid = threading.get_ident()
+        event = Event(
+            start_time_us=int(start_us),
+            duration_us=int(end_us - start_us),
+            thread_id=tid,
+            name=name)
+        _pyprof.clibs[_step].clibs[category].events.extend([event])
 
 def wrap_module(module, category,
                 func_regex=None, ignore_func_regex="^_",
