@@ -4,6 +4,7 @@ from glob import glob
 import codecs
 import json
 import time
+import math
 import os
 import subprocess
 import re
@@ -15,7 +16,25 @@ from profiler import profilers
 
 from test import py_interface
 
+from profiler.profilers import tensorflow_profile_context
+from profiler.profilers import clib_wrap
+
 import py_config
+
+def test_timestamp():
+    """
+    Make sure pyprof and tfprof timestamps match.
+    """
+    tfprof_t = tensorflow_profile_context.now_in_usec()
+    pyprof_t = clib_wrap.now_us()
+    diff_us = math.fabs(tfprof_t - pyprof_t)
+    margin_of_error_us = 10
+    # Be generous; we expect tfprof/pyprof timestamps to be within 10 us of each other.
+    # Typical values:
+    # - 2.5, 4.0, 2.25, ...
+    assert diff_us < margin_of_error_us
+
+    print("> diff_us = {diff_us} usec".format(diff_us=diff_us))
 
 class TestCallC:
     def __init__(self, args, parser):

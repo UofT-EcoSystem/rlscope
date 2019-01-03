@@ -355,7 +355,10 @@ class Profiler:
                                                                       # Dump everything on the final step.
                                                                       # NOTE: This is required, otherwise profiler will default to step=100
                                                                       # and will truncate any steps afterwards.
-                                                                      dump_steps=[max(trace_steps)])
+                                                                      dump_steps=[max(trace_steps)],
+                                                                      # Avoid adding profiling overhead from calling add_step.
+                                                                      # Instead, do it at the end of profiling.
+                                                                      dump_on_finished=True)
                 self.pctx.__enter__()
 
             clib_wrap.clear_pyprof_profiling()

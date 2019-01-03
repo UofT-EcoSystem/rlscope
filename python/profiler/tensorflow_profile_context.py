@@ -38,6 +38,7 @@ from tensorflow.python.util import compat
 WARMUP_STEPS = 10
 MAX_TRACED_STEPS = 100
 
+DEBUG = False
 
 def _profiled_init(self, target='', graph=None, config=None):
   """Overwrites the session.__init__."""
@@ -54,7 +55,8 @@ def _profiled_run(self,
   # Count the session steps.
   with self.profile_context._new_step() as state:
     step, locked = state
-    print("tfprof> with step={step}".format(step=step))
+    if DEBUG:
+        print("tfprof> with step={step}".format(step=step))
     # Fast path if no need for profiling.
     if locked and not self.profile_context._is_fast_path(step):
       # Maybe trace this step.
@@ -62,7 +64,9 @@ def _profiled_run(self,
         if self.profile_context._debug:
           sys.stderr.write('debug: tracing step: %d\n' % step)
         # Enable tracing, perform auto profiling or auto dump.
+        copy_run_metadata = True
         if not run_metadata:
+          copy_run_metadata = False
           run_metadata = config_pb2.RunMetadata()
 
         if not options:
@@ -81,23 +85,28 @@ def _profiled_run(self,
         if self.profile_context._debug:
           self.profile_context._dump_file(run_metadata, 'run_meta_%d' % step)
 
-        self.profile_context.profiler._graph = self.graph
-        self.profile_context.profiler.add_step(step, run_metadata)
+        if self.profile_context._dump_on_finished:
+            self.profile_context.add_step(step, self.graph, run_metadata, copy_run_metadata)
+        else:
+          self.profile_context.profiler._graph = self.graph
+          self.profile_context.profiler.add_step(step, run_metadata)
         end_add_step_t = time.time()
         options.trace_level = old_trace_level
 
-        # For q_backward, if profiling overhead from add_step is the issue, I expect:
-        #   _profiler_run_internal to take ~ 0.10199415534734727 sec
-        #   add_step to take ~ 1.196728 - 0.10199415534734727 = 1.0947338 sec
-        print(textwrap.dedent("""
-        tfprof> add_step(step={step})
-                _profiler_run_internal = {prof_sec} seconds
-                add_step = {add_step_sec} seconds
-        """.format(step=step,
-                   prof_sec=end_run_internal_t - start_run_internal_t,
-                   add_step_sec=end_add_step_t - start_add_step_t)))
+        if DEBUG:
+            # For q_backward, if profiling overhead from add_step is the issue, I expect:
+            #   _profiler_run_internal to take ~ 0.10199415534734727 sec
+            #   add_step to take ~ 1.196728 - 0.10199415534734727 = 1.0947338 sec
+            print(textwrap.dedent("""
+            tfprof> add_step(step={step})
+                    _profiler_run_internal = {prof_sec} seconds
+                    add_step = {add_step_sec} seconds
+            """.format(step=step,
+                       prof_sec=end_run_internal_t - start_run_internal_t,
+                       add_step_sec=end_add_step_t - start_add_step_t)))
       else:
-        print("tfprof> (1) SKIP step={step}".format(step=step))
+        if DEBUG:
+            print("tfprof> (1) SKIP step={step}".format(step=step))
         ret = self._profiler_run_internal(fetches, feed_dict, options)
 
       # Maybe dump profile.
@@ -121,7 +130,8 @@ def _profiled_run(self,
           raise ValueError('Unknown cmd: %s\n' % cmd)
       return ret
   # Fast no lock path.
-  print("tfprof> (2) SKIP step={step}".format(step=step))
+  if DEBUG:
+      print("tfprof> (2) SKIP step={step}".format(step=step))
   return self._profiler_run_internal(
       fetches, feed_dict, options, run_metadata)
   # pylint: enable=protected-access
@@ -165,6 +175,9 @@ class ProfileContext(object):
         user to only enable profiling when needed.
     debug: If true, also dumps the raw trace RunMetadata text file to
         profile_dir. And print debugging message. Useful for bug report.
+    dump_on_finished: If true, ignore dump_steps, and avoid calling profiler.add_step while
+        profiling to avoid adding profiling overhead.
+        Instead, save all the data so we can dump it all at the end of profililng.
   """
 
   def __init__(self,
@@ -172,10 +185,15 @@ class ProfileContext(object):
                trace_steps=None,
                dump_steps=None,
                enabled=True,
-               debug=False):
+               debug=False,
+               dump_on_finished=False):
     self._enabled = enabled
     if not self._enabled:
       return
+
+    self._dump_on_finished = dump_on_finished
+
+    self._step_data = []
 
     self._debug = debug
     if not profile_dir:
@@ -288,14 +306,18 @@ class ProfileContext(object):
 
   def _maybe_dump(self, step):
     """Maybe dump the profile file."""
-    if not (step in self._dump_steps or self._dump_next_step):
+    if self._dump_on_finished or not (step in self._dump_steps or self._dump_next_step):
       return
+    self._dump(step)
+
+  def _dump(self, step):
     if self._debug:
       sys.stderr.write('debug: dumping file at step: %d\n' % step)
     if not gfile.Exists(self._profiler_dir):
       gfile.MakeDirs(self._profiler_dir)
 
-    print("tfprof> Dump @ step={step}".format(step=step))
+    if DEBUG:
+      print("tfprof> Dump @ step={step}".format(step=step))
     filename = os.path.join(compat.as_bytes(self._profiler_dir),
                             compat.as_bytes('profile_%d' % step))
     self.profiler._write_profile(filename)  # pylint: disable=protected-access
@@ -323,6 +345,12 @@ class ProfileContext(object):
       if self._step in prof_steps:
         to_profile.append(auto_prof)
     return to_profile
+
+  def add_step(self, step, graph, run_metadata, copy_run_metadata):
+    if copy_run_metadata:
+      # WARNING: copying this protobuf could be expensive...
+      raise NotImplementedError("Need to make a copy of protobuf in case it gets reused...")
+    self._step_data.append((step, graph, run_metadata))
 
   def __enter__(self):
     if self._enabled:
@@ -352,9 +380,24 @@ class ProfileContext(object):
   def __exit__(self, exec_type, exec_value, exec_tb):
     if not self._enabled:
       return
+
+    if self._dump_on_finished:
+        dump_step = 0
+        for step, graph, run_metadata in self._step_data:
+          dump_step = max(dump_step, step)
+          self.profiler._graph = graph
+          self.profiler.add_step(step, run_metadata)
+        self._dump(dump_step)
+        # Discard profiling data.
+        self._step_data = []
+
     print_mdl.DeleteProfiler()
     setattr(session.BaseSession, 'run', self.old_run)
     setattr(session.BaseSession, '__init__', self.old_init)
     setattr(session.BaseSession, '_profiler_run_internal', None)
     setattr(session.BaseSession, '_profiler_init_internal', None)
     setattr(session.BaseSession, 'profile_context', None)
+
+def now_in_usec():
+  time_us = print_mdl.NowInUsec()
+  return time_us

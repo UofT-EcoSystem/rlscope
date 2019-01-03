@@ -9,6 +9,8 @@ import threading
 from proto.protobuf.pyprof_pb2 import Pyprof, Event
 # from proto.protobuf import pyprof_pb2
 
+from profiler import tensorflow_profile_context
+
 from os.path import join as _j, abspath as _a, exists as _e, dirname as _d, basename as _b
 
 import py_config
@@ -33,7 +35,8 @@ def set_step(step):
     global _step, _trace_steps
     _step = step
     if _step in _trace_steps and _step not in _pyprof.steps:
-        print("> ADD STEP: {s}".format(s=_step))
+        if tensorflow_profile_context.DEBUG:
+            print("> ADD PYPROF STEP: {s}".format(s=_step))
         _pyprof.steps.extend([step])
 
 _trace_steps = None
