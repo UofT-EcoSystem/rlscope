@@ -16,6 +16,23 @@ from proto.protobuf.pyprof_pb2 import Pyprof
 
 from parser.stats import KernelTime
 
+from profiler.clib_wrap import CATEGORY_TF_API
+
+def read_category_times(step, category_times_readers, group_by_device=False):
+    category_times = dict()
+    for reader in category_times_readers:
+        new_times = reader.parse(step, group_by_device=group_by_device)
+        same_categories = set(new_times.keys()).intersection(set(category_times.keys()))
+        assert len(same_categories) == 0
+        category_times.update(new_times)
+    for category in category_times.keys():
+        if type(category_times[category]) == list:
+            category_times[category].sort(key=lambda ktime: ktime.start_time_usec)
+        else:
+            for device in category_times[category].keys():
+                category_times[category][device].sort(key=lambda ktime: ktime.start_time_usec)
+    return category_times
+
 class TFProfCategoryTimesReader:
     def __init__(self, profile_path):
         self.profile_path = profile_path
@@ -23,7 +40,11 @@ class TFProfCategoryTimesReader:
             self.proto = ProfileProto()
             self.proto.ParseFromString(f.read())
 
-    def parse(self, step):
+    @property
+    def steps(self):
+        return sorted(self.proto.steps)
+
+    def parse(self, step, group_by_device=False):
 
             # PSEUDOCODE:
             # Compute [CUDA CPU time | GPU time | CUDA CPU/GPU time] overlap/non-overlap for a single step.
@@ -56,30 +77,36 @@ class TFProfCategoryTimesReader:
         for node_id, node in self.proto.nodes.items():
             if step not in node.execs.keys():
                 continue
-            self.add_all_times(category_times, step, node, self.get_accelerator_execs)
-            self.add_all_times(category_times, step, node, self.get_cpu_execs)
+            self.add_all_times(category_times, step, node, self.get_accelerator_execs, group_by_device=group_by_device)
+            self.add_all_times(category_times, step, node, self.get_cpu_execs, group_by_device=group_by_device)
 
         return category_times
 
-    def IsGPUTime(self, device):
-        return re.search('stream:all', device)
+    def add_time(self, category_times, device, ktime, group_by_device):
+        def _add_time(category, group_by_device):
+            if category not in category_times:
+                if group_by_device:
+                    category_times[category] = dict()
+                else:
+                    category_times[category] = []
 
-    def IsCPUTime(self, device):
-        return re.search(".*/(device:gpu|gpu|device:cpu|cpu|device:sycl):\\d+", device)
+            if group_by_device and device not in category_times[category]:
+                category_times[category][device] = []
 
-    def add_time(self, category_times, device, ktime):
-        if self.IsGPUTime(device):
-            if CATEGORY_GPU not in category_times:
-                category_times[CATEGORY_GPU] = []
-            category_times[CATEGORY_GPU].append(ktime)
-        elif self.IsCPUTime(device):
-            if CATEGORY_CUDA_API_CPU not in category_times:
-                category_times[CATEGORY_CUDA_API_CPU] = []
-            category_times[CATEGORY_CUDA_API_CPU].append(ktime)
+            if group_by_device:
+                add_to = category_times[category][device]
+            else:
+                add_to = category_times[category]
+            add_to.append(ktime)
+
+        if IsGPUTime(device):
+            _add_time(CATEGORY_GPU, False)
+        elif IsCPUTime(device):
+            _add_time(CATEGORY_CUDA_API_CPU, group_by_device)
         else:
             raise NotImplementedError("Not sure what category device={dev} falls under.".format(dev=device))
 
-    def add_all_times(self, category_times, step, node, get_execs):
+    def add_all_times(self, category_times, step, node, get_execs, group_by_device):
         """
         :param get_execs:
             ExecProfile -> map<string, ExecTime>
@@ -90,8 +117,10 @@ class TFProfCategoryTimesReader:
         for device in execs.keys():
             for tupl in execs[device].times:
                 start_us, duration_us = tupl.int64_values
-                ktime = KernelTime(start_usec=start_us, time_usec=duration_us)
-                self.add_time(category_times, device, ktime)
+                if node.name == "_arg_deepq_1/obs_t_0_2/_31":
+                    import ipdb; ipdb.set_trace()
+                ktime = KernelTime(start_usec=start_us, time_usec=duration_us, name=node.name)
+                self.add_time(category_times, device, ktime, group_by_device)
 
     def get_accelerator_execs(self, exec_profile):
         return exec_profile.accelerator_execs
@@ -106,7 +135,7 @@ class PyprofCategoryTimesReader:
             self.proto = Pyprof()
             self.proto.ParseFromString(f.read())
 
-    def parse(self, step):
+    def parse(self, step, group_by_device=False):
         assert step in self.proto.steps
 
         category_times = dict()
@@ -118,6 +147,7 @@ class PyprofCategoryTimesReader:
         for category, clib_events in self.proto.clibs[step].clibs.items():
             assert category not in category_times
             category_times[category] = []
+            # TODO: add C API function name to proto / KernelTime
             self.add_event_times_to(category_times[category], clib_events.events)
 
         return category_times
@@ -533,6 +563,272 @@ class TotalTimeParser(ProfilerParserCommonMixin):
         if self.skip:
             return
 
+class TraceEventsParser(ProfilerParserCommonMixin):
+
+    def __init__(self, parser, args, src_files, bench_name=NO_BENCH_NAME, data=None):
+        self.is_dqn = 'microbenchmark_json' in src_files.opt_paths
+        self.src_files = src_files
+
+        # When True, include pyprof timestamps; the total-time-sec we end up with is too large
+        # (i.e. larger than total time measuring using time.time() around profiled code)
+        #
+        # When False, use only tfprof timestamps; the total-time-sec "makes sense"
+        # (i.e. a bit smaller but similar to time.time() measurement)
+        self.include_pyprof_timestamps = False
+
+        self.parser = parser
+        self.args = args
+        self.bench_name = bench_name
+        self.data = data
+        self.skip = False
+        self.conn = None
+
+        self.config_path = src_files.get('config_json', bench_name, or_none=True)
+        if self.config_path is not None:
+            self.config = load_json(self.config_path)
+            print("> Found optional config_json @ {f}".format(f=self.config_path))
+        else:
+            self.config = {
+            }
+
+        self._next_pid = 0
+        self.category_to_pid = dict()
+        self.reproduce_tfprof = True
+
+    @staticmethod
+    def required_source_basename_regexes():
+        return {
+            'tfprof_path': r"^profile_\d+{bench}.proto$".format(bench=BENCH_SUFFIX_RE),
+        }
+
+    @staticmethod
+    def optional_source_basename_regexes():
+        return {
+            'pyprof_path': r"^Pyprof{bench}.proto$".format(bench=BENCH_SUFFIX_RE),
+            'microbenchmark_json':r"^microbenchmark.json$",
+            'config_json':r"^config{bench}\.json$".format(bench=BENCH_SUFFIX_RE),
+        }
+
+    @staticmethod
+    def allow_multiple_src_matches():
+        return True
+
+    @staticmethod
+    def uses_all_benches():
+        return False
+
+    @staticmethod
+    def uses_multiple_dirs():
+        return False
+
+    def tfprof_path(self, bench_name):
+        return self.src_files.get('tfprof_path', self.bench_name)
+
+    def pyprof_path(self, bench_name):
+        return self.src_files.get('pyprof_path', self.bench_name)
+
+    # Output
+
+    @property
+    def _profile_json_path(self):
+        return self.get_profile_json_path(self.src_files, self.bench_name)
+
+    @classmethod
+    def get_profile_json_path(ParseKlass, src_files, bench_name):
+        path = _j(src_files.directory, 'traceEvents{bench}.json'.format(bench=bench_suffix(bench_name)))
+        return path
+
+    @property
+    def _tfprof_txt_path(self):
+        return self.get_tfprof_txt_path(self.src_files, self.bench_name)
+
+    @classmethod
+    def get_tfprof_txt_path(ParseKlass, src_files, bench_name):
+        path = _j(src_files.directory, 'tfprof{bench}.proto.txt'.format(bench=bench_suffix(bench_name)))
+        return path
+
+    def parse(self, bench_name):
+        category_times_readers = []
+
+        tfprof_path = self.tfprof_path(self.bench_name)
+        tfprof_reader = TFProfCategoryTimesReader(tfprof_path)
+        category_times_readers.append(tfprof_reader)
+
+        pyprof_path = self.pyprof_path(self.bench_name)
+        pyprof_reader = PyprofCategoryTimesReader(pyprof_path)
+        category_times_readers.append(pyprof_reader)
+
+        # Overlap, computed across different "steps".
+        overlaps = []
+
+        step = tfprof_reader.steps[0]
+        print("> Generate traceEvents for step={step}".format(step=step))
+
+        with open(self._tfprof_txt_path, 'w') as f:
+            print(tfprof_reader.proto, file=f)
+
+        # Just default to outputting the first step...
+        category_times = read_category_times(step, category_times_readers, group_by_device=True)
+        self.js_add_category_times(category_times)
+        do_dump_json(self.js, self._profile_json_path)
+
+    def js_add_category_times(self, category_times):
+        """
+        self.js = {
+            "traceEvents": [
+                {
+                    "args": {
+                        "name": "Op scheduling threads: /job:localhost/replica:0/task:0/device:gpu:0"
+                    },
+                    "name": "process_name",
+                    "ph": "M",
+                    "pid": 0
+                },
+                {
+                    "args": {
+                        "name": "Op scheduling threads: /job:localhost/replica:0/task:0/device:cpu:0"
+                    },
+                    "name": "process_name",
+                    "ph": "M",
+                    "pid": 1
+                },
+                {
+                    "args": {
+                        "name": "Op execution threads: /device:gpu:0/stream:all"
+                    },
+                    "name": "process_name",
+                    "ph": "M",
+                    "pid": 2
+                },
+                {
+                    "args": {
+                        "name": "deepq/target_q_func/action_value/fully_connected_1/biases"
+                    },
+                    "cat": "Op",
+                    "dur": 138,
+                    "name": "deepq/target_q_func/action_value/fully_connected_1/biases",
+                    "ph": "X",
+                    "pid": 0,
+                    "tid": 0,
+                    "ts": 1546471006818165
+                },
+            ...
+        }
+        """
+        self.js = {
+            "traceEvents": [
+            ],
+        }
+
+        for category, times in category_times.items():
+            if category == CATEGORY_CUDA_API_CPU:
+                # category_times[CATEGORY_CUDA_API_CPU] : device -> (tid -> times)
+                assert type(category_times[CATEGORY_CUDA_API_CPU]) == dict
+                for device, all_times in category_times[CATEGORY_CUDA_API_CPU].items():
+                    category_name = "{cat}: {dev}".format(cat=category, dev=device)
+                    self.js_add_section(category_name)
+                    tid_to_times = self.js_split_into_tids(all_times)
+                    for tid, times in tid_to_times.items():
+                        for time in times:
+                            self.js_add_time(time.name, category_name, time, tid)
+            # elif category == CATEGORY_GPU:
+            #     ...
+            elif self.reproduce_tfprof and category in [CATEGORY_PYTHON, CATEGORY_TF_API]:
+                # Ignore pyprof for now.
+                # We just want to test that we are properly reproducing the tfprof traceEvents json.
+                pass
+            else:
+                category_name = category
+                self.js_add_section(category_name)
+                for time in times:
+                    self.js_add_time(time.name, category, time, tid=0)
+            # else:
+            #     raise NotImplementedError("Not sure how to handle category={c}".format(
+            #         c=category))
+
+    def js_split_into_tids(self, times):
+        times = sorted(times, key=lambda ktime: ktime.start_time_usec)
+        # tid -> times
+        next_tid = 0
+        allocated_tids = []
+        tid_times = dict()
+
+        for time in times:
+            tid = -1
+            # c_tid = candidate tid
+            for c_tid in reversed_iter(allocated_tids):
+                if time.start_time_usec < tid_times[c_tid][-1].end_time_usec:
+                    # Case (1): kernel start-time < lane's last end-time
+                    #   Kernel starts earlier in this lane.
+                    #   Either try the next lane, or allocate a new lane
+                    pass
+                elif time.start_time_usec >= tid_times[c_tid][-1].end_time_usec:
+                    # Case (2): kernel start-time > lane's last end-time
+                    #   Kernel starts later in this lane.
+                    #   Place the kernel in this lane.
+                    tid = c_tid
+                    break
+                # else:
+                #     # Case (3): lane's last end-time == kernel's start-time.
+                #     #   The current kernel starts executing right as the last kernel in this lane ends.
+                #     #   Look at the kernel from this lane that execute before the current one.
+                #     #   Q: This seems pointless, seems like we're going to fall into case 2.
+
+            if tid == -1:
+                tid = next_tid
+                allocated_tids.append(tid)
+                next_tid += 1
+                tid_times[tid] = []
+
+            if time.name == "_arg_deepq_1/obs_t_0_2/_31":
+                # gets added to CATEGORY_CUDA_API_CPU
+                import ipdb; ipdb.set_trace()
+
+            tid_times[tid].append(time)
+
+        return tid_times
+
+    def js_add_section(self, name):
+        if name in self.category_to_pid:
+            return
+        pid = self._js_allocate_pid()
+        section = {
+            'args': {
+                'name': name,
+            },
+            'name': 'process_name',
+            'ph': 'M',
+            'pid': pid,
+        }
+        assert name not in self.category_to_pid
+        self.category_to_pid[name] = pid
+        self.js['traceEvents'].append(section)
+
+    def js_add_time(self, name, category, ktime, tid):
+        pid = self.category_to_pid[category]
+        jtime = {
+            'args': {
+                'name': name,
+            },
+            'cat': 'Op',
+            'dur': ktime.total_time_usec,
+            'name': name,
+            'ph': 'X',
+            'pid': pid,
+            'tid': tid,
+            'ts': ktime.start_time_usec,
+        }
+        self.js['traceEvents'].append(jtime)
+
+    def _js_allocate_pid(self):
+        pid = self._next_pid
+        self._next_pid += 1
+        return pid
+
+    def dump(self, bench_name):
+        if self.skip:
+            return
+
 class TFProfParser(ProfilerParserCommonMixin):
     """
     What do we want to compute?
@@ -622,15 +918,6 @@ class TFProfParser(ProfilerParserCommonMixin):
     def get_micro_name(self):
         return self.bench_name
 
-    def read_category_times(self, step, category_times_readers):
-        category_times = dict()
-        for reader in category_times_readers:
-            new_times = reader.parse(step)
-            same_categories = set(new_times.keys()).intersection(set(category_times.keys()))
-            assert len(same_categories) == 0
-            category_times.update(new_times)
-        return category_times
-
     def parse(self, bench_name):
         self.tf_proto = None
         if self.tfprof_path(self.bench_name) is not None:
@@ -686,7 +973,7 @@ class TFProfParser(ProfilerParserCommonMixin):
         overlaps = []
 
         for step in steps:
-            category_times = self.read_category_times(step, category_times_readers)
+            category_times = read_category_times(step, category_times_readers)
             compute_overlap = ComputeOverlap(category_times)
             compute_overlap.compute()
             overlaps.append(compute_overlap.get_category_times())
@@ -734,22 +1021,6 @@ class TFProfParser(ProfilerParserCommonMixin):
         }
         do_dump_json(json_output, self._profile_json_path)
 
-    # From TensorFlow code base:
-    #
-    # bool CountAsAcceleratorTime(const string& device) {
-    # return device.find("stream:all") != device.npos;
-    # }
-    # bool CountAsCPUTime(const string& device) {
-    # return RE2::FullMatch(device,
-    #                       ".*/(device:gpu|gpu|device:cpu|cpu|device:sycl):\\d+");
-    # }
-
-    def IsGPUTime(self, device):
-        return re.search('stream:all', device)
-
-    def IsCPUTime(self, device):
-        return re.search(".*/(device:gpu|gpu|device:cpu|cpu|device:sycl):\\d+", device)
-
     def dump(self, bench_name):
         if self.skip:
             return
@@ -762,6 +1033,27 @@ class TFProfParser(ProfilerParserCommonMixin):
     def get_profile_json_path(ParseKlass, src_files, bench_name):
         path = _j(src_files.directory, 'tfprof{bench}.json'.format(bench=bench_suffix(bench_name)))
         return path
+
+# From TensorFlow code base:
+#
+# bool CountAsAcceleratorTime(const string& device) {
+# return device.find("stream:all") != device.npos;
+# }
+# bool CountAsCPUTime(const string& device) {
+# return RE2::FullMatch(device,
+#                       ".*/(device:gpu|gpu|device:cpu|cpu|device:sycl):\\d+");
+# }
+
+def IsGPUTime(device):
+    return re.search('stream:all', device)
+
+def IsCPUTime(device):
+    return re.search(".*/(device:gpu|gpu|device:cpu|cpu|device:sycl):\\d+", device)
+
+def reversed_iter(xs):
+    n = len(xs)
+    for i in range(n - 1, 0 - 1, -1):
+        yield xs[i]
 
 def test_compute_overlap():
     # Set to true to print info.

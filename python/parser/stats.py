@@ -55,6 +55,10 @@ class KernelTime:
         assert self.end_usec is not None
         return self.end_usec
 
+    @property
+    def total_time_usec(self):
+        return self.end_time_usec - self.start_time_usec
+
     def overlaps(self, ktime_b):
         ktime_a = self
         assert ktime_a.start_usec <= ktime_b.start_usec
@@ -88,6 +92,9 @@ class KernelTime:
         return KernelTime(end_usec - start_usec, start_usec, end_usec, name=name)
 
     def __str__(self):
+        if self.name is not None:
+            return "(name={name}, start={start} us, dur={dur} us)".format(
+                name=self.name, start=self.start_usec, dur=self.time_usec)
         return "(start={start} us, dur={dur} us)".format(
             start=self.start_usec, dur=self.time_usec)
 
