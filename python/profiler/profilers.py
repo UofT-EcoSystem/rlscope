@@ -367,12 +367,20 @@ class Profiler:
             self.enable_profiling(bench_name)
             self.start_num_calls_t = time.time()
             for i in range(self.num_calls):
-                clib_wrap.set_step(i + 1)
+                # NOTE: pyprof's step counter for deciding whether to trace the current step is is 0-based.
+                # Offsetting this by +1 will cause pyprof data from 1 iteration prior to be shown with tfprof
+                # from 1 iteration later.
+                # (We had this bug before...)
+                clib_wrap.set_step(i)
+                if tensorflow_profile_context.DEBUG and clib_wrap.is_recording():
+                    print("> RECORDING STEP = {step}".format(step=i))
                 start_call_us = clib_wrap.now_us()
                 start_tf_call_us = tensorflow_profile_context.now_in_usec()
                 ret = func(*args, **kwargs)
                 end_tf_call_us = tensorflow_profile_context.now_in_usec()
                 end_call_us = clib_wrap.now_us()
+                # This is a good sanity check to leave on even for non-debug runs.
+                # if tensorflow_profile_context.DEBUG and clib_wrap.is_recording():
                 clib_wrap.record_event(CATEGORY_DUMMY_EVENT, 'Start call', start_call_us, start_call_us + 1)
                 clib_wrap.record_event(CATEGORY_DUMMY_EVENT, 'End call', end_call_us, end_call_us + 1)
                 clib_wrap.record_event(CATEGORY_DUMMY_EVENT, 'Start TF call', start_tf_call_us, start_tf_call_us + 1)

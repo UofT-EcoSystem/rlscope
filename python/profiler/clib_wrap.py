@@ -192,6 +192,10 @@ def record_event(category, name, start_us, end_us):
             name=name)
         _pyprof.clibs[_step].clibs[category].events.extend([event])
 
+def is_recording():
+    global _step, _trace_steps
+    return _trace_steps is not None and _step in _trace_steps
+
 def wrap_module(module, category,
                 func_regex=None, ignore_func_regex="^_",
                 prefix=DEFAULT_PREFIX):

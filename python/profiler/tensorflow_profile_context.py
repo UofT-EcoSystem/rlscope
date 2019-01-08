@@ -98,7 +98,7 @@ def _profiled_run(self,
             #   _profiler_run_internal to take ~ 0.10199415534734727 sec
             #   add_step to take ~ 1.196728 - 0.10199415534734727 = 1.0947338 sec
             print(textwrap.dedent("""
-            tfprof> add_step(step={step})
+            tfprof> cache stats needed for add_step(step={step})
                     _profiler_run_internal = {prof_sec} seconds
                     add_step = {add_step_sec} seconds
             """.format(step=step,
@@ -386,6 +386,8 @@ class ProfileContext(object):
         for step, graph, run_metadata in self._step_data:
           dump_step = max(dump_step, step)
           self.profiler._graph = graph
+          if DEBUG:
+            print("tfprof> use cached results for add_step(step={step})".format(step=step))
           self.profiler.add_step(step, run_metadata)
         self._dump(dump_step)
         # Discard profiling data.

@@ -133,10 +133,17 @@ class PyprofCategoryTimesReader:
             self.proto = Pyprof()
             self.proto.ParseFromString(f.read())
 
-    def parse(self, step, group_by_device=False):
-        assert step in self.proto.steps
+    @property
+    def steps(self):
+        return sorted(self.proto.steps)
 
+    def parse(self, step, group_by_device=False):
         category_times = dict()
+
+        if step not in self.proto.steps:
+            print("> WARNING: didn't find step in pyprof @ {path}".format(
+                path=self.profile_path))
+            return category_times
 
         category_times[CATEGORY_PYTHON] = []
         self.add_event_times_to(category_times[CATEGORY_PYTHON], self.proto.python_events[step].events)
@@ -598,6 +605,40 @@ class TraceEventsParser(ProfilerParserCommonMixin):
         self.category_to_pid = dict()
         self.reproduce_tfprof = False
 
+        # > name="Start Python call TF_SessionRun_wrapper", timestamp = 1546965588823333.5 usec
+        # > name="Start wrapper Python call TF_SessionRun_wrapper", timestamp = 1546965588823383.2 usec
+        # 2019-01-08 11:39:48.823459: I tensorflow/python/client/tf_session_helper.cc:348] > name="Start TF_SessionRun_wrapper_helper", timestamp = 1546965588823449 usec
+        # 2019-01-08 11:39:48.823568: I tensorflow/c/c_api.cc:112] > name="Start TF_SessionRun", timestamp = 1546965588823561 usec
+        # 2019-01-08 11:39:48.823629: I tensorflow/c/c_api.cc:112] > name="Start TF_Run_Helper", timestamp = 1546965588823625 usec
+        # 2019-01-08 11:39:48.823665: I tensorflow/core/common_runtime/direct_session.cc:440] > name="Start DirectSession::Run", timestamp = 1546965588823662 usec
+        # 2019-01-08 11:39:48.823744: I tensorflow/core/common_runtime/direct_session.cc:440] > name="Start RunInternal", timestamp = 1546965588823740 usec
+        # 2019-01-08 11:39:48.823815: I tensorflow/core/common_runtime/direct_session.cc:440] > name="Start tracing", timestamp = 1546965588823812 usec
+        # 2019-01-08 11:39:48.823981: I tensorflow/core/common_runtime/direct_session.cc:440] > name="Start wait for notification", timestamp = 1546965588823976 usec
+        # 2019-01-08 11:39:48.837436: I tensorflow/core/common_runtime/direct_session.cc:440] > name="End wait for notification", timestamp = 1546965588837426 usec
+        # 2019-01-08 11:39:48.837844: I tensorflow/core/common_runtime/direct_session.cc:440] > name="Start Collect stats", timestamp = 1546965588837834 usec
+        # 2019-01-08 11:39:48.839810: I tensorflow/core/common_runtime/direct_session.cc:440] > name="End Collect stats", timestamp = 1546965588839807 usec
+        # 2019-01-08 11:39:48.840588: I tensorflow/core/common_runtime/direct_session.cc:440] > name="End RunInternal", timestamp = 1546965588840583 usec
+        # 2019-01-08 11:39:48.842441: I tensorflow/c/c_api.cc:112] > name="End TF_Run_Helper", timestamp = 1546965588842427 usec
+        # 2019-01-08 11:39:48.842469: I tensorflow/c/c_api.cc:112] > name="End TF_SessionRun", timestamp = 1546965588842467 usec
+        # 2019-01-08 11:39:48.842532: I tensorflow/python/client/tf_session_helper.cc:348] > name="End TF_SessionRun_wrapper_helper", timestamp = 1546965588842527 usec
+        self.dummy_times_str = textwrap.dedent("""
+        """)
+        lines = self.dummy_times_str.splitlines(keepends=False)
+        timestamps = dict()
+        for line in lines:
+            m = re.search(r'> name="(?P<name>[^"]+)", timestamp = (?P<time_usec>{float}) usec'.format(
+                float=float_re),
+                line)
+            # print("LINE = {line}".format(line=line))
+            if m:
+                assert m.group('name') not in timestamps
+                timestamps[m.group('name')] = int(float(m.group('time_usec')))
+                continue
+        self.dummy_times = []
+        for name, time_usec in timestamps.items():
+            ktime = KernelTime(start_usec=time_usec, time_usec=1, name=name)
+            self.dummy_times.append(ktime)
+
     @staticmethod
     def required_source_basename_regexes():
         return {
@@ -673,7 +714,17 @@ class TraceEventsParser(ProfilerParserCommonMixin):
         # Overlap, computed across different "steps".
         overlaps = []
 
-        step = tfprof_reader.steps[0]
+        if len(tfprof_reader.steps) > 0:
+            steps = tfprof_reader.steps
+        else:
+            steps = pyprof_reader.steps
+
+        # step = tfprof_reader.steps[0]
+        # Skip the first step, since it includes profiler initialization stuff.
+        # In particular, the libcupti NVIDIA library gets loaded on-demand during
+        # the first traced step, and this can take 2 seconds to load!
+        # (We had this bug before...)
+        step = steps[1]
         print("> Generate traceEvents for step={step}".format(step=step))
 
         with open(self._tfprof_txt_path, 'w') as f:
@@ -684,6 +735,13 @@ class TraceEventsParser(ProfilerParserCommonMixin):
 
         # Just default to outputting the first step...
         category_times = read_category_times(step, category_times_readers, group_by_device=True)
+
+        if len(self.dummy_times) > 0:
+            print("> Adding hardcoded times:")
+            pprint.pprint(self.dummy_times, indent=2)
+            if CATEGORY_DUMMY_EVENT not in category_times:
+                category_times[CATEGORY_DUMMY_EVENT] = []
+            category_times[CATEGORY_DUMMY_EVENT].extend(self.dummy_times)
         self.js_add_category_times(category_times)
         do_dump_json(self.js, self._profile_json_path)
 
