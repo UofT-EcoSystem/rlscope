@@ -25,6 +25,7 @@ from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, base
 
 from profiler import cudaprofile
 from profiler import clib_wrap
+from profiler.clib_wrap import MICROSECONDS_IN_SECOND
 from profiler import tensorflow_profile_context
 from parser.tfprof import CATEGORY_DUMMY_EVENT
 
@@ -33,6 +34,8 @@ from parser.tfprof import CATEGORY_DUMMY_EVENT
 NO_BENCH_NAME = "NoBenchName"
 NO_DEVICE_NAME = "NoDeviceName"
 NO_IMPL_NAME = "NoImplName"
+
+TF_PRINT_TIMESTAMP = ENV.get('TF_PRINT_TIMESTAMP', 'no') == 'yes'
 
 _TF_MODIFIED = False
 def modify_tensorflow():
@@ -127,6 +130,8 @@ class Profiler:
         self.steps = 0
         self.average_time_per_call_sec = None
         self.average_time_per_call_no_profile_sec = None
+        self.profile_sec = []
+        self.no_profile_sec = []
 
         # clib_wrap.wrap_libs()
 
@@ -208,7 +213,7 @@ class Profiler:
                 report_decision(total_time_sec, iterations)
                 # self.iterations = iterations
                 self.num_calls = iterations
-                self.average_time_per_call_no_profile_sec = total_time_sec/float(iterations)
+                # self.average_time_per_call_no_profile_sec = total_time_sec/float(iterations)
                 return
 
             # stdev = np.std(repetition_time_sec)
@@ -366,21 +371,34 @@ class Profiler:
 
             self.enable_profiling(bench_name)
             self.start_num_calls_t = time.time()
+
+            self.profile_sec = []
+            self.no_profile_sec = []
             for i in range(self.num_calls):
                 # NOTE: pyprof's step counter for deciding whether to trace the current step is is 0-based.
                 # Offsetting this by +1 will cause pyprof data from 1 iteration prior to be shown with tfprof
                 # from 1 iteration later.
                 # (We had this bug before...)
                 clib_wrap.set_step(i)
-                if tensorflow_profile_context.DEBUG and clib_wrap.is_recording():
+                recording = clib_wrap.is_recording()
+                if (tensorflow_profile_context.DEBUG or TF_PRINT_TIMESTAMP) and recording:
                     print("> RECORDING STEP = {step}".format(step=i))
                 start_call_us = clib_wrap.now_us()
                 start_tf_call_us = tensorflow_profile_context.now_in_usec()
                 ret = func(*args, **kwargs)
                 end_tf_call_us = tensorflow_profile_context.now_in_usec()
                 end_call_us = clib_wrap.now_us()
+                # Record the last amount of time in between returning
+                # from a call to q_forward, and finishing benchmarking.
+                # This will include time spent in the tensorflow python API
+                clib_wrap.record_python_event('Finish python benchmark', end_call_us)
                 # This is a good sanity check to leave on even for non-debug runs.
-                # if tensorflow_profile_context.DEBUG and clib_wrap.is_recording():
+                # if tensorflow_profile_context.DEBUG and recording:
+                time_sec = (end_call_us - start_call_us)/MICROSECONDS_IN_SECOND
+                if recording:
+                    self.profile_sec.append(time_sec)
+                else:
+                    self.no_profile_sec.append(time_sec)
                 clib_wrap.record_event(CATEGORY_DUMMY_EVENT, 'Start call', start_call_us, start_call_us + 1)
                 clib_wrap.record_event(CATEGORY_DUMMY_EVENT, 'End call', end_call_us, end_call_us + 1)
                 clib_wrap.record_event(CATEGORY_DUMMY_EVENT, 'Start TF call', start_tf_call_us, start_tf_call_us + 1)
@@ -388,7 +406,11 @@ class Profiler:
             self.end_num_calls_t = time.time()
             self.disable_profiling(bench_name, num_calls=self.num_calls)
 
-            self.average_time_per_call_sec = (self.end_num_calls_t - self.start_num_calls_t)/self.num_calls
+            # self.average_time_per_call_sec = (self.end_num_calls_t - self.start_num_calls_t)/self.num_calls
+            if len(self.profile_sec) > 1:
+                self.average_time_per_call_sec = np.mean(self.profile_sec[1:])
+            if len(self.no_profile_sec) > 1:
+                self.average_time_per_call_no_profile_sec = np.mean(self.no_profile_sec[1:])
 
             if self.tfprof:
                 self.pctx.__exit__(None, None, None)
@@ -429,6 +451,8 @@ class Profiler:
         dump_config(config_path,
                     num_calls=self.num_calls,
                     start_measuring_call=self.start_measuring_call,
+                    profile_sec=self.profile_sec,
+                    no_profile_sec=self.no_profile_sec,
                     average_time_per_call_sec=self.average_time_per_call_sec,
                     average_time_per_call_no_profile_sec=self.average_time_per_call_no_profile_sec,
                     **config_kwargs)

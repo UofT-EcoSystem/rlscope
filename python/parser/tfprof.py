@@ -16,9 +16,7 @@ from proto.protobuf.pyprof_pb2 import Pyprof
 
 from parser.stats import KernelTime
 
-from profiler.clib_wrap import CATEGORY_TF_API
-
-def read_category_times(step, category_times_readers, group_by_device=False):
+def read_category_times(step, category_times_readers, group_by_device=False, include_dummy=False):
     category_times = dict()
     for reader in category_times_readers:
         new_times = reader.parse(step, group_by_device=group_by_device)
@@ -44,7 +42,7 @@ class TFProfCategoryTimesReader:
     def steps(self):
         return sorted(self.proto.steps)
 
-    def parse(self, step, group_by_device=False):
+    def parse(self, step, group_by_device=False, include_dummy=False):
 
             # PSEUDOCODE:
             # Compute [CUDA CPU time | GPU time | CUDA CPU/GPU time] overlap/non-overlap for a single step.
@@ -137,7 +135,7 @@ class PyprofCategoryTimesReader:
     def steps(self):
         return sorted(self.proto.steps)
 
-    def parse(self, step, group_by_device=False):
+    def parse(self, step, group_by_device=False, include_dummy=False):
         category_times = dict()
 
         if step not in self.proto.steps:
@@ -150,6 +148,8 @@ class PyprofCategoryTimesReader:
 
         # clib_times = dict()
         for category, clib_events in self.proto.clibs[step].clibs.items():
+            if category in [CATEGORY_DUMMY_EVENT]:
+                continue
             assert category not in category_times
             category_times[category] = []
             # TODO: add C API function name to proto / KernelTime
@@ -407,6 +407,7 @@ class ComputeOverlap:
 
         return times
 
+CATEGORY_TF_API = "Framework API C"
 CATEGORY_PYTHON = 'Python'
 CATEGORY_CUDA_API_CPU = 'CUDA API CPU'
 CATEGORY_GPU = 'GPU'
@@ -605,36 +606,35 @@ class TraceEventsParser(ProfilerParserCommonMixin):
         self.category_to_pid = dict()
         self.reproduce_tfprof = False
 
-        # > name="Start Python call TF_SessionRun_wrapper", timestamp = 1546965588823333.5 usec
-        # > name="Start wrapper Python call TF_SessionRun_wrapper", timestamp = 1546965588823383.2 usec
-        # 2019-01-08 11:39:48.823459: I tensorflow/python/client/tf_session_helper.cc:348] > name="Start TF_SessionRun_wrapper_helper", timestamp = 1546965588823449 usec
-        # 2019-01-08 11:39:48.823568: I tensorflow/c/c_api.cc:112] > name="Start TF_SessionRun", timestamp = 1546965588823561 usec
-        # 2019-01-08 11:39:48.823629: I tensorflow/c/c_api.cc:112] > name="Start TF_Run_Helper", timestamp = 1546965588823625 usec
-        # 2019-01-08 11:39:48.823665: I tensorflow/core/common_runtime/direct_session.cc:440] > name="Start DirectSession::Run", timestamp = 1546965588823662 usec
-        # 2019-01-08 11:39:48.823744: I tensorflow/core/common_runtime/direct_session.cc:440] > name="Start RunInternal", timestamp = 1546965588823740 usec
-        # 2019-01-08 11:39:48.823815: I tensorflow/core/common_runtime/direct_session.cc:440] > name="Start tracing", timestamp = 1546965588823812 usec
-        # 2019-01-08 11:39:48.823981: I tensorflow/core/common_runtime/direct_session.cc:440] > name="Start wait for notification", timestamp = 1546965588823976 usec
-        # 2019-01-08 11:39:48.837436: I tensorflow/core/common_runtime/direct_session.cc:440] > name="End wait for notification", timestamp = 1546965588837426 usec
-        # 2019-01-08 11:39:48.837844: I tensorflow/core/common_runtime/direct_session.cc:440] > name="Start Collect stats", timestamp = 1546965588837834 usec
-        # 2019-01-08 11:39:48.839810: I tensorflow/core/common_runtime/direct_session.cc:440] > name="End Collect stats", timestamp = 1546965588839807 usec
-        # 2019-01-08 11:39:48.840588: I tensorflow/core/common_runtime/direct_session.cc:440] > name="End RunInternal", timestamp = 1546965588840583 usec
-        # 2019-01-08 11:39:48.842441: I tensorflow/c/c_api.cc:112] > name="End TF_Run_Helper", timestamp = 1546965588842427 usec
-        # 2019-01-08 11:39:48.842469: I tensorflow/c/c_api.cc:112] > name="End TF_SessionRun", timestamp = 1546965588842467 usec
-        # 2019-01-08 11:39:48.842532: I tensorflow/python/client/tf_session_helper.cc:348] > name="End TF_SessionRun_wrapper_helper", timestamp = 1546965588842527 usec
-        self.dummy_times_str = textwrap.dedent("""
-        """)
-        lines = self.dummy_times_str.splitlines(keepends=False)
-        timestamps = dict()
-        for line in lines:
-            m = re.search(r'> name="(?P<name>[^"]+)", timestamp = (?P<time_usec>{float}) usec'.format(
-                float=float_re),
-                line)
-            # print("LINE = {line}".format(line=line))
-            if m:
-                assert m.group('name') not in timestamps
-                timestamps[m.group('name')] = int(float(m.group('time_usec')))
-                continue
+    def parse_dummy_events(self, step):
+
         self.dummy_times = []
+
+        if self._dummy_events_path is None:
+            return
+
+        timestamps = dict()
+        with open(self._dummy_events_path) as f:
+            cur_step = None
+            for line in f:
+                line = line.rstrip()
+
+                m = re.search(r'> RECORDING STEP = (?P<step>\d+)', line)
+                if m:
+                    cur_step = int(m.group('step'))
+
+                if cur_step is None or cur_step != step:
+                    continue
+
+                m = re.search(r'> name="(?P<name>[^"]+)", timestamp = (?P<time_usec>{float}) usec'.format(
+                    float=float_re),
+                    line)
+                # print("LINE = {line}".format(line=line))
+                if m:
+                    assert m.group('name') not in timestamps
+                    timestamps[m.group('name')] = int(float(m.group('time_usec')))
+                    continue
+
         for name, time_usec in timestamps.items():
             ktime = KernelTime(start_usec=time_usec, time_usec=1, name=name)
             self.dummy_times.append(ktime)
@@ -651,6 +651,7 @@ class TraceEventsParser(ProfilerParserCommonMixin):
             'pyprof_path': r"^Pyprof{bench}.proto$".format(bench=BENCH_SUFFIX_RE),
             'microbenchmark_json':r"^microbenchmark.json$",
             'config_json':r"^config{bench}\.json$".format(bench=BENCH_SUFFIX_RE),
+            'dummy_events_path': r"^dummy_events{bench}.txt$".format(bench=BENCH_SUFFIX_RE),
         }
 
     @staticmethod
@@ -672,6 +673,18 @@ class TraceEventsParser(ProfilerParserCommonMixin):
         return self.src_files.get('pyprof_path', self.bench_name)
 
     # Output
+
+    @property
+    def _dummy_events_path(self):
+        path = self.get_dummy_events_path(self.src_files, self.bench_name)
+        if not _e(path):
+            return None
+        return path
+
+    @classmethod
+    def get_dummy_events_path(ParseKlass, src_files, bench_name):
+        path = _j(src_files.directory, 'dummy_events{bench}.txt'.format(bench=bench_suffix(bench_name)))
+        return path
 
     @property
     def _profile_json_path(self):
@@ -727,6 +740,8 @@ class TraceEventsParser(ProfilerParserCommonMixin):
         step = steps[1]
         print("> Generate traceEvents for step={step}".format(step=step))
 
+        self.parse_dummy_events(step)
+
         with open(self._tfprof_txt_path, 'w') as f:
             print(tfprof_reader.proto, file=f)
 
@@ -734,7 +749,9 @@ class TraceEventsParser(ProfilerParserCommonMixin):
             print(pyprof_reader.proto, file=f)
 
         # Just default to outputting the first step...
-        category_times = read_category_times(step, category_times_readers, group_by_device=True)
+        category_times = read_category_times(step, category_times_readers,
+                                             group_by_device=True,
+                                             include_dummy=True)
 
         if len(self.dummy_times) > 0:
             print("> Adding hardcoded times:")
@@ -1002,7 +1019,7 @@ class TFProfParser(ProfilerParserCommonMixin):
             self.py_proto = Pyprof()
             self.py_proto.ParseFromString(f.read())
 
-        if self.tf_proto is not None:
+        if self.tf_proto is not None and len(self.tf_proto.steps) > 0:
             steps = list(self.tf_proto.steps)
             steps_name = "TF_PROTO"
         else:
@@ -1017,8 +1034,6 @@ class TFProfParser(ProfilerParserCommonMixin):
         if self.tf_proto is not None:
             for tf_step in self.tf_proto.steps:
                 assert tf_step in self.py_proto.steps
-
-        # import ipdb; ipdb.set_trace()
 
         # PSEUDOCODE:
         # Compute [CUDA CPU time | GPU time | CUDA CPU/GPU time] overlap/non-overlap for a single step.
@@ -1046,7 +1061,9 @@ class TFProfParser(ProfilerParserCommonMixin):
         overlaps = []
 
         for step in steps:
-            category_times = read_category_times(step, category_times_readers)
+            category_times = read_category_times(step, category_times_readers,
+                                                 # Don't want to compute overlap w/ dummy events; doesn't mean anything.
+                                                 include_dummy=False)
             compute_overlap = ComputeOverlap(category_times)
             compute_overlap.compute()
             overlaps.append(compute_overlap.get_category_times())

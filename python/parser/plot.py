@@ -18,6 +18,7 @@ from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, base
 from parser.common import *
 from parser.nvprof import CUDASQLiteParser
 from parser.pyprof import PythonProfileParser
+from parser.tfprof import CATEGORY_TF_API
 
 # figsize (W x H) in inches
 aspect_ratio = 16./9.
@@ -26,7 +27,8 @@ fig_height = float(fig_width) / aspect_ratio
 FIG_SIZE = (fig_width, fig_height)
 
 DEVICE_ORDER = ['NoDeviceName', 'Quadro K4000', 'Quadro P4000', 'GTX 1080']
-IMPL_NAME_ORDER = ["DQN Python", NO_IMPL_NAME]
+# IMPL_NAME_ORDER = ["DQN Python", NO_IMPL_NAME]
+IMPL_NAME_ORDER = [NO_IMPL_NAME]
 
 DQN_BENCH_NAME_LABELS = {
     'q_update_target_network':'Update target network',
@@ -587,25 +589,21 @@ class CategoryOverlapPlot(ProfilerParserCommonMixin):
     def _tfprof_json(self):
         return self.src_files.get('tfprof_json', self.bench_name)
 
-    @property
-    def _category_overlap_png(self):
-        return CategoryOverlapPlot.get_category_overlap_png(self.src_files)
+    def _category_overlap_png(self, bench_name):
+        return CategoryOverlapPlot.get_category_overlap_png(self.src_files, bench_name)
 
     @staticmethod
-    def get_category_overlap_png(src_files):
-        return _j(src_files.directory, "category_overlap.png")
-
-    @property
-    def _category_overlap_png(self):
-        return CategoryOverlapPlot.get_category_overlap_png(self.src_files)
+    def get_category_overlap_png(src_files, bench_name):
+        return _j(src_files.directory, "category_overlap{bench}.png".format(
+            bench=bench_suffix(bench_name)))
 
     @staticmethod
-    def get_plot_data_path(src_files):
-        return _j(src_files.directory, "category_overlap.plot_data.txt")
+    def get_plot_data_path(src_files, bench_name):
+        return _j(src_files.directory, "category_overlap.plot_data{bench}.txt".format(
+            bench=bench_suffix(bench_name)))
 
-    @property
-    def _plot_data_path(self):
-        return CategoryOverlapPlot.get_plot_data_path(self.src_files)
+    def _plot_data_path(self, bench_name):
+        return CategoryOverlapPlot.get_plot_data_path(self.src_files, bench_name)
 
     def __init__(self, parser, args, src_files, bench_name=NO_BENCH_NAME, bar_width=0.25, show=False):
         self.parser = parser
@@ -618,13 +616,11 @@ class CategoryOverlapPlot(ProfilerParserCommonMixin):
         #     'PythonTimeSec':"/",
         # }
         categories = set()
-        def _combo_name(combo):
-            return " + ".join(combo)
         tfprof_paths = [src_files.get('tfprof_json', bench) for bench in src_files.bench_names]
         for tfprof_path in tfprof_paths:
             js = load_json(tfprof_path)
             for combo_and_times in js['category_combo_times']:
-                category = _combo_name(combo_and_times['category_combo'])
+                category = _category_str(combo_and_times['category_combo'])
                 categories.add(category)
                 # self.category_order.append(category)
                 # times_sec = np.array(combo_and_times['times_usec'])/MICROSECONDS_IN_SECOND
@@ -644,6 +640,9 @@ class CategoryOverlapPlot(ProfilerParserCommonMixin):
             category_labels=self.category_labels,
             bar_width=bar_width, show=show,
             json_reader_klass=TFProfReader,
+            title='DQN iteration time breakdown',
+            xlabel='DQN',
+            ylabel='Time (seconds)',
         )
 
     def run(self, bench_name=NO_BENCH_NAME):
@@ -672,10 +671,11 @@ class CategoryOverlapPlot(ProfilerParserCommonMixin):
                            impl=impl_name)))
                 self.plotter.add_json_data(json_data, bench,
                                            device_name, impl_name, debug=True)
+
         self.plotter.plot()
 
 class StackedBarPlotter:
-    def __init__(self, png, plot_data_path,
+    def __init__(self, get_png, get_plot_data_path,
                  category_order,
                  impl_name_order,
                  device_order,
@@ -683,11 +683,31 @@ class StackedBarPlotter:
                  category_hatch_map=None,
                  category_labels=None,
                  bar_width=0.25, show=False,
-                 json_reader_klass=None):
-        self.png = png
-        self.plot_data_path = plot_data_path
+                 json_reader_klass=None,
+                 xlabel=None,
+                 ylabel=None,
+                 title=None):
+        if callable(get_png):
+            self.get_png = get_png
+            self.png = None
+        else:
+            assert type(get_png) == str
+            self.get_png = None
+            self.png = get_png
+
+        if callable(get_plot_data_path):
+            self.get_plot_data_path = get_plot_data_path
+            self.plot_data_path = None
+        else:
+            assert type(get_plot_data_path) == str
+            self.get_plot_data_path = None
+            self.plot_data_path = get_plot_data_path
+
         self.bar_width = bar_width
         self.show = show
+        self.xlabel = xlabel
+        self.ylabel = ylabel
+        self.title = title
         assert json_reader_klass is not None
         self.json_reader_klass = json_reader_klass
         self.value_field = 'time_sec'
@@ -749,25 +769,53 @@ class StackedBarPlotter:
         if self.df is None:
             self._as_dataframe()
 
-        with open(self.plot_data_path, 'w') as f:
-            DataFrame.print_df(self.mean_df, file=f)
-        print("> DataFrame:")
-        print(self.mean_df)
-
+        # Keep this...
         fig = plt.figure()
 
-        self._add_lines()
-        self._add_legend()
-        self._add_axis_labels()
-        self._show()
+        all_benches = self.get_plot_bench_names()
+        for bench_name in all_benches:
 
-    def _show(self):
+            if bench_name == NO_BENCH_NAME:
+                bench_df = self.mean_df
+            else:
+                bench_df = self.mean_df[self.mean_df['bench_name'] == bench_name]
+
+            with open(self.get_plot_data_pt(bench_name), 'w') as f:
+                DataFrame.print_df(bench_df, file=f)
+            print("> DataFrame:")
+            print(bench_df)
+
+            self._add_lines(bench_name)
+            self._add_legend(bench_name)
+            self._add_axis_labels(bench_name)
+            self._show(bench_name)
+
+    def get_plot_bench_names(self):
+        if self.get_png is not None:
+            all_benches = [NO_BENCH_NAME] + list(self.mean_df['bench_name'])
+            return all_benches
+
+        return [NO_BENCH_NAME]
+
+    def get_png_path(self, bench_name):
+        if self.get_png is not None:
+            return self.get_png(bench_name)
+
+        return self.png
+
+    def get_plot_data_pt(self, bench_name):
+        if self.get_plot_data_path is not None:
+            return self.get_plot_data_path(bench_name)
+
+        return self.plot_data_path
+
+    def _show(self, bench_name=None):
         if self.show:
             plt.show()
         else:
-            print("> Save figure to {path}".format(path=self.png))
-            print("> Save plot data to {path}".format(path=self.plot_data_path))
-            plt.savefig(self.png, bbox_inches="tight")
+            print("> Save figure to {path}".format(path=self.get_png_path(bench_name)))
+            print("> Save plot data to {path}".format(path=self.get_plot_data_pt(bench_name)))
+            plt.savefig(self.get_png_path(bench_name), bbox_inches="tight")
             plt.close()
 
     def add_json_data(self, json_data, bench_name, device, impl_name, debug=False):
@@ -799,37 +847,44 @@ class StackedBarPlotter:
                 self.df_data['category_order'].append(self.category_order_map[category])
                 self.df_data[self.value_field].append(time_sec)
 
-    def _add_lines(self):
+    def _add_lines(self, bench_name=None):
+
+        self._bottom = None
+        def _add_line(impl_name, bench_name):
+            for category in self.category_order:
+                rows = self.df[
+                    (self.df['bench_name'] == bench_name)
+                    & (self.df['category'] == category)
+                    ]
+                if len(rows) == 0:
+                    continue
+                xvalues = self._get_xvalues(rows['impl_name'], rows['device'])
+                yvalues = rows['mean'].values
+                yerr = rows['std'].values
+                hatch = self.category_hatch_map[category]
+                color = self.bench_name_color_map[bench_name]
+
+                if self._bottom is None:
+                    self._bottom = np.zeros_like(yvalues)
+
+                # PROBLEM: if data is missing for step
+                assert self._bottom.shape == yvalues.shape
+
+                plot = plt.bar(xvalues, yvalues, color=color, width=self.bar_width, edgecolor='white', label=bench_name,
+                               bottom=self._bottom,
+                               hatch=hatch,
+                               yerr=yerr)
+
+                self._bottom += yvalues
+
         for impl_name in self.impl_name_order:
-            bottom = None
-            for bench_name in self.bench_name_order:
-                for category in self.category_order:
-                    rows = self.df[
-                        (self.df['bench_name'] == bench_name)
-                        & (self.df['category'] == category)
-                        ]
-                    if len(rows) == 0:
-                        continue
-                    xvalues = self._get_xvalues(rows['impl_name'], rows['device'])
-                    yvalues = rows['mean'].values
-                    yerr = rows['std'].values
-                    hatch = self.category_hatch_map[category]
-                    color = self.bench_name_color_map[bench_name]
+            if bench_name == NO_BENCH_NAME:
+                for bench_name in self.bench_name_order:
+                    _add_line(impl_name, bench_name)
+            else:
+                _add_line(impl_name, bench_name)
 
-                    if bottom is None:
-                        bottom = np.zeros_like(yvalues)
-
-                    # PROBLEM: if data is missing for step
-                    assert bottom.shape == yvalues.shape
-
-                    plot = plt.bar(xvalues, yvalues, color=color, width=self.bar_width, edgecolor='white', label=bench_name,
-                                   bottom=bottom,
-                                   hatch=hatch,
-                                   yerr=yerr)
-
-                    bottom += yvalues
-
-    def _add_legend(self):
+    def _add_legend(self, bench_name=None):
         self.legend_makers = []
 
         # We need two groups of lines:
@@ -886,12 +941,24 @@ class StackedBarPlotter:
         self.df = DataFrame.get_mean_std(self.orig_df, self.value_field)
         self.df = self.df.sort_values(by=['impl_name_order', 'device_order', 'bench_name_order', 'category_order'])
         # groupby_cols = DataFrame.get_groupby_cols(self.orig_df, value_field)
+        self.df['std_div_mean_percent'] = 100 * self.df['std']/self.df['mean']
 
         self.mean_df = self.df
 
 
-    def _add_axis_labels(self):
-        plt.xlabel('DQN implementation', fontweight='bold')
+    def _add_axis_labels(self, bench_name=None):
+        if self.title is not None:
+            plt.title(self.title)
+
+        if self.xlabel is not None:
+            # , fontweight='bold'
+            if bench_name == NO_BENCH_NAME:
+                plt.xlabel(self.xlabel)
+            else:
+                plt.xlabel(get_pretty_bench(bench_name))
+
+        if self.ylabel is not None:
+            plt.ylabel(self.ylabel)
 
         n_bars = len(self.device_order)
         xtick_xvalues = self._xtick_xvalues(self.impl_name_order, self.impl_name_order_map, n_bars)
@@ -944,7 +1011,23 @@ class PlotSummaryReader:
         return list(k for k in self.json_data.keys())
 
     def get_times_sec(self, category):
-        return self.json_data[category]
+        return self.json_data[category][1:]
+
+def _category_str(category_combo):
+    assert type(category_combo) in [list, tuple]
+
+    # HACK to make CategoryOverlapPlot more readable...
+    # technically "Framework API C" overlaps with all the "GPU" time and other stuff, but it makes things annoying to read.
+    # So, only keep "Framework API C" if it is the only category in the combo, otherwise remove it.
+    if len(category_combo) > 1:
+        new_category_combo = list(category_combo)
+        new_category_combo.remove(CATEGORY_TF_API)
+        category_combo = new_category_combo
+
+    # for category in category_combo:
+    #     # Otherwise, we cannot do re.split(r' \+ ', ...) to recover the category_combo.
+    #     assert '+' not in category
+    return " + ".join(category_combo)
 
 class TFProfReader:
     """
@@ -971,26 +1054,20 @@ class TFProfReader:
     """
     def __init__(self, json_data):
         self.json_data = json_data
-        self.categories = [self._category_str(category_combo)
+        self.categories = [_category_str(category_combo)
                            for category_combo in self.json_data['category_combinations']]
 
     def get_categories(self):
         return self.categories
 
-    def _category_str(self, category_combo):
-        assert type(category_combo) in [list, tuple]
-        # for category in category_combo:
-        #     # Otherwise, we cannot do re.split(r' \+ ', ...) to recover the category_combo.
-        #     assert '+' not in category
-        return " + ".join(category_combo)
-
     def get_times_sec(self, category):
         for cat_data in self.json_data['category_combo_times']:
             category_combo = cat_data['category_combo']
-            cat_str = self._category_str(category_combo)
+            cat_str = _category_str(category_combo)
             times_sec = np.array(cat_data['times_usec'])/MICROSECONDS_IN_SECOND
             if category == cat_str:
-                return times_sec
+                # Ignore the first time since it includes libcupti.so load time.
+                return times_sec[1:]
         print("> json_data = ")
         pprint.pprint(self.json_data, indent=2)
         raise RuntimeError("Couldn't find category=\"{cat}\"".format(cat=category))

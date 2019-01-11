@@ -32,8 +32,9 @@ def clear_pyprof_profiling():
 
 _step = None
 def set_step(step):
-    global _step, _trace_steps
+    global _step, _trace_steps, _python_start_us
     _step = step
+    _python_start_us = now_us()
     if _step in _trace_steps and _step not in _pyprof.steps:
         if tensorflow_profile_context.DEBUG:
             print("> ADD PYPROF STEP: {s}".format(s=_step))
@@ -181,8 +182,8 @@ class FuncWrapper:
     def __getattr__(self, name):
         return getattr(self.c_func, name)
 
-def record_event(category, name, start_us, end_us):
-    global _step, _trace_steps
+def record_event(category, name, start_us, end_us, python_event=False):
+    global _step, _trace_steps, _pyprof
     if _trace_steps is not None and _step in _trace_steps:
         tid = threading.get_ident()
         event = Event(
@@ -190,7 +191,22 @@ def record_event(category, name, start_us, end_us):
             duration_us=int(end_us - start_us),
             thread_id=tid,
             name=name)
-        _pyprof.clibs[_step].clibs[category].events.extend([event])
+        if python_event:
+            _pyprof.python_events[_step].events.extend([event])
+        else:
+            _pyprof.clibs[_step].clibs[category].events.extend([event])
+
+def record_python_event(name, end_us):
+    """
+    Useful for recording the last amount of time in between returning
+    from a call to q_forward, and finishing benchmarking.
+    This will include time spent in the tensorflow python API
+    (i.e. not doing C++ calls, just returning back to the benchmarking script).
+    """
+    global _step, _trace_steps, _python_start_us
+    if _trace_steps is not None and _step in _trace_steps:
+        record_event(CATEGORY_PYTHON, name, _python_start_us, end_us, python_event=True)
+        _python_start_us = now_us()
 
 def is_recording():
     global _step, _trace_steps
@@ -244,8 +260,7 @@ def unwrap_libs():
     unwrap_atari()
     _LIBS_WRAPPED = False
 
-CATEGORY_TF_API = "Framework API C"
-
+from parser.tfprof import CATEGORY_TF_API, CATEGORY_PYTHON
 
 def wrap_lib(import_libname, category, func_regex=None, wrap_libname=None):
     if wrap_libname is None:
