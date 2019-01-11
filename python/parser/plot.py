@@ -605,10 +605,19 @@ class CategoryOverlapPlot(ProfilerParserCommonMixin):
     def _plot_data_path(self, bench_name):
         return CategoryOverlapPlot.get_plot_data_path(self.src_files, bench_name)
 
+    @staticmethod
+    def get_stats(src_files, bench_name):
+        return _j(src_files.directory, "category_overlap.stats{bench}.json".format(
+            bench=bench_suffix(bench_name)))
+
+    def _stats(self, bench_name):
+        return CategoryOverlapPlot.get_stats(self.src_files, bench_name)
+
     def __init__(self, parser, args, src_files, bench_name=NO_BENCH_NAME, bar_width=0.25, show=False):
         self.parser = parser
         self.args = args
         self.src_files = src_files
+        self.bench_name = args.bench_name if args.bench_name is not None else NO_BENCH_NAME
 
         # {
         #     'GPUTimeSec':"\\",
@@ -626,7 +635,7 @@ class CategoryOverlapPlot(ProfilerParserCommonMixin):
                 # times_sec = np.array(combo_and_times['times_usec'])/MICROSECONDS_IN_SECOND
         self.category_order = sorted(categories)
         self.bench_name_labels = DQN_BENCH_NAME_LABELS
-        self.category_hatch_map = None
+        self.category_color_map = None
         self.category_labels = None
         self.impl_name_order = IMPL_NAME_ORDER
         self.device_order = DEVICE_ORDER
@@ -636,7 +645,7 @@ class CategoryOverlapPlot(ProfilerParserCommonMixin):
             self.impl_name_order,
             self.device_order,
             bench_name_labels=self.bench_name_labels,
-            category_hatch_map=self.category_hatch_map,
+            category_color_map=self.category_color_map,
             category_labels=self.category_labels,
             bar_width=bar_width, show=show,
             json_reader_klass=TFProfReader,
@@ -672,7 +681,33 @@ class CategoryOverlapPlot(ProfilerParserCommonMixin):
                 self.plotter.add_json_data(json_data, bench,
                                            device_name, impl_name, debug=True)
 
-        self.plotter.plot()
+        self.plotter.plot(self.bench_name)
+
+        bench_names = self.plotter.get_plot_bench_names()
+        pprint.pprint({'bench_names':bench_names})
+        for bench_name in bench_names:
+            with open(self._stats(bench_name), 'w') as f:
+                bench_df = self.plotter.plot_data(bench_name)
+                def is_gpu_row(row):
+                    return re.search(r'\bGPU\b', row['category'])
+                gpu_rows = pd.DataFrame([row for index, row in bench_df.iterrows() if is_gpu_row(row)])
+                cpu_rows = pd.DataFrame([row for index, row in bench_df.iterrows() if not is_gpu_row(row)])
+                def sum_time(rows):
+                    if len(rows) > 0:
+                        return rows['mean'].sum()
+                    return 0.
+                cpu_time_sec = sum_time(cpu_rows)
+                gpu_time_sec = sum_time(gpu_rows)
+                total_time_sec = cpu_time_sec + gpu_time_sec
+                js_stats = {
+                    'cpu_time_sec':cpu_time_sec,
+                    'gpu_time_sec':gpu_time_sec,
+                    'total_time_sec':total_time_sec,
+                    'gpu_time_percent': 100*gpu_time_sec/total_time_sec,
+                    'cpu_time_percent': 100*cpu_time_sec/total_time_sec,
+                }
+                print("> Save plot stats to {path}".format(path=self._stats(bench_name)))
+                do_dump_json(js_stats, self._stats(bench_name))
 
 class StackedBarPlotter:
     def __init__(self, get_png, get_plot_data_path,
@@ -680,7 +715,7 @@ class StackedBarPlotter:
                  impl_name_order,
                  device_order,
                  bench_name_labels=None,
-                 category_hatch_map=None,
+                 category_color_map=None,
                  category_labels=None,
                  bar_width=0.25, show=False,
                  json_reader_klass=None,
@@ -735,14 +770,10 @@ class StackedBarPlotter:
 
         self.bench_name_labels = bench_name_labels
 
-        if category_hatch_map is None:
-            # Need enough distinct hash-styles to fit categories.
-            assert len(self.category_order) <= len(HATCH_STYLES)
-            category_hatch_map = dict()
-            for category, hatch_style in zip(self.category_order, HATCH_STYLES):
-                category_hatch_map[category] = hatch_style
-        self.category_hatch_map = category_hatch_map
-        self._check_has_keys(self.category_order, self.category_hatch_map)
+        if category_color_map is None:
+            category_color_map = self.as_color_map(self.category_order)
+        self.category_color_map = category_color_map
+        self._check_has_keys(self.category_order, self.category_color_map)
 
         self.category_order_map = as_order_map(self.category_order)
         self.rev_category_order_map = reverse_dict(self.category_order_map)
@@ -754,31 +785,52 @@ class StackedBarPlotter:
         self.device_order_map = as_order_map(self.device_order)
         self.rev_device_order_map = reverse_dict(self.device_order_map)
 
+    def as_hatch_map(self, xs):
+        # Need enough distinct hash-styles to fit categories.
+        assert len(xs) <= len(HATCH_STYLES)
+        hatch_map = dict()
+        for x, hatch_style in zip(xs, HATCH_STYLES):
+            hatch_map[x] = hatch_style
+        return hatch_map
+
     def _build_bench_name_order(self):
         # # Delay making this until we know all the bench_name's from add_json_data
         # self.bench_name_order = ['q_update_target_network', 'q_forward', 'q_backward', 'step']
         self.bench_name_order = sorted(unique(self.df_data['bench_name']))
         self.bench_name_order_map = as_order_map(self.bench_name_order)
         self.rev_bench_name_order_map = reverse_dict(self.bench_name_order_map)
-        self.bench_name_color_map = self.as_color_map(self.bench_name_order)
+        self.bench_name_hatch_map = self.as_hatch_map(self.bench_name_order)
+
         if self.bench_name_labels is None:
             self.bench_name_labels = dict((k, k) for k in self.bench_name_order)
         self.df_data['bench_name_order'] = [self.bench_name_order_map[bench_name] for bench_name in self.df_data['bench_name']]
 
-    def plot(self):
+    def plot_data(self, bench_name=NO_BENCH_NAME):
+        if self.df is None:
+            self._as_dataframe()
+
+        if bench_name == NO_BENCH_NAME:
+            bench_df = self.mean_df
+        else:
+            bench_df = self.mean_df[self.mean_df['bench_name'] == bench_name]
+
+        return bench_df
+
+    def plot(self, bench_name=NO_BENCH_NAME):
         if self.df is None:
             self._as_dataframe()
 
         # Keep this...
         fig = plt.figure()
 
-        all_benches = self.get_plot_bench_names()
+        if bench_name == NO_BENCH_NAME:
+            all_benches = self.get_plot_bench_names()
+        else:
+            all_benches = [bench_name]
+
         for bench_name in all_benches:
 
-            if bench_name == NO_BENCH_NAME:
-                bench_df = self.mean_df
-            else:
-                bench_df = self.mean_df[self.mean_df['bench_name'] == bench_name]
+            bench_df = self.plot_data(bench_name)
 
             with open(self.get_plot_data_pt(bench_name), 'w') as f:
                 DataFrame.print_df(bench_df, file=f)
@@ -792,7 +844,7 @@ class StackedBarPlotter:
 
     def get_plot_bench_names(self):
         if self.get_png is not None:
-            all_benches = [NO_BENCH_NAME] + list(self.mean_df['bench_name'])
+            all_benches = [NO_BENCH_NAME] + unique(self.mean_df['bench_name'])
             return all_benches
 
         return [NO_BENCH_NAME]
@@ -861,8 +913,9 @@ class StackedBarPlotter:
                 xvalues = self._get_xvalues(rows['impl_name'], rows['device'])
                 yvalues = rows['mean'].values
                 yerr = rows['std'].values
-                hatch = self.category_hatch_map[category]
-                color = self.bench_name_color_map[bench_name]
+
+                color = self.category_color_map[category]
+                hatch = self.bench_name_hatch_map[bench_name]
 
                 if self._bottom is None:
                     self._bottom = np.zeros_like(yvalues)
@@ -903,23 +956,28 @@ class StackedBarPlotter:
         legend_kwargs = []
 
         hatch_legend = LegendMaker(attr_name='hatch',
-                                   field_to_attr_map=self.category_hatch_map,
-                                   field_order=self.category_order,
-                                   labels=self.category_labels,
+                                   field_to_attr_map=self.bench_name_hatch_map,
+                                   field_order=self.bench_name_order,
+                                   labels=self.bench_name_labels,
                                    legend_kwargs={
                                        'loc':'upper right',
+                                       'labelspacing': 1.2,
+                                       'handlelength': 3,
+                                       'handleheight': 2,
                                    })
         legend_kwargs.append({'loc': 'upper left',
                               'bbox_to_anchor': (1.04, 1)})
         self.legend_makers.append(hatch_legend)
 
         color_legend = LegendMaker(attr_name='facecolor',
-                                   field_to_attr_map=self.bench_name_color_map,
-                                   field_order=self.bench_name_order,
-                                   labels=self.bench_name_labels,
+                                   field_to_attr_map=self.category_color_map,
+                                   field_order=self.category_order,
+                                   labels=self.category_labels,
                                    edgecolor='white',
                                    legend_kwargs={
                                        'loc':'upper left',
+                                       'handlelength': 3,
+                                       'handleheight': 2,
                                    })
         legend_kwargs.append({'loc': 'lower left',
                               'bbox_to_anchor': (1.04, 0)})
