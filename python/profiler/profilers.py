@@ -15,6 +15,7 @@ import numpy as np
 import tensorflow as tf
 from tensorflow.python.client import device_lib as tf_device_lib
 from tensorflow.python.profiler import profile_context
+from tensorflow.python.framework import c_api_util
 
 # pip install py-cpuinfo
 import cpuinfo
@@ -28,6 +29,8 @@ from profiler import clib_wrap
 from profiler.clib_wrap import MICROSECONDS_IN_SECOND
 from profiler import tensorflow_profile_context
 from parser.tfprof import CATEGORY_DUMMY_EVENT
+
+import py_config
 
 # Avoid using None for no bench_name; doesn't play nice with pandas/numpy
 # (None == NaN in that context).
@@ -379,6 +382,9 @@ class Profiler:
                 # Offsetting this by +1 will cause pyprof data from 1 iteration prior to be shown with tfprof
                 # from 1 iteration later.
                 # (We had this bug before...)
+                with clib_wrap.tracing_disabled():
+                    if py_config.CUSTOM_TF and clib_wrap.should_record(i):
+                        tensorflow_profile_context.preallocate_tracer(i)
                 clib_wrap.set_step(i)
                 recording = clib_wrap.is_recording()
                 if (tensorflow_profile_context.DEBUG or TF_PRINT_TIMESTAMP) and recording:
@@ -472,9 +478,11 @@ class Profiler:
             if len(tfprof_protos) > 0:
                 # If the sub-operation doesn't call sess.run(...), a profile_100 file won't be created.
                 tf_proto = tfprof_protos[0]
-                new_tf_proto = "{tfproto}{bench}.proto".format(
-                    tfproto=tf_proto,
-                    bench=bench_suffix(self.bench_name))
+                tf_proto_dir = _d(tf_proto)
+                new_tf_proto = _j(
+                    tf_proto_dir,
+                    "profile{bench}.proto".format(
+                        bench=bench_suffix(self.bench_name)))
                 os.rename(tf_proto, new_tf_proto)
             else:
                 print(("WARNING: bench_name={bench} did not run session.run(...), "

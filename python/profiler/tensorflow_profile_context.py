@@ -25,6 +25,9 @@ import sys
 import threading
 import time
 import textwrap
+import pprint
+
+import tensorflow as tf
 
 from tensorflow.core.protobuf import config_pb2
 from tensorflow.python import pywrap_tensorflow as print_mdl
@@ -34,11 +37,20 @@ from tensorflow.python.framework import ops
 from tensorflow.python.platform import gfile
 from tensorflow.python.profiler import model_analyzer
 from tensorflow.python.util import compat
+from tensorflow.python.framework import c_api_util
+
+import py_config
 
 WARMUP_STEPS = 10
 MAX_TRACED_STEPS = 100
 
 DEBUG = False
+
+RUN_OPTIONS_NO_TRACE = config_pb2.RunOptions(
+  trace_level=config_pb2.RunOptions.NO_TRACE)
+
+RUN_OPTIONS_FULL_TRACE = config_pb2.RunOptions(
+  trace_level=config_pb2.RunOptions.FULL_TRACE)
 
 def _profiled_init(self, target='', graph=None, config=None):
   """Overwrites the session.__init__."""
@@ -70,8 +82,7 @@ def _profiled_run(self,
           run_metadata = config_pb2.RunMetadata()
 
         if not options:
-          options = config_pb2.RunOptions(
-              trace_level=config_pb2.RunOptions.FULL_TRACE)
+          options = RUN_OPTIONS_FULL_TRACE
           old_trace_level = options.trace_level
         else:
           old_trace_level = options.trace_level
@@ -86,9 +97,13 @@ def _profiled_run(self,
           self.profile_context._dump_file(run_metadata, 'run_meta_%d' % step)
 
         if self.profile_context._dump_on_finished:
+          if py_config.CUSTOM_TF:
+            self.profile_context.graph = self.graph
+          else:
             self.profile_context.add_step(step, self.graph, run_metadata, copy_run_metadata)
         else:
-          self.profile_context.profiler._graph = self.graph
+          assert not py_config.CUSTOM_TF
+          self.profile_context.profiler.graph = self.graph
           self.profile_context.profiler.add_step(step, run_metadata)
         end_add_step_t = time.time()
         options.trace_level = old_trace_level
@@ -106,11 +121,11 @@ def _profiled_run(self,
                        add_step_sec=end_add_step_t - start_add_step_t)))
       else:
         if DEBUG:
-            print("tfprof> (1) SKIP step={step}".format(step=step))
+          print("tfprof> (1) SKIP step={step}".format(step=step))
         ret = self._profiler_run_internal(fetches, feed_dict, options)
 
       # Maybe dump profile.
-      self.profile_context._maybe_dump(step)
+      # self.profile_context._maybe_dump(step)
 
       # Maybe profile:
       to_profiles = self.profile_context._profile_candidates()
@@ -331,6 +346,7 @@ class ProfileContext(object):
   @contextlib.contextmanager
   def _new_step(self):
     acquired = self._lock.acquire(False)
+    print("> tfprof: step={step}".format(step=self._step))
     yield (self._step, acquired)
     self._step += 1
     self._trace_next_step = False
@@ -382,16 +398,31 @@ class ProfileContext(object):
       return
 
     if self._dump_on_finished:
-        dump_step = 0
-        for step, graph, run_metadata in self._step_data:
-          dump_step = max(dump_step, step)
-          self.profiler._graph = graph
-          if DEBUG:
-            print("tfprof> use cached results for add_step(step={step})".format(step=step))
-          self.profiler.add_step(step, run_metadata)
-        self._dump(dump_step)
-        # Discard profiling data.
-        self._step_data = []
+
+        if py_config.CUSTOM_TF:
+          sess = tf.get_default_session()
+          self.trace_data = c_api_util.get_trace_data(sess)
+          print("> tfprof steps: ")
+          steps = sorted(list(self.trace_data.traced_steps))
+          pprint.pprint({'steps':steps})
+          graph = self.graph
+          dump_step = 0
+          for step, run_metadata in self.trace_data.traced_steps.items():
+            dump_step = max(dump_step, step)
+            self.profiler._graph = graph
+            self.profiler.add_step(step, run_metadata)
+          self._dump(dump_step)
+        else:
+          dump_step = 0
+          for step, graph, run_metadata in self._step_data:
+            dump_step = max(dump_step, step)
+            self.profiler._graph = graph
+            if DEBUG:
+              print("tfprof> use cached results for add_step(step={step})".format(step=step))
+            self.profiler.add_step(step, run_metadata)
+          self._dump(dump_step)
+          # Discard profiling data.
+          self._step_data = []
 
     print_mdl.DeleteProfiler()
     setattr(session.BaseSession, 'run', self.old_run)
@@ -403,3 +434,8 @@ class ProfileContext(object):
 def now_in_usec():
   time_us = print_mdl.NowInUsec()
   return time_us
+
+def preallocate_tracer(step):
+  sess = tf.get_default_session()
+  print("PreallocateTracer for step={step}".format(step=step))
+  print_mdl.TF_PreallocateTracer(sess._session, step)

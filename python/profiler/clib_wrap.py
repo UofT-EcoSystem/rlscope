@@ -137,13 +137,13 @@ class FuncWrapper:
             name=name)
 
     def __call__(self, *args, **kwargs):
-        global _python_start_us, _step, _trace_steps
+        global _python_start_us, _step, _trace_steps, _TRACING_ON
 
         start_us = now_us()
         ret = self.call(*args, **kwargs)
         end_us = now_us()
 
-        if _trace_steps is not None and _step in _trace_steps:
+        if _TRACING_ON and _trace_steps is not None and _step in _trace_steps:
             # Q: What if _step isn't present?
             tid = threading.get_ident()
 
@@ -211,6 +211,25 @@ def record_python_event(name, end_us):
 def is_recording():
     global _step, _trace_steps
     return _trace_steps is not None and _step in _trace_steps
+
+def should_record(step):
+    global _trace_steps
+    return _trace_steps is not None and step in _trace_steps
+
+_TRACING_ON = True
+
+class tracing_disabled:
+    def __init__(self):
+        pass
+
+    def __enter__(self):
+        global _TRACING_ON
+        self._tracing_on = _TRACING_ON
+        _TRACING_ON = False
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        global _TRACING_ON
+        _TRACING_ON = self._tracing_on
 
 def wrap_module(module, category,
                 func_regex=None, ignore_func_regex="^_",

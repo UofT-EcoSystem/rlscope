@@ -444,7 +444,7 @@ class TotalTimeParser(ProfilerParserCommonMixin):
     @staticmethod
     def required_source_basename_regexes():
         return {
-            'tfprof_path': r"^profile_\d+{bench}.proto$".format(bench=BENCH_SUFFIX_RE),
+            'tfprof_path': r"^profile{bench}.proto$".format(bench=BENCH_SUFFIX_RE),
             'pyprof_path': r"^Pyprof{bench}.proto$".format(bench=BENCH_SUFFIX_RE),
         }
 
@@ -642,7 +642,7 @@ class TraceEventsParser(ProfilerParserCommonMixin):
     @staticmethod
     def required_source_basename_regexes():
         return {
-            'tfprof_path': r"^profile_\d+{bench}.proto$".format(bench=BENCH_SUFFIX_RE),
+            'tfprof_path': r"^profile{bench}.proto$".format(bench=BENCH_SUFFIX_RE),
         }
 
     @staticmethod
@@ -968,7 +968,7 @@ class TFProfParser(ProfilerParserCommonMixin):
     @staticmethod
     def required_source_basename_regexes():
         return {
-            'tfprof_path': r"^profile_\d+{bench}.proto$".format(bench=BENCH_SUFFIX_RE),
+            'tfprof_path': r"^profile{bench}.proto$".format(bench=BENCH_SUFFIX_RE),
             'pyprof_path': r"^Pyprof{bench}.proto$".format(bench=BENCH_SUFFIX_RE),
         }
 
