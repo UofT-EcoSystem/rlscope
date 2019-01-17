@@ -412,6 +412,15 @@ CATEGORY_PYTHON = 'Python'
 CATEGORY_CUDA_API_CPU = 'CUDA API CPU'
 CATEGORY_GPU = 'GPU'
 CATEGORY_DUMMY_EVENT = 'Dummy event'
+# Category captures when operations of a given type start/end.
+# That way, if we have a profile with multiple operations in it,
+# we can reduce the scope to just an operation of interest (e.g. Q-forward).
+#
+# NOTE: This operation category should NOT show up in compute_overlap.
+CATEGORY_OPERATION = 'Operation'
+# Category captures when we are executing a TRACE/WARMUP/DUMP phase of profiling.
+# Can be useful for ignoring parts of the execution (e.g. DUMP).
+# CATEGORY_PHASE = 'Phase'
 
 class TotalTimeParser(ProfilerParserCommonMixin):
 

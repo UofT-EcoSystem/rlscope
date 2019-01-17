@@ -45,6 +45,7 @@ WARMUP_STEPS = 10
 MAX_TRACED_STEPS = 100
 
 DEBUG = False
+# DEBUG = True
 
 RUN_OPTIONS_NO_TRACE = config_pb2.RunOptions(
   trace_level=config_pb2.RunOptions.NO_TRACE)
