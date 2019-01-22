@@ -36,11 +36,12 @@ from parser.nvprof import CUDASQLiteParser
 from parser.tfprof import TFProfParser, TotalTimeParser, TraceEventsParser
 from parser.pyprof import PythonProfileParser, PythonProfileTotalParser
 from parser.plot import TimeBreakdownPlot, PlotSummary, CombinedProfileParser, CategoryOverlapPlot
+from parser.db import SQLiteParser
 
 from parser.common import *
 
 # CUDAProfileParser,
-PARSER_KLASSES = [PythonProfileParser, PythonProfileTotalParser, CUDASQLiteParser, TFProfParser, CombinedProfileParser, PlotSummary, TimeBreakdownPlot, CategoryOverlapPlot, TotalTimeParser, TraceEventsParser]
+PARSER_KLASSES = [PythonProfileParser, PythonProfileTotalParser, CUDASQLiteParser, TFProfParser, CombinedProfileParser, PlotSummary, TimeBreakdownPlot, CategoryOverlapPlot, TotalTimeParser, TraceEventsParser, SQLiteParser]
 PARSER_NAME_TO_KLASS = dict((ParserKlass.__name__, ParserKlass) \
                             for ParserKlass in PARSER_KLASSES)
 
@@ -104,6 +105,35 @@ def test_get_gpus(parser, args):
     pprint.pprint({'gpus':gpus, 'cpus':cpus})
 
 def parse_profile(parser, args):
+    assert args.rule is not None
+
+    ParserKlass = PARSER_NAME_TO_KLASS[args.rule]
+
+    if issubclass(ParserKlass, ProfilerParserCommonMixin):
+        return old_parse_profile(parser, args)
+
+    if args.directories is not None:
+        directories = list(args.directories)
+    else:
+        directories = [args.directory]
+
+    if len(directories) > 1:
+        print("ERROR: expected a single --directory")
+        sys.exit(1)
+
+    directory = directories[0]
+
+    kwargs = {
+        'directory': directory,
+    }
+    parser = ParserKlass(**kwargs)
+    try:
+        parser.run()
+    except ParserException as e:
+        print(str(e))
+        sys.exit(1)
+
+def old_parse_profile(parser, args):
     assert args.rule is not None
 
     ParserKlass = PARSER_NAME_TO_KLASS[args.rule]

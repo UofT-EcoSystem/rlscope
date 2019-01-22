@@ -39,6 +39,14 @@ class TFProfCategoryTimesReader:
             self.proto.ParseFromString(f.read())
 
     @property
+    def process_name(self):
+        return self.proto.process_name
+
+    @property
+    def phase(self):
+        return self.proto.phase
+
+    @property
     def steps(self):
         return sorted(self.proto.steps)
 
@@ -75,12 +83,12 @@ class TFProfCategoryTimesReader:
         for node_id, node in self.proto.nodes.items():
             if step not in node.execs.keys():
                 continue
-            self.add_all_times(category_times, step, node, self.get_accelerator_execs, group_by_device=group_by_device)
-            self.add_all_times(category_times, step, node, self.get_cpu_execs, group_by_device=group_by_device)
+            self._add_all_times(category_times, step, node, self.get_accelerator_execs, group_by_device=group_by_device)
+            self._add_all_times(category_times, step, node, self.get_cpu_execs, group_by_device=group_by_device)
 
         return category_times
 
-    def add_time(self, category_times, device, ktime, group_by_device):
+    def _add_time(self, category_times, device, ktime, group_by_device):
         def _add_time(category, group_by_device):
             if category not in category_times:
                 if group_by_device:
@@ -104,7 +112,14 @@ class TFProfCategoryTimesReader:
         else:
             raise NotImplementedError("Not sure what category device={dev} falls under.".format(dev=device))
 
-    def add_all_times(self, category_times, step, node, get_execs, group_by_device):
+    def get_category(self, device):
+        if IsGPUTime(device):
+            return CATEGORY_GPU
+        elif IsCPUTime(device):
+            return CATEGORY_CUDA_API_CPU
+        raise NotImplementedError("Not sure what category device={dev} falls under.".format(dev=device))
+
+    def _add_all_times(self, category_times, step, node, get_execs, group_by_device):
         """
         :param get_execs:
             ExecProfile -> map<string, ExecTime>
@@ -116,10 +131,41 @@ class TFProfCategoryTimesReader:
             for tupl in execs[device].times:
                 start_us, duration_us = tupl.int64_values
                 ktime = KernelTime(start_usec=start_us, time_usec=duration_us, name=node.name)
-                self.add_time(category_times, device, ktime, group_by_device)
+                self._add_time(category_times, device, ktime, group_by_device)
 
     def get_accelerator_execs(self, exec_profile):
         return exec_profile.accelerator_execs
+
+    def each_device(self, step, node, get_execs):
+        exec_profile = node.execs[step]
+        execs = get_execs(exec_profile)
+        return list(execs.keys())
+
+    def each_event(self, device, step, node, get_execs):
+        exec_profile = node.execs[step]
+        execs = get_execs(exec_profile)
+        for tupl in execs[device].times:
+            start_us, duration_us = tupl.int64_values
+            name = node.name
+            category = self.get_category(device)
+            yield category, start_us, duration_us, name
+
+    def all_events(self):
+        def events_for(step, node, get_execs):
+            devices = self.each_device(step, node, get_execs)
+            for device in devices:
+                for event in self.each_event(device, step, node, get_execs):
+                    yield device, event
+
+        for step in self.steps:
+            for node_id, node in self.proto.nodes.items():
+                if step not in node.execs.keys():
+                    continue
+
+            for device, event in events_for(step, node, self.get_accelerator_execs):
+                yield device, event
+            for device, event in events_for(step, node, self.get_cpu_execs):
+                yield device, event
 
     def get_cpu_execs(self, exec_profile):
         return exec_profile.cpu_execs

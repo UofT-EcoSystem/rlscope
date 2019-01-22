@@ -262,23 +262,16 @@ class tracing_as:
         global _TRACING_ON
         _TRACING_ON = self._tracing_on
 
-# class tracing_disabled:
-#     def __init__(self):
-#         pass
-#
-#     def __enter__(self):
-#         global _TRACING_ON
-#         self._tracing_on = _TRACING_ON
-#         _TRACING_ON = False
-#
-#     def __exit__(self, exc_type, exc_val, exc_tb):
-#         global _TRACING_ON
-#         _TRACING_ON = self._tracing_on
-
-def dump_pyprof(path):
+def dump_pyprof(path, process_name, phase):
     with open(path, 'wb') as f:
         print("> dump pyprof.steps:")
-        pprint.pprint({'_pyprof.steps':list(_pyprof.steps)}, indent=2)
+        pprint.pprint({
+            '_pyprof.steps':list(_pyprof.steps),
+            '_pyprof.process_name':_pyprof.process_name,
+            '_pyprof.phase':_pyprof.phase,
+        }, indent=2)
+        _pyprof.process_name = process_name
+        _pyprof.phase = phase
         f.write(_pyprof.SerializeToString())
 
 #

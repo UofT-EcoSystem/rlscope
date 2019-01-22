@@ -80,6 +80,9 @@ BENCH_TYPES = [
 BENCH_SUFFIX_RE = r"(:?\.(?P<bench_name>{bench}))?".format(bench=BENCH_NAME_REGEX)
 BENCH_PREFIX_RE = r"(:?(?P<bench_name>{bench})\.)?".format(bench=BENCH_NAME_REGEX)
 
+# trace_id is not optional.
+TRACE_SUFFIX_RE = r"(?:\.trace_(?P<trace_id>\d+))"
+
 float_re = r'(?:[-+]?[0-9]*\.?[0-9]+([eE][-+]?[0-9]+)?)'
 
 # Avoid using None for no bench_name; doesn't play nice with pandas/numpy
@@ -1135,3 +1138,9 @@ class DataFrame:
     def get_groupby_cols(df, value_field):
         groupby_cols = [field for field in list(df.keys()) if field != value_field]
         return groupby_cols
+
+class ParserException(Exception):
+    pass
+
+class MissingInputFiles(ParserException):
+    pass

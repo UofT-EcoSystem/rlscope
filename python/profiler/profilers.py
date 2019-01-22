@@ -18,6 +18,10 @@ from tensorflow.python.client import device_lib as tf_device_lib
 from tensorflow.python.profiler import profile_context
 from tensorflow.python.framework import c_api_util
 
+from proto.tensorflow.core.profiler.tfprof_log_pb2 import ProfileProto
+
+from parser.db import is_tfprof_file, is_pyprof_file, is_config_file
+
 # pip install py-cpuinfo
 import cpuinfo
 
@@ -32,6 +36,8 @@ from profiler import tensorflow_profile_context
 from parser.tfprof import CATEGORY_DUMMY_EVENT
 
 import py_config
+
+DEBUG = tensorflow_profile_context.DEBUG
 
 # Avoid using None for no bench_name; doesn't play nice with pandas/numpy
 # (None == NaN in that context).
@@ -106,13 +112,20 @@ class Profiler:
     def __init__(self, directory,
                  bench_names=[NO_BENCH_NAME], bench_name=NO_BENCH_NAME, num_calls=None, start_measuring_call=None,
                  no_idempotent=False,
-                 tfprof=False,
+                 tfprof=True,
                  c_lib_func_pyprof_pattern=None,
                  # tfprof=True,
                  repetition_time_limit_sec=10.,
                  debug=False, idempotent_bench_names=[NO_BENCH_NAME],
                  exit_early=True):
         modify_tensorflow()
+        self.pctx = None
+        self.next_trace_id = None
+        self.process_name = None
+        self.phase = 0
+        self.next_trace_id = None
+        # self.init_trace_id()
+        self._profiler_started = False
         self.cur_bench_name = NO_BENCH_NAME
         self.total_profile_time_sec = 0
         self.directory = directory
@@ -152,6 +165,31 @@ class Profiler:
         # assert ( self.num_calls is None and self.start_measuring_call is None ) or \
         #        ( self.num_calls is not None and self.start_measuring_call is not None )
         # assert self.start_measuring_call is not None
+
+    def init_trace_id(self):
+        if self.process_name is None:
+            return
+        self.next_trace_id = 0
+        # NOTE: We DON'T want to keep existing trace files across runs...
+        # we really should add code for deleting existing trace files...
+        # for dirpath, dirnames, filenames in os.walk(self.out_dir):
+        #     for base in filenames:
+        #         path = _j(dirpath, base)
+        #         m = is_pyprof_file(path)
+        #         if m:
+        #             trace_id = int(m.group('trace_id'))
+        #             self.next_trace_id = max(self.next_trace_id, trace_id + 1)
+        for dirpath, dirnames, filenames in os.walk(self.out_dir):
+            for base in filenames:
+                path = _j(dirpath, base)
+                # print("> Consider {path}".format(path=path))
+                if is_pyprof_file(path) or is_tfprof_file(path) or is_config_file(path):
+                    print("> RM {path}".format(path=path))
+                    os.remove(path)
+                    # trace_id = int(m.group('trace_id'))
+                    # self.next_trace_id = max(self.next_trace_id, trace_id + 1)
+        if DEBUG:
+            print("> Using next_trace_id = {id}".format(id=self.next_trace_id))
 
     def is_idempotent(self, bench_name):
         return bench_name in self.idempotent_bench_names
@@ -253,10 +291,38 @@ class Profiler:
         # self.iterations = iterations
 
     @property
+    def out_dir(self):
+        assert self.process_name is not None
+        assert self.phase is not None
+        direc = phase_directory(self.directory, self.process_name, self.phase)
+        os.makedirs(direc, exist_ok=True)
+        return direc
+
+    @property
     def pyprof_proto_path(self):
-        ret = _j(self.directory, "Pyprof{bench}.proto".format(
-            bench=bench_suffix(self.bench_name)))
+        ret = _j(self.out_dir, "pyprof{bench}{trace}.proto".format(
+            bench=bench_suffix(self.bench_name),
+            trace=trace_suffix(self.next_trace_id),
+        ))
         return ret
+
+    @property
+    def config_path(self):
+        config_path = _j(self.out_dir, "config{bench}{trace}.json".format(
+            bench=bench_suffix(self.bench_name),
+            trace=trace_suffix(self.next_trace_id),
+        ))
+        return config_path
+
+    @property
+    def tfprof_path(self):
+        tfprof_path = _j(
+            self.out_dir,
+            "profile{bench}{trace}.proto".format(
+                bench=bench_suffix(self.bench_name),
+                trace=trace_suffix(self.next_trace_id),
+            ))
+        return tfprof_path
 
     def _start(self):
         if not self.tfprof:
@@ -272,7 +338,7 @@ class Profiler:
 
     def _should_measure_call(self, bench_name=NO_BENCH_NAME):
         # return self.start_measuring_call is None or self.bench_name == bench_name
-        return self.bench_name == bench_name and (
+        return ( self.bench_name == NO_BENCH_NAME or self.bench_name == bench_name ) and (
                 self.start_measuring_call is None or \
                 # (self.code_count[bench_name] - 1) >= self.start_measuring_call
                 self.steps + 1 >= self.start_measuring_call
@@ -302,13 +368,48 @@ class Profiler:
         self.code_count[bench_name] += num_calls
 
     def start_profiling(self):
-        self.start_profiling_t = time.time()
+        """
+        Meant to be called right before we start measuring individual operations.
+
+        Does setup needed for profiling:
+        - Wrap TF library to measure python API time
+        - Enable tfprof to hook into session.run(...) for measuring TF-side GPU/C++ API time
+
+        :return:
+        """
+        if self.process_name is None:
+            raise RuntimeError("You need to call profier.set_process_name(...) before profiling.")
+        assert self.phase is not None
+
+        if self._profiler_started:
+            return
+        clib_wrap.wrap_libs()
+        self.pctx = tensorflow_profile_context.ProfileContext(self.out_dir, dump_on_finished=True,
+                                                              # Need to explicitly use empty trace steps otherwise profiler
+                                                              # "auto decides" which steps to trace.
+                                                              trace_steps=[],
+                                                              process_name=self.process_name,
+                                                              phase=self.phase)
+        self.pctx.__enter__()
+        self._profiler_started = True
 
     def stop_profiling(self):
-        self.end_profiling_t = time.time()
-        self.total_profile_time_sec += self.end_profiling_t - self.start_profiling_t
+        """
+        Stop profiling:
+        - Collect trace data, and dump it to file(s)
+
+        :return:
+        """
+        if not self._profiler_started:
+            return
+        # NOTE: this is when we collect the trace data... keep that in mind when we implement DUMP.
+        self.pctx.__exit__(None, None, None)
+        self._profiler_started = False
 
     def set_operation(self, bench_name):
+        if self.pctx is None:
+            raise RuntimeError("You need to call profier.start_profiling() before profiling.")
+
         if self.cur_bench_name != NO_BENCH_NAME:
             """
             Allow this usage (i.e. leaving out the end_operation calls):
@@ -319,7 +420,7 @@ class Profiler:
             profiler.set_operation('op3')
             
             """
-            self.end_operation(bench_name)
+            self.end_operation(self.cur_bench_name)
 
         if not(
             self._should_measure_call(bench_name)
@@ -331,6 +432,9 @@ class Profiler:
         self.cur_bench_name = bench_name
         # Q: If we don't have a session.run() call, will this result in a bug?
         self.pctx.trace_next_step()
+
+        if DEBUG:
+            print("> set_operation(op={op})".format(op=bench_name))
 
         with _tracing_disabled(prof=self):
             if py_config.CUSTOM_TF:
@@ -372,6 +476,9 @@ class Profiler:
         if bench_name == NO_BENCH_NAME:
             assert self.cur_bench_name != NO_BENCH_NAME
             bench_name = self.cur_bench_name
+
+        if DEBUG:
+            print("> end_operation(op={op})".format(op=bench_name))
 
         self.end_call_us = clib_wrap.now_us()
         self.disable_profiling(bench_name, num_calls=1)
@@ -424,6 +531,8 @@ class Profiler:
         """
         should_measure = self._should_measure_call(bench_name)
 
+        raise NotImplementedError
+
         if should_measure and not self.no_idempotent and self.is_idempotent(bench_name):
             # idempotent.
             # for i in range(self.start_measuring_call):
@@ -433,18 +542,15 @@ class Profiler:
                 # Do any kind of initialization needed before profiling
                 func.init(*args, **kwargs)
 
-            if self.num_calls is None:
-                # Dynamically decide # of iterations to run, such that time to
-                # run bench_name experiment is <= 10 seconds.
-                self._init_num_calls(bench_name, func, *args, **kwargs)
-                assert self.num_calls is not None
+            # if self.num_calls is None:
+            #     # Dynamically decide # of iterations to run, such that time to
+            #     # run bench_name experiment is <= 10 seconds.
+            #     self._init_num_calls(bench_name, func, *args, **kwargs)
+            #     assert self.num_calls is not None
 
-            # with tf.contrib.tfprof.ProfileContext(self.directory) as pctx:
+            # with tf.contrib.tfprof.ProfileContext(self.out_dir) as pctx:
             if self.tfprof:
-                # TODO: evenly space 100 (MAX_TRACE_STEPS) samples.
-                clib_wrap.wrap_libs()
-                self.pctx = tensorflow_profile_context.ProfileContext(self.directory, dump_on_finished=True)
-                self.pctx.__enter__()
+                self.start_profiling()
 
             self.profile_sec = []
             self.no_profile_sec = []
@@ -465,8 +571,7 @@ class Profiler:
                 self.average_time_per_call_no_profile_sec = np.mean(self.no_profile_sec[1:])
 
             if self.tfprof:
-                # NOTE: this is when we collect the trace data... keep that in mind when we implement DUMP.
-                self.pctx.__exit__(None, None, None)
+                self.stop_profiling()
 
             if hasattr(func, 'reset'):
                 # Cleanup anything we did specific to profiling so we can resume
@@ -487,28 +592,41 @@ class Profiler:
 
         return ret
 
+    def set_process_name(self, process_name):
+        self.process_name = process_name
+        self.init_trace_id()
+
+    def set_phase(self, phase):
+        assert type(phase) == int
+        self.phase = phase
+        self.init_trace_id()
+
     def finish(self):
         # We shouldn't be in the middle of measuring an operation.
         assert self.cur_bench_name == NO_BENCH_NAME
 
-        ProfileGlobals.files_after = ls_files(self.directory)
+        self.stop_profiling()
+
+        # ProfileGlobals.files_after = ls_files(self.out_dir)
 
         # Put this here to test that cleanup_files doesn't delete nvprof/pyprof files
         self.dump()
-        ProfileGlobals.cleanup_files()
+        # ProfileGlobals.cleanup_files()
 
         # Discards profiling data now that it has been recorded.
-        clib_wrap.clear_pyprof_profiling()
-        self.pctx = None
+        self._discard_profiling_data()
 
         print("> IML: Stopping training early now that profiler is done")
         sys.exit(0)
 
+    def _discard_profiling_data(self):
+        clib_wrap.clear_pyprof_profiling()
+        self.pctx = None
+
     def dump(self, config_kwargs=dict()):
 
         # Q: Should we be calling this again...?  We'd like to update num_calls if it was computed dynamically...
-        config_path = _j(self.directory, "config{bench}.json".format(
-            bench=bench_suffix(self.bench_name)))
+        config_path = self.config_path
         if self.c_lib_func_pyprof_pattern is not None and \
                 'c_lib_func_pyprof_pattern' not in config_kwargs:
             config_kwargs['c_lib_func_pyprof_pattern'] = self.c_lib_func_pyprof_pattern
@@ -519,15 +637,16 @@ class Profiler:
                     no_profile_sec=self.no_profile_sec,
                     average_time_per_call_sec=self.average_time_per_call_sec,
                     average_time_per_call_no_profile_sec=self.average_time_per_call_no_profile_sec,
+                    process_name=self.process_name,
                     **config_kwargs)
 
         if not self.tfprof:
             self.cuda_profiler.dump()
-        clib_wrap.dump_pyprof(self.pyprof_proto_path)
+        clib_wrap.dump_pyprof(self.pyprof_proto_path, self.process_name, self.phase)
 
         if self.tfprof:
             # Rename: profile_100 -> profile_100.q_forward.proto
-            tfprof_protos = [path for path in glob("{dir}/profile_*".format(dir=self.directory))
+            tfprof_protos = [path for path in glob("{dir}/profile_*".format(dir=self.out_dir))
                              if re.search(r'^profile_\d+$', _b(path))]
             if len(tfprof_protos) > 1:
                 pprint.pprint({'tf_protos':tfprof_protos})
@@ -536,14 +655,31 @@ class Profiler:
                 # If the sub-operation doesn't call sess.run(...), a profile_100 file won't be created.
                 tf_proto = tfprof_protos[0]
                 tf_proto_dir = _d(tf_proto)
-                new_tf_proto = _j(
-                    tf_proto_dir,
-                    "profile{bench}.proto".format(
-                        bench=bench_suffix(self.bench_name)))
+
+                new_tf_proto = self.tfprof_path
                 os.rename(tf_proto, new_tf_proto)
+                # self._fixup_tfprof(new_tf_proto)
             else:
                 print(("WARNING: bench_name={bench} did not run session.run(...), "
                        "so no tfprof output was generated for it").format(bench=self.bench_name))
+
+        self.next_trace_id += 1
+
+    def _fixup_tfprof(self, path):
+        """
+        Add profiler specific data to ProfileProto tfprof protobuf file.
+
+        In particular:
+        - process_name
+        - phase
+        """
+        with open(path, 'rb') as f:
+            proto = ProfileProto()
+            proto.ParseFromString(f.read())
+        proto.process_name = self.process_name
+        proto.phase = self.phase
+        with open(path, 'wb') as f:
+            f.write(proto.SerializeToString())
 
     def _maybe_finish(self):
         # print("> _maybe_finish")
@@ -737,9 +873,9 @@ def add_iml_arguments(parser):
     parser.add_argument('--iml-no-idempotent', action='store_true', help=textwrap.dedent("""
         IML: don't measure bench_name's iterations all-at-once; measure 1 iteration at each loop-step only.
     """))
-    parser.add_argument('--iml-tfprof', action='store_true', help=textwrap.dedent("""
-        IML: use tfprof TensorFlow profiling utility INSTEAD of nvprof.
-    """))
+    # parser.add_argument('--iml-tfprof', action='store_true', help=textwrap.dedent("""
+    #     IML: use tfprof TensorFlow profiling utility INSTEAD of nvprof.
+    # """))
     parser.add_argument('--iml-num-calls', type=int, help="IML: how many calls should be measured?")
     # TODO: num-calls should be the number of calls we profile.
     parser.add_argument('--iml-fuzz', action='store_true', help=textwrap.dedent("""
@@ -781,37 +917,37 @@ def is_iml_file(path):
         nvprof=NVPROF_REGEX),
         base)
 
-class _ProfileGlobals:
-    def __init__(self):
-        self.files_before = None
-        self.files_after = None
+# class _ProfileGlobals:
+#     def __init__(self):
+#         self.files_before = None
+#         self.files_after = None
+#
+#     def cleanup_files(self):
+#         """
+#         PROBLEM: script might output result files, and not be written to handle
+#         re-running itself once those files exist.
+#
+#         - Modify script to overwrite/delete old output files:
+#           Can probably handle this with IML wrapper.
+#           files_before = [ files seen before run ]
+#           files_after  = [ files seen after run ]
+#           iml_files    = [ files output by iml ]
+#           files_to_rm  = files_after - files_before - iml_files
+#         """
+#         # self.iml_files = [path for path in self.files_after if is_iml_file(path)]
+#         self.files_to_rm = set(self.files_after).difference(set(self.files_before))
+#         self.files_to_rm = [path for path in self.files_to_rm if not is_iml_file(path)]
+#         for path in self.files_to_rm:
+#             opts = ""
+#             if os.path.isdir(path):
+#                 opts = "-r "
+#             print("> RM {opts}{f}".format(
+#                 opts=opts, f=path))
 
-    def cleanup_files(self):
-        """
-        PROBLEM: script might output result files, and not be written to handle
-        re-running itself once those files exist.
-
-        - Modify script to overwrite/delete old output files:
-          Can probably handle this with IML wrapper.
-          files_before = [ files seen before run ]
-          files_after  = [ files seen after run ]
-          iml_files    = [ files output by iml ]
-          files_to_rm  = files_after - files_before - iml_files
-        """
-        # self.iml_files = [path for path in self.files_after if is_iml_file(path)]
-        self.files_to_rm = set(self.files_after).difference(set(self.files_before))
-        self.files_to_rm = [path for path in self.files_to_rm if not is_iml_file(path)]
-        for path in self.files_to_rm:
-            opts = ""
-            if os.path.isdir(path):
-                opts = "-r "
-            print("> RM {opts}{f}".format(
-                opts=opts, f=path))
-
-ProfileGlobals = _ProfileGlobals()
+# ProfileGlobals = _ProfileGlobals()
 
 def handle_iml_args(output_directory, parser, args, no_bench_name=False):
-    ProfileGlobals.files_before = ls_files(output_directory)
+    # ProfileGlobals.files_before = ls_files(output_directory)
 
     if args.iml_bench_names is None:
         if no_bench_name:
@@ -819,22 +955,24 @@ def handle_iml_args(output_directory, parser, args, no_bench_name=False):
         else:
             parser.error("--iml-bench-names must contain the names of all the code-blocks this ML script contains.")
 
-    if args.iml_bench_name is not None and args.iml_bench_name not in args.iml_bench_names:
+    if args.iml_bench_name != NO_BENCH_NAME and args.iml_bench_name not in args.iml_bench_names:
         parser.error("--iml-bench-name=\"{b}\" not in available bench names: --iml-bench-names={bs}".format(
             b=args.iml_bench_name,
             bs=args.iml_bench_names))
 
-    if not args.iml_nvprof_enabled and not args.iml_tfprof:
-        if args.iml_bench_name is not None:
-            # User wants to run specific bench_name.
-            run_with_nvprof(output_directory, parser, args,
-                            bench_name=args.iml_bench_name)
-        else:
-            # Run each bench_name.
-            for bench_name in args.iml_bench_names:
-                run_with_nvprof(output_directory, parser, args,
-                                bench_name=bench_name)
-        sys.exit(0)
+    # args.iml_tfprof = True
+    # if not args.iml_nvprof_enabled:
+    # if not args.iml_nvprof_enabled and not args.iml_tfprof:
+    #     if args.iml_bench_name is not None:
+    #         # User wants to run specific bench_name.
+    #         run_with_nvprof(output_directory, parser, args,
+    #                         bench_name=args.iml_bench_name)
+    #     else:
+    #         # Run each bench_name.
+    #         for bench_name in args.iml_bench_names:
+    #             run_with_nvprof(output_directory, parser, args,
+    #                             bench_name=bench_name)
+    #     sys.exit(0)
 
 def run_with_nvprof(directory, parser, args,
                     bench_name=NO_BENCH_NAME):
@@ -996,6 +1134,14 @@ def bench_suffix(bench):
         return ".{bench}".format(bench=bench)
     return ""
 
+def trace_suffix(trace_id, allow_none=False):
+    if trace_id is None and not allow_none:
+        raise RuntimeError("trace_id must be >= 0, got None")
+
+    if trace_id is not None:
+        return ".trace_{id}".format(id=trace_id)
+    return ""
+
 def list_files(direc):
     def _list_files(direc):
         def _path(path):
@@ -1071,3 +1217,13 @@ def _tracing_disabled(prof : Profiler):
             pass
             # if was_tracing:
             #     prof.enable_tracing()
+
+def process_directory(directory, process_name):
+    direc = _j(directory, "process", process_name)
+    return direc
+
+def phase_directory(directory, process_name, phase):
+    process_direc = process_directory(directory, process_name)
+    direc = _j(process_direc, "phase", str(phase))
+    return direc
+

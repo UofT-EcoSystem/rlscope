@@ -18,6 +18,9 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, basename as _b
+
+import re
 import contextlib
 import os
 import random
@@ -29,6 +32,7 @@ import pprint
 
 import tensorflow as tf
 
+from tensorflow.core.profiler import tfprof_log_pb2
 from tensorflow.core.protobuf import config_pb2
 from tensorflow.python import pywrap_tensorflow as print_mdl
 from tensorflow.python.client import session
@@ -44,8 +48,8 @@ import py_config
 WARMUP_STEPS = 10
 MAX_TRACED_STEPS = 100
 
-DEBUG = False
-# DEBUG = True
+# DEBUG = False
+DEBUG = True
 
 RUN_OPTIONS_NO_TRACE = config_pb2.RunOptions(
   trace_level=config_pb2.RunOptions.NO_TRACE)
@@ -202,7 +206,11 @@ class ProfileContext(object):
                dump_steps=None,
                enabled=True,
                debug=False,
-               dump_on_finished=False):
+               dump_on_finished=False,
+               process_name=None,
+               phase=None):
+    self.process_name = process_name
+    self.phase = phase
     self._enabled = enabled
     if not self._enabled:
       return
@@ -394,6 +402,111 @@ class ProfileContext(object):
     else:
       return self
 
+  def _dump_custom_tf(self):
+    sess = tf.get_default_session()
+    self.trace_data = c_api_util.get_trace_data(sess)
+    byte_size = self.trace_data.ByteSize()
+    print("> trace_data size = {b} bytes".format(b=byte_size))
+    print("> tfprof steps: ")
+    steps = sorted(list(self.trace_data.traced_steps.keys()))
+    pprint.pprint({'steps':steps})
+
+    profile_proto = tfprof_log_pb2.ProfileProto()
+    if self.process_name is not None:
+      profile_proto.process_name = self.process_name
+    if self.phase is not None:
+      profile_proto.phase = self.phase
+    self.next_node_id = 0
+    name_to_id = dict()
+
+    def add_run_meta(step, run_meta):
+      if step not in profile_proto.steps:
+        profile_proto.steps.extend([step])
+
+      for dev_stat in run_meta.step_stats.dev_stats:
+        dev = dev_stat.device.lower()
+        for node_stat in dev_stat.node_stats:
+          name = node_stat.node_name
+          m = re.search(r'(?P<name>.*):', name)
+          if m:
+            name = m.group('name')
+
+          if name in name_to_id:
+            node_id = name_to_id[name]
+          else:
+            node_id = self.next_node_id
+            self.next_node_id += 1
+            name_to_id[name] = node_id
+
+          has_node = node_id in profile_proto.nodes
+          profile_node = profile_proto.nodes[node_id]
+          if not has_node:
+            profile_node.name = name
+
+          # TFGraphNode::AddStepStat
+          # Skip the "IsCanonicalDevice" crap...
+
+          # ExecStep::AddTimeStats
+
+          if node_stat.all_start_micros > 0:
+            op_end_rel_micros = min(1, node_stat.op_end_rel_micros)
+
+            start_us = node_stat.all_start_micros
+            end_us = op_end_rel_micros
+
+            exec_profile = profile_node.execs[step]
+            # exec_time = exec_profile[dev]
+
+            if IsGPUTime(dev):
+              exec_time = exec_profile.accelerator_execs[dev]
+            elif IsCPUTime(dev):
+              exec_time = exec_profile.cpu_execs[dev]
+
+            tupl = exec_time.times.add()
+            tupl.int64_values.extend([start_us, end_us])
+            # exec_time = tfprof_log_pb2.ExecTime()
+            # exec_time.times.int64_values.extend([start_us, end_us])
+            # exec_time.times.extend([]).int64_values.extend([start_us, end_us])
+            # if IsGPUTime(dev):
+            #   exec_profile.accelerator_execs[dev].extend([exec_time])
+            # elif IsCPUTime(dev):
+            #   exec_profile.cpu_execs[dev].extend([exec_time])
+
+    for step, traces in self.trace_data.traced_steps.items():
+      for run_meta in traces.traces:
+          add_run_meta(step, run_meta)
+    dump_step = max(self.trace_data.traced_steps.keys())
+    profile_path = _j(self._profiler_dir, 'profile_{d}'.format(d=dump_step))
+    size_bytes = profile_proto.ByteSize()
+    print("> Dump tfprof ({b} bytes) to: {path}".format(
+      b=size_bytes, path=profile_path))
+    with open(profile_path, 'wb') as f:
+      f.write(profile_proto.SerializeToString())
+
+  def _old_dump_custom_tf(self):
+    """
+    Used to use this for dumping tfprof data, however stopped using it since it results in memory corruption
+    (not sure why!).
+    Besides memory corruption, it's inefficient to re-serialize tracing data we just read from C++ anyways
+    via get_trace_data().
+
+    Basically we are adding each run_meta_data to C++, and C++ is responsible for writing the proto file.
+    """
+    sess = tf.get_default_session()
+    self.trace_data = c_api_util.get_trace_data(sess)
+    byte_size = self.trace_data.ByteSize()
+    print("> trace_data size = {b} bytes".format(b=byte_size))
+    print("> tfprof steps: ")
+    steps = sorted(list(self.trace_data.traced_steps))
+    pprint.pprint({'steps':steps})
+    graph = self.graph
+    dump_step = 0
+    for step, run_metadata in self.trace_data.traced_steps.items():
+      dump_step = max(dump_step, step)
+      self.profiler._graph = graph
+      self.profiler.add_step(step, run_metadata)
+    self._dump(dump_step)
+
   def __exit__(self, exec_type, exec_value, exec_tb):
     if not self._enabled:
       return
@@ -401,18 +514,7 @@ class ProfileContext(object):
     if self._dump_on_finished:
 
         if py_config.CUSTOM_TF:
-          sess = tf.get_default_session()
-          self.trace_data = c_api_util.get_trace_data(sess)
-          print("> tfprof steps: ")
-          steps = sorted(list(self.trace_data.traced_steps))
-          pprint.pprint({'steps':steps})
-          graph = self.graph
-          dump_step = 0
-          for step, run_metadata in self.trace_data.traced_steps.items():
-            dump_step = max(dump_step, step)
-            self.profiler._graph = graph
-            self.profiler.add_step(step, run_metadata)
-          self._dump(dump_step)
+          self._dump_custom_tf()
         else:
           dump_step = 0
           for step, graph, run_metadata in self._step_data:
@@ -437,6 +539,13 @@ def now_in_usec():
   return time_us
 
 def preallocate_tracer(step):
+  if DEBUG:
+    print("> PREALLOCATE_TRACER for step={step}".format(step=step))
   sess = tf.get_default_session()
-  print("PreallocateTracer for step={step}".format(step=step))
   print_mdl.TF_PreallocateTracer(sess._session, step)
+
+def IsGPUTime(device):
+  return re.search('stream:all', device)
+
+def IsCPUTime(device):
+  return re.search(".*/(device:gpu|gpu|device:cpu|cpu|device:sycl):\\d+", device)
