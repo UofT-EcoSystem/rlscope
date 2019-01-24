@@ -18,7 +18,6 @@ from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, base
 from parser.common import *
 from parser.nvprof import CUDASQLiteParser
 from parser.pyprof import PythonProfileParser
-from parser.tfprof import CATEGORY_TF_API
 
 # figsize (W x H) in inches
 aspect_ratio = 16./9.
@@ -1077,7 +1076,7 @@ def _category_str(category_combo):
     # HACK to make CategoryOverlapPlot more readable...
     # technically "Framework API C" overlaps with all the "GPU" time and other stuff, but it makes things annoying to read.
     # So, only keep "Framework API C" if it is the only category in the combo, otherwise remove it.
-    if len(category_combo) > 1:
+    if len(category_combo) > 1 and CATEGORY_TF_API in category_combo:
         new_category_combo = list(category_combo)
         new_category_combo.remove(CATEGORY_TF_API)
         category_combo = new_category_combo

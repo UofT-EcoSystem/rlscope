@@ -18,7 +18,8 @@ from tensorflow.python.client import device_lib as tf_device_lib
 from tensorflow.python.profiler import profile_context
 from tensorflow.python.framework import c_api_util
 
-from proto.tensorflow.core.profiler.tfprof_log_pb2 import ProfileProto
+# from proto.tensorflow.core.profiler.tfprof_log_pb2 import ProfileProto
+from tensorflow.core.profiler.tfprof_log_pb2 import ProfileProto
 
 from parser.db import is_tfprof_file, is_pyprof_file, is_config_file
 
@@ -29,11 +30,11 @@ from os import environ as ENV
 
 from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, basename as _b
 
+from parser.common import *
 from profiler import cudaprofile
 from profiler import clib_wrap
 from profiler.clib_wrap import MICROSECONDS_IN_SECOND
 from profiler import tensorflow_profile_context
-from parser.tfprof import CATEGORY_DUMMY_EVENT
 
 import py_config
 
@@ -691,7 +692,7 @@ class Profiler:
         # print("  done_measuring = {t}".format(t=self.done_measuring()))
         # if self.done_measuring():
 
-        if len(self.profile_sec) >= NUM_STEPS_TO_TRACE:
+        if len(self.profile_sec) >= self.num_calls:
             self.finish()
 
     def next_step(self, skip_finish=False):

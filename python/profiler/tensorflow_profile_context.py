@@ -44,6 +44,7 @@ from tensorflow.python.util import compat
 from tensorflow.python.framework import c_api_util
 
 import py_config
+from parser.common import *
 
 WARMUP_STEPS = 10
 MAX_TRACED_STEPS = 100
@@ -449,7 +450,7 @@ class ProfileContext(object):
           # ExecStep::AddTimeStats
 
           if node_stat.all_start_micros > 0:
-            op_end_rel_micros = min(1, node_stat.op_end_rel_micros)
+            op_end_rel_micros = max(1, node_stat.op_end_rel_micros)
 
             start_us = node_stat.all_start_micros
             end_us = op_end_rel_micros

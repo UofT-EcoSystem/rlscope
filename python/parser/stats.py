@@ -110,6 +110,51 @@ class KernelTime:
             name = self.name
         return KernelTime(end_usec - start_usec, start_usec, end_usec, name=name)
 
+#
+# Category time format.
+#
+
+def category_times_add_time(category_times, device, ktime, group_by_device, category=None):
+    def _add_time(category, group_by_device):
+        if category not in category_times:
+            if group_by_device:
+                category_times[category] = dict()
+            else:
+                category_times[category] = []
+
+        if group_by_device and device not in category_times[category]:
+            category_times[category][device] = []
+
+        if group_by_device:
+            add_to = category_times[category][device]
+        else:
+            add_to = category_times[category]
+        add_to.append(ktime)
+
+    if category is None and device is not None:
+        # Assume it's tfprof
+        assert device is not None
+
+        if IsGPUTime(device):
+            _add_time(CATEGORY_GPU, False)
+            category = CATEGORY_GPU
+            # group_by_device = False
+        elif IsCPUTime(device):
+            _add_time(CATEGORY_CUDA_API_CPU, group_by_device)
+            category = CATEGORY_CUDA_API_CPU
+            # group_by_device = group_by_device
+        else:
+            raise NotImplementedError("Not sure what category device={dev} falls under.".format(dev=device))
+
+    assert category is not None
+
+    if category in [CATEGORY_CUDA_API_CPU]:
+        group_by_device = group_by_device
+    else:
+        group_by_device = False
+
+    _add_time(category, group_by_device)
+
 class Stat:
     """
     Compute either the sum/min/avg/stdev of calls to a function.

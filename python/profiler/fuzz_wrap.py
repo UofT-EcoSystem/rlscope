@@ -1,6 +1,8 @@
 import traceback
 import textwrap
 
+from parser.common import *
+
 def get_stacktrace(n_skip):
     """
     Return a stacktrace ready for printing; usage:

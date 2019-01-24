@@ -11,15 +11,20 @@ from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, base
 
 from parser.common import *
 from parser.stats import Stats
-from proto.tensorflow.core.profiler.tfprof_log_pb2 import ProfileProto
+# from proto.tensorflow.core.profiler.tfprof_log_pb2 import ProfileProto
+from tensorflow.core.profiler.tfprof_log_pb2 import ProfileProto
 from proto.protobuf.pyprof_pb2 import Pyprof
 
-from parser.stats import KernelTime
+from parser.stats import KernelTime, category_times_add_time
 
-def read_category_times(step, category_times_readers, group_by_device=False, include_dummy=False):
+from parser.db import SQLiteCategoryTimesReader, traces_db_path
+
+def read_category_times(step, bench_name, category_times_readers, group_by_device=False, include_dummy=False, debug=False):
     category_times = dict()
     for reader in category_times_readers:
-        new_times = reader.parse(step, group_by_device=group_by_device)
+        new_times = reader.parse(step, bench_name,
+                                 include_dummy=include_dummy,
+                                 group_by_device=group_by_device, debug=debug)
         same_categories = set(new_times.keys()).intersection(set(category_times.keys()))
         assert len(same_categories) == 0
         category_times.update(new_times)
@@ -30,187 +35,6 @@ def read_category_times(step, category_times_readers, group_by_device=False, inc
             for device in category_times[category].keys():
                 category_times[category][device].sort(key=lambda ktime: ktime.start_time_usec)
     return category_times
-
-class TFProfCategoryTimesReader:
-    def __init__(self, profile_path):
-        self.profile_path = profile_path
-        with open(self.profile_path, 'rb') as f:
-            self.proto = ProfileProto()
-            self.proto.ParseFromString(f.read())
-
-    @property
-    def process_name(self):
-        return self.proto.process_name
-
-    @property
-    def phase(self):
-        return self.proto.phase
-
-    @property
-    def steps(self):
-        return sorted(self.proto.steps)
-
-    def parse(self, step, group_by_device=False, include_dummy=False):
-
-            # PSEUDOCODE:
-            # Compute [CUDA CPU time | GPU time | CUDA CPU/GPU time] overlap/non-overlap for a single step.
-            #
-            # We want to "group together" the 3 CPU lane thread times.
-            # More when GPU time overlaps with nothing in CPU time,
-            # and CPU time overlaps with nothing in GPU time.
-            #
-            # To get the average stats, we average ACROSS the steps measured.
-            # Would be nice to know CPU is every executing anything else...
-            # thread-pool threads are just blocked, but is the "main" thread doing anything?
-
-            # self.kernel_times()
-            # self.api_times()
-            # print("HELLO PROTO 1")
-            # print(self.proto)
-            # PSEUDOCODE:
-            # for step in steps:
-            #
-            # import ipdb; ipdb.set_trace()
-            # print("HELLO PROTO 2")
-
-        # for step in self.proto.steps:
-        # Categories:
-        # - [CUDA API CPU]
-        # - [GPU]
-        # - Future: [Framework CPU]
-        category_times = dict()
-
-        for node_id, node in self.proto.nodes.items():
-            if step not in node.execs.keys():
-                continue
-            self._add_all_times(category_times, step, node, self.get_accelerator_execs, group_by_device=group_by_device)
-            self._add_all_times(category_times, step, node, self.get_cpu_execs, group_by_device=group_by_device)
-
-        return category_times
-
-    def _add_time(self, category_times, device, ktime, group_by_device):
-        def _add_time(category, group_by_device):
-            if category not in category_times:
-                if group_by_device:
-                    category_times[category] = dict()
-                else:
-                    category_times[category] = []
-
-            if group_by_device and device not in category_times[category]:
-                category_times[category][device] = []
-
-            if group_by_device:
-                add_to = category_times[category][device]
-            else:
-                add_to = category_times[category]
-            add_to.append(ktime)
-
-        if IsGPUTime(device):
-            _add_time(CATEGORY_GPU, False)
-        elif IsCPUTime(device):
-            _add_time(CATEGORY_CUDA_API_CPU, group_by_device)
-        else:
-            raise NotImplementedError("Not sure what category device={dev} falls under.".format(dev=device))
-
-    def get_category(self, device):
-        if IsGPUTime(device):
-            return CATEGORY_GPU
-        elif IsCPUTime(device):
-            return CATEGORY_CUDA_API_CPU
-        raise NotImplementedError("Not sure what category device={dev} falls under.".format(dev=device))
-
-    def _add_all_times(self, category_times, step, node, get_execs, group_by_device):
-        """
-        :param get_execs:
-            ExecProfile -> map<string, ExecTime>
-            Either reteurn accelerator_execs or cpu_execs
-        """
-        exec_profile = node.execs[step]
-        execs = get_execs(exec_profile)
-        for device in execs.keys():
-            for tupl in execs[device].times:
-                start_us, duration_us = tupl.int64_values
-                ktime = KernelTime(start_usec=start_us, time_usec=duration_us, name=node.name)
-                self._add_time(category_times, device, ktime, group_by_device)
-
-    def get_accelerator_execs(self, exec_profile):
-        return exec_profile.accelerator_execs
-
-    def each_device(self, step, node, get_execs):
-        exec_profile = node.execs[step]
-        execs = get_execs(exec_profile)
-        return list(execs.keys())
-
-    def each_event(self, device, step, node, get_execs):
-        exec_profile = node.execs[step]
-        execs = get_execs(exec_profile)
-        for tupl in execs[device].times:
-            start_us, duration_us = tupl.int64_values
-            name = node.name
-            category = self.get_category(device)
-            yield category, start_us, duration_us, name
-
-    def all_events(self):
-        def events_for(step, node, get_execs):
-            devices = self.each_device(step, node, get_execs)
-            for device in devices:
-                for event in self.each_event(device, step, node, get_execs):
-                    yield device, event
-
-        for step in self.steps:
-            for node_id, node in self.proto.nodes.items():
-                if step not in node.execs.keys():
-                    continue
-
-            for device, event in events_for(step, node, self.get_accelerator_execs):
-                yield device, event
-            for device, event in events_for(step, node, self.get_cpu_execs):
-                yield device, event
-
-    def get_cpu_execs(self, exec_profile):
-        return exec_profile.cpu_execs
-
-class PyprofCategoryTimesReader:
-    def __init__(self, profile_path):
-        self.profile_path = profile_path
-        with open(self.profile_path, 'rb') as f:
-            self.proto = Pyprof()
-            self.proto.ParseFromString(f.read())
-
-    @property
-    def steps(self):
-        return sorted(self.proto.steps)
-
-    def parse(self, step, group_by_device=False, include_dummy=False):
-        category_times = dict()
-
-        if step not in self.proto.steps:
-            print("> WARNING: didn't find step in pyprof @ {path}".format(
-                path=self.profile_path))
-            return category_times
-
-        category_times[CATEGORY_PYTHON] = []
-        self.add_event_times_to(category_times[CATEGORY_PYTHON], self.proto.python_events[step].events)
-
-        # clib_times = dict()
-        for category, clib_events in self.proto.clibs[step].clibs.items():
-            if category in [CATEGORY_DUMMY_EVENT]:
-                continue
-            assert category not in category_times
-            category_times[category] = []
-            # TODO: add C API function name to proto / KernelTime
-            self.add_event_times_to(category_times[category], clib_events.events)
-
-        return category_times
-
-    def add_event_times_to(self, ktimes, events):
-        for event in events:
-            if hasattr(event, 'name'):
-                name = event.name
-            else:
-                name = None
-            ktime = KernelTime(start_usec=event.start_time_us, time_usec=event.duration_us, name=name)
-            ktimes.append(ktime)
 
 class ComputeOverlap:
     """
@@ -453,21 +277,6 @@ class ComputeOverlap:
 
         return times
 
-CATEGORY_TF_API = "Framework API C"
-CATEGORY_PYTHON = 'Python'
-CATEGORY_CUDA_API_CPU = 'CUDA API CPU'
-CATEGORY_GPU = 'GPU'
-CATEGORY_DUMMY_EVENT = 'Dummy event'
-# Category captures when operations of a given type start/end.
-# That way, if we have a profile with multiple operations in it,
-# we can reduce the scope to just an operation of interest (e.g. Q-forward).
-#
-# NOTE: This operation category should NOT show up in compute_overlap.
-CATEGORY_OPERATION = 'Operation'
-# Category captures when we are executing a TRACE/WARMUP/DUMP phase of profiling.
-# Can be useful for ignoring parts of the execution (e.g. DUMP).
-# CATEGORY_PHASE = 'Phase'
-
 class TotalTimeParser(ProfilerParserCommonMixin):
 
     def __init__(self, parser, args, src_files, bench_name=NO_BENCH_NAME, data=None):
@@ -629,37 +438,61 @@ class TotalTimeParser(ProfilerParserCommonMixin):
         if self.skip:
             return
 
-class TraceEventsParser(ProfilerParserCommonMixin):
+# class TraceEventsParser(ProfilerParserCommonMixin):
+class TraceEventsParser:
 
-    def __init__(self, parser, args, src_files, bench_name=NO_BENCH_NAME, data=None):
-        self.is_dqn = 'microbenchmark_json' in src_files.opt_paths
-        self.src_files = src_files
+    # def __init__(self, parser, args, src_files, bench_name=NO_BENCH_NAME, data=None):
+    def __init__(self, directory,
+                 # Swallow any excess arguments
+                 debug=False,
+                 **kwargs):
+        # self.is_dqn = 'microbenchmark_json' in src_files.opt_paths
+        # self.src_files = src_files
 
         # When True, include pyprof timestamps; the total-time-sec we end up with is too large
         # (i.e. larger than total time measuring using time.time() around profiled code)
         #
         # When False, use only tfprof timestamps; the total-time-sec "makes sense"
         # (i.e. a bit smaller but similar to time.time() measurement)
-        self.include_pyprof_timestamps = False
+        # self.include_pyprof_timestamps = False
 
-        self.parser = parser
-        self.args = args
-        self.bench_name = bench_name
-        self.data = data
+        # self.parser = parser
+        # self.args = args
+        # self.bench_name = bench_name
+        # self.data = data
         self.skip = False
-        self.conn = None
 
-        self.config_path = src_files.get('config_json', bench_name, or_none=True)
-        if self.config_path is not None:
-            self.config = load_json(self.config_path)
-            print("> Found optional config_json @ {f}".format(f=self.config_path))
-        else:
-            self.config = {
-            }
+        self.directory = directory
+        self.debug = debug
+
+        # self.config_path = src_files.get('config_json', bench_name, or_none=True)
+        # if self.config_path is not None:
+        #     self.config = load_json(self.config_path)
+        #     print("> Found optional config_json @ {f}".format(f=self.config_path))
+        # else:
+        #     self.config = {
+        #     }
+
+        self.dummy_times = []
 
         self._next_pid = 0
         self.category_to_pid = dict()
         self.reproduce_tfprof = False
+
+    def get_source_files(self):
+        """
+        We want traces.db
+        """
+        src_files = []
+        traces_db = traces_db_path(self.directory)
+        if not _e(traces_db):
+            raise MissingInputFiles(textwrap.dedent("""
+            {klass}: Couldn't find any traces.db at {path}.
+            """.format(
+                klass=self.__class__.__name__,
+                path=traces_db,
+            )))
+        return src_files
 
     def parse_dummy_events(self, step):
 
@@ -721,17 +554,16 @@ class TraceEventsParser(ProfilerParserCommonMixin):
     def uses_multiple_dirs():
         return False
 
-    def tfprof_path(self, bench_name):
-        return self.src_files.get('tfprof_path', self.bench_name)
+    # def tfprof_path(self, bench_name):
+    #     return self.src_files.get('tfprof_path', self.bench_name)
 
-    def pyprof_path(self, bench_name):
-        return self.src_files.get('pyprof_path', self.bench_name)
+    # def pyprof_path(self, bench_name):
+    #     return self.src_files.get('pyprof_path', self.bench_name)
 
     # Output
 
-    @property
-    def _dummy_events_path(self):
-        path = self.get_dummy_events_path(self.src_files, self.bench_name)
+    def _dummy_events_path(self, bench_name):
+        path = self.get_dummy_events_path(self.src_files, bench_name)
         if not _e(path):
             return None
         return path
@@ -741,81 +573,121 @@ class TraceEventsParser(ProfilerParserCommonMixin):
         path = _j(src_files.directory, 'dummy_events{bench}.txt'.format(bench=bench_suffix(bench_name)))
         return path
 
-    @property
-    def _profile_json_path(self):
-        return self.get_profile_json_path(self.src_files, self.bench_name)
-
-    @classmethod
-    def get_profile_json_path(ParseKlass, src_files, bench_name):
-        path = _j(src_files.directory, 'traceEvents{bench}.json'.format(bench=bench_suffix(bench_name)))
+    def _profile_json_path(self, bench_name):
+        path = _j(self.directory, 'traceEvents{bench}.json'.format(bench=bench_suffix(bench_name)))
         return path
+        # return self.get_profile_json_path(self.src_files, bench_name)
 
-    @property
-    def _tfprof_txt_path(self):
-        return self.get_tfprof_txt_path(self.src_files, self.bench_name)
+    # @classmethod
+    # def get_profile_json_path(ParseKlass, src_files, bench_name):
+    #     path = _j(src_files.directory, 'traceEvents{bench}.json'.format(bench=bench_suffix(bench_name)))
+    #     return path
 
-    @classmethod
-    def get_tfprof_txt_path(ParseKlass, src_files, bench_name):
-        path = _j(src_files.directory, 'tfprof{bench}.proto.txt'.format(bench=bench_suffix(bench_name)))
-        return path
+    # @property
+    # def _tfprof_txt_path(self):
+    #     return self.get_tfprof_txt_path(self.src_files, self.bench_name)
+    #
+    # @classmethod
+    # def get_tfprof_txt_path(ParseKlass, src_files, bench_name):
+    #     path = _j(src_files.directory, 'tfprof{bench}.proto.txt'.format(bench=bench_suffix(bench_name)))
+    #     return path
+    #
+    # @property
+    # def _pyprof_txt_path(self):
+    #     return self.get_pyprof_txt_path(self.src_files, self.bench_name)
+    #
+    # @classmethod
+    # def get_pyprof_txt_path(ParseKlass, src_files, bench_name):
+    #     path = _j(src_files.directory, 'pyprof{bench}.proto.txt'.format(bench=bench_suffix(bench_name)))
+    #     return path
 
-    @property
-    def _pyprof_txt_path(self):
-        return self.get_pyprof_txt_path(self.src_files, self.bench_name)
-
-    @classmethod
-    def get_pyprof_txt_path(ParseKlass, src_files, bench_name):
-        path = _j(src_files.directory, 'pyprof{bench}.proto.txt'.format(bench=bench_suffix(bench_name)))
-        return path
-
-    def parse(self, bench_name):
+    def run(self):
         category_times_readers = []
 
-        tfprof_path = self.tfprof_path(self.bench_name)
-        tfprof_reader = TFProfCategoryTimesReader(tfprof_path)
-        category_times_readers.append(tfprof_reader)
+        sql_reader = SQLiteCategoryTimesReader(traces_db_path(self.directory))
+        bench_names = sql_reader.bench_names
+        category_times_readers.append(sql_reader)
 
-        pyprof_path = self.pyprof_path(self.bench_name)
-        pyprof_reader = PyprofCategoryTimesReader(pyprof_path)
-        category_times_readers.append(pyprof_reader)
+        for bench_name in bench_names:
 
-        # Overlap, computed across different "steps".
-        overlaps = []
+            # tfprof_path = self.tfprof_path(self.bench_name)
+            # tfprof_reader = TFProfCategoryTimesReader(tfprof_path)
+            # category_times_readers.append(tfprof_reader)
+            #
+            # pyprof_path = self.pyprof_path(self.bench_name)
+            # pyprof_reader = PyprofCategoryTimesReader(pyprof_path)
+            # category_times_readers.append(pyprof_reader)
 
-        if len(tfprof_reader.steps) > 0:
-            steps = tfprof_reader.steps
-        else:
-            steps = pyprof_reader.steps
+            # Overlap, computed across different "steps".
+            overlaps = []
 
-        # step = tfprof_reader.steps[0]
-        # Skip the first step, since it includes profiler initialization stuff.
-        # In particular, the libcupti NVIDIA library gets loaded on-demand during
-        # the first traced step, and this can take 2 seconds to load!
-        # (We had this bug before...)
-        step = steps[1]
-        print("> Generate traceEvents for step={step}".format(step=step))
+            # if len(tfprof_reader.steps) > 0:
+            #     steps = tfprof_reader.steps
+            # else:
+            #     steps = pyprof_reader.steps
 
-        self.parse_dummy_events(step)
+            steps = sql_reader.steps(bench_name)
+            if self.debug:
+                print("> steps = {steps}".format(steps=steps))
 
-        with open(self._tfprof_txt_path, 'w') as f:
-            print(tfprof_reader.proto, file=f)
+            # step = tfprof_reader.steps[0]
+            # Skip the first step, since it includes profiler initialization stuff.
+            # In particular, the libcupti NVIDIA library gets loaded on-demand during
+            # the first traced step, and this can take 2 seconds to load!
+            # (We had this bug before...)
+            step = steps[1]
 
-        with open(self._pyprof_txt_path, 'w') as f:
-            print(pyprof_reader.proto, file=f)
+            print("> Generate traceEvents for step={step}".format(step=step))
 
-        # Just default to outputting the first step...
-        category_times = read_category_times(step, category_times_readers,
-                                             group_by_device=True,
-                                             include_dummy=True)
+            # self.parse_dummy_events(step)
 
-        if len(self.dummy_times) > 0:
-            print("> Adding hardcoded times:")
-            pprint.pprint(self.dummy_times, indent=2)
-            if CATEGORY_DUMMY_EVENT not in category_times:
-                category_times[CATEGORY_DUMMY_EVENT] = []
-            category_times[CATEGORY_DUMMY_EVENT].extend(self.dummy_times)
-        self.js_add_category_times(category_times)
-        do_dump_json(self.js, self._profile_json_path)
+            # with open(self._tfprof_txt_path, 'w') as f:
+            #     print(tfprof_reader.proto, file=f)
+            #
+            # with open(self._pyprof_txt_path, 'w') as f:
+            #     print(pyprof_reader.proto, file=f)
+
+            """
+            ComputeOverlap ALSO reads the same information; even though it summarizes ACROSS steps, 
+            it still prefers to read individual steps at-a-time.
+            
+            TraceEvents needs to read category times belonging to a single-operation, 
+            and for a single-step.
+            
+            We don't record any notion of "step" in SQLite.
+            op_events = 
+              Instead, we need to separately query all the 'Operation' events whose event_name == bench_name, 
+              sorted by Event.start_us.
+            
+            
+            step = op_events[1]
+            
+            events = 
+                (category_name, event_name, start_us, end_us)
+                Query all the event times that fall within (step.start_us, step.end_us).
+            
+            category_times = rows_as_category_times(events)
+            
+            return category_times
+            """
+
+            # Just default to outputting the first step...
+            category_times = read_category_times(step, bench_name, category_times_readers,
+                                                 group_by_device=True,
+                                                 include_dummy=True,
+                                                 debug=self.debug)
+
+            if len(self.dummy_times) > 0:
+                print("> Adding hardcoded times:")
+                pprint.pprint(self.dummy_times, indent=2)
+                if CATEGORY_DUMMY_EVENT not in category_times:
+                    category_times[CATEGORY_DUMMY_EVENT] = []
+                category_times[CATEGORY_DUMMY_EVENT].extend(self.dummy_times)
+
+            self.js_add_category_times(category_times)
+            profile_path = self._profile_json_path(bench_name)
+            print("> Write traceEvents to: {path}".format(path=profile_path))
+            do_dump_json(self.js, profile_path)
 
     def js_add_category_times(self, category_times):
         """
@@ -974,85 +846,39 @@ class TraceEventsParser(ProfilerParserCommonMixin):
         if self.skip:
             return
 
-class TFProfParser(ProfilerParserCommonMixin):
+class OverlapJSONParser:
     """
-    What do we want to compute?
+    Computes a json file containing the overlap between event categories across different steps,
+    on a per-operation/bench_name basis.
 
-    - TotalTimeSec
-    - CppAndGPUTimeSec
-
-    - CppTimeSec
-      Comes from python.
-
-    - FrameworkCppTimeSec
-
-    - CudaCppTimeSec
-      Should be able to compute this...but will it include kernel time?
-      TODO: plot this in timeline view.
-
-    - PercentTimeInGPU
-    - GPUTimeSec
-      Should be able to compute this.
-
-    - GPUAndCudaCppTimeSec
-    - TheoreticalSpeedup
-    - PercentTimeInPython
-    - PythonTimeSec
-    - PythonOverheadPercent
+    e.g.
+    tfprof.q_forward.json:
+        For each q_forward operation, tell me the overlap among
+        the different categories measure (GPU, Python, CUDA API C, etc)
     """
 
-    def __init__(self, parser, args, src_files, bench_name=NO_BENCH_NAME, data=None):
-        self.is_dqn = 'microbenchmark_json' in src_files.opt_paths
-        self.src_files = src_files
+    def __init__(self, directory,
+                 # Swallow any excess arguments
+                 debug=False,
+                 **kwargs):
 
-        self.parser = parser
-        self.args = args
-        self.bench_name = bench_name
-        self.data = data
-        self.skip = False
-        self.conn = None
+        self.directory = directory
+        self.debug = debug
 
-        self.config_path = src_files.get('config_json', bench_name, or_none=True)
-        if self.config_path is not None:
-            self.config = load_json(self.config_path)
-            print("> Found optional config_json @ {f}".format(f=self.config_path))
-        else:
-            self.config = {
-            }
-
-    @staticmethod
-    def required_source_basename_regexes():
-        return {
-            'tfprof_path': r"^profile{bench}.proto$".format(bench=BENCH_SUFFIX_RE),
-            'pyprof_path': r"^Pyprof{bench}.proto$".format(bench=BENCH_SUFFIX_RE),
-        }
-
-    @staticmethod
-    def optional_source_basename_regexes():
-        return {
-            'microbenchmark_json':r"^microbenchmark.json$",
-            'config_json':r"^config{bench}\.json$".format(bench=BENCH_SUFFIX_RE),
-        }
-
-    @staticmethod
-    def allow_multiple_src_matches():
-        return True
-
-    @staticmethod
-    def uses_all_benches():
-        return False
-
-    @staticmethod
-    def uses_multiple_dirs():
-        return False
-
-    @classmethod
-    def get_targets(Klass, src_files, bench_name):
-        return [
-            Klass.get_gpu_overhead_path(src_files, bench_name),
-            Klass.get_pretty_profile_path(src_files, bench_name),
-            Klass.get_variable_path(src_files, bench_name),
-        ]
+    def get_source_files(self):
+        """
+        We want traces.db
+        """
+        src_files = []
+        traces_db = traces_db_path(self.directory)
+        if not _e(traces_db):
+            raise MissingInputFiles(textwrap.dedent("""
+            {klass}: Couldn't find any traces.db at {path}.
+            """.format(
+                klass=self.__class__.__name__,
+                path=traces_db,
+            )))
+        return src_files
 
     def tfprof_path(self, bench_name, or_none=True):
         return self.src_files.get('tfprof_path', self.bench_name, or_none=or_none)
@@ -1063,32 +889,34 @@ class TFProfParser(ProfilerParserCommonMixin):
     def get_micro_name(self):
         return self.bench_name
 
-    def parse(self, bench_name):
-        self.tf_proto = None
-        if self.tfprof_path(self.bench_name) is not None:
-            with open(self.tfprof_path(self.bench_name), 'rb') as f:
-                self.tf_proto = ProfileProto()
-                self.tf_proto.ParseFromString(f.read())
+    def run(self):
+        # self.tf_proto = None
 
-        with open(self.pyprof_path(self.bench_name), 'rb') as f:
-            self.py_proto = Pyprof()
-            self.py_proto.ParseFromString(f.read())
+        # if self.tfprof_path(self.bench_name) is not None:
+        #     with open(self.tfprof_path(self.bench_name), 'rb') as f:
+        #         self.tf_proto = ProfileProto()
+        #         self.tf_proto.ParseFromString(f.read())
 
-        if self.tf_proto is not None and len(self.tf_proto.steps) > 0:
-            steps = list(self.tf_proto.steps)
-            steps_name = "TF_PROTO"
-        else:
-            steps = list(self.py_proto.steps)
-            steps_name = "PY_PROTO"
+        # with open(self.pyprof_path(self.bench_name), 'rb') as f:
+        #     self.py_proto = Pyprof()
+        #     self.py_proto.ParseFromString(f.read())
 
-        print("TFProfParser > steps={name}".format(name=steps_name))
-        print("> steps = ")
-        pprint.pprint({'len(steps)':len(steps),
-                       'steps':steps})
+        # raise RuntimeError(
+        #     "This code has a bug in it; we FORGOT to skip the first step, "
+        #     "so these times will include libcupti library-load-time overhead.")
 
-        if self.tf_proto is not None:
-            for tf_step in self.tf_proto.steps:
-                assert tf_step in self.py_proto.steps
+        # if self.tf_proto is not None and len(self.tf_proto.steps) > 0:
+        #     steps = list(self.tf_proto.steps)
+        #     steps_name = "TF_PROTO"
+        # else:
+        #     steps = list(self.py_proto.steps)
+        #     steps_name = "PY_PROTO"
+
+        # print("OverlapJSONParser > steps={name}".format(name=steps_name))
+
+        # if self.tf_proto is not None:
+        #     for tf_step in self.tf_proto.steps:
+        #         assert tf_step in self.py_proto.steps
 
         # PSEUDOCODE:
         # Compute [CUDA CPU time | GPU time | CUDA CPU/GPU time] overlap/non-overlap for a single step.
@@ -1103,81 +931,93 @@ class TFProfParser(ProfilerParserCommonMixin):
 
         category_times_readers = []
 
-        tfprof_path = self.tfprof_path(self.bench_name)
-        if tfprof_path is not None:
-            tfprof_reader = TFProfCategoryTimesReader(tfprof_path)
-            category_times_readers.append(tfprof_reader)
+        # tfprof_path = self.tfprof_path(self.bench_name)
+        # if tfprof_path is not None:
+        #     tfprof_reader = TFProfCategoryTimesReader(tfprof_path)
+        #     category_times_readers.append(tfprof_reader)
 
-        pyprof_path = self.pyprof_path(self.bench_name)
-        pyprof_reader = PyprofCategoryTimesReader(pyprof_path)
-        category_times_readers.append(pyprof_reader)
+        # pyprof_path = self.pyprof_path(self.bench_name)
+        # pyprof_reader = PyprofCategoryTimesReader(pyprof_path)
+        # category_times_readers.append(pyprof_reader)
 
-        # Overlap, computed across different "steps".
-        overlaps = []
+        sql_reader = SQLiteCategoryTimesReader(traces_db_path(self.directory))
+        category_times_readers.append(sql_reader)
+        bench_names = sql_reader.bench_names
+        for bench_name in bench_names:
+            steps = sql_reader.steps(bench_name)
+            print("> steps = ")
+            pprint.pprint({'len(steps)':len(steps),
+                           'steps':steps})
 
-        for step in steps:
-            category_times = read_category_times(step, category_times_readers,
-                                                 # Don't want to compute overlap w/ dummy events; doesn't mean anything.
-                                                 include_dummy=False)
-            compute_overlap = ComputeOverlap(category_times)
-            compute_overlap.compute()
-            overlaps.append(compute_overlap.get_category_times())
+            # Overlap, computed across different "steps".
+            overlaps = []
 
-        pprint.pprint({
-            'overlaps':overlaps,
-        })
+            # Skip the first step (it captures libcupti.so load time).
+            keep_steps = steps[1:]
+            for step in keep_steps:
+                category_times = read_category_times(step, bench_name, category_times_readers,
+                                                     # Don't want to compute overlap w/ dummy events; doesn't mean anything.
+                                                     include_dummy=False,
+                                                     debug=self.debug)
+                compute_overlap = ComputeOverlap(category_times)
+                compute_overlap.compute()
+                overlaps.append(compute_overlap.get_category_times())
 
-        categories = set()
-        category_combinations = set()
-        combo_to_id = dict()
-        combo_id_pairs = []
-        next_combo_id = 0
-        for overlap in overlaps:
-            for combo in overlap.keys():
-                category_combinations.add(combo)
-                combo_key = frozenset(combo)
-                if combo_key not in combo_to_id:
-                    combo_id = next_combo_id
-                    next_combo_id += 1
-                    combo_to_id[combo_key] = combo_id
-                    combo_id_pairs.append((combo_id, sorted(list(combo))))
-                for category in combo:
-                    categories.add(category)
-
-        combo_to_time_usec = dict()
-        for overlap in overlaps:
-            for combo_key in overlap.keys():
-                if combo_key not in combo_to_time_usec:
-                    combo_to_time_usec[combo_key] = []
-                combo_to_time_usec[combo_key].append(overlap[combo_key])
-
-        category_combo_times = []
-        for combo_key in sorted(combo_to_time_usec.keys()):
-            combo_times = combo_to_time_usec[combo_key]
-            category_combo_times.append({
-                'category_combo':sorted(combo_key),
-                'times_usec':combo_times,
+            pprint.pprint({
+                'overlaps':overlaps,
             })
 
-        json_output = {
-            'categories': sorted(list(categories)),
-            'category_combinations': sorted(sorted(combo) for combo in category_combinations),
-            'category_combo_times':category_combo_times,
-        }
-        do_dump_json(json_output, self._profile_json_path)
+            categories = set()
+            category_combinations = set()
+            combo_to_id = dict()
+            combo_id_pairs = []
+            next_combo_id = 0
+            for overlap in overlaps:
+                for combo in overlap.keys():
+                    category_combinations.add(combo)
+                    combo_key = frozenset(combo)
+                    if combo_key not in combo_to_id:
+                        combo_id = next_combo_id
+                        next_combo_id += 1
+                        combo_to_id[combo_key] = combo_id
+                        combo_id_pairs.append((combo_id, sorted(list(combo))))
+                    for category in combo:
+                        categories.add(category)
+
+            combo_to_time_usec = dict()
+            for overlap in overlaps:
+                for combo_key in overlap.keys():
+                    if combo_key not in combo_to_time_usec:
+                        combo_to_time_usec[combo_key] = []
+                    combo_to_time_usec[combo_key].append(overlap[combo_key])
+
+            category_combo_times = []
+            for combo_key in sorted(combo_to_time_usec.keys()):
+                combo_times = combo_to_time_usec[combo_key]
+                category_combo_times.append({
+                    'category_combo':sorted(combo_key),
+                    'times_usec':combo_times,
+                })
+
+            json_output = {
+                'categories': sorted(list(categories)),
+                'category_combinations': sorted(sorted(combo) for combo in category_combinations),
+                'category_combo_times':category_combo_times,
+            }
+            do_dump_json(json_output, self._profile_json_path(bench_name))
 
     def dump(self, bench_name):
         if self.skip:
             return
 
-    @property
-    def _profile_json_path(self):
-        return self.get_profile_json_path(self.src_files, self.bench_name)
-
-    @classmethod
-    def get_profile_json_path(ParseKlass, src_files, bench_name):
-        path = _j(src_files.directory, 'tfprof{bench}.json'.format(bench=bench_suffix(bench_name)))
+    def _profile_json_path(self, bench_name):
+        path = _j(self.directory, 'tfprof{bench}.json'.format(bench=bench_suffix(bench_name)))
         return path
+
+    # @classmethod
+    # def get_profile_json_path(ParseKlass, src_files, bench_name):
+    #     path = _j(src_files.directory, 'tfprof{bench}.json'.format(bench=bench_suffix(bench_name)))
+    #     return path
 
 # From TensorFlow code base:
 #
@@ -1188,12 +1028,6 @@ class TFProfParser(ProfilerParserCommonMixin):
 # return RE2::FullMatch(device,
 #                       ".*/(device:gpu|gpu|device:cpu|cpu|device:sycl):\\d+");
 # }
-
-def IsGPUTime(device):
-    return re.search('stream:all', device)
-
-def IsCPUTime(device):
-    return re.search(".*/(device:gpu|gpu|device:cpu|cpu|device:sycl):\\d+", device)
 
 def reversed_iter(xs):
     n = len(xs)

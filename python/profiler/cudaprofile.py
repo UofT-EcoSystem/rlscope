@@ -1,5 +1,7 @@
 import ctypes
 
+from parser.common import *
+
 from ctypes import *
 # _cudart = ctypes.CDLL('libcudart.so')
 _cudart = ctypes.cdll.LoadLibrary('libcudart.so')

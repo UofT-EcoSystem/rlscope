@@ -7,6 +7,8 @@ import contextlib
 from ctypes import *
 import threading
 
+from parser.common import *
+
 from proto.protobuf.pyprof_pb2 import Pyprof, Event
 # from proto.protobuf import pyprof_pb2
 
@@ -22,8 +24,6 @@ import types
 MICROSECONDS_IN_SECOND = float(1e6)
 
 from profiler import wrap_util
-
-from parser.tfprof import CATEGORY_OPERATION
 
 DEBUG = wrap_util.DEBUG
 
@@ -294,8 +294,6 @@ def unwrap_libs():
     unwrap_atari()
     _LIBS_WRAPPED = False
 
-from parser.tfprof import CATEGORY_TF_API, CATEGORY_PYTHON
-
 def wrap_tensorflow(category=CATEGORY_TF_API):
     success = wrap_util.wrap_lib(
         CFuncWrapper,
@@ -307,8 +305,6 @@ def wrap_tensorflow(category=CATEGORY_TF_API):
 def unwrap_tensorflow():
     wrap_util.unwrap_lib(CFuncWrapper, 'tensorflow.pywrap_tensorflow')
 
-CATEGORY_SIMULATOR_CPP = "Simulator C"
-CATEGORY_ATARI = CATEGORY_SIMULATOR_CPP
 def wrap_atari(category=CATEGORY_ATARI):
     try:
         import atari_py

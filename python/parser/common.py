@@ -11,6 +11,23 @@ import json
 import codecs
 from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, basename as _b
 
+CATEGORY_TF_API = "Framework API C"
+CATEGORY_PYTHON = 'Python'
+CATEGORY_CUDA_API_CPU = 'CUDA API CPU'
+CATEGORY_GPU = 'GPU'
+CATEGORY_DUMMY_EVENT = 'Dummy event'
+# Category captures when operations of a given type start/end.
+# That way, if we have a profile with multiple operations in it,
+# we can reduce the scope to just an operation of interest (e.g. Q-forward).
+#
+# NOTE: This operation category should NOT show up in compute_overlap.
+CATEGORY_OPERATION = 'Operation'
+# Category captures when we are executing a TRACE/WARMUP/DUMP phase of profiling.
+# Can be useful for ignoring parts of the execution (e.g. DUMP).
+# CATEGORY_PHASE = 'Phase'
+CATEGORY_SIMULATOR_CPP = "Simulator C"
+CATEGORY_ATARI = CATEGORY_SIMULATOR_CPP
+
 PLOT_SUMMMARY_FIELDS = [
     "TotalTimeSec",
     "CppAndGPUTimeSec",
@@ -1144,3 +1161,33 @@ class ParserException(Exception):
 
 class MissingInputFiles(ParserException):
     pass
+
+def IsGPUTime(device):
+    return re.search('stream:all', device)
+
+def IsCPUTime(device):
+    return re.search(".*/(device:gpu|gpu|device:cpu|cpu|device:sycl):\\d+", device)
+
+def is_tfprof_file(path):
+    base = _b(path)
+    m = re.search(r'profile{bench}{trace}.proto'.format(
+        bench=BENCH_SUFFIX_RE,
+        trace=TRACE_SUFFIX_RE,
+    ), base)
+    return m
+
+def is_pyprof_file(path):
+    base = _b(path)
+    m = re.search(r'pyprof{bench}{trace}.proto'.format(
+        bench=BENCH_SUFFIX_RE,
+        trace=TRACE_SUFFIX_RE,
+    ), base)
+    return m
+
+def is_config_file(path):
+    base = _b(path)
+    m = re.search(r'config{bench}{trace}.json'.format(
+        bench=BENCH_SUFFIX_RE,
+        trace=TRACE_SUFFIX_RE,
+    ), base)
+    return m
