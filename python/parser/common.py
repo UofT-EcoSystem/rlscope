@@ -1,6 +1,8 @@
 import re
 import sys
+import traceback
 import numpy as np
+import time
 import pandas as pd
 import os
 import csv
@@ -27,6 +29,10 @@ CATEGORY_OPERATION = 'Operation'
 # CATEGORY_PHASE = 'Phase'
 CATEGORY_SIMULATOR_CPP = "Simulator C"
 CATEGORY_ATARI = CATEGORY_SIMULATOR_CPP
+
+CATEGORY_PROFILING = 'Profiling'
+
+PROFILING_DUMP_TRACE = "Dump trace"
 
 PLOT_SUMMMARY_FIELDS = [
     "TotalTimeSec",
@@ -1191,3 +1197,35 @@ def is_config_file(path):
         trace=TRACE_SUFFIX_RE,
     ), base)
     return m
+
+def now_us():
+    return time.time()*MICROSECONDS_IN_SECOND
+
+def get_stacktrace(n_skip=0):
+    """
+    Return a stacktrace ready for printing; usage:
+
+    # Dump the stack of the current location of this line.
+    '\n'.join(get_stacktrace(0))
+
+    :param n_skip:
+        Number of stack-levels to skip in the caller.
+
+    :return:
+    """
+    # We want to skip "get_stacktrace", plus whatever the caller wishes to skip.
+    n_skip_total = n_skip + 2
+    stack = traceback.extract_stack()
+    keep_stack = stack[:-n_skip_total]
+    return traceback.format_list(keep_stack)
+
+def print_stacktrace(msg, n_skip=0):
+    # Doesn't include "print_stacktrace"
+    # stacktrace = get_stacktrace(n_skip + 1)
+    stacktrace = get_stacktrace(n_skip)
+    print(textwrap.dedent("""
+    {msg}
+    {stack}
+    """.format(
+        msg=msg,
+        stack=''.join(stacktrace))))

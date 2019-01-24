@@ -111,7 +111,9 @@ class Profiler:
         Othwerwise, continue executing ML script until it finishes.
     """
     def __init__(self, directory,
-                 bench_names=[NO_BENCH_NAME], bench_name=NO_BENCH_NAME, num_calls=None, start_measuring_call=None,
+                 bench_names=[NO_BENCH_NAME], bench_name=NO_BENCH_NAME,
+                 num_calls=None, start_measuring_call=None,
+                 num_traces=None,
                  no_idempotent=False,
                  tfprof=True,
                  c_lib_func_pyprof_pattern=None,
@@ -135,6 +137,7 @@ class Profiler:
         self.c_lib_func_pyprof_pattern = c_lib_func_pyprof_pattern
         self.repetition_time_limit_sec = repetition_time_limit_sec
         self.num_calls = num_calls
+        self.num_traces = num_traces
         self.bench_names = set(bench_names if bench_names is not None else [])
         self.bench_name = bench_name
         self.start_measuring_call = start_measuring_call
@@ -153,6 +156,8 @@ class Profiler:
         # (self.start_measuring_call + self.num_calls) times.
         self.code_count = init_bench_dict(0)
         self.steps = 0
+        self.step_start_profiling = None
+        self.step_end_profiling = None
         self.average_time_per_call_sec = None
         self.average_time_per_call_no_profile_sec = None
 
@@ -393,6 +398,7 @@ class Profiler:
                                                               phase=self.phase)
         self.pctx.__enter__()
         self._profiler_started = True
+        self.step_start_profiling = self.steps
 
     def stop_profiling(self):
         """
@@ -579,7 +585,7 @@ class Profiler:
                 # running the training loop.
                 func.reset(*args, **kwargs)
 
-            self.finish()
+            self.dump_trace()
             # We shouldn't return from maybe_finish for idempotent operations.
             assert False
 
@@ -603,7 +609,12 @@ class Profiler:
         self.init_trace_id()
 
     def finish(self):
+        print("> IML: Stopping training early now that profiler is done")
+        sys.exit(0)
+
+    def dump_trace(self):
         # We shouldn't be in the middle of measuring an operation.
+        start_us = now_us()
         assert self.cur_bench_name == NO_BENCH_NAME
 
         self.stop_profiling()
@@ -611,20 +622,25 @@ class Profiler:
         # ProfileGlobals.files_after = ls_files(self.out_dir)
 
         # Put this here to test that cleanup_files doesn't delete nvprof/pyprof files
-        self.dump()
+        self._dump()
         # ProfileGlobals.cleanup_files()
 
         # Discards profiling data now that it has been recorded.
         self._discard_profiling_data()
-
-        print("> IML: Stopping training early now that profiler is done")
-        sys.exit(0)
+        end_us = now_us()
+        clib_wrap.record_event(CATEGORY_PROFILING, PROFILING_DUMP_TRACE, start_us, end_us)
 
     def _discard_profiling_data(self):
         clib_wrap.clear_pyprof_profiling()
         self.pctx = None
 
-    def dump(self, config_kwargs=dict()):
+    def _dump(self, config_kwargs=dict()):
+        """
+        Dump trace data to:
+        - pyprof.trace_<next_trace_id>.proto
+        - profile.trace_<next_trace_id>.proto
+        - config.trace_<next_trace_id>.proto
+        """
 
         # Q: Should we be calling this again...?  We'd like to update num_calls if it was computed dynamically...
         config_path = self.config_path
@@ -682,20 +698,31 @@ class Profiler:
         with open(path, 'wb') as f:
             f.write(proto.SerializeToString())
 
-    def _maybe_finish(self):
-        # print("> _maybe_finish")
-        # print("  self.num_calls = {n}".format(n=self.num_calls))
-        # print("  self.code_count[bench={b}] = {n}".format(b=self.bench_name, n=self.code_count.get(self.bench_name, None)))
-        # if self.num_calls is not None:
-        #     print("  self.total_calls_to_run = {n}".format(n=self.total_calls_to_run))
-        # print()
-        # print("  done_measuring = {t}".format(t=self.done_measuring()))
-        # if self.done_measuring():
+    def should_dump_trace(self):
+        return self.steps >= self.step_start_profiling + self.num_calls
 
-        if len(self.profile_sec) >= self.num_calls:
+    def should_finish(self, skip_finish=False):
+        return not skip_finish and self.next_trace_id >= self.num_traces
+
+    def _maybe_finish(self, skip_finish=False):
+        dump_trace = self.should_dump_trace()
+        if dump_trace:
+            self.dump_trace()
+
+        if self.should_finish(skip_finish):
             self.finish()
 
+        if dump_trace:
+            # We just dumped a trace but we're not finished;
+            # start profiling again for the next trace.
+            self.start_profiling()
+
     def next_step(self, skip_finish=False):
+        """
+        If we've recorded enough samples, dump trace files.
+
+        If we've dumped enough trace files, exit (we're done).
+        """
         # Not implemented correctly, only supports idempotent operations right now...
         # self._maybe_finish()
 
@@ -707,9 +734,8 @@ class Profiler:
         if self.cur_bench_name != NO_BENCH_NAME:
             self.end_operation(self.cur_bench_name)
         assert self.cur_bench_name == NO_BENCH_NAME
+        self._maybe_finish(skip_finish)
         self.steps += 1
-        if not skip_finish:
-            self._maybe_finish()
 
     def done_measuring(self):
         return self.num_calls is not None and \
@@ -877,8 +903,10 @@ def add_iml_arguments(parser):
     # parser.add_argument('--iml-tfprof', action='store_true', help=textwrap.dedent("""
     #     IML: use tfprof TensorFlow profiling utility INSTEAD of nvprof.
     # """))
-    parser.add_argument('--iml-num-calls', type=int, help="IML: how many calls should be measured?")
-    # TODO: num-calls should be the number of calls we profile.
+    parser.add_argument('--iml-num-calls', type=int, default=1000,
+                        help="IML: how many calls should be measured in a single trace?")
+    parser.add_argument('--iml-num-traces', type=int, default=10,
+                        help="IML: how many traces should be measured?")
     parser.add_argument('--iml-fuzz', action='store_true', help=textwrap.dedent("""
         IML: \"Fuzz\" the script for calls to TensorFlow API's.
         
@@ -888,7 +916,8 @@ def add_iml_arguments(parser):
         for e.g. sesssion.run(...) for running the computational graph
         (currently this is the only thing we trace).
     """))
-    parser.add_argument('--iml-start-measuring-call', type=int, help="IML: when should measuring begin?")
+    parser.add_argument('--iml-start-measuring-call', default=100, type=int,
+                        help="IML: when should measuring begin?")
     parser.add_argument('--iml-bench-name',
                         default=NO_BENCH_NAME,
                         help=textwrap.dedent("""

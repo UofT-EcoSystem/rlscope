@@ -1,6 +1,7 @@
 import os
 import re
 import subprocess
+import progressbar
 
 import sqlite3
 from sqlite3 import Error
@@ -25,6 +26,7 @@ from parser.stats import category_times_add_time
 from parser.stats import KernelTime
 
 TABLE_SQL = _j(py_config.ROOT, "sqlite", "tables.sql")
+INDICES_SQL = _j(py_config.ROOT, "sqlite", "indices.sql")
 
 class SQLiteParser:
     # (ProfilerParserCommonMixin):
@@ -50,11 +52,10 @@ class SQLiteParser:
                  # Swallow any excess arguments
                  debug=False,
                  **kwargs):
-        # self.parser = parser
-        # self.args = args
         self.directory = directory
         self.conn = TracesSQLiteConnection(self.db_path)
         self.debug = debug
+        self.block_size = 50000
 
     def get_source_files(self):
         src_files = []
@@ -86,56 +87,68 @@ class SQLiteParser:
         if db_exists:
             os.remove(self.db_path)
 
-        with transaction(self.conn):
-            self.create_db()
+        self.create_db()
 
-            self.process_to_id = dict()
-            self.category_to_id = dict()
-            self.device_to_id = dict()
+        self.process_to_id = dict()
+        self.category_to_id = dict()
+        self.device_to_id = dict()
 
-            src_files = self.get_source_files()
-            pprint.pprint({
-                'rule':self.__class__.__name__,
-                'src_files':src_files,
-            })
-            for path in src_files:
-                if is_tfprof_file(path):
-                    self.insert_tfprof_file(path)
-                elif is_pyprof_file(path):
-                    self.insert_pyprof_file(path)
-                else:
-                    raise NotImplementedError
+        src_files = self.get_source_files()
+        pprint.pprint({
+            'rule':self.__class__.__name__,
+            'src_files':src_files,
+        })
+        for path in src_files:
+            if is_tfprof_file(path):
+                self.insert_tfprof_file(path)
+            elif is_pyprof_file(path):
+                self.insert_pyprof_file(path)
+            else:
+                raise NotImplementedError
 
+        # Create indices at the end to reduce per-insert overhead.
+        self.create_indices()
+
+        self.conn.commit()
         self.conn.close()
+
+    def maybe_commit(self, i):
+        if (i + 1) % self.block_size == 0:
+            self.conn.commit()
 
     def insert_tfprof_file(self, path):
 
         reader = TFProfCategoryTimesReader(path)
 
+        print("> Insert tfprof file: {p}".format(p=path))
         if self.debug:
-            print("> Insert tfprof file: {p}".format(p=path))
             reader.print(sys.stdout)
 
         process_id = self.insert_process_name(reader.process_name)
-        for device, event in reader.all_events():
-            category, start_time_us, duration_us, name = event
-            category_id = self.insert_category_name(category)
-            if category == 'GPU' and self.debug:
-                print("> category = {c}, duration_us = {duration_us}".format(
-                    c=category,
-                    duration_us=duration_us))
-            device_id = self.insert_device_name(device)
-            self.conn.insert_dict('Event', {
-                # 'thread_id':event.thread_id,
-                'start_time_us':start_time_us,
-                'duration_us':duration_us,
-                'event_name':name,
-                'category_id':category_id,
-                'process_id':process_id,
-                'device_id':device_id,
-            })
 
-        self.conn.commit()
+        inserts = []
+        self._total_inserts = 0
+
+        with progressbar.ProgressBar(max_value=reader.num_all_events()) as bar, \
+             bulk_inserter(self.conn, 'Event', self.block_size, bar) as bulk:
+            for i, (device, event) in enumerate(reader.all_events()):
+                category, start_time_us, duration_us, name = event
+                category_id = self.insert_category_name(category)
+                if category == 'GPU' and self.debug:
+                    print("> category = {c}, duration_us = {duration_us}".format(
+                        c=category,
+                        duration_us=duration_us))
+                device_id = self.insert_device_name(device)
+                insert = {
+                    # 'thread_id':event.thread_id,
+                    'start_time_us':start_time_us,
+                    'duration_us':duration_us,
+                    'event_name':name,
+                    'category_id':category_id,
+                    'process_id':process_id,
+                    'device_id':device_id,
+                }
+                bulk.add_insert(insert)
 
     def insert_process_name(self, process_name):
         return self._insert_name(
@@ -187,34 +200,27 @@ class SQLiteParser:
         return ident
 
     def insert_pyprof_file(self, path):
-
         with open(path, 'rb') as f:
             proto = Pyprof()
             proto.ParseFromString(f.read())
 
+        print("> Insert pyprof file: {p}".format(p=path))
         if self.debug:
-            print("> Insert pyprof file: {p}".format(p=path))
             print(proto)
 
         c = self.cursor
-
         # Insert Process
         process_id = self.insert_process_name(proto.process_name)
-        # Insert Category
-        # categories = set()
-        # for step, clibs in proto.clibs.items():
-        #     for category, clib_events in clibs.clibs.items():
-        # categories = list(proto.clibs.keys())
-        # for category in categories:
-        #     self.insert_category_name(category)
 
-        def insert_category_events(category, events):
-            categories.add(category)
+        # categories = set()
+        def insert_category_events(event_conn, eventattr_conn, category, events):
+            # Insert Category
+            # categories.add(category)
             category_id = self.insert_category_name(category)
             # category_id = self.category_to_id[category]
             for event in events:
                 # Insert Event
-                self.conn.insert_dict('Event', {
+                event_id = event_conn.insert_dict('Event', {
                     'thread_id':event.thread_id,
                     'start_time_us':event.start_time_us,
                     'duration_us':event.duration_us,
@@ -222,47 +228,29 @@ class SQLiteParser:
                     'category_id':category_id,
                     'process_id':process_id,
                 })
-                event_id = c.lastrowid
                 # Insert EventAttr
                 for attr_name, attr_value in event.attrs.items():
-                    self.conn.insert_dict('EventAttr', {
+                    attr_id = eventattr_conn.insert_dict('EventAttr', {
                         'event_id':event_id,
                         'attr_name':attr_name,
                         'attr_value':attr_value,
                     })
-                    attr_id = c.lastrowid
 
-        categories = set()
+        def each_category_events():
+            for step, python_events in proto.python_events.items():
+                yield CATEGORY_PYTHON, python_events.events
 
-        for step, python_events in proto.python_events.items():
-            insert_category_events(CATEGORY_PYTHON, python_events.events)
+            for step, clibs in proto.clibs.items():
+                for category, clib_events in clibs.clibs.items():
+                    yield category, clib_events.events
 
-        for step, clibs in proto.clibs.items():
-            for category, clib_events in clibs.clibs.items():
-                insert_category_events(category, clib_events.events)
+        num_all_events = sum(len(events) for category, events in each_category_events())
 
-                # categories.add(category)
-                # category_id = self.insert_category_name(category)
-                # # category_id = self.category_to_id[category]
-                # for event in clib_events.events:
-                #     # Insert Event
-                #     self.conn.insert_dict('Event', {
-                #         'thread_id':event.thread_id,
-                #         'start_time_us':event.start_time_us,
-                #         'duration_us':event.duration_us,
-                #         'event_name':event.name,
-                #         'category_id':category_id,
-                #         'process_id':process_id,
-                #     })
-                #     event_id = c.lastrowid
-                #     # Insert EventAttr
-                #     for attr_name, attr_value in event.attrs.items():
-                #         self.conn.insert_dict('EventAttr', {
-                #             'event_id':event_id,
-                #             'attr_name':attr_name,
-                #             'attr_value':attr_value,
-                #         })
-                #         attr_id = c.lastrowid
+        with progressbar.ProgressBar(max_value=num_all_events) as bar, \
+            bulk_inserter(self.conn, 'EventAttr', self.block_size, bar) as event_attr_bulk, \
+            bulk_inserter(self.conn, 'Event', self.block_size, progress_bar=None, id_field='event_id') as event_bulk:
+            for category, events in each_category_events():
+                insert_category_events(event_bulk, event_attr_bulk, category, events)
 
         self.conn.commit()
 
@@ -276,17 +264,43 @@ class SQLiteParser:
         #     script = f.read()
         # self.cursor.executescript(script)
 
+    def create_indices(self):
+        self.conn.run_sql_file(self.db_path, INDICES_SQL)
+
     @property
     def db_path(self):
         return traces_db_path(self.directory)
 
 @contextlib.contextmanager
 def transaction(conn):
+    # print_stacktrace('> IML: BEGIN TRANSACTION')
+    conn.cursor.execute('BEGIN TRANSACTION')
     try:
         yield
     except Exception as e:
         raise
-    conn.commit()
+    conn.cursor.execute('COMMIT')
+
+@contextlib.contextmanager
+# def bulk_inserter(conn, table, block_size=50000, progress_bar=None, id_field=None):
+def bulk_inserter(*args, **kwargs):
+    try:
+        bulk = BulkInserter(*args, **kwargs)
+        # bulk = BulkInserter(conn, table, block_size, progress_bar, id_field)
+        yield bulk
+    except Exception as e:
+        raise
+    bulk.finish()
+    # conn.commit()
+
+# @contextlib.contextmanager
+# def fast_inserts(conn):
+#     try:
+#         conn.disable_fast_inserts()
+#         yield
+#     except Exception as e:
+#         raise
+#     conn.disable_fast_inserts()
 
 @contextlib.contextmanager
 def connection(conn):
@@ -301,13 +315,103 @@ def connection(conn):
     # conn.commit()
     # conn.close()
 
+class BulkInserter:
+    def __init__(self, conn, table, block_size=50000, progress_bar=None, id_field=None):
+        """
+        Bulk insert rows into an SQLite table efficiently by doing batching
+        and starting each batch with a BEGIN/END TRANSACTION.
+
+        :param conn:
+        :param table:
+        :param block_size:
+        :param progress_bar:
+        :param id_field:
+            The autoincrement primary key of the table.
+            If this is set, query the last insert id, and inject the next id into each add_insert call.
+
+            Useful when bulk inserting multiple tables that reference each other.
+        """
+        self.conn = conn
+        self.table = table
+        self.inserts = []
+        self.block_size = block_size
+        self.total_inserts = 0
+        self.progress_bar = progress_bar
+        self.id_field = id_field
+        self.next_id = None
+
+        if self.id_field is not None:
+            self.next_id = self._last_insert_id() + 1
+
+    def _last_insert_id(self):
+        assert self.id_field is not None
+        c = self.conn.cursor
+        c.execute("""
+        SELECT MAX({id}) as id FROM {table}
+        """.format(
+            id=self.id_field,
+            table=self.table))
+        row = c.fetchone()
+        ident = row['id']
+        if ident is None:
+            # There are no rows in the table!
+            # print("> IDENT is None, use 0")
+            ident = 0
+        return ident
+
+    def _commit_inserts(self):
+        with transaction(self.conn):
+            self.conn.insert_dicts(self.table, self.inserts)
+        self.conn.commit()
+        self.total_inserts += len(self.inserts)
+        self.inserts.clear()
+        if self.progress_bar is not None:
+            self.progress_bar.update(self.total_inserts)
+
+    # Match TracesSQLiteConnection interface
+    def insert_dict(self, table, insert):
+        assert self.table == table
+        return self.add_insert(insert)
+
+    def add_insert(self, insert):
+        ret = None
+
+        if self.id_field is not None:
+            insert[self.id_field] = self.next_id
+            ret = self.next_id
+            self.next_id += 1
+
+        self.inserts.append(insert)
+        if len(self.inserts) >= self.block_size:
+            self._commit_inserts()
+
+        return ret
+
+    def finish(self):
+        if len(self.inserts) > 0:
+            self._commit_inserts()
+
 class TracesSQLiteConnection:
     def __init__(self, db_path):
         self.db_path = db_path
         self._cursor = None
         self.conn = None
 
+    def enable_fast_inserts(self):
+        c = self.cursor
+        c.execute("""
+        PRAGMA synchronous = OFF
+        """)
+
+    def disable_fast_inserts(self):
+        c = self.cursor
+        c.execute("""
+        PRAGMA synchronous = NORMAL
+        """)
+
     def commit(self):
+        if self.conn is None:
+            self.create_connection()
         self.conn.commit()
 
     def close(self):
@@ -322,25 +426,68 @@ class TracesSQLiteConnection:
 
     def insert_dict(self, table, dic):
         c = self._cursor
-        sorted_cols = sorted(dic.keys())
-        placeholders = ','.join('?' * len(sorted_cols))
-        colnames = ','.join(sorted_cols)
-        values = [dic[col] for col in sorted_cols]
+        cols, placeholders, colnames = self._get_insert_info(dic)
+        values = [dic[col] for col in cols]
         c.execute("INSERT INTO {table} ({colnames}) VALUES ({placeholders})".format(
             placeholders=placeholders,
             table=table,
             colnames=colnames,
         ), values)
+        return c.lastrowid
+
+    def _get_insert_info(self, dic):
+        cols = sorted(dic.keys())
+        placeholders = ','.join('?' * len(cols))
+        colnames = ','.join(cols)
+        return cols, placeholders, colnames
+
+    def _get_vals(self, cols, dic):
+        return [dic[col] for col in cols]
+
+    def insert_dicts(self, table, dics):
+        c = self._cursor
+        cols, placeholders, colnames = self._get_insert_info(dics[0])
+
+        all_values = [self._get_vals(cols, dic) for dic in dics]
+
+        # all_values = [None]*(len(cols) * len(dics))
+        # i = 0
+        # for dic in dics:
+        #     vals = self._get_vals(cols, dic)
+        #     for j in range(len(vals)):
+        #         all_values[i] = vals[j]
+        #     i += len(vals)
+
+        c.executemany("INSERT INTO {table} ({colnames}) VALUES ({placeholders})".format(
+            placeholders=placeholders,
+            table=table,
+            colnames=colnames,
+        ), all_values)
+
+        # def bracket(x):
+        #     return "({x})".format(x=x)
+        # all_placeholders = ', '.join(bracket(placeholders) for i in range(len(dics)))
+        # c.execute("INSERT INTO {table} ({colnames}) VALUES {all_placeholders}".format(
+        #     all_placeholders=all_placeholders,
+        #     table=table,
+        #     colnames=colnames,
+        # ), all_values)
 
     def create_connection(self):
         """ create a database connection to a SQLite database """
         if self.conn is not None:
             return
 
-        self.conn = sqlite3.connect(self.db_path)
+        # NOTE: isolation_level = None means no transaction (we're the only user of this database).
+        # This is required for BulkInserter to work,
+        # otherwise you'll get an error on 'COMMIT':
+        #   sqlite3.OperationalError: cannot commit - no transaction is active
+        self.conn = sqlite3.connect(self.db_path, isolation_level=None)
+        # self.conn = sqlite3.connect(self.db_path)
+        assert self.conn.isolation_level is None
+
         self.conn.row_factory = sqlite3.Row
         self._cursor = self.conn.cursor()
-        # print(sqlite3.version)
 
     def run_sql_file(self, db_path, sql_path):
         """

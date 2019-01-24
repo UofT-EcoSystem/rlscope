@@ -3,24 +3,6 @@ import textwrap
 
 from parser.common import *
 
-def get_stacktrace(n_skip):
-    """
-    Return a stacktrace ready for printing; usage:
-
-    # Dump the stack of the current location of this line.
-    '\n'.join(get_stacktrace(0))
-
-    :param n_skip:
-        Number of stack-levels to skip in the caller.
-
-    :return:
-    """
-    # We want to skip "get_stacktrace", plus whatever the caller wishes to skip.
-    n_skip_total = n_skip + 1
-    stack = traceback.extract_stack()
-    keep_stack = stack[n_skip_total:]
-    return traceback.format_list(keep_stack)
-
 class FuzzFuncWrapper:
     """
     We want to print out all the stack-trace locations where there is a

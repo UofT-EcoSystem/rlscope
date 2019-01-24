@@ -51,7 +51,3 @@ CREATE TABLE Device (
   device_name TEXT,
   UNIQUE (device_name)
 );
-
--- Indexes for "class SQLiteCategoryTimesReader"
-CREATE INDEX index_start_time_us ON Event (start_time_us);
-CREATE INDEX index_category_name ON Category (category_name);

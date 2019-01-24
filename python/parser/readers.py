@@ -148,6 +148,12 @@ class TFProfCategoryTimesReader:
             category = self.get_category(device)
             yield category, start_us, duration_us, name
 
+    def num_all_events(self):
+        n = 0
+        for _ in self.all_events():
+            n += 1
+        return n
+
     def all_events(self):
         def events_for(step, node, get_execs):
             devices = self.each_device(step, node, get_execs)

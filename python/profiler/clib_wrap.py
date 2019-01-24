@@ -31,9 +31,10 @@ DEFAULT_PREFIX = "CLIB__"
 
 _pyprof = Pyprof()
 def clear_pyprof_profiling():
-    global _pyprof, _python_start_us
+    global _pyprof, _python_start_us, _step
     _pyprof = Pyprof()
     _python_start_us = now_us()
+    _step = None
 
 _step = None
 def set_step(step, expect_traced=False):
@@ -45,14 +46,14 @@ def set_step(step, expect_traced=False):
     #     # pprint.pprint({'step':step, 'trace_steps':_trace_steps})
     #     assert step in _trace_steps
     # if _step in _trace_steps and _step not in _pyprof.steps:
-    if _TRACING_ON:
+    if _TRACING_ON and step not in _pyprof.steps:
         if tensorflow_profile_context.DEBUG:
             print("> ADD PYPROF STEP: {s}".format(s=_step))
 
         _pyprof.steps.extend([step])
 
         if tensorflow_profile_context.DEBUG:
-            pprint.pprint({'_pyprof.steps':list(_pyprof.steps)}, indent=2)
+            pprint.pprint({'len(_pyprof.steps)':len(_pyprof.steps)}, indent=2)
 
 # _trace_steps = None
 # def set_trace_steps(trace_steps):
@@ -60,8 +61,6 @@ def set_step(step, expect_traced=False):
 #     _trace_steps = trace_steps
 #     pprint.pprint({'_trace_steps':trace_steps})
 
-def now_us():
-    return time.time()*MICROSECONDS_IN_SECOND
 _python_start_us = None
 
 class CFuncWrapper:
