@@ -5,6 +5,10 @@ from proto.protobuf.pyprof_pb2 import Pyprof
 from parser.common import *
 from parser.stats import KernelTime, category_times_add_time
 
+DEFAULT_group_by_device = False
+DEFAULT_ignore_categories = {CATEGORY_DUMMY_EVENT, CATEGORY_UNKNOWN}
+DEFAULT_debug = False
+
 class TFProfCategoryTimesReader:
     """
     Reads a tfprof protobuf file, outputs "category times" format.
@@ -48,7 +52,10 @@ class TFProfCategoryTimesReader:
     def steps(self):
         return sorted(self.proto.steps)
 
-    def parse(self, step, bench_name, group_by_device=False, include_dummy=False):
+    def parse(self, step, bench_name,
+              group_by_device=DEFAULT_group_by_device,
+              ignore_categories=DEFAULT_ignore_categories,
+              debug=DEFAULT_debug):
 
         # PSEUDOCODE:
         # Compute [CUDA CPU time | GPU time | CUDA CPU/GPU time] overlap/non-overlap for a single step.
@@ -110,13 +117,6 @@ class TFProfCategoryTimesReader:
         else:
             raise NotImplementedError("Not sure what category device={dev} falls under.".format(dev=device))
 
-    def get_category(self, device):
-        if IsGPUTime(device):
-            return CATEGORY_GPU
-        elif IsCPUTime(device):
-            return CATEGORY_CUDA_API_CPU
-        raise NotImplementedError("Not sure what category device={dev} falls under.".format(dev=device))
-
     def _add_all_times(self, category_times, step, node, get_execs, group_by_device):
         """
         :param get_execs:
@@ -145,7 +145,7 @@ class TFProfCategoryTimesReader:
         for tupl in execs[device].times:
             start_us, duration_us = tupl.int64_values
             name = node.name
-            category = self.get_category(device)
+            category = get_category_from_device(device)
             yield category, start_us, duration_us, name
 
     def num_all_events(self):
@@ -192,7 +192,10 @@ class PyprofCategoryTimesReader:
     def steps(self):
         return sorted(self.proto.steps)
 
-    def parse(self, step, bench_name, group_by_device=False, include_dummy=False):
+    def parse(self, step, bench_name,
+              group_by_device=DEFAULT_group_by_device,
+              ignore_categories=DEFAULT_ignore_categories,
+              debug=DEFAULT_debug):
         category_times = dict()
 
         if step not in self.proto.steps:

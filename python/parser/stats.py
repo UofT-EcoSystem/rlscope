@@ -132,20 +132,7 @@ def category_times_add_time(category_times, device, ktime, group_by_device, cate
         add_to.append(ktime)
 
     if category is None and device is not None:
-        # Assume it's tfprof
-        assert device is not None
-
-        if IsGPUTime(device):
-            _add_time(CATEGORY_GPU, False)
-            category = CATEGORY_GPU
-            # group_by_device = False
-        elif IsCPUTime(device):
-            _add_time(CATEGORY_CUDA_API_CPU, group_by_device)
-            category = CATEGORY_CUDA_API_CPU
-            # group_by_device = group_by_device
-        else:
-            raise NotImplementedError("Not sure what category device={dev} falls under.".format(dev=device))
-
+        category = get_category_from_device(device)
     assert category is not None
 
     if category in [CATEGORY_CUDA_API_CPU]:

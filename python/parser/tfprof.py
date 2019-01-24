@@ -19,12 +19,15 @@ from parser.stats import KernelTime, category_times_add_time
 
 from parser.db import SQLiteCategoryTimesReader, traces_db_path
 
-def read_category_times(step, bench_name, category_times_readers, group_by_device=False, include_dummy=False, debug=False):
+from parser.readers import TFProfCategoryTimesReader, \
+    DEFAULT_group_by_device, \
+    DEFAULT_ignore_categories, \
+    DEFAULT_debug \
+
+def read_category_times(category_times_readers, *args, **kwargs):
     category_times = dict()
     for reader in category_times_readers:
-        new_times = reader.parse(step, bench_name,
-                                 include_dummy=include_dummy,
-                                 group_by_device=group_by_device, debug=debug)
+        new_times = reader.parse(*args, **kwargs)
         same_categories = set(new_times.keys()).intersection(set(category_times.keys()))
         assert len(same_categories) == 0
         category_times.update(new_times)
@@ -475,9 +478,14 @@ class TraceEventsParser:
 
         self.dummy_times = []
 
+        self.reset()
+        self.reproduce_tfprof = False
+
+        self.category_times_readers = []
+
+    def reset(self):
         self._next_pid = 0
         self.category_to_pid = dict()
-        self.reproduce_tfprof = False
 
     def get_source_files(self):
         """
@@ -602,35 +610,18 @@ class TraceEventsParser:
     #     return path
 
     def run(self):
-        category_times_readers = []
 
-        sql_reader = SQLiteCategoryTimesReader(traces_db_path(self.directory))
-        bench_names = sql_reader.bench_names
-        category_times_readers.append(sql_reader)
+        self.sql_reader = SQLiteCategoryTimesReader(traces_db_path(self.directory))
+        self.bench_names = self.sql_reader.bench_names
+        self.category_times_readers.append(self.sql_reader)
 
-        for bench_name in bench_names:
+        for bench_name in self.bench_names:
 
-            # tfprof_path = self.tfprof_path(self.bench_name)
-            # tfprof_reader = TFProfCategoryTimesReader(tfprof_path)
-            # category_times_readers.append(tfprof_reader)
-            #
-            # pyprof_path = self.pyprof_path(self.bench_name)
-            # pyprof_reader = PyprofCategoryTimesReader(pyprof_path)
-            # category_times_readers.append(pyprof_reader)
-
-            # Overlap, computed across different "steps".
-            overlaps = []
-
-            # if len(tfprof_reader.steps) > 0:
-            #     steps = tfprof_reader.steps
-            # else:
-            #     steps = pyprof_reader.steps
-
-            steps = sql_reader.steps(bench_name)
+            steps = self.sql_reader.steps(bench_name)
             if self.debug:
                 print("> steps = {steps}".format(steps=steps))
 
-            # step = tfprof_reader.steps[0]
+            # step = steps[0]
             # Skip the first step, since it includes profiler initialization stuff.
             # In particular, the libcupti NVIDIA library gets loaded on-demand during
             # the first traced step, and this can take 2 seconds to load!
@@ -638,14 +629,6 @@ class TraceEventsParser:
             step = steps[1]
 
             print("> Generate traceEvents for step={step}".format(step=step))
-
-            # self.parse_dummy_events(step)
-
-            # with open(self._tfprof_txt_path, 'w') as f:
-            #     print(tfprof_reader.proto, file=f)
-            #
-            # with open(self._pyprof_txt_path, 'w') as f:
-            #     print(pyprof_reader.proto, file=f)
 
             """
             ComputeOverlap ALSO reads the same information; even though it summarizes ACROSS steps, 
@@ -671,23 +654,35 @@ class TraceEventsParser:
             return category_times
             """
 
-            # Just default to outputting the first step...
-            category_times = read_category_times(step, bench_name, category_times_readers,
-                                                 group_by_device=True,
-                                                 include_dummy=True,
-                                                 debug=self.debug)
+            category_times = self.read_category_times(step, bench_name)
 
-            if len(self.dummy_times) > 0:
-                print("> Adding hardcoded times:")
-                pprint.pprint(self.dummy_times, indent=2)
-                if CATEGORY_DUMMY_EVENT not in category_times:
-                    category_times[CATEGORY_DUMMY_EVENT] = []
-                category_times[CATEGORY_DUMMY_EVENT].extend(self.dummy_times)
+            self.js_dump(category_times, bench_name)
 
-            self.js_add_category_times(category_times)
-            profile_path = self._profile_json_path(bench_name)
-            print("> Write traceEvents to: {path}".format(path=profile_path))
-            do_dump_json(self.js, profile_path)
+    def read_category_times(self, step, bench_name):
+        # Just default to outputting the first step...
+        ignore_cats = list(DEFAULT_ignore_categories)
+        if CATEGORY_DUMMY_EVENT in ignore_cats:
+            ignore_cats.remove(CATEGORY_DUMMY_EVENT)
+        category_times = read_category_times(self.category_times_readers, step, bench_name,
+                                             group_by_device=True,
+                                             ignore_categories=ignore_cats,
+                                             debug=self.debug)
+
+        if len(self.dummy_times) > 0:
+            print("> Adding hardcoded times:")
+            pprint.pprint(self.dummy_times, indent=2)
+            if CATEGORY_DUMMY_EVENT not in category_times:
+                category_times[CATEGORY_DUMMY_EVENT] = []
+            category_times[CATEGORY_DUMMY_EVENT].extend(self.dummy_times)
+
+        return category_times
+
+    def js_dump(self, category_times, bench_name):
+        self.reset()
+        self.js_add_category_times(category_times)
+        profile_path = self._profile_json_path(bench_name)
+        print("> Write traceEvents to: {path}".format(path=profile_path))
+        do_dump_json(self.js, profile_path)
 
     def js_add_category_times(self, category_times):
         """
@@ -955,9 +950,9 @@ class OverlapJSONParser:
             # Skip the first step (it captures libcupti.so load time).
             keep_steps = steps[1:]
             for step in keep_steps:
-                category_times = read_category_times(step, bench_name, category_times_readers,
+                category_times = read_category_times(category_times_readers, step, bench_name,
                                                      # Don't want to compute overlap w/ dummy events; doesn't mean anything.
-                                                     include_dummy=False,
+                                                     ignore_categories=DEFAULT_ignore_categories,
                                                      debug=self.debug)
                 compute_overlap = ComputeOverlap(category_times)
                 compute_overlap.compute()

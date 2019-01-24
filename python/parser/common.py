@@ -16,6 +16,7 @@ from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, base
 CATEGORY_TF_API = "Framework API C"
 CATEGORY_PYTHON = 'Python'
 CATEGORY_CUDA_API_CPU = 'CUDA API CPU'
+CATEGORY_UNKNOWN = 'Unknown'
 CATEGORY_GPU = 'GPU'
 CATEGORY_DUMMY_EVENT = 'Dummy event'
 # Category captures when operations of a given type start/end.
@@ -1172,7 +1173,9 @@ def IsGPUTime(device):
     return re.search('stream:all', device)
 
 def IsCPUTime(device):
-    return re.search(".*/(device:gpu|gpu|device:cpu|cpu|device:sycl):\\d+", device)
+    # NOTE: do NOT use re.search or re.match here!
+    # We must match the whole device string to match tfprof behaviour.
+    return re.fullmatch(".*/(device:gpu|gpu|device:cpu|cpu|device:sycl):\\d+", device)
 
 def is_tfprof_file(path):
     base = _b(path)
@@ -1229,3 +1232,10 @@ def print_stacktrace(msg, n_skip=0):
     """.format(
         msg=msg,
         stack=''.join(stacktrace))))
+
+def get_category_from_device(device):
+    if IsGPUTime(device):
+        return CATEGORY_GPU
+    elif IsCPUTime(device):
+        return CATEGORY_CUDA_API_CPU
+    return CATEGORY_UNKNOWN

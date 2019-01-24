@@ -15,7 +15,10 @@ from proto.protobuf.pyprof_pb2 import Pyprof
 
 import py_config
 
-from parser.readers import TFProfCategoryTimesReader
+from parser.readers import TFProfCategoryTimesReader, \
+    DEFAULT_group_by_device, \
+    DEFAULT_ignore_categories, \
+    DEFAULT_debug \
 
 import contextlib
 
@@ -580,7 +583,9 @@ class SQLiteCategoryTimesReader:
         return self._steps[bench_name][step]
 
     def parse(self, step, bench_name,
-              group_by_device=False, include_dummy=False, debug=False):
+              group_by_device=DEFAULT_group_by_device,
+              ignore_categories=DEFAULT_ignore_categories,
+              debug=DEFAULT_debug):
         """
         # PSEUDOCODE:
         rows = SELECT category_name, start_time_us, duration_us FROM Category NATURAL JOIN Event
@@ -617,11 +622,18 @@ class SQLiteCategoryTimesReader:
         - However, currently we only ever want to select a SINGLE "step" at a time, 
           so we aren't using this.
         """
-        dummy_where = ""
-        if not include_dummy:
-            dummy_where = textwrap.dedent("""\
-            AND ( c_out.category_name != '{CATEGORY_DUMMY_EVENT}' )\
-            """.format(CATEGORY_DUMMY_EVENT=CATEGORY_DUMMY_EVENT))
+
+        def ignore_and_clause(category):
+            and_clause = textwrap.dedent("""\
+            AND ( c_out.category_name != '{category}' )\
+            """.format(category=category))
+            return and_clause
+
+        ignore_clauses = []
+        ignore_cats = list(ignore_categories) + [CATEGORY_OPERATION]
+        for category in ignore_cats:
+            ignore_clauses.append(ignore_and_clause(category))
+        ignore_clause = "\n".join(ignore_clauses)
 
         query = textwrap.dedent("""
         SELECT device_name, category_name, event_name, start_time_us, duration_us
@@ -630,12 +642,10 @@ class SQLiteCategoryTimesReader:
           NATURAL JOIN Event as e_out
           NATURAL LEFT JOIN Device as d_out
         WHERE ( ? <= e_out.start_time_us AND e_out.start_time_us <= ? )
-        {dummy_where}
-        AND ( c_out.category_name != '{CATEGORY_OPERATION}' )
+        {ignore_clause}
         ORDER BY start_time_us ASC 
         """.format(
-            dummy_where=dummy_where,
-            CATEGORY_OPERATION=CATEGORY_OPERATION,
+            ignore_clause=ignore_clause,
         ))
         if debug:
             print("> {name} query:".format(name=self.__class__.__name__))
