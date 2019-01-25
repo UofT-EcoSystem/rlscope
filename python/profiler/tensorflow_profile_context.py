@@ -212,6 +212,8 @@ class ProfileContext(object):
                phase=None):
     self.process_name = process_name
     self.phase = phase
+    self._sess = None
+    
     self._enabled = enabled
     if not self._enabled:
       return
@@ -404,7 +406,7 @@ class ProfileContext(object):
       return self
 
   def _dump_custom_tf(self):
-    sess = tf.get_default_session()
+    sess = self._cur_session()
     self.trace_data = c_api_util.get_trace_data(sess)
     byte_size = self.trace_data.ByteSize()
     print("> trace_data size = {b} bytes".format(b=byte_size))
@@ -476,13 +478,37 @@ class ProfileContext(object):
     for step, traces in self.trace_data.traced_steps.items():
       for run_meta in traces.traces:
           add_run_meta(step, run_meta)
-    dump_step = max(self.trace_data.traced_steps.keys())
+
+    if len(self.trace_data.traced_steps) == 0:
+      # No sess.run() calls were traced.
+      print(
+        "> WARNING: tfprof didn't capture any session.run(...) calls!\n",
+        "Maybe try setting --iml-start-measuring-call lower (e.g. 0)?")
+      dump_step = 0
+    else:
+      dump_step = max(self.trace_data.traced_steps.keys())
+
     profile_path = _j(self._profiler_dir, 'profile_{d}'.format(d=dump_step))
     size_bytes = profile_proto.ByteSize()
     print("> Dump tfprof ({b} bytes) to: {path}".format(
       b=size_bytes, path=profile_path))
     with open(profile_path, 'wb') as f:
       f.write(profile_proto.SerializeToString())
+
+  def _cur_session(self):
+    if self._sess is not None:
+      return self._sess
+
+    sess = tf.get_default_session()
+    if sess is None:
+      raise RuntimeError(
+        "Couldn't find current session; you either need to call Profiler.set_session(sess), "
+        "or do \"with sess.as_default():\"")
+
+    return sess
+
+  def set_session(self, sess):
+    self._sess = sess
 
   def _old_dump_custom_tf(self):
     """
@@ -493,7 +519,7 @@ class ProfileContext(object):
 
     Basically we are adding each run_meta_data to C++, and C++ is responsible for writing the proto file.
     """
-    sess = tf.get_default_session()
+    sess = self._cur_session()
     self.trace_data = c_api_util.get_trace_data(sess)
     byte_size = self.trace_data.ByteSize()
     print("> trace_data size = {b} bytes".format(b=byte_size))
@@ -539,10 +565,11 @@ def now_in_usec():
   time_us = print_mdl.NowInUsec()
   return time_us
 
-def preallocate_tracer(step):
+def preallocate_tracer(step, sess):
   if DEBUG:
     print("> PREALLOCATE_TRACER for step={step}".format(step=step))
-  sess = tf.get_default_session()
+  assert sess is not None
+  # sess = tf.get_default_session()
   print_mdl.TF_PreallocateTracer(sess._session, step)
 
 def IsGPUTime(device):

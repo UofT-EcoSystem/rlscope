@@ -626,7 +626,10 @@ class TraceEventsParser:
             # In particular, the libcupti NVIDIA library gets loaded on-demand during
             # the first traced step, and this can take 2 seconds to load!
             # (We had this bug before...)
-            step = steps[1]
+            if len(steps) > 1:
+                step = steps[1]
+            else:
+                step = steps[0]
 
             print("> Generate traceEvents for step={step}".format(step=step))
 

@@ -17,6 +17,7 @@ import tensorflow as tf
 from tensorflow.python.client import device_lib as tf_device_lib
 from tensorflow.python.profiler import profile_context
 from tensorflow.python.framework import c_api_util
+from tensorflow.python.client import session
 
 # from proto.tensorflow.core.profiler.tfprof_log_pb2 import ProfileProto
 from tensorflow.core.profiler.tfprof_log_pb2 import ProfileProto
@@ -65,10 +66,31 @@ def modify_tensorflow():
 
     tensorflow_profile_context.MAX_TRACED_STEPS = 99999999
 
+    setup_wrap_BaseSession_as_default()
+
     # from tensorflow.python.profiler import profile_context
     # profile_context.MAX_TRACED_STEPS = 99999999
 
     _TF_MODIFIED = True
+
+# All currently active Profiler objects (there should really only be one).
+# Used for hooking into sess.as_default()
+PROFILERS = []
+
+"""
+Wrap sess.as_default().
+"""
+old_BaseSession_as_default = None
+def setup_wrap_BaseSession_as_default():
+    global old_BaseSession_as_default
+    old_BaseSession_as_default = getattr(session.BaseSession, 'as_default')
+    setattr(session.BaseSession, 'as_default', wrap_BaseSession_as_default)
+def wrap_BaseSession_as_default(self):
+    if DEBUG:
+        print_stacktrace("> wrapped sess.as_default()")
+    for prof in PROFILERS:
+        prof.set_session(self)
+    return old_BaseSession_as_default(self)
 
 class Profiler:
     """
@@ -110,18 +132,52 @@ class Profiler:
         if True, exit ML script immediately after benchmarking bench_name.
         Othwerwise, continue executing ML script until it finishes.
     """
-    def __init__(self, directory,
-                 bench_names=[NO_BENCH_NAME], bench_name=NO_BENCH_NAME,
+    def __init__(self, directory=None,
+                 bench_name=NO_BENCH_NAME,
                  num_calls=None, start_measuring_call=None,
                  num_traces=None,
-                 no_idempotent=False,
                  tfprof=True,
                  c_lib_func_pyprof_pattern=None,
                  # tfprof=True,
                  repetition_time_limit_sec=10.,
-                 debug=False, idempotent_bench_names=[NO_BENCH_NAME],
-                 exit_early=True):
+                 debug=None,
+                 exit_early=True,
+                 args=None):
         modify_tensorflow()
+
+        def get_iml_argname(argname):
+            name = argname
+            # name = re.sub('_', '-', name)
+            name = "iml_{name}".format(name=name)
+            return name
+
+        def get_argval(argname, klass_arg, default_arg, allow_none=True):
+            """
+            Extract --iml-* args added by add_iml_arguments, unless provided with arguments to the constructor.
+
+            :param argname:
+                Name of argument (without iml prefix).
+            :param klass_arg:
+                Value provided to constructor.
+            :param default_arg:
+                Default value to use if klass_arg is not provided to constructor and/or args is not provided.
+            :return:
+            """
+            if args is None or klass_arg is not None:
+                return klass_arg
+
+            iml_argname = get_iml_argname(argname)
+
+            if hasattr(args, iml_argname) and getattr(args, iml_argname) is not None:
+                argval = getattr(args, iml_argname)
+                return argval
+
+            if not allow_none and default_arg is None:
+                raise RuntimeError("IML: you must provide a value for --{arg}".format(
+                    arg=re.sub('_', '-', iml_argname)))
+
+            return default_arg
+
         self.pctx = None
         self.next_trace_id = None
         self.process_name = None
@@ -131,35 +187,34 @@ class Profiler:
         self._profiler_started = False
         self.cur_bench_name = NO_BENCH_NAME
         self.total_profile_time_sec = 0
-        self.directory = directory
+        self.directory = get_argval('directory', directory, None, allow_none=False)
         self.exit_early = exit_early
         self.tfprof = tfprof
         self.c_lib_func_pyprof_pattern = c_lib_func_pyprof_pattern
         self.repetition_time_limit_sec = repetition_time_limit_sec
-        self.num_calls = num_calls
-        self.num_traces = num_traces
-        self.bench_names = set(bench_names if bench_names is not None else [])
-        self.bench_name = bench_name
-        self.start_measuring_call = start_measuring_call
-        self.no_idempotent = no_idempotent
-        self.debug = debug
+        self.num_calls = get_argval('num_calls', num_calls, None)
+        self.num_traces = get_argval('num_traces', num_traces, None)
+        self.bench_name = get_argval('bench_name', bench_name, None)
+        self.start_measuring_call = get_argval('start_measuring_call', start_measuring_call, None)
+        self.debug = get_argval('debug', debug, False)
         if not self.tfprof:
             self.cuda_profiler = CUDAProfiler()
-        def init_bench_dict(default_value):
-            return dict((bench_name, default_value) for bench_name in self.bench_names)
-        self.idempotent_bench_names = set(idempotent_bench_names) if idempotent_bench_names is not None else set()
-        self.start_t = init_bench_dict(None)
-        self.end_t = init_bench_dict(None)
-        self.time_sec = init_bench_dict(0.)
+        self.start_t = dict()
+        self.end_t = dict()
+        self.time_sec = dict()
         # How many times has a block of code that we are intending to profile been run?
         # We expect to run that block of code at least
         # (self.start_measuring_call + self.num_calls) times.
-        self.code_count = init_bench_dict(0)
+        self.code_count = dict()
         self.steps = 0
         self.step_start_profiling = None
         self.step_end_profiling = None
         self.average_time_per_call_sec = None
         self.average_time_per_call_no_profile_sec = None
+
+        self._op_trace_enabled = False
+
+        self.sess = None
 
         # Total times collected from running profiled operations.
         self.profile_sec = []
@@ -197,9 +252,6 @@ class Profiler:
         if DEBUG:
             print("> Using next_trace_id = {id}".format(id=self.next_trace_id))
 
-    def is_idempotent(self, bench_name):
-        return bench_name in self.idempotent_bench_names
-
     def _init_num_calls(self, bench_name, func, *args, **kwargs):
         """
         PSEUDOCODE:
@@ -236,7 +288,7 @@ class Profiler:
           total_time_sec = end_t - start_t
         while (stdev / mean) > 1% and total_time_sec < time_limit_sec:
         """
-        if self.num_calls is not None or self.no_idempotent or not self.is_idempotent(bench_name):
+        if self.num_calls is not None:
             return
 
         # Dynamically calculate number of iterations to run for; start with 10 at least.
@@ -364,16 +416,60 @@ class Profiler:
 
     def disable_profiling(self, bench_name=NO_BENCH_NAME, num_calls=1):
         if not self._should_measure_call(bench_name):
-            self.code_count[bench_name] += 1
+            self.code_count[bench_name] = self.code_count.get(bench_name, 0) + 1
             return
 
         self._end()
         end_time_sec = time.time()
         self.end_t[bench_name] = end_time_sec
-        self.time_sec[bench_name] += end_time_sec - self.start_t[bench_name]
-        self.code_count[bench_name] += num_calls
+        self.time_sec[bench_name] = self.time_sec.get(bench_name, 0.) + end_time_sec - self.start_t[bench_name]
+        self.code_count[bench_name] = self.code_count.get(bench_name, 0) + num_calls
 
-    def start_profiling(self):
+    def set_session(self, sess):
+        if DEBUG:
+            print_stacktrace("> set_session = {sess}".format(sess=sess))
+
+        assert sess is not None
+
+        if self.sess is not None:
+            raise NotImplementedError("Haven't implemented profiling using multiple session objects.")
+        self.sess = sess
+
+        if self.cur_bench_name is not None and not self._op_trace_enabled:
+            self._init_op_trace(self.cur_bench_name, allow_skip=False)
+
+        if self.pctx is not None:
+            self.pctx.set_session(self.sess)
+
+    def _cur_session(self, allow_none=False):
+        if self.sess is not None:
+            return self.sess
+
+        sess = tf.get_default_session()
+        if sess is None and not allow_none:
+            raise RuntimeError(
+                "Couldn't find current session; you either need to call Profiler.set_session(sess), "
+                "or do \"with sess.as_default():\"")
+
+        return sess
+
+    def start(self):
+        self._start_tfprof()
+        PROFILERS.append(self)
+
+    def _maybe_end_operation(self):
+        if self.cur_bench_name != NO_BENCH_NAME:
+            self.end_operation(self.cur_bench_name)
+        assert self.cur_bench_name == NO_BENCH_NAME
+
+    def stop(self):
+        PROFILERS.remove(self)
+        self._maybe_end_operation()
+        self._maybe_finish(finish_now=True, skip_finish=False)
+        # Execution shouldn't reach here.
+        assert False
+
+    def _start_tfprof(self):
         """
         Meant to be called right before we start measuring individual operations.
 
@@ -400,7 +496,7 @@ class Profiler:
         self._profiler_started = True
         self.step_start_profiling = self.steps
 
-    def stop_profiling(self):
+    def _stop_tfprof(self):
         """
         Stop profiling:
         - Collect trace data, and dump it to file(s)
@@ -410,6 +506,8 @@ class Profiler:
         if not self._profiler_started:
             return
         # NOTE: this is when we collect the trace data... keep that in mind when we implement DUMP.
+        if self.sess is not None:
+            self.pctx.set_session(self.sess)
         self.pctx.__exit__(None, None, None)
         self._profiler_started = False
 
@@ -431,8 +529,6 @@ class Profiler:
 
         if not(
             self._should_measure_call(bench_name)
-            # and
-            # not self.no_idempotent and self.is_idempotent(bench_name)
         ):
             return
 
@@ -443,28 +539,31 @@ class Profiler:
         if DEBUG:
             print("> set_operation(op={op})".format(op=bench_name))
 
+        self._init_op_trace(bench_name, allow_skip=True)
+
+    def _init_op_trace(self, bench_name, allow_skip=False):
+        sess = self._cur_session(allow_none=True)
+        if sess is None:
+            if allow_skip:
+                # They called set_operation before calling set_session/sess.as_default().
+                # Delay preallocation of tracer until session is set.
+                #
+                # PROBLEM: we cannot hook into "with sess.as_default()"
+                return
+            raise RuntimeError(
+                "Couldn't find current session; you either need to call Profiler.set_session(sess), "
+                "or do \"with sess.as_default():\"")
+
         with _tracing_disabled(prof=self):
             if py_config.CUSTOM_TF:
-                tensorflow_profile_context.preallocate_tracer(self._tfprof_step)
-        # PROBLEM: internally tfprof uses its own step counter, which starts at 0
-        # when we start tfprof (pctx.__enter__) and increments at each session.run() call.
-        #
-        # This is bad for several reasons:
-        # - What if we try to measure something with 2 session.run() calls?
-        # -
-        #
-        # Why we like step counts:
-        # - It's easy to group operations into separate measurements.
-        # - However that can be done by adding operation-event's
-        # - We should get RID of step, and replace it with operation-event's;
-        #   we select multiple measurements of an operation by filtering by a particular operation-event type,
-        #   and select sequential traces over time.
+                tensorflow_profile_context.preallocate_tracer(self._tfprof_step, sess)
         clib_wrap.enable_tracing()
         self.enable_profiling(bench_name)
         clib_wrap.set_step(self._tfprof_step, expect_traced=True)
         if (tensorflow_profile_context.DEBUG or TF_PRINT_TIMESTAMP) and clib_wrap.is_recording():
             print("> RECORDING STEP = {step}".format(step=self._tfprof_step))
         self.start_call_us = clib_wrap.now_us()
+        self._op_trace_enabled = True
 
     @property
     def _tfprof_step(self):
@@ -480,6 +579,13 @@ class Profiler:
         return self.pctx._step
 
     def end_operation(self, bench_name=NO_BENCH_NAME):
+        if self.cur_bench_name == NO_BENCH_NAME and bench_name != self.cur_bench_name:
+            """
+            start_operation was called, but was skipped since _should_measure_call 
+            returned false.
+            """
+            return
+
         if bench_name == NO_BENCH_NAME:
             assert self.cur_bench_name != NO_BENCH_NAME
             bench_name = self.cur_bench_name
@@ -504,6 +610,7 @@ class Profiler:
                                    op_name=bench_name)
         clib_wrap.disable_tracing()
         self.cur_bench_name = NO_BENCH_NAME
+        self._op_trace_enabled = True
 
     def profile(self, bench_name, func, *args, **kwargs):
         """
@@ -540,7 +647,7 @@ class Profiler:
 
         raise NotImplementedError
 
-        if should_measure and not self.no_idempotent and self.is_idempotent(bench_name):
+        if should_measure:
             # idempotent.
             # for i in range(self.start_measuring_call):
             #     func(*args, **kwargs)
@@ -557,7 +664,7 @@ class Profiler:
 
             # with tf.contrib.tfprof.ProfileContext(self.out_dir) as pctx:
             if self.tfprof:
-                self.start_profiling()
+                self._start_tfprof()
 
             self.profile_sec = []
             self.no_profile_sec = []
@@ -578,7 +685,7 @@ class Profiler:
                 self.average_time_per_call_no_profile_sec = np.mean(self.no_profile_sec[1:])
 
             if self.tfprof:
-                self.stop_profiling()
+                self._stop_tfprof()
 
             if hasattr(func, 'reset'):
                 # Cleanup anything we did specific to profiling so we can resume
@@ -617,7 +724,7 @@ class Profiler:
         start_us = now_us()
         assert self.cur_bench_name == NO_BENCH_NAME
 
-        self.stop_profiling()
+        self._stop_tfprof()
 
         # ProfileGlobals.files_after = ls_files(self.out_dir)
 
@@ -698,24 +805,24 @@ class Profiler:
         with open(path, 'wb') as f:
             f.write(proto.SerializeToString())
 
-    def should_dump_trace(self):
-        return self.steps >= self.step_start_profiling + self.num_calls
+    def should_dump_trace(self, finish_now=False):
+        return finish_now or ( self.steps >= self.step_start_profiling + self.num_calls )
 
-    def should_finish(self, skip_finish=False):
-        return not skip_finish and self.next_trace_id >= self.num_traces
+    def should_finish(self, finish_now=False, skip_finish=False):
+        return finish_now or ( not skip_finish and self.next_trace_id >= self.num_traces )
 
-    def _maybe_finish(self, skip_finish=False):
-        dump_trace = self.should_dump_trace()
+    def _maybe_finish(self, finish_now=False, skip_finish=False):
+        dump_trace = self.should_dump_trace(finish_now)
         if dump_trace:
             self.dump_trace()
 
-        if self.should_finish(skip_finish):
+        if self.should_finish(finish_now, skip_finish):
             self.finish()
 
         if dump_trace:
             # We just dumped a trace but we're not finished;
             # start profiling again for the next trace.
-            self.start_profiling()
+            self._start_tfprof()
 
     def next_step(self, skip_finish=False):
         """
@@ -731,10 +838,9 @@ class Profiler:
         # set_operation assumes self.steps has a certain value,
         # so end_operation ought to be able to assume self.steps doesn't change.
         # So, yes.
-        if self.cur_bench_name != NO_BENCH_NAME:
-            self.end_operation(self.cur_bench_name)
-        assert self.cur_bench_name == NO_BENCH_NAME
-        self._maybe_finish(skip_finish)
+        self._maybe_end_operation()
+        self._maybe_finish(finish_now=False,
+                           skip_finish=skip_finish)
         self.steps += 1
 
     def done_measuring(self):
@@ -753,8 +859,6 @@ class Profiler:
         # Can only measure one bench_name at a time.
         return self.exit_early and \
                self.done_measuring()
-        # return all(self.code_count[bench_name] >= self.num_calls \
-        #            for bench_name in self.bench_names)
 
 class CUDAProfiler:
     def __init__(self):
@@ -897,9 +1001,6 @@ def add_iml_arguments(parser):
         used to determine whether this python script has been invoked using nvprof.
         If it hasn't, the script will re-invoke itself with nvprof.
     """))
-    parser.add_argument('--iml-no-idempotent', action='store_true', help=textwrap.dedent("""
-        IML: don't measure bench_name's iterations all-at-once; measure 1 iteration at each loop-step only.
-    """))
     # parser.add_argument('--iml-tfprof', action='store_true', help=textwrap.dedent("""
     #     IML: use tfprof TensorFlow profiling utility INSTEAD of nvprof.
     # """))
@@ -916,6 +1017,9 @@ def add_iml_arguments(parser):
         for e.g. sesssion.run(...) for running the computational graph
         (currently this is the only thing we trace).
     """))
+    parser.add_argument('--iml-debug', action='store_true', help=textwrap.dedent("""
+        IML: debug profiler.
+    """))
     parser.add_argument('--iml-start-measuring-call', default=100, type=int,
                         help="IML: when should measuring begin?")
     parser.add_argument('--iml-bench-name',
@@ -926,15 +1030,10 @@ def add_iml_arguments(parser):
         # Just measure "some_bench", nothing else.
         profiler.profile('some_bench', do_some_bench)
     """))
-    parser.add_argument('--iml-bench-names',
-                        default=[NO_BENCH_NAME],
+    parser.add_argument('--iml-directory',
                         help=textwrap.dedent("""
-    IML: which code blocks should we measure?
-    i.e. --iml-bench-names bench1 bench3
-        profiler.profile('bench1', do_bench1) # Measure this
-        profiler.profile('bench2', do_bench2) # SKIP
-        profiler.profile('bench3', do_bench3) # Measure this
-    """), nargs='+')
+    IML: profiling output directory.
+    """))
 
 # Match input/output to PythonProfilerParser
 PYPROF_REGEX = r'(?:python_profile.*|microbenchmark\.json|config.*\.json)'
@@ -977,32 +1076,8 @@ def is_iml_file(path):
 # ProfileGlobals = _ProfileGlobals()
 
 def handle_iml_args(output_directory, parser, args, no_bench_name=False):
+    pass
     # ProfileGlobals.files_before = ls_files(output_directory)
-
-    if args.iml_bench_names is None:
-        if no_bench_name:
-            args.iml_bench_names = [NO_BENCH_NAME]
-        else:
-            parser.error("--iml-bench-names must contain the names of all the code-blocks this ML script contains.")
-
-    if args.iml_bench_name != NO_BENCH_NAME and args.iml_bench_name not in args.iml_bench_names:
-        parser.error("--iml-bench-name=\"{b}\" not in available bench names: --iml-bench-names={bs}".format(
-            b=args.iml_bench_name,
-            bs=args.iml_bench_names))
-
-    # args.iml_tfprof = True
-    # if not args.iml_nvprof_enabled:
-    # if not args.iml_nvprof_enabled and not args.iml_tfprof:
-    #     if args.iml_bench_name is not None:
-    #         # User wants to run specific bench_name.
-    #         run_with_nvprof(output_directory, parser, args,
-    #                         bench_name=args.iml_bench_name)
-    #     else:
-    #         # Run each bench_name.
-    #         for bench_name in args.iml_bench_names:
-    #             run_with_nvprof(output_directory, parser, args,
-    #                             bench_name=bench_name)
-    #     sys.exit(0)
 
 def run_with_nvprof(directory, parser, args,
                     bench_name=NO_BENCH_NAME):

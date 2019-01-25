@@ -104,18 +104,20 @@ def test_get_gpus(parser, args):
     cpus = get_available_cpus()
     pprint.pprint({'gpus':gpus, 'cpus':cpus})
 
-def parse_profile(parser, args):
-    assert args.rule is not None
+def parse_profile(rule, parser, args):
 
-    ParserKlass = PARSER_NAME_TO_KLASS[args.rule]
+    ParserKlass = PARSER_NAME_TO_KLASS[rule]
 
     if issubclass(ParserKlass, ProfilerParserCommonMixin):
-        return old_parse_profile(parser, args)
+        return old_parse_profile(rule, parser, args)
 
     if args.directories is not None:
         directories = list(args.directories)
     else:
         directories = [args.directory]
+
+    # if args.rules is None:
+    #     args.rules = []
 
     if len(directories) > 1:
         print("ERROR: expected a single --directory")
@@ -134,10 +136,9 @@ def parse_profile(parser, args):
         print(str(e))
         sys.exit(1)
 
-def old_parse_profile(parser, args):
-    assert args.rule is not None
+def old_parse_profile(rule, parser, args):
 
-    ParserKlass = PARSER_NAME_TO_KLASS[args.rule]
+    ParserKlass = PARSER_NAME_TO_KLASS[rule]
 
     if args.directories is not None:
         directories = list(args.directories)
@@ -192,7 +193,8 @@ def main():
 
     parser.add_argument("--benchmarks",
                         choices=list(BENCH_NAME_ORDER),
-                        action='append', default=[])
+                        action='append', default=[],
+                        )
     parser.add_argument("--clock",
                         choices=['monotonic_clock'],
                         default='monotonic_clock',
@@ -216,7 +218,9 @@ def main():
                         help=textwrap.dedent("""
                         Minimum amount of time for it to take to run a single repetition.
                         """))
-    parser.add_argument("--rule",
+    parser.add_argument("--rules",
+                        nargs='+', default=[],
+                        # action='append', default=[],
                         help='rule to run')
     parser.add_argument("--bench-name",
                         # default=NO_BENCH_NAME,
@@ -343,8 +347,11 @@ def main():
                         action='store_true')
     args = parse_args(parser)
 
-    if args.rule is not None:
-        parse_profile(parser, args)
+    if len(args.rules) > 0:
+        for rule in args.rules:
+            print("> Rule = {rule}".format(
+                rule=rule))
+            parse_profile(rule, parser, args)
         return
 
     global tf
