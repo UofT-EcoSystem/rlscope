@@ -2,6 +2,7 @@ import cProfile, pstats, io
 import codecs
 import sys
 import json
+import argparse
 import pprint
 import subprocess
 import textwrap
@@ -142,8 +143,16 @@ class Profiler:
                  repetition_time_limit_sec=10.,
                  debug=None,
                  exit_early=True,
+                 require_end_operation=False,
+                 disable=None,
                  args=None):
         modify_tensorflow()
+
+        """
+        If set, require the user to call prof.end_operation
+        (don't allow a call to prof.set_operation to also count as a call to prof.end_operation)
+        """
+        self.require_end_operation = require_end_operation
 
         def get_iml_argname(argname):
             name = argname
@@ -184,10 +193,12 @@ class Profiler:
         self.phase = 0
         self.next_trace_id = None
         # self.init_trace_id()
-        self._profiler_started = False
+        self._tfprof_enabled = False
+        self._pyprof_enabled = False
         self.cur_bench_name = NO_BENCH_NAME
         self.total_profile_time_sec = 0
         self.directory = get_argval('directory', directory, None, allow_none=False)
+        self.disable = get_argval('disable', disable, False)
         self.exit_early = exit_early
         self.tfprof = tfprof
         self.c_lib_func_pyprof_pattern = c_lib_func_pyprof_pattern
@@ -211,8 +222,6 @@ class Profiler:
         self.step_end_profiling = None
         self.average_time_per_call_sec = None
         self.average_time_per_call_no_profile_sec = None
-
-        self._op_trace_enabled = False
 
         self.sess = None
 
@@ -435,8 +444,11 @@ class Profiler:
             raise NotImplementedError("Haven't implemented profiling using multiple session objects.")
         self.sess = sess
 
-        if self.cur_bench_name is not None and not self._op_trace_enabled:
-            self._init_op_trace(self.cur_bench_name, allow_skip=False)
+        if self.disable:
+            return
+
+        if self.cur_bench_name is not None and not self._tfprof_enabled:
+            self._start_tfprof(bench_name=self.cur_bench_name, allow_skip=False)
 
         if self.pctx is not None:
             self.pctx.set_session(self.sess)
@@ -454,8 +466,12 @@ class Profiler:
         return sess
 
     def start(self):
-        self._start_tfprof()
         PROFILERS.append(self)
+
+        if self.disable:
+            return
+
+        self._start_tfprof(allow_skip=True)
 
     def _maybe_end_operation(self):
         if self.cur_bench_name != NO_BENCH_NAME:
@@ -464,12 +480,16 @@ class Profiler:
 
     def stop(self):
         PROFILERS.remove(self)
+
+        if self.disable:
+            return
+
         self._maybe_end_operation()
         self._maybe_finish(finish_now=True, skip_finish=False)
         # Execution shouldn't reach here.
         assert False
 
-    def _start_tfprof(self):
+    def _start_tfprof(self, bench_name=NO_BENCH_NAME, allow_skip=False):
         """
         Meant to be called right before we start measuring individual operations.
 
@@ -480,40 +500,62 @@ class Profiler:
         :return:
         """
         if self.process_name is None:
-            raise RuntimeError("You need to call profier.set_process_name(...) before profiling.")
+            raise RuntimeError("You need to call profiler.set_process_name(...) before profiling.")
         assert self.phase is not None
 
-        if self._profiler_started:
+        if self._tfprof_enabled:
             return
-        clib_wrap.wrap_libs()
+
+        sess = self._cur_session(allow_none=True)
+        if sess is None:
+            if allow_skip:
+                # They called set_operation before calling set_session/sess.as_default().
+                # Delay preallocation of tracer until session is set.
+                return
+            raise RuntimeError(
+                "Couldn't find current session; you either need to call Profiler.set_session(sess), "
+                "or do \"with sess.as_default():\"")
+
         self.pctx = tensorflow_profile_context.ProfileContext(self.out_dir, dump_on_finished=True,
                                                               # Need to explicitly use empty trace steps otherwise profiler
                                                               # "auto decides" which steps to trace.
                                                               trace_steps=[],
                                                               process_name=self.process_name,
-                                                              phase=self.phase)
+                                                              phase=self.phase,
+                                                              trace_all=True)
+        # NOTE: this needs to be called before each session.run(...) call....
+        # with _tracing_disabled(prof=self):
+        #     if py_config.CUSTOM_TF:
+        #         tensorflow_profile_context.preallocate_tracer(self._tfprof_step, sess)
         self.pctx.__enter__()
-        self._profiler_started = True
-        self.step_start_profiling = self.steps
+        self._tfprof_enabled = True
 
-    def _stop_tfprof(self):
+    def _stop_tfprof(self, bench_name=NO_BENCH_NAME):
         """
         Stop profiling:
         - Collect trace data, and dump it to file(s)
 
         :return:
         """
-        if not self._profiler_started:
+        if not self._tfprof_enabled:
             return
         # NOTE: this is when we collect the trace data... keep that in mind when we implement DUMP.
         if self.sess is not None:
             self.pctx.set_session(self.sess)
         self.pctx.__exit__(None, None, None)
-        self._profiler_started = False
+        self._tfprof_enabled = False
+
+    def _check_profiling_started(self):
+        global PROFILERS
+        started = self in PROFILERS
+        if not started:
+            raise RuntimeError("IML: You need to call profiler.start() before profiling.")
 
     def set_operation(self, bench_name):
-        if self.pctx is None:
-            raise RuntimeError("You need to call profier.start_profiling() before profiling.")
+        if self.disable:
+            return
+
+        self._check_profiling_started()
 
         if self.cur_bench_name != NO_BENCH_NAME:
             """
@@ -534,65 +576,30 @@ class Profiler:
 
         self.cur_bench_name = bench_name
         # Q: If we don't have a session.run() call, will this result in a bug?
-        self.pctx.trace_next_step()
+        # self.pctx.trace_next_step()
 
         if DEBUG:
             print("> set_operation(op={op})".format(op=bench_name))
 
-        self._init_op_trace(bench_name, allow_skip=True)
+        self._start_tfprof(bench_name, allow_skip=True)
+        self._start_pyprof(bench_name)
 
-    def _init_op_trace(self, bench_name, allow_skip=False):
-        sess = self._cur_session(allow_none=True)
-        if sess is None:
-            if allow_skip:
-                # They called set_operation before calling set_session/sess.as_default().
-                # Delay preallocation of tracer until session is set.
-                #
-                # PROBLEM: we cannot hook into "with sess.as_default()"
-                return
-            raise RuntimeError(
-                "Couldn't find current session; you either need to call Profiler.set_session(sess), "
-                "or do \"with sess.as_default():\"")
-
-        with _tracing_disabled(prof=self):
-            if py_config.CUSTOM_TF:
-                tensorflow_profile_context.preallocate_tracer(self._tfprof_step, sess)
+    def _start_pyprof(self, bench_name):
+        # if self._pyprof_enabled:
+        #     return
+        # assert not self._pyprof_enabled
+        clib_wrap.wrap_libs()
+        self.step_start_profiling = self.steps
         clib_wrap.enable_tracing()
         self.enable_profiling(bench_name)
-        clib_wrap.set_step(self._tfprof_step, expect_traced=True)
+        clib_wrap.set_step(self._pyprof_step, expect_traced=True)
         if (tensorflow_profile_context.DEBUG or TF_PRINT_TIMESTAMP) and clib_wrap.is_recording():
-            print("> RECORDING STEP = {step}".format(step=self._tfprof_step))
+            print("> RECORDING pyprof_step = {step}".format(step=self._pyprof_step))
         self.start_call_us = clib_wrap.now_us()
-        self._op_trace_enabled = True
+        self._pyprof_enabled = True
 
-    @property
-    def _tfprof_step(self):
-        """
-        Internally, tfprof profiler (tensorflow_profile_context.ProfileContext) increments a step counter
-        every time session.run() is called.
-
-        Keep pyprof step number in sync by returning it directly.
-
-        :return:
-        """
-        assert self.pctx is not None
-        return self.pctx._step
-
-    def end_operation(self, bench_name=NO_BENCH_NAME):
-        if self.cur_bench_name == NO_BENCH_NAME and bench_name != self.cur_bench_name:
-            """
-            start_operation was called, but was skipped since _should_measure_call 
-            returned false.
-            """
-            return
-
-        if bench_name == NO_BENCH_NAME:
-            assert self.cur_bench_name != NO_BENCH_NAME
-            bench_name = self.cur_bench_name
-
-        if DEBUG:
-            print("> end_operation(op={op})".format(op=bench_name))
-
+    def _stop_pyprof(self, bench_name):
+        assert self._pyprof_enabled
         self.end_call_us = clib_wrap.now_us()
         self.disable_profiling(bench_name, num_calls=1)
         # Record the last amount of time in between returning
@@ -609,8 +616,63 @@ class Profiler:
         clib_wrap.record_operation(self.start_call_us, self.end_call_us,
                                    op_name=bench_name)
         clib_wrap.disable_tracing()
+        self._pyprof_enabled = False
+
+    @property
+    def _pyprof_step(self):
+        """
+        Some operations just won't call session.run(...).
+        In that case, we cannot depend on using the tfprof step number since
+        it won't increment between next_step calls.
+        So, just use our internal next_step counter.
+        """
+        return self.steps
+
+    @property
+    def _tfprof_step(self):
+        """
+        Internally, tfprof profiler (tensorflow_profile_context.ProfileContext) increments a step counter
+        every time session.run() is called.
+
+        Keep pyprof step number in sync by returning it directly.
+
+        :return:
+        """
+        assert self.pctx is not None
+        return self.pctx._step
+
+    def end_operation(self, bench_name=NO_BENCH_NAME):
+        if self.disable:
+            return
+
+        if bench_name != NO_BENCH_NAME and self.cur_bench_name != bench_name:
+            raise RuntimeError(textwrap.dedent("""
+            Detected nested profiling statements:
+                prof.set_operation({b1})
+                prof.set_operation({b2})
+            """.format(
+                b1=self.cur_bench_name,
+                b2=bench_name,
+            )))
+
+        if self.cur_bench_name == NO_BENCH_NAME and bench_name != self.cur_bench_name:
+            """
+            start_operation was called, but was skipped since _should_measure_call 
+            returned false.
+            """
+            return
+
+        if bench_name == NO_BENCH_NAME:
+            assert self.cur_bench_name != NO_BENCH_NAME
+            bench_name = self.cur_bench_name
+
+        if DEBUG:
+            print("> end_operation(op={op})".format(op=bench_name))
+
+        self._stop_pyprof(bench_name)
+        self._stop_tfprof(bench_name)
+
         self.cur_bench_name = NO_BENCH_NAME
-        self._op_trace_enabled = True
 
     def profile(self, bench_name, func, *args, **kwargs):
         """
@@ -664,7 +726,7 @@ class Profiler:
 
             # with tf.contrib.tfprof.ProfileContext(self.out_dir) as pctx:
             if self.tfprof:
-                self._start_tfprof()
+                self._start_tfprof(bench_name, allow_skip=False)
 
             self.profile_sec = []
             self.no_profile_sec = []
@@ -685,7 +747,7 @@ class Profiler:
                 self.average_time_per_call_no_profile_sec = np.mean(self.no_profile_sec[1:])
 
             if self.tfprof:
-                self._stop_tfprof()
+                self._stop_tfprof(bench_name)
 
             if hasattr(func, 'reset'):
                 # Cleanup anything we did specific to profiling so we can resume
@@ -724,7 +786,9 @@ class Profiler:
         start_us = now_us()
         assert self.cur_bench_name == NO_BENCH_NAME
 
-        self._stop_tfprof()
+        assert not self._tfprof_enabled
+        assert not self._pyprof_enabled
+        # self._stop_tfprof()
 
         # ProfileGlobals.files_after = ls_files(self.out_dir)
 
@@ -784,7 +848,7 @@ class Profiler:
                 os.rename(tf_proto, new_tf_proto)
                 # self._fixup_tfprof(new_tf_proto)
             else:
-                print(("WARNING: bench_name={bench} did not run session.run(...), "
+                print(("> WARNING: bench_name={bench} did not run session.run(...), "
                        "so no tfprof output was generated for it").format(bench=self.bench_name))
 
         self.next_trace_id += 1
@@ -822,7 +886,7 @@ class Profiler:
         if dump_trace:
             # We just dumped a trace but we're not finished;
             # start profiling again for the next trace.
-            self._start_tfprof()
+            self._start_tfprof(allow_skip=True)
 
     def next_step(self, skip_finish=False):
         """
@@ -1017,6 +1081,9 @@ def add_iml_arguments(parser):
         for e.g. sesssion.run(...) for running the computational graph
         (currently this is the only thing we trace).
     """))
+    parser.add_argument('--iml-disable', action='store_true', help=textwrap.dedent("""
+        IML: Skip any profiling.
+    """))
     parser.add_argument('--iml-debug', action='store_true', help=textwrap.dedent("""
         IML: debug profiler.
     """))
@@ -1079,6 +1146,19 @@ def handle_iml_args(output_directory, parser, args, no_bench_name=False):
     pass
     # ProfileGlobals.files_before = ls_files(output_directory)
 
+def iml_argv():
+    """
+    Return a list of string arguments related to IML that were passed to the current running python process.
+
+    Useful for forwarding IML arguments to python child processes instrumented with IML.
+    """
+    # JAMES TODO: forward set_phase to children.
+    parser = argparse.ArgumentParser()
+    add_iml_arguments(parser)
+    args, extra_argv = parser.parse_known_args(sys.argv)
+    argv = args_to_cmdline(parser, args, keep_executable=False, keep_debug=False)
+    return argv
+
 def run_with_nvprof(directory, parser, args,
                     bench_name=NO_BENCH_NAME):
     print("> Reinvoking script with nvprof; bench_name={b}".format(
@@ -1108,8 +1188,12 @@ def run_with_nvprof(directory, parser, args,
     print_cmd(argv_exec)
     subprocess.run(argv_exec, stdout=sys.stdout, stderr=sys.stderr, check=True)
 
-def args_to_cmdline(parser, args):
+def args_to_cmdline(parser, args,
+                    keep_executable=True,
+                    keep_debug=True):
     """
+    NOTE: This WON'T keep arguments from sys.argv that AREN'T captured by parser.
+
     # To convert args namespace into cmdline:
 
     if args.option == True and option in parser:
@@ -1134,9 +1218,18 @@ def args_to_cmdline(parser, args):
     while not re.search(r'\.py$', sys.argv[py_script_idx]):
         py_script_idx += 1
     extra_opts = []
-    if hasattr(args, 'debug') and args.debug:
+    if keep_debug and hasattr(args, 'debug') and args.debug:
         extra_opts.extend(["-m", "ipdb"])
-    cmdline = [sys.executable] + extra_opts + sys.argv[0:py_script_idx+1]
+    cmdline = []
+    if keep_executable:
+        cmdline.append(sys.executable)
+    cmdline.extend(extra_opts)
+    if keep_executable:
+        # Include python script path
+        cmdline.extend(sys.argv[0:py_script_idx+1])
+    else:
+        # Don't include python script path
+        cmdline.extend(sys.argv[0:py_script_idx])
     for option, value in args.__dict__.items():
         opt = optname(option)
         if value is None:

@@ -94,6 +94,17 @@ def _profiled_run(self,
           old_trace_level = options.trace_level
           options.trace_level = config_pb2.RunOptions.FULL_TRACE
 
+        # with _tracing_disabled(prof=self):
+        if py_config.CUSTOM_TF:
+            tfprof_step = self.profile_context._step
+            sess = self
+            preallocate_tracer(tfprof_step, sess)
+
+        if DEBUG:
+          sess = self
+          tracer_is_set = c_api_util.get_is_tracer_set(sess)
+          assert tracer_is_set
+
         start_run_internal_t = time.time()
         ret = self._profiler_run_internal(
             fetches, feed_dict, options, run_metadata)
@@ -209,10 +220,12 @@ class ProfileContext(object):
                debug=False,
                dump_on_finished=False,
                process_name=None,
-               phase=None):
+               phase=None,
+               trace_all=False):
     self.process_name = process_name
     self.phase = phase
     self._sess = None
+    self._trace_all = trace_all
     
     self._enabled = enabled
     if not self._enabled:
@@ -294,6 +307,9 @@ class ProfileContext(object):
     self._slow_path_steps.add(self._step)
 
   def _is_fast_path(self, step):
+    if self._trace_all:
+      return False
+    
     if step in self._slow_path_steps:
       return False
     # When user doesn't set the tracing steps explicitly, auto decide it.
@@ -301,9 +317,15 @@ class ProfileContext(object):
         self._traced_steps <= MAX_TRACED_STEPS):
       return False
     return True
+  
+  def set_trace_all(self, trace_all):
+    self._trace_all = trace_all
 
   def _should_trace(self, step, graph, fetches):
     """Whether should do tracing at current step."""
+    if self._trace_all:
+      return True
+    
     if self._traced_steps > MAX_TRACED_STEPS:
       return False
     # Check user-set tracing steps.
@@ -406,7 +428,13 @@ class ProfileContext(object):
       return self
 
   def _dump_custom_tf(self):
-    sess = self._cur_session()
+    sess = self._cur_session(allow_none=True)
+
+    if sess is None:
+        print(("> WARNING: tfprof didn't trace sessions for cmd:\n"
+               "  cmd: {cmd}").format(cmd=" ".join(sys.argv)))
+        return
+
     self.trace_data = c_api_util.get_trace_data(sess)
     byte_size = self.trace_data.ByteSize()
     print("> trace_data size = {b} bytes".format(b=byte_size))
@@ -495,12 +523,12 @@ class ProfileContext(object):
     with open(profile_path, 'wb') as f:
       f.write(profile_proto.SerializeToString())
 
-  def _cur_session(self):
+  def _cur_session(self, allow_none=False):
     if self._sess is not None:
       return self._sess
 
     sess = tf.get_default_session()
-    if sess is None:
+    if sess is None and not allow_none:
       raise RuntimeError(
         "Couldn't find current session; you either need to call Profiler.set_session(sess), "
         "or do \"with sess.as_default():\"")
