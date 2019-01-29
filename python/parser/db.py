@@ -2,6 +2,7 @@ import os
 import re
 import subprocess
 import progressbar
+import pytest
 
 import sqlite3
 from sqlite3 import Error
@@ -14,6 +15,8 @@ from tensorflow.core.profiler.tfprof_log_pb2 import ProfileProto
 from proto.protobuf.pyprof_pb2 import Pyprof
 
 import py_config
+
+from parser.trace_events import dump_category_times
 
 from parser.readers import TFProfCategoryTimesReader, \
     DEFAULT_group_by_device, \
@@ -76,6 +79,100 @@ class SQLiteParser:
             )))
         return src_files
 
+    def _check_no_partial_or_complete_op_overlap(self):
+        """
+        User adds profiling annotations in stack-oriented fashion:
+
+            e.g.
+
+            # with op1:
+            prof.set_operation('op1')
+            # with op2:
+            prof.set_operation('op2')
+            prof.end_operation('op2')
+            prof.end_operation('op1')
+
+        We don't allow non-stack-oriented annotations:
+
+            e.g.
+
+            prof.set_operation('op1')
+            prof.set_operation('op2')
+            prof.end_operation('op1')
+            prof.end_operation('op2')
+
+        The reason we don't allow this is so when we have overlapping operations types
+        in a super-operation/sub-operation arrangement,
+        we can unambiguously tell which operation to attribute execution time to
+        (i.e. op2 "absorbs" inner operation time of op1 in the first example)
+
+        To check for this, we assert that are no 2 op_events in the database that have partial-overlap:
+
+        e.g.
+
+        [    op1    ]
+                [    op2    ]
+
+                ----
+                partial overlap
+
+        Partial overlap condition:
+          op1.start < op2.start < op1.end < op2.end
+
+                [    op1    ]
+                [    op2    ]
+
+                ----
+                complete overlap
+
+        Partial overlap condition:
+          op1.start == op2.start and
+          op1.end   == op2.end
+
+        We only allow "full overlap", or "no overlap"
+        """
+        c = self.cursor
+
+        # op1.start         < op2.start         < op1.end                                 < op2.end
+        # op1.start_time_us < op2.start_time_us < ( op1.start_time_us + op1.duration_us ) < ( op2.start_time_us + op2.duration_us )
+        c.execute("""
+        SELECT * FROM Event AS op1 NATURAL JOIN Category c1
+        WHERE 
+        c1.category_name = '{CATEGORY_OPERATION}' AND
+        EXISTS (
+            SELECT * FROM Event AS op2 NATURAL JOIN Category c2
+            WHERE 
+            c2.category_name = '{CATEGORY_OPERATION}' AND
+            op1.start_time_us < op2.start_time_us AND
+                                op2.start_time_us < op1.end_time_us AND
+                                                    op1.end_time_us < op2.end_time_us
+        )
+        """.format(CATEGORY_OPERATION=CATEGORY_OPERATION))
+        rows = c.fetchall()
+        if len(rows) > 0:
+            pprint.pprint({'Events with partial overlap':[dict(row) for row in rows]})
+            raise RuntimeError("ERROR: Detected partial-overlap between operation-type events")
+
+        # op1.start == op2.start and
+        # op1.end   == op2.end
+        c.execute("""
+        SELECT * FROM Event AS op1 NATURAL JOIN Category c1
+        WHERE 
+        c1.category_name = '{CATEGORY_OPERATION}' AND
+        EXISTS (
+            SELECT * FROM Event AS op2 NATURAL JOIN Category c2
+            WHERE 
+            c2.category_name = '{CATEGORY_OPERATION}' AND
+            op1.event_id != op2.event_id AND
+            op1.start_time_us == op2.start_time_us AND
+            op1.end_time_us == op2.end_time_us
+        )
+        """.format(CATEGORY_OPERATION=CATEGORY_OPERATION))
+        rows = c.fetchall()
+        if len(rows) > 0:
+            pprint.pprint({'Events with complete overlap':[dict(row) for row in rows]})
+            raise RuntimeError("ERROR: Detected complete-overlap between operation-type events")
+
     def run(self):
         # 1. Create SQLite db file
         # for each input file:
@@ -111,9 +208,17 @@ class SQLiteParser:
 
         # Create indices at the end to reduce per-insert overhead.
         self.create_indices()
+        
+        self._check()
 
         self.conn.commit()
         self.conn.close()
+        
+    def _check(self):
+        """
+        Run any post-insert checks not captured by database constraints.
+        """
+        self._check_no_partial_or_complete_op_overlap()
 
     def maybe_commit(self, i):
         if (i + 1) % self.block_size == 0:
@@ -142,9 +247,11 @@ class SQLiteParser:
                         c=category,
                         duration_us=duration_us))
                 device_id = self.insert_device_name(device)
+                end_time_us = start_time_us + duration_us
                 insert = {
                     # 'thread_id':event.thread_id,
                     'start_time_us':start_time_us,
+                    'end_time_us':end_time_us,
                     'duration_us':duration_us,
                     'event_name':name,
                     'category_id':category_id,
@@ -226,6 +333,7 @@ class SQLiteParser:
                 event_id = event_conn.insert_dict('Event', {
                     'thread_id':event.thread_id,
                     'start_time_us':event.start_time_us,
+                    'end_time_us':event.start_time_us + event.duration_us,
                     'duration_us':event.duration_us,
                     'event_name':event.name,
                     'category_id':category_id,
@@ -542,6 +650,10 @@ class SQLiteCategoryTimesReader:
         return list(range(self.num_steps(bench_name)))
 
     @property
+    def directory(self):
+        return _d(self.db_path)
+
+    @property
     def bench_names(self):
         c = self.conn.cursor
         c.execute("""
@@ -618,7 +730,7 @@ class SQLiteCategoryTimesReader:
         Arguments: (? = bench_name)
         - This checks whether the given event occurs during the operation <bench_name>.
           An event E occurs during an operation, if there exists an 'Operation' event 
-          that surrounds its start time E.start.us.
+          that surrounds its start time E.start_us OR its end time E.end_us.
         - However, currently we only ever want to select a SINGLE "step" at a time, 
           so we aren't using this.
         """
@@ -630,18 +742,34 @@ class SQLiteCategoryTimesReader:
             return and_clause
 
         ignore_clauses = []
-        ignore_cats = list(ignore_categories) + [CATEGORY_OPERATION]
+        # ignore_cats = list(ignore_categories) + [CATEGORY_OPERATION]
+        ignore_cats = list(ignore_categories)
         for category in ignore_cats:
             ignore_clauses.append(ignore_and_clause(category))
         ignore_clause = "\n".join(ignore_clauses)
 
+        #
+        # For each time this op-type was called / for each step:
+        #   Split up op-type events based on nesting pattern. <-- handle nesting
+        #   Compute the overlap of this op-type instance with all other categories
+        #
+        # NOTE: We DON'T want to keep any overlap for OTHER op-types, 
+        # since those will be calculated separately.
+        # - One way of handling this; after splitting up by op-types, sweep through 
+        #   the op-types and remove anything that's not equal to the current op-type.
+        #
+
+        # e_out.event_name != 'train_loop' AND
         query = textwrap.dedent("""
         SELECT device_name, category_name, event_name, start_time_us, duration_us
         FROM 
           Category AS c_out 
           NATURAL JOIN Event as e_out
           NATURAL LEFT JOIN Device as d_out
-        WHERE ( ? <= e_out.start_time_us AND e_out.start_time_us <= ? )
+        WHERE ( 
+            ( ? <= e_out.start_time_us AND e_out.start_time_us <= ? ) OR
+            ( ? <= e_out.end_time_us AND e_out.end_time_us <= ? )
+        )
         {ignore_clause}
         ORDER BY start_time_us ASC 
         """.format(
@@ -650,12 +778,28 @@ class SQLiteCategoryTimesReader:
         if debug:
             print("> {name} query:".format(name=self.__class__.__name__))
             print(query)
-        c.execute(query, (op_event.start_time_usec, op_event.end_time_usec))
-        rows = c.fetchall()
+        c.execute(query, (
+            op_event.start_time_usec, op_event.end_time_usec,
+            op_event.start_time_usec, op_event.end_time_usec,
+        ))
         category_times = dict()
-        for row in rows:
+        # rows = c.fetchall()
+        # for row in rows:
+        for row in c:
             ktime = row_as_ktime(row)
             category_times_add_time(category_times, row['device_name'], ktime, group_by_device, category=row['category_name'])
+
+        # if i == 0 and self.debug:
+        if debug:
+            # Q: What do does train_loop look like, overlapped with all its fellow operation-types?
+            json_path = _j(self.directory, "SQLiteCategoryTimesReader.step_{step}{bench}.debug.json".format(
+                step=step,
+                bench=bench_suffix(bench_name)))
+            print("> DEBUG: dump trace events @ {path}".format(path=json_path))
+            dump_category_times(category_times, json_path)
+
+        category_times[CATEGORY_OPERATION] = process_op_nest(category_times[CATEGORY_OPERATION],
+                                                             filter_by_op=bench_name)
 
         return category_times
 
@@ -678,3 +822,305 @@ def row_as_ktime(row):
         name=row['event_name'],
     )
     return ktime
+
+def process_op_nest(op_events, filter_by_op=None):
+    """
+    Given nested operation-type events, have the inner-nested
+    events "absorb" the outer-nested events.
+
+    Then, filter out only the event-type of interest.
+
+
+    op-type                    [op3]
+                          [     op2      ]
+                     [          op1          ]
+
+    absorb =>        [op1][op2][op3][op2][op1]
+
+    filter(op1) =>   [op1]               [op1]
+
+    :param bench_name:
+        Current op-type.
+        Only keep ops of this type.
+    :param op_events: List[KernelTime]
+    :return:
+    """
+
+    def check_no_complete_overlap(op_events):
+        for op1, op2 in zip(op_events, op_events[1:]):
+            assert not op1.equals(op2)
+
+    check_no_complete_overlap(op_events)
+
+    op_stack = None
+    events = []
+    for i, op_event in enumerate(op_events):
+        if op_stack is None:
+            op_stack = OpStack(op_event)
+        elif op_stack.ktime.subsumes(op_event):
+            op_stack.insert(op_event)
+        else:
+            for event in op_stack.get_absored_ops():
+                events.append(event)
+            op_stack = OpStack(op_event)
+
+    if op_stack is not None:
+        for event in op_stack.get_absored_ops():
+            events.append(event)
+
+    if filter_by_op is not None:
+        events = [event for event in events if event.name == filter_by_op]
+
+    return events
+
+class OpStack:
+    """
+    Helper class for process_op_nest;
+    shouldn't be used by anything else.
+
+    An OpStack is a stack of operations.
+    e.g. op1, op2, op3, op4, op5 are all OpStack objects.
+
+                   [op2] [op3] [op4] [op5]
+    OpStack -> [             op1               ]
+
+    op1 = OpStack()
+    op1.sub_ops = [op2, op3, op4, op5]
+
+    NOTE:
+        OpStack assumes operations will be inserted sorted according to op.start_time.
+    """
+    def __init__(self, kernel_time):
+        self.sub_ops = []
+        self.ktime = kernel_time
+        self.last_insert_start_time = None
+
+    def subsumes(self, op):
+        return self.ktime.subsumes(op.ktime)
+
+    def insert(self, ktime):
+        if self.last_insert_start_time is None:
+            self.last_insert_start_time = ktime.start_time_usec
+        else:
+            assert self.last_insert_start_time <= ktime.start_time_usec
+
+        op1 = OpStack(ktime)
+        assert self.subsumes(op1)
+        self._insert(op1)
+
+    def _insert(self, op1):
+        assert self.subsumes(op1)
+        for op2 in self.sub_ops:
+            if op2.subsumes(op1):
+                op2._insert(op1)
+                return
+        if len(self.sub_ops) > 0:
+            assert op1.ktime.is_after(self.sub_ops[-1].ktime)
+        self.sub_ops.append(op1)
+        # into = self
+        # if into.ktime.subsumes(op.ktime):
+
+    @property
+    def name(self):
+        return self.ktime.name
+
+    @property
+    def start_time_usec(self):
+        return self.ktime.start_time_usec
+
+    @property
+    def end_time_usec(self):
+        return self.ktime.end_time_usec
+
+    def get_absored_ops(self, recursive=True):
+        def maybe_ktime(*args, **kwargs):
+            ktime = KernelTime(*args, **kwargs, name=self.name)
+            if ktime.start_time_usec < ktime.end_time_usec:
+                return ktime
+            return None
+
+        if len(self.sub_ops) == 0:
+            yield self.ktime
+            return
+
+        """
+        
+                                     Special case (2): End
+        Special case (1): Start      |
+        ---                       ------
+           [op2]-[op3]-[op4]-[op5]
+        [       |     |op1  |           ]
+                -------------
+                Iterative case: Between sub-ops
+        """
+
+        # Special case (1): Start
+        # Space from op1 until the first sub-op.
+        start_op = maybe_ktime(start_usec=self.start_time_usec,
+                               end_usec=self.sub_ops[0].start_time_usec)
+        if start_op is not None:
+            yield start_op
+
+        # zip([1], []):
+        #   Nothing.
+        # zip([1, 2], [2]):
+        #   (1, 2)
+
+        # Iterative case: Between sub-ops
+        # Space between adjacent operations, which is covered only by op1.
+        for op1, op2 in zip(self.sub_ops, self.sub_ops[1:]):
+
+            if recursive:
+                # Recursive case (1):
+                #   Recurse on [op2], [op3], [op4] in the diagram above.
+                for op in op1.get_absored_ops(True):
+                    yield op
+
+            op = maybe_ktime(start_usec=op1.end_time_usec,
+                             end_usec=op2.start_time_usec)
+            if op:
+                yield op
+
+        if recursive:
+            # Recursive case (2):
+            #   Recurse on [op5] in the diagram above.
+            for op in self.sub_ops[-1].get_absored_ops(True):
+                yield op
+
+        # Special case (2): End
+        # Space from op1 until the first sub-op.
+        end_op = maybe_ktime(start_usec=self.sub_ops[-1].end_time_usec,
+                             end_usec=self.end_time_usec)
+        if end_op is not None:
+            yield end_op
+
+def test_process_op_nest():
+    from test.test_util import sec, T
+
+    def test_01_1_stack():
+        op_events = [
+            T(0, 5, 'op1'),
+            T(1, 4, 'op2'),
+            T(2, 3, 'op3'),
+        ]
+
+        # Unfiltered:
+        actual = process_op_nest(op_events)
+        expect = [
+            T(0, 1, 'op1'),
+            T(1, 2, 'op2'),
+            T(2, 3, 'op3'),
+            T(3, 4, 'op2'),
+            T(4, 5, 'op1'),
+        ]
+        assert actual == expect
+
+        # Filter by op1
+        actual = process_op_nest(op_events, 'op1')
+        expect = [
+            T(0, 1, 'op1'),
+            T(4, 5, 'op1'),
+        ]
+        assert actual == expect
+
+        # Filter by op2
+        actual = process_op_nest(op_events, 'op2')
+        expect = [
+            T(1, 2, 'op2'),
+            T(3, 4, 'op2'),
+        ]
+        assert actual == expect
+
+        # Filter by op3
+        actual = process_op_nest(op_events, 'op3')
+        expect = [
+            T(2, 3, 'op3'),
+        ]
+        assert actual == expect
+    test_01_1_stack()
+
+    def test_02_2_stacks():
+        op_events = [
+            # Stack 1
+            T(0, 5, 'op1'),
+            T(1, 4, 'op2'),
+            T(2, 3, 'op3'),
+            # Stack 2
+            T(5, 8, 'op4'),
+            T(6, 7, 'op5'),
+        ]
+
+        # Unfiltered:
+        actual = process_op_nest(op_events)
+        expect = [
+            # Stack 1
+            T(0, 1, 'op1'),
+            T(1, 2, 'op2'),
+            T(2, 3, 'op3'),
+            T(3, 4, 'op2'),
+            T(4, 5, 'op1'),
+            # Stack 2
+            T(5, 6, 'op4'),
+            T(6, 7, 'op5'),
+            T(7, 8, 'op4'),
+        ]
+        assert actual == expect
+    test_02_2_stacks()
+
+    # Invalid input test
+    def test_03_complete_overlap():
+        op_events = [
+            T(0, 1, 'op1'),
+            T(0, 1, 'op2'),
+        ]
+
+        # Unfiltered:
+        with pytest.raises(AssertionError):
+            actual = process_op_nest(op_events)
+        # expect = [
+        #     T(0, 1, 'op2'),
+        # ]
+        # assert actual == expect
+    test_03_complete_overlap()
+
+    def test_04_multiple_sub_events():
+        op_events = [
+            T(0, 5, 'op1'),
+            T(1, 2, 'op2'),
+            T(3, 4, 'op3'),
+        ]
+
+        # Unfiltered:
+        actual = process_op_nest(op_events)
+        expect = [
+            T(0, 1, 'op1'),
+            T(1, 2, 'op2'),
+            T(2, 3, 'op1'),
+            T(3, 4, 'op3'),
+            T(4, 5, 'op1'),
+        ]
+        assert actual == expect
+
+        # Filter by op1
+        actual = process_op_nest(op_events, 'op1')
+        expect = [
+            T(0, 1, 'op1'),
+            T(2, 3, 'op1'),
+            T(4, 5, 'op1'),
+        ]
+        assert actual == expect
+
+        # Filter by op2
+        actual = process_op_nest(op_events, 'op2')
+        expect = [
+            T(1, 2, 'op2'),
+        ]
+        assert actual == expect
+
+        # Filter by op3
+        actual = process_op_nest(op_events, 'op3')
+        expect = [
+            T(3, 4, 'op3'),
+        ]
+        assert actual == expect
+    test_04_multiple_sub_events()

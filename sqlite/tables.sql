@@ -6,6 +6,7 @@ CREATE TABLE Event (
     event_id INTEGER PRIMARY KEY AUTOINCREMENT,
     thread_id INTEGER,
     start_time_us INTEGER NOT NULL,
+    end_time_us INTEGER NOT NULL,
     duration_us INTEGER NOT NULL,
     event_name TEXT,
 

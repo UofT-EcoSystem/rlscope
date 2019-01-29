@@ -1239,3 +1239,9 @@ def get_category_from_device(device):
     elif IsCPUTime(device):
         return CATEGORY_CUDA_API_CPU
     return CATEGORY_UNKNOWN
+
+def reversed_iter(xs):
+    n = len(xs)
+    for i in range(n - 1, 0 - 1, -1):
+        yield xs[i]
+

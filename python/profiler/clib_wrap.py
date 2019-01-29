@@ -31,8 +31,10 @@ DEFAULT_PREFIX = "CLIB__"
 
 _pyprof = Pyprof()
 def clear_pyprof_profiling():
-    global _pyprof, _python_start_us, _step
+    global _pyprof, _python_start_us, _step, _process_name
     _pyprof = Pyprof()
+    if _process_name is not None:
+        _pyprof.process_name = _process_name
     _python_start_us = now_us()
     _step = None
 
@@ -54,6 +56,12 @@ def set_step(step, expect_traced=False):
 
         if tensorflow_profile_context.DEBUG:
             pprint.pprint({'len(_pyprof.steps)':len(_pyprof.steps)}, indent=2)
+
+_process_name = None
+def set_process_name(process_name):
+    global _process_name
+    _process_name = process_name
+    _pyprof.process_name = process_name
 
 # _trace_steps = None
 # def set_trace_steps(trace_steps):

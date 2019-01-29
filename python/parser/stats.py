@@ -45,6 +45,16 @@ class KernelTime:
             self.time_usec = time_usec
             assert self.time_usec == self.end_usec - self.start_usec
 
+    def subsumes(self, op2):
+        op1 = self
+        # return op1.start_time_usec < op2.start_time_usec < op2.end_time_usec < op1.end_time_usec
+        return op1.start_time_usec <= op2.start_time_usec <= op2.end_time_usec <= op1.end_time_usec
+
+    def equals(self, op2):
+        op1 = self
+        return op1.start_time_usec == op2.start_time_usec and \
+               op1.end_time_usec == op2.end_time_usec
+
     @property
     def start_time_usec(self):
         assert self.start_usec is not None
@@ -73,6 +83,9 @@ class KernelTime:
     def is_before(self, ktime_b):
         return self.start_time_usec <= ktime_b.start_time_usec
         # return self.end_time_usec <= ktime_b.start_time_usec
+
+    def is_after(self, ktime_b):
+        return ktime_b.is_before(self)
 
     def __eq__(self, ktime_b):
         ktime_a = self

@@ -226,7 +226,8 @@ class ProfileContext(object):
     self.phase = phase
     self._sess = None
     self._trace_all = trace_all
-    
+    self._disable = False
+
     self._enabled = enabled
     if not self._enabled:
       return
@@ -283,6 +284,12 @@ class ProfileContext(object):
     self._slow_path_steps |= set(profile_steps)
     self._trace_steps |= set(profile_steps)
 
+  def disable_tracing(self):
+    self._disable = True
+
+  def enable_tracing(self):
+    self._disable = False
+
   @property
   def profiler(self):
     """Returns the current profiler object."""
@@ -307,6 +314,9 @@ class ProfileContext(object):
     self._slow_path_steps.add(self._step)
 
   def _is_fast_path(self, step):
+    if self._disable:
+      return True
+
     if self._trace_all:
       return False
     
@@ -323,6 +333,9 @@ class ProfileContext(object):
 
   def _should_trace(self, step, graph, fetches):
     """Whether should do tracing at current step."""
+    if self._disable:
+      return False
+
     if self._trace_all:
       return True
     

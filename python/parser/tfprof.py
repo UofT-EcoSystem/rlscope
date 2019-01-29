@@ -17,6 +17,8 @@ from proto.protobuf.pyprof_pb2 import Pyprof
 
 from parser.stats import KernelTime, category_times_add_time
 
+from parser.trace_events import TraceEventsDumper, dump_category_times
+
 from parser.db import SQLiteCategoryTimesReader, traces_db_path
 
 from parser.readers import TFProfCategoryTimesReader, \
@@ -98,8 +100,13 @@ class ComputeOverlap:
         'GPU': [[start, end], ...],
     }
     """
-    def __init__(self, category_times, debug=False):
+    def __init__(self, category_times, overlaps_with=None, debug=False):
         self.debug = debug
+        self.overlaps_with = overlaps_with
+        if self.overlaps_with is not None:
+            self.overlaps_with = set(self.overlaps_with)
+            for category in self.overlaps_with:
+                assert category in category_times.keys()
         category = list(category_times.keys())[0]
         if type(category_times[category][0]) == list:
             self.category_times = self._flatten_category_times(category_times)
@@ -276,6 +283,15 @@ class ComputeOverlap:
             # We may get artificial overlaps even if two categories are synchronous,
             # if the next category starts exactly when the last one ends.
             if times[categories_key] == 0:
+                del times[categories_key]
+
+        if self.overlaps_with is not None:
+            del_keys = []
+            for categories_key in times.keys():
+                if not self.overlaps_with.issubset(categories_key):
+                    del_keys.append(categories_key)
+
+            for categories_key in del_keys:
                 del times[categories_key]
 
         return times
@@ -478,14 +494,8 @@ class TraceEventsParser:
 
         self.dummy_times = []
 
-        self.reset()
-        self.reproduce_tfprof = False
 
         self.category_times_readers = []
-
-    def reset(self):
-        self._next_pid = 0
-        self.category_to_pid = dict()
 
     def get_source_files(self):
         """
@@ -659,7 +669,10 @@ class TraceEventsParser:
 
             category_times = self.read_category_times(step, bench_name)
 
-            self.js_dump(category_times, bench_name)
+            trace_events_dumper = TraceEventsDumper(
+                category_times,
+                json_path=self._profile_json_path(bench_name))
+            trace_events_dumper.dump()
 
     def read_category_times(self, step, bench_name):
         # Just default to outputting the first step...
@@ -680,165 +693,6 @@ class TraceEventsParser:
 
         return category_times
 
-    def js_dump(self, category_times, bench_name):
-        self.reset()
-        self.js_add_category_times(category_times)
-        profile_path = self._profile_json_path(bench_name)
-        print("> Write traceEvents to: {path}".format(path=profile_path))
-        do_dump_json(self.js, profile_path)
-
-    def js_add_category_times(self, category_times):
-        """
-        self.js = {
-            "traceEvents": [
-                {
-                    "args": {
-                        "name": "Op scheduling threads: /job:localhost/replica:0/task:0/device:gpu:0"
-                    },
-                    "name": "process_name",
-                    "ph": "M",
-                    "pid": 0
-                },
-                {
-                    "args": {
-                        "name": "Op scheduling threads: /job:localhost/replica:0/task:0/device:cpu:0"
-                    },
-                    "name": "process_name",
-                    "ph": "M",
-                    "pid": 1
-                },
-                {
-                    "args": {
-                        "name": "Op execution threads: /device:gpu:0/stream:all"
-                    },
-                    "name": "process_name",
-                    "ph": "M",
-                    "pid": 2
-                },
-                {
-                    "args": {
-                        "name": "deepq/target_q_func/action_value/fully_connected_1/biases"
-                    },
-                    "cat": "Op",
-                    "dur": 138,
-                    "name": "deepq/target_q_func/action_value/fully_connected_1/biases",
-                    "ph": "X",
-                    "pid": 0,
-                    "tid": 0,
-                    "ts": 1546471006818165
-                },
-            ...
-        }
-        """
-        self.js = {
-            "traceEvents": [
-            ],
-        }
-
-        for category, times in category_times.items():
-            if category == CATEGORY_CUDA_API_CPU:
-                # category_times[CATEGORY_CUDA_API_CPU] : device -> (tid -> times)
-                assert type(category_times[CATEGORY_CUDA_API_CPU]) == dict
-                for device, all_times in category_times[CATEGORY_CUDA_API_CPU].items():
-                    category_name = "{cat}: {dev}".format(cat=category, dev=device)
-                    self.js_add_section(category_name)
-                    tid_to_times = self.js_split_into_tids(all_times)
-                    for tid, times in tid_to_times.items():
-                        for time in times:
-                            self.js_add_time(time.name, category_name, time, tid)
-            # elif category == CATEGORY_GPU:
-            #     ...
-            elif self.reproduce_tfprof and category in [CATEGORY_PYTHON, CATEGORY_TF_API]:
-                # Ignore pyprof for now.
-                # We just want to test that we are properly reproducing the tfprof traceEvents json.
-                pass
-            else:
-                category_name = category
-                self.js_add_section(category_name)
-                for time in times:
-                    if time.name is not None:
-                        name = time.name
-                    else:
-                        name = 'unknown'
-                    self.js_add_time(name, category, time, tid=0)
-            # else:
-            #     raise NotImplementedError("Not sure how to handle category={c}".format(
-            #         c=category))
-
-    def js_split_into_tids(self, times):
-        times = sorted(times, key=lambda ktime: ktime.start_time_usec)
-        # tid -> times
-        next_tid = 0
-        allocated_tids = []
-        tid_times = dict()
-
-        for time in times:
-            tid = -1
-            # c_tid = candidate tid
-            for c_tid in reversed_iter(allocated_tids):
-                if time.start_time_usec < tid_times[c_tid][-1].end_time_usec:
-                    # Case (1): kernel start-time < lane's last end-time
-                    #   Kernel starts earlier in this lane.
-                    #   Either try the next lane, or allocate a new lane
-                    pass
-                elif time.start_time_usec >= tid_times[c_tid][-1].end_time_usec:
-                    # Case (2): kernel start-time > lane's last end-time
-                    #   Kernel starts later in this lane.
-                    #   Place the kernel in this lane.
-                    tid = c_tid
-                    break
-                # else:
-                #     # Case (3): lane's last end-time == kernel's start-time.
-                #     #   The current kernel starts executing right as the last kernel in this lane ends.
-                #     #   Look at the kernel from this lane that execute before the current one.
-                #     #   Q: This seems pointless, seems like we're going to fall into case 2.
-
-            if tid == -1:
-                tid = next_tid
-                allocated_tids.append(tid)
-                next_tid += 1
-                tid_times[tid] = []
-
-            tid_times[tid].append(time)
-
-        return tid_times
-
-    def js_add_section(self, name):
-        if name in self.category_to_pid:
-            return
-        pid = self._js_allocate_pid()
-        section = {
-            'args': {
-                'name': name,
-            },
-            'name': 'process_name',
-            'ph': 'M',
-            'pid': pid,
-        }
-        assert name not in self.category_to_pid
-        self.category_to_pid[name] = pid
-        self.js['traceEvents'].append(section)
-
-    def js_add_time(self, name, category, ktime, tid):
-        pid = self.category_to_pid[category]
-        jtime = {
-            'args': {
-                'name': name,
-            },
-            'cat': 'Op',
-            'dur': ktime.total_time_usec,
-            'name': name,
-            'ph': 'X',
-            'pid': pid,
-            'tid': tid,
-            'ts': ktime.start_time_usec,
-        }
-        self.js['traceEvents'].append(jtime)
-
-    def _js_allocate_pid(self):
-        pid = self._next_pid
-        self._next_pid += 1
-        return pid
 
     def dump(self, bench_name):
         if self.skip:
@@ -888,33 +742,12 @@ class OverlapJSONParser:
         return self.bench_name
 
     def run(self):
-        # self.tf_proto = None
-
-        # if self.tfprof_path(self.bench_name) is not None:
-        #     with open(self.tfprof_path(self.bench_name), 'rb') as f:
-        #         self.tf_proto = ProfileProto()
-        #         self.tf_proto.ParseFromString(f.read())
-
-        # with open(self.pyprof_path(self.bench_name), 'rb') as f:
-        #     self.py_proto = Pyprof()
-        #     self.py_proto.ParseFromString(f.read())
-
-        # raise RuntimeError(
-        #     "This code has a bug in it; we FORGOT to skip the first step, "
-        #     "so these times will include libcupti library-load-time overhead.")
-
-        # if self.tf_proto is not None and len(self.tf_proto.steps) > 0:
-        #     steps = list(self.tf_proto.steps)
-        #     steps_name = "TF_PROTO"
-        # else:
-        #     steps = list(self.py_proto.steps)
-        #     steps_name = "PY_PROTO"
-
-        # print("OverlapJSONParser > steps={name}".format(name=steps_name))
-
-        # if self.tf_proto is not None:
-        #     for tf_step in self.tf_proto.steps:
-        #         assert tf_step in self.py_proto.steps
+        
+        #
+        # In order to handle overlapping events.
+        # PSEUDOCODE:
+        # SELECT all events that overlap with an event-type.
+        #
 
         # PSEUDOCODE:
         # Compute [CUDA CPU time | GPU time | CUDA CPU/GPU time] overlap/non-overlap for a single step.
@@ -929,15 +762,6 @@ class OverlapJSONParser:
 
         category_times_readers = []
 
-        # tfprof_path = self.tfprof_path(self.bench_name)
-        # if tfprof_path is not None:
-        #     tfprof_reader = TFProfCategoryTimesReader(tfprof_path)
-        #     category_times_readers.append(tfprof_reader)
-
-        # pyprof_path = self.pyprof_path(self.bench_name)
-        # pyprof_reader = PyprofCategoryTimesReader(pyprof_path)
-        # category_times_readers.append(pyprof_reader)
-
         sql_reader = SQLiteCategoryTimesReader(traces_db_path(self.directory))
         category_times_readers.append(sql_reader)
         bench_names = sql_reader.bench_names
@@ -949,15 +773,31 @@ class OverlapJSONParser:
 
             # Overlap, computed across different "steps".
             overlaps = []
-
+            
             # Skip the first step (it captures libcupti.so load time).
             keep_steps = steps[1:]
-            for step in keep_steps:
+            for i, step in enumerate(keep_steps):
+                reader_debug = (i == 0 and self.debug)
                 category_times = read_category_times(category_times_readers, step, bench_name,
                                                      # Don't want to compute overlap w/ dummy events; doesn't mean anything.
                                                      ignore_categories=DEFAULT_ignore_categories,
-                                                     debug=self.debug)
-                compute_overlap = ComputeOverlap(category_times)
+                                                     debug=reader_debug)
+
+                if reader_debug:
+                    # Q: What do does train_loop look like, overlapped with all its fellow operation-types?
+                    json_path = _j(self.directory, "OverlapJSONParser.step_{step}{bench}.debug.json".format(
+                        step=step,
+                        bench=bench_suffix(bench_name)))
+                    print("> DEBUG: dump trace events @ {path}".format(path=json_path))
+                    dump_category_times(category_times, json_path)
+
+                for ktime in category_times.get(CATEGORY_OPERATION, []):
+                    assert ktime.name == bench_name
+                # JAMES TODO: We only want to compute overlap of execution time with op-events whose type is bench_name.
+                # If it's just execution time without op-type overlap we should discard it.
+
+                # JAMES TODO: remove "Operation" from plot labels
+                compute_overlap = ComputeOverlap(category_times, overlaps_with=[CATEGORY_OPERATION])
                 compute_overlap.compute()
                 overlaps.append(compute_overlap.get_category_times())
 
@@ -1027,71 +867,101 @@ class OverlapJSONParser:
 #                       ".*/(device:gpu|gpu|device:cpu|cpu|device:sycl):\\d+");
 # }
 
-def reversed_iter(xs):
-    n = len(xs)
-    for i in range(n - 1, 0 - 1, -1):
-        yield xs[i]
-
 def test_compute_overlap():
     # Set to true to print info.
     debug = False
 
-    def sec(seconds):
-        return seconds*MICROSECONDS_IN_SECOND
+    from test.test_util import sec, T
 
-    def T(start_sec, end_sec):
-        return KernelTime(start_usec=start_sec*MICROSECONDS_IN_SECOND,
-                          end_usec=end_sec*MICROSECONDS_IN_SECOND)
-    category_times = {
-        'c1':[
-            [
-                T(3, 4), T(8, 10),
+    def test_01_complete():
+        category_times = {
+            'c1':[
+                [
+                    T(3, 4), T(8, 10),
+                ],
+                [
+                    T(3.5, 7),
+                ],
             ],
-            [
-                T(3.5, 7),
+            'c2':[
+                [
+                    T(1, 4), T(6, 9),
+                ],
             ],
-        ],
-        'c2':[
-            [
+            'c3':[
+                [
+                    T(2, 3), T(4, 5), T(7, 8),
+                ],
+                [
+                    T(3, 4), T(11, 12),
+                ],
+            ],
+        }
+        compute_overlap = ComputeOverlap(category_times, debug=debug)
+        compute_overlap.compute_merge()
+        got = compute_overlap.get_merged_categories()
+        expect = {
+            'c1':[
+                T(3, 7), T(8, 10),
+            ],
+            'c2':[
                 T(1, 4), T(6, 9),
             ],
-        ],
-        'c3':[
-            [
-                T(2, 3), T(4, 5), T(7, 8),
+            'c3':[
+                T(2, 5), T(7, 8), T(11, 12),
             ],
-            [
-                T(3, 4), T(11, 12),
-            ],
-        ],
-    }
-    compute_overlap = ComputeOverlap(category_times, debug=debug)
-    compute_overlap.compute_merge()
-    got = compute_overlap.get_merged_categories()
-    expect = {
-        'c1':[
-            T(3, 7), T(8, 10),
-        ],
-        'c2':[
-            T(1, 4), T(6, 9),
-        ],
-        'c3':[
-            T(2, 5), T(7, 8), T(11, 12),
-        ],
-    }
-    assert got == expect
+        }
+        assert got == expect
 
-    # compute_overlap.compute()
-    compute_overlap.compute_times()
-    got = compute_overlap.get_category_times()
-    expect = {
-        frozenset({'c1'}):sec(2),
-        frozenset({'c2'}):sec(1),
-        frozenset({'c3'}):sec(1),
-        frozenset({'c1', 'c2'}):sec(2),
-        frozenset({'c1', 'c3'}):sec(1),
-        frozenset({'c2', 'c3'}):sec(2),
-        frozenset({'c1', 'c2', 'c3'}):sec(1),
-    }
-    assert got == expect
+        # compute_overlap.compute()
+        compute_overlap.compute_times()
+        got = compute_overlap.get_category_times()
+        expect = {
+            frozenset({'c1'}):sec(2),
+            frozenset({'c2'}):sec(1),
+            frozenset({'c3'}):sec(1),
+            frozenset({'c1', 'c2'}):sec(2),
+            frozenset({'c1', 'c3'}):sec(1),
+            frozenset({'c2', 'c3'}):sec(2),
+            frozenset({'c1', 'c2', 'c3'}):sec(1),
+        }
+        assert got == expect
+    test_01_complete()
+
+    def test_02_overlaps_with():
+        category_times = {
+            'c1':[
+                [
+                    T(3, 4), T(8, 10),
+                ],
+                [
+                    T(3.5, 7),
+                ],
+            ],
+            'c2':[
+                [
+                    T(1, 4), T(6, 9),
+                ],
+            ],
+            'c3':[
+                [
+                    T(2, 3), T(4, 5), T(7, 8),
+                ],
+                [
+                    T(3, 4), T(11, 12),
+                ],
+            ],
+        }
+        compute_overlap = ComputeOverlap(category_times, overlaps_with=['c1'], debug=debug)
+
+        compute_overlap.compute()
+        got = compute_overlap.get_category_times()
+        expect = {
+            frozenset({'c1'}):sec(2),
+            frozenset({'c1', 'c2'}):sec(2),
+            frozenset({'c1', 'c3'}):sec(1),
+            frozenset({'c1', 'c2', 'c3'}):sec(1),
+        }
+        assert got == expect
+    test_02_overlaps_with()
 
