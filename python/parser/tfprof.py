@@ -698,7 +698,7 @@ class TraceEventsParser:
         if self.skip:
             return
 
-class OverlapJSONParser:
+class OverlapComputer:
     """
     Computes a json file containing the overlap between event categories across different steps,
     on a per-operation/bench_name basis.
@@ -709,39 +709,20 @@ class OverlapJSONParser:
         the different categories measure (GPU, Python, CUDA API C, etc)
     """
 
-    def __init__(self, directory,
+    def __init__(self, db_path,
                  # Swallow any excess arguments
                  debug=False,
                  **kwargs):
-
-        self.directory = directory
+        self.db_path = db_path
         self.debug = debug
 
-    def get_source_files(self):
-        """
-        We want traces.db
-        """
-        src_files = []
-        traces_db = traces_db_path(self.directory)
-        if not _e(traces_db):
-            raise MissingInputFiles(textwrap.dedent("""
-            {klass}: Couldn't find any traces.db at {path}.
-            """.format(
-                klass=self.__class__.__name__,
-                path=traces_db,
-            )))
-        return src_files
+    @property
+    def directory(self):
+        return _d(self.db_path)
 
-    def tfprof_path(self, bench_name, or_none=True):
-        return self.src_files.get('tfprof_path', self.bench_name, or_none=or_none)
-
-    def pyprof_path(self, bench_name):
-        return self.src_files.get('pyprof_path', self.bench_name)
-
-    def get_micro_name(self):
-        return self.bench_name
-
-    def run(self):
+    def compute_per_operation_overlap(self, bench_name):
+        
+        # TODO: we could consider memoizing results inside of a file, but screw it shouldn't take too long.
         
         #
         # In order to handle overlapping events.
@@ -762,100 +743,99 @@ class OverlapJSONParser:
 
         category_times_readers = []
 
-        sql_reader = SQLiteCategoryTimesReader(traces_db_path(self.directory))
+        sql_reader = SQLiteCategoryTimesReader(self.db_path)
         category_times_readers.append(sql_reader)
-        bench_names = sql_reader.bench_names
-        for bench_name in bench_names:
-            steps = sql_reader.steps(bench_name)
-            print("> steps = ")
-            pprint.pprint({'len(steps)':len(steps),
-                           'steps':steps})
+        # bench_names = sql_reader.bench_names
+        # for bench_name in bench_names:
 
-            # Overlap, computed across different "steps".
-            overlaps = []
-            
-            # Skip the first step (it captures libcupti.so load time).
-            keep_steps = steps[1:]
-            for i, step in enumerate(keep_steps):
-                reader_debug = (i == 0 and self.debug)
-                category_times = read_category_times(category_times_readers, step, bench_name,
-                                                     # Don't want to compute overlap w/ dummy events; doesn't mean anything.
-                                                     ignore_categories=DEFAULT_ignore_categories,
-                                                     debug=reader_debug)
+        steps = sql_reader.steps(bench_name)
+        print("> steps = ")
+        pprint.pprint({'len(steps)':len(steps),
+                       'steps':steps})
 
-                if reader_debug:
-                    # Q: What do does train_loop look like, overlapped with all its fellow operation-types?
-                    json_path = _j(self.directory, "OverlapJSONParser.step_{step}{bench}.debug.json".format(
-                        step=step,
-                        bench=bench_suffix(bench_name)))
-                    print("> DEBUG: dump trace events @ {path}".format(path=json_path))
-                    dump_category_times(category_times, json_path)
+        # Overlap, computed across different "steps".
+        overlaps = []
 
-                for ktime in category_times.get(CATEGORY_OPERATION, []):
-                    assert ktime.name == bench_name
-                # JAMES TODO: We only want to compute overlap of execution time with op-events whose type is bench_name.
-                # If it's just execution time without op-type overlap we should discard it.
+        # Skip the first step (it captures libcupti.so load time).
+        keep_steps = steps[1:]
+        for i, step in enumerate(keep_steps):
+            reader_debug = (i == 0 and self.debug)
+            category_times = read_category_times(category_times_readers, step, bench_name,
+                                                 # Don't want to compute overlap w/ dummy events; doesn't mean anything.
+                                                 ignore_categories=DEFAULT_ignore_categories,
+                                                 debug=reader_debug)
 
-                # JAMES TODO: remove "Operation" from plot labels
-                compute_overlap = ComputeOverlap(category_times, overlaps_with=[CATEGORY_OPERATION])
-                compute_overlap.compute()
-                overlaps.append(compute_overlap.get_category_times())
+            if reader_debug:
+                # Q: What do does train_loop look like, overlapped with all its fellow operation-types?
+                json_path = _j(self.directory, "OverlapComputer.step_{step}{bench}.debug.json".format(
+                    step=step,
+                    bench=bench_suffix(bench_name)))
+                print("> DEBUG: dump trace events @ {path}".format(path=json_path))
+                dump_category_times(category_times, json_path, print_log=False)
 
-            pprint.pprint({
-                'overlaps':overlaps,
+            for ktime in category_times.get(CATEGORY_OPERATION, []):
+                assert ktime.name == bench_name
+            # JAMES TODO: We only want to compute overlap of execution time with op-events whose type is bench_name.
+            # If it's just execution time without op-type overlap we should discard it.
+
+            # JAMES TODO: remove "Operation" from plot labels
+            compute_overlap = ComputeOverlap(category_times, overlaps_with=[CATEGORY_OPERATION])
+            compute_overlap.compute()
+            overlaps.append(compute_overlap.get_category_times())
+
+        pprint.pprint({
+            'overlaps':overlaps,
+        })
+
+        categories = set()
+        category_combinations = set()
+        combo_to_id = dict()
+        combo_id_pairs = []
+        next_combo_id = 0
+        for overlap in overlaps:
+            for combo in overlap.keys():
+                category_combinations.add(combo)
+                combo_key = frozenset(combo)
+                if combo_key not in combo_to_id:
+                    combo_id = next_combo_id
+                    next_combo_id += 1
+                    combo_to_id[combo_key] = combo_id
+                    combo_id_pairs.append((combo_id, sorted(list(combo))))
+                for category in combo:
+                    categories.add(category)
+
+        combo_to_time_usec = dict()
+        for overlap in overlaps:
+            for combo_key in overlap.keys():
+                if combo_key not in combo_to_time_usec:
+                    combo_to_time_usec[combo_key] = []
+                combo_to_time_usec[combo_key].append(overlap[combo_key])
+
+        category_combo_times = []
+        for combo_key in sorted(combo_to_time_usec.keys()):
+            combo_times = combo_to_time_usec[combo_key]
+            category_combo_times.append({
+                'category_combo':sorted(combo_key),
+                'times_usec':combo_times,
             })
 
-            categories = set()
-            category_combinations = set()
-            combo_to_id = dict()
-            combo_id_pairs = []
-            next_combo_id = 0
-            for overlap in overlaps:
-                for combo in overlap.keys():
-                    category_combinations.add(combo)
-                    combo_key = frozenset(combo)
-                    if combo_key not in combo_to_id:
-                        combo_id = next_combo_id
-                        next_combo_id += 1
-                        combo_to_id[combo_key] = combo_id
-                        combo_id_pairs.append((combo_id, sorted(list(combo))))
-                    for category in combo:
-                        categories.add(category)
+        json_output = {
+            'categories': sorted(list(categories)),
+            'category_combinations': sorted(sorted(combo) for combo in category_combinations),
+            'category_combo_times':category_combo_times,
+        }
+        if self.debug:
+            self._dump_per_operation_json(bench_name, json_output)
+        return json_output
 
-            combo_to_time_usec = dict()
-            for overlap in overlaps:
-                for combo_key in overlap.keys():
-                    if combo_key not in combo_to_time_usec:
-                        combo_to_time_usec[combo_key] = []
-                    combo_to_time_usec[combo_key].append(overlap[combo_key])
+    def _dump_per_operation_json(self, bench_name, json_output):
+        path = self._per_operation_json_path(bench_name)
+        print("> DEBUG: dump per-operation compute overlap @ {path}".format(path=path))
+        do_dump_json(json_output, path)
 
-            category_combo_times = []
-            for combo_key in sorted(combo_to_time_usec.keys()):
-                combo_times = combo_to_time_usec[combo_key]
-                category_combo_times.append({
-                    'category_combo':sorted(combo_key),
-                    'times_usec':combo_times,
-                })
-
-            json_output = {
-                'categories': sorted(list(categories)),
-                'category_combinations': sorted(sorted(combo) for combo in category_combinations),
-                'category_combo_times':category_combo_times,
-            }
-            do_dump_json(json_output, self._profile_json_path(bench_name))
-
-    def dump(self, bench_name):
-        if self.skip:
-            return
-
-    def _profile_json_path(self, bench_name):
+    def _per_operation_json_path(self, bench_name):
         path = _j(self.directory, 'tfprof{bench}.json'.format(bench=bench_suffix(bench_name)))
         return path
-
-    # @classmethod
-    # def get_profile_json_path(ParseKlass, src_files, bench_name):
-    #     path = _j(src_files.directory, 'tfprof{bench}.json'.format(bench=bench_suffix(bench_name)))
-    #     return path
 
 # From TensorFlow code base:
 #

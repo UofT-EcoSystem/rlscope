@@ -664,6 +664,16 @@ class SQLiteCategoryTimesReader:
         bench_names = [row['event_name'] for row in c.fetchall()]
         return bench_names
 
+    @property
+    def categories(self):
+        c = self.conn.cursor
+        c.execute("""
+        SELECT category_name FROM Category
+        ORDER BY category_name ASC
+        """.format(op=CATEGORY_OPERATION))
+        category_names = [row['category_name'] for row in c.fetchall()]
+        return category_names
+
     def _fetch_steps(self, bench_name):
         if bench_name in self._steps:
             return
@@ -796,7 +806,7 @@ class SQLiteCategoryTimesReader:
                 step=step,
                 bench=bench_suffix(bench_name)))
             print("> DEBUG: dump trace events @ {path}".format(path=json_path))
-            dump_category_times(category_times, json_path)
+            dump_category_times(category_times, json_path, print_log=False)
 
         category_times[CATEGORY_OPERATION] = process_op_nest(category_times[CATEGORY_OPERATION],
                                                              filter_by_op=bench_name)

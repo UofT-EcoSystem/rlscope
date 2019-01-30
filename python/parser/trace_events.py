@@ -1,8 +1,8 @@
 from parser.common import *
 
-def dump_category_times(category_times, json_path):
+def dump_category_times(category_times, json_path, print_log=True):
     trace_events_dumper = TraceEventsDumper(category_times, json_path)
-    trace_events_dumper.dump()
+    trace_events_dumper.dump(print_log)
 
 class TraceEventsDumper:
     def __init__(self, category_times, json_path):
@@ -11,10 +11,11 @@ class TraceEventsDumper:
         self.reproduce_tfprof = False
         self.reset()
 
-    def dump(self):
+    def dump(self, print_log=True):
         self.reset()
         self.js_add_category_times(self.category_times)
-        print("> Write traceEvents to: {path}".format(path=self.json_path))
+        if print_log:
+            print("> Write traceEvents to: {path}".format(path=self.json_path))
         do_dump_json(self.js, self.json_path)
 
     def js_add_category_times(self, category_times):

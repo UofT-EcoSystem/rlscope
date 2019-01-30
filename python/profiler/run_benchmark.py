@@ -33,7 +33,7 @@ import py_config
 from profiler import profilers
 
 from parser.nvprof import CUDASQLiteParser
-from parser.tfprof import OverlapJSONParser, TotalTimeParser, TraceEventsParser
+from parser.tfprof import TotalTimeParser, TraceEventsParser
 from parser.pyprof import PythonProfileParser, PythonProfileTotalParser
 from parser.plot import TimeBreakdownPlot, PlotSummary, CombinedProfileParser, CategoryOverlapPlot
 from parser.db import SQLiteParser
@@ -41,7 +41,7 @@ from parser.db import SQLiteParser
 from parser.common import *
 
 # CUDAProfileParser,
-PARSER_KLASSES = [PythonProfileParser, PythonProfileTotalParser, CUDASQLiteParser, OverlapJSONParser, CombinedProfileParser, PlotSummary, TimeBreakdownPlot, CategoryOverlapPlot, TotalTimeParser, TraceEventsParser, SQLiteParser]
+PARSER_KLASSES = [PythonProfileParser, PythonProfileTotalParser, CUDASQLiteParser, CombinedProfileParser, PlotSummary, TimeBreakdownPlot, CategoryOverlapPlot, TotalTimeParser, TraceEventsParser, SQLiteParser]
 PARSER_NAME_TO_KLASS = dict((ParserKlass.__name__, ParserKlass) \
                             for ParserKlass in PARSER_KLASSES)
 

@@ -18,6 +18,8 @@ from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, base
 from parser.common import *
 from parser.nvprof import CUDASQLiteParser
 from parser.pyprof import PythonProfileParser
+from parser.tfprof import OverlapComputer
+from parser.db import SQLiteCategoryTimesReader, traces_db_path
 
 # figsize (W x H) in inches
 aspect_ratio = 16./9.
@@ -545,11 +547,26 @@ class PlotSummary(ProfilerParserCommonMixin):
 # Instead of just "Python", "C++", "GPU", we want to break down the labels arbitrairily.
 # Also, we want to control the order of the legend labels.
 
-class CategoryOverlapPlot(ProfilerParserCommonMixin):
+class CategoryOverlapPlot:
     """
     Create a stacked bar plot.
     For the list of times to show, see self.category_order.
     """
+
+    def get_source_files(self):
+        """
+        We want traces.db
+        """
+        src_files = []
+        traces_db = traces_db_path(self.directory)
+        if not _e(traces_db):
+            raise MissingInputFiles(textwrap.dedent("""
+                {klass}: Couldn't find any traces.db at {path}.
+                """.format(
+                klass=self.__class__.__name__,
+                path=traces_db,
+            )))
+        return src_files
 
     @staticmethod
     def required_source_basename_regexes():
@@ -584,55 +601,62 @@ class CategoryOverlapPlot(ProfilerParserCommonMixin):
         ]
         return targets
 
-    @property
-    def _tfprof_json(self):
-        return self.src_files.get('tfprof_json', self.bench_name)
-
     def _category_overlap_png(self, bench_name):
-        return CategoryOverlapPlot.get_category_overlap_png(self.src_files, bench_name)
+        return CategoryOverlapPlot.get_category_overlap_png(self.directory, bench_name)
 
     @staticmethod
-    def get_category_overlap_png(src_files, bench_name):
-        return _j(src_files.directory, "category_overlap{bench}.png".format(
+    def get_category_overlap_png(directory, bench_name):
+        return _j(directory, "category_overlap{bench}.png".format(
             bench=bench_suffix(bench_name)))
 
     @staticmethod
-    def get_plot_data_path(src_files, bench_name):
-        return _j(src_files.directory, "category_overlap.plot_data{bench}.txt".format(
+    def get_plot_data_path(directory, bench_name):
+        return _j(directory, "category_overlap.plot_data{bench}.txt".format(
             bench=bench_suffix(bench_name)))
 
     def _plot_data_path(self, bench_name):
-        return CategoryOverlapPlot.get_plot_data_path(self.src_files, bench_name)
+        return CategoryOverlapPlot.get_plot_data_path(self.directory, bench_name)
 
     @staticmethod
-    def get_stats(src_files, bench_name):
-        return _j(src_files.directory, "category_overlap.stats{bench}.json".format(
+    def get_stats(directory, bench_name):
+        return _j(directory, "category_overlap.stats{bench}.json".format(
             bench=bench_suffix(bench_name)))
 
     def _stats(self, bench_name):
-        return CategoryOverlapPlot.get_stats(self.src_files, bench_name)
+        return CategoryOverlapPlot.get_stats(self.directory, bench_name)
 
-    def __init__(self, parser, args, src_files, bench_name=NO_BENCH_NAME, bar_width=0.25, show=False):
-        self.parser = parser
-        self.args = args
-        self.src_files = src_files
-        self.bench_name = args.bench_name if args.bench_name is not None else NO_BENCH_NAME
+    def __init__(self, directory,
+                 debug=False,
+                 # Swallow any excess arguments
+                 **kwargs):
+        self.directory = directory
+        self.debug = debug
 
-        # {
-        #     'GPUTimeSec':"\\",
-        #     'CppTimeSec':"|",
-        #     'PythonTimeSec':"/",
-        # }
-        categories = set()
-        tfprof_paths = [src_files.get('tfprof_json', bench) for bench in src_files.bench_names]
-        for tfprof_path in tfprof_paths:
-            js = load_json(tfprof_path)
-            for combo_and_times in js['category_combo_times']:
+        self.bar_width = 0.25
+        self.show = False
+
+    def run(self):
+
+        self.sql_reader = SQLiteCategoryTimesReader(self.db_path)
+        self.bench_names = self.sql_reader.bench_names + [NO_BENCH_NAME]
+        assert len(self.bench_names) == len(unique(self.bench_names))
+        self.categories = self.sql_reader.categories
+
+        overlap_computer = OverlapComputer(self.db_path, debug=self.debug)
+
+        all_categories = set()
+        json_datas = []
+        for bench_name in self.bench_names:
+            json_data = overlap_computer.compute_per_operation_overlap(bench_name)
+            json_datas.append(json_data)
+
+            for combo_and_times in json_data['category_combo_times']:
                 category = _category_str(combo_and_times['category_combo'])
-                categories.add(category)
-                # self.category_order.append(category)
-                # times_sec = np.array(combo_and_times['times_usec'])/MICROSECONDS_IN_SECOND
-        self.category_order = sorted(categories)
+                all_categories.add(category)
+
+        pprint.pprint({'all_categories': all_categories})
+
+        self.category_order = sorted(all_categories)
         self.bench_name_labels = DQN_BENCH_NAME_LABELS
         self.category_color_map = None
         self.category_labels = None
@@ -646,67 +670,49 @@ class CategoryOverlapPlot(ProfilerParserCommonMixin):
             bench_name_labels=self.bench_name_labels,
             category_color_map=self.category_color_map,
             category_labels=self.category_labels,
-            bar_width=bar_width, show=show,
+            bar_width=self.bar_width, show=self.show,
             json_reader_klass=TFProfReader,
             title='DQN iteration time breakdown',
             xlabel='DQN',
             ylabel='Time (seconds)',
         )
+        for bench_name, json_data in zip(self.bench_names, json_datas):
+            device_name = NO_DEVICE_NAME
+            impl_name = NO_IMPL_NAME
+            self.plotter.add_json_data(json_data, bench_name,
+                                       device_name, impl_name, debug=True)
 
-    def run(self, bench_name=NO_BENCH_NAME):
-        print("> src_files = ")
-        print(str(self.src_files))
-        for directory in self.src_files.directories:
-            src_files = self.src_files.get_src_files(directory)
+        # for bench_name in [NO_BENCH_NAME]:
+        for bench_name in self.bench_names:
+            self.plotter.plot(bench_name)
+            self._dump_cpu_gpu_stats(bench_name)
 
-            device_name = self.config_get(src_files, 'device_name', NO_DEVICE_NAME)
-            impl_name = self.config_get(src_files, 'impl_name', NO_IMPL_NAME)
+    def _dump_cpu_gpu_stats(self, bench_name):
+        bench_df = self.plotter.plot_data(bench_name)
+        def is_gpu_row(row):
+            return re.search(r'\bGPU\b', row['category'])
+        gpu_rows = pd.DataFrame([row for index, row in bench_df.iterrows() if is_gpu_row(row)])
+        cpu_rows = pd.DataFrame([row for index, row in bench_df.iterrows() if not is_gpu_row(row)])
+        def sum_time(rows):
+            if len(rows) > 0:
+                return rows['mean'].sum()
+            return 0.
+        cpu_time_sec = sum_time(cpu_rows)
+        gpu_time_sec = sum_time(gpu_rows)
+        total_time_sec = cpu_time_sec + gpu_time_sec
+        js_stats = {
+            'cpu_time_sec':cpu_time_sec,
+            'gpu_time_sec':gpu_time_sec,
+            'total_time_sec':total_time_sec,
+            'gpu_time_percent': 100*gpu_time_sec/total_time_sec,
+            'cpu_time_percent': 100*cpu_time_sec/total_time_sec,
+        }
+        print("> Save plot stats to {path}".format(path=self._stats(bench_name)))
+        do_dump_json(js_stats, self._stats(bench_name))
 
-            bench_names = src_files.bench_names
-            for bench in bench_names:
-                json_path = src_files.get('tfprof_json', bench)
-                json_data = load_json(json_path)
-                pretty_bench = get_pretty_bench(bench)
-                print(textwrap.dedent("""
-                > add_json_data:
-                  path = {path}
-                  bench = {bench}
-                  device = {device}
-                  impl = {impl}
-                """.format(path=json_path,
-                           bench=bench,
-                           device=device_name,
-                           impl=impl_name)))
-                self.plotter.add_json_data(json_data, bench,
-                                           device_name, impl_name, debug=True)
-
-        self.plotter.plot(self.bench_name)
-
-        bench_names = self.plotter.get_plot_bench_names()
-        pprint.pprint({'bench_names':bench_names})
-        for bench_name in bench_names:
-            with open(self._stats(bench_name), 'w') as f:
-                bench_df = self.plotter.plot_data(bench_name)
-                def is_gpu_row(row):
-                    return re.search(r'\bGPU\b', row['category'])
-                gpu_rows = pd.DataFrame([row for index, row in bench_df.iterrows() if is_gpu_row(row)])
-                cpu_rows = pd.DataFrame([row for index, row in bench_df.iterrows() if not is_gpu_row(row)])
-                def sum_time(rows):
-                    if len(rows) > 0:
-                        return rows['mean'].sum()
-                    return 0.
-                cpu_time_sec = sum_time(cpu_rows)
-                gpu_time_sec = sum_time(gpu_rows)
-                total_time_sec = cpu_time_sec + gpu_time_sec
-                js_stats = {
-                    'cpu_time_sec':cpu_time_sec,
-                    'gpu_time_sec':gpu_time_sec,
-                    'total_time_sec':total_time_sec,
-                    'gpu_time_percent': 100*gpu_time_sec/total_time_sec,
-                    'cpu_time_percent': 100*cpu_time_sec/total_time_sec,
-                }
-                print("> Save plot stats to {path}".format(path=self._stats(bench_name)))
-                do_dump_json(js_stats, self._stats(bench_name))
+    @property
+    def db_path(self):
+        return traces_db_path(self.directory)
 
 class StackedBarPlotter:
     def __init__(self, get_png, get_plot_data_path,
@@ -1484,3 +1490,31 @@ class CombinedProfileParser(ProfilerParserCommonMixin):
     def _combined_path(self, bench_name):
         return self.get_combined_path(self.src_files, bench_name)
 
+class UtilizationPlot:
+    """
+    CPU/GPU utilization over training.
+    """
+
+    def __init__(self, directory,
+                 debug=False,
+                 # Swallow any excess arguments
+                 **kwargs):
+        self.directory = directory
+        self.conn = TracesSQLiteConnection(self.db_path)
+        self.debug = debug
+        # self.block_size = 50000
+
+    def get_source_files(self):
+        """
+        We want traces.db
+        """
+        src_files = []
+        traces_db = traces_db_path(self.directory)
+        if not _e(traces_db):
+            raise MissingInputFiles(textwrap.dedent("""
+            {klass}: Couldn't find any traces.db at {path}.
+            """.format(
+                klass=self.__class__.__name__,
+                path=traces_db,
+            )))
+        return src_files
