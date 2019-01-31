@@ -280,8 +280,7 @@ class ComputeOverlap:
         if self.overlaps_with is not None:
             del_keys = []
             for categories_key in times.keys():
-                # if not self.overlaps_with.issubset(categories_key):
-                if self.overlaps_with.intersection(categories_key) == 0:
+                if len(self.overlaps_with.intersection(categories_key)) == 0:
                     del_keys.append(categories_key)
 
             for categories_key in del_keys:
@@ -736,9 +735,15 @@ class OverlapComputer:
             # If it's just execution time without op-type overlap we should discard it.
 
             # JAMES TODO: remove "Operation" from plot labels
-            compute_overlap = ComputeOverlap(category_times, overlaps_with=[CATEGORY_OPERATION])
+            # compute_overlap = ComputeOverlap(category_times, overlaps_with=[CATEGORY_OPERATION])
+            compute_overlap = ComputeOverlap(category_times)
             compute_overlap.compute()
-            overlaps.append(compute_overlap.get_category_times())
+            overlap = compute_overlap.get_category_times()
+            for category_key in list(overlap.keys()):
+                if not( len(category_key) > 1 and CATEGORY_OPERATION in category_key ):
+                    del overlap[category_key]
+
+            overlaps.append(overlap)
 
             # Only debug the first step of the first process (if --debug is set)
             sql_reader.parse_debug = False

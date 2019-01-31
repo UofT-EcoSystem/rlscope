@@ -613,12 +613,18 @@ class CategoryOverlapPlot:
         all_categories = set()
         json_datas = []
         for bench_name in self.bench_names:
+            start_t = time.time()
             json_data = overlap_computer.compute_per_operation_overlap(bench_name)
             json_datas.append(json_data)
 
             for combo_and_times in json_data['category_combo_times']:
                 category = _category_str(combo_and_times['category_combo'])
                 all_categories.add(category)
+            end_t = time.time()
+            print("> compute_per_operation_overlap(bench_name={op}) took {sec} seconds".format(
+                op=bench_name,
+                sec=end_t - start_t,
+            ))
 
         pprint.pprint({'all_categories': all_categories})
 
@@ -1038,20 +1044,30 @@ class PlotSummaryReader:
         return self.json_data[category][1:]
 
 def _category_str(category_combo):
+    """
+    This determines "execution category" plot labels in the graphs.
+    e.g. "CUDA API CPU + GPU"
+
+    :param category_combo:
+    :return:
+    """
     assert type(category_combo) in [list, tuple, frozenset, set]
 
     # HACK to make CategoryOverlapPlot more readable...
     # technically "Framework API C" overlaps with all the "GPU" time and other stuff, but it makes things annoying to read.
     # So, only keep "Framework API C" if it is the only category in the combo, otherwise remove it.
-    if len(category_combo) > 1 and CATEGORY_TF_API in category_combo:
-        new_category_combo = list(category_combo)
-        new_category_combo.remove(CATEGORY_TF_API)
-        category_combo = new_category_combo
 
-    # for category in category_combo:
-    #     # Otherwise, we cannot do re.split(r' \+ ', ...) to recover the category_combo.
-    #     assert '+' not in category
-    return " + ".join(sorted(category_combo))
+    new_category_combo = list(category_combo)
+    def _maybe_remove(category):
+        if len(new_category_combo) > 1 and category in new_category_combo:
+            new_category_combo.remove(category)
+
+    # NOTE: order of category removal matters here.
+    # If it comes down to a single category, only the LAST element of the list will be kept.
+    for category in [CATEGORY_OPERATION, CATEGORY_TF_API]:
+        _maybe_remove(category)
+
+    return " + ".join(sorted(new_category_combo))
 
 class TFProfReader:
     """
