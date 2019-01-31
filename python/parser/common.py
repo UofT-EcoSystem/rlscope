@@ -33,6 +33,17 @@ CATEGORY_ATARI = CATEGORY_SIMULATOR_CPP
 
 CATEGORY_PROFILING = 'Profiling'
 
+CATEGORIES_CPU = set([
+    CATEGORY_TF_API,
+    CATEGORY_PYTHON,
+    CATEGORY_CUDA_API_CPU,
+    CATEGORY_SIMULATOR_CPP,
+])
+
+# Not a category used during tracing;
+# represents a group of categories.
+CATEGORY_CPU = 'CPU'
+
 PROFILING_DUMP_TRACE = "Dump trace"
 
 PLOT_SUMMMARY_FIELDS = [
@@ -941,12 +952,13 @@ def load_json(path):
         data = fixup_json(data)
         return data
 
-def do_dump_json(data, path):
+def do_dump_json(data, path, cls=None):
     os.makedirs(_d(path), exist_ok=True)
     json.dump(data,
               codecs.open(path, mode='w', encoding='utf-8'),
               sort_keys=True, indent=4,
-              skipkeys=False)
+              skipkeys=False,
+              cls=cls)
 
 def store_group(dic, m, types=dict(), store_as=None, replace=False):
     groupdict = m.groupdict()

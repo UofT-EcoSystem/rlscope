@@ -85,6 +85,12 @@ class ComputeOverlap:
         'Framework CPU': [[start, end], ...],
         'GPU': [[start, end], ...],
     }
+
+    :param overlaps_with
+        Only keep times whose category_key contains at least one of these categories.
+
+        Typically overlaps_with = [CATEGORY_OPERATION], so we only keep execution time
+        that happened during an operation.
     """
     def __init__(self, category_times, overlaps_with=None, debug=False):
         self.debug = debug
@@ -274,7 +280,8 @@ class ComputeOverlap:
         if self.overlaps_with is not None:
             del_keys = []
             for categories_key in times.keys():
-                if not self.overlaps_with.issubset(categories_key):
+                # if not self.overlaps_with.issubset(categories_key):
+                if self.overlaps_with.intersection(categories_key) == 0:
                     del_keys.append(categories_key)
 
             for categories_key in del_keys:
@@ -580,6 +587,110 @@ class OverlapComputer:
     def directory(self):
         return _d(self.db_path)
 
+    def compute_process_timeline_overlap(self):
+        sql_reader = SQLiteCategoryTimesReader(self.db_path)
+
+        # Overlap, computed across different "steps".
+        # overlaps = []
+
+        category_times, categories, operation_types = sql_reader.parse_timeline(debug=self.debug)
+        assert len(operation_types) > 0
+        assert len(categories) > 0
+
+        def split_combo_key(combo_key):
+            op_categories = set()
+            non_op_categories = set()
+            for category in combo_key:
+                if category in operation_types:
+                    op_categories.add(category)
+                else:
+                    non_op_categories.add(category)
+            return frozenset(op_categories), frozenset(non_op_categories)
+
+        # We only want to keep CATEGORY_OPERATION times.
+        # However, the operation-types have replaced CATEGORY_OPERATION.
+        compute_overlap = ComputeOverlap(category_times)
+        compute_overlap.compute()
+        overlap = compute_overlap.get_category_times()
+        assert len(overlap) > 0  #FAILS! ...why?
+
+        for category_key in list(overlap.keys()):
+            op_categories, non_op_categories = split_combo_key(category_key)
+            # If Overlap involves BOTH execution: {CPU, GPU, CPU/GPU},
+            #    and an operation: {q_forward, q_backward, ...}
+            #   Keep.
+            if len(op_categories) == 0 or len(non_op_categories) == 0:
+                del overlap[category_key]
+
+        # This can take a while since the timeline can be large...
+        # if self.debug:
+        #     print("> DEBUG: write process timeline traceEvents @ {path}".format(
+        #         path=self._debug_process_timeline_json_path()))
+        #     dump_category_times(category_times, self._debug_process_timeline_json_path(), print_log=False)
+
+        # set(operation categories) -> set(non-operation categories) -> [ CPU, GPU, CPU/GPU ] time
+        #  <q_forward, q_backward>       <CPU>, <GPU>, <CPU, GPU>             0.001 sec
+        operation_overlap = dict()
+        for combo_key, time in overlap.items():
+            op_categories, non_op_categories = split_combo_key(combo_key)
+            assert len(op_categories) > 0
+            assert len(non_op_categories) > 0
+            if op_categories not in operation_overlap:
+                operation_overlap[op_categories] = dict()
+            operation_overlap[op_categories][non_op_categories] = time
+
+        if self.debug:
+            self._dump_process_timeline_json(operation_overlap)
+
+        return operation_overlap
+
+    def _dump_process_timeline_json(self, operation_overlap):
+        path = self._process_timeline_json_path()
+        print("> DEBUG: dump process timeline compute overlap @ {path}".format(path=path))
+
+        # PROBLEM: overlap JSON file is usually for a single operation.
+        # However, now we have multiple operations for a given overlap calculation.
+        # NOTE: the only reason we have a JSON-specific format us because
+        # JSON doesn't allow a "set" as a dictionary key.
+        #
+        # Conversion to JSON:
+        # A dict whose keys are frozenset's should be converted to a list of key/value pairs:
+        # [
+        #   (key[0], value[0]),
+        #   ...,
+        # ]
+
+        def js_friendly(obj):
+            """
+            Dict keys in json can only be numbers/strings/booleans/null, they CANNOT be lists/dicts/sets.
+
+            So, to represent a dict whose keys are frozensets...well you just cannot do that.
+
+            :param obj:
+            :return:
+            """
+            if type(obj) == dict and len(obj) > 0 and type(next(iter(obj.keys()))) == frozenset:
+                key_values_pairs = []
+                for key, value in obj.items():
+                    key_values_pairs.append((
+                        js_friendly(key),
+                        js_friendly(value)))
+                return key_values_pairs
+            elif type(obj) == frozenset:
+                return sorted([js_friendly(x) for x in obj])
+            return obj
+
+        js = js_friendly(operation_overlap)
+        do_dump_json(js, path)
+
+    def _process_timeline_json_path(self):
+        path = _j(self.directory, 'process_timeline.json')
+        return path
+
+    def _debug_process_timeline_json_path(self):
+        path = _j(self.directory, 'process_timeline.debug.json')
+        return path
+
     def compute_per_operation_overlap(self, bench_name):
         
         # TODO: we could consider memoizing results inside of a file, but screw it shouldn't take too long.
@@ -632,6 +743,13 @@ class OverlapComputer:
             # Only debug the first step of the first process (if --debug is set)
             sql_reader.parse_debug = False
 
+        json_output = self._overlaps_as_json(overlaps)
+        if self.debug:
+            self._dump_per_operation_json(bench_name, json_output)
+
+        return json_output
+
+    def _overlaps_as_json(self, overlaps):
         pprint.pprint({
             'overlaps':overlaps,
         })
@@ -673,8 +791,7 @@ class OverlapComputer:
             'category_combinations': sorted(sorted(combo) for combo in category_combinations),
             'category_combo_times':category_combo_times,
         }
-        if self.debug:
-            self._dump_per_operation_json(bench_name, json_output)
+
         return json_output
 
     def _dump_per_operation_json(self, bench_name, json_output):

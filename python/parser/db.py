@@ -3,6 +3,7 @@ import re
 import subprocess
 import progressbar
 import pytest
+import bisect
 
 import sqlite3
 from sqlite3 import Error
@@ -662,7 +663,7 @@ class SQLiteCategoryTimesReader:
         else:
             keep_steps = steps
 
-        return steps
+        return keep_steps
 
     @property
     def directory(self):
@@ -750,6 +751,211 @@ class SQLiteCategoryTimesReader:
                                             group_by_device, ignore_categories, debug)
                 yield process_name, step, category_times
 
+    def parse_timeline(self,
+                       # group_by_device=DEFAULT_group_by_device,
+                       ignore_categories=DEFAULT_ignore_categories,
+                       debug=DEFAULT_debug):
+        """
+        PSEUDOCODE:
+        for proc in self.process_names:
+            events[proc] = Select all events for <process_name> (i.e. over its min/max time range)
+            events[proc] = process_op_nest(events[proc]) to get the right operations for CATEGORY_OPERATION.
+
+        # Replace Python/C++/CUDA-C with CPU category.
+        # Keep GPU category.
+        category_times = dict()
+        for proc in events.keys():
+            for event in events[proc]:
+                if row['category_name'] in Python/C++/CUDA-C/etc:
+                    category = 'CPU'
+                else:
+                    assert category == 'GPU'
+
+                # process information is no longer required.
+                category_times_add_time(
+                    category_times, row['device_name'], ktime, group_by_device, category=category)
+
+        # In caller:
+        # - They will compute a single repetition of times for the different categories of overlap.
+        overlap = ComputeOverlap(category_times)
+
+        :param process_name:
+        :param group_by_device:
+        :param ignore_categories:
+        :param debug:
+        :return:
+        """
+        category_times = dict()
+        operation_types = set()
+        # Categories NOT including the operation-type categories (that replaced CATEGORY_OPERATION)
+        categories = set()
+
+        for process_name in self.process_names:
+
+            proc_events = self.process_events(process_name, ignore_categories,
+                                              debug=debug,
+                                              # fetchall=False,
+                                              fetchall=True,
+                                              )
+            # assert len(proc_events) > 0
+            proc_category_times = dict()
+            self._add_event_rows_to_category_times(proc_category_times, proc_events)
+            assert len(proc_category_times) > 0
+            assert len(proc_category_times[CATEGORY_OPERATION]) > 0
+
+            assert CATEGORY_OPERATION in proc_category_times
+            proc_category_times[CATEGORY_OPERATION] = process_op_nest(proc_category_times[CATEGORY_OPERATION])
+            assert len(proc_category_times[CATEGORY_OPERATION]) > 0
+
+            # Merge all the process-specific events into a single category_times dict.
+            for category, events in proc_category_times.items():
+                for event in events:
+                    if category in CATEGORIES_CPU:
+                        new_category = CATEGORY_CPU
+                        categories.add(new_category)
+                    elif category == CATEGORY_GPU:
+                        new_category = CATEGORY_GPU
+                        categories.add(new_category)
+                    elif category == CATEGORY_OPERATION:
+                        new_category = event.name
+                        operation_types.add(new_category)
+                    else:
+                        # Q: What about category operation...?
+                        # We want to KEEP the operation category so we can determine
+                        # overlap between q_backward/q_forward across processes...
+                        #
+                        # I think all we need to do is replace "CATEGORY_OPERATION" for an event
+                        # with event.name (it's operation-type).
+                        # Then, when we go to plot the category_times data, we "remove" any operation
+                        # names from the category (forming an operation_key), and group the data
+                        # into an operation-specific dict for plotting.
+                        #
+                        # We can still test a single process trace without handling this.
+                        # (graph should be the same with fewer categories: CPU, GPU, CPU + GPU)
+                        raise RuntimeError("Not sure how to categorize {cat} into CPU or GPU.".format(
+                            cat=category))
+                    if new_category not in category_times:
+                        category_times[new_category] = []
+                    # NOTE: if we bin the CPU/GPU/operation events into separate lists,
+                    # we can use merge_sorted, which may be faster.
+                    #
+                    # However, merge_sorted approach will probably cause more allocations...
+                    insort(category_times[new_category], event, key=lambda event: event.start_time_usec)
+                # insort_list(category_times[new_category], events, key=lambda event: event.start_time_usec)
+
+        # Sanity check: Events are all sorted.
+        for category, events in category_times.items():
+            for e1, e2 in zip(events, events[1:]):
+                assert e1.start_time_usec <= e2.start_time_usec
+
+        assert len(operation_types) > 0
+
+        if debug:
+            print("> DEBUG: parse_timeline: ")
+            pprint.pprint({
+                'operation_types':operation_types,
+                'categories':categories,
+            }, indent=2)
+
+        return category_times, categories, operation_types
+
+    def _query(self, query, params=None, debug=False):
+        c = self.conn.cursor
+        if debug:
+            print("> {name} query:".format(name=self.__class__.__name__))
+            print(query)
+            if params is not None:
+                print("> params:")
+                pprint.pprint(params, indent=2)
+        if params is not None:
+            c.execute(query, params)
+        else:
+            c.execute(query)
+
+    def total_trace_time_sec(self, debug=False):
+        """
+        Select min(start_time_us) as, max(end_time_us) from Event
+        (i.e. across all processes)
+        """
+        c = self.conn.cursor
+        query = textwrap.dedent("""
+        SELECT MIN(start_time_us) AS min_us, MAX(end_time_us) AS max_us
+        FROM Event
+        """)
+        self._query(query, debug=debug)
+        row = c.fetchone()
+        total_time_us = row['max_us'] - row['min_us']
+        total_time_sec = total_time_us/MICROSECONDS_IN_SECOND
+        return total_time_sec
+
+    def process_events(self, process_name, ignore_categories,
+                       debug=False,
+                       fetchall=True):
+        ignore_clause = self._ignore_clause(ignore_categories)
+        c = self.conn.cursor
+        query = textwrap.dedent("""
+        SELECT device_name, category_name, event_name, start_time_us, duration_us
+        FROM 
+          Category AS c 
+          NATURAL JOIN Event as e
+          NATURAL JOIN Process as p
+          NATURAL LEFT JOIN Device as d
+        WHERE p.process_name = ?
+        {ignore_clause}
+        ORDER BY start_time_us ASC 
+        """.format(
+            ignore_clause=ignore_clause,
+        ))
+
+        # query = textwrap.dedent("""
+        # SELECT device_name, category_name, event_name, start_time_us, duration_us
+        # FROM
+        #   Category AS c
+        #   NATURAL JOIN Event as e
+        #   NATURAL JOIN Process as p
+        #   NATURAL LEFT JOIN Device as d
+        # ORDER BY start_time_us ASC
+        # """.format(
+        #     ignore_clause=ignore_clause,
+        # ))
+
+
+        params = (
+            process_name,
+        )
+        if debug:
+            print("> {name} query:".format(name=self.__class__.__name__))
+            print(query)
+            print("> params:")
+            pprint.pprint(params, indent=2)
+        c.execute(query, params)
+        if fetchall:
+            ret = c.fetchall()
+        else:
+            ret = c
+        return ret
+
+    def _ignore_clause(self, ignore_categories):
+        def ignore_and_clause(category):
+            and_clause = textwrap.dedent("""\
+            AND ( category_name != '{category}' )\
+            """.format(category=category))
+            return and_clause
+
+        # ignore_cats = list(ignore_categories) + [CATEGORY_OPERATION]
+        ignore_clause = "\n".join([ignore_and_clause(category) for category in ignore_categories])
+
+        return ignore_clause
+
+    def _add_event_rows_to_category_times(self, category_times, rows,
+                                          group_by_device=DEFAULT_group_by_device):
+        # rows = c.fetchall()
+        # for row in rows:
+        for row in rows:
+            ktime = row_as_ktime(row)
+            category_times_add_time(category_times, row['device_name'], ktime, group_by_device, category=row['category_name'])
+
+
     def parse(self, step, process_name, bench_name,
               group_by_device=DEFAULT_group_by_device,
               ignore_categories=DEFAULT_ignore_categories,
@@ -799,18 +1005,7 @@ class SQLiteCategoryTimesReader:
           so we aren't using this.
         """
 
-        def ignore_and_clause(category):
-            and_clause = textwrap.dedent("""\
-            AND ( c_out.category_name != '{category}' )\
-            """.format(category=category))
-            return and_clause
-
-        ignore_clauses = []
-        # ignore_cats = list(ignore_categories) + [CATEGORY_OPERATION]
-        ignore_cats = list(ignore_categories)
-        for category in ignore_cats:
-            ignore_clauses.append(ignore_and_clause(category))
-        ignore_clause = "\n".join(ignore_clauses)
+        ignore_clause = self._ignore_clause(ignore_categories)
 
         #
         # For each time this op-type was called / for each step:
@@ -827,13 +1022,13 @@ class SQLiteCategoryTimesReader:
         query = textwrap.dedent("""
         SELECT device_name, category_name, event_name, start_time_us, duration_us
         FROM 
-          Category AS c_out 
-          NATURAL JOIN Event as e_out
-          NATURAL JOIN Process as p_out
-          NATURAL LEFT JOIN Device as d_out
-        WHERE p_out.process_name = ? AND ( 
-            ( ? <= e_out.start_time_us AND e_out.start_time_us <= ? ) OR
-            ( ? <= e_out.end_time_us AND e_out.end_time_us <= ? )
+          Category
+          NATURAL JOIN Event
+          NATURAL JOIN Process
+          NATURAL LEFT JOIN Device
+        WHERE process_name = ? AND ( 
+            ( ? <= start_time_us AND start_time_us <= ? ) OR
+            ( ? <= end_time_us AND end_time_us <= ? )
         )
         {ignore_clause}
         ORDER BY start_time_us ASC 
@@ -849,11 +1044,7 @@ class SQLiteCategoryTimesReader:
             op_event.start_time_usec, op_event.end_time_usec,
         ))
         category_times = dict()
-        # rows = c.fetchall()
-        # for row in rows:
-        for row in c:
-            ktime = row_as_ktime(row)
-            category_times_add_time(category_times, row['device_name'], ktime, group_by_device, category=row['category_name'])
+        self._add_event_rows_to_category_times(category_times, c, group_by_device)
 
         # if i == 0 and self.debug:
         if parse_debug:
@@ -1060,6 +1251,105 @@ class OpStack:
                              end_usec=self.end_time_usec)
         if end_op is not None:
             yield end_op
+
+#
+# From bisect.insort.
+# Modify to add a key-function.
+#
+def insort_right(a, x, lo=0, hi=None,
+                 key=lambda x: x):
+    """Insert item x in list a, and keep it sorted assuming a is sorted.
+
+    If x is already in a, insert it to the right of the rightmost x.
+
+    Optional args lo (default 0) and hi (default len(a)) bound the
+    slice of a to be searched.
+    """
+
+    if lo < 0:
+        raise ValueError('lo must be non-negative')
+    if hi is None:
+        hi = len(a)
+    while lo < hi:
+        mid = (lo+hi)//2
+        if key(x) < key(a[mid]):
+            hi = mid
+        else:
+            lo = mid+1
+    a.insert(lo, x)
+insort = insort_right   # backward compatibility
+
+def insort_list(xs, ys, key=lambda x: x):
+    """
+    :param xs:
+        The list to be inserted into.
+        Must be sorted.
+    :param ys:
+        A list (doesn't need to be sorted).
+        These are the elements to be inserted into xs.
+    :return:
+    """
+    for y in ys:
+        insort(xs, y, key=key)
+
+def merge_sorted(xs, ys, key=lambda x: x):
+    """
+    Merge two sorted lists.
+    :param inplace
+        Insert ys into xs.
+    """
+
+    i = 0
+    j = 0
+
+    # xs:         5 6 7 8
+    # ys: 1 2 3 4 5       9 10 11
+
+    # zs = []
+
+    zs = [None]*(len(xs) + len(ys))
+    m = 0
+
+    while i < len(xs) and j < len(ys):
+        if key(xs[i]) < key(ys[j]):
+            # zs.append(xs[i])
+            zs[m] = xs[i]
+            m += 1
+            i += 1
+        else:
+            # zs.append(ys[j])
+            zs[m] = ys[j]
+            m += 1
+            j += 1
+
+    if i < len(xs):
+        # zs.extend(xs[i:])
+        for k in range(i, len(xs)):
+            zs[m] = xs[k]
+            m += 1
+        i += len(xs[i:])
+    elif j < len(ys):
+        # zs.extend(ys[j:])
+        for k in range(j, len(ys)):
+            zs[m] = ys[k]
+            m += 1
+        j += len(ys[j:])
+
+    return zs
+
+def test_merge_sorted():
+
+    def test_01():
+
+        # xs:         5 6 7 8
+        # ys: 1 2 3 4 5       9 10 11
+        xs = [            5, 6, 7, 8,          ]
+        ys = [1, 2, 3, 4, 5,          9, 10, 11]
+        expect = [1, 2, 3, 4, 5, 5, 6, 7, 8, 9, 10, 11]
+        actual = merge_sorted(xs, ys)
+
+        assert actual == expect
+    test_01()
 
 def test_process_op_nest():
     from test.test_util import sec, T

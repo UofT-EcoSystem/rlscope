@@ -552,6 +552,15 @@ class CategoryOverlapPlot:
     Create a stacked bar plot.
     For the list of times to show, see self.category_order.
     """
+    def __init__(self, directory,
+                 debug=False,
+                 # Swallow any excess arguments
+                 **kwargs):
+        self.directory = directory
+        self.debug = debug
+
+        self.bar_width = 0.25
+        self.show = False
 
     def get_source_files(self):
         """
@@ -567,39 +576,6 @@ class CategoryOverlapPlot:
                 path=traces_db,
             )))
         return src_files
-
-    @staticmethod
-    def required_source_basename_regexes():
-        return {
-            'tfprof_json': r"tfprof{bench}.json$".format(bench=BENCH_SUFFIX_RE),
-        }
-
-    @staticmethod
-    def optional_source_basename_regexes():
-        # Same requirement; config_json.
-        return {'config_json':r"^config.json$"}
-
-    @staticmethod
-    def allow_multiple_src_matches():
-        return True
-
-    @staticmethod
-    def uses_all_benches():
-        return True
-
-    @staticmethod
-    def uses_multiple_dirs():
-        return True
-
-    @classmethod
-    def get_targets(Klass, src_files, bench_name=NO_BENCH_NAME):
-        # TODO: get rid of bench_name (if uses_all_benches is set?)
-        # TODO: fields depends on contents of src_files technically... ok to not output a file we say we will output?
-        targets = [
-            Klass.get_plot_data_path(src_files),
-            Klass.get_category_overlap_png(src_files),
-        ]
-        return targets
 
     def _category_overlap_png(self, bench_name):
         return CategoryOverlapPlot.get_category_overlap_png(self.directory, bench_name)
@@ -624,16 +600,6 @@ class CategoryOverlapPlot:
 
     def _stats(self, bench_name):
         return CategoryOverlapPlot.get_stats(self.directory, bench_name)
-
-    def __init__(self, directory,
-                 debug=False,
-                 # Swallow any excess arguments
-                 **kwargs):
-        self.directory = directory
-        self.debug = debug
-
-        self.bar_width = 0.25
-        self.show = False
 
     def run(self):
 
@@ -688,25 +654,8 @@ class CategoryOverlapPlot:
             self._dump_cpu_gpu_stats(bench_name)
 
     def _dump_cpu_gpu_stats(self, bench_name):
-        bench_df = self.plotter.plot_data(bench_name)
-        def is_gpu_row(row):
-            return re.search(r'\bGPU\b', row['category'])
-        gpu_rows = pd.DataFrame([row for index, row in bench_df.iterrows() if is_gpu_row(row)])
-        cpu_rows = pd.DataFrame([row for index, row in bench_df.iterrows() if not is_gpu_row(row)])
-        def sum_time(rows):
-            if len(rows) > 0:
-                return rows['mean'].sum()
-            return 0.
-        cpu_time_sec = sum_time(cpu_rows)
-        gpu_time_sec = sum_time(gpu_rows)
-        total_time_sec = cpu_time_sec + gpu_time_sec
-        js_stats = {
-            'cpu_time_sec':cpu_time_sec,
-            'gpu_time_sec':gpu_time_sec,
-            'total_time_sec':total_time_sec,
-            'gpu_time_percent': 100*gpu_time_sec/total_time_sec,
-            'cpu_time_percent': 100*cpu_time_sec/total_time_sec,
-        }
+        js_stats = dict()
+        _add_cpu_gpu_stats(js_stats, self.plotter, bench_name)
         print("> Save plot stats to {path}".format(path=self._stats(bench_name)))
         do_dump_json(js_stats, self._stats(bench_name))
 
@@ -828,7 +777,9 @@ class StackedBarPlotter:
         # Keep this...
         fig = plt.figure()
 
-        if bench_name == NO_BENCH_NAME:
+        if bench_name is None:
+            all_benches = [NO_BENCH_NAME]
+        elif bench_name == NO_BENCH_NAME:
             all_benches = self.get_plot_bench_names()
         else:
             all_benches = [bench_name]
@@ -875,7 +826,8 @@ class StackedBarPlotter:
             plt.savefig(self.get_png_path(bench_name), bbox_inches="tight")
             plt.close()
 
-    def add_json_data(self, json_data, bench_name, device, impl_name, debug=False):
+    def add_json_data(self, json_data, bench_name, device, impl_name, debug=False,
+                      expect_times=False):
         # bench_names = self._get_bench_names(json_data)
         # # device = json_data['attrs']['name']
         # # impl_name = json_data['attrs']['impl_name']
@@ -884,16 +836,19 @@ class StackedBarPlotter:
         categories = [k for k in json.get_categories() if k in self.category_order]
         # categories = self._get_categories(json_data)
         if debug:
-            print("> json_data = ")
-            pprint.pprint(json_data, indent=2)
-            print("> categories = {c}".format(c=categories))
+            print("> bench_name={op}, json_data = ".format(op=bench_name))
+            print(textwrap.indent(pprint.pformat(json_data), prefix="  "))
+            print("  > categories = {c}".format(c=categories))
         for category in categories:
             if debug:
                 print("> add category={c}: {times}".format(
                     c=category,
                     times=json.get_times_sec(category)))
                     # times=json_data[category]))
-            for time_sec in json.get_times_sec(category):
+            times_seconds = json.get_times_sec(category)
+            if expect_times:
+                assert len(times_seconds) > 0
+            for time_sec in times_seconds:
                 self.df_data['bench_name'].append(bench_name)
                 # self.df_data['bench_name_order'].append(self.bench_name_order_map[bench_name])
                 self.df_data['impl_name'].append(impl_name)
@@ -995,6 +950,12 @@ class StackedBarPlotter:
     # def _get_categories(self, json_data):
     #     return list(k for k in json_data.keys() if k in self.category_order)
 
+    @property
+    def dataframe(self):
+        if self.df is None:
+            self._as_dataframe()
+        return self.df
+
     def _as_dataframe(self):
         self._build_bench_name_order()
 
@@ -1077,7 +1038,7 @@ class PlotSummaryReader:
         return self.json_data[category][1:]
 
 def _category_str(category_combo):
-    assert type(category_combo) in [list, tuple]
+    assert type(category_combo) in [list, tuple, frozenset, set]
 
     # HACK to make CategoryOverlapPlot more readable...
     # technically "Framework API C" overlaps with all the "GPU" time and other stuff, but it makes things annoying to read.
@@ -1090,7 +1051,7 @@ def _category_str(category_combo):
     # for category in category_combo:
     #     # Otherwise, we cannot do re.split(r' \+ ', ...) to recover the category_combo.
     #     assert '+' not in category
-    return " + ".join(category_combo)
+    return " + ".join(sorted(category_combo))
 
 class TFProfReader:
     """
@@ -1131,6 +1092,59 @@ class TFProfReader:
             if category == cat_str:
                 # Ignore the first time since it includes libcupti.so load time.
                 return times_sec[1:]
+        print("> json_data = ")
+        pprint.pprint(self.json_data, indent=2)
+        raise RuntimeError("Couldn't find category=\"{cat}\"".format(cat=category))
+
+class ProcessTimelineReader:
+    """
+    > json_data = operation_overlap[operation category]
+    # operation_overlap: dict
+    #   set(operation categories) -> set(non-operation categories) -> [ CPU, GPU, CPU/GPU ] time
+    #    <q_forward, q_backward>       <CPU>, <GPU>, <CPU, GPU>             0.001 sec
+    #
+    #                                -----------------------------------------------------------
+
+    { 'categories': ['CUDA API CPU', 'Framework API C', 'GPU', 'Python'],
+      'category_combinations': [ ['CUDA API CPU'],
+                                 ['CUDA API CPU', 'GPU'],
+                                 ['Framework API C'],
+                                 ['Framework API C', 'Python'],
+                                 ['GPU'],
+                                 ['Python']],
+      'category_combo_times': [ { 'category_combo': ['CUDA API CPU', 'GPU'],
+                                  'times_usec': [1697.0, 1706.0, 1909.0, 1567.0]},
+                                { 'category_combo': ['Python'],
+                                  'times_usec': [884.0, 848.0, 921.0, 955.0]},
+                                { 'category_combo': ['CUDA API CPU'],
+                                  'times_usec': [5153.0, 5762.0, 4238.0, 5038.0]},
+                                { 'category_combo': ['Framework API C'],
+                                  'times_usec': [6355.0, 6291.0, 7505.0, 6915.0]},
+                                { 'category_combo': ['Framework API C', 'Python'],
+                                  'times_usec': [0.0, 0.0, 0.0, 0.0]},
+                                { 'category_combo': ['GPU'],
+                                  'times_usec': [1391.0, 1390.0, 1172.0, 1531.0]}]}
+    """
+    def __init__(self, json_data):
+        self.json_data = json_data
+        self.categories = [_category_str(category_combo)
+                           for category_combo in self.json_data.keys()]
+
+    def get_categories(self):
+        return self.categories
+
+    def get_times_sec(self, category):
+        for category_combo, time in self.json_data.items():
+            cat_str = _category_str(category_combo)
+            if category == cat_str:
+                return [time/MICROSECONDS_IN_SECOND]
+        # for cat_data in self.json_data['category_combo_times']:
+        #     category_combo = cat_data['category_combo']
+        #     cat_str = _category_str(category_combo)
+        #     times_sec = np.array(cat_data['times_usec'])/MICROSECONDS_IN_SECOND
+        #     if category == cat_str:
+        #         # Ignore the first time since it includes libcupti.so load time.
+        #         return times_sec[1:]
         print("> json_data = ")
         pprint.pprint(self.json_data, indent=2)
         raise RuntimeError("Couldn't find category=\"{cat}\"".format(cat=category))
@@ -1494,15 +1508,15 @@ class UtilizationPlot:
     """
     CPU/GPU utilization over training.
     """
-
     def __init__(self, directory,
                  debug=False,
                  # Swallow any excess arguments
                  **kwargs):
         self.directory = directory
-        self.conn = TracesSQLiteConnection(self.db_path)
         self.debug = debug
-        # self.block_size = 50000
+
+        self.bar_width = 0.25
+        self.show = False
 
     def get_source_files(self):
         """
@@ -1512,9 +1526,167 @@ class UtilizationPlot:
         traces_db = traces_db_path(self.directory)
         if not _e(traces_db):
             raise MissingInputFiles(textwrap.dedent("""
-            {klass}: Couldn't find any traces.db at {path}.
-            """.format(
+                {klass}: Couldn't find any traces.db at {path}.
+                """.format(
                 klass=self.__class__.__name__,
                 path=traces_db,
             )))
         return src_files
+
+    def _process_timeline_png(self, bench_name):
+        return UtilizationPlot.get_process_timeline_png(self.directory, bench_name)
+
+    @staticmethod
+    def get_process_timeline_png(directory, bench_name):
+        return _j(directory, "process_timeline{bench}.png".format(
+            bench=bench_suffix(bench_name)))
+
+    @staticmethod
+    def get_plot_data_path(directory, bench_name):
+        return _j(directory, "process_timeline.plot_data{bench}.txt".format(
+            bench=bench_suffix(bench_name)))
+
+    def _plot_data_path(self, bench_name):
+        return UtilizationPlot.get_plot_data_path(self.directory, bench_name)
+
+    def run(self):
+
+        self.sql_reader = SQLiteCategoryTimesReader(self.db_path)
+        # self.bench_names = self.sql_reader.bench_names + [NO_BENCH_NAME]
+        # assert len(self.bench_names) == len(unique(self.bench_names))
+        # self.categories = self.sql_reader.categories
+
+        overlap_computer = OverlapComputer(self.db_path, debug=self.debug)
+
+        operation_overlap = overlap_computer.compute_process_timeline_overlap()
+        assert len(operation_overlap) > 0
+
+        # all_categories = set()
+        # json_datas = []
+        # for bench_name in self.bench_names:
+        #     # json_data = overlap_computer.compute_per_operation_overlap(bench_name)
+        #     json_datas.append(json_data)
+        #
+        #     for combo_and_times in json_data['category_combo_times']:
+        #         category = _category_str(combo_and_times['category_combo'])
+        #         all_categories.add(category)
+
+        all_categories = set()
+        for operation_key, combo_to_time in operation_overlap.items():
+            for category_key, time in combo_to_time.items():
+                category = _category_str(category_key)
+                all_categories.add(category)
+
+        pprint.pprint({'all_categories': all_categories})
+
+        self.category_order = sorted(all_categories)
+        # self.bench_name_labels = DQN_BENCH_NAME_LABELS
+        # TODO: create bench name labels
+        self.bench_name_labels = None
+        self.category_color_map = None
+        self.category_labels = None
+        self.impl_name_order = IMPL_NAME_ORDER
+        self.device_order = DEVICE_ORDER
+        self.plotter = StackedBarPlotter(
+            self._process_timeline_png, self._plot_data_path,
+            self.category_order,
+            self.impl_name_order,
+            self.device_order,
+            bench_name_labels=self.bench_name_labels,
+            category_color_map=self.category_color_map,
+            category_labels=self.category_labels,
+            bar_width=self.bar_width, show=self.show,
+            json_reader_klass=ProcessTimelineReader,
+            title='CPU/GPU utilization over training',
+            # TODO: use "minigo"
+            xlabel='',
+            ylabel='Total training time (seconds)',
+        )
+
+        # for bench_name, json_data in zip(self.bench_names, json_datas):
+        #     device_name = NO_DEVICE_NAME
+        #     impl_name = NO_IMPL_NAME
+        #     self.plotter.add_json_data(json_data, bench_name,
+        #                                device_name, impl_name, debug=True)
+
+        for operation_key, combo_to_time in operation_overlap.items():
+            json_data = combo_to_time
+            # for category_key, time in operation_overlap.items():
+            category = _category_str(category_key)
+            all_categories.add(category)
+            operations_name = _category_str(operation_key)
+
+            device_name = NO_DEVICE_NAME
+            impl_name = NO_IMPL_NAME
+            self.plotter.add_json_data(json_data, operations_name,
+                                       device_name, impl_name, debug=True,
+                                       expect_times=True)
+
+        # for bench_name in [NO_BENCH_NAME]:
+        # for bench_name in self.bench_names:
+        #     self.plotter.plot(bench_name)
+        df = self.plotter.dataframe
+        assert len(df) != 0
+        self._dump_stats()
+        self.plotter.plot(bench_name=None)
+
+    @property
+    def db_path(self):
+        return traces_db_path(self.directory)
+
+    @staticmethod
+    def get_stats(directory):
+        return _j(directory, "process_timeline.stats.json")
+
+    def _stats(self):
+        return UtilizationPlot.get_stats(self.directory)
+
+    def _dump_stats(self):
+        """
+        Dump some stats useful for testing the correctness of our plot.
+
+        - Total time spent tracing:
+          We expect total time spent tracing to match that total size of our bar-graph.
+          NOTE: would be nice to measure this with time.time() separately, but oh well!
+
+        -
+        :param bench_name:
+        :return:
+        """
+        total_trace_time_sec = self.sql_reader.total_trace_time_sec(debug=self.debug)
+        # EXPECT:
+        # - total_trace_time_sec    ~ total_time_sec
+        #   --------------------      --------------
+        #   Anything that's traced    Stuff covered by operations
+        # IF FAILS:
+        # - then we aren't profiling part of the code.
+        js_stats = {
+            # Select min(start_time_us) as, max(end_time_us) from Event
+            # (i.e. across all processes)
+            'total_trace_time_sec':total_trace_time_sec,
+        }
+        _add_cpu_gpu_stats(js_stats, self.plotter)
+        print("> Save plot stats to {path}".format(path=self._stats()))
+        do_dump_json(js_stats, self._stats())
+        return js_stats
+
+def _add_cpu_gpu_stats(js_stats, plotter, bench_name=NO_BENCH_NAME):
+    bench_df = plotter.plot_data(bench_name)
+    def is_gpu_row(row):
+        return re.search(r'\bGPU\b', row['category'])
+    gpu_rows = pd.DataFrame([row for index, row in bench_df.iterrows() if is_gpu_row(row)])
+    cpu_rows = pd.DataFrame([row for index, row in bench_df.iterrows() if not is_gpu_row(row)])
+    def sum_time(rows):
+        if len(rows) > 0:
+            return rows['mean'].sum()
+        return 0.
+    cpu_time_sec = sum_time(cpu_rows)
+    gpu_time_sec = sum_time(gpu_rows)
+    total_time_sec = cpu_time_sec + gpu_time_sec
+    js_stats.update({
+        'cpu_time_sec':cpu_time_sec,
+        'gpu_time_sec':gpu_time_sec,
+        'total_time_sec':total_time_sec,
+        'gpu_time_percent': 100*gpu_time_sec/total_time_sec,
+        'cpu_time_percent': 100*cpu_time_sec/total_time_sec,
+    })
