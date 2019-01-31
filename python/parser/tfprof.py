@@ -5,6 +5,7 @@ import csv
 import textwrap
 import pprint
 from io import StringIO
+import itertools
 import json
 import codecs
 from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, basename as _b
@@ -25,21 +26,6 @@ from parser.readers import TFProfCategoryTimesReader, \
     DEFAULT_group_by_device, \
     DEFAULT_ignore_categories, \
     DEFAULT_debug \
-
-def read_category_times(category_times_readers, *args, **kwargs):
-    category_times = dict()
-    for reader in category_times_readers:
-        new_times = reader.parse(*args, **kwargs)
-        same_categories = set(new_times.keys()).intersection(set(category_times.keys()))
-        assert len(same_categories) == 0
-        category_times.update(new_times)
-    for category in category_times.keys():
-        if type(category_times[category]) == list:
-            category_times[category].sort(key=lambda ktime: ktime.start_time_usec)
-        else:
-            for device in category_times[category].keys():
-                category_times[category][device].sort(key=lambda ktime: ktime.start_time_usec)
-    return category_times
 
 class ComputeOverlap:
     """
@@ -457,7 +443,6 @@ class TotalTimeParser(ProfilerParserCommonMixin):
         if self.skip:
             return
 
-# class TraceEventsParser(ProfilerParserCommonMixin):
 class TraceEventsParser:
 
     # def __init__(self, parser, args, src_files, bench_name=NO_BENCH_NAME, data=None):
@@ -465,37 +450,13 @@ class TraceEventsParser:
                  # Swallow any excess arguments
                  debug=False,
                  **kwargs):
-        # self.is_dqn = 'microbenchmark_json' in src_files.opt_paths
-        # self.src_files = src_files
-
-        # When True, include pyprof timestamps; the total-time-sec we end up with is too large
-        # (i.e. larger than total time measuring using time.time() around profiled code)
-        #
-        # When False, use only tfprof timestamps; the total-time-sec "makes sense"
-        # (i.e. a bit smaller but similar to time.time() measurement)
-        # self.include_pyprof_timestamps = False
-
-        # self.parser = parser
-        # self.args = args
-        # self.bench_name = bench_name
-        # self.data = data
-        self.skip = False
 
         self.directory = directory
         self.debug = debug
 
-        # self.config_path = src_files.get('config_json', bench_name, or_none=True)
-        # if self.config_path is not None:
-        #     self.config = load_json(self.config_path)
-        #     print("> Found optional config_json @ {f}".format(f=self.config_path))
-        # else:
-        #     self.config = {
-        #     }
+        # self.dummy_times = []
 
-        self.dummy_times = []
-
-
-        self.category_times_readers = []
+        # self.category_times_readers = []
 
     def get_source_files(self):
         """
@@ -512,187 +473,86 @@ class TraceEventsParser:
             )))
         return src_files
 
-    def parse_dummy_events(self, step):
-
-        self.dummy_times = []
-
-        if self._dummy_events_path is None:
-            return
-
-        timestamps = dict()
-        with open(self._dummy_events_path) as f:
-            cur_step = None
-            for line in f:
-                line = line.rstrip()
-
-                m = re.search(r'> RECORDING STEP = (?P<step>\d+)', line)
-                if m:
-                    cur_step = int(m.group('step'))
-
-                if cur_step is None or cur_step != step:
-                    continue
-
-                m = re.search(r'> name="(?P<name>[^"]+)", timestamp = (?P<time_usec>{float}) usec'.format(
-                    float=float_re),
-                    line)
-                # print("LINE = {line}".format(line=line))
-                if m:
-                    assert m.group('name') not in timestamps
-                    timestamps[m.group('name')] = int(float(m.group('time_usec')))
-                    continue
-
-        for name, time_usec in timestamps.items():
-            ktime = KernelTime(start_usec=time_usec, time_usec=1, name=name)
-            self.dummy_times.append(ktime)
-
-    @staticmethod
-    def required_source_basename_regexes():
-        return {
-            'tfprof_path': r"^profile{bench}.proto$".format(bench=BENCH_SUFFIX_RE),
-        }
-
-    @staticmethod
-    def optional_source_basename_regexes():
-        return {
-            'pyprof_path': r"^Pyprof{bench}.proto$".format(bench=BENCH_SUFFIX_RE),
-            'microbenchmark_json':r"^microbenchmark.json$",
-            'config_json':r"^config{bench}\.json$".format(bench=BENCH_SUFFIX_RE),
-            'dummy_events_path': r"^dummy_events{bench}.txt$".format(bench=BENCH_SUFFIX_RE),
-        }
-
-    @staticmethod
-    def allow_multiple_src_matches():
-        return True
-
-    @staticmethod
-    def uses_all_benches():
-        return False
-
-    @staticmethod
-    def uses_multiple_dirs():
-        return False
-
-    # def tfprof_path(self, bench_name):
-    #     return self.src_files.get('tfprof_path', self.bench_name)
-
-    # def pyprof_path(self, bench_name):
-    #     return self.src_files.get('pyprof_path', self.bench_name)
+    # def parse_dummy_events(self, step):
+    #
+    #     self.dummy_times = []
+    #
+    #     if self._dummy_events_path is None:
+    #         return
+    #
+    #     timestamps = dict()
+    #     with open(self._dummy_events_path) as f:
+    #         cur_step = None
+    #         for line in f:
+    #             line = line.rstrip()
+    #
+    #             m = re.search(r'> RECORDING STEP = (?P<step>\d+)', line)
+    #             if m:
+    #                 cur_step = int(m.group('step'))
+    #
+    #             if cur_step is None or cur_step != step:
+    #                 continue
+    #
+    #             m = re.search(r'> name="(?P<name>[^"]+)", timestamp = (?P<time_usec>{float}) usec'.format(
+    #                 float=float_re),
+    #                 line)
+    #             # print("LINE = {line}".format(line=line))
+    #             if m:
+    #                 assert m.group('name') not in timestamps
+    #                 timestamps[m.group('name')] = int(float(m.group('time_usec')))
+    #                 continue
+    #
+    #     for name, time_usec in timestamps.items():
+    #         ktime = KernelTime(start_usec=time_usec, time_usec=1, name=name)
+    #         self.dummy_times.append(ktime)
 
     # Output
 
-    def _dummy_events_path(self, bench_name):
-        path = self.get_dummy_events_path(self.src_files, bench_name)
-        if not _e(path):
-            return None
-        return path
-
-    @classmethod
-    def get_dummy_events_path(ParseKlass, src_files, bench_name):
-        path = _j(src_files.directory, 'dummy_events{bench}.txt'.format(bench=bench_suffix(bench_name)))
-        return path
-
-    def _profile_json_path(self, bench_name):
-        path = _j(self.directory, 'traceEvents{bench}.json'.format(bench=bench_suffix(bench_name)))
-        return path
-        # return self.get_profile_json_path(self.src_files, bench_name)
-
-    # @classmethod
-    # def get_profile_json_path(ParseKlass, src_files, bench_name):
-    #     path = _j(src_files.directory, 'traceEvents{bench}.json'.format(bench=bench_suffix(bench_name)))
-    #     return path
-
-    # @property
-    # def _tfprof_txt_path(self):
-    #     return self.get_tfprof_txt_path(self.src_files, self.bench_name)
-    #
-    # @classmethod
-    # def get_tfprof_txt_path(ParseKlass, src_files, bench_name):
-    #     path = _j(src_files.directory, 'tfprof{bench}.proto.txt'.format(bench=bench_suffix(bench_name)))
+    # def _dummy_events_path(self, bench_name):
+    #     path = self.get_dummy_events_path(self.src_files, bench_name)
+    #     if not _e(path):
+    #         return None
     #     return path
     #
-    # @property
-    # def _pyprof_txt_path(self):
-    #     return self.get_pyprof_txt_path(self.src_files, self.bench_name)
-    #
     # @classmethod
-    # def get_pyprof_txt_path(ParseKlass, src_files, bench_name):
-    #     path = _j(src_files.directory, 'pyprof{bench}.proto.txt'.format(bench=bench_suffix(bench_name)))
+    # def get_dummy_events_path(ParseKlass, src_files, bench_name):
+    #     path = _j(src_files.directory, 'dummy_events{bench}.txt'.format(bench=bench_suffix(bench_name)))
     #     return path
+
+    def _trace_events_path(self, process_name, step, bench_name):
+        path = _j(self.directory, 'traceEvents{proc}{step}{bench}.json'.format(
+            proc=process_suffix(process_name),
+            step=step_suffix(step),
+            bench=bench_suffix(bench_name),
+        ))
+        return path
 
     def run(self):
 
         self.sql_reader = SQLiteCategoryTimesReader(traces_db_path(self.directory))
         self.bench_names = self.sql_reader.bench_names
-        self.category_times_readers.append(self.sql_reader)
+        # self.category_times_readers.append(self.sql_reader)
 
-        for bench_name in self.bench_names:
-
-            steps = self.sql_reader.steps(bench_name)
-            if self.debug:
-                print("> steps = {steps}".format(steps=steps))
-
-            # step = steps[0]
-            # Skip the first step, since it includes profiler initialization stuff.
-            # In particular, the libcupti NVIDIA library gets loaded on-demand during
-            # the first traced step, and this can take 2 seconds to load!
-            # (We had this bug before...)
-            if len(steps) > 1:
-                step = steps[1]
-            else:
-                step = steps[0]
-
-            print("> Generate traceEvents for step={step}".format(step=step))
-
-            """
-            ComputeOverlap ALSO reads the same information; even though it summarizes ACROSS steps, 
-            it still prefers to read individual steps at-a-time.
-            
-            TraceEvents needs to read category times belonging to a single-operation, 
-            and for a single-step.
-            
-            We don't record any notion of "step" in SQLite.
-            op_events = 
-              Instead, we need to separately query all the 'Operation' events whose event_name == bench_name, 
-              sorted by Event.start_us.
-            
-            
-            step = op_events[1]
-            
-            events = 
-                (category_name, event_name, start_us, end_us)
-                Query all the event times that fall within (step.start_us, step.end_us).
-            
-            category_times = rows_as_category_times(events)
-            
-            return category_times
-            """
-
-            category_times = self.read_category_times(step, bench_name)
-
-            trace_events_dumper = TraceEventsDumper(
-                category_times,
-                json_path=self._profile_json_path(bench_name))
-            trace_events_dumper.dump()
-
-    def read_category_times(self, step, bench_name):
-        # Just default to outputting the first step...
         ignore_cats = list(DEFAULT_ignore_categories)
         if CATEGORY_DUMMY_EVENT in ignore_cats:
             ignore_cats.remove(CATEGORY_DUMMY_EVENT)
-        category_times = read_category_times(self.category_times_readers, step, bench_name,
-                                             group_by_device=True,
-                                             ignore_categories=ignore_cats,
-                                             debug=self.debug)
 
-        if len(self.dummy_times) > 0:
-            print("> Adding hardcoded times:")
-            pprint.pprint(self.dummy_times, indent=2)
-            if CATEGORY_DUMMY_EVENT not in category_times:
-                category_times[CATEGORY_DUMMY_EVENT] = []
-            category_times[CATEGORY_DUMMY_EVENT].extend(self.dummy_times)
+        for bench_name in self.bench_names:
 
-        return category_times
+            for process_name, step, category_times in itertools.islice(
+                self.sql_reader.each_op_instance(bench_name,
+                                                 group_by_device=True,
+                                                 ignore_categories=ignore_cats,
+                                                 debug=self.debug),
+                # Just grab the very first operation from the very first process.
+                0, 1):
 
+                print("> Generate traceEvents for step={step}".format(step=step))
+
+                trace_events_dumper = TraceEventsDumper(
+                    category_times,
+                    json_path=self._trace_events_path(process_name, step, bench_name))
+                trace_events_dumper.dump()
 
     def dump(self, bench_name):
         if self.skip:
@@ -741,36 +601,22 @@ class OverlapComputer:
         # Would be nice to know CPU is every executing anything else...
         # thread-pool threads are just blocked, but is the "main" thread doing anything?
 
-        category_times_readers = []
-
         sql_reader = SQLiteCategoryTimesReader(self.db_path)
-        category_times_readers.append(sql_reader)
-        # bench_names = sql_reader.bench_names
-        # for bench_name in bench_names:
-
-        steps = sql_reader.steps(bench_name)
-        print("> steps = ")
-        pprint.pprint({'len(steps)':len(steps),
-                       'steps':steps})
 
         # Overlap, computed across different "steps".
         overlaps = []
 
-        # Skip the first step (it captures libcupti.so load time).
-        keep_steps = steps[1:]
-        for i, step in enumerate(keep_steps):
-            reader_debug = (i == 0 and self.debug)
-            category_times = read_category_times(category_times_readers, step, bench_name,
-                                                 # Don't want to compute overlap w/ dummy events; doesn't mean anything.
-                                                 ignore_categories=DEFAULT_ignore_categories,
-                                                 debug=reader_debug)
+        sql_reader.parse_debug = self.debug
+        for process_name, step, category_times in sql_reader.each_op_instance(bench_name):
 
-            if reader_debug:
+            if sql_reader.parse_debug:
                 # Q: What do does train_loop look like, overlapped with all its fellow operation-types?
-                json_path = _j(self.directory, "OverlapComputer.step_{step}{bench}.debug.json".format(
-                    step=step,
-                    bench=bench_suffix(bench_name)))
-                print("> DEBUG: dump trace events @ {path}".format(path=json_path))
+                json_path = _j(self.directory, 'OverlapComputer{proc}{step}{bench}.debug.json'.format(
+                    proc=process_suffix(process_name),
+                    step=step_suffix(step),
+                    bench=bench_suffix(bench_name),
+                ))
+                print("> DEBUG: dump trace events AFTER process_op_nest @ {path}".format(path=json_path))
                 dump_category_times(category_times, json_path, print_log=False)
 
             for ktime in category_times.get(CATEGORY_OPERATION, []):
@@ -782,6 +628,9 @@ class OverlapComputer:
             compute_overlap = ComputeOverlap(category_times, overlaps_with=[CATEGORY_OPERATION])
             compute_overlap.compute()
             overlaps.append(compute_overlap.get_category_times())
+
+            # Only debug the first step of the first process (if --debug is set)
+            sql_reader.parse_debug = False
 
         pprint.pprint({
             'overlaps':overlaps,

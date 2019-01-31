@@ -643,11 +643,26 @@ class SQLiteCategoryTimesReader:
     def __init__(self, db_path):
         self.db_path = db_path
         self.conn = TracesSQLiteConnection(db_path)
+        self.parse_debug = False
 
         self._steps = dict()
 
-    def steps(self, bench_name):
-        return list(range(self.num_steps(bench_name)))
+    def steps(self, process_name, bench_name):
+        return list(range(self.num_steps(process_name, bench_name)))
+
+    def keep_steps(self, process_name, bench_name, skip_first_step=True):
+        steps = self.steps(process_name, bench_name)
+
+        # Skip the first step, since it includes profiler initialization stuff.
+        # In particular, the libcupti NVIDIA library gets loaded on-demand during
+        # the first traced step, and this can take 2 seconds to load!
+        # (We had this bug before...)
+        if skip_first_step and len(steps) > 1:
+            keep_steps = steps[1:]
+        else:
+            keep_steps = steps
+
+        return steps
 
     @property
     def directory(self):
@@ -670,26 +685,42 @@ class SQLiteCategoryTimesReader:
         c.execute("""
         SELECT category_name FROM Category
         ORDER BY category_name ASC
-        """.format(op=CATEGORY_OPERATION))
+        """)
         category_names = [row['category_name'] for row in c.fetchall()]
         return category_names
 
-    def _fetch_steps(self, bench_name):
+    @property
+    def process_names(self):
+        c = self.conn.cursor
+        c.execute("""
+        SELECT process_name FROM Process
+        ORDER BY process_name ASC
+        """)
+        process_names = [row['process_name'] for row in c.fetchall()]
+        return process_names
+
+    def _fetch_steps(self, process_name, bench_name):
         if bench_name in self._steps:
             return
 
         c = self.conn.cursor
         c.execute("""
-        SELECT e.event_name, e.start_time_us, e.duration_us FROM Event AS e NATURAL JOIN Category AS c
+        SELECT e.event_name, e.start_time_us, e.duration_us
+        FROM Event AS e 
+            NATURAL JOIN Category AS c
+            NATURAL JOIN Process AS p
         WHERE c.category_name = '{op}' AND
-              e.event_name = ?
+              e.event_name = ? AND
+              p.process_name = ?
         ORDER BY e.start_time_us ASC 
         """.format(op=CATEGORY_OPERATION),
-                  (bench_name,))
+                  (bench_name, process_name))
         rows = rows_as_ktime(c.fetchall())
-        self._steps[bench_name] = rows
+        if process_name not in self._steps:
+            self._steps[process_name] = dict()
+        self._steps[process_name][bench_name] = rows
 
-    def num_steps(self, bench_name):
+    def num_steps(self, process_name, bench_name):
         """
         We don't record step numbers in the database.
         Instead, steps are an index into the i-th time this operation occurs in the entire ML-script.
@@ -697,18 +728,39 @@ class SQLiteCategoryTimesReader:
         We tend to want to skip the 1-st time the operation occurs / is profiled, since
         it will include load-time overheads (libcupti).
         """
-        self._fetch_steps(bench_name)
-        return len(self._steps[bench_name])
+        self._fetch_steps(process_name, bench_name)
+        return len(self._steps[process_name][bench_name])
 
-    def step_event(self, step, bench_name):
-        self._fetch_steps(bench_name)
-        return self._steps[bench_name][step]
+    def step_event(self, step, process_name, bench_name):
+        self._fetch_steps(process_name, bench_name)
+        return self._steps[process_name][bench_name][step]
 
-    def parse(self, step, bench_name,
+    def each_op_instance(self, bench_name,
+                         group_by_device=DEFAULT_group_by_device,
+                         ignore_categories=DEFAULT_ignore_categories,
+                         debug=DEFAULT_debug,
+                         skip_first_step=True):
+        process_names = self.process_names
+        for process_name in process_names:
+
+            keep_steps = self.keep_steps(process_name, bench_name, skip_first_step)
+
+            for step in keep_steps:
+                category_times = self.parse(step, process_name, bench_name,
+                                            group_by_device, ignore_categories, debug)
+                yield process_name, step, category_times
+
+    def parse(self, step, process_name, bench_name,
               group_by_device=DEFAULT_group_by_device,
               ignore_categories=DEFAULT_ignore_categories,
               debug=DEFAULT_debug):
         """
+        JAMES NOTE: This is for reading a operation-instance (step) at-a-time.
+        In order to read a "chunk" of the timeline trace at a time, we probably
+        want to expose another method.
+
+        Also, we do NOT consider process_id's here at all.
+
         # PSEUDOCODE:
         rows = SELECT category_name, start_time_us, duration_us FROM Category NATURAL JOIN Event
         for category_name, start_time_us, duration_us in rows:
@@ -718,14 +770,16 @@ class SQLiteCategoryTimesReader:
         :return:
         """
         assert bench_name != NO_BENCH_NAME
-        n_steps = self.num_steps(bench_name)
+        n_steps = self.num_steps(process_name, bench_name)
         assert 0 <= step < n_steps
 
-        op_event = self.step_event(step, bench_name)
+        op_event = self.step_event(step, process_name, bench_name)
 
-        if debug:
-            print("> step={step}, op={bench}, time={time}".format(
-                step=step, bench=bench_name, time=op_event))
+        parse_debug = debug or self.parse_debug
+
+        if parse_debug:
+            print("> step={step}, process={proc}, op={bench}, time={time}".format(
+                step=step, proc=process_name, bench=bench_name, time=op_event))
 
         c = self.conn.cursor
 
@@ -775,8 +829,9 @@ class SQLiteCategoryTimesReader:
         FROM 
           Category AS c_out 
           NATURAL JOIN Event as e_out
+          NATURAL JOIN Process as p_out
           NATURAL LEFT JOIN Device as d_out
-        WHERE ( 
+        WHERE p_out.process_name = ? AND ( 
             ( ? <= e_out.start_time_us AND e_out.start_time_us <= ? ) OR
             ( ? <= e_out.end_time_us AND e_out.end_time_us <= ? )
         )
@@ -785,10 +840,11 @@ class SQLiteCategoryTimesReader:
         """.format(
             ignore_clause=ignore_clause,
         ))
-        if debug:
+        if parse_debug:
             print("> {name} query:".format(name=self.__class__.__name__))
             print(query)
         c.execute(query, (
+            process_name,
             op_event.start_time_usec, op_event.end_time_usec,
             op_event.start_time_usec, op_event.end_time_usec,
         ))
@@ -800,12 +856,13 @@ class SQLiteCategoryTimesReader:
             category_times_add_time(category_times, row['device_name'], ktime, group_by_device, category=row['category_name'])
 
         # if i == 0 and self.debug:
-        if debug:
+        if parse_debug:
             # Q: What do does train_loop look like, overlapped with all its fellow operation-types?
-            json_path = _j(self.directory, "SQLiteCategoryTimesReader.step_{step}{bench}.debug.json".format(
-                step=step,
+            json_path = _j(self.directory, "SQLiteCategoryTimesReader{proc}{step}{bench}.debug.json".format(
+                proc=process_suffix(process_name),
+                step=step_suffix(step),
                 bench=bench_suffix(bench_name)))
-            print("> DEBUG: dump trace events @ {path}".format(path=json_path))
+            print("> DEBUG: dump trace events BEFORE process_op_nest @ {path}".format(path=json_path))
             dump_category_times(category_times, json_path, print_log=False)
 
         category_times[CATEGORY_OPERATION] = process_op_nest(category_times[CATEGORY_OPERATION],

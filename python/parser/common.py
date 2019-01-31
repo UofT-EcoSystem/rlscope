@@ -112,6 +112,7 @@ float_re = r'(?:[-+]?[0-9]*\.?[0-9]+([eE][-+]?[0-9]+)?)'
 # Avoid using None for no bench_name; doesn't play nice with pandas/numpy
 # (None == NaN in that context).
 NO_BENCH_NAME = "NoBenchName"
+NO_PROCESS_NAME = "NoProcessName"
 NO_DEVICE_NAME = "NoDeviceName"
 NO_IMPL_NAME = "NoImplName"
 
@@ -923,6 +924,16 @@ def bench_suffix(bench):
     if bench != NO_BENCH_NAME:
         return ".{bench}".format(bench=bench)
     return ""
+
+def process_suffix(process_name):
+    assert process_name is not None
+    if process_name != NO_PROCESS_NAME:
+        return ".{proc}".format(proc=process_name)
+    return ""
+
+def step_suffix(step):
+    assert step is not None
+    return ".step_{id}".format(id=step)
 
 def load_json(path):
     with codecs.open(path, mode='r', encoding='utf-8') as f:
