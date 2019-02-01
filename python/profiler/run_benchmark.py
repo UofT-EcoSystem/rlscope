@@ -189,6 +189,11 @@ ERROR: Didn't find all required source files in directory={dir} for parser={pars
                 expr.run(bench_name)
 
 def main():
+
+    # from test import test_plot
+    # test_plot.test_plot_position()
+    # return
+
     parser = argparse.ArgumentParser("benchmark DQN")
 
     parser.add_argument("--benchmarks",

@@ -134,6 +134,11 @@ class SQLiteParser:
         """
         c = self.cursor
 
+        # [    op1    ]
+        #         [    op2    ]
+        #         -----
+        #         partial overlap
+        #
         # op1.start         < op2.start         < op1.end                                 < op2.end
         # op1.start_time_us < op2.start_time_us < ( op1.start_time_us + op1.duration_us ) < ( op2.start_time_us + op2.duration_us )
         c.execute("""
@@ -143,6 +148,7 @@ class SQLiteParser:
         EXISTS (
             SELECT * FROM Event AS op2 NATURAL JOIN Category c2
             WHERE 
+            op1.process_id == op2.process_id AND
             c2.category_name = '{CATEGORY_OPERATION}' AND
             op1.start_time_us < op2.start_time_us AND
                                 op2.start_time_us < op1.end_time_us AND

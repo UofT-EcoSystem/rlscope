@@ -70,7 +70,15 @@ Parameters
 ----------
 hatch : {'/', '\\', '|', '-', '+', 'x', 'o', 'O', '.', '*'}
 """
-HATCH_STYLES = ['/', '\\', '|', 'x', 'o', '.', '*']
+HATCH_STYLES = [
+    '/', '\\', '|', 'x', 'o', '.', '*',
+
+    '/.', '\\.', '|.', 'x.', 'o.', '.', '*.',
+
+    # '/', '\\', '|', 'x', 'o', '.', '*',
+    # '/', '\\', '|', 'x', 'o', '.', '*',
+    # '/', '\\', '|', 'x', 'o', '.', '*',
+]
 # '+',
 # '-',
 # 'O',
@@ -681,7 +689,10 @@ class StackedBarPlotter:
                  json_reader_klass=None,
                  xlabel=None,
                  ylabel=None,
-                 title=None):
+                 title=None,
+                 reversed_labels=False,
+                 # reversed_labels=True,
+                 ):
         if callable(get_png):
             self.get_png = get_png
             self.png = None
@@ -703,6 +714,7 @@ class StackedBarPlotter:
         self.xlabel = xlabel
         self.ylabel = ylabel
         self.title = title
+        self.reversed_labels = reversed_labels
         assert json_reader_klass is not None
         self.json_reader_klass = json_reader_klass
         self.value_field = 'time_sec'
@@ -757,9 +769,22 @@ class StackedBarPlotter:
         # # Delay making this until we know all the bench_name's from add_json_data
         # self.bench_name_order = ['q_update_target_network', 'q_forward', 'q_backward', 'step']
         self.bench_name_order = sorted(unique(self.df_data['bench_name']))
+        # Doesn't work, hatches used change but label order still backwards.
+        # self.bench_name_order = list(reversed(sorted(unique(self.df_data['bench_name']))))
+        pprint.pprint({'bench_name_order':self.bench_name_order})
         self.bench_name_order_map = as_order_map(self.bench_name_order)
         self.rev_bench_name_order_map = reverse_dict(self.bench_name_order_map)
-        self.bench_name_hatch_map = self.as_hatch_map(self.bench_name_order)
+
+        # if self.reversed_labels:
+        #     # Show "simplest" hatch styles at the top of the plot always
+        #     self.bench_name_hatch_map = self.as_hatch_map(list(reversed(self.bench_name_order)))
+        # else:
+        #     self.bench_name_hatch_map = self.as_hatch_map(self.bench_name_order)
+
+        # we WANT this if reversed_labels = True
+        # AND
+        # we WANT this if reversed_labels = False
+        self.bench_name_hatch_map = self.as_hatch_map(list(reversed(self.bench_name_order)))
 
         if self.bench_name_labels is None:
             self.bench_name_labels = dict((k, k) for k in self.bench_name_order)
@@ -930,7 +955,8 @@ class StackedBarPlotter:
                                        'labelspacing': 1.2,
                                        'handlelength': 3,
                                        'handleheight': 2,
-                                   })
+                                   },
+                                   reversed=self.reversed_labels)
         legend_kwargs.append({'loc': 'upper left',
                               'bbox_to_anchor': (1.04, 1)})
         self.legend_makers.append(hatch_legend)
@@ -944,7 +970,8 @@ class StackedBarPlotter:
                                        'loc':'upper left',
                                        'handlelength': 3,
                                        'handleheight': 2,
-                                   })
+                                   },
+                                   reversed=self.reversed_labels)
         legend_kwargs.append({'loc': 'lower left',
                               'bbox_to_anchor': (1.04, 0)})
         self.legend_makers.append(color_legend)
@@ -969,7 +996,13 @@ class StackedBarPlotter:
         self.orig_df = pd.DataFrame(self.df_data)
 
         self.df = DataFrame.get_mean_std(self.orig_df, self.value_field)
+        print("> DATAFRAME BEFORE SORT:")
+        print(self.df)
         self.df = self.df.sort_values(by=['impl_name_order', 'device_order', 'bench_name_order', 'category_order'])
+        # self.df = self.df.sort_values(by=['impl_name_order', 'device_order', 'bench_name_order', 'category_order'], ascending=False)
+        # self.df = self.df.sort_values(by=['bench_name_order'])
+        print("> DATAFRAME AFTER SORT:")
+        print(self.df)
         # groupby_cols = DataFrame.get_groupby_cols(self.orig_df, value_field)
         self.df['std_div_mean_percent'] = 100 * self.df['std']/self.df['mean']
 
@@ -1302,14 +1335,21 @@ class LegendMaker:
     """
     Create "Patches" to create a legend.
     https://matplotlib.org/users/legend_guide.html#creating-artists-specifically-for-adding-to-the-legend-aka-proxy-artists
+
+    :param reversed
+        If true, label-order is reversed from order of bar-stacks in plot.
     """
     def __init__(self, attr_name, field_to_attr_map, field_order, labels,
                  edgecolor="black",
                  facecolor="white",
                  legend_kwargs=None,
+                 reversed=False,
                  **kwargs):
         self.attr_name = attr_name
+        self.reversed = reversed
         self.field_order = field_order
+        pprint.pprint({'field_order':self.field_order})
+        # self.field_order = sorted(field_order)
         self.legend_kwargs = legend_kwargs
         self.patch_attrs = {
             'edgecolor':edgecolor,
@@ -1343,7 +1383,15 @@ class LegendMaker:
         else:
             legend_kwargs = dict()
         legend_kwargs.update(kwargs)
-        self.legend = plt.legend(handles=self.patches, labels=legend_labels, **legend_kwargs)
+        if not self.reversed:
+            self.legend = plt.legend(handles=list(reversed(self.patches)), labels=list(reversed(legend_labels)), **legend_kwargs)
+            # self.legend = plt.legend(handles=list(reversed(self.patches)), labels=legend_labels, **legend_kwargs)
+        else:
+            # Default stacked-bar behaviour shows labels in reverse order from the stacked bars.
+            # That's just silly.
+            #
+            # NOTE: "reversed=True" implies this case (the backwards default behaviour)
+            self.legend = plt.legend(handles=self.patches, labels=legend_labels, **legend_kwargs)
         return self.legend
 
     @staticmethod

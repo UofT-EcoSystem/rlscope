@@ -138,6 +138,7 @@ class Profiler:
     def __init__(self, directory=None,
                  bench_name=NO_BENCH_NAME,
                  num_calls=None, start_measuring_call=None,
+                 trace_time_sec=None,
                  num_traces=None,
                  tfprof=True,
                  c_lib_func_pyprof_pattern=None,
@@ -150,13 +151,16 @@ class Profiler:
                  args=None):
         modify_tensorflow()
 
-        def get_iml_argname(argname):
+        def get_iml_argname(argname, internal=False):
             name = argname
             # name = re.sub('_', '-', name)
-            name = "iml_{name}".format(name=name)
+            if internal:
+                name = "iml_internal_{name}".format(name=name)
+            else:
+                name = "iml_{name}".format(name=name)
             return name
 
-        def get_argval(argname, klass_arg, default_arg, allow_none=True):
+        def get_argval(argname, klass_arg, default_arg, allow_none=True, internal=False):
             """
             Extract --iml-* args added by add_iml_arguments, unless provided with arguments to the constructor.
 
@@ -171,7 +175,7 @@ class Profiler:
             if args is None or klass_arg is not None:
                 return klass_arg
 
-            iml_argname = get_iml_argname(argname)
+            iml_argname = get_iml_argname(argname, internal=internal)
 
             if hasattr(args, iml_argname) and getattr(args, iml_argname) is not None:
                 argval = getattr(args, iml_argname)
@@ -182,6 +186,15 @@ class Profiler:
                     arg=re.sub('_', '-', iml_argname)))
 
             return default_arg
+
+        def get_internal_argval(argname, default_arg=None, allow_none=True):
+            """
+            Extract --iml-internal-* args added by add_iml_arguments, unless provided with arguments to the constructor.
+            """
+            klass_arg = None
+            argval = get_argval(argname, klass_arg, default_arg,
+                                allow_none=allow_none, internal=True)
+            return argval
 
         self._op_stack = []
 
@@ -207,8 +220,13 @@ class Profiler:
         self.c_lib_func_pyprof_pattern = c_lib_func_pyprof_pattern
         self.repetition_time_limit_sec = repetition_time_limit_sec
         self.num_calls = get_argval('num_calls', num_calls, None)
+        self.trace_time_sec = get_argval('trace_time_sec', trace_time_sec, None)
+        self.start_trace_time_sec = None
         self.num_traces = get_argval('num_traces', num_traces, None)
         self.bench_name = get_argval('bench_name', bench_name, None)
+
+        self.start_trace_time_sec = get_internal_argval('start_trace_time_sec')
+
         self.start_measuring_call = get_argval('start_measuring_call', start_measuring_call, None)
         self.debug = get_argval('debug', debug, False)
         if not self.tfprof:
@@ -238,6 +256,13 @@ class Profiler:
         # assert ( self.num_calls is None and self.start_measuring_call is None ) or \
         #        ( self.num_calls is not None and self.start_measuring_call is not None )
         # assert self.start_measuring_call is not None
+
+    def get_start_trace_time_sec(self):
+        # NOTE: ML script may fork new python scripts before tracing with pyprof/tfprof even begins
+        # ( i.e. before prof.start(), prof.set_operation() )
+        # So, in that case, start the timer immediately prior to fork.
+        self._init_trace_time()
+        return self.start_trace_time_sec
 
     def init_trace_id(self):
         if self.process_name is None or self.phase is None:
@@ -494,6 +519,8 @@ class Profiler:
         if self._tfprof_enabled:
             return
 
+        self._init_trace_time()
+
         sess = self._cur_session(allow_none=True)
         if sess is None:
             if allow_skip:
@@ -572,9 +599,19 @@ class Profiler:
         self.enable_profiling(bench_name)
         self.start_call_us[bench_name] = clib_wrap.now_us()
 
+    def _init_trace_time(self):
+        """
+        Record the start time-since-epoch of tracing information being collected.
+
+        (i.e. the time should proceed start_time_us of all recorded events)
+        """
+        if self.start_trace_time_sec is None:
+            self.start_trace_time_sec = time.time()
+
     def _start_pyprof(self):
         if self._pyprof_enabled:
             return
+        self._init_trace_time()
         clib_wrap.wrap_libs()
         if self.step_start_tracing is None:
             self.step_start_tracing = self.steps
@@ -910,7 +947,23 @@ class Profiler:
         return ret
 
     def should_finish(self, finish_now=False, skip_finish=False):
-        return finish_now or ( not skip_finish and self.next_trace_id >= self.num_traces )
+        total_trace_time_sec = self._total_trace_time_sec()
+        return finish_now or (
+            not skip_finish
+            and (
+                self.next_trace_id >= self.num_traces
+                or (
+                    self.trace_time_sec is not None
+                    and total_trace_time_sec >= self.trace_time_sec
+                )
+            )
+        )
+
+    def _total_trace_time_sec(self):
+        if self.trace_time_sec is None:
+            return None
+        now_sec = time.time()
+        return now_sec - self.start_trace_time_sec
 
     def _maybe_dump_trace(self, finish_now=False):
         dump_trace = self.should_dump_trace(finish_now)
@@ -919,9 +972,11 @@ class Profiler:
         return dump_trace
 
     def _maybe_finish(self, finish_now=False, skip_finish=False):
-        dump_trace = self._maybe_dump_trace(finish_now)
+        should_finish = self.should_finish(finish_now, skip_finish)
 
-        if self.should_finish(finish_now, skip_finish):
+        self._maybe_dump_trace(finish_now or should_finish)
+
+        if should_finish:
             self.finish()
 
     def next_step(self, skip_finish=False):
@@ -1098,6 +1153,17 @@ def add_iml_arguments(parser):
     # """))
     parser.add_argument('--iml-num-calls', type=int, default=1000,
                         help="IML: how many calls should be measured in a single trace?")
+    parser.add_argument('--iml-trace-time-sec', type=float,
+                        help="IML: how long should we profile for, in seconds; "
+                             "tracing will stop when either "
+                             "we've collected --iml-num-traces OR "
+                             "--iml-trace-time-sec has been exceeded")
+    parser.add_argument('--iml-internal-start-trace-time-sec', type=float,
+                        help=textwrap.dedent("""
+        IML: (internal use)
+        The start time of tracing (in seconds). 
+        This gets inherited by child processes.
+    """))
     parser.add_argument('--iml-num-traces', type=int, default=10,
                         help="IML: how many traces should be measured?")
     parser.add_argument('--iml-fuzz', action='store_true', help=textwrap.dedent("""
@@ -1171,20 +1237,33 @@ def is_iml_file(path):
 # ProfileGlobals = _ProfileGlobals()
 
 def handle_iml_args(output_directory, parser, args, no_bench_name=False):
-    pass
     # ProfileGlobals.files_before = ls_files(output_directory)
 
-def iml_argv():
+    if args.iml_trace_time_sec is None and args.iml_num_traces is None:
+        print('IML: ERROR, you must provided at least one of --iml-trace-time-sec or --iml-num-traces')
+        sys.exit(1)
+
+
+def iml_argv(prof : Profiler, keep_executable=False, keep_non_iml_args=False):
     """
     Return a list of string arguments related to IML that were passed to the current running python process.
 
     Useful for forwarding IML arguments to python child processes instrumented with IML.
     """
+    # If this fails and your using profiler.glbl, make sure you call profiler.glbl.handle_iml_args(...)
+    # before spawning child processes.
+    assert prof is not None
     # JAMES TODO: forward set_phase to children.
     parser = argparse.ArgumentParser()
     add_iml_arguments(parser)
-    args, extra_argv = parser.parse_known_args(sys.argv)
-    argv = args_to_cmdline(parser, args, keep_executable=False, keep_debug=False)
+    print("> argv: {argv}".format(argv=' '.join(sys.argv)))
+    # NOTE: sys.argv[0] is the python script name.
+    args, extra_argv = parser.parse_known_args(sys.argv[1:])
+    print("> extra_argv: {argv}".format(argv=' '.join(extra_argv)))
+    args.iml_internal_start_trace_time_sec = prof.get_start_trace_time_sec()
+    argv = args_to_cmdline(parser, args, keep_executable=keep_executable, keep_debug=False)
+    if keep_non_iml_args:
+        return argv + extra_argv
     return argv
 
 def run_with_nvprof(directory, parser, args,
