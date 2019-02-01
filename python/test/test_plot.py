@@ -296,3 +296,61 @@ def test_plot_position():
     axHisty.set_ylim(axScatter.get_ylim())
 
     plt.show()
+
+def test_subplot():
+    # https://matplotlib.org/users/transforms_tutorial.html#axes-coordinates
+    #
+    # This example code.
+    # Shows how to position text inside the plot using the axes coordinate system.
+
+    # https://matplotlib.org/users/transforms_tutorial.html
+    #
+    # Discussion of the different coordinate systems used in matplotlib
+    # TLDR:
+    # - axes coordinate system: (0,0) is bottom-left of x-y plot, (1,1) is top-right
+    #   You can access the axes of a particular subplot:
+    #   subplot_axes = fig.add_subplot(...)
+    # - figure coordinate system: (0,0) is bottom-left of entire figure, (1,1) is top-right
+    #   I think you access this system via fig.axes
+
+    # https://matplotlib.org/api/_as_gen/matplotlib.pyplot.legend.html
+    #
+    # Legend arguments for positioning the legend.
+    # By default, you make a legend via subplot_axes.legend(...).
+    # So, the legend uses the axes coordinate system of the subplot.
+    # To position the legend in a different coordinate system, such as the whole figure, you do:
+    #   fig = plt.figure()
+    #   ...
+    #   leg = ax.legend(
+    #       # Coordinates in the figure coordinate system:
+    #       bbox_to_anchor=(0.5, 0.5),
+    #       bbox_transform=fig.transFigure)
+    #
+    # NOTE: I think if you use plt.legend(), it uses the figure coordinate system.
+
+    # https://matplotlib.org/users/artists.html
+    #
+    # Discussion of "primitives" (e.g. text, lines) and "containers" (e.g. figure, subplot)
+
+    # Options:
+    # 1. Make legend and query width/height; NOPE
+    # 2. Use preset width/height and add it to bbox_to_anchor arguments for legend.
+    # 3. Get the axes of the top-legend, and set the bottom-legend bbox=(x=0, y=-0.04)
+
+    fig = plt.figure()
+
+    for i, label in enumerate(('A', 'B', 'C', 'D')):
+        ax = fig.add_subplot(2,2,i+1)
+        ax.text(0.05, 0.95, label, transform=ax.transAxes,
+          fontsize=16, fontweight='bold', va='top')
+
+        # Default position is relative to the subplot's axes.
+        leg = ax.legend(bbox_to_anchor=(0.05, 0.95))
+
+        # This places the legend in the middle of whole figure.
+        # leg = ax.legend(
+        #     # loc=(0.5, 0.5),
+        #     bbox_to_anchor=(0.5, 0.5),
+        #     bbox_transform=fig.transFigure)
+
+    plt.show()

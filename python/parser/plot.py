@@ -951,14 +951,17 @@ class StackedBarPlotter:
                                    field_order=self.bench_name_order,
                                    labels=self.bench_name_labels,
                                    legend_kwargs={
-                                       'loc':'upper right',
                                        'labelspacing': 1.2,
                                        'handlelength': 3,
                                        'handleheight': 2,
                                    },
                                    reversed=self.reversed_labels)
-        legend_kwargs.append({'loc': 'upper left',
-                              'bbox_to_anchor': (1.04, 1)})
+        legend_kwargs.append({
+            # NOTE:
+            # - Internally LegendMaker uses the figure coordinate system.
+            # - So, (1, 1) is the (right, top) of the whole figure,
+            #   so 1.04 makes it just a bit to the right of the whole figure
+            'bbox_to_anchor': (1.04, 1)})
         self.legend_makers.append(hatch_legend)
 
         color_legend = LegendMaker(attr_name='facecolor',
@@ -967,17 +970,42 @@ class StackedBarPlotter:
                                    labels=self.category_labels,
                                    edgecolor='white',
                                    legend_kwargs={
-                                       'loc':'upper left',
                                        'handlelength': 3,
                                        'handleheight': 2,
                                    },
                                    reversed=self.reversed_labels)
-        legend_kwargs.append({'loc': 'lower left',
-                              'bbox_to_anchor': (1.04, 0)})
+        # legend_kwargs.append({
+        #
+        #     # NOTE:
+        #     # - Internally LegendMaker uses the figure coordinate system.
+        #     # - So, (1, 0) is the (right, bottom) of the whole figure,
+        #     #   so 1.04 makes it just a bit to the right of the whole figure
+        #     'bbox_to_anchor': (1.04, 0)})
+        legend_kwargs.append({
+            # 'loc':'lower left',
+            # 'loc':'left',
+            # 'bbox_to_anchor': (0, -1),
+
+            # Place legend beneath plot so it has room to grow when there are lots of labels,
+            # without overlapping the other legend.
+            # Sadly, I still don't understand how this thing works.
+            # (e.g. I'm not sure how to left-align the legend beneath the plot... OH WELL).
+            #
+            # https://stackoverflow.com/questions/4700614/how-to-put-the-legend-out-of-the-plot
+            'loc':'upper center',
+            'bbox_to_anchor':(0.5, -0.05),
+            'fancybox':True,
+            'shadow':True,
+            # 'ncol':5,
+
+        })
         self.legend_makers.append(color_legend)
 
         LegendMaker.add_legends(self.legend_makers,
                                 legend_kwargs=legend_kwargs)
+
+        # LegendMaker.add_legends_vertically(self.legend_makers,
+        #                         legend_kwargs=legend_kwargs)
 
 
     # def _get_categories(self, json_data):
@@ -1348,8 +1376,6 @@ class LegendMaker:
         self.attr_name = attr_name
         self.reversed = reversed
         self.field_order = field_order
-        pprint.pprint({'field_order':self.field_order})
-        # self.field_order = sorted(field_order)
         self.legend_kwargs = legend_kwargs
         self.patch_attrs = {
             'edgecolor':edgecolor,
@@ -1374,7 +1400,7 @@ class LegendMaker:
             patch = mpatches.Patch(**patch_kwargs)
             self.patches.append(patch)
 
-    def get_legend(self, **kwargs):
+    def get_legend(self, axis=None, **kwargs):
         if self.legend is not None:
             return self.legend
         legend_labels = [self.labels.get(field, field) for field in self.field_order]
@@ -1383,15 +1409,24 @@ class LegendMaker:
         else:
             legend_kwargs = dict()
         legend_kwargs.update(kwargs)
+        if axis is None:
+            axis = plt
         if not self.reversed:
-            self.legend = plt.legend(handles=list(reversed(self.patches)), labels=list(reversed(legend_labels)), **legend_kwargs)
+            self.legend = axis.legend(handles=list(reversed(self.patches)), labels=list(reversed(legend_labels)), **legend_kwargs)
             # self.legend = plt.legend(handles=list(reversed(self.patches)), labels=legend_labels, **legend_kwargs)
         else:
             # Default stacked-bar behaviour shows labels in reverse order from the stacked bars.
             # That's just silly.
             #
             # NOTE: "reversed=True" implies this case (the backwards default behaviour)
-            self.legend = plt.legend(handles=self.patches, labels=legend_labels, **legend_kwargs)
+            self.legend = axis.legend(handles=self.patches, labels=legend_labels, **legend_kwargs)
+
+        # if self.attr_name == 'hatch':
+        #     leg = self.legend
+        #     ax = leg.axes # Q: Can we obtain the width/height?
+        #     pprint.pprint(({'dir(ax)': dir(ax)}))
+        #     import ipdb; ipdb.set_trace()
+
         return self.legend
 
     @staticmethod
@@ -1407,6 +1442,40 @@ class LegendMaker:
         for legend in legends:
             plt.gca().add_artist(legend)
         return legends
+
+    # @staticmethod
+    # def add_legends_vertically(legend_makers, legend_kwargs=[]):
+    #
+    #     # left, bottom, width, height
+    #     # (right, top + spacing)
+    #     ax = plt.axes([1.04, 1, 0, 0])
+    #
+    #     legends = []
+    #     for i, legend_maker in enumerate(legend_makers):
+    #         if i < len(legend_kwargs):
+    #             legend_kwarg = legend_kwargs[i]
+    #         else:
+    #             legend_kwarg = dict()
+    #         legend = legend_maker.get_legend(axis=ax, **legend_kwarg)
+    #         legends.append(legend)
+    #     transform = None
+    #     for legend in legends:
+    #         if transform is None:
+    #             # transform = legend.get_transform()
+    #             # transform = legend.transAxes
+    #             transform = ax.transAxes
+    #         else:
+    #             legend.set_transform(transform)
+    #             # Place the legend beneath the previous legend.
+    #             # Use the previous legend's axes coordinate system to do this.
+    #             # (0, 1) is the (left, bottom) of the previous legend,
+    #             # so (0, 1.04) adds vertical spacing of .04
+    #             legend.set_bbox_to_anchor((0, 1.04))
+    #         art = plt.gca().add_artist(legend)
+    #         # art = ax.add_artist(legend)
+    #         # print('HI')
+    #         # import ipdb; ipdb.set_trace()
+    #     return legends
 
 
 class CombinedProfileParser(ProfilerParserCommonMixin):

@@ -194,6 +194,10 @@ def main():
     # test_plot.test_plot_position()
     # return
 
+    # from test import test_plot
+    # test_plot.test_subplot()
+    # return
+
     parser = argparse.ArgumentParser("benchmark DQN")
 
     parser.add_argument("--benchmarks",
