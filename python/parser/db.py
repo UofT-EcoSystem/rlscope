@@ -795,6 +795,7 @@ class SQLiteCategoryTimesReader:
         operation_types = set()
         # Categories NOT including the operation-type categories (that replaced CATEGORY_OPERATION)
         categories = set()
+        proc_types = set()
 
         for process_name in self.process_names:
 
@@ -813,18 +814,21 @@ class SQLiteCategoryTimesReader:
             proc_category_times[CATEGORY_OPERATION] = process_op_nest(proc_category_times[CATEGORY_OPERATION])
             assert len(proc_category_times[CATEGORY_OPERATION]) > 0
 
+            proc_category = proc_as_category(process_name)
+            proc_types.add(proc_category)
+
             # Merge all the process-specific events into a single category_times dict.
             for category, events in proc_category_times.items():
                 for event in events:
                     if category in CATEGORIES_CPU:
-                        new_category = CATEGORY_CPU
-                        categories.add(new_category)
+                        cat = CATEGORY_CPU
+                        categories.add(cat)
                     elif category == CATEGORY_GPU:
-                        new_category = CATEGORY_GPU
-                        categories.add(new_category)
+                        cat = CATEGORY_GPU
+                        categories.add(cat)
                     elif category == CATEGORY_OPERATION:
-                        new_category = event.name
-                        operation_types.add(new_category)
+                        cat = event.name
+                        operation_types.add(cat)
                     else:
                         # Q: What about category operation...?
                         # We want to KEEP the operation category so we can determine
@@ -840,6 +844,8 @@ class SQLiteCategoryTimesReader:
                         # (graph should be the same with fewer categories: CPU, GPU, CPU + GPU)
                         raise RuntimeError("Not sure how to categorize {cat} into CPU or GPU.".format(
                             cat=category))
+
+                    new_category = frozenset([cat, proc_category])
                     if new_category not in category_times:
                         category_times[new_category] = []
                     # NOTE: if we bin the CPU/GPU/operation events into separate lists,
@@ -859,11 +865,12 @@ class SQLiteCategoryTimesReader:
         if debug:
             print("> DEBUG: parse_timeline: ")
             pprint.pprint({
+                'proc_types':proc_types,
                 'operation_types':operation_types,
                 'categories':categories,
             }, indent=2)
 
-        return category_times, categories, operation_types
+        return category_times, categories, operation_types, proc_types
 
     def _query(self, query, params=None, debug=False):
         c = self.conn.cursor

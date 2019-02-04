@@ -1268,3 +1268,9 @@ def reversed_iter(xs):
     for i in range(n - 1, 0 - 1, -1):
         yield xs[i]
 
+def proc_as_category(process_name):
+    return "PROC:{proc}".format(proc=process_name)
+
+def match_proc_category(category):
+    m = re.search(r'^PROC:(?P<process_name>.*)', category)
+    return m
