@@ -23,8 +23,6 @@ from tensorflow.python.client import session
 # from proto.tensorflow.core.profiler.tfprof_log_pb2 import ProfileProto
 from tensorflow.core.profiler.tfprof_log_pb2 import ProfileProto
 
-from parser.db import is_tfprof_file, is_pyprof_file, is_config_file
-
 # pip install py-cpuinfo
 import cpuinfo
 
@@ -281,7 +279,7 @@ class Profiler:
             for base in filenames:
                 path = _j(dirpath, base)
                 # print("> Consider {path}".format(path=path))
-                if is_pyprof_file(path) or is_tfprof_file(path) or is_config_file(path):
+                if is_pyprof_file(path) or is_dump_event_file(path) or is_tfprof_file(path) or is_config_file(path):
                     print("> RM {path}".format(path=path))
                     os.remove(path)
                     # trace_id = int(m.group('trace_id'))
@@ -396,6 +394,14 @@ class Profiler:
     @property
     def pyprof_proto_path(self):
         ret = _j(self.out_dir, "pyprof{bench}{trace}.proto".format(
+            bench=bench_suffix(self.bench_name),
+            trace=trace_suffix(self.next_trace_id),
+        ))
+        return ret
+
+    @property
+    def dump_event_proto_path(self):
+        ret = _j(self.out_dir, "dump_event{bench}{trace}.proto".format(
             bench=bench_suffix(self.bench_name),
             trace=trace_suffix(self.next_trace_id),
         ))
@@ -839,13 +845,7 @@ class Profiler:
         # ProfileGlobals.files_after = ls_files(self.out_dir)
 
         # Put this here to test that cleanup_files doesn't delete nvprof/pyprof files
-        self._dump()
-        # ProfileGlobals.cleanup_files()
-
-        # Discards profiling data now that it has been recorded.
-        self._discard_profiling_data()
-        end_us = now_us()
-        clib_wrap.record_event(CATEGORY_PROFILING, PROFILING_DUMP_TRACE, start_us, end_us)
+        self._dump(start_us)
 
         if self.step_start_tracing is None:
             self.step_start_tracing = None
@@ -858,7 +858,7 @@ class Profiler:
             self.pctx.set_session(self.sess)
         self.pctx.__exit__(None, None, None)
 
-    def _dump(self, config_kwargs=dict()):
+    def _dump(self, dump_start_us, config_kwargs=dict()):
         """
         Dump trace data to:
         - pyprof.trace_<next_trace_id>.proto
@@ -902,6 +902,24 @@ class Profiler:
             else:
                 print(("> WARNING: bench_name={bench} did not run session.run(...), "
                        "so no tfprof output was generated for it").format(bench=self.bench_name))
+
+        # Discards profiling data now that it has been recorded.
+        self._discard_profiling_data()
+        dump_end_us = now_us()
+
+        #
+        # NOTE: we need to record DUMP events separate from other events,
+        # since start/end timestamps boundary serialization of other events.
+        # So, we dump the "DUMP" events into a separate Pyprof file that looks like:
+        # - dump_event.trace_0.proto
+        #
+        clib_wrap.set_step(self._pyprof_step,
+                           expect_traced=True,
+                           ignore_disable=True)
+        clib_wrap.record_event(CATEGORY_PROFILING, PROFILING_DUMP_TRACE, dump_start_us, dump_end_us,
+                               ignore_disable=True)
+        clib_wrap.dump_pyprof(self.dump_event_proto_path, self.process_name, self.phase)
+        self._discard_profiling_data()
 
         self.next_trace_id += 1
 
@@ -948,7 +966,7 @@ class Profiler:
 
     def should_finish(self, finish_now=False, skip_finish=False):
         total_trace_time_sec = self._total_trace_time_sec()
-        return finish_now or (
+        ret = finish_now or (
             not skip_finish
             and (
                 self.next_trace_id >= self.num_traces
@@ -958,6 +976,30 @@ class Profiler:
                 )
             )
         )
+        if ret and DEBUG:
+            print("> FINISH:")
+            print(textwrap.indent(textwrap.dedent("""
+            - finish_now = {finish_now}
+            - skip_finish = {skip_finish}
+            - self.next_trace_id >= self.num_traces = {next_bool}
+              - self.next_trace_id = {next_trace_id}
+              - self.num_traces = {num_traces}
+            """.format(
+                finish_now=finish_now,
+                skip_finish=skip_finish,
+                next_bool=self.next_trace_id >= self.num_traces,
+                next_trace_id=self.next_trace_id,
+                num_traces=self.num_traces,
+            )), prefix="  "))
+            if self.trace_time_sec is not None:
+                print(textwrap.indent(textwrap.dedent("""
+                - self.trace_time_sec = {trace_time_sec}
+                  - total_trace_time_sec = {total_trace_time_sec}
+                """.format(
+                    trace_time_sec=self.trace_time_sec,
+                    total_trace_time_sec=total_trace_time_sec,
+                )), prefix="  "))
+        return ret
 
     def _total_trace_time_sec(self):
         if self.trace_time_sec is None:

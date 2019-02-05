@@ -243,6 +243,19 @@ COPYKIND_TO_MEMCPY = {
     8:'[CUDA memcpy DtoD]',
 }
 
+TXT_INDENT = "    "
+def get_indent(indents):
+    return TXT_INDENT*indents
+
+def maybe_indent(txt, indents):
+    if indents is None:
+        return txt
+    indent = get_indent(indents)
+    txt = textwrap.indent(txt, prefix=indent)
+    # DON'T indent the first line (typically manually indented in code.
+    txt = re.sub('^\s*', '', txt, count=1)
+    return txt
+
 class ProfilerParserCommonMixin:
 
     def run(self, bench_name):
@@ -1216,6 +1229,14 @@ def is_pyprof_file(path):
     ), base)
     return m
 
+def is_dump_event_file(path):
+    base = _b(path)
+    m = re.search(r'dump_event{bench}{trace}.proto'.format(
+        bench=BENCH_SUFFIX_RE,
+        trace=TRACE_SUFFIX_RE,
+    ), base)
+    return m
+
 def is_config_file(path):
     base = _b(path)
     m = re.search(r'config{bench}{trace}.json'.format(
@@ -1274,3 +1295,9 @@ def proc_as_category(process_name):
 def match_proc_category(category):
     m = re.search(r'^PROC:(?P<process_name>.*)', category)
     return m
+
+def update_dict(dic1, dic2, overwrite=False):
+    if not overwrite:
+        common_keys = set(dic1.keys()).intersection(set(dic2.keys()))
+        assert len(common_keys) == 0
+    dic1.update(dic2)

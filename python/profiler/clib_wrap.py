@@ -39,7 +39,7 @@ def clear_pyprof_profiling():
     _step = None
 
 _step = None
-def set_step(step, expect_traced=False):
+def set_step(step, expect_traced=False, ignore_disable=False):
     global _step, _python_start_us
     _step = step
     _python_start_us = now_us()
@@ -48,7 +48,7 @@ def set_step(step, expect_traced=False):
     #     # pprint.pprint({'step':step, 'trace_steps':_trace_steps})
     #     assert step in _trace_steps
     # if _step in _trace_steps and _step not in _pyprof.steps:
-    if _TRACING_ON and step not in _pyprof.steps:
+    if ( _TRACING_ON or ignore_disable ) and step not in _pyprof.steps:
         if tensorflow_profile_context.DEBUG:
             print("> ADD PYPROF STEP: {s}".format(s=_step))
 
@@ -172,10 +172,10 @@ class CFuncWrapper:
     def __getattr__(self, name):
         return getattr(self.func, name)
 
-def record_event(category, name, start_us, end_us, attrs=None, python_event=False):
+def record_event(category, name, start_us, end_us, attrs=None, python_event=False, ignore_disable=False):
     global _step, _pyprof
     # if _trace_steps is not None and _step in _trace_steps:
-    if _TRACING_ON:
+    if _TRACING_ON or ignore_disable:
         tid = threading.get_ident()
         event = Event(
             start_time_us=int(start_us),
@@ -188,7 +188,7 @@ def record_event(category, name, start_us, end_us, attrs=None, python_event=Fals
         else:
             _pyprof.clibs[_step].clibs[category].events.extend([event])
 
-def record_python_event(name, end_us):
+def record_python_event(name, end_us, ignore_disable=False):
     """
     Useful for recording the last amount of time in between returning
     from a call to q_forward, and finishing benchmarking.
@@ -197,13 +197,16 @@ def record_python_event(name, end_us):
     """
     global _step, _start_us, _python_start_us
     # if _trace_steps is not None and _step in _trace_steps:
-    if _TRACING_ON:
-        record_event(CATEGORY_PYTHON, name, _python_start_us, end_us, python_event=True)
+    if _TRACING_ON or ignore_disable:
+        record_event(CATEGORY_PYTHON, name, _python_start_us, end_us,
+                     python_event=True,
+                     ignore_disable=ignore_disable)
         _python_start_us = now_us()
 
 def record_operation(start_us, end_us,
                      # attrs
-                     op_name):
+                     op_name,
+                     ignore_disable=False):
     """
     Useful for recording the last amount of time in between returning
     from a call to q_forward, and finishing benchmarking.
@@ -212,12 +215,13 @@ def record_operation(start_us, end_us,
     """
     global _step
     # if _trace_steps is not None and _step in _trace_steps:
-    if _TRACING_ON:
+    if _TRACING_ON or ignore_disable:
         record_event(CATEGORY_OPERATION, op_name, start_us, end_us,
                      attrs={
                          'op_name': op_name,
                      },
-                     python_event=False)
+                     python_event=False,
+                     ignore_disable=ignore_disable)
 
 def is_recording():
     global _step

@@ -69,7 +69,7 @@ class SQLiteParser:
         for dirpath, dirnames, filenames in os.walk(self.directory):
             for base in filenames:
                 path = _j(dirpath, base)
-                if is_tfprof_file(path) or is_pyprof_file(path):
+                if is_tfprof_file(path) or is_pyprof_file(path) or is_dump_event_file(path):
                     src_files.append(path)
         if len(src_files) == 0:
             raise MissingInputFiles(textwrap.dedent("""
@@ -208,7 +208,7 @@ class SQLiteParser:
         for path in src_files:
             if is_tfprof_file(path):
                 self.insert_tfprof_file(path)
-            elif is_pyprof_file(path):
+            elif is_pyprof_file(path) or is_dump_event_file(path):
                 self.insert_pyprof_file(path)
             else:
                 raise NotImplementedError
@@ -706,22 +706,40 @@ class SQLiteCategoryTimesReader:
         process_names = [row['process_name'] for row in c.fetchall()]
         return process_names
 
+
     def _fetch_steps(self, process_name, bench_name):
         if bench_name in self._steps:
             return
 
         c = self.conn.cursor
         c.execute("""
-        SELECT e.event_name, e.start_time_us, e.duration_us
-        FROM Event AS e 
+        SELECT e1.event_name, e1.start_time_us, e1.duration_us
+        FROM Event AS e1
             NATURAL JOIN Category AS c
             NATURAL JOIN Process AS p
-        WHERE c.category_name = '{op}' AND
-              e.event_name = ? AND
-              p.process_name = ?
-        ORDER BY e.start_time_us ASC 
-        """.format(op=CATEGORY_OPERATION),
-                  (bench_name, process_name))
+        WHERE 
+            c.category_name = '{CATEGORY_OPERATION}' AND
+            e1.event_name = ? AND
+            p.process_name = ? AND 
+            NOT EXISTS (
+                SELECT * 
+                FROM Event AS e2
+                    NATURAL JOIN Category as c2
+                WHERE 
+                    c2.category_name = '{CATEGORY_PROFILING}' AND
+                    e2.event_name = '{PROFILING_DUMP_TRACE}' AND 
+                    {overlap_clause}
+            )
+        ORDER BY e1.start_time_us ASC 
+        """.format(
+            CATEGORY_OPERATION=CATEGORY_OPERATION,
+            CATEGORY_PROFILING=CATEGORY_PROFILING,
+            PROFILING_DUMP_TRACE=PROFILING_DUMP_TRACE,
+            # NOTE: We do NOT want to select any steps of an operation that overlap at all with a DUMP event.
+            # indents=3 since {overlap_clause} above has 3 indent-levels in front of it.
+            overlap_clause=sql_overlap_clause('e1', 'e2', indents=3),
+        ),
+            (bench_name, process_name))
         rows = rows_as_ktime(c.fetchall())
         if process_name not in self._steps:
             self._steps[process_name] = dict()
@@ -904,21 +922,33 @@ class SQLiteCategoryTimesReader:
     def process_events(self, process_name, ignore_categories,
                        debug=False,
                        fetchall=True):
-        ignore_clause = self._ignore_clause(ignore_categories)
         c = self.conn.cursor
         query = textwrap.dedent("""
-        SELECT device_name, category_name, event_name, start_time_us, duration_us
+        SELECT d1.device_name, c1.category_name, e1.event_name, e1.start_time_us, e1.duration_us
         FROM 
-          Category AS c 
-          NATURAL JOIN Event as e
-          NATURAL JOIN Process as p
-          NATURAL LEFT JOIN Device as d
-        WHERE p.process_name = ?
-        {ignore_clause}
+            Category AS c1
+            NATURAL JOIN Event as e1
+            NATURAL JOIN Process as p1
+            NATURAL LEFT JOIN Device as d1
+        WHERE 
+            p1.process_name = ?
+            {ignore_clause} AND
+            NOT EXISTS (
+                SELECT * 
+                FROM Event as e2
+                    NATURAL JOIN Category as c2
+                WHERE 
+                    c2.category_name = '{CATEGORY_PROFILING}' AND
+                    e2.event_name = '{PROFILING_DUMP_TRACE}' AND 
+                    {overlap_clause}
+            )
         ORDER BY start_time_us ASC 
-        """.format(
-            ignore_clause=ignore_clause,
-        ))
+        """).format(
+            ignore_clause=self._ignore_clause(ignore_categories, indents=1),
+            CATEGORY_PROFILING=CATEGORY_PROFILING,
+            PROFILING_DUMP_TRACE=PROFILING_DUMP_TRACE,
+            overlap_clause=sql_overlap_clause('e1', 'e2', indents=3),
+        )
 
         # query = textwrap.dedent("""
         # SELECT device_name, category_name, event_name, start_time_us, duration_us
@@ -948,15 +978,22 @@ class SQLiteCategoryTimesReader:
             ret = c
         return ret
 
-    def _ignore_clause(self, ignore_categories):
+    def _ignore_clause(self, ignore_categories, indents=None):
+        if len(ignore_categories) == 0:
+            return ""
+
         def ignore_and_clause(category):
-            and_clause = textwrap.dedent("""\
-            AND ( category_name != '{category}' )\
-            """.format(category=category))
+            and_clause = "category_name != '{category}'".format(
+                category=category)
             return and_clause
 
         # ignore_cats = list(ignore_categories) + [CATEGORY_OPERATION]
-        ignore_clause = "\n".join([ignore_and_clause(category) for category in ignore_categories])
+        ignore_clause = \
+            "AND (\n" + \
+                " AND \n".join([ignore_and_clause(category) for category in ignore_categories]) + \
+            "\n)"
+
+        ignore_clause = maybe_indent(ignore_clause, indents)
 
         return ignore_clause
 
@@ -1018,8 +1055,6 @@ class SQLiteCategoryTimesReader:
           so we aren't using this.
         """
 
-        ignore_clause = self._ignore_clause(ignore_categories)
-
         #
         # For each time this op-type was called / for each step:
         #   Split up op-type events based on nesting pattern. <-- handle nesting
@@ -1035,18 +1070,19 @@ class SQLiteCategoryTimesReader:
         query = textwrap.dedent("""
         SELECT device_name, category_name, event_name, start_time_us, duration_us
         FROM 
-          Category
-          NATURAL JOIN Event
-          NATURAL JOIN Process
-          NATURAL LEFT JOIN Device
-        WHERE process_name = ? AND ( 
-            ( ? <= start_time_us AND start_time_us <= ? ) OR
-            ( ? <= end_time_us AND end_time_us <= ? )
-        )
-        {ignore_clause}
+            Category
+            NATURAL JOIN Event
+            NATURAL JOIN Process
+            NATURAL LEFT JOIN Device
+        WHERE 
+            process_name = ? AND ( 
+                ( ? <= start_time_us AND start_time_us <= ? ) OR
+                ( ? <= end_time_us AND end_time_us <= ? )
+            )
+            {ignore_clause}
         ORDER BY start_time_us ASC 
         """.format(
-            ignore_clause=ignore_clause,
+            ignore_clause=self._ignore_clause(ignore_categories, indents=1),
         ))
         if parse_debug:
             print("> {name} query:".format(name=self.__class__.__name__))
@@ -1349,6 +1385,52 @@ def merge_sorted(xs, ys, key=lambda x: x):
         j += len(ys[j:])
 
     return zs
+
+def sql_overlap_clause(event_alias_1, event_alias_2, indents=None):
+    """
+    Given two Event table aliases, provide a clause for determine
+    if the events from those two tables overlap.
+    :return:
+    """
+
+    # Q: How many ways can your overlap 2 events?
+    # 1. [ op1 ]
+    #       [ op2 ]
+    #    op1.start <= op2.start <= op1.end <= op2.end
+    #
+    # 2. [ op2 ]
+    #       [ op1 ]
+    #    op2.start <= op1.start <= op2.end <= op1.end
+    #
+    # 3. [     op1     ]
+    #        [ op2 ]
+    #    op2.start <= op1.start <= op1.end <= op2.end
+    #
+    # 4. [     op2     ]
+    #        [ op1 ]
+    #    op1.start <= op2.start <= op2.end <= op1.end
+    clause = textwrap.dedent("""
+        (
+            ( {e1}.start_time_us <= {e2}.start_time_us AND 
+                                    {e2}.start_time_us <= {e1}.end_time_us AND 
+                                                          {e1}.end_time_us <= {e2}.end_time_us ) OR
+            ( {e2}.start_time_us <= {e1}.start_time_us AND 
+                                    {e1}.start_time_us <= {e2}.end_time_us AND 
+                                                          {e2}.end_time_us <= {e1}.end_time_us ) OR
+            ( {e2}.start_time_us <= {e1}.start_time_us AND 
+                                    {e1}.start_time_us <= {e1}.end_time_us AND 
+                                                          {e1}.end_time_us <= {e2}.end_time_us ) OR
+            ( {e1}.start_time_us <= {e2}.start_time_us AND 
+                                    {e2}.start_time_us <= {e2}.end_time_us AND 
+                                                          {e2}.end_time_us <= {e1}.end_time_us )
+        )
+        """.format(
+        e1=event_alias_1,
+        e2=event_alias_2))
+
+    clause = maybe_indent(clause, indents)
+
+    return clause
 
 def test_merge_sorted():
 

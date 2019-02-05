@@ -1,14 +1,16 @@
 from parser.common import *
 
-def dump_category_times(category_times, json_path, print_log=True):
-    trace_events_dumper = TraceEventsDumper(category_times, json_path)
+def dump_category_times(category_times, json_path, print_log=True, category_as_str=None):
+    trace_events_dumper = TraceEventsDumper(category_times, json_path, category_as_str=category_as_str)
     trace_events_dumper.dump(print_log)
 
 class TraceEventsDumper:
-    def __init__(self, category_times, json_path):
+    def __init__(self, category_times, json_path,
+                 category_as_str=None):
         self.category_times = category_times
         self.json_path = json_path
         self.reproduce_tfprof = False
+        self.category_as_str = category_as_str
         self.reset()
 
     def dump(self, print_log=True):
@@ -17,6 +19,11 @@ class TraceEventsDumper:
         if print_log:
             print("> Write traceEvents to: {path}".format(path=self.json_path))
         do_dump_json(self.js, self.json_path)
+
+    def _cat(self, category):
+        if self.category_as_str is None:
+            return category
+        return self.category_as_str(category)
 
     def js_add_category_times(self, category_times):
         """
@@ -68,16 +75,17 @@ class TraceEventsDumper:
 
         for category, times in category_times.items():
             # if category == CATEGORY_CUDA_API_CPU and type(category_times[CATEGORY_CUDA_API_CPU]) == dict:
+            cat = self._cat(category)
             if type(category_times[category]) == dict:
                 # category_times[CATEGORY_CUDA_API_CPU] : device -> (tid -> times)
                 # assert type(category_times[CATEGORY_CUDA_API_CPU]) == dict
                 for device, all_times in category_times[category].items():
-                    category_name = "{cat}: {dev}".format(cat=category, dev=device)
+                    category_name = "{cat}: {dev}".format(cat=cat, dev=device)
                     self.js_add_section(category_name)
                     tid_to_times = self.js_split_into_tids(all_times)
                     for tid, times in tid_to_times.items():
-                        for time in times:
-                            self.js_add_time(time.name, category_name, time, tid)
+                        for time_sec in times:
+                            self.js_add_time(time.name, category_name, time_sec, tid)
             # elif category == CATEGORY_GPU:
             #     ...
             elif self.reproduce_tfprof and category in [CATEGORY_PYTHON, CATEGORY_TF_API]:
@@ -86,14 +94,15 @@ class TraceEventsDumper:
                 pass
             else:
                 assert type(category_times[category]) == list
-                category_name = category
+                category_name = self._cat(category)
+                # category_name = category
                 self.js_add_section(category_name)
-                for time in times:
-                    if time.name is not None:
-                        name = time.name
+                for ktime in times:
+                    if ktime.name is not None:
+                        name = ktime.name
                     else:
                         name = 'unknown'
-                    self.js_add_time(name, category, time, tid=0)
+                    self.js_add_time(name, category_name, ktime, tid=0)
             # else:
             #     raise NotImplementedError("Not sure how to handle category={c}".format(
             #         c=category))
@@ -105,16 +114,16 @@ class TraceEventsDumper:
         allocated_tids = []
         tid_times = dict()
 
-        for time in times:
+        for ktime in times:
             tid = -1
             # c_tid = candidate tid
             for c_tid in reversed_iter(allocated_tids):
-                if time.start_time_usec < tid_times[c_tid][-1].end_time_usec:
+                if ktime.start_time_usec < tid_times[c_tid][-1].end_time_usec:
                     # Case (1): kernel start-time < lane's last end-time
                     #   Kernel starts earlier in this lane.
                     #   Either try the next lane, or allocate a new lane
                     pass
-                elif time.start_time_usec >= tid_times[c_tid][-1].end_time_usec:
+                elif ktime.start_time_usec >= tid_times[c_tid][-1].end_time_usec:
                     # Case (2): kernel start-time > lane's last end-time
                     #   Kernel starts later in this lane.
                     #   Place the kernel in this lane.
@@ -132,7 +141,7 @@ class TraceEventsDumper:
                 next_tid += 1
                 tid_times[tid] = []
 
-            tid_times[tid].append(time)
+            tid_times[tid].append(ktime)
 
         return tid_times
 

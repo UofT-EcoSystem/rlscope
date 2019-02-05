@@ -1211,10 +1211,10 @@ class ProcessTimelineReader:
         return self.categories
 
     def get_times_sec(self, category):
-        for category_combo, time in self.json_data.items():
+        for category_combo, time_us in self.json_data.items():
             cat_str = _category_str(category_combo)
             if category == cat_str:
-                return [time/MICROSECONDS_IN_SECOND]
+                return [time_us/MICROSECONDS_IN_SECOND]
         # for cat_data in self.json_data['category_combo_times']:
         #     category_combo = cat_data['category_combo']
         #     cat_str = _category_str(category_combo)
@@ -1691,7 +1691,7 @@ class UtilizationPlot:
 
         overlap_computer = OverlapComputer(self.db_path, debug=self.debug)
 
-        operation_overlap = overlap_computer.compute_process_timeline_overlap()
+        operation_overlap, proc_stats = overlap_computer.compute_process_timeline_overlap()
         assert len(operation_overlap) > 0
 
         # all_categories = set()
@@ -1706,7 +1706,7 @@ class UtilizationPlot:
 
         all_categories = set()
         for operation_key, combo_to_time in operation_overlap.items():
-            for category_key, time in combo_to_time.items():
+            for category_key, time_us in combo_to_time.items():
                 category = _category_str(category_key)
                 all_categories.add(category)
 
@@ -1760,7 +1760,7 @@ class UtilizationPlot:
         #     self.plotter.plot(bench_name)
         df = self.plotter.dataframe
         assert len(df) != 0
-        self._dump_stats()
+        self._dump_stats(proc_stats)
         self.plotter.plot(bench_name=None)
 
     @property
@@ -1774,7 +1774,7 @@ class UtilizationPlot:
     def _stats(self):
         return UtilizationPlot.get_stats(self.directory)
 
-    def _dump_stats(self):
+    def _dump_stats(self, proc_stats):
         """
         Dump some stats useful for testing the correctness of our plot.
 
@@ -1798,6 +1798,7 @@ class UtilizationPlot:
             # (i.e. across all processes)
             'total_trace_time_sec':total_trace_time_sec,
         }
+        update_dict(js_stats, proc_stats)
         _add_cpu_gpu_stats(js_stats, self.plotter)
         print("> Save plot stats to {path}".format(path=self._stats()))
         do_dump_json(js_stats, self._stats())
@@ -1816,10 +1817,11 @@ def _add_cpu_gpu_stats(js_stats, plotter, bench_name=NO_BENCH_NAME):
     cpu_time_sec = sum_time(cpu_rows)
     gpu_time_sec = sum_time(gpu_rows)
     total_time_sec = cpu_time_sec + gpu_time_sec
-    js_stats.update({
+    stats = {
         'cpu_time_sec':cpu_time_sec,
         'gpu_time_sec':gpu_time_sec,
         'total_time_sec':total_time_sec,
         'gpu_time_percent': 100*gpu_time_sec/total_time_sec,
         'cpu_time_percent': 100*cpu_time_sec/total_time_sec,
-    })
+    }
+    update_dict(js_stats, stats)
