@@ -3,8 +3,11 @@ Manage a singleton instance to a Profiler object.
 """
 
 from profiler import profilers
+import tensorflow as tf
 
 prof = None
+session = None
+
 def get_profiler():
     global prof
     # if prof is None:
@@ -16,6 +19,30 @@ def init_profiler(*args, **kwargs):
     assert prof is None
     prof = profilers.Profiler(*args, **kwargs)
     return prof
+
+def init_session(**kwargs):
+    global session
+    assert session is None
+
+    if 'config' not in kwargs:
+        config = tf.ConfigProto()
+    else:
+        config = kwargs['config']
+        del kwargs['config']
+
+    if 'graph' not in kwargs:
+        graph = tf.Graph()
+    else:
+        graph = kwargs['graph']
+        del kwargs['graph']
+
+    # Allow multiple users to use the TensorFlow API.
+    config.gpu_options.allow_growth = True
+
+    sess = tf.Session(graph=graph, config=config, **kwargs)
+    sess.__enter__()
+
+    return session
 
 def handle_iml_args(parser, args, directory=None):
     """

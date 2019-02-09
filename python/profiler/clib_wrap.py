@@ -175,6 +175,10 @@ class CFuncWrapper:
 def record_event(category, name, start_us, end_us, attrs=None, python_event=False, ignore_disable=False):
     global _step, _pyprof
     # if _trace_steps is not None and _step in _trace_steps:
+
+    if _step is None:
+        import ipdb; ipdb.set_trace()
+
     if _TRACING_ON or ignore_disable:
         tid = threading.get_ident()
         event = Event(
@@ -277,7 +281,7 @@ def dump_pyprof(path, process_name, phase):
     with open(path, 'wb') as f:
         print("> dump pyprof.steps:")
         pprint.pprint({
-            '_pyprof.steps':list(_pyprof.steps),
+            'len(_pyprof.steps)':len(_pyprof.steps),
             '_pyprof.process_name':_pyprof.process_name,
             '_pyprof.phase':_pyprof.phase,
         }, indent=2)

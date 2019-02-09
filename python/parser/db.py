@@ -5,6 +5,7 @@ import progressbar
 import pytest
 import bisect
 
+import pickle
 import sqlite3
 from sqlite3 import Error
 
@@ -169,6 +170,7 @@ class SQLiteParser:
         EXISTS (
             SELECT * FROM Event AS op2 NATURAL JOIN Category c2
             WHERE 
+            op1.process_id == op2.process_id AND
             c2.category_name = '{CATEGORY_OPERATION}' AND
             op1.event_id != op2.event_id AND
             op1.start_time_us == op2.start_time_us AND
@@ -255,6 +257,7 @@ class SQLiteParser:
                         duration_us=duration_us))
                 device_id = self.insert_device_name(device)
                 end_time_us = start_time_us + duration_us
+                is_debug_event = bool(match_debug_event_name(name))
                 insert = {
                     # 'thread_id':event.thread_id,
                     'start_time_us':start_time_us,
@@ -264,6 +267,7 @@ class SQLiteParser:
                     'category_id':category_id,
                     'process_id':process_id,
                     'device_id':device_id,
+                    'is_debug_event':is_debug_event,
                 }
                 bulk.add_insert(insert)
 
@@ -337,6 +341,7 @@ class SQLiteParser:
             # category_id = self.category_to_id[category]
             for event in events:
                 # Insert Event
+                is_debug_event = bool(match_debug_event_name(event.name))
                 event_id = event_conn.insert_dict('Event', {
                     'thread_id':event.thread_id,
                     'start_time_us':event.start_time_us,
@@ -345,6 +350,7 @@ class SQLiteParser:
                     'event_name':event.name,
                     'category_id':category_id,
                     'process_id':process_id,
+                    'is_debug_event':is_debug_event,
                 })
                 # Insert EventAttr
                 for attr_name, attr_value in event.attrs.items():
@@ -647,10 +653,11 @@ class SQLiteCategoryTimesReader:
 
         NOTE: start/end tuples are in sorted order (by their start time)
     """
-    def __init__(self, db_path):
+    def __init__(self, db_path, debug_ops=False):
         self.db_path = db_path
         self.conn = TracesSQLiteConnection(db_path)
         self.parse_debug = False
+        self.debug_ops = debug_ops
 
         self._steps = dict()
 
@@ -675,14 +682,18 @@ class SQLiteCategoryTimesReader:
     def directory(self):
         return _d(self.db_path)
 
-    @property
-    def bench_names(self):
+    def bench_names(self, debug_ops=False):
         c = self.conn.cursor
         c.execute("""
         SELECT DISTINCT event_name FROM Event AS e NATURAL JOIN Category AS c
-        WHERE c.category_name = '{op}' 
+        WHERE 
+            c.category_name = '{CATEGORY_OPERATION}' 
+            {debug_ops_clause}
         ORDER BY e.event_name
-        """.format(op=CATEGORY_OPERATION))
+        """.format(
+            CATEGORY_OPERATION=CATEGORY_OPERATION,
+            debug_ops_clause=sql_debug_ops_clause(debug_ops, 'e'),
+         ))
         bench_names = [row['event_name'] for row in c.fetchall()]
         return bench_names
 
@@ -775,10 +786,17 @@ class SQLiteCategoryTimesReader:
                                             group_by_device, ignore_categories, debug)
                 yield process_name, step, category_times
 
+    def _parse_timeline_memo_path(self):
+        return _j(self.directory, '{klass}.parse_timeline.pickle'.format(
+            klass=self.__class__.__name__,
+        ))
+
     def parse_timeline(self,
                        # group_by_device=DEFAULT_group_by_device,
                        ignore_categories=DEFAULT_ignore_categories,
-                       debug=DEFAULT_debug):
+                       debug=DEFAULT_debug,
+                       debug_ops=False,
+                       debug_memoize=False):
         """
         PSEUDOCODE:
         for proc in self.process_names:
@@ -809,6 +827,11 @@ class SQLiteCategoryTimesReader:
         :param debug:
         :return:
         """
+
+        if should_load_memo(debug_memoize, self._parse_timeline_memo_path()):
+            ret = load_memo(debug_memoize, self._parse_timeline_memo_path())
+            return ret
+
         category_times = dict()
         operation_types = set()
         # Categories NOT including the operation-type categories (that replaced CATEGORY_OPERATION)
@@ -819,18 +842,20 @@ class SQLiteCategoryTimesReader:
 
             proc_events = self.process_events(process_name, ignore_categories,
                                               debug=debug,
+                                              debug_ops=debug_ops,
                                               # fetchall=False,
                                               fetchall=True,
                                               )
             # assert len(proc_events) > 0
             proc_category_times = dict()
             self._add_event_rows_to_category_times(proc_category_times, proc_events)
-            assert len(proc_category_times) > 0
-            assert len(proc_category_times[CATEGORY_OPERATION]) > 0
+            # assert len(proc_category_times) > 0
+            # assert len(proc_category_times[CATEGORY_OPERATION]) > 0
 
-            assert CATEGORY_OPERATION in proc_category_times
-            proc_category_times[CATEGORY_OPERATION] = process_op_nest(proc_category_times[CATEGORY_OPERATION])
-            assert len(proc_category_times[CATEGORY_OPERATION]) > 0
+            # assert CATEGORY_OPERATION in proc_category_times
+            if CATEGORY_OPERATION in proc_category_times:
+                proc_category_times[CATEGORY_OPERATION] = process_op_nest(proc_category_times[CATEGORY_OPERATION])
+                assert len(proc_category_times[CATEGORY_OPERATION]) > 0
 
             proc_category = proc_as_category(process_name)
             proc_types.add(proc_category)
@@ -888,7 +913,9 @@ class SQLiteCategoryTimesReader:
                 'categories':categories,
             }, indent=2)
 
-        return category_times, categories, operation_types, proc_types
+        ret = category_times, categories, operation_types, proc_types
+        maybe_memoize(debug_memoize, ret, self._parse_timeline_memo_path())
+        return ret
 
     def _query(self, query, params=None, debug=False):
         c = self.conn.cursor
@@ -921,6 +948,7 @@ class SQLiteCategoryTimesReader:
 
     def process_events(self, process_name, ignore_categories,
                        debug=False,
+                       debug_ops=False,
                        fetchall=True):
         c = self.conn.cursor
         query = textwrap.dedent("""
@@ -932,6 +960,7 @@ class SQLiteCategoryTimesReader:
             NATURAL LEFT JOIN Device as d1
         WHERE 
             p1.process_name = ?
+            {debug_ops_clause}
             {ignore_clause} AND
             NOT EXISTS (
                 SELECT * 
@@ -948,6 +977,7 @@ class SQLiteCategoryTimesReader:
             CATEGORY_PROFILING=CATEGORY_PROFILING,
             PROFILING_DUMP_TRACE=PROFILING_DUMP_TRACE,
             overlap_clause=sql_overlap_clause('e1', 'e2', indents=3),
+            debug_ops_clause=sql_debug_ops_clause(debug_ops, 'e1', indents=1)
         )
 
         # query = textwrap.dedent("""
@@ -973,8 +1003,19 @@ class SQLiteCategoryTimesReader:
             pprint.pprint(params, indent=2)
         c.execute(query, params)
         if fetchall:
+            query_start_t = time.time()
             ret = c.fetchall()
+            query_end_t = time.time()
+            time_sec = query_end_t - query_start_t
+            if debug:
+                print("> query took {sec} seconds".format(
+                    sec=time_sec,
+                ))
         else:
+            if debug:
+                print("> fetchall = {fetchall}".format(
+                    fetchall=fetchall,
+                ))
             ret = c
         return ret
 
@@ -1001,7 +1042,7 @@ class SQLiteCategoryTimesReader:
                                           group_by_device=DEFAULT_group_by_device):
         # rows = c.fetchall()
         # for row in rows:
-        for row in rows:
+        for row in progress(rows, '_add_event_rows_to_category_times'):
             ktime = row_as_ktime(row)
             category_times_add_time(category_times, row['device_name'], ktime, group_by_device, category=row['category_name'])
 
@@ -1385,6 +1426,18 @@ def merge_sorted(xs, ys, key=lambda x: x):
         j += len(ys[j:])
 
     return zs
+
+def sql_debug_ops_clause(debug_ops, event_alias, indents=None):
+    if debug_ops:
+        txt = ""
+    else:
+        # --debug-ops is not set.
+        # DON'T show debug events.
+        txt = "AND NOT {e}.is_debug_event".format(
+            e=event_alias)
+
+    txt = maybe_indent(txt, indents)
+    return txt
 
 def sql_overlap_clause(event_alias_1, event_alias_2, indents=None):
     """

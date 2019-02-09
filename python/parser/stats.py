@@ -101,6 +101,7 @@ class KernelTime:
         start_usec = self.start_time_usec
         end_usec = ktime_b.end_time_usec
         if name is None:
+            # Q: Should we assert that self.name == ktime_b.name?
             name = self.name
         return KernelTime(end_usec - start_usec, start_usec, end_usec, name=name)
 

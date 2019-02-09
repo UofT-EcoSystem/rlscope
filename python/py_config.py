@@ -17,5 +17,5 @@ BENCH_DQN_PY = _j(BASELINES_ROOT, 'baselines/deepq/experiments/benchmark_dqn.py'
 
 # Use a custom-built/modified version of TF for benchmarking things.
 # Modifies C++ code to make tfprof add less overhead to the critical path.
-CUSTOM_TF = True
+# CUSTOM_TF = True
 # CUSTOM_TF = False

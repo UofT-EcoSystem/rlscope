@@ -1,5 +1,3 @@
-# Copyright 2016 The TensorFlow Authors. All Rights Reserved.
-#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -39,24 +37,63 @@ from tensorflow.python.client import session
 from tensorflow.python.framework import errors
 from tensorflow.python.framework import ops
 from tensorflow.python.platform import gfile
-from tensorflow.python.profiler import model_analyzer
+
+# from tensorflow.python.profiler import model_analyzer
+import profiler.tensorflow_model_analyzer as model_analyzer
+from profiler.tensorflow_model_analyzer import ENABLE_PRINT_MDL, ERR_NO_PRINT_MDL
+
 from tensorflow.python.util import compat
 from tensorflow.python.framework import c_api_util
 
 import py_config
 from parser.common import *
 
+
+# Only allow a single traced session.run(...) call to run at a time.
+# By default, tfprof code enforces this.
+# Q: Will multiple tracers work now...?
+# SINGLE_TRACE_AT_A_TIME = True
+SINGLE_TRACE_AT_A_TIME = False
+
+# Global mutex to serialize session.run(...) calls when tracing is enabled.
+if SINGLE_TRACE_AT_A_TIME:
+  GLOBAL_SESSION_RUN_LOCK = threading.Lock()
+else:
+  GLOBAL_SESSION_RUN_LOCK = None
+
+THREAD_IDS = set()
+THREAD_IDS_LOCK = threading.Lock()
+def _check_single_threaded():
+  with THREAD_IDS_LOCK:
+      tid = threading.get_ident()
+      THREAD_IDS.add(tid)
+      if len(THREAD_IDS) > 1:
+        pprint.pprint({'THREAD_IDS':THREAD_IDS})
+        raise RuntimeError("IML: Detected more than 1 ({n}) python-thread; currently we don't support multiple threads.".format(
+          n=len(THREAD_IDS),
+        ))
+
 WARMUP_STEPS = 10
 MAX_TRACED_STEPS = 100
 
-# DEBUG = False
-DEBUG = True
+DEBUG = False
+DEBUG_THREADS = False
+# DEBUG = True
+# DEBUG_THREADS = True
 
 RUN_OPTIONS_NO_TRACE = config_pb2.RunOptions(
   trace_level=config_pb2.RunOptions.NO_TRACE)
 
 RUN_OPTIONS_FULL_TRACE = config_pb2.RunOptions(
   trace_level=config_pb2.RunOptions.FULL_TRACE)
+
+SESSION_RUN_CALLS_TRACED = 0
+def reset_session_run_calls_traced():
+  global SESSION_RUN_CALLS_TRACED
+  SESSION_RUN_CALLS_TRACED = 0
+def get_session_run_calls_traced():
+  global SESSION_RUN_CALLS_TRACED
+  return SESSION_RUN_CALLS_TRACED
 
 def _profiled_init(self, target='', graph=None, config=None):
   """Overwrites the session.__init__."""
@@ -71,99 +108,145 @@ def _profiled_run(self,
   """Overwrites the session.run()."""
   # pylint: disable=protected-access
   # Count the session steps.
-  with self.profile_context._new_step() as state:
-    step, locked = state
-    if DEBUG:
-        print("tfprof> with step={step}".format(step=step))
-    # Fast path if no need for profiling.
-    if locked and not self.profile_context._is_fast_path(step):
-      # Maybe trace this step.
-      if self.profile_context._should_trace(step, self.graph, fetches):
-        if self.profile_context._debug:
-          sys.stderr.write('debug: tracing step: %d\n' % step)
-        # Enable tracing, perform auto profiling or auto dump.
-        copy_run_metadata = True
-        if not run_metadata:
-          copy_run_metadata = False
-          run_metadata = config_pb2.RunMetadata()
+  global SESSION_RUN_CALLS_TRACED
 
-        if not options:
-          options = RUN_OPTIONS_FULL_TRACE
-          old_trace_level = options.trace_level
-        else:
-          old_trace_level = options.trace_level
-          options.trace_level = config_pb2.RunOptions.FULL_TRACE
+  if DEBUG_THREADS:
+      _check_single_threaded()
 
-        # with _tracing_disabled(prof=self):
-        if py_config.CUSTOM_TF:
-            tfprof_step = self.profile_context._step
-            sess = self
-            preallocate_tracer(tfprof_step, sess)
+  profile_context = getattr(self, 'profile_context', None)
+  if profile_context is not None:
+    profile_context_state = profile_context._new_step()
+    step, locked = profile_context_state.__enter__()
+    assert locked
+  else:
+    step = None
+    locked = False
 
-        if DEBUG:
-          sess = self
-          tracer_is_set = c_api_util.get_is_tracer_set(sess)
-          assert tracer_is_set
-
-        start_run_internal_t = time.time()
-        ret = self._profiler_run_internal(
-            fetches, feed_dict, options, run_metadata)
-        end_run_internal_t = time.time()
-        start_add_step_t = end_run_internal_t
-        if self.profile_context._debug:
-          self.profile_context._dump_file(run_metadata, 'run_meta_%d' % step)
-
-        if self.profile_context._dump_on_finished:
-          if py_config.CUSTOM_TF:
-            self.profile_context.graph = self.graph
-          else:
-            self.profile_context.add_step(step, self.graph, run_metadata, copy_run_metadata)
-        else:
-          assert not py_config.CUSTOM_TF
-          self.profile_context.profiler.graph = self.graph
-          self.profile_context.profiler.add_step(step, run_metadata)
-        end_add_step_t = time.time()
-        options.trace_level = old_trace_level
-
-        if DEBUG:
-            # For q_backward, if profiling overhead from add_step is the issue, I expect:
-            #   _profiler_run_internal to take ~ 0.10199415534734727 sec
-            #   add_step to take ~ 1.196728 - 0.10199415534734727 = 1.0947338 sec
-            print(textwrap.dedent("""
-            tfprof> cache stats needed for add_step(step={step})
-                    _profiler_run_internal = {prof_sec} seconds
-                    add_step = {add_step_sec} seconds
-            """.format(step=step,
-                       prof_sec=end_run_internal_t - start_run_internal_t,
-                       add_step_sec=end_add_step_t - start_add_step_t)))
-      else:
-        if DEBUG:
-          print("tfprof> (1) SKIP step={step}".format(step=step))
-        ret = self._profiler_run_internal(fetches, feed_dict, options)
-
-      # Maybe dump profile.
-      # self.profile_context._maybe_dump(step)
-
-      # Maybe profile:
-      to_profiles = self.profile_context._profile_candidates()
-      for to_prof in to_profiles:
-        cmd, opts, _ = to_prof
-        if self.profile_context._debug:
-          sys.stderr.write('debug: profiling %s step: %d\n' % (cmd, step))
-        if cmd == 'graph':
-          self.profile_context.profiler.profile_graph(opts)
-        elif cmd == 'scope':
-          self.profile_context.profiler.profile_name_scope(opts)
-        elif cmd == 'op':
-          self.profile_context.profiler.profile_operations(opts)
-        elif cmd == 'code':
-          self.profile_context.profiler.profile_python(opts)
-        else:
-          raise ValueError('Unknown cmd: %s\n' % cmd)
-      return ret
-  # Fast no lock path.
   if DEBUG:
-      print("tfprof> (2) SKIP step={step}".format(step=step))
+    print(textwrap.dedent("""
+    > _profile_run:
+      - profile_context = {pctx}
+      - step = {step}
+      - locked = {locked}
+    """.format(
+      pctx=profile_context,
+      step=step,
+      locked=locked,
+    )))
+    if profile_context is not None:
+      print(textwrap.dedent("""
+      - not self.profile_context._is_fast_path(step) = {fast_path_bool}
+        - self.profile_context._disable = {disable}
+        - self.profile_context._trace_all = {trace_all}
+      """.format(
+          fast_path_bool=not self.profile_context._is_fast_path(step),
+          disable=self.profile_context._disable,
+          trace_all=self.profile_context._trace_all,
+        )))
+    # else:
+    #   # Q: Why isn't this Session object being traced with a ProfileContext object?
+    #   import ipdb; ipdb.set_trace()
+
+  # Fast path if no need for profiling.
+  if locked and not self.profile_context._is_fast_path(step):
+    if DEBUG:
+      print("tfprof> with step={step}".format(step=step))
+    # Maybe trace this step.
+    if self.profile_context._should_trace(step, self.graph, fetches):
+      if self.profile_context._debug:
+        sys.stderr.write('debug: tracing step: %d\n' % step)
+      # Enable tracing, perform auto profiling or auto dump.
+      copy_run_metadata = True
+      if not run_metadata:
+        copy_run_metadata = False
+        run_metadata = config_pb2.RunMetadata()
+
+      if not options:
+        options = RUN_OPTIONS_FULL_TRACE
+        old_trace_level = options.trace_level
+      else:
+        old_trace_level = options.trace_level
+        options.trace_level = config_pb2.RunOptions.FULL_TRACE
+
+      # tfprof_step = self.profile_context._step
+      SESSION_RUN_CALLS_TRACED += 1
+      assert profile_context is self.profile_context
+      assert step is not None
+      sess = self
+      # preallocate_tracer(tfprof_step, sess)
+      preallocate_tracer(step, sess)
+
+      if DEBUG:
+        sess = self
+        tracer_is_set = c_api_util.get_is_tracer_set(sess)
+        assert tracer_is_set
+
+      start_run_internal_t = time.time()
+      ret = self._profiler_run_internal(
+          fetches, feed_dict, options, run_metadata)
+      end_run_internal_t = time.time()
+      start_add_step_t = end_run_internal_t
+      if self.profile_context._debug:
+        self.profile_context._dump_file(run_metadata, 'run_meta_%d' % step)
+
+      # JAMES NOTE: We don't care about the "graph" anymore when dumping profiling info.
+      #
+      # if self.profile_context._dump_on_finished:
+      #   self.profile_context.graph = self.graph
+      # else:
+      #   self.profile_context.profiler.graph = self.graph
+      #   self.profile_context.profiler.add_step(step, run_metadata)
+
+      end_add_step_t = time.time()
+      options.trace_level = old_trace_level
+
+      # if DEBUG:
+      #     # For q_backward, if profiling overhead from add_step is the issue, I expect:
+      #     #   _profiler_run_internal to take ~ 0.10199415534734727 sec
+      #     #   add_step to take ~ 1.196728 - 0.10199415534734727 = 1.0947338 sec
+      #     print(textwrap.dedent("""
+      #     tfprof> cache stats needed for add_step(step={step})
+      #             _profiler_run_internal = {prof_sec} seconds
+      #             add_step = {add_step_sec} seconds
+      #     """.format(step=step,
+      #                prof_sec=end_run_internal_t - start_run_internal_t,
+      #                add_step_sec=end_add_step_t - start_add_step_t)))
+
+    else:
+      # if DEBUG:
+      #   print("tfprof> (1) SKIP step={step}".format(step=step))
+      ret = self._profiler_run_internal(fetches, feed_dict, options)
+
+    # Maybe dump profile.
+    # self.profile_context._maybe_dump(step)
+
+    # Maybe profile:
+    to_profiles = self.profile_context._profile_candidates()
+    for to_prof in to_profiles:
+      cmd, opts, _ = to_prof
+      if self.profile_context._debug:
+        sys.stderr.write('debug: profiling %s step: %d\n' % (cmd, step))
+      if cmd == 'graph':
+        self.profile_context.profiler.profile_graph(opts)
+      elif cmd == 'scope':
+        self.profile_context.profiler.profile_name_scope(opts)
+      elif cmd == 'op':
+        self.profile_context.profiler.profile_operations(opts)
+      elif cmd == 'code':
+        self.profile_context.profiler.profile_python(opts)
+      else:
+        raise ValueError('Unknown cmd: %s\n' % cmd)
+
+    if profile_context is not None:
+      profile_context_state.__exit__(None, None, None)
+
+    return ret
+
+  if profile_context is not None:
+    profile_context_state.__exit__(None, None, None)
+  # Fast no lock path.
+  # if DEBUG:
+  #     print("tfprof> (2) SKIP step={step}".format(step=step))
   return self._profiler_run_internal(
       fetches, feed_dict, options, run_metadata)
   # pylint: enable=protected-access
@@ -213,18 +296,20 @@ class ProfileContext(object):
   """
 
   def __init__(self,
-               profile_dir,
+               profile_dir=None,
                trace_steps=None,
                dump_steps=None,
                enabled=True,
                debug=False,
                dump_on_finished=False,
-               process_name=None,
-               phase=None,
-               trace_all=False):
-    self.process_name = process_name
-    self.phase = phase
-    self._sess = None
+               # process_name=None,
+               # phase=None,
+               trace_all=False,
+               session=None):
+    # self.process_name = process_name
+    # self.phase = phase
+    self._sess = session
+    assert self._sess is not None
     self._trace_all = trace_all
     self._disable = False
 
@@ -237,8 +322,8 @@ class ProfileContext(object):
     self._step_data = []
 
     self._debug = debug
-    if not profile_dir:
-      raise ValueError('Must have a directory for profile.\n')
+    # if not profile_dir:
+    #   raise ValueError('Must have a directory for profile.\n')
     self._profiler_dir = profile_dir
 
     if trace_steps is None:
@@ -264,7 +349,10 @@ class ProfileContext(object):
     self._traced_steps = 0
     self._auto_profiles = []
     self._profiler = None
-    self._lock = threading.Lock()
+    if SINGLE_TRACE_AT_A_TIME:
+      self._lock = GLOBAL_SESSION_RUN_LOCK
+    else:
+      self._lock = None
 
     print("Ported profiler")
 
@@ -375,6 +463,7 @@ class ProfileContext(object):
   def _dump(self, step):
     if self._debug:
       sys.stderr.write('debug: dumping file at step: %d\n' % step)
+    assert self._profiler_dir is not None
     if not gfile.Exists(self._profiler_dir):
       gfile.MakeDirs(self._profiler_dir)
 
@@ -385,6 +474,7 @@ class ProfileContext(object):
     self.profiler._write_profile(filename)  # pylint: disable=protected-access
 
   def _dump_file(self, pb, basename):
+    assert self._profiler_dir is not None
     if not gfile.Exists(self._profiler_dir):
       gfile.MakeDirs(self._profiler_dir)
     with gfile.Open(os.path.join(self._profiler_dir, basename), 'w') as f:
@@ -392,13 +482,30 @@ class ProfileContext(object):
 
   @contextlib.contextmanager
   def _new_step(self):
-    acquired = self._lock.acquire(False)
-    print("> tfprof: step={step}".format(step=self._step))
+    if self._lock is not None:
+      acquired = self._lock.acquire(False)
+    else:
+      # We haven't acquired a lock.
+      # However, the caller uses this flag to decide whether to profile.
+      # So just set it to True.
+      acquired = True
+    # if DEBUG:
+    #     print("> tfprof: step={step}, locked={locked}".format(
+    #       step=self._step,
+    #       locked=acquired))
+    if DEBUG:
+      print("> tfprof: step={step}".format(
+        step=self._step,
+      ))
     yield (self._step, acquired)
+    # if DEBUG:
+    #   print("> tfprof: AFTER step={step}, locked={locked}".format(
+    #     step=self._step,
+    #     locked=acquired))
     self._step += 1
     self._trace_next_step = False
     self._dump_next_step = False
-    if acquired:
+    if self._lock is not None and acquired:
       self._lock.release()
 
   def _profile_candidates(self):
@@ -417,31 +524,19 @@ class ProfileContext(object):
 
   def __enter__(self):
     if self._enabled:
-      self.old_run = getattr(session.BaseSession, 'run', None)
-      self.old_init = getattr(session.BaseSession, '__init__', None)
-      if not self.old_run:
-        raise errors.InternalError(None, None, 'BaseSession misses run method.')
-      elif not self.old_init:
-        raise errors.InternalError(None, None,
-                                   'BaseSession misses __init__ method.')
-      elif getattr(session.BaseSession, '_profiler_run_internal', None):
-        raise errors.InternalError(None, None,
-                                   'Already in context or context not cleaned.')
-      elif getattr(session.BaseSession, '_profiler_init_internal', None):
-        raise errors.InternalError(None, None,
-                                   'Already in context or context not cleaned.')
-      else:
-        setattr(session.BaseSession, 'run', _profiled_run)
-        setattr(session.BaseSession, '__init__', _profiled_init)
-        setattr(session.BaseSession, '_profiler_run_internal', self.old_run)
-        setattr(session.BaseSession, '_profiler_init_internal', self.old_init)
-        setattr(session.BaseSession, 'profile_context', self)
-        return self
-    else:
-      return self
+      old_pctx = getattr(self._sess, 'profile_context', None)
+      assert old_pctx is None
+      self._sess.profile_context = self
+    return self
 
-  def _dump_custom_tf(self):
+  def dump(self, dump_path, process_name, phase):
     sess = self._cur_session(allow_none=True)
+
+    # if process_name is None:
+    #   process_name = self.process_name
+
+    # if phase is None:
+    #   phase = self.phase
 
     if sess is None:
         print(("> WARNING: tfprof didn't trace sessions for cmd:\n"
@@ -453,103 +548,54 @@ class ProfileContext(object):
     print("> trace_data size = {b} bytes".format(b=byte_size))
     print("> tfprof steps: ")
     steps = sorted(list(self.trace_data.traced_steps.keys()))
-    pprint.pprint({'steps':steps})
+    pprint.pprint({'len(steps)':len(steps)})
 
-    profile_proto = tfprof_log_pb2.ProfileProto()
-    if self.process_name is not None:
-      profile_proto.process_name = self.process_name
-    if self.phase is not None:
-      profile_proto.phase = self.phase
-    self.next_node_id = 0
-    name_to_id = dict()
-
-    def add_run_meta(step, run_meta):
-      if step not in profile_proto.steps:
-        profile_proto.steps.extend([step])
-
-      for dev_stat in run_meta.step_stats.dev_stats:
-        dev = dev_stat.device.lower()
-        for node_stat in dev_stat.node_stats:
-          name = node_stat.node_name
-          m = re.search(r'(?P<name>.*):', name)
-          if m:
-            name = m.group('name')
-
-          if name in name_to_id:
-            node_id = name_to_id[name]
-          else:
-            node_id = self.next_node_id
-            self.next_node_id += 1
-            name_to_id[name] = node_id
-
-          has_node = node_id in profile_proto.nodes
-          profile_node = profile_proto.nodes[node_id]
-          if not has_node:
-            profile_node.name = name
-
-          # TFGraphNode::AddStepStat
-          # Skip the "IsCanonicalDevice" crap...
-
-          # ExecStep::AddTimeStats
-
-          if node_stat.all_start_micros > 0:
-            op_end_rel_micros = max(1, node_stat.op_end_rel_micros)
-
-            start_us = node_stat.all_start_micros
-            end_us = op_end_rel_micros
-
-            exec_profile = profile_node.execs[step]
-            # exec_time = exec_profile[dev]
-
-            if IsGPUTime(dev):
-              exec_time = exec_profile.accelerator_execs[dev]
-            elif IsCPUTime(dev):
-              exec_time = exec_profile.cpu_execs[dev]
-
-            tupl = exec_time.times.add()
-            tupl.int64_values.extend([start_us, end_us])
-            # exec_time = tfprof_log_pb2.ExecTime()
-            # exec_time.times.int64_values.extend([start_us, end_us])
-            # exec_time.times.extend([]).int64_values.extend([start_us, end_us])
-            # if IsGPUTime(dev):
-            #   exec_profile.accelerator_execs[dev].extend([exec_time])
-            # elif IsCPUTime(dev):
-            #   exec_profile.cpu_execs[dev].extend([exec_time])
-
+    profile_proto_builder = ProfileProtoBuilder(process_name, phase)
     for step, traces in self.trace_data.traced_steps.items():
       for run_meta in traces.traces:
-          add_run_meta(step, run_meta)
+          profile_proto_builder.add_run_meta(step, run_meta)
 
     if len(self.trace_data.traced_steps) == 0:
       # No sess.run() calls were traced.
       print(
         "> WARNING: tfprof didn't capture any session.run(...) calls!\n",
         "Maybe try setting --iml-start-measuring-call lower (e.g. 0)?")
-      dump_step = 0
-    else:
-      dump_step = max(self.trace_data.traced_steps.keys())
+    #   dump_step = 0
+    # else:
+    #   dump_step = max(self.trace_data.traced_steps.keys())
 
-    profile_path = _j(self._profiler_dir, 'profile_{d}'.format(d=dump_step))
-    size_bytes = profile_proto.ByteSize()
+    # assert self._profiler_dir is not None
+    # profile_path = _j(self._profiler_dir, 'profile_{d}'.format(d=dump_step))
+    # profile_path = self.get_dump_path()
+    size_bytes = profile_proto_builder.size_bytes()
     print("> Dump tfprof ({b} bytes) to: {path}".format(
-      b=size_bytes, path=profile_path))
-    with open(profile_path, 'wb') as f:
-      f.write(profile_proto.SerializeToString())
+      b=size_bytes, path=dump_path))
+    profile_proto_builder.dump(dump_path)
+
+  def get_dump_path(self):
+    assert self.dump_basename is not None
+    assert self._profiler_dir is not None
+    profile_path = _j(self._profiler_dir, self.dump_basename)
+    return profile_path
+
+  def set_dump_basename(self, dump_basename):
+    assert self._profiler_dir is not None
+    self.dump_basename = dump_basename
 
   def _cur_session(self, allow_none=False):
     if self._sess is not None:
       return self._sess
 
-    sess = tf.get_default_session()
-    if sess is None and not allow_none:
-      raise RuntimeError(
-        "Couldn't find current session; you either need to call Profiler.set_session(sess), "
-        "or do \"with sess.as_default():\"")
+    # sess = tf.get_default_session()
+    # if sess is None and not allow_none:
+    raise RuntimeError(
+      "Couldn't find current session; you either need to call Profiler.set_session(sess), "
+      "or do \"with sess.as_default():\"")
 
-    return sess
+    # return sess
 
-  def set_session(self, sess):
-    self._sess = sess
+  # def set_session(self, sess):
+  #   self._sess = sess
 
   def _old_dump_custom_tf(self):
     """
@@ -579,28 +625,145 @@ class ProfileContext(object):
     if not self._enabled:
       return
 
+    # Q: How much of ProfilerContext is single-session specific?
+    # (i.e. do we need a ProfilerContext for each active-session?)
+    # - print_mdl.DeleteProfiler below deletes a singleton "TF_Stat" object from C++,
+    #   if it exists.
+    # - However, C++ code is OK to call DeleteProfiler multiple times
+    #   (only first delete counts)
+    #
+    # - tf.Profiler object creates singleton object.
+    #   Q: What if we call create multiple times?
+    #   Sadly, that will cause a memory leak.
+    #   So, we need to wrap tf.Profiler to remove print_mdl.NewProfiler calls.
     if self._dump_on_finished:
+        self.dump()
 
-        if py_config.CUSTOM_TF:
-          self._dump_custom_tf()
+    if ENABLE_PRINT_MDL:
+      print_mdl.DeleteProfiler()
+    # setattr(session.BaseSession, 'run', self.old_run)
+    # setattr(session.BaseSession, '__init__', self.old_init)
+    # setattr(session.BaseSession, '_profiler_run_internal', None)
+    # setattr(session.BaseSession, '_profiler_init_internal', None)
+    # setattr(session.BaseSession, 'profile_context', None)
+    assert self._sess.profile_context is self
+    self._sess.profile_context = None
+
+
+class ProfileProtoBuilder:
+  """
+  Given a bunch of RunMetadata from traced session.run(...) calls, condense them all
+  into the final tfprof output protobuf:
+  i.e. ProfileProto
+
+  NOTE: This code used to be done in C++, but there is no need
+  since it's more annoying to modify.
+  """
+  def __init__(self, process_name, phase):
+    self.process_name = process_name
+    self.phase = phase
+
+    self.profile_proto = tfprof_log_pb2.ProfileProto()
+    self.profile_proto.process_name = self.process_name
+    self.profile_proto.phase = self.phase
+
+    self.next_node_id = 0
+    self.name_to_id = dict()
+
+  def add_run_meta(self, step, run_meta):
+    if step not in self.profile_proto.steps:
+      self.profile_proto.steps.extend([step])
+
+    for dev_stat in run_meta.step_stats.dev_stats:
+      dev = dev_stat.device.lower()
+      for node_stat in dev_stat.node_stats:
+        name = node_stat.node_name
+        m = re.search(r'(?P<name>.*):', name)
+        if m:
+          name = m.group('name')
+
+        if name in self.name_to_id:
+          node_id = self.name_to_id[name]
         else:
-          dump_step = 0
-          for step, graph, run_metadata in self._step_data:
-            dump_step = max(dump_step, step)
-            self.profiler._graph = graph
-            if DEBUG:
-              print("tfprof> use cached results for add_step(step={step})".format(step=step))
-            self.profiler.add_step(step, run_metadata)
-          self._dump(dump_step)
-          # Discard profiling data.
-          self._step_data = []
+          node_id = self.next_node_id
+          self.next_node_id += 1
+          self.name_to_id[name] = node_id
 
-    print_mdl.DeleteProfiler()
-    setattr(session.BaseSession, 'run', self.old_run)
-    setattr(session.BaseSession, '__init__', self.old_init)
-    setattr(session.BaseSession, '_profiler_run_internal', None)
-    setattr(session.BaseSession, '_profiler_init_internal', None)
-    setattr(session.BaseSession, 'profile_context', None)
+        has_node = node_id in self.profile_proto.nodes
+        profile_node = self.profile_proto.nodes[node_id]
+        if not has_node:
+          profile_node.name = name
+
+        # TFGraphNode::AddStepStat
+        # Skip the "IsCanonicalDevice" crap...
+
+        # ExecStep::AddTimeStats
+
+        if node_stat.all_start_micros > 0:
+          op_end_rel_micros = max(1, node_stat.op_end_rel_micros)
+
+          start_us = node_stat.all_start_micros
+          end_us = op_end_rel_micros
+
+          exec_profile = profile_node.execs[step]
+          # exec_time = exec_profile[dev]
+
+          if IsGPUTime(dev):
+            exec_time = exec_profile.accelerator_execs[dev]
+          elif IsCPUTime(dev):
+            exec_time = exec_profile.cpu_execs[dev]
+
+          tupl = exec_time.times.add()
+          tupl.int64_values.extend([start_us, end_us])
+          # exec_time = tfprof_log_pb2.ExecTime()
+          # exec_time.times.int64_values.extend([start_us, end_us])
+          # exec_time.times.extend([]).int64_values.extend([start_us, end_us])
+          # if IsGPUTime(dev):
+          #   exec_profile.accelerator_execs[dev].extend([exec_time])
+          # elif IsCPUTime(dev):
+          #   exec_profile.cpu_execs[dev].extend([exec_time])
+
+  def size_bytes(self):
+    return self.profile_proto.ByteSize()
+
+  def dump(self, path):
+    with open(path, 'wb') as f:
+      f.write(self.profile_proto.SerializeToString())
+
+SETUP_DONE = False
+def setup(allow_skip=False):
+  global SETUP_DONE
+  if allow_skip and SETUP_DONE:
+    return
+  assert not SETUP_DONE
+
+  setup_wrap_Session()
+
+  SETUP_DONE = True
+
+def setup_wrap_Session():
+  old_run = getattr(session.BaseSession, 'run', None)
+  if not old_run:
+    raise errors.InternalError(None, None, "BaseSession doesn't have a run method.")
+  old_init = getattr(session.BaseSession, '__init__', None)
+
+  # Overwrite tf.Session.run(...) and tf.Session.__init__(...)
+  setattr(session.BaseSession, 'run', _profiled_run)
+  setattr(session.BaseSession, '__init__', _profiled_init)
+
+  # Keep old tf.Session.run(...) and tf.Session.__init__(...)
+  setattr(session.BaseSession, '_profiler_run_internal', old_run)
+  setattr(session.BaseSession, '_profiler_init_internal', old_init)
+
+  # elif not old_init:
+  #   raise errors.InternalError(None, None,
+  #                              'BaseSession misses __init__ method.')
+  # elif getattr(session.BaseSession, '_profiler_run_internal', None):
+  #   raise errors.InternalError(None, None,
+  #                              'Already in context or context not cleaned.')
+  # elif getattr(session.BaseSession, '_profiler_init_internal', None):
+  #   raise errors.InternalError(None, None,
+  #                              'Already in context or context not cleaned.')
 
 def now_in_usec():
   time_us = print_mdl.NowInUsec()

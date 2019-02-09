@@ -156,6 +156,14 @@ class ComputeOverlap:
         return merged_category_times
 
     def _merge_times(self, times):
+        """
+        Given a list of sorted KernelTime's, merge adjacent
+        overlapping KernelTime's into a single KernelTime.
+
+        :param times: List[KernelTime]
+            times is in sorted order by event.start_time_usec.
+        :return:
+        """
         new_times = [times[0]]
         i = 1
         while i < len(times):
@@ -169,6 +177,7 @@ class ComputeOverlap:
 
     def _compute_overlap(self, category_times):
         # categories = set(category_times.keys())
+        # JAMES TODO: compute the progress of this function... I think it takes forever with minigo
 
         start_key = lambda ktime: ktime.start_time_usec
         end_key = lambda ktime: ktime.end_time_usec
@@ -266,7 +275,15 @@ class ComputeOverlap:
                                    'curtime': next_time})
                     print()
                 pop_time(min_category, by_end)
-                cur_categories.remove(min_category)
+                # NOTE: I think this bug will occur if you have two events from the same category
+                # that overlap each other (EITHER partially or fully).
+                # Perhaps this is happening inadvertantly when I form the 'CPU'
+                # events from the Python/C++ events.
+                # - TODO:
+                #   - make a test case to reproduce the bug
+                #   - assert for this condition being violated in the event-data
+                #   - pickle the category_times data so we can iterate quickly.
+                cur_categories.remove(min_category) # KeyError: frozenset({'CPU', 'PROC:loop_train_eval'})
 
             curtime = next_time
 
@@ -537,7 +554,7 @@ class TraceEventsParser:
     def run(self):
 
         self.sql_reader = SQLiteCategoryTimesReader(traces_db_path(self.directory))
-        self.bench_names = self.sql_reader.bench_names
+        self.bench_names = self.sql_reader.bench_names()
         # self.category_times_readers.append(self.sql_reader)
 
         ignore_cats = list(DEFAULT_ignore_categories)
@@ -609,11 +626,13 @@ class OverlapComputer:
     """
 
     def __init__(self, db_path,
-                 # Swallow any excess arguments
                  debug=False,
+                 debug_ops=False,
+                 # Swallow any excess arguments
                  **kwargs):
         self.db_path = db_path
         self.debug = debug
+        self.debug_ops = debug_ops
 
     @property
     def directory(self):
@@ -843,29 +862,32 @@ class OverlapComputer:
 
         return new_overlap
 
-    def compute_process_timeline_overlap(self):
+    def compute_process_timeline_overlap(self, debug_memoize=False):
         sql_reader = SQLiteCategoryTimesReader(self.db_path)
 
         # Overlap, computed across different "steps".
         # overlaps = []
 
-        category_times, categories, operation_types, proc_types = sql_reader.parse_timeline(debug=self.debug)
+        category_times, categories, operation_types, proc_types = sql_reader.parse_timeline(
+            debug=self.debug,
+            debug_ops=self.debug_ops,
+            debug_memoize=debug_memoize)
         assert len(operation_types) > 0
         assert len(categories) > 0
 
-        # This can take a while since the timeline can be large...
-        if self.debug:
-            start_t = time.time()
-            print("> DEBUG: write process timeline traceEvents @ {path}".format(
-                path=self._debug_process_timeline_json_path()))
-            new_category_times = dict((_as_category_key(categories, operation_types, proc_types, proc_key=proc_key), value)
-                                      for proc_key, value in category_times.items())
-            # reduce_category_keys(category_times, categories, operation_types, proc_types)
-            dump_category_times(new_category_times, self._debug_process_timeline_json_path(),
-                                print_log=False,
-                                category_as_str=traceEvents_key_str)
-            end_t = time.time()
-            print("  Took {sec} seconds".format(sec=end_t - start_t))
+        # # This can take a while since the timeline can be large...
+        # if self.debug:
+        #     start_t = time.time()
+        #     print("> DEBUG: write process timeline traceEvents @ {path}".format(
+        #         path=self._debug_process_timeline_json_path()))
+        #     new_category_times = dict((_as_category_key(categories, operation_types, proc_types, proc_key=proc_key), value)
+        #                               for proc_key, value in category_times.items())
+        #     # reduce_category_keys(category_times, categories, operation_types, proc_types)
+        #     dump_category_times(new_category_times, self._debug_process_timeline_json_path(),
+        #                         print_log=False,
+        #                         category_as_str=traceEvents_key_str)
+        #     end_t = time.time()
+        #     print("  Took {sec} seconds".format(sec=end_t - start_t))
 
         # We only want to keep CATEGORY_OPERATION times.
         # However, the operation-types have replaced CATEGORY_OPERATION.
@@ -1306,3 +1328,89 @@ def test_compute_overlap():
         assert got == expect
     test_02_overlaps_with()
 
+    def test_03_error_partial_overlap():
+        category_times = {
+            'c1':[
+                [
+                    T(3, 5), T(4, 6),
+                ],
+            ],
+        }
+        compute_overlap = ComputeOverlap(category_times, debug=debug)
+
+        compute_overlap.compute()
+        got = compute_overlap.get_category_times()
+        # expect = {
+        #     frozenset({'c1'}):sec(2),
+        #     frozenset({'c1', 'c2'}):sec(2),
+        #     frozenset({'c1', 'c3'}):sec(1),
+        #     frozenset({'c1', 'c2', 'c3'}):sec(1),
+        # }
+        # assert got == expect
+    test_03_error_partial_overlap()
+
+    def test_04_error_full_overlap():
+        category_times = {
+            'c1':[
+                [
+                    T(3, 6), T(4, 5),
+                ],
+            ],
+        }
+        compute_overlap = ComputeOverlap(category_times, debug=debug)
+
+        compute_overlap.compute()
+        got = compute_overlap.get_category_times()
+        # expect = {
+        #     frozenset({'c1'}):sec(2),
+        #     frozenset({'c1', 'c2'}):sec(2),
+        #     frozenset({'c1', 'c3'}):sec(1),
+        #     frozenset({'c1', 'c2', 'c3'}):sec(1),
+        # }
+        # assert got == expect
+    test_04_error_full_overlap()
+
+    def test_05_error_duplicate_overlap():
+        category_times = {
+            'c1':[
+                [
+                    T(3, 6), T(3, 6),
+                ],
+            ],
+        }
+        compute_overlap = ComputeOverlap(category_times, debug=debug)
+
+        compute_overlap.compute()
+        got = compute_overlap.get_category_times()
+        # expect = {
+        #     frozenset({'c1'}):sec(2),
+        #     frozenset({'c1', 'c2'}):sec(2),
+        #     frozenset({'c1', 'c3'}):sec(1),
+        #     frozenset({'c1', 'c2', 'c3'}):sec(1),
+        # }
+        # assert got == expect
+    test_05_error_duplicate_overlap()
+
+    def test_06_error_not_sorted_by_end_time():
+        category_times = {
+            'c1':[
+                [
+                    # T(3, 6), T(3, 5),
+                    # T(3, 5), T(3, 6),
+                    # T(2, 5), T(3, 6),
+                    T(3, 6), T(2, 5),
+                ],
+            ],
+        }
+        compute_overlap = ComputeOverlap(category_times, debug=debug)
+
+        compute_overlap.compute()
+        got = compute_overlap.get_category_times()
+        # expect = {
+        #     frozenset({'c1'}):sec(2),
+        #     frozenset({'c1', 'c2'}):sec(2),
+        #     frozenset({'c1', 'c3'}):sec(1),
+        #     frozenset({'c1', 'c2', 'c3'}):sec(1),
+        # }
+        # assert got == expect
+    test_06_error_not_sorted_by_end_time()

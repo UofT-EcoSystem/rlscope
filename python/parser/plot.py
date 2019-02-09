@@ -612,7 +612,7 @@ class CategoryOverlapPlot:
     def run(self):
 
         self.sql_reader = SQLiteCategoryTimesReader(self.db_path)
-        self.bench_names = self.sql_reader.bench_names + [NO_BENCH_NAME]
+        self.bench_names = self.sql_reader.bench_names() + [NO_BENCH_NAME]
         assert len(self.bench_names) == len(unique(self.bench_names))
         self.categories = self.sql_reader.categories
 
@@ -1643,10 +1643,14 @@ class UtilizationPlot:
     """
     def __init__(self, directory,
                  debug=False,
+                 debug_ops=False,
+                 debug_memoize=False,
                  # Swallow any excess arguments
                  **kwargs):
         self.directory = directory
         self.debug = debug
+        self.debug_ops = debug_ops
+        self.debug_memoize = debug_memoize
 
         self.bar_width = 0.25
         self.show = False
@@ -1667,31 +1671,40 @@ class UtilizationPlot:
         return src_files
 
     def _process_timeline_png(self, bench_name):
-        return UtilizationPlot.get_process_timeline_png(self.directory, bench_name)
+        return UtilizationPlot.get_process_timeline_png(self.directory, bench_name, self.debug_ops)
 
     @staticmethod
-    def get_process_timeline_png(directory, bench_name):
-        return _j(directory, "process_timeline{bench}.png".format(
-            bench=bench_suffix(bench_name)))
+    def get_process_timeline_png(directory, bench_name, debug_ops):
+        return _j(directory, "process_timeline{bench}{debug}.png".format(
+            bench=bench_suffix(bench_name),
+            debug=debug_suffix(debug_ops),
+        ))
 
     @staticmethod
-    def get_plot_data_path(directory, bench_name):
-        return _j(directory, "process_timeline.plot_data{bench}.txt".format(
-            bench=bench_suffix(bench_name)))
+    def get_plot_data_path(directory, bench_name, debug_ops):
+        return _j(directory, "process_timeline.plot_data{bench}{debug}.txt".format(
+            bench=bench_suffix(bench_name),
+            debug=debug_suffix(debug_ops),
+        ))
 
     def _plot_data_path(self, bench_name):
-        return UtilizationPlot.get_plot_data_path(self.directory, bench_name)
+        return UtilizationPlot.get_plot_data_path(self.directory, bench_name, self.debug_ops)
 
     def run(self):
 
-        self.sql_reader = SQLiteCategoryTimesReader(self.db_path)
-        # self.bench_names = self.sql_reader.bench_names + [NO_BENCH_NAME]
+        # print("> debug_ops = {debug_ops}".format(
+        #     debug_ops=self.debug_ops,
+        # ))
+
+        self.sql_reader = SQLiteCategoryTimesReader(self.db_path, debug_ops=self.debug_ops)
+        # self.bench_names = self.sql_reader.bench_names(self.debug_ops) + [NO_BENCH_NAME]
         # assert len(self.bench_names) == len(unique(self.bench_names))
         # self.categories = self.sql_reader.categories
 
-        overlap_computer = OverlapComputer(self.db_path, debug=self.debug)
+        overlap_computer = OverlapComputer(self.db_path, debug=self.debug, debug_ops=self.debug_ops)
 
-        operation_overlap, proc_stats = overlap_computer.compute_process_timeline_overlap()
+        operation_overlap, proc_stats = overlap_computer.compute_process_timeline_overlap(
+            debug_memoize=self.debug_memoize)
         assert len(operation_overlap) > 0
 
         # all_categories = set()

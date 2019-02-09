@@ -125,11 +125,12 @@ def parse_profile(rule, parser, args):
 
     directory = directories[0]
 
-    kwargs = {
+    parser_klass_kwargs = dict(args.__dict__)
+    parser_klass_kwargs.update({
         'directory': directory,
-        'debug': args.debug,
-    }
-    parser = ParserKlass(**kwargs)
+        # 'debug': args.debug,
+    })
+    parser = ParserKlass(**parser_klass_kwargs)
     try:
         parser.run()
     except ParserException as e:
@@ -246,6 +247,24 @@ def main():
     parser.add_argument("--debug",
                         action='store_true',
                         help='debug')
+    parser.add_argument("--debug-ops",
+                        action='store_true',
+                        help=textwrap.dedent("""
+                        Debug where you've appropriately decorated you ML codebase 
+                        with set_operation/end_operation annotations. 
+                        
+                        In particular, this will cause UtilizationPlot to show time captured by 
+                        prof.start()/prof.start() but NOT captured by a set_operation/end_operation. 
+                        
+                        This time may or may not be worth capturing (you must decide).
+                        (i.e. you may or may not decide not to capture some one-time initialization 
+                        that happens just after prof.start())
+                        """))
+    parser.add_argument("--debug-memoize",
+                        action='store_true',
+                        help=textwrap.dedent("""
+                        Pickle/unpickle intermediate results to allow quick re-runs of Plot's.
+                        """))
     parser.add_argument("--no-profile-cuda",
                         action='store_true',
                         help=textwrap.dedent("""

@@ -35,6 +35,13 @@ from tensorflow.python.profiler import option_builder
 from tensorflow.python.profiler import tfprof_logger
 from tensorflow.python.util.tf_export import tf_export
 
+# IML: Don't use any print_mdl.* C++ API calls.
+#
+# print_mdl.* API calls assume a singleton Profiler object.
+# So, they inherently don't support tracing multiple tf.Session objects.
+ENABLE_PRINT_MDL = False
+ERR_NO_PRINT_MDL = "IML: Cannot support multiple tf.Session objects and print_mdl C++ API at the same time."
+
 _DEFAULT_PROFILE_OPTIONS = 0
 _DEFAULT_ADVISE_OPTIONS = 0
 
@@ -180,11 +187,13 @@ class Profiler(object):
     op_log = tfprof_logger.merge_default_with_oplog(
         self._graph, op_log=op_log)
     # pylint: enable=protected-access
-    print_mdl.NewProfiler(
+    if ENABLE_PRINT_MDL:
+      print_mdl.NewProfiler(
         _graph_string(self._graph), op_log.SerializeToString())
 
   def __del__(self):
-    print_mdl.DeleteProfiler()
+    if ENABLE_PRINT_MDL:
+      print_mdl.DeleteProfiler()
 
   def add_step(self, step, run_meta):
     """Add statistics of a step.
@@ -200,9 +209,12 @@ class Profiler(object):
         self._graph, run_meta=run_meta)
     # pylint: enable=protected-access
     # TODO(xpan): P1: Better to find the current graph.
-    self._coverage = print_mdl.AddStep(step, _graph_string(self._graph),
-                                       run_meta.SerializeToString(),
-                                       op_log.SerializeToString())
+    if ENABLE_PRINT_MDL:
+      self._coverage = print_mdl.AddStep(step, _graph_string(self._graph),
+                                         run_meta.SerializeToString(),
+                                         op_log.SerializeToString())
+    else:
+      raise NotImplementedError(ERR_NO_PRINT_MDL)
 
   def profile_python(self, options):
     """Profile the statistics of the Python codes.
@@ -219,8 +231,11 @@ class Profiler(object):
     opts = _build_options(options)
     tfprof_node = tfprof_output_pb2.MultiGraphNodeProto()
     try:
-      tfprof_node.ParseFromString(
-          print_mdl.Profile('code'.encode('utf-8'), opts.SerializeToString()))
+      if ENABLE_PRINT_MDL:
+        tfprof_node.ParseFromString(
+            print_mdl.Profile('code'.encode('utf-8'), opts.SerializeToString()))
+      else:
+        raise NotImplementedError(ERR_NO_PRINT_MDL)
     except message.DecodeError as e:
       sys.stderr.write('Cannot parse returned proto: %s.\n' % e)
     return tfprof_node
@@ -236,8 +251,11 @@ class Profiler(object):
     opts = _build_options(options)
     tfprof_node = tfprof_output_pb2.MultiGraphNodeProto()
     try:
-      tfprof_node.ParseFromString(
-          print_mdl.Profile('op'.encode('utf-8'), opts.SerializeToString()))
+      if ENABLE_PRINT_MDL:
+        tfprof_node.ParseFromString(
+            print_mdl.Profile('op'.encode('utf-8'), opts.SerializeToString()))
+      else:
+        raise NotImplementedError(ERR_NO_PRINT_MDL)
     except message.DecodeError as e:
       sys.stderr.write('Cannot parse returned proto: %s.\n' % e)
     return tfprof_node
@@ -253,8 +271,11 @@ class Profiler(object):
     opts = _build_options(options)
     tfprof_node = tfprof_output_pb2.GraphNodeProto()
     try:
-      tfprof_node.ParseFromString(
-          print_mdl.Profile('scope'.encode('utf-8'), opts.SerializeToString()))
+      if ENABLE_PRINT_MDL:
+        tfprof_node.ParseFromString(
+            print_mdl.Profile('scope'.encode('utf-8'), opts.SerializeToString()))
+      else:
+        raise NotImplementedError(ERR_NO_PRINT_MDL)
     except message.DecodeError as e:
       sys.stderr.write('Cannot parse returned proto: %s.\n' % e)
     return tfprof_node
@@ -270,8 +291,11 @@ class Profiler(object):
     opts = _build_options(options)
     tfprof_node = tfprof_output_pb2.GraphNodeProto()
     try:
-      tfprof_node.ParseFromString(
-          print_mdl.Profile('graph'.encode('utf-8'), opts.SerializeToString()))
+      if ENABLE_PRINT_MDL:
+        tfprof_node.ParseFromString(
+            print_mdl.Profile('graph'.encode('utf-8'), opts.SerializeToString()))
+      else:
+        raise NotImplementedError(ERR_NO_PRINT_MDL)
     except message.DecodeError as e:
       sys.stderr.write('Cannot parse returned proto: %s.\n' % e)
     return tfprof_node
@@ -286,8 +310,11 @@ class Profiler(object):
     """
     advise_pb = tfprof_output_pb2.AdviceProto()
     opts = _build_advisor_options(options)
-    advise_pb.ParseFromString(
-        print_mdl.Profile('advise'.encode('utf-8'), opts.SerializeToString()))
+    if ENABLE_PRINT_MDL:
+      advise_pb.ParseFromString(
+          print_mdl.Profile('advise'.encode('utf-8'), opts.SerializeToString()))
+    else:
+      raise NotImplementedError(ERR_NO_PRINT_MDL)
     return advise_pb
 
   def serialize_to_string(self):
@@ -299,11 +326,17 @@ class Profiler(object):
     Returns:
       ProfileProto binary string.
     """
-    return print_mdl.SerializeToString()
+    if ENABLE_PRINT_MDL:
+      return print_mdl.SerializeToString()
+    else:
+      raise NotImplementedError(ERR_NO_PRINT_MDL)
 
   def _write_profile(self, filename):
     """Writes the profile to a file."""
-    print_mdl.WriteProfile(filename)
+    if ENABLE_PRINT_MDL:
+      print_mdl.WriteProfile(filename)
+    else:
+      raise NotImplementedError(ERR_NO_PRINT_MDL)
 
 
 @tf_export('profiler.profile')
@@ -355,10 +388,13 @@ def profile(graph=None,
 
   if cmd == 'code' or cmd == 'op':
     tfprof_node = tfprof_output_pb2.MultiGraphNodeProto()
-    ret = print_mdl.PrintModelAnalysis(graph_str, run_meta_str,
-                                       op_log.SerializeToString(),
-                                       cmd.encode('utf-8'),
-                                       opts.SerializeToString())
+    if ENABLE_PRINT_MDL:
+      ret = print_mdl.PrintModelAnalysis(graph_str, run_meta_str,
+                                         op_log.SerializeToString(),
+                                         cmd.encode('utf-8'),
+                                         opts.SerializeToString())
+    else:
+      raise NotImplementedError(ERR_NO_PRINT_MDL)
     try:
       tfprof_node.ParseFromString(ret)
     except message.DecodeError as e:
@@ -366,10 +402,13 @@ def profile(graph=None,
 
   elif cmd == 'graph' or cmd == 'scope':
     tfprof_node = tfprof_output_pb2.GraphNodeProto()
-    ret = print_mdl.PrintModelAnalysis(graph_str, run_meta_str,
-                                       op_log.SerializeToString(),
-                                       cmd.encode('utf-8'),
-                                       opts.SerializeToString())
+    if ENABLE_PRINT_MDL:
+      ret = print_mdl.PrintModelAnalysis(graph_str, run_meta_str,
+                                         op_log.SerializeToString(),
+                                         cmd.encode('utf-8'),
+                                         opts.SerializeToString())
+    else:
+      raise NotImplementedError(ERR_NO_PRINT_MDL)
     try:
       tfprof_node.ParseFromString(ret)
     except message.DecodeError as e:
@@ -413,8 +452,11 @@ def advise(graph=None, run_meta=None, options=_DEFAULT_ADVISE_OPTIONS):
 
   opts = _build_advisor_options(options)
   ret = tfprof_output_pb2.AdviceProto()
-  ret.ParseFromString(
+  if ENABLE_PRINT_MDL:
+    ret.ParseFromString(
       print_mdl.PrintModelAnalysis(
-          _graph_string(graph), run_meta_str, op_log.SerializeToString(),
-          'advise'.encode('utf-8'), opts.SerializeToString()))
+        _graph_string(graph), run_meta_str, op_log.SerializeToString(),
+        'advise'.encode('utf-8'), opts.SerializeToString()))
+  else:
+    raise NotImplementedError(ERR_NO_PRINT_MDL)
   return ret

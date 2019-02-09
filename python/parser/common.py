@@ -3,6 +3,7 @@ import sys
 import traceback
 import numpy as np
 import time
+import pickle
 import pandas as pd
 import os
 import csv
@@ -12,6 +13,7 @@ from io import StringIO
 import json
 import codecs
 from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, basename as _b
+from tqdm import tqdm as tqdm_progress
 
 CATEGORY_TF_API = "Framework API C"
 CATEGORY_PYTHON = 'Python'
@@ -31,7 +33,26 @@ CATEGORY_OPERATION = 'Operation'
 CATEGORY_SIMULATOR_CPP = "Simulator C"
 CATEGORY_ATARI = CATEGORY_SIMULATOR_CPP
 
+# Category captures special profiling events. Currently includes:
+# - event.name = PROFILING_DUMP_TRACE
+#   - tfprof/pyprof files are being dumped; we should NOT use any
+#     events recorded during this time to avoid accidentally measuring
+#     the profiler itself.
 CATEGORY_PROFILING = 'Profiling'
+
+# Record a "special" operation event-name (category=CATEGORY_OPERATION)
+# when the prof.start()/stop() is called.
+#
+# These events are to help debug whether all the code is properly marked.
+# Generally, they aren't mean to show up in any of the final plots.
+# record_event(name="[PROC:run_atari_1]", start_us=prof.start() time, end_us=prof.end() time)
+def op_process_event_name(process_name):
+    assert process_name is not None
+    return "[{proc}]".format(
+        proc=process_name)
+# def match_special_event_name(event_name):
+def match_debug_event_name(event_name):
+    return re.search(r'^\[(?P<event_name>.*)\]$', event_name)
 
 CATEGORIES_CPU = set([
     CATEGORY_TF_API,
@@ -112,11 +133,12 @@ BENCH_TYPES = [
     # 'python_profile',
 ]
 
-BENCH_SUFFIX_RE = r"(:?\.(?P<bench_name>{bench}))?".format(bench=BENCH_NAME_REGEX)
-BENCH_PREFIX_RE = r"(:?(?P<bench_name>{bench})\.)?".format(bench=BENCH_NAME_REGEX)
+BENCH_SUFFIX_RE = r"(:?\.op_(?P<bench_name>{bench}))?".format(bench=BENCH_NAME_REGEX)
+BENCH_PREFIX_RE = r"(:?op_(?P<bench_name>{bench})\.)?".format(bench=BENCH_NAME_REGEX)
 
 # trace_id is not optional.
 TRACE_SUFFIX_RE = r"(?:\.trace_(?P<trace_id>\d+))"
+SESSION_SUFFIX_RE = r"(?:\.session_(?P<session_id>\d+))"
 
 float_re = r'(?:[-+]?[0-9]*\.?[0-9]+([eE][-+]?[0-9]+)?)'
 
@@ -949,6 +971,11 @@ def bench_suffix(bench):
         return ".{bench}".format(bench=bench)
     return ""
 
+def debug_suffix(debug):
+    if debug:
+        return ".debug"
+    return ""
+
 def process_suffix(process_name):
     assert process_name is not None
     if process_name != NO_PROCESS_NAME:
@@ -1215,9 +1242,10 @@ def IsCPUTime(device):
 
 def is_tfprof_file(path):
     base = _b(path)
-    m = re.search(r'profile{bench}{trace}.proto'.format(
+    m = re.search(r'profile{bench}{trace}{sess}.proto'.format(
         bench=BENCH_SUFFIX_RE,
         trace=TRACE_SUFFIX_RE,
+        sess=SESSION_SUFFIX_RE,
     ), base)
     return m
 
@@ -1301,3 +1329,35 @@ def update_dict(dic1, dic2, overwrite=False):
         common_keys = set(dic1.keys()).intersection(set(dic2.keys()))
         assert len(common_keys) == 0
     dic1.update(dic2)
+
+# Pickle
+
+def should_load_memo(debug_memoize, path):
+    return debug_memoize and _e(path) and os.stat(path).st_size > 0
+
+def load_memo(debug_memoize, path):
+    with open(path, 'rb') as f:
+        # -1 specifies highest binary protocol
+        ret = pickle.load(f)
+    return ret
+
+def maybe_memoize(debug_memoize, ret, path):
+    if debug_memoize:
+        with open(path, 'wb') as f:
+            # -1 specifies highest binary protocol
+            pickle.dump(ret, f, -1)
+
+def progress(xs, desc, total=None, show_progress=False):
+    if not show_progress:
+        return xs
+
+    import sqlite3
+    if total is None:
+        if hasattr(xs, '__len__'):
+            total = len(xs)
+        elif type(xs) == sqlite3.Cursor and xs.rowcount != -1:
+            total = xs.rowcount
+        else:
+            print("WARNING: not sure what total to use for progress(desc={desc})".format(
+                desc=desc))
+    return tqdm_progress(xs, desc=desc, total=total)
