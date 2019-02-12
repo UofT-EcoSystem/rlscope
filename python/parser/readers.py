@@ -154,26 +154,44 @@ class TFProfCategoryTimesReader:
             n += 1
         return n
 
-    def all_events(self):
-        def events_for(step, node, get_execs):
-            devices = self.each_device(step, node, get_execs)
-            for device in devices:
-                for event in self.each_event(device, step, node, get_execs):
-                    yield device, event
-
+    def _events_for(self, step, node, get_execs):
+        devices = self.each_device(step, node, get_execs)
+        for device in devices:
+            for event in self.each_event(device, step, node, get_execs):
+                yield device, event
+                
+    def get_device_names(self):
+        device_names = set()
         for step in self.steps:
             for node_id, node in self.proto.nodes.items():
                 if step not in node.execs.keys():
                     continue
 
-                # TODO: Some of the events in the tfprof trace are DEFINITELY duplicates.
-                # e.g. memcpy / stream:all have overlaps.
-                # I think my compute overlap code handles duplicates,
-                # as long as they belong to the same category.
-                for device, event in events_for(step, node, self.get_accelerator_execs):
-                    yield device, event
-                for device, event in events_for(step, node, self.get_cpu_execs):
-                    yield device, event
+                devices = self.each_device(step, node, self.get_accelerator_execs)
+                device_names.update(devices)
+                
+                devices = self.each_device(step, node, self.get_cpu_execs)
+                device_names.update(devices)
+        return device_names
+
+    def all_events_for_step(self, step):
+        for node_id, node in self.proto.nodes.items():
+            if step not in node.execs.keys():
+                continue
+
+            # TODO: Some of the events in the tfprof trace are DEFINITELY duplicates.
+            # e.g. memcpy / stream:all have overlaps.
+            # I think my compute overlap code handles duplicates,
+            # as long as they belong to the same category.
+            for device, event in self._events_for(step, node, self.get_accelerator_execs):
+                yield device, event
+            for device, event in self._events_for(step, node, self.get_cpu_execs):
+                yield device, event
+
+    def all_events(self, debug=False):
+        for step in self.steps:
+            for item in self.all_events_for_step(step):
+                yield item
 
     def get_cpu_execs(self, exec_profile):
         return exec_profile.cpu_execs

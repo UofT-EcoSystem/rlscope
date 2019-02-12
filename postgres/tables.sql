@@ -24,7 +24,7 @@ CREATE TABLE Event (
     device_id INTEGER,
 
     -- NOTE: This is a boolean, but SQLite just uses 0/1 integers for those.
-    is_debug_event INTEGER NOT NULL
+    is_debug_event BOOLEAN NOT NULL
 
 --     FOREIGN KEY(process_id) REFERENCES Process(process_id),
 --     FOREIGN KEY(category_id) REFERENCES Category(category_id),

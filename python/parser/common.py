@@ -1,5 +1,6 @@
 import re
 import sys
+import math
 import traceback
 import numpy as np
 import time
@@ -39,6 +40,18 @@ CATEGORY_ATARI = CATEGORY_SIMULATOR_CPP
 #     events recorded during this time to avoid accidentally measuring
 #     the profiler itself.
 CATEGORY_PROFILING = 'Profiling'
+
+CATEGORIES_ALL = [
+    CATEGORY_TF_API,
+    CATEGORY_PYTHON,
+    CATEGORY_CUDA_API_CPU,
+    CATEGORY_UNKNOWN,
+    CATEGORY_GPU,
+    CATEGORY_DUMMY_EVENT,
+    CATEGORY_OPERATION,
+    CATEGORY_SIMULATOR_CPP,
+    CATEGORY_PROFILING,
+]
 
 # Record a "special" operation event-name (category=CATEGORY_OPERATION)
 # when the prof.start()/stop() is called.
@@ -1361,3 +1374,42 @@ def progress(xs, desc, total=None, show_progress=False):
             print("WARNING: not sure what total to use for progress(desc={desc})".format(
                 desc=desc))
     return tqdm_progress(xs, desc=desc, total=total)
+
+def split_list(xs, n):
+    assert n > 0
+    chunk_size = max(int(len(xs)/float(n)), 1)
+    n_chunks = n
+    for i in range(n_chunks-1):
+        start = i*chunk_size
+        stop = (i + 1)*chunk_size
+        yield xs[start:stop]
+    start = (n_chunks - 1)*chunk_size
+    yield xs[start:]
+
+def test_split():
+
+    xs = list(range(1, 10+1))
+
+    actual = list(split_list(xs, 3))
+    expect = [
+        [1, 2, 3],
+        [4, 5, 6],
+        [7, 8, 9, 10],
+    ]
+    assert actual == expect
+
+    actual = list(split_list(xs, 11))
+    expect = [
+        [1],
+        [2],
+        [3],
+        [4],
+        [5],
+        [6],
+        [7],
+        [8],
+        [9],
+        [10],
+        [],
+    ]
+    assert actual == expect

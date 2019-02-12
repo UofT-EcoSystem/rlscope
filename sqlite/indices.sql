@@ -1,4 +1,4 @@
--- Indexes for "class SQLiteCategoryTimesReader"
+-- Indexes for "class SQLCategoryTimesReader"
 CREATE INDEX index_event_name ON Event (event_name);
 CREATE INDEX index_is_debug_event ON Event (is_debug_event);
 CREATE INDEX index_start_time_us ON Event (start_time_us);

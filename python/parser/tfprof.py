@@ -21,7 +21,7 @@ from parser.stats import KernelTime, category_times_add_time
 
 from parser.trace_events import TraceEventsDumper, dump_category_times
 
-from parser.db import SQLiteCategoryTimesReader, traces_db_path
+from parser.db import SQLCategoryTimesReader, sql_input_path, sql_get_source_files
 
 from parser.readers import TFProfCategoryTimesReader, \
     DEFAULT_group_by_device, \
@@ -483,19 +483,7 @@ class TraceEventsParser:
         # self.category_times_readers = []
 
     def get_source_files(self):
-        """
-        We want traces.db
-        """
-        src_files = []
-        traces_db = traces_db_path(self.directory)
-        if not _e(traces_db):
-            raise MissingInputFiles(textwrap.dedent("""
-            {klass}: Couldn't find any traces.db at {path}.
-            """.format(
-                klass=self.__class__.__name__,
-                path=traces_db,
-            )))
-        return src_files
+        return sql_get_source_files(self.__class__, self.directory)
 
     # def parse_dummy_events(self, step):
     #
@@ -553,7 +541,7 @@ class TraceEventsParser:
 
     def run(self):
 
-        self.sql_reader = SQLiteCategoryTimesReader(traces_db_path(self.directory))
+        self.sql_reader = SQLCategoryTimesReader(sql_input_path(self.directory))
         self.bench_names = self.sql_reader.bench_names()
         # self.category_times_readers.append(self.sql_reader)
 
@@ -863,7 +851,7 @@ class OverlapComputer:
         return new_overlap
 
     def compute_process_timeline_overlap(self, debug_memoize=False):
-        sql_reader = SQLiteCategoryTimesReader(self.db_path)
+        sql_reader = SQLCategoryTimesReader(self.db_path)
 
         # Overlap, computed across different "steps".
         # overlaps = []
@@ -1033,7 +1021,7 @@ class OverlapComputer:
         # Would be nice to know CPU is every executing anything else...
         # thread-pool threads are just blocked, but is the "main" thread doing anything?
 
-        sql_reader = SQLiteCategoryTimesReader(self.db_path)
+        sql_reader = SQLCategoryTimesReader(self.db_path)
 
         # Overlap, computed across different "steps".
         overlaps = []

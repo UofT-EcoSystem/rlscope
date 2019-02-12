@@ -19,7 +19,7 @@ from parser.common import *
 from parser.nvprof import CUDASQLiteParser
 from parser.pyprof import PythonProfileParser
 from parser.tfprof import OverlapComputer
-from parser.db import SQLiteCategoryTimesReader, traces_db_path
+from parser.db import SQLCategoryTimesReader, sql_get_source_files, sql_input_path
 
 # figsize (W x H) in inches
 aspect_ratio = 16./9.
@@ -571,19 +571,7 @@ class CategoryOverlapPlot:
         self.show = False
 
     def get_source_files(self):
-        """
-        We want traces.db
-        """
-        src_files = []
-        traces_db = traces_db_path(self.directory)
-        if not _e(traces_db):
-            raise MissingInputFiles(textwrap.dedent("""
-                {klass}: Couldn't find any traces.db at {path}.
-                """.format(
-                klass=self.__class__.__name__,
-                path=traces_db,
-            )))
-        return src_files
+        return sql_get_source_files(self.__class__, self.directory)
 
     def _category_overlap_png(self, bench_name):
         return CategoryOverlapPlot.get_category_overlap_png(self.directory, bench_name)
@@ -611,7 +599,7 @@ class CategoryOverlapPlot:
 
     def run(self):
 
-        self.sql_reader = SQLiteCategoryTimesReader(self.db_path)
+        self.sql_reader = SQLCategoryTimesReader(self.db_path)
         self.bench_names = self.sql_reader.bench_names() + [NO_BENCH_NAME]
         assert len(self.bench_names) == len(unique(self.bench_names))
         self.categories = self.sql_reader.categories
@@ -675,7 +663,7 @@ class CategoryOverlapPlot:
 
     @property
     def db_path(self):
-        return traces_db_path(self.directory)
+        return sql_input_path(self.directory)
 
 class StackedBarPlotter:
     def __init__(self, get_png, get_plot_data_path,
@@ -1656,19 +1644,7 @@ class UtilizationPlot:
         self.show = False
 
     def get_source_files(self):
-        """
-        We want traces.db
-        """
-        src_files = []
-        traces_db = traces_db_path(self.directory)
-        if not _e(traces_db):
-            raise MissingInputFiles(textwrap.dedent("""
-                {klass}: Couldn't find any traces.db at {path}.
-                """.format(
-                klass=self.__class__.__name__,
-                path=traces_db,
-            )))
-        return src_files
+        return sql_get_source_files(self.__class__, self.directory)
 
     def _process_timeline_png(self, bench_name):
         return UtilizationPlot.get_process_timeline_png(self.directory, bench_name, self.debug_ops)
@@ -1696,7 +1672,7 @@ class UtilizationPlot:
         #     debug_ops=self.debug_ops,
         # ))
 
-        self.sql_reader = SQLiteCategoryTimesReader(self.db_path, debug_ops=self.debug_ops)
+        self.sql_reader = SQLCategoryTimesReader(self.db_path, debug_ops=self.debug_ops)
         # self.bench_names = self.sql_reader.bench_names(self.debug_ops) + [NO_BENCH_NAME]
         # assert len(self.bench_names) == len(unique(self.bench_names))
         # self.categories = self.sql_reader.categories
@@ -1778,7 +1754,7 @@ class UtilizationPlot:
 
     @property
     def db_path(self):
-        return traces_db_path(self.directory)
+        return sql_input_path(self.directory)
 
     @staticmethod
     def get_stats(directory):

@@ -164,6 +164,10 @@ def main():
                         help=textwrap.dedent("""
                         Run quickly.
                         """))
+    parser.add_argument("--debug-single-thread", action='store_true',
+                        help=textwrap.dedent("""
+                        Run with a single thread to make debugging easier.
+                        """))
     parser.add_argument("--gpu-time-sec",
                         help=textwrap.dedent("""
                         Time to spend in GPU.
