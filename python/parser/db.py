@@ -1,6 +1,8 @@
 import os
 import re
+import psutil
 import multiprocessing
+from concurrent.futures import ProcessPoolExecutor
 import pprint
 import subprocess
 import math
@@ -260,20 +262,32 @@ class SQLParser:
         table = 'Event'
         # id_field = 'event_id'
         id_field = None
-        worker = CSVInserterWorker(
-            self.db_path, table, self.block_size, id_field, self.directory,
-            debug=self.debug,
-        )
+        # worker = CSVInserterWorker(
+        #     self.db_path, table, self.block_size, id_field, self.directory,
+        #     debug=self.debug,
+        # )
 
-        def single_thread_iter(worker, src_files):
-            for path in src_files:
-                ret = worker(path)
+        def single_thread_iter(worker, worker_kwargs):
+            for kwargs in worker_kwargs:
+                ret = worker(kwargs)
                 yield ret
 
+        def get_worker_kwargs(path):
+            return {
+                'path':path,
+                'db_path':self.db_path,
+                'table':table,
+                'block_size':self.block_size,
+                'id_field':id_field,
+                'directory':self.directory,
+                'debug':self.debug,
+            }
+        worker_kwargs = [get_worker_kwargs(path) for path in src_files]
+
         if not self.debug_single_thread:
-            imap_iter = pool.imap_unordered(worker, src_files)
+            imap_iter = pool.imap_unordered(CSVInserterWorker, worker_kwargs)
         else:
-            imap_iter = single_thread_iter(worker, src_files)
+            imap_iter = single_thread_iter(CSVInserterWorker, worker_kwargs)
 
         with progressbar.ProgressBar(max_value=len(src_files), prefix="SQL insert") as bar:
             for i, result in enumerate(imap_iter):
@@ -691,18 +705,22 @@ class AutoincrementID:
             ident = 0
         return ident
 
-class CSVInserterWorker:
+def CSVInserterWorker(kwargs):
+    worker = _CSVInserterWorker(**kwargs)
+    worker.run()
+
+class _CSVInserterWorker:
 
     # def __init__(self, path, db_path, table, block_size=50000, id_field=None, directory=None,
     #              # fields=None,
     #              debug=False,
     #              ):
-    def __init__(self, db_path, table, block_size=50000, id_field=None, directory=None,
+    def __init__(self, path, db_path, table, block_size=50000, id_field=None, directory=None,
                  # fields=None,
                  debug=False,
                  csv_path=None,
                  ):
-        # self.path = path
+        self.path = path
         self.db_path = db_path
         self.table = table
         self.block_size = block_size
@@ -728,6 +746,7 @@ class CSVInserterWorker:
         self.fields = None
         self.header_written = False
         self.total_inserts = 0
+        self.is_empty = True
 
         if self.csv_path is not None:
             self.tmp_path = self.csv_path
@@ -747,10 +766,11 @@ class CSVInserterWorker:
             os.chmod(self.tmp_path, 0o664)
             self.tmp_f = os.fdopen(self.tmp_f, mode='w')
 
-    def __call__(self, path):
-        self.run(path)
+    # def __call__(self, path):
+    #     self.run(path)
 
-    def run(self, path):
+
+    def run(self):
         self._init()
 
         self.conn = sql_create_connection(self.db_path)
@@ -759,7 +779,7 @@ class CSVInserterWorker:
         self.category_to_id = self.build_name_to_id('Category', 'category_id', 'category_name')
         self.device_to_id = self.build_name_to_id('Device', 'device_id', 'device_name')
 
-        self.insert_file(path)
+        self.insert_file(self.path)
         self.finish()
 
     @property
@@ -914,6 +934,7 @@ class CSVInserterWorker:
             line = ','.join(self._csv_val(val) for val in insert)
         self.tmp_f.write(line)
         self.tmp_f.write("\n")
+        self.is_empty = False
 
     def _write_csv_header(self):
         line = ','.join(self.fields)
@@ -951,15 +972,17 @@ class CSVInserterWorker:
     def finish(self):
         self.tmp_f.flush()
 
-        start_t = time.time()
-        self.conn.insert_csv(self.tmp_path, self.table)
-        end_t = time.time()
-        # print("> Loading CSV into {table} took {sec} seconds".format(
-        #     table=self.table,
-        #     sec=end_t - start_t))
+        if not self.is_empty:
+            start_t = time.time()
+            self.conn.insert_csv(self.tmp_path, self.table)
+            end_t = time.time()
+            # print("> Loading CSV into {table} took {sec} seconds".format(
+            #     table=self.table,
+            #     sec=end_t - start_t))
 
         self.tmp_f.close()
         os.remove(self.tmp_path)
+        self.conn.close()
 
 class CSVInserter:
     def __init__(self, conn, table, block_size=50000, progress_bar=None, id_field=None, directory=None, fields=None,
@@ -1210,9 +1233,48 @@ class TracesPostgresConnection:
     def _dump_db_config(self):
         do_dump_json(self.db_config, self.db_config_path)
 
+    def _db_exists(self):
+        return self.db_config is not None
+
+    def _drop_connections(self):
+        print("> Drop existing connections to {db}".format(db=self.db_name))
+        # psutil.
+        # pid = 1234 # The pid whose info you're looking for
+        # p = psutil.Process(pid)
+        # print p.cmdline
+        c = self.cursor
+
+        c.execute("""
+        SELECT pid, pg_terminate_backend(pid) as terminated
+        FROM pg_stat_activity
+        WHERE datname = current_database() AND pid <> pg_backend_pid();
+        """.format(db=self.db_name))
+        active_pids = c.fetchall()
+
+        proc_info = [{
+            'pid':row['pid'],
+            'cmdline':psutil.Process(row['pid']).cmdline(),
+        } for row in active_pids]
+
+        c.execute("""
+        SELECT pid, pg_terminate_backend(pid) as terminated
+        FROM pg_stat_activity
+        WHERE datname = current_database() AND pid <> pg_backend_pid();
+        """.format(db=self.db_name))
+        dropped_pids = c.fetchall()
+
+        if len(proc_info) > 0 or len(dropped_pids) > 0:
+            pprint.pprint({
+                'proc_info':proc_info,
+                'dropped_pids':dropped_pids,
+            })
+
     def create_db(self, recreate):
         if _e(self.db_config_path):
             self._read_db_config()
+            if self._db_exists():
+                self._maybe_create_db_connection()
+                self._drop_connections()
             if recreate:
                 self._drop_database()
                 self._create_database(self.db_name)
@@ -1706,55 +1768,56 @@ class SQLCategoryTimesReader:
                                               )
             # assert len(proc_events) > 0
             proc_category_times = dict()
-            self._add_event_rows_to_category_times(proc_category_times, proc_events)
+            start_t = time.time()
+            process_label = "process={proc}".format(
+                proc=process_name)
+            self._add_event_rows_to_category_times(
+                proc_category_times, proc_events,
+                debug=debug,
+                debug_label=process_label)
+            end_t = time.time()
+            if debug:
+                time_sec = end_t - start_t
+                print("> process_name={proc}: _add_event_rows_to_category_times took {sec} seconds".format(
+                    proc=process_name,
+                    sec=time_sec,
+                ))
             # assert len(proc_category_times) > 0
             # assert len(proc_category_times[CATEGORY_OPERATION]) > 0
 
             # assert CATEGORY_OPERATION in proc_category_times
             if CATEGORY_OPERATION in proc_category_times:
-                proc_category_times[CATEGORY_OPERATION] = process_op_nest(proc_category_times[CATEGORY_OPERATION])
+                proc_category_times[CATEGORY_OPERATION] = process_op_nest_single_thread(
+                    proc_category_times[CATEGORY_OPERATION],
+                    show_progress=debug,
+                    debug_label=process_label)
+                # Doesn't speed anything up on "test_load"
+                # proc_category_times[CATEGORY_OPERATION] = process_op_nest_parallel(
+                #     proc_category_times[CATEGORY_OPERATION],
+                #     show_progress=debug,
+                #     debug_label=process_label)
                 assert len(proc_category_times[CATEGORY_OPERATION]) > 0
 
             proc_category = proc_as_category(process_name)
             proc_types.add(proc_category)
 
             # Merge all the process-specific events into a single category_times dict.
-            for category, events in proc_category_times.items():
-                for event in events:
-                    if category in CATEGORIES_CPU:
-                        cat = CATEGORY_CPU
-                        categories.add(cat)
-                    elif category == CATEGORY_GPU:
-                        cat = CATEGORY_GPU
-                        categories.add(cat)
-                    elif category == CATEGORY_OPERATION:
-                        cat = event.name
-                        operation_types.add(cat)
-                    else:
-                        # Q: What about category operation...?
-                        # We want to KEEP the operation category so we can determine
-                        # overlap between q_backward/q_forward across processes...
-                        #
-                        # I think all we need to do is replace "CATEGORY_OPERATION" for an event
-                        # with event.name (it's operation-type).
-                        # Then, when we go to plot the category_times data, we "remove" any operation
-                        # names from the category (forming an operation_key), and group the data
-                        # into an operation-specific dict for plotting.
-                        #
-                        # We can still test a single process trace without handling this.
-                        # (graph should be the same with fewer categories: CPU, GPU, CPU + GPU)
-                        raise RuntimeError("Not sure how to categorize {cat} into CPU or GPU.".format(
-                            cat=category))
 
-                    new_category = frozenset([cat, proc_category])
-                    if new_category not in category_times:
-                        category_times[new_category] = []
-                    # NOTE: if we bin the CPU/GPU/operation events into separate lists,
-                    # we can use merge_sorted, which may be faster.
-                    #
-                    # However, merge_sorted approach will probably cause more allocations...
-                    insort(category_times[new_category], event, key=lambda event: event.start_time_usec)
-                # insort_list(category_times[new_category], events, key=lambda event: event.start_time_usec)
+            # Q: How do we parallelize this part?
+            # A: All we are doing is iterating over every event, and replacing its category.
+            #    Then, we are sticking it back inside a single category_times dict.
+            #    Regardless of how we partition the work, merging results from multiple workers
+            #    involves writing a merge function for category_times.
+            #    i.e. merged_category_times = merge(ctimes_1[c], ctimes_2[c],
+            #                                       by=event.start_time_usec)
+            #    I'm not sure if we'll overcome the single-threaded merge time...
+            bin_category_times_single_thread(
+                process_name, proc_category_times,
+                categories, operation_types, category_times, debug)
+            # Doesn't speed anything up on "test_load"
+            # bin_category_times_parallel(
+            #     process_name, proc_category_times,
+            #     categories, category_times, operation_types, debug)
 
         # Sanity check: Events are all sorted.
         for category, events in category_times.items():
@@ -1787,7 +1850,6 @@ class SQLCategoryTimesReader:
         FROM Event
         """)
         sql_exec_query(c, query, klass=self.__class__, debug=debug)
-        self._query(query, debug=debug)
         row = c.fetchone()
         total_time_us = row['max_us'] - row['min_us']
         total_time_sec = total_time_us/MICROSECONDS_IN_SECOND
@@ -1883,10 +1945,17 @@ class SQLCategoryTimesReader:
         return ignore_clause
 
     def _add_event_rows_to_category_times(self, category_times, rows,
-                                          group_by_device=DEFAULT_group_by_device):
+                                          group_by_device=DEFAULT_group_by_device,
+                                          debug=False,
+                                          debug_label=None):
         # rows = c.fetchall()
         # for row in rows:
-        for row in progress(rows, '_add_event_rows_to_category_times'):
+        if debug_label is None:
+            progress_label = '_add_event_rows_to_category_times'
+        else:
+            progress_label = '_add_event_rows_to_category_times: {debug_label}'.format(
+                debug_label=debug_label)
+        for row in progress(rows, desc=progress_label, show_progress=debug):
             ktime = row_as_ktime(row)
             category_times_add_time(category_times, row['device_name'], ktime, group_by_device, category=row['category_name'])
 
@@ -1977,7 +2046,14 @@ class SQLCategoryTimesReader:
         )
         sql_exec_query(c, query, params, self.__class__, parse_debug)
         category_times = dict()
-        self._add_event_rows_to_category_times(category_times, c, group_by_device)
+        debug_label = "process={proc}, step={step}".format(
+            proc=process_name,
+            step=step,
+        )
+        self._add_event_rows_to_category_times(
+            category_times, c, group_by_device,
+            debug=debug,
+            debug_label=debug_label)
 
         # if i == 0 and self.debug:
         if parse_debug:
@@ -1989,10 +2065,260 @@ class SQLCategoryTimesReader:
             print("> DEBUG: dump trace events BEFORE process_op_nest @ {path}".format(path=json_path))
             dump_category_times(category_times, json_path, print_log=False)
 
-        category_times[CATEGORY_OPERATION] = process_op_nest(category_times[CATEGORY_OPERATION],
-                                                             filter_by_op=bench_name)
+        category_times[CATEGORY_OPERATION] = process_op_nest_single_thread(category_times[CATEGORY_OPERATION],
+                                                             filter_by_op=bench_name,
+                                                             show_progress=debug,
+                                                             debug_label=debug_label)
 
         return category_times
+
+def bin_category_times_old(
+    process_name,
+    category,
+    events,
+    categories=None,
+    operation_types=None,
+    category_times=None,
+    debug=False):
+
+    if categories is None:
+        categories = set()
+    if operation_types is None:
+        operation_types = set()
+    if category_times is None:
+        category_times = dict()
+
+    proc_category = proc_as_category(process_name)
+
+    progress_label = "parse_timeline: process={proc}, category={cat}".format(
+        proc=process_name, cat=category)
+    for event in progress(events, desc=progress_label, show_progress=debug):
+        if category in CATEGORIES_CPU:
+            cat = CATEGORY_CPU
+            categories.add(cat)
+        elif category == CATEGORY_GPU:
+            cat = CATEGORY_GPU
+            categories.add(cat)
+        elif category == CATEGORY_OPERATION:
+            cat = event.name
+            operation_types.add(cat)
+        else:
+            # Q: What about category operation...?
+            # We want to KEEP the operation category so we can determine
+            # overlap between q_backward/q_forward across processes...
+            #
+            # I think all we need to do is replace "CATEGORY_OPERATION" for an event
+            # with event.name (it's operation-type).
+            # Then, when we go to plot the category_times data, we "remove" any operation
+            # names from the category (forming an operation_key), and group the data
+            # into an operation-specific dict for plotting.
+            #
+            # We can still test a single process trace without handling this.
+            # (graph should be the same with fewer categories: CPU, GPU, CPU + GPU)
+            raise RuntimeError("Not sure how to categorize {cat} into CPU or GPU.".format(
+                cat=category))
+
+        new_category = frozenset([cat, proc_category])
+        if new_category not in category_times:
+            category_times[new_category] = []
+        # NOTE: if we bin the CPU/GPU/operation events into separate lists,
+        # we can use merge_sorted, which may be faster.
+        #
+        # However, merge_sorted approach will probably cause more allocations...
+        insort(category_times[new_category], event, key=lambda event: event.start_time_usec)
+
+    return category_times, categories, operation_types
+
+def bin_category_times(
+    process_name,
+    category,
+    events,
+    categories=None,
+    operation_types=None,
+    category_times=None,
+    debug=False):
+
+    if categories is None:
+        categories = set()
+    if operation_types is None:
+        operation_types = set()
+
+    if category_times is None:
+        category_times = dict()
+        use_insort = True
+    else:
+        use_insort = False
+
+    proc_category = proc_as_category(process_name)
+
+    progress_label = "parse_timeline: process={proc}, category={cat}".format(
+        proc=process_name, cat=category)
+    for event in progress(events, desc=progress_label, show_progress=debug):
+        if category in CATEGORIES_CPU:
+            cat = CATEGORY_CPU
+            categories.add(cat)
+        elif category == CATEGORY_GPU:
+            cat = CATEGORY_GPU
+            categories.add(cat)
+        elif category == CATEGORY_OPERATION:
+            cat = event.name
+            # print("> operation_types.add {cat}".format(cat=cat))
+            operation_types.add(cat)
+        else:
+            # Q: What about category operation...?
+            # We want to KEEP the operation category so we can determine
+            # overlap between q_backward/q_forward across processes...
+            #
+            # I think all we need to do is replace "CATEGORY_OPERATION" for an event
+            # with event.name (it's operation-type).
+            # Then, when we go to plot the category_times data, we "remove" any operation
+            # names from the category (forming an operation_key), and group the data
+            # into an operation-specific dict for plotting.
+            #
+            # We can still test a single process trace without handling this.
+            # (graph should be the same with fewer categories: CPU, GPU, CPU + GPU)
+            raise RuntimeError("Not sure how to categorize {cat} into CPU or GPU.".format(
+                cat=category))
+
+        new_category = frozenset([cat, proc_category])
+        if new_category not in category_times:
+            category_times[new_category] = []
+        # NOTE: if we bin the CPU/GPU/operation events into separate lists,
+        # we can use merge_sorted, which may be faster.
+        #
+        # However, merge_sorted approach will probably cause more allocations...
+        if use_insort:
+            insort(category_times[new_category], event, key=lambda event: event.start_time_usec)
+        else:
+            category_times[new_category].append(event)
+
+    return category_times, categories, operation_types
+
+def bin_category_times_single_thread(
+    process_name,
+    proc_category_times,
+    categories=None,
+    operation_types=None,
+    category_times=None,
+    debug=False):
+    if categories is None:
+        categories = set()
+    if operation_types is None:
+        operation_types = set()
+    if category_times is None:
+        category_times = dict()
+
+    for i, (category, events) in enumerate(proc_category_times.items()):
+        category_times_i, _, _ = bin_category_times(
+            process_name, category, events,
+            categories, operation_types, category_times=None,
+            debug=debug)
+        merge_category_times(category_times, category_times_i, inplace=True)
+
+    return category_times, categories, operation_types
+
+# def bin_category_times_single_thread_old(
+#     process_name,
+#     proc_category_times,
+#     categories=None,
+#     operation_types=None,
+#     category_times=None,
+#     debug=False):
+#     if categories is None:
+#         categories = set()
+#     if operation_types is None:
+#         operation_types = set()
+#     if category_times is None:
+#         category_times = dict()
+#
+#     for category, events in proc_category_times.items():
+#         bin_category_times(process_name, category, events,
+#                            categories, operation_types, category_times,
+#                            debug)
+#
+#     return category_times, categories, operation_types
+
+# def BinCategoryTimesWorker(process_name, category, events, debug):
+def BinCategoryTimesWorker(args):
+    process_name, category, events, debug = args
+    return bin_category_times(process_name, category, events, debug=debug)
+
+def split_category_times_by_category(process_name, proc_category_times, debug):
+    for category, events in proc_category_times.items():
+        yield process_name, category, events, debug
+
+# TODO: if this doesn't help much, we could perform more equal splits by doing:
+# 1. compute total number of events
+# 2. split proc_category_times into n dicts with equal events;
+#    Need to make a split_category_times(category_times, n) to do that
+# 3. make the Worker take proc_category_times instead of <category, events>
+
+def bin_category_times_parallel(
+    process_name,
+    proc_category_times,
+    categories=None,
+    category_times=None,
+    operation_types=None,
+    debug=False,
+    nprocs=None):
+    if categories is None:
+        categories = set()
+    if operation_types is None:
+        operation_types = set()
+    if category_times is None:
+        category_times = dict()
+
+    with multiprocessing.Pool(nprocs) as pool:
+        splits = list(split_category_times_by_category(process_name, proc_category_times, debug=False))
+        it = pool.imap_unordered(BinCategoryTimesWorker, splits)
+        progress_label = "bin_category_times_parallel: process={proc}".format(proc=process_name)
+        for i, (category_times_i, categories_i, operation_types_i) in enumerate(progress(it, desc=progress_label, total=len(splits), show_progress=debug)):
+            merge_category_times(category_times, category_times_i, inplace=True)
+            categories.update(categories_i)
+            operation_types.update(operation_types_i)
+
+    return category_times, categories, operation_types
+
+def merge_events(events1, events2):
+    return merge_sorted(events1, events2, key=lambda event: event.start_time_usec)
+
+def merge_all_category_times(category_times_list):
+    merged_category_times = dict()
+    for category_times in category_times_list:
+        merge_category_times(merged_category_times, category_times, inplace=True)
+    # categories = set()
+    # for category_times in category_times_list:
+    #     categories.extend(category_times.keys())
+    # for category in categories:
+    #     merged_category_times[category] = []
+    #     for category_times in category_times_list:
+    #         if category not in category_times:
+    #             continue
+    #         merged_category_times[category] = merge_events(merged_category_times[category],
+    #                                                        category_times[category])
+    return merged_category_times
+
+def merge_category_times(ctimes1, ctimes2, inplace=False):
+    if inplace:
+        merged_category_times = ctimes1
+        category_times_list = [ctimes2]
+    else:
+        merged_category_times = dict()
+        category_times_list = [ctimes1, ctimes2]
+
+    categories = set()
+    for category_times in category_times_list:
+        categories.update(category_times.keys())
+
+    for category in categories:
+        if category not in merged_category_times:
+            merged_category_times[category] = []
+        for category_times in category_times_list:
+            if category not in category_times:
+                continue
+            merged_category_times[category] = merge_events(merged_category_times[category],
+                                                           category_times[category])
+    return merged_category_times
 
 def _sqlite_traces_db_path(directory):
     return _j(directory, "traces.db")
@@ -2067,7 +2393,10 @@ def row_as_ktime(row):
     )
     return ktime
 
-def process_op_nest(op_events, filter_by_op=None):
+def process_op_nest_single_thread(op_events, filter_by_op=None,
+                    debug=False,
+                    show_progress=False,
+                    debug_label=None):
     """
     Given nested operation-type events, have the inner-nested
     events "absorb" the outer-nested events.
@@ -2090,32 +2419,120 @@ def process_op_nest(op_events, filter_by_op=None):
     :return:
     """
 
-    def check_no_complete_overlap(op_events):
-        for op1, op2 in zip(op_events, op_events[1:]):
-            assert not op1.equals(op2)
+    # def check_no_complete_overlap(op_events):
+    #     for op1, op2 in zip(op_events, op_events[1:]):
+    #         assert not op1.equals(op2)
+    # check_no_complete_overlap(op_events)
 
-    check_no_complete_overlap(op_events)
+    # We can parallelize this by first scanning for "contiguous chunks" of operations.
+    # Then the Worker would take a contiguous chunk of operations, convert it to an OpStack,
+    # then yield events from it.
+
+    all_events = []
+    for i, op_stack in enumerate(split_op_stacks(op_events,
+                                                 show_progress=show_progress,
+                                                 debug_label=debug_label,
+                                                 just_op_stack=True)):
+        for event in op_stack.get_absored_ops():
+            if filter_by_op is not None and event.name != filter_by_op:
+                continue
+            all_events.append(event)
+
+    return all_events
+
+# def ProcessOpNestWorker(op_stack : OpStack, debug):
+def ProcessOpNestWorker(args):
+    op_stack, filter_by_op, debug = args
+    events = []
+    for event in op_stack.get_absored_ops():
+        if filter_by_op is not None and event.name != filter_by_op:
+            continue
+        events.append(event)
+    return events
+
+def split_op_stacks(op_events,
+                    filter_by_op=None, debug=False, debug_label=None,
+                    show_progress=False,
+                    just_op_stack=False):
+
+    # NOTE: It IS possible to parallelize split_op_stacks.
+    # The worker processes just need to agree who covers the "chunk" on the boundary of the event split
+    # e.g. if we start in the middle of a "chunk", walk forwards past the end of the chunk,
+    # and assume the previous worker will handle it.
+    def as_result(op_stack):
+        if just_op_stack:
+            return op_stack
+        return op_stack, filter_by_op, debug
 
     op_stack = None
-    events = []
-    for i, op_event in enumerate(op_events):
+    for i, op_event in enumerate(progress(
+        op_events,
+        desc=as_progress_label("split_op_stacks", debug_label),
+        show_progress=show_progress)):
         if op_stack is None:
             op_stack = OpStack(op_event)
         elif op_stack.ktime.subsumes(op_event):
             op_stack.insert(op_event)
         else:
-            for event in op_stack.get_absored_ops():
-                events.append(event)
+            yield as_result(op_stack)
             op_stack = OpStack(op_event)
-
     if op_stack is not None:
-        for event in op_stack.get_absored_ops():
-            events.append(event)
+        yield as_result(op_stack)
 
-    if filter_by_op is not None:
-        events = [event for event in events if event.name == filter_by_op]
+def process_op_nest_parallel(op_events, filter_by_op=None,
+                             debug=False,
+                             show_progress=False,
+                             debug_label=None,
+                             nprocs=None):
+    """
+    Given nested operation-type events, have the inner-nested
+    events "absorb" the outer-nested events.
 
-    return events
+    Then, filter out only the event-type of interest.
+
+
+    op-type                    [op3]
+                          [     op2      ]
+                     [          op1          ]
+
+    absorb =>        [op1][op2][op3][op2][op1]
+
+    filter(op1) =>   [op1]               [op1]
+
+    :param bench_name:
+        Current op-type.
+        Only keep ops of this type.
+    :param op_events: List[KernelTime]
+    :return:
+    """
+
+    # def check_no_complete_overlap(op_events):
+    #     for op1, op2 in progress(zip(op_events, op_events[1:]),
+    #                              desc=as_progress_label("process_op_nest.check", debug_label),
+    #                              show_progress=show_progress,
+    #                              total=len(op_events)):
+    #         assert not op1.equals(op2)
+    # check_no_complete_overlap(op_events)
+
+    # total_op_stacks = len(list(split_op_stacks(op_events, filter_by_op, debug, show_progress=True)))
+    # print("> total_op_stacks = {total_op_stacks}".format(
+    #     total_op_stacks=total_op_stacks,
+    # ))
+    total_op_stacks = None
+
+    # with multiprocessing.Pool(nprocs) as pool:
+    with ProcessPoolExecutor(nprocs) as pool:
+        splits = split_op_stacks(op_events, filter_by_op, debug)
+        all_events = []
+        for i, events in enumerate(progress(
+            pool.map(ProcessOpNestWorker, splits),
+            desc=as_progress_label("process_op_nest_parallel", debug_label),
+            total=total_op_stacks,
+            show_progress=show_progress)
+        ):
+            all_events.extend(events)
+
+    return all_events
 
 class OpStack:
     """

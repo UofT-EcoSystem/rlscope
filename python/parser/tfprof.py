@@ -93,8 +93,9 @@ class ComputeOverlap:
         Typically overlaps_with = [CATEGORY_OPERATION], so we only keep execution time
         that happened during an operation.
     """
-    def __init__(self, category_times, overlaps_with=None, debug=False):
+    def __init__(self, category_times, overlaps_with=None, debug=False, show_progress=False):
         self.debug = debug
+        self.show_progress = show_progress
         self.overlaps_with = overlaps_with
         if self.overlaps_with is not None:
             self.overlaps_with = set(self.overlaps_with)
@@ -109,8 +110,22 @@ class ComputeOverlap:
         self.category_times = self._sort_category_times(self.category_times)
 
     def compute(self):
+        start_merge_t = time.time()
         self.compute_merge()
+        end_merge_t = time.time()
+        sec_merge = end_merge_t - start_merge_t
+        if self.debug:
+            print("> {klass}.compute_merge took {sec} seconds".format(
+                klass=self.__class__.__name__,
+                sec=end_merge_t))
+        start_compute_t = end_merge_t
         self.compute_times()
+        end_compute_t = time.time()
+        sec_compute = end_compute_t - start_compute_t
+        if self.debug:
+            print("> {klass}.compute_times took {sec} seconds".format(
+                klass=self.__class__.__name__,
+                sec=sec_compute))
 
     def compute_merge(self):
         self.merged_category_times = self._merge_category_times(self.category_times)
@@ -138,12 +153,6 @@ class ComputeOverlap:
         new_category_times = dict()
         for category in category_times:
             new_category_times[category] = sorted(category_times[category], key=lambda ktime: ktime.start_time_usec)
-        return new_category_times
-
-    def _sort_category_times_by(self, category_times, key):
-        new_category_times = dict()
-        for category in category_times:
-            new_category_times[category] = sorted(category_times[category], key=key)
         return new_category_times
 
     def _merge_category_times(self, category_times):
@@ -176,135 +185,262 @@ class ComputeOverlap:
         return new_times
 
     def _compute_overlap(self, category_times):
-        # categories = set(category_times.keys())
-        # JAMES TODO: compute the progress of this function... I think it takes forever with minigo
+        return compute_overlap_single_thread(
+            category_times,
+            self.overlaps_with,
+            self.debug,
+            self.show_progress)
 
-        start_key = lambda ktime: ktime.start_time_usec
-        end_key = lambda ktime: ktime.end_time_usec
+def split_category_times(category_times, n):
+    pass
 
-        def min_time(ctimes, key):
-            ktimes = []
-            for category in ctimes.keys():
-                if len(ctimes[category]) > 0:
-                    ktimes.append((category, ctimes[category][0]))
-            category, ktime = min(ktimes, key=lambda time_ktime: key(time_ktime[1]))
-            return category, ktime
+def _sort_category_times_by(category_times, key):
+    new_category_times = dict()
+    for category in category_times:
+        new_category_times[category] = sorted(category_times[category], key=key)
+    return new_category_times
 
-        def min_time_start_end(start_ctimes, end_ctimes):
-            if not has_times_left(by_end):
-                start_category, start_ktime = min_time(start_ctimes, start_key)
-                return start_category, start_ktime, 'start'
-            elif not has_times_left(by_start):
-                end_category, end_ktime = min_time(end_ctimes, end_key)
-                return end_category, end_ktime, 'end'
+class ListWrapper:
+    """
+    Wrap pop() so it doesn't change the underlying list,
+    but still makes it look like the list has shrunk.
+    """
+    def __init__(self, xs):
+        self.xs = xs
+        self._len = len(self.xs)
+        self._orig_len = self._len
 
-            start_category, start_ktime = min_time(start_ctimes, start_key)
-            end_category, end_ktime = min_time(end_ctimes, end_key)
-            if start_key(start_ktime) <= end_key(end_ktime):
-                return start_category, start_ktime, 'start'
-            return end_category, end_ktime, 'end'
+    def pop(self):
+        self._len -= 1
 
-        def has_times_left(ctimes):
-            return not all(len(ctimes[category]) == 0 for category in ctimes.keys())
+    def __len__(self):
+        return self._len
 
-        def pop_time(category, ctimes):
-            del ctimes[category][0]
+    def __getitem__(self, key):
+        if type(key) == int:
+            if key < 0:
+                # Index relative to end of list.
+                # Need to take into account any .pop() calls.
+                # e.g. if they called .pop() once,  when they reference xs[-1], give them xs[-2]
+                #                            twice,                     xs[-1],           xs[-3]
+                #                            ...
+                idx = (self._len - self._orig_len) + key
+                return self.xs[idx]
+            elif key > self._len:
+                raise IndexError("list index out of range: len={len}, index={key}".format(
+                    len=self._len, key=key))
+        return self.xs[key]
 
-        def get_time(ktime, start_or_end):
-            if start_or_end == 'start':
-                return start_key(ktime)
-            return end_key(ktime)
+    def __setitem__(self, key, value):
+        self.xs[key] = value
 
-        by_start = self._sort_category_times_by(category_times, key=start_key)
-        by_end = self._sort_category_times_by(category_times, key=end_key)
+class CategoryTimesWrapper:
+    # enum
+    START = 0
+    END = 1
+    NAME_TO_TYPE_CODE = {
+        'start':START,
+        'end':END,
+    }
 
-        cur_categories = set()
+    def __init__(self, ctimes, key, reversed_key, name):
+        self.key = key
+        self.reversed_key = reversed_key
+        self.name = name
+        self.by_key = _sort_category_times_by(ctimes, key=self.reversed_key)
+        # for k in list(self.by_key.keys()):
+        #     self.by_key[k] = ListWrapper(self.by_key[k])
+        self.type_code = CategoryTimesWrapper.NAME_TO_TYPE_CODE[self.name]
+        self._num_events = self._count_times_left()
 
-        times = dict()
+    def min_time(self):
 
-        min_category, min_ktime = min_time(by_start, start_key)
-        start_or_end = 'start'
-        curtime = start_key(min_ktime)
-        pop_time(min_category, by_start)
-        cur_categories.add(min_category)
+        min_category = None
+        min_ktime = None
+        for category in self.by_key.keys():
+            ktimes = self.by_key[category]
+            if len(ktimes) > 0:
+                ktime = ktimes[-1]
+                if min_category is None or \
+                    self.key(ktime) < self.key(min_ktime):
+                    min_category = category
+                    min_ktime = ktime
 
-        if self.debug:
-            print("> Start computing overlap; choose initial start (curtime)")
+        # if len(self.by_key[category]) > 0:
+        #     ktimes.append((category, self.by_key[category][-1]))
+        # category, ktime = min(ktimes, key=lambda time_ktime: self.key(time_ktime[1]))
+
+        # ktimes = []
+        # for category in self.by_key.keys():
+        #     if len(self.by_key[category]) > 0:
+        #         ktimes.append((category, self.by_key[category][-1]))
+        # category, ktime = min(ktimes, key=lambda time_ktime: self.key(time_ktime[1]))
+        # return category, ktime
+
+        return min_category, min_ktime
+
+    def has_times_left(self):
+        # return any(len(ctimes_for_category) > 0 for ctimes_for_category in self.by_key.values())
+        return self._num_events > 0
+
+    def count_times_left(self):
+        return self._num_events
+
+    def _count_times_left(self):
+        return sum(len(ctimes_for_category) for ctimes_for_category in self.by_key.values())
+
+    def pop_time(self, category):
+        # del self.by_key[category][0]
+        self.by_key[category].pop()
+        self._num_events -= 1
+
+    def get_time(self, ktime):
+        return self.key(ktime)
+
+    @staticmethod
+    def min_time_start_end(by_start, by_end):
+        if not by_end.has_times_left():
+            start_category, start_ktime = by_start.min_time()
+            return start_category, start_ktime, by_start
+        elif not by_start.has_times_left():
+            end_category, end_ktime = by_end.min_time()
+            return end_category, end_ktime, by_end
+
+        start_category, start_ktime = by_start.min_time()
+        end_category, end_ktime = by_end.min_time()
+        if by_start.key(start_ktime) <= by_end.key(end_ktime):
+            return start_category, start_ktime, by_start
+        return end_category, end_ktime, by_end
+
+    @staticmethod
+    def total_left(by_start, by_end):
+        return by_start.count_times_left() + by_end.count_times_left()
+
+def compute_overlap_single_thread(
+    category_times,
+    overlaps_with=None,
+    debug=False,
+    show_progress=False):
+    # categories = set(category_times.keys())
+    # JAMES TODO: compute the progress of this function... I think it takes forever with minigo
+
+    start_key = lambda ktime: ktime.start_time_usec
+    reversed_start_key = lambda ktime: - ktime.start_time_usec
+    end_key = lambda ktime: ktime.end_time_usec
+    reversed_end_key = lambda ktime: - ktime.end_time_usec
+
+    by_start = CategoryTimesWrapper(category_times, start_key, reversed_start_key, 'start')
+    by_end = CategoryTimesWrapper(category_times, end_key, reversed_end_key, 'end')
+
+    cur_categories = set()
+    def pop_start(category):
+        by_start.pop_time(category)
+        cur_categories.add(category)
+    def pop_end(category):
+        by_end.pop_time(category)
+        cur_categories.remove(category)
+
+    times = dict()
+
+    min_category, min_ktime = by_start.min_time()
+    start_or_end = by_start
+    curtime = by_start.key(min_ktime)
+    pop_start(min_category)
+
+    if debug:
+        print("> Start computing overlap; choose initial start (curtime)")
+        pprint.pprint({
+            'min_category': min_category,
+            'min_ktime': min_ktime,
+            'start_or_end': start_or_end.name,
+            'curtime': curtime,
+        })
+        print()
+
+    total_events = CategoryTimesWrapper.total_left(by_start, by_end)
+    bar = progress(desc="compute_overlap", show_progress=show_progress, total=total_events)
+
+    # Takes 4:50.
+    # Delete from back of array, now it takes: 3:12
+    # ListWrapper, now it takes: 4:48
+    # Avoid counting/summing, now it takes: 2:43
+    # avoid intermediate ktimes list for min operation, now it takes: 2:40
+    while by_start.has_times_left() or by_end.has_times_left():
+
+        min_category, min_ktime, start_or_end = CategoryTimesWrapper.min_time_start_end(by_start, by_end)
+        next_time = start_or_end.get_time(min_ktime)
+        time_chunk = next_time - curtime
+
+        if len(cur_categories) > 0:
+            # Don't bother recording empty gaps between times.
+            categories_key = frozenset(cur_categories)
+            if categories_key not in times:
+                times[categories_key] = 0.
+            times[categories_key] += time_chunk
+
+        if debug:
             pprint.pprint({
                 'min_category': min_category,
                 'min_ktime': min_ktime,
-                'start_or_end': start_or_end,
-                'curtime': curtime,
+                'start_or_end': start_or_end.name,
+                'update':"times[{s}] += {t}".format(s=categories_key, t=time_chunk),
             })
             print()
 
-        while has_times_left(by_start) or has_times_left(by_end):
-
-            min_category, min_ktime, start_or_end = min_time_start_end(by_start, by_end)
-            next_time = get_time(min_ktime, start_or_end)
-            time_chunk = next_time - curtime
-
-            if len(cur_categories) > 0:
-                # Don't bother recording empty gaps between times.
-                categories_key = frozenset(cur_categories)
-                if categories_key not in times:
-                    times[categories_key] = 0.
-                times[categories_key] += time_chunk
-
-            if self.debug:
-                pprint.pprint({
-                    'min_category': min_category,
-                    'min_ktime': min_ktime,
-                    'start_or_end': start_or_end,
-                    'update':"times[{s}] += {t}".format(s=categories_key, t=time_chunk),
-                })
+        if start_or_end.type_code == CategoryTimesWrapper.START:
+            if debug:
+                pprint.pprint({'cur_categories':cur_categories,
+                               'add': min_category,
+                               'curtime': next_time})
                 print()
+            pop_start(min_category)
+        else:
+            if debug:
+                pprint.pprint({'cur_categories':cur_categories,
+                               'remove': min_category,
+                               'curtime': next_time})
+                print()
+            # NOTE: I think this bug will occur if you have two events from the same category
+            # that overlap each other (EITHER partially or fully).
+            # Perhaps this is happening inadvertantly when I form the 'CPU'
+            # events from the Python/C++ events.
+            # - TODO:
+            #   - make a test case to reproduce the bug
+            #   - assert for this condition being violated in the event-data
+            #   - pickle the category_times data so we can iterate quickly.
+            # KeyError: frozenset({'CPU', 'PROC:loop_train_eval'})
+            pop_end(min_category)
 
-            if start_or_end == 'start':
-                if self.debug:
-                    pprint.pprint({'cur_categories':cur_categories,
-                                   'add': min_category,
-                                   'curtime': next_time})
-                    print()
-                pop_time(min_category, by_start)
-                cur_categories.add(min_category)
-            else:
-                if self.debug:
-                    pprint.pprint({'cur_categories':cur_categories,
-                                   'remove': min_category,
-                                   'curtime': next_time})
-                    print()
-                pop_time(min_category, by_end)
-                # NOTE: I think this bug will occur if you have two events from the same category
-                # that overlap each other (EITHER partially or fully).
-                # Perhaps this is happening inadvertantly when I form the 'CPU'
-                # events from the Python/C++ events.
-                # - TODO:
-                #   - make a test case to reproduce the bug
-                #   - assert for this condition being violated in the event-data
-                #   - pickle the category_times data so we can iterate quickly.
-                cur_categories.remove(min_category) # KeyError: frozenset({'CPU', 'PROC:loop_train_eval'})
+        if show_progress:
+            count_left = CategoryTimesWrapper.total_left(by_start, by_end)
+            bar.update(total_events - count_left)
 
-            curtime = next_time
+        curtime = next_time
 
-        assert len(cur_categories) == 0
+    bar.close()
 
-        for categories_key in list(times.keys()):
-            # We may get artificial overlaps even if two categories are synchronous,
-            # if the next category starts exactly when the last one ends.
-            if times[categories_key] == 0:
-                del times[categories_key]
+    assert len(cur_categories) == 0
 
-        if self.overlaps_with is not None:
-            del_keys = []
-            for categories_key in times.keys():
-                if len(self.overlaps_with.intersection(categories_key)) == 0:
-                    del_keys.append(categories_key)
+    for categories_key in list(times.keys()):
+        # We may get artificial overlaps even if two categories are synchronous,
+        # if the next category starts exactly when the last one ends.
+        if times[categories_key] == 0:
+            del times[categories_key]
 
-            for categories_key in del_keys:
-                del times[categories_key]
+    if overlaps_with is not None:
+        del_keys = []
+        for categories_key in times.keys():
+            if len(overlaps_with.intersection(categories_key)) == 0:
+                del_keys.append(categories_key)
 
-        return times
+        for categories_key in del_keys:
+            del times[categories_key]
+
+    return times
+
+class CategoryTimesWalker:
+    def __init__(self, category_times):
+        self.category_times = category_times
 
 class TotalTimeParser(ProfilerParserCommonMixin):
 
@@ -749,14 +885,14 @@ class OverlapComputer:
                     skip_proc = proc
                     break
             if skip:
-                if self.debug:
-                    print("> DELETE OVERLAP:")
-                    pprint.pprint({
-                        'overlap_key':overlap_key,
-                        'proc':skip_proc,
-                        'ops':proc_ops[proc],
-                        'non_ops':proc_non_ops[proc],
-                    })
+                # if self.debug:
+                #     print("> DELETE OVERLAP:")
+                #     pprint.pprint({
+                #         'overlap_key':overlap_key,
+                #         'proc':skip_proc,
+                #         'ops':proc_ops[proc],
+                #         'non_ops':proc_non_ops[proc],
+                #     })
                 continue
 
             new_key = _as_category_key(categories, operation_types, proc_types,
@@ -856,12 +992,16 @@ class OverlapComputer:
         # Overlap, computed across different "steps".
         # overlaps = []
 
+        start_parse_timeline_t = time.time()
         category_times, categories, operation_types, proc_types = sql_reader.parse_timeline(
             debug=self.debug,
             debug_ops=self.debug_ops,
             debug_memoize=debug_memoize)
         assert len(operation_types) > 0
         assert len(categories) > 0
+        end_parse_timeline_t = time.time()
+        parse_timeline_sec = end_parse_timeline_t - start_parse_timeline_t
+        print("> parse_timeline took {sec} seconds".format(sec=parse_timeline_sec))
 
         # # This can take a while since the timeline can be large...
         # if self.debug:
@@ -879,9 +1019,15 @@ class OverlapComputer:
 
         # We only want to keep CATEGORY_OPERATION times.
         # However, the operation-types have replaced CATEGORY_OPERATION.
-        compute_overlap = ComputeOverlap(category_times)
-        compute_overlap.compute()
-        overlap = compute_overlap.get_category_times()
+
+
+        if should_load_memo(debug_memoize, self._compute_overlap_memo_path()):
+            overlap = load_memo(debug_memoize, self._compute_overlap_memo_path())
+        else:
+            compute_overlap = ComputeOverlap(category_times, show_progress=self.debug)
+            compute_overlap.compute()
+            overlap = compute_overlap.get_category_times()
+            maybe_memoize(debug_memoize, overlap, self._compute_overlap_memo_path())
         assert len(overlap) > 0
 
         # if self.debug:
@@ -967,6 +1113,11 @@ class OverlapComputer:
     def _debug_process_timeline_json_path(self):
         path = _j(self.directory, 'process_timeline.traceEvents.debug.json')
         return path
+
+    def _compute_overlap_memo_path(self):
+        return _j(self.directory, '{klass}.compute_overlap.pickle'.format(
+            klass=self.__class__.__name__,
+        ))
 
     # def _stats(self):
     #     return _j(self.directory, "process_timeline.stats.json")
@@ -1220,7 +1371,8 @@ def _add_key(new_overlap, key, value):
 
 def test_compute_overlap():
     # Set to true to print info.
-    debug = False
+    # debug = False
+    debug = True
 
     from test.test_util import sec, T
 

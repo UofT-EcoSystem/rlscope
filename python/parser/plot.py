@@ -1,5 +1,6 @@
 import re
 import sys
+import itertools
 import os
 import csv
 import textwrap
@@ -71,9 +72,14 @@ Parameters
 hatch : {'/', '\\', '|', '-', '+', 'x', 'o', 'O', '.', '*'}
 """
 HATCH_STYLES = [
+    # 7
     '/', '\\', '|', 'x', 'o', '.', '*',
 
-    '/.', '\\.', '|.', 'x.', 'o.', '.', '*.',
+    # 6
+    '/.', '\\.', '|.', 'x.', 'o.', '*.',
+
+    # 5
+    '/o', '\\o', '|o', 'xo', '*o',
 
     # '/', '\\', '|', 'x', 'o', '.', '*',
     # '/', '\\', '|', 'x', 'o', '.', '*',
@@ -747,9 +753,14 @@ class StackedBarPlotter:
 
     def as_hatch_map(self, xs):
         # Need enough distinct hash-styles to fit categories.
-        assert len(xs) <= len(HATCH_STYLES)
+        # assert len(xs) <= len(HATCH_STYLES)
+        if len(xs) > len(HATCH_STYLES):
+            print("> WARNING: We only have {h} HATCH_STYLES, but there are {x} category-overlap labels".format(
+                h=len(HATCH_STYLES),
+                x=len(xs),
+            ))
         hatch_map = dict()
-        for x, hatch_style in zip(xs, HATCH_STYLES):
+        for x, hatch_style in zip(xs, itertools.cycle(HATCH_STYLES)):
             hatch_map[x] = hatch_style
         return hatch_map
 

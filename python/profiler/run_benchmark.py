@@ -265,6 +265,11 @@ def main():
                         help=textwrap.dedent("""
                         Pickle/unpickle intermediate results to allow quick re-runs of Plot's.
                         """))
+    parser.add_argument("--debug-single-thread",
+                        action='store_true',
+                        help=textwrap.dedent("""
+                        Run any multiprocessing stuff using a single thread for debugging.
+                        """))
     parser.add_argument("--no-profile-cuda",
                         action='store_true',
                         help=textwrap.dedent("""

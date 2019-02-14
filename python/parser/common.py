@@ -1360,9 +1360,12 @@ def maybe_memoize(debug_memoize, ret, path):
             # -1 specifies highest binary protocol
             pickle.dump(ret, f, -1)
 
-def progress(xs, desc, total=None, show_progress=False):
+def progress(xs=None, desc=None, total=None, show_progress=False):
+    if xs is None:
+        assert total is not None
+
     if not show_progress:
-        return xs
+        return tqdm_progress(xs, desc=desc, disable=True)
 
     import sqlite3
     if total is None:
@@ -1371,9 +1374,18 @@ def progress(xs, desc, total=None, show_progress=False):
         elif type(xs) == sqlite3.Cursor and xs.rowcount != -1:
             total = xs.rowcount
         else:
-            print("WARNING: not sure what total to use for progress(desc={desc})".format(
+            print("> WARNING: not sure what total to use for progress(desc={desc})".format(
                 desc=desc))
     return tqdm_progress(xs, desc=desc, total=total)
+
+def as_progress_label(func_name, debug_label):
+    if debug_label is None:
+        progress_label = func_name
+    else:
+        progress_label = "{func}: {debug_label}".format(
+            func=func_name,
+            debug_label=debug_label)
+    return progress_label
 
 def split_list(xs, n):
     assert n > 0
