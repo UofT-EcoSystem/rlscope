@@ -150,8 +150,10 @@ BENCH_SUFFIX_RE = r"(:?\.op_(?P<bench_name>{bench}))?".format(bench=BENCH_NAME_R
 BENCH_PREFIX_RE = r"(:?op_(?P<bench_name>{bench})\.)?".format(bench=BENCH_NAME_REGEX)
 
 # trace_id is not optional.
-TRACE_SUFFIX_RE = r"(?:\.trace_(?P<trace_id>\d+))"
-SESSION_SUFFIX_RE = r"(?:\.session_(?P<session_id>\d+))"
+# WARNING: To ensure we can load files created in older commits,
+# we allow trace_id and session_id suffixes to be OPTIONAL.
+TRACE_SUFFIX_RE = r"(?:\.trace_(?P<trace_id>\d+))?"
+SESSION_SUFFIX_RE = r"(?:\.session_(?P<session_id>\d+))?"
 
 float_re = r'(?:[-+]?[0-9]*\.?[0-9]+([eE][-+]?[0-9]+)?)'
 
