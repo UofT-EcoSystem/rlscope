@@ -1824,11 +1824,15 @@ def _add_cpu_gpu_stats(js_stats, plotter, bench_name=NO_BENCH_NAME):
         if denom == 0:
             return None
         return numer/denom
+    def safe_mul(a, b):
+        if a is None or b is None:
+            return None
+        return a*b
     stats = {
         'cpu_time_sec':cpu_time_sec,
         'gpu_time_sec':gpu_time_sec,
         'total_time_sec':total_time_sec,
-        'gpu_time_percent': 100*safe_div(gpu_time_sec, total_time_sec),
-        'cpu_time_percent': 100*safe_div(cpu_time_sec, total_time_sec),
+        'gpu_time_percent': safe_mul(100, safe_div(gpu_time_sec, total_time_sec)),
+        'cpu_time_percent': safe_mul(100, safe_div(cpu_time_sec, total_time_sec)),
     }
     update_dict(js_stats, stats)
