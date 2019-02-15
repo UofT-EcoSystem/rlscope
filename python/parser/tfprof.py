@@ -1151,6 +1151,7 @@ class OverlapComputer:
     #     do_dump_json(js_stats, self._stats())
     #     return js_stats
 
+    DEBUG_COMPUTE_PER_OPERATION_OVERLAP = False
     def compute_per_operation_overlap(self, bench_name):
         
         # TODO: we could consider memoizing results inside of a file, but screw it shouldn't take too long.
@@ -1178,6 +1179,8 @@ class OverlapComputer:
         overlaps = []
 
         sql_reader.parse_debug = self.debug
+        # class PerOperationOverlapWorker:
+        #     def __init__(self):
         for process_name, step, category_times in sql_reader.each_op_instance(bench_name):
 
             if sql_reader.parse_debug:
@@ -1197,9 +1200,19 @@ class OverlapComputer:
 
             # JAMES TODO: remove "Operation" from plot labels
             # compute_overlap = ComputeOverlap(category_times, overlaps_with=[CATEGORY_OPERATION])
+
+            # Can take up to 1.2 seconds, often 0.011 seconds, 0.004 seconds for loop_train_eval.
+            start_overlap_t = time.time()
             compute_overlap = ComputeOverlap(category_times)
             compute_overlap.compute()
             overlap = compute_overlap.get_category_times()
+            end_overlap_t = time.time()
+            sec_overlap = end_overlap_t - start_overlap_t
+            if OverlapComputer.DEBUG_COMPUTE_PER_OPERATION_OVERLAP:
+                print("> compute_overlap(process={proc}, step={step}) took {sec} seconds".format(
+                    proc=process_name,
+                    step=step,
+                    sec=sec_overlap))
             for category_key in list(overlap.keys()):
                 if not( len(category_key) > 1 and CATEGORY_OPERATION in category_key ):
                     del overlap[category_key]

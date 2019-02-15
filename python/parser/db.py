@@ -1604,7 +1604,7 @@ class SQLCategoryTimesReader:
     def bench_names(self, debug_ops=False):
         c = self.conn.cursor
         c.execute("""
-        SELECT DISTINCT event_name FROM Event AS e NATURAL JOIN Category AS c
+        SELECT DISTINCT e.event_name FROM Event AS e NATURAL JOIN Category AS c
         WHERE 
             c.category_name = '{CATEGORY_OPERATION}' 
             {debug_ops_clause}
@@ -1637,10 +1637,12 @@ class SQLCategoryTimesReader:
         return process_names
 
 
+    DEBUG_FETCH_STEPS = False
     def _fetch_steps(self, process_name, bench_name):
-        if bench_name in self._steps:
+        if process_name in self._steps and bench_name in self._steps[process_name]:
             return
 
+        start_fetch_t = time.time()
         c = self.conn.cursor
         c.execute("""
         SELECT e1.event_name, e1.start_time_us, e1.duration_us
@@ -1675,6 +1677,14 @@ class SQLCategoryTimesReader:
         if process_name not in self._steps:
             self._steps[process_name] = dict()
         self._steps[process_name][bench_name] = rows
+        end_fetch_t = time.time()
+        sec_fetch = end_fetch_t - start_fetch_t
+        if SQLCategoryTimesReader.DEBUG_FETCH_STEPS:
+            print("> fetch_steps process={proc}, op={op} took {sec} seconds".format(
+                proc=process_name,
+                op=bench_name,
+                sec=sec_fetch,
+            ))
 
     def num_steps(self, process_name, bench_name):
         """
@@ -1691,20 +1701,39 @@ class SQLCategoryTimesReader:
         self._fetch_steps(process_name, bench_name)
         return self._steps[process_name][bench_name][step]
 
+    DEBUG_EACH_OP_INSTANCE = False
     def each_op_instance(self, bench_name,
                          group_by_device=DEFAULT_group_by_device,
                          ignore_categories=DEFAULT_ignore_categories,
                          debug=DEFAULT_debug,
-                         skip_first_step=True):
+                         skip_first_step=True,
+                         show_progress=True):
+        start_t = time.time()
         process_names = self.process_names
         for process_name in process_names:
 
             keep_steps = self.keep_steps(process_name, bench_name, skip_first_step)
 
-            for step in keep_steps:
+            for step in progress(keep_steps,
+                                 desc=as_progress_label("each_op_instance", process_name),
+                                 show_progress=show_progress):
                 category_times = self.parse(step, process_name, bench_name,
-                                            group_by_device, ignore_categories, debug)
+                                            group_by_device, ignore_categories, debug,
+                                            show_progress=show_progress)
+                end_t = time.time()
+                sec = end_t - start_t
+                if SQLCategoryTimesReader.DEBUG_EACH_OP_INSTANCE:
+                    # - As bad as 56 seconds in split_op_stacks
+                    #   yield(process=loop_train_eval, step=0)
+                    #   Why is step 0 so slow?
+                    # - often 0.02 seconds, 0.10 seconds
+                    print("> each_op_instance yield(process={proc}, step={step}) took {sec} seconds".format(
+                        proc=process_name,
+                        step=step,
+                        sec=sec,
+                    ))
                 yield process_name, step, category_times
+                start_t = time.time()
 
     def _parse_timeline_memo_path(self):
         return _j(self.directory, '{klass}.parse_timeline.pickle'.format(
@@ -1774,6 +1803,7 @@ class SQLCategoryTimesReader:
             self._add_event_rows_to_category_times(
                 proc_category_times, proc_events,
                 debug=debug,
+                show_progress=debug,
                 debug_label=process_label)
             end_t = time.time()
             if debug:
@@ -1947,6 +1977,7 @@ class SQLCategoryTimesReader:
     def _add_event_rows_to_category_times(self, category_times, rows,
                                           group_by_device=DEFAULT_group_by_device,
                                           debug=False,
+                                          show_progress=False,
                                           debug_label=None):
         # rows = c.fetchall()
         # for row in rows:
@@ -1955,15 +1986,16 @@ class SQLCategoryTimesReader:
         else:
             progress_label = '_add_event_rows_to_category_times: {debug_label}'.format(
                 debug_label=debug_label)
-        for row in progress(rows, desc=progress_label, show_progress=debug):
+        for row in progress(rows, desc=progress_label, show_progress=show_progress):
             ktime = row_as_ktime(row)
             category_times_add_time(category_times, row['device_name'], ktime, group_by_device, category=row['category_name'])
 
-
+    DEBUG_PARSE = False
     def parse(self, step, process_name, bench_name,
               group_by_device=DEFAULT_group_by_device,
               ignore_categories=DEFAULT_ignore_categories,
-              debug=DEFAULT_debug):
+              debug=DEFAULT_debug,
+              show_progress=False):
         """
         JAMES NOTE: This is for reading a operation-instance (step) at-a-time.
         In order to read a "chunk" of the timeline trace at a time, we probably
@@ -1979,6 +2011,9 @@ class SQLCategoryTimesReader:
         :param bench_name:
         :return:
         """
+        if SQLCategoryTimesReader.DEBUG_PARSE:
+            start_parse_t = time.time()
+            start_get_events = time.time()
         assert bench_name != NO_BENCH_NAME
         n_steps = self.num_steps(process_name, bench_name)
         assert 0 <= step < n_steps
@@ -1986,6 +2021,15 @@ class SQLCategoryTimesReader:
         op_event = self.step_event(step, process_name, bench_name)
 
         parse_debug = debug or self.parse_debug
+        if SQLCategoryTimesReader.DEBUG_PARSE:
+            end_get_events = time.time()
+            sec_get_events = end_get_events - start_get_events
+            print("> parse.get_events process={proc}, op={op}, step={step} took {sec} seconds".format(
+                proc=process_name,
+                op=bench_name,
+                step=step,
+                sec=sec_get_events,
+            ))
 
         if parse_debug:
             print("> step={step}, process={proc}, op={bench}, time={time}".format(
@@ -2044,16 +2088,44 @@ class SQLCategoryTimesReader:
             op_event.start_time_usec, op_event.end_time_usec,
             op_event.start_time_usec, op_event.end_time_usec,
         )
+
+        if SQLCategoryTimesReader.DEBUG_PARSE:
+            start_parse_query_t = time.time()
         sql_exec_query(c, query, params, self.__class__, parse_debug)
+        # import ipdb; ipdb.set_trace()
         category_times = dict()
         debug_label = "process={proc}, step={step}".format(
             proc=process_name,
             step=step,
         )
+        rows = c.fetchall()
+        if SQLCategoryTimesReader.DEBUG_PARSE:
+            end_parse_query_t = time.time()
+            sec_parse_query = end_parse_query_t - start_parse_query_t
+            print("> parse.query process={proc}, op={op}, step={step} took {sec} seconds".format(
+                proc=process_name,
+                op=bench_name,
+                step=step,
+                sec=sec_parse_query,
+            ))
+            start_add_event_rows_t = time.time()
         self._add_event_rows_to_category_times(
-            category_times, c, group_by_device,
-            debug=debug,
+            category_times, rows, group_by_device,
+            # category_times, c, group_by_device,
+            debug=debug or show_progress,
+            # Gets in the way of each_op_instance progress bar.
+            # show_progress=debug or show_progress,
+            show_progress=False,
             debug_label=debug_label)
+        if SQLCategoryTimesReader.DEBUG_PARSE:
+            end_add_event_rows_t = time.time()
+            sec_add_event_rows_t = end_add_event_rows_t - start_add_event_rows_t
+            print("> parse.add_event_rows process={proc}, op={op}, step={step} took {sec} seconds".format(
+                proc=process_name,
+                op=bench_name,
+                step=step,
+                sec=sec_add_event_rows_t,
+            ))
 
         # if i == 0 and self.debug:
         if parse_debug:
@@ -2065,10 +2137,36 @@ class SQLCategoryTimesReader:
             print("> DEBUG: dump trace events BEFORE process_op_nest @ {path}".format(path=json_path))
             dump_category_times(category_times, json_path, print_log=False)
 
+        if SQLCategoryTimesReader.DEBUG_PARSE:
+            start_process_op_nest_t = time.time()
         category_times[CATEGORY_OPERATION] = process_op_nest_single_thread(category_times[CATEGORY_OPERATION],
                                                              filter_by_op=bench_name,
-                                                             show_progress=debug,
+                                                             # Gets in the way of each_op_instance progress bar.
+                                                             # show_progress=debug or show_progress,
+                                                             show_progress=SQLCategoryTimesReader.DEBUG_PARSE,
                                                              debug_label=debug_label)
+        if SQLCategoryTimesReader.DEBUG_PARSE:
+            end_process_op_nest_t = time.time()
+            sec_process_op_nest_t = end_process_op_nest_t - start_process_op_nest_t
+            print("> parse.process_op_nest process={proc}, op={op}, step={step} took {sec} seconds".format(
+                proc=process_name,
+                op=bench_name,
+                step=step,
+                sec=sec_process_op_nest_t,
+            ))
+
+            end_parse_t = time.time()
+            sec_parse = end_parse_t - start_parse_t
+            print("> parse process={proc}, op={op}, step={step} took {sec} seconds".format(
+                proc=process_name,
+                op=bench_name,
+                step=step,
+                sec=sec_parse,
+            ))
+            sec_total = sec_get_events + sec_add_event_rows_t + sec_process_op_nest_t + sec_parse_query
+            print("> total parse subops = {sec} seconds".format(
+                sec=sec_total,
+            ))
 
         return category_times
 

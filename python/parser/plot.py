@@ -623,6 +623,9 @@ class CategoryOverlapPlot:
                 category = _category_str(combo_and_times['category_combo'])
                 all_categories.add(category)
             end_t = time.time()
+            # > compute_per_operation_overlap(bench_name=tree_search) took 400.79692363739014 seconds
+            # > compute_per_operation_overlap(bench_name=eval_game) took 778.2323503494263 seconds
+            # This thing takes a LONG time.
             print("> compute_per_operation_overlap(bench_name={op}) took {sec} seconds".format(
                 op=bench_name,
                 sec=end_t - start_t,
@@ -1817,11 +1820,15 @@ def _add_cpu_gpu_stats(js_stats, plotter, bench_name=NO_BENCH_NAME):
     cpu_time_sec = sum_time(cpu_rows)
     gpu_time_sec = sum_time(gpu_rows)
     total_time_sec = cpu_time_sec + gpu_time_sec
+    def safe_div(numer, denom):
+        if denom == 0:
+            return None
+        return numer/denom
     stats = {
         'cpu_time_sec':cpu_time_sec,
         'gpu_time_sec':gpu_time_sec,
         'total_time_sec':total_time_sec,
-        'gpu_time_percent': 100*gpu_time_sec/total_time_sec,
-        'cpu_time_percent': 100*cpu_time_sec/total_time_sec,
+        'gpu_time_percent': 100*safe_div(gpu_time_sec, total_time_sec),
+        'cpu_time_percent': 100*safe_div(cpu_time_sec, total_time_sec),
     }
     update_dict(js_stats, stats)

@@ -1373,7 +1373,7 @@ def progress(xs=None, desc=None, total=None, show_progress=False):
     if total is None:
         if hasattr(xs, '__len__'):
             total = len(xs)
-        elif type(xs) == sqlite3.Cursor and xs.rowcount != -1:
+        elif hasattr(xs, 'rowcount') and getattr(xs, 'rowcount') != -1:
             total = xs.rowcount
         else:
             print("> WARNING: not sure what total to use for progress(desc={desc})".format(
