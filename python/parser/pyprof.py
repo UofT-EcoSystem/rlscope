@@ -1,5 +1,7 @@
 import re
 import numpy as np
+import csv
+import subprocess
 import sys
 import time
 import os
@@ -15,214 +17,385 @@ from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, base
 import progressbar
 
 from parser.common import *
-from parser.stats import Stats
+from parser.stats import Stats, KernelTime
 
-class PythonProfileParser(ProfilerParser):
-    def __init__(self, parser, args, src_files,
-                 convert_to_seconds=True, data=None, bench_name=NO_BENCH_NAME):
+from parser.db import SQLCategoryTimesReader, sql_get_source_files, sql_input_path, process_op_nest_single_thread, each_stack_trace
 
-        self.is_dqn = 'microbenchmark_json' in src_files.opt_paths
+import py_config
 
-        super().__init__(parser, args, src_files,
-                         data=data,
-                         bench_name=bench_name)
+FLAME_GRAPH_PERL = _j(py_config.ROOT, 'third_party', 'FlameGraph', 'flamegraph.pl')
 
-        self.config_path = src_files.get('config_json', bench_name, or_none=True)
-        if self.config_path is not None:
-            self.config = load_json(self.config_path)
-            print("> Found optional config_json @ {f}".format(f=self.config_path))
+class PythonFlameGraphParser:
+    def __init__(self, directory,
+                 op_name=None,
+                 debug=False,
+                 # Swallow any excess arguments
+                 **kwargs):
+        self.directory = directory
+        self.debug = debug
+        self.op_name = op_name
+
+    def parse_flame_graph(self, op_name, debug_label=None):
+
+        # TODO: we only want samples belonging to <bench_name>
+        category_times = self.sql_reader.process_events(
+            keep_categories={CATEGORY_PYTHON_PROFILER, CATEGORY_OPERATION},
+            op_name=op_name,
+            debug=self.debug,
+            # fetchall=False,
+            fetchall=True,
+            debug_label='parse_call_times',
+        )
+
+        # category_times[CATEGORY_OPERATION] = process_op_nest_single_thread(
+        #     category_times[CATEGORY_OPERATION],
+        #     debug=self.debug,
+        #     show_progress=True,
+        #     debug_label='parse_flame_graph',
+        # )
+
+        # use_sample_count = True
+        use_sample_count = False
+
+        if use_sample_count:
+            sample_count = dict()
         else:
-            self.config = {
-                'clock':'monotonic_clock',
-            }
+            time_sec_sum = dict()
 
-        if not self.is_dqn or 'num_calls' in self.config:
-            self.num_calls = compute_num_calls(self.config)
-        else:
-            # Compute later?
-            self.num_calls = None
+        for op_stack in each_stack_trace(
+            category_times[CATEGORY_PYTHON_PROFILER],
+            show_progress=True,
+            debug=False,
+            debug_label='parse_flame_graph'):
 
-        if 'discard_first_sample' in self.config:
-            self.discard_first_sample = self.config['discard_first_sample']
+            key = self.flame_graph_key(op_stack)
+
+            if use_sample_count:
+                if key not in sample_count:
+                    sample_count[key] = 0
+                sample_count[key] += 1
+            else:
+                # Add the time spent in the "leaf" function of this stacktrace.
+                if key not in time_sec_sum:
+                    time_sec_sum[key] = 0.
+                # time_sec_sum[key] += sec_to_ms(op_stack.time_sec)
+                time_sec_sum[key] += sec_to_us(op_stack.time_sec)
+
+        if use_sample_count:
+            count_data = sample_count
         else:
-            self.discard_first_sample = self.args.discard_first_sample
+            count_data = time_sec_sum
+
+        print("> Output python flame-graph input file @ {path}".format(
+            path=self._flamegraph_input_path(op_name)))
+        with open(self._flamegraph_input_path(op_name), 'w') as f:
+            # writer = csv.writer(f, delimiter=' ', lineterminator='\n', quoting=csv.QUOTE_NONE, strict=True)
+            for key in sorted(count_data.keys()):
+                count = count_data[key]
+                f.write(' '.join(map(str, [key, count])))
+                f.write("\n")
+                # writer.writerow([key, count])
+
+        print("> Output python flame-graph svg file @ {path}".format(
+            path=self._flamegraph_svg_path(op_name)))
+        with \
+            open(self._flamegraph_input_path(op_name), 'r') as input_f, \
+            open(self._flamegraph_svg_path(op_name), 'wb') as png_f:
+
+            if use_sample_count:
+                argv = []
+            else:
+                # argv = ['--countname', 'ms']
+                argv = ['--countname', 'us']
+
+            subprocess.run(
+                ['perl', FLAME_GRAPH_PERL] + argv,
+                stdin=input_f,
+                stdout=png_f)
+
+    def _flamegraph_input_path(self, op_name):
+        return _j(self.directory, 'flamegraph{bench}.txt'.format(
+            bench=bench_suffix(op_name),
+        ))
+
+    def _flamegraph_svg_path(self, op_name):
+        return _j(self.directory, 'flamegraph{bench}.svg'.format(
+            bench=bench_suffix(op_name),
+        ))
+
+    def flame_graph_time_sec(self, op_stack):
+        """
+        Return total time spent in the 
+        :param op_stack: 
+        :return: 
+        """
+
+    def flame_graph_key(self, op_stack):
+        """
+        Return the stacktrace "key" in FlameGraph 'stackcollapse'd format.
+        i.e. the format that flamegraph.pl accepts.
+
+        e.g. From https://github.com/brendangregg/FlameGraph @ "2. Fold stacks"
+
+            unix`_sys_sysenter_post_swapgs 1401
+            unix`_sys_sysenter_post_swapgs;genunix`close 5
+            unix`_sys_sysenter_post_swapgs;genunix`close;genunix`closeandsetf 85
+            unix`_sys_sysenter_post_swapgs;genunix`close;genunix`closeandsetf;c2audit`audit_closef 26
+            unix`_sys_sysenter_post_swapgs;genunix`close;genunix`closeandsetf;c2audit`audit_setf 5
+            unix`_sys_sysenter_post_swapgs;genunix`close;genunix`closeandsetf;genunix`audit_getstate 6
+            unix`_sys_sysenter_post_swapgs;genunix`close;genunix`closeandsetf;genunix`audit_unfalloc 2
+            unix`_sys_sysenter_post_swapgs;genunix`close;genunix`closeandsetf;genunix`closef 48
+            [...]
+
+        e.g. from https://github.com/brendangregg/FlameGraph/blob/1b1c6deede9c33c5134c920bdb7a44cc5528e9a7/stackcollapse.pl
+            Example input:
+
+             unix`i86_mwait+0xd
+             unix`cpu_idle_mwait+0xf1
+             unix`idle+0x114
+             unix`thread_start+0x8
+             1641
+
+            Example output:
+
+             unix`thread_start;unix`idle;unix`cpu_idle_mwait;unix`i86_mwait 1641
+
+        Documentation from https://github.com/brendangregg/FlameGraph/blob/1b1c6deede9c33c5134c920bdb7a44cc5528e9a7/flamegraph.pl
+
+            The input is stack frames and sample counts formatted as single lines.  Each
+            frame in the stack is semicolon separated, with a space and count at the end
+            of the line.  These can be generated for Linux perf script output using
+            stackcollapse-perf.pl, for DTrace using stackcollapse.pl, and for other tools
+            using the other stackcollapse programs.  Example input:
+
+             swapper;start_kernel;rest_init;cpu_idle;default_idle;native_safe_halt 1
+
+            An optional extra column of counts can be provided to generate a differential
+            flame graph of the counts, colored red for more, and blue for less.  This
+            can be useful when using flame graphs for non-regression testing.
+            See the header comment in the difffolded.pl program for instructions.
+
+            The input functions can optionally have annotations at the end of each
+            function name, following a precedent by some tools (Linux perf's _[k]):
+                _[k] for kernel
+                _[i] for inlined
+                _[j] for jit
+                _[w] for waker
+            Some of the stackcollapse programs support adding these annotations, eg,
+            stackcollapse-perf.pl --kernel --jit. They are used merely for colors by
+            some palettes, eg, flamegraph.pl --color=java.
+
+        :return:
+        """
+        trace = op_stack.stacktrace()
+        for frame in trace:
+            assert frame.name is not None
+            assert ';' not in frame.name
+        key = ';'.join(self.py_name(frame) for frame in trace)
+        return key
+
+    def py_name(self, op_stack):
+        name = op_stack.name
+
+        m = re.search(r'^<built-in method (?P<func>.*)>$', name)
+        if m:
+            name = m.group('func')
+
+
+        # <method 'startswith' of 'str' objects> 315.6939999999996
+        # <method 'sub' of '_sre.SRE_Pattern' objects> 4318.467999999995
+        m = re.search(r"^<method '(?P<func>.*)' of '(?P<klass>.*)' objects>$", name)
+        if m:
+            name = "{klass}.{func}".format(
+                klass=m.group('klass'),
+                func=m.group('func'))
+
+        m = re.search(r'^_pywrap_tensorflow_internal\.(?P<func>.*)', name)
+        if m:
+            name = m.group('func')
+
+        m = re.search(r'<(?P<func>listcomp|genexpr|lambda)>', name)
+        if m:
+            name = "<{func}@{file}:{line}>".format(
+                func=m.group('func'),
+                file=op_stack.ktime.pyprof_filename,
+                line=op_stack.ktime.pyprof_line_no)
+            # '/home/james/clone/clone/baselines/baselines/common/tf_util.py:165(<lambda>)'
+            # I like having the <lambda> at the front instead.
+            # name = op_stack.ktime.pyprof_line_description
+
+        return name
+
+
+    def run(self):
+        self.sql_reader = SQLCategoryTimesReader(self.db_path)
+
+        if self.op_name is not None:
+            op_names = [self.op_name]
+        else:
+            op_names = self.sql_reader.op_names()
+
+        for op_name in op_names:
+            self.parse_flame_graph(op_name)
+
+    def get_source_files(self):
+        return sql_get_source_files(self.__class__, self.directory)
+
+    @property
+    def db_path(self):
+        return sql_input_path(self.directory)
+
+class PythonProfileParser:
+    """
+    Given raw (start_us, end_us) timestamps for python-function calls,
+    dump python profiling information in CSV format with these columns:
+
+    - Type
+    - Time(%)
+    - Time
+    - Calls
+    - Avg
+    - Std
+    - Std/Avg(%)
+    - Min
+    - Max
+    - Call#
+    - Name
+
+    Input:
+    - NOTE: We want to output a python profile for each operation-type
+    - List of KernelTime/Event's with pyprof information included in them (NOT NULL)
+      - i.e.
+        events = Query all the events that are subsumed by (op-nested) CATEGORY_PYTHON_PROFILING
+        (NOTE: this is what UtilizationPlot does)
+
+    PROBLEM: How do we select ONLY python call-times specific to a particular operation?
+    We need to use the same "overlap after processing-op-nest" queries we've already been doing to construct our plots.
+    For nested operations, some python times will span 2 operations;
+    for e.g., tree_search python function time will span both the 'tree_search' and 'tree_search_loop' operations.
+    To match the plots, we only want to show python-times that are FULLY subsumed by an operation.
+    So, we should NOT show tree_search python function time in the profile...
+    slightly unintuitive behaviour in this particular scenario, but it is actually the correct behaviour for handling
+    other scenarios.
+    If you wanted to include the tree_search function start/end time, you need to
+    set_operation('tree_search') PRIOR to calling the tree_search function.
+
+    PythonProfileParser:
+
+    PSEUDOCODE:
+    # Generator
+    def write_python_profile():
+        For each op_name:
+            pyprof_call_times = query_pyprof_call_times(op_name)
+            # NOTE: We must group pyprof events by <file, line, func> in order to report a "row" of the csv
+            Report "python_profile.{op_name}.csv" from pyprof_events
+
+    def query_pyprof_call_times(op_name):
+        # For each "step"/call to op:
+        events = Query CATEGORY_PYTHON_PROFILING/CATEGORY_OPERATION events
+                       across ALL steps
+                       across ALL processes
+                 # ORDER BY <pyprof_filename, pyprof_line_no, pyprof_function>
+                 # NOTE: I don't think there's a nice way to preserve this ORDER BY across process_op_nest...
+        events[CATEGORY_OPERATION] = process_op_nest(events[CATEGORY_OPERATION])
+        pyprof_events = events.filter {
+            Event.category == CATEGORY_PYTHON_PROFILING and
+              Event is SUBSUMED by an event with op_type == op.type              # <-- NOTE: we can us OpStack to compute this.
+        }
+        pyprof_call_times = {
+            'call_times':
+              # NOTE: bins should be sorted by start_time_us (guaranteed since pyprof_events is already sorted)
+              Bin pyprof_events into a dict where key = <pyprof_filename, pyprof_line_no, pyprof_function>,
+        }
+        return pyprof_call_times
+
+    """
+    def __init__(self, directory,
+                 debug=False,
+                 # Swallow any excess arguments
+                 **kwargs):
+        self.directory = directory
+        self.debug = debug
+
+        self.num_calls = None
+        self.discard_first_sample = False
 
         self.time_fields = ['tottime', 'cumtime', 'tottime_percall', 'cumtime_percall']
         self.total_time_fields = ['tottime_seconds']
         self.sortby = ('tottime_seconds', 'filename:lineno(function)')
 
-        self.pyfunc_stats = Stats(self.discard_first_sample, debug=self.args.debug)
-        self.convert_to_seconds = convert_to_seconds
+        # self.pyfunc_stats = Stats(self.discard_first_sample, debug=self.args.debug)
+        # self.pyfunc_stats = Stats(discard_first_sample=False, debug=self.debug)
+        # self.convert_to_seconds = convert_to_seconds
 
-        # config_path = self._config_path(bench_name)
-        # if _e(config_path):
-        # self.config = load_json(self._config_path(bench_name))
+    def get_source_files(self):
+        return sql_get_source_files(self.__class__, self.directory)
 
-        # if self.is_dqn:
-        #     self.config = load_json(self._config_path(bench_name))
-        # else:
-        #     self.config = {
-        #         'clock':'monotonic_clock',
-        #     }
+    # def _config_path(self, bench_name):
+    #     return _j(self.directory(bench_name), "config.json")
+
+    # def _parse_num_calls(self, bench_name):
+    #     call_times_path = self._call_times_path(bench_name)
+    #     print("> Parsing call times: {f}".format(f=call_times_path))
+    #     # self.call_times = self.load_call_times(bench_name)
+    #     # if self.is_dqn:
+    #     #     micro_data = self.load_microbench(bench_name)
+    #     #     micro_name = self.get_micro_name()
+    #     #     bench_data = micro_data[micro_name]
+    #     #     # This is the number of times (for e.g.) Forward was called.
+    #     #     # We expect the number of times a particular CUDA-function/CUDA-API is called to be a multiple of
+    #     #     # num_calls = iterations*repetitions
+    #     #     self.num_calls = compute_num_calls_dqn(bench_data)
+    #     # else:
+    #     #     # Already read it from self.config in __init__
+    #     #     assert self.num_calls is not None
+    #     print("> num_calls = {num_calls}".format(
+    #         num_calls=self.num_calls))
+
+    def run(self):
+        self.sql_reader = SQLCategoryTimesReader(self.db_path)
+
+        op_names = self.sql_reader.op_names()
+        for op_name in op_names:
+            self.parse_call_times(op_name)
+
+        # # from UtilizationPlot:
+        # self.sql_reader = SQLCategoryTimesReader(self.db_path, debug_ops=self.debug_ops)
+        # # self.bench_names = self.sql_reader.bench_names(self.debug_ops) + [NO_BENCH_NAME]
+        # # assert len(self.bench_names) == len(unique(self.bench_names))
+        # # self.categories = self.sql_reader.categories
+        #
+        # overlap_computer = OverlapComputer(self.db_path, debug=self.debug, debug_ops=self.debug_ops)
+        #
+        # operation_overlap, proc_stats = overlap_computer.compute_process_timeline_overlap(
+        #     debug_memoize=self.debug_memoize)
+        # assert len(operation_overlap) > 0
+
+        # NOTE: we just want to keep RAW events that overlap with CATEGORY_PYTHON_PROFILING events...
+        # This isn't QUITE what ComputeOverlap does.
+        # ComputeOverlap is incrementally computing the total-sum of time-overlap between category types,
+        # but it DISCARDS the raw events when doing this.
+        # that's NOT what this does.
+
+
+    def _call_times_summary_path(self, bench_name):
+        path = _j(self.directory, "pyprof_call_times{bench}.txt".format(bench=bench_suffix(bench_name)))
+        return path
 
     @property
-    def debug(self):
-        return self.args.debug
+    def db_path(self):
+        return sql_input_path(self.directory)
 
-    @staticmethod
-    def required_source_basename_regexes():
-        return {
-            'profile_path': r"^python_profile{bench}\.txt$".format(bench=BENCH_SUFFIX_RE),
-            'python_call_times':"^python_profile{bench}\.call_times.json$".format(bench=BENCH_SUFFIX_RE),
-            'config_json':r"^config{bench}\.json$".format(bench=BENCH_SUFFIX_RE),
-        }
+    def parse_call_times(self, op_name, debug_label=None):
 
-    @staticmethod
-    def optional_source_basename_regexes():
-        return {'microbenchmark_json':r"^microbenchmark.json$",
-                }
+        pyfunc_stats = Stats(discard_first_sample=False, debug=self.debug)
 
-    @classmethod
-    def test_targets(ParserKlass):
-        paths = [
-            'checkpoints/PongNoFrameskip-v4/glue/gpu/quadro_p4000.new/microbenchmark/python_profile.q_backward.pretty.csv',
-            'checkpoints/PongNoFrameskip-v4/glue/gpu/quadro_p4000.new/microbenchmark/python_profile.q_forward.pretty.csv',
-            'checkpoints/PongNoFrameskip-v4/glue/gpu/quadro_p4000.new/microbenchmark/python_profile.q_update_target_network.pretty.csv',
-            'checkpoints/PongNoFrameskip-v4/glue/gpu/quadro_p4000.new/microbenchmark/python_profile.step.pretty.csv',
-        ]
-        src_files = ParserKlass.glob_target_files(paths, debug=True)
-        matching_srcs = src_files.all_sources(all_bench_names=True)
-        assert set(paths).issubset(set(matching_srcs))
-
-    @staticmethod
-    def target_basename_regexes():
-        return {
-            'pretty_profile_path': r"^python_profile{bench}\.pretty\.csv$".format(bench=BENCH_SUFFIX_RE),
-            'python_overhead_path': r"^python_profile{bench}\.python_overhead\.pyprof\.json".format(bench=BENCH_SUFFIX_RE),
-            # Klass.get_call_times_path(src_files, bench_name),
-            # 'total_path':r"^python_profile.total.python_overhead.pyprof.json$",
-        }
-
-    @staticmethod
-    def allow_multiple_src_matches():
-        return True
-
-    @staticmethod
-    def uses_all_benches():
-        return False
-
-    @staticmethod
-    def uses_multiple_dirs():
-        return False
-
-    def pre_parse(self, bench_name):
-        pass
-        # We only use monotonic_clock, no longer use cycle counter since we
-        # had issues getting it to work.
-        # if self.convert_to_seconds:
-        #     self.tsc_freq = BenchmarkTSCFreq(self.parser, self.args)
-        #     self.tsc_freq.run()
-
-    @classmethod
-    def get_targets(Klass, src_files, bench_name):
-        return [Klass.get_pretty_profile_path(src_files, bench_name),
-                Klass.get_python_overhead_path(src_files, bench_name),
-                # Klass.get_python_pyprof_total_path(src_files),
-
-                # Klass.get_call_times_path(src_files, bench_name),
-                Klass.get_call_times_summary_path(src_files, bench_name),
-                Klass.get_call_times_pyprof_path(src_files, bench_name),
-                ]
-
-    def _config_path(self, bench_name):
-        return _j(self.directory(bench_name), "config.json")
-
-
-    @classmethod
-    def get_call_times_path(self, src_files, bench_name):
-        # ret = _j(src_files.directory, "python_profile_call_times{bench}.json".format(bench=bench_suffix(bench_name)))
-        ret = _j(src_files.directory, "python_profile{bench}.call_times.json".format(bench=bench_suffix(bench_name)))
-        # call_times_path = re.sub(r'.txt$', '.call_times.json', self.profile_path(bench_name))
-        # return call_times_path
-        return ret
-    def _call_times_path(self, bench_name):
-        return self.get_call_times_path(self.src_files, bench_name)
-        # call_times_path = re.sub(r'.txt$', '.call_times.json', self.profile_path(bench_name))
-        # return call_times_path
-
-    @classmethod
-    def get_call_times_summary_path(ParserKlass, src_files, bench_name):
-        # profile_path = src_files.get('profile_path', bench_name)
-        ret = _j(src_files.directory, "python_profile_call_times{bench}.txt".format(bench=bench_suffix(bench_name)))
-        # ret = re.sub(r'.txt$', '.call_times.txt', profile_path)
-        # assert ret != profile_path
-        return ret
-    def _call_times_summary_path(self, bench_name):
-        return self.get_call_times_summary_path(self.src_files, bench_name)
-
-    @classmethod
-    def get_call_times_pyprof_path(ParserKlass, src_files, bench_name):
-        # profile_path = src_files.get('profile_path', bench_name)
-        # ret = re.sub(r'.txt$', '.call_times.pyprof.txt', profile_path)
-        ret = _j(src_files.directory, "python_profile_call_times_pyprof{bench}.txt".format(bench=bench_suffix(bench_name)))
-        # assert ret != profile_path
-        return ret
-    def _call_times_pyprof_path(self, bench_name):
-        return self.get_call_times_pyprof_path(self.src_files, bench_name)
-
-    def _python_overhead_path(self, bench_name):
-        return self.get_python_overhead_path(self.src_files, bench_name)
-
-    @classmethod
-    def get_python_overhead_path(Klass, src_files, bench_name):
-        ret = _j(src_files.directory, "python_profile_python_overhead_pyprof{bench}.json".format(bench=bench_suffix(bench_name)))
-        # ret = re.sub(r'.txt$', '.python_overhead.pyprof.json', src_files.get('profile_path', bench_name))
-        # assert ret != src_files.get('profile_path', bench_name)
-        return ret
-
-    def _microbench_path(self, bench_name):
-        return get_microbench_path(_d(self.profile_path(bench_name)))
-
-    def load_microbench(self, bench_name):
-        microbench_path = self._microbench_path(bench_name)
-        assert _e(microbench_path)
-
-        with codecs.open(microbench_path, mode='r', encoding='utf-8') as f:
-            data = json.load(f)
-            data = fixup_json(data)
-            return data
-
-    def get_micro_name(self):
-        # if self.args.c_only:
-        #     return get_c_only_name(self.bench_name)
-        return self.bench_name
-
-    def _parse_num_calls(self, bench_name):
-        call_times_path = self._call_times_path(bench_name)
-        print("> Parsing call times: {f}".format(f=call_times_path))
-        self.call_times = self.load_call_times(bench_name)
-        if self.is_dqn:
-            micro_data = self.load_microbench(bench_name)
-            micro_name = self.get_micro_name()
-            bench_data = micro_data[micro_name]
-            # This is the number of times (for e.g.) Forward was called.
-            # We expect the number of times a particular CUDA-function/CUDA-API is called to be a multiple of
-            # num_calls = iterations*repetitions
-            self.num_calls = compute_num_calls_dqn(bench_data)
-        else:
-            # Already read it from self.config in __init__
-            assert self.num_calls is not None
-        print("> num_calls = {num_calls}".format(
-            num_calls=self.num_calls))
-
-    def parse_call_times(self, bench_name):
-
-        # call_times_path = self._call_times_path(bench_name)
+        # call_times_path = self._call_times_path(op_name)
         # # if not _e(call_times_path):
         # #     return
         # print("> Parsing call times: {f}".format(f=call_times_path))
-        # call_times = self.load_call_times(bench_name)
-        # micro_data = self.load_microbench(bench_name)
+        # call_times = self.load_call_times(op_name)
+        # micro_data = self.load_microbench(op_name)
         # micro_name = self.get_micro_name()
         # bench_data = micro_data[micro_name]
         # # This is the number of times (for e.g.) Forward was called.
@@ -231,46 +404,77 @@ class PythonProfileParser(ProfilerParser):
         # self.num_calls = compute_num_calls_dqn(bench_data)
         # print("> num_calls = {num_calls}".format(
         #     num_calls=self.num_calls))
-        start_parse_call_times = time.time()
-        self._parse_num_calls(bench_name)
-        end_parse_call_times = time.time()
-        print("> Parsing call times took: {sec} seconds".format(sec=end_parse_call_times - start_parse_call_times)) # 45 seconds, ~ 6-7 GB
+        # start_parse_call_times = time.time()
+        # self._parse_num_calls(op_name)
+        
+        category_times = self.sql_reader.process_events(
+            keep_categories={CATEGORY_PYTHON_PROFILER, CATEGORY_OPERATION},
+            op_name=op_name,
+            debug=self.debug,
+            # fetchall=False,
+            fetchall=True,
+            debug_label='parse_call_times',
+        )
 
-        print("> Adding call times to pyfunc_stats:") # 249 seconds / 4min 9sec; this takes up a LOT of memory: 34.5 GIG.
+        if len(category_times) == 0:
+            print("> WARNING: cannot generate python profile for op={op}; no events found for any process.".format(
+                op=op_name))
+            return
+
+        # JAMES TODO: process_op_nest(category_times[CATGEORY_OPERATION])
+        # replace call_times below with category_times[CATEGORY_PYTHON_PROFILING]; handle usec
+        # call_times = ...
+
+        # self.num_calls = min(len(times) for times in category_times.values())
+        # for times in category_times.values():
+        #     assert self.num_calls == len(times)
+
+        self.num_calls = len(category_times[CATEGORY_OPERATION])
+
+        # end_parse_call_times = time.time()
+        # print("> Parsing call times took: {sec} seconds".format(sec=end_parse_call_times - start_parse_call_times)) # 45 seconds, ~ 6-7 GB
+
+        # print("> Adding call times to pyfunc_stats:") # 249 seconds / 4min 9sec; this takes up a LOT of memory: 34.5 GIG.
         start_add_call_times = time.time()
-        with progressbar.ProgressBar(max_value=len(self.call_times.items())) as bar:
-            for i, (func_name, call_times) in enumerate(self.call_times.items()):
-                if self.config['clock'] == 'monotonic_clock':
-                    time_secs = call_times
-                else:
-                    raise NotImplementedError
-
-                self.pyfunc_stats.add_times_sec(func_name, time_secs)
-
-                bar.update(i)
+        progress_label = as_progress_label('parse_call_times', debug_label)
+        for i, ktime in enumerate(progress(category_times[CATEGORY_PYTHON_PROFILER],
+                                           desc=progress_label,
+                                           show_progress=self.debug)):
+            # if self.config['clock'] == 'monotonic_clock':
+            #     time_secs = call_times
+            # else:
+            #     raise NotImplementedError
+            # time_sec = ktime.total_time_sec
+            # pyfunc_stats.add_time_sec(
+            #     ktime.pyprof_function,
+            #     time_sec)
+            # Q: Why dont we add the KernelTime entireyl?
+            assert type(ktime) == KernelTime
+            pyfunc_stats.add_ktime(ktime)
         end_add_call_times = time.time()
         print("> Adding call times to pyfunc_stats took: {sec} seconds".format(sec=end_add_call_times - start_add_call_times))
 
         # TODO: convert cycles to usec!
 
+        # Q: I don't think it makes sense to call 'split'...?
         print("> Split pyfunc stats:") # 20 seconds
         start_split_call_times = time.time()
-        self.pyfunc_stats.split(self.num_calls)
+        pyfunc_stats.split(self.num_calls)
         end_split_call_times = time.time()
         print("> Split pyfunc stats took: {sec} seconds".format(sec=end_split_call_times - start_split_call_times))
 
         # This takes a while and we don't use it; skip.
         print("> Dumping pyfunc stats:") # 467 seconds
         start_dump_call_times = time.time()
-        with open(self._call_times_summary_path(bench_name), 'w') as f:
-            # with open(self._call_times_pyprof_path(bench_name), 'w') as f_pyprof:
-            self.pyfunc_stats.dump_separate_calls(f, 'Python')
+        with open(self._call_times_summary_path(op_name), 'w') as f:
+            # with open(self._call_times_pyprof_path(op_name), 'w') as f_pyprof:
+            pyfunc_stats.dump_separate_calls(f, 'Python')
             # Dump profile similar to cProfile/pstats output so
             # we can make sure we're doing things correctly.
-            # self.pyfunc_stats.dump_nvprof(f_pyprof, 'Python')
+            # pyfunc_stats.dump_nvprof(f_pyprof, 'Python')
         end_dump_call_times = time.time()
         print("> Dumping pyfunc stats took: {sec} seconds".format(sec=end_dump_call_times - start_dump_call_times))
-        print("> Parsed call times into: {f}".format(f=self._call_times_summary_path(bench_name)))
+        print("> Parsed call times into: {f}".format(f=self._call_times_summary_path(op_name)))
 
     def total_iterations(self, bench_name):
         if self.num_calls is None:
@@ -281,146 +485,140 @@ class PythonProfileParser(ProfilerParser):
             return self.num_calls - 1
         return self.num_calls
 
-    # TODO: make this unit-testable (in particular, when we gather python_times/PythonTimeSec
-    def parse_python_overhead(self, bench_name, dump_json=True, get_raw_data=False):
-        self.parse_call_times(bench_name)
+    # # TODO: make this unit-testable (in particular, when we gather python_times/PythonTimeSec
+    # def parse_python_overhead(self, bench_name, dump_json=True, get_raw_data=False):
+    #     self.parse_call_times(bench_name)
+    #
+    #     print("> Parsing python overhead: {f}".format(f=self._python_overhead_path(bench_name)))
+    #
+    #     # TODO: This is tensorflow specific, we need to try wrapping end-to-end test
+    #     # and making this work for all C++ libraries
+    #     # if self.is_dqn:
+    #     #     default_cpp_func_re = r'(?:built-in.*pywrap_tensorflow)'
+    #     # else:
+    #     default_cpp_func_re = r"CLIB__.*"
+    #     cpp_func_re = self.config.get('c_lib_func_pyprof_pattern', default_cpp_func_re)
+    #
+    #     def is_cpp_func(func_name):
+    #         m = re.search(cpp_func_re, func_name)
+    #         return bool(m)
+    #     cpp_and_gpu_times = np.zeros(self.total_iterations(bench_name))
+    #     python_times = np.zeros(self.total_iterations(bench_name))
+    #     # 1000 iterations
+    #     # 22000 calls
+    #     # 22 different calls to this function in each iteration
+    #
+    #     print("> Compute python overhead")
+    #     start_compute_python_overhead = time.time()
+    #     if self.debug:
+    #         print("> cpp_func_re = {regex}".format(regex=cpp_func_re))
+    #     for stat in pyfunc_stats.stats:
+    #         # Returns an array of size self.num_calls, one entry for each time
+    #         # an "iteration" of the expierment was run.
+    #         times_sec = stat.iteration_times_sec(self.num_calls)
+    #         if self.debug:
+    #             print("> stat.name = {name}".format(name=stat.name))
+    #             if stat.name == "/mnt/data/james/clone/dnn_tensorflow_cpp/python/test/py_interface.py:78(CLIB__run_cpp)":
+    #                 import ipdb; ipdb.set_trace()
+    #         if is_cpp_func(stat.name):
+    #             cpp_and_gpu_times += times_sec
+    #         else:
+    #             python_times += times_sec
+    #     end_compute_python_overhead = time.time()
+    #     print("> Compute python overhead took: {sec} seconds".format(sec=end_compute_python_overhead - start_compute_python_overhead))
+    #
+    #     total_times = cpp_and_gpu_times + python_times
+    #
+    #     # NOTE: The idea behind this calculation is that in an ideal case,
+    #     # we only need to execute the C code, and the python code doesn't need to be executed.
+    #     # So, overhead = time(python)/time(C)
+    #     # NOT:
+    #     #   overhead = time(python)/time(python + C)
+    #     #   This is what the profiler tells us.
+    #     python_overhead_percent = 100.*python_times/cpp_and_gpu_times
+    #
+    #     raw_data = {
+    #         "TotalTimeSec":total_times,
+    #         "CppAndGPUTimeSec":cpp_and_gpu_times,
+    #         "PythonTimeSec":python_times,
+    #         "PythonOverheadPercent":python_overhead_percent,
+    #     }
+    #     if get_raw_data:
+    #         return raw_data
+    #
+    #     data = compute_plot_data(cpp_and_gpu_times, python_times)
+    #     if dump_json:
+    #         do_dump_json(data, self._python_overhead_path(bench_name))
+    #
+    #
+    #     return data
 
-        print("> Parsing python overhead: {f}".format(f=self._python_overhead_path(bench_name)))
+    # def load_call_times(self, bench_name):
+    #     # JAMES TODO: put this into the parser class for the python profiling data; produce output similar to what we did for CUDA stuff.
+    #     call_times_path = self._call_times_path(bench_name)
+    #     assert _e(call_times_path)
+    #
+    #     with codecs.open(call_times_path, mode='r', encoding='utf-8') as f:
+    #         data = json.load(f)
+    #         # data = fixup_json(data)
+    #         return data
 
-        # TODO: This is tensorflow specific, we need to try wrapping end-to-end test
-        # and making this work for all C++ libraries
-        if self.is_dqn:
-            default_cpp_func_re = r'(?:built-in.*pywrap_tensorflow)'
-        else:
-            default_cpp_func_re = r"CLIB__.*"
-        cpp_func_re = self.config.get('c_lib_func_pyprof_pattern', default_cpp_func_re)
+    # def parse_header(self, line, it):
+    #     assert self.header is None
+    #     if re.search(r'^\s*ncalls\s*tottime', line):
+    #         self.header = re.split(r'\s+', line.strip())
+    #         for i in range(len(self.header)):
+    #             if self.header[i] == 'percall':
+    #                 self.header[i] = "{last_col}_percall".format(last_col=self.header[i-1])
+    #         return True
+    #     return False
 
-        def is_cpp_func(func_name):
-            m = re.search(cpp_func_re, func_name)
-            return bool(m)
-        cpp_and_gpu_times = np.zeros(self.total_iterations(bench_name))
-        python_times = np.zeros(self.total_iterations(bench_name))
-        # 1000 iterations
-        # 22000 calls
-        # 22 different calls to this function in each iteration
+    # def parse_other(self, line, it):
+    #     m = re.search(r'\s*(?P<total_function_calls>{float}) function calls (?:\(\d+ primitive calls\) )?in (?P<total_time>{float}) (?P<profiling_unit>\w+)'.format(float=float_re), line)
+    #     if m:
+    #         store_group(self.results, m)
+    #         return True
+    #     return False
 
-        print("> Compute python overhead")
-        start_compute_python_overhead = time.time()
-        if self.debug:
-            print("> cpp_func_re = {regex}".format(regex=cpp_func_re))
-        for stat in self.pyfunc_stats.stats:
-            # Returns an array of size self.num_calls, one entry for each time
-            # an "iteration" of the expierment was run.
-            times_sec = stat.iteration_times_sec(self.num_calls)
-            if self.debug:
-                print("> stat.name = {name}".format(name=stat.name))
-                if stat.name == "/mnt/data/james/clone/dnn_tensorflow_cpp/python/test/py_interface.py:78(CLIB__run_cpp)":
-                    import ipdb; ipdb.set_trace()
-            if is_cpp_func(stat.name):
-                cpp_and_gpu_times += times_sec
-            else:
-                python_times += times_sec
-        end_compute_python_overhead = time.time()
-        print("> Compute python overhead took: {sec} seconds".format(sec=end_compute_python_overhead - start_compute_python_overhead))
+    # def parse_columns(self, line, it):
+    #     fields = re.split(r'\s+', line.strip())
+    #     last_field_i = len(self.header) - 1
+    #     for i, name in enumerate(self.header[0:len(self.header) - 1]):
+    #         field = fields[i]
+    #         store_as(self.results, name, field, store_type='list')
+    #     field = " ".join(fields[last_field_i:])
+    #     store_as(self.results, self.header[-1], field, store_type='list')
 
-        total_times = cpp_and_gpu_times + python_times
+    # def post_parse(self, bench_name):
+    #     if self.convert_to_seconds and self.results['profiling_unit'] == 'cycles':
+    #         for key in self.time_fields:
+    #             time_sec = self.results[key]
+    #             self.results[key] = self.cycles_to_seconds(time_sec)
+    #
+    #     self.parse_python_overhead(bench_name)
 
-        # NOTE: The idea behind this calculation is that in an ideal case,
-        # we only need to execute the C code, and the python code doesn't need to be executed.
-        # So, overhead = time(python)/time(C)
-        # NOT:
-        #   overhead = time(python)/time(python + C)
-        #   This is what the profiler tells us.
-        python_overhead_percent = 100.*python_times/cpp_and_gpu_times
+    # def each_line(self):
+    #     num_lines = len(self.results[self.header[0]])
+    #     for i in range(num_lines):
+    #         row = []
+    #         for k in self.header:
+    #             # NOTE: must match order of append inside dump_header.
+    #             value = self.results[k][i]
+    #             if k in self.time_fields:
+    #                 row.append(pretty_time(value))
+    #             row.append(value)
+    #             if k in self.total_time_fields:
+    #                 # per_iter_time_sec = self.results[self.per_iter_field(k)][i]
+    #                 time_per_iter = self.time_per_call(value)
+    #                 row.append(pretty_time(time_per_iter))
+    #         yield row
 
-        raw_data = {
-            "TotalTimeSec":total_times,
-            "CppAndGPUTimeSec":cpp_and_gpu_times,
-            "PythonTimeSec":python_times,
-            "PythonOverheadPercent":python_overhead_percent,
-        }
-        if get_raw_data:
-            return raw_data
-
-        data = compute_plot_data(cpp_and_gpu_times, python_times)
-        if dump_json:
-            do_dump_json(data, self._python_overhead_path(bench_name))
-
-
-        return data
-
-    def directory(self, bench_name):
-        return _d(self.profile_path(bench_name))
-
-    def load_call_times(self, bench_name):
-        # JAMES TODO: put this into the parser class for the python profiling data; produce output similar to what we did for CUDA stuff.
-        call_times_path = self._call_times_path(bench_name)
-        assert _e(call_times_path)
-
-        with codecs.open(call_times_path, mode='r', encoding='utf-8') as f:
-            data = json.load(f)
-            # data = fixup_json(data)
-            return data
-
-    def sec_as_usec(self, sec):
-        return sec * 1e6
-
-    def parse_header(self, line, it):
-        assert self.header is None
-        if re.search(r'^\s*ncalls\s*tottime', line):
-            self.header = re.split(r'\s+', line.strip())
-            for i in range(len(self.header)):
-                if self.header[i] == 'percall':
-                    self.header[i] = "{last_col}_percall".format(last_col=self.header[i-1])
-            return True
-        return False
-
-    def parse_other(self, line, it):
-        m = re.search(r'\s*(?P<total_function_calls>{float}) function calls (?:\(\d+ primitive calls\) )?in (?P<total_time>{float}) (?P<profiling_unit>\w+)'.format(float=float_re), line)
-        if m:
-            store_group(self.results, m)
-            return True
-        return False
-
-    def parse_columns(self, line, it):
-        fields = re.split(r'\s+', line.strip())
-        last_field_i = len(self.header) - 1
-        for i, name in enumerate(self.header[0:len(self.header) - 1]):
-            field = fields[i]
-            store_as(self.results, name, field, store_type='list')
-        field = " ".join(fields[last_field_i:])
-        store_as(self.results, self.header[-1], field, store_type='list')
-
-    def post_parse(self, bench_name):
-        if self.convert_to_seconds and self.results['profiling_unit'] == 'cycles':
-            for key in self.time_fields:
-                time_sec = self.results[key]
-                self.results[key] = self.cycles_to_seconds(time_sec)
-
-        self.parse_python_overhead(bench_name)
-
-    def each_line(self):
-        num_lines = len(self.results[self.header[0]])
-        for i in range(num_lines):
-            row = []
-            for k in self.header:
-                # NOTE: must match order of append inside dump_header.
-                value = self.results[k][i]
-                if k in self.time_fields:
-                    row.append(pretty_time(value))
-                row.append(value)
-                if k in self.total_time_fields:
-                    # per_iter_time_sec = self.results[self.per_iter_field(k)][i]
-                    time_per_iter = self.time_per_call(value)
-                    row.append(pretty_time(time_per_iter))
-            yield row
-
-    def cycles_to_seconds(self, cycles):
-        # cpu_freq_ghz = self.cpu_freq.results['cpu_freq_ghz_mean']
-        cpu_freq_ghz = self.tsc_freq.results['tsc_freq_ghz_mean']
-        HZ_IN_GHZ = 1e9
-        cpu_freq_hz = cpu_freq_ghz*HZ_IN_GHZ
-        return [x/cpu_freq_hz for x in cycles]
+    # def cycles_to_seconds(self, cycles):
+    #     # cpu_freq_ghz = self.cpu_freq.results['cpu_freq_ghz_mean']
+    #     cpu_freq_ghz = self.tsc_freq.results['tsc_freq_ghz_mean']
+    #     HZ_IN_GHZ = 1e9
+    #     cpu_freq_hz = cpu_freq_ghz*HZ_IN_GHZ
+    #     return [x/cpu_freq_hz for x in cycles]
 
 class PythonProfileTotalParser(ProfilerParser):
     def __init__(self, parser, args, src_files, bench_name=NO_BENCH_NAME):

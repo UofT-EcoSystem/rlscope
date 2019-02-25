@@ -16,8 +16,12 @@ import codecs
 from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, basename as _b
 from tqdm import tqdm as tqdm_progress
 
+from tensorflow.core.profiler.tfprof_log_pb2 import ProfileProto
+from proto.protobuf.pyprof_pb2 import Pyprof
+
 CATEGORY_TF_API = "Framework API C"
 CATEGORY_PYTHON = 'Python'
+CATEGORY_PYTHON_PROFILER = 'Python profiler'
 CATEGORY_CUDA_API_CPU = 'CUDA API CPU'
 CATEGORY_UNKNOWN = 'Unknown'
 CATEGORY_GPU = 'GPU'
@@ -51,6 +55,7 @@ CATEGORIES_ALL = [
     CATEGORY_OPERATION,
     CATEGORY_SIMULATOR_CPP,
     CATEGORY_PROFILING,
+    CATEGORY_PYTHON_PROFILER,
 ]
 
 # Record a "special" operation event-name (category=CATEGORY_OPERATION)
@@ -292,6 +297,12 @@ def maybe_indent(txt, indents):
     # DON'T indent the first line (typically manually indented in code.
     txt = re.sub('^\s*', '', txt, count=1)
     return txt
+
+def maybe_clause(op_clause, keep, indents=None):
+    if not keep:
+        return maybe_indent("TRUE", indents)
+    return maybe_indent(op_clause, indents)
+
 
 class ProfilerParserCommonMixin:
 
@@ -937,8 +948,11 @@ def pretty_time(time_sec, use_space=True):
 def us_to_sec(usec):
     return usec/1e6
 
-def sec_to_us(usec):
-    return usec*1e6
+def sec_to_us(sec):
+    return sec*1e6
+
+def sec_to_ms(sec):
+    return sec*1e3
 
 def unique(xs):
     return list(set(xs))
@@ -995,6 +1009,11 @@ def process_suffix(process_name):
     assert process_name is not None
     if process_name != NO_PROCESS_NAME:
         return ".{proc}".format(proc=process_name)
+    return ""
+
+def event_suffix(event_id):
+    if event_id is not None:
+        return ".{id}".format(id=event_id)
     return ""
 
 def step_suffix(step):
@@ -1255,12 +1274,37 @@ def IsCPUTime(device):
     # We must match the whole device string to match tfprof behaviour.
     return re.fullmatch(".*/(device:gpu|gpu|device:cpu|cpu|device:sycl):\\d+", device)
 
+def read_tfprof_file(path):
+    with open(path, 'rb') as f:
+        proto = ProfileProto()
+        proto.ParseFromString(f.read())
+    return proto
+
+def read_pyprof_file(path):
+    with open(path, 'rb') as f:
+        proto = Pyprof()
+        proto.ParseFromString(f.read())
+    return proto
+
+def read_pyprof_call_times_file(path):
+    with open(path, 'rb') as f:
+        call_times_data = pickle.load(f)
+    return call_times_data
+
 def is_tfprof_file(path):
     base = _b(path)
     m = re.search(r'profile{bench}{trace}{sess}.proto'.format(
         bench=BENCH_SUFFIX_RE,
         trace=TRACE_SUFFIX_RE,
         sess=SESSION_SUFFIX_RE,
+    ), base)
+    return m
+
+def is_pyprof_call_times_file(path):
+    base = _b(path)
+    m = re.search(r'pyprof_call_times{bench}{trace}.pickle'.format(
+        bench=BENCH_SUFFIX_RE,
+        trace=TRACE_SUFFIX_RE,
     ), base)
     return m
 
@@ -1279,6 +1323,15 @@ def is_dump_event_file(path):
         trace=TRACE_SUFFIX_RE,
     ), base)
     return m
+
+def is_insertable_file(path):
+    """
+    Does this file contain event data that can be inserted using SQLParser?
+    """
+    return is_tfprof_file(path) or \
+           is_pyprof_file(path) or \
+           is_dump_event_file(path) or \
+           is_pyprof_call_times_file(path)
 
 def is_config_file(path):
     base = _b(path)
@@ -1399,6 +1452,77 @@ def split_list(xs, n):
         yield xs[start:stop]
     start = (n_chunks - 1)*chunk_size
     yield xs[start:]
+
+# Taken from cProfile's Lib/pstats.py;
+# func_name is 3-tuple of (file-path, line#, function_name)
+# e.g.
+#     ('Lib/test/my_test_profile.py', 259, '__getattr__'):
+def pyprof_func_std_string(func_tuple): # match what old profile produced
+    if func_tuple[:2] == ('~', 0):
+        # special case for built-in functions
+        name = func_tuple[2]
+        if name.startswith('<') and name.endswith('>'):
+            return '{%s}' % name[1:-1]
+        else:
+            return name
+    else:
+        path, lineno, func_name = func_tuple
+        new_path = path
+        # Full path is useful for vim when visiting lines; keep it.
+        # new_path = re.sub(r'.*/site-packages/', '', new_path)
+        # new_path = re.sub(r'.*/clone/', '', new_path)
+        # new_path = re.sub(r'.*/lib/python[^/]*/', '', new_path)
+        return "{path}:{lineno}({func_name})".format(
+            path=new_path,
+            lineno=lineno,
+            func_name=func_name,
+        )
+
+class pythunk:
+    """
+    Create a 'thunk' when evaluating func(*args, *kwargs).
+    i.e. don't run func as normal when it's called.
+    Instead, keep track of the arguments that were passed. 
+    @pythunk
+    def f(x, y):
+        return x + y
+    thunk = func(1, 2)
+    # >>> type(thunk) == pythunk
+    thunk.evaluate()
+    When thunk.evalulate()
+    
+    """
+    def __init__(self, func):
+        self.func = func
+        self._evaluated = False
+
+    def eval(self):
+        if not self._evaluated:
+            self._ret = self.func(*self.args, **self.kwargs)
+            # Don't need these anymore.
+            self.args = None
+            self.kwargs = None
+            self._evaluated = True
+        return self._ret
+
+    def maybe_eval(self, should_eval):
+        if should_eval or self._evaluated:
+            return self.eval()
+        return self
+
+    def __call__(self, *args, **kwargs):
+        """
+        Store the arguments used for the call to func(*args, **kwargs).
+        However, don't actually run the function.
+        (we run the function only once pythunk.eval() is called).
+        
+        :param args: 
+        :param kwargs: 
+        :return: 
+        """
+        self.args = args
+        self.kwargs = kwargs
+        return self
 
 def test_split():
 

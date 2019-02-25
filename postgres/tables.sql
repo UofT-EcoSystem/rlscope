@@ -5,12 +5,60 @@
 CREATE TABLE Event (
     event_id SERIAL PRIMARY KEY,
     thread_id BIGINT,
-    start_time_us BIGINT NOT NULL,
-    end_time_us BIGINT NOT NULL,
-    duration_us BIGINT NOT NULL,
+
+--     start_time_us BIGINT NOT NULL,
+--     end_time_us BIGINT NOT NULL,
+--     duration_us BIGINT NOT NULL,
+
+    -- Use float/double instead of integer since for python call-times,
+    -- individual function-calls can take sub-microsecond time
+    -- (e.g. list operations).
+    -- TODO: read https://en.wikipedia.org/wiki/Denormal_number
+    -- These numbers shouldn't be too small.
+    -- Not sure about them being to large though...
+--     start_time_us FLOAT NOT NULL,
+--     end_time_us FLOAT NOT NULL,
+--     duration_us FLOAT NOT NULL,
+
+    -- We need nanosecond scale precision for short python profile function calls.
+    --
+    -- https://www.postgresql.org/docs/10/datatype-numeric.html#DATATYPE-FLOAT
+    -- Suggestion: use numeric type to preserve precision.
+    --
+    -- Q: Can we specify needed decimal-digits precision / # of non-decimal-digits?
+    -- Would that be faster?
+    --
+    -- Double precision is not good enough for nanosecond scale:
+    --   "1550795540.17681"
+    --   select 1550795540.1768074::double precision;
+    --   "1550795540.17681"
+    --   select 1550795540.176808::double precision;
+    --   (1550795540.176808 − 1550795540.1768074)×1e9 = 600 ns...
+    --   But postgres rounds these to the same number!
+    --   That's why the start time of now_us() and time.time() are identical in the trace.
+    --
+    -- Numeric precision works!
+    --   "1550795540.1768074"
+    --   select 1550795540.1768074::numeric;
+    --   "1550795540.176808"
+    --   select 1550795540.176808::numeric;
+    start_time_us NUMERIC NOT NULL,
+    end_time_us NUMERIC NOT NULL,
+    duration_us NUMERIC NOT NULL,
+
+    -- A short name to show in the chrome://tracing view of Chromium web browser.
     event_name TEXT,
 
     category_id INTEGER NOT NULL,
+    -- Detailed python profiler file/line-number/function information.
+    -- e.g.
+    --   ('Lib/test/my_test_profile.py', 225, 'helper'),
+    --   ('~', 0, "<method 'append' of 'list' objects>"),
+    pyprof_filename TEXT,
+    pyprof_line_no INTEGER,
+    pyprof_function TEXT,
+    -- Concatenated version of; make it easier to do "LIKE" queries.
+    pyprof_line_description TEXT,
 
     -- Not present in protobuf (currently);
     -- however to support tracing multiple processes, we will need this.

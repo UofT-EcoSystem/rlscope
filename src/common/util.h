@@ -5,6 +5,7 @@
 #ifndef DNN_TENSORFLOW_CPP_UTIL_H
 #define DNN_TENSORFLOW_CPP_UTIL_H
 
+#include <cmath>
 #include <vector>
 
 #include <type_traits>
@@ -60,6 +61,29 @@ T Average(CircularBuffer<T> buffer) {
     sm += buffer._buffer[i];
   }
   return sm/((T)len);
+}
+
+template <typename T>
+T Average(std::vector<T>& buffer) {
+  T sm = 0;
+  auto len = buffer.size();
+  for (const auto& elem : buffer) {
+    sm += elem;
+  }
+  return sm/((T)len);
+}
+
+template <typename T>
+T Stdev(std::vector<T>& buffer) {
+  T sm = 0;
+  auto avg = Average(buffer);
+  auto len = buffer.size();
+  for (const auto& elem : buffer) {
+    sm += pow(elem - avg, 2);
+  }
+  double var = sm/((T)len);
+  auto sd = sqrt(var);
+  return sd;
 }
 
 // https://stackoverflow.com/questions/7778734/static-assert-a-way-to-dynamically-customize-error-message

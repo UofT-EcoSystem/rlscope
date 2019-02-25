@@ -280,6 +280,7 @@ class Profiler:
                  debug=None,
                  exit_early=True,
                  require_end_operation=False,
+                 python=None,
                  disable=None,
                  args=None):
         modify_tensorflow()
@@ -355,6 +356,7 @@ class Profiler:
         self.total_profile_time_sec = 0
         self.directory = get_argval('directory', directory, None, allow_none=False)
         self.disable = get_argval('disable', disable, False)
+        self.python = get_argval('python', python, False)
         self.exit_early = exit_early
         self.tfprof = tfprof
         self.c_lib_func_pyprof_pattern = c_lib_func_pyprof_pattern
@@ -384,6 +386,9 @@ class Profiler:
         self.step_start_tracing = None
         self.average_time_per_call_sec = None
         self.average_time_per_call_no_profile_sec = None
+
+        if self.python:
+            self.pyprof = PythonProfiler(self.directory)
 
         # self.sess = None
         # self.pctx = None
@@ -562,6 +567,14 @@ class Profiler:
     @property
     def pyprof_proto_path(self):
         ret = _j(self.out_dir, "pyprof{bench}{trace}.proto".format(
+            bench=bench_suffix(self.bench_name),
+            trace=trace_suffix(self.next_trace_id),
+        ))
+        return ret
+
+    @property
+    def pyprof_call_times_path(self):
+        ret = _j(self.out_dir, "pyprof_call_times{bench}{trace}.pickle".format(
             bench=bench_suffix(self.bench_name),
             trace=trace_suffix(self.next_trace_id),
         ))
@@ -814,6 +827,8 @@ class Profiler:
         clib_wrap.set_step(self._pyprof_step, expect_traced=True)
         if (tensorflow_profile_context.DEBUG or TF_PRINT_TIMESTAMP) and clib_wrap.is_recording():
             print("> RECORDING pyprof_step = {step}".format(step=self._pyprof_step))
+        if self.python:
+            self.pyprof.enable()
         self._pyprof_enabled = True
 
     def _stop_pyprof(self):
@@ -821,6 +836,8 @@ class Profiler:
             return
         clib_wrap.disable_tracing()
         self._pyprof_enabled = False
+        if self.python:
+            self.pyprof.disable()
 
     @property
     def _pyprof_step(self):
@@ -1104,6 +1121,9 @@ class Profiler:
         self.dump_sessions_tfprof()
         clib_wrap.dump_pyprof(self.pyprof_proto_path, self.process_name, self.phase)
 
+        if self.python:
+            self.pyprof.dump(self.pyprof_call_times_path, self.process_name, self.phase)
+
         # if self.tfprof:
         #     # Rename: profile_100 -> profile_100.q_forward.proto
         #     tfprof_protos = [path for path in glob("{dir}/profile_*".format(dir=self.out_dir))
@@ -1337,105 +1357,124 @@ class PythonProfiler:
     with profiler(python_profile_basename="some/profile"):
             # profile this code
     """
-    def __init__(self, directory, bench_name=NO_BENCH_NAME, record_call_times=True, clock='monotonic_clock'):
+    def __init__(self, directory,
+                 # record_call_times=True,
+                 clock='monotonic_clock'):
         self.profile = cProfile.Profile()
         self.directory = directory
-        self.bench_name = bench_name
         self.clock = clock
         assert self.clock in ['monotonic_clock']
-        self.use_cycle_counter = (self.clock == 'cycle_counter')
+        # self.use_cycle_counter = (self.clock == 'cycle_counter')
         self.use_monotonic_clock = (self.clock == 'monotonic_clock')
-        self.record_call_times = record_call_times
+        # self.record_call_times = record_call_times
 
-        assert not ( self.use_cycle_counter and self.use_monotonic_clock )
+        # assert not ( self.use_cycle_counter and self.use_monotonic_clock )
 
-        if self.use_cycle_counter:
-            self.profile.make_use_cycle_counter()
+        # if self.use_cycle_counter:
+        #     self.profile.make_use_cycle_counter()
 
         if self.use_monotonic_clock:
-            self.profile.make_use_monotonic_clock()
+            if hasattr(self.profile, 'make_use_monotonic_clock'):
+                self.profile.make_use_monotonic_clock()
+            else:
+                print("WARNING: couldn't enable monotonic_clock for cProfiler; "
+                      "are you using a modified python3 with support for collecting raw start/end timestamps?")
 
-        if self.record_call_times:
+        # if self.record_call_times:
+        if hasattr(self.profile, 'make_record_call_times'):
             self.profile.make_record_call_times()
+        else:
+            print("WARNING: couldn't enable make_record_call_times for cProfiler; "
+                  "are you using a modified python3 with support for collecting raw start/end timestamps?")
 
     def __enter__(self):
         self.start()
+
+    def enable(self):
+        self.start()
+
+    def disable(self):
+        self.stop()
 
     def start(self):
         self.profile.enable()
 
     def stop(self):
         self.profile.disable()
-        # self.dump()
 
-    def dump(self):
+    def dump(self, call_times_path, process_name, phase,
+             pstats_txt_path=None,
+             pstats_path=None):
+
+        # if pstats_txt_path is not None:
         # sortby = ('calls', 'filename', 'name', 'line')
         sortby = ('tottime', 'filename', 'line', 'name')
+        # os.makedirs(os.path.dirname(pstats_txt_path), exist_ok=True)
+        # with open(pstats_txt_path, mode='w') as f:
+        #     # ps = pstats.Stats(self.profile, stream=f).sort_stats(*sortby)
+        #     ps = pstats.Stats(self.profile)
+        #     # if self.record_call_times:
+        #     call_times = ps.call_times
+        #     # ps.print_stats()
+        ps = pstats.Stats(self.profile)
+        call_times = ps.call_times
 
-        os.makedirs(os.path.dirname(self._stats_path), exist_ok=True)
-        with open(self._stats_path, mode='w') as f:
-            ps = pstats.Stats(self.profile, stream=f).sort_stats(*sortby)
-            if self.record_call_times:
-                call_times = ps.call_times
-            ps.print_stats()
-
-        if self.record_call_times:
-
-            # Tuple keys are not OK; convert to strings.
-            new_call_times = dict()
-            for func_tuple, times in call_times.items():
-                func = func_std_string(func_tuple)
-                new_call_times[func] = times
-            json.dump(new_call_times,
-                                codecs.open(self._call_times_path, mode='w', encoding='utf-8'),
-                                sort_keys=True, indent=4)
+        # if self.record_call_times:
+        # self._dump_call_times_json(call_times, call_times_path)
+        data = {
+            'process_name': process_name,
+            'phase': phase,
+            'call_times': call_times,
+        }
+        self._dump_call_times_pickle(data, call_times_path)
 
         os.makedirs(os.path.dirname(self._prof_path), exist_ok=True)
-        ps.dump_stats(self._prof_path)
+        if pstats_path is not None:
+            ps.dump_stats(pstats_path)
+
+        # Clear any python profiler data.
+        self.profile.clear()
+
+    def _dump_call_times_pickle(self, data, call_times_path):
+        os.makedirs(os.path.dirname(call_times_path), exist_ok=True)
+        print("> dump pyprof call_times data @ {path}".format(
+            path=call_times_path))
+        with open(call_times_path, 'wb') as f:
+            # -1 specifies highest binary protocol
+            pickle.dump(data, f, -1)
+
+    def _dump_call_times_json(self, call_times, call_times_path):
+
+        # Tuple keys are not OK; convert to strings.
+        new_call_times = dict()
+        for func_tuple, times in call_times.items():
+            func = pyprof_func_std_string(func_tuple)
+            new_call_times[func] = times
+        json.dump(new_call_times,
+                  codecs.open(call_times_path, mode='w', encoding='utf-8'),
+                  sort_keys=True, indent=4)
 
     @property
     def _prof_path(self):
-        ret = _j(self.directory, "python_profile{bench}.prof".format(
-            bench=bench_suffix(self.bench_name)))
+        ret = _j(self.directory, "python_profile.prof")
         return ret
 
-    @property
-    def _call_times_path(self):
-        return _j(self.directory, "python_profile{bench}.call_times.json".format(
-            bench=bench_suffix(self.bench_name)))
+    # @property
+    # def _call_times_path(self):
+    #     return _j(self.directory, "python_profile{bench}.call_times.json".format(
+    #         bench=bench_suffix(self.bench_name)))
+
+    # @property
+    # def _call_times_path(self):
+    #     return _j(self.directory, "pyprof_call_times{bench}.call_times.json".format(
+    #         bench=bench_suffix(self.bench_name)))
 
     @property
     def _stats_path(self):
-        return _j(self.directory, "python_profile{bench}.txt".format(
-            bench=bench_suffix(self.bench_name)))
+        return _j(self.directory, "python_profile.txt")
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.stop()
-
-# Taken from cProfile's Lib/pstats.py;
-# func_name is 3-tuple of (file-path, line#, function_name)
-# e.g.
-#     ('Lib/test/my_test_profile.py', 259, '__getattr__'):
-def func_std_string(func_tuple): # match what old profile produced
-    if func_tuple[:2] == ('~', 0):
-        # special case for built-in functions
-        name = func_tuple[2]
-        if name.startswith('<') and name.endswith('>'):
-            return '{%s}' % name[1:-1]
-        else:
-            return name
-    else:
-        path, lineno, func_name = func_tuple
-        new_path = path
-        # Full path is useful for vim when visiting lines; keep it.
-        # new_path = re.sub(r'.*/site-packages/', '', new_path)
-        # new_path = re.sub(r'.*/clone/', '', new_path)
-        # new_path = re.sub(r'.*/lib/python[^/]*/', '', new_path)
-        return "{path}:{lineno}({func_name})".format(
-            path=new_path,
-            lineno=lineno,
-            func_name=func_name,
-        )
 
 def add_iml_arguments(parser):
     parser.add_argument('--iml-nvprof-enabled', action='store_true', help=textwrap.dedent("""
@@ -1468,6 +1507,14 @@ def add_iml_arguments(parser):
         IML: DON'T delete any existing trace files; keep them and append to them.
         
         Useful if your ML script launches worker processes repeatedly.
+    """))
+    parser.add_argument('--iml-python', action='store_true', help=textwrap.dedent("""
+        IML: Collecting python profiler (pyprof) data for profiled operations.
+        
+        Python profiling data is grouped into per-operation summaries, instead of 
+        presenting profiling data process-wide.
+        
+        This prevent overwhelming the user with too much information.
     """))
     parser.add_argument('--iml-fuzz', action='store_true', help=textwrap.dedent("""
         IML: \"Fuzz\" the script for calls to TensorFlow API's.

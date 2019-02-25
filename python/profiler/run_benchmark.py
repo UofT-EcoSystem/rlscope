@@ -8,7 +8,7 @@ from os import environ as ENV
 # import baselines
 # from baselines import deepq
 # from baselines.deepq.simple_refactor import DQN, NAME_TO_MICRO, CUDA_MICROBENCH_NAMES, CUDA_MICROBENCH_NAME_TO_PRETTY, BENCH_NAME_REGEX, BENCH_AND_TOTAL_NAME_REGEX, BENCH_NAME_ORDER, BENCH_TYPES, MICRO_DEFAULTS, ARGPARSE_DEFAULTS, ARGPARSE_DEFAULTS_DEBUG, BENCH_NAME_TO_PRETTY, \
-#     get_nvprof_name, get_c_only_name, func_std_string, get_microbench_path, get_microbench_basename, is_microbench_path
+#     get_nvprof_name, get_c_only_name, pyprof_func_std_string, get_microbench_path, get_microbench_basename, is_microbench_path
 import re
 
 # pip install py-cpuinfo
@@ -34,14 +34,15 @@ from profiler import profilers
 
 from parser.nvprof import CUDASQLiteParser
 from parser.tfprof import TotalTimeParser, TraceEventsParser
-from parser.pyprof import PythonProfileParser, PythonProfileTotalParser
+from parser.pyprof import PythonProfileParser, PythonFlameGraphParser, PythonProfileTotalParser
 from parser.plot import TimeBreakdownPlot, PlotSummary, CombinedProfileParser, CategoryOverlapPlot, UtilizationPlot
 from parser.db import SQLParser
 
 from parser.common import *
 
-# CUDAProfileParser,
-PARSER_KLASSES = [PythonProfileParser, PythonProfileTotalParser, CUDASQLiteParser, CombinedProfileParser, PlotSummary, TimeBreakdownPlot, CategoryOverlapPlot, UtilizationPlot, TotalTimeParser, TraceEventsParser, SQLParser]
+# Deprecated:
+# CUDAProfileParser, PythonProfileTotalParser, CUDASQLiteParser, CombinedProfileParser,
+PARSER_KLASSES = [PythonProfileParser, PythonFlameGraphParser, PlotSummary, TimeBreakdownPlot, CategoryOverlapPlot, UtilizationPlot, TotalTimeParser, TraceEventsParser, SQLParser]
 PARSER_NAME_TO_KLASS = dict((ParserKlass.__name__, ParserKlass) \
                             for ParserKlass in PARSER_KLASSES)
 
@@ -247,6 +248,8 @@ def main():
     parser.add_argument("--debug",
                         action='store_true',
                         help='debug')
+    parser.add_argument("--op-name",
+                        help='Only handle <op_name> (instead of all op_names)')
     parser.add_argument("--debug-ops",
                         action='store_true',
                         help=textwrap.dedent("""
@@ -269,6 +272,10 @@ def main():
                         action='store_true',
                         help=textwrap.dedent("""
                         Run any multiprocessing stuff using a single thread for debugging.
+                        """))
+    parser.add_argument("--overlaps-event-id", type=int,
+                        help=textwrap.dedent("""
+                        TraceEventsParser: dump events that overlap with this one.
                         """))
     parser.add_argument("--no-profile-cuda",
                         action='store_true',

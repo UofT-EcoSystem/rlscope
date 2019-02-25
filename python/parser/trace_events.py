@@ -1,3 +1,5 @@
+import decimal
+
 from parser.common import *
 
 def dump_category_times(category_times, json_path, print_log=True, category_as_str=None):
@@ -18,7 +20,14 @@ class TraceEventsDumper:
         self.js_add_category_times(self.category_times)
         if print_log:
             print("> Write traceEvents to: {path}".format(path=self.json_path))
-        do_dump_json(self.js, self.json_path)
+
+        class DecimalEncoder(json.JSONEncoder):
+            def default(self, o):
+                if isinstance(o, decimal.Decimal):
+                    return str(o)
+                return super(DecimalEncoder, self).default(o)
+
+        do_dump_json(self.js, self.json_path, cls=DecimalEncoder)
 
     def _cat(self, category):
         if self.category_as_str is None:
@@ -85,7 +94,7 @@ class TraceEventsDumper:
                     tid_to_times = self.js_split_into_tids(all_times)
                     for tid, times in tid_to_times.items():
                         for time_sec in times:
-                            self.js_add_time(time.name, category_name, time_sec, tid)
+                            self.js_add_time(time_sec.name, category_name, time_sec, tid)
             # elif category == CATEGORY_GPU:
             #     ...
             elif self.reproduce_tfprof and category in [CATEGORY_PYTHON, CATEGORY_TF_API]:

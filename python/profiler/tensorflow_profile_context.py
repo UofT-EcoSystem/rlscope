@@ -76,9 +76,9 @@ def _check_single_threaded():
 WARMUP_STEPS = 10
 MAX_TRACED_STEPS = 100
 
-DEBUG = False
+# DEBUG = False
+DEBUG = True
 DEBUG_THREADS = False
-# DEBUG = True
 # DEBUG_THREADS = True
 
 RUN_OPTIONS_NO_TRACE = config_pb2.RunOptions(

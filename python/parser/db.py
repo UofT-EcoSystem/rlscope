@@ -90,7 +90,7 @@ class SQLParser:
         for dirpath, dirnames, filenames in os.walk(self.directory):
             for base in filenames:
                 path = _j(dirpath, base)
-                if is_tfprof_file(path) or is_pyprof_file(path) or is_dump_event_file(path):
+                if is_insertable_file(path):
                     src_files.append(path)
         if len(src_files) == 0:
             raise MissingInputFiles(textwrap.dedent("""
@@ -809,6 +809,8 @@ class _CSVInserterWorker:
             self.insert_tfprof_file(path)
         elif is_pyprof_file(path) or is_dump_event_file(path):
             self.insert_pyprof_file(path)
+        elif is_pyprof_call_times_file(path):
+            self.insert_pyprof_call_times_file(path)
         else:
             raise NotImplementedError
 
@@ -863,6 +865,81 @@ class _CSVInserterWorker:
         for step, clibs in pyprof_proto.clibs.items():
             for category, clib_events in clibs.clibs.items():
                 yield category, clib_events.events
+
+    def insert_pyprof_call_times_file(self, path):
+        call_times_data = read_pyprof_call_times_file(path)
+
+        print("> Insert pyprof call_times file: {p}".format(p=path))
+        if self.debug:
+            pprint.pprint({'call_times_data':call_times_data})
+
+        process_name = call_times_data['process_name']
+
+        c = self.cursor
+        # Insert Process
+        # process_id = self.insert_process_name(proto.process_name)
+        process_id = self.process_to_id[process_name]
+
+        num_all_events = sum(len(epoch_duration_sec_pairs) \
+                             for func_tupl, epoch_duration_sec_pairs in call_times_data['call_times'].items())
+
+        with progressbar.ProgressBar(max_value=num_all_events) as bar:
+            category = CATEGORY_PYTHON_PROFILER
+            category_id = self.category_to_id[category]
+            i = 0
+            for func_tupl, epoch_duration_sec_pairs in call_times_data['call_times'].items():
+                pyprof_filename, pyprof_line_no, pyprof_function = func_tupl
+                for start_epoch_sec, duration_sec in epoch_duration_sec_pairs:
+                    # Q: Should we define a separate table for python profiling data to avoid cramming file/line/func-name data into a single field?
+                    # Options:
+                    # - Use EventAttribute's
+                    #   - Annoying/slow: extra joins (NOTE: joins may not be a big deal)
+                    # - Add (usually) NULL columns for pyprof-specific fields <-- this is probably the best approach.
+                    #   - Do this; assume # of Event's is LARGE ( which is definitely is ), so lets avoid joins.
+                    # - Add Pyprof table with foreign-key reference from Event to Pyprof metadata row (file/line/func-name)
+                    #   - Makes event inserts slower...I don't bother handling foreign key management when doing bulk inserts.
+                    #   - extra joins (NOTE: joins may not be a big deal)
+                    pyprof_line_description = pyprof_func_std_string(func_tupl)
+                    # Insert Event
+                    is_debug_event = False
+                    start_time_us = sec_to_us(start_epoch_sec)
+                    duration_us = sec_to_us(duration_sec)
+                    end_time_us = start_time_us + duration_us
+                    ins = {
+                        # 'thread_id':event.thread_id,
+                        'start_time_us':start_time_us,
+                        'end_time_us':end_time_us,
+                        'duration_us':duration_us,
+                        # Q: function name alone can be vague without knowing the filename.
+                        'event_name':pyprof_function,
+                        'category_id':category_id,
+                        'process_id':process_id,
+                        'is_debug_event':is_debug_event,
+                        'pyprof_filename':pyprof_filename,
+                        'pyprof_line_no':pyprof_line_no,
+                        'pyprof_function':pyprof_function,
+                        'pyprof_line_description':pyprof_line_description,
+                    }
+                    # import ipdb; ipdb.set_trace()
+
+                    # ipdb> pp ins
+                    # {'category_id': 8,
+                    #  'duration_us': 10.735000000000001,
+                    #  'end_time_us': 1550795540176821.2,
+                    #  'event_name': 'set_operation',
+                    #  'is_debug_event': False,
+                    #  'process_id': 1,
+                    #  'pyprof_filename': '/mnt/data/james/clone/dnn_tensorflow_cpp/python/profiler/profilers.py',
+                    #  'pyprof_function': 'set_operation',
+                    #  'pyprof_line_description': '/mnt/data/james/clone/dnn_tensorflow_cpp/python/profiler/profilers.py:788(set_operation)',
+                    #  'pyprof_line_no': 788,
+                    #  'start_time_us': 1550795540176810.5}
+
+                    event_id = self.insert_dict('Event', ins)
+                    i += 1
+                    bar.update(i)
+
+        self.conn.commit()
 
     def insert_pyprof_file(self, path):
         with open(path, 'rb') as f:
@@ -1601,12 +1678,15 @@ class SQLCategoryTimesReader:
     def directory(self):
         return _d(self.db_path)
 
+    def op_names(self, debug_ops=False):
+        return self.bench_names(debug_ops)
+
     def bench_names(self, debug_ops=False):
         c = self.conn.cursor
         c.execute("""
         SELECT DISTINCT e.event_name FROM Event AS e NATURAL JOIN Category AS c
         WHERE 
-            c.category_name = '{CATEGORY_OPERATION}' 
+            c.category_name = '{CATEGORY_OPERATION}' AND
             {debug_ops_clause}
         ORDER BY e.event_name
         """.format(
@@ -1789,29 +1869,16 @@ class SQLCategoryTimesReader:
 
         for process_name in self.process_names:
 
-            proc_events = self.process_events(process_name, ignore_categories,
+            process_label = "process={proc}".format(
+                proc=process_name)
+            proc_category_times = self.process_events(process_name, ignore_categories,
                                               debug=debug,
                                               debug_ops=debug_ops,
+                                              debug_label=process_label,
                                               # fetchall=False,
                                               fetchall=True,
                                               )
             # assert len(proc_events) > 0
-            proc_category_times = dict()
-            start_t = time.time()
-            process_label = "process={proc}".format(
-                proc=process_name)
-            self._add_event_rows_to_category_times(
-                proc_category_times, proc_events,
-                debug=debug,
-                show_progress=debug,
-                debug_label=process_label)
-            end_t = time.time()
-            if debug:
-                time_sec = end_t - start_t
-                print("> process_name={proc}: _add_event_rows_to_category_times took {sec} seconds".format(
-                    proc=process_name,
-                    sec=time_sec,
-                ))
             # assert len(proc_category_times) > 0
             # assert len(proc_category_times[CATEGORY_OPERATION]) > 0
 
@@ -1885,38 +1952,89 @@ class SQLCategoryTimesReader:
         total_time_sec = total_time_us/MICROSECONDS_IN_SECOND
         return total_time_sec
 
-    def process_events(self, process_name, ignore_categories,
+    def process_events(self, process_name=None,
+                       ignore_categories=None,
+                       op_name=None,
+                       keep_categories=None,
                        debug=False,
+                       debug_label=None,
                        debug_ops=False,
                        fetchall=True):
+        """
+        Query ALL events for a particular process_name.
+        If process_name is None, return events across ALL processes.
+
+        :param process_name:
+            If process_name is None, return events across ALL processes.
+        :param ignore_categories:
+            Ignore events belonging to this category.
+        :param keep_categories:
+            Only keep events belonging to this category.
+        :param debug:
+        :param debug_ops:
+        :param fetchall:
+        :return:
+        """
+
         c = self.conn.cursor
+
+        @pythunk
+        def get_op_clause():
+            return """
+            EXISTS (
+                SELECT * 
+                FROM Event as op_event
+                    NATURAL JOIN Category as c2
+                WHERE 
+                    c2.category_name = '{CATEGORY_OPERATION}' AND
+                    op_event.event_name = '{op}' AND 
+                    {op_event_subsumes_e1_clause}
+            )
+            """.format(
+                op_event_subsumes_e1_clause=sql_overlap_clause('op_event', 'e1', overlap_type='subsumes', indents=3),
+                CATEGORY_OPERATION=CATEGORY_OPERATION,
+                op=op_name,
+            )
+        keep_op_clause = op_name is not None
+        op_clause = maybe_clause(get_op_clause().maybe_eval(keep_op_clause), keep=keep_op_clause, indents=3)
+
         query = textwrap.dedent("""
         SELECT d1.device_name, c1.category_name, e1.event_name, e1.start_time_us, e1.duration_us
+            , e1.pyprof_filename
+            , e1.pyprof_line_no
+            , e1.pyprof_function
+            , e1.pyprof_line_description
         FROM 
             Category AS c1
             NATURAL JOIN Event as e1
             NATURAL JOIN Process as p1
             NATURAL LEFT JOIN Device as d1
         WHERE 
-            p1.process_name = {p}
-            {debug_ops_clause}
+            {process_clause} AND
+            {debug_ops_clause} AND
             {ignore_clause} AND
+            -- Ignore any events that overlap with when we dump profiling information.
             NOT EXISTS (
                 SELECT * 
-                FROM Event as e2
+                FROM Event as dump_event
                     NATURAL JOIN Category as c2
                 WHERE 
                     c2.category_name = '{CATEGORY_PROFILING}' AND
-                    e2.event_name = '{PROFILING_DUMP_TRACE}' AND 
+                    dump_event.event_name = '{PROFILING_DUMP_TRACE}' AND 
                     {overlap_clause}
-            )
+            ) AND 
+            -- Only keep events that are subsumed by an <op> event.
+            -- e.g. Only keep pyprof events that belong to the set_operation('tree_search') annotation
+            {op_clause}
         ORDER BY start_time_us ASC 
         """).format(
-            ignore_clause=self._ignore_clause(ignore_categories, indents=1),
+            ignore_clause=sql_ignore_clause('c1', ignore_categories, keep_categories, indents=1),
             CATEGORY_PROFILING=CATEGORY_PROFILING,
             PROFILING_DUMP_TRACE=PROFILING_DUMP_TRACE,
-            overlap_clause=sql_overlap_clause('e1', 'e2', indents=3),
+            overlap_clause=sql_overlap_clause('e1', 'dump_event', indents=3),
+            process_clause=sql_process_clause(process_name, 'p1', indents=1, allow_none=True),
             debug_ops_clause=sql_debug_ops_clause(debug_ops, 'e1', indents=1),
+            op_clause=op_clause,
             p=sql_placeholder(),
         )
 
@@ -1932,7 +2050,6 @@ class SQLCategoryTimesReader:
         #     ignore_clause=ignore_clause,
         # ))
 
-
         params = (
             process_name,
         )
@@ -1940,7 +2057,7 @@ class SQLCategoryTimesReader:
 
         if fetchall:
             query_start_t = time.time()
-            ret = c.fetchall()
+            rows = c.fetchall()
             query_end_t = time.time()
             time_sec = query_end_t - query_start_t
             if debug:
@@ -1952,27 +2069,25 @@ class SQLCategoryTimesReader:
                 print("> fetchall = {fetchall}".format(
                     fetchall=fetchall,
                 ))
-            ret = c
-        return ret
+            rows = c
 
-    def _ignore_clause(self, ignore_categories, indents=None):
-        if len(ignore_categories) == 0:
-            return ""
+        # start_t = time.time()
+        category_times = dict()
+        self._add_event_rows_to_category_times(
+            category_times, rows,
+            debug=debug,
+            show_progress=debug,
+            debug_label=debug_label)
+        # end_t = time.time()
+        # if debug:
+        #     time_sec = end_t - start_t
+        #     print("> process_name={proc}: _add_event_rows_to_category_times took {sec} seconds".format(
+        #         proc=process_name,
+        #         sec=time_sec,
+        #     ))
 
-        def ignore_and_clause(category):
-            and_clause = "category_name != '{category}'".format(
-                category=category)
-            return and_clause
+        return category_times
 
-        # ignore_cats = list(ignore_categories) + [CATEGORY_OPERATION]
-        ignore_clause = \
-            "AND (\n" + \
-                " AND \n".join([ignore_and_clause(category) for category in ignore_categories]) + \
-            "\n)"
-
-        ignore_clause = maybe_indent(ignore_clause, indents)
-
-        return ignore_clause
 
     def _add_event_rows_to_category_times(self, category_times, rows,
                                           group_by_device=DEFAULT_group_by_device,
@@ -1997,7 +2112,12 @@ class SQLCategoryTimesReader:
               debug=DEFAULT_debug,
               show_progress=False):
         """
-        JAMES NOTE: This is for reading a operation-instance (step) at-a-time.
+        This is for reading a operation-instance ("step") at-a-time, for a particular process.
+        e.g.
+           Give me ALL events across ALL categories
+           that overlap with the bench_name='tree_search' operation,
+           for process_name=loop_train_eval
+
         In order to read a "chunk" of the timeline trace at a time, we probably
         want to expose another method.
 
@@ -2035,6 +2155,46 @@ class SQLCategoryTimesReader:
             print("> step={step}, process={proc}, op={bench}, time={time}".format(
                 step=step, proc=process_name, bench=bench_name, time=op_event))
 
+        return self.events_that_overlap_with(
+            op_event, process_name,
+            bench_name=bench_name,
+            step=step,
+            group_by_device=group_by_device,
+            ignore_categories=ignore_categories,
+            debug=debug,
+            show_progress=show_progress)
+
+    def event_by_id(self, event_id, debug=False):
+        c = self.conn.cursor
+        query = textwrap.dedent("""
+        SELECT event_id, device_name, category_name, process_name, event_name, start_time_us, duration_us
+        FROM 
+            Category
+            NATURAL JOIN Event
+            NATURAL JOIN Process
+            NATURAL LEFT JOIN Device
+        WHERE 
+            event_id = {p}
+        """.format(
+            p=sql_placeholder(),
+        ))
+        params = (
+            event_id,
+        )
+        sql_exec_query(c, query, params, self.__class__, debug)
+        row = c.fetchone()
+        ktime = row_as_event(row)
+        return ktime
+
+    def events_that_overlap_with(self, op_event, process_name,
+                                 # For debugging self.parse()
+                                 bench_name=None,
+                                 step=None,
+                                 group_by_device=DEFAULT_group_by_device,
+                                 ignore_categories=DEFAULT_ignore_categories,
+                                 debug=DEFAULT_debug,
+                                 show_progress=False):
+
         c = self.conn.cursor
 
         """
@@ -2068,7 +2228,7 @@ class SQLCategoryTimesReader:
         query = textwrap.dedent("""
         SELECT device_name, category_name, event_name, start_time_us, duration_us
         FROM 
-            Category
+            Category AS c
             NATURAL JOIN Event
             NATURAL JOIN Process
             NATURAL LEFT JOIN Device
@@ -2076,11 +2236,11 @@ class SQLCategoryTimesReader:
             process_name = {p} AND ( 
                 ( {p} <= start_time_us AND start_time_us <= {p} ) OR
                 ( {p} <= end_time_us AND end_time_us <= {p} )
-            )
+            ) AND
             {ignore_clause}
         ORDER BY start_time_us ASC 
         """.format(
-            ignore_clause=self._ignore_clause(ignore_categories, indents=1),
+            ignore_clause=sql_ignore_clause('c', ignore_categories, indents=1),
             p=sql_placeholder(),
         ))
         params = (
@@ -2091,7 +2251,7 @@ class SQLCategoryTimesReader:
 
         if SQLCategoryTimesReader.DEBUG_PARSE:
             start_parse_query_t = time.time()
-        sql_exec_query(c, query, params, self.__class__, parse_debug)
+        sql_exec_query(c, query, params, self.__class__, debug)
         # import ipdb; ipdb.set_trace()
         category_times = dict()
         debug_label = "process={proc}, step={step}".format(
@@ -2128,7 +2288,7 @@ class SQLCategoryTimesReader:
             ))
 
         # if i == 0 and self.debug:
-        if parse_debug:
+        if debug:
             # Q: What do does train_loop look like, overlapped with all its fellow operation-types?
             json_path = _j(self.directory, "SQLCategoryTimesReader{proc}{step}{bench}.debug.json".format(
                 proc=process_suffix(process_name),
@@ -2489,6 +2649,23 @@ def row_as_ktime(row):
         end_usec=row['start_time_us'] + row['duration_us'],
         name=row['event_name'],
     )
+    event_maybe_add_pyprof_fields(ktime, row)
+    return ktime
+
+def event_maybe_add_pyprof_fields(ktime, row):
+    if 'pyprof_function' in row and row['pyprof_function'] is not None:
+        ktime.pyprof_function = row['pyprof_function']
+        ktime.pyprof_line_no = row['pyprof_line_no']
+        ktime.pyprof_filename = row['pyprof_filename']
+        ktime.pyprof_line_description = row['pyprof_line_description']
+
+def row_as_event(row):
+    ktime = row_as_ktime(row)
+    # Add additional attributes to KernelTime.
+    ktime.event_id = row['event_id']
+    ktime.device_name = row['device_name']
+    ktime.category_name = row['category_name']
+    ktime.process_name = row['process_name']
     return ktime
 
 def process_op_nest_single_thread(op_events, filter_by_op=None,
@@ -2517,26 +2694,43 @@ def process_op_nest_single_thread(op_events, filter_by_op=None,
     :return:
     """
 
-    # def check_no_complete_overlap(op_events):
-    #     for op1, op2 in zip(op_events, op_events[1:]):
-    #         assert not op1.equals(op2)
-    # check_no_complete_overlap(op_events)
-
-    # We can parallelize this by first scanning for "contiguous chunks" of operations.
-    # Then the Worker would take a contiguous chunk of operations, convert it to an OpStack,
+    # NOTE: We could (but haven't) parallelize this by first scanning for
+    # "contiguous chunks" of operations.
+    # Then the Worker would take a contiguous chunk of operations,
+    # convert it to an OpStack,
     # then yield events from it.
 
     all_events = []
     for i, op_stack in enumerate(split_op_stacks(op_events,
                                                  show_progress=show_progress,
                                                  debug_label=debug_label,
-                                                 just_op_stack=True)):
+                                                 each_push=True)):
         for event in op_stack.get_absored_ops():
             if filter_by_op is not None and event.name != filter_by_op:
                 continue
             all_events.append(event)
 
     return all_events
+
+def each_stack_trace(events,
+                     show_progress=False,
+                     debug=False,
+                     debug_label=None):
+    # all_events = []
+    return split_op_stacks(events,
+                           show_progress=show_progress,
+                           debug_label=debug_label,
+                           each_push=True)
+
+    # for op_stack in split_op_stacks(events,
+    #                                 show_progress=show_progress,
+    #                                 debug_label=debug_label,
+    #                                 each_push=True):
+    #     yield op_stack
+    #     # for event in op_stack.get_absored_ops():
+    #     #     if filter_by_op is not None and event.name != filter_by_op:
+    #     #         continue
+    #     #     all_events.append(event)
 
 # def ProcessOpNestWorker(op_stack : OpStack, debug):
 def ProcessOpNestWorker(args):
@@ -2549,18 +2743,18 @@ def ProcessOpNestWorker(args):
     return events
 
 def split_op_stacks(op_events,
-                    filter_by_op=None, debug=False, debug_label=None,
+                    debug_label=None,
                     show_progress=False,
-                    just_op_stack=False):
+                    each_push=False):
 
     # NOTE: It IS possible to parallelize split_op_stacks.
     # The worker processes just need to agree who covers the "chunk" on the boundary of the event split
     # e.g. if we start in the middle of a "chunk", walk forwards past the end of the chunk,
     # and assume the previous worker will handle it.
-    def as_result(op_stack):
-        if just_op_stack:
-            return op_stack
-        return op_stack, filter_by_op, debug
+    # def as_result(op_stack):
+    #     if just_op_stack:
+    #         return op_stack
+    #     return op_stack, filter_by_op, debug
 
     op_stack = None
     for i, op_event in enumerate(progress(
@@ -2569,13 +2763,22 @@ def split_op_stacks(op_events,
         show_progress=show_progress)):
         if op_stack is None:
             op_stack = OpStack(op_event)
+            if each_push:
+                yield op_stack
         elif op_stack.ktime.subsumes(op_event):
-            op_stack.insert(op_event)
+            op_ins = op_stack.insert(op_event)
+            if each_push:
+                yield op_ins
         else:
-            yield as_result(op_stack)
+            yield op_stack
+            # yield as_result(op_stack)
             op_stack = OpStack(op_event)
-    if op_stack is not None:
-        yield as_result(op_stack)
+            if each_push:
+                yield op_stack
+
+    if op_stack is not None and not each_push:
+        # yield as_result(op_stack)
+        yield op_stack
 
 def process_op_nest_parallel(op_events, filter_by_op=None,
                              debug=False,
@@ -2618,9 +2821,14 @@ def process_op_nest_parallel(op_events, filter_by_op=None,
     # ))
     total_op_stacks = None
 
+    def _split_op_stacks(op_events):
+        for op_stack in split_op_stacks(op_events, filter_by_op, debug):
+            # Pass extra arguments to ProcessOpNestWorker.
+            yield op_stack, filter_by_op, debug
+
     # with multiprocessing.Pool(nprocs) as pool:
     with ProcessPoolExecutor(nprocs) as pool:
-        splits = split_op_stacks(op_events, filter_by_op, debug)
+        splits = _split_op_stacks(op_events)
         all_events = []
         for i, events in enumerate(progress(
             pool.map(ProcessOpNestWorker, splits),
@@ -2653,6 +2861,55 @@ class OpStack:
         self.sub_ops = []
         self.ktime = kernel_time
         self.last_insert_start_time = None
+        self.parent = None
+        
+    @property
+    def time_sec(self):
+        """
+                          [op3: 1 second]
+                       [   op2: 5 seconds   ] 
+        OpStack -> [       op1: 10 seconds        ]
+        
+        >>> op3.time_sec()
+        1 second
+        >>> op2.stacktrace()
+        5 seconds
+        >>> op1.stacktrace()
+        10 seconds
+        
+        :param op_stack: 
+        :return: 
+            List of OpStack entries.
+        """
+        return self.ktime.total_time_sec
+        
+    def stacktrace(self):
+        """
+                          [op3]
+                       [   op2   ] [op4] [op5]
+        OpStack -> [             op1               ]
+        
+        >>> op3.stacktrace()
+        [op1, op2, op3]
+        >>> op2.stacktrace()
+        [op1, op2]
+        >>> op4.stacktrace()
+        [op1, op4]
+        >>> op1.stacktrace()
+        [op1]
+        
+        :param op_stack: 
+        :return: 
+            List of OpStack entries.
+        """
+        trace = []
+        curframe = self
+        while curframe != None:
+            trace.append(curframe)
+            curframe = curframe.parent
+        # Put root-call is at the start of the list.
+        trace.reverse()
+        return trace
 
     def subsumes(self, op):
         return self.ktime.subsumes(op.ktime)
@@ -2666,6 +2923,7 @@ class OpStack:
         op1 = OpStack(ktime)
         assert self.subsumes(op1)
         self._insert(op1)
+        return op1
 
     def _insert(self, op1):
         assert self.subsumes(op1)
@@ -2675,6 +2933,7 @@ class OpStack:
                 return
         if len(self.sub_ops) > 0:
             assert op1.ktime.is_after(self.sub_ops[-1].ktime)
+        op1.parent = self
         self.sub_ops.append(op1)
         # into = self
         # if into.ktime.subsumes(op.ktime):
@@ -2840,58 +3099,194 @@ def merge_sorted(xs, ys, key=lambda x: x):
 
 def sql_debug_ops_clause(debug_ops, event_alias, indents=None):
     if debug_ops:
-        txt = ""
+        txt = "TRUE"
     else:
         # --debug-ops is not set.
         # DON'T show debug events.
-        txt = "AND NOT {e}.is_debug_event".format(
+        txt = "( NOT {e}.is_debug_event )".format(
             e=event_alias)
 
     txt = maybe_indent(txt, indents)
     return txt
 
-def sql_overlap_clause(event_alias_1, event_alias_2, indents=None):
+def sql_process_clause(process_name, process_alias, indents=None, allow_none=False):
+    if process_name is None:
+        if not allow_none:
+            raise RuntimeError("Expected process_name not to be None")
+        txt = "TRUE"
+    else:
+        txt = "( {p}.process_name = '{process_name}' )".format(
+            process_name=process_name,
+            p=process_alias)
+
+    txt = maybe_indent(txt, indents)
+    return txt
+
+def sql_ignore_clause(category_alias, ignore_categories=None, keep_categories=None, indents=None):
+    if keep_categories is not None and ignore_categories is not None:
+        raise RuntimeError("Can only provide keep_categories or ignore_categories, not both")
+
+    if ( ignore_categories is None or len(ignore_categories) == 0 ) and \
+        ( keep_categories is None or len(keep_categories) == 0 ):
+        return "TRUE"
+
+    assert ( ignore_categories is not None and len(ignore_categories) > 0 ) or \
+           ( keep_categories is not None and len(keep_categories) > 0 )
+
+    def _clause(category, ignore):
+        if ignore:
+            clause = "{c}.category_name != '{category}'".format(
+                c=category_alias,
+                category=category)
+        else:
+            clause = "{c}.category_name = '{category}'".format(
+                c=category_alias,
+                category=category)
+        return clause
+
+    def _clauses(categories, ignore):
+        if ignore:
+            conjunct = 'AND'
+        else:
+            conjunct = 'OR'
+        clause = \
+            "(\n" + \
+            " {conjunct} \n".format(conjunct=conjunct).join([
+                _clause(category, ignore) for category in categories
+            ]) + \
+            "\n)"
+        clause = maybe_indent(clause, indents)
+        return clause
+
+    if ignore_categories is not None:
+        clauses = _clauses(ignore_categories, ignore=True)
+    else:
+        clauses = _clauses(keep_categories, ignore=False)
+
+    return clauses
+
+def sql_overlap_clause(event_alias_1, event_alias_2,
+                       indents=None,
+                       overlap_type='any'):
     """
     Given two Event table aliases, provide a clause for determine
     if the events from those two tables overlap.
+    :param overlap_type
+        'any'
+            Any overlap between op1 and op2, be it partial, or subsumes (in either direction)
+        'subsumes'
+            op1 subsumes op2
+            Any overlap between op1 and op2, be it partial, or subsumes (in either direction)
+        'partial'
+            op1 partially overlaps op2.
+            NOTE: partial overlap is symmetric
+            i.e.
+            "op1 partially overlaps op2" is the same as
+            "op2 partially overlaps op1"
     :return:
     """
 
     # Q: How many ways can your overlap 2 events?
-    # 1. [ op1 ]
-    #       [ op2 ]
-    #    op1.start <= op2.start <= op1.end <= op2.end
+    # Partial overlap:
     #
-    # 2. [ op2 ]
-    #       [ op1 ]
+    #   1. [ op1 ]
+    #         [ op2 ]
+    #      op1.start <= op2.start <= op1.end <= op2.end
+    #
+    #   2. [ op2 ]
+    #         [ op1 ]
     #    op2.start <= op1.start <= op2.end <= op1.end
     #
-    # 3. [     op1     ]
-    #        [ op2 ]
-    #    op2.start <= op1.start <= op1.end <= op2.end
+    # Subsume:
     #
-    # 4. [     op2     ]
-    #        [ op1 ]
+    #   op1 subsumes op2
+    #   3. [     op1     ]
+    #          [ op2 ]
+    #      op2.start <= op1.start <= op1.end <= op2.end
+    #
+    #   op2 subsumes op1
+    #   4. [     op2     ]
+    #          [ op1 ]
     #    op1.start <= op2.start <= op2.end <= op1.end
-    clause = textwrap.dedent("""
-        (
-            ( {e1}.start_time_us <= {e2}.start_time_us AND 
-                                    {e2}.start_time_us <= {e1}.end_time_us AND 
-                                                          {e1}.end_time_us <= {e2}.end_time_us ) OR
-            ( {e2}.start_time_us <= {e1}.start_time_us AND 
-                                    {e1}.start_time_us <= {e2}.end_time_us AND 
-                                                          {e2}.end_time_us <= {e1}.end_time_us ) OR
-            ( {e2}.start_time_us <= {e1}.start_time_us AND 
-                                    {e1}.start_time_us <= {e1}.end_time_us AND 
-                                                          {e1}.end_time_us <= {e2}.end_time_us ) OR
-            ( {e1}.start_time_us <= {e2}.start_time_us AND 
-                                    {e2}.start_time_us <= {e2}.end_time_us AND 
-                                                          {e2}.end_time_us <= {e1}.end_time_us )
-        )
-        """.format(
-        e1=event_alias_1,
-        e2=event_alias_2))
 
+    def _clause(op1, op2, otype):
+        if otype == 'subsumes':
+            # op1 subsumes op2
+            #   3. [     op1     ]
+            #          [ op2 ]
+            clause = textwrap.dedent("""
+                ( {op1}.start_time_us <= {op2}.start_time_us AND 
+                                         {op2}.start_time_us <= {op2}.end_time_us AND 
+                                                                {op2}.end_time_us <= {op1}.end_time_us )
+                """.format(
+                op1=op1,
+                op2=op2))
+        elif otype == 'partial':
+            # op1 partially overlaps op2
+            #   1. [ op1 ]
+            #         [ op2 ]
+            clause = textwrap.dedent("""
+                ( {op1}.start_time_us <= {op2}.start_time_us AND 
+                                         {op2}.start_time_us <= {op1}.end_time_us AND 
+                                                                {op1}.end_time_us <= {op2}.end_time_us ) 
+                """.format(
+                op1=op1,
+                op2=op2))
+        else:
+            raise NotImplementedError
+        return clause
+
+    e1 = event_alias_1
+    e2 = event_alias_2
+    if overlap_type == 'any':
+        clauses = [
+            _clause(e1, e2, 'partial'),
+            _clause(e2, e1, 'partial'),
+            _clause(e1, e2, 'subsumes'),
+            _clause(e2, e1, 'subsumes'),
+        ]
+    elif overlap_type == 'partial':
+        clauses = [
+            _clause(e1, e2, 'partial'),
+            _clause(e2, e1, 'partial'),
+        ]
+    elif overlap_type == 'subsumes':
+        clauses = [
+            _clause(e1, e2, 'subsumes'),
+        ]
+    else:
+        raise NotImplementedError
+
+    # Join clauses via OR, but make it legible (not all on 1 line, proper indent)
+    clauses = " OR \n".join(clauses)
+    clause = textwrap.dedent("""
+    (
+        {clauses}
+    )
+    """).format(
+        clauses=maybe_indent(clauses, indents=1),
+    )
+
+    # clause = textwrap.dedent("""
+    #     (
+    #         ( {e1}.start_time_us <= {e2}.start_time_us AND
+    #                                 {e2}.start_time_us <= {e1}.end_time_us AND
+    #                                                       {e1}.end_time_us <= {e2}.end_time_us ) OR
+    #         ( {e2}.start_time_us <= {e1}.start_time_us AND
+    #                                 {e1}.start_time_us <= {e2}.end_time_us AND
+    #                                                       {e2}.end_time_us <= {e1}.end_time_us ) OR
+    #         ( {e2}.start_time_us <= {e1}.start_time_us AND
+    #                                 {e1}.start_time_us <= {e1}.end_time_us AND
+    #                                                       {e1}.end_time_us <= {e2}.end_time_us ) OR
+    #         ( {e1}.start_time_us <= {e2}.start_time_us AND
+    #                                 {e2}.start_time_us <= {e2}.end_time_us AND
+    #                                                       {e2}.end_time_us <= {e1}.end_time_us )
+    #     )
+    #     """.format(
+    #     e1=event_alias_1,
+    #     e2=event_alias_2))
+
+    # Add indent desired by caller
     clause = maybe_indent(clause, indents)
 
     return clause
@@ -2914,17 +3309,17 @@ def sql_get_source_files(klass, directory):
 
 def get_proto_process_name(path):
     if is_tfprof_file(path):
-        with open(path, 'rb') as f:
-            proto = ProfileProto()
-            proto.ParseFromString(f.read())
+        proto = read_tfprof_file(path)
         return proto.process_name
     elif is_pyprof_file(path) or is_dump_event_file(path):
-        with open(path, 'rb') as f:
-            proto = Pyprof()
-            proto.ParseFromString(f.read())
+        proto = read_pyprof_file(path)
         return proto.process_name
+    elif is_pyprof_call_times_file(path):
+        call_times_data = read_pyprof_call_times_file(path)
+        return call_times_data['process_name']
     else:
-        raise NotImplementedError
+        raise NotImplementedError("Not sure how to get process_name from trace-file {path}".format(
+            path=path))
 
 def test_merge_sorted():
 

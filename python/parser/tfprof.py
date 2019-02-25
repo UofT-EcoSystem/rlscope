@@ -609,10 +609,19 @@ class TraceEventsParser:
     def __init__(self, directory,
                  # Swallow any excess arguments
                  debug=False,
+                 show_progress=False,
+                 overlaps_event_id=None,
+                 op_name=None,
+                 # start_usec=None,
+                 # end_usec=None,
+                 # process_op_nest=False,
                  **kwargs):
 
         self.directory = directory
         self.debug = debug
+        self.overlaps_event_id = overlaps_event_id
+        self.op_name = op_name
+        self.show_progress = show_progress
 
         # self.dummy_times = []
 
@@ -621,53 +630,9 @@ class TraceEventsParser:
     def get_source_files(self):
         return sql_get_source_files(self.__class__, self.directory)
 
-    # def parse_dummy_events(self, step):
-    #
-    #     self.dummy_times = []
-    #
-    #     if self._dummy_events_path is None:
-    #         return
-    #
-    #     timestamps = dict()
-    #     with open(self._dummy_events_path) as f:
-    #         cur_step = None
-    #         for line in f:
-    #             line = line.rstrip()
-    #
-    #             m = re.search(r'> RECORDING STEP = (?P<step>\d+)', line)
-    #             if m:
-    #                 cur_step = int(m.group('step'))
-    #
-    #             if cur_step is None or cur_step != step:
-    #                 continue
-    #
-    #             m = re.search(r'> name="(?P<name>[^"]+)", timestamp = (?P<time_usec>{float}) usec'.format(
-    #                 float=float_re),
-    #                 line)
-    #             # print("LINE = {line}".format(line=line))
-    #             if m:
-    #                 assert m.group('name') not in timestamps
-    #                 timestamps[m.group('name')] = int(float(m.group('time_usec')))
-    #                 continue
-    #
-    #     for name, time_usec in timestamps.items():
-    #         ktime = KernelTime(start_usec=time_usec, time_usec=1, name=name)
-    #         self.dummy_times.append(ktime)
-
     # Output
 
-    # def _dummy_events_path(self, bench_name):
-    #     path = self.get_dummy_events_path(self.src_files, bench_name)
-    #     if not _e(path):
-    #         return None
-    #     return path
-    #
-    # @classmethod
-    # def get_dummy_events_path(ParseKlass, src_files, bench_name):
-    #     path = _j(src_files.directory, 'dummy_events{bench}.txt'.format(bench=bench_suffix(bench_name)))
-    #     return path
-
-    def _trace_events_path(self, process_name, step, bench_name):
+    def _trace_first_step_path(self, process_name, step, bench_name):
         path = _j(self.directory, 'traceEvents{proc}{step}{bench}.json'.format(
             proc=process_suffix(process_name),
             step=step_suffix(step),
@@ -675,32 +640,60 @@ class TraceEventsParser:
         ))
         return path
 
-    def run(self):
+    def _trace_event_overlap_path(self, event):
+        path = _j(self.directory, 'traceEvents{proc}{event}.json'.format(
+            proc=process_suffix(event.process_name),
+            event=event_suffix(event.event_id),
+        ))
+        return path
 
-        self.sql_reader = SQLCategoryTimesReader(sql_input_path(self.directory))
-        self.bench_names = self.sql_reader.bench_names()
-        # self.category_times_readers.append(self.sql_reader)
-
+    def _trace_first_step(self):
         ignore_cats = list(DEFAULT_ignore_categories)
         if CATEGORY_DUMMY_EVENT in ignore_cats:
             ignore_cats.remove(CATEGORY_DUMMY_EVENT)
 
-        for bench_name in self.bench_names:
+        for op_name in self.op_names:
 
             for process_name, step, category_times in itertools.islice(
-                self.sql_reader.each_op_instance(bench_name,
-                                                 group_by_device=True,
-                                                 ignore_categories=ignore_cats,
-                                                 debug=self.debug),
-                # Just grab the very first operation from the very first process.
-                0, 1):
+                    self.sql_reader.each_op_instance(op_name,
+                                                     group_by_device=True,
+                                                     ignore_categories=ignore_cats,
+                                                     debug=self.debug),
+                    # Just grab the very first operation from the very first process.
+                    0, 1):
 
                 print("> Generate traceEvents for step={step}".format(step=step))
 
                 trace_events_dumper = TraceEventsDumper(
                     category_times,
-                    json_path=self._trace_events_path(process_name, step, bench_name))
+                    json_path=self._trace_first_step_path(process_name, step, op_name))
                 trace_events_dumper.dump()
+
+    def _trace_event_overlap(self):
+        event = self.sql_reader.event_by_id(self.overlaps_event_id, self.debug)
+        category_times = self.sql_reader.events_that_overlap_with(
+            event, event.process_name,
+            show_progress=self.show_progress)
+        trace_events_dumper = TraceEventsDumper(
+            category_times,
+            json_path=self._trace_event_overlap_path(event))
+        trace_events_dumper.dump()
+
+    def run(self):
+
+        self.sql_reader = SQLCategoryTimesReader(sql_input_path(self.directory))
+        if self.op_name is not None:
+            self.op_names = [self.op_name]
+        else:
+            self.op_names = self.sql_reader.op_names()
+
+
+        if self.overlaps_event_id is not None:
+            trace_func = self._trace_event_overlap
+        else:
+            trace_func = self._trace_first_step
+
+        trace_func()
 
     def dump(self, bench_name):
         if self.skip:

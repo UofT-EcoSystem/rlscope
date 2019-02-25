@@ -69,6 +69,10 @@ class KernelTime:
     def total_time_usec(self):
         return self.end_time_usec - self.start_time_usec
 
+    @property
+    def total_time_sec(self):
+        return float(self.end_time_usec - self.start_time_usec)/1e6
+
     def overlaps(self, ktime_b):
         ktime_a = self
         assert ktime_a.start_usec <= ktime_b.start_usec
@@ -168,15 +172,24 @@ class Stat:
         self.debug = debug
         self.name = name
         self.discard_first_sample = discard_first_sample
+        self._has_split = False
 
-    def add(self, time_usec, start_usec=None, end_usec=None):
+    def add(self, time_usec=None, start_usec=None, end_usec=None):
         assert self.num_calls is None
         self.kernel_times.append(KernelTime(time_usec, start_usec, end_usec, name=self.name))
 
+    def add_ktime(self, ktime):
+        assert type(ktime) == KernelTime
+        assert ktime.name == self.name
+        self.kernel_times.append(ktime)
+
+    def add_time_sec(self, time_sec):
+        time_usec = sec_to_us(time_sec)
+        self.kernel_times.append(KernelTime(time_usec, name=self.name))
+
     def add_times_sec(self, times_sec):
         for time_sec in times_sec:
-            time_usec = sec_to_us(time_sec)
-            self.kernel_times.append(KernelTime(time_usec, name=self.name))
+            self.add_time_sec(time_sec)
 
     def iteration_times_sec(self, num_calls):
         """
@@ -225,54 +238,69 @@ class Stat:
     def split(self, num_calls):
         """
         Q: Am I dividing up calls correctly?
-        If we call cudaLaunch 5 times for each iteration, and the number of iterations/calls is 1000, calls will look like:Initially, kernel_times contains every time the function was ever called.
-        kernel_times[0..4999] = [
-            # First iteration…
-            cudaLaunch[i=0]
-            cudaLaunch[i=1]
-            cudaLaunch[i=2]
-            cudaLaunch[i=3]
-            cudaLaunch[i=4]
-            # Next iteration…
-            cudaLaunch[i=5]
-            cudaLaunch[i=6]
-            cudaLaunch[i=7]
-            cudaLaunch[i=8]
-            cudaLaunch[i=9]
-            ...
-            # 5 * 1000 = 5000 calls in total
-        ]
+        If we call cudaLaunch 5 times for each iteration, and the number of iterations/calls is 1000, calls will look like:
+        INITIALLY, kernel_times contains every time the function was ever called.
 
-        Once we find out the number of iterations (num_calls) is 1000, we discover num_diff_calls=5000/1000 = 5. We use this to split up the times into calls with the same arguments
-        kernel_times[0..4] = [
-            [
-                # Take the 1st call from each iteration-group
-                cudaLaunch[i=0],
-                cudaLaunch[i=5],
+            kernel_times[0..4999] = [
+                # First iteration…
+                cudaLaunch[i=0]
+                cudaLaunch[i=1]
+                cudaLaunch[i=2]
+                cudaLaunch[i=3]
+                cudaLaunch[i=4]
+                # Next iteration…
+                cudaLaunch[i=5]
+                cudaLaunch[i=6]
+                cudaLaunch[i=7]
+                cudaLaunch[i=8]
+                cudaLaunch[i=9]
                 ...
-                # 1000 calls to cudaLaunch with the same arguments
+                # 5 * 1000 = 5000 calls in total
             ]
-            [
-                # Take the 2nd call from each iteration-group
-                cudaLaunch[i=1],
-                cudaLaunch[i=6],
+
+        Once we find out the number of iterations (num_calls) is 1000, we discover num_diff_calls=5000/1000 = 5.
+        We use this to split up the times into calls with the same arguments:
+
+            kernel_times[0..4] = [
+                [
+                    # Take the 1st call from each iteration-group
+                    cudaLaunch[i=0],
+                    cudaLaunch[i=5],
+                    ...
+                    # 1000 calls to cudaLaunch with the same arguments
+                ]
+                [
+                    # Take the 2nd call from each iteration-group
+                    cudaLaunch[i=1],
+                    cudaLaunch[i=6],
+                    ...
+                ]
                 ...
+                [
+                    # Take the 5th call from each iteration-group
+                    cudaLaunch[i=4],
+                    cudaLaunch[i=9],
+                    ...
+                ]
+                # 5 "different" calls to cudaLaunch during a single call to Forward.
             ]
-            ...
-            [
-                # Take the 5th call from each iteration-group
-                cudaLaunch[i=4],
-                cudaLaunch[i=9],
-                ...
-            ]
-            # 5 "different" calls to cudaLaunch during a single call to Forward.
-        ]
+
+        Converts kernel_times from:
+            List[KernelTime] -> List[List[KernelTime]]
 
         :param num_calls:
         The number of times (e.g.) Forward was called.
         num_calls = iterations * repetitions
         :return:
         """
+        # print("> Split func={name}".format(
+        #     name=self.name))
+        assert not self._has_split
+
+        # Converts kernel_times from:
+        #     List[KernelTime] -> List[List[KernelTime]]
+        assert type(self.kernel_times) == list and \
+               type(self.kernel_times[0]) == KernelTime
 
         # n_calls = the number of times this function was called.
         n_calls = len(self.kernel_times)
@@ -293,26 +321,35 @@ class Stat:
             self.num_calls = 1
             self.num_diff_calls = 1
             self.not_divisible = True
-            return
 
-        # num_diff_calls = # of times this function is called (likely with different arguments)
-        #                  during a single call to Forward
-        self.num_diff_calls = int(n_calls / num_calls)
+        else:
 
-        if self.debug:
-            print("[n_calls={n_calls}, num_calls={num_calls}] Use num_calls={num_calls} for function={name}".format(
-                n_calls=n_calls,
-                num_calls=num_calls,
-                name=self.name))
-        self.num_calls = num_calls
-        self.not_divisible = False
-        kernel_times = [[] for i in range(self.num_diff_calls)]
-        for i, kt in enumerate(self.kernel_times):
-            # Q: Initially, kernel_times[0...num_diff_calls] are different calls to the same function,
-            # for one call to Forward.
-            call_idx = i % self.num_diff_calls
-            kernel_times[call_idx].append(kt)
-        self.kernel_times = kernel_times
+            # num_diff_calls = # of times this function is called (likely with different arguments)
+            #                  during a single call to Forward
+            self.num_diff_calls = int(n_calls / num_calls)
+
+            if self.debug:
+                print("[n_calls={n_calls}, num_calls={num_calls}] Use num_calls={num_calls} for function={name}".format(
+                    n_calls=n_calls,
+                    num_calls=num_calls,
+                    name=self.name))
+            self.num_calls = num_calls
+            self.not_divisible = False
+            kernel_times = [[] for i in range(self.num_diff_calls)]
+            for i, kt in enumerate(self.kernel_times):
+                # Q: Initially, kernel_times[0...num_diff_calls] are different calls to the same function,
+                # for one call to Forward.
+                call_idx = i % self.num_diff_calls
+                kernel_times[call_idx].append(kt)
+            self.kernel_times = kernel_times
+
+        self._has_split = True
+
+        # Converts kernel_times from:
+        #     List[KernelTime] -> List[List[KernelTime]]
+        assert type(self.kernel_times) == list and \
+               type(self.kernel_times[0]) == list and \
+               type(self.kernel_times[0][0]) == KernelTime
 
     def _check_call_idx(self, call_idx):
         # if call_idx is None:
@@ -347,6 +384,8 @@ class Stat:
         
         After call self.split(num_calls):
             self.num_calls = num_calls
+            # kernel_times = List[List[KernelTime]]?
+            # But I see kernel_times = List[List[List[KernelTime]]]?
             kernel_times = [
                 [the 1st time the API call was made, across all 1000 iterations*repetitions calls to Forward],
                 [the 2nd time the API call was made, across all 1000 iterations*repetitions calls to Forward],
@@ -709,12 +748,17 @@ class Stats:
                 kt.split(num_calls)
                 bar.update(i)
 
-    def add(self, name, time_usec,
-            start_usec=None, end_usec=None):
-        assert (start_usec is None and end_usec is None) or \
-               (start_usec is not None and end_usec is not None)
+    def add(self, name, 
+            time_usec=None, start_usec=None, end_usec=None):
+        # assert (start_usec is None and end_usec is None) or \
+        #        (start_usec is not None and end_usec is not None)
         kt = self._get_stat(name)
-        kt.add(time_usec, start_usec=start_usec, end_usec=end_usec)
+        kt.add(time_usec=time_usec, start_usec=start_usec, end_usec=end_usec)
+
+    def add_ktime(self, ktime):
+        assert type(ktime) == KernelTime
+        kt = self._get_stat(ktime.name)
+        kt.add_ktime(ktime)
 
     def _get_stat(self, name):
         if name not in self.name_to_stat:
@@ -724,6 +768,10 @@ class Stats:
     def add_times_sec(self, name, times_sec):
         stat = self._get_stat(name)
         stat.add_times_sec(times_sec)
+
+    def add_time_sec(self, name, time_sec):
+        stat = self._get_stat(name)
+        stat.add_time_sec(time_sec)
 
     def dump(self, f, profile_data_type, skip_header=False, summary_type='nvprof'):
         if summary_type == 'nvprof':

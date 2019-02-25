@@ -51,7 +51,8 @@ set(EXEC_NAMES
         cartpole)
 set(GFLAGS_EXEC_NAMES
         model
-        cartpole)
+        cartpole
+        epoch_sec)
 set(ALL_TARGETS
         ${EXEC_NAMES}
         ${GFLAGS_EXEC_NAMES}
@@ -161,6 +162,12 @@ add_executable(cartpole
 add_executable(tests
         ./src/drivers/run_tests.cpp
         ${TEST_SOURCES})
+add_executable(epoch_sec
+        ./src/test/epoch_sec.cpp
+#        ${TF_SOURCES}
+        ./tensorflow/core/platform/default/logging.cc
+        tensorflow/core/platform/env_time.cc
+        tensorflow/core/platform/posix/env_time.cc)
 
 #./test/py_interface/py_interface_src.cpp
 add_library(py_interface SHARED

@@ -565,6 +565,18 @@ class CategoryOverlapPlot:
     """
     Create a stacked bar plot.
     For the list of times to show, see self.category_order.
+    
+    CategoryOverlapPlot
+
+      PSEUDOCODE:
+      For each op/bench_name:
+          op_overlaps = []
+          For each process:
+              For each "step"/call to op:
+                  overlaps.add { Compute category-overlap for this call to op }
+          Report average category-overlap across all calls to op (across ALL processes)
+            i.e. avg(overlaps)
+
     """
     def __init__(self, directory,
                  debug=False,
