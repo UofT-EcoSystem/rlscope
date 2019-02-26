@@ -49,6 +49,8 @@ import py_config
 from parser.common import *
 
 
+from profiler import glbl
+
 # Only allow a single traced session.run(...) call to run at a time.
 # By default, tfprof code enforces this.
 # Q: Will multiple tracers work now...?
@@ -112,11 +114,19 @@ def _profiled_run(self,
 
   if DEBUG_THREADS:
       _check_single_threaded()
-
+      
   profile_context = getattr(self, 'profile_context', None)
   if profile_context is not None:
     profile_context_state = profile_context._new_step()
     step, locked = profile_context_state.__enter__()
+    
+    # Inherit the "phase" from the Profiler object when we first call session.run(...).
+    if profile_context.phase is None:
+      assert glbl.prof.phase is not None
+      profile_context.phase = glbl.prof.phase
+    elif profile_context.phase != glbl.prof.phase:
+      raise RuntimeError("IML: Internal error; detected ProfileContext being used across multiple phases.")
+
     assert locked
   else:
     step = None
@@ -305,10 +315,12 @@ class ProfileContext(object):
                # process_name=None,
                # phase=None,
                trace_all=False,
-               session=None):
+               session=None,
+               phase=None):
     # self.process_name = process_name
     # self.phase = phase
     self._sess = session
+    self.phase = phase
     assert self._sess is not None
     self._trace_all = trace_all
     self._disable = False
@@ -529,7 +541,8 @@ class ProfileContext(object):
       self._sess.profile_context = self
     return self
 
-  def dump(self, dump_path, process_name, phase):
+  def dump(self, dump_path, process_name):
+    assert self.phase is not None
     sess = self._cur_session(allow_none=True)
 
     # if process_name is None:
@@ -550,7 +563,7 @@ class ProfileContext(object):
     steps = sorted(list(self.trace_data.traced_steps.keys()))
     pprint.pprint({'len(steps)':len(steps)})
 
-    profile_proto_builder = ProfileProtoBuilder(process_name, phase)
+    profile_proto_builder = ProfileProtoBuilder(process_name, self.phase)
     for step, traces in self.trace_data.traced_steps.items():
       for run_meta in traces.traces:
           profile_proto_builder.add_run_meta(step, run_meta)

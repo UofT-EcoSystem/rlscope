@@ -52,6 +52,8 @@ NO_BENCH_NAME = "NoBenchName"
 NO_DEVICE_NAME = "NoDeviceName"
 NO_IMPL_NAME = "NoImplName"
 
+DEFAULT_PHASE = 'default_phase'
+
 TF_PRINT_TIMESTAMP = ENV.get('TF_PRINT_TIMESTAMP', 'no') == 'yes'
 
 # If we exceed 1000 session.run(...) calls without dumping a trace, only print a warning every 100 calls.
@@ -121,7 +123,7 @@ class _ProfileContextManager:
     def __init__(self):
         self._session_to_context = dict()
 
-    def add_profile_context(self, session):
+    def add_profile_context(self, session, phase=None):
         assert session not in self._session_to_context
         if glbl.prof is not None:
             disabled = not glbl.prof.is_tfprof_enabled
@@ -136,7 +138,8 @@ class _ProfileContextManager:
             # "auto decides" which steps to trace.
             trace_steps=[],
             trace_all=True,
-            session=session)
+            session=session,
+            phase=phase)
         if disabled:
             pctx.disable_tracing()
         pctx.__enter__()
@@ -150,6 +153,37 @@ class _ProfileContextManager:
 
         pctx = self._session_to_context[session]
         return pctx
+
+    def recreate_profile_context(self, session, phase=None):
+        """
+        We are about to switches phases.
+        Dump the current profile-context for this session,
+        and initialize a new profile-context.
+        """
+        self.remove_profile_context(session)
+        pctx = self.add_profile_context(session, phase)
+        return pctx
+
+        # assert session not in self._session_to_context
+        # if glbl.prof is not None:
+        #     disabled = not glbl.prof.is_tfprof_enabled
+        # else:
+        #     disabled = False
+        # pctx = tensorflow_profile_context.ProfileContext(
+        #     # We handle dumping explicitly.
+        #     # Do NOT set this to true; otherwise we'll start dumping during the critical path
+        #     # when __exit__ is called in remove_profile_context.
+        #     dump_on_finished=False,
+        #     # Need to explicitly use empty trace steps otherwise profiler
+        #     # "auto decides" which steps to trace.
+        #     trace_steps=[],
+        #     trace_all=True,
+        #     session=session)
+        # if disabled:
+        #     pctx.disable_tracing()
+        # pctx.__enter__()
+        # self._session_to_context[session] = pctx
+        # return pctx
 
     def remove_profile_context(self, session):
         assert session in self._session_to_context
@@ -188,11 +222,13 @@ class DumpThunk:
     def __init__(self, session, pctx):
         self.session = session
         self.pctx = pctx
+        assert self.pctx.phase is not None
+        self.phase = self.pctx.phase
 
-    def dump(self, trace_id, process_name, phase, prof):
+    def dump(self, trace_id, process_name, prof):
         dump_path = prof.tfprof_path(self.session.session_id,
                                      trace_id=trace_id)
-        self.pctx.dump(dump_path, process_name, phase)
+        self.pctx.dump(dump_path, process_name, self.phase)
 
 DUMP_THUNKS = []
 def add_dump_thunk(session, pctx):
@@ -349,7 +385,6 @@ class Profiler:
 
         self.next_trace_id = None
         self.process_name = None
-        self.phase = 0
         # self.init_trace_id()
         self._tfprof_enabled = False
         self._pyprof_enabled = False
@@ -369,6 +404,7 @@ class Profiler:
         self.bench_name = get_argval('bench_name', bench_name, None)
 
         self.start_trace_time_sec = get_internal_argval('start_trace_time_sec')
+        self.phase = get_internal_argval('phase', DEFAULT_PHASE)
 
         self.start_measuring_call = get_argval('start_measuring_call', start_measuring_call, None)
         self.debug = get_argval('debug', debug, False)
@@ -1035,8 +1071,25 @@ class Profiler:
         # self._maybe_init_profile_context()
 
     def set_phase(self, phase):
-        assert type(phase) == int
+        assert type(phase) == str
+
+        if self.disable:
+            return
+
+        if len(self._op_stack) != 0:
+            raise RuntimeError("IML: ERROR, you cannot change phases while operations are in-progress: ops = {ops}".format(
+                ops=self._op_stack))
+
+        assert self.session.pctx.phase is not None
+        # Record the current tfprof for the current phase as a DumpThunk.
+        # Also, create a new pctx for the next phase.
+        ProfileContextManager.recreate_profile_context(self.session, phase)
+        # Dump the DumpThunk.
+        self.dump_trace(debug=self.debug)
+
         self.phase = phase
+        clib_wrap.set_phase(phase)
+
         self.init_trace_id()
         # self._maybe_init_profile_context()
 
@@ -1500,6 +1553,14 @@ def add_iml_arguments(parser):
         The start time of tracing (in seconds). 
         This gets inherited by child processes.
     """))
+    parser.add_argument('--iml-phase',
+                        help=textwrap.dedent("""
+        IML: (internal use)
+        The "phase" of training captured by this script. 
+        The phase covered by a script may change during training.
+        E.g. a single script could handle "simulator" and "gradient_update" phases.
+        This gets inherited by child processes.
+    """))
     parser.add_argument('--iml-num-traces', type=int,
                         # default=10,
                         help="IML: how many traces should be measured?")
@@ -1611,7 +1672,9 @@ def iml_argv(prof : Profiler, keep_executable=False, keep_non_iml_args=False):
     # NOTE: sys.argv[0] is the python script name.
     args, extra_argv = parser.parse_known_args(sys.argv[1:])
     print("> extra_argv: {argv}".format(argv=' '.join(extra_argv)))
+    # Inherit arguments in our fork-ed children.
     args.iml_internal_start_trace_time_sec = prof.get_start_trace_time_sec()
+    args.iml_phase = prof.phase
     argv = args_to_cmdline(parser, args, keep_executable=keep_executable, keep_debug=False)
     if keep_non_iml_args:
         return argv + extra_argv

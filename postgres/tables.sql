@@ -64,6 +64,11 @@ CREATE TABLE Event (
     -- however to support tracing multiple processes, we will need this.
     process_id INTEGER NOT NULL,
 
+    -- The "phase" this training event belongs to.
+    -- The phase covered by a script may change during training.
+    -- E.g. a single script could handle "simulator" and "gradient_update" phases.
+    phase_id INTEGER NOT NULL,
+
     -- This is specific to tfprof.
     -- pyprof doesn't use it.
     --
@@ -97,6 +102,12 @@ CREATE TABLE Process (
   process_id SERIAL NOT NULL PRIMARY KEY,
   process_name TEXT
 --   UNIQUE (process_name)
+);
+
+CREATE TABLE Phase (
+  phase_id SERIAL NOT NULL PRIMARY KEY,
+  phase_name TEXT
+--   UNIQUE (phase_name)
 );
 
 CREATE TABLE Device (

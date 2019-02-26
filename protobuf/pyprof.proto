@@ -18,7 +18,7 @@ message Pyprof {
     map<int64, CLibs> clibs = 3;
 
     string process_name = 4;
-    int64 phase = 5;
+    string phase = 5;
 }
 
 // Q: What unit of time should we use?

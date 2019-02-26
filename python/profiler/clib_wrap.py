@@ -63,6 +63,12 @@ def set_process_name(process_name):
     _process_name = process_name
     _pyprof.process_name = process_name
 
+_phase = None
+def set_phase(phase):
+    global _phase
+    _phase = phase
+    _pyprof.phase = phase
+
 # _trace_steps = None
 # def set_trace_steps(trace_steps):
 #     global _trace_steps
