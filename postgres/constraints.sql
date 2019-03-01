@@ -14,5 +14,13 @@ ALTER TABLE Category ADD CONSTRAINT Category_fk_01
 ALTER TABLE Process ADD CONSTRAINT Process_fk_01
   UNIQUE(process_name);
 
+ALTER TABLE ProcessDependency ADD CONSTRAINT ProcessDependency_fk_01
+  UNIQUE(process_name_parent, process_name_child);
+ALTER TABLE ProcessDependency ADD CONSTRAINT ProcessDependency_fk_02
+  FOREIGN KEY(process_id_parent) REFERENCES Process(process_id);
+ALTER TABLE ProcessDependency ADD CONSTRAINT ProcessDependency_fk_03
+  FOREIGN KEY(process_id_child) REFERENCES Process(process_id);
+
 ALTER TABLE Device ADD CONSTRAINT Device_fk_01
   UNIQUE(device_name);
+

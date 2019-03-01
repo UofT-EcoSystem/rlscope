@@ -1228,7 +1228,7 @@ class ProcessTimelineReader:
         for category_combo, time_us in self.json_data.items():
             cat_str = _category_str(category_combo)
             if category == cat_str:
-                return [time_us/MICROSECONDS_IN_SECOND]
+                return [time_us/as_type(MICROSECONDS_IN_SECOND, type(time_us))]
         # for cat_data in self.json_data['category_combo_times']:
         #     category_combo = cat_data['category_combo']
         #     cat_str = _category_str(category_combo)
@@ -1659,12 +1659,14 @@ class UtilizationPlot:
                  debug=False,
                  debug_ops=False,
                  debug_memoize=False,
+                 entire_trace=False,
                  # Swallow any excess arguments
                  **kwargs):
         self.directory = directory
         self.debug = debug
         self.debug_ops = debug_ops
         self.debug_memoize = debug_memoize
+        self.entire_trace = entire_trace
 
         self.bar_width = 0.25
         self.show = False
@@ -1672,12 +1674,10 @@ class UtilizationPlot:
     def get_source_files(self):
         return sql_get_source_files(self.__class__, self.directory)
 
-    def _process_timeline_png(self, bench_name):
-        return UtilizationPlot.get_process_timeline_png(self.directory, bench_name, self.debug_ops)
-
-    @staticmethod
-    def get_process_timeline_png(directory, bench_name, debug_ops):
-        return _j(directory, "process_timeline{bench}{debug}.png".format(
+    def get_process_timeline_png(self, process_name, phase_name, bench_name, debug_ops):
+        return _j(self.directory, "process_timeline{proc}{phase}{bench}{debug}.png".format(
+            proc=process_suffix(process_name),
+            phase=phase_suffix(phase_name),
             bench=bench_suffix(bench_name),
             debug=debug_suffix(debug_ops),
         ))
@@ -1693,19 +1693,38 @@ class UtilizationPlot:
         return UtilizationPlot.get_plot_data_path(self.directory, bench_name, self.debug_ops)
 
     def run(self):
-
-        # print("> debug_ops = {debug_ops}".format(
-        #     debug_ops=self.debug_ops,
-        # ))
-
         self.sql_reader = SQLCategoryTimesReader(self.db_path, debug_ops=self.debug_ops)
+
+        if self.entire_trace:
+            # Plot a single plot for the entire trace across ALL processes.
+            self.plot_process_phase()
+            return
+
+        process_names = self.sql_reader.process_names
+
+        for process_name in process_names:
+            # phases = self.sql_reader.process_phase_start_end_times(process_name, debug=self.debug)
+            phases = self.sql_reader.process_phases(process_name, debug=self.debug)
+            for phase in phases:
+                pprint.pprint({'process_name':process_name, 'phase': phase})
+                # self.plot_process_phase(process_name, phase['phase_name'])
+                self.plot_process_phase(process_name, phase)
+
+    def plot_process_phase(self, process_name=None, phase_name=None):
+        assert ( process_name is None and phase_name is None ) or \
+               ( process_name is not None and phase_name is not None )
+
         # self.bench_names = self.sql_reader.bench_names(self.debug_ops) + [NO_BENCH_NAME]
         # assert len(self.bench_names) == len(unique(self.bench_names))
         # self.categories = self.sql_reader.categories
 
-        overlap_computer = OverlapComputer(self.db_path, debug=self.debug, debug_ops=self.debug_ops)
+        overlap_computer = OverlapComputer(self.db_path, 
+                                           debug=self.debug, 
+                                           debug_ops=self.debug_ops)
 
         operation_overlap, proc_stats = overlap_computer.compute_process_timeline_overlap(
+            process_name=process_name,
+            phase_name=phase_name,
             debug_memoize=self.debug_memoize)
         assert len(operation_overlap) > 0
 
@@ -1727,6 +1746,9 @@ class UtilizationPlot:
 
         pprint.pprint({'all_categories': all_categories})
 
+        def get_png(bench_name):
+            return self.get_process_timeline_png(process_name, phase_name, bench_name, self.debug_ops)
+
         self.category_order = sorted(all_categories)
         # self.bench_name_labels = DQN_BENCH_NAME_LABELS
         # TODO: create bench name labels
@@ -1736,7 +1758,7 @@ class UtilizationPlot:
         self.impl_name_order = IMPL_NAME_ORDER
         self.device_order = DEVICE_ORDER
         self.plotter = StackedBarPlotter(
-            self._process_timeline_png, self._plot_data_path,
+            get_png, self._plot_data_path,
             self.category_order,
             self.impl_name_order,
             self.device_order,
@@ -1816,7 +1838,7 @@ class UtilizationPlot:
         update_dict(js_stats, proc_stats)
         _add_cpu_gpu_stats(js_stats, self.plotter)
         print("> Save plot stats to {path}".format(path=self._stats()))
-        do_dump_json(js_stats, self._stats())
+        do_dump_json(js_stats, self._stats(), cls=DecimalEncoder)
         return js_stats
 
 def _add_cpu_gpu_stats(js_stats, plotter, bench_name=NO_BENCH_NAME):

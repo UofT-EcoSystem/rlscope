@@ -18,6 +18,7 @@ import cpuinfo
 from glob import glob
 import subprocess
 import pprint
+import decimal
 import argparse
 import numpy as np
 from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, basename as _b
@@ -250,6 +251,14 @@ def main():
                         help='debug')
     parser.add_argument("--op-name",
                         help='Only handle <op_name> (instead of all op_names)')
+    parser.add_argument("--start-usec",
+                        type=decimal.Decimal,
+                        help='TraceEventsParser.start_usec')
+    parser.add_argument("--end-usec",
+                        type=decimal.Decimal,
+                        help='TraceEventsParser.end_usec')
+    parser.add_argument("--process-name",
+                        help='TraceEventsParser.process_name')
     parser.add_argument("--debug-ops",
                         action='store_true',
                         help=textwrap.dedent("""
@@ -262,6 +271,16 @@ def main():
                         This time may or may not be worth capturing (you must decide).
                         (i.e. you may or may not decide not to capture some one-time initialization 
                         that happens just after prof.start())
+                        """))
+    parser.add_argument("--entire-trace",
+                        action='store_true',
+                        help=textwrap.dedent("""
+                        UtilizationPlot: Create a SINGLE plot for the entire trace, across all processes.
+                        
+                        This usually leads to a combinatorial explosion in plot-labels, so we avoid this.
+                        
+                        Instead (when --entire-trace is NOT provided) we create 
+                        a UtilizationPlot for each <process_name, phase_name>.
                         """))
     parser.add_argument("--debug-memoize",
                         action='store_true',

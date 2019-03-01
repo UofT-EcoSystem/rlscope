@@ -1,4 +1,5 @@
 import re
+import numbers
 import time
 import sys
 import os
@@ -93,8 +94,14 @@ class ComputeOverlap:
         Typically overlaps_with = [CATEGORY_OPERATION], so we only keep execution time
         that happened during an operation.
     """
-    def __init__(self, category_times, overlaps_with=None, debug=False, show_progress=False):
+    def __init__(self,
+                 category_times,
+                 overlaps_with=None,
+                 check_key=None,
+                 debug=False,
+                 show_progress=False):
         self.debug = debug
+        self.check_key = check_key
         self.show_progress = show_progress
         self.overlaps_with = overlaps_with
         if self.overlaps_with is not None:
@@ -188,6 +195,7 @@ class ComputeOverlap:
         return compute_overlap_single_thread(
             category_times,
             self.overlaps_with,
+            self.check_key,
             self.debug,
             self.show_progress)
 
@@ -319,6 +327,7 @@ class CategoryTimesWrapper:
 def compute_overlap_single_thread(
     category_times,
     overlaps_with=None,
+    check_key=None,
     debug=False,
     show_progress=False):
     # categories = set(category_times.keys())
@@ -374,8 +383,15 @@ def compute_overlap_single_thread(
         if len(cur_categories) > 0:
             # Don't bother recording empty gaps between times.
             categories_key = frozenset(cur_categories)
+
+            # For debugging; useful to check for overlaps we don't expect to occur.
+            # For example, overlap across CATEGORY_OPERATION's within a single process.
+            if check_key is not None:
+                check_key(categories_key)
+
             if categories_key not in times:
-                times[categories_key] = 0.
+                NumberType = type(time_chunk)
+                times[categories_key] = NumberType(0.)
             times[categories_key] += time_chunk
 
         if debug:
@@ -612,16 +628,22 @@ class TraceEventsParser:
                  show_progress=False,
                  overlaps_event_id=None,
                  op_name=None,
-                 # start_usec=None,
-                 # end_usec=None,
+                 process_name=None,
+                 process_op_nest=False,
+                 start_usec=None,
+                 end_usec=None,
                  # process_op_nest=False,
                  **kwargs):
 
         self.directory = directory
         self.debug = debug
+        self.start_usec = start_usec
+        self.end_usec = end_usec
         self.overlaps_event_id = overlaps_event_id
         self.op_name = op_name
+        self.process_name = process_name
         self.show_progress = show_progress
+        self.process_op_nest = process_op_nest
 
         # self.dummy_times = []
 
@@ -644,6 +666,18 @@ class TraceEventsParser:
         path = _j(self.directory, 'traceEvents{proc}{event}.json'.format(
             proc=process_suffix(event.process_name),
             event=event_suffix(event.event_id),
+        ))
+        return path
+
+    def _trace_event_time_range_path(self):
+        def usec_suffix(usec):
+            assert usec is not None
+            return ".{us}_usec".format(
+                us=usec,
+            )
+        path = _j(self.directory, 'traceEvents{start}{end}.json'.format(
+            start=usec_suffix(self.start_usec),
+            end=usec_suffix(self.end_usec),
         ))
         return path
 
@@ -679,6 +713,19 @@ class TraceEventsParser:
             json_path=self._trace_event_overlap_path(event))
         trace_events_dumper.dump()
 
+    def _trace_event_time_range(self):
+        category_times = self.sql_reader.events_by_time_range(
+            self.start_usec, self.end_usec, self.process_name,
+            debug=self.debug)
+        # category_times = self.sql_reader.events_that_overlap_with(
+        #     event, event.process_name,
+        #     show_progress=self.show_progress)
+        
+        trace_events_dumper = TraceEventsDumper(
+            category_times,
+            json_path=self._trace_event_time_range_path())
+        trace_events_dumper.dump()
+
     def run(self):
 
         self.sql_reader = SQLCategoryTimesReader(sql_input_path(self.directory))
@@ -690,6 +737,10 @@ class TraceEventsParser:
 
         if self.overlaps_event_id is not None:
             trace_func = self._trace_event_overlap
+        elif self.start_usec is not None:
+            if self.end_usec is None or self.process_name is None:
+                raise RuntimeError("Need --start-usec, --end-usec, and --process-name for TraceEventsParser time-range")
+            trace_func = self._trace_event_time_range
         else:
             trace_func = self._trace_first_step
 
@@ -785,12 +836,15 @@ class OverlapComputer:
         # NOTE: it's nicer to work with
         new_overlap_01 = reduce_category_keys(overlap,
                                               categories, operation_types, proc_types)
-        traced_time_sec = 0.
-        traced_op_time_sec = 0.
+        NumberType = float
+        if len(new_overlap_01) > 0:
+            NumberType = type(next(iter(new_overlap_01.values())))
+        traced_time_sec = NumberType(0.)
+        traced_op_time_sec = NumberType(0.)
         for category_key, time_us in new_overlap_01.items():
-            traced_time_sec += time_us/MICROSECONDS_IN_SECOND
+            traced_time_sec += time_us/NumberType(MICROSECONDS_IN_SECOND)
             if len(category_key.ops) > 0:
-                traced_op_time_sec += time_us/MICROSECONDS_IN_SECOND
+                traced_op_time_sec += time_us/NumberType(MICROSECONDS_IN_SECOND)
 
         total_trace_time_sec = sql_reader.total_trace_time_sec(debug=self.debug)
         missing_traced_time_sec = total_trace_time_sec - traced_time_sec
@@ -846,7 +900,7 @@ class OverlapComputer:
             return dic[key]
 
         def _split_combo_key(combo_key):
-            return split_combo_key(combo_key, categories, operation_types, proc_types)
+            return split_combo_key(combo_key, operation_types, proc_types)
 
         new_overlap = dict()
         for overlap_key, times in overlap.items():
@@ -888,7 +942,7 @@ class OverlapComputer:
                 #     })
                 continue
 
-            new_key = _as_category_key(categories, operation_types, proc_types,
+            new_key = _as_category_key(operation_types, proc_types,
                                        overlap_key=overlap_key)
             assert len(new_key.ops) > 0
             assert len(new_key.non_ops) > 0
@@ -979,7 +1033,10 @@ class OverlapComputer:
 
         return new_overlap
 
-    def compute_process_timeline_overlap(self, debug_memoize=False):
+    def compute_process_timeline_overlap(self, 
+                                         process_name=None,
+                                         phase_name=None,
+                                         debug_memoize=False):
         sql_reader = SQLCategoryTimesReader(self.db_path)
 
         # Overlap, computed across different "steps".
@@ -987,6 +1044,8 @@ class OverlapComputer:
 
         start_parse_timeline_t = time.time()
         category_times, categories, operation_types, proc_types = sql_reader.parse_timeline(
+            process_name=process_name,
+            phase_name=phase_name,
             debug=self.debug,
             debug_ops=self.debug_ops,
             debug_memoize=debug_memoize)
@@ -1001,7 +1060,7 @@ class OverlapComputer:
         #     start_t = time.time()
         #     print("> DEBUG: write process timeline traceEvents @ {path}".format(
         #         path=self._debug_process_timeline_json_path()))
-        #     new_category_times = dict((_as_category_key(categories, operation_types, proc_types, proc_key=proc_key), value)
+        #     new_category_times = dict((_as_category_key(operation_types, proc_types, proc_key=proc_key), value)
         #                               for proc_key, value in category_times.items())
         #     # reduce_category_keys(category_times, categories, operation_types, proc_types)
         #     dump_category_times(new_category_times, self._debug_process_timeline_json_path(),
@@ -1013,14 +1072,29 @@ class OverlapComputer:
         # We only want to keep CATEGORY_OPERATION times.
         # However, the operation-types have replaced CATEGORY_OPERATION.
 
+        # if should_load_memo(debug_memoize, self._compute_overlap_memo_path()):
+        #     overlap = load_memo(debug_memoize, self._compute_overlap_memo_path())
+        # else:
 
-        if should_load_memo(debug_memoize, self._compute_overlap_memo_path()):
-            overlap = load_memo(debug_memoize, self._compute_overlap_memo_path())
-        else:
-            compute_overlap = ComputeOverlap(category_times, show_progress=self.debug)
-            compute_overlap.compute()
-            overlap = compute_overlap.get_category_times()
-            maybe_memoize(debug_memoize, overlap, self._compute_overlap_memo_path())
+        check_key = None
+
+        # if self.debug:
+        #     # Set a breakpoint if we detect overlap across operations within the same process.
+        #     # We can inspect the event's using TraceDumper once we know where in the timeline they occur.
+        #     # It would help to know the event_id as well...
+        #     def check_key(overlap_key):
+        #         category_key = _as_category_key(overlap_key=overlap_key)
+        #         if len(category_key.ops) > 1:
+        #             # Operations can only overlap cross-process, not within a single-process
+        #             assert len(category_key.procs) > 1
+
+        compute_overlap = ComputeOverlap(category_times,
+                                         check_key=check_key,
+                                         # debug=self.debug,
+                                         show_progress=self.debug)
+        compute_overlap.compute()
+        overlap = compute_overlap.get_category_times()
+        # maybe_memoize(debug_memoize, overlap, self._compute_overlap_memo_path())
         assert len(overlap) > 0
 
         # if self.debug:
@@ -1097,7 +1171,7 @@ class OverlapComputer:
             return obj
 
         js = js_friendly(operation_overlap)
-        do_dump_json(js, path)
+        do_dump_json(js, path, cls=DecimalEncoder)
 
     def _process_timeline_json_path(self):
         path = _j(self.directory, 'process_timeline.json')
@@ -1285,21 +1359,23 @@ class OverlapComputer:
 #                       ".*/(device:gpu|gpu|device:cpu|cpu|device:sycl):\\d+");
 # }
 
-def split_combo_key(combo_key, categories, operation_types, proc_types):
+def split_combo_key(combo_key, operation_types, proc_types):
     assert not isinstance(combo_key, _CategoryKey)
     op_categories = set()
     proc_categories = set()
     non_op_categories = set()
     for category in combo_key:
-        if category in operation_types:
-            op_categories.add(category)
-        elif category in proc_types:
+        if ( proc_types is not None and category in proc_types ) or match_proc_category(category):
             proc_categories.add(category)
+        elif ( operation_types is not None and category in operation_types ) or not match_cpu_gpu_category(category):
+            # If operation_types isn't provided, assume it's an operation (unless its CPU or GPU).
+            op_categories.add(category)
         else:
             non_op_categories.add(category)
     return frozenset(op_categories), frozenset(non_op_categories), frozenset(proc_categories)
 
-def _as_category_key(categories, operation_types, proc_types,
+def _as_category_key(operation_types=None,
+                     proc_types=None,
                      overlap_key=None,
                      proc_key=None):
 
@@ -1307,7 +1383,7 @@ def _as_category_key(categories, operation_types, proc_types,
            ( overlap_key is None and proc_key is not None )
 
     def _split_combo_key(combo_key):
-        return split_combo_key(combo_key, categories, operation_types, proc_types)
+        return split_combo_key(combo_key, operation_types, proc_types)
 
     op_categories = set()
     non_op_categories = set()
@@ -1338,7 +1414,7 @@ def reduce_category_keys(overlap,
 
     new_overlap = dict()
     for overlap_key, times in overlap.items():
-        new_key = _as_category_key(categories, operation_types, proc_types,
+        new_key = _as_category_key(operation_types, proc_types,
                                    overlap_key=overlap_key)
         assert len(new_key.ops) > 0 or \
                len(new_key.non_ops) > 0
@@ -1365,12 +1441,13 @@ def _new_key_like(new_overlap, key, value):
     Add a non-existant key.
     """
     if key not in new_overlap:
-        new_overlap[key] = 0.
+        NumberType = type(value)
+        new_overlap[key] = NumberType(0.)
 def _add_key(new_overlap, key, value):
     """
     Merge an existing key.
     """
-    assert type(value) in {float, int}
+    # assert isinstance(value, numbers.Number)
     if key not in new_overlap:
         _new_key_like(new_overlap, key, value)
     new_overlap[key] += value

@@ -2,6 +2,7 @@ import re
 import sys
 import math
 import traceback
+import decimal
 import numpy as np
 import time
 import pickle
@@ -77,6 +78,7 @@ CATEGORIES_CPU = set([
     CATEGORY_PYTHON,
     CATEGORY_CUDA_API_CPU,
     CATEGORY_SIMULATOR_CPP,
+    CATEGORY_PYTHON_PROFILER,
 ])
 
 # Not a category used during tracing;
@@ -166,6 +168,7 @@ float_re = r'(?:[-+]?[0-9]*\.?[0-9]+([eE][-+]?[0-9]+)?)'
 # (None == NaN in that context).
 NO_BENCH_NAME = "NoBenchName"
 NO_PROCESS_NAME = "NoProcessName"
+NO_PHASE_NAME = "NoProcessName"
 NO_DEVICE_NAME = "NoDeviceName"
 NO_IMPL_NAME = "NoImplName"
 
@@ -996,7 +999,7 @@ def as_str(obj, indent=None):
     return string
 
 def bench_suffix(bench):
-    if bench != NO_BENCH_NAME:
+    if bench != NO_BENCH_NAME and bench is not None:
         return ".{bench}".format(bench=bench)
     return ""
 
@@ -1006,18 +1009,26 @@ def debug_suffix(debug):
     return ""
 
 def process_suffix(process_name):
-    assert process_name is not None
-    if process_name != NO_PROCESS_NAME:
-        return ".{proc}".format(proc=process_name)
+    # assert process_name is not None
+    if process_name is not None:
+        return ".process_{proc}".format(proc=process_name)
+    return ""
+
+def phase_suffix(phase_name):
+    # assert phase_name is not None
+    if phase_name is not None:
+        return ".phase_{phase}".format(phase=phase_name)
     return ""
 
 def event_suffix(event_id):
     if event_id is not None:
-        return ".{id}".format(id=event_id)
+        return ".event_{id}".format(id=event_id)
     return ""
 
-def step_suffix(step):
-    assert step is not None
+def step_suffix(step, allow_none=False):
+    assert allow_none or step is not None
+    if step is None:
+        return ""
     return ".step_{id}".format(id=step)
 
 def load_json(path):
@@ -1026,7 +1037,13 @@ def load_json(path):
         data = fixup_json(data)
         return data
 
-def do_dump_json(data, path, cls=None):
+class DecimalEncoder(json.JSONEncoder):
+    def default(self, o):
+        if isinstance(o, decimal.Decimal):
+            return str(o)
+        return super(DecimalEncoder, self).default(o)
+
+def do_dump_json(data, path, cls=DecimalEncoder):
     os.makedirs(_d(path), exist_ok=True)
     json.dump(data,
               codecs.open(path, mode='w', encoding='utf-8'),
@@ -1240,6 +1257,9 @@ class DataFrame:
 
     @staticmethod
     def get_mean_std(df, value_field):
+        # NOTE: Pandas throws an error if you attempt to use decimal.Decimal objects for groupby.
+        # This will convert to a float64.
+        df[value_field] = df[value_field].astype(float)
         groupby_cols = DataFrame.get_groupby_cols(df, value_field)
         mean = df.groupby(groupby_cols).mean().rename(columns={value_field: 'mean'}).reset_index()
         std = df.groupby(groupby_cols).std().rename(columns={value_field: 'std'}).reset_index()
@@ -1392,6 +1412,12 @@ def match_proc_category(category):
     m = re.search(r'^PROC:(?P<process_name>.*)', category)
     return m
 
+def match_cpu_gpu_category(category):
+    regex = r'^(?:{regex})$'.format(
+        regex='|'.join([CATEGORY_CPU, CATEGORY_GPU]))
+    m = re.search(regex, category)
+    return m
+
 def update_dict(dic1, dic2, overwrite=False):
     if not overwrite:
         common_keys = set(dic1.keys()).intersection(set(dic2.keys()))
@@ -1477,6 +1503,9 @@ def pyprof_func_std_string(func_tuple): # match what old profile produced
             lineno=lineno,
             func_name=func_name,
         )
+
+def as_type(value, klass):
+    return klass(value)
 
 class pythunk:
     """

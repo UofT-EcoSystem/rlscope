@@ -21,12 +21,6 @@ class TraceEventsDumper:
         if print_log:
             print("> Write traceEvents to: {path}".format(path=self.json_path))
 
-        class DecimalEncoder(json.JSONEncoder):
-            def default(self, o):
-                if isinstance(o, decimal.Decimal):
-                    return str(o)
-                return super(DecimalEncoder, self).default(o)
-
         do_dump_json(self.js, self.json_path, cls=DecimalEncoder)
 
     def _cat(self, category):

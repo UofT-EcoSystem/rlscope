@@ -71,7 +71,10 @@ class KernelTime:
 
     @property
     def total_time_sec(self):
-        return float(self.end_time_usec - self.start_time_usec)/1e6
+        diff = self.end_time_usec - self.start_time_usec
+        NumberType = type(diff)
+        time_sec = diff / NumberType(1e6)
+        return time_sec
 
     def overlaps(self, ktime_b):
         ktime_a = self

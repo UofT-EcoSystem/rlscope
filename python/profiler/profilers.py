@@ -56,6 +56,8 @@ DEFAULT_PHASE = 'default_phase'
 
 TF_PRINT_TIMESTAMP = ENV.get('TF_PRINT_TIMESTAMP', 'no') == 'yes'
 
+UTILIZATION_SAMPLER_PY = _j(py_config.ROOT, 'python', 'scripts', 'utilization_sampler.py')
+
 # If we exceed 1000 session.run(...) calls without dumping a trace, only print a warning every 100 calls.
 WARN_EVERY_CALL_MODULO = 100
 
@@ -154,6 +156,11 @@ class _ProfileContextManager:
         pctx = self._session_to_context[session]
         return pctx
 
+    def recreate_sessions_profile_contexts(self, phase=None):
+        sessions = self._session_to_context.keys()
+        for session in sessions:
+            self.recreate_profile_context(session, phase)
+
     def recreate_profile_context(self, session, phase=None):
         """
         We are about to switches phases.
@@ -228,7 +235,7 @@ class DumpThunk:
     def dump(self, trace_id, process_name, prof):
         dump_path = prof.tfprof_path(self.session.session_id,
                                      trace_id=trace_id)
-        self.pctx.dump(dump_path, process_name, self.phase)
+        self.pctx.dump(dump_path, process_name)
 
 DUMP_THUNKS = []
 def add_dump_thunk(session, pctx):
@@ -1070,6 +1077,18 @@ class Profiler:
         self.init_trace_id()
         # self._maybe_init_profile_context()
 
+    def set_machine_name(self, machine_name):
+        self.machine_name = machine_name
+
+    @property
+    def is_root_process(self):
+        return self.process_name is None
+
+    def _maybe_launch_utilization_sampler(self):
+        if self.is_root_process:
+            self.util_sampler_proc = subprocess.Popen([UTILIZATION_SAMPLER_PY])
+            self.util_sampler_proc.terminate()
+
     def set_phase(self, phase):
         assert type(phase) == str
 
@@ -1080,17 +1099,18 @@ class Profiler:
             raise RuntimeError("IML: ERROR, you cannot change phases while operations are in-progress: ops = {ops}".format(
                 ops=self._op_stack))
 
-        assert self.session.pctx.phase is not None
+        # assert self.session.pctx.phase is not None
         # Record the current tfprof for the current phase as a DumpThunk.
         # Also, create a new pctx for the next phase.
-        ProfileContextManager.recreate_profile_context(self.session, phase)
-        # Dump the DumpThunk.
-        self.dump_trace(debug=self.debug)
+        # ProfileContextManager.recreate_profile_context(self.session, phase)
+        ProfileContextManager.recreate_sessions_profile_contexts(phase)
+        # Dump the DumpThunk's.
+        self.dump_trace(finish_now=False, debug=self.debug)
 
         self.phase = phase
         clib_wrap.set_phase(phase)
 
-        self.init_trace_id()
+        # self.init_trace_id()
         # self._maybe_init_profile_context()
 
     def finish(self):
@@ -1133,11 +1153,11 @@ class Profiler:
     def dump_session_tfprof(self, session):
         pctx = ProfileContextManager.get_profile_context(session)
         tfprof_path = self.tfprof_path(session.session_id, self.next_trace_id)
-        pctx.dump(tfprof_path, self.process_name, self.phase)
+        pctx.dump(tfprof_path, self.process_name)
 
     def dump_sessions_tfprof(self):
         for dump_thunk in DUMP_THUNKS:
-            dump_thunk.dump(self.next_trace_id, self.process_name, self.phase, prof=self)
+            dump_thunk.dump(self.next_trace_id, self.process_name, prof=self)
             self.next_trace_id += 1
         DUMP_THUNKS.clear()
 
@@ -1474,12 +1494,12 @@ class PythonProfiler:
 
         # if self.record_call_times:
         # self._dump_call_times_json(call_times, call_times_path)
-        data = {
+        call_times_data = {
             'process_name': process_name,
             'phase': phase,
             'call_times': call_times,
         }
-        self._dump_call_times_pickle(data, call_times_path)
+        self._dump_call_times_pickle(call_times_data, call_times_path)
 
         os.makedirs(os.path.dirname(self._prof_path), exist_ok=True)
         if pstats_path is not None:
@@ -1560,6 +1580,13 @@ def add_iml_arguments(parser):
         The phase covered by a script may change during training.
         E.g. a single script could handle "simulator" and "gradient_update" phases.
         This gets inherited by child processes.
+    """))
+    parser.add_argument('--iml-internal-parent-process-name',
+                        help=textwrap.dedent("""
+        IML: (internal use)
+        The process name of the parent that launched this child python process.
+        i.e. whatever was passed to glbl.prof.set_process_name('forker')
+        Internally, this is used for tracking "process dependencies".
     """))
     parser.add_argument('--iml-num-traces', type=int,
                         # default=10,
@@ -1675,6 +1702,9 @@ def iml_argv(prof : Profiler, keep_executable=False, keep_non_iml_args=False):
     # Inherit arguments in our fork-ed children.
     args.iml_internal_start_trace_time_sec = prof.get_start_trace_time_sec()
     args.iml_phase = prof.phase
+    if prof.process_name is None:
+        raise RuntimeError("IML: You must call glbl.prof.set_process_name('some_name') before forking children!")
+    args.iml_internal_parent_process_name = prof.process_name
     argv = args_to_cmdline(parser, args, keep_executable=keep_executable, keep_debug=False)
     if keep_non_iml_args:
         return argv + extra_argv

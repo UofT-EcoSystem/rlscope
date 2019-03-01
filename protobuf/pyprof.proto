@@ -21,6 +21,40 @@ message Pyprof {
     string phase = 5;
 }
 
+// Metadata about a process.
+// Only one of these files is written per-process, when the process exits.
+// This captures information that not is not conveniently/efficiently captured by
+// existing "profiling" files (i.e. Pyprof, ProfileProto)
+// - Process dependency information:
+//   information needed for visualizing the computational graph.
+message ProcessMetadata {
+    message ProcessChildren {
+        repeated string = 1;
+    }
+    // parent -> child:
+    // On exit, a parent process will know all the child-processes it launched.
+    // This map encode that information
+    map<string, ProcessChildren> process_children = 1;
+}
+
+// Samples of "overall device utilization" for each device on this machine.
+message MachineUtilization {
+    message DeviceUtilization {
+        message Sample {
+            // Epoch in usec when sample was taken.
+            int64 start_time_us = 1;
+            // Percent utilization: [0..100]
+            float util = 2;
+        }
+        string device_name = 1;
+        repeated Sample = 2;
+    }
+    // A unique cross-machine identifier (e.g. $(hostname)).
+    string machine_name = 1;
+    // device_name (e.g. CPU/GPU) -> utilization samples for that device
+    map<string, DeviceUtilization> = 2;
+}
+
 // Q: What unit of time should we use?
 // Looks like tfprof already uses microseconds, so may as well do that.
 message Event {
@@ -44,15 +78,15 @@ message PythonEvents {
     repeated Event events = 1;
 }
 
-// Taken from tensorflow
-message AttrValue {
-  message ListValue {
+message ListValue {
     repeated bytes s = 2;                        // "list(string)"
     repeated int64 i = 3 [packed = true];        // "list(int)"
     repeated float f = 4 [packed = true];        // "list(float)"
     repeated bool b = 5 [packed = true];         // "list(bool)"
-  }
+}
 
+// Taken from tensorflow
+message AttrValue {
   oneof value {
     bytes s = 2;                 // "string"
     int64 i = 3;                 // "int"

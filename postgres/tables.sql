@@ -104,6 +104,15 @@ CREATE TABLE Process (
 --   UNIQUE (process_name)
 );
 
+CREATE TABLE ProcessDependency (
+  process_id_parent SERIAL NOT NULL PRIMARY KEY,
+  process_name_parent TEXT,
+  process_id_child SERIAL NOT NULL PRIMARY KEY,
+  process_name_child TEXT,
+  PRIMARY KEY(process_id_parent, process_id_child)
+--   UNIQUE (process_name_parent, process_name_child)
+);
+
 CREATE TABLE Phase (
   phase_id SERIAL NOT NULL PRIMARY KEY,
   phase_name TEXT

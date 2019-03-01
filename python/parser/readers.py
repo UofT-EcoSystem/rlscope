@@ -47,6 +47,9 @@ class TFProfCategoryTimesReader:
     @property
     def phase(self):
         return self.proto.phase
+    @property
+    def phase_name(self):
+        return self.phase
 
     @property
     def steps(self):

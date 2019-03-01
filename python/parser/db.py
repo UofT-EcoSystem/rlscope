@@ -163,17 +163,23 @@ class SQLParser:
         # op1.start         < op2.start         < op1.end                                 < op2.end
         # op1.start_time_us < op2.start_time_us < ( op1.start_time_us + op1.duration_us ) < ( op2.start_time_us + op2.duration_us )
         partial_overlap_query = """
-        SELECT * FROM Event AS op1 NATURAL JOIN Category c1
+        SELECT * 
+        FROM Event AS op1 NATURAL JOIN Category c1
         WHERE 
         c1.category_name = '{CATEGORY_OPERATION}' AND
         EXISTS (
-            SELECT * FROM Event AS op2 NATURAL JOIN Category c2
+            SELECT * 
+            FROM Event AS op2 NATURAL JOIN Category c2
             WHERE 
-            op1.process_id = op2.process_id AND
-            c2.category_name = '{CATEGORY_OPERATION}' AND
-            op1.start_time_us < op2.start_time_us AND
-                                op2.start_time_us < op1.end_time_us AND
-                                                    op1.end_time_us < op2.end_time_us
+                op1.event_id != op2.event_id AND
+                op1.process_id = op2.process_id AND
+                c2.category_name = '{CATEGORY_OPERATION}' AND
+                (
+                    -- Partial overlap
+                    op1.start_time_us < op2.start_time_us AND
+                                        op2.start_time_us < op1.end_time_us AND
+                                                             op1.end_time_us < op2.end_time_us 
+                )
         )
         """.format(CATEGORY_OPERATION=CATEGORY_OPERATION)
         sql_exec_query(c, partial_overlap_query, klass=self.__class__, debug=self.debug)
@@ -191,11 +197,14 @@ class SQLParser:
         EXISTS (
             SELECT * FROM Event AS op2 NATURAL JOIN Category c2
             WHERE 
+            op1.event_id != op2.event_id AND
             op1.process_id = op2.process_id AND
             c2.category_name = '{CATEGORY_OPERATION}' AND
-            op1.event_id != op2.event_id AND
-            op1.start_time_us == op2.start_time_us AND
-            op1.end_time_us == op2.end_time_us
+            (
+                -- Complete overlap
+                op1.start_time_us == op2.start_time_us AND
+                op1.end_time_us == op2.end_time_us
+            )
         )
         """.format(CATEGORY_OPERATION=CATEGORY_OPERATION)
         sql_exec_query(c, full_overlap_query, klass=self.__class__, debug=self.debug)
@@ -219,6 +228,7 @@ class SQLParser:
         self.create_db(recreate=True)
 
         self.process_to_id = dict()
+        self.phase_to_id = dict()
         self.category_to_id = dict()
         self.device_to_id = dict()
 
@@ -228,9 +238,15 @@ class SQLParser:
             'src_files':src_files,
         })
 
-        process_names = sorted(set(get_proto_process_name(path) for path in src_files))
+        metas = [get_proto_metadata(path) for path in src_files]
+
+        process_names = sorted(meta['process_name'] for meta in metas)
         for process_name in process_names:
             self.insert_process_name(process_name)
+
+        phase_names = sorted(meta['phase_name'] for meta in metas)
+        for phase_name in phase_names:
+            self.insert_phase_name(phase_name)
 
         categories = sorted(set(CATEGORIES_ALL))
         for category in categories:
@@ -333,77 +349,81 @@ class SQLParser:
         if (i + 1) % self.block_size == 0:
             self.conn.commit()
 
-    def insert_tfprof_file(self, path):
-
-        reader = TFProfCategoryTimesReader(path)
-
-        print("> Insert tfprof file: {p}".format(p=path))
-        if self.debug:
-            reader.print(sys.stdout)
-
-        process_id = self.insert_process_name(reader.process_name)
-
-        inserts = []
-        self._total_inserts = 0
-
-        fields = ['start_time_us',
-                  'end_time_us',
-                  'duration_us',
-                  'event_name',
-                  'category_id',
-                  'process_id',
-                  'device_id',
-                  'is_debug_event']
-
-
-        with progressbar.ProgressBar(max_value=reader.num_all_events()) as bar, \
-            bulk_inserter(self.conn, 'Event', self.block_size, bar, directory=self.directory,
-                          fields=fields) as bulk:
-
-            for i, (device, event) in enumerate(reader.all_events(debug=True)):
-                category, start_time_us, duration_us, name = event
-                category_id = self.insert_category_name(category)
-                if category == 'GPU' and self.debug:
-                    print("> category = {c}, duration_us = {duration_us}".format(
-                        c=category,
-                        duration_us=duration_us))
-                device_id = self.insert_device_name(device)
-                end_time_us = start_time_us + duration_us
-                is_debug_event = bool(match_debug_event_name(name))
-                # insert = {
-                #     # 'thread_id':event.thread_id,
-                #     'start_time_us':start_time_us,
-                #     'end_time_us':end_time_us,
-                #     'duration_us':duration_us,
-                #     'event_name':name,
-                #     'category_id':category_id,
-                #     'process_id':process_id,
-                #     'device_id':device_id,
-                #     'is_debug_event':is_debug_event,
-                # }
-                # bulk.add_insert(insert)
-
-                insert = [
-                    # 'thread_id':event.thread_id,
-
-                    # 'start_time_us'
-                    start_time_us,
-                    # 'end_time_us'
-                    end_time_us,
-                    # 'duration_us'
-                    duration_us,
-                    # 'event_name'
-                    name,
-                    # 'category_id'
-                    category_id,
-                    # 'process_id'
-                    process_id,
-                    # 'device_id'
-                    device_id,
-                    # 'is_debug_event'
-                    is_debug_event,
-                ]
-                bulk.add_insert(insert)
+    # def insert_tfprof_file(self, path):
+    #
+    #     reader = TFProfCategoryTimesReader(path)
+    #
+    #     print("> Insert tfprof file: {p}".format(p=path))
+    #     if self.debug:
+    #         reader.print(sys.stdout)
+    #
+    #     process_id = self.insert_process_name(reader.process_name)
+    #     phase_id = self.insert_phase_name(reader.phase_name)
+    #
+    #     inserts = []
+    #     self._total_inserts = 0
+    #
+    #     fields = ['start_time_us',
+    #               'end_time_us',
+    #               'duration_us',
+    #               'event_name',
+    #               'category_id',
+    #               'process_id',
+    #               'phase_id',
+    #               'device_id',
+    #               'is_debug_event']
+    #
+    #
+    #     with progressbar.ProgressBar(max_value=reader.num_all_events()) as bar, \
+    #         bulk_inserter(self.conn, 'Event', self.block_size, bar, directory=self.directory,
+    #                       fields=fields) as bulk:
+    #
+    #         for i, (device, event) in enumerate(reader.all_events(debug=True)):
+    #             category, start_time_us, duration_us, name = event
+    #             category_id = self.insert_category_name(category)
+    #             if category == 'GPU' and self.debug:
+    #                 print("> category = {c}, duration_us = {duration_us}".format(
+    #                     c=category,
+    #                     duration_us=duration_us))
+    #             device_id = self.insert_device_name(device)
+    #             end_time_us = start_time_us + duration_us
+    #             is_debug_event = bool(match_debug_event_name(name))
+    #             # insert = {
+    #             #     # 'thread_id':event.thread_id,
+    #             #     'start_time_us':start_time_us,
+    #             #     'end_time_us':end_time_us,
+    #             #     'duration_us':duration_us,
+    #             #     'event_name':name,
+    #             #     'category_id':category_id,
+    #             #     'process_id':process_id,
+    #             #     'device_id':device_id,
+    #             #     'is_debug_event':is_debug_event,
+    #             # }
+    #             # bulk.add_insert(insert)
+    #
+    #             insert = [
+    #                 # 'thread_id':event.thread_id,
+    #
+    #                 # 'start_time_us'
+    #                 start_time_us,
+    #                 # 'end_time_us'
+    #                 end_time_us,
+    #                 # 'duration_us'
+    #                 duration_us,
+    #                 # 'event_name'
+    #                 name,
+    #                 # 'category_id'
+    #                 category_id,
+    #                 # 'process_id'
+    #                 process_id,
+    #                 # 'phase_id'
+    #                 phase_id,
+    #                 # 'device_id'
+    #                 device_id,
+    #                 # 'is_debug_event'
+    #                 is_debug_event,
+    #             ]
+    #             bulk.add_insert(insert)
 
     def insert_process_name(self, process_name):
         return self._insert_name(
@@ -411,6 +431,13 @@ class SQLParser:
             'process_id', 'process_name',
             self.process_to_id,
             process_name)
+
+    def insert_phase_name(self, phase_name):
+        return self._insert_name(
+            'Phase',
+            'phase_id', 'phase_name',
+            self.phase_to_id,
+            phase_name)
 
     def insert_device_name(self, device_name):
         return self._insert_name(
@@ -455,63 +482,63 @@ class SQLParser:
 
         return ident
 
-    def insert_pyprof_file(self, path):
-        with open(path, 'rb') as f:
-            proto = Pyprof()
-            proto.ParseFromString(f.read())
-
-        print("> Insert pyprof file: {p}".format(p=path))
-        if self.debug:
-            print(proto)
-
-        c = self.cursor
-        # Insert Process
-        process_id = self.insert_process_name(proto.process_name)
-
-        # categories = set()
-        def insert_category_events(event_conn, eventattr_conn, category, events):
-            # Insert Category
-            # categories.add(category)
-            category_id = self.insert_category_name(category)
-            # category_id = self.category_to_id[category]
-            for event in events:
-                # Insert Event
-                is_debug_event = bool(match_debug_event_name(event.name))
-                event_id = event_conn.insert_dict('Event', {
-                    'thread_id':event.thread_id,
-                    'start_time_us':event.start_time_us,
-                    'end_time_us':event.start_time_us + event.duration_us,
-                    'duration_us':event.duration_us,
-                    'event_name':event.name,
-                    'category_id':category_id,
-                    'process_id':process_id,
-                    'is_debug_event':is_debug_event,
-                })
-                # Insert EventAttr
-                for attr_name, attr_value in event.attrs.items():
-                    attr_id = eventattr_conn.insert_dict('EventAttr', {
-                        'event_id':event_id,
-                        'attr_name':attr_name,
-                        'attr_value':attr_value,
-                    })
-
-        def each_category_events():
-            for step, python_events in proto.python_events.items():
-                yield CATEGORY_PYTHON, python_events.events
-
-            for step, clibs in proto.clibs.items():
-                for category, clib_events in clibs.clibs.items():
-                    yield category, clib_events.events
-
-        num_all_events = sum(len(events) for category, events in each_category_events())
-
-        with progressbar.ProgressBar(max_value=num_all_events) as bar, \
-            bulk_inserter(self.conn, 'EventAttr', self.block_size, bar, directory=self.directory) as event_attr_bulk, \
-            bulk_inserter(self.conn, 'Event', self.block_size, progress_bar=None, id_field='event_id', directory=self.directory) as event_bulk:
-            for category, events in each_category_events():
-                insert_category_events(event_bulk, event_attr_bulk, category, events)
-
-        self.conn.commit()
+    # def insert_pyprof_file(self, path):
+    #     with open(path, 'rb') as f:
+    #         proto = Pyprof()
+    #         proto.ParseFromString(f.read())
+    #
+    #     print("> Insert pyprof file: {p}".format(p=path))
+    #     if self.debug:
+    #         print(proto)
+    #
+    #     c = self.cursor
+    #     # Insert Process
+    #     process_id = self.insert_process_name(proto.process_name)
+    #
+    #     # categories = set()
+    #     def insert_category_events(event_conn, eventattr_conn, category, events):
+    #         # Insert Category
+    #         # categories.add(category)
+    #         category_id = self.insert_category_name(category)
+    #         # category_id = self.category_to_id[category]
+    #         for event in events:
+    #             # Insert Event
+    #             is_debug_event = bool(match_debug_event_name(event.name))
+    #             event_id = event_conn.insert_dict('Event', {
+    #                 'thread_id':event.thread_id,
+    #                 'start_time_us':event.start_time_us,
+    #                 'end_time_us':event.start_time_us + event.duration_us,
+    #                 'duration_us':event.duration_us,
+    #                 'event_name':event.name,
+    #                 'category_id':category_id,
+    #                 'process_id':process_id,
+    #                 'is_debug_event':is_debug_event,
+    #             })
+    #             # Insert EventAttr
+    #             for attr_name, attr_value in event.attrs.items():
+    #                 attr_id = eventattr_conn.insert_dict('EventAttr', {
+    #                     'event_id':event_id,
+    #                     'attr_name':attr_name,
+    #                     'attr_value':attr_value,
+    #                 })
+    #
+    #     def each_category_events():
+    #         for step, python_events in proto.python_events.items():
+    #             yield CATEGORY_PYTHON, python_events.events
+    #
+    #         for step, clibs in proto.clibs.items():
+    #             for category, clib_events in clibs.clibs.items():
+    #                 yield category, clib_events.events
+    #
+    #     num_all_events = sum(len(events) for category, events in each_category_events())
+    #
+    #     with progressbar.ProgressBar(max_value=num_all_events) as bar, \
+    #         bulk_inserter(self.conn, 'EventAttr', self.block_size, bar, directory=self.directory) as event_attr_bulk, \
+    #         bulk_inserter(self.conn, 'Event', self.block_size, progress_bar=None, id_field='event_id', directory=self.directory) as event_bulk:
+    #         for category, events in each_category_events():
+    #             insert_category_events(event_bulk, event_attr_bulk, category, events)
+    #
+    #     self.conn.commit()
 
     def create_db(self, recreate):
         self.conn.create_db(recreate)
@@ -552,18 +579,18 @@ def transaction(conn):
         raise
     conn.cursor.execute('COMMIT')
 
-@contextlib.contextmanager
-# def bulk_inserter(conn, table, block_size=50000, progress_bar=None, id_field=None):
-def bulk_inserter(*args, **kwargs):
-    try:
-        # bulk = BulkInserter(*args, **kwargs)
-        bulk = CSVInserter(*args, **kwargs)
-        # bulk = BulkInserter(conn, table, block_size, progress_bar, id_field)
-        yield bulk
-    except Exception as e:
-        raise
-    bulk.finish()
-    # conn.commit()
+# @contextlib.contextmanager
+# # def bulk_inserter(conn, table, block_size=50000, progress_bar=None, id_field=None):
+# def bulk_inserter(*args, **kwargs):
+#     try:
+#         # bulk = BulkInserter(*args, **kwargs)
+#         bulk = CSVInserter(*args, **kwargs)
+#         # bulk = BulkInserter(conn, table, block_size, progress_bar, id_field)
+#         yield bulk
+#     except Exception as e:
+#         raise
+#     bulk.finish()
+#     # conn.commit()
 
 # @contextlib.contextmanager
 # def fast_inserts(conn):
@@ -776,6 +803,7 @@ class _CSVInserterWorker:
         self.conn = sql_create_connection(self.db_path)
 
         self.process_to_id = self.build_name_to_id('Process', 'process_id', 'process_name')
+        self.phase_to_id = self.build_name_to_id('Phase', 'phase_id', 'phase_name')
         self.category_to_id = self.build_name_to_id('Category', 'category_id', 'category_name')
         self.device_to_id = self.build_name_to_id('Device', 'device_id', 'device_name')
 
@@ -824,6 +852,7 @@ class _CSVInserterWorker:
 
         # process_id = self.insert_process_name(reader.process_name)
         process_id = self.process_to_id[reader.process_name]
+        phase_id = self.phase_to_id[reader.phase_name]
 
         # inserts = []
         self._total_inserts = 0
@@ -853,6 +882,7 @@ class _CSVInserterWorker:
                 'event_name':name,
                 'category_id':category_id,
                 'process_id':process_id,
+                'phase_id':phase_id,
                 'device_id':device_id,
                 'is_debug_event':is_debug_event,
             }
@@ -874,11 +904,13 @@ class _CSVInserterWorker:
             pprint.pprint({'call_times_data':call_times_data})
 
         process_name = call_times_data['process_name']
+        phase_name = call_times_data['phase']
 
         c = self.cursor
         # Insert Process
         # process_id = self.insert_process_name(proto.process_name)
         process_id = self.process_to_id[process_name]
+        phase_id = self.phase_to_id[phase_name]
 
         num_all_events = sum(len(epoch_duration_sec_pairs) \
                              for func_tupl, epoch_duration_sec_pairs in call_times_data['call_times'].items())
@@ -914,6 +946,7 @@ class _CSVInserterWorker:
                         'event_name':pyprof_function,
                         'category_id':category_id,
                         'process_id':process_id,
+                        'phase_id':phase_id,
                         'is_debug_event':is_debug_event,
                         'pyprof_filename':pyprof_filename,
                         'pyprof_line_no':pyprof_line_no,
@@ -954,6 +987,7 @@ class _CSVInserterWorker:
         # Insert Process
         # process_id = self.insert_process_name(proto.process_name)
         process_id = self.process_to_id[proto.process_name]
+        phase_id = self.phase_to_id[proto.phase]
 
         # categories = set()
         def insert_category_events(event_conn, eventattr_conn, category, events):
@@ -972,6 +1006,7 @@ class _CSVInserterWorker:
                     'event_name':event.name,
                     'category_id':category_id,
                     'process_id':process_id,
+                    'phase_id':phase_id,
                     'is_debug_event':is_debug_event,
                 })
                 # Insert EventAttr
@@ -985,8 +1020,6 @@ class _CSVInserterWorker:
         num_all_events = sum(len(events) for category, events in self._pyprof_each_category_events(proto))
 
         with progressbar.ProgressBar(max_value=num_all_events) as bar:
-            # bulk_inserter(self.conn, 'EventAttr', self.block_size, bar, directory=self.directory) as event_attr_bulk, \
-            # bulk_inserter(self.conn, 'Event', self.block_size, progress_bar=None, id_field='event_id', directory=self.directory) as event_bulk:
             for category, events in self._pyprof_each_category_events(proto):
                 insert_category_events(self, self, category, events)
 
@@ -1660,6 +1693,76 @@ class SQLCategoryTimesReader:
     def steps(self, process_name, bench_name):
         return list(range(self.num_steps(process_name, bench_name)))
 
+    def process_phases(self, process_name, debug=False):
+        c = self.conn.cursor
+        query = textwrap.dedent("""
+        SELECT DISTINCT phase_name 
+        FROM 
+            Event AS e1
+            NATURAL JOIN Phase
+            NATURAL JOIN Process AS p
+        WHERE
+            p.process_name = {p} AND 
+            {no_dump_overlap_clause}
+        """.format(
+            no_dump_overlap_clause=sql_no_dump_overlap_clause('e1', 'e2', 'c2', indents=1),
+            p=sql_placeholder(),
+        ))
+        params = (process_name,)
+        sql_exec_query(c, query, params, debug=debug)
+        phase_names = [row['phase_name'] for row in c.fetchall()]
+        return phase_names
+
+    def process_phase_start_end_times(self, process_name, debug=False):
+        # This query is slow because of the SELECT MIN/MAX.
+        # We're better off issuing separate min/max queries for each <process_name, phase_name>.
+        raise NotImplementedError
+
+        c = self.conn.cursor
+        # Phase start time is the first event with that phase_name
+        # Q: Don't we need to make sure this doesn't overlap with a DUMP event?
+        query = textwrap.dedent("""
+        SELECT DISTINCT 
+        
+            ph.phase_name 
+        
+            , (
+                SELECT MIN(e1.start_time_us) 
+                FROM 
+                    Event e1
+                WHERE
+                    e1.phase_id = ph.phase_id AND
+                    {min_no_dump_overlap_clause}
+            ) AS phase_start_time_us 
+        
+            , (
+                SELECT MAX(e1.end_time_us) 
+                FROM 
+                    Event e1
+                WHERE
+                    e1.phase_id = ph.phase_id AND
+                    {max_no_dump_overlap_clause}
+            ) AS phase_end_time_us 
+        
+        FROM 
+            Event AS e
+            NATURAL JOIN Phase AS ph
+            NATURAL JOIN Process AS p
+        WHERE
+            p.process_name = {p} AND 
+            {no_dump_overlap_clause}
+        """).format(
+            no_dump_overlap_clause=sql_no_dump_overlap_clause('e', 'e2', 'c2', indents=1),
+            min_no_dump_overlap_clause=sql_no_dump_overlap_clause('e1', 'e2', 'c2', indents=3),
+            max_no_dump_overlap_clause=sql_no_dump_overlap_clause('e1', 'e2', 'c2', indents=3),
+            p=sql_placeholder(),
+        )
+        params = (process_name,)
+        sql_exec_query(c, query, params, debug=debug)
+        # phase_names = [row['phase_name'] for row in c.fetchall()]
+        rows = [dict(row) for row in c.fetchall()]
+        return rows
+
     def keep_steps(self, process_name, bench_name, skip_first_step=True):
         steps = self.steps(process_name, bench_name)
 
@@ -1733,26 +1836,30 @@ class SQLCategoryTimesReader:
             c.category_name = '{CATEGORY_OPERATION}' AND
             e1.event_name = {p} AND
             p.process_name = {p} AND 
-            NOT EXISTS (
-                SELECT * 
-                FROM Event AS e2
-                    NATURAL JOIN Category as c2
-                WHERE 
-                    c2.category_name = '{CATEGORY_PROFILING}' AND
-                    e2.event_name = '{PROFILING_DUMP_TRACE}' AND 
-                    {overlap_clause}
-            )
+            {no_dump_overlap_clause}
         ORDER BY e1.start_time_us ASC 
         """.format(
             CATEGORY_OPERATION=CATEGORY_OPERATION,
-            CATEGORY_PROFILING=CATEGORY_PROFILING,
-            PROFILING_DUMP_TRACE=PROFILING_DUMP_TRACE,
+            # CATEGORY_PROFILING=CATEGORY_PROFILING,
+            # PROFILING_DUMP_TRACE=PROFILING_DUMP_TRACE,
             # NOTE: We do NOT want to select any steps of an operation that overlap at all with a DUMP event.
             # indents=3 since {overlap_clause} above has 3 indent-levels in front of it.
-            overlap_clause=sql_overlap_clause('e1', 'e2', indents=3),
+            # overlap_clause=sql_overlap_clause('e1', 'e2', indents=3),
+            no_dump_overlap_clause=sql_no_dump_overlap_clause('e1', tmp_event_alias_2='e2', tmp_category_alias_2='c2', indents=1),
             p=sql_placeholder(),
         ),
             (bench_name, process_name))
+
+        # NOT EXISTS (
+        #     SELECT *
+        #     FROM Event AS e2
+        # NATURAL JOIN Category as c2
+        # WHERE
+        # c2.category_name = '{CATEGORY_PROFILING}' AND
+        # e2.event_name = '{PROFILING_DUMP_TRACE}' AND
+        # {overlap_clause}
+        # )
+
         rows = rows_as_ktime(c.fetchall())
         if process_name not in self._steps:
             self._steps[process_name] = dict()
@@ -1821,6 +1928,8 @@ class SQLCategoryTimesReader:
         ))
 
     def parse_timeline(self,
+                       process_name=None,
+                       phase_name=None,
                        # group_by_device=DEFAULT_group_by_device,
                        ignore_categories=DEFAULT_ignore_categories,
                        debug=DEFAULT_debug,
@@ -1857,21 +1966,26 @@ class SQLCategoryTimesReader:
         :return:
         """
 
-        if should_load_memo(debug_memoize, self._parse_timeline_memo_path()):
-            ret = load_memo(debug_memoize, self._parse_timeline_memo_path())
-            return ret
+        # if should_load_memo(debug_memoize, self._parse_timeline_memo_path()):
+        #     ret = load_memo(debug_memoize, self._parse_timeline_memo_path())
+        #     return ret
 
         category_times = dict()
         operation_types = set()
         # Categories NOT including the operation-type categories (that replaced CATEGORY_OPERATION)
         categories = set()
         proc_types = set()
+        
+        if process_name is not None:
+            process_names = [process_name]
+        else:
+            process_names = self.process_names
 
-        for process_name in self.process_names:
+        for process_name in process_names:
 
             process_label = "process={proc}".format(
                 proc=process_name)
-            proc_category_times = self.process_events(process_name, ignore_categories,
+            proc_category_times = self.process_events(process_name, phase_name, ignore_categories,
                                               debug=debug,
                                               debug_ops=debug_ops,
                                               debug_label=process_label,
@@ -1932,7 +2046,7 @@ class SQLCategoryTimesReader:
             }, indent=2)
 
         ret = category_times, categories, operation_types, proc_types
-        maybe_memoize(debug_memoize, ret, self._parse_timeline_memo_path())
+        # maybe_memoize(debug_memoize, ret, self._parse_timeline_memo_path())
         return ret
 
 
@@ -1949,10 +2063,11 @@ class SQLCategoryTimesReader:
         sql_exec_query(c, query, klass=self.__class__, debug=debug)
         row = c.fetchone()
         total_time_us = row['max_us'] - row['min_us']
-        total_time_sec = total_time_us/MICROSECONDS_IN_SECOND
+        NumberType = type(total_time_us)
+        total_time_sec = total_time_us/NumberType(MICROSECONDS_IN_SECOND)
         return total_time_sec
 
-    def process_events(self, process_name=None,
+    def process_events(self, process_name=None, phase_name=None,
                        ignore_categories=None,
                        op_name=None,
                        keep_categories=None,
@@ -1966,6 +2081,8 @@ class SQLCategoryTimesReader:
 
         :param process_name:
             If process_name is None, return events across ALL processes.
+        :param phase_name:
+            If phase_name is None, return events across ALL phases.
         :param ignore_categories:
             Ignore events belonging to this category.
         :param keep_categories:
@@ -2008,35 +2125,41 @@ class SQLCategoryTimesReader:
             Category AS c1
             NATURAL JOIN Event as e1
             NATURAL JOIN Process as p1
+            NATURAL JOIN Phase as ph1
             NATURAL LEFT JOIN Device as d1
         WHERE 
             {process_clause} AND
+            {phase_clause} AND
             {debug_ops_clause} AND
             {ignore_clause} AND
             -- Ignore any events that overlap with when we dump profiling information.
-            NOT EXISTS (
-                SELECT * 
-                FROM Event as dump_event
-                    NATURAL JOIN Category as c2
-                WHERE 
-                    c2.category_name = '{CATEGORY_PROFILING}' AND
-                    dump_event.event_name = '{PROFILING_DUMP_TRACE}' AND 
-                    {overlap_clause}
-            ) AND 
+            {no_dump_overlap_clause} AND
             -- Only keep events that are subsumed by an <op> event.
             -- e.g. Only keep pyprof events that belong to the set_operation('tree_search') annotation
             {op_clause}
         ORDER BY start_time_us ASC 
         """).format(
             ignore_clause=sql_ignore_clause('c1', ignore_categories, keep_categories, indents=1),
-            CATEGORY_PROFILING=CATEGORY_PROFILING,
-            PROFILING_DUMP_TRACE=PROFILING_DUMP_TRACE,
-            overlap_clause=sql_overlap_clause('e1', 'dump_event', indents=3),
+            # CATEGORY_PROFILING=CATEGORY_PROFILING,
+            # PROFILING_DUMP_TRACE=PROFILING_DUMP_TRACE,
+            # overlap_clause=sql_overlap_clause('e1', 'dump_event', indents=3),
+            no_dump_overlap_clause=sql_no_dump_overlap_clause('e1', 'e2', 'c2', indents=1),
             process_clause=sql_process_clause(process_name, 'p1', indents=1, allow_none=True),
+            phase_clause=sql_phase_clause(phase_name, 'ph1', indents=1, allow_none=True),
             debug_ops_clause=sql_debug_ops_clause(debug_ops, 'e1', indents=1),
             op_clause=op_clause,
             p=sql_placeholder(),
         )
+
+        # NOT EXISTS (
+        #     SELECT *
+        #     FROM Event as dump_event
+        # NATURAL JOIN Category as c2
+        # WHERE
+        # c2.category_name = '{CATEGORY_PROFILING}' AND
+        # dump_event.event_name = '{PROFILING_DUMP_TRACE}' AND
+        # {overlap_clause}
+        # ) AND
 
         # query = textwrap.dedent("""
         # SELECT device_name, category_name, event_name, start_time_us, duration_us
@@ -2194,6 +2317,23 @@ class SQLCategoryTimesReader:
                                  ignore_categories=DEFAULT_ignore_categories,
                                  debug=DEFAULT_debug,
                                  show_progress=False):
+        return self.events_by_time_range(
+            op_event.start_time_usec, op_event.end_time_usec, process_name,
+            bench_name=bench_name,
+            step=step,
+            group_by_device=group_by_device,
+            ignore_categories=ignore_categories,
+            debug=debug,
+            show_progress=show_progress)
+
+    def events_by_time_range(self, start_time_usec, end_time_usec, process_name,
+                                 # For debugging self.parse()
+                                 bench_name=None,
+                                 step=None,
+                                 group_by_device=DEFAULT_group_by_device,
+                                 ignore_categories=DEFAULT_ignore_categories,
+                                 debug=DEFAULT_debug,
+                                 show_progress=False):
 
         c = self.conn.cursor
 
@@ -2245,8 +2385,8 @@ class SQLCategoryTimesReader:
         ))
         params = (
             process_name,
-            op_event.start_time_usec, op_event.end_time_usec,
-            op_event.start_time_usec, op_event.end_time_usec,
+            start_time_usec, end_time_usec,
+            start_time_usec, end_time_usec,
         )
 
         if SQLCategoryTimesReader.DEBUG_PARSE:
@@ -2292,7 +2432,7 @@ class SQLCategoryTimesReader:
             # Q: What do does train_loop look like, overlapped with all its fellow operation-types?
             json_path = _j(self.directory, "SQLCategoryTimesReader{proc}{step}{bench}.debug.json".format(
                 proc=process_suffix(process_name),
-                step=step_suffix(step),
+                step=step_suffix(step, allow_none=True),
                 bench=bench_suffix(bench_name)))
             print("> DEBUG: dump trace events BEFORE process_op_nest @ {path}".format(path=json_path))
             dump_category_times(category_times, json_path, print_log=False)
@@ -2704,7 +2844,7 @@ def process_op_nest_single_thread(op_events, filter_by_op=None,
     for i, op_stack in enumerate(split_op_stacks(op_events,
                                                  show_progress=show_progress,
                                                  debug_label=debug_label,
-                                                 each_push=True)):
+                                                 each_push=False)):
         for event in op_stack.get_absored_ops():
             if filter_by_op is not None and event.name != filter_by_op:
                 continue
@@ -3110,15 +3250,30 @@ def sql_debug_ops_clause(debug_ops, event_alias, indents=None):
     return txt
 
 def sql_process_clause(process_name, process_alias, indents=None, allow_none=False):
-    if process_name is None:
+    return _sql_eq_clause(process_name, process_alias, 'process_name', indents, allow_none)
+
+def sql_phase_clause(phase_name, phase_alias, indents=None, allow_none=False):
+    return _sql_eq_clause(phase_name, phase_alias, 'phase_name', indents, allow_none)
+
+def _sql_eq_clause(value, alias, field, indents=None, allow_none=False):
+    def _as_value(value):
+        if type(value) == str:
+            return "'{value}'".format(
+                value=value)
+        return str(value)
+    
+    if value is None:
         if not allow_none:
-            raise RuntimeError("Expected process_name not to be None")
+            raise RuntimeError("Expected {alias}.{field} not to be None".format(
+                alias=alias,
+                field=field))
         txt = "TRUE"
     else:
-        txt = "( {p}.process_name = '{process_name}' )".format(
-            process_name=process_name,
-            p=process_alias)
-
+        txt = "( {p}.{field} = {value} )".format(
+            p=alias,
+            field=field,
+            value=_as_value(value))
+        
     txt = maybe_indent(txt, indents)
     return txt
 
@@ -3291,6 +3446,41 @@ def sql_overlap_clause(event_alias_1, event_alias_2,
 
     return clause
 
+def sql_no_dump_overlap_clause(event_alias_1, tmp_event_alias_2, tmp_category_alias_2, indents=None):
+    """
+    Make sure Event's we are selecting from event_alias_1
+    do not overlap with DUMP Event's we are selecting from tmp_event_alias_2.
+
+    :param event_alias_1:
+        The event alias used for Events we are overlapping against.
+    :param tmp_event_alias_2:
+    :param tmp_category_alias_2:
+        Aliases to use for DUMP events.
+    :return:
+    """
+    clause = textwrap.dedent("""
+        NOT EXISTS (
+            SELECT * 
+            FROM Event AS {e2}
+                NATURAL JOIN Category as {c2}
+            WHERE 
+                {c2}.category_name = '{CATEGORY_PROFILING}' AND
+                {e2}.event_name = '{PROFILING_DUMP_TRACE}' AND 
+                {overlap_clause}
+        )
+        """.format(
+        CATEGORY_OPERATION=CATEGORY_OPERATION,
+        CATEGORY_PROFILING=CATEGORY_PROFILING,
+        PROFILING_DUMP_TRACE=PROFILING_DUMP_TRACE,
+        # NOTE: We do NOT want to select any steps of an operation that overlap at all with a DUMP event.
+        # indents=3 since {overlap_clause} above has 3 indent-levels in front of it.
+        e2=tmp_event_alias_2,
+        c2=tmp_category_alias_2,
+        overlap_clause=sql_overlap_clause(event_alias_1, tmp_event_alias_2, indents=indents+2),
+    ))
+    clause = maybe_indent(clause, indents)
+    return clause
+
 def sql_get_source_files(klass, directory):
     """
     SQLite: We want traces.db
@@ -3307,16 +3497,37 @@ def sql_get_source_files(klass, directory):
         )))
     return src_files
 
-def get_proto_process_name(path):
+def get_proto_metadata(path):
+    """
+    Return stuff we must insert BEFORE inserting individual events in bulk.
+    That includes:
+    - process_name's
+    - phase_name's
+
+    :param path:
+    :return:
+    """
     if is_tfprof_file(path):
         proto = read_tfprof_file(path)
-        return proto.process_name
+        meta = {
+            'process_name':proto.process_name,
+            'phase_name':proto.phase,
+        }
+        return meta
     elif is_pyprof_file(path) or is_dump_event_file(path):
         proto = read_pyprof_file(path)
-        return proto.process_name
+        meta = {
+            'process_name':proto.process_name,
+            'phase_name':proto.phase,
+        }
+        return meta
     elif is_pyprof_call_times_file(path):
         call_times_data = read_pyprof_call_times_file(path)
-        return call_times_data['process_name']
+        meta = {
+            'process_name':call_times_data['process_name'],
+            'phase_name':call_times_data['phase'],
+        }
+        return meta
     else:
         raise NotImplementedError("Not sure how to get process_name from trace-file {path}".format(
             path=path))
@@ -3336,9 +3547,21 @@ def test_merge_sorted():
     test_01()
 
 def test_process_op_nest():
-    from test.test_util import sec, T
+    from test.test_util import sec, T, U
+
+    process_op_nest = process_op_nest_single_thread
 
     def test_01_1_stack():
+        #           [   op3   ]
+        #       [       op2       ]
+        # [             op1             ]
+        # 0     1   2         3   4     5
+
+        #           [   op3   ]
+        #       [o2]           [o2]
+        # [ op1]                   [op1 ]
+        # 0     1   2         3   4     5
+
         op_events = [
             T(0, 5, 'op1'),
             T(1, 4, 'op2'),
@@ -3408,21 +3631,21 @@ def test_process_op_nest():
         assert actual == expect
     test_02_2_stacks()
 
-    # Invalid input test
-    def test_03_complete_overlap():
-        op_events = [
-            T(0, 1, 'op1'),
-            T(0, 1, 'op2'),
-        ]
-
-        # Unfiltered:
-        with pytest.raises(AssertionError):
-            actual = process_op_nest(op_events)
-        # expect = [
-        #     T(0, 1, 'op2'),
-        # ]
-        # assert actual == expect
-    test_03_complete_overlap()
+    # # Invalid input test
+    # def test_03_complete_overlap():
+    #     op_events = [
+    #         T(0, 1, 'op1'),
+    #         T(0, 1, 'op2'),
+    #     ]
+    #
+    #     # Unfiltered:
+    #     with pytest.raises(AssertionError):
+    #         actual = process_op_nest(op_events)
+    #     # expect = [
+    #     #     T(0, 1, 'op2'),
+    #     # ]
+    #     # assert actual == expect
+    # test_03_complete_overlap()
 
     def test_04_multiple_sub_events():
         op_events = [
@@ -3466,3 +3689,89 @@ def test_process_op_nest():
         assert actual == expect
     test_04_multiple_sub_events()
 
+    def test_05_wild_data_01():
+        """
+        Saw this data happen 'in the wild' from a collected trace.
+        For some reason, process_op_nest failed.
+
+        {
+            "args": {
+                "name": "train_loop"
+            },
+            "cat": "Op",
+            "dur": "1180757",
+            "name": "train_loop",
+            "ph": "X",
+            "pid": 1,
+            "tid": 0,
+            "ts": "1551209039576428"
+        },
+        {
+            "args": {
+                "name": "q_forward"
+            },
+            "cat": "Op",
+            "dur": "1178289",
+            "name": "q_forward",
+            "ph": "X",
+            "pid": 1,
+            "tid": 0,
+            "ts": "1551209039576444"
+        },
+
+        :return:
+        """
+        from decimal import Decimal as dec
+
+        # [       train_loop      ]
+        # |     [ q_forward ]     |
+        # |     |           |     |
+        # |     qf_start    qf_end|
+        # tl_start                tl_end
+
+        tl_start = dec(1551209039576428)
+        tl_dur = dec(1180757)
+        tl_end = dec(1551209039576428) + tl_dur
+        qf_start = dec(1551209039576444)
+        qf_dur = dec(1178289)
+        qf_end = dec(1551209039576444) + qf_dur
+
+        train_loop_ev = U(tl_start, tl_end, name='train_loop')
+        q_forward_ev = U(qf_start, qf_end, name='q_forward')
+        op_events = [
+            train_loop_ev,
+            q_forward_ev
+        ]
+
+        # Unfiltered:
+        actual = process_op_nest(op_events)
+        expect = [
+            U(tl_start, tl_start + ( qf_start - tl_start ), 'train_loop'),
+            U(qf_start, qf_start + qf_dur, 'q_forward'),
+            U(qf_start + qf_dur, tl_start + tl_dur, 'train_loop'),
+        ]
+        assert actual == expect
+
+        # # Filter by op1
+        # actual = process_op_nest(op_events, 'op1')
+        # expect = [
+        #     T(0, 1, 'op1'),
+        #     T(2, 3, 'op1'),
+        #     T(4, 5, 'op1'),
+        # ]
+        # assert actual == expect
+        #
+        # # Filter by op2
+        # actual = process_op_nest(op_events, 'op2')
+        # expect = [
+        #     T(1, 2, 'op2'),
+        # ]
+        # assert actual == expect
+        #
+        # # Filter by op3
+        # actual = process_op_nest(op_events, 'op3')
+        # expect = [
+        #     T(3, 4, 'op3'),
+        # ]
+        # assert actual == expect
+    test_05_wild_data_01()
