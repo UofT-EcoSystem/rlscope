@@ -1320,6 +1320,13 @@ def is_tfprof_file(path):
     ), base)
     return m
 
+def is_machine_util_file(path):
+    base = _b(path)
+    m = re.search(r'machine_util{trace}.proto'.format(
+        trace=TRACE_SUFFIX_RE,
+    ), base)
+    return m
+
 def is_pyprof_call_times_file(path):
     base = _b(path)
     m = re.search(r'pyprof_call_times{bench}{trace}.pickle'.format(

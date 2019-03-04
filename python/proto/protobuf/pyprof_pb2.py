@@ -20,7 +20,7 @@ DESCRIPTOR = _descriptor.FileDescriptor(
   package='iml.pyprof',
   syntax='proto3',
   serialized_options=None,
-  serialized_pb=_b('\n\x15protobuf/pyprof.proto\x12\niml.pyprof\"\xb7\x02\n\x06Pyprof\x12\r\n\x05steps\x18\x01 \x03(\x03\x12;\n\rpython_events\x18\x02 \x03(\x0b\x32$.iml.pyprof.Pyprof.PythonEventsEntry\x12,\n\x05\x63libs\x18\x03 \x03(\x0b\x32\x1d.iml.pyprof.Pyprof.ClibsEntry\x12\x14\n\x0cprocess_name\x18\x04 \x01(\t\x12\r\n\x05phase\x18\x05 \x01(\x03\x1aM\n\x11PythonEventsEntry\x12\x0b\n\x03key\x18\x01 \x01(\x03\x12\'\n\x05value\x18\x02 \x01(\x0b\x32\x18.iml.pyprof.PythonEvents:\x02\x38\x01\x1a?\n\nClibsEntry\x12\x0b\n\x03key\x18\x01 \x01(\x03\x12 \n\x05value\x18\x02 \x01(\x0b\x32\x11.iml.pyprof.CLibs:\x02\x38\x01\"\xaf\x01\n\x05\x45vent\x12\x11\n\tthread_id\x18\x01 \x01(\x03\x12\x15\n\rstart_time_us\x18\x02 \x01(\x03\x12\x13\n\x0b\x64uration_us\x18\x03 \x01(\x03\x12\x0c\n\x04name\x18\x04 \x01(\t\x12+\n\x05\x61ttrs\x18\x05 \x03(\x0b\x32\x1c.iml.pyprof.Event.AttrsEntry\x1a,\n\nAttrsEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\t:\x02\x38\x01\"z\n\x05\x43Libs\x12+\n\x05\x63libs\x18\x01 \x03(\x0b\x32\x1c.iml.pyprof.CLibs.ClibsEntry\x1a\x44\n\nClibsEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12%\n\x05value\x18\x02 \x01(\x0b\x32\x16.iml.pyprof.CLibEvents:\x02\x38\x01\"/\n\nCLibEvents\x12!\n\x06\x65vents\x18\x01 \x03(\x0b\x32\x11.iml.pyprof.Event\"1\n\x0cPythonEvents\x12!\n\x06\x65vents\x18\x01 \x03(\x0b\x32\x11.iml.pyprof.Event\"\xbe\x01\n\tAttrValue\x12\x0b\n\x01s\x18\x02 \x01(\x0cH\x00\x12\x0b\n\x01i\x18\x03 \x01(\x03H\x00\x12\x0b\n\x01\x66\x18\x04 \x01(\x02H\x00\x12\x0b\n\x01\x62\x18\x05 \x01(\x08H\x00\x12/\n\x04list\x18\x01 \x01(\x0b\x32\x1f.iml.pyprof.AttrValue.ListValueH\x00\x1a\x43\n\tListValue\x12\t\n\x01s\x18\x02 \x03(\x0c\x12\r\n\x01i\x18\x03 \x03(\x03\x42\x02\x10\x01\x12\r\n\x01\x66\x18\x04 \x03(\x02\x42\x02\x10\x01\x12\r\n\x01\x62\x18\x05 \x03(\x08\x42\x02\x10\x01\x42\x07\n\x05valueb\x06proto3')
+  serialized_pb=_b('\n\x15protobuf/pyprof.proto\x12\niml.pyprof\"\xb7\x02\n\x06Pyprof\x12\r\n\x05steps\x18\x01 \x03(\x03\x12;\n\rpython_events\x18\x02 \x03(\x0b\x32$.iml.pyprof.Pyprof.PythonEventsEntry\x12,\n\x05\x63libs\x18\x03 \x03(\x0b\x32\x1d.iml.pyprof.Pyprof.ClibsEntry\x12\x14\n\x0cprocess_name\x18\x04 \x01(\t\x12\r\n\x05phase\x18\x05 \x01(\t\x1aM\n\x11PythonEventsEntry\x12\x0b\n\x03key\x18\x01 \x01(\x03\x12\'\n\x05value\x18\x02 \x01(\x0b\x32\x18.iml.pyprof.PythonEvents:\x02\x38\x01\x1a?\n\nClibsEntry\x12\x0b\n\x03key\x18\x01 \x01(\x03\x12 \n\x05value\x18\x02 \x01(\x0b\x32\x11.iml.pyprof.CLibs:\x02\x38\x01\"\xeb\x01\n\x0fProcessMetadata\x12J\n\x10process_children\x18\x01 \x03(\x0b\x32\x30.iml.pyprof.ProcessMetadata.ProcessChildrenEntry\x1a\'\n\x0fProcessChildren\x12\x14\n\x0cprocess_name\x18\x01 \x03(\t\x1a\x63\n\x14ProcessChildrenEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12:\n\x05value\x18\x02 \x01(\x0b\x32+.iml.pyprof.ProcessMetadata.ProcessChildren:\x02\x38\x01\"\xc1\x01\n\x12MachineUtilization\x12\x14\n\x0cmachine_name\x18\x01 \x01(\t\x12\x43\n\x0b\x64\x65vice_util\x18\x02 \x03(\x0b\x32..iml.pyprof.MachineUtilization.DeviceUtilEntry\x1aP\n\x0f\x44\x65viceUtilEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12,\n\x05value\x18\x02 \x01(\x0b\x32\x1d.iml.pyprof.DeviceUtilization:\x02\x38\x01\"X\n\x11\x44\x65viceUtilization\x12\x13\n\x0b\x64\x65vice_name\x18\x01 \x01(\t\x12.\n\x07samples\x18\x02 \x03(\x0b\x32\x1d.iml.pyprof.UtilizationSample\"8\n\x11UtilizationSample\x12\x15\n\rstart_time_us\x18\x01 \x01(\x03\x12\x0c\n\x04util\x18\x02 \x01(\x02\"\xaf\x01\n\x05\x45vent\x12\x11\n\tthread_id\x18\x01 \x01(\x03\x12\x15\n\rstart_time_us\x18\x02 \x01(\x03\x12\x13\n\x0b\x64uration_us\x18\x03 \x01(\x03\x12\x0c\n\x04name\x18\x04 \x01(\t\x12+\n\x05\x61ttrs\x18\x05 \x03(\x0b\x32\x1c.iml.pyprof.Event.AttrsEntry\x1a,\n\nAttrsEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\t:\x02\x38\x01\"z\n\x05\x43Libs\x12+\n\x05\x63libs\x18\x01 \x03(\x0b\x32\x1c.iml.pyprof.CLibs.ClibsEntry\x1a\x44\n\nClibsEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12%\n\x05value\x18\x02 \x01(\x0b\x32\x16.iml.pyprof.CLibEvents:\x02\x38\x01\"/\n\nCLibEvents\x12!\n\x06\x65vents\x18\x01 \x03(\x0b\x32\x11.iml.pyprof.Event\"1\n\x0cPythonEvents\x12!\n\x06\x65vents\x18\x01 \x03(\x0b\x32\x11.iml.pyprof.Event\"C\n\tListValue\x12\t\n\x01s\x18\x02 \x03(\x0c\x12\r\n\x01i\x18\x03 \x03(\x03\x42\x02\x10\x01\x12\r\n\x01\x66\x18\x04 \x03(\x02\x42\x02\x10\x01\x12\r\n\x01\x62\x18\x05 \x03(\x08\x42\x02\x10\x01\"o\n\tAttrValue\x12\x0b\n\x01s\x18\x02 \x01(\x0cH\x00\x12\x0b\n\x01i\x18\x03 \x01(\x03H\x00\x12\x0b\n\x01\x66\x18\x04 \x01(\x02H\x00\x12\x0b\n\x01\x62\x18\x05 \x01(\x08H\x00\x12%\n\x04list\x18\x01 \x01(\x0b\x32\x15.iml.pyprof.ListValueH\x00\x42\x07\n\x05valueb\x06proto3')
 )
 
 
@@ -137,8 +137,8 @@ _PYPROF = _descriptor.Descriptor(
       serialized_options=None, file=DESCRIPTOR),
     _descriptor.FieldDescriptor(
       name='phase', full_name='iml.pyprof.Pyprof.phase', index=4,
-      number=5, type=3, cpp_type=2, label=1,
-      has_default_value=False, default_value=0,
+      number=5, type=9, cpp_type=9, label=1,
+      has_default_value=False, default_value=_b("").decode('utf-8'),
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       serialized_options=None, file=DESCRIPTOR),
@@ -156,6 +156,255 @@ _PYPROF = _descriptor.Descriptor(
   ],
   serialized_start=38,
   serialized_end=349,
+)
+
+
+_PROCESSMETADATA_PROCESSCHILDREN = _descriptor.Descriptor(
+  name='ProcessChildren',
+  full_name='iml.pyprof.ProcessMetadata.ProcessChildren',
+  filename=None,
+  file=DESCRIPTOR,
+  containing_type=None,
+  fields=[
+    _descriptor.FieldDescriptor(
+      name='process_name', full_name='iml.pyprof.ProcessMetadata.ProcessChildren.process_name', index=0,
+      number=1, type=9, cpp_type=9, label=3,
+      has_default_value=False, default_value=[],
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+  ],
+  extensions=[
+  ],
+  nested_types=[],
+  enum_types=[
+  ],
+  serialized_options=None,
+  is_extendable=False,
+  syntax='proto3',
+  extension_ranges=[],
+  oneofs=[
+  ],
+  serialized_start=447,
+  serialized_end=486,
+)
+
+_PROCESSMETADATA_PROCESSCHILDRENENTRY = _descriptor.Descriptor(
+  name='ProcessChildrenEntry',
+  full_name='iml.pyprof.ProcessMetadata.ProcessChildrenEntry',
+  filename=None,
+  file=DESCRIPTOR,
+  containing_type=None,
+  fields=[
+    _descriptor.FieldDescriptor(
+      name='key', full_name='iml.pyprof.ProcessMetadata.ProcessChildrenEntry.key', index=0,
+      number=1, type=9, cpp_type=9, label=1,
+      has_default_value=False, default_value=_b("").decode('utf-8'),
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='value', full_name='iml.pyprof.ProcessMetadata.ProcessChildrenEntry.value', index=1,
+      number=2, type=11, cpp_type=10, label=1,
+      has_default_value=False, default_value=None,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+  ],
+  extensions=[
+  ],
+  nested_types=[],
+  enum_types=[
+  ],
+  serialized_options=_b('8\001'),
+  is_extendable=False,
+  syntax='proto3',
+  extension_ranges=[],
+  oneofs=[
+  ],
+  serialized_start=488,
+  serialized_end=587,
+)
+
+_PROCESSMETADATA = _descriptor.Descriptor(
+  name='ProcessMetadata',
+  full_name='iml.pyprof.ProcessMetadata',
+  filename=None,
+  file=DESCRIPTOR,
+  containing_type=None,
+  fields=[
+    _descriptor.FieldDescriptor(
+      name='process_children', full_name='iml.pyprof.ProcessMetadata.process_children', index=0,
+      number=1, type=11, cpp_type=10, label=3,
+      has_default_value=False, default_value=[],
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+  ],
+  extensions=[
+  ],
+  nested_types=[_PROCESSMETADATA_PROCESSCHILDREN, _PROCESSMETADATA_PROCESSCHILDRENENTRY, ],
+  enum_types=[
+  ],
+  serialized_options=None,
+  is_extendable=False,
+  syntax='proto3',
+  extension_ranges=[],
+  oneofs=[
+  ],
+  serialized_start=352,
+  serialized_end=587,
+)
+
+
+_MACHINEUTILIZATION_DEVICEUTILENTRY = _descriptor.Descriptor(
+  name='DeviceUtilEntry',
+  full_name='iml.pyprof.MachineUtilization.DeviceUtilEntry',
+  filename=None,
+  file=DESCRIPTOR,
+  containing_type=None,
+  fields=[
+    _descriptor.FieldDescriptor(
+      name='key', full_name='iml.pyprof.MachineUtilization.DeviceUtilEntry.key', index=0,
+      number=1, type=9, cpp_type=9, label=1,
+      has_default_value=False, default_value=_b("").decode('utf-8'),
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='value', full_name='iml.pyprof.MachineUtilization.DeviceUtilEntry.value', index=1,
+      number=2, type=11, cpp_type=10, label=1,
+      has_default_value=False, default_value=None,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+  ],
+  extensions=[
+  ],
+  nested_types=[],
+  enum_types=[
+  ],
+  serialized_options=_b('8\001'),
+  is_extendable=False,
+  syntax='proto3',
+  extension_ranges=[],
+  oneofs=[
+  ],
+  serialized_start=703,
+  serialized_end=783,
+)
+
+_MACHINEUTILIZATION = _descriptor.Descriptor(
+  name='MachineUtilization',
+  full_name='iml.pyprof.MachineUtilization',
+  filename=None,
+  file=DESCRIPTOR,
+  containing_type=None,
+  fields=[
+    _descriptor.FieldDescriptor(
+      name='machine_name', full_name='iml.pyprof.MachineUtilization.machine_name', index=0,
+      number=1, type=9, cpp_type=9, label=1,
+      has_default_value=False, default_value=_b("").decode('utf-8'),
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='device_util', full_name='iml.pyprof.MachineUtilization.device_util', index=1,
+      number=2, type=11, cpp_type=10, label=3,
+      has_default_value=False, default_value=[],
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+  ],
+  extensions=[
+  ],
+  nested_types=[_MACHINEUTILIZATION_DEVICEUTILENTRY, ],
+  enum_types=[
+  ],
+  serialized_options=None,
+  is_extendable=False,
+  syntax='proto3',
+  extension_ranges=[],
+  oneofs=[
+  ],
+  serialized_start=590,
+  serialized_end=783,
+)
+
+
+_DEVICEUTILIZATION = _descriptor.Descriptor(
+  name='DeviceUtilization',
+  full_name='iml.pyprof.DeviceUtilization',
+  filename=None,
+  file=DESCRIPTOR,
+  containing_type=None,
+  fields=[
+    _descriptor.FieldDescriptor(
+      name='device_name', full_name='iml.pyprof.DeviceUtilization.device_name', index=0,
+      number=1, type=9, cpp_type=9, label=1,
+      has_default_value=False, default_value=_b("").decode('utf-8'),
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='samples', full_name='iml.pyprof.DeviceUtilization.samples', index=1,
+      number=2, type=11, cpp_type=10, label=3,
+      has_default_value=False, default_value=[],
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+  ],
+  extensions=[
+  ],
+  nested_types=[],
+  enum_types=[
+  ],
+  serialized_options=None,
+  is_extendable=False,
+  syntax='proto3',
+  extension_ranges=[],
+  oneofs=[
+  ],
+  serialized_start=785,
+  serialized_end=873,
+)
+
+
+_UTILIZATIONSAMPLE = _descriptor.Descriptor(
+  name='UtilizationSample',
+  full_name='iml.pyprof.UtilizationSample',
+  filename=None,
+  file=DESCRIPTOR,
+  containing_type=None,
+  fields=[
+    _descriptor.FieldDescriptor(
+      name='start_time_us', full_name='iml.pyprof.UtilizationSample.start_time_us', index=0,
+      number=1, type=3, cpp_type=2, label=1,
+      has_default_value=False, default_value=0,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='util', full_name='iml.pyprof.UtilizationSample.util', index=1,
+      number=2, type=2, cpp_type=6, label=1,
+      has_default_value=False, default_value=float(0),
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+  ],
+  extensions=[
+  ],
+  nested_types=[],
+  enum_types=[
+  ],
+  serialized_options=None,
+  is_extendable=False,
+  syntax='proto3',
+  extension_ranges=[],
+  oneofs=[
+  ],
+  serialized_start=875,
+  serialized_end=931,
 )
 
 
@@ -192,8 +441,8 @@ _EVENT_ATTRSENTRY = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=483,
-  serialized_end=527,
+  serialized_start=1065,
+  serialized_end=1109,
 )
 
 _EVENT = _descriptor.Descriptor(
@@ -250,8 +499,8 @@ _EVENT = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=352,
-  serialized_end=527,
+  serialized_start=934,
+  serialized_end=1109,
 )
 
 
@@ -288,8 +537,8 @@ _CLIBS_CLIBSENTRY = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=583,
-  serialized_end=651,
+  serialized_start=1165,
+  serialized_end=1233,
 )
 
 _CLIBS = _descriptor.Descriptor(
@@ -318,8 +567,8 @@ _CLIBS = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=529,
-  serialized_end=651,
+  serialized_start=1111,
+  serialized_end=1233,
 )
 
 
@@ -349,8 +598,8 @@ _CLIBEVENTS = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=653,
-  serialized_end=700,
+  serialized_start=1235,
+  serialized_end=1282,
 )
 
 
@@ -380,41 +629,41 @@ _PYTHONEVENTS = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=702,
-  serialized_end=751,
+  serialized_start=1284,
+  serialized_end=1333,
 )
 
 
-_ATTRVALUE_LISTVALUE = _descriptor.Descriptor(
+_LISTVALUE = _descriptor.Descriptor(
   name='ListValue',
-  full_name='iml.pyprof.AttrValue.ListValue',
+  full_name='iml.pyprof.ListValue',
   filename=None,
   file=DESCRIPTOR,
   containing_type=None,
   fields=[
     _descriptor.FieldDescriptor(
-      name='s', full_name='iml.pyprof.AttrValue.ListValue.s', index=0,
+      name='s', full_name='iml.pyprof.ListValue.s', index=0,
       number=2, type=12, cpp_type=9, label=3,
       has_default_value=False, default_value=[],
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       serialized_options=None, file=DESCRIPTOR),
     _descriptor.FieldDescriptor(
-      name='i', full_name='iml.pyprof.AttrValue.ListValue.i', index=1,
+      name='i', full_name='iml.pyprof.ListValue.i', index=1,
       number=3, type=3, cpp_type=2, label=3,
       has_default_value=False, default_value=[],
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       serialized_options=_b('\020\001'), file=DESCRIPTOR),
     _descriptor.FieldDescriptor(
-      name='f', full_name='iml.pyprof.AttrValue.ListValue.f', index=2,
+      name='f', full_name='iml.pyprof.ListValue.f', index=2,
       number=4, type=2, cpp_type=6, label=3,
       has_default_value=False, default_value=[],
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       serialized_options=_b('\020\001'), file=DESCRIPTOR),
     _descriptor.FieldDescriptor(
-      name='b', full_name='iml.pyprof.AttrValue.ListValue.b', index=3,
+      name='b', full_name='iml.pyprof.ListValue.b', index=3,
       number=5, type=8, cpp_type=7, label=3,
       has_default_value=False, default_value=[],
       message_type=None, enum_type=None, containing_type=None,
@@ -432,9 +681,10 @@ _ATTRVALUE_LISTVALUE = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=868,
-  serialized_end=935,
+  serialized_start=1335,
+  serialized_end=1402,
 )
+
 
 _ATTRVALUE = _descriptor.Descriptor(
   name='AttrValue',
@@ -481,7 +731,7 @@ _ATTRVALUE = _descriptor.Descriptor(
   ],
   extensions=[
   ],
-  nested_types=[_ATTRVALUE_LISTVALUE, ],
+  nested_types=[],
   enum_types=[
   ],
   serialized_options=None,
@@ -493,8 +743,8 @@ _ATTRVALUE = _descriptor.Descriptor(
       name='value', full_name='iml.pyprof.AttrValue.value',
       index=0, containing_type=None, fields=[]),
   ],
-  serialized_start=754,
-  serialized_end=944,
+  serialized_start=1404,
+  serialized_end=1515,
 )
 
 _PYPROF_PYTHONEVENTSENTRY.fields_by_name['value'].message_type = _PYTHONEVENTS
@@ -503,6 +753,14 @@ _PYPROF_CLIBSENTRY.fields_by_name['value'].message_type = _CLIBS
 _PYPROF_CLIBSENTRY.containing_type = _PYPROF
 _PYPROF.fields_by_name['python_events'].message_type = _PYPROF_PYTHONEVENTSENTRY
 _PYPROF.fields_by_name['clibs'].message_type = _PYPROF_CLIBSENTRY
+_PROCESSMETADATA_PROCESSCHILDREN.containing_type = _PROCESSMETADATA
+_PROCESSMETADATA_PROCESSCHILDRENENTRY.fields_by_name['value'].message_type = _PROCESSMETADATA_PROCESSCHILDREN
+_PROCESSMETADATA_PROCESSCHILDRENENTRY.containing_type = _PROCESSMETADATA
+_PROCESSMETADATA.fields_by_name['process_children'].message_type = _PROCESSMETADATA_PROCESSCHILDRENENTRY
+_MACHINEUTILIZATION_DEVICEUTILENTRY.fields_by_name['value'].message_type = _DEVICEUTILIZATION
+_MACHINEUTILIZATION_DEVICEUTILENTRY.containing_type = _MACHINEUTILIZATION
+_MACHINEUTILIZATION.fields_by_name['device_util'].message_type = _MACHINEUTILIZATION_DEVICEUTILENTRY
+_DEVICEUTILIZATION.fields_by_name['samples'].message_type = _UTILIZATIONSAMPLE
 _EVENT_ATTRSENTRY.containing_type = _EVENT
 _EVENT.fields_by_name['attrs'].message_type = _EVENT_ATTRSENTRY
 _CLIBS_CLIBSENTRY.fields_by_name['value'].message_type = _CLIBEVENTS
@@ -510,8 +768,7 @@ _CLIBS_CLIBSENTRY.containing_type = _CLIBS
 _CLIBS.fields_by_name['clibs'].message_type = _CLIBS_CLIBSENTRY
 _CLIBEVENTS.fields_by_name['events'].message_type = _EVENT
 _PYTHONEVENTS.fields_by_name['events'].message_type = _EVENT
-_ATTRVALUE_LISTVALUE.containing_type = _ATTRVALUE
-_ATTRVALUE.fields_by_name['list'].message_type = _ATTRVALUE_LISTVALUE
+_ATTRVALUE.fields_by_name['list'].message_type = _LISTVALUE
 _ATTRVALUE.oneofs_by_name['value'].fields.append(
   _ATTRVALUE.fields_by_name['s'])
 _ATTRVALUE.fields_by_name['s'].containing_oneof = _ATTRVALUE.oneofs_by_name['value']
@@ -528,10 +785,15 @@ _ATTRVALUE.oneofs_by_name['value'].fields.append(
   _ATTRVALUE.fields_by_name['list'])
 _ATTRVALUE.fields_by_name['list'].containing_oneof = _ATTRVALUE.oneofs_by_name['value']
 DESCRIPTOR.message_types_by_name['Pyprof'] = _PYPROF
+DESCRIPTOR.message_types_by_name['ProcessMetadata'] = _PROCESSMETADATA
+DESCRIPTOR.message_types_by_name['MachineUtilization'] = _MACHINEUTILIZATION
+DESCRIPTOR.message_types_by_name['DeviceUtilization'] = _DEVICEUTILIZATION
+DESCRIPTOR.message_types_by_name['UtilizationSample'] = _UTILIZATIONSAMPLE
 DESCRIPTOR.message_types_by_name['Event'] = _EVENT
 DESCRIPTOR.message_types_by_name['CLibs'] = _CLIBS
 DESCRIPTOR.message_types_by_name['CLibEvents'] = _CLIBEVENTS
 DESCRIPTOR.message_types_by_name['PythonEvents'] = _PYTHONEVENTS
+DESCRIPTOR.message_types_by_name['ListValue'] = _LISTVALUE
 DESCRIPTOR.message_types_by_name['AttrValue'] = _ATTRVALUE
 _sym_db.RegisterFileDescriptor(DESCRIPTOR)
 
@@ -557,6 +819,58 @@ Pyprof = _reflection.GeneratedProtocolMessageType('Pyprof', (_message.Message,),
 _sym_db.RegisterMessage(Pyprof)
 _sym_db.RegisterMessage(Pyprof.PythonEventsEntry)
 _sym_db.RegisterMessage(Pyprof.ClibsEntry)
+
+ProcessMetadata = _reflection.GeneratedProtocolMessageType('ProcessMetadata', (_message.Message,), dict(
+
+  ProcessChildren = _reflection.GeneratedProtocolMessageType('ProcessChildren', (_message.Message,), dict(
+    DESCRIPTOR = _PROCESSMETADATA_PROCESSCHILDREN,
+    __module__ = 'protobuf.pyprof_pb2'
+    # @@protoc_insertion_point(class_scope:iml.pyprof.ProcessMetadata.ProcessChildren)
+    ))
+  ,
+
+  ProcessChildrenEntry = _reflection.GeneratedProtocolMessageType('ProcessChildrenEntry', (_message.Message,), dict(
+    DESCRIPTOR = _PROCESSMETADATA_PROCESSCHILDRENENTRY,
+    __module__ = 'protobuf.pyprof_pb2'
+    # @@protoc_insertion_point(class_scope:iml.pyprof.ProcessMetadata.ProcessChildrenEntry)
+    ))
+  ,
+  DESCRIPTOR = _PROCESSMETADATA,
+  __module__ = 'protobuf.pyprof_pb2'
+  # @@protoc_insertion_point(class_scope:iml.pyprof.ProcessMetadata)
+  ))
+_sym_db.RegisterMessage(ProcessMetadata)
+_sym_db.RegisterMessage(ProcessMetadata.ProcessChildren)
+_sym_db.RegisterMessage(ProcessMetadata.ProcessChildrenEntry)
+
+MachineUtilization = _reflection.GeneratedProtocolMessageType('MachineUtilization', (_message.Message,), dict(
+
+  DeviceUtilEntry = _reflection.GeneratedProtocolMessageType('DeviceUtilEntry', (_message.Message,), dict(
+    DESCRIPTOR = _MACHINEUTILIZATION_DEVICEUTILENTRY,
+    __module__ = 'protobuf.pyprof_pb2'
+    # @@protoc_insertion_point(class_scope:iml.pyprof.MachineUtilization.DeviceUtilEntry)
+    ))
+  ,
+  DESCRIPTOR = _MACHINEUTILIZATION,
+  __module__ = 'protobuf.pyprof_pb2'
+  # @@protoc_insertion_point(class_scope:iml.pyprof.MachineUtilization)
+  ))
+_sym_db.RegisterMessage(MachineUtilization)
+_sym_db.RegisterMessage(MachineUtilization.DeviceUtilEntry)
+
+DeviceUtilization = _reflection.GeneratedProtocolMessageType('DeviceUtilization', (_message.Message,), dict(
+  DESCRIPTOR = _DEVICEUTILIZATION,
+  __module__ = 'protobuf.pyprof_pb2'
+  # @@protoc_insertion_point(class_scope:iml.pyprof.DeviceUtilization)
+  ))
+_sym_db.RegisterMessage(DeviceUtilization)
+
+UtilizationSample = _reflection.GeneratedProtocolMessageType('UtilizationSample', (_message.Message,), dict(
+  DESCRIPTOR = _UTILIZATIONSAMPLE,
+  __module__ = 'protobuf.pyprof_pb2'
+  # @@protoc_insertion_point(class_scope:iml.pyprof.UtilizationSample)
+  ))
+_sym_db.RegisterMessage(UtilizationSample)
 
 Event = _reflection.GeneratedProtocolMessageType('Event', (_message.Message,), dict(
 
@@ -602,27 +916,28 @@ PythonEvents = _reflection.GeneratedProtocolMessageType('PythonEvents', (_messag
   ))
 _sym_db.RegisterMessage(PythonEvents)
 
-AttrValue = _reflection.GeneratedProtocolMessageType('AttrValue', (_message.Message,), dict(
+ListValue = _reflection.GeneratedProtocolMessageType('ListValue', (_message.Message,), dict(
+  DESCRIPTOR = _LISTVALUE,
+  __module__ = 'protobuf.pyprof_pb2'
+  # @@protoc_insertion_point(class_scope:iml.pyprof.ListValue)
+  ))
+_sym_db.RegisterMessage(ListValue)
 
-  ListValue = _reflection.GeneratedProtocolMessageType('ListValue', (_message.Message,), dict(
-    DESCRIPTOR = _ATTRVALUE_LISTVALUE,
-    __module__ = 'protobuf.pyprof_pb2'
-    # @@protoc_insertion_point(class_scope:iml.pyprof.AttrValue.ListValue)
-    ))
-  ,
+AttrValue = _reflection.GeneratedProtocolMessageType('AttrValue', (_message.Message,), dict(
   DESCRIPTOR = _ATTRVALUE,
   __module__ = 'protobuf.pyprof_pb2'
   # @@protoc_insertion_point(class_scope:iml.pyprof.AttrValue)
   ))
 _sym_db.RegisterMessage(AttrValue)
-_sym_db.RegisterMessage(AttrValue.ListValue)
 
 
 _PYPROF_PYTHONEVENTSENTRY._options = None
 _PYPROF_CLIBSENTRY._options = None
+_PROCESSMETADATA_PROCESSCHILDRENENTRY._options = None
+_MACHINEUTILIZATION_DEVICEUTILENTRY._options = None
 _EVENT_ATTRSENTRY._options = None
 _CLIBS_CLIBSENTRY._options = None
-_ATTRVALUE_LISTVALUE.fields_by_name['i']._options = None
-_ATTRVALUE_LISTVALUE.fields_by_name['f']._options = None
-_ATTRVALUE_LISTVALUE.fields_by_name['b']._options = None
+_LISTVALUE.fields_by_name['i']._options = None
+_LISTVALUE.fields_by_name['f']._options = None
+_LISTVALUE.fields_by_name['b']._options = None
 # @@protoc_insertion_point(module_scope)

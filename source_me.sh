@@ -104,6 +104,13 @@ tf_cpp_source_all() {
 
 }
 
+iml_build_protos() {
+(
+    cd $_TF_CPP_ROOT
+    protoc --python_out=$_TF_CPP_ROOT/python/proto protobuf/pyprof.proto
+)
+}
+
 # activate_tf_cpp
 # tf_cpp_source_all
 tf_cpp_tensorflow_env_settings
