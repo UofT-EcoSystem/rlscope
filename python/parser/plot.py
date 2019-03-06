@@ -20,6 +20,7 @@ from parser.common import *
 from parser.nvprof import CUDASQLiteParser
 from parser.pyprof import PythonProfileParser
 from parser.tfprof import OverlapComputer
+from parser.heatscale import HeatScale, exponential_moving_average
 from parser.db import SQLCategoryTimesReader, sql_get_source_files, sql_input_path
 
 # figsize (W x H) in inches
@@ -1870,3 +1871,95 @@ def _add_cpu_gpu_stats(js_stats, plotter, bench_name=NO_BENCH_NAME):
         'cpu_time_percent': safe_mul(100, safe_div(cpu_time_sec, total_time_sec)),
     }
     update_dict(js_stats, stats)
+    
+# def device_name_to_
+
+class HeatScalePlot:
+    """
+    HeatScale/colormap of overall device (CPU/GPU) utilization.
+    """
+    def __init__(self, directory,
+                 debug=False,
+                 step_sec=1.,
+                 decay=0.99,
+                 # Swallow any excess arguments
+                 **kwargs):
+        self.directory = directory
+        self.debug = debug
+
+        self.step_sec = step_sec
+        self.decay = decay
+
+        # self.bar_width = 0.25
+        self.show = False
+
+    def get_source_files(self):
+        return sql_get_source_files(self.__class__, self.directory)
+
+    def get_util_scale_png(self, device_id):
+        return _j(self.directory, "util_scale{dev}.png".format(
+            dev=device_id_suffix(device_id),
+        ))
+
+    def _plot_data_path(self, device_id):
+        return _j(self.directory, "util_scale.plot_data{dev}.txt".format(
+            dev=device_id_suffix(device_id),
+        ))
+
+    def run(self):
+        self.sql_reader = SQLCategoryTimesReader(self.db_path)
+        
+        # for device_name, device_id in sql_reader.devices:
+        #   samples = SELECT all utilization samples for <device_name>
+        #   plotter.plot(samples) @ png=util_scale.<device_id>.png
+
+        # The start time of all traced Events / utilization samples.
+        # Use this as the "starting point" of the heat-scale.
+        start_time_sec = self.sql_reader.trace_start_time_sec
+        for device in self.sql_reader.util_devices:
+            samples = self.sql_reader.util_samples(device)
+            png = self.get_util_scale_png(device.device_id)
+            plotter = HeatScale(
+                color_value='util', y_axis='start_time_sec',
+                png=png,
+                pixels_per_square=10,
+                # Anchor colormap colors using min/max utilization values.
+                vmin=0.0, vmax=1.0,
+                # 1 second
+                step=1.)
+
+            if self.debug:
+                # Print the unadjusted raw utilization + timestamp data, centered @ start_time_sec.
+                raw_centered_time_secs = (np.array(samples['start_time_sec']) - start_time_sec).tolist()
+                raw_df = pd.DataFrame({
+                    'util':samples['util'],
+                    'start_time_sec':raw_centered_time_secs,
+                }).astype(float)
+                print("> DEBUG: Unadjusted raw utilization measurements for device={dev}".format(dev=device))
+                print(raw_df)
+            norm_time_secs, norm_utils = exponential_moving_average(
+                samples['start_time_sec'], samples['util'],
+                start_time_sec, self.step_sec, self.decay)
+            centered_time_secs = (np.array(norm_time_secs) - start_time_sec).tolist()
+            norm_samples = {
+                'util':norm_utils,
+                'start_time_sec':centered_time_secs,
+            }
+            plot_df = pd.DataFrame(norm_samples).astype(float)
+            self.dump_plot_data(plot_df, device)
+            plotter.add_data(norm_samples)
+            print("> HeatScalePlot @ {path}".format(path=png))
+            plotter.plot()
+
+    def dump_plot_data(self, plot_df, device):
+        path = self._plot_data_path(device.device_id)
+        print("> HeatScalePlot @ plot data @ {path}".format(path=path))
+        with open(path, 'w') as f:
+            DataFrame.print_df(plot_df, file=f)
+        print(plot_df)
+
+    @property
+    def db_path(self):
+        return sql_input_path(self.directory)
+
+

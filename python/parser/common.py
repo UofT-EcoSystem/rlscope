@@ -18,7 +18,7 @@ from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, base
 from tqdm import tqdm as tqdm_progress
 
 from tensorflow.core.profiler.tfprof_log_pb2 import ProfileProto
-from proto.protobuf.pyprof_pb2 import Pyprof
+from proto.protobuf.pyprof_pb2 import Pyprof, MachineUtilization
 
 CATEGORY_TF_API = "Framework API C"
 CATEGORY_PYTHON = 'Python'
@@ -1031,6 +1031,15 @@ def step_suffix(step, allow_none=False):
         return ""
     return ".step_{id}".format(id=step)
 
+def device_id_suffix(device_id, allow_none=False):
+    if device_id is None and not allow_none:
+        raise RuntimeError("device_id must be >= 0, got None")
+
+    if device_id is not None:
+        return ".device_id_{id}".format(id=device_id)
+    return ""
+
+
 def load_json(path):
     with codecs.open(path, mode='r', encoding='utf-8') as f:
         data = json.load(f)
@@ -1300,6 +1309,12 @@ def read_tfprof_file(path):
         proto.ParseFromString(f.read())
     return proto
 
+def read_machine_util_file(path):
+    with open(path, 'rb') as f:
+        proto = MachineUtilization()
+        proto.ParseFromString(f.read())
+    return proto
+
 def read_pyprof_file(path):
     with open(path, 'rb') as f:
         proto = Pyprof()
@@ -1358,6 +1373,15 @@ def is_insertable_file(path):
     return is_tfprof_file(path) or \
            is_pyprof_file(path) or \
            is_dump_event_file(path) or \
+           is_pyprof_call_times_file(path) or \
+           is_machine_util_file(path)
+
+def is_process_trace_file(path):
+    """
+    Return true if this file contains a proto that has start/end events for a specific process.
+    """
+    return is_tfprof_file(path) or \
+           is_pyprof_file(path) or is_dump_event_file(path) or \
            is_pyprof_call_times_file(path)
 
 def is_config_file(path):

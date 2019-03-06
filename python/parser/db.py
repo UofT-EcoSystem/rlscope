@@ -25,7 +25,7 @@ from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, base
 
 # from proto.tensorflow.core.profiler.tfprof_log_pb2 import ProfileProto
 from tensorflow.core.profiler.tfprof_log_pb2 import ProfileProto
-from proto.protobuf.pyprof_pb2 import Pyprof
+from proto.protobuf.pyprof_pb2 import Pyprof, MachineUtilization
 
 import py_config
 
@@ -231,6 +231,7 @@ class SQLParser:
         self.phase_to_id = dict()
         self.category_to_id = dict()
         self.device_to_id = dict()
+        self.machine_to_id = dict()
 
         src_files = self.get_source_files()
         pprint.pprint({
@@ -238,15 +239,30 @@ class SQLParser:
             'src_files':src_files,
         })
 
-        metas = [get_proto_metadata(path) for path in src_files]
+        process_trace_metas = [get_process_trace_metadata(path) for path in src_files if is_process_trace_file(path)]
 
-        process_names = sorted(meta['process_name'] for meta in metas)
+        process_names = sorted(meta['process_name'] for meta in process_trace_metas)
         for process_name in process_names:
             self.insert_process_name(process_name)
 
-        phase_names = sorted(meta['phase_name'] for meta in metas)
+        phase_names = sorted(meta['phase_name'] for meta in process_trace_metas)
         for phase_name in phase_names:
             self.insert_phase_name(phase_name)
+
+        # Read metadata from CPU/GPU utilization files
+        # e.g. machine_util.trace_0.proto
+        util_metas = [get_util_metadata(path) for path in src_files if is_machine_util_file(path)]
+        util_machine_names = set()
+        util_device_names = set()
+        for util_meta in util_metas:
+            util_machine_names.add(util_meta['machine_name'])
+        for util_meta in util_metas:
+            util_device_names.update(util_meta['device_names'])
+
+        for machine_name in util_machine_names:
+            self.insert_machine_name(machine_name)
+        for device_name in util_device_names:
+            self.insert_device_name(device_name)
 
         categories = sorted(set(CATEGORIES_ALL))
         for category in categories:
@@ -271,11 +287,12 @@ class SQLParser:
             'process_to_id':self.process_to_id,
             'category_to_id':self.category_to_id,
             'device_to_id':self.device_to_id,
+            'machine_to_id':self.machine_to_id,
         })
 
         if not self.debug_single_thread:
             pool = multiprocessing.Pool()
-        table = 'Event'
+        # table = 'Event'
         # id_field = 'event_id'
         id_field = None
         # worker = CSVInserterWorker(
@@ -289,6 +306,10 @@ class SQLParser:
                 yield ret
 
         def get_worker_kwargs(path):
+            if is_machine_util_file(path):
+                table = 'DeviceUtilization'
+            else:
+                table = 'Event'
             return {
                 'path':path,
                 'db_path':self.db_path,
@@ -445,6 +466,13 @@ class SQLParser:
             'device_id', 'device_name',
             self.device_to_id,
             device_name)
+
+    def insert_machine_name(self, machine_name):
+        return self._insert_name(
+            'Machine',
+            'machine_id', 'machine_name',
+            self.machine_to_id,
+            machine_name)
 
     def insert_category_name(self, category_name):
         return self._insert_name(
@@ -806,6 +834,7 @@ class _CSVInserterWorker:
         self.phase_to_id = self.build_name_to_id('Phase', 'phase_id', 'phase_name')
         self.category_to_id = self.build_name_to_id('Category', 'category_id', 'category_name')
         self.device_to_id = self.build_name_to_id('Device', 'device_id', 'device_name')
+        self.machine_to_id = self.build_name_to_id('Machine', 'machine_id', 'machine_name')
 
         self.insert_file(self.path)
         self.finish()
@@ -839,8 +868,10 @@ class _CSVInserterWorker:
             self.insert_pyprof_file(path)
         elif is_pyprof_call_times_file(path):
             self.insert_pyprof_call_times_file(path)
+        elif is_machine_util_file(path):
+            self.insert_machine_util_file(path)
         else:
-            raise NotImplementedError
+            raise NotImplementedError("Not sure how to insert into path={path} into database".format(path=path))
 
     def insert_tfprof_file(self, path):
 
@@ -1022,6 +1053,42 @@ class _CSVInserterWorker:
         with progressbar.ProgressBar(max_value=num_all_events) as bar:
             for category, events in self._pyprof_each_category_events(proto):
                 insert_category_events(self, self, category, events)
+
+        self.conn.commit()
+
+    def insert_machine_util_file(self, path):
+        proto = read_machine_util_file(path)
+
+        print("> Insert machine CPU/GPU utilization file: {p}".format(p=path))
+        if self.debug:
+            print(proto)
+
+        machine_id = self.machine_to_id[proto.machine_name]
+
+        def each_sample(machine_util):
+            for device_name, device_util in machine_util.device_util.items():
+                for sample in device_util.samples:
+                    device_id = self.device_to_id[device_name]
+                    yield device_id, sample.start_time_us, sample.util
+
+        def count_samples(machine_util):
+            n = 0
+            for device_name, device_util in machine_util.device_util.items():
+                n += len(device_util.samples)
+            return n
+
+        num_all_samples = count_samples(proto)
+
+        with progressbar.ProgressBar(max_value=num_all_samples) as bar:
+            for i, (device_id, start_time_us, util) in enumerate(each_sample(proto)):
+                ins = {
+                    'device_id':device_id,
+                    'machine_id':machine_id,
+                    'start_time_us':start_time_us,
+                    'util':util,
+                }
+                device_util_id = self.insert_dict('DeviceUtilization', ins)
+                bar.update(i)
 
         self.conn.commit()
 
@@ -1692,6 +1759,80 @@ class SQLCategoryTimesReader:
 
     def steps(self, process_name, bench_name):
         return list(range(self.num_steps(process_name, bench_name)))
+
+    @property
+    def util_devices(self):
+        """
+        Select devices that have CPU/GPU utilization info recorded.
+        :return:
+        """
+        c = self.conn.cursor
+        query = textwrap.dedent("""
+        SELECT *
+        FROM Device AS d1
+            NATURAL JOIN Machine AS m
+        WHERE
+            EXISTS (
+                SELECT *
+                FROM DeviceUtilization AS du
+                WHERE du.device_id = d1.device_id
+            )
+        """)
+        params = None
+        sql_exec_query(c, query, params, self.__class__, self.debug_ops)
+        rows = c.fetchall()
+        devices = [Device.from_row(row) for row in rows]
+        return devices
+
+    def util_samples(self, device):
+        """
+        Select devices that have CPU/GPU utilization info recorded.
+        :return:
+        """
+        c = self.conn.cursor
+        query = textwrap.dedent("""
+        SELECT 
+            du.start_time_us/1e6 AS start_time_sec, du.util
+        FROM 
+            Device AS d1
+            NATURAL JOIN Machine AS m
+            NATURAL JOIN DeviceUtilization AS du
+        WHERE
+            d1.device_id = {p}
+        ORDER BY start_time_us ASC 
+        """.format(p=sql_placeholder()))
+        params = (device.device_id,)
+        sql_exec_query(c, query, params, self.__class__, self.debug_ops)
+        rows = c.fetchall()
+        samples = {
+            'util':[],
+            'start_time_sec':[],
+        }
+        for row in rows:
+            samples['util'].append(row['util'])
+            samples['start_time_sec'].append(row['start_time_sec'])
+        return samples
+
+    @property
+    def trace_start_time_sec(self):
+        """
+        Return the earliest epoch_sec of any traced Event / utilization sample.
+        This determines where the heat-scale starts showing values.
+        """
+        c = self.conn.cursor
+        query = textwrap.dedent("""
+        SELECT MIN(time_us)/1e6 AS start_time_sec
+        FROM 
+        (
+        SELECT MIN(start_time_us) AS time_us FROM Event
+        UNION
+        SELECT MIN(start_time_us) AS time_us FROM DeviceUtilization
+        ) AS tbl
+        """)
+        params = None
+        sql_exec_query(c, query, params, self.__class__, self.debug_ops)
+        row = c.fetchone()
+        return row['start_time_sec']
 
     def process_phases(self, process_name, debug=False):
         c = self.conn.cursor
@@ -3497,7 +3638,7 @@ def sql_get_source_files(klass, directory):
         )))
     return src_files
 
-def get_proto_metadata(path):
+def get_process_trace_metadata(path):
     """
     Return stuff we must insert BEFORE inserting individual events in bulk.
     That includes:
@@ -3507,6 +3648,8 @@ def get_proto_metadata(path):
     :param path:
     :return:
     """
+    assert is_process_trace_file(path)
+
     if is_tfprof_file(path):
         proto = read_tfprof_file(path)
         meta = {
@@ -3531,6 +3674,43 @@ def get_proto_metadata(path):
     else:
         raise NotImplementedError("Not sure how to get process_name from trace-file {path}".format(
             path=path))
+
+def get_util_metadata(path):
+    """
+    Return stuff we must insert BEFORE inserting individual events in bulk.
+    That includes:
+    - machine_name
+    - device_name's
+    """
+    assert is_machine_util_file(path)
+
+    proto = read_machine_util_file(path)
+    device_names = list(proto.device_util.keys())
+    meta = {
+        'machine_name':proto.machine_name,
+        'device_names':device_names,
+    }
+    return meta
+
+class Device:
+    def __init__(self, device_name, device_id,
+                 # Swallow any excess arguments
+                 **kwargs):
+        self.device_name = device_name
+        self.device_id = device_id
+
+    @staticmethod
+    def from_row(row):
+        device = Device(**row)
+        for attr, value in row.items():
+            if not hasattr(device, attr):
+                setattr(device, attr, value)
+        return device
+
+    def __str__(self):
+        return 'Device(name="{name}", id={id})'.format(
+            name=self.device_name,
+            id=self.device_id)
 
 def test_merge_sorted():
 

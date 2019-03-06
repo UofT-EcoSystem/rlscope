@@ -25,6 +25,7 @@ from tensorflow.core.profiler.tfprof_log_pb2 import ProfileProto
 
 # pip install py-cpuinfo
 import cpuinfo
+import psutil
 
 from os import environ as ENV
 
@@ -57,6 +58,7 @@ DEFAULT_PHASE = 'default_phase'
 TF_PRINT_TIMESTAMP = ENV.get('TF_PRINT_TIMESTAMP', 'no') == 'yes'
 
 UTILIZATION_SAMPLER_PY = _j(py_config.ROOT, 'python', 'scripts', 'utilization_sampler.py')
+PYTHON_BIN = 'python3'
 
 # If we exceed 1000 session.run(...) calls without dumping a trace, only print a warning every 100 calls.
 WARN_EVERY_CALL_MODULO = 100
@@ -410,6 +412,9 @@ class Profiler:
         self.keep_traces = get_argval('keep_traces', keep_traces, False)
         self.bench_name = get_argval('bench_name', bench_name, None)
 
+        self.util_sampler_pid = get_internal_argval('util_sampler_pid')
+        self.handle_utilization_sampler = False
+
         self.start_trace_time_sec = get_internal_argval('start_trace_time_sec')
         self.phase = get_internal_argval('phase', DEFAULT_PHASE)
 
@@ -460,11 +465,13 @@ class Profiler:
 
         Generally used to delete traces from a PREVIOUS run before re-running the profiler.
         """
-        for dirpath, dirnames, filenames in os.walk(self.out_dir):
+        os.makedirs(self.directory, exist_ok=True)
+        print("> Delete trace files rooted at {dir}".format(dir=self.directory))
+        for dirpath, dirnames, filenames in os.walk(self.directory):
             for base in filenames:
                 path = _j(dirpath, base)
-                # print("> Consider {path}".format(path=path))
-                if is_pyprof_file(path) or is_dump_event_file(path) or is_tfprof_file(path) or is_config_file(path):
+                print("> Consider {path}".format(path=path))
+                if is_insertable_file(path):
                     print("> RM {path}".format(path=path))
                     os.remove(path)
                     # trace_id = int(m.group('trace_id'))
@@ -709,11 +716,15 @@ class Profiler:
     #
     #     return sess
 
-    def start(self):
+    def start(self, start_utilization_sampler=False, handle_utilization_sampler=False):
         PROFILERS.append(self)
 
         if self.disable:
             return
+
+        self.handle_utilization_sampler = handle_utilization_sampler
+        if start_utilization_sampler or handle_utilization_sampler:
+            self._launch_utilization_sampler()
 
         self._start_us = now_us()
 
@@ -723,11 +734,17 @@ class Profiler:
         while len(self._op_stack) != 0:
             self.end_operation(self._cur_operation, skip_finish=True)
 
-    def stop(self):
+    def stop(self, stop_utilization_sampler=False):
         PROFILERS.remove(self)
 
         if self.disable:
             return
+
+        if stop_utilization_sampler:
+            # Q: Any way to avoid forgetting to terminate utilization sampler?
+            # A: Not really...can add a cleanup() script/python-API to call in the code when the programmer expects to terminate...
+            # harder to forget than a call to stop() that's missing a parameter.
+            self._terminate_utilization_sampler()
 
         self._maybe_end_operations()
         self._maybe_finish(finish_now=True, skip_finish=False)
@@ -1084,10 +1101,36 @@ class Profiler:
     def is_root_process(self):
         return self.process_name is None
 
-    def _maybe_launch_utilization_sampler(self):
-        if self.is_root_process:
-            self.util_sampler_proc = subprocess.Popen([UTILIZATION_SAMPLER_PY])
-            self.util_sampler_proc.terminate()
+    def _launch_utilization_sampler(self):
+        if not self.is_root_process:
+            print("IML: Warning; you are starting the utilization sampler later than expected (this is not the root process of your training script")
+
+        if self.util_sampler_pid is not None:
+            print("IML: Warning; you're already running utilization sampler @ pid={pid}".format(pid=self.util_sampler_pid))
+            return
+
+        util_cmdline = [PYTHON_BIN, UTILIZATION_SAMPLER_PY]
+        util_cmdline.extend(['--iml-directory', _a(self.directory)])
+        if self.debug:
+            util_cmdline.append('--iml-debug')
+        # if self.debug:
+        print("> CMDLINE: {cmd}".format(cmd=' '.join(util_cmdline)))
+        self.util_sampler_proc = subprocess.Popen(util_cmdline)
+        self.util_sampler_pid = self.util_sampler_proc.pid
+        print("IML: CPU/GPU utilization sampler running @ pid={pid}".format(pid=self.util_sampler_pid))
+
+    def _terminate_utilization_sampler(self, warn_terminated=True):
+        assert self.util_sampler_pid is not None
+        print("IML: terminating CPU/GPU utilization sampler @ pid={pid}".format(pid=self.util_sampler_pid))
+
+        try:
+            proc = psutil.Process(self.util_sampler_pid)
+        except psutil.NoSuchProcess as e:
+            if warn_terminated:
+                print("IML: Warning; tried to terminate utilization sampler @ pid={pid} but it wasn't running".format(pid=self.util_sampler_pid))
+            return
+
+        proc.terminate()
 
     def set_phase(self, phase):
         assert type(phase) == str
@@ -1114,6 +1157,9 @@ class Profiler:
         # self._maybe_init_profile_context()
 
     def finish(self):
+        if self.handle_utilization_sampler:
+            self._terminate_utilization_sampler(warn_terminated=False)
+
         print("> IML: Stopping training early now that profiler is done")
         sys.exit(0)
 
@@ -1549,6 +1595,60 @@ class PythonProfiler:
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.stop()
 
+# 100 ms
+MIN_UTIL_SAMPLE_FREQUENCY_SEC = 100/MILLISECONDS_IN_SECOND
+# 500 ms
+DEFAULT_UTIL_SAMPLE_FREQUENCY_SEC = 500/MILLISECONDS_IN_SECOND
+def get_util_sampler_parser(only_fwd_arguments=False):
+    """
+    :param fwd_arguments:
+        Only add arguments that should be forwarded to utilization_sampler.py from ML scripts.
+    :return:
+    """
+    parser = argparse.ArgumentParser("Sample GPU/CPU utilization over the course of training")
+    parser.add_argument('--iml-directory',
+                        required=True,
+                        help=textwrap.dedent("""
+    IML: profiling output directory.
+    """))
+    parser.add_argument('--iml-debug',
+                        action='store_true',
+                        help=textwrap.dedent("""
+    IML: debug profiler.
+    """))
+    if only_fwd_arguments:
+        return parser
+
+    parser.add_argument('--iml-util-sample-frequency-sec',
+                        type=float,
+                        default=DEFAULT_UTIL_SAMPLE_FREQUENCY_SEC,
+                        help=textwrap.dedent("""
+    IML: How frequently (in seconds) should we sample GPU/CPU utilization?
+    default: sample every 500 ms.
+    """))
+    parser.add_argument('--iml-util-dump-frequency-sec',
+                        type=float,
+                        default=10.,
+                        help=textwrap.dedent("""
+    IML: How frequently (in seconds) should we sample GPU/CPU utilization?
+    default: dump every 10 seconds.
+    """))
+    parser.add_argument('--iml-debug-single-thread',
+                        action='store_true',
+                        help=textwrap.dedent("""
+    IML: debug with single thread.
+    """))
+
+    parser.add_argument('--measure-samples-per-sec',
+                        action='store_true',
+                        help=textwrap.dedent("""
+    Determines reasonable values for --iml-util-sample-frequency-sec.
+    
+    How fast can we call nvidia-smi (to sample GPU utilization)?  
+    How fast can we gather CPU utilization?
+    """))
+    return parser
+
 def add_iml_arguments(parser):
     parser.add_argument('--iml-nvprof-enabled', action='store_true', help=textwrap.dedent("""
         IML: is nvprof running?
@@ -1588,6 +1688,13 @@ def add_iml_arguments(parser):
         i.e. whatever was passed to glbl.prof.set_process_name('forker')
         Internally, this is used for tracking "process dependencies".
     """))
+    parser.add_argument('--iml-util-sampler-pid',
+                        help=textwrap.dedent("""
+        IML: (internal use)
+        The pid of the utilization_sampler.py script that samples CPU/GPU utilization during training.
+        We need to keep this so we can terminate it once we are done.
+    """))
+
     parser.add_argument('--iml-num-traces', type=int,
                         # default=10,
                         help="IML: how many traces should be measured?")
@@ -1705,6 +1812,7 @@ def iml_argv(prof : Profiler, keep_executable=False, keep_non_iml_args=False):
     if prof.process_name is None:
         raise RuntimeError("IML: You must call glbl.prof.set_process_name('some_name') before forking children!")
     args.iml_internal_parent_process_name = prof.process_name
+    args.iml_util_sampler_pid = prof.util_sampler_pid
     argv = args_to_cmdline(parser, args, keep_executable=keep_executable, keep_debug=False)
     if keep_non_iml_args:
         return argv + extra_argv

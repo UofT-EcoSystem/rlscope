@@ -36,14 +36,14 @@ from profiler import profilers
 from parser.nvprof import CUDASQLiteParser
 from parser.tfprof import TotalTimeParser, TraceEventsParser
 from parser.pyprof import PythonProfileParser, PythonFlameGraphParser, PythonProfileTotalParser
-from parser.plot import TimeBreakdownPlot, PlotSummary, CombinedProfileParser, CategoryOverlapPlot, UtilizationPlot
+from parser.plot import TimeBreakdownPlot, PlotSummary, CombinedProfileParser, CategoryOverlapPlot, UtilizationPlot, HeatScalePlot
 from parser.db import SQLParser
 
 from parser.common import *
 
 # Deprecated:
 # CUDAProfileParser, PythonProfileTotalParser, CUDASQLiteParser, CombinedProfileParser,
-PARSER_KLASSES = [PythonProfileParser, PythonFlameGraphParser, PlotSummary, TimeBreakdownPlot, CategoryOverlapPlot, UtilizationPlot, TotalTimeParser, TraceEventsParser, SQLParser]
+PARSER_KLASSES = [PythonProfileParser, PythonFlameGraphParser, PlotSummary, TimeBreakdownPlot, CategoryOverlapPlot, UtilizationPlot, HeatScalePlot, TotalTimeParser, TraceEventsParser, SQLParser]
 PARSER_NAME_TO_KLASS = dict((ParserKlass.__name__, ParserKlass) \
                             for ParserKlass in PARSER_KLASSES)
 

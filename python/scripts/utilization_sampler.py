@@ -16,7 +16,7 @@ from proto.protobuf.pyprof_pb2 import Pyprof, MachineUtilization, DeviceUtilizat
 
 from parser.common import *
 
-from profiler.profilers import trace_suffix
+from profiler.profilers import trace_suffix, get_util_sampler_parser, MIN_UTIL_SAMPLE_FREQUENCY_SEC
 
 class UtilizationSampler:
     def __init__(self, directory, util_dump_frequency_sec, util_sample_frequency_sec,
@@ -29,6 +29,7 @@ class UtilizationSampler:
         self.machine_util = mk_machine_util()
         self.debug = debug
         self.debug_single_thread = debug_single_thread
+        self.pending_dump_futures = []
 
     def add_util(self, start_time_sec, util):
         """
@@ -43,7 +44,10 @@ class UtilizationSampler:
         else:
             device_util = self.machine_util.device_util[util['device_name']]
 
-        start_time_usec = start_time_sec/MICROSECONDS_IN_SECOND
+        start_time_usec = start_time_sec*MICROSECONDS_IN_SECOND
+        # NOTE: When UtilizationSample.util is 0.0 and we print it, it just won't print
+        # "util: 0.0" which you may confused with util being None.
+        # assert util['util'] is not None
         sample = UtilizationSample(
             start_time_us=int(start_time_usec),
             util=util['util'],
@@ -54,13 +58,48 @@ class UtilizationSampler:
         for util in utils:
             self.add_util(start_time_sec, util)
 
+    def _maybe_dump(self, cur_time_sec, dump=False):
+        # now_sec = time.time()
+        if self.n_samples > 0 and ( dump or ( cur_time_sec - self.last_dump_sec >= self.util_dump_frequency_sec ) ):
+            machine_util = self.machine_util
+            trace_id = self.trace_id
+
+            if self.debug:
+                print("> {klass}: Dump CPU/GPU utilization after {sec} seconds (# samples = {n}, sampled every {every_ms} ms) @ {path}".format(
+                    klass=self.__class__.__name__,
+                    sec=self.util_dump_frequency_sec,
+                    every_ms=self.util_sample_frequency_sec*MILLISECONDS_IN_SECOND,
+                    n=self.n_samples,
+                    path=get_trace_path(self.directory, trace_id),
+                ))
+
+            machine_util_str = machine_util.SerializeToString()
+            if self.debug_single_thread:
+                dump_machine_util(self.directory, trace_id, machine_util_str, self.debug)
+            else:
+                # NOTE: No need to wait for previous dumps to complete.
+                #
+                # https://groups.google.com/d/msg/protobuf/VqWJ3BmQXVg/iwO_m6apVlkJ
+                #
+                # Protobuf is a C-extension class that cannot be pickled.
+                # Multiprocessing uses pickling to send data to processes.
+                # So, we must serialize/deserialize protobuf manually.
+                dump_future = self.pool.submit(dump_machine_util, self.directory, trace_id, machine_util_str, self.debug)
+                self.pending_dump_futures.append(dump_future)
+            self.machine_util = mk_machine_util()
+            self.trace_id += 1
+            self.n_samples = 0
+            self.last_dump_sec = time.time()
+
+        # return now_sec
+
     def run(self):
         if self.debug:
             print("> {klass}: Start collecting CPU/GPU utilization samples".format(
                 klass=self.__class__.__name__,
             ))
         self.last_dump_sec = time.time()
-        n_samples = 0
+        self.n_samples = 0
         with self.pool:
             while True:
                 before = time.time()
@@ -73,56 +112,57 @@ class UtilizationSampler:
                         ms=one_ms*MILLISECONDS_IN_SECOND,
                     ))
 
+                cur_time_sec = time.time()
+
                 if SigTermWatcher.kill_now:
                     if self.debug:
-                        print("> {klass}: Got SIGINT; stop collecting utilization samples and exit".format(
+                        print("> {klass}: Got SIGINT; dumping remaining collected samples and exiting".format(
                             klass=self.__class__.__name__,
                         ))
+                        # Dump any remaining samples we have not dumped yet.
+                        self._maybe_dump(cur_time_sec, dump=True)
+                        self.check_pending_dump_calls(wait=True)
                     break
 
-                now_sec = time.time()
-                if now_sec - self.last_dump_sec >= self.util_dump_frequency_sec:
-                    machine_util = self.machine_util
-                    trace_id = self.trace_id
-
-                    if self.debug:
-                        print("> {klass}: Dump CPU/GPU utilization after {sec} seconds (# samples = {n}, sampled every {every_ms} ms) @ {path}".format(
-                            klass=self.__class__.__name__,
-                            sec=self.util_dump_frequency_sec,
-                            every_ms=self.util_sample_frequency_sec*MILLISECONDS_IN_SECOND,
-                            n=n_samples,
-                            path=get_trace_path(self.directory, trace_id),
-                        ))
-
-                    if self.debug_single_thread:
-                        dump_machine_util(self.directory, trace_id, machine_util)
-                    else:
-                        # NOTE: No need to wait for previous dumps to complete.
-                        dump_future = self.pool.submit(dump_machine_util, self.directory, trace_id, machine_util)
-                    self.machine_util = mk_machine_util()
-                    self.trace_id += 1
-                    n_samples = 0
-                    self.last_dump_sec = time.time()
+                self._maybe_dump(cur_time_sec)
 
                 if self.debug:
                     print("> {klass}: # Samples = {n} @ {sec}".format(
                         klass=self.__class__.__name__,
-                        sec=now_sec,
-                        n=n_samples,
+                        sec=cur_time_sec,
+                        n=self.n_samples,
                     ))
 
-                # This takes a second to run...why?
+                self.check_pending_dump_calls()
+
                 cpu_util = sample_cpu_utilization()
                 gpu_utils = sample_gpu_utilization()
-                self.add_util(now_sec, cpu_util)
-                self.add_utils(now_sec, gpu_utils)
+                if self.debug:
+                    print("> {klass}: utils = \n{utils}".format(
+                        klass=self.__class__.__name__,
+                        utils=textwrap.indent(
+                            pprint.pformat({'cpu_util':cpu_util, 'gpu_utils':gpu_utils}),
+                            prefix="  "),
+                    ))
+                self.add_util(cur_time_sec, cpu_util)
+                self.add_utils(cur_time_sec, gpu_utils)
 
-                n_samples += 1
+                self.n_samples += 1
 
-# 100 ms
-MIN_SAMPLE_FREQUENCY_SEC = 100/MILLISECONDS_IN_SECOND
-# 500 ms
-DEFAULT_SAMPLE_FREQUENCY_SEC = 500/MILLISECONDS_IN_SECOND
+    def check_pending_dump_calls(self, wait=False):
+        del_indices = []
+        for i, dump_future in enumerate(self.pending_dump_futures):
+            if wait:
+                dump_future.result()
+            if dump_future.done():
+                ex = dump_future.exception(timeout=0)
+                if ex is not None:
+                    raise ex
+                del_indices.append(i)
+        for i in del_indices:
+            del self.pending_dump_futures[i]
+
+
 def measure_samples_per_sec():
     """
     Results:
@@ -167,13 +207,21 @@ def measure_samples_per_sec():
     report_calls_per_sec('sample_cpu_utilization', run_sample_cpu_utilization, iterations=100)
 
 
-def dump_machine_util(directory, trace_id, machine_util):
+def dump_machine_util(directory, trace_id, machine_util, debug):
     """
     NOTE: Run in a separate thread/process; should NOT perform state modifications.
     """
+    if type(machine_util) != MachineUtilization:
+        machine_util_str = machine_util
+        machine_util = MachineUtilization()
+        machine_util.ParseFromString(machine_util_str)
+
     trace_path = get_trace_path(directory, trace_id)
     with open(trace_path, 'wb') as f:
         f.write(machine_util.SerializeToString())
+
+    if debug:
+        print("> Dumped @ {path}".format(path=trace_path))
 
 def get_trace_path(directory, trace_id):
     path = _j(directory, 'machine_util{trace}.proto'.format(
@@ -219,7 +267,7 @@ def sample_cpu_utilization():
     NOTE: It's also possible to get INDIVIDUAL utilization for each CPU,
     if we choose to do that in the future.
     """
-    cpu_util = psutil.cpu_percent()
+    cpu_util = psutil.cpu_percent()/100.
     epoch_time_usec = now_us()
     device_name = CPU_INFO['brand']
     return {
@@ -268,56 +316,82 @@ def mk_machine_util():
     )
     return machine_util
 
-def main():
-    parser = argparse.ArgumentParser("Sample GPU/CPU utilization over the course of training")
-    parser.add_argument('--iml-util-sample-frequency-sec',
-                        type=float,
-                        default=DEFAULT_SAMPLE_FREQUENCY_SEC,
-                        help=textwrap.dedent("""
-    IML: How frequently (in seconds) should we sample GPU/CPU utilization?
-    default: sample every 500 ms.
-    """))
-    parser.add_argument('--iml-util-dump-frequency-sec',
-                        type=float,
-                        default=10.,
-                        help=textwrap.dedent("""
-    IML: How frequently (in seconds) should we sample GPU/CPU utilization?
-    default: dump every 10 seconds.
-    """))
-    parser.add_argument('--iml-directory',
-                        required=True,
-                        help=textwrap.dedent("""
-    IML: profiling output directory.
-    """))
-    parser.add_argument('--iml-debug',
-                        action='store_true',
-                        help=textwrap.dedent("""
-    IML: debug profiler.
-    """))
-    parser.add_argument('--iml-debug-single-thread',
-                        action='store_true',
-                        help=textwrap.dedent("""
-    IML: debug with single thread.
-    """))
+def test_sample_cpu_util():
+    tries = 10000
+    for i in range(tries):
+        cpu_util = sample_cpu_utilization()
+        assert 0 <= cpu_util['util'] <= 1
 
-    parser.add_argument('--measure-samples-per-sec',
-                        action='store_true',
-                        help=textwrap.dedent("""
-    Determines reasonable values for --iml-util-sample-frequency-sec.
-    
-    How fast can we call nvidia-smi (to sample GPU utilization)?  
-    How fast can we gather CPU utilization?
-    """))
+def test_sample_gpu_util():
+    tries = 100
+    import tensorflow as tf
+    import multiprocessing
+
+    class GPURunner:
+        def __init__(self, should_stop):
+            self.should_stop = should_stop
+            # Allow multiple users to use the TensorFlow API.
+            config = tf.ConfigProto()
+            config.gpu_options.allow_growth = True
+            self.sess = tf.Session(config=config)
+            self.name = 'GPURunner'
+
+            self.N = 1000
+            self.zeros = np.zeros((self.N, self.N))
+            self.feed_dict = {
+                'a':self.zeros,
+                'b':self.zeros,
+            }
+
+            self.mk_graph()
+            self.run()
+
+        def mk_graph(self):
+            with tf.name_scope(self.name):
+                self.a = tf.placeholder(float)
+                self.b = tf.placeholder(float)
+                self.c = self.a * self.b
+
+        def run(self):
+            while True:
+                with self.should_stop:
+                    if self.should_stop.value:
+                        break
+                c = self.sess.run(self.c, feed_dict=self.feed_dict)
+                assert np.equal(c, 0.).all()
+
+    should_stop = multiprocessing.Value('i', 0)
+
+    gpu_runner = multiprocessing.Process(target=GPURunner, args=(should_stop,))
+    gpu_runner.start()
+    # Wait for it to start using the GPU...
+    time.sleep(2)
+
+    try:
+        for i in range(tries):
+            gpu_utils = sample_gpu_utilization()
+            for gpu_util in gpu_utils:
+                pprint.pprint({'gpu_util':gpu_util})
+                assert 0 <= gpu_util['util'] <= 1
+    finally:
+        with should_stop:
+            should_stop.value = 1
+        gpu_runner.join(timeout=2)
+        gpu_runner.terminate()
+
+def main():
+    parser = get_util_sampler_parser()
+    # args, extra_argv = parser.parse_known_args()
     args = parser.parse_args()
 
     if args.measure_samples_per_sec:
         measure_samples_per_sec()
         return
 
-    if args.iml_util_sample_frequency_sec < MIN_SAMPLE_FREQUENCY_SEC:
+    if args.iml_util_sample_frequency_sec < MIN_UTIL_SAMPLE_FREQUENCY_SEC:
         parser.error("Need --iml-util-sample-frequency-sec={val} to be larger than minimum sample frequency ({min} sec)".format(
             val=args.iml_util_sample_frequency_sec,
-            min=MIN_SAMPLE_FREQUENCY_SEC,
+            min=MIN_UTIL_SAMPLE_FREQUENCY_SEC,
         ))
 
     util_sampler = UtilizationSampler(

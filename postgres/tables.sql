@@ -125,3 +125,15 @@ CREATE TABLE Device (
 --   UNIQUE (device_name)
 );
 
+CREATE TABLE DeviceUtilization (
+  device_id INTEGER NOT NULL,
+  machine_id INTEGER NOT NULL,
+  start_time_us NUMERIC NOT NULL,
+  util FLOAT NOT NULL
+);
+
+CREATE TABLE Machine (
+  machine_id SERIAL NOT NULL PRIMARY KEY,
+  machine_name TEXT
+--   UNIQUE (machine_name)
+);

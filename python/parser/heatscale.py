@@ -130,17 +130,59 @@ MATPLOTLIB_PIXEL_FACTOR = 1e-2
 class HeatScale:
     """
     Make a CPU/GPU utilization color scale.
+
+    Wrapper around:
+    https://seaborn.pydata.org/generated/seaborn.heatmap.html
     """
     def __init__(self, color_value, y_axis, png,
-                 width_pixels=480., height_pixels_per_sec=None,
+                 # sns.heatmap arguments:
+                 # "Values to anchor the colormap, otherwise they are inferred from the
+                 # data and other keyword arguments."
+                 vmin=None, vmax=None,
+                 width_pixels=None, 
+                 height_pixels_per_sec=None,
+                 step=None,
+                 pixels_per_square=None,
                  cbar_width_px=300, cbar_height_px=100,
                  cmap_name='Blues',
                  debug=False):
+        """
+        
+        :param color_value: 
+            util
+        :param y_axis: 
+            time_sec
+        :param png: 
+        :param width_pixels: 
+        :param height_pixels_per_sec: 
+        :param step: 
+            How much change in <y_axis> (e.g. time_sec) should be shown per "square"?
+        :param pixels_per_square: 
+            How many pixels should be shown in a single "sample" of device utilization?
+        :param cbar_width_px: 
+        :param cbar_height_px: 
+        :param cmap_name: 
+        :param debug: 
+        """
         self.color_value = color_value
         self.y_axis = y_axis
         self.png = png
-        self.width_pixels = width_pixels
-        self.height_pixels_per_sec = height_pixels_per_sec
+        self.vmin = vmin
+        self.vmax = vmax
+        if height_pixels_per_sec is not None:
+            self.height_pixels_per_sec = height_pixels_per_sec
+            self.width_pixels = width_pixels
+        elif step is not None and pixels_per_square is not None:
+            self.width_pixels = pixels_per_square
+            self.step = step
+            self.pixels_per_square = pixels_per_square
+            self.height_pixels_per_sec = self.pixels_per_square * (1 / self.step)
+        else:
+            raise RuntimeError("HeatScale needs either height_pixels_per_sec, or step and pixels_per_square")
+
+        if self.width_pixels is None:
+            self.width_pixels = 480.
+            
         self.cbar_width_px = cbar_width_px
         self.cmap_name = cmap_name
         self.cbar_height_px = cbar_height_px
@@ -162,6 +204,8 @@ class HeatScale:
         data = dict(dic)
         n = len(dic[self.color_value])
         self.df = pd.DataFrame(data)
+        self.df[self.y_axis] = self.df[self.y_axis].astype(float)
+        self.df[self.color_value] = self.df[self.color_value].astype(float)
         # xaxis: We just want a single vertical axis of colored squares, not a matrix heatmap.
         self.df['_heatscale_xaxis'] = 0
         # data['_heatscale_idx'] = np.arange(n)
@@ -216,6 +260,8 @@ class HeatScale:
 
             square=True,
             cmap=self.cmap_name,
+            vmin=self.vmin,
+            vmax=self.vmax,
             # If cbar is False, it won't show the color gradient legend.
             # NOTE: We plot colorbar separately in plot_colorbar()
             cbar=False,
@@ -258,6 +304,59 @@ class HeatScale:
         assert path != self.png
         return path
 
+def exponential_moving_average(time_secs, utils, start_time_sec, step_sec, decay=0.99):
+    """
+    :param time_secs:
+        Epoch_sec of samples.
+    :param utils:
+        Device utilization samples.
+    :param start_time_sec:
+        Start time of the heat-scale.
+    :param step_sec:
+        How much a square in the heat-scale represents.
+        We report the exponential moving average window (EMA) every step_sec seconds.
+    :return:
+    """
+    class ExponentialMovingAverage:
+        def __init__(self, time_sec, value, decay=0.99):
+            self.decay = decay
+            self.time_sec = time_sec
+            self.ema = value
+
+        def add(self, time_sec, value):
+            self.time_sec = time_sec
+            # self.ema = self.decay * self.ema + (1 - self.decay) * value
+            self.ema = self.decay * value + (1 - self.decay) * self.ema
+
+    # PSEUDOCODE:
+    assert len(time_secs) == len(utils)
+    curtime = start_time_sec
+    sample_time_secs = []
+    sample_utils = []
+    initial_util = 0.
+    ema = ExponentialMovingAverage(curtime, initial_util, decay=decay)
+
+    NumberType = type(start_time_sec)
+    step_sec = NumberType(step_sec)
+
+    i = 0
+    while i < len(time_secs):
+        time_sec = time_secs[i]
+        assert time_sec >= start_time_sec
+        util = utils[i]
+        if time_sec > curtime + step_sec:
+            sample_time_secs.append(curtime)
+            sample_utils.append(ema.ema)
+            curtime = curtime + step_sec
+            continue
+        else:
+            ema.add(time_sec, util)
+            i += 1
+
+    assert len(sample_time_secs) == len(sample_utils)
+
+    return sample_time_secs, sample_utils
+
 def test_heatscale(args):
     # - Sample every 1 second over a period of 10 seconds
     # - A sample at every 1 + 0.1 second (i.e. offset by about 0.1 second)
@@ -287,10 +386,12 @@ def test_heatscale(args):
     }
     png = 'test_heatscale.png'
     pixels_per_square = 10
-    height_pixels_per_sec = pixels_per_square * (1 / step)
+    # height_pixels_per_sec = pixels_per_square * (1 / step)
     heatscale = HeatScale('color_value', 'y_axis', png,
-                          height_pixels_per_sec=height_pixels_per_sec,
+                          # height_pixels_per_sec=height_pixels_per_sec,
                           width_pixels=pixels_per_square,
+                          step=step,
+                          pixels_per_square=pixels_per_square,
                           debug=args.debug)
     heatscale.add_data(dic)
     heatscale.plot()

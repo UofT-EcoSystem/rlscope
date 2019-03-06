@@ -28,6 +28,8 @@ def main():
         dump_proto_txt(args.proto, ProfileProto, sys.stdout)
     elif is_pyprof_file(args.proto) or is_dump_event_file(args.proto):
         dump_proto_txt(args.proto, Pyprof, sys.stdout)
+    elif is_machine_util_file(args.proto):
+        dump_proto_txt(args.proto, MachineUtilization, sys.stdout)
     elif is_pyprof_call_times_file(args.proto):
         call_times_data = read_pyprof_call_times_file(args.proto)
         pprint.pprint(call_times_data)
