@@ -97,9 +97,9 @@ def get_session_run_calls_traced():
   global SESSION_RUN_CALLS_TRACED
   return SESSION_RUN_CALLS_TRACED
 
-def _profiled_init(self, target='', graph=None, config=None):
-  """Overwrites the session.__init__."""
-  self._profiler_init_internal(target, graph, config)  # pylint: disable=protected-access
+# def _profiled_init(self, target='', graph=None, config=None):
+#   """Overwrites the session.__init__."""
+#   self._profiler_init_internal(target, graph, config)  # pylint: disable=protected-access
 
 
 def _profiled_run(self,
@@ -758,15 +758,15 @@ def setup_wrap_Session():
   old_run = getattr(session.BaseSession, 'run', None)
   if not old_run:
     raise errors.InternalError(None, None, "BaseSession doesn't have a run method.")
-  old_init = getattr(session.BaseSession, '__init__', None)
+  # old_init = getattr(session.BaseSession, '__init__', None)
 
   # Overwrite tf.Session.run(...) and tf.Session.__init__(...)
   setattr(session.BaseSession, 'run', _profiled_run)
-  setattr(session.BaseSession, '__init__', _profiled_init)
+  # setattr(session.BaseSession, '__init__', _profiled_init)
 
   # Keep old tf.Session.run(...) and tf.Session.__init__(...)
   setattr(session.BaseSession, '_profiler_run_internal', old_run)
-  setattr(session.BaseSession, '_profiler_init_internal', old_init)
+  # setattr(session.BaseSession, '_profiler_init_internal', old_init)
 
   # elif not old_init:
   #   raise errors.InternalError(None, None,

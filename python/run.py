@@ -557,29 +557,29 @@ def _device_proto_as_dict(device_proto):
     name = m.group('name')
     return {"device_number":device, "device_name":name}
 
-def get_available_cpus():
-    import tensorflow as tf
-    from tensorflow.python.client import device_lib as tf_device_lib
-    local_device_protos = tf_device_lib.list_local_devices()
-    device_protos = [x for x in local_device_protos if x.device_type != 'GPU']
-    assert len(device_protos) == 1
-    cpu = cpuinfo.get_cpu_info()
-    # 'brand': 'Intel(R) Xeon(R) CPU E5-2680 v4 @ 2.40GHz',
-    device_dict = {
-        'device_name':cpu['brand'],
-        'device_number':0,
-    }
-    return [device_dict]
-    # device_dicts = [_device_proto_as_dict(device_proto) for device_proto in device_protos]
-    # return device_dicts
+# def get_available_cpus():
+#     import tensorflow as tf
+#     from tensorflow.python.client import device_lib as tf_device_lib
+#     local_device_protos = tf_device_lib.list_local_devices()
+#     device_protos = [x for x in local_device_protos if x.device_type != 'GPU']
+#     assert len(device_protos) == 1
+#     cpu = cpuinfo.get_cpu_info()
+#     # 'brand': 'Intel(R) Xeon(R) CPU E5-2680 v4 @ 2.40GHz',
+#     device_dict = {
+#         'device_name':cpu['brand'],
+#         'device_number':0,
+#     }
+#     return [device_dict]
+#     # device_dicts = [_device_proto_as_dict(device_proto) for device_proto in device_protos]
+#     # return device_dicts
 
-def get_available_gpus():
-    import tensorflow as tf
-    from tensorflow.python.client import device_lib as tf_device_lib
-    local_device_protos = tf_device_lib.list_local_devices()
-    device_protos = [x for x in local_device_protos if x.device_type == 'GPU']
-    device_dicts = [_device_proto_as_dict(device_proto) for device_proto in device_protos]
-    return device_dicts
+# def get_available_gpus():
+#     import tensorflow as tf
+#     from tensorflow.python.client import device_lib as tf_device_lib
+#     local_device_protos = tf_device_lib.list_local_devices()
+#     device_protos = [x for x in local_device_protos if x.device_type == 'GPU']
+#     device_dicts = [_device_proto_as_dict(device_proto) for device_proto in device_protos]
+#     return device_dicts
 
 def load_json(path):
     with codecs.open(path, mode='r', encoding='utf-8') as f:

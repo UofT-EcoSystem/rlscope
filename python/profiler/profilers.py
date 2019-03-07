@@ -470,7 +470,7 @@ class Profiler:
         for dirpath, dirnames, filenames in os.walk(self.directory):
             for base in filenames:
                 path = _j(dirpath, base)
-                print("> Consider {path}".format(path=path))
+                # print("> Consider {path}".format(path=path))
                 if is_insertable_file(path):
                     print("> RM {path}".format(path=path))
                     os.remove(path)
@@ -1235,7 +1235,7 @@ class Profiler:
                     average_time_per_call_sec=self.average_time_per_call_sec,
                     average_time_per_call_no_profile_sec=self.average_time_per_call_no_profile_sec,
                     process_name=self.process_name,
-                    **config_kwargs)
+                    **config_kwargs) # <-- this triggers GPU allocation
 
         self.dump_sessions_tfprof()
         clib_wrap.dump_pyprof(self.pyprof_proto_path, self.process_name, self.phase)
@@ -1916,7 +1916,7 @@ CLIB_WRAPPER_REGEX = r'CLIB__.*'
 def dump_config(path, **kwargs):
     config = dict()
 
-    avail_gpus = get_available_gpus()
+    avail_gpus = get_available_gpus() # <-- This triggers entire GPU allocation...wtf!
     avail_cpus = get_available_cpus()
     # We want to be CERTAIN about which device TensorFlow is using.
     # If no GPUs are available, TF will use the CPU.
@@ -2021,25 +2021,65 @@ def list_files(direc):
 
     return _list_files(direc)
 
+GET_AVAILABLE_CPUS_CPU_INFO = cpuinfo.get_cpu_info()
 def get_available_cpus():
-    local_device_protos = tf_device_lib.list_local_devices()
-    device_protos = [x for x in local_device_protos if x.device_type != 'GPU']
-    assert len(device_protos) == 1
-    cpu = cpuinfo.get_cpu_info()
-    # 'brand': 'Intel(R) Xeon(R) CPU E5-2680 v4 @ 2.40GHz',
-    device_dict = {
-        'device_name':cpu['brand'],
+    """
+    Report a single [0..1] value representing current system-wide CPU utilization.
+
+    psutil.cpu_percent() returns EXACTLY this.
+    From psutil.cpu_percent docstring:
+        "
+        Return a float representing the current system-wide CPU
+        utilization as a percentage.
+        "
+
+    NOTE: It's also possible to get INDIVIDUAL utilization for each CPU,
+    if we choose to do that in the future.
+    """
+    device_name = GET_AVAILABLE_CPUS_CPU_INFO['brand']
+    return {
+        'device_name':device_name,
         'device_number':0,
     }
-    return [device_dict]
-    # device_dicts = [_device_proto_as_dict(device_proto) for device_proto in device_protos]
-    # return device_dicts
+
+def get_visible_gpu_ids():
+    if 'CUDA_VISIBLE_DEVICES' not in ENV:
+        return []
+    gpu_ids = sorted(int(gpu_id) for gpu_id in re.split(r'\s*,\s*', ENV['CUDA_VISIBLE_DEVICES']))
+    return gpu_ids
 
 def get_available_gpus():
-    local_device_protos = tf_device_lib.list_local_devices()
-    device_protos = [x for x in local_device_protos if x.device_type == 'GPU']
-    device_dicts = [_device_proto_as_dict(device_proto) for device_proto in device_protos]
-    return device_dicts
+    # $ tensorflow_cuda9 git:(opt-tfprof) ✗ nvidia-smi -L
+    # GPU 0: GeForce RTX 2070 (UUID: GPU-e9c6b1d8-2b80-fee2-b750-08c5adcaac3f)
+    # GPU 1: Quadro K4000 (UUID: GPU-6a547b6a-ae88-2aac-feb9-ae6b7095baaf)
+    proc = subprocess.run(['nvidia-smi', '-L'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+    lines = proc.stdout.decode('utf-8').splitlines()
+    device_dicts = []
+    for line in lines:
+        # if re.search(r'^\s*$', line):
+        #     continue
+        m = re.search(r'^GPU (?P<gpu_id>\d+):\s*(?P<gpu_name>.*)\s+\(UUID: (?P<gpu_uuid>.*)\)\s*', line)
+        if m:
+            device_dicts.append({
+                "device_number":int(m.group('gpu_id')),
+                "device_name":m.group('gpu_name'),
+            })
+    visible_gpu_ids = get_visible_gpu_ids()
+    keep_devices = [gpu for gpu in device_dicts if gpu['device_number'] in visible_gpu_ids]
+    return keep_devices
+
+    # Don't user TensorFlow to do this since it allocates the GPU when it runs...
+    #
+    # config = tf.ConfigProto()
+    # # Allow multiple users to use the TensorFlow API.
+    # config.gpu_options.allow_growth = True  # <--- even with this, it still user 645 MB!
+    #
+    # print("Before list_local_devices")
+    # import ipdb; ipdb.set_trace()
+    # local_device_protos = tf_device_lib.list_local_devices(config) # <-- this trigger GPU allocation
+    # device_protos = [x for x in local_device_protos if x.device_type == 'GPU']
+    # device_dicts = [_device_proto_as_dict(device_proto) for device_proto in device_protos]
+    # return device_dicts
 
 def _device_proto_as_dict(device_proto):
     # For GPU's

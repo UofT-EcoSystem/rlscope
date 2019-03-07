@@ -81,29 +81,9 @@ def _device_proto_as_dict(device_proto):
     name = m.group('name')
     return {"device_number":device, "device_name":name}
 
-def get_available_cpus():
-    local_device_protos = tf_device_lib.list_local_devices()
-    device_protos = [x for x in local_device_protos if x.device_type != 'GPU']
-    assert len(device_protos) == 1
-    cpu = cpuinfo.get_cpu_info()
-    # 'brand': 'Intel(R) Xeon(R) CPU E5-2680 v4 @ 2.40GHz',
-    device_dict = {
-        'device_name':cpu['brand'],
-        'device_number':0,
-    }
-    return [device_dict]
-    # device_dicts = [_device_proto_as_dict(device_proto) for device_proto in device_protos]
-    # return device_dicts
-
-def get_available_gpus():
-    local_device_protos = tf_device_lib.list_local_devices()
-    device_protos = [x for x in local_device_protos if x.device_type == 'GPU']
-    device_dicts = [_device_proto_as_dict(device_proto) for device_proto in device_protos]
-    return device_dicts
-
 def test_get_gpus(parser, args):
-    gpus = get_available_gpus()
-    cpus = get_available_cpus()
+    gpus = profilers.get_available_gpus()
+    cpus = profilers.get_available_cpus()
     pprint.pprint({'gpus':gpus, 'cpus':cpus})
 
 def parse_profile(rule, parser, args):
@@ -762,8 +742,8 @@ class BenchmarkDQN:
             bench.run()
 
     def dump_config(self, bench_name):
-        avail_gpus = get_available_gpus()
-        avail_cpus = get_available_cpus()
+        avail_gpus = profilers.get_available_gpus()
+        avail_cpus = profilers.get_available_cpus()
         # We want to be CERTAIN about which device TensorFlow is using.
         # If no GPUs are available, TF will use the CPU.
         # If a GPU is available, make sure only 1 is available so we are certain it's using that one.

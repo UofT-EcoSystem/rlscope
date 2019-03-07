@@ -381,8 +381,14 @@ def test_sample_gpu_util():
 
 def main():
     parser = get_util_sampler_parser()
-    # args, extra_argv = parser.parse_known_args()
-    args = parser.parse_args()
+    # To make it easy to launch utilization sampler manually in certain code bases,
+    # allow ignoring all the --iml-* arguments:
+    #
+    # e.g. in minigo's loop_main.sh shell script we do
+    #   python3 -m scripts.utilization_sampler "$@" --iml-directory $BASE_DIR &
+    # where $@ contains all the --iml-* args.
+    args, extra_argv = parser.parse_known_args()
+    # args = parser.parse_args()
 
     if args.measure_samples_per_sec:
         measure_samples_per_sec()
