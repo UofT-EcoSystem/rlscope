@@ -1,3 +1,4 @@
+import argparse
 import re
 import sys
 import itertools
@@ -40,6 +41,15 @@ DQN_BENCH_NAME_LABELS = {
     'step':'Step',
     # 'total':'Total',
 }
+
+# "dots-per-inch" (pixels-per-inch).
+# Matplotlib functions set figure size in inches.
+# If we want to set them in pixels, we need to use this to do the conversion.
+# NOTE: This takes a WHILE to run...
+DPI = plt.figure().get_dpi()
+def pixels_as_inches(px):
+    px = float(px) / float(DPI)
+    return px
 
 # Documentation from
 # matplotlib/collections.py @ Collection.set_hatch:
@@ -688,7 +698,10 @@ class CategoryOverlapPlot:
         return sql_input_path(self.directory)
 
 class StackedBarPlotter:
-    def __init__(self, get_png, get_plot_data_path,
+    def __init__(self,
+                 get_png,
+                 # get_png_legend,
+                 get_plot_data_path,
                  category_order,
                  impl_name_order,
                  device_order,
@@ -701,8 +714,12 @@ class StackedBarPlotter:
                  ylabel=None,
                  title=None,
                  reversed_labels=False,
+                 yvalue_per_pixel=None,
+                 width_px=500,
+                 dynamic_size=False,
                  # reversed_labels=True,
                  ):
+
         if callable(get_png):
             self.get_png = get_png
             self.png = None
@@ -711,6 +728,14 @@ class StackedBarPlotter:
             self.get_png = None
             self.png = get_png
 
+        # if callable(get_png_legend):
+        #     self.get_png_legend = get_png_legend
+        #     self.png_legend = None
+        # else:
+        #     assert type(get_png_legend) == str
+        #     self.get_png_legend = None
+        #     self.png_legend = get_png_legend
+
         if callable(get_plot_data_path):
             self.get_plot_data_path = get_plot_data_path
             self.plot_data_path = None
@@ -718,6 +743,12 @@ class StackedBarPlotter:
             assert type(get_plot_data_path) == str
             self.get_plot_data_path = None
             self.plot_data_path = get_plot_data_path
+
+        self.yvalue_per_pixel = yvalue_per_pixel
+        self.width_px = width_px
+        self.dynamic_size = dynamic_size
+        if self.dynamic_size:
+            assert self.yvalue_per_pixel is not None and self.width_px is not None
 
         self.bar_width = bar_width
         self.show = show
@@ -816,12 +847,25 @@ class StackedBarPlotter:
 
         return bench_df
 
+    def plot_legend(self):
+        figlegend = plt.figure(figsize=(3,2))
+        # ax = fig.add_subplot(111)
+        # lines = ax.plot(range(10), range(10), range(10), range(10))
+        figlegend.legend(plot, ('one', 'two'), 'center')
+        figlegend.savefig(
+            'test_just_legend.png',
+            bbox_inches="tight")
+
+
     def plot(self, bench_name=NO_BENCH_NAME):
         if self.df is None:
             self._as_dataframe()
 
         # Keep this...
-        fig = plt.figure()
+        # fig = plt.figure()
+
+        MATPLOTLIB_PIXEL_FACTOR = 1e-2
+        self.width_px = 500
 
         if bench_name is None:
             all_benches = [NO_BENCH_NAME]
@@ -831,8 +875,52 @@ class StackedBarPlotter:
             all_benches = [bench_name]
 
         for bench_name in all_benches:
-
             bench_df = self.plot_data(bench_name)
+
+            if self.dynamic_size:
+                # TODO: Use test_pixel_bar to make a plot exactly pixels_as_inches(height_px) in height
+                # TODO: Use test_just_legend to make a plot just the legend
+                # TODO: Use test_just_legend to make a plot just the legend
+                # TODO: Use test_stacked_bar to test.
+                total_yvalue = bench_df['mean'].max()
+                height_px = math.ceil(total_yvalue / self.yvalue_per_pixel)
+                assert height_px > 1
+                fig = plt.figure(figsize=(pixels_as_inches(self.width_px), pixels_as_inches(height_px)))
+
+                # left = 0.0
+                # bottom = 0.0
+                # width = 1.0
+                # height = 1.0
+                # ax = fig.add_axes([left, bottom, width, height])
+
+                #
+                # Test test_pixel_bar
+                #
+
+                # How much wiggle-room to reserve along the outside of the plot-area for the plot-area-outline?
+                pixels_for_outline = 2
+
+                width_percent_per_pixel = 1.0 / self.width_px
+                width_percent_line_spacer = pixels_for_outline * width_percent_per_pixel
+
+                height_percent_per_pixel = 1.0 / height_px
+                height_percent_line_spacer = pixels_for_outline * height_percent_per_pixel
+
+                left = 0.0 + width_percent_line_spacer
+                bottom = 0.0 + height_percent_line_spacer
+                width = 1.0 - 2*width_percent_line_spacer
+                height = 1.0 - 2*height_percent_line_spacer
+
+                # This guarantees the plot-area fills the entire 500x500 figure size.
+                ax = fig.add_axes([left, bottom, width, height])
+
+
+                # Q: Pass ax around? What do use for ax below?
+                assert len(fig.get_axes()) == 1
+            else:
+                fig = plt.figure()
+                # Q: What's this affect?
+                ax = plt.add_subplot(111)
 
             with open(self.get_plot_data_pt(bench_name), 'w') as f:
                 DataFrame.print_df(bench_df, file=f)
@@ -840,9 +928,50 @@ class StackedBarPlotter:
             print(bench_df)
 
             self._add_lines(bench_name)
-            self._add_legend(bench_name)
+
+            if self.dynamic_size:
+                #
+                # Test test_just_legend
+                #
+
+                fig_legend = plt.figure(figsize=(3,2))
+                # ax = fig.add_subplot(111)
+                # lines = ax.plot(range(10), range(10), range(10), range(10))
+                # fig_legend.legend(lines, ('one', 'two'), 'center')
+                ax_legend = fig_legend.add_subplot(111)
+                legend_png = self.get_png_legend_path(bench_name)
+                self._add_legend(bench_name, axis=ax_legend)
+                fig_legend.savefig(
+                    legend_png,
+                    bbox_inches="tight")
+                assert ax.get_legend() is None
+                # ax.get_legend().remove()
+            else:
+                self._add_legend(bench_name)
             self._add_axis_labels(bench_name)
-            self._show(bench_name)
+
+            if self.dynamic_size:
+                #
+                # Test test_pixel_bar
+                #
+
+                ax.tick_params(
+                    axis='x',          # changes apply to the x-axis
+                    which='both',      # both major and minor ticks are affected
+                    bottom=False,      # ticks along the bottom edge are off
+                    top=False,         # ticks along the top edge are off
+                    labelbottom=False, # labels along the bottom edge are off
+                )
+
+                # Put y-label inside the plot
+                ax.tick_params(axis="y", direction="in", pad=-22)
+
+                # Adjust y-min we can see the "0" y-label still.
+                ymin, ymax = ax.get_ylim()
+                assert ymin == 0
+                ax.set_ylim(-( 0.05*ymax ), ymax)
+
+            self._show(fig, bench_name)
 
     def get_plot_bench_names(self):
         if self.get_png is not None:
@@ -857,19 +986,32 @@ class StackedBarPlotter:
 
         return self.png
 
+    def get_png_legend_path(self, bench_name):
+        png_path = self.get_png_path(bench_name)
+        legend_png_path = re.sub(r'\.png$', '.legend.png', png_path)
+        return legend_png_path
+
+        # if self.get_png_legend is not None:
+        #     return self.get_png_legend(bench_name)
+        #
+        # return self.png_legend
+
     def get_plot_data_pt(self, bench_name):
         if self.get_plot_data_path is not None:
             return self.get_plot_data_path(bench_name)
 
         return self.plot_data_path
 
-    def _show(self, bench_name=None):
+    def _show(self, fig, bench_name=None):
         if self.show:
             plt.show()
         else:
             print("> Save figure to {path}".format(path=self.get_png_path(bench_name)))
             print("> Save plot data to {path}".format(path=self.get_plot_data_pt(bench_name)))
-            plt.savefig(self.get_png_path(bench_name), bbox_inches="tight")
+            if not self.dynamic_size:
+                fig.savefig(self.get_png_path(bench_name), bbox_inches="tight")
+            else:
+                fig.savefig(self.get_png_path(bench_name))
             plt.close()
 
     def add_json_data(self, json_data, bench_name, device, impl_name, debug=False,
@@ -943,7 +1085,7 @@ class StackedBarPlotter:
             else:
                 _add_line(impl_name, bench_name)
 
-    def _add_legend(self, bench_name=None):
+    def _add_legend(self, bench_name=None, axis=None):
         self.legend_makers = []
 
         # We need two groups of lines:
@@ -1016,8 +1158,10 @@ class StackedBarPlotter:
         })
         self.legend_makers.append(color_legend)
 
-        LegendMaker.add_legends(self.legend_makers,
-                                legend_kwargs=legend_kwargs)
+        LegendMaker.add_legends(
+            self.legend_makers,
+            axis=axis,
+            legend_kwargs=legend_kwargs)
 
         # LegendMaker.add_legends_vertically(self.legend_makers,
         #                         legend_kwargs=legend_kwargs)
@@ -1053,22 +1197,23 @@ class StackedBarPlotter:
 
 
     def _add_axis_labels(self, bench_name=None):
-        if self.title is not None:
+        if self.title is not None and not self.dynamic_size:
             plt.title(self.title)
 
-        if self.xlabel is not None:
+        if self.xlabel is not None and not self.dynamic_size:
             # , fontweight='bold'
             if bench_name == NO_BENCH_NAME:
                 plt.xlabel(self.xlabel)
             else:
                 plt.xlabel(get_pretty_bench(bench_name))
 
-        if self.ylabel is not None:
+        if self.ylabel is not None and not self.dynamic_size:
             plt.ylabel(self.ylabel)
 
-        n_bars = len(self.device_order)
-        xtick_xvalues = self._xtick_xvalues(self.impl_name_order, self.impl_name_order_map, n_bars)
-        plt.xticks(xtick_xvalues, self.impl_name_order)
+        if not self.dynamic_size:
+            n_bars = len(self.device_order)
+            xtick_xvalues = self._xtick_xvalues(self.impl_name_order, self.impl_name_order_map, n_bars)
+            plt.xticks(xtick_xvalues, self.impl_name_order)
 
 
     def _get_xvalue(self, impl_name, device):
@@ -1445,17 +1590,22 @@ class LegendMaker:
         return self.legend
 
     @staticmethod
-    def add_legends(legend_makers, legend_kwargs=[]):
+    def add_legends(legend_makers, axis=None, legend_kwargs=[]):
         legends = []
         for i, legend_maker in enumerate(legend_makers):
             if i < len(legend_kwargs):
                 legend_kwarg = legend_kwargs[i]
             else:
                 legend_kwarg = dict()
-            legend = legend_maker.get_legend(**legend_kwarg)
+            legend = legend_maker.get_legend(axis=axis, **legend_kwarg)
             legends.append(legend)
+
+        if axis is None:
+            axis = plt.gca()
+
         for legend in legends:
-            plt.gca().add_artist(legend)
+            axis.add_artist(legend)
+
         return legends
 
     # @staticmethod
@@ -1657,13 +1807,41 @@ class UtilizationPlot:
     CPU/GPU utilization over training.
     """
     def __init__(self, directory,
+                 step_sec=1.,
+                 pixels_per_square=10,
+                 dynamic_size=False,
                  debug=False,
                  debug_ops=False,
                  debug_memoize=False,
                  entire_trace=False,
                  # Swallow any excess arguments
                  **kwargs):
+        """
+        :param directory:
+
+        :param step_sec:
+        :param pixels_per_square:
+            Condensed:
+            e.g.
+            sec_per_pixel = 0.1 sec / pixel
+            sec_per_pixel = step_sec / pixels_per_square
+            PROBLEM: A pixel is the smallest visual unit, so if we attempt to show
+            a unit of time SMALLER than a pixel, it will be impossible to plot.
+            => for all plots:
+                 assert plot.total_sec >= sec_per_pixel
+            If this fails, then the use must provide a larger "sec_per_pixel" value.
+
+        :param debug:
+        :param debug_ops:
+        :param debug_memoize:
+        :param entire_trace:
+        :param kwargs:
+        """
         self.directory = directory
+        self.step_sec = step_sec
+        self.pixels_per_square = pixels_per_square
+        self.dynamic_size = dynamic_size
+        self.sec_per_pixel = self.step_sec / float(self.pixels_per_square)
         self.debug = debug
         self.debug_ops = debug_ops
         self.debug_memoize = debug_memoize
@@ -1772,6 +1950,8 @@ class UtilizationPlot:
             # TODO: use "minigo"
             xlabel='',
             ylabel='Total training time (seconds)',
+            yvalue_per_pixel=self.sec_per_pixel,
+            dynamic_size=self.dynamic_size,
         )
 
         # for bench_name, json_data in zip(self.bench_names, json_datas):
@@ -1881,13 +2061,33 @@ class HeatScalePlot:
     def __init__(self, directory,
                  debug=False,
                  step_sec=1.,
+                 pixels_per_square=10,
                  decay=0.99,
                  # Swallow any excess arguments
                  **kwargs):
+        """
+
+        :param directory:
+        :param debug:
+
+        :param step_sec:
+        :param pixels_per_square:
+            `pixels_per_square` determines how many pixels are taken up by "step" units.
+            `step_sec` determines how many seconds each utilization square represents.
+            - step_sec should be bigger than the sampling frequency (500 ms)
+            Q: Any reason we want to specify step and pixels_per_square separately?
+            A: Yes I believe so:
+            - Only increases pixels_per_square if we'd like the same "exponential average window", but just a larger generated image.
+            - Only decrease/increase step_sec if we'd like to see a more fine/coarse grained "exponential average window"
+
+        :param decay:
+        :param kwargs:
+        """
         self.directory = directory
         self.debug = debug
 
         self.step_sec = step_sec
+        self.pixels_per_square = pixels_per_square
         self.decay = decay
 
         # self.bar_width = 0.25
@@ -1922,7 +2122,7 @@ class HeatScalePlot:
             plotter = HeatScale(
                 color_value='util', y_axis='start_time_sec',
                 png=png,
-                pixels_per_square=10,
+                pixels_per_square=self.pixels_per_square,
                 # Anchor colormap colors using min/max utilization values.
                 vmin=0.0, vmax=1.0,
                 # 1 second
@@ -1962,4 +2162,224 @@ class HeatScalePlot:
     def db_path(self):
         return sql_input_path(self.directory)
 
+def test_pixel_bar():
+    """
+    Can we make the total height-pixels of a bar-plot have a 1-to-1 correspondence for pixel-per-sec?
 
+    :return:
+    """
+    width_px = 500
+    height_px = 500
+
+    # This guarantees a 500x500 plot.
+    fig = plt.figure(figsize=(
+        pixels_as_inches(width_px),
+        pixels_as_inches(height_px)))
+
+    # How much space to reserve for ylabels
+    # (only relevant if ylabels are outside the plot).
+    # ylabel_spacer_percent = 0.1
+    ylabel_spacer_percent = 0.0
+
+    # We'd use these values to make the plot-area fill the ENTIRE figure size.
+    # (including the black-plot-outline even!)
+    # left = 0.0
+    # bottom = 0.0
+    # width = 1.0
+    # height = 1.0
+
+    # How much wiggle-room to reserve along the outside of the plot-area for the plot-area-outline?
+    pixels_for_outline = 2
+
+    width_percent_per_pixel = 1.0 / width_px
+    width_percent_line_spacer = pixels_for_outline * width_percent_per_pixel
+
+    height_percent_per_pixel = 1.0 / height_px
+    height_percent_line_spacer = pixels_for_outline * height_percent_per_pixel
+
+    left = 0.0 + ylabel_spacer_percent + width_percent_line_spacer
+    bottom = 0.0 + height_percent_line_spacer
+    width = 1.0 - ylabel_spacer_percent - 2*width_percent_line_spacer
+    height = 1.0 - 2*height_percent_line_spacer
+
+    # This guarantees the plot-area fills the entire 500x500 figure size.
+    ax = fig.add_axes([left, bottom, width, height])
+    yvalues = np.array(range(1, 5+1, 1))
+    xvalues = ["one", "two", "three", "four", "five"]
+    bar_width = 0.25
+    plot = ax.bar(xvalues, yvalues,
+                  color=color, width=bar_width, edgecolor='black',
+                  # label=bench_name,
+                  # bottom=self._bottom,
+                  # hatch=hatch,
+                  # yerr=yerr,
+                  )
+    ax.tick_params(
+        axis='x',          # changes apply to the x-axis
+        which='both',      # both major and minor ticks are affected
+        bottom=False,      # ticks along the bottom edge are off
+        top=False,         # ticks along the top edge are off
+        labelbottom=False, # labels along the bottom edge are off
+    )
+
+    # Put y-label inside the plot
+    ax.tick_params(axis="y", direction="in", pad=-22)
+
+    # Adjust y-min we can see the "0" y-label still.
+    ymin, ymax = ax.get_ylim()
+    assert ymin == 0
+    ax.set_ylim(-0.1, ymax)
+
+    # Overlap with next y-tick
+    fig.savefig('./test_pixel_bar.png',
+                # Remove excess whitespace around the plot.
+                # NOTE: This does NOT guarantee a 500x500 plot; in fact it ADDS whitespace.
+                # bbox_inches='tight',
+                )
+
+def test_stacked_bar():
+    """
+    PROBLEM: StackedBarPlotter code is coupled with how data is formatted...
+    Really just want it to care about what data it has to plot.
+
+    TEST CASES:
+    1. Plot existing data, legends and all
+    2. Plot simulated data <- do this and refactor plotting code.
+       2 operations: forward and backward
+       categories: python, c++, gpu
+
+       forward: {
+         python:3,
+         c++:2,
+         gpu:1,
+       }
+       backward: {
+         python:1,
+         c++:2,
+         gpu:3,
+       }
+
+    3. Add sec-per-pixel:
+       a. plot the same simulated data, and show 10 pixels per sec
+       b. plot the same simulated data, and show 5 pixels per sec
+          EXPECT: the total plot height should be halved, but should have the same proportions.
+
+    :return:
+    """
+    data = {
+        'operations':['Forward', 'Backward'],
+        'categories':['Python', 'C++', 'GPU'],
+        'time_sec': {
+            'Forward': {
+                'Python':[3],
+                'C++':[2],
+                'GPU':[1],
+            },
+            'Backward': {
+                'Python':[1],
+                'C++':[2],
+                'GPU':[3],
+            },
+        },
+    }
+    # bench_name here is "Forward" or "Backward"
+    def get_png(bench_name):
+        return "test_stacked_bar{bench}.png".format(
+            bench=bench_suffix(bench_name),
+        )
+
+
+    directory = "."
+    def get_plot_data_path(bench_name):
+        return _j(directory, "test_stacked_bar.plot_data{bench}.txt".format(
+            bench=bench_suffix(bench_name),
+        ))
+
+    class DebugReader:
+        def __init__(self, op_data):
+            self.op_data = op_data
+
+        def get_categories(self):
+            return list(self.op_data.keys())
+
+        def get_times_sec(self, category):
+            return self.op_data[category]
+
+    all_categories = sorted(data['categories'])
+    category_order = sorted(all_categories)
+    bench_name_labels = DQN_BENCH_NAME_LABELS
+    category_color_map = None
+    category_labels = None
+    impl_name_order = IMPL_NAME_ORDER
+    device_order = DEVICE_ORDER
+
+    # TODO:
+    # - generate a legend separately
+
+    bar_width = 0.25
+    show = False
+    dynamic_size = True
+    # seconds / pixel
+    sec_per_pixel = 1. / 10.
+    plotter = StackedBarPlotter(
+        get_png, get_plot_data_path,
+        category_order,
+        impl_name_order,
+        device_order,
+        bench_name_labels=bench_name_labels,
+        category_color_map=category_color_map,
+        category_labels=category_labels,
+        bar_width=bar_width, show=show,
+        json_reader_klass=DebugReader,
+        title='CPU/GPU utilization over training',
+        # TODO: use "minigo"
+        xlabel='',
+        ylabel='Total training time (seconds)',
+        yvalue_per_pixel=sec_per_pixel,
+        width_px=500,
+        dynamic_size=dynamic_size,
+    )
+
+    bench_names = data['operations']
+    for bench_name in bench_names:
+        op_data = data['time_sec'][bench_name]
+        device_name = NO_DEVICE_NAME
+        impl_name = NO_IMPL_NAME
+        plotter.add_json_data(op_data, bench_name, device_name, impl_name, debug=True)
+
+    plotter.plot()
+
+def test_just_legend():
+    """
+    Only show the legend, not the plot.
+    """
+    fig = plt.figure()
+    figlegend = plt.figure(figsize=(3,2))
+    ax = fig.add_subplot(111)
+    lines = ax.plot(range(10), range(10), range(10), range(10))
+    figlegend.legend(lines, ('one', 'two'), 'center')
+    figlegend.savefig(
+        'test_just_legend.png',
+        bbox_inches="tight")
+
+def main():
+    p = argparse.ArgumentParser()
+    p.add_argument('--test-stacked-bar', action='store_true')
+    p.add_argument('--test-pixel-bar', action='store_true')
+    p.add_argument('--test-just-legend', action='store_true')
+    args = p.parse_args()
+
+    if args.test_stacked_bar:
+        test_stacked_bar()
+        return
+
+    if args.test_pixel_bar:
+        test_pixel_bar()
+        return
+
+    if args.test_just_legend:
+        test_just_legend()
+        return
+
+if __name__ == '__main__':
+    main()

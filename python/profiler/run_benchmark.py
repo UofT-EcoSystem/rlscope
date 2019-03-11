@@ -229,6 +229,20 @@ def main():
     parser.add_argument("--debug",
                         action='store_true',
                         help='debug')
+    parser.add_argument("--pixels-per-square",
+                        type=int,
+                        default=10,
+                        help='HeatScalePlot')
+    parser.add_argument("--step-sec",
+                        type=float,
+                        default=1.,
+                        help='HeatScalePlot')
+    parser.add_argument("--dynamic-size",
+                        action='store_true',
+                        help=textwrap.dedent("""
+                        UtilizationPlot / StackedBarPlotter.
+                        Make a plot suitable for creating a multi-process visualization
+                        """))
     parser.add_argument("--op-name",
                         help='Only handle <op_name> (instead of all op_names)')
     parser.add_argument("--start-usec",
