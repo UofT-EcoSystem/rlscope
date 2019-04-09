@@ -576,7 +576,7 @@ class CategoryOverlapPlot:
     """
     Create a stacked bar plot.
     For the list of times to show, see self.category_order.
-    
+
     CategoryOverlapPlot
 
       PSEUDOCODE:
@@ -920,7 +920,8 @@ class StackedBarPlotter:
             else:
                 fig = plt.figure()
                 # Q: What's this affect?
-                ax = plt.add_subplot(111)
+                # ax = plt.add_subplot(111)
+                ax = fig.add_subplot(111)
 
             with open(self.get_plot_data_pt(bench_name), 'w') as f:
                 DataFrame.print_df(bench_df, file=f)
@@ -1325,7 +1326,13 @@ class TFProfReader:
         for cat_data in self.json_data['category_combo_times']:
             category_combo = cat_data['category_combo']
             cat_str = _category_str(category_combo)
-            times_sec = np.array(cat_data['times_usec'])/MICROSECONDS_IN_SECOND
+            # times_sec = np.array(cat_data['times_usec'])/MICROSECONDS_IN_SECOND
+            if len(cat_data['times_usec']) > 0:
+                float_type = type(cat_data['times_usec'][0])
+            else:
+                float_type = type(MICROSECONDS_IN_SECOND)
+            times_sec = np.array(cat_data['times_usec'])/as_type(MICROSECONDS_IN_SECOND, float_type)
+
             if category == cat_str:
                 # Ignore the first time since it includes libcupti.so load time.
                 return times_sec[1:]
@@ -1897,8 +1904,8 @@ class UtilizationPlot:
         # assert len(self.bench_names) == len(unique(self.bench_names))
         # self.categories = self.sql_reader.categories
 
-        overlap_computer = OverlapComputer(self.db_path, 
-                                           debug=self.debug, 
+        overlap_computer = OverlapComputer(self.db_path,
+                                           debug=self.debug,
                                            debug_ops=self.debug_ops)
 
         operation_overlap, proc_stats = overlap_computer.compute_process_timeline_overlap(
@@ -2051,7 +2058,7 @@ def _add_cpu_gpu_stats(js_stats, plotter, bench_name=NO_BENCH_NAME):
         'cpu_time_percent': safe_mul(100, safe_div(cpu_time_sec, total_time_sec)),
     }
     update_dict(js_stats, stats)
-    
+
 # def device_name_to_
 
 class HeatScalePlot:
@@ -2108,7 +2115,7 @@ class HeatScalePlot:
 
     def run(self):
         self.sql_reader = SQLCategoryTimesReader(self.db_path)
-        
+
         # for device_name, device_id in sql_reader.devices:
         #   samples = SELECT all utilization samples for <device_name>
         #   plotter.plot(samples) @ png=util_scale.<device_id>.png
