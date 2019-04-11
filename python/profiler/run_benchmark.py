@@ -276,6 +276,17 @@ def main():
                         Instead (when --entire-trace is NOT provided) we create 
                         a UtilizationPlot for each <process_name, phase_name>.
                         """))
+    parser.add_argument("--overlap-type",
+                        choices=CategoryOverlapPlot.OVERLAP_TYPES,
+                        help=textwrap.dedent("""
+                        UtilizationPlot: ResourceOverlap/OperationOverlap
+                        """))
+    parser.add_argument("--operation-overlap-resource",
+                        action='append',
+                        help=textwrap.dedent("""
+                        UtilizationPlot: ResourceOverlap/OperationOverlap
+                        [CPU], [GPU], [CPU, GPU]
+                        """))
     parser.add_argument("--debug-memoize",
                         action='store_true',
                         help=textwrap.dedent("""

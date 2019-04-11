@@ -1020,6 +1020,12 @@ def phase_suffix(phase_name):
         return ".phase_{phase}".format(phase=phase_name)
     return ""
 
+def resources_suffix(resources):
+    if resources is not None:
+        return ".resources_{resources}".format(
+            resources="_".join(resources))
+    return ""
+
 def event_suffix(event_id):
     if event_id is not None:
         return ".event_{id}".format(id=event_id)
@@ -1542,7 +1548,7 @@ class pythunk:
     """
     Create a 'thunk' when evaluating func(*args, *kwargs).
     i.e. don't run func as normal when it's called.
-    Instead, keep track of the arguments that were passed. 
+    Instead, keep track of the arguments that were passed.
     @pythunk
     def f(x, y):
         return x + y
@@ -1550,7 +1556,7 @@ class pythunk:
     # >>> type(thunk) == pythunk
     thunk.evaluate()
     When thunk.evalulate()
-    
+
     """
     def __init__(self, func):
         self.func = func
@@ -1575,10 +1581,10 @@ class pythunk:
         Store the arguments used for the call to func(*args, **kwargs).
         However, don't actually run the function.
         (we run the function only once pythunk.eval() is called).
-        
-        :param args: 
-        :param kwargs: 
-        :return: 
+
+        :param args:
+        :param kwargs:
+        :return:
         """
         self.args = args
         self.kwargs = kwargs

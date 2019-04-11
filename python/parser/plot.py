@@ -589,8 +589,13 @@ class CategoryOverlapPlot:
             i.e. avg(overlaps)
 
     """
+
+    # Make accessible from run_benchmark.py
+    OVERLAP_TYPES = OverlapComputer.OVERLAP_TYPES
+
     def __init__(self, directory,
                  debug=False,
+                 group_by_phase=False,
                  # Swallow any excess arguments
                  **kwargs):
         self.directory = directory
@@ -628,8 +633,15 @@ class CategoryOverlapPlot:
 
     def run(self):
 
+        """
+        PSEUDOCODE:
+        if group_by_phase:
+            for phase in phases
+
+        """
+
         self.sql_reader = SQLCategoryTimesReader(self.db_path)
-        self.bench_names = self.sql_reader.bench_names() + [NO_BENCH_NAME]
+        self.bench_names = self.sql_reader.bench_names()
         assert len(self.bench_names) == len(unique(self.bench_names))
         self.categories = self.sql_reader.categories
 
@@ -683,7 +695,7 @@ class CategoryOverlapPlot:
                                        device_name, impl_name, debug=True)
 
         # for bench_name in [NO_BENCH_NAME]:
-        for bench_name in self.bench_names:
+        for bench_name in self.bench_names + [NO_BENCH_NAME]:
             self.plotter.plot(bench_name)
             self._dump_cpu_gpu_stats(bench_name)
 
@@ -1809,7 +1821,7 @@ class CombinedProfileParser(ProfilerParserCommonMixin):
     def _combined_path(self, bench_name):
         return self.get_combined_path(self.src_files, bench_name)
 
-class UtilizationPlot:
+class ResourceOverlapPlotData:
     """
     CPU/GPU utilization over training.
     """
@@ -1932,6 +1944,354 @@ class UtilizationPlot:
 
         pprint.pprint({'all_categories': all_categories})
 
+        # def get_png(bench_name):
+        #     return self.get_process_timeline_png(process_name, phase_name, bench_name, self.debug_ops)
+
+        # self.category_order = sorted(all_categories)
+        # self.bench_name_labels = DQN_BENCH_NAME_LABELS
+        # TODO: create bench name labels
+        # self.bench_name_labels = None
+        # self.category_color_map = None
+        # self.category_labels = None
+        # self.impl_name_order = IMPL_NAME_ORDER
+        # self.device_order = DEVICE_ORDER
+        # self.plotter = StackedBarPlotter(
+        #     get_png, self._plot_data_path,
+        #     self.category_order,
+        #     self.impl_name_order,
+        #     self.device_order,
+        #     bench_name_labels=self.bench_name_labels,
+        #     category_color_map=self.category_color_map,
+        #     category_labels=self.category_labels,
+        #     bar_width=self.bar_width, show=self.show,
+        #     json_reader_klass=ProcessTimelineReader,
+        #     title='CPU/GPU utilization over training',
+        #     # TODO: use "minigo"
+        #     xlabel='',
+        #     ylabel='Total training time (seconds)',
+        #     yvalue_per_pixel=self.sec_per_pixel,
+        #     dynamic_size=self.dynamic_size,
+        # )
+
+        # for bench_name, json_data in zip(self.bench_names, json_datas):
+        #     device_name = NO_DEVICE_NAME
+        #     impl_name = NO_IMPL_NAME
+        #     self.plotter.add_json_data(json_data, bench_name,
+        #                                device_name, impl_name, debug=True)
+
+        for operation_key, combo_to_time in operation_overlap.items():
+            json_data = combo_to_time
+            # for category_key, time in operation_overlap.items():
+            category = _category_str(category_key)
+            all_categories.add(category)
+            operations_name = _category_str(operation_key)
+
+            device_name = NO_DEVICE_NAME
+            impl_name = NO_IMPL_NAME
+            self.plotter.add_json_data(json_data, operations_name,
+                                       device_name, impl_name, debug=True,
+                                       expect_times=True)
+
+        # df = self.plotter.dataframe
+        # assert len(df) != 0
+        # self._dump_stats(proc_stats)
+        # self.plotter.plot(bench_name=None)
+
+    @property
+    def db_path(self):
+        return sql_input_path(self.directory)
+
+    @staticmethod
+    def get_stats(directory):
+        return _j(directory, "process_timeline.stats.json")
+
+    def _stats(self):
+        return UtilizationPlot.get_stats(self.directory)
+
+    def _dump_stats(self, proc_stats):
+        """
+        Dump some stats useful for testing the correctness of our plot.
+
+        - Total time spent tracing:
+          We expect total time spent tracing to match that total size of our bar-graph.
+          NOTE: would be nice to measure this with time.time() separately, but oh well!
+
+        -
+        :param bench_name:
+        :return:
+        """
+        total_trace_time_sec = self.sql_reader.total_trace_time_sec(debug=self.debug)
+        # EXPECT:
+        # - total_trace_time_sec    ~ total_time_sec
+        #   --------------------      --------------
+        #   Anything that's traced    Stuff covered by operations
+        # IF FAILS:
+        # - then we aren't profiling part of the code.
+        js_stats = {
+            # Select min(start_time_us) as, max(end_time_us) from Event
+            # (i.e. across all processes)
+            'total_trace_time_sec':total_trace_time_sec,
+        }
+        update_dict(js_stats, proc_stats)
+        _add_cpu_gpu_stats(js_stats, self.plotter)
+        print("> Save plot stats to {path}".format(path=self._stats()))
+        do_dump_json(js_stats, self._stats(), cls=DecimalEncoder)
+        return js_stats
+
+class UtilizationPlot:
+    """
+    CPU/GPU utilization over training.
+    """
+    def __init__(self, directory,
+                 step_sec=1.,
+                 pixels_per_square=10,
+                 dynamic_size=False,
+                 debug=False,
+                 debug_ops=False,
+                 debug_memoize=False,
+                 entire_trace=False,
+                 overlap_type=None,
+                 # If overlap_type = OperationOverlap, then dump this resource-type.
+                 operation_overlap_resource=None,
+                 # Swallow any excess arguments
+                 **kwargs):
+        """
+        :param directory:
+
+        :param step_sec:
+        :param pixels_per_square:
+            Condensed:
+            e.g.
+            sec_per_pixel = 0.1 sec / pixel
+            sec_per_pixel = step_sec / pixels_per_square
+            PROBLEM: A pixel is the smallest visual unit, so if we attempt to show
+            a unit of time SMALLER than a pixel, it will be impossible to plot.
+            => for all plots:
+                 assert plot.total_sec >= sec_per_pixel
+            If this fails, then the use must provide a larger "sec_per_pixel" value.
+
+        :param debug:
+        :param debug_ops:
+        :param debug_memoize:
+        :param entire_trace:
+        :param kwargs:
+        """
+        if operation_overlap_resource is None:
+            operation_overlap_resource = [CATEGORY_CPU]
+        self.overlap_type = overlap_type
+        self.operation_overlap_resource = frozenset(operation_overlap_resource)
+        self.directory = directory
+        self.step_sec = step_sec
+        self.pixels_per_square = pixels_per_square
+        self.dynamic_size = dynamic_size
+        self.sec_per_pixel = self.step_sec / float(self.pixels_per_square)
+        self.debug = debug
+        self.debug_ops = debug_ops
+        self.debug_memoize = debug_memoize
+        self.entire_trace = entire_trace
+
+        self.bar_width = 0.25
+        self.show = False
+
+    def get_source_files(self):
+        return sql_get_source_files(self.__class__, self.directory)
+
+    def get_process_timeline_png(self, process_name, phase_name, bench_name, debug_ops):
+        return _j(self.directory, "process_timeline{proc}{phase}{bench}{debug}.png".format(
+            proc=process_suffix(process_name),
+            phase=phase_suffix(phase_name),
+            bench=bench_suffix(bench_name),
+            debug=debug_suffix(debug_ops),
+        ))
+
+    def _resource_overlap_json(self, process_name, phase_name):
+        return _j(self.directory, "ResourceOverlap{proc}{phase}.json".format(
+            proc=process_suffix(process_name),
+            phase=phase_suffix(phase_name),
+        ))
+
+    def _resource_overlap_venn_js_json(self, process_name, phase_name):
+        return _j(self.directory, "ResourceOverlap{proc}{phase}.venn_js.json".format(
+            proc=process_suffix(process_name),
+            phase=phase_suffix(phase_name),
+        ))
+
+    def _resource_overlap_subplot_json(self, process_name, phase_name):
+        return _j(self.directory, "ResourceOverlapSubplot{proc}{phase}.json".format(
+            proc=process_suffix(process_name),
+            phase=phase_suffix(phase_name),
+        ))
+
+    def _resource_overlap_subplot_venn_js_json(self, process_name, phase_name):
+        return _j(self.directory, "ResourceOverlapSubplot{proc}{phase}.venn_js.json".format(
+            proc=process_suffix(process_name),
+            phase=phase_suffix(phase_name),
+        ))
+
+    def _operation_overlap_json(self, process_name, phase_name, resources):
+        return _j(self.directory, "OperationOverlap{proc}{phase}{resources}.json".format(
+            proc=process_suffix(process_name),
+            phase=phase_suffix(phase_name),
+            resources=resources_suffix(resources),
+        ))
+
+    def _operation_overlap_venn_js_json(self, process_name, phase_name, resources):
+        return _j(self.directory, "OperationOverlap{proc}{phase}.venn_js.json".format(
+            proc=process_suffix(process_name),
+            phase=phase_suffix(phase_name),
+            resources=resources_suffix(resources),
+        ))
+
+    @staticmethod
+    def get_plot_data_path(directory, bench_name, debug_ops):
+        return _j(directory, "process_timeline.plot_data{bench}{debug}.txt".format(
+            bench=bench_suffix(bench_name),
+            debug=debug_suffix(debug_ops),
+        ))
+
+    def _plot_data_path(self, bench_name):
+        return UtilizationPlot.get_plot_data_path(self.directory, bench_name, self.debug_ops)
+
+    def run(self):
+        self.sql_reader = SQLCategoryTimesReader(self.db_path, debug_ops=self.debug_ops)
+
+        if self.entire_trace:
+            # Plot a single plot for the entire trace across ALL processes.
+            self.plot_process_phase()
+            return
+
+        process_names = self.sql_reader.process_names
+
+        debug_process_names = ['loop_train_eval']
+        debug_phases = ['sgd_updates']
+
+        for process_name in debug_process_names:
+            # for process_name in process_names:
+
+            # OLD
+            # phases = self.sql_reader.process_phase_start_end_times(process_name, debug=self.debug)
+
+            # phases = self.sql_reader.process_phases(process_name, debug=self.debug)
+
+            for phase in debug_phases:
+                # for phase in phases:
+                pprint.pprint({'process_name':process_name, 'phase': phase})
+                # self.plot_process_phase(process_name, phase['phase_name'])
+                self.plot_process_phase(process_name, phase)
+
+    def dump_overlap(self, operation_overlap, path, venn_js_path=None):
+        print("> Dump data for {overlap_type} @ {path}".format(path=path, overlap_type=self.overlap_type))
+        dumper = OverlapJSONDumper(operation_overlap)
+        js = dumper.dump(path)
+
+        if venn_js_path is not None:
+            print("> Dump data for {overlap_type} venn.js plot @ {path}".format(path=venn_js_path, overlap_type=self.overlap_type))
+            converter = OverlapJSONToVennConverter(js=js)
+            venn_js = converter.dump(venn_js_path)
+            pprint.pprint({'venn_js':venn_js})
+
+    def plot_process_phase(self, process_name=None, phase_name=None):
+        assert ( process_name is None and phase_name is None ) or \
+               ( process_name is not None and phase_name is not None )
+
+        # converter = OverlapJSONToVennConverter(path=self._resource_overlap_json(process_name, phase_name))
+        # js = converter.convert()
+        # pprint.pprint({'js':js})
+        # sys.exit(0)
+
+        # self.bench_names = self.sql_reader.bench_names(self.debug_ops) + [NO_BENCH_NAME]
+        # assert len(self.bench_names) == len(unique(self.bench_names))
+        # self.categories = self.sql_reader.categories
+
+        overlap_computer = OverlapComputer(self.db_path,
+                                           debug=self.debug,
+                                           debug_ops=self.debug_ops)
+
+        operation_overlap, proc_stats = overlap_computer.compute_process_timeline_overlap(
+            process_name=process_name,
+            phase_name=phase_name,
+            debug_memoize=self.debug_memoize,
+            overlap_type=self.overlap_type)
+        assert len(operation_overlap) > 0
+
+
+        # TODO: Make it so we can generate ALL of these, by reusing the parse_timeline/ComputeOverlap computation.
+        # i.e. turn OverlapCompute.compute_process_timeline_overlap into a class.
+        if self.overlap_type == 'ResourceOverlap':
+            self.dump_overlap(
+                operation_overlap,
+                path=self._resource_overlap_json(process_name, phase_name),
+                venn_js_path=self._resource_overlap_venn_js_json(process_name, phase_name))
+        elif self.overlap_type == 'OperationOverlap':
+            operation_overlap_by_resource = operation_overlap[self.operation_overlap_resource]
+            self.dump_overlap(
+                operation_overlap_by_resource,
+                path=self._operation_overlap_json(process_name, phase_name, self.operation_overlap_resource),
+                venn_js_path=self._operation_overlap_venn_js_json(process_name, phase_name, self.operation_overlap_resource))
+        elif self.overlap_type == 'ResourceSubplot':
+            self.dump_overlap(
+                operation_overlap,
+                path=self._resource_overlap_subplot_json(process_name, phase_name),
+                venn_js_path=self._resource_overlap_subplot_venn_js_json(process_name, phase_name))
+
+        # PROBLEM: I DON'T want to group by operation.
+        # I want to group by CPU/GPU.
+        # There should only be 3 categories:
+        # - CPU
+        # - GPU
+        # - CPU/GPU
+        # The expected format is:
+        # {frozenset({'CPU'}:Decimal('682219')
+        #  frozenset({'GPU'}:Decimal('682219')
+        #  frozenset({'CPU', 'GPU'}:Decimal('682219')}
+        #
+        # {'operation_overlap': {('estimator_save_model',): {frozenset({'CPU'}): Decimal('682219')},
+        #                        ('estimator_train',): {frozenset({'CPU'}): Decimal('25125539'),
+        #                                               frozenset({'GPU'}): Decimal('113459'),
+        #                                               frozenset({'GPU', 'CPU'}): Decimal('181450')},
+        #                        ('gather',): {frozenset({'CPU'}): Decimal('15568359')},
+        #                        ('train',): {frozenset({'CPU'}): Decimal('8507345')}},
+        #  'phase_name': 'sgd_updates',
+        #  'process_name': 'loop_train_eval'}
+        # pprint.pprint({
+        #     'process_name': process_name,
+        #     'phase_name': phase_name,
+        #     'operation_overlap': operation_overlap})
+        # self.dump_overlap(
+        #     operation_overlap,
+        #     path=self._resource_overlap_json(process_name, phase_name),
+        #     venn_js_path=self._resource_overlap_venn_js_json(process_name, phase_name))
+
+        # all_categories = set()
+        # json_datas = []
+        # for bench_name in self.bench_names:
+        #     # json_data = overlap_computer.compute_per_operation_overlap(bench_name)
+        #     json_datas.append(json_data)
+        #
+        #     for combo_and_times in json_data['category_combo_times']:
+        #         category = _category_str(combo_and_times['category_combo'])
+        #         all_categories.add(category)
+
+        if self.overlap_type == 'default':
+            self._dump_stats(proc_stats)
+            # Plot the "CPU/GPU Utilization" plot.
+            # Other overlap_type's will JUST output the overlap data (to be consumed by iml-drill).
+            self._do_plot_process_phase(operation_overlap, process_name, phase_name)
+
+    def _do_plot_process_phase(self, operation_overlap, process_name=None, phase_name=None):
+        assert ( process_name is None and phase_name is None ) or \
+               ( process_name is not None and phase_name is not None )
+
+        assert self.overlap_type == 'default'
+
+        all_categories = set()
+        for operation_key, combo_to_time in operation_overlap.items():
+            for category_key, time_us in combo_to_time.items():
+                category = _category_str(category_key)
+                all_categories.add(category)
+
+        pprint.pprint({'all_categories': all_categories})
+
         def get_png(bench_name):
             return self.get_process_timeline_png(process_name, phase_name, bench_name, self.debug_ops)
 
@@ -1985,7 +2345,6 @@ class UtilizationPlot:
         #     self.plotter.plot(bench_name)
         df = self.plotter.dataframe
         assert len(df) != 0
-        self._dump_stats(proc_stats)
         self.plotter.plot(bench_name=None)
 
     @property
@@ -2058,6 +2417,88 @@ def _add_cpu_gpu_stats(js_stats, plotter, bench_name=NO_BENCH_NAME):
         'cpu_time_percent': safe_mul(100, safe_div(cpu_time_sec, total_time_sec)),
     }
     update_dict(js_stats, stats)
+
+class OverlapJSONDumper:
+    def __init__(self, overlap):
+        # set([CPU, GPU]) -> np.array(...)
+        self.overlap = overlap
+        # self.overlap_to_id = dict()
+
+    def dump(self, path):
+        js = dict()
+        overlap_to_id = dict()
+        js['overlap_id_pairs'] = []
+        js['overlap_id_to_values'] = dict()
+        for i, (k, vs) in enumerate(self.overlap.items()):
+            new_k = tuple(sorted(k))
+            assert new_k not in overlap_to_id
+            overlap_to_id[new_k] = i
+            js['overlap_id_pairs'].append((new_k, overlap_to_id[new_k]))
+            js['overlap_id_to_values'][overlap_to_id[new_k]] = vs
+        do_dump_json(js, path)
+        return js
+
+class OverlapJSONToVennConverter:
+    def __init__(self, js=None, path=None):
+        # set([CPU, GPU]) -> np.array(...)?
+        assert js is not None or path is not None
+        if path is not None:
+            with open(path, 'r') as f:
+                js = json.load(f)
+
+        self.js = js
+        self.path = path
+
+    def convert(self):
+        """
+        venn_music_data = [
+            {"sets": [0], "label": "Radiohead", "size": 77348},
+            {"sets": [1], "label": "Thom Yorke", "size": 5621},
+            ...
+            {"sets": [0, 1], "size": 4832},
+            ...
+        ]
+        """
+        venn_js = []
+        # keys = sorted([k for overlap, k in self.js['overlap_id_pairs']])
+        overlap_id_to_overlap_list = dict((k, overlap) for overlap, k in self.js['overlap_id_pairs'])
+
+        category_to_id = dict()
+        categories = set()
+        for overlap, k in self.js['overlap_id_pairs']:
+            assert type(overlap) in [list, tuple, set, frozenset]
+            categories.update(overlap)
+        categories = sorted(categories)
+        for i, category in enumerate(categories):
+            category_to_id[category] = i
+
+        def as_sets(overlap_id):
+            overlap_list = overlap_id_to_overlap_list[overlap_id]
+            sets_ids = [category_to_id[category] for category in overlap_list]
+            sets_ids.sort()
+            return sets_ids
+
+        for overlap_id, values in self.js['overlap_id_to_values'].items():
+            overlap_id = int(overlap_id)
+            venn_set = {
+                "sets": as_sets(overlap_id),
+                "size": values,
+            }
+            if len(venn_set['sets']) == 1:
+                assert len(overlap_id_to_overlap_list[overlap_id]) == 1
+                venn_set["label"] = overlap_id_to_overlap_list[overlap_id][0]
+            venn_js.append(venn_set)
+
+        # Make the shorter (in particular, single-element) venn_sets appear first.
+        # venn_sets within the same length are ordered based on lexicographic order.
+        venn_js.sort(key=lambda venn_set: (len(venn_set['sets']), venn_set['sets']))
+
+        return venn_js
+
+    def dump(self, path):
+        js = self.convert()
+        do_dump_json(js, path)
+        return js
 
 # def device_name_to_
 

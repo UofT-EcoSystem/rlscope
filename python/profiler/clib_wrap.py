@@ -147,6 +147,14 @@ class CFuncWrapper:
             # That means we stopping executing python while C++ runs.
             # So, we must add a python execution and C++ execution event.
             name = self.func.__name__
+            # TODO: BUG: sometimes, this results in a negative duration_us.
+            # HACK: just filter out these rare events when building SQL database.
+            # That must mean _python_start_us has been UPDATED after "start_us = now_us()" was called...
+            # The only way this can happen is if self.call(...) triggered an update to _python_start_us.
+            # This happens when calling "TF_Output"; possibilities:
+            # - TF_Output causes a call to another wrapped function (don't think so, its a SWIG entry)
+            # - multiple threads updating _python_start_us (e.g. by calling set_step/clear_pyprof_profiling/calling wrapped functions)
+            #   ... unlikely since code tends to use fork() via multiprocessing if at all
             python_event = Event(
                 start_time_us=int(_python_start_us),
                 duration_us=int(start_us - _python_start_us),

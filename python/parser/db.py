@@ -101,6 +101,44 @@ class SQLParser:
             )))
         return src_files
 
+    def _remove_buggy_data(self):
+        """
+        TODO: BUG: sometimes, this results in a negative duration_us for Event.duration_us for Python event's.
+        HACK: just filter out these rare events when building SQL database.
+
+        For details; see CFuncWrapper.__call__
+        """
+        print("> BUG: remove Python Events with negative Event.duration_us")
+        c = self.cursor
+
+        negative_duration_query = textwrap.dedent("""
+        SELECT e.event_name, e.duration_us, c.category_name
+        FROM
+          Event AS e 
+          NATURAL JOIN Category c
+        WHERE 
+            e.duration_us < 0
+        """)
+        sql_exec_query(c, negative_duration_query, klass=self.__class__, debug=self.debug)
+        rows = c.fetchall()
+
+        if len(rows) == 0:
+            return
+
+        pprint.pprint({
+            'num_rows': len(rows),
+            'Events with negative Event.duration_us':[dict(row) for row in rows],
+        })
+
+        del_negative_duration_query = textwrap.dedent("""
+        DELETE
+        FROM
+            Event AS e
+        WHERE
+            e.duration_us < 0
+        """)
+        sql_exec_query(c, del_negative_duration_query, klass=self.__class__, debug=self.debug)
+
     def _check_no_partial_or_complete_op_overlap(self):
         """
         User adds profiling annotations in stack-oriented fashion:
@@ -352,9 +390,11 @@ class SQLParser:
         # Not sure why.
         # self._check()
 
+        self._HACK_clean_data()
+
         self.conn.commit()
         self.conn.close()
-        
+
     def _check(self):
         """
         Run any post-insert checks not captured by database constraints.
@@ -365,6 +405,9 @@ class SQLParser:
         end_t = time.time()
         time_sec = end_t - start_t
         print("  Took {sec} seconds".format(sec=time_sec))
+
+    def _HACK_clean_data(self):
+        self._remove_buggy_data()
 
     def maybe_commit(self, i):
         if (i + 1) % self.block_size == 0:
@@ -2029,6 +2072,7 @@ class SQLCategoryTimesReader:
         self._fetch_steps(process_name, bench_name)
         return self._steps[process_name][bench_name][step]
 
+        # Swallow any excess arguments
     DEBUG_EACH_OP_INSTANCE = False
     def each_op_instance(self, bench_name,
                          group_by_device=DEFAULT_group_by_device,
@@ -2041,6 +2085,10 @@ class SQLCategoryTimesReader:
         for process_name in process_names:
 
             keep_steps = self.keep_steps(process_name, bench_name, skip_first_step)
+            if bench_name == NO_BENCH_NAME:
+                pprint.pprint({
+                    'name':'SQLCategoryTimesReader.each_op_instance',
+                    'keep_steps':keep_steps})
 
             for step in progress(keep_steps,
                                  desc=as_progress_label("each_op_instance", process_name),
@@ -2077,6 +2125,23 @@ class SQLCategoryTimesReader:
                        debug_ops=False,
                        debug_memoize=False):
         """
+        Return all the Event's belonging to specific process(es), and a specific phase(s).
+        The format of returned events is "process_cpu_gpu_category_times" format; i.e.
+        {
+          <process_cat>: <Event's sorted by Event.start_time>,
+          ...
+        }
+
+        where process_cat =
+            set(
+              process_name,
+              set(                                             # <-- NOTE: nested set for CPU/GPU/operation
+                  CPU if Event.category is a CPU-category,
+                  GPU if Event.category is a GPU-category,
+                  Event.name if Event.category is a 'operation',
+              ),
+            )
+
         PSEUDOCODE:
         for proc in self.process_names:
             events[proc] = Select all events for <process_name> (i.e. over its min/max time range)
@@ -2116,7 +2181,7 @@ class SQLCategoryTimesReader:
         # Categories NOT including the operation-type categories (that replaced CATEGORY_OPERATION)
         categories = set()
         proc_types = set()
-        
+
         if process_name is not None:
             process_names = [process_name]
         else:
@@ -2126,6 +2191,12 @@ class SQLCategoryTimesReader:
 
             process_label = "process={proc}".format(
                 proc=process_name)
+            """
+            {
+                <category_name>: <events belonging to process_name, sorted by start_sec>,
+                ...
+            }
+            """
             proc_category_times = self.process_events(process_name, phase_name, ignore_categories,
                                               debug=debug,
                                               debug_ops=debug_ops,
@@ -2139,6 +2210,11 @@ class SQLCategoryTimesReader:
 
             # assert CATEGORY_OPERATION in proc_category_times
             if CATEGORY_OPERATION in proc_category_times:
+                """
+                Replace proc_category_times[CATEGORY_OPERATION], handle operation nesting.
+                We are assuming a single process is single-threaded here, so any operation 
+                nesting is form a single-threaded "call-stack".
+                """
                 proc_category_times[CATEGORY_OPERATION] = process_op_nest_single_thread(
                     proc_category_times[CATEGORY_OPERATION],
                     show_progress=debug,
@@ -2219,6 +2295,12 @@ class SQLCategoryTimesReader:
         """
         Query ALL events for a particular process_name.
         If process_name is None, return events across ALL processes.
+
+        Return format is "category_times":
+        {
+            <category_name>: <events belonging to process_name, sorted by start_sec>,
+            ...
+        }
 
         :param process_name:
             If process_name is None, return events across ALL processes.
@@ -2499,9 +2581,9 @@ class SQLCategoryTimesReader:
         #   Split up op-type events based on nesting pattern. <-- handle nesting
         #   Compute the overlap of this op-type instance with all other categories
         #
-        # NOTE: We DON'T want to keep any overlap for OTHER op-types, 
+        # NOTE: We DON'T want to keep any overlap for OTHER op-types,
         # since those will be calculated separately.
-        # - One way of handling this; after splitting up by op-types, sweep through 
+        # - One way of handling this; after splitting up by op-types, sweep through
         #   the op-types and remove anything that's not equal to the current op-type.
         #
 
@@ -2676,6 +2758,20 @@ def bin_category_times(
     operation_types=None,
     category_times=None,
     debug=False):
+    """
+    Given a list of Event's, redistribute them into category_times[<cat>]
+    where cat =
+        set(
+          process_name,
+          set(                                             # <-- NOTE: nested set for CPU/GPU/operation
+              CPU if Event.category is a CPU-category,
+              GPU if Event.category is a GPU-category,
+              Event.name if Event.category is a 'operation',
+          ),
+        )
+
+    We are preparing events for CPU/GPU/operation overlap-processing.
+    """
 
     if categories is None:
         categories = set()
@@ -2740,6 +2836,21 @@ def bin_category_times_single_thread(
     operation_types=None,
     category_times=None,
     debug=False):
+    """
+    Given proc_category_times (category_times format for a specific process), redistribute the
+    Event's into category_times to prepare for CPU/GPU/operation overlap-processing,
+    potentially across processes.
+
+    See bin_category_times for details.
+
+    :param process_name:
+    :param proc_category_times:
+    :param categories:
+    :param operation_types:
+    :param category_times:
+    :param debug:
+    :return:
+    """
     if categories is None:
         categories = set()
     if operation_types is None:
@@ -2894,10 +3005,14 @@ def sql_exec_query(cursor, query, params=None, klass=None, debug=False):
         if params is not None:
             print("> params:")
             pprint.pprint(params, indent=2)
+    start_t = time.time()
     if params is not None:
         c.execute(query, params)
     else:
         c.execute(query)
+    end_t = time.time()
+    if debug:
+        print("> query took {sec} seconds".format(sec=end_t - start_t))
 
 def sql_create_connection(db_path):
     if py_config.SQL_IMPL == 'psql':
@@ -3143,33 +3258,33 @@ class OpStack:
         self.ktime = kernel_time
         self.last_insert_start_time = None
         self.parent = None
-        
+
     @property
     def time_sec(self):
         """
                           [op3: 1 second]
-                       [   op2: 5 seconds   ] 
+                       [   op2: 5 seconds   ]
         OpStack -> [       op1: 10 seconds        ]
-        
+
         >>> op3.time_sec()
         1 second
         >>> op2.stacktrace()
         5 seconds
         >>> op1.stacktrace()
         10 seconds
-        
-        :param op_stack: 
-        :return: 
+
+        :param op_stack:
+        :return:
             List of OpStack entries.
         """
         return self.ktime.total_time_sec
-        
+
     def stacktrace(self):
         """
                           [op3]
                        [   op2   ] [op4] [op5]
         OpStack -> [             op1               ]
-        
+
         >>> op3.stacktrace()
         [op1, op2, op3]
         >>> op2.stacktrace()
@@ -3178,9 +3293,9 @@ class OpStack:
         [op1, op4]
         >>> op1.stacktrace()
         [op1]
-        
-        :param op_stack: 
-        :return: 
+
+        :param op_stack:
+        :return:
             List of OpStack entries.
         """
         trace = []
@@ -3402,7 +3517,7 @@ def _sql_eq_clause(value, alias, field, indents=None, allow_none=False):
             return "'{value}'".format(
                 value=value)
         return str(value)
-    
+
     if value is None:
         if not allow_none:
             raise RuntimeError("Expected {alias}.{field} not to be None".format(
@@ -3414,7 +3529,7 @@ def _sql_eq_clause(value, alias, field, indents=None, allow_none=False):
             p=alias,
             field=field,
             value=_as_value(value))
-        
+
     txt = maybe_indent(txt, indents)
     return txt
 
