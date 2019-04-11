@@ -1546,6 +1546,30 @@ def pyprof_func_std_string(func_tuple): # match what old profile produced
 def as_type(value, klass):
     return klass(value)
 
+def js_friendly(obj):
+    """
+    Dict keys in json can only be numbers/strings/booleans/null, they CANNOT be lists/dicts/sets.
+
+    So, to represent a dict whose keys are frozensets...well you just cannot do that.
+
+    :param obj:
+    :return:
+    """
+    if type(obj) == dict and len(obj) > 0 and \
+            isinstance(
+                next(iter(obj.keys())),
+                (frozenset, tuple)
+            ):
+        key_values_pairs = []
+        for key, value in obj.items():
+            key_values_pairs.append((
+                js_friendly(key),
+                js_friendly(value)))
+        return key_values_pairs
+    elif type(obj) == frozenset:
+        return sorted([js_friendly(x) for x in obj])
+    return obj
+
 class pythunk:
     """
     Create a 'thunk' when evaluating func(*args, *kwargs).

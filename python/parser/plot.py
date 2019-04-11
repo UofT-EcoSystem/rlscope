@@ -2130,6 +2130,17 @@ class UtilizationPlot:
             phase=phase_suffix(phase_name),
         ))
 
+    def _default_subplot_json(self, process_name, phase_name):
+        # '{OverlapType}.{process}{phase}.operation_overlap.json'.format(
+        #     OverlapType=overlap_type,
+        #     process=process_suffix(process_name),
+        #     phase=phase_suffix(phase_name),
+        # )
+        return _j(self.directory, "default{proc}{phase}.json".format(
+            proc=process_suffix(process_name),
+            phase=phase_suffix(phase_name),
+        ))
+
     def _resource_overlap_subplot_venn_js_json(self, process_name, phase_name):
         return _j(self.directory, "ResourceOverlapSubplot{proc}{phase}.venn_js.json".format(
             proc=process_suffix(process_name),
@@ -2198,6 +2209,11 @@ class UtilizationPlot:
             venn_js = converter.dump(venn_js_path)
             pprint.pprint({'venn_js':venn_js})
 
+    def _dump_json(self, obj, path):
+        print("> Dump @ {path}".format(path=path))
+        js = js_friendly(obj)
+        do_dump_json(js, path, cls=DecimalEncoder)
+
     def plot_process_phase(self, process_name=None, phase_name=None, phase=None):
         if phase is not None and phase_name is None:
             phase_name = phase.phase_name
@@ -2255,6 +2271,10 @@ class UtilizationPlot:
                 operation_overlap,
                 path=self._resource_overlap_subplot_json(process_name, phase_name),
                 venn_js_path=self._resource_overlap_subplot_venn_js_json(process_name, phase_name))
+        elif self.overlap_type == 'default':
+            self._dump_json(
+                operation_overlap,
+                self._default_subplot_json(process_name, phase_name))
 
         # PROBLEM: I DON'T want to group by operation.
         # I want to group by CPU/GPU.
@@ -2295,12 +2315,11 @@ class UtilizationPlot:
         #         all_categories.add(category)
 
         if self.overlap_type == 'default':
-            self._dump_stats(proc_stats)
             # Plot the "CPU/GPU Utilization" plot.
             # Other overlap_type's will JUST output the overlap data (to be consumed by iml-drill).
-            self._do_plot_process_phase(operation_overlap, process_name, phase_name)
+            self._do_plot_process_phase(operation_overlap, proc_stats, process_name, phase_name)
 
-    def _do_plot_process_phase(self, operation_overlap, process_name=None, phase_name=None):
+    def _do_plot_process_phase(self, operation_overlap, proc_stats, process_name=None, phase_name=None):
         assert ( process_name is None and phase_name is None ) or \
                ( process_name is not None and phase_name is not None )
 
@@ -2368,6 +2387,8 @@ class UtilizationPlot:
         df = self.plotter.dataframe
         assert len(df) != 0
         self.plotter.plot(bench_name=None)
+
+        self._dump_stats(proc_stats)
 
     @property
     def db_path(self):
