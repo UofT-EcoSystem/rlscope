@@ -2079,6 +2079,7 @@ class SQLCategoryTimesReader:
                        phase_name=None,
                        start_time_us=None,
                        end_time_us=None,
+                       pre_reduce=None,
                        # group_by_device=DEFAULT_group_by_device,
                        ignore_categories=DEFAULT_ignore_categories,
                        debug=DEFAULT_debug,
@@ -2137,10 +2138,10 @@ class SQLCategoryTimesReader:
         #     return ret
 
         category_times = dict()
-        operation_types = set()
+        # operation_types = set()
         # Categories NOT including the operation-type categories (that replaced CATEGORY_OPERATION)
-        categories = set()
-        proc_types = set()
+        # categories = set()
+        # proc_types = set()
 
         if process_name is not None:
             process_names = [process_name]
@@ -2188,8 +2189,8 @@ class SQLCategoryTimesReader:
                 #     debug_label=process_label)
                 assert len(proc_category_times[CATEGORY_OPERATION]) > 0
 
-            proc_category = proc_as_category(process_name)
-            proc_types.add(proc_category)
+            # proc_category = proc_as_category(process_name)
+            # proc_types.add(proc_category)
 
             # Merge all the process-specific events into a single category_times dict.
 
@@ -2203,7 +2204,9 @@ class SQLCategoryTimesReader:
             #    I'm not sure if we'll overcome the single-threaded merge time...
             bin_category_times_single_thread(
                 process_name, proc_category_times,
-                categories, operation_types, category_times, debug)
+                pre_reduce=pre_reduce,
+                # categories=categories, operation_types=operation_types,
+                category_times=category_times, debug=debug)
             # Doesn't speed anything up on "test_load"
             # bin_category_times_parallel(
             #     process_name, proc_category_times,
@@ -2214,20 +2217,20 @@ class SQLCategoryTimesReader:
             for e1, e2 in zip(events, events[1:]):
                 assert e1.start_time_usec <= e2.start_time_usec
 
-        assert len(operation_types) > 0
+        # assert len(operation_types) > 0
 
-        if debug:
-            print("> DEBUG: parse_timeline: ")
-            pprint.pprint({
-                'proc_types':proc_types,
-                'operation_types':operation_types,
-                'categories':categories,
-            }, indent=2)
+        # if debug:
+        #     print("> DEBUG: parse_timeline: ")
+        #     pprint.pprint({
+        #         'proc_types':proc_types,
+        #         'operation_types':operation_types,
+        #         'categories':categories,
+        #     }, indent=2)
 
-        ret = category_times, categories, operation_types, proc_types
+        # ret = category_times, categories, operation_types, proc_types
+        ret = category_times
         # maybe_memoize(debug_memoize, ret, self._parse_timeline_memo_path())
         return ret
-
 
     def total_trace_time_sec(self, debug=False):
         """
@@ -2765,12 +2768,26 @@ class EventCategoryMapper:
 #
 #         new_category = frozenset([cat, proc_category])
 
+def default_pre_reduce(category, event, process_name):
+    if category == CATEGORY_OPERATION:
+        new_category = CategoryKey(
+            ops=frozenset([event.name]),
+            non_ops=frozenset(),
+            procs=frozenset([process_name]))
+    else:
+        new_category = CategoryKey(
+            ops=frozenset(),
+            non_ops=frozenset([category]),
+            procs=frozenset([process_name]))
+    return new_category
+
 def bin_category_times(
     process_name,
     category,
     events,
-    categories=None,
-    operation_types=None,
+    pre_reduce=None,
+    # categories=None,
+    # operation_types=None,
     category_times=None,
     debug=False):
     """
@@ -2788,10 +2805,13 @@ def bin_category_times(
     We are preparing events for CPU/GPU/operation overlap-processing.
     """
 
-    if categories is None:
-        categories = set()
-    if operation_types is None:
-        operation_types = set()
+    if pre_reduce is None:
+        pre_reduce = default_pre_reduce
+
+    # if categories is None:
+    #     categories = set()
+    # if operation_types is None:
+    #     operation_types = set()
 
     if category_times is None:
         category_times = dict()
@@ -2804,33 +2824,37 @@ def bin_category_times(
     progress_label = "parse_timeline: process={proc}, category={cat}".format(
         proc=process_name, cat=category)
     for event in progress(events, desc=progress_label, show_progress=debug):
-        if category in CATEGORIES_CPU:
-            cat = CATEGORY_CPU
-            categories.add(cat)
-        elif category == CATEGORY_GPU:
-            cat = CATEGORY_GPU
-            categories.add(cat)
-        elif category == CATEGORY_OPERATION:
-            cat = event.name
-            # print("> operation_types.add {cat}".format(cat=cat))
-            operation_types.add(cat)
-        else:
-            # Q: What about category operation...?
-            # We want to KEEP the operation category so we can determine
-            # overlap between q_backward/q_forward across processes...
-            #
-            # I think all we need to do is replace "CATEGORY_OPERATION" for an event
-            # with event.name (it's operation-type).
-            # Then, when we go to plot the category_times data, we "remove" any operation
-            # names from the category (forming an operation_key), and group the data
-            # into an operation-specific dict for plotting.
-            #
-            # We can still test a single process trace without handling this.
-            # (graph should be the same with fewer categories: CPU, GPU, CPU + GPU)
-            raise RuntimeError("Not sure how to categorize {cat} into CPU or GPU.".format(
-                cat=category))
 
-        new_category = frozenset([cat, proc_category])
+        # if category in CATEGORIES_CPU:
+        #     cat = CATEGORY_CPU
+        #     categories.add(cat)
+        # elif category == CATEGORY_GPU:
+        #     cat = CATEGORY_GPU
+        #     categories.add(cat)
+        # elif category == CATEGORY_OPERATION:
+        #     cat = event.name
+        #     # print("> operation_types.add {cat}".format(cat=cat))
+        #     operation_types.add(cat)
+        # else:
+        #     # Q: What about category operation...?
+        #     # We want to KEEP the operation category so we can determine
+        #     # overlap between q_backward/q_forward across processes...
+        #     #
+        #     # I think all we need to do is replace "CATEGORY_OPERATION" for an event
+        #     # with event.name (it's operation-type).
+        #     # Then, when we go to plot the category_times data, we "remove" any operation
+        #     # names from the category (forming an operation_key), and group the data
+        #     # into an operation-specific dict for plotting.
+        #     #
+        #     # We can still test a single process trace without handling this.
+        #     # (graph should be the same with fewer categories: CPU, GPU, CPU + GPU)
+        #     raise RuntimeError("Not sure how to categorize {cat} into CPU or GPU.".format(
+        #         cat=category))
+        #
+        # new_category = frozenset([cat, proc_category])
+
+        new_category = pre_reduce(category, event, process_name)
+
         if new_category not in category_times:
             category_times[new_category] = []
         # NOTE: if we bin the CPU/GPU/operation events into separate lists,
@@ -2842,13 +2866,15 @@ def bin_category_times(
         else:
             category_times[new_category].append(event)
 
-    return category_times, categories, operation_types
+    # return category_times, categories, operation_types
+    return category_times
 
 def bin_category_times_single_thread(
     process_name,
     proc_category_times,
-    categories=None,
-    operation_types=None,
+    pre_reduce=None,
+    # categories=None,
+    # operation_types=None,
     category_times=None,
     debug=False):
     """
@@ -2866,21 +2892,24 @@ def bin_category_times_single_thread(
     :param debug:
     :return:
     """
-    if categories is None:
-        categories = set()
-    if operation_types is None:
-        operation_types = set()
+    # if categories is None:
+    #     categories = set()
+    # if operation_types is None:
+    #     operation_types = set()
     if category_times is None:
         category_times = dict()
 
     for i, (category, events) in enumerate(proc_category_times.items()):
-        category_times_i, _, _ = bin_category_times(
+        category_times_i = bin_category_times(
             process_name, category, events,
-            categories, operation_types, category_times=None,
+            pre_reduce=pre_reduce,
+            # categories=categories, operation_types=operation_types, category_times=None,
+            category_times=None,
             debug=debug)
         merge_category_times(category_times, category_times_i, inplace=True)
 
-    return category_times, categories, operation_types
+    # return category_times, categories, operation_types
+    return category_times
 
 # def bin_category_times_single_thread_old(
 #     process_name,

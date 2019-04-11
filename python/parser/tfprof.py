@@ -810,8 +810,7 @@ class OverlapComputer:
     def directory(self):
         return _d(self.db_path)
 
-    def _compute_process_timeline_stats(self, sql_reader, overlap,
-                                        categories, operation_types, proc_types):
+    def _compute_process_timeline_stats(self, sql_reader, overlap):
         """
 
         Q: What's the total time spent tracing that isn't captured by ANY tracing events?
@@ -838,8 +837,7 @@ class OverlapComputer:
             overlap = compute_overlap.get_category_times()
         """
         # NOTE: it's nicer to work with
-        new_overlap_01 = reduce_category_keys(overlap,
-                                              categories, operation_types, proc_types)
+        new_overlap_01 = reduce_category_keys(overlap)
         NumberType = float
         if len(new_overlap_01) > 0:
             NumberType = type(next(iter(new_overlap_01.values())))
@@ -866,123 +864,6 @@ class OverlapComputer:
         }
         return proc_stats
 
-    def reduce_overlap_p0(self, overlap,
-                          categories, operation_types, proc_types):
-        """
-        Reduce keys across processes.
-
-        Make it so:
-        1. Remove keys that either don't have a process, or don't have a CPU/GPU
-        2. Remove association between op's and resource.
-           i.e. replace with
-           CategoryKey(
-             ops=<operations>,
-             non_ops=[CPU|GPU],
-             procs[p0, p1, ...])
-
-           NOTE: with CategoryKey, it's no longer clear which op/resource belongs to which process.
-
-        For initial overlap computation, the keys are sets-of-sets:
-
-        e.g.
-        {'category_key': frozenset({frozenset({'PROC:run_atari_1', 'CPU'}),
-                                    frozenset({'PROC:run_atari_0', 'CPU'}),
-                                    frozenset({'PROC:run_atari_1', 'GPU'}),
-                                    frozenset({'PROC:run_atari_1', 'q_backward'})}
-
-        We want to transform this "set"-based key into:
-        CategoryKey(
-            ops={q_backward},
-            non_ops={CPU, GPU},
-            procs={P0, P1},
-        )
-
-        NOTE: It's possible for us to need to merge keys when doing this.
-        For example, the following similar key from the above example,
-        maps to the same reduced key:
-        {'category_key': frozenset({frozenset({'PROC:run_atari_0', 'CPU'}),
-                                    frozenset({'PROC:run_atari_1', 'CPU'}),
-                                    frozenset({'PROC:run_atari_0', 'GPU'}),
-                                    frozenset({'PROC:run_atari_0', 'q_backward'})}
-        =>
-        CategoryKey(
-            ops={q_backward},
-            non_ops={CPU, GPU},
-            procs={P0, P1},
-        )
-
-        We got this key by simply switching P0/P1, which is a likely occurrence.
-
-        :param overlap:
-        :return:
-        """
-
-        def _get(dic, key, default):
-            if key not in dic:
-                dic[key] = default
-            return dic[key]
-
-        def _split_combo_key(combo_key):
-            return split_combo_key(combo_key, operation_types, proc_types)
-
-        new_overlap = dict()
-        for overlap_key, times in overlap.items():
-
-            """
-            Delete any time (CPU, GPU, or both) that involves at least one process, 
-            and that is NOT captured by an operation.
-            
-            Q: Where the heck is this un-captured CPU/GPU time coming from in the first place...?
-            Seems like we're compensating for a bug earlier in the pipeline....
-            """
-            proc_ops = dict()
-            proc_non_ops = dict()
-            for proc_key in overlap_key:
-                ops, non_ops, procs = _split_combo_key(proc_key)
-                assert len(procs) == 1
-                proc = next(iter(procs))
-                _get(proc_ops, proc, set()).update(ops)
-                _get(proc_non_ops, proc, set()).update(non_ops)
-            skip = False
-            skip_proc = None
-            # If for every "process_key", the process_key
-            #    involves BOTH execution: {CPU, GPU, CPU/GPU},
-            #    and an operation: {q_forward, q_backward, ...}
-            #   Keep.
-            for proc in proc_ops.keys():
-                if len(proc_ops[proc]) == 0 or len(proc_non_ops[proc]) == 0:
-                    skip = True
-                    skip_proc = proc
-                    break
-            if skip:
-                # if self.debug:
-                #     print("> DELETE OVERLAP:")
-                #     pprint.pprint({
-                #         'overlap_key':overlap_key,
-                #         'proc':skip_proc,
-                #         'ops':proc_ops[proc],
-                #         'non_ops':proc_non_ops[proc],
-                #     })
-                continue
-
-            new_key = _as_category_key(operation_types, proc_types,
-                                       overlap_key=overlap_key)
-            assert len(new_key.ops) > 0
-            assert len(new_key.non_ops) > 0
-            assert len(new_key.procs) > 0
-
-            if len(new_key.ops) > 1:
-                # Operations can only overlap cross-process, not within a single-process
-                assert len(new_key.procs) > 1
-
-            _add_key(new_overlap, new_key, times)
-
-            # pprint.pprint({
-            #     'overlap.keys()':overlap.keys(),
-            # })
-            # raise NotImplementedError("Not sure how to reduce overlap keys for overlap_key={key}".format(key=overlap_key))
-
-        return new_overlap
 
     def reduce_overlap_resource_operation(
             self, overlap,
@@ -1146,6 +1027,7 @@ class OverlapComputer:
 
     OVERLAP_TYPES = ['OperationOverlap', 'ResourceOverlap', 'ResourceSubplot', 'CategoryOverlap', 'default']
     def compute_process_timeline_overlap(self,
+                                         pre_reduce,
                                          process_name=None,
                                          phase_name=None,
                                          start_time_us=None,
@@ -1173,11 +1055,13 @@ class OverlapComputer:
         assert overlap_type in OverlapComputer.OVERLAP_TYPES
 
         start_parse_timeline_t = time.time()
-        category_times, categories, operation_types, proc_types = sql_reader.parse_timeline(
+        # category_times, categories, operation_types, proc_types = sql_reader.parse_timeline(
+        category_times = sql_reader.parse_timeline(
             process_name=process_name,
             phase_name=phase_name,
             start_time_us=start_time_us,
             end_time_us=end_time_us,
+            pre_reduce=pre_reduce,
             debug=self.debug,
             debug_ops=self.debug_ops,
             debug_memoize=debug_memoize)
@@ -1197,8 +1081,8 @@ class OverlapComputer:
         #         json_path=self._debug_trace_events_path(process_name, phase_name),
         #         category_as_str=category_as_str)
         #     trace_events_dumper.dump()
-        assert len(operation_types) > 0
-        assert len(categories) > 0
+        # assert len(operation_types) > 0
+        # assert len(categories) > 0
         end_parse_timeline_t = time.time()
         parse_timeline_sec = end_parse_timeline_t - start_parse_timeline_t
         print("> parse_timeline took {sec} seconds".format(sec=parse_timeline_sec))
@@ -1251,46 +1135,10 @@ class OverlapComputer:
         # if self.debug:
         #     pprint.pprint({'overlap.keys()':list(overlap.keys())})
 
-        proc_stats = self._compute_process_timeline_stats(sql_reader, overlap,
-                                                          categories, operation_types, proc_types)
+        proc_stats = self._compute_process_timeline_stats(sql_reader, overlap)
 
-        new_overlap = overlap
-        assert len(new_overlap) > 0
-
-        new_overlap = self.reduce_overlap_p0(new_overlap,
-                                             categories, operation_types, proc_types)
-        assert len(new_overlap) > 0
-
-        if overlap_type == 'default':
-            new_overlap = self.reduce_overlap_resource_operation(
-                new_overlap,
-                categories, operation_types, proc_types)
-            assert len(new_overlap) > 0
-            operation_overlap = self._group_by_ops_resource(new_overlap)
-        elif overlap_type == 'OperationOverlap':
-            new_overlap = self.reduce_overlap_OperationOverlap(
-                new_overlap,
-                categories, operation_types, proc_types)
-            assert len(new_overlap) > 0
-            operation_overlap = self._group_by_resource_ops(new_overlap)
-        elif overlap_type == 'ResourceOverlap':
-            new_overlap = self.reduce_overlap_ResourceOverlap(
-                new_overlap,
-                categories, operation_types, proc_types)
-            assert len(new_overlap) > 0
-            operation_overlap = self._group_by_resource(new_overlap)
-        elif overlap_type == 'ResourceSubplot':
-            new_overlap = self.reduce_overlap_ResourceSubplot(new_overlap,
-                                                              categories, operation_types, proc_types)
-            assert len(new_overlap) > 0
-            operation_overlap = self._group_by_resource(new_overlap)
-        else:
-            raise NotImplementedError
-
-        if self.debug:
-            self._dump_process_timeline_json(operation_overlap)
-
-        return operation_overlap, proc_stats
+        # return operation_overlap, proc_stats
+        return overlap, proc_stats
 
     def _group_by_ops_resource(self, new_overlap):
         # set(operation categories) -> set(non-operation categories) -> [ CPU, GPU, CPU/GPU ] time
@@ -1330,52 +1178,6 @@ class OverlapComputer:
             operation_overlap[combo_key.non_ops][combo_key.ops] = time_us
         return operation_overlap
 
-    def _dump_process_timeline_json(self, operation_overlap):
-        path = self._process_timeline_json_path()
-        print("> DEBUG: dump process timeline compute overlap @ {path}".format(path=path))
-
-        # PROBLEM: overlap JSON file is usually for a single operation.
-        # However, now we have multiple operations for a given overlap calculation.
-        # NOTE: the only reason we have a JSON-specific format us because
-        # JSON doesn't allow a "set" as a dictionary key.
-        #
-        # Conversion to JSON:
-        # A dict whose keys are frozenset's should be converted to a list of key/value pairs:
-        # [
-        #   (key[0], value[0]),
-        #   ...,
-        # ]
-
-        def js_friendly(obj):
-            """
-            Dict keys in json can only be numbers/strings/booleans/null, they CANNOT be lists/dicts/sets.
-
-            So, to represent a dict whose keys are frozensets...well you just cannot do that.
-
-            :param obj:
-            :return:
-            """
-            if type(obj) == dict and len(obj) > 0 and \
-                isinstance(
-                    next(iter(obj.keys())),
-                    (frozenset, tuple)
-                ):
-                key_values_pairs = []
-                for key, value in obj.items():
-                    key_values_pairs.append((
-                        js_friendly(key),
-                        js_friendly(value)))
-                return key_values_pairs
-            elif type(obj) == frozenset:
-                return sorted([js_friendly(x) for x in obj])
-            return obj
-
-        js = js_friendly(operation_overlap)
-        do_dump_json(js, path, cls=DecimalEncoder)
-
-    def _process_timeline_json_path(self):
-        path = _j(self.directory, 'process_timeline.json')
-        return path
 
     def _debug_process_timeline_json_path(self):
         path = _j(self.directory, 'process_timeline.traceEvents.debug.json')
@@ -1549,6 +1351,491 @@ class OverlapComputer:
         path = _j(self.directory, 'tfprof{bench}.json'.format(bench=bench_suffix(bench_name)))
         return path
 
+class OverlapTypeInterface:
+    """
+    Overlap computations performed during --rule=UtilizationPlot.
+
+    --overlap-type is one of:
+    ResourceOverlap / CategoryOverlap / ResourceSubplot.
+
+    We have a sub-class for each overlap-type.
+    """
+
+    def as_overlap_js(self, new_overlap):
+        operation_overlap = dict()
+        for category_key, time_us in new_overlap.items():
+            new_key = self.category_key_as_strs(category_key)
+            assert new_key not in operation_overlap
+            operation_overlap[new_key] = time_us
+        return operation_overlap
+
+    def dump_json_files(self, new_overlap, process_name, phase_name):
+        operation_overlap = self.as_overlap_js(new_overlap)
+        self.dump_overlap(operation_overlap,
+                          self._overlap_json(process_name, phase_name),
+                          self._overlap_venn_jsjson(process_name, phase_name))
+
+    def _overlap_json(self, directory, process_name, phase_name):
+        return _j(directory, "{OverlapType}{proc}{phase}.json".format(
+            OverlapType=self.overlap_type,
+            proc=process_suffix(process_name),
+            phase=phase_suffix(phase_name),
+        ))
+
+    def _overlap_venn_js_json(self, directory, process_name, phase_name):
+        return _j(directory, "{OverlapType}{proc}{phase}.venn_js.json".format(
+            OverlapType=self.overlap_type,
+            proc=process_suffix(process_name),
+            phase=phase_suffix(phase_name),
+        ))
+
+    def dump_overlap(self, operation_overlap, directory, process_name, phase_name):
+        path = self._overlap_json(directory, process_name, phase_name)
+        venn_js_path = self._overlap_venn_js_json(directory, process_name, phase_name)
+        print("> Dump data for {overlap_type} @ {path}".format(path=path, overlap_type=self.overlap_type))
+        dumper = OverlapJSONDumper(operation_overlap)
+        js = dumper.dump(path)
+
+        if venn_js_path is not None:
+            print("> Dump data for {overlap_type} venn.js plot @ {path}".format(path=venn_js_path, overlap_type=self.overlap_type))
+            converter = OverlapJSONToVennConverter(js=js)
+            venn_js = converter.dump(venn_js_path)
+            pprint.pprint({'venn_js':venn_js})
+
+    def dump_overlap_as_is(self, operation_overlap, directory, process_name, phase_name):
+        path = self._overlap_json(directory, process_name, phase_name)
+        print("> Dump data for {overlap_type} @ {path}".format(path=path, overlap_type=self.overlap_type))
+        js = js_friendly(operation_overlap)
+        do_dump_json(js, path, cls=DecimalEncoder)
+
+    def post_reduce(self, overlap):
+        category_key_overlap = self.reduce_to_category_key(overlap)
+        new_overlap = self.post_reduce_category_key(category_key_overlap)
+        return new_overlap
+
+    def pre_reduce_cpu_gpu(self, category, event, process_name):
+        """
+        Modular function to bin_events for "reducing" events to CPU/GPU BEFORE OverlapComputation.
+        Also, allow ability to "filter-out" events (e.g. category=GPU; needed for CategoryOverlap).
+
+        [Events] ->
+        :return:
+        """
+        if category in CATEGORIES_CPU:
+            non_ops = frozenset([CATEGORY_CPU])
+            ops = frozenset()
+        elif category == CATEGORY_GPU:
+            non_ops = frozenset([CATEGORY_GPU])
+            ops = frozenset()
+        elif category == CATEGORY_OPERATION:
+            non_ops = frozenset()
+            ops = frozenset([event.name])
+        else:
+            # Q: What about category operation...?
+            # We want to KEEP the operation category so we can determine
+            # overlap between q_backward/q_forward across processes...
+            #
+            # I think all we need to do is replace "CATEGORY_OPERATION" for an event
+            # with event.name (it's operation-type).
+            # Then, when we go to plot the category_times data, we "remove" any operation
+            # names from the category (forming an operation_key), and group the data
+            # into an operation-specific dict for plotting.
+            #
+            # We can still test a single process trace without handling this.
+            # (graph should be the same with fewer categories: CPU, GPU, CPU + GPU)
+            raise RuntimeError("Not sure how to categorize {cat} into CPU or GPU.".format(
+                cat=category))
+        # new_category = frozenset([cat, proc_category])
+        new_key = CategoryKey(ops=ops,
+                              non_ops=non_ops,
+                              procs=frozenset([process_name]))
+        # pprint.pprint({
+        #     'name':'pre_reduce_cpu_gpu',
+        #     'event':event,
+        #     'category':category,
+        #     'new_key': new_key})
+        return new_key
+
+    def reduce_to_category_key(self, overlap):
+        """
+        Reduce keys across processes into a single CategoryKey.
+
+        i.e. make it so:
+        1. Remove keys that either don't have a process, or don't have a CPU/GPU
+        2. Remove association between op's and resource.
+           i.e. replace with
+           CategoryKey(
+             ops=<operations>,
+             non_ops=[CPU|GPU],
+             procs[p0, p1, ...])
+
+           NOTE: with CategoryKey, it's no longer clear which op/resource belongs to which process.
+
+        For initial overlap computation, the keys are sets-of-sets:
+
+        e.g.
+        {'category_key': frozenset({frozenset({'PROC:run_atari_1', 'CPU'}),
+                                    frozenset({'PROC:run_atari_0', 'CPU'}),
+                                    frozenset({'PROC:run_atari_1', 'GPU'}),
+                                    frozenset({'PROC:run_atari_1', 'q_backward'})}
+
+        We want to transform this "set"-based key into:
+        CategoryKey(
+            ops={q_backward},
+            non_ops={CPU, GPU},
+            procs={P0, P1},
+        )
+
+        NOTE: It's possible for us to need to merge keys when doing this.
+        For example, the following similar key from the above example,
+        maps to the same reduced key:
+        {'category_key': frozenset({frozenset({'PROC:run_atari_0', 'CPU'}),
+                                    frozenset({'PROC:run_atari_1', 'CPU'}),
+                                    frozenset({'PROC:run_atari_0', 'GPU'}),
+                                    frozenset({'PROC:run_atari_0', 'q_backward'})}
+        =>
+        CategoryKey(
+            ops={q_backward},
+            non_ops={CPU, GPU},
+            procs={P0, P1},
+        )
+
+        We got this key by simply switching P0/P1, which is a likely occurrence.
+
+        :param overlap:
+        :return:
+        """
+
+        def _get(dic, key, default):
+            if key not in dic:
+                dic[key] = default
+            return dic[key]
+
+        new_overlap = dict()
+        for overlap_key, times in overlap.items():
+
+            """
+            Delete any time (CPU, GPU, or both) that involves at least one process, 
+            and that is NOT captured by an operation.
+            
+            Q: Where the heck is this un-captured CPU/GPU time coming from in the first place...?
+            Seems like we're compensating for a bug earlier in the pipeline....
+            """
+            proc_ops = dict()
+            proc_non_ops = dict()
+            for category_key in overlap_key:
+                assert len(category_key.procs) == 1
+                # proc = category_key.procs[0]
+                proc = next(iter(category_key.procs))
+                _get(proc_ops, proc, set()).update(category_key.ops)
+                _get(proc_non_ops, proc, set()).update(category_key.non_ops)
+            skip = False
+            skip_proc = None
+            # If for every "process_key", the process_key
+            #    involves BOTH execution: {CPU, GPU, CPU/GPU},
+            #    and an operation: {q_forward, q_backward, ...}
+            #   Keep.
+            for proc in proc_ops.keys():
+                if len(proc_ops[proc]) == 0 or len(proc_non_ops[proc]) == 0:
+                    skip = True
+                    skip_proc = proc
+                    break
+            if skip:
+                # if self.debug:
+                #     print("> DELETE OVERLAP:")
+                #     pprint.pprint({
+                #         'overlap_key':overlap_key,
+                #         'proc':skip_proc,
+                #         'ops':proc_ops[proc],
+                #         'non_ops':proc_non_ops[proc],
+                #     })
+                continue
+
+            new_key = _as_category_key(overlap_key)
+            pprint.pprint({
+                'name':'reduce_to_category',
+                'new_key':new_key,
+                'overlap_key':overlap_key})
+            assert len(new_key.ops) > 0
+            assert len(new_key.non_ops) > 0
+            assert len(new_key.procs) > 0
+
+            if len(new_key.ops) > 1:
+                # Operations can only overlap cross-process, not within a single-process
+                assert len(new_key.procs) > 1
+
+            _reduce_add_key(new_overlap, new_key, times)
+
+            # pprint.pprint({
+            #     'overlap.keys()':overlap.keys(),
+            # })
+            # raise NotImplementedError("Not sure how to reduce overlap keys for overlap_key={key}".format(key=overlap_key))
+
+        pprint.pprint({'reduce_to_category_key.keys': list(new_overlap.keys())})
+        # import ipdb; ipdb.set_trace()
+
+        return new_overlap
+
+#
+# Helper functions for reduce_overlap_*
+#
+def _reduce_new_key_like(new_overlap, key, value):
+    """
+    Add a non-existant key.
+    """
+    if key not in new_overlap:
+        NumberType = type(value)
+        new_overlap[key] = NumberType(0.)
+
+def _reduce_add_key(new_overlap, key, value):
+    """
+    Merge an existing key.
+    """
+    # assert isinstance(value, numbers.Number)
+    if key not in new_overlap:
+        _reduce_new_key_like(new_overlap, key, value)
+    new_overlap[key] += value
+
+class DefaultOverlapType(OverlapTypeInterface):
+    def __init__(self):
+        self.overlap_type = 'default'
+
+    def pre_reduce(self, category, event, process_name):
+        return self.pre_reduce_cpu_gpu(category, event, process_name)
+
+    def as_overlap_js(self, new_overlap):
+        # def _group_by_ops_resource(self, new_overlap):
+        # set(operation categories) -> set(non-operation categories) -> [ CPU, GPU, CPU/GPU ] time
+        #  <q_forward, q_backward>       <CPU>, <GPU>, <CPU, GPU>             0.001 sec
+        operation_overlap = dict()
+        for category_key, time_us in new_overlap.items():
+            assert len(category_key.ops) > 0
+            assert len(category_key.non_ops) > 0
+            assert len(category_key.procs) == 0
+            if category_key.ops not in operation_overlap:
+                operation_overlap[category_key.ops] = dict()
+            operation_overlap[category_key.ops][category_key.non_ops] = time_us
+        return operation_overlap
+
+    def post_reduce_category_key(
+            self, overlap,
+            group_self_overlap=False):
+        """
+        Reduce keys to pair of operation-types, or a single operation-type.
+        (eliminate process, just keep operation-type and execution-type)
+
+        We want to produce overlap that has keys like:
+
+        1. Single-op type:
+           e.g.
+           <q_forward>: The q_forward operation, not overlapped with any other operation.
+
+        2. Pair of op-types:
+           e.g.
+           <q_forward, q_forward>: Two or more q_forward operations running simultaneously.
+           <q_forward, q_backward>: Two or more q_forward and q_backward operations running simultaneously.
+
+        PSEUDOCODE: Reduce across the "Process<ID>" dimension:
+
+        For keys like <q_forward, P1, P2, ..., [CPU, GPU]>:
+            new_overlap[q_forward, q_forward] +=
+              overlap[q_forward, P1, P2, ..., [CPU, GPU]]
+
+        For keys like <q_forward, ..., P1, ...>:
+            "Operations can only overlap cross-process, not within a single-process"
+            Assert: If len(ops) > 1 then len(procs) > 1
+            new_overlap[q_forward, ..., [CPU, GPU]] +=
+              overlap[q_forward, ..., P1, ..., [CPU, GPU]]
+
+        return new_overlap
+        """
+
+        new_overlap = dict()
+        for overlap_key, times in overlap.items():
+
+            if len(overlap_key.ops) > 1:
+                # Operations can only overlap cross-process, not within a single-process
+                assert len(overlap_key.procs) > 1
+
+            if len(overlap_key.ops) == 1 and len(overlap_key.procs) >= 2:
+                """
+                Single operation type, with overlap.
+                
+                i.e. operation overlaps with itself across processes.
+                e.g. <q_forward, q_forward>
+                """
+                cat = next(iter(overlap_key.ops))
+                if group_self_overlap:
+                    # "Group" overlap of an operation with itself across processes
+                    # into the operation's time.
+                    ops = [cat]
+                else:
+                    # "Group" overlap of an operation with itself across processes
+                    # into a pair of operation-types <op, op>.
+                    ops = [cat, cat]
+                new_key = CategoryKey(ops=ops,
+                                      non_ops=overlap_key.non_ops,
+                                      procs=frozenset())
+                _add_key(new_overlap, new_key, times)
+                continue
+
+            if len(overlap_key.ops) >= 1 and len(overlap_key.procs) >= 1:
+                """
+                Either:
+                - Single operation type, no overlap (single with overlap already handled above!)
+                - Multi-operation type, with overlap
+                """
+                new_key = CategoryKey(ops=overlap_key.ops,
+                                      non_ops=overlap_key.non_ops,
+                                      procs=frozenset())
+                _add_key(new_overlap, new_key, times)
+                continue
+
+            pprint.pprint({
+                'overlap.keys()':list(overlap.keys()),
+            })
+            raise NotImplementedError("Not sure how to reduce overlap keys for overlap_key={key}".format(key=overlap_key))
+
+        return new_overlap
+
+class ResourceOverlapType(OverlapTypeInterface):
+    def __init__(self):
+        self.overlap_type = 'ResourceOverlap'
+
+    def pre_reduce(self, category, event, process_name):
+        return self.pre_reduce_cpu_gpu(category, event, process_name)
+
+    def post_reduce_category_key(self, overlap):
+        """
+        Add modular "post-reduce" function for "adding" CategoryKey's that map to the same key.
+
+        :return:
+        """
+        # def reduce_overlap_ResourceOverlap(
+        #         self, overlap,
+        #         categories, operation_types, proc_types):
+        """
+        Group keys by resource-type (non_ops).
+        """
+        new_overlap = dict()
+        for overlap_key, times in overlap.items():
+
+            if len(overlap_key.ops) > 1:
+                # Operations can only overlap cross-process, not within a single-process
+                assert len(overlap_key.procs) > 1
+
+            new_key = CategoryKey(ops=frozenset(),
+                                  non_ops=overlap_key.non_ops,
+                                  procs=frozenset())
+            _reduce_add_key(new_overlap, new_key, times)
+
+        pprint.pprint({'ResourceOverlapType.post_reduce_category_key.keys': list(new_overlap.keys())})
+        # import ipdb; ipdb.set_trace()
+
+        return new_overlap
+
+    def category_key_as_strs(self, category_key):
+        # def _group_by_resource(self, new_overlap):
+        #     # set(non-operation categories) -> [ CPU, GPU, CPU/GPU ] time
+        #     #   <CPU>, <GPU>, <CPU, GPU>             0.001 sec
+        assert len(category_key.ops) == 0
+        assert len(category_key.non_ops) > 0
+        assert len(category_key.procs) == 0
+        return category_key.non_ops
+
+OVERLAP_TYPE_TO_KLASS = {
+    'ResourceOverlap':ResourceOverlapType,
+    'default':DefaultOverlapType,
+    # 'CategoryOverlap':CategoryOverlapType,
+    # 'OperationOverlap':OperationOverlapType,
+    # 'ResourceSubplot':ResourceSubplotOverlapType,
+}
+def overlap_type_to_instance(overlap_type):
+    OverlapType = OVERLAP_TYPE_TO_KLASS[overlap_type]
+    return OverlapType()
+
+class OverlapJSONDumper:
+    def __init__(self, overlap):
+        # set([CPU, GPU]) -> np.array(...)
+        self.overlap = overlap
+        # self.overlap_to_id = dict()
+
+    def dump(self, path):
+        js = dict()
+        overlap_to_id = dict()
+        js['overlap_id_pairs'] = []
+        js['overlap_id_to_values'] = dict()
+        for i, (k, vs) in enumerate(self.overlap.items()):
+            new_k = tuple(sorted(k))
+            assert new_k not in overlap_to_id
+            overlap_to_id[new_k] = i
+            js['overlap_id_pairs'].append((new_k, overlap_to_id[new_k]))
+            js['overlap_id_to_values'][overlap_to_id[new_k]] = vs
+        do_dump_json(js, path)
+        return js
+
+class OverlapJSONToVennConverter:
+    def __init__(self, js=None, path=None):
+        # set([CPU, GPU]) -> np.array(...)?
+        assert js is not None or path is not None
+        if path is not None:
+            with open(path, 'r') as f:
+                js = json.load(f)
+
+        self.js = js
+        self.path = path
+
+    def convert(self):
+        """
+        venn_music_data = [
+            {"sets": [0], "label": "Radiohead", "size": 77348},
+            {"sets": [1], "label": "Thom Yorke", "size": 5621},
+            ...
+            {"sets": [0, 1], "size": 4832},
+            ...
+        ]
+        """
+        venn_js = []
+        # keys = sorted([k for overlap, k in self.js['overlap_id_pairs']])
+        overlap_id_to_overlap_list = dict((k, overlap) for overlap, k in self.js['overlap_id_pairs'])
+
+        category_to_id = dict()
+        categories = set()
+        for overlap, k in self.js['overlap_id_pairs']:
+            assert type(overlap) in [list, tuple, set, frozenset]
+            categories.update(overlap)
+        categories = sorted(categories)
+        for i, category in enumerate(categories):
+            category_to_id[category] = i
+
+        def as_sets(overlap_id):
+            overlap_list = overlap_id_to_overlap_list[overlap_id]
+            sets_ids = [category_to_id[category] for category in overlap_list]
+            sets_ids.sort()
+            return sets_ids
+
+        for overlap_id, values in self.js['overlap_id_to_values'].items():
+            overlap_id = int(overlap_id)
+            venn_set = {
+                "sets": as_sets(overlap_id),
+                "size": values,
+            }
+            if len(venn_set['sets']) == 1:
+                assert len(overlap_id_to_overlap_list[overlap_id]) == 1
+                venn_set["label"] = overlap_id_to_overlap_list[overlap_id][0]
+            venn_js.append(venn_set)
+
+        # Make the shorter (in particular, single-element) venn_sets appear first.
+        # venn_sets within the same length are ordered based on lexicographic order.
+        venn_js.sort(key=lambda venn_set: (len(venn_set['sets']), venn_set['sets']))
+
+        return venn_js
+
+    def dump(self, path):
+        js = self.convert()
+        do_dump_json(js, path)
+        return js
+
 # From TensorFlow code base:
 #
 # bool CountAsAcceleratorTime(const string& device) {
@@ -1574,48 +1861,29 @@ def split_combo_key(combo_key, operation_types, proc_types):
             non_op_categories.add(category)
     return frozenset(op_categories), frozenset(non_op_categories), frozenset(proc_categories)
 
-def _as_category_key(operation_types=None,
-                     proc_types=None,
-                     overlap_key=None,
-                     proc_key=None):
-
-    assert ( overlap_key is not None and proc_key is None ) or \
-           ( overlap_key is None and proc_key is not None )
-
-    def _split_combo_key(combo_key):
-        return split_combo_key(combo_key, operation_types, proc_types)
-
+def _as_category_key(overlap_key):
     op_categories = set()
     non_op_categories = set()
     proc_categories = set()
-    def _add_proc_key(proc_key):
-        ops, non_ops, procs = _split_combo_key(proc_key)
-        if len(ops) > 0:
+    for proc_key in overlap_key:
+        if len(proc_key.ops) > 0:
             # CPU or GPU.
             # DON'T keep proc information from this.
             # We only keep proc information that tells us about __operation__ overlap across processes,
-            assert len(non_ops) == 0
-            assert len(procs) > 0
-            proc_categories.update(procs)
-        op_categories.update(ops)
-        non_op_categories.update(non_ops)
-
-    if overlap_key is not None:
-        for proc_key in overlap_key:
-            _add_proc_key(proc_key)
-    else:
-        _add_proc_key(proc_key)
+            assert len(proc_key.non_ops) == 0
+            assert len(proc_key.procs) > 0
+            proc_categories.update(proc_key.procs)
+        op_categories.update(proc_key.ops)
+        non_op_categories.update(proc_key.non_ops)
 
     new_key = CategoryKey(op_categories, non_op_categories, proc_categories)
     return new_key
 
-def reduce_category_keys(overlap,
-                         categories, operation_types, proc_types):
+def reduce_category_keys(overlap):
 
     new_overlap = dict()
     for overlap_key, times in overlap.items():
-        new_key = _as_category_key(operation_types, proc_types,
-                                   overlap_key=overlap_key)
+        new_key = _as_category_key(overlap_key=overlap_key)
         assert len(new_key.ops) > 0 or \
                len(new_key.non_ops) > 0
         # assert len(new_key.procs) > 0
@@ -1624,7 +1892,7 @@ def reduce_category_keys(overlap,
             # Operations can only overlap cross-process, not within a single-process
             assert len(new_key.procs) > 1
 
-        _add_key(new_overlap, new_key, times)
+        _reduce_add_key(new_overlap, new_key, times)
 
         # pprint.pprint({
         #     'overlap.keys()':overlap.keys(),

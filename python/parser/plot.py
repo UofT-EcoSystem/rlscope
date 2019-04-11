@@ -20,7 +20,7 @@ from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, base
 from parser.common import *
 from parser.nvprof import CUDASQLiteParser
 from parser.pyprof import PythonProfileParser
-from parser.tfprof import OverlapComputer
+from parser.tfprof import OverlapComputer, overlap_type_to_instance
 from parser.heatscale import HeatScale, exponential_moving_average
 from parser.db import SQLCategoryTimesReader, sql_get_source_files, sql_input_path
 
@@ -2205,6 +2205,8 @@ class UtilizationPlot:
         assert ( process_name is None and phase_name is None ) or \
                ( process_name is not None and phase_name is not None )
 
+        overlap_obj = overlap_type_to_instance(self.overlap_type)
+
         # converter = OverlapJSONToVennConverter(path=self._resource_overlap_json(process_name, phase_name))
         # js = converter.convert()
         # pprint.pprint({'js':js})
@@ -2223,38 +2225,85 @@ class UtilizationPlot:
             # phase_name=phase_name,
             # For OperationOverlap, select events across ALL execution that is concurrent with this process/phase.
             # (a "vertical-slice" of the SummaryView).
-            operation_overlap, proc_stats = overlap_computer.compute_process_timeline_overlap(
+            overlap, proc_stats = overlap_computer.compute_process_timeline_overlap(
+                overlap_obj.pre_reduce,
                 start_time_us=phase.phase_start_time_us,
                 end_time_us=phase.phase_end_time_us,
                 debug_memoize=self.debug_memoize,
                 overlap_type=self.overlap_type)
         else:
-            operation_overlap, proc_stats = overlap_computer.compute_process_timeline_overlap(
+            overlap, proc_stats = overlap_computer.compute_process_timeline_overlap(
+                overlap_obj.pre_reduce,
                 process_name=process_name,
                 phase_name=phase_name,
                 debug_memoize=self.debug_memoize,
                 overlap_type=self.overlap_type)
+
+        if self.debug:
+            self._dump_process_timeline_json(overlap)
+
+        new_overlap = overlap
+        assert len(new_overlap) > 0
+
+        new_overlap = overlap_obj.post_reduce(new_overlap)
+        assert len(new_overlap) > 0
+
+        # new_overlap = self.reduce_overlap_p0(new_overlap,
+        #                                      categories, operation_types, proc_types)
+        # assert len(new_overlap) > 0
+
+        # if overlap_type == 'default':
+        #     new_overlap = self.reduce_overlap_resource_operation(
+        #         new_overlap,
+        #         categories, operation_types, proc_types)
+        #     assert len(new_overlap) > 0
+        #     operation_overlap = self._group_by_ops_resource(new_overlap)
+        # elif overlap_type == 'OperationOverlap':
+        #     new_overlap = self.reduce_overlap_OperationOverlap(
+        #         new_overlap,
+        #         categories, operation_types, proc_types)
+        #     assert len(new_overlap) > 0
+        #     operation_overlap = self._group_by_resource_ops(new_overlap)
+        # elif overlap_type == 'ResourceOverlap':
+        #     new_overlap = self.reduce_overlap_ResourceOverlap(
+        #         new_overlap,
+        #         categories, operation_types, proc_types)
+        #     assert len(new_overlap) > 0
+        #     operation_overlap = self._group_by_resource(new_overlap)
+        # elif overlap_type == 'ResourceSubplot':
+        #     new_overlap = self.reduce_overlap_ResourceSubplot(new_overlap,
+        #                                                       categories, operation_types, proc_types)
+        #     assert len(new_overlap) > 0
+        #     operation_overlap = self._group_by_resource(new_overlap)
+        # else:
+        #     raise NotImplementedError
+
+        operation_overlap = overlap_obj.as_overlap_js(new_overlap)
         assert len(operation_overlap) > 0
 
+        if self.overlap_type != 'default':
+            overlap_obj.dump_overlap(operation_overlap, self.directory, process_name, phase_name)
+        else:
+            overlap_obj.dump_overlap_as_is(operation_overlap, self.directory, process_name, phase_name)
 
-        # TODO: Make it so we can generate ALL of these, by reusing the parse_timeline/ComputeOverlap computation.
-        # i.e. turn OverlapCompute.compute_process_timeline_overlap into a class.
-        if self.overlap_type == 'ResourceOverlap':
-            self.dump_overlap(
-                operation_overlap,
-                path=self._resource_overlap_json(process_name, phase_name),
-                venn_js_path=self._resource_overlap_venn_js_json(process_name, phase_name))
-        elif self.overlap_type == 'OperationOverlap':
-            operation_overlap_by_resource = operation_overlap[self.operation_overlap_resource]
-            self.dump_overlap(
-                operation_overlap_by_resource,
-                path=self._operation_overlap_json(process_name, phase_name, self.operation_overlap_resource),
-                venn_js_path=self._operation_overlap_venn_js_json(process_name, phase_name, self.operation_overlap_resource))
-        elif self.overlap_type == 'ResourceSubplot':
-            self.dump_overlap(
-                operation_overlap,
-                path=self._resource_overlap_subplot_json(process_name, phase_name),
-                venn_js_path=self._resource_overlap_subplot_venn_js_json(process_name, phase_name))
+        # # TODO: Make it so we can generate ALL of these, by reusing the parse_timeline/ComputeOverlap computation.
+        # # i.e. turn OverlapCompute.compute_process_timeline_overlap into a class.
+        # if self.overlap_type == 'ResourceOverlap':
+        #     self.dump_overlap(
+        #         operation_overlap,
+        #         path=self._resource_overlap_json(process_name, phase_name),
+        #         venn_js_path=self._resource_overlap_venn_js_json(process_name, phase_name))
+        # elif self.overlap_type == 'OperationOverlap':
+        #     operation_overlap_by_resource = operation_overlap[self.operation_overlap_resource]
+        #     self.dump_overlap(
+        #         operation_overlap_by_resource,
+        #         path=self._operation_overlap_json(process_name, phase_name, self.operation_overlap_resource),
+        #         venn_js_path=self._operation_overlap_venn_js_json(process_name, phase_name, self.operation_overlap_resource))
+        # elif self.overlap_type == 'ResourceSubplot':
+        #     self.dump_overlap(
+        #         operation_overlap,
+        #         path=self._resource_overlap_subplot_json(process_name, phase_name),
+        #         venn_js_path=self._resource_overlap_subplot_venn_js_json(process_name, phase_name))
 
         # PROBLEM: I DON'T want to group by operation.
         # I want to group by CPU/GPU.
@@ -2295,12 +2344,9 @@ class UtilizationPlot:
         #         all_categories.add(category)
 
         if self.overlap_type == 'default':
-            self._dump_stats(proc_stats)
-            # Plot the "CPU/GPU Utilization" plot.
-            # Other overlap_type's will JUST output the overlap data (to be consumed by iml-drill).
-            self._do_plot_process_phase(operation_overlap, process_name, phase_name)
+            self._do_plot_process_phase(operation_overlap, proc_stats, process_name, phase_name)
 
-    def _do_plot_process_phase(self, operation_overlap, process_name=None, phase_name=None):
+    def _do_plot_process_phase(self, operation_overlap, proc_stats, process_name=None, phase_name=None):
         assert ( process_name is None and phase_name is None ) or \
                ( process_name is not None and phase_name is not None )
 
@@ -2368,6 +2414,32 @@ class UtilizationPlot:
         df = self.plotter.dataframe
         assert len(df) != 0
         self.plotter.plot(bench_name=None)
+
+        self._dump_stats(proc_stats)
+        # Plot the "CPU/GPU Utilization" plot.
+        # Other overlap_type's will JUST output the overlap data (to be consumed by iml-drill).
+
+    def _dump_process_timeline_json(self, operation_overlap):
+        path = self._process_timeline_json_path()
+        print("> DEBUG: dump process timeline compute overlap @ {path}".format(path=path))
+
+        # PROBLEM: overlap JSON file is usually for a single operation.
+        # However, now we have multiple operations for a given overlap calculation.
+        # NOTE: the only reason we have a JSON-specific format us because
+        # JSON doesn't allow a "set" as a dictionary key.
+        #
+        # Conversion to JSON:
+        # A dict whose keys are frozenset's should be converted to a list of key/value pairs:
+        # [
+        #   (key[0], value[0]),
+        #   ...,
+        # ]
+        js = js_friendly(operation_overlap)
+        do_dump_json(js, path, cls=DecimalEncoder)
+
+    def _process_timeline_json_path(self):
+        path = _j(self.directory, 'process_timeline.json')
+        return path
 
     @property
     def db_path(self):
@@ -2440,87 +2512,6 @@ def _add_cpu_gpu_stats(js_stats, plotter, bench_name=NO_BENCH_NAME):
     }
     update_dict(js_stats, stats)
 
-class OverlapJSONDumper:
-    def __init__(self, overlap):
-        # set([CPU, GPU]) -> np.array(...)
-        self.overlap = overlap
-        # self.overlap_to_id = dict()
-
-    def dump(self, path):
-        js = dict()
-        overlap_to_id = dict()
-        js['overlap_id_pairs'] = []
-        js['overlap_id_to_values'] = dict()
-        for i, (k, vs) in enumerate(self.overlap.items()):
-            new_k = tuple(sorted(k))
-            assert new_k not in overlap_to_id
-            overlap_to_id[new_k] = i
-            js['overlap_id_pairs'].append((new_k, overlap_to_id[new_k]))
-            js['overlap_id_to_values'][overlap_to_id[new_k]] = vs
-        do_dump_json(js, path)
-        return js
-
-class OverlapJSONToVennConverter:
-    def __init__(self, js=None, path=None):
-        # set([CPU, GPU]) -> np.array(...)?
-        assert js is not None or path is not None
-        if path is not None:
-            with open(path, 'r') as f:
-                js = json.load(f)
-
-        self.js = js
-        self.path = path
-
-    def convert(self):
-        """
-        venn_music_data = [
-            {"sets": [0], "label": "Radiohead", "size": 77348},
-            {"sets": [1], "label": "Thom Yorke", "size": 5621},
-            ...
-            {"sets": [0, 1], "size": 4832},
-            ...
-        ]
-        """
-        venn_js = []
-        # keys = sorted([k for overlap, k in self.js['overlap_id_pairs']])
-        overlap_id_to_overlap_list = dict((k, overlap) for overlap, k in self.js['overlap_id_pairs'])
-
-        category_to_id = dict()
-        categories = set()
-        for overlap, k in self.js['overlap_id_pairs']:
-            assert type(overlap) in [list, tuple, set, frozenset]
-            categories.update(overlap)
-        categories = sorted(categories)
-        for i, category in enumerate(categories):
-            category_to_id[category] = i
-
-        def as_sets(overlap_id):
-            overlap_list = overlap_id_to_overlap_list[overlap_id]
-            sets_ids = [category_to_id[category] for category in overlap_list]
-            sets_ids.sort()
-            return sets_ids
-
-        for overlap_id, values in self.js['overlap_id_to_values'].items():
-            overlap_id = int(overlap_id)
-            venn_set = {
-                "sets": as_sets(overlap_id),
-                "size": values,
-            }
-            if len(venn_set['sets']) == 1:
-                assert len(overlap_id_to_overlap_list[overlap_id]) == 1
-                venn_set["label"] = overlap_id_to_overlap_list[overlap_id][0]
-            venn_js.append(venn_set)
-
-        # Make the shorter (in particular, single-element) venn_sets appear first.
-        # venn_sets within the same length are ordered based on lexicographic order.
-        venn_js.sort(key=lambda venn_set: (len(venn_set['sets']), venn_set['sets']))
-
-        return venn_js
-
-    def dump(self, path):
-        js = self.convert()
-        do_dump_json(js, path)
-        return js
 
 # def device_name_to_
 
