@@ -2717,6 +2717,54 @@ def bin_category_times_old(
 
     return category_times, categories, operation_types
 
+class EventCategoryMapper:
+    """
+    Map an Event and an old_category to a new_category, to be used in the category_times format:
+    {
+        <new_category>: <events sorted by event.start_time>,
+        ...
+    }
+
+    Events belonging to an old_category are processed in serial order.
+    EventCategoryMapper's can track useful state related to a stream of events belonging to a category.
+    """
+    pass
+
+# class EventCategoryMapper(EventCategoryMapper):
+#     def __init__(self):
+#         self.categories = set()
+#         self.operation_types = set()
+#
+#     @staticmethod
+#     def as_proc_resource_category(event, old_category, state):
+#         if old_category in CATEGORIES_CPU:
+#             cat = CATEGORY_CPU
+#             self.categories.add(cat)
+#         elif old_category == CATEGORY_GPU:
+#             cat = CATEGORY_GPU
+#             self.categories.add(cat)
+#         elif old_category == CATEGORY_OPERATION:
+#             cat = event.name
+#             # print("> operation_types.add {cat}".format(cat=cat))
+#             self.operation_types.add(cat)
+#         else:
+#             # Q: What about category operation...?
+#             # We want to KEEP the operation category so we can determine
+#             # overlap between q_backward/q_forward across processes...
+#             #
+#             # I think all we need to do is replace "CATEGORY_OPERATION" for an event
+#             # with event.name (it's operation-type).
+#             # Then, when we go to plot the category_times data, we "remove" any operation
+#             # names from the category (forming an operation_key), and group the data
+#             # into an operation-specific dict for plotting.
+#             #
+#             # We can still test a single process trace without handling this.
+#             # (graph should be the same with fewer categories: CPU, GPU, CPU + GPU)
+#             raise RuntimeError("Not sure how to categorize {cat} into CPU or GPU.".format(
+#                 cat=old_category))
+#
+#         new_category = frozenset([cat, proc_category])
+
 def bin_category_times(
     process_name,
     category,

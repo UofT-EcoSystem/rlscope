@@ -85,6 +85,8 @@ CATEGORIES_CPU = set([
 # represents a group of categories.
 CATEGORY_CPU = 'CPU'
 
+CATEGORY_TOTAL = 'Total'
+
 PROFILING_DUMP_TRACE = "Dump trace"
 
 PLOT_SUMMMARY_FIELDS = [

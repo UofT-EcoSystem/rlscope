@@ -1102,8 +1102,20 @@ class OverlapComputer:
                 assert len(overlap_key.procs) > 1
 
             for resource_type in overlap_key.non_ops:
+                # NOTE: This is sort of hacky;
+                # we AREN'T outputting disjoint overlap regions here;
+                # instead we are outputting an entire "set" including its overlaps:
+                # i.e.
+                # CPU   = [CPU only time] + [CPU overlapped with GPU time]
+                # GPU   = [GPU only time] + [GPU overlapped with GPU time]
+                # Total = [CPU only time] + [GPU only time] + [CPU overlapped with GPU time]
                 new_key = CategoryKey(ops=frozenset(),
                                       non_ops=frozenset([resource_type]),
+                                      procs=frozenset())
+                _add_key(new_overlap, new_key, times)
+
+                new_key = CategoryKey(ops=frozenset(),
+                                      non_ops=frozenset([CATEGORY_TOTAL]),
                                       procs=frozenset())
                 _add_key(new_overlap, new_key, times)
 
