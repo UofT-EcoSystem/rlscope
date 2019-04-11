@@ -2042,6 +2042,7 @@ class UtilizationPlot:
     """
     CPU/GPU utilization over training.
     """
+    RESOURCE_TYPES = [CATEGORY_CPU, CATEGORY_GPU]
     def __init__(self, directory,
                  step_sec=1.,
                  pixels_per_square=10,
@@ -2053,6 +2054,10 @@ class UtilizationPlot:
                  overlap_type=None,
                  # If overlap_type = OperationOverlap, then dump this resource-type.
                  operation_overlap_resource=None,
+                 # CategoryOverlap
+                 process_name=None,
+                 phase_name=None,
+                 resource_type=None,
                  # Swallow any excess arguments
                  **kwargs):
         """
@@ -2079,6 +2084,9 @@ class UtilizationPlot:
         if operation_overlap_resource is None:
             operation_overlap_resource = [CATEGORY_CPU]
         self.overlap_type = overlap_type
+        self.process_name = process_name
+        self.phase_name = phase_name
+        self.resource_type = resource_type
         self.operation_overlap_resource = frozenset(operation_overlap_resource)
         self.directory = directory
         self.step_sec = step_sec
@@ -2168,16 +2176,16 @@ class UtilizationPlot:
         for process_name in debug_process_names:
             # for process_name in process_names:
 
-            # OLD
-            # phases = self.sql_reader.process_phase_start_end_times(process_name, debug=self.debug)
+            # phase_names = self.sql_reader.process_phases(process_name, debug=self.debug)
+            # phases = [self.sql_reader.process_phase(process_name, phase_name, debug=self.debug)
+            #           for phase_name in phase_names]
+            phases = self.sql_reader.process_phases(process_name, debug=self.debug)
+            phases = [phase for phase in phases if phase.phase_name in debug_phases]
 
-            # phases = self.sql_reader.process_phases(process_name, debug=self.debug)
-
-            for phase in debug_phases:
-                # for phase in phases:
+            for phase in phases:
                 pprint.pprint({'process_name':process_name, 'phase': phase})
                 # self.plot_process_phase(process_name, phase['phase_name'])
-                self.plot_process_phase(process_name, phase)
+                self.plot_process_phase(process_name, phase=phase)
 
     def dump_overlap(self, operation_overlap, path, venn_js_path=None):
         print("> Dump data for {overlap_type} @ {path}".format(path=path, overlap_type=self.overlap_type))
@@ -2190,7 +2198,10 @@ class UtilizationPlot:
             venn_js = converter.dump(venn_js_path)
             pprint.pprint({'venn_js':venn_js})
 
-    def plot_process_phase(self, process_name=None, phase_name=None):
+    def plot_process_phase(self, process_name=None, phase_name=None, phase=None):
+        if phase is not None and phase_name is None:
+            phase_name = phase.phase_name
+
         assert ( process_name is None and phase_name is None ) or \
                ( process_name is not None and phase_name is not None )
 
@@ -2207,11 +2218,22 @@ class UtilizationPlot:
                                            debug=self.debug,
                                            debug_ops=self.debug_ops)
 
-        operation_overlap, proc_stats = overlap_computer.compute_process_timeline_overlap(
-            process_name=process_name,
-            phase_name=phase_name,
-            debug_memoize=self.debug_memoize,
-            overlap_type=self.overlap_type)
+        if self.overlap_type == 'OperationOverlap':
+            # process_name=process_name,
+            # phase_name=phase_name,
+            # For OperationOverlap, select events across ALL execution that is concurrent with this process/phase.
+            # (a "vertical-slice" of the SummaryView).
+            operation_overlap, proc_stats = overlap_computer.compute_process_timeline_overlap(
+                start_time_us=phase.phase_start_time_us,
+                end_time_us=phase.phase_end_time_us,
+                debug_memoize=self.debug_memoize,
+                overlap_type=self.overlap_type)
+        else:
+            operation_overlap, proc_stats = overlap_computer.compute_process_timeline_overlap(
+                process_name=process_name,
+                phase_name=phase_name,
+                debug_memoize=self.debug_memoize,
+                overlap_type=self.overlap_type)
         assert len(operation_overlap) > 0
 
 

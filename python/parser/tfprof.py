@@ -1132,10 +1132,12 @@ class OverlapComputer:
             debug=debug_suffix(self.debug),
         ))
 
-    OVERLAP_TYPES = ['OperationOverlap', 'ResourceOverlap', 'ResourceSubplot', 'default']
+    OVERLAP_TYPES = ['OperationOverlap', 'ResourceOverlap', 'ResourceSubplot', 'CategoryOverlap', 'default']
     def compute_process_timeline_overlap(self,
                                          process_name=None,
                                          phase_name=None,
+                                         start_time_us=None,
+                                         end_time_us=None,
                                          debug_memoize=False,
                                          overlap_type=None):
         """
@@ -1162,6 +1164,8 @@ class OverlapComputer:
         category_times, categories, operation_types, proc_types = sql_reader.parse_timeline(
             process_name=process_name,
             phase_name=phase_name,
+            start_time_us=start_time_us,
+            end_time_us=end_time_us,
             debug=self.debug,
             debug_ops=self.debug_ops,
             debug_memoize=debug_memoize)

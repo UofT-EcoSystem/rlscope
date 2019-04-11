@@ -252,7 +252,20 @@ def main():
                         type=decimal.Decimal,
                         help='TraceEventsParser.end_usec')
     parser.add_argument("--process-name",
-                        help='TraceEventsParser.process_name')
+                        help=textwrap.dedent("""
+                        TraceEventsParser.process_name
+                        
+                        UtilizationPlot.process_name
+                        """))
+    parser.add_argument("--phase-name",
+                        help=textwrap.dedent("""
+                        UtilizationPlot.phase_name
+                        """))
+    parser.add_argument("--resource-type",
+                        choices=UtilizationPlot.RESOURCE_TYPES,
+                        help=textwrap.dedent("""
+                        UtilizationPlot.resource_type
+                        """))
     parser.add_argument("--debug-ops",
                         action='store_true',
                         help=textwrap.dedent("""

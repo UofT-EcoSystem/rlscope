@@ -1877,74 +1877,32 @@ class SQLCategoryTimesReader:
         row = c.fetchone()
         return row['start_time_sec']
 
-    def process_phases(self, process_name, debug=False):
+    def process_phases(
+            self,
+            process_name,
+            debug=False):
         c = self.conn.cursor
         query = textwrap.dedent("""
-        SELECT DISTINCT phase_name 
-        FROM 
-            Event AS e1
-            NATURAL JOIN Phase
-            NATURAL JOIN Process AS p
-        WHERE
-            p.process_name = {p} AND 
-            {no_dump_overlap_clause}
-        """.format(
-            no_dump_overlap_clause=sql_no_dump_overlap_clause('e1', 'e2', 'c2', indents=1),
-            p=sql_placeholder(),
-        ))
-        params = (process_name,)
-        sql_exec_query(c, query, params, debug=debug)
-        phase_names = [row['phase_name'] for row in c.fetchall()]
-        return phase_names
+        SELECT 
+            p.process_name, 
+            ph.phase_name, 
+            MIN(e.start_time_us) AS phase_start_time_us, 
+            MAX(e.end_time_us) AS phase_end_time_us
 
-    def process_phase_start_end_times(self, process_name, debug=False):
-        # This query is slow because of the SELECT MIN/MAX.
-        # We're better off issuing separate min/max queries for each <process_name, phase_name>.
-        raise NotImplementedError
-
-        c = self.conn.cursor
-        # Phase start time is the first event with that phase_name
-        # Q: Don't we need to make sure this doesn't overlap with a DUMP event?
-        query = textwrap.dedent("""
-        SELECT DISTINCT 
-        
-            ph.phase_name 
-        
-            , (
-                SELECT MIN(e1.start_time_us) 
-                FROM 
-                    Event e1
-                WHERE
-                    e1.phase_id = ph.phase_id AND
-                    {min_no_dump_overlap_clause}
-            ) AS phase_start_time_us 
-        
-            , (
-                SELECT MAX(e1.end_time_us) 
-                FROM 
-                    Event e1
-                WHERE
-                    e1.phase_id = ph.phase_id AND
-                    {max_no_dump_overlap_clause}
-            ) AS phase_end_time_us 
-        
-        FROM 
+        FROM
             Event AS e
             NATURAL JOIN Phase AS ph
             NATURAL JOIN Process AS p
         WHERE
-            p.process_name = {p} AND 
-            {no_dump_overlap_clause}
+            p.process_name = {p}
+        GROUP BY
+            p.process_name, ph.phase_name
         """).format(
-            no_dump_overlap_clause=sql_no_dump_overlap_clause('e', 'e2', 'c2', indents=1),
-            min_no_dump_overlap_clause=sql_no_dump_overlap_clause('e1', 'e2', 'c2', indents=3),
-            max_no_dump_overlap_clause=sql_no_dump_overlap_clause('e1', 'e2', 'c2', indents=3),
             p=sql_placeholder(),
         )
         params = (process_name,)
         sql_exec_query(c, query, params, debug=debug)
-        # phase_names = [row['phase_name'] for row in c.fetchall()]
-        rows = [dict(row) for row in c.fetchall()]
+        rows = [row_as_phase(row) for row in c.fetchall()]
         return rows
 
     def keep_steps(self, process_name, bench_name, skip_first_step=True):
@@ -2119,6 +2077,8 @@ class SQLCategoryTimesReader:
     def parse_timeline(self,
                        process_name=None,
                        phase_name=None,
+                       start_time_us=None,
+                       end_time_us=None,
                        # group_by_device=DEFAULT_group_by_device,
                        ignore_categories=DEFAULT_ignore_categories,
                        debug=DEFAULT_debug,
@@ -2198,6 +2158,8 @@ class SQLCategoryTimesReader:
             }
             """
             proc_category_times = self.process_events(process_name, phase_name, ignore_categories,
+                                              start_time_us=None,
+                                              end_time_us=None,
                                               debug=debug,
                                               debug_ops=debug_ops,
                                               debug_label=process_label,
@@ -2286,6 +2248,8 @@ class SQLCategoryTimesReader:
 
     def process_events(self, process_name=None, phase_name=None,
                        ignore_categories=None,
+                       start_time_us=None,
+                       end_time_us=None,
                        op_name=None,
                        keep_categories=None,
                        debug=False,
@@ -2357,6 +2321,8 @@ class SQLCategoryTimesReader:
             {ignore_clause} AND
             -- Ignore any events that overlap with when we dump profiling information.
             {no_dump_overlap_clause} AND
+            -- Keep events within a start/end time range (e.g. overlap with a specific process phase).
+            {event_range_clause} AND
             -- Only keep events that are subsumed by an <op> event.
             -- e.g. Only keep pyprof events that belong to the set_operation('tree_search') annotation
             {op_clause}
@@ -2370,6 +2336,7 @@ class SQLCategoryTimesReader:
             process_clause=sql_process_clause(process_name, 'p1', indents=1, allow_none=True),
             phase_clause=sql_phase_clause(phase_name, 'ph1', indents=1, allow_none=True),
             debug_ops_clause=sql_debug_ops_clause(debug_ops, 'e1', indents=1),
+            event_range_clause=sql_event_range_clause('e1', start_time_us, end_time_us, indents=1),
             op_clause=op_clause,
             p=sql_placeholder(),
         )
@@ -3064,6 +3031,34 @@ def row_as_event(row):
     ktime.process_name = row['process_name']
     return ktime
 
+class Phase:
+    def __init__(self, phase_name):
+        self.phase_name = phase_name
+
+    def _add_row_fields(self, row):
+        self.process_name = row['process_name']
+        self.phase_start_time_us = row['phase_start_time_us']
+        self.phase_end_time_us = row['phase_end_time_us']
+
+    @property
+    def time_usec(self):
+        return self.phase_end_time_us - self.phase_start_time_us
+
+    def __str__(self):
+        if hasattr(self, 'phase_start_time_us'):
+            return "Phase(name={name}, start={start} us, dur={dur} us)".format(
+                name=self.phase_name, start=self.phase_start_time_us, dur=self.time_usec)
+        return "Phase(name={name})".format(
+            name=self.phase_name)
+
+    def __repr__(self):
+        return str(self)
+
+def row_as_phase(row):
+    phase = Phase(row['phase_name'])
+    phase._add_row_fields(row)
+    return phase
+
 def process_op_nest_single_thread(op_events, filter_by_op=None,
                     debug=False,
                     show_progress=False,
@@ -3501,6 +3496,27 @@ def sql_debug_ops_clause(debug_ops, event_alias, indents=None):
         # DON'T show debug events.
         txt = "( NOT {e}.is_debug_event )".format(
             e=event_alias)
+
+    txt = maybe_indent(txt, indents)
+    return txt
+
+def sql_event_range_clause(event_alias, start_time_us, end_time_us, indents=None):
+    if start_time_us is None and end_time_us is None:
+        txt = "TRUE"
+    elif start_time_us is not None and end_time_us is not None:
+        txt = "( {e}.start_time_us <= {start} AND {end} <= {e}.end_time_us )".format(
+            e=event_alias,
+            start=start_time_us,
+            end=end_time_us)
+    elif start_time_us is not None:
+        txt = "( {e}.start_time_us <= {start} )".format(
+            e=event_alias,
+            start=start_time_us)
+    else:
+        assert end_time_us is not None
+        txt = "( {end} <= {e}.end_time_us )".format(
+            e=event_alias,
+            end=end_time_us)
 
     txt = maybe_indent(txt, indents)
     return txt

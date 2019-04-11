@@ -16,5 +16,11 @@ export LD_LIBRARY_PATH="\
 $LD_LIBRARY_PATH"
 }
 
+_add_python_path() {
+export PYTHONPATH="\
+$IML/python:\
+$PYTHONPATH"
+}
 _activate_virtualenv_cuda9
 _activate_cuda9
+_add_python_path
