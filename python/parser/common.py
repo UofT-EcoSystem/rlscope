@@ -1022,6 +1022,16 @@ def phase_suffix(phase_name):
         return ".phase_{phase}".format(phase=phase_name)
     return ""
 
+def ops_suffix(ops):
+    if ops is None:
+        return ""
+
+    if type(ops) == str:
+        ops = [ops]
+
+    # NOTE: operation names use underscores; we cannot different ops...
+    return ".ops_{ops}".format(ops="_".join(sorted(ops)))
+
 def resources_suffix(resources):
     if resources is not None:
         return ".resources_{resources}".format(
@@ -1057,6 +1067,8 @@ def load_json(path):
 class DecimalEncoder(json.JSONEncoder):
     def default(self, o):
         if isinstance(o, decimal.Decimal):
+            # TODO: Should we convert it to float(...)?
+            # str will retain precision... but makes it annoying "reading it back in"...
             return str(o)
         return super(DecimalEncoder, self).default(o)
 
@@ -1561,11 +1573,18 @@ def js_friendly(obj):
                 (frozenset, tuple)
             ):
         key_values_pairs = []
-        for key, value in obj.items():
+        keys = sorted(obj.keys())
+        for key in keys:
+            value = obj[key]
             key_values_pairs.append((
                 js_friendly(key),
                 js_friendly(value)))
         return key_values_pairs
+    elif type(obj) == dict and len(obj) > 0:
+        new_obj = dict()
+        for k in obj.keys():
+            new_obj[k] = js_friendly(obj[k])
+        return new_obj
     elif type(obj) == frozenset:
         return sorted([js_friendly(x) for x in obj])
     return obj

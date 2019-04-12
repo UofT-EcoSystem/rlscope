@@ -2205,7 +2205,10 @@ class UtilizationPlot:
         assert ( process_name is None and phase_name is None ) or \
                ( process_name is not None and phase_name is not None )
 
-        overlap_obj = overlap_type_to_instance(self.overlap_type)
+        overlap_obj = overlap_type_to_instance(
+            self.overlap_type,
+            debug=self.debug,
+        )
 
         # converter = OverlapJSONToVennConverter(path=self._resource_overlap_json(process_name, phase_name))
         # js = converter.convert()

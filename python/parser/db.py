@@ -2854,6 +2854,9 @@ def bin_category_times(
         # new_category = frozenset([cat, proc_category])
 
         new_category = pre_reduce(category, event, process_name)
+        if new_category is None:
+            # SKIP this event entirely.
+            continue
 
         if new_category not in category_times:
             category_times[new_category] = []

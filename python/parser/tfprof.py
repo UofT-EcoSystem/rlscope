@@ -940,9 +940,10 @@ class OverlapComputer:
                 _add_key(new_overlap, new_key, times)
                 continue
 
-            pprint.pprint({
-                'overlap.keys()':list(overlap.keys()),
-            })
+            if self.debug:
+                pprint.pprint({
+                    'overlap.keys()':list(overlap.keys()),
+                })
             raise NotImplementedError("Not sure how to reduce overlap keys for overlap_key={key}".format(key=overlap_key))
 
         return new_overlap
@@ -1351,6 +1352,10 @@ class OverlapComputer:
         path = _j(self.directory, 'tfprof{bench}.json'.format(bench=bench_suffix(bench_name)))
         return path
 
+# Debug ResourceOverlapType/OperationOverlapType/etc.
+# Useful for avoiding debugging OverlapComputer (noisy debug messages).
+DEBUG_OVERLAP_TYPE = True
+
 class OverlapTypeInterface:
     """
     Overlap computations performed during --rule=UtilizationPlot.
@@ -1410,11 +1415,12 @@ class OverlapTypeInterface:
             venn_js_path = self._overlap_venn_js_json(directory, process_name, phase_name)
         print("> Dump data for {overlap_type} @ {path}".format(path=path, overlap_type=self.overlap_type))
         dumper = OverlapJSONDumper(operation_overlap)
-        js = dumper.dump(path)
+        dumper.dump(path)
 
         if venn_js_path is not None:
             print("> Dump data for {overlap_type} venn.js plot @ {path}".format(path=venn_js_path, overlap_type=self.overlap_type))
-            converter = OverlapJSONToVennConverter(js=js)
+            # converter = OverlapJSONToVennConverter(js=js)
+            converter = OverlapJSONToVennConverter(path=path)
             venn_js = converter.dump(venn_js_path)
             pprint.pprint({'venn_js':venn_js})
 
@@ -1470,11 +1476,13 @@ class OverlapTypeInterface:
         new_key = CategoryKey(ops=ops,
                               non_ops=non_ops,
                               procs=frozenset([process_name]))
+
         # pprint.pprint({
         #     'name':'pre_reduce_cpu_gpu',
         #     'event':event,
         #     'category':category,
         #     'new_key': new_key})
+
         return new_key
 
     def reduce_to_category_key(self, overlap):
@@ -1573,10 +1581,11 @@ class OverlapTypeInterface:
                 continue
 
             new_key = _as_category_key(overlap_key)
-            pprint.pprint({
-                'name':'reduce_to_category',
-                'new_key':new_key,
-                'overlap_key':overlap_key})
+            if self.debug:
+                pprint.pprint({
+                    'name':'reduce_to_category',
+                    'new_key':new_key,
+                    'overlap_key':overlap_key})
             assert len(new_key.ops) > 0
             assert len(new_key.non_ops) > 0
             assert len(new_key.procs) > 0
@@ -1671,9 +1680,10 @@ class OverlapTypeInterface:
                 _add_key(new_overlap, new_key, times)
                 continue
 
-            pprint.pprint({
-                'overlap.keys()':list(overlap.keys()),
-            })
+            if self.debug:
+                pprint.pprint({
+                    'overlap.keys()':list(overlap.keys()),
+                })
             raise NotImplementedError("Not sure how to reduce overlap keys for overlap_key={key}".format(key=overlap_key))
 
         return new_overlap
@@ -1699,9 +1709,10 @@ def _reduce_add_key(new_overlap, key, value):
     new_overlap[key] += value
 
 class DefaultOverlapType(OverlapTypeInterface):
-    def __init__(self):
+    def __init__(self, debug=False):
         self.overlap_type = 'default'
         self.should_dump_as_is = True
+        self.debug = debug or DEBUG_OVERLAP_TYPE
 
     def pre_reduce(self, category, event, process_name):
         return self.pre_reduce_cpu_gpu(category, event, process_name)
@@ -1725,9 +1736,10 @@ class DefaultOverlapType(OverlapTypeInterface):
             overlap, group_self_overlap=False)
 
 class ResourceOverlapType(OverlapTypeInterface):
-    def __init__(self):
+    def __init__(self, debug=False):
         self.overlap_type = 'ResourceOverlap'
         self.should_dump_as_is = False
+        self.debug = debug or DEBUG_OVERLAP_TYPE
 
     def pre_reduce(self, category, event, process_name):
         return self.pre_reduce_cpu_gpu(category, event, process_name)
@@ -1756,7 +1768,8 @@ class ResourceOverlapType(OverlapTypeInterface):
                                   procs=frozenset())
             _reduce_add_key(new_overlap, new_key, times)
 
-        pprint.pprint({'ResourceOverlapType.post_reduce_category_key.keys': list(new_overlap.keys())})
+        if self.debug:
+            pprint.pprint({'ResourceOverlapType.post_reduce_category_key.keys': list(new_overlap.keys())})
         # import ipdb; ipdb.set_trace()
 
         return new_overlap
@@ -1771,9 +1784,10 @@ class ResourceOverlapType(OverlapTypeInterface):
         return category_key.non_ops
 
 class OperationOverlapType(OverlapTypeInterface):
-    def __init__(self):
+    def __init__(self, debug=False):
         self.overlap_type = 'OperationOverlap'
         self.should_dump_as_is = False
+        self.debug = debug or DEBUG_OVERLAP_TYPE
 
     def pre_reduce(self, category, event, process_name):
         return self.pre_reduce_cpu_gpu(category, event, process_name)
@@ -1809,6 +1823,7 @@ class OperationOverlapType(OverlapTypeInterface):
         ))
 
     def dump_json_files(self, new_overlap, directory, process_name, phase_name):
+        # Q: Why don't we need to call as_overlap_js here?
         for resources, op_overlap in new_overlap.items():
             # operation_overlap = self.as_overlap_js(new_overlap)
             self._dump_overlap(
@@ -1830,10 +1845,160 @@ class OperationOverlapType(OverlapTypeInterface):
             operation_overlap[combo_key.non_ops][combo_key.ops] = time_us
         return operation_overlap
 
+class CategoryOverlapType(OverlapTypeInterface):
+    def __init__(self, debug=False):
+        self.overlap_type = 'CategoryOverlap'
+        self.should_dump_as_is = False
+        self.debug = debug or DEBUG_OVERLAP_TYPE
+
+    def pre_reduce(self, category, event, process_name):
+        """
+        Modular function to bin_events for "reducing" events to CPU/GPU BEFORE OverlapComputation.
+        Also, allow ability to "filter-out" events (e.g. category=GPU; needed for CategoryOverlap).
+
+        Pre-reduce: keep categories as-is; filter out GPU stuff.
+        """
+        if category in CATEGORIES_CPU:
+            # Keep ALL the CPU events, and retain the details of their category.
+            non_ops = frozenset([category])
+            ops = frozenset()
+        elif category == CATEGORY_GPU:
+            # SKIP GPU events; we just want to measure CPU time.
+            # Q: Won't GPU perhaps overlap with these?
+            #       [ GPU ]
+            # [     CPU     ]
+            # No, I don't think so; GPU events are recorded from the "GPU-side".
+            # "CUDA API C" is recorded from the CPU-side.
+            return None
+        elif category == CATEGORY_OPERATION:
+            non_ops = frozenset()
+            ops = frozenset([event.name])
+        else:
+            # Q: What about category operation...?
+            # We want to KEEP the operation category so we can determine
+            # overlap between q_backward/q_forward across processes...
+            #
+            # I think all we need to do is replace "CATEGORY_OPERATION" for an event
+            # with event.name (it's operation-type).
+            # Then, when we go to plot the category_times data, we "remove" any operation
+            # names from the category (forming an operation_key), and group the data
+            # into an operation-specific dict for plotting.
+            #
+            # We can still test a single process trace without handling this.
+            # (graph should be the same with fewer categories: CPU, GPU, CPU + GPU)
+            raise RuntimeError("Not sure how to categorize {cat} into CPU or GPU.".format(
+                cat=category))
+        # new_category = frozenset([cat, proc_category])
+        new_key = CategoryKey(ops=ops,
+                              non_ops=non_ops,
+                              procs=frozenset([process_name]))
+
+        # if self.debug:
+        #     pprint.pprint({
+        #         'name':'{OverlapType}.pre_reduce'.format(OverlapType=self.overlap_type),
+        #         'event':event,
+        #         'category':category,
+        #         'new_key': new_key})
+
+        return new_key
+
+    def post_reduce_category_key(self, overlap):
+        """
+        Add modular "post-reduce" function for "adding" CategoryKey's that map to the same key.
+
+        Post-reduce: I don't think we need to do anything here?
+        Everything should belong to a single process:
+          CategoryKey(ops=key.ops, non_ops=key.non_ops, procs=None)
+        """
+        # return self.reduce_overlap_resource_operation(
+        #     overlap,
+        #     group_self_overlap=True)
+
+        new_overlap = dict()
+        for overlap_key, times in overlap.items():
+
+            if len(overlap_key.ops) > 1:
+                # Operations can only overlap cross-process, not within a single-process
+                assert len(overlap_key.procs) > 1
+
+            assert len(overlap_key.procs) == 1
+            assert len(overlap_key.ops) == 1
+            assert len(overlap_key.non_ops) >= 1
+            new_key = CategoryKey(ops=overlap_key.ops,
+                                  non_ops=overlap_key.non_ops,
+                                  procs=frozenset())
+            _reduce_add_key(new_overlap, new_key, times)
+
+        if self.debug:
+            pprint.pprint({
+                '{OverlapType}.post_reduce_category_key.keys'.format(OverlapType=self.overlap_type):
+                    list(new_overlap.keys())})
+            # import ipdb; ipdb.set_trace()
+
+        return new_overlap
+
+    def _category_overlap_json(self, directory, process_name, phase_name, ops):
+        return _j(directory, "{OverlapType}{proc}{phase}{ops}.json".format(
+            OverlapType=self.overlap_type,
+            proc=process_suffix(process_name),
+            phase=phase_suffix(phase_name),
+            ops=ops_suffix(ops),
+        ))
+
+    def _category_overlap_venn_js_json(self, directory, process_name, phase_name, ops):
+        return _j(directory, "{OverlapType}{proc}{phase}{ops}.venn_js.json".format(
+            OverlapType=self.overlap_type,
+            proc=process_suffix(process_name),
+            phase=phase_suffix(phase_name),
+            ops=ops_suffix(ops),
+        ))
+
+    def dump_json_files(self, new_overlap, directory, process_name, phase_name):
+        """
+        For op in ops(process, phases):
+          key = CategoryKey[ops=[op]]
+          # SHOULD exist; all keys should have 1 op also
+          # (no overlap with a process)
+          yield Key -> [str(non_op) for non_op in key.non_ops]
+          # CategoryOverlap{process}{phase}{op}.json
+
+        :param new_overlap:
+        :param directory:
+        :param process_name:
+        :param phase_name:
+        :return:
+        """
+        overlap = self.as_overlap_js(new_overlap)
+        if self.debug:
+            pprint.pprint({
+                'name':"{OverlapType}.dump_json_files".format(OverlapType=self.overlap_type),
+                'overlap':overlap,
+            })
+        for ops, category_overlap in overlap.items():
+            self._dump_overlap(
+                category_overlap,
+                path=self._category_overlap_json(directory, process_name, phase_name, ops),
+                venn_js_path=self._category_overlap_venn_js_json(directory, process_name, phase_name, ops))
+
+    def as_overlap_js(self, new_overlap):
+        # def _group_by_resource_ops(self, new_overlap):
+        # set(non-operation categories) -> set(operation categories) -> [ CPU, GPU, CPU/GPU ] time
+        #    <CPU>, <GPU>, <CPU, GPU>       <q_forward, q_backward>           0.001 sec
+        operation_overlap = dict()
+        for combo_key, time_us in new_overlap.items():
+            assert len(combo_key.ops) > 0
+            assert len(combo_key.non_ops) > 0
+            assert len(combo_key.procs) == 0
+            if combo_key.ops not in operation_overlap:
+                operation_overlap[combo_key.ops] = dict()
+            operation_overlap[combo_key.ops][combo_key.non_ops] = time_us
+        return operation_overlap
+
 class ResourceSubplotOverlapType(OverlapTypeInterface):
-    def __init__(self):
+    def __init__(self, debug=False):
         self.overlap_type = 'ResourceSubplot'
         self.should_dump_as_is = False
+        self.debug = debug or DEBUG_OVERLAP_TYPE
 
     def pre_reduce(self, category, event, process_name):
         return self.pre_reduce_cpu_gpu(category, event, process_name)
@@ -1887,37 +2052,31 @@ class ResourceSubplotOverlapType(OverlapTypeInterface):
 OVERLAP_TYPE_TO_KLASS = {
     'ResourceOverlap':ResourceOverlapType,
     'default':DefaultOverlapType,
-    # 'CategoryOverlap':CategoryOverlapType,
+    'CategoryOverlap':CategoryOverlapType,
     'OperationOverlap':OperationOverlapType,
     'ResourceSubplot':ResourceSubplotOverlapType,
 }
-def overlap_type_to_instance(overlap_type):
+def overlap_type_to_instance(overlap_type, debug=False):
     OverlapType = OVERLAP_TYPE_TO_KLASS[overlap_type]
-    return OverlapType()
+    return OverlapType(debug)
 
 class OverlapJSONDumper:
     def __init__(self, overlap):
-        # set([CPU, GPU]) -> np.array(...)
+        # "overlap region"     "size of overlap"
+        # set([CPU, GPU])  ->  Number
         self.overlap = overlap
-        # self.overlap_to_id = dict()
 
     def dump(self, path):
-        js = dict()
-        overlap_to_id = dict()
-        js['overlap_id_pairs'] = []
-        js['overlap_id_to_values'] = dict()
-        for i, (k, vs) in enumerate(self.overlap.items()):
-            new_k = tuple(sorted(k))
-            assert new_k not in overlap_to_id
-            overlap_to_id[new_k] = i
-            js['overlap_id_pairs'].append((new_k, overlap_to_id[new_k]))
-            js['overlap_id_to_values'][overlap_to_id[new_k]] = vs
-        do_dump_json(js, path)
+        js = js_friendly({
+            'overlap': self.overlap,
+        })
+        do_dump_json(js, path, cls=DecimalEncoder)
         return js
 
 class OverlapJSONToVennConverter:
     def __init__(self, js=None, path=None):
-        # set([CPU, GPU]) -> np.array(...)?
+        # "overlap region"     "size of overlap"
+        # set([CPU, GPU])  ->  Number
         assert js is not None or path is not None
         if path is not None:
             with open(path, 'r') as f:
@@ -1925,6 +2084,24 @@ class OverlapJSONToVennConverter:
 
         self.js = js
         self.path = path
+        self.overlap = self._reconstruct_overlap()
+
+    def _reconstruct_overlap(self):
+        overlap = dict()
+
+        for pairs, size in self.js['overlap']:
+            overlap[tuple(sorted(pairs))] = float(size)
+        return overlap
+
+    def _compute_set_sizes(self):
+        set_to_size = dict()
+        for overlap_region, size in self.overlap.items():
+            for set_region in overlap_region:
+                assert type(set_region) == str
+                if set_region not in set_to_size:
+                    set_to_size[set_region] = as_type(0., type(size))
+                set_to_size[set_region] += size
+        return set_to_size
 
     def convert(self):
         """
@@ -1937,33 +2114,40 @@ class OverlapJSONToVennConverter:
         ]
         """
         venn_js = []
-        # keys = sorted([k for overlap, k in self.js['overlap_id_pairs']])
-        overlap_id_to_overlap_list = dict((k, overlap) for overlap, k in self.js['overlap_id_pairs'])
 
-        category_to_id = dict()
-        categories = set()
-        for overlap, k in self.js['overlap_id_pairs']:
+        set_to_size = self._compute_set_sizes()
+
+        label_to_id = dict()
+        labels = set()
+        for overlap, size in self.overlap.items():
             assert type(overlap) in [list, tuple, set, frozenset]
-            categories.update(overlap)
-        categories = sorted(categories)
-        for i, category in enumerate(categories):
-            category_to_id[category] = i
+            labels.update(overlap)
+        labels = sorted(labels)
+        for i, label in enumerate(labels):
+            label_to_id[label] = i
 
-        def as_sets(overlap_id):
-            overlap_list = overlap_id_to_overlap_list[overlap_id]
-            sets_ids = [category_to_id[category] for category in overlap_list]
+        def as_sets(overlap):
+            sets_ids = [label_to_id[category] for category in overlap]
             sets_ids.sort()
             return sets_ids
 
-        for overlap_id, values in self.js['overlap_id_to_values'].items():
-            overlap_id = int(overlap_id)
+        for label, size in set_to_size.items():
             venn_set = {
-                "sets": as_sets(overlap_id),
-                "size": values,
+                "sets": as_sets([label]),
+                "size": size,
+                "label": label,
             }
-            if len(venn_set['sets']) == 1:
-                assert len(overlap_id_to_overlap_list[overlap_id]) == 1
-                venn_set["label"] = overlap_id_to_overlap_list[overlap_id][0]
+            venn_js.append(venn_set)
+
+        for overlap, size in self.overlap.items():
+            if len(overlap) == 1:
+                # Single "set region" doesn't include overlap with other sets.
+                # "Set region" is handled in for-loop above this one.
+                continue
+            venn_set = {
+                "sets": as_sets(overlap),
+                "size": size,
+            }
             venn_js.append(venn_set)
 
         # Make the shorter (in particular, single-element) venn_sets appear first.
@@ -2060,6 +2244,48 @@ def _add_key(new_overlap, key, value):
     if key not in new_overlap:
         _new_key_like(new_overlap, key, value)
     new_overlap[key] += value
+
+# def test_venn_js_converter():
+#
+#     wrong_venn_js = {
+#         # Sizes of the INDIVIDUAL regions.
+#         'venn_js': [{'label': 'Framework API C',
+#                      'sets': [1],
+#                      'size': Decimal('15174940')},
+#                     {'label': 'Python', 'sets': [2], 'size': Decimal('192978')},
+#                     {'sets': [0, 1], 'size': Decimal('202827')},
+#                     {'sets': [0, 2], 'size': Decimal('401')},
+#                     {'sets': [1, 2], 'size': Decimal('85')}]}
+#
+#     correct_venn_js =
+#         # Sizes of the INDIVIDUAL regions.
+#         'venn_js': [{'label': 'Framework API C',
+#                      'sets': [1],
+#                      'size': Decimal('15174940') + Decimal('202827') + Decimal('85')},
+#                     {'label': 'Python', 'sets': [2], 'size': Decimal('192978') + Decimal('401') + Decimal('85')},
+#                     {'sets': [0, 1], 'size': Decimal('202827')},
+#                     {'sets': [0, 2], 'size': Decimal('401')},
+#                     {'sets': [1, 2], 'size': Decimal('85')}]}
+#
+#     overlap = {('estimator_save_model',): {frozenset({'Framework API C'}): Decimal('369188'),
+#                                            frozenset({'Python'}): Decimal('336883'),
+#                                            frozenset({'CUDA API CPU', 'Framework API C'}): Decimal('41590')},
+#                ('estimator_train',): {frozenset({'Framework API C'}): Decimal('6908831'),
+#                                       frozenset({'Python'}): Decimal('17241'),
+#                                       frozenset({'CUDA API CPU', 'Framework API C'}): Decimal('19335039')},
+#                ('gather',): {frozenset({'Framework API C'}): Decimal('15174940'),
+#                              frozenset({'CUDA API CPU', 'Framework API C'}): Decimal('202827'),
+#                              frozenset({'Python'}): Decimal('192978'),
+#                              frozenset({'Python', 'CUDA API CPU'}): Decimal('401'),
+#                              frozenset({'Python', 'Framework API C'}): Decimal('85')},
+#                ('train',): {frozenset({'Framework API C'}): Decimal('3595757'),
+#                             frozenset({'Python'}): Decimal('4952793'),
+#                             frozenset({'CUDA API CPU', 'Framework API C'}): Decimal('60576')}}
+#
+#     js = overlap[('gather',)]
+#
+#     venn_js = OverlapJSONToVennConverter(js)
+#     assert venn_js != wrong_venn_js
 
 def test_compute_overlap():
     # Set to true to print info.
