@@ -1025,7 +1025,7 @@ def phase_suffix(phase_name):
 def resources_suffix(resources):
     if resources is not None:
         return ".resources_{resources}".format(
-            resources="_".join(resources))
+            resources="_".join(sorted(resources)))
     return ""
 
 def event_suffix(event_id):

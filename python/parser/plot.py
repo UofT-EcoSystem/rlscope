@@ -2278,13 +2278,7 @@ class UtilizationPlot:
         # else:
         #     raise NotImplementedError
 
-        operation_overlap = overlap_obj.as_overlap_js(new_overlap)
-        assert len(operation_overlap) > 0
-
-        if self.overlap_type != 'default':
-            overlap_obj.dump_overlap(operation_overlap, self.directory, process_name, phase_name)
-        else:
-            overlap_obj.dump_overlap_as_is(operation_overlap, self.directory, process_name, phase_name)
+        overlap_obj.dump_json_files(new_overlap, self.directory, process_name, phase_name)
 
         # # TODO: Make it so we can generate ALL of these, by reusing the parse_timeline/ComputeOverlap computation.
         # # i.e. turn OverlapCompute.compute_process_timeline_overlap into a class.
@@ -2344,6 +2338,8 @@ class UtilizationPlot:
         #         all_categories.add(category)
 
         if self.overlap_type == 'default':
+            operation_overlap = overlap_obj.as_overlap_js(new_overlap)
+            assert len(operation_overlap) > 0
             self._do_plot_process_phase(operation_overlap, proc_stats, process_name, phase_name)
 
     def _do_plot_process_phase(self, operation_overlap, proc_stats, process_name=None, phase_name=None):
