@@ -8,11 +8,13 @@ def dump_category_times(category_times, json_path, print_log=True, category_as_s
 
 class TraceEventsDumper:
     def __init__(self, category_times, json_path,
-                 category_as_str=None):
+                 category_as_str=None,
+                 debug=False):
         self.category_times = category_times
         self.json_path = json_path
         self.reproduce_tfprof = False
         self.category_as_str = category_as_str
+        self.debug = debug
         self.reset()
 
     def dump(self, print_log=True):
@@ -88,7 +90,8 @@ class TraceEventsDumper:
                     tid_to_times = self.js_split_into_tids(all_times)
                     for tid, times in tid_to_times.items():
                         for time_sec in times:
-                            self.js_add_time(time_sec.name, category_name, time_sec, tid)
+                            name = self._ktime_name(ktime)
+                            self.js_add_time(name, category_name, time_sec, tid)
             # elif category == CATEGORY_GPU:
             #     ...
             elif self.reproduce_tfprof and category in [CATEGORY_PYTHON, CATEGORY_TF_API]:
@@ -101,14 +104,20 @@ class TraceEventsDumper:
                 # category_name = category
                 self.js_add_section(category_name)
                 for ktime in times:
-                    if ktime.name is not None:
-                        name = ktime.name
-                    else:
-                        name = 'unknown'
+                    name = self._ktime_name(ktime)
                     self.js_add_time(name, category_name, ktime, tid=0)
             # else:
             #     raise NotImplementedError("Not sure how to handle category={c}".format(
             #         c=category))
+
+    def _ktime_name(self, ktime):
+        if hasattr(ktime, 'event_id') and ktime.name is not None:
+            return "{id}: {name}".format(
+                id=ktime.event_id,
+                name=ktime.name)
+        elif ktime.name is not None:
+            return ktime.name
+        return 'unknown'
 
     def js_split_into_tids(self, times):
         times = sorted(times, key=lambda ktime: ktime.start_time_usec)
@@ -178,6 +187,9 @@ class TraceEventsDumper:
             'tid': tid,
             'ts': ktime.start_time_usec,
         }
+        # if self.debug:
+        #     pprint.pprint(jtime)
+        #     import ipdb; ipdb.set_trace()
         self.js['traceEvents'].append(jtime)
 
     def _js_allocate_pid(self):

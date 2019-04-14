@@ -2143,7 +2143,10 @@ class SQLCategoryTimesReader:
         # categories = set()
         # proc_types = set()
 
-        if process_name is not None:
+        if process_name is None and ( start_time_us is not None or end_time_us is not None ):
+            # [None]
+            process_names = [process_name]
+        elif process_name is not None:
             process_names = [process_name]
         else:
             process_names = self.process_names
@@ -2158,15 +2161,18 @@ class SQLCategoryTimesReader:
                 ...
             }
             """
-            proc_category_times = self.process_events(process_name, phase_name, ignore_categories,
-                                              start_time_us=None,
-                                              end_time_us=None,
-                                              debug=debug,
-                                              debug_ops=debug_ops,
-                                              debug_label=process_label,
-                                              # fetchall=False,
-                                              fetchall=True,
-                                              )
+            proc_category_times = self.process_events(
+                process_name=process_name,
+                phase_name=phase_name,
+                ignore_categories=ignore_categories,
+                start_time_us=start_time_us,
+                end_time_us=end_time_us,
+                debug=debug,
+                debug_ops=debug_ops,
+                debug_label=process_label,
+                # fetchall=False,
+                fetchall=True,
+            )
             # assert len(proc_events) > 0
             # assert len(proc_category_times) > 0
             # assert len(proc_category_times[CATEGORY_OPERATION]) > 0
@@ -2203,7 +2209,8 @@ class SQLCategoryTimesReader:
             #                                       by=event.start_time_usec)
             #    I'm not sure if we'll overcome the single-threaded merge time...
             bin_category_times_single_thread(
-                process_name, proc_category_times,
+                # process_name, proc_category_times,
+                proc_category_times,
                 pre_reduce=pre_reduce,
                 # categories=categories, operation_types=operation_types,
                 category_times=category_times, debug=debug)
@@ -2307,6 +2314,8 @@ class SQLCategoryTimesReader:
 
         query = textwrap.dedent("""
         SELECT d1.device_name, c1.category_name, e1.event_name, e1.start_time_us, e1.duration_us
+            , e1.event_id
+            , p1.process_name, ph1.phase_name
             , e1.pyprof_filename
             , e1.pyprof_line_no
             , e1.pyprof_function
@@ -2366,9 +2375,7 @@ class SQLCategoryTimesReader:
         #     ignore_clause=ignore_clause,
         # ))
 
-        params = (
-            process_name,
-        )
+        params = None
         sql_exec_query(c, query, params, self.__class__, debug)
 
         if fetchall:
@@ -2559,11 +2566,13 @@ class SQLCategoryTimesReader:
 
         # e_out.event_name != 'train_loop' AND
         query = textwrap.dedent("""
-        SELECT device_name, category_name, event_name, start_time_us, duration_us
+        SELECT device_name, category_name, event_name, start_time_us, duration_us, 
+               process_name, phase_name, event_id
         FROM 
             Category AS c
             NATURAL JOIN Event
             NATURAL JOIN Process
+            NATURAL JOIN Phase
             NATURAL LEFT JOIN Device
         WHERE 
             process_name = {p} AND ( 
@@ -2782,7 +2791,7 @@ def default_pre_reduce(category, event, process_name):
     return new_category
 
 def bin_category_times(
-    process_name,
+    # process_name,
     category,
     events,
     pre_reduce=None,
@@ -2819,10 +2828,12 @@ def bin_category_times(
     else:
         use_insort = False
 
-    proc_category = proc_as_category(process_name)
+    # proc_category = proc_as_category(process_name)
 
-    progress_label = "parse_timeline: process={proc}, category={cat}".format(
-        proc=process_name, cat=category)
+    progress_label = "parse_timeline: category={cat}".format(
+        cat=category)
+    # progress_label = "parse_timeline: process={proc}, category={cat}".format(
+    #     proc=process_name, cat=category)
     for event in progress(events, desc=progress_label, show_progress=debug):
 
         # if category in CATEGORIES_CPU:
@@ -2853,7 +2864,8 @@ def bin_category_times(
         #
         # new_category = frozenset([cat, proc_category])
 
-        new_category = pre_reduce(category, event, process_name)
+        # new_category = pre_reduce(category, event, process_name)
+        new_category = pre_reduce(category, event)
         if new_category is None:
             # SKIP this event entirely.
             continue
@@ -2873,7 +2885,7 @@ def bin_category_times(
     return category_times
 
 def bin_category_times_single_thread(
-    process_name,
+    # process_name,
     proc_category_times,
     pre_reduce=None,
     # categories=None,
@@ -2904,7 +2916,8 @@ def bin_category_times_single_thread(
 
     for i, (category, events) in enumerate(proc_category_times.items()):
         category_times_i = bin_category_times(
-            process_name, category, events,
+            # process_name,
+            category, events,
             pre_reduce=pre_reduce,
             # categories=categories, operation_types=operation_types, category_times=None,
             category_times=None,
@@ -3093,6 +3106,7 @@ def row_as_ktime(row):
         name=row['event_name'],
     )
     event_maybe_add_pyprof_fields(ktime, row)
+    event_maybe_add_process_phase_fields(ktime, row)
     return ktime
 
 def event_maybe_add_pyprof_fields(ktime, row):
@@ -3101,6 +3115,16 @@ def event_maybe_add_pyprof_fields(ktime, row):
         ktime.pyprof_line_no = row['pyprof_line_no']
         ktime.pyprof_filename = row['pyprof_filename']
         ktime.pyprof_line_description = row['pyprof_line_description']
+
+def event_maybe_add_process_phase_fields(ktime, row):
+    if 'process_name' in row:
+        ktime.process_name = row['process_name']
+
+    if 'phase_name' in row:
+        ktime.phase_name = row['phase_name']
+
+    if 'event_id' in row:
+        ktime.event_id = row['event_id']
 
 def row_as_event(row):
     ktime = row_as_ktime(row)
@@ -3423,7 +3447,9 @@ class OpStack:
 
     def get_absored_ops(self, recursive=True):
         def maybe_ktime(*args, **kwargs):
-            ktime = KernelTime(*args, **kwargs, name=self.name)
+            ktime = KernelTime(*args, **kwargs,
+                               name=self.name,
+                               create_from=self.ktime)
             if ktime.start_time_usec < ktime.end_time_usec:
                 return ktime
             return None
@@ -3584,17 +3610,20 @@ def sql_event_range_clause(event_alias, start_time_us, end_time_us, indents=None
     if start_time_us is None and end_time_us is None:
         txt = "TRUE"
     elif start_time_us is not None and end_time_us is not None:
-        txt = "( {e}.start_time_us <= {start} AND {end} <= {e}.end_time_us )".format(
+        # txt = "( {e}.start_time_us <= {start} AND {end} <= {e}.end_time_us )".format(
+        txt = "( {start} <= {e}.start_time_us AND {e}.end_time_us <= {end} )".format(
             e=event_alias,
             start=start_time_us,
             end=end_time_us)
     elif start_time_us is not None:
-        txt = "( {e}.start_time_us <= {start} )".format(
+        # txt = "( {e}.start_time_us <= {start} )".format(
+        txt = "( {start} <= {e}.start_time_us )".format(
             e=event_alias,
             start=start_time_us)
     else:
         assert end_time_us is not None
-        txt = "( {end} <= {e}.end_time_us )".format(
+        # txt = "( {end} <= {e}.end_time_us )".format(
+        txt = "( {e}.end_time_us <= {end} )".format(
             e=event_alias,
             end=end_time_us)
 

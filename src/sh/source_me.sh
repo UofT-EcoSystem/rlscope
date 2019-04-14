@@ -24,3 +24,31 @@ $PYTHONPATH"
 _activate_virtualenv_cuda9
 _activate_cuda9
 _add_python_path
+
+_process_minigo() {
+(
+    set -e
+#    set -x
+    set -o pipefail
+
+    _do() {
+        echo "> CMD: $@"
+        "$@"
+    }
+
+    cd $IML
+
+#    for overlap_type in ResourceOverlap ResourceSubplot CategoryOverlap OperationOverlap; do
+#    for overlap_type in ResourceOverlap ResourceSubplot OperationOverlap; do
+    for overlap_type in OperationOverlap; do
+        (
+        echo "> overlap_type = $overlap_type"
+        _do python3 $IML/python/profiler/run_benchmark.py \
+            --directories $IML/checkpoints/minigo/vector_test_multiple_workers_k4000 \
+            --rules UtilizationPlot \
+            --overlap-type $overlap_type
+        echo "> DONE"
+        ) | tee ${overlap_type}.txt
+    done
+)
+}

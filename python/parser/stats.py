@@ -27,7 +27,7 @@ class KernelTime:
     KernelTime(time_usec=..., start_usec=...)
     KernelTime(start_usec=..., end_usec=...)
     """
-    def __init__(self, time_usec=None, start_usec=None, end_usec=None, name=None):
+    def __init__(self, time_usec=None, start_usec=None, end_usec=None, name=None, create_from=None):
         self.name = name
         if time_usec is None:
             # KernelTime(start_usec=..., end_usec=...)
@@ -44,6 +44,25 @@ class KernelTime:
             self.end_usec = end_usec
             self.time_usec = time_usec
             assert self.time_usec == self.end_usec - self.start_usec
+
+        if create_from is not None:
+            self._get_attrs(create_from)
+
+    def _get_attrs(self, ktime):
+        """
+        OpStack.get_absorbed_ops/split_op_stacks creates new events
+        by "splitting" an event into multiple smaller events.
+
+        Inherit attributes from the original event when splitting;
+        e.g. process_name, phase_name
+
+        :param ktime:
+            The event we are "splitting from"
+        :return:
+        """
+        for key, value in ktime.__dict__.items():
+            if not hasattr(self, key):
+                setattr(self, key, value)
 
     def subsumes(self, op2):
         op1 = self
@@ -113,11 +132,12 @@ class KernelTime:
         return KernelTime(end_usec - start_usec, start_usec, end_usec, name=name)
 
     def __str__(self):
-        if self.name is not None:
-            return "(name={name}, start={start} us, dur={dur} us)".format(
-                name=self.name, start=self.start_usec, dur=self.time_usec)
-        return "(start={start} us, dur={dur} us)".format(
-            start=self.start_usec, dur=self.time_usec)
+        return str(self.__dict__)
+        # if self.name is not None:
+        #     return "(name={name}, start={start} us, dur={dur} us)".format(
+        #         name=self.name, start=self.start_usec, dur=self.time_usec)
+        # return "(start={start} us, dur={dur} us)".format(
+        #     start=self.start_usec, dur=self.time_usec)
 
     def __repr__(self):
         return str(self)
@@ -751,7 +771,7 @@ class Stats:
                 kt.split(num_calls)
                 bar.update(i)
 
-    def add(self, name, 
+    def add(self, name,
             time_usec=None, start_usec=None, end_usec=None):
         # assert (start_usec is None and end_usec is None) or \
         #        (start_usec is not None and end_usec is not None)

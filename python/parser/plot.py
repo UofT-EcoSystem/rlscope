@@ -2042,6 +2042,8 @@ class UtilizationPlot:
     """
     CPU/GPU utilization over training.
     """
+    # DEBUG_MINIGO = False
+    DEBUG_MINIGO = True
     RESOURCE_TYPES = [CATEGORY_CPU, CATEGORY_GPU]
     def __init__(self, directory,
                  step_sec=1.,
@@ -2168,35 +2170,35 @@ class UtilizationPlot:
             self.plot_process_phase()
             return
 
-        process_names = self.sql_reader.process_names
 
-        debug_process_names = ['loop_train_eval']
-        debug_phases = ['sgd_updates']
+        # HACK: quickly debug OverlapType for minigo
 
-        for process_name in debug_process_names:
-            # for process_name in process_names:
+        # debug_process_names = ['loop_train_eval']
+        # debug_phases = ['sgd_updates']
+
+        # Debug OperationOverlap having overlap of operations within the same process:
+        debug_process_names = ['loop_selfplay']
+        debug_phases = ['default_phase']
+
+        if not UtilizationPlot.DEBUG_MINIGO:
+            process_names = self.sql_reader.process_names
+        else:
+            process_names = debug_process_names
+
+        # for process_name in debug_process_names:
+        for process_name in process_names:
 
             # phase_names = self.sql_reader.process_phases(process_name, debug=self.debug)
             # phases = [self.sql_reader.process_phase(process_name, phase_name, debug=self.debug)
             #           for phase_name in phase_names]
             phases = self.sql_reader.process_phases(process_name, debug=self.debug)
-            phases = [phase for phase in phases if phase.phase_name in debug_phases]
+            if UtilizationPlot.DEBUG_MINIGO:
+                phases = [phase for phase in phases if phase.phase_name in debug_phases]
 
             for phase in phases:
                 pprint.pprint({'process_name':process_name, 'phase': phase})
                 # self.plot_process_phase(process_name, phase['phase_name'])
                 self.plot_process_phase(process_name, phase=phase)
-
-    def dump_overlap(self, operation_overlap, path, venn_js_path=None):
-        print("> Dump data for {overlap_type} @ {path}".format(path=path, overlap_type=self.overlap_type))
-        dumper = OverlapJSONDumper(operation_overlap)
-        js = dumper.dump(path)
-
-        if venn_js_path is not None:
-            print("> Dump data for {overlap_type} venn.js plot @ {path}".format(path=venn_js_path, overlap_type=self.overlap_type))
-            converter = OverlapJSONToVennConverter(js=js)
-            venn_js = converter.dump(venn_js_path)
-            pprint.pprint({'venn_js':venn_js})
 
     def plot_process_phase(self, process_name=None, phase_name=None, phase=None):
         if phase is not None and phase_name is None:
@@ -2210,22 +2212,11 @@ class UtilizationPlot:
             debug=self.debug,
         )
 
-        # converter = OverlapJSONToVennConverter(path=self._resource_overlap_json(process_name, phase_name))
-        # js = converter.convert()
-        # pprint.pprint({'js':js})
-        # sys.exit(0)
-
-        # self.bench_names = self.sql_reader.bench_names(self.debug_ops) + [NO_BENCH_NAME]
-        # assert len(self.bench_names) == len(unique(self.bench_names))
-        # self.categories = self.sql_reader.categories
-
         overlap_computer = OverlapComputer(self.db_path,
                                            debug=self.debug,
                                            debug_ops=self.debug_ops)
 
         if self.overlap_type == 'OperationOverlap':
-            # process_name=process_name,
-            # phase_name=phase_name,
             # For OperationOverlap, select events across ALL execution that is concurrent with this process/phase.
             # (a "vertical-slice" of the SummaryView).
             overlap, proc_stats = overlap_computer.compute_process_timeline_overlap(
@@ -2246,103 +2237,16 @@ class UtilizationPlot:
             self._dump_process_timeline_json(overlap)
 
         new_overlap = overlap
-        assert len(new_overlap) > 0
-
-        new_overlap = overlap_obj.post_reduce(new_overlap)
-        assert len(new_overlap) > 0
-
-        # new_overlap = self.reduce_overlap_p0(new_overlap,
-        #                                      categories, operation_types, proc_types)
         # assert len(new_overlap) > 0
 
-        # if overlap_type == 'default':
-        #     new_overlap = self.reduce_overlap_resource_operation(
-        #         new_overlap,
-        #         categories, operation_types, proc_types)
-        #     assert len(new_overlap) > 0
-        #     operation_overlap = self._group_by_ops_resource(new_overlap)
-        # elif overlap_type == 'OperationOverlap':
-        #     new_overlap = self.reduce_overlap_OperationOverlap(
-        #         new_overlap,
-        #         categories, operation_types, proc_types)
-        #     assert len(new_overlap) > 0
-        #     operation_overlap = self._group_by_resource_ops(new_overlap)
-        # elif overlap_type == 'ResourceOverlap':
-        #     new_overlap = self.reduce_overlap_ResourceOverlap(
-        #         new_overlap,
-        #         categories, operation_types, proc_types)
-        #     assert len(new_overlap) > 0
-        #     operation_overlap = self._group_by_resource(new_overlap)
-        # elif overlap_type == 'ResourceSubplot':
-        #     new_overlap = self.reduce_overlap_ResourceSubplot(new_overlap,
-        #                                                       categories, operation_types, proc_types)
-        #     assert len(new_overlap) > 0
-        #     operation_overlap = self._group_by_resource(new_overlap)
-        # else:
-        #     raise NotImplementedError
+        new_overlap = overlap_obj.post_reduce(new_overlap)
+        # assert len(new_overlap) > 0
 
         overlap_obj.dump_json_files(new_overlap, self.directory, process_name, phase_name)
 
-        # # TODO: Make it so we can generate ALL of these, by reusing the parse_timeline/ComputeOverlap computation.
-        # # i.e. turn OverlapCompute.compute_process_timeline_overlap into a class.
-        # if self.overlap_type == 'ResourceOverlap':
-        #     self.dump_overlap(
-        #         operation_overlap,
-        #         path=self._resource_overlap_json(process_name, phase_name),
-        #         venn_js_path=self._resource_overlap_venn_js_json(process_name, phase_name))
-        # elif self.overlap_type == 'OperationOverlap':
-        #     operation_overlap_by_resource = operation_overlap[self.operation_overlap_resource]
-        #     self.dump_overlap(
-        #         operation_overlap_by_resource,
-        #         path=self._operation_overlap_json(process_name, phase_name, self.operation_overlap_resource),
-        #         venn_js_path=self._operation_overlap_venn_js_json(process_name, phase_name, self.operation_overlap_resource))
-        # elif self.overlap_type == 'ResourceSubplot':
-        #     self.dump_overlap(
-        #         operation_overlap,
-        #         path=self._resource_overlap_subplot_json(process_name, phase_name),
-        #         venn_js_path=self._resource_overlap_subplot_venn_js_json(process_name, phase_name))
-
-        # PROBLEM: I DON'T want to group by operation.
-        # I want to group by CPU/GPU.
-        # There should only be 3 categories:
-        # - CPU
-        # - GPU
-        # - CPU/GPU
-        # The expected format is:
-        # {frozenset({'CPU'}:Decimal('682219')
-        #  frozenset({'GPU'}:Decimal('682219')
-        #  frozenset({'CPU', 'GPU'}:Decimal('682219')}
-        #
-        # {'operation_overlap': {('estimator_save_model',): {frozenset({'CPU'}): Decimal('682219')},
-        #                        ('estimator_train',): {frozenset({'CPU'}): Decimal('25125539'),
-        #                                               frozenset({'GPU'}): Decimal('113459'),
-        #                                               frozenset({'GPU', 'CPU'}): Decimal('181450')},
-        #                        ('gather',): {frozenset({'CPU'}): Decimal('15568359')},
-        #                        ('train',): {frozenset({'CPU'}): Decimal('8507345')}},
-        #  'phase_name': 'sgd_updates',
-        #  'process_name': 'loop_train_eval'}
-        # pprint.pprint({
-        #     'process_name': process_name,
-        #     'phase_name': phase_name,
-        #     'operation_overlap': operation_overlap})
-        # self.dump_overlap(
-        #     operation_overlap,
-        #     path=self._resource_overlap_json(process_name, phase_name),
-        #     venn_js_path=self._resource_overlap_venn_js_json(process_name, phase_name))
-
-        # all_categories = set()
-        # json_datas = []
-        # for bench_name in self.bench_names:
-        #     # json_data = overlap_computer.compute_per_operation_overlap(bench_name)
-        #     json_datas.append(json_data)
-        #
-        #     for combo_and_times in json_data['category_combo_times']:
-        #         category = _category_str(combo_and_times['category_combo'])
-        #         all_categories.add(category)
-
         if self.overlap_type == 'default':
             operation_overlap = overlap_obj.as_overlap_js(new_overlap)
-            assert len(operation_overlap) > 0
+            # assert len(operation_overlap) > 0
             self._do_plot_process_phase(operation_overlap, proc_stats, process_name, phase_name)
 
     def _do_plot_process_phase(self, operation_overlap, proc_stats, process_name=None, phase_name=None):
@@ -2411,7 +2315,7 @@ class UtilizationPlot:
         # for bench_name in self.bench_names:
         #     self.plotter.plot(bench_name)
         df = self.plotter.dataframe
-        assert len(df) != 0
+        # assert len(df) != 0
         self.plotter.plot(bench_name=None)
 
         self._dump_stats(proc_stats)
