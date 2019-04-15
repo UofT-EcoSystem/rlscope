@@ -38,6 +38,7 @@ class PythonFlameGraphParser:
     def parse_flame_graph(self, op_name, debug_label=None):
 
         # TODO: we only want samples belonging to <bench_name>
+        raise NotImplementedError("Need handle process_category_times[proc], and add process_name to process_events(...) call")
         category_times = self.sql_reader.process_events(
             keep_categories={CATEGORY_PYTHON_PROFILER, CATEGORY_OPERATION},
             op_name=op_name,
@@ -125,9 +126,9 @@ class PythonFlameGraphParser:
 
     def flame_graph_time_sec(self, op_stack):
         """
-        Return total time spent in the 
-        :param op_stack: 
-        :return: 
+        Return total time spent in the
+        :param op_stack:
+        :return:
         """
 
     def flame_graph_key(self, op_stack):
@@ -406,7 +407,8 @@ class PythonProfileParser:
         #     num_calls=self.num_calls))
         # start_parse_call_times = time.time()
         # self._parse_num_calls(op_name)
-        
+
+        raise NotImplementedError("Need handle process_category_times[proc], and add process_name to process_events(...) call")
         category_times = self.sql_reader.process_events(
             keep_categories={CATEGORY_PYTHON_PROFILER, CATEGORY_OPERATION},
             op_name=op_name,

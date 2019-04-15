@@ -15,6 +15,7 @@ import psycopg2
 import psycopg2.extras
 import random
 import string
+import itertools
 
 import pickle
 import sqlite3
@@ -2161,7 +2162,7 @@ class SQLCategoryTimesReader:
                 ...
             }
             """
-            proc_category_times = self.process_events(
+            process_category_times = self.process_events(
                 process_name=process_name,
                 phase_name=phase_name,
                 ignore_categories=ignore_categories,
@@ -2177,23 +2178,25 @@ class SQLCategoryTimesReader:
             # assert len(proc_category_times) > 0
             # assert len(proc_category_times[CATEGORY_OPERATION]) > 0
 
-            # assert CATEGORY_OPERATION in proc_category_times
-            if CATEGORY_OPERATION in proc_category_times:
-                """
-                Replace proc_category_times[CATEGORY_OPERATION], handle operation nesting.
-                We are assuming a single process is single-threaded here, so any operation 
-                nesting is form a single-threaded "call-stack".
-                """
-                proc_category_times[CATEGORY_OPERATION] = process_op_nest_single_thread(
-                    proc_category_times[CATEGORY_OPERATION],
-                    show_progress=debug,
-                    debug_label=process_label)
-                # Doesn't speed anything up on "test_load"
-                # proc_category_times[CATEGORY_OPERATION] = process_op_nest_parallel(
-                #     proc_category_times[CATEGORY_OPERATION],
-                #     show_progress=debug,
-                #     debug_label=process_label)
-                assert len(proc_category_times[CATEGORY_OPERATION]) > 0
+            for proc in process_category_times.keys():
+
+                # assert CATEGORY_OPERATION in proc_category_times
+                if CATEGORY_OPERATION in process_category_times[proc]:
+                    """
+                    Replace proc_category_times[CATEGORY_OPERATION], handle operation nesting.
+                    We are assuming a single process is single-threaded here, so any operation 
+                    nesting is form a single-threaded "call-stack".
+                    """
+                    process_category_times[proc][CATEGORY_OPERATION] = process_op_nest_single_thread(
+                        process_category_times[proc][CATEGORY_OPERATION],
+                        show_progress=debug,
+                        debug_label=process_label)
+                    # Doesn't speed anything up on "test_load"
+                    # proc_category_times[CATEGORY_OPERATION] = process_op_nest_parallel(
+                    #     proc_category_times[CATEGORY_OPERATION],
+                    #     show_progress=debug,
+                    #     debug_label=process_label)
+                    assert len(process_category_times[proc][CATEGORY_OPERATION]) > 0
 
             # proc_category = proc_as_category(process_name)
             # proc_types.add(proc_category)
@@ -2208,16 +2211,17 @@ class SQLCategoryTimesReader:
             #    i.e. merged_category_times = merge(ctimes_1[c], ctimes_2[c],
             #                                       by=event.start_time_usec)
             #    I'm not sure if we'll overcome the single-threaded merge time...
-            bin_category_times_single_thread(
-                # process_name, proc_category_times,
-                proc_category_times,
-                pre_reduce=pre_reduce,
-                # categories=categories, operation_types=operation_types,
-                category_times=category_times, debug=debug)
-            # Doesn't speed anything up on "test_load"
-            # bin_category_times_parallel(
-            #     process_name, proc_category_times,
-            #     categories, category_times, operation_types, debug)
+            for proc in process_category_times.keys():
+                bin_category_times_single_thread(
+                    # process_name, proc_category_times,
+                    process_category_times[proc],
+                    pre_reduce=pre_reduce,
+                    # categories=categories, operation_types=operation_types,
+                    category_times=category_times, debug=debug)
+                # Doesn't speed anything up on "test_load"
+                # bin_category_times_parallel(
+                #     process_name, proc_category_times,
+                #     categories, category_times, operation_types, debug)
 
         # Sanity check: Events are all sorted.
         for category, events in category_times.items():
@@ -2338,7 +2342,8 @@ class SQLCategoryTimesReader:
             -- Only keep events that are subsumed by an <op> event.
             -- e.g. Only keep pyprof events that belong to the set_operation('tree_search') annotation
             {op_clause}
-        ORDER BY start_time_us ASC 
+        ORDER BY 
+            p1.process_name, e1.start_time_us ASC 
         """).format(
             ignore_clause=sql_ignore_clause('c1', ignore_categories, keep_categories, indents=1),
             # CATEGORY_PROFILING=CATEGORY_PROFILING,
@@ -2395,12 +2400,19 @@ class SQLCategoryTimesReader:
             rows = c
 
         # start_t = time.time()
-        category_times = dict()
-        self._add_event_rows_to_category_times(
-            category_times, rows,
-            debug=debug,
-            show_progress=debug,
-            debug_label=debug_label)
+
+        # process_category_times:
+        # process_name -> CATEGORY_* -> times
+        process_category_times = dict()
+        for process_name, process_rows in itertools.groupby(rows, key=lambda row: row['process_name']):
+            assert process_name not in process_category_times
+            process_category_times[process_name] = dict()
+            self._add_event_rows_to_category_times(
+                process_category_times[process_name], process_rows,
+                debug=debug,
+                show_progress=debug,
+                debug_label=debug_label)
+
         # end_t = time.time()
         # if debug:
         #     time_sec = end_t - start_t
@@ -2409,7 +2421,7 @@ class SQLCategoryTimesReader:
         #         sec=time_sec,
         #     ))
 
-        return category_times
+        return process_category_times
 
 
     def _add_event_rows_to_category_times(self, category_times, rows,
@@ -3188,6 +3200,13 @@ def process_op_nest_single_thread(op_events, filter_by_op=None,
     :param op_events: List[KernelTime]
     :return:
     """
+
+    # Pre-condition:
+    # op_events are events from a SINGLE process, sorted by start_time_sec.
+    procs = set()
+    for event in op_events:
+        procs.add(event.process_name)
+    assert len(procs) == 1
 
     # NOTE: We could (but haven't) parallelize this by first scanning for
     # "contiguous chunks" of operations.

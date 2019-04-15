@@ -1,3 +1,5 @@
+import re
+
 import plot_index_data as idx
 
 idx.INDEX
@@ -54,6 +56,40 @@ class _DataIndex:
             ident = self.md_id(md, sel_order)
             yield md, entry, ident
 
+    def get_title(self, md):
+        """
+        Plot:{}, Process:{proc}, Phase:{phase}, ResourceOverlap:{resource_overlap}, Operation:{op}
+
+        :param md:
+        :return:
+        """
+
+        def pretty_field(field):
+            if field == 'overlap_type':
+                return 'Plot'
+            pretty = field
+            pretty = re.sub(r'(^[a-z])', r'\u', pretty)
+            pretty = re.sub(r'(^[a-z])', r'\u$1', pretty)
+            pretty = re.sub(r'(:?_([a-z]))', r'\u$1', pretty)
+            return pretty
+
+        value_sep = ', '
+        def pretty_value(value):
+            if type(value) in {list, tuple, set, frozenset}:
+                return "[" + value_sep.join(sorted(value)) + "]"
+
+            return str(value)
+
+        sub_title_sep = ', '
+        title = sub_title_sep.join([
+           "{field}:{value}".format(
+               field=pretty_field(field),
+               value=pretty_value(md[field]),
+           ) for field in _DataIndex.TITLE_ORDER if field in md
+        ])
+
+        return title
+
     def md_id(self, md, sel_order):
         """
         Valid <div id=*> format for id's in HTML:
@@ -104,6 +140,7 @@ class _DataIndex:
 
         return ident
 
+    TITLE_ORDER = ['overlap_type', 'process', 'phase', 'resource_overlap', 'operation']
     SEL_ORDER = {
         'CategoryOverlap': ['process', 'phase', 'resource_overlap', 'operation'],
         'ResourceOverlap': ['process', 'phase'],
@@ -141,11 +178,18 @@ class _DataIndex:
         """
 
         def sel(idx, sel_field):
+            if sel_field in selector and callable(selector[sel_field]):
+                for value, subtree in idx.items():
+                    if selector[sel_field](value):
+                        yield value, subtree
+                return
+
             if sel_field in selector:
                 value = selector[sel_field]
                 subtree = idx[value]
                 yield value, subtree
                 return
+
             for value, subtree in idx.items():
                 yield value, subtree
 

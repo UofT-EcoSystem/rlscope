@@ -1056,6 +1056,46 @@ class OverlapComputer:
             debug=debug_suffix(self.debug),
         ))
 
+    def _compute_metadata(self, category_times):
+        """
+        Q: How can we make the start/end time's zero-based?
+        A: We need to subtract the earliest time we are displaying.
+           So, bootstrap's start_time_usec serves as the "zero" time for the whole visualization.
+           The javascript code will have to handle that then.
+        metadata = {
+            start_time_usec: ...,
+            end_time_usec: ...,
+        }
+
+        :param category_times:
+        :return:
+        """
+        def get_extreme(extreme, key, default=None):
+            best = default
+            found = False
+            for cat, events in category_times.items():
+                if len(events) > 0:
+                    candidate = extreme(events, key=key)
+                    if best is None:
+                        best = candidate
+                    else:
+                        best = extreme(best, candidate, key=key)
+                    found = True
+            if found:
+                return key(best)
+            return default
+            # return extreme(
+            #     extreme(key(event) for event in category_times[cat])
+            #     for cat in category_times.keys()
+            # )
+
+        metadata = {
+            'start_time_usec':get_extreme(min, lambda event: event.start_time_usec),
+            'end_time_usec':get_extreme(max, lambda event: event.end_time_usec),
+        }
+        return metadata
+
+
     OVERLAP_TYPES = ['OperationOverlap', 'ResourceOverlap', 'ResourceSubplot', 'CategoryOverlap', 'default']
     def compute_process_timeline_overlap(self,
                                          pre_reduce,
@@ -1156,6 +1196,13 @@ class OverlapComputer:
                             'md':md})
                     assert len(category_key.procs) > 1
 
+        metadata = self._compute_metadata(category_times)
+
+        pprint.pprint({
+            'metadata': metadata,
+            'process_name':process_name,
+            'phase_name':phase_name})
+
         # NOTE: We can reduce across whatever dimensions we want to achieve different
         # levels/configurations of the drill-down.
         # Q: ... is that true?
@@ -1174,7 +1221,7 @@ class OverlapComputer:
         proc_stats = self._compute_process_timeline_stats(sql_reader, overlap)
 
         # return operation_overlap, proc_stats
-        return overlap, proc_stats
+        return overlap, proc_stats, metadata
 
     def _group_by_ops_resource(self, new_overlap):
         # set(operation categories) -> set(non-operation categories) -> [ CPU, GPU, CPU/GPU ] time
@@ -1410,9 +1457,10 @@ class OverlapTypeInterface:
             operation_overlap[new_key] = time_us
         return operation_overlap
 
-    def dump_json_files(self, new_overlap, directory, process_name, phase_name):
+    def dump_json_files(self, new_overlap, metadata, directory, process_name, phase_name):
         operation_overlap = self.as_overlap_js(new_overlap)
-        self.dump_overlap(operation_overlap,
+        self.dump_overlap(operation_overlap, metadata,
+                          directory=directory, process_name=process_name, phase_name=phase_name,
                           path=self._overlap_json(directory, process_name, phase_name),
                           venn_js_path=self._overlap_venn_js_json(directory, process_name, phase_name))
 
@@ -1430,22 +1478,21 @@ class OverlapTypeInterface:
             phase=phase_suffix(phase_name),
         ))
 
-    def dump_overlap(self, operation_overlap,
+    def dump_overlap(self, operation_overlap, metadata,
                      directory=None, process_name=None, phase_name=None,
                      path=None, venn_js_path=None):
-        metadata = {
-            'overlap_type': self.overlap_type,
-        }
+        md = dict(metadata)
+        md['overlap_type'] = self.overlap_type
         if process_name is not None:
-            metadata['process'] = process_name
+            md['process'] = process_name
         if phase_name is not None:
-            metadata['phase'] = phase_name
+            md['phase'] = phase_name
         if self.should_dump_as_is:
-            return self.dump_overlap_as_is(operation_overlap, metadata,
+            return self.dump_overlap_as_is(operation_overlap, md,
                      directory=directory, process_name=process_name, phase_name=phase_name,
                      path=path)
 
-        return self._dump_overlap(operation_overlap, metadata,
+        return self._dump_overlap(operation_overlap, md,
                                   directory=directory, process_name=process_name, phase_name=phase_name,
                                   path=path, venn_js_path=venn_js_path)
 
@@ -1869,7 +1916,7 @@ class OperationOverlapType(OverlapTypeInterface):
             resources=resources_suffix(resources),
         ))
 
-    def dump_json_files(self, new_overlap, directory, process_name, phase_name):
+    def dump_json_files(self, new_overlap, metadata, directory, process_name, phase_name):
         # Q: Why don't we need to call as_overlap_js here?
         overlap = self.as_overlap_js(new_overlap)
         for resources, op_overlap in overlap.items():
@@ -1880,14 +1927,15 @@ class OperationOverlapType(OverlapTypeInterface):
                     'resources':resources,
                     'op_overlap':op_overlap,
                 })
-            metadata = {
+            md = dict(metadata)
+            md.update({
                 'overlap_type': self.overlap_type,
                 'process': process_name,
                 'phase': phase_name,
                 'resource_overlap': sorted(resources),
-            }
+            })
             self._dump_overlap(
-                op_overlap, metadata,
+                op_overlap, md,
                 path=self._operation_overlap_json(directory, process_name, phase_name, resources),
                 venn_js_path=self._operation_overlap_venn_js_json(directory, process_name, phase_name, resources))
 
@@ -2013,7 +2061,7 @@ class CategoryOverlapType(OverlapTypeInterface):
             ops=ops_suffix(ops),
         ))
 
-    def dump_json_files(self, new_overlap, directory, process_name, phase_name):
+    def dump_json_files(self, new_overlap, metadata, directory, process_name, phase_name):
         """
         For op in ops(process, phases):
           key = CategoryKey[ops=[op]]
@@ -2037,7 +2085,8 @@ class CategoryOverlapType(OverlapTypeInterface):
         for ops, category_overlap in overlap.items():
             assert len(ops) == 1
             op = next(iter(ops))
-            metadata = {
+            md = dict(metadata)
+            md.update({
                 'overlap_type': self.overlap_type,
                 'process': process_name,
                 'phase': phase_name,
@@ -2045,9 +2094,9 @@ class CategoryOverlapType(OverlapTypeInterface):
                 # in the future we may have more fine-grained GPU categories.
                 'resource_overlap': sorted([CATEGORY_CPU]),
                 'operation': op,
-            }
+            })
             self._dump_overlap(
-                category_overlap, metadata,
+                category_overlap, md,
                 path=self._category_overlap_json(directory, process_name, phase_name, ops),
                 venn_js_path=self._category_overlap_venn_js_json(directory, process_name, phase_name, ops))
 

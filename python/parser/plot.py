@@ -1920,7 +1920,7 @@ class ResourceOverlapPlotData:
                                            debug=self.debug,
                                            debug_ops=self.debug_ops)
 
-        operation_overlap, proc_stats = overlap_computer.compute_process_timeline_overlap(
+        operation_overlap, proc_stats, metadata = overlap_computer.compute_process_timeline_overlap(
             process_name=process_name,
             phase_name=phase_name,
             debug_memoize=self.debug_memoize)
@@ -2042,8 +2042,8 @@ class UtilizationPlot:
     """
     CPU/GPU utilization over training.
     """
-    # DEBUG_MINIGO = False
-    DEBUG_MINIGO = True
+    DEBUG_MINIGO = False
+    # DEBUG_MINIGO = True
     RESOURCE_TYPES = [CATEGORY_CPU, CATEGORY_GPU]
     def __init__(self, directory,
                  step_sec=1.,
@@ -2219,22 +2219,23 @@ class UtilizationPlot:
         if self.overlap_type == 'OperationOverlap':
             # For OperationOverlap, select events across ALL execution that is concurrent with this process/phase.
             # (a "vertical-slice" of the SummaryView).
-            overlap, proc_stats = overlap_computer.compute_process_timeline_overlap(
+            overlap, proc_stats, metadata = overlap_computer.compute_process_timeline_overlap(
                 overlap_obj.pre_reduce,
                 start_time_us=phase.phase_start_time_us,
                 end_time_us=phase.phase_end_time_us,
                 debug_memoize=self.debug_memoize,
                 overlap_type=self.overlap_type)
         else:
-            overlap, proc_stats = overlap_computer.compute_process_timeline_overlap(
+            overlap, proc_stats, metadata = overlap_computer.compute_process_timeline_overlap(
                 overlap_obj.pre_reduce,
                 process_name=process_name,
                 phase_name=phase_name,
                 debug_memoize=self.debug_memoize,
                 overlap_type=self.overlap_type)
 
-        if self.debug:
-            self._dump_process_timeline_json(overlap)
+        # NOTE: FAILS for OperationOverlap.
+        # if self.debug:
+        #     self._dump_process_timeline_json(overlap)
 
         new_overlap = overlap
         # assert len(new_overlap) > 0
@@ -2242,7 +2243,7 @@ class UtilizationPlot:
         new_overlap = overlap_obj.post_reduce(new_overlap)
         # assert len(new_overlap) > 0
 
-        overlap_obj.dump_json_files(new_overlap, self.directory, process_name, phase_name)
+        overlap_obj.dump_json_files(new_overlap, metadata, self.directory, process_name, phase_name)
 
         if self.overlap_type == 'default':
             operation_overlap = overlap_obj.as_overlap_js(new_overlap)

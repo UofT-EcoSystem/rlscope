@@ -40,7 +40,8 @@ _process_minigo() {
 
 #    for overlap_type in ResourceOverlap ResourceSubplot CategoryOverlap OperationOverlap; do
 #    for overlap_type in ResourceOverlap ResourceSubplot OperationOverlap; do
-    for overlap_type in OperationOverlap; do
+#    for overlap_type in OperationOverlap; do
+    for overlap_type in ResourceOverlap ResourceSubplot; do
         (
         echo "> overlap_type = $overlap_type"
         _do python3 $IML/python/profiler/run_benchmark.py \
