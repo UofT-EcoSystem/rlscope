@@ -22,12 +22,13 @@ from parser.common import *
 # from profiler.profilers import trace_suffix, get_util_sampler_parser, MIN_UTIL_SAMPLE_FREQUENCY_SEC
 
 class GeneratePlotIndex:
-    def __init__(self, directory,
+    def __init__(self, directory, out_dir,
                  basename=None,
                  debug=False,
                  replace=False,
                  dry_run=False):
         self.directory = directory
+        self.out_dir = out_dir
         self.basename = basename
         self.debug = debug
         self.replace = replace
@@ -123,7 +124,7 @@ class GeneratePlotIndex:
 
     @property
     def plot_index_path(self):
-        return _j(self.directory, self.basename)
+        return _j(self.out_dir, self.basename)
 
     def dump_plot_index_py(self):
         cmd = sys.argv
@@ -135,7 +136,7 @@ class GeneratePlotIndex:
 
         with open(self.plot_index_path, 'w') as f:
 
-            contents = textwrap.dedent("""
+            contents = textwrap.dedent("""\
                 #!/usr/bin/env python3
                 
                 ### GENERATED FILE; do NOT modify!
@@ -148,14 +149,14 @@ class GeneratePlotIndex:
                 DIRECTORY = "{dir}"
                 INDEX = \\
                 {index}
-                """.format(
+                """).format(
                 dir=os.path.realpath(self.directory),
                 index=textwrap.indent(
                     pprint.pformat(self.index),
                     prefix="    "),
                 cmd=" ".join(cmd),
                 pwd=os.getcwd(),
-            ))
+            )
             if self.debug:
                 print()
                 print("> Generated file: {path}".format(path=self.plot_index_path))
@@ -167,7 +168,7 @@ class GeneratePlotIndex:
         if not self.dry_run:
             shutil.copyfile(
                 _j(py_config.ROOT, 'python/scripts/plot_index.py'),
-                _j(self.directory, 'plot_index.py'),
+                _j(self.out_dir, 'plot_index.py'),
             )
 
 def mkd(dic, key):
@@ -188,6 +189,11 @@ def main():
     Look for *.venn_js.json rooted at this directory.
     The output file will be <directory>/plot_index_data.py.
     All the venn_js_path's in the index will be relative to --directory.
+    """))
+    parser.add_argument('--out-dir',
+                        help=textwrap.dedent("""
+    The output file will be <out-dir>/plot_index_data.py.
+    Default: --directory
     """))
     parser.add_argument('--debug',
                         action='store_true',
@@ -211,8 +217,12 @@ def main():
     """))
     args = parser.parse_args()
 
+    if args.out_dir is None:
+        args.out_dir = args.directory
+
     obj = GeneratePlotIndex(
         directory=args.directory,
+        out_dir=args.out_dir,
         basename=args.basename,
         debug=args.debug,
         replace=args.replace,

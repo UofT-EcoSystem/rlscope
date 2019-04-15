@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 export IML=$HOME/clone/dnn_tensorflow_cpp
+export IML_DRILL=$HOME/clone/iml-drill
 
 _activate_virtualenv_cuda9() {
     source $HOME/envs/cuda9/bin/activate
