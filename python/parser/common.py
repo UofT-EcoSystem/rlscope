@@ -1049,12 +1049,22 @@ def step_suffix(step, allow_none=False):
         return ""
     return ".step_{id}".format(id=step)
 
-def device_id_suffix(device_id, allow_none=False):
+def device_id_suffix(device_id, device_name=None, allow_none=False):
     if device_id is None and not allow_none:
         raise RuntimeError("device_id must be >= 0, got None")
 
-    if device_id is not None:
-        return ".device_id_{id}".format(id=device_id)
+    if device_id is not None and device_name is not None:
+        name = device_name
+        name = re.sub(r' ', '_', name)
+        return ".device_{id}_{name}".format(
+            id=device_id,
+            name=name,
+        )
+    elif device_id is not None:
+        return ".device_{id}".format(
+            id=device_id,
+        )
+
     return ""
 
 

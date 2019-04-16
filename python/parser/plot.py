@@ -2462,14 +2462,19 @@ class HeatScalePlot:
     def get_source_files(self):
         return sql_get_source_files(self.__class__, self.directory)
 
-    def get_util_scale_png(self, device_id):
+    def get_util_scale_png(self, device_id, device_name):
         return _j(self.directory, "util_scale{dev}.png".format(
-            dev=device_id_suffix(device_id),
+            dev=device_id_suffix(device_id, device_name),
         ))
 
-    def _plot_data_path(self, device_id):
+    def _plot_data_path(self, device_id, device_name):
         return _j(self.directory, "util_scale.plot_data{dev}.txt".format(
-            dev=device_id_suffix(device_id),
+            dev=device_id_suffix(device_id, device_name),
+        ))
+
+    def _json_path(self, device_id, device_name):
+        return _j(self.directory, "util_scale{dev}.js_path.json".format(
+            dev=device_id_suffix(device_id, device_name),
         ))
 
     def run(self):
@@ -2481,10 +2486,42 @@ class HeatScalePlot:
 
         # The start time of all traced Events / utilization samples.
         # Use this as the "starting point" of the heat-scale.
+
+        # TODO: How can we make things "match up" with the SummaryView?
+        # Options:
+        #
+        # 1. Show utilization from [start_time_usec .. start_time_usec + duration_sec].
+        #
+        #    We currently use start_time_usec from events to decide on initial plot locations;
+        #    so ideally we would sample the utilization samples running from:
+        #    [start_time_usec .. start_time_usec + duration_sec] for each phase.
+        #    PROBLEM:
+        #    - actual time shown in subplots spans ~ 531 seconds;
+        #    - total time according to utilization data is ~ 1244 seconds.
+        #
+        #    PRO: utilization will "appear" to match up with ResourceSubplot.
+        #    CON: utilization will not actually match up with ResourceSubplot.
+        #    PRO: easiest to implement.
+        #
+        # 2. "Condense" utilization from [subplot.start_time_usec .. subplot.end_time_usec] to fit within subplot height;
+        #    don't show time-scale.
+        #
+        #    "Operations" may not capture all CPU/GPU activity.
+        #    However, we can still show a condensed view of overall hardware utilization during that time.
+        #
+        #    CON: if "operations" are wrong, maybe we didn't capture high activity and so our ResourceSubplot subplot
+        #         will look wrong in comparison.
+        #    PRO: true hardware utilization is shown for "some" interval of time
+        #
+        # 3. Only keeps utilization samples that "match up" with the spans of time that make up our ResourceSubplot plots.
+        #    PRO: ResourceOverlap and HeatScale will "match up".
+        #    CON: We may be missing actual hardware utilization (programmer annotations are wrong)
+        #    CON: time-consuming to implement.
+
         start_time_sec = self.sql_reader.trace_start_time_sec
         for device in self.sql_reader.util_devices:
             samples = self.sql_reader.util_samples(device)
-            png = self.get_util_scale_png(device.device_id)
+            png = self.get_util_scale_png(device.device_id, device.device_name)
             plotter = HeatScale(
                 color_value='util', y_axis='start_time_sec',
                 png=png,
@@ -2513,12 +2550,32 @@ class HeatScalePlot:
             }
             plot_df = pd.DataFrame(norm_samples).astype(float)
             self.dump_plot_data(plot_df, device)
+            self.dump_js_data(norm_samples, device, start_time_sec)
             plotter.add_data(norm_samples)
             print("> HeatScalePlot @ {path}".format(path=png))
             plotter.plot()
 
+    def dump_js_data(self, norm_samples, device, start_time_sec):
+        js = {
+            'metadata': {
+                'plot_type': 'HeatScale',
+                'device_id': device.device_id,
+                'device_name': device.device_name,
+                'start_time_usec': float(start_time_sec)*MICROSECONDS_IN_SECOND,
+                'step_usec': self.step_sec*MICROSECONDS_IN_SECOND,
+                'decay': self.decay,
+            },
+            'data': {
+                'util': norm_samples['util'],
+                'start_time_sec': norm_samples['start_time_sec'],
+            },
+        }
+        path = self._json_path(device.device_id, device.device_name)
+        print("> HeatScalePlot @ plot data @ {path}".format(path=path))
+        do_dump_json(js, path)
+
     def dump_plot_data(self, plot_df, device):
-        path = self._plot_data_path(device.device_id)
+        path = self._plot_data_path(device.device_id, device.device_name)
         print("> HeatScalePlot @ plot data @ {path}".format(path=path))
         with open(path, 'w') as f:
             DataFrame.print_df(plot_df, file=f)

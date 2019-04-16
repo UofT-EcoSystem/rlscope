@@ -40,7 +40,7 @@ class GeneratePlotIndex:
         for dirpath, dirnames, filenames in os.walk(self.directory):
             for base in filenames:
                 path = _j(dirpath, base)
-                if self.is_venn_js_path(path):
+                if self.is_venn_js_path(path) or self.is_js_path(path):
                     yield path
 
     def is_venn_js_path(self, path):
@@ -53,6 +53,11 @@ class GeneratePlotIndex:
         m = re.search(r'\.overlap_js\.json$', base)
         return m
 
+    def is_js_path(self, path):
+        base = _b(path)
+        m = re.search(r'\.js_path\.json$', base)
+        return m
+
     def read_metadata(self, path):
         with open(path, 'r') as f:
             js = json.load(f)
@@ -62,43 +67,56 @@ class GeneratePlotIndex:
         return md
 
     def lookup_entry(self, md, path=None):
-        if md['overlap_type'] == 'CategoryOverlap':
+        if 'overlap_type' in md:
+            if md['overlap_type'] == 'CategoryOverlap':
 
-            # self.index['process'][md['process']] \
-            #     ['phase'][md['phase']] \
-            # ['resource_overlap'][tuple(md['resource_overlap'])] \
-            #     ['operation'][tuple(md['operation'])] \
-            #     ['venn_js_path'] = venn_js_path
-            return mkds(self.index,
-                 md['overlap_type'],
-                 'process', md['process'],
-                 'phase', md['phase'],
-                 'resource_overlap', tuple(md['resource_overlap']),
-                 'operation', md['operation'],
-                 )
+                # self.index['process'][md['process']] \
+                #     ['phase'][md['phase']] \
+                # ['resource_overlap'][tuple(md['resource_overlap'])] \
+                #     ['operation'][tuple(md['operation'])] \
+                #     ['venn_js_path'] = venn_js_path
+                return mkds(self.index,
+                     md['overlap_type'],
+                     'process', md['process'],
+                     'phase', md['phase'],
+                     'resource_overlap', tuple(md['resource_overlap']),
+                     'operation', md['operation'],
+                     )
 
-        elif md['overlap_type'] in ['ResourceOverlap', 'ResourceSubplot']:
-            return mkds(self.index,
-                 md['overlap_type'],
-                 'process', md['process'],
-                 'phase', md['phase'],
-                 )
+            elif md['overlap_type'] in ['ResourceOverlap', 'ResourceSubplot']:
+                return mkds(self.index,
+                     md['overlap_type'],
+                     'process', md['process'],
+                     'phase', md['phase'],
+                     )
 
-        elif md['overlap_type'] == 'OperationOverlap':
-            return mkds(self.index,
-                 md['overlap_type'],
-                 'process', md['process'],
-                 'phase', md['phase'],
-                 'resource_overlap', tuple(md['resource_overlap']),
-                 )
+            elif md['overlap_type'] == 'OperationOverlap':
+                return mkds(self.index,
+                     md['overlap_type'],
+                     'process', md['process'],
+                     'phase', md['phase'],
+                     'resource_overlap', tuple(md['resource_overlap']),
+                     )
 
-        else:
-            raise NotImplementedError(
-                ("Not sure how to insert OverlapType={OverlapType} for path={path} into index; "
-                 "metadata = {md}").format(
-                    OverlapType=md['overlap_type'],
-                    path=path,
-                    md=md))
+            else:
+                raise NotImplementedError(
+                    ("Not sure how to insert OverlapType={OverlapType} for path={path} into index; "
+                     "metadata = {md}").format(
+                        OverlapType=md['overlap_type'],
+                        path=path,
+                        md=md))
+        elif 'plot_type' in md:
+            if md['plot_type'] == 'HeatScale':
+                return mkds(self.index,
+                            md['plot_type'],
+                            'device_name', md['device_name'])
+            else:
+                raise NotImplementedError(
+                    ("Not sure how to insert plot_type={PlotType} for path={path} into index; "
+                     "metadata = {md}").format(
+                        OverlapType=md['plot_type'],
+                        path=path,
+                        md=md))
 
     def run(self):
         for path in self.each_file():
@@ -117,6 +135,8 @@ class GeneratePlotIndex:
                 entry['venn_js_path'] = relpath
             elif self.is_overlap_js_path(path):
                 entry['overlap_js_path'] = relpath
+            elif self.is_js_path(path):
+                entry['js_path'] = relpath
             else:
                 raise NotImplementedError
 

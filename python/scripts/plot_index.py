@@ -11,6 +11,7 @@ SEL_ORDER = {
     'ResourceOverlap': ['process', 'phase'],
     'ResourceSubplot': ['process', 'phase'],
     'OperationOverlap': ['process', 'phase', 'resource_overlap'],
+    'HeatScale': ['device_name'],
 }
 
 class _DataIndex:
@@ -42,10 +43,17 @@ class _DataIndex:
             }
         :return:
         """
-        assert 'overlap_type' in selector
-        for md, entry in _sel_idx(self.index, selector):
-            md['overlap_type'] = selector['overlap_type']
-            sel_order = SEL_ORDER[selector['overlap_type']]
+        if 'overlap_type' in selector:
+            field = 'overlap_type'
+        elif 'plot_type' in selector:
+            field = 'plot_type'
+        else:
+            assert False
+
+        for md, entry in _sel_idx(self.index, selector, field):
+            md[field] = selector[field]
+            sel_order = SEL_ORDER[selector[field]]
+            pprint.pprint({'entry':entry})
             ident = self.md_id(md, sel_order)
             new_entry = self._adjust_paths(entry)
             pprint.pprint({'md':md, 'entry':new_entry, 'ident':ident})
@@ -132,6 +140,7 @@ class _DataIndex:
         :return:
         """
         for field in sel_order:
+            pprint.pprint({'field': field, 'md': md, 'sel_order':sel_order})
             assert field in md
 
         field_value_sep = '_'
@@ -157,7 +166,7 @@ class _DataIndex:
 
         return ident
 
-def _sel_idx(idx, selector):
+def _sel_idx(idx, selector, field):
     """
     Generalize this code across all the different OverlapType's:
 
@@ -188,7 +197,7 @@ def _sel_idx(idx, selector):
     """
     md = dict()
     level = 0
-    for overlap, subtree in _sel(selector, idx, 'overlap_type'):
+    for overlap, subtree in _sel(selector, idx, field):
         sel_order = SEL_ORDER[overlap]
         for md, entry in _sel_all(selector, sel_order, level, md, subtree):
             yield md, entry
