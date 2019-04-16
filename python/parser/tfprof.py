@@ -1,6 +1,7 @@
 import re
 from decimal import Decimal
 import numbers
+import copy
 import time
 import sys
 import os
@@ -143,10 +144,13 @@ class ComputeOverlap:
 
     def compute_times(self):
         # set(c1, ..., cn) -> time in seconds
-        self.times = self._compute_overlap(self.merged_category_times)
+        self.times, self.overlap_metadata = self._compute_overlap(self.merged_category_times)
 
     def get_category_times(self):
         return self.times
+
+    def get_overlap_metadata(self):
+        return self.overlap_metadata
 
     def get_merged_categories(self):
         return self.merged_category_times
@@ -328,6 +332,92 @@ class CategoryTimesWrapper:
     def total_left(by_start, by_end):
         return by_start.count_times_left() + by_end.count_times_left()
 
+class RegionMetadata:
+    def __init__(self, category_key=None):
+        self.category_key = category_key
+        self.start_time_usec = None
+        self.end_time_usec = None
+        self.num_events = 0
+
+    def add_event(self, event):
+        if self.start_time_usec is None or event.start_time_usec < self.start_time_usec:
+            self.start_time_usec = event.start_time_usec
+
+        if self.end_time_usec is None or event.end_time_usec > self.end_time_usec:
+            self.end_time_usec = event.end_time_usec
+
+        self.num_events += 1
+
+    def merge_inplace(self, region2):
+        region1 = self
+        region1.start_time_usec = min([
+            x for x in [region1.start_time_usec, region2.start_time_usec]
+            if x is not None],
+            default=None)
+        region1.end_time_usec = max([
+            x for x in [region1.end_time_usec, region2.end_time_usec]
+            if x is not None],
+            default=None)
+        region1.num_events = region1.num_events + region2.num_events
+        return region1
+
+    def __str__(self):
+        return "(key={key}, start_usec={start}, end_usec={end}, num_events={num_events})".format(
+            key=self.category_key,
+            start=self.start_time_usec,
+            end=self.end_time_usec,
+            num_events=self.num_events)
+
+class OverlapMetadata:
+    """
+    When computing overlap between categories,
+    compute some useful statistics about each overlap region:
+
+    - region.start_time_usec:
+      The earliest event.start_time_usec that has contributed to this region.
+
+    - region.end_time_usec:
+      The latest event.end_time_usec that has contributed to this region.
+    """
+    def __init__(self):
+        # CategoryKey -> RegionMetadata
+        self.regions = dict()
+
+    def add_event(self, category_key, event):
+        if category_key not in self.regions:
+            self.regions[category_key] = RegionMetadata(category_key)
+
+        self.regions[category_key].add_event(event)
+
+    @staticmethod
+    def merge_regions(regions):
+        region = RegionMetadata()
+        for r in regions:
+            region.merge_inplace(r)
+        return region
+
+    def merge_keys(self, category_key1, category_key2, new_category_key):
+        region1 = self.regions[category_key1]
+        region2 = self.regions[category_key2]
+        region = region1.merge(region2, new_category_key)
+        del self.regions[category_key1]
+        del self.regions[category_key2]
+
+        # Q: Perhaps we're merging into an existing region though...
+        assert new_category_key not in self.regions
+        self.regions[new_category_key] = region
+
+    def get_region(self, category_key):
+        return self.regions[category_key]
+
+    def merge_region(self, category_key, region):
+        if category_key not in self.regions:
+            self.regions[category_key] = RegionMetadata(category_key)
+        self.regions[category_key].merge_inplace(region)
+
+    def __str__(self):
+        return "OverlapMetadata(regions={regions})".format(regions=self.regions)
+
 def compute_overlap_single_thread(
     category_times,
     overlaps_with=None,
@@ -339,6 +429,8 @@ def compute_overlap_single_thread(
     pprint.pprint({
         'compute_overlap_single_thread.debug':debug,
     })
+
+    overlap_metadata = OverlapMetadata()
 
     start_key = lambda ktime: ktime.start_time_usec
     reversed_start_key = lambda ktime: - ktime.start_time_usec
@@ -368,7 +460,7 @@ def compute_overlap_single_thread(
     times = dict()
 
     if len(category_times) == 0:
-        return dict()
+        return dict(), overlap_metadata
 
     min_category, min_ktime = by_start.min_time()
     start_or_end = by_start
@@ -423,6 +515,7 @@ def compute_overlap_single_thread(
             if categories_key not in times:
                 NumberType = type(time_chunk)
                 times[categories_key] = NumberType(0.)
+            overlap_metadata.add_event(categories_key, min_ktime)
             times[categories_key] += time_chunk
 
         if debug:
@@ -483,7 +576,7 @@ def compute_overlap_single_thread(
         for categories_key in del_keys:
             del times[categories_key]
 
-    return times
+    return times, overlap_metadata
 
 class CategoryTimesWalker:
     def __init__(self, category_times):
@@ -840,63 +933,62 @@ class OverlapComputer:
     def directory(self):
         return _d(self.db_path)
 
-    def _compute_process_timeline_stats(self, sql_reader, overlap):
-        """
-
-        Q: What's the total time spent tracing that isn't captured by ANY tracing events?
-        i.e.
-        missing_traced_time_sec = total_trace_time_sec - time_overlap(anything)
-                                                         ----------------------
-                                                         traced_time_sec
-
-        Q: What's the total time spent tracing that ISN'T captured by operation trace events?
-        i.e.
-        missing_op_time_sec = total_trace_time_sec - time_overlap(with operation-type)
-
-        Q: What's the total time spent tracing that ISN'T captured by CPU/GPU operation trace events?
-        i.e.
-        missing_op_time_sec = total_trace_time_sec - time_overlap(with CPU/GPU operations)
-                                                     -------------------------------------
-                                                     traced_op_time_sec
-
-        :param overlap
-          Output from:
-            category_times, ... = sql_reader.parse_timeline()
-            compute_overlap = ComputeOverlap(category_times)
-            compute_overlap.compute()
-            overlap = compute_overlap.get_category_times()
-        """
-        # NOTE: it's nicer to work with
-        new_overlap_01 = reduce_category_keys(overlap)
-        NumberType = float
-        if len(new_overlap_01) > 0:
-            NumberType = type(next(iter(new_overlap_01.values())))
-        traced_time_sec = NumberType(0.)
-        traced_op_time_sec = NumberType(0.)
-        for category_key, time_us in new_overlap_01.items():
-            traced_time_sec += time_us/NumberType(MICROSECONDS_IN_SECOND)
-            if len(category_key.ops) > 0:
-                traced_op_time_sec += time_us/NumberType(MICROSECONDS_IN_SECOND)
-
-        total_trace_time_sec = sql_reader.total_trace_time_sec(debug=self.debug)
-        missing_traced_time_sec = total_trace_time_sec - as_type(traced_time_sec, type(total_trace_time_sec))
-        missing_op_time_sec = total_trace_time_sec - as_type(traced_op_time_sec, type(total_trace_time_sec))
-
-        proc_stats = {
-            # Tracing time that ISN'T covered by ANY trace-events.
-            # Q: How to fix?
-            # - Not sure... reduce "gaps" between traced events?
-            'missing_traced_time_sec':missing_traced_time_sec,
-            # Tracing time that ISN'T covered by ANY operation trace-events.
-            # Q: How to fix?
-            # - Add more set_operation calls to ML script.
-            'missing_op_time_sec':missing_op_time_sec,
-        }
-        return proc_stats
-
+    # def _compute_process_timeline_stats(self, sql_reader, overlap):
+    #     """
+    #
+    #     Q: What's the total time spent tracing that isn't captured by ANY tracing events?
+    #     i.e.
+    #     missing_traced_time_sec = total_trace_time_sec - time_overlap(anything)
+    #                                                      ----------------------
+    #                                                      traced_time_sec
+    #
+    #     Q: What's the total time spent tracing that ISN'T captured by operation trace events?
+    #     i.e.
+    #     missing_op_time_sec = total_trace_time_sec - time_overlap(with operation-type)
+    #
+    #     Q: What's the total time spent tracing that ISN'T captured by CPU/GPU operation trace events?
+    #     i.e.
+    #     missing_op_time_sec = total_trace_time_sec - time_overlap(with CPU/GPU operations)
+    #                                                  -------------------------------------
+    #                                                  traced_op_time_sec
+    #
+    #     :param overlap
+    #       Output from:
+    #         category_times, ... = sql_reader.parse_timeline()
+    #         compute_overlap = ComputeOverlap(category_times)
+    #         compute_overlap.compute()
+    #         overlap = compute_overlap.get_category_times()
+    #     """
+    #     # NOTE: it's nicer to work with
+    #     new_overlap_01 = reduce_category_keys(overlap)
+    #     NumberType = float
+    #     if len(new_overlap_01) > 0:
+    #         NumberType = type(next(iter(new_overlap_01.values())))
+    #     traced_time_sec = NumberType(0.)
+    #     traced_op_time_sec = NumberType(0.)
+    #     for category_key, time_us in new_overlap_01.items():
+    #         traced_time_sec += time_us/NumberType(MICROSECONDS_IN_SECOND)
+    #         if len(category_key.ops) > 0:
+    #             traced_op_time_sec += time_us/NumberType(MICROSECONDS_IN_SECOND)
+    #
+    #     total_trace_time_sec = sql_reader.total_trace_time_sec(debug=self.debug)
+    #     missing_traced_time_sec = total_trace_time_sec - as_type(traced_time_sec, type(total_trace_time_sec))
+    #     missing_op_time_sec = total_trace_time_sec - as_type(traced_op_time_sec, type(total_trace_time_sec))
+    #
+    #     proc_stats = {
+    #         # Tracing time that ISN'T covered by ANY trace-events.
+    #         # Q: How to fix?
+    #         # - Not sure... reduce "gaps" between traced events?
+    #         'missing_traced_time_sec':missing_traced_time_sec,
+    #         # Tracing time that ISN'T covered by ANY operation trace-events.
+    #         # Q: How to fix?
+    #         # - Add more set_operation calls to ML script.
+    #         'missing_op_time_sec':missing_op_time_sec,
+    #     }
+    #     return proc_stats
 
     def reduce_overlap_resource_operation(
-            self, overlap,
+            self, overlap, overlap_metadata,
             categories, operation_types, proc_types,
             group_self_overlap=False):
         """
@@ -930,6 +1022,7 @@ class OverlapComputer:
         """
 
         new_overlap = dict()
+        new_overlap_metadata = OverlapMetadata()
         for overlap_key, times in overlap.items():
 
             if len(overlap_key.ops) > 1:
@@ -956,6 +1049,7 @@ class OverlapComputer:
                                       non_ops=overlap_key.non_ops,
                                       procs=frozenset())
                 _add_key(new_overlap, new_key, times)
+                new_overlap_metadata.merge_region(new_key, overlap_metadata.get_region(overlap_key))
                 continue
 
             if len(overlap_key.ops) >= 1 and len(overlap_key.procs) >= 1:
@@ -968,6 +1062,7 @@ class OverlapComputer:
                                       non_ops=overlap_key.non_ops,
                                       procs=frozenset())
                 _add_key(new_overlap, new_key, times)
+                new_overlap_metadata.merge_region(new_key, overlap_metadata.get_region(overlap_key))
                 continue
 
             if self.debug:
@@ -976,17 +1071,18 @@ class OverlapComputer:
                 })
             raise NotImplementedError("Not sure how to reduce overlap keys for overlap_key={key}".format(key=overlap_key))
 
-        return new_overlap
+        return new_overlap, new_overlap_metadata
 
     # PROBLEM: CategoryKey has lost whether q_forward belonged to p1 or p2...
     def reduce_overlap_ResourceOverlap(
-            self, overlap,
+            self, overlap, overlap_metadata,
             categories, operation_types, proc_types):
         """
         Group keys by resource-type (non_ops).
         """
 
         new_overlap = dict()
+        new_overlap_metadata = OverlapMetadata()
         for overlap_key, times in overlap.items():
 
             if len(overlap_key.ops) > 1:
@@ -997,16 +1093,18 @@ class OverlapComputer:
                                   non_ops=overlap_key.non_ops,
                                   procs=frozenset())
             _add_key(new_overlap, new_key, times)
+            new_overlap_metadata.merge_region(new_key, overlap_metadata.get_region(overlap_key))
 
-        return new_overlap
+        return new_overlap, new_overlap_metadata
 
     def reduce_overlap_ResourceSubplot(
-            self, overlap,
+            self, overlap, overlap_metadata,
             categories, operation_types, proc_types):
         """
         Group keys by resource-type (non_ops).
         """
         new_overlap = dict()
+        new_overlap_metadata = OverlapMetadata()
         for overlap_key, times in overlap.items():
 
             if len(overlap_key.ops) > 1:
@@ -1025,16 +1123,18 @@ class OverlapComputer:
                                       non_ops=frozenset([resource_type]),
                                       procs=frozenset())
                 _add_key(new_overlap, new_key, times)
+                new_overlap_metadata.merge_region(new_key, overlap_metadata.get_region(overlap_key))
 
                 new_key = CategoryKey(ops=frozenset(),
                                       non_ops=frozenset([CATEGORY_TOTAL]),
                                       procs=frozenset())
                 _add_key(new_overlap, new_key, times)
+                new_overlap_metadata.merge_region(new_key, overlap_metadata.get_region(overlap_key))
 
-        return new_overlap
+        return new_overlap, new_overlap_metadata
 
     def reduce_overlap_OperationOverlap(
-            self, overlap,
+            self, overlap, overlap_metadata,
             categories, operation_types, proc_types):
         """
         Remove keys that don't match CPU(?).
@@ -1042,11 +1142,9 @@ class OverlapComputer:
         Group keys by operation-type (non_ops).
         """
         return self.reduce_overlap_resource_operation(
-            overlap,
+            overlap, overlap_metadata,
             categories, operation_types, proc_types,
             group_self_overlap=True)
-
-        return new_overlap
 
     def _debug_trace_events_path(self, process_name, phase_name):
         return _j(self.directory, "OverlapComputer.trace_events{proc}{phase}{debug}.json".format(
@@ -1196,12 +1294,11 @@ class OverlapComputer:
                             'md':md})
                     assert len(category_key.procs) > 1
 
-        metadata = self._compute_metadata(category_times)
-
-        pprint.pprint({
-            'metadata': metadata,
-            'process_name':process_name,
-            'phase_name':phase_name})
+        # metadata = self._compute_metadata(category_times)
+        # pprint.pprint({
+        #     'metadata': metadata,
+        #     'process_name':process_name,
+        #     'phase_name':phase_name})
 
         # NOTE: We can reduce across whatever dimensions we want to achieve different
         # levels/configurations of the drill-down.
@@ -1212,16 +1309,23 @@ class OverlapComputer:
                                          show_progress=self.debug)
         compute_overlap.compute()
         overlap = compute_overlap.get_category_times()
+        overlap_metadata = compute_overlap.get_overlap_metadata()
         # maybe_memoize(debug_memoize, overlap, self._compute_overlap_memo_path())
         # assert len(overlap) > 0
+
+        pprint.pprint({
+            'overlap_metadata': overlap_metadata,
+            'process_name':process_name,
+            'phase_name':phase_name})
 
         # if self.debug:
         #     pprint.pprint({'overlap.keys()':list(overlap.keys())})
 
-        proc_stats = self._compute_process_timeline_stats(sql_reader, overlap)
+        # proc_stats = self._compute_process_timeline_stats(sql_reader, overlap)
+        proc_stats = None
 
         # return operation_overlap, proc_stats
-        return overlap, proc_stats, metadata
+        return overlap, proc_stats, overlap_metadata
 
     def _group_by_ops_resource(self, new_overlap):
         # set(operation categories) -> set(non-operation categories) -> [ CPU, GPU, CPU/GPU ] time
@@ -1449,20 +1553,27 @@ class OverlapTypeInterface:
     We have a sub-class for each overlap-type.
     """
 
-    def as_overlap_js(self, new_overlap):
+    def as_js_dict(self, new_overlap):
         operation_overlap = dict()
-        for category_key, time_us in new_overlap.items():
+        for category_key, value in new_overlap.items():
             new_key = self.category_key_as_strs(category_key)
             assert new_key not in operation_overlap
-            operation_overlap[new_key] = time_us
+            operation_overlap[new_key] = value
         return operation_overlap
 
-    def dump_json_files(self, new_overlap, metadata, directory, process_name, phase_name):
-        operation_overlap = self.as_overlap_js(new_overlap)
-        self.dump_overlap(operation_overlap, metadata,
+    def dump_json_files(self, new_overlap, new_overlap_metadata, directory, process_name, phase_name):
+        operation_overlap = self.as_js_dict(new_overlap)
+        overlap_metadata_dict = self.as_js_dict(new_overlap_metadata.regions)
+        self.dump_overlap(operation_overlap, overlap_metadata_dict,
                           directory=directory, process_name=process_name, phase_name=phase_name,
                           path=self._overlap_json(directory, process_name, phase_name),
                           venn_js_path=self._overlap_venn_js_json(directory, process_name, phase_name))
+
+    def _add_overlap_region_metadata(self, overlap_metadata_dict, md):
+        overlap_region = OverlapMetadata.merge_regions(overlap_metadata_dict.values())
+        md['start_time_usec'] = overlap_region.start_time_usec
+        md['end_time_usec'] = overlap_region.end_time_usec
+        md['num_events'] = overlap_region.num_events
 
     def _overlap_json(self, directory, process_name, phase_name):
         return _j(directory, "{OverlapType}{proc}{phase}.overlap_js.json".format(
@@ -1478,20 +1589,22 @@ class OverlapTypeInterface:
             phase=phase_suffix(phase_name),
         ))
 
-    def dump_overlap(self, operation_overlap, metadata,
+    def dump_overlap(self, operation_overlap, overlap_metadata_dict,
                      directory=None, process_name=None, phase_name=None,
                      path=None, venn_js_path=None):
-        md = dict(metadata)
+        md = dict()
         md['overlap_type'] = self.overlap_type
         if process_name is not None:
             md['process'] = process_name
         if phase_name is not None:
             md['phase'] = phase_name
+        self._add_overlap_region_metadata(overlap_metadata_dict, md)
         if self.should_dump_as_is:
             return self.dump_overlap_as_is(operation_overlap, md,
                      directory=directory, process_name=process_name, phase_name=phase_name,
                      path=path)
 
+        # self._add_overlap_region_metadata(new_overlap_metadata, md)
         return self._dump_overlap(operation_overlap, md,
                                   directory=directory, process_name=process_name, phase_name=phase_name,
                                   path=path, venn_js_path=venn_js_path)
@@ -1529,10 +1642,10 @@ class OverlapTypeInterface:
         })
         do_dump_json(js, path, cls=DecimalEncoder)
 
-    def post_reduce(self, overlap):
-        category_key_overlap = self.reduce_to_category_key(overlap)
-        new_overlap = self.post_reduce_category_key(category_key_overlap)
-        return new_overlap
+    def post_reduce(self, overlap, overlap_metadata):
+        category_key_overlap, category_key_overlap_metadata = self.reduce_to_category_key(overlap, overlap_metadata)
+        new_overlap, new_overlap_metadata = self.post_reduce_category_key(category_key_overlap, category_key_overlap_metadata)
+        return new_overlap, new_overlap_metadata
 
     def pre_reduce_cpu_gpu(self, category, event):
         """
@@ -1579,7 +1692,7 @@ class OverlapTypeInterface:
 
         return new_key
 
-    def reduce_to_category_key(self, overlap):
+    def reduce_to_category_key(self, overlap, overlap_metadata):
         """
         Reduce keys across processes into a single CategoryKey.
 
@@ -1635,6 +1748,7 @@ class OverlapTypeInterface:
             return dic[key]
 
         new_overlap = dict()
+        new_overlap_metadata = OverlapMetadata()
         for overlap_key, times in overlap.items():
 
             """
@@ -1689,19 +1803,24 @@ class OverlapTypeInterface:
                 assert len(new_key.procs) > 1
 
             _reduce_add_key(new_overlap, new_key, times)
+            new_overlap_metadata.merge_region(new_key, overlap_metadata.get_region(overlap_key))
 
             # pprint.pprint({
             #     'overlap.keys()':overlap.keys(),
             # })
             # raise NotImplementedError("Not sure how to reduce overlap keys for overlap_key={key}".format(key=overlap_key))
 
-        pprint.pprint({'reduce_to_category_key.keys': list(new_overlap.keys())})
-        # import ipdb; ipdb.set_trace()
+        if self.debug:
+            pprint.pprint({
+                'reduce_to_category_key.keys': list(new_overlap.keys()),
+                'new_overlap_metadata': new_overlap_metadata,
+            })
+            # import ipdb; ipdb.set_trace()
 
-        return new_overlap
+        return new_overlap, new_overlap_metadata
 
     def reduce_overlap_resource_operation(
-            self, overlap,
+            self, overlap, overlap_metadata,
             group_self_overlap=False):
         """
         Reduce keys to pair of operation-types, or a single operation-type.
@@ -1734,6 +1853,7 @@ class OverlapTypeInterface:
         """
 
         new_overlap = dict()
+        new_overlap_metadata = OverlapMetadata()
         for overlap_key, times in overlap.items():
 
             if len(overlap_key.ops) > 1:
@@ -1760,6 +1880,7 @@ class OverlapTypeInterface:
                                       non_ops=overlap_key.non_ops,
                                       procs=frozenset())
                 _add_key(new_overlap, new_key, times)
+                new_overlap_metadata.merge_region(new_key, overlap_metadata.get_region(overlap_key))
                 continue
 
             if len(overlap_key.ops) >= 1 and len(overlap_key.procs) >= 1:
@@ -1772,15 +1893,17 @@ class OverlapTypeInterface:
                                       non_ops=overlap_key.non_ops,
                                       procs=frozenset())
                 _add_key(new_overlap, new_key, times)
+                new_overlap_metadata.merge_region(new_key, overlap_metadata.get_region(overlap_key))
                 continue
 
             if self.debug:
                 pprint.pprint({
                     'overlap.keys()':list(overlap.keys()),
+                    'new_overlap_metadata':new_overlap_metadata,
                 })
             raise NotImplementedError("Not sure how to reduce overlap keys for overlap_key={key}".format(key=overlap_key))
 
-        return new_overlap
+        return new_overlap, new_overlap_metadata
 
 #
 # Helper functions for reduce_overlap_*
@@ -1811,23 +1934,23 @@ class DefaultOverlapType(OverlapTypeInterface):
     def pre_reduce(self, category, event):
         return self.pre_reduce_cpu_gpu(category, event)
 
-    def as_overlap_js(self, new_overlap):
+    def as_js_dict(self, new_overlap):
         # def _group_by_ops_resource(self, new_overlap):
         # set(operation categories) -> set(non-operation categories) -> [ CPU, GPU, CPU/GPU ] time
         #  <q_forward, q_backward>       <CPU>, <GPU>, <CPU, GPU>             0.001 sec
         operation_overlap = dict()
-        for category_key, time_us in new_overlap.items():
+        for category_key, value in new_overlap.items():
             assert len(category_key.ops) > 0
             assert len(category_key.non_ops) > 0
             assert len(category_key.procs) == 0
             if category_key.ops not in operation_overlap:
                 operation_overlap[category_key.ops] = dict()
-            operation_overlap[category_key.ops][category_key.non_ops] = time_us
+            operation_overlap[category_key.ops][category_key.non_ops] = value
         return operation_overlap
 
-    def post_reduce_category_key(self, overlap):
+    def post_reduce_category_key(self, overlap, overlap_metadata):
         return self.reduce_overlap_resource_operation(
-            overlap, group_self_overlap=False)
+            overlap, overlap_metadata, group_self_overlap=False)
 
 class ResourceOverlapType(OverlapTypeInterface):
     def __init__(self, debug=False):
@@ -1838,7 +1961,7 @@ class ResourceOverlapType(OverlapTypeInterface):
     def pre_reduce(self, category, event):
         return self.pre_reduce_cpu_gpu(category, event)
 
-    def post_reduce_category_key(self, overlap):
+    def post_reduce_category_key(self, overlap, overlap_metadata):
         """
         Add modular "post-reduce" function for "adding" CategoryKey's that map to the same key.
 
@@ -1851,6 +1974,7 @@ class ResourceOverlapType(OverlapTypeInterface):
         Group keys by resource-type (non_ops).
         """
         new_overlap = dict()
+        new_overlap_metadata = OverlapMetadata()
         for overlap_key, times in overlap.items():
 
             if len(overlap_key.ops) > 1:
@@ -1861,12 +1985,16 @@ class ResourceOverlapType(OverlapTypeInterface):
                                   non_ops=overlap_key.non_ops,
                                   procs=frozenset())
             _reduce_add_key(new_overlap, new_key, times)
+            new_overlap_metadata.merge_region(new_key, overlap_metadata.get_region(overlap_key))
 
         if self.debug:
-            pprint.pprint({'ResourceOverlapType.post_reduce_category_key.keys': list(new_overlap.keys())})
+            pprint.pprint({
+                'ResourceOverlapType.post_reduce_category_key.keys': list(new_overlap.keys()),
+                'new_overlap_metadata':new_overlap_metadata,
+            })
         # import ipdb; ipdb.set_trace()
 
-        return new_overlap
+        return new_overlap, new_overlap_metadata
 
     def category_key_as_strs(self, category_key):
         # def _group_by_resource(self, new_overlap):
@@ -1886,7 +2014,7 @@ class OperationOverlapType(OverlapTypeInterface):
     def pre_reduce(self, category, event):
         return self.pre_reduce_cpu_gpu(category, event)
 
-    def post_reduce_category_key(self, overlap):
+    def post_reduce_category_key(self, overlap, overlap_metadata):
         """
         Add modular "post-reduce" function for "adding" CategoryKey's that map to the same key.
 
@@ -1897,7 +2025,7 @@ class OperationOverlapType(OverlapTypeInterface):
         :return:
         """
         return self.reduce_overlap_resource_operation(
-            overlap,
+            overlap, overlap_metadata,
             group_self_overlap=True)
 
     def _operation_overlap_json(self, directory, process_name, phase_name, resources):
@@ -1916,41 +2044,44 @@ class OperationOverlapType(OverlapTypeInterface):
             resources=resources_suffix(resources),
         ))
 
-    def dump_json_files(self, new_overlap, metadata, directory, process_name, phase_name):
-        # Q: Why don't we need to call as_overlap_js here?
-        overlap = self.as_overlap_js(new_overlap)
+    def dump_json_files(self, new_overlap, new_overlap_metadata, directory, process_name, phase_name):
+        # Q: Why don't we need to call as_js_dict here?
+        # JAMES LEFT OFF
+        overlap = self.as_js_dict(new_overlap)
+        overlap_metadata_dict = self.as_js_dict(new_overlap_metadata.regions)
         for resources, op_overlap in overlap.items():
-            # operation_overlap = self.as_overlap_js(new_overlap)
+            # operation_overlap = self.as_js_dict(new_overlap)
             if self.debug:
                 pprint.pprint({
                     'name':'{OverlapType}.dump_json_files'.format(OverlapType=self.overlap_type),
                     'resources':resources,
                     'op_overlap':op_overlap,
                 })
-            md = dict(metadata)
+            md = dict()
             md.update({
                 'overlap_type': self.overlap_type,
                 'process': process_name,
                 'phase': phase_name,
                 'resource_overlap': sorted(resources),
             })
+            self._add_overlap_region_metadata(overlap_metadata_dict[resources], md)
             self._dump_overlap(
                 op_overlap, md,
                 path=self._operation_overlap_json(directory, process_name, phase_name, resources),
                 venn_js_path=self._operation_overlap_venn_js_json(directory, process_name, phase_name, resources))
 
-    def as_overlap_js(self, new_overlap):
+    def as_js_dict(self, new_overlap):
         # def _group_by_resource_ops(self, new_overlap):
         # set(non-operation categories) -> set(operation categories) -> [ CPU, GPU, CPU/GPU ] time
         #    <CPU>, <GPU>, <CPU, GPU>       <q_forward, q_backward>           0.001 sec
         operation_overlap = dict()
-        for combo_key, time_us in new_overlap.items():
+        for combo_key, value in new_overlap.items():
             assert len(combo_key.ops) > 0
             assert len(combo_key.non_ops) > 0
             assert len(combo_key.procs) == 0
             if combo_key.non_ops not in operation_overlap:
                 operation_overlap[combo_key.non_ops] = dict()
-            operation_overlap[combo_key.non_ops][combo_key.ops] = time_us
+            operation_overlap[combo_key.non_ops][combo_key.ops] = value
         return operation_overlap
 
 class CategoryOverlapType(OverlapTypeInterface):
@@ -2010,7 +2141,7 @@ class CategoryOverlapType(OverlapTypeInterface):
 
         return new_key
 
-    def post_reduce_category_key(self, overlap):
+    def post_reduce_category_key(self, overlap, overlap_metadata):
         """
         Add modular "post-reduce" function for "adding" CategoryKey's that map to the same key.
 
@@ -2019,10 +2150,11 @@ class CategoryOverlapType(OverlapTypeInterface):
           CategoryKey(ops=key.ops, non_ops=key.non_ops, procs=None)
         """
         # return self.reduce_overlap_resource_operation(
-        #     overlap,
+        #     overlap, overlap_metadata,
         #     group_self_overlap=True)
 
         new_overlap = dict()
+        new_overlap_metadata = OverlapMetadata()
         for overlap_key, times in overlap.items():
 
             if len(overlap_key.ops) > 1:
@@ -2036,14 +2168,17 @@ class CategoryOverlapType(OverlapTypeInterface):
                                   non_ops=overlap_key.non_ops,
                                   procs=frozenset())
             _reduce_add_key(new_overlap, new_key, times)
+            new_overlap_metadata.merge_region(new_key, overlap_metadata.get_region(overlap_key))
 
         if self.debug:
             pprint.pprint({
                 '{OverlapType}.post_reduce_category_key.keys'.format(OverlapType=self.overlap_type):
-                    list(new_overlap.keys())})
+                    list(new_overlap.keys()),
+                'new_overlap_metadata':new_overlap_metadata,
+            })
             # import ipdb; ipdb.set_trace()
 
-        return new_overlap
+        return new_overlap, new_overlap_metadata
 
     def _category_overlap_json(self, directory, process_name, phase_name, ops):
         return _j(directory, "{OverlapType}{proc}{phase}{ops}.overlap_js.json".format(
@@ -2061,7 +2196,7 @@ class CategoryOverlapType(OverlapTypeInterface):
             ops=ops_suffix(ops),
         ))
 
-    def dump_json_files(self, new_overlap, metadata, directory, process_name, phase_name):
+    def dump_json_files(self, new_overlap, new_overlap_metadata, directory, process_name, phase_name):
         """
         For op in ops(process, phases):
           key = CategoryKey[ops=[op]]
@@ -2076,7 +2211,8 @@ class CategoryOverlapType(OverlapTypeInterface):
         :param phase_name:
         :return:
         """
-        overlap = self.as_overlap_js(new_overlap)
+        overlap = self.as_js_dict(new_overlap)
+        overlap_metadata_dict = self.as_js_dict(new_overlap_metadata.regions)
         if self.debug:
             pprint.pprint({
                 'name':"{OverlapType}.dump_json_files".format(OverlapType=self.overlap_type),
@@ -2085,7 +2221,8 @@ class CategoryOverlapType(OverlapTypeInterface):
         for ops, category_overlap in overlap.items():
             assert len(ops) == 1
             op = next(iter(ops))
-            md = dict(metadata)
+            md = dict()
+            self._add_overlap_region_metadata(overlap_metadata_dict[ops], md)
             md.update({
                 'overlap_type': self.overlap_type,
                 'process': process_name,
@@ -2100,18 +2237,18 @@ class CategoryOverlapType(OverlapTypeInterface):
                 path=self._category_overlap_json(directory, process_name, phase_name, ops),
                 venn_js_path=self._category_overlap_venn_js_json(directory, process_name, phase_name, ops))
 
-    def as_overlap_js(self, new_overlap):
+    def as_js_dict(self, new_overlap):
         # def _group_by_resource_ops(self, new_overlap):
         # set(non-operation categories) -> set(operation categories) -> [ CPU, GPU, CPU/GPU ] time
         #    <CPU>, <GPU>, <CPU, GPU>       <q_forward, q_backward>           0.001 sec
         operation_overlap = dict()
-        for combo_key, time_us in new_overlap.items():
+        for combo_key, value in new_overlap.items():
             assert len(combo_key.ops) > 0
             assert len(combo_key.non_ops) > 0
             assert len(combo_key.procs) == 0
             if combo_key.ops not in operation_overlap:
                 operation_overlap[combo_key.ops] = dict()
-            operation_overlap[combo_key.ops][combo_key.non_ops] = time_us
+            operation_overlap[combo_key.ops][combo_key.non_ops] = value
         return operation_overlap
 
 class ResourceSubplotOverlapType(OverlapTypeInterface):
@@ -2123,7 +2260,7 @@ class ResourceSubplotOverlapType(OverlapTypeInterface):
     def pre_reduce(self, category, event):
         return self.pre_reduce_cpu_gpu(category, event)
 
-    def post_reduce_category_key(self, overlap):
+    def post_reduce_category_key(self, overlap, overlap_metadata):
         """
         Add modular "post-reduce" function for "adding" CategoryKey's that map to the same key.
 
@@ -2134,6 +2271,7 @@ class ResourceSubplotOverlapType(OverlapTypeInterface):
         #         self, overlap,
         #         categories, operation_types, proc_types):
         new_overlap = dict()
+        new_overlap_metadata = OverlapMetadata()
         for overlap_key, times in overlap.items():
 
             if len(overlap_key.ops) > 1:
@@ -2152,13 +2290,15 @@ class ResourceSubplotOverlapType(OverlapTypeInterface):
                                       non_ops=frozenset([resource_type]),
                                       procs=frozenset())
                 _add_key(new_overlap, new_key, times)
+                new_overlap_metadata.merge_region(new_key, overlap_metadata.get_region(overlap_key))
 
                 new_key = CategoryKey(ops=frozenset(),
                                       non_ops=frozenset([CATEGORY_TOTAL]),
                                       procs=frozenset())
                 _add_key(new_overlap, new_key, times)
+                new_overlap_metadata.merge_region(new_key, overlap_metadata.get_region(overlap_key))
 
-        return new_overlap
+        return new_overlap, new_overlap_metadata
 
     def category_key_as_strs(self, category_key):
         # def _group_by_resource(self, new_overlap):
@@ -2331,27 +2471,27 @@ def _as_category_key(overlap_key):
     new_key = CategoryKey(op_categories, non_op_categories, proc_categories)
     return new_key
 
-def reduce_category_keys(overlap):
-
-    new_overlap = dict()
-    for overlap_key, times in overlap.items():
-        new_key = _as_category_key(overlap_key=overlap_key)
-        assert len(new_key.ops) > 0 or \
-               len(new_key.non_ops) > 0
-        # assert len(new_key.procs) > 0
-
-        if len(new_key.ops) > 1:
-            # Operations can only overlap cross-process, not within a single-process
-            assert len(new_key.procs) > 1
-
-        _reduce_add_key(new_overlap, new_key, times)
-
-        # pprint.pprint({
-        #     'overlap.keys()':overlap.keys(),
-        # })
-        # raise NotImplementedError("Not sure how to reduce overlap keys for overlap_key={key}".format(key=overlap_key))
-
-    return new_overlap
+# def reduce_category_keys(overlap):
+#
+#     new_overlap = dict()
+#     for overlap_key, times in overlap.items():
+#         new_key = _as_category_key(overlap_key=overlap_key)
+#         assert len(new_key.ops) > 0 or \
+#                len(new_key.non_ops) > 0
+#         # assert len(new_key.procs) > 0
+#
+#         if len(new_key.ops) > 1:
+#             # Operations can only overlap cross-process, not within a single-process
+#             assert len(new_key.procs) > 1
+#
+#         _reduce_add_key(new_overlap, new_key, times)
+#
+#         # pprint.pprint({
+#         #     'overlap.keys()':overlap.keys(),
+#         # })
+#         # raise NotImplementedError("Not sure how to reduce overlap keys for overlap_key={key}".format(key=overlap_key))
+#
+#     return new_overlap
 
 #
 # Helper functions for reduce_overlap_*

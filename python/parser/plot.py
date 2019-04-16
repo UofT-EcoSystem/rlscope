@@ -2219,14 +2219,14 @@ class UtilizationPlot:
         if self.overlap_type == 'OperationOverlap':
             # For OperationOverlap, select events across ALL execution that is concurrent with this process/phase.
             # (a "vertical-slice" of the SummaryView).
-            overlap, proc_stats, metadata = overlap_computer.compute_process_timeline_overlap(
+            overlap, proc_stats, overlap_metadata = overlap_computer.compute_process_timeline_overlap(
                 overlap_obj.pre_reduce,
                 start_time_us=phase.phase_start_time_us,
                 end_time_us=phase.phase_end_time_us,
                 debug_memoize=self.debug_memoize,
                 overlap_type=self.overlap_type)
         else:
-            overlap, proc_stats, metadata = overlap_computer.compute_process_timeline_overlap(
+            overlap, proc_stats, overlap_metadata = overlap_computer.compute_process_timeline_overlap(
                 overlap_obj.pre_reduce,
                 process_name=process_name,
                 phase_name=phase_name,
@@ -2240,13 +2240,13 @@ class UtilizationPlot:
         new_overlap = overlap
         # assert len(new_overlap) > 0
 
-        new_overlap = overlap_obj.post_reduce(new_overlap)
+        new_overlap, new_overlap_metadata = overlap_obj.post_reduce(new_overlap, overlap_metadata)
         # assert len(new_overlap) > 0
 
-        overlap_obj.dump_json_files(new_overlap, metadata, self.directory, process_name, phase_name)
+        overlap_obj.dump_json_files(new_overlap, new_overlap_metadata, self.directory, process_name, phase_name)
 
         if self.overlap_type == 'default':
-            operation_overlap = overlap_obj.as_overlap_js(new_overlap)
+            operation_overlap = overlap_obj.as_js_dict(new_overlap)
             # assert len(operation_overlap) > 0
             self._do_plot_process_phase(operation_overlap, proc_stats, process_name, phase_name)
 
@@ -2319,7 +2319,8 @@ class UtilizationPlot:
         # assert len(df) != 0
         self.plotter.plot(bench_name=None)
 
-        self._dump_stats(proc_stats)
+        if proc_stats is not None:
+            self._dump_stats(proc_stats)
         # Plot the "CPU/GPU Utilization" plot.
         # Other overlap_type's will JUST output the overlap data (to be consumed by iml-drill).
 
