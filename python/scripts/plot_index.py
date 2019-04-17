@@ -1,4 +1,5 @@
 import re
+import numpy as np
 import pprint
 
 from os.path import join as _j, abspath as _a, exists as _e, dirname as _d, basename as _b
@@ -71,9 +72,9 @@ class _DataIndex:
         assert len(files) == 1
         return files[0]
 
-    def get_title(self, md):
+    def get_title(self, md, total_sec=None):
         """
-        Plot:{}, Process:{proc}, Phase:{phase}, ResourceOverlap:{resource_overlap}, Operation:{op}
+        Plot:{}, Process:{proc}, Phase:{phase}, ResourceOverlap:{resource_overlap}, Operation:{op}, [TotalSec:{total_sec}]
 
         :param md:
         :return:
@@ -104,11 +105,17 @@ class _DataIndex:
             return str(value)
 
         sub_title_sep = ', '
+
+        fields = [field for field in TITLE_ORDER if field in md]
+        values = [md[field] for field in fields]
+        if total_sec is not None:
+            fields.append('TotalSec')
+            values.append(np.round(total_sec, 2))
         title = sub_title_sep.join([
            "{field}:{value}".format(
                field=pretty_field(field),
-               value=pretty_value(md[field]),
-           ) for field in TITLE_ORDER if field in md
+               value=pretty_value(value),
+           ) for field, value in zip(fields, values)
         ])
 
         return title

@@ -2216,22 +2216,25 @@ class UtilizationPlot:
                                            debug=self.debug,
                                            debug_ops=self.debug_ops)
 
-        if self.overlap_type == 'OperationOverlap':
-            # For OperationOverlap, select events across ALL execution that is concurrent with this process/phase.
-            # (a "vertical-slice" of the SummaryView).
-            overlap, proc_stats, overlap_metadata = overlap_computer.compute_process_timeline_overlap(
-                overlap_obj.pre_reduce,
-                start_time_us=phase.phase_start_time_us,
-                end_time_us=phase.phase_end_time_us,
-                debug_memoize=self.debug_memoize,
-                overlap_type=self.overlap_type)
-        else:
-            overlap, proc_stats, overlap_metadata = overlap_computer.compute_process_timeline_overlap(
-                overlap_obj.pre_reduce,
-                process_name=process_name,
-                phase_name=phase_name,
-                debug_memoize=self.debug_memoize,
-                overlap_type=self.overlap_type)
+        # NOTE: So far, this isn't useful for visualizing cross-process/phase operation overlap.
+        # For now, just show operations belonging to the single process/phase.
+        #
+        # if self.overlap_type == 'OperationOverlap':
+        #     # For OperationOverlap, select events across ALL execution that is concurrent with this process/phase.
+        #     # (a "vertical-slice" of the SummaryView).
+        #     overlap, proc_stats, overlap_metadata = overlap_computer.compute_process_timeline_overlap(
+        #         overlap_obj.pre_reduce,
+        #         start_time_us=phase.phase_start_time_us,
+        #         end_time_us=phase.phase_end_time_us,
+        #         debug_memoize=self.debug_memoize,
+        #         overlap_type=self.overlap_type)
+        # else:
+        overlap, proc_stats, overlap_metadata = overlap_computer.compute_process_timeline_overlap(
+            overlap_obj.pre_reduce,
+            process_name=process_name,
+            phase_name=phase_name,
+            debug_memoize=self.debug_memoize,
+            overlap_type=self.overlap_type)
 
         # NOTE: FAILS for OperationOverlap.
         # if self.debug:
