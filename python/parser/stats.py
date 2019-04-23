@@ -64,6 +64,10 @@ class KernelTime:
             if not hasattr(self, key):
                 setattr(self, key, value)
 
+    def copy(self):
+        ktime = KernelTime(start_usec=self.start_usec, end_usec=self.end_usec, name=self.name, create_from=self)
+        return ktime
+
     def subsumes(self, op2):
         op1 = self
         # return op1.start_time_usec < op2.start_time_usec < op2.end_time_usec < op1.end_time_usec
@@ -73,6 +77,11 @@ class KernelTime:
         op1 = self
         return op1.start_time_usec == op2.start_time_usec and \
                op1.end_time_usec == op2.end_time_usec
+
+    def set_start_end(self, start_usec, end_usec):
+        self.start_usec = start_usec
+        self.end_usec = end_usec
+        self.time_usec = self.end_usec - self.start_usec
 
     @property
     def start_time_usec(self):
@@ -132,12 +141,14 @@ class KernelTime:
         return KernelTime(end_usec - start_usec, start_usec, end_usec, name=name)
 
     def __str__(self):
-        return str(self.__dict__)
-        # if self.name is not None:
-        #     return "(name={name}, start={start} us, dur={dur} us)".format(
-        #         name=self.name, start=self.start_usec, dur=self.time_usec)
+        # return str(self.__dict__)
+        if self.name is not None:
+            return "(name={name}, start={start} us, dur={dur} us)".format(
+                name=self.name, start=self.start_usec, dur=self.time_usec)
         # return "(start={start} us, dur={dur} us)".format(
         #     start=self.start_usec, dur=self.time_usec)
+        return "(start={start} us, end={end} us)".format(
+            start=self.start_usec, end=self.end_usec)
 
     def __repr__(self):
         return str(self)

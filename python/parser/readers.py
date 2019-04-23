@@ -140,7 +140,8 @@ class TFProfCategoryTimesReader:
     def each_device(self, step, node, get_execs):
         exec_profile = node.execs[step]
         execs = get_execs(exec_profile)
-        return list(execs.keys())
+        return execs.keys()
+        # return list(execs.keys())
 
     def each_event(self, device, step, node, get_execs):
         exec_profile = node.execs[step]
@@ -162,24 +163,28 @@ class TFProfCategoryTimesReader:
         for device in devices:
             for event in self.each_event(device, step, node, get_execs):
                 yield device, event
-                
+
     def get_device_names(self):
         device_names = set()
-        for step in self.steps:
-            for node_id, node in self.proto.nodes.items():
-                if step not in node.execs.keys():
+        # for step in self.steps:
+        #     for node_id, node in self.proto.nodes.items():
+        for node_id, node in self.proto.nodes.items():
+            for step in self.steps:
+                # if step not in node.execs.keys():
+                if step not in node.execs:
                     continue
 
                 devices = self.each_device(step, node, self.get_accelerator_execs)
                 device_names.update(devices)
-                
+
                 devices = self.each_device(step, node, self.get_cpu_execs)
                 device_names.update(devices)
         return device_names
 
     def all_events_for_step(self, step):
         for node_id, node in self.proto.nodes.items():
-            if step not in node.execs.keys():
+            # if step not in node.execs.keys():
+            if step not in node.execs:
                 continue
 
             # TODO: Some of the events in the tfprof trace are DEFINITELY duplicates.

@@ -2177,8 +2177,14 @@ class UtilizationPlot:
         # debug_phases = ['sgd_updates']
 
         # Debug OperationOverlap having overlap of operations within the same process:
-        debug_process_names = ['loop_selfplay']
-        debug_phases = ['default_phase']
+        # debug_process_names = ['loop_selfplay']
+        # debug_phases = ['default_phase']
+
+        # debug_process_names = ['loop_train_eval']
+        # debug_phases = ['sgd_updates']
+
+        # debug_process_names = ['selfplay_worker_1']
+        # debug_phases = ['selfplay_worker_1']
 
         if not UtilizationPlot.DEBUG_MINIGO:
             process_names = self.sql_reader.process_names

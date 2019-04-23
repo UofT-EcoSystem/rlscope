@@ -155,19 +155,20 @@ class ComputeOverlap:
     def get_merged_categories(self):
         return self.merged_category_times
 
-    def _flatten_category_times(self, category_times):
-        new_category_times = dict()
-        for category in category_times.keys():
-            all_times = []
-            for times in category_times[category]:
-                all_times.extend(times)
-            new_category_times[category] = all_times
-        return new_category_times
+    # def _flatten_category_times(self, category_times):
+    #     new_category_times = dict()
+    #     for category in category_times.keys():
+    #         all_times = []
+    #         for times in category_times[category]:
+    #             all_times.extend(times)
+    #         new_category_times[category] = all_times
+    #     return new_category_times
 
     def _sort_category_times(self, category_times):
         new_category_times = dict()
         for category in category_times:
             new_category_times[category] = sorted(category_times[category], key=lambda ktime: ktime.start_time_usec)
+            new_category_times[category] = merge_adjacent_events(new_category_times[category])
         return new_category_times
 
     def _merge_category_times(self, category_times):
@@ -426,9 +427,6 @@ def compute_overlap_single_thread(
     show_progress=False):
     # categories = set(category_times.keys())
     # JAMES TODO: compute the progress of this function... I think it takes forever with minigo
-    pprint.pprint({
-        'compute_overlap_single_thread.debug':debug,
-    })
 
     overlap_metadata = OverlapMetadata()
 
@@ -878,6 +876,7 @@ class TraceEventsParser:
             return
 
 from collections import namedtuple
+
 class _CategoryKey(namedtuple('CategoryKey', 'ops non_ops procs')):
     __slots__ = ()
 def CategoryKey(ops, non_ops, procs):
@@ -887,6 +886,26 @@ def CategoryKey(ops, non_ops, procs):
         ops=tuple(sorted(ops)),
         non_ops=frozenset(non_ops),
         procs=frozenset(procs))
+
+class _CPUAndGPUCategories(namedtuple('CPUAndGPUCategories', 'cpus gpus')):
+    __slots__ = ()
+def CPUAndGPUCategories(cpus, gpus):
+    return _CPUAndGPUCategories(
+        cpus=frozenset(cpus),
+        gpus=frozenset(gpus))
+
+def split_cpu_gpu_categories(category_key):
+    cpus = set()
+    gpus = set()
+    for category in category_key.non_ops:
+        if category in CATEGORIES_CPU:
+            cpus.add(category)
+        elif category in CATEGORIES_GPU:
+            gpus.add(category)
+        else:
+            raise NotImplementedError("Not sure how to categorize category={cat} as CPU vs GPU".format(
+                cat=category))
+    return CPUAndGPUCategories(cpus, gpus)
 
 def traceEvents_key_str(category_key):
     assert isinstance(category_key, _CategoryKey)
@@ -1896,12 +1915,18 @@ class OverlapTypeInterface:
                 new_overlap_metadata.merge_region(new_key, overlap_metadata.get_region(overlap_key))
                 continue
 
-            if self.debug:
-                pprint.pprint({
-                    'overlap.keys()':list(overlap.keys()),
-                    'new_overlap_metadata':new_overlap_metadata,
-                })
             raise NotImplementedError("Not sure how to reduce overlap keys for overlap_key={key}".format(key=overlap_key))
+
+        if self.debug:
+            total_size = compute_total_size(overlap)
+            pprint.pprint({
+                'overlap':overlap,
+                'new_overlap':new_overlap,
+                'total_size':total_size,
+                'overlap.keys()':list(overlap.keys()),
+                'new_overlap_metadata':new_overlap_metadata,
+            })
+
 
         return new_overlap, new_overlap_metadata
 
@@ -2099,7 +2124,13 @@ class CategoryOverlapType(OverlapTypeInterface):
         """
         if category in CATEGORIES_CPU:
             # Keep ALL the CPU events, and retain the details of their category.
+
             non_ops = frozenset([category])
+            # Q: If we change this one thing, we SHOULD get the same total_size as OperationOverlap (equivalent code)
+            # A: YES, we do as expected
+            #    => Something caused by using non_ops=raw_category during causes the inflation in overlap time...
+            # non_ops = frozenset([CATEGORY_CPU])
+
             ops = frozenset()
         elif category == CATEGORY_GPU:
             # SKIP GPU events; we just want to measure CPU time.
@@ -2108,7 +2139,9 @@ class CategoryOverlapType(OverlapTypeInterface):
             # [     CPU     ]
             # No, I don't think so; GPU events are recorded from the "GPU-side".
             # "CUDA API C" is recorded from the CPU-side.
-            return None
+            # return None
+            non_ops = frozenset([category])
+            ops = frozenset()
         elif category == CATEGORY_OPERATION:
             non_ops = frozenset()
             ops = frozenset([event.name])
@@ -2171,7 +2204,11 @@ class CategoryOverlapType(OverlapTypeInterface):
             new_overlap_metadata.merge_region(new_key, overlap_metadata.get_region(overlap_key))
 
         if self.debug:
+            total_size = compute_total_size(overlap)
             pprint.pprint({
+                'overlap':overlap,
+                'new_overlap':new_overlap,
+                'total_size':total_size,
                 '{OverlapType}.post_reduce_category_key.keys'.format(OverlapType=self.overlap_type):
                     list(new_overlap.keys()),
                 'new_overlap_metadata':new_overlap_metadata,
@@ -2180,20 +2217,22 @@ class CategoryOverlapType(OverlapTypeInterface):
 
         return new_overlap, new_overlap_metadata
 
-    def _category_overlap_json(self, directory, process_name, phase_name, ops):
-        return _j(directory, "{OverlapType}{proc}{phase}{ops}.overlap_js.json".format(
+    def _category_overlap_json(self, directory, process_name, phase_name, ops, resources):
+        return _j(directory, "{OverlapType}{proc}{phase}{ops}{resources}.overlap_js.json".format(
             OverlapType=self.overlap_type,
             proc=process_suffix(process_name),
             phase=phase_suffix(phase_name),
             ops=ops_suffix(ops),
+            resources=resources_suffix(resources),
         ))
 
-    def _category_overlap_venn_js_json(self, directory, process_name, phase_name, ops):
-        return _j(directory, "{OverlapType}{proc}{phase}{ops}.venn_js.json".format(
+    def _category_overlap_venn_js_json(self, directory, process_name, phase_name, ops, resources):
+        return _j(directory, "{OverlapType}{proc}{phase}{ops}{resources}.venn_js.json".format(
             OverlapType=self.overlap_type,
             proc=process_suffix(process_name),
             phase=phase_suffix(phase_name),
             ops=ops_suffix(ops),
+            resources=resources_suffix(resources),
         ))
 
     def dump_json_files(self, new_overlap, new_overlap_metadata, directory, process_name, phase_name):
@@ -2218,37 +2257,64 @@ class CategoryOverlapType(OverlapTypeInterface):
                 'name':"{OverlapType}.dump_json_files".format(OverlapType=self.overlap_type),
                 'overlap':overlap,
             })
-        for ops, category_overlap in overlap.items():
+        for ops, resource_to_category_overlap in overlap.items():
             assert len(ops) == 1
             op = next(iter(ops))
-            md = dict()
-            self._add_overlap_region_metadata(overlap_metadata_dict[ops], md)
-            md.update({
-                'overlap_type': self.overlap_type,
-                'process': process_name,
-                'phase': phase_name,
-                # TODO: For now we only are computed category overlap for CPU;
-                # in the future we may have more fine-grained GPU categories.
-                'resource_overlap': sorted([CATEGORY_CPU]),
-                'operation': op,
-            })
-            self._dump_overlap(
-                category_overlap, md,
-                path=self._category_overlap_json(directory, process_name, phase_name, ops),
-                venn_js_path=self._category_overlap_venn_js_json(directory, process_name, phase_name, ops))
+            for resources, category_overlap in resource_to_category_overlap.items():
+                md = dict()
+                self._add_overlap_region_metadata(overlap_metadata_dict[ops][resources], md)
+                md.update({
+                    'overlap_type': self.overlap_type,
+                    'process': process_name,
+                    'phase': phase_name,
+                    # TODO: For now we only are computed category overlap for CPU;
+                    # in the future we may have more fine-grained GPU categories.
+                    # 'resource_overlap': sorted([CATEGORY_CPU]),
+                    'resource_overlap': resources,
+                    'operation': op,
+                })
+                self._dump_overlap(
+                    category_overlap, md,
+                    path=self._category_overlap_json(directory, process_name, phase_name, ops, resources),
+                    venn_js_path=self._category_overlap_venn_js_json(directory, process_name, phase_name, ops, resources))
 
     def as_js_dict(self, new_overlap):
         # def _group_by_resource_ops(self, new_overlap):
         # set(non-operation categories) -> set(operation categories) -> [ CPU, GPU, CPU/GPU ] time
         #    <CPU>, <GPU>, <CPU, GPU>       <q_forward, q_backward>           0.001 sec
+
+        # set(non-operation categories) -> set(operation categories) -> [ CPU, GPU, CPU/GPU ] time
+        #    <CPU>, <GPU>, <CPU, GPU>      <q_forward>, <q_backward>           0.001 sec
+
+
+        # non_ops={TFlow C, CUDA API CPU, GPU}
+        # => CPU={TFlow C, CUDA API CPU}
+        #    GPU={GPU}
+        # resource_key = {CPU, GPU}
+        #
+        # non_ops={Python}
+        # => CPU={Python}
+        #    GPU={GPU}
+        # resource_key = {CPU, GPU}
         operation_overlap = dict()
         for combo_key, value in new_overlap.items():
+            cpus_gpus = split_cpu_gpu_categories(combo_key)
+            resource_key = set()
+            if len(cpus_gpus.cpus) > 0:
+                resource_key.add(CATEGORY_CPU)
+            if len(cpus_gpus.gpus) > 0:
+                resource_key.add(CATEGORY_GPU)
+            resource_key = frozenset(resource_key)
             assert len(combo_key.ops) > 0
             assert len(combo_key.non_ops) > 0
             assert len(combo_key.procs) == 0
             if combo_key.ops not in operation_overlap:
                 operation_overlap[combo_key.ops] = dict()
-            operation_overlap[combo_key.ops][combo_key.non_ops] = value
+            if resource_key not in operation_overlap[combo_key.ops]:
+                operation_overlap[combo_key.ops][resource_key] = dict()
+            categories_key = cpus_gpus.cpus.union(cpus_gpus.gpus)
+            assert categories_key not in operation_overlap[combo_key.ops][resource_key]
+            operation_overlap[combo_key.ops][resource_key][categories_key] = value
         return operation_overlap
 
 class ResourceSubplotOverlapType(OverlapTypeInterface):
@@ -2278,6 +2344,23 @@ class ResourceSubplotOverlapType(OverlapTypeInterface):
                 # Operations can only overlap cross-process, not within a single-process
                 assert len(overlap_key.procs) > 1
 
+            assert len(overlap_key.non_ops) > 0
+
+            # Just {CPU}
+            # Add time to CPU, add time to Total.
+            #
+            # Just {GPU}
+            # Add time to GPU, add time to Total.
+            #
+            # Just {CPU, GPU}
+            # Add time to CPU, add time to GPU, add time to Total.
+
+            new_key = CategoryKey(ops=frozenset(),
+                                  non_ops=frozenset([CATEGORY_TOTAL]),
+                                  procs=frozenset())
+            _add_key(new_overlap, new_key, times)
+            new_overlap_metadata.merge_region(new_key, overlap_metadata.get_region(overlap_key))
+
             for resource_type in overlap_key.non_ops:
                 # NOTE: This is sort of hacky;
                 # we AREN'T outputting disjoint overlap regions here;
@@ -2288,12 +2371,6 @@ class ResourceSubplotOverlapType(OverlapTypeInterface):
                 # Total = [CPU only time] + [GPU only time] + [CPU overlapped with GPU time]
                 new_key = CategoryKey(ops=frozenset(),
                                       non_ops=frozenset([resource_type]),
-                                      procs=frozenset())
-                _add_key(new_overlap, new_key, times)
-                new_overlap_metadata.merge_region(new_key, overlap_metadata.get_region(overlap_key))
-
-                new_key = CategoryKey(ops=frozenset(),
-                                      non_ops=frozenset([CATEGORY_TOTAL]),
                                       procs=frozenset())
                 _add_key(new_overlap, new_key, times)
                 new_overlap_metadata.merge_region(new_key, overlap_metadata.get_region(overlap_key))
@@ -2511,6 +2588,27 @@ def _add_key(new_overlap, key, value):
     if key not in new_overlap:
         _new_key_like(new_overlap, key, value)
     new_overlap[key] += value
+def _merge_key(new_overlap, key, merge_values, new_value):
+    """
+    Merge an existing key.
+
+    e.g.
+
+    merge_values(key, old_value, new_value):
+        # Add
+        return old_value + new_value
+
+    merge_values(key, old_value, new_value):
+        # Subtract from old value
+        return old_value - new_value
+    """
+    # assert isinstance(value, numbers.Number)
+    if key not in new_overlap:
+        _new_key_like(new_overlap, key, new_value)
+
+    old_value = new_overlap[key]
+    merged_value = merge_values(old_value, new_value)
+    new_overlap[key] = merged_value
 
 # def test_venn_js_converter():
 #
@@ -2554,12 +2652,26 @@ def _add_key(new_overlap, key, value):
 #     venn_js = OverlapJSONToVennConverter(js)
 #     assert venn_js != wrong_venn_js
 
+def compute_total_size(overlap):
+    return np.sum(list(overlap.values()))
+
+def test_merge_adjacent_events():
+
+    from test.test_util import sec, T, flatten_category_times as flat
+
+    def test_01_merge_adj_events():
+        events = [T(1, 6), T(2, 6), T(3, 7), T(4, 6)]
+        got = merge_adjacent_events(events)
+        expect = [T(1, 7)]
+        assert got == expect
+    test_01_merge_adj_events()
+
 def test_compute_overlap():
     # Set to true to print info.
     # debug = False
     debug = True
 
-    from test.test_util import sec, T
+    from test.test_util import sec, T, flatten_category_times as flat
 
     def test_01_complete():
         category_times = {
@@ -2585,7 +2697,7 @@ def test_compute_overlap():
                 ],
             ],
         }
-        compute_overlap = ComputeOverlap(category_times, debug=debug)
+        compute_overlap = ComputeOverlap(flat(category_times), debug=debug)
         compute_overlap.compute_merge()
         got = compute_overlap.get_merged_categories()
         expect = {
@@ -2640,7 +2752,7 @@ def test_compute_overlap():
                 ],
             ],
         }
-        compute_overlap = ComputeOverlap(category_times, overlaps_with=['c1'], debug=debug)
+        compute_overlap = ComputeOverlap(flat(category_times), overlaps_with=['c1'], debug=debug)
 
         compute_overlap.compute()
         got = compute_overlap.get_category_times()
@@ -2661,17 +2773,23 @@ def test_compute_overlap():
                 ],
             ],
         }
-        compute_overlap = ComputeOverlap(category_times, debug=debug)
+        compute_overlap = ComputeOverlap(flat(category_times), debug=debug)
 
         compute_overlap.compute()
         got = compute_overlap.get_category_times()
+        expect = {
+            frozenset({'c1'}):sec(3),
+            # frozenset({'c1', 'c2'}):sec(2),
+            # frozenset({'c1', 'c3'}):sec(1),
+            # frozenset({'c1', 'c2', 'c3'}):sec(1),
+        }
         # expect = {
         #     frozenset({'c1'}):sec(2),
         #     frozenset({'c1', 'c2'}):sec(2),
         #     frozenset({'c1', 'c3'}):sec(1),
         #     frozenset({'c1', 'c2', 'c3'}):sec(1),
         # }
-        # assert got == expect
+        assert got == expect
     test_03_error_partial_overlap()
 
     def test_04_error_full_overlap():
@@ -2682,7 +2800,7 @@ def test_compute_overlap():
                 ],
             ],
         }
-        compute_overlap = ComputeOverlap(category_times, debug=debug)
+        compute_overlap = ComputeOverlap(flat(category_times), debug=debug)
 
         compute_overlap.compute()
         got = compute_overlap.get_category_times()
@@ -2703,7 +2821,7 @@ def test_compute_overlap():
                 ],
             ],
         }
-        compute_overlap = ComputeOverlap(category_times, debug=debug)
+        compute_overlap = ComputeOverlap(flat(category_times), debug=debug)
 
         compute_overlap.compute()
         got = compute_overlap.get_category_times()
@@ -2727,7 +2845,7 @@ def test_compute_overlap():
                 ],
             ],
         }
-        compute_overlap = ComputeOverlap(category_times, debug=debug)
+        compute_overlap = ComputeOverlap(flat(category_times), debug=debug)
 
         compute_overlap.compute()
         got = compute_overlap.get_category_times()
@@ -2739,3 +2857,146 @@ def test_compute_overlap():
         # }
         # assert got == expect
     test_06_error_not_sorted_by_end_time()
+
+    def test_07_overlapping_sorted_events():
+
+        category_times = {
+            'c1':[
+                [
+                    # [1..7]
+                    T(1, 6), T(2, 6), T(3, 7), T(4, 6)
+                ],
+            ],
+            'c2':[
+                [
+                    T(4, 5),
+                ],
+            ],
+        }
+        compute_overlap = ComputeOverlap(flat(category_times), debug=debug)
+
+        compute_overlap.compute()
+        got = compute_overlap.get_category_times()
+        expect = {
+            frozenset({'c1'}):sec(5),
+            frozenset({'c1', 'c2'}):sec(1),
+        }
+        assert got == expect
+    test_07_overlapping_sorted_events()
+
+    def test_08_overlapping_sorted_events():
+        # Q: What if start times match but end times are unordered?
+        # Q: WHY would this EVER happen in our data though...?
+        #    It CAN if concurrent events get "shuffled" into the same category (for some reason).
+        #    Perhaps this could happen with CPU/GPU?
+
+        category_times = {
+            'c1':[
+                [
+                    # [1..7] 6
+                    T(1, 6), T(2, 6), T(3, 7), T(4, 6)
+                ],
+            ],
+            'c2':[
+                [
+                    # [4..9] 5
+                    T(4, 4.5), T(4.5, 5), T(5, 9), T(5, 8)
+                ],
+            ],
+            'c3':[
+                [
+                    # [5..9] 4
+                    T(5, 9),
+                ],
+            ],
+        }
+        compute_overlap = ComputeOverlap(flat(category_times), debug=debug)
+
+        compute_overlap.compute()
+        got = compute_overlap.get_category_times()
+        expect = {
+            # [1..4]
+            frozenset({'c1'}):sec(3),
+            # [4..5]
+            frozenset({'c1', 'c2'}):sec(1),
+            # [5..7]
+            frozenset({'c1', 'c2', 'c3'}):sec(2),
+            # [7..9]
+            frozenset({'c2', 'c3'}):sec(2),
+        }
+        assert got == expect
+    test_08_overlapping_sorted_events()
+
+def merge_adjacent_events(events, inplace=False, debug=False):
+    """
+    Given a list of events sorted by event.start_time_usec,
+    merge events that "overlap"
+
+    :param events:
+    :return:
+    """
+    if len(events) == 0:
+        return []
+
+    def get_event(event):
+        if inplace:
+            return event
+        else:
+            return event.copy()
+
+    new_events = [get_event(events[0])]
+
+    if debug:
+        pprint.pprint(new_events)
+
+    for event in events[1:]:
+        # In case of overlap, it may look like any of:
+        #
+        # case 1: subsume
+        # [ new_events[-1] ]
+        #       [ event ]
+        #
+        # case 2: partial overlap
+        # [ new_events[-1] ]
+        #       [ event        ]
+        #
+        # [ new_events[-1] ]
+        #       [ event    ]
+        #
+        # In case of NO overlap, it may look like:
+        #
+        # case 3:
+        # [ new_events[-1] ]
+        #                   [ event ]
+        #
+        # [ new_events[-1] ]
+        #                       [ event ]
+        assert new_events[-1].start_time_usec <= event.start_time_usec
+
+        if new_events[-1].start_time_usec <= event.start_time_usec <= event.end_time_usec <= new_events[-1].end_time_usec:
+            # case 1: subsume
+            if debug:
+                print("Subsume: {e1} subsumes {e2}".format(e1=new_events[-1], e2=event))
+            new_events[-1].set_start_end(
+                start_usec=new_events[-1].start_usec,
+                end_usec=max(new_events[-1].end_usec, event.end_usec),
+            )
+        elif new_events[-1].start_time_usec <= event.start_time_usec <= new_events[-1].end_time_usec <= event.end_time_usec:
+            # case 2: partial overlap
+            if debug:
+                print("Partial: {e1} partial {e2}".format(e1=new_events[-1], e2=event))
+            new_events[-1].set_start_end(
+                start_usec=new_events[-1].start_usec,
+                end_usec=max(new_events[-1].end_usec, event.end_usec),
+            )
+        else:
+            # case 3: no overlap
+            if debug:
+                print("No-overlap: {e1} no-overlap {e2}".format(e1=new_events[-1], e2=event))
+            new_events.append(get_event(event))
+
+        if debug:
+            pprint.pprint(new_events)
+
+    return new_events
+

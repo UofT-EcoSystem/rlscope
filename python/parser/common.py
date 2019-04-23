@@ -81,6 +81,10 @@ CATEGORIES_CPU = set([
     CATEGORY_PYTHON_PROFILER,
 ])
 
+CATEGORIES_GPU = set([
+    CATEGORY_GPU,
+])
+
 # Not a category used during tracing;
 # represents a group of categories.
 CATEGORY_CPU = 'CPU'

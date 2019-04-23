@@ -52,9 +52,19 @@ PSQL_TABLE_SQL = _j(py_config.ROOT, "postgres", "tables.sql")
 PSQL_INDICES_SQL = _j(py_config.ROOT, "postgres", "indices.sql")
 PSQL_CONSTRAINTS_SQL = _j(py_config.ROOT, "postgres", "constraints.sql")
 
-def Worker_get_device_names(path):
-    reader = TFProfCategoryTimesReader(path)
-    return reader.get_device_names()
+def Worker_get_device_names(kwargs):
+    print("HELLO WORLD")
+    if kwargs['debug']:
+        print("> Start: Worker_get_device_names tfprof_file={path}".format(path=kwargs['tfprof_file']))
+    reader = TFProfCategoryTimesReader(kwargs['tfprof_file'])
+    device_names = reader.get_device_names()
+    if kwargs['debug']:
+        pprint.pprint({
+            'tfprof.device_names':device_names,
+            'tfprof_file':kwargs['tfprof_file']})
+        print("> Stop: Worker_get_device_names tfprof_file={path}".format(path=kwargs['tfprof_file']))
+
+    return device_names
 
 class SQLParser:
     """
@@ -252,6 +262,11 @@ class SQLParser:
             pprint.pprint({'Events with complete overlap':[dict(row) for row in rows]})
             raise RuntimeError("ERROR: Detected complete-overlap between operation-type events")
 
+    def single_thread_iter(self, worker, worker_kwargs):
+        for kwargs in worker_kwargs:
+            ret = worker(kwargs)
+            yield ret
+
     def run(self):
         # 1. Create SQLite db file
         # for each input file:
@@ -266,6 +281,8 @@ class SQLParser:
         # Postgres: allocate/recreate database.
         self.create_db(recreate=True)
 
+        self.conn.create_connection()
+
         self.process_to_id = dict()
         self.phase_to_id = dict()
         self.category_to_id = dict()
@@ -278,19 +295,45 @@ class SQLParser:
             'src_files':src_files,
         })
 
-        process_trace_metas = [get_process_trace_metadata(path) for path in src_files if is_process_trace_file(path)]
+        if self.debug:
+            print("> Read metadata.")
+
+        process_trace_metas = []
+        for path in src_files:
+            if not is_process_trace_file(path):
+                continue
+            if self.debug:
+                print("> get_process_trace_metadata path={path}".format(path=path))
+            md = get_process_trace_metadata(path)
+            process_trace_metas.append(md)
+
+        if self.debug:
+            print("> Insert processes.")
 
         process_names = sorted(meta['process_name'] for meta in process_trace_metas)
         for process_name in process_names:
             self.insert_process_name(process_name)
 
+        if self.debug:
+            print("> Insert phases.")
+
         phase_names = sorted(meta['phase_name'] for meta in process_trace_metas)
         for phase_name in phase_names:
             self.insert_phase_name(phase_name)
 
+        if self.debug:
+            print("> Read util metadata.")
+
         # Read metadata from CPU/GPU utilization files
         # e.g. machine_util.trace_0.proto
-        util_metas = [get_util_metadata(path) for path in src_files if is_machine_util_file(path)]
+        util_metas = []
+        for path in src_files:
+            if not is_machine_util_file(path):
+                continue
+            if self.debug:
+                print("> get_util_metadata path={path}".format(path=path))
+            md = get_util_metadata(path)
+            util_metas.append(md)
         util_machine_names = set()
         util_device_names = set()
         for util_meta in util_metas:
@@ -298,36 +341,73 @@ class SQLParser:
         for util_meta in util_metas:
             util_device_names.update(util_meta['device_names'])
 
+        if self.debug:
+            print("> Insert util machine names.")
         for machine_name in util_machine_names:
             self.insert_machine_name(machine_name)
+
+        if self.debug:
+            print("> Insert util devices.")
         for device_name in util_device_names:
             self.insert_device_name(device_name)
 
+        if self.debug:
+            print("> Insert categories.")
         categories = sorted(set(CATEGORIES_ALL))
         for category in categories:
             self.insert_category_name(category)
 
+        if self.debug:
+            print("> Insert tfprof device names.")
+
         device_names = set()
-        device_name_pool = multiprocessing.Pool()
-        tfprof_files = [path for path in src_files if is_tfprof_file(path)]
-        imap_iter = device_name_pool.imap_unordered(Worker_get_device_names, tfprof_files)
-        for names in tqdm_progress(imap_iter, desc='Device names', total=len(tfprof_files)):
+
+        def get_Worker_get_device_names_kwargs(tfprof_file):
+            return {'tfprof_file':tfprof_file, 'debug':self.debug}
+
+        device_names_kwargs = [get_Worker_get_device_names_kwargs(tfprof_file)
+                               for tfprof_file in src_files if is_tfprof_file(tfprof_file)]
+
+        if not self.debug_single_thread:
+            device_name_pool = multiprocessing.Pool()
+            imap_iter = device_name_pool.imap_unordered(Worker_get_device_names, device_names_kwargs)
+        else:
+            imap_iter = self.single_thread_iter(Worker_get_device_names, device_names_kwargs)
+
+        for names in tqdm_progress(imap_iter, desc='Device names', total=len(device_names_kwargs)):
             device_names.update(names)
             # if is_tfprof_file(path):
             #     reader = TFProfCategoryTimesReader(path)
             #     device_names.update(reader.get_device_names())
-        device_name_pool.close()
-        device_name_pool.join()
+        pprint.pprint({'tfprof.device_names':device_names})
+
+        if not self.debug_single_thread:
+            device_name_pool.close()
+            device_name_pool.join()
+
         for device_name in device_names:
             self.insert_device_name(device_name)
 
+        if self.debug:
+            print("> Commit.")
         self.conn.commit()
+
+
+        # name_to_id_obj = NameToID(self.db_path, debug=self.debug)
+        # name_to_id_obj.run()
+        #
+        # self.process_to_id = name_to_id_obj.process_to_id
+        # self.category_to_id = name_to_id_obj.category_to_id
+        # self.device_to_id = name_to_id_obj.device_to_id
+        # self.machine_to_id = name_to_id_obj.machine_to_id
+
         pprint.pprint({
             'process_to_id':self.process_to_id,
             'category_to_id':self.category_to_id,
             'device_to_id':self.device_to_id,
             'machine_to_id':self.machine_to_id,
         })
+        # sys.exit(0)
 
         if not self.debug_single_thread:
             pool = multiprocessing.Pool()
@@ -339,10 +419,8 @@ class SQLParser:
         #     debug=self.debug,
         # )
 
-        def single_thread_iter(worker, worker_kwargs):
-            for kwargs in worker_kwargs:
-                ret = worker(kwargs)
-                yield ret
+        if self.debug:
+            print("> Insert table files.")
 
         def get_worker_kwargs(path):
             if is_machine_util_file(path):
@@ -361,9 +439,13 @@ class SQLParser:
         worker_kwargs = [get_worker_kwargs(path) for path in src_files]
 
         if not self.debug_single_thread:
+            if self.debug:
+                print("> Insert table files using thread pool.")
             imap_iter = pool.imap_unordered(CSVInserterWorker, worker_kwargs)
         else:
-            imap_iter = single_thread_iter(CSVInserterWorker, worker_kwargs)
+            if self.debug:
+                print("> Insert table files using single thread.")
+            imap_iter = self.single_thread_iter(CSVInserterWorker, worker_kwargs)
 
         with progressbar.ProgressBar(max_value=len(src_files), prefix="SQL insert") as bar:
             for i, result in enumerate(imap_iter):
@@ -808,6 +890,49 @@ def CSVInserterWorker(kwargs):
     worker = _CSVInserterWorker(**kwargs)
     worker.run()
 
+class NameToID:
+
+    def __init__(self, db_path,
+                 debug=False,
+                 ):
+        self.db_path = db_path
+        self.debug = debug
+
+    def run(self):
+        self.conn = sql_create_connection(self.db_path)
+
+        self.process_to_id = self.build_name_to_id('Process', 'process_id', 'process_name')
+        self.phase_to_id = self.build_name_to_id('Phase', 'phase_id', 'phase_name')
+        self.category_to_id = self.build_name_to_id('Category', 'category_id', 'category_name')
+        self.device_to_id = self.build_name_to_id('Device', 'device_id', 'device_name')
+        self.machine_to_id = self.build_name_to_id('Machine', 'machine_id', 'machine_name')
+
+        # self.insert_file(self.path)
+        # self.finish()
+
+    @property
+    def cursor(self):
+        return self.conn.cursor
+
+    def build_name_to_id(self, table, id_field, name_field):
+        c = self.cursor
+        query = """
+        SELECT {name_field} AS name, {id_field} AS ident 
+        FROM {table} 
+        """.format(
+            id_field=id_field,
+            table=table,
+            name_field=name_field,
+            p=sql_placeholder(),
+        )
+        sql_exec_query(
+            c, query,
+            # klass=self.__class__, debug=self.debug)
+            klass=self.__class__, debug=False)
+        rows = c.fetchall()
+        name_to_id = dict((row['name'], row['ident']) for row in rows)
+        return name_to_id
+
 class _CSVInserterWorker:
 
     # def __init__(self, path, db_path, table, block_size=50000, id_field=None, directory=None,
@@ -900,7 +1025,8 @@ class _CSVInserterWorker:
         )
         sql_exec_query(
             c, query,
-            klass=self.__class__, debug=self.debug)
+            # klass=self.__class__, debug=self.debug)
+            klass=self.__class__, debug=False)
         rows = c.fetchall()
         name_to_id = dict((row['name'], row['ident']) for row in rows)
         return name_to_id
@@ -922,8 +1048,8 @@ class _CSVInserterWorker:
         reader = TFProfCategoryTimesReader(path)
 
         print("> Insert tfprof file: {p}".format(p=path))
-        if self.debug:
-            reader.print(sys.stdout)
+        # if self.debug:
+        #     reader.print(sys.stdout)
 
         # process_id = self.insert_process_name(reader.process_name)
         process_id = self.process_to_id[reader.process_name]
@@ -941,11 +1067,17 @@ class _CSVInserterWorker:
             category, start_time_us, duration_us, name = event
             # category_id = self.insert_category_name(category)
             category_id = self.category_to_id[category]
-            if category == 'GPU' and self.debug:
-                print("> category = {c}, duration_us = {duration_us}".format(
-                    c=category,
-                    duration_us=duration_us))
+            # if category == 'GPU' and self.debug:
+            #     print("> category = {c}, duration_us = {duration_us}".format(
+            #         c=category,
+            #         duration_us=duration_us))
             # device_id = self.insert_device_name(device)
+            if device not in self.device_to_id:
+                print("> ERROR: Couldn't find device={dev} in path={path}".format(
+                    dev=device,
+                    path=path))
+                pprint.pprint({
+                    'device_to_id':self.device_to_id})
             device_id = self.device_to_id[device]
             end_time_us = start_time_us + duration_us
             is_debug_event = bool(match_debug_event_name(name))
@@ -975,8 +1107,8 @@ class _CSVInserterWorker:
         call_times_data = read_pyprof_call_times_file(path)
 
         print("> Insert pyprof call_times file: {p}".format(p=path))
-        if self.debug:
-            pprint.pprint({'call_times_data':call_times_data})
+        # if self.debug:
+        #     pprint.pprint({'call_times_data':call_times_data})
 
         process_name = call_times_data['process_name']
         phase_name = call_times_data['phase']
@@ -1055,8 +1187,8 @@ class _CSVInserterWorker:
             proto.ParseFromString(f.read())
 
         print("> Insert pyprof file: {p}".format(p=path))
-        if self.debug:
-            print(proto)
+        # if self.debug:
+        #     print(proto)
 
         c = self.cursor
         # Insert Process
@@ -1104,8 +1236,8 @@ class _CSVInserterWorker:
         proto = read_machine_util_file(path)
 
         print("> Insert machine CPU/GPU utilization file: {p}".format(p=path))
-        if self.debug:
-            print(proto)
+        # if self.debug:
+        #     print(proto)
 
         machine_id = self.machine_to_id[proto.machine_name]
 
@@ -3908,6 +4040,10 @@ def get_process_trace_metadata(path):
     :return:
     """
     assert is_process_trace_file(path)
+
+    # REALLY slow for this file:
+    # /mnt/data/james/clone/dnn_tensorflow_cpp/checkpoints/minigo/vector_multiple_workers_k4000/process/loop_train_eval/phase/sgd_updates/profile.trace_2.session_1.proto
+    # NOTE: we need to fix large file handling (more frequent dumps!).
 
     if is_tfprof_file(path):
         proto = read_tfprof_file(path)

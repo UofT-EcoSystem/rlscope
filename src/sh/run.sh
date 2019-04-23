@@ -52,15 +52,15 @@ _train_minigo() {
 )
 }
 
-train_minigo_multiple() {
+train_minigo_test_multiple() {
     local base_dir=$CHECKPOINTS/minigo/vector_test_multiple_workers_k4000
     local goparams=$MLPERF_DIR/reinforcement/tensorflow/minigo/params/test_multiple_workers.json
     _train_minigo $base_dir $goparams
 }
 
-train_minigo_multiple_final() {
-    local base_dir=$CHECKPOINTS/minigo/vector_final_multiple_workers_k4000
-    local goparams=$MLPERF_DIR/reinforcement/tensorflow/minigo/params/final_multiple_workers.json
+train_minigo_multiple() {
+    local base_dir=$CHECKPOINTS/minigo/vector_multiple_workers_k4000
+    local goparams=$MLPERF_DIR/reinforcement/tensorflow/minigo/params/multiple_workers.json
     _train_minigo $base_dir $goparams
 }
 

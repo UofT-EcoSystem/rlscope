@@ -37,21 +37,41 @@ _process_minigo() {
         "$@"
     }
 
+    DIR=$IML/checkpoints/minigo/vector_multiple_workers_k4000
+
     cd $IML
 
-#    for overlap_type in ResourceOverlap ResourceSubplot CategoryOverlap OperationOverlap; do
 #    for overlap_type in ResourceOverlap ResourceSubplot OperationOverlap; do
 #    for overlap_type in ResourceOverlap ResourceSubplot; do
 #    for overlap_type in ResourceSubplot; do
-    for overlap_type in OperationOverlap; do
+#    for overlap_type in OperationOverlap; do
+#    for overlap_type in ResourceSubplot; do
+#    for overlap_type in OperationOverlap CategoryOverlap; do
+#    for overlap_type in CategoryOverlap; do
+#    for overlap_type in OperationOverlap; do
+    for overlap_type in ResourceOverlap ResourceSubplot CategoryOverlap OperationOverlap; do
         (
         echo "> overlap_type = $overlap_type"
         _do python3 $IML/python/profiler/run_benchmark.py \
-            --directories $IML/checkpoints/minigo/vector_test_multiple_workers_k4000 \
+            --directories $DIR \
             --rules UtilizationPlot \
-            --overlap-type $overlap_type
+            --overlap-type $overlap_type \
+            --debug
         echo "> DONE"
-        ) | tee ${overlap_type}.txt
+        ) | tee ${overlap_type}.txt &
     done
+
+    local plot_type="HeatScale"
+    (
+    echo "> plot_type = $plot_type"
+    _do python3 $IML/python/profiler/run_benchmark.py \
+      --directories $DIR \
+      --rules HeatScalePlot
+    echo "> DONE"
+    ) | tee ${plot_type}.txt &
+
+    echo "Wait for things to finish..."
+    wait
+
 )
 }

@@ -15,3 +15,12 @@ def U(start_usec, end_usec=None, name=None, time_usec=None):
                       time_usec=time_usec,
                       end_usec=end_usec,
                       name=name)
+
+def flatten_category_times(category_times):
+    new_category_times = dict()
+    for category in category_times.keys():
+        all_times = []
+        for times in category_times[category]:
+            all_times.extend(times)
+        new_category_times[category] = all_times
+    return new_category_times
