@@ -9,10 +9,12 @@ import threading
 
 from parser.common import *
 
-from proto.protobuf.pyprof_pb2 import Pyprof, Event
+from prof_protobuf.pyprof_pb2 import Pyprof, Event
 # from proto.protobuf import pyprof_pb2
 
 from profiler import tensorflow_profile_context
+
+from profiler import proto_util
 
 from os.path import join as _j, abspath as _a, exists as _e, dirname as _d, basename as _b
 
@@ -29,53 +31,166 @@ DEBUG = wrap_util.DEBUG
 
 DEFAULT_PREFIX = "CLIB__"
 
-_pyprof = Pyprof()
-def clear_pyprof_profiling():
-    global _pyprof, _python_start_us, _step, _process_name
-    _pyprof = Pyprof()
-    if _process_name is not None:
-        _pyprof.process_name = _process_name
-    _python_start_us = now_us()
-    _step = None
+# 39870 events in Pyprof ~ 1.6M
+PROTO_MAX_PYPROF_PY_EVENTS = 40000
 
+# PROBLEM: We're only counting the number C++ API calls;
+# we AREN'T counting python events being collected via the pyprof profiler!
+# Q: Why do we need to record a python event for the C++ API call;
+#    shouldn't it be counted by the pyprof profiler?
+# A: It looks like we AREN'T actually using the pyprof profiler;
+#    instead we are strictly using python timings recorded here...
+#    that's correct.
+#
+# NOTE:
+# Currently, we prefer NOT to collect all the pyprof profiler events
+# (i.e. individual python function calls) since it's a LOT more data,
+# Hence (I would suspect but have not measured) using pyprof profiler
+# would lead to more profiling overhead.
+# Of course, we cannot provide fine-grained python-code information
+# (e.g. FlameGraph) with this approach.
+# For our current purposes of isolating python time to "operations",
+# this is "good enough".
+
+class RecordEventHook:
+    """
+    Interface for adding hooks for when a TensorFlow C++ API event / Python event is recorded.
+    """
+    def __init__(self):
+        pass
+
+    # Can't see a reason for providing this.
+    #
+    # def before_record_event(self, pyprof_trace, event):
+    #     pass
+
+    def after_record_event(self, pyprof_trace, event):
+        pass
+
+RECORD_EVENT_HOOKS = []
+def register_record_event_hook(hook : RecordEventHook):
+    RECORD_EVENT_HOOKS.append(hook)
+def unregister_record_event_hook(hook : RecordEventHook):
+    RECORD_EVENT_HOOKS.remove(hook)
+
+class PyprofTrace:
+    def __init__(self):
+        self.pyprof = Pyprof()
+        self.num_events = 0
+
+    def finish(self, process_name, phase):
+        self.pyprof.process_name = process_name
+        self.pyprof.phase = phase
+
+    def set_step(self, step):
+        if step is None:
+            return
+        self.step = step
+        if step not in self.pyprof.steps:
+            if tensorflow_profile_context.DEBUG:
+                print("> ADD PYPROF STEP: {s}".format(s=self.step))
+
+            self.pyprof.steps.extend([step])
+
+            if tensorflow_profile_context.DEBUG:
+                pprint.pprint({
+                    'len(self.pyprof.steps)':len(self.pyprof.steps),
+                }, indent=2)
+
+    def dump(self, path, process_name, phase):
+        self.pyprof.process_name = process_name
+        self.pyprof.phase = phase
+
+        with open(path, 'wb') as f:
+            print("> dump pyprof.steps:")
+            pprint.pprint({
+                'len(pyprof.steps)':len(self.pyprof.steps),
+                'pyprof.process_name':self.pyprof.process_name,
+                'pyprof.phase':self.pyprof.phase,
+            }, indent=2)
+            f.write(self.pyprof.SerializeToString())
+
+    def record_event(self, step, category, name, start_us, end_us, attrs=None, python_event=False):
+        assert step is not None
+
+        event = proto_util.mk_event(
+            name=name,
+            start_us=start_us,
+            end_us=end_us,
+            attrs=attrs)
+
+        # NOTE: extend() makes a copy of everything we add, but it's more familiar so who cares.
+        # https://developers.google.com/protocol-buffers/docs/reference/python-generated#repeated-message-fields
+        if python_event:
+            self.pyprof.python_events[step].events.extend([event])
+        else:
+            self.pyprof.clibs[step].clibs[category].events.extend([event])
+
+        self.num_events += 1
+
+        # Call any RecordEvent callbacks
+        # (e.g. you could register a hook to dump this PyprofTrace
+        # when the number of events exceeds a threshold)
+        for hook in RECORD_EVENT_HOOKS:
+            hook.after_record_event(pyprof_trace=self, event=event)
+
+    def record_python_event(self, step, name, start_us, end_us, ignore_disable=False):
+        """
+        Useful for recording the last amount of time in between returning
+        from a call to q_forward, and finishing benchmarking.
+        This will include time spent in the tensorflow python API
+        (i.e. not doing C++ calls, just returning back to the benchmarking script).
+        """
+        self.record_event(step, CATEGORY_PYTHON, name, start_us, end_us,
+                          python_event=True)
+
+#
+# Module globals.
+#
+_pyprof_trace = PyprofTrace()
 _step = None
+_process_name = None
+_phase = None
+# Q: Should we initialize this to now_us()...?
+_python_start_us = None
+# By default tracing is OFF.
+_TRACING_ON = False
+
+def clear_pyprof_profiling():
+    global _pyprof_trace, _python_start_us, _process_name
+    _pyprof_trace = PyprofTrace()
+    _pyprof_trace.set_step(_step)
+    _python_start_us = now_us()
+def get_pyprof_trace():
+    global _pyprof_trace, _process_name, _phase
+    trace = _pyprof_trace
+    trace.finish(_process_name, _phase)
+
+    clear_pyprof_profiling()
+    return trace
+
+def num_events_recorded():
+    global _pyprof_trace
+    return _pyprof_trace.num_events
+
+def should_dump_pyprof():
+    global _pyprof_trace
+    return _pyprof_trace.num_events >= PROTO_MAX_PYPROF_PY_EVENTS
+
 def set_step(step, expect_traced=False, ignore_disable=False):
-    global _step, _python_start_us
+    global _pyprof_trace, _step, _python_start_us
     _step = step
     _python_start_us = now_us()
-    # if expect_traced:
-    #     # print("> is traced = {t}".format(t=step in _trace_steps))
-    #     # pprint.pprint({'step':step, 'trace_steps':_trace_steps})
-    #     assert step in _trace_steps
-    # if _step in _trace_steps and _step not in _pyprof.steps:
-    if ( _TRACING_ON or ignore_disable ) and step not in _pyprof.steps:
-        if tensorflow_profile_context.DEBUG:
-            print("> ADD PYPROF STEP: {s}".format(s=_step))
+    if _TRACING_ON or ignore_disable:
+        _pyprof_trace.set_step(step)
 
-        _pyprof.steps.extend([step])
-
-        if tensorflow_profile_context.DEBUG:
-            pprint.pprint({'len(_pyprof.steps)':len(_pyprof.steps)}, indent=2)
-
-_process_name = None
 def set_process_name(process_name):
     global _process_name
     _process_name = process_name
-    _pyprof.process_name = process_name
 
-_phase = None
 def set_phase(phase):
     global _phase
     _phase = phase
-    _pyprof.phase = phase
-
-# _trace_steps = None
-# def set_trace_steps(trace_steps):
-#     global _trace_steps
-#     _trace_steps = trace_steps
-#     pprint.pprint({'_trace_steps':trace_steps})
-
-_python_start_us = None
 
 class CFuncWrapper:
     def __init__(self, func, category, prefix=DEFAULT_PREFIX):
@@ -132,21 +247,23 @@ class CFuncWrapper:
             name=name)
 
     def __call__(self, *args, **kwargs):
-        global _python_start_us, _step, _TRACING_ON
+        global _pyprof_trace, _python_start_us, _step, _TRACING_ON
 
         start_us = now_us()
         ret = self.call(*args, **kwargs)
         end_us = now_us()
 
-        # if _TRACING_ON and _trace_steps is not None and _step in _trace_steps:
         if _TRACING_ON:
-            # Q: What if _step isn't present?
-            tid = threading.get_ident()
+            name = self.func.__name__
 
             # We are about to call from python into a C++ API.
             # That means we stopping executing python while C++ runs.
             # So, we must add a python execution and C++ execution event.
-            name = self.func.__name__
+            #
+            # [ last C++ call ][ python call ][ C++ call ]
+            #                 |               |          |
+            #         _python_start_us     start_us   end_us
+
             # TODO: BUG: sometimes, this results in a negative duration_us.
             # HACK: just filter out these rare events when building SQL database.
             # That must mean _python_start_us has been UPDATED after "start_us = now_us()" was called...
@@ -155,26 +272,26 @@ class CFuncWrapper:
             # - TF_Output causes a call to another wrapped function (don't think so, its a SWIG entry)
             # - multiple threads updating _python_start_us (e.g. by calling set_step/clear_pyprof_profiling/calling wrapped functions)
             #   ... unlikely since code tends to use fork() via multiprocessing if at all
-            python_event = Event(
-                start_time_us=int(_python_start_us),
-                duration_us=int(start_us - _python_start_us),
-                thread_id=tid,
-                name=name)
-            category_event = Event(
-                start_time_us=int(start_us),
-                duration_us=int(end_us - start_us),
-                thread_id=tid,
-                name=name)
 
-            # category = self.__getattr__('category')
-            category = self.category
-            # NOTE: extend() makes a copy of everything we add, but it's more familiar so who cares.
-            # https://developers.google.com/protocol-buffers/docs/reference/python-generated#repeated-message-fields
-            _pyprof.python_events[_step].events.extend([python_event])
-            _pyprof.clibs[_step].clibs[category].events.extend([category_event])
-            # if _step not in _pyprof.steps:
-            #     print("> ADD STEP: {s}".format(s=_step))
-            #     _pyprof.steps.extend([_step])
+            # python_event = Event(
+            #     start_time_us=int(_python_start_us),
+            #     duration_us=int(start_us - _python_start_us),
+            #     thread_id=tid,
+            #     name=name)
+            # category_event = Event(
+            #     start_time_us=int(start_us),
+            #     duration_us=int(end_us - start_us),
+            #     thread_id=tid,
+            #     name=name)
+
+            _pyprof_trace.record_python_event(
+                _pyprof_trace.step, name,
+                start_us=_python_start_us,
+                end_us=start_us)
+            _pyprof_trace.record_event(
+                _pyprof_trace.step, self.category, name,
+                start_us=start_us,
+                end_us=end_us)
 
         _python_start_us = end_us
 
@@ -187,24 +304,12 @@ class CFuncWrapper:
         return getattr(self.func, name)
 
 def record_event(category, name, start_us, end_us, attrs=None, python_event=False, ignore_disable=False):
-    global _step, _pyprof
-    # if _trace_steps is not None and _step in _trace_steps:
-
-    if _step is None:
-        import ipdb; ipdb.set_trace()
+    global _pyprof_trace
 
     if _TRACING_ON or ignore_disable:
-        tid = threading.get_ident()
-        event = Event(
-            start_time_us=int(start_us),
-            duration_us=int(end_us - start_us),
-            thread_id=tid,
-            name=name,
-            attrs=attrs)
-        if python_event:
-            _pyprof.python_events[_step].events.extend([event])
-        else:
-            _pyprof.clibs[_step].clibs[category].events.extend([event])
+        _pyprof_trace.record_event(
+            _pyprof_trace.step, category, name, start_us, end_us,
+            attrs=attrs, python_event=python_event)
 
 def record_python_event(name, end_us, ignore_disable=False):
     """
@@ -213,8 +318,7 @@ def record_python_event(name, end_us, ignore_disable=False):
     This will include time spent in the tensorflow python API
     (i.e. not doing C++ calls, just returning back to the benchmarking script).
     """
-    global _step, _start_us, _python_start_us
-    # if _trace_steps is not None and _step in _trace_steps:
+    global _start_us, _python_start_us
     if _TRACING_ON or ignore_disable:
         record_event(CATEGORY_PYTHON, name, _python_start_us, end_us,
                      python_event=True,
@@ -231,8 +335,6 @@ def record_operation(start_us, end_us,
     This will include time spent in the tensorflow python API
     (i.e. not doing C++ calls, just returning back to the benchmarking script).
     """
-    global _step
-    # if _trace_steps is not None and _step in _trace_steps:
     if _TRACING_ON or ignore_disable:
         record_event(CATEGORY_OPERATION, op_name, start_us, end_us,
                      attrs={
@@ -242,17 +344,10 @@ def record_operation(start_us, end_us,
                      ignore_disable=ignore_disable)
 
 def is_recording():
-    global _step
     return _TRACING_ON
-    # return _trace_steps is not None and _step in _trace_steps
 
 def should_record(step):
-    # global _trace_steps
-    # return _trace_steps is not None and step in _trace_steps
     return _TRACING_ON
-
-# By default tracing is OFF.
-_TRACING_ON = False
 
 @contextlib.contextmanager
 def tracing_disabled():
@@ -290,18 +385,6 @@ class tracing_as:
     def __exit__(self, exc_type, exc_val, exc_tb):
         global _TRACING_ON
         _TRACING_ON = self._tracing_on
-
-def dump_pyprof(path, process_name, phase):
-    with open(path, 'wb') as f:
-        print("> dump pyprof.steps:")
-        pprint.pprint({
-            'len(_pyprof.steps)':len(_pyprof.steps),
-            '_pyprof.process_name':_pyprof.process_name,
-            '_pyprof.phase':_pyprof.phase,
-        }, indent=2)
-        _pyprof.process_name = process_name
-        _pyprof.phase = phase
-        f.write(_pyprof.SerializeToString())
 
 #
 # Some pre-written C++ library wrappers.

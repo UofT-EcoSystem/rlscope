@@ -3,7 +3,9 @@ export IML=$HOME/clone/dnn_tensorflow_cpp
 export IML_DRILL=$HOME/clone/iml-drill
 
 _activate_virtualenv_cuda9() {
+    # tensorflow_cuda9 github repo checkout
     source $HOME/envs/cuda9/bin/activate
+#    source $HOME/envs/tf_patch_cuda9/bin/activate
 }
 
 _activate_cuda9() {
@@ -19,12 +21,22 @@ $LD_LIBRARY_PATH"
 
 _add_python_path() {
 export PYTHONPATH="\
+$IML:\
 $IML/python:\
 $PYTHONPATH"
 }
 _activate_virtualenv_cuda9
 _activate_cuda9
 _add_python_path
+
+iml_gen_protobufs() {
+(
+    set -e
+    set -x
+    cd $IML
+    protoc -I$PWD --python_out=. prof_protobuf/*.proto
+)
+}
 
 _process_minigo() {
 (

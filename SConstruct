@@ -1,27 +1,24 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 from __future__ import print_function
-from glob import glob
 import time
 import pprint
 import textwrap
 import sys
 import re
 import os
-import fnmatch
 import subprocess
-from os.path import dirname as _d, basename as _b, exists as _e
+from os.path import exists as _e
 from os.path import join as _j, abspath as _a
-from os.path import splitext
 from io import StringIO
 
-from profiler import run_benchmark
+from scripts import run_benchmark
 
 # import py_config
 
 # NOTE:
 # - do NOT use the absolute paths from expr_config
-# - if you try to, scons won't realize absolute paths == relative paths and refuse to 
+# - if you try to, scons won't realize absolute paths == relative paths and refuse to
 #     build stuff silently
 #     (look at paths in "scons --debug=stree" to debug if you suspect this is happening).
 _ROOT = "."

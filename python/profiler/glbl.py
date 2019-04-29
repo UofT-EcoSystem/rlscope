@@ -55,7 +55,7 @@ def handle_iml_args(parser, args, directory=None):
         we fall back on this.
     """
     if args.iml_directory is not None:
-        iml_directory = args.iml_dir
+        iml_directory = args.iml_directory
     elif directory is not None:
         iml_directory = directory
 

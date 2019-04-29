@@ -114,12 +114,12 @@ def _profiled_run(self,
 
   if DEBUG_THREADS:
       _check_single_threaded()
-      
+
   profile_context = getattr(self, 'profile_context', None)
   if profile_context is not None:
     profile_context_state = profile_context._new_step()
     step, locked = profile_context_state.__enter__()
-    
+
     # Inherit the "phase" from the Profiler object when we first call session.run(...).
     if profile_context.phase is None:
       assert glbl.prof.phase is not None
@@ -419,7 +419,7 @@ class ProfileContext(object):
 
     if self._trace_all:
       return False
-    
+
     if step in self._slow_path_steps:
       return False
     # When user doesn't set the tracing steps explicitly, auto decide it.
@@ -427,7 +427,7 @@ class ProfileContext(object):
         self._traced_steps <= MAX_TRACED_STEPS):
       return False
     return True
-  
+
   def set_trace_all(self, trace_all):
     self._trace_all = trace_all
 
@@ -438,7 +438,7 @@ class ProfileContext(object):
 
     if self._trace_all:
       return True
-    
+
     if self._traced_steps > MAX_TRACED_STEPS:
       return False
     # Check user-set tracing steps.
@@ -540,6 +540,23 @@ class ProfileContext(object):
       assert old_pctx is None
       self._sess.profile_context = self
     return self
+
+  def clear(self):
+    assert self.phase is not None
+    sess = self._cur_session(allow_none=True)
+
+    # if process_name is None:
+    #   process_name = self.process_name
+
+    # if phase is None:
+    #   phase = self.phase
+
+    if sess is None:
+      print(("> WARNING: tfprof didn't trace sessions for cmd:\n"
+             "  cmd: {cmd}").format(cmd=" ".join(sys.argv)))
+      return
+
+    c_api_util.clear_trace_data(sess)
 
   def dump(self, dump_path, process_name):
     assert self.phase is not None

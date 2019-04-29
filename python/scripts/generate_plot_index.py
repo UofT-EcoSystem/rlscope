@@ -13,7 +13,7 @@ from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, base
 
 # import GPUtil
 
-# from proto.protobuf.pyprof_pb2 import Pyprof, MachineUtilization, DeviceUtilization, UtilizationSample
+# from prof_protobuf.pyprof_pb2 import Pyprof, MachineUtilization, DeviceUtilization, UtilizationSample
 
 import py_config
 

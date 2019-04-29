@@ -111,7 +111,8 @@ _train_pong() {
 }
 
 train_pong() {
-    local chkpt_path=$BASELINES_CHECKPOINTS/PongNoFrameskip-v4/vector_k4000
+#    local chkpt_path=$BASELINES_CHECKPOINTS/PongNoFrameskip-v4/vector_k4000
+    local chkpt_path=$BASELINES_CHECKPOINTS/PongNoFrameskip-v4/test_k4000
     _train_pong $chkpt_path
 }
 

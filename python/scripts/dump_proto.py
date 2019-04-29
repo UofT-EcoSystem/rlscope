@@ -2,7 +2,7 @@ import argparse
 import textwrap
 
 from tensorflow.core.profiler.tfprof_log_pb2 import ProfileProto
-from proto.protobuf.pyprof_pb2 import Pyprof
+from prof_protobuf.pyprof_pb2 import Pyprof
 
 from parser.common import *
 

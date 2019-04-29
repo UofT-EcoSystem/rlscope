@@ -18,7 +18,9 @@ from parser.common import *
 from parser.stats import Stats
 # from proto.tensorflow.core.profiler.tfprof_log_pb2 import ProfileProto
 from tensorflow.core.profiler.tfprof_log_pb2 import ProfileProto
-from proto.protobuf.pyprof_pb2 import Pyprof
+from prof_protobuf.pyprof_pb2 import Pyprof
+
+from profiler import proto_util
 
 from parser.stats import KernelTime, category_times_add_time
 
@@ -742,6 +744,33 @@ class TotalTimeParser(ProfilerParserCommonMixin):
             return
 
 class TraceEventsParser:
+    """
+    Usage modes:
+    python3 python/profiler/run_benchmark.py --directories ... --rules TraceEventsParser
+      Default mode; just show just the FIRST "step" for EACH operation (e.g. q_forward, q_backward, ...) in the ML script.
+      Each operation will generate a separate trace_events.json file.
+      NOTE: a "step" = an 0-based identifier for each traced TensorFlow C++ API call (e.g. q_forward)
+
+    python3 python/profiler/run_benchmark.py --directories ... --rules TraceEventsParser --op-name q_forward
+      Same as above, except just output a file for --op-name.
+
+    python3 python/profiler/run_benchmark.py --directories ... --rules TraceEventsParser --overlaps-event-id 116098
+      Keep all events that overlap with a particular event-id (from the Event SQL table).
+      Useful for debugging overlap computation.
+
+    python3 python/profiler/run_benchmark.py --directories ... --rules TraceEventsParser --start-usec <epoch_us> --end-usec <epoch_us>
+      Output ALL events that fall within a certain [--start-usec, --end-usec] epoch time range.
+      NOTE: We output IMLUnitTest data for this as well.
+
+    """
+
+    # TODO: Add the ability to parse IMLUnitTestOnce/Multiple files and add the events to the trace_events.json.
+    # Row:
+    # IMLUnitTest:
+    #
+    # We can just show the ENTIRE trace;
+    # For larger traces (minigo), we probably just want to 'zoom-in' to a trouble-some area
+    # (phase start/end time + IMLUnitTest start/end time for that phase)
 
     # def __init__(self, parser, args, src_files, bench_name=NO_BENCH_NAME, data=None):
     def __init__(self, directory,
@@ -766,6 +795,7 @@ class TraceEventsParser:
         self.process_name = process_name
         self.show_progress = show_progress
         self.process_op_nest = process_op_nest
+        self.td = None
 
         # self.dummy_times = []
 
@@ -837,6 +867,59 @@ class TraceEventsParser:
             debug=self.debug)
         trace_events_dumper.dump()
 
+    def _add_unit_test_times(self, category_times):
+        """
+        td = Read IMLUnitTest
+
+        # NOTE: We need to restrict events we add to falling between [self.start_usec, self.end_usec]
+
+        category = "IMLUnitTest: phases"
+        for process in td.processes:
+            for phase in process.phases:
+                category_times[category].append(
+                  Event(name=phase, ...))
+
+        category = "IMLUnitTest: profiling"
+        category_times[category].append(
+          Event(name='prof.start()/prof.stop()', start_us=td.start_usec, end_us=td.end_usec))
+
+        :return:
+        """
+        if self.td is None:
+            from profiler.profilers import unit_test_util
+            self.td = unit_test_util.TestData(debug=self.debug)
+            self.td.read_directory(self.directory)
+
+        def should_keep_event(event):
+            return self.start_usec <= event.start_time_us <= proto_util.event_end_us(event) <= self.end_usec
+
+        processes = [self.td.get_process(self.process_name)]
+
+        # prof.set_phase(...)
+        category = 'IMLUnitTest: phases'
+        # for process in self.td.processes:
+        for process in processes:
+            for phase in process.phases:
+                for event in process.events(phase):
+                    if should_keep_event(event):
+                        # assert event.name == phase
+                        ktime = KernelTime(name=phase, start_usec=event.start_time_us, end_usec=proto_util.event_end_us(event))
+                        if category not in category_times:
+                            category_times[category] = []
+                        category_times[category].append(ktime)
+
+        # prof.start()/stop()
+        category = 'IMLUnitTest: processes'
+        # for process in self.td.processes:
+        for process in processes:
+            if should_keep_event(process.prof_event):
+                # TODO: us prof.start()/prof.stop() times instead of first/last phase times.
+                # However, we need to adjust unit-tests first.
+                ktime = KernelTime(name=process.process_name, start_usec=process.prof_event.start_time_us, end_usec=proto_util.event_end_us(process.prof_event))
+                if category not in category_times:
+                    category_times[category] = []
+                category_times[category].append(ktime)
+
     def _trace_event_time_range(self):
         category_times = self.sql_reader.events_by_time_range(
             self.start_usec, self.end_usec, self.process_name,
@@ -844,6 +927,8 @@ class TraceEventsParser:
         # category_times = self.sql_reader.events_that_overlap_with(
         #     event, event.process_name,
         #     show_progress=self.show_progress)
+
+        self._add_unit_test_times(category_times)
 
         trace_events_dumper = TraceEventsDumper(
             category_times,
@@ -863,8 +948,10 @@ class TraceEventsParser:
         if self.overlaps_event_id is not None:
             trace_func = self._trace_event_overlap
         elif self.start_usec is not None:
+            process_names = self.sql_reader.process_names
             if self.end_usec is None or self.process_name is None:
-                raise RuntimeError("Need --start-usec, --end-usec, and --process-name for TraceEventsParser time-range")
+                raise RuntimeError("Need --start-usec, --end-usec, and --process-name for TraceEventsParser time-range;\n  process_names = {procs}".format(
+                    procs=process_names))
             trace_func = self._trace_event_time_range
         else:
             trace_func = self._trace_first_step

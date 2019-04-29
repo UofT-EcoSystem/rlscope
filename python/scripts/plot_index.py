@@ -1,6 +1,7 @@
 import re
 import numpy as np
 import pprint
+import json
 
 from os.path import join as _j, abspath as _a, exists as _e, dirname as _d, basename as _b
 
@@ -28,9 +29,13 @@ class _DataIndex:
       - all CatergoryOverlap files belonging to a given (process, phase)
       - etc.
     """
-    def __init__(self, index, directory):
+    def __init__(self, index, directory, debug=False):
         self.index = index
         self.directory = directory
+        self.debug = debug
+
+    def set_debug(self, debug):
+        self.debug = debug
 
     def each_file(self, selector):
         """
@@ -54,10 +59,12 @@ class _DataIndex:
         for md, entry in _sel_idx(self.index, selector, field):
             md[field] = selector[field]
             sel_order = SEL_ORDER[selector[field]]
-            pprint.pprint({'entry':entry})
+            if self.debug:
+                pprint.pprint({'entry':entry})
             ident = self.md_id(md, sel_order)
             new_entry = self._adjust_paths(entry)
-            pprint.pprint({'md':md, 'entry':new_entry, 'ident':ident})
+            if self.debug:
+                pprint.pprint({'md':md, 'entry':new_entry, 'ident':ident})
             yield md, new_entry, ident
 
     def _adjust_paths(self, old_entry):
@@ -71,6 +78,14 @@ class _DataIndex:
         files = list(self.each_file(selector))
         assert len(files) == 1
         return files[0]
+
+    def read_metadata(self, selector, path_field='venn_js_path'):
+        md, entry, ident = self.get_file(selector)
+        path = entry[path_field]
+        with open(path) as f:
+            js = json.load(f)
+        metadata = js['metadata']
+        return metadata
 
     def get_title(self, md, total_sec=None):
         """
@@ -147,7 +162,8 @@ class _DataIndex:
         :return:
         """
         for field in sel_order:
-            pprint.pprint({'field': field, 'md': md, 'sel_order':sel_order})
+            if self.debug:
+                pprint.pprint({'field': field, 'md': md, 'sel_order':sel_order})
             assert field in md
 
         field_value_sep = '_'

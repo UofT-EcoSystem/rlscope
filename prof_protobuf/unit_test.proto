@@ -1,0 +1,96 @@
+//
+// Protobuf's used for recording data used for unit-testing.
+//
+syntax = "proto3";
+package iml;
+
+// Q: How do we include iml/protobuf to the search-path?
+// Q: Should we use protobuf/pyprof.proto instead (project-relative path)?
+//import "pyprof.proto";
+import "prof_protobuf/pyprof.proto";
+//import iml.pyprof;
+//import "iml.pyprof";
+
+// UNIT TEST 01:
+// Total time traced matches total time from analyzed trace-file
+//
+// Profile something for a KNOWN duration of time, and make sure the time we know
+// we profiled it for matches the time our analysis says we traced it for.
+//
+// - PSEUDOCODE:
+//
+// start_t = Time.time()
+// glbl.prof.start()
+// ...
+// glbl.prof.stop()
+// end_t = time.time()
+// total_trace_time_sec = end_t - start_t
+//
+// # Analyze trace data
+// assert DB.total_trace_time_sec == total_trace_time_sec
+
+// UNIT TEST 02:
+// Phase start-time (epoch_sec) matches subplot start-time (epoch_sec).
+//
+//  - Should do single and multi-script tests.
+//  - PSEUDOCODE:
+//
+//  glbl.prof.start()
+//  phase_start_sec['phase_1'] = time.time()
+//  glbl.prof.set_phase('phase_1')
+//  ...
+//
+//  # NOTE: could be in a different py_script
+//  phase_start_sec['phase_1'] = time.time()
+//  glbl.prof.set_phase('phase_2')
+//  ...
+//
+//  phase_start_sec['phase_1'] = time.time()
+//  glbl.prof.set_phase('phase_3')
+//
+//  glbl.prof.stop()
+//
+//  - For phase in phases:
+//      assert DB.get_phase_start_time_sec(phase) == phase_start_sec[phase]
+//
+//  - NOTE: DB.get_phase_start_time_sec(phase)
+//    This compute the phase start time using the same code used by ResourceSubplot
+
+// Q: Can a phase happen multiple times in the same process?
+// A: Yes, that's possible technically speaking.  We probably won't
+// construct a unit-test that does that however.
+
+// A proto file that written "multiple" times by the unit-test.
+//
+// Currently, this includes glbl.prof.set_phase() start/end times.
+message IMLUnitTestMultiple {
+    string test_name = 1;
+    string process_name = 2;
+    // PSEUDOCODE:
+    //   # All belongs to the SAME py_script.
+    //   phase_start_sec['phase_1'] = time.time()
+    //   glbl.prof.set_phase('phase_1')
+    //   ...
+    //   phase_start_sec['phase_2'] = time.time()
+    //   glbl.prof.set_phase('phase_2')
+    //
+    // phase -> Event's
+    map<string, PhaseEvents> phase_events = 3;
+}
+
+// A proto file that written "once" by the unit-test, at the very end.
+//
+// Currently, this includes glbl.prof.start()/end() times
+message IMLUnitTestOnce {
+    string test_name = 1;
+    string process_name = 2;
+    // PSEUDOCODE:
+    //   glbl.prof.start()
+    //   ...
+    //   glbl.prof.stop()
+    Event prof_event = 3;
+}
+
+message PhaseEvents {
+    repeated Event events = 1;
+}

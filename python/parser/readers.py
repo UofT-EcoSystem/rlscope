@@ -1,6 +1,6 @@
 # from proto.tensorflow.core.profiler.tfprof_log_pb2 import ProfileProto
 from tensorflow.core.profiler.tfprof_log_pb2 import ProfileProto
-from proto.protobuf.pyprof_pb2 import Pyprof
+from prof_protobuf.pyprof_pb2 import Pyprof
 
 from parser.common import *
 from parser.stats import KernelTime, category_times_add_time

@@ -5,15 +5,14 @@ import json
 import codecs
 import re
 # pip install py-cpuinfo
-import cpuinfo
 from io import StringIO
 import pprint
 import os
 import subprocess
 import sys
-from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, basename as _b, isdir
+from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, isdir
 
-from profiler import run_benchmark
+from scripts import run_benchmark
 
 MEASURE_DEBUG_OPTS = ["--repetitions", 2]
 

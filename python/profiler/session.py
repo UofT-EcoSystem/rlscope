@@ -33,12 +33,15 @@ _original_BaseSession_init = None
 def setup_wrap_BaseSession():
     global _original_BaseSession_init
     global _original_BaseSession_close
+    global _original_BaseSession_run
 
     _original_BaseSession_init = BaseSession.__init__
     _original_BaseSession_close = BaseSession.close
+    _original_BaseSession_run = BaseSession.run
 
     BaseSession.__init__ = _wrapped_BaseSession_init
     BaseSession.close = _wrapped_BaseSession_close
+    BaseSession.run = _wrapped_BaseSession_run
 
 # old_Session = None
 # def setup_wrap_Session():
@@ -54,6 +57,19 @@ def setup_wrap_BaseSession():
 
 # TODO:
 # We also need to wrap tf.InteractiveSession.
+
+class SessionRunHook:
+    """
+    Interface for adding hooks for when a session becomes active.
+    """
+    def __init__(self):
+        pass
+
+    def before_run(self, session):
+        pass
+
+    def after_run(self, session):
+        pass
 
 class SessionActiveHook:
     """
@@ -92,6 +108,12 @@ def register_session_inactive_hook(hook : SessionInactiveHook):
     INACTIVE_HOOKS.append(hook)
 def unregister_session_inactive_hook(hook : SessionInactiveHook):
     INACTIVE_HOOKS.remove(hook)
+
+RUN_HOOKS = []
+def register_session_run_hook(hook : SessionRunHook):
+    RUN_HOOKS.append(hook)
+def unregister_session_run_hook(hook : SessionRunHook):
+    RUN_HOOKS.remove(hook)
 
 # NOTE: would be nice to have an INACTIVE session list, where once we dump the session, we no longer need to keep track of it anymore
 
@@ -132,7 +154,17 @@ def _after_inactive_hooks(session):
     for hook in INACTIVE_HOOKS:
         hook.after_inactive(session)
 
-# Autoincremented 
+def _before_run_hooks(session):
+    global RUN_HOOKS
+    for hook in RUN_HOOKS:
+        hook.before_run(session)
+
+def _after_run_hooks(session):
+    global RUN_HOOKS
+    for hook in RUN_HOOKS:
+        hook.after_run(session)
+
+# Autoincremented
 _NEXT_SESSION_ID = 0
 def _get_next_session_id():
     global _NEXT_SESSION_ID
@@ -151,6 +183,27 @@ def _wrapped_BaseSession_init(self, *args, **kwargs):
     _make_active(session=self)
     _original_BaseSession_init(self, *args, **kwargs)
     _after_active_hooks(session=self)
+
+def _wrapped_BaseSession_run(self, *args, **kwargs):
+    # Q: Is this going to be compatible with ProfileContext's wrapping of SessionRun?
+    # A: I think it will work; you're just wrapping a wrapper.
+    #
+    # Q: Should we make ProfileContext use this module?
+    # No.
+    # pctx wrapper needs to grab a lock for the duration of the session.run(...).
+    # "hooks" are less general than having a custom wrapper for a function.
+    #
+    # Q: Does it matter the order in which the pctx / dump-check wrappers get called?
+    # A: If we wrap the original session.run(...), then the dump-callback will be called in the middle of pctx code.
+    #    This could be bad, if we decide to modify pctx state (I don't think we do...)
+    #
+    # print("> Wrapped: {name}".format(
+    #     name=_wrapped_BaseSession_run.__name__,
+    # ))
+    _before_run_hooks(session=self)
+    ret = _original_BaseSession_run(self, *args, **kwargs)
+    _after_run_hooks(session=self)
+    return ret
 
 def _wrapped_BaseSession_close(self):
     """

@@ -18,7 +18,8 @@ from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, base
 from tqdm import tqdm as tqdm_progress
 
 from tensorflow.core.profiler.tfprof_log_pb2 import ProfileProto
-from proto.protobuf.pyprof_pb2 import Pyprof, MachineUtilization
+from prof_protobuf.pyprof_pb2 import Pyprof, MachineUtilization
+from prof_protobuf.unit_test_pb2 import IMLUnitTestOnce, IMLUnitTestMultiple
 
 CATEGORY_TF_API = "Framework API C"
 CATEGORY_PYTHON = 'Python'
@@ -1006,7 +1007,23 @@ def as_str(obj, indent=None):
 
 def bench_suffix(bench):
     if bench != NO_BENCH_NAME and bench is not None:
-        return ".{bench}".format(bench=bench)
+        return ".op_{bench}".format(bench=bench)
+    return ""
+
+def trace_suffix(trace_id, allow_none=False):
+    if trace_id is None and not allow_none:
+        raise RuntimeError("trace_id must be >= 0, got None")
+
+    if trace_id is not None:
+        return ".trace_{id}".format(id=trace_id)
+    return ""
+
+def sess_suffix(session_id, allow_none=False):
+    if session_id is None and not allow_none:
+        raise RuntimeError("session_id must be >= 0, got None")
+
+    if session_id is not None:
+        return ".session_{id}".format(id=session_id)
     return ""
 
 def debug_suffix(debug):
@@ -1234,6 +1251,20 @@ def get_microbench_basename():
 def get_microbench_path(direc):
     return _j(direc, 'microbenchmark.json')
 
+def get_unit_test_once_path(directory, trace_id, bench_name):
+    ret = _j(directory, "unit_test_once{bench}{trace}.proto".format(
+        bench=bench_suffix(bench_name),
+        trace=trace_suffix(trace_id),
+    ))
+    return ret
+
+def get_unit_test_multiple_path(directory, trace_id, bench_name):
+    ret = _j(directory, "unit_test_multiple{bench}{trace}.proto".format(
+        bench=bench_suffix(bench_name),
+        trace=trace_suffix(trace_id),
+    ))
+    return ret
+
 def is_microbench_path(path):
     return re.search(r"^microbenchmark\.json$", _b(path))
 
@@ -1356,6 +1387,18 @@ def read_pyprof_file(path):
         proto.ParseFromString(f.read())
     return proto
 
+def read_unit_test_once_file(path):
+    with open(path, 'rb') as f:
+        proto = IMLUnitTestOnce()
+        proto.ParseFromString(f.read())
+    return proto
+
+def read_unit_test_multiple_file(path):
+    with open(path, 'rb') as f:
+        proto = IMLUnitTestMultiple()
+        proto.ParseFromString(f.read())
+    return proto
+
 def read_pyprof_call_times_file(path):
     with open(path, 'rb') as f:
         call_times_data = pickle.load(f)
@@ -1367,6 +1410,22 @@ def is_tfprof_file(path):
         bench=BENCH_SUFFIX_RE,
         trace=TRACE_SUFFIX_RE,
         sess=SESSION_SUFFIX_RE,
+    ), base)
+    return m
+
+def is_unit_test_once_file(path):
+    base = _b(path)
+    m = re.search(r'unit_test_once{bench}{trace}.proto'.format(
+        bench=BENCH_SUFFIX_RE,
+        trace=TRACE_SUFFIX_RE,
+    ), base)
+    return m
+
+def is_unit_test_multiple_file(path):
+    base = _b(path)
+    m = re.search(r'unit_test_multiple{bench}{trace}.proto'.format(
+        bench=BENCH_SUFFIX_RE,
+        trace=TRACE_SUFFIX_RE,
     ), base)
     return m
 

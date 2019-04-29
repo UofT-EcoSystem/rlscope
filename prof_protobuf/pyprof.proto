@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-package iml.pyprof;
+package iml;
 
 // Q: This is the single binary-file output format.
 // In reality, we only need to keep a single "step" in memory when profiling.

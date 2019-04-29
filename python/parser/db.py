@@ -26,7 +26,7 @@ from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, base
 
 # from proto.tensorflow.core.profiler.tfprof_log_pb2 import ProfileProto
 from tensorflow.core.profiler.tfprof_log_pb2 import ProfileProto
-from proto.protobuf.pyprof_pb2 import Pyprof, MachineUtilization
+from prof_protobuf.pyprof_pb2 import Pyprof, MachineUtilization
 
 import py_config
 
@@ -53,7 +53,6 @@ PSQL_INDICES_SQL = _j(py_config.ROOT, "postgres", "indices.sql")
 PSQL_CONSTRAINTS_SQL = _j(py_config.ROOT, "postgres", "constraints.sql")
 
 def Worker_get_device_names(kwargs):
-    print("HELLO WORLD")
     if kwargs['debug']:
         print("> Start: Worker_get_device_names tfprof_file={path}".format(path=kwargs['tfprof_file']))
     reader = TFProfCategoryTimesReader(kwargs['tfprof_file'])
