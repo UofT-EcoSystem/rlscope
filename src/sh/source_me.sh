@@ -6,6 +6,8 @@ _activate_virtualenv_cuda9() {
     # tensorflow_cuda9 github repo checkout
     source $HOME/envs/cuda9/bin/activate
 #    source $HOME/envs/tf_patch_cuda9/bin/activate
+#    source $HOME/envs/py37/bin/activate
+# TODO: Make PILCO run without python3.7 requirement.
 }
 
 _activate_cuda9() {

@@ -757,8 +757,8 @@ class Profiler:
             for base in filenames:
                 path = _j(dirpath, base)
                 # print("> Consider {path}".format(path=path))
-                if is_insertable_file(path):
-                    print("> RM {path}".format(path=path))
+                if is_trace_file(path):
+                    print("> HELLO_THERE RM {path}".format(path=path))
                     os.remove(path)
                     # trace_id = int(m.group('trace_id'))
                     # self.next_trace_id = max(self.next_trace_id, trace_id + 1)
@@ -1046,8 +1046,6 @@ class Profiler:
 
         self._maybe_end_operations()
         self._maybe_finish(finish_now=True, skip_finish=False, should_exit=False)
-        # Execution shouldn't reach here.
-        assert False
 
     def _start_tfprof(self):
         """
@@ -1164,6 +1162,16 @@ class Profiler:
 
         self.enable_profiling(bench_name)
         self.start_call_us[bench_name] = clib_wrap.now_us()
+
+    def operation(self, operation):
+        return Operation(operation, prof=self)
+
+    def profile(self, process_name, phase_name=DEFAULT_PHASE, handle_utilization_sampler=True):
+        return Profile(
+            prof=self,
+            process_name=process_name,
+            phase_name=phase_name,
+            handle_utilization_sampler=handle_utilization_sampler)
 
     def _start_profiling(self):
         """
@@ -1292,110 +1300,6 @@ class Profiler:
 
             if not skip_finish:
                 self._maybe_finish(skip_finish=False, debug=True)
-
-
-    # def profile(self, bench_name, func, *args, **kwargs):
-    #     """
-    #     Useful for quickly profiling a single portion of the training loop by running the operation repeatedly.
-    #     Assumes the func is idempotent.
-    #
-    #     PSEUDOCODE:
-    #
-    #     if idempotent:
-    #       # func(...) is idempotent, so just run all the iterations
-    #       # at once to reduce total runtime.
-    #
-    #       for i in range(warmup):
-    #         func(...)
-    #       start_t = time.time()
-    #       profiler.start()
-    #       for i in range(iterations):
-    #         func(...)
-    #       profiler.stop()
-    #
-    #     else:
-    #       # func(...) is not idempotent, so we must collect iterations
-    #       # one-at-a-time.
-    #
-    #       func(...)
-    #
-    #     :param self:
-    #     :param func:
-    #     :param args:
-    #     :param kwargs:
-    #     :return:
-    #     """
-    #     should_measure = self._should_measure_call(bench_name)
-    #
-    #     raise NotImplementedError
-    #
-    #     if should_measure:
-    #         # idempotent.
-    #         # for i in range(self.start_measuring_call):
-    #         #     func(*args, **kwargs)
-    #
-    #         if hasattr(func, 'init'):
-    #             # Do any kind of initialization needed before profiling
-    #             func.init(*args, **kwargs)
-    #
-    #         # if self.num_calls is None:
-    #         #     # Dynamically decide # of iterations to run, such that time to
-    #         #     # run bench_name experiment is <= 10 seconds.
-    #         #     self._init_num_calls(bench_name, func, *args, **kwargs)
-    #         #     assert self.num_calls is not None
-    #
-    #         # with tf.contrib.tfprof.ProfileContext(self.out_dir) as pctx:
-    #         if self.tfprof:
-    #             self._start_tfprof(allow_skip=False)
-    #
-    #         # self.profile_sec = []
-    #         # self.no_profile_sec = []
-    #
-    #         for i in range(self.num_calls):
-    #             # NOTE: pyprof's step counter for deciding whether to trace the current step is is 0-based.
-    #             # Offsetting this by +1 will cause pyprof data from 1 iteration prior to be shown with tfprof
-    #             # from 1 iteration later.
-    #             # (We had this bug before...)
-    #             self.set_operation(bench_name)
-    #             ret = func(*args, **kwargs)
-    #             self.end_operation(bench_name)
-    #             self.next_step(bench_name)
-    #
-    #         # if len(self.profile_sec) > 1:
-    #         #     self.average_time_per_call_sec = np.mean(self.profile_sec[1:])
-    #         # if len(self.no_profile_sec) > 1:
-    #         #     self.average_time_per_call_no_profile_sec = np.mean(self.no_profile_sec[1:])
-    #
-    #         if self.tfprof:
-    #             self._stop_tfprof()
-    #
-    #         if hasattr(func, 'reset'):
-    #             # Cleanup anything we did specific to profiling so we can resume
-    #             # running the training loop.
-    #             func.reset(*args, **kwargs)
-    #
-    #         self.dump_trace(finish_now=True)
-    #         # We shouldn't return from maybe_finish for idempotent operations.
-    #         assert False
-    #
-    #     else:
-    #         # Not idempotent.
-    #         if should_measure:
-    #             self.set_operation(bench_name)
-    #         ret = func(*args, **kwargs)
-    #         if should_measure:
-    #             self.end_operation(bench_name)
-    #
-    #     return ret
-
-    # def _maybe_init_profile_context(self):
-    #     # if self.pctx is not None or self.process_name is None or self.phase is None:
-    #     #     return
-    #
-    #     pctx = ProfileContextManager.add_profile_context(
-    #         session=self._cur_session(),
-    #         out_dir=self.out_dir)
-    #     pctx.disable_tracing()
 
     def set_process_name(self, process_name):
         self.process_name = process_name
@@ -1827,6 +1731,34 @@ class CUDAProfiler:
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.stop()
 
+class Operation:
+    def __init__(self, operation, prof):
+        self.operation = operation
+        self.prof = prof
+
+    def __enter__(self):
+        self.prof.set_operation(self.operation)
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        # Q: Should we call this when an exception is thrown?
+        self.prof.end_operation(self.operation)
+
+class Profile:
+    def __init__(self, prof, process_name, phase_name=DEFAULT_PHASE, handle_utilization_sampler=True):
+        self.process_name = process_name
+        self.phase_name = phase_name
+        self.prof = prof
+        self.handle_utilization_sampler = handle_utilization_sampler
+
+    def __enter__(self):
+        self.prof.set_process_name(self.process_name)
+        self.prof.set_phase(self.phase_name)
+        self.prof.start(handle_utilization_sampler=self.handle_utilization_sampler)
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        # Q: Should we call this when an exception is thrown?
+        self.prof.stop()
+
 class PythonProfiler:
     """
     Run profiler on python code block.
@@ -2008,30 +1940,31 @@ def get_util_sampler_parser(only_fwd_arguments=False):
     return parser
 
 def add_iml_arguments(parser):
-    parser.add_argument('--iml-nvprof-enabled', action='store_true', help=textwrap.dedent("""
+    iml_parser = parser.add_argument_group("IML")
+    iml_parser.add_argument('--iml-nvprof-enabled', action='store_true', help=textwrap.dedent("""
         IML: is nvprof running?
         
         Internal use only; 
         used to determine whether this python script has been invoked using nvprof.
         If it hasn't, the script will re-invoke itself with nvprof.
     """))
-    # parser.add_argument('--iml-tfprof', action='store_true', help=textwrap.dedent("""
+    # iml_parser.add_argument('--iml-tfprof', action='store_true', help=textwrap.dedent("""
     #     IML: use tfprof TensorFlow profiling utility INSTEAD of nvprof.
     # """))
-    parser.add_argument('--iml-num-calls', type=int, default=1000,
+    iml_parser.add_argument('--iml-num-calls', type=int, default=1000,
                         help="IML: how many calls should be measured in a single trace?")
-    parser.add_argument('--iml-trace-time-sec', type=float,
+    iml_parser.add_argument('--iml-trace-time-sec', type=float,
                         help="IML: how long should we profile for, in seconds; "
                              "tracing will stop when either "
                              "we've collected --iml-num-traces OR "
                              "--iml-trace-time-sec has been exceeded")
-    parser.add_argument('--iml-internal-start-trace-time-sec', type=float,
+    iml_parser.add_argument('--iml-internal-start-trace-time-sec', type=float,
                         help=textwrap.dedent("""
         IML: (internal use)
         The start time of tracing (in seconds). 
         This gets inherited by child processes.
     """))
-    parser.add_argument('--iml-phase',
+    iml_parser.add_argument('--iml-phase',
                         help=textwrap.dedent("""
         IML: (internal use)
         The "phase" of training captured by this script. 
@@ -2039,29 +1972,29 @@ def add_iml_arguments(parser):
         E.g. a single script could handle "simulator" and "gradient_update" phases.
         This gets inherited by child processes.
     """))
-    parser.add_argument('--iml-internal-parent-process-name',
+    iml_parser.add_argument('--iml-internal-parent-process-name',
                         help=textwrap.dedent("""
         IML: (internal use)
         The process name of the parent that launched this child python process.
         i.e. whatever was passed to glbl.prof.set_process_name('forker')
         Internally, this is used for tracking "process dependencies".
     """))
-    parser.add_argument('--iml-util-sampler-pid',
+    iml_parser.add_argument('--iml-util-sampler-pid',
                         help=textwrap.dedent("""
         IML: (internal use)
         The pid of the utilization_sampler.py script that samples CPU/GPU utilization during training.
         We need to keep this so we can terminate it once we are done.
     """))
 
-    parser.add_argument('--iml-num-traces', type=int,
+    iml_parser.add_argument('--iml-num-traces', type=int,
                         # default=10,
                         help="IML: how many traces should be measured?")
-    parser.add_argument('--iml-keep-traces', action='store_true', help=textwrap.dedent("""
+    iml_parser.add_argument('--iml-keep-traces', action='store_true', help=textwrap.dedent("""
         IML: DON'T delete any existing trace files; keep them and append to them.
         
         Useful if your ML script launches worker processes repeatedly.
     """))
-    parser.add_argument('--iml-python', action='store_true', help=textwrap.dedent("""
+    iml_parser.add_argument('--iml-python', action='store_true', help=textwrap.dedent("""
         IML: Collecting python profiler (pyprof) data for profiled operations.
         
         Python profiling data is grouped into per-operation summaries, instead of 
@@ -2069,7 +2002,7 @@ def add_iml_arguments(parser):
         
         This prevent overwhelming the user with too much information.
     """))
-    parser.add_argument('--iml-fuzz', action='store_true', help=textwrap.dedent("""
+    iml_parser.add_argument('--iml-fuzz', action='store_true', help=textwrap.dedent("""
         IML: \"Fuzz\" the script for calls to TensorFlow API's.
         
         Useful if you have no idea where the training-loop of an ML script is located. 
@@ -2078,24 +2011,24 @@ def add_iml_arguments(parser):
         for e.g. sesssion.run(...) for running the computational graph
         (currently this is the only thing we trace).
     """))
-    parser.add_argument('--iml-disable', action='store_true', help=textwrap.dedent("""
+    iml_parser.add_argument('--iml-disable', action='store_true', help=textwrap.dedent("""
         IML: Skip any profiling.
     """))
-    parser.add_argument('--iml-unit-test',
+    iml_parser.add_argument('--iml-unit-test',
                         action='store_true',
                         help=textwrap.dedent("""
     IML: (for unit-testing) Record "actual results" needed for doing basics unit-test checks.
     """))
-    parser.add_argument('--iml-unit-test-name',
+    iml_parser.add_argument('--iml-unit-test-name',
                         help=textwrap.dedent("""
     IML: (for unit-testing) name to store in IMLUnitTest.test_name.
     """))
-    parser.add_argument('--iml-debug', action='store_true', help=textwrap.dedent("""
+    iml_parser.add_argument('--iml-debug', action='store_true', help=textwrap.dedent("""
         IML: debug profiler.
     """))
-    parser.add_argument('--iml-start-measuring-call', default=1, type=int,
+    iml_parser.add_argument('--iml-start-measuring-call', default=1, type=int,
                         help="IML: when should measuring begin?")
-    parser.add_argument('--iml-bench-name',
+    iml_parser.add_argument('--iml-bench-name',
                         default=NO_BENCH_NAME,
                         help=textwrap.dedent("""
     IML: which code block should we measure?
@@ -2103,7 +2036,7 @@ def add_iml_arguments(parser):
         # Just measure "some_bench", nothing else.
         profiler.profile('some_bench', do_some_bench)
     """))
-    parser.add_argument('--iml-directory',
+    iml_parser.add_argument('--iml-directory',
                         help=textwrap.dedent("""
     IML: profiling output directory.
     """))

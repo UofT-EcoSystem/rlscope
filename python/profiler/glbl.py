@@ -56,8 +56,11 @@ def handle_iml_args(parser, args, directory=None):
     """
     if args.iml_directory is not None:
         iml_directory = args.iml_directory
-    elif directory is not None:
+    else:
         iml_directory = directory
+
+    if iml_directory is None:
+        raise RuntimeError("IML: you must provide a location to store trace files: --iml-directory <dir>")
 
     profilers.handle_iml_args(output_directory=iml_directory,
                               parser=parser,

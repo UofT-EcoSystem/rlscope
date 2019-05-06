@@ -82,6 +82,8 @@ DEBUG = False
 # DEBUG = True
 DEBUG_THREADS = False
 # DEBUG_THREADS = True
+# DEBUG_DISABLE_TRACING = True
+DEBUG_DISABLE_TRACING = False
 
 RUN_OPTIONS_NO_TRACE = config_pb2.RunOptions(
   trace_level=config_pb2.RunOptions.NO_TRACE)
@@ -157,12 +159,24 @@ def _profiled_run(self,
     #   # Q: Why isn't this Session object being traced with a ProfileContext object?
     #   import ipdb; ipdb.set_trace()
 
+  # print("> tfprof debug: {vars}".format(vars={
+  #   'locked': locked,
+  #   'step': step,
+  #   'DEBUG': DEBUG,
+  #   'is_fast_path': self.profile_context._is_fast_path(step),
+  #   'should_trace': self.profile_context._should_trace(step, self.graph, fetches),
+  # }))
+
   # Fast path if no need for profiling.
   if locked and not self.profile_context._is_fast_path(step):
-    if DEBUG:
-      print("tfprof> with step={step}".format(step=step))
+
+    if DEBUG and not self.profile_context._should_trace(step, self.graph, fetches):
+        print("tfprof> SKIP step={step}".format(step=step))
+
     # Maybe trace this step.
     if self.profile_context._should_trace(step, self.graph, fetches):
+      if DEBUG:
+        print("tfprof> with step={step}".format(step=step))
       if self.profile_context._debug:
         sys.stderr.write('debug: tracing step: %d\n' % step)
       # Enable tracing, perform auto profiling or auto dump.
@@ -433,6 +447,9 @@ class ProfileContext(object):
 
   def _should_trace(self, step, graph, fetches):
     """Whether should do tracing at current step."""
+    if DEBUG_DISABLE_TRACING:
+      return False
+
     if self._disable:
       return False
 
@@ -556,6 +573,10 @@ class ProfileContext(object):
              "  cmd: {cmd}").format(cmd=" ".join(sys.argv)))
       return
 
+    if DEBUG and self._disable:
+      print("> SKIP pctx.clear(); --iml-disable")
+      return
+
     c_api_util.clear_trace_data(sess)
 
   def dump(self, dump_path, process_name):
@@ -571,6 +592,12 @@ class ProfileContext(object):
     if sess is None:
         print(("> WARNING: tfprof didn't trace sessions for cmd:\n"
                "  cmd: {cmd}").format(cmd=" ".join(sys.argv)))
+        return
+
+    if DEBUG and self._disable:
+        print("> SKIP pctx.dump(dump_path={path}, process={proc}); --iml-disable".format(
+          path=dump_path,
+          proc=process_name))
         return
 
     self.trace_data = c_api_util.get_trace_data(sess)
@@ -804,6 +831,7 @@ def preallocate_tracer(step, sess):
     print("> PREALLOCATE_TRACER for step={step}".format(step=step))
   assert sess is not None
   # sess = tf.get_default_session()
+  # print("> preallocate_tracer: _session = {session}".format(session=sess._session))
   print_mdl.TF_PreallocateTracer(sess._session, step)
 
 def IsGPUTime(device):

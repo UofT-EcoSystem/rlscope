@@ -1470,6 +1470,19 @@ def is_insertable_file(path):
            is_pyprof_call_times_file(path) or \
            is_machine_util_file(path)
 
+def is_trace_file(path):
+    """
+    Does this file contain data that should NOT exist if we re-run IML?
+    (this is to prevent keeping data from old runs and interpreting it as being from the same run).
+    """
+    return is_tfprof_file(path) or \
+           is_pyprof_file(path) or \
+           is_dump_event_file(path) or \
+           is_pyprof_call_times_file(path) or \
+           is_machine_util_file(path) or \
+           is_unit_test_once_file(path) or \
+           is_unit_test_multiple_file(path)
+
 def is_process_trace_file(path):
     """
     Return true if this file contains a proto that has start/end events for a specific process.
