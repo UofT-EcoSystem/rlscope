@@ -1,37 +1,22 @@
-import re
-from decimal import Decimal
-import numbers
-import copy
-import time
-import sys
-import os
-import csv
-import textwrap
-import pprint
-from io import StringIO
 import itertools
-import json
-import codecs
-from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, basename as _b
+from os.path import join as _j, dirname as _d
 
-from parser.common import *
-from parser.stats import Stats
-# from proto.tensorflow.core.profiler.tfprof_log_pb2 import ProfileProto
+from iml_profiler.parser.common import *
 from tensorflow.core.profiler.tfprof_log_pb2 import ProfileProto
-from prof_protobuf.pyprof_pb2 import Pyprof
+from iml_profiler.protobuf.pyprof_pb2 import Pyprof
 
-from profiler import proto_util
+from iml_profiler.profiler import proto_util
 
-from parser.stats import KernelTime, category_times_add_time
+from iml_profiler.parser.stats import KernelTime
 
-from parser.trace_events import TraceEventsDumper, dump_category_times
+from iml_profiler.parser.trace_events import TraceEventsDumper, dump_category_times
 
-from parser.db import SQLCategoryTimesReader, sql_input_path, sql_get_source_files
+from iml_profiler.parser.db import SQLCategoryTimesReader, sql_input_path, sql_get_source_files
 
-from parser.readers import TFProfCategoryTimesReader, \
-    DEFAULT_group_by_device, \
-    DEFAULT_ignore_categories, \
-    DEFAULT_debug \
+from iml_profiler.parser.readers import TFProfCategoryTimesReader, \
+   DEFAULT_group_by_device, \
+   DEFAULT_ignore_categories, \
+   DEFAULT_debug \
 
 class ComputeOverlap:
     # DEBUG = True
@@ -886,7 +871,7 @@ class TraceEventsParser:
         :return:
         """
         if self.td is None:
-            from profiler.profilers import unit_test_util
+            from iml_profiler.profiler.profilers import unit_test_util
             self.td = unit_test_util.TestData(debug=self.debug)
             self.td.read_directory(self.directory)
 

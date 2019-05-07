@@ -29,17 +29,17 @@ import textwrap
 import os
 import copy
 
-import py_config
+from iml_profiler import py_config
 
-from profiler import profilers
+from iml_profiler.profiler import profilers
 
-from parser.nvprof import CUDASQLiteParser
-from parser.tfprof import TotalTimeParser, TraceEventsParser
-from parser.pyprof import PythonProfileParser, PythonFlameGraphParser, PythonProfileTotalParser
-from parser.plot import TimeBreakdownPlot, PlotSummary, CombinedProfileParser, CategoryOverlapPlot, UtilizationPlot, HeatScalePlot
-from parser.db import SQLParser
+from iml_profiler.parser.nvprof import CUDASQLiteParser
+from iml_profiler.parser.tfprof import TotalTimeParser, TraceEventsParser
+from iml_profiler.parser.pyprof import PythonProfileParser, PythonFlameGraphParser, PythonProfileTotalParser
+from iml_profiler.parser.plot import TimeBreakdownPlot, PlotSummary, CombinedProfileParser, CategoryOverlapPlot, UtilizationPlot, HeatScalePlot
+from iml_profiler.parser.db import SQLParser
 
-from parser.common import *
+from iml_profiler.parser.common import *
 
 # Deprecated:
 # CUDAProfileParser, PythonProfileTotalParser, CUDASQLiteParser, CombinedProfileParser,

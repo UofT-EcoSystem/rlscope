@@ -11,8 +11,8 @@ import codecs
 import matplotlib.pyplot as plt
 from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, basename as _b
 
-from parser.common import *
-from parser.plot import TimeBreakdownPlot
+from iml_profiler.parser.common import *
+from iml_profiler.parser.plot import TimeBreakdownPlot
 
 def test_grouped_stacked_bar_plot(parser, args):
     # Stacked barplot:
@@ -213,7 +213,7 @@ def test_grouped_stacked_bar_plot(parser, args):
 
 def test_legend_position():
     # https://matplotlib.org/gallery/subplots_axes_and_figures/subplots_adjust.html#sphx-glr-gallery-subplots-axes-and-figures-subplots-adjust-py
-    
+
     # Fixing random state for reproducibility
     np.random.seed(19680801)
 

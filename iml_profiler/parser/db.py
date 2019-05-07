@@ -1,14 +1,8 @@
-import os
-import re
 import psutil
 import multiprocessing
 from concurrent.futures import ProcessPoolExecutor
-import pprint
 import subprocess
-import math
 import progressbar
-import pytest
-import bisect
 import tempfile
 import getpass
 import psycopg2
@@ -17,33 +11,28 @@ import random
 import string
 import itertools
 
-import pickle
 import sqlite3
-from sqlite3 import Error
 
-from parser.common import ProfilerParserCommonMixin
-from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, basename as _b
+from os.path import join as _j, dirname as _d, exists as _e
 
-# from proto.tensorflow.core.profiler.tfprof_log_pb2 import ProfileProto
-from tensorflow.core.profiler.tfprof_log_pb2 import ProfileProto
-from prof_protobuf.pyprof_pb2 import Pyprof, MachineUtilization
+from iml_profiler.protobuf.pyprof_pb2 import Pyprof, MachineUtilization
 
-import py_config
+from iml_profiler import py_config
 
-from parser.trace_events import dump_category_times
+from iml_profiler.parser.trace_events import dump_category_times
 
-from parser.readers import TFProfCategoryTimesReader, \
+from iml_profiler.parser.readers import TFProfCategoryTimesReader, \
     DEFAULT_group_by_device, \
     DEFAULT_ignore_categories, \
     DEFAULT_debug \
 
 import contextlib
 
-from parser.common import *
+from iml_profiler.parser.common import *
 
-from parser.stats import category_times_add_time
+from iml_profiler.parser.stats import category_times_add_time
 
-from parser.stats import KernelTime
+from iml_profiler.parser.stats import KernelTime
 
 SQLITE_TABLE_SQL = _j(py_config.ROOT, "sqlite", "tables.sql")
 SQLITE_INDICES_SQL = _j(py_config.ROOT, "sqlite", "indices.sql")

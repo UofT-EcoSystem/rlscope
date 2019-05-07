@@ -39,17 +39,17 @@ from tensorflow.python.framework import ops
 from tensorflow.python.platform import gfile
 
 # from tensorflow.python.profiler import model_analyzer
-import profiler.tensorflow_model_analyzer as model_analyzer
-from profiler.tensorflow_model_analyzer import ENABLE_PRINT_MDL, ERR_NO_PRINT_MDL
+import iml_profiler.profiler.tensorflow_model_analyzer as model_analyzer
+from iml_profiler.profiler.tensorflow_model_analyzer import ENABLE_PRINT_MDL, ERR_NO_PRINT_MDL
 
 from tensorflow.python.util import compat
 from tensorflow.python.framework import c_api_util
 
-import py_config
-from parser.common import *
+from iml_profiler import py_config
+from iml_profiler.parser.common import *
 
 
-from profiler import glbl
+from iml_profiler.profiler import glbl
 
 # Only allow a single traced session.run(...) call to run at a time.
 # By default, tfprof code enforces this.

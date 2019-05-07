@@ -1,6 +1,6 @@
-from parser.common import *
+from iml_profiler.parser.common import *
 
-from parser.stats import KernelTime
+from iml_profiler.parser.stats import KernelTime
 
 def sec(seconds):
     return seconds*MICROSECONDS_IN_SECOND

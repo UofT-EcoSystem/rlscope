@@ -1,7 +1,7 @@
 import traceback
 import textwrap
 
-from parser.common import *
+from iml_profiler.parser.common import *
 
 class FuzzFuncWrapper:
     """

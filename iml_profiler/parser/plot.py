@@ -17,12 +17,12 @@ import seaborn as sns
 
 from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, basename as _b
 
-from parser.common import *
-from parser.nvprof import CUDASQLiteParser
-from parser.pyprof import PythonProfileParser
-from parser.tfprof import OverlapComputer, overlap_type_to_instance
-from parser.heatscale import HeatScale, exponential_moving_average
-from parser.db import SQLCategoryTimesReader, sql_get_source_files, sql_input_path
+from iml_profiler.parser.common import *
+from iml_profiler.parser.nvprof import CUDASQLiteParser
+from iml_profiler.parser.pyprof import PythonProfileParser
+from iml_profiler.parser.tfprof import OverlapComputer, overlap_type_to_instance
+from iml_profiler.parser.heatscale import HeatScale, exponential_moving_average
+from iml_profiler.parser.db import SQLCategoryTimesReader, sql_get_source_files, sql_input_path
 
 # figsize (W x H) in inches
 aspect_ratio = 16./9.

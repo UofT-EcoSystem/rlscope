@@ -8,22 +8,22 @@ from os.path import join as _j, abspath as _a, exists as _e, dirname as _d, base
 import fnmatch
 import os
 import re
+import subprocess
 import pprint
 import sys
 
 from setuptools import find_packages
 from setuptools import setup
 
-#
-# Parse command line arguments.
-#
-DEBUG = False
-if "--debug" in sys.argv:
-    sys.argv.remove("--debug")
-    DEBUG = True
+# from distutils.command.build_py import build_py as _build_py
+# from distutils.command.clean import clean as _clean
+from distutils.spawn import find_executable
 
-with open("README.md", "r") as fh:
-    long_description = fh.read()
+# Find the Protocol Compiler.
+if 'PROTOC' in os.environ and os.path.exists(os.environ['PROTOC']):
+  protoc = os.environ['PROTOC']
+else:
+  protoc = find_executable("protoc")
 
 PYTHON_SRC_DIR = "python"
 
@@ -51,6 +51,14 @@ REQUIRED_PACKAGES = [
     'protobuf >= 3.6.1',
     'numpy >= 1.13.3',
     'tensorflow >= 1.3.1',
+    'psutil >= 5.6.2',
+    'GPUtil >= 1.4.0',
+    'matplotlib >= 3.0.3',
+    'pandas >= 0.24.2',
+    'progressbar2>=3.39.2',
+    'scipy >= 1.2.1',
+    'seaborn >= 0.9.0',
+    'tqdm >= 4.31.1',
 ]
 
 project_name = 'iml_profiler'
@@ -67,17 +75,6 @@ CONSOLE_SCRIPTS = [
     'iml-util-sampler = iml_profiler.scripts.utilization_sampler:main',
     'iml-dump-proto = iml_profiler.scripts.dump_proto:main',
     'iml-generate-plot-index = iml_profiler.scripts.generate_plot_index:main',
-    # 'freeze_graph = tensorflow.python.tools.freeze_graph:run_main',
-    # 'toco_from_protos = tensorflow.lite.toco.python.toco_from_protos:main',
-    # 'tflite_convert = tensorflow.lite.python.tflite_convert:main',
-    # 'toco = tensorflow.lite.python.tflite_convert:main',
-    # 'saved_model_cli = tensorflow.python.tools.saved_model_cli:main',
-    # # We need to keep the TensorBoard command, even though the console script
-    # # is now declared by the tensorboard pip package. If we remove the
-    # # TensorBoard command, pip will inappropriately remove it during install,
-    # # even though the command is not removed, just moved to a different wheel.
-    # 'tensorboard = tensorboard.main:run_main',
-    # 'tf_upgrade_v2 = tensorflow.tools.compatibility.tf_upgrade_v2_main:main',
 ]
 # pylint: enable=line-too-long
 
@@ -91,10 +88,40 @@ def find_files(pattern, root):
       for filename in fnmatch.filter(files, pattern):
           yield os.path.join(direc, filename)
 
-PROTOBUF_DIR = 'prof_protobuf'
+def generate_proto(source, require=True):
+  """Invokes the Protocol Compiler to generate a _pb2.py from the given
+  .proto file.  Does nothing if the output already exists and is newer than
+  the input."""
+
+  if not require and not os.path.exists(source):
+      return
+
+  output = source.replace(".proto", "_pb2.py").replace("../src/", "")
+
+  if (not os.path.exists(output) or
+          (os.path.exists(source) and
+           os.path.getmtime(source) > os.path.getmtime(output))):
+      print("Generating %s..." % output)
+
+      if not os.path.exists(source):
+          sys.stderr.write("Can't find required file: %s\n" % source)
+          sys.exit(-1)
+
+      if protoc is None:
+          sys.stderr.write(
+              "protoc is not installed nor found in ../src.  Please compile it "
+              "or install the binary package.\n")
+          sys.exit(-1)
+
+
+      # protoc -I$PWD --python_out=. prof_protobuf/*.proto
+      # protoc_command = [protoc, "-I.", "--python_out=.", "{dir}/*.proto".format(
+      protoc_command = [protoc, "-I.", "--python_out=.", source]
+      if subprocess.call(protoc_command) != 0:
+          sys.exit(-1)
+
+PROTOBUF_DIR = 'iml_profiler/protobuf'
 proto_files = list(find_files('*.proto', PROTOBUF_DIR))
-if DEBUG:
-    pprint.pprint({'proto_files':proto_files})
 
 POSTGRES_SQL_DIR = 'postgres'
 
@@ -106,53 +133,84 @@ THIRD_PARTY_DIR = 'third_party'
 PYTHON_PACKAGE_DIRS = [
     'iml_profiler',
 ]
-PACKAGE_DIRS = PYTHON_PACKAGE_DIRS + \
-               [
-                   PROTOBUF_DIR,
-                   POSTGRES_SQL_DIR,
-                   THIRD_PARTY_DIR,
-               ]
-if DEBUG:
-    pprint.pprint({'PACKAGE_DIRS':PACKAGE_DIRS})
+PACKAGE_DIRS = PYTHON_PACKAGE_DIRS
+# PACKAGE_DIRS = PYTHON_PACKAGE_DIRS + \
+#                [
+#                    PROTOBUF_DIR,
+#                    POSTGRES_SQL_DIR,
+#                    THIRD_PARTY_DIR,
+#                ]
 
-setup(
-    name=project_name,
-    version=_VERSION.replace('-', ''),
-    description=DOCLINES[0],
-    long_description=long_description,
-    url='https://github.com/UofT-EcoSystem/iml',
-    download_url='https://github.com/UofT-EcoSystem/iml/tags',
-    author='James Gleeson',
-    author_email='jagleeso@gmail.com',
-    # Contained modules and scripts.
-    packages=PACKAGE_DIRS,
-    entry_points={
-        'console_scripts': CONSOLE_SCRIPTS,
-    },
-    install_requires=REQUIRED_PACKAGES,
-    tests_require=REQUIRED_PACKAGES + TEST_PACKAGES,
-    package_data={
-        # 'protobuf': proto_files,
-        # '': proto_files + ['*.proto'],
-        PROTOBUF_DIR: ['*.proto'],
-        POSTGRES_SQL_DIR: ['*.sql'],
-        THIRD_PARTY_DIR: [
-            'FlameGraph/flamegraph.pl',
+def main():
+    #
+    # Parse command line arguments.
+    #
+    global DEBUG
+    DEBUG = False
+    if "--debug" in sys.argv:
+        sys.argv.remove("--debug")
+        DEBUG = True
+
+    print("> Using protoc = {protoc}".format(protoc=protoc))
+
+    if DEBUG:
+        pprint.pprint({'proto_files':proto_files})
+        pprint.pprint({'PACKAGE_DIRS':PACKAGE_DIRS})
+
+    with open("README.md", "r") as fh:
+        long_description = fh.read()
+
+    def _proto(base):
+        return _j(PROTOBUF_DIR, base)
+    generate_proto(_proto('pyprof.proto'))
+    generate_proto(_proto('unit_test.proto'))
+
+    setup(
+        name=project_name,
+        version=_VERSION.replace('-', ''),
+        description=DOCLINES[0],
+        long_description=long_description,
+        url='https://github.com/UofT-EcoSystem/iml',
+        download_url='https://github.com/UofT-EcoSystem/iml/tags',
+        author='James Gleeson',
+        author_email='jagleeso@gmail.com',
+        # Contained modules and scripts.
+        packages=PACKAGE_DIRS,
+        entry_points={
+            'console_scripts': CONSOLE_SCRIPTS,
+        },
+        install_requires=REQUIRED_PACKAGES,
+        tests_require=REQUIRED_PACKAGES + TEST_PACKAGES,
+        package_data={
+            'iml_profiler': ['**/*.py', '*.py'],
+            # PROTOBUF_DIR: ['*.proto'],
+            # POSTGRES_SQL_DIR: ['*.sql'],
+            # THIRD_PARTY_DIR: [
+            #     'FlameGraph/flamegraph.pl',
+            # ],
+            '': [
+                _j(PROTOBUF_DIR, '*.proto'),
+                _j(POSTGRES_SQL_DIR, '*.sql'),
+                _j(THIRD_PARTY_DIR, 'FlameGraph/flamegraph.pl'),
+            ],
+        },
+        classifiers=[
+            'Intended Audience :: Developers',
+            'Intended Audience :: Education',
+            'Intended Audience :: Science/Research',
+            'Programming Language :: Python :: 3.5',
+            'Programming Language :: Python :: 3.6',
+            'Topic :: Scientific/Engineering',
+            'Topic :: Scientific/Engineering :: Mathematics',
+            'Topic :: Scientific/Engineering :: Artificial Intelligence',
+            'Topic :: Software Development',
+            'Topic :: Software Development :: Libraries',
+            'Topic :: Software Development :: Libraries :: Python Modules',
         ],
-    },
-    classifiers=[
-        'Intended Audience :: Developers',
-        'Intended Audience :: Education',
-        'Intended Audience :: Science/Research',
-        'Programming Language :: Python :: 3.5',
-        'Programming Language :: Python :: 3.6',
-        'Topic :: Scientific/Engineering',
-        'Topic :: Scientific/Engineering :: Mathematics',
-        'Topic :: Scientific/Engineering :: Artificial Intelligence',
-        'Topic :: Software Development',
-        'Topic :: Software Development :: Libraries',
-        'Topic :: Software Development :: Libraries :: Python Modules',
-    ],
-    # TODO: Add license!
-    keywords='iml ml profiling tensorflow machine learning',
-)
+        # TODO: Add license!
+        keywords='iml ml profiling tensorflow machine learning',
+    )
+
+if __name__ == '__main__':
+    main()
+

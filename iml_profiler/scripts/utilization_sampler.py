@@ -12,11 +12,11 @@ from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, base
 
 import GPUtil
 
-from prof_protobuf.pyprof_pb2 import Pyprof, MachineUtilization, DeviceUtilization, UtilizationSample
+from iml_profiler.protobuf.pyprof_pb2 import Pyprof, MachineUtilization, DeviceUtilization, UtilizationSample
 
-from parser.common import *
+from iml_profiler.parser.common import *
 
-from profiler.profilers import trace_suffix, get_util_sampler_parser, MIN_UTIL_SAMPLE_FREQUENCY_SEC
+from iml_profiler.profiler.profilers import trace_suffix, get_util_sampler_parser, MIN_UTIL_SAMPLE_FREQUENCY_SEC
 
 class UtilizationSampler:
     def __init__(self, directory, util_dump_frequency_sec, util_sample_frequency_sec,

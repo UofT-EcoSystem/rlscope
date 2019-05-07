@@ -12,7 +12,7 @@ Currently, this toolkit is intended to be used as a a python library.
 # Create a Profiler instance.
 # This includes both nvprof and pyprof profilers.
 #
-from profiler import Profiler
+from iml_profiler.profiler import Profiler
 profiler = Profiler(...)
 
 for epoch in range(epochs):

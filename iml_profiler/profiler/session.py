@@ -9,7 +9,7 @@ import tensorflow as tf
 import threading
 import pprint
 
-from profiler import tensorflow_profile_context
+from iml_profiler.profiler import tensorflow_profile_context
 
 DEBUG = tensorflow_profile_context.DEBUG
 

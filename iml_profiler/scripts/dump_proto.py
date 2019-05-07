@@ -2,9 +2,9 @@ import argparse
 import textwrap
 
 from tensorflow.core.profiler.tfprof_log_pb2 import ProfileProto
-from prof_protobuf.pyprof_pb2 import Pyprof
+from iml_profiler.protobuf.pyprof_pb2 import Pyprof
 
-from parser.common import *
+from iml_profiler.parser.common import *
 
 def dump_proto_txt(path, ProtoKlass, stream):
     print("> DUMP: {name} @ {path}".format(

@@ -1,5 +1,4 @@
-from prof_protobuf.pyprof_pb2 import Pyprof, Event
-# from prof_protobuf.unit_test_pb2 import IMLUnitTestOnce, IMLUnitTestMultiple
+from iml_profiler.protobuf.pyprof_pb2 import Pyprof, Event
 
 import threading
 

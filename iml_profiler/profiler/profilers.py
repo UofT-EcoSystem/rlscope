@@ -9,12 +9,9 @@ import textwrap
 import os
 import time
 import re
-from glob import glob
 import math
-import numpy as np
 import contextlib
 import multiprocessing
-import atexit
 from concurrent.futures.process import ProcessPoolExecutor
 
 ORIG_EXCEPT_HOOK = sys.excepthook
@@ -28,17 +25,13 @@ def cleanup_profiler_excepthook(exctype, value, traceback):
         glbl.prof.maybe_terminate_utilization_sampler(warn_terminated=True)
     return ORIG_EXCEPT_HOOK(exctype, value, traceback)
 
-import tensorflow as tf
-from tensorflow.python.client import device_lib as tf_device_lib
+
 from tensorflow.python.profiler import profile_context
 from tensorflow.python.framework import c_api_util
 from tensorflow.python.client import session
 
-from profiler import unit_test_util
+from iml_profiler.profiler import unit_test_util
 
-from prof_protobuf.unit_test_pb2 import IMLUnitTestOnce, IMLUnitTestMultiple
-
-# from proto.tensorflow.core.profiler.tfprof_log_pb2 import ProfileProto
 from tensorflow.core.profiler.tfprof_log_pb2 import ProfileProto
 
 # pip install py-cpuinfo
@@ -49,18 +42,18 @@ from os import environ as ENV
 
 from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, basename as _b
 
-from parser.common import *
-from profiler import cudaprofile
-from profiler import clib_wrap
-from profiler.clib_wrap import MICROSECONDS_IN_SECOND
-from profiler import tensorflow_profile_context
+from iml_profiler.parser.common import *
+from iml_profiler.profiler import cudaprofile
+from iml_profiler.profiler import clib_wrap
+from iml_profiler.profiler.clib_wrap import MICROSECONDS_IN_SECOND
+from iml_profiler.profiler import tensorflow_profile_context
 
-from profiler import glbl
-from profiler import proto_util
-import profiler.estimator
-import profiler.session
+from iml_profiler.profiler import glbl
+from iml_profiler.profiler import proto_util
+import iml_profiler.profiler.estimator
+import iml_profiler.profiler.session
 
-import py_config
+from iml_profiler import py_config
 
 DEBUG = tensorflow_profile_context.DEBUG
 # DEBUG_OP_STACK = True
@@ -93,9 +86,9 @@ def modify_tensorflow():
         return
 
     setup()
-    profiler.session.setup()
-    profiler.estimator.setup()
-    profiler.tensorflow_profile_context.setup()
+    iml_profiler.profiler.session.setup()
+    iml_profiler.profiler.estimator.setup()
+    iml_profiler.profiler.tensorflow_profile_context.setup()
 
     # from tensorflow.python.profiler import profile_context
     # profile_context.MAX_TRACED_STEPS = 99999999
@@ -122,9 +115,9 @@ def setup(allow_skip=False):
 
     # setup_wrap_BaseSession_as_default()
 
-    profiler.session.register_session_active_hook(AddProfileContextHook)
-    profiler.session.register_session_inactive_hook(RemoveProfileContextHook)
-    profiler.session.register_session_run_hook(MaybeDumperTfprofContextHook)
+    iml_profiler.profiler.session.register_session_active_hook(AddProfileContextHook)
+    iml_profiler.profiler.session.register_session_inactive_hook(RemoveProfileContextHook)
+    iml_profiler.profiler.session.register_session_run_hook(MaybeDumperTfprofContextHook)
     clib_wrap.register_record_event_hook(DumpPyprofTraceHook)
 
     sys.excepthook = cleanup_profiler_excepthook
@@ -478,7 +471,7 @@ ProfileContextManager = _ProfileContextManager()
 """
 Add after-inactive hooks to call remove_profile_context, and after-active hooks to add_profile_context.
 """
-class _AddProfileContextHook(profiler.session.SessionActiveHook):
+class _AddProfileContextHook(iml_profiler.profiler.session.SessionActiveHook):
     def __init__(self):
         pass
 
@@ -489,7 +482,7 @@ class _AddProfileContextHook(profiler.session.SessionActiveHook):
         ProfileContextManager.add_profile_context(session)
 AddProfileContextHook = _AddProfileContextHook()
 
-class _RemoveProfileContextHook(profiler.session.SessionInactiveHook):
+class _RemoveProfileContextHook(iml_profiler.profiler.session.SessionInactiveHook):
     def __init__(self):
         pass
 
@@ -504,7 +497,7 @@ RemoveProfileContextHook = _RemoveProfileContextHook()
 Add after-inactive hooks to call remove_profile_context, and after-active hooks to add_profile_context.
 """
 
-class _MaybeDumperTfprofContextHook(profiler.session.SessionRunHook):
+class _MaybeDumperTfprofContextHook(iml_profiler.profiler.session.SessionRunHook):
     def __init__(self):
         pass
 
@@ -1085,12 +1078,12 @@ class Profiler:
         self._tfprof_enabled = True
 
     def _tfprof_enable_tracing(self):
-        for session in profiler.session.ACTIVE_SESSIONS:
+        for session in iml_profiler.profiler.session.ACTIVE_SESSIONS:
             pctx = ProfileContextManager.get_profile_context(session)
             pctx.enable_tracing()
 
     def _tfprof_disable_tracing(self):
-        for session in profiler.session.ACTIVE_SESSIONS:
+        for session in iml_profiler.profiler.session.ACTIVE_SESSIONS:
             pctx = ProfileContextManager.get_profile_context(session)
             pctx.disable_tracing()
 
@@ -1390,7 +1383,7 @@ class Profiler:
         # for sess in ACTIVE_SESSIONS:
         #   self.dump_tfprof(sess)
         print("> IML: Schedule any remaining traces to be dumped.")
-        for session in profiler.session.ACTIVE_SESSIONS:
+        for session in iml_profiler.profiler.session.ACTIVE_SESSIONS:
             self._dump_tfprof(session)
         # At the very least, make sure to dump the [PROC:<process_name>] we recorded above.
         # Q: How frequently should we dump pyprof data?

@@ -1,6 +1,6 @@
 import decimal
 
-from parser.common import *
+from iml_profiler.parser.common import *
 
 def dump_category_times(category_times, json_path, print_log=True, category_as_str=None):
     trace_events_dumper = TraceEventsDumper(category_times, json_path, category_as_str=category_as_str)

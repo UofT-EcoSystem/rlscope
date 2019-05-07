@@ -17,7 +17,7 @@ but we COULD wrap it (minigo doesn't use it).
 
 import tensorflow as tf
 
-from profiler import glbl
+from iml_profiler.profiler import glbl
 
 from tensorflow.python.training.training import CheckpointSaverListener
 

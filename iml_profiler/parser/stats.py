@@ -1,7 +1,7 @@
 # pip install progressbar2
 import progressbar
 
-from parser.common import *
+from iml_profiler.parser.common import *
 
 VARIABLE_HEADER = ['Type', 'Time(%)',
                    'Avg', 'Std', 'Std/Avg(%)',

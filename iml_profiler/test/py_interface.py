@@ -11,7 +11,7 @@ import os
 
 from os.path import join as _j, abspath as _a, exists as _e, dirname as _d, basename as _b
 
-import py_config
+from iml_profiler import py_config
 
 # https://stackoverflow.com/questions/9386636/profiling-a-system-with-extensively-reused-decorators
 import types

@@ -1,9 +1,8 @@
-# from proto.tensorflow.core.profiler.tfprof_log_pb2 import ProfileProto
 from tensorflow.core.profiler.tfprof_log_pb2 import ProfileProto
-from prof_protobuf.pyprof_pb2 import Pyprof
+from iml_profiler.protobuf.pyprof_pb2 import Pyprof
 
-from parser.common import *
-from parser.stats import KernelTime, category_times_add_time
+from iml_profiler.parser.common import *
+from iml_profiler.parser.stats import KernelTime, category_times_add_time
 
 DEFAULT_group_by_device = False
 DEFAULT_ignore_categories = {CATEGORY_DUMMY_EVENT, CATEGORY_UNKNOWN}

@@ -2,7 +2,7 @@
 Manage a singleton instance to a Profiler object.
 """
 
-from profiler import profilers
+from iml_profiler.profiler import profilers
 import tensorflow as tf
 
 prof = None

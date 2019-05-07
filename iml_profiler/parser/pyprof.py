@@ -16,12 +16,12 @@ from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, base
 # pip install progressbar2
 import progressbar
 
-from parser.common import *
-from parser.stats import Stats, KernelTime
+from iml_profiler.parser.common import *
+from iml_profiler.parser.stats import Stats, KernelTime
 
-from parser.db import SQLCategoryTimesReader, sql_get_source_files, sql_input_path, process_op_nest_single_thread, each_stack_trace
+from iml_profiler.parser.db import SQLCategoryTimesReader, sql_get_source_files, sql_input_path, process_op_nest_single_thread, each_stack_trace
 
-import py_config
+from iml_profiler import py_config
 
 FLAME_GRAPH_PERL = _j(py_config.ROOT, 'third_party', 'FlameGraph', 'flamegraph.pl')
 

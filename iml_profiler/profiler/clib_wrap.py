@@ -1,31 +1,19 @@
-import re
-import time
-import pprint
-import importlib
 import contextlib
 
-from ctypes import *
-import threading
+from iml_profiler.parser.common import *
 
-from parser.common import *
+from iml_profiler.protobuf.pyprof_pb2 import Pyprof, Event
 
-from prof_protobuf.pyprof_pb2 import Pyprof, Event
-# from proto.protobuf import pyprof_pb2
+from iml_profiler.profiler import tensorflow_profile_context
 
-from profiler import tensorflow_profile_context
-
-from profiler import proto_util
-
-from os.path import join as _j, abspath as _a, exists as _e, dirname as _d, basename as _b
-
-import py_config
+from iml_profiler.profiler import proto_util
 
 # https://stackoverflow.com/questions/9386636/profiling-a-system-with-extensively-reused-decorators
 import types
 
 MICROSECONDS_IN_SECOND = float(1e6)
 
-from profiler import wrap_util
+from iml_profiler.profiler import wrap_util
 
 DEBUG = wrap_util.DEBUG
 

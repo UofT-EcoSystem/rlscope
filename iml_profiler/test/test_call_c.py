@@ -11,15 +11,15 @@ import re
 import sys
 from os.path import join as _j, abspath as _a, dirname as _d, exists as _e
 
-from profiler.profilers import Profiler
-from profiler import profilers
+from iml_profiler.profiler.profilers import Profiler
+from iml_profiler.profiler import profilers
 
-from test import py_interface
+from iml_profiler.test import py_interface
 
-from profiler.profilers import tensorflow_profile_context
-from profiler.profilers import clib_wrap
+from iml_profiler.profiler.profilers import tensorflow_profile_context
+from iml_profiler.profiler.profilers import clib_wrap
 
-import py_config
+from iml_profiler import py_config
 
 def test_timestamp():
     """

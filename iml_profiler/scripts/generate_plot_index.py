@@ -13,13 +13,9 @@ from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, base
 
 # import GPUtil
 
-# from prof_protobuf.pyprof_pb2 import Pyprof, MachineUtilization, DeviceUtilization, UtilizationSample
+from iml_profiler import py_config
 
-import py_config
-
-from parser.common import *
-
-# from profiler.profilers import trace_suffix, get_util_sampler_parser, MIN_UTIL_SAMPLE_FREQUENCY_SEC
+from iml_profiler.parser.common import *
 
 class GeneratePlotIndex:
     def __init__(self, directory, out_dir,

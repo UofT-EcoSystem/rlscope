@@ -4,12 +4,7 @@
 syntax = "proto3";
 package iml;
 
-// Q: How do we include iml/protobuf to the search-path?
-// Q: Should we use protobuf/pyprof.proto instead (project-relative path)?
-//import "pyprof.proto";
-import "prof_protobuf/pyprof.proto";
-//import iml.pyprof;
-//import "iml.pyprof";
+import "iml_profiler/protobuf/pyprof.proto";
 
 // UNIT TEST 01:
 // Total time traced matches total time from analyzed trace-file

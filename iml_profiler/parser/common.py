@@ -1,6 +1,4 @@
 import re
-import sys
-import math
 import traceback
 import decimal
 import numpy as np
@@ -14,12 +12,12 @@ import pprint
 from io import StringIO
 import json
 import codecs
-from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, basename as _b
+from os.path import join as _j, dirname as _d, exists as _e, basename as _b
 from tqdm import tqdm as tqdm_progress
 
 from tensorflow.core.profiler.tfprof_log_pb2 import ProfileProto
-from prof_protobuf.pyprof_pb2 import Pyprof, MachineUtilization
-from prof_protobuf.unit_test_pb2 import IMLUnitTestOnce, IMLUnitTestMultiple
+from iml_profiler.protobuf.pyprof_pb2 import Pyprof, MachineUtilization
+from iml_profiler.protobuf.unit_test_pb2 import IMLUnitTestOnce, IMLUnitTestMultiple
 
 CATEGORY_TF_API = "Framework API C"
 CATEGORY_PYTHON = 'Python'
@@ -1586,7 +1584,6 @@ def progress(xs=None, desc=None, total=None, show_progress=False):
     if not show_progress:
         return tqdm_progress(xs, desc=desc, disable=True)
 
-    import sqlite3
     if total is None:
         if hasattr(xs, '__len__'):
             total = len(xs)
