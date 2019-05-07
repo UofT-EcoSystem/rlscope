@@ -12,7 +12,7 @@ import subprocess
 import sys
 from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, isdir
 
-from scripts import run_benchmark
+from scripts import analyze
 
 MEASURE_DEBUG_OPTS = ["--repetitions", 2]
 
@@ -26,7 +26,7 @@ def reverse_dict(dic):
 SCRIPT_DIR = _d(_a(__file__))
 # $ROOT
 ROOT = _d(SCRIPT_DIR)
-BENCH_PY = _j(ROOT, "python/profiler/run_benchmark.py")
+BENCH_PY = _j(ROOT, "python/profiler/analyze.py")
 CHECKPOINTS_PONG = _j(ROOT, "checkpoints/PongNoFrameskip-v4")
 GPU_DATA = _j(ROOT, "gpu_data.json")
 
@@ -177,13 +177,13 @@ class Run:
             Specify a specific directory to run from.
             (not --extra-subdir, e.g. --directory checkpoints/test_call_c)
             """
-            for ParserKlass in run_benchmark.PARSER_KLASSES:
+            for ParserKlass in analyze.PARSER_KLASSES:
                 rebuild = should_rebuild(ParserKlass)
                 ret = build(ParserKlass, [args.directory], rebuild)
                 handle_build_ret(ret)
         else:
             all_device_dirs = [get_directory(device) for device in args.devices]
-            for ParserKlass in run_benchmark.PARSER_KLASSES:
+            for ParserKlass in analyze.PARSER_KLASSES:
                 if ParserKlass.uses_multiple_dirs():
                     """
                     TimeBreakdownPlot takes multiple directories as input.
@@ -211,7 +211,7 @@ class Run:
         """
         RUN:
           cwd: /home/james/clone/baselines
-          cmd: python3 -u run_benchmark.py
+          cmd: python3 -u analyze.py
                  --repetitions 2 --subdir debug/glue/gpu/quadro_k4000 --no-profile-cuda
         """
         args = self.args
@@ -363,7 +363,7 @@ class Run:
         """
         RUN:
           cwd: /home/james/clone/baselines
-          cmd: python3 -u run_benchmark.py --plot
+          cmd: python3 -u analyze.py --plot
                 --directory ...
                 --directories ...
 

@@ -18,7 +18,7 @@ BENCH_DQN_PY = _j(BASELINES_ROOT, 'baselines/deepq/experiments/benchmark_dqn.py'
 SQL_IMPL = 'psql'
 assert SQL_IMPL in {'psql', 'sqlite'}
 
-ANALYSIS_PY = _j(ROOT, "python/scripts", "run_benchmark.py")
+ANALYSIS_PY = _j(ROOT, "python/scripts", "analyze.py")
 GENERATE_INDEX_PY = _j(ROOT, "python/scripts", "generate_plot_index.py")
 
 # Use a custom-built/modified version of TF for benchmarking things.

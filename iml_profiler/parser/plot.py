@@ -590,7 +590,7 @@ class CategoryOverlapPlot:
 
     """
 
-    # Make accessible from run_benchmark.py
+    # Make accessible from analyze.py
     OVERLAP_TYPES = OverlapComputer.OVERLAP_TYPES
 
     def __init__(self, directory,

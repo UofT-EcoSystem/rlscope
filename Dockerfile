@@ -118,7 +118,7 @@ RUN pip3 install --upgrade pip
 # Test out python installation.
 RUN pip3 install ipdb ipython
 
-# run_benchmark.py requirements
+# analyze.py requirements
 RUN pip3 install numpy scipy pandas \
     py-cpuinfo \
     progressbar2 \

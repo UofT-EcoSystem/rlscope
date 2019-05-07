@@ -746,19 +746,19 @@ class TotalTimeParser(ProfilerParserCommonMixin):
 class TraceEventsParser:
     """
     Usage modes:
-    python3 python/profiler/run_benchmark.py --directories ... --rules TraceEventsParser
+    python3 python/profiler/analyze.py --directories ... --rules TraceEventsParser
       Default mode; just show just the FIRST "step" for EACH operation (e.g. q_forward, q_backward, ...) in the ML script.
       Each operation will generate a separate trace_events.json file.
       NOTE: a "step" = an 0-based identifier for each traced TensorFlow C++ API call (e.g. q_forward)
 
-    python3 python/profiler/run_benchmark.py --directories ... --rules TraceEventsParser --op-name q_forward
+    python3 python/profiler/analyze.py --directories ... --rules TraceEventsParser --op-name q_forward
       Same as above, except just output a file for --op-name.
 
-    python3 python/profiler/run_benchmark.py --directories ... --rules TraceEventsParser --overlaps-event-id 116098
+    python3 python/profiler/analyze.py --directories ... --rules TraceEventsParser --overlaps-event-id 116098
       Keep all events that overlap with a particular event-id (from the Event SQL table).
       Useful for debugging overlap computation.
 
-    python3 python/profiler/run_benchmark.py --directories ... --rules TraceEventsParser --start-usec <epoch_us> --end-usec <epoch_us>
+    python3 python/profiler/analyze.py --directories ... --rules TraceEventsParser --start-usec <epoch_us> --end-usec <epoch_us>
       Output ALL events that fall within a certain [--start-usec, --end-usec] epoch time range.
       NOTE: We output IMLUnitTest data for this as well.
 
