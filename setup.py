@@ -61,6 +61,14 @@ REQUIRED_PACKAGES = [
     'tqdm >= 4.31.1',
 ]
 
+# NOTE: dependencies for building docker images are defined in dockerfiles/requirements.txt
+# DOCKER_PACKAGES = [
+#     'PyYAML >= 5.1',
+#     'absl-py >= 0.1.6',
+#     'cerberus >= 1.3',
+#     'docker >= 3.7.2',
+# ]
+
 project_name = 'iml_profiler'
 
 # python3 requires wheel 0.26
@@ -181,6 +189,15 @@ def main():
         },
         install_requires=REQUIRED_PACKAGES,
         tests_require=REQUIRED_PACKAGES + TEST_PACKAGES,
+        # # https://setuptools.readthedocs.io/en/latest/setuptools.html#declaring-extras-optional-features-with-their-own-dependencies
+        # # These requirements are only installed if these features are enabled when installing the pip package.
+        # #
+        # # $ pip install 'iml_profiler[docker]'
+        # #
+        # # Q: Does this work with .whl files?
+        # extras_require={
+        #     'docker': DOCKER_PACKAGES,
+        # },
         package_data={
             'iml_profiler': ['**/*.py', '*.py'],
             # PROTOBUF_DIR: ['*.proto'],

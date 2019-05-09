@@ -12,7 +12,12 @@ RUN apt-get update && apt-get install -y \
 
 RUN ${PIP} --no-cache-dir install --upgrade \
     pip \
-    setuptools
+    setuptools \
+    virtualenv
+
+# NOTE: We install virtualenv above so we can install python source-repos as $USER using:
+#   python setup.py develop
+# We do this for the TensorFlow repo as well as IML.
 
 # Some TF tools expect a "python" binary
-RUN ln -s $(which ${PYTHON}) /usr/local/bin/python 
+RUN ln -s $(which ${PYTHON}) /usr/local/bin/python

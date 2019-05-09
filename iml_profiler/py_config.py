@@ -3,6 +3,10 @@ from os import environ as ENV
 
 ROOT = _d(_d(_a(__file__)))
 
+IML_DIR = ROOT
+
+IML_TEST_DIR = _j(IML_DIR, 'test_results')
+
 BUILD_DIR = None
 DEBUG_BUILD_DIR = _j(ROOT, "Debug")
 RELEASE_BUILD_DIR = _j(ROOT, "Release")

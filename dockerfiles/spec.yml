@@ -1,5 +1,5 @@
 header: |
-    # Copyright 2018 The TensorFlow Authors. All Rights Reserved.
+    # Copyright 2018 The IML Authors. All Rights Reserved.
     #
     # Licensed under the Apache License, Version 2.0 (the "License");
     # you may not use this file except in compliance with the License.
@@ -17,7 +17,7 @@ header: |
     # THIS IS A GENERATED DOCKERFILE.
     #
     # This file was assembled from multiple pieces, whose use is documented
-    # throughout. Please refer to the TensorFlow dockerfiles documentation
+    # throughout. Please refer to the IML dockerfiles documentation
     # for more information.
 
 # A combinatorial explosion of Docker images and Dockerfiles.
@@ -36,25 +36,35 @@ header: |
 #
 # Releases are all treated differently by TensorFlow's CI systems.
 releases:
-    # Built Nightly and pushed to tensorflow/tensorflow
-    nightly:
-        tag_specs:
-            - "{nightly}{py}{jupyter}"
-            - "{ubuntu-devel}{py}"
+#
+# IML: Disable tensorflow specific dockerfiles.
+#
+#    # Built Nightly and pushed to tensorflow/tensorflow
+#    nightly:
+#        tag_specs:
+#            - "{nightly}{py}{jupyter}"
+#            - "{ubuntu-devel}{py}"
+#
+#    # Built per-release and pushed to tensorflow/tensorflow
+#    # --arg _TAG_PREFIX=<val> should be set to "1.11" (for example) or "latest".
+#    versioned:
+#        tag_specs:
+#            - "{_TAG_PREFIX}{ubuntu}{py}{jupyter}"
+#
+#    # Dockerfiles stored in the TF repo; not pushed anywhere
+#    dockerfiles:
+#        is_dockerfiles: true
+#        upload_images: false
+#        tag_specs:
+#            - "{ubuntu}{jupyter}"
+#            - "{ubuntu-devel}{jupyter}"
 
-    # Built per-release and pushed to tensorflow/tensorflow
-    # --arg _TAG_PREFIX=<val> should be set to "1.11" (for example) or "latest".
-    versioned:
-        tag_specs:
-            - "{_TAG_PREFIX}{ubuntu}{py}{jupyter}"
-
-    # Dockerfiles stored in the TF repo; not pushed anywhere
-    dockerfiles:
+    # IML
+    iml:
         is_dockerfiles: true
         upload_images: false
         tag_specs:
-            - "{ubuntu}{jupyter}"
-            - "{ubuntu-devel}{jupyter}"
+            - "{ubuntu-devel-iml}"
 
 slice_sets:
 
@@ -121,6 +131,51 @@ slice_sets:
           test_runtime: nvidia
           args:
               - CHECKOUT_TF_SRC=1
+
+    ubuntu-devel-iml:
+        #
+        # IML profiler:
+        # Build "patched" tensorflow, then run end-to-end Pong training test.
+        #
+        - add_to_name: "devel-iml-gpu"
+          dockerfile_exclusive_name: "devel-iml-gpu"
+          partials:
+          - ubuntu/version
+          - ubuntu/devel-nvidia
+          - ubuntu/python
+          - ubuntu/bazel
+          - ubuntu/nvidia_nccl
+          - ubuntu/nvidia_rtx_2070_env
+#          - iml/install_iml_profiler
+          - ubuntu/add_user
+          - shell
+          - iml/install_sh
+          - ubuntu/as_user
+          - ubuntu/virtualenv
+#          tests:
+#          - build-gpu.sh
+#          - sh/install_tensorflow.sh
+#          - sh/make_tflow_dbg.sh
+#          - sh/run_iml_tests.sh
+#          - sh/test_01_pong.sh
+          test_runtime: nvidia
+          args:
+          # NOTE: must be provided at assembler.py command line
+          - CHECKOUT_TF_SRC=0
+          - USE_PYTHON_3_NOT_2=1
+          run_args:
+          # NOTE: To make it so we can run the same scripts inside/outside containers:
+          # - Outside containers: we define these environment variables in a source_me.sh
+          # - Inside containers: we require these to be defined when calling assembler.py (docker run)
+          #
+          # The root directory of a 'patched' TensorFlow checkout.
+          - TENSORFLOW_DIR=
+          # The root directory of the iml_profiler repo checkout.
+          - IML_DIR=
+          # The --iml-directory argument to training scripts, which is where trace-data files are stored.
+          - IML_TEST_DIR=
+          # The local path where we should output bazel objects (overrides $HOME/.cache/bazel).
+          - BAZEL_BUILD_DIR=
 
     nightly:
         - add_to_name: "nightly"
