@@ -818,6 +818,8 @@ def main(argv):
             for test in tag_def['tests']:
               eprint('>> Testing {}...'.format(test))
 
+              os.makedirs(docker_run_env['IML_TEST_DIR'], exist_ok=True)
+
               test_kwargs = dict(
                 image=image,
                 command=_j(docker_run_env['IML_TEST_SH'], test),

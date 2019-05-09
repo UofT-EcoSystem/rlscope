@@ -3,6 +3,7 @@ import time
 import subprocess
 import shutil
 import argparse
+import sys
 import textwrap
 import psutil
 import platform
@@ -183,8 +184,8 @@ class GeneratePlotIndex:
 
         if not self.dry_run:
             shutil.copyfile(
-                _j(py_config.ROOT, 'python/scripts/plot_index.py'),
-                _j(self.out_dir, 'plot_index.py'),
+                _j(py_config.ROOT, 'iml_profiler/scripts/iml_profiler_plot_index.py'),
+                _j(self.out_dir, 'iml_profiler_plot_index.py'),
             )
 
 def mkd(dic, key):
@@ -203,12 +204,12 @@ def main():
                         required=True,
                         help=textwrap.dedent("""
     Look for *.venn_js.json rooted at this directory.
-    The output file will be <directory>/plot_index_data.py.
+    The output file will be <directory>/iml_profiler_plot_index_data.py.
     All the venn_js_path's in the index will be relative to --directory.
     """))
     parser.add_argument('--out-dir',
                         help=textwrap.dedent("""
-    The output file will be <out-dir>/plot_index_data.py.
+    The output file will be <out-dir>/iml_profiler_plot_index_data.py.
     Default: --directory
     """))
     parser.add_argument('--debug',
@@ -222,7 +223,7 @@ def main():
     Don't write file.
     """))
     parser.add_argument('--basename',
-                        default='plot_index_data.py',
+                        default='iml_profiler_plot_index_data.py',
                         help=textwrap.dedent("""
     Name of python file to generate.
     """))

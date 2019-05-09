@@ -53,12 +53,15 @@ REQUIRED_PACKAGES = [
     'tensorflow >= 1.3.1',
     'psutil >= 5.6.2',
     'GPUtil >= 1.4.0',
-    'matplotlib >= 3.0.3',
+    # 'matplotlib >= 3.0.3',
+    # Python 3.6 is required for matplotlib >= 3.1
+    'matplotlib < 3.1',
     'pandas >= 0.24.2',
     'progressbar2>=3.39.2',
     'scipy >= 1.2.1',
     'seaborn >= 0.9.0',
     'tqdm >= 4.31.1',
+    'py-cpuinfo == 4.0.0',
 ]
 
 # NOTE: dependencies for building docker images are defined in dockerfiles/requirements.txt
@@ -82,7 +85,7 @@ CONSOLE_SCRIPTS = [
     'iml-analyze = iml_profiler.scripts.analyze:main',
     'iml-util-sampler = iml_profiler.scripts.utilization_sampler:main',
     'iml-dump-proto = iml_profiler.scripts.dump_proto:main',
-    'iml-generate-plot-index = iml_profiler.scripts.generate_plot_index:main',
+    'iml-generate-plot-index = iml_profiler.scripts.generate_iml_profiler_plot_index:main',
 ]
 # pylint: enable=line-too-long
 
@@ -187,8 +190,8 @@ def main():
         entry_points={
             'console_scripts': CONSOLE_SCRIPTS,
         },
-        install_requires=REQUIRED_PACKAGES,
-        tests_require=REQUIRED_PACKAGES + TEST_PACKAGES,
+        install_requires=REQUIRED_PACKAGES + TEST_PACKAGES,
+        # tests_require=REQUIRED_PACKAGES + TEST_PACKAGES,
         # # https://setuptools.readthedocs.io/en/latest/setuptools.html#declaring-extras-optional-features-with-their-own-dependencies
         # # These requirements are only installed if these features are enabled when installing the pip package.
         # #

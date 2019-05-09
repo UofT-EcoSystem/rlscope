@@ -23,7 +23,7 @@ SQL_IMPL = 'psql'
 assert SQL_IMPL in {'psql', 'sqlite'}
 
 ANALYSIS_PY = _j(ROOT, "python/scripts", "analyze.py")
-GENERATE_INDEX_PY = _j(ROOT, "python/scripts", "generate_plot_index.py")
+GENERATE_INDEX_PY = _j(ROOT, "python/scripts", "generate_iml_profiler_plot_index.py")
 
 # Use a custom-built/modified version of TF for benchmarking things.
 # Modifies C++ code to make tfprof add less overhead to the critical path.

@@ -15,7 +15,6 @@ import codecs
 from os.path import join as _j, dirname as _d, exists as _e, basename as _b
 from tqdm import tqdm as tqdm_progress
 
-from tensorflow.core.profiler.tfprof_log_pb2 import ProfileProto
 from iml_profiler.protobuf.pyprof_pb2 import Pyprof, MachineUtilization
 from iml_profiler.protobuf.unit_test_pb2 import IMLUnitTestOnce, IMLUnitTestMultiple
 
@@ -1368,6 +1367,7 @@ def IsCPUTime(device):
     return re.fullmatch(".*/(device:gpu|gpu|device:cpu|cpu|device:sycl):\\d+", device)
 
 def read_tfprof_file(path):
+    from tensorflow.core.profiler.tfprof_log_pb2 import ProfileProto
     with open(path, 'rb') as f:
         proto = ProfileProto()
         proto.ParseFromString(f.read())

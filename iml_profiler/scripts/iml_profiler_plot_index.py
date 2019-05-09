@@ -5,7 +5,7 @@ import json
 
 from os.path import join as _j, abspath as _a, exists as _e, dirname as _d, basename as _b
 
-import plot_index_data
+import iml_profiler_plot_index_data
 
 TITLE_ORDER = ['overlap_type', 'process', 'phase', 'resource_overlap', 'operation']
 SEL_ORDER = {
@@ -291,7 +291,7 @@ def _sel_all(selector, sel_order, level, md, subtree):
             yield md, entry
 
 
-DataIndex = _DataIndex(plot_index_data.INDEX, plot_index_data.DIRECTORY)
+DataIndex = _DataIndex(iml_profiler_plot_index_data.INDEX, iml_profiler_plot_index_data.DIRECTORY)
 
 # DIRECTORY = "/mnt/data/james/clone/baselines.checkpoints/checkpoints/minigo/vector_test_multiple_workers_k4000/to_index"
 # INDEX = \
