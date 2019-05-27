@@ -66,6 +66,30 @@ releases:
         tag_specs:
             - "{ubuntu-devel-iml}"
 
+    iml-rocm:
+        is_dockerfiles: true
+        upload_images: false
+        tag_specs:
+            - "{ubuntu-devel-iml-rocm}"
+
+    v1.3.1:
+      is_dockerfiles: true
+      upload_images: false
+      tag_specs:
+      - "{ubuntu-devel-v1.3.1}"
+
+    iml-rocm-upstream:
+      is_dockerfiles: true
+      upload_images: false
+      tag_specs:
+      - "{ubuntu-devel-iml-rocm-upstream}"
+
+    rocm:
+      is_dockerfiles: true
+      upload_images: false
+      tag_specs:
+      - "{rocm}"
+
 slice_sets:
 
     py:
@@ -137,8 +161,8 @@ slice_sets:
         # IML profiler:
         # Build "patched" tensorflow, then run end-to-end Pong training test.
         #
-        - add_to_name: "devel-iml-gpu"
-          dockerfile_exclusive_name: "devel-iml-gpu"
+        - add_to_name: "devel-iml-gpu-cuda"
+          dockerfile_exclusive_name: "devel-iml-gpu-cuda"
           partials:
           - ubuntu/version
           - ubuntu/devel-nvidia
@@ -146,12 +170,13 @@ slice_sets:
           - ubuntu/bazel
           - ubuntu/nvidia_nccl
           - ubuntu/nvidia_rtx_2070_env
-#          - iml/install_iml_profiler
           - ubuntu/add_user
           - shell
           - iml/install_sh
           - ubuntu/as_user
+          - ubuntu/pip_download_tf_v1.13.1
           - ubuntu/virtualenv
+          - ubuntu/pip_dependencies
 #          tests:
 #          - build-gpu.sh
 #          - sh/install_tensorflow.sh
@@ -176,6 +201,148 @@ slice_sets:
           - IML_TEST_DIR=
           # The local path where we should output bazel objects (overrides $HOME/.cache/bazel).
           - BAZEL_BUILD_DIR=
+          run_args_optional:
+          # The root directory of a checkout of TensorFlow benchmarks repo (https://github.com/tensorflow/benchmarks)
+          - TENSORFLOW_BENCHMARKS_DIR=
+
+    ubuntu-devel-iml-rocm:
+        - add_to_name: "devel-iml-gpu-rocm"
+          dockerfile_exclusive_name: "devel-iml-gpu-rocm"
+          partials:
+          - ubuntu/version
+          - ubuntu/devel-rocm
+          - ubuntu/python
+          - ubuntu/bazel
+          - ubuntu/amd_rocm_env
+          - ubuntu/rocm_tf_dependencies
+          - ubuntu/add_user
+          - shell
+          - iml/install_sh
+          - ubuntu/as_user
+          - ubuntu/virtualenv
+          - ubuntu/pip_dependencies
+          - ubuntu/rocm_path
+          - ubuntu/rocm_hip_env
+          test_runtime: rocm
+          args:
+          - CHECKOUT_TF_SRC=0
+          - USE_PYTHON_3_NOT_2=1
+          run_args:
+          - TENSORFLOW_DIR=
+          - IML_DIR=
+          - IML_TEST_DIR=
+          - BAZEL_BUILD_DIR=
+          run_args_optional:
+          - TENSORFLOW_BENCHMARKS_DIR=
+
+    ubuntu-devel-iml-rocm-upstream:
+    - add_to_name: "devel-iml-gpu-rocm-upstream"
+      dockerfile_exclusive_name: "devel-iml-gpu-rocm-upstream"
+      partials:
+      - ubuntu/version
+      - ubuntu/devel-rocm
+      - ubuntu/python
+      - ubuntu/bazel
+      - ubuntu/amd_rocm_env
+      - ubuntu/rocm_tf_dependencies
+      - ubuntu/add_user
+      - shell
+      - iml/install_sh
+      - ubuntu/as_user
+      - ubuntu/virtualenv
+      - ubuntu/pip_dependencies
+      - ubuntu/rocm_path
+      - ubuntu/rocm_hip_env
+      test_runtime: rocm
+      args:
+      # Indicates this repo is a checkout from ROCm's repo:
+      # git clone -b r1.13-rocm https://github.com/ROCmSoftwarePlatform/tensorflow-upstream.git
+      # The repo includes a "build_rocm_python3" script we can run.
+      - ROCM_UPSTREAM_TF=1
+      - CHECKOUT_TF_SRC=0
+      - USE_PYTHON_3_NOT_2=1
+      run_args:
+      - TENSORFLOW_DIR=
+      - IML_DIR=
+      - IML_TEST_DIR=
+      - BAZEL_BUILD_DIR=
+      run_args_optional:
+      - TENSORFLOW_BENCHMARKS_DIR=
+
+    rocm:
+    - add_to_name: "rocm"
+      dockerfile_exclusive_name: "rocm"
+      partials:
+      - ubuntu/version
+      - ubuntu/devel-rocm
+#      - ubuntu/python
+#      - ubuntu/bazel
+      - ubuntu/amd_rocm_env
+#      - ubuntu/add_user
+      - shell
+#      - iml/install_sh
+#      - ubuntu/as_user
+#      - ubuntu/virtualenv
+      - ubuntu/rocm_path
+      test_runtime: rocm
+      args:
+      - CHECKOUT_TF_SRC=0
+      - USE_PYTHON_3_NOT_2=1
+      run_args:
+      - TENSORFLOW_DIR=
+      - IML_DIR=
+      - IML_TEST_DIR=
+      - BAZEL_BUILD_DIR=
+      run_args_optional:
+      - TENSORFLOW_BENCHMARKS_DIR=
+
+#    ubuntu-devel-v1.3.1:
+#    #
+#    # Fresh install of v1.3.1.
+#    # NOT built from source; installed via PyPi
+#    #
+#    - add_to_name: "devel-iml-gpu-cuda"
+#      dockerfile_exclusive_name: "devel-iml-gpu-cuda"
+#      partials:
+#      - ubuntu/version
+#      - ubuntu/devel-nvidia
+#      - ubuntu/python
+#      - ubuntu/bazel
+#      - ubuntu/nvidia_nccl
+#      - ubuntu/nvidia_rtx_2070_env
+#      - ubuntu/add_user
+#      - shell
+#      - iml/install_sh
+#      - ubuntu/as_user
+#      - ubuntu/virtualenv
+#      - ubuntu/pip_dependencies
+#      #          tests:
+#      #          - build-gpu.sh
+#      #          - sh/install_tensorflow.sh
+#      #          - sh/make_tflow_dbg.sh
+#      #          - sh/run_iml_tests.sh
+#      #          - sh/test_01_pong.sh
+#      test_runtime: nvidia
+#      args:
+#      # NOTE: must be provided at assembler.py command line
+#      - CHECKOUT_TF_SRC=0
+#      - USE_PYTHON_3_NOT_2=1
+#      run_args:
+#      # NOTE: To make it so we can run the same scripts inside/outside containers:
+#      # - Outside containers: we define these environment variables in a source_me.sh
+#      # - Inside containers: we require these to be defined when calling assembler.py (docker run)
+#      #
+#      # The root directory of a 'patched' TensorFlow checkout.
+#      - TENSORFLOW_DIR=
+#      # The root directory of the iml_profiler repo checkout.
+#      - IML_DIR=
+#      # The --iml-directory argument to training scripts, which is where trace-data files are stored.
+#      - IML_TEST_DIR=
+#      # The local path where we should output bazel objects (overrides $HOME/.cache/bazel).
+#      - BAZEL_BUILD_DIR=
+#      run_args_optional:
+#      # The root directory of a checkout of TensorFlow benchmarks repo (https://github.com/tensorflow/benchmarks)
+#      - TENSORFLOW_BENCHMARKS_DIR=
 
     nightly:
         - add_to_name: "nightly"

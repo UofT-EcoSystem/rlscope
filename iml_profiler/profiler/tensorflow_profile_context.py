@@ -42,6 +42,8 @@ from tensorflow.python.platform import gfile
 import iml_profiler.profiler.tensorflow_model_analyzer as model_analyzer
 from iml_profiler.profiler.tensorflow_model_analyzer import ENABLE_PRINT_MDL, ERR_NO_PRINT_MDL
 
+import iml_profiler
+
 from tensorflow.python.util import compat
 from tensorflow.python.framework import c_api_util
 
@@ -124,9 +126,9 @@ def _profiled_run(self,
 
     # Inherit the "phase" from the Profiler object when we first call session.run(...).
     if profile_context.phase is None:
-      assert glbl.prof.phase is not None
-      profile_context.phase = glbl.prof.phase
-    elif profile_context.phase != glbl.prof.phase:
+      assert iml_profiler.api.prof.phase is not None
+      profile_context.phase = iml_profiler.api.prof.phase
+    elif profile_context.phase != iml_profiler.api.prof.phase:
       raise RuntimeError("IML: Internal error; detected ProfileContext being used across multiple phases.")
 
     assert locked

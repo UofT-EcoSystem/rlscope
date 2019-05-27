@@ -15,9 +15,9 @@ import "iml_profiler/protobuf/pyprof.proto";
 // - PSEUDOCODE:
 //
 // start_t = Time.time()
-// glbl.prof.start()
+// iml_profiler.api.prof.start()
 // ...
-// glbl.prof.stop()
+// iml_profiler.api.prof.stop()
 // end_t = time.time()
 // total_trace_time_sec = end_t - start_t
 //
@@ -30,20 +30,20 @@ import "iml_profiler/protobuf/pyprof.proto";
 //  - Should do single and multi-script tests.
 //  - PSEUDOCODE:
 //
-//  glbl.prof.start()
+//  iml_profiler.api.prof.start()
 //  phase_start_sec['phase_1'] = time.time()
-//  glbl.prof.set_phase('phase_1')
+//  iml_profiler.api.prof.set_phase('phase_1')
 //  ...
 //
 //  # NOTE: could be in a different py_script
 //  phase_start_sec['phase_1'] = time.time()
-//  glbl.prof.set_phase('phase_2')
+//  iml_profiler.api.prof.set_phase('phase_2')
 //  ...
 //
 //  phase_start_sec['phase_1'] = time.time()
-//  glbl.prof.set_phase('phase_3')
+//  iml_profiler.api.prof.set_phase('phase_3')
 //
-//  glbl.prof.stop()
+//  iml_profiler.api.prof.stop()
 //
 //  - For phase in phases:
 //      assert DB.get_phase_start_time_sec(phase) == phase_start_sec[phase]
@@ -57,17 +57,17 @@ import "iml_profiler/protobuf/pyprof.proto";
 
 // A proto file that written "multiple" times by the unit-test.
 //
-// Currently, this includes glbl.prof.set_phase() start/end times.
+// Currently, this includes iml_profiler.api.prof.set_phase() start/end times.
 message IMLUnitTestMultiple {
     string test_name = 1;
     string process_name = 2;
     // PSEUDOCODE:
     //   # All belongs to the SAME py_script.
     //   phase_start_sec['phase_1'] = time.time()
-    //   glbl.prof.set_phase('phase_1')
+    //   iml_profiler.api.prof.set_phase('phase_1')
     //   ...
     //   phase_start_sec['phase_2'] = time.time()
-    //   glbl.prof.set_phase('phase_2')
+    //   iml_profiler.api.prof.set_phase('phase_2')
     //
     // phase -> Event's
     map<string, PhaseEvents> phase_events = 3;
@@ -75,14 +75,14 @@ message IMLUnitTestMultiple {
 
 // A proto file that written "once" by the unit-test, at the very end.
 //
-// Currently, this includes glbl.prof.start()/end() times
+// Currently, this includes iml_profiler.api.prof.start()/end() times
 message IMLUnitTestOnce {
     string test_name = 1;
     string process_name = 2;
     // PSEUDOCODE:
-    //   glbl.prof.start()
+    //   iml_profiler.api.prof.start()
     //   ...
-    //   glbl.prof.stop()
+    //   iml_profiler.api.prof.stop()
     Event prof_event = 3;
 }
 

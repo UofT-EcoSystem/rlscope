@@ -15,6 +15,7 @@ _check_env
 #BAZEL_BUILD_FLAGS=(--compilation_mode=dbg)
 _set_bazel_dbg_build_flags
 
-BAZEL_EXPLAIN_LOG="$BAZEL_BUILD_DIR/bazel_explain.dbg.log"
+BAZEL_EXPLAIN_LOG="$BAZEL_BUILD_DIR/tfprof.bazel_explain.dbg.log"
+BAZEL_BUILD_TARGET="//tensorflow/core/profiler:profiler"
 cd $TENSORFLOW_DIR
 _bazel_build

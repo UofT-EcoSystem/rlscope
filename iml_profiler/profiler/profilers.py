@@ -14,6 +14,8 @@ import contextlib
 import multiprocessing
 from concurrent.futures.process import ProcessPoolExecutor
 
+import iml_profiler
+
 ORIG_EXCEPT_HOOK = sys.excepthook
 def cleanup_profiler_excepthook(exctype, value, traceback):
     # Stop utilization sampler if it is running.
@@ -21,8 +23,8 @@ def cleanup_profiler_excepthook(exctype, value, traceback):
     # NOTE: If we crash unexpectedly, make sure to terminate the utilization_sampler.py process.
     # This is important when running unit-tests; otherwise the "train" portion of the unit-test will hang!
     # It's also important to prevent zombie utilization_sampler.py from accumulating.
-    if glbl.prof is not None:
-        glbl.prof.maybe_terminate_utilization_sampler(warn_terminated=True)
+    if iml_profiler.api.prof is not None:
+        iml_profiler.api.prof.maybe_terminate_utilization_sampler(warn_terminated=True)
     return ORIG_EXCEPT_HOOK(exctype, value, traceback)
 
 
@@ -145,8 +147,8 @@ class _ProfileContextManager:
 
     def add_profile_context(self, session, phase=None):
         assert session not in self._session_to_context
-        if glbl.prof is not None:
-            disabled = not glbl.prof.is_tfprof_enabled
+        if iml_profiler.api.prof is not None:
+            disabled = not iml_profiler.api.prof.is_tfprof_enabled
         else:
             disabled = False
         pctx = tensorflow_profile_context.ProfileContext(
@@ -193,8 +195,8 @@ class _ProfileContextManager:
         return pctx
 
         # assert session not in self._session_to_context
-        # if glbl.prof is not None:
-        #     disabled = not glbl.prof.is_tfprof_enabled
+        # if iml_profiler.api.prof is not None:
+        #     disabled = not iml_profiler.api.prof.is_tfprof_enabled
         # else:
         #     disabled = False
         # pctx = tensorflow_profile_context.ProfileContext(
@@ -218,10 +220,10 @@ class _ProfileContextManager:
         pctx = self._session_to_context[session]
         # TODO: cleanup profile context here?
 
-        # if glbl.prof is not None:
-        #     process_name = glbl.prof.process_name
-        #     phase = glbl.prof.phase
-        #     dump_path = glbl.prof.tfprof_path(session.session_id)
+        # if iml_profiler.api.prof is not None:
+        #     process_name = iml_profiler.api.prof.process_name
+        #     phase = iml_profiler.api.prof.phase
+        #     dump_path = iml_profiler.api.prof.tfprof_path(session.session_id)
         # else:
         #     process_name = None
         #     phase = None
@@ -236,7 +238,7 @@ class _ProfileContextManager:
 
         # SOLUTION: delay the dump in a DumpThunk.
         # add_dump_thunk(session, pctx)
-        glbl.prof._dump_tfprof(session)
+        iml_profiler.api.prof._dump_tfprof(session)
 
         del self._session_to_context[session]
 
@@ -510,8 +512,8 @@ class _MaybeDumperTfprofContextHook(iml_profiler.profiler.session.SessionRunHook
         if not hasattr(session, '_iml_num_runs_traced'):
             session._iml_num_runs_traced = 0
 
-        if session._iml_num_runs_traced >= glbl.prof.num_calls:
-            glbl.prof._dump_tfprof(session)
+        if session._iml_num_runs_traced >= iml_profiler.api.prof.num_calls:
+            iml_profiler.api.prof._dump_tfprof(session)
             session._iml_num_runs_traced = 0
         else:
             session._iml_num_runs_traced += 1
@@ -530,7 +532,7 @@ class _DumpPyprofTraceHook(clib_wrap.RecordEventHook):
 
     def after_record_event(self, pyprof_trace, event):
         if pyprof_trace.num_events >= clib_wrap.PROTO_MAX_PYPROF_PY_EVENTS:
-            glbl.prof._dump_pyprof()
+            iml_profiler.api.prof._dump_pyprof()
             num_events = clib_wrap.num_events_recorded()
             assert num_events == 0
 DumpPyprofTraceHook = _DumpPyprofTraceHook()
@@ -601,7 +603,7 @@ class Profiler:
 
         global _prof_singleton
         if _prof_singleton is not None:
-            raise RuntimeError("IML: Only a single profiler.Profiler object can be created; use profiler.glbl.handle_iml_args/profiler.glbl.prof instead.")
+            raise RuntimeError("IML: Only a single profiler.Profiler object can be created; use profiler.glbl.handle_iml_args/profiler.iml_profiler.api.prof instead.")
         _prof_singleton = self
 
         def get_iml_argname(argname, internal=False):
@@ -1969,7 +1971,7 @@ def add_iml_arguments(parser):
                         help=textwrap.dedent("""
         IML: (internal use)
         The process name of the parent that launched this child python process.
-        i.e. whatever was passed to glbl.prof.set_process_name('forker')
+        i.e. whatever was passed to iml_profiler.api.prof.set_process_name('forker')
         Internally, this is used for tracking "process dependencies".
     """))
     iml_parser.add_argument('--iml-util-sampler-pid',
@@ -2103,7 +2105,7 @@ def iml_argv(prof : Profiler, keep_executable=False, keep_non_iml_args=False):
     args.iml_internal_start_trace_time_sec = prof.get_start_trace_time_sec()
     args.iml_phase = prof.phase
     if prof.process_name is None:
-        raise RuntimeError("IML: You must call glbl.prof.set_process_name('some_name') before forking children!")
+        raise RuntimeError("IML: You must call iml_profiler.api.prof.set_process_name('some_name') before forking children!")
     args.iml_internal_parent_process_name = prof.process_name
     args.iml_util_sampler_pid = prof.util_sampler_pid
     argv = args_to_cmdline(parser, args, keep_executable=keep_executable, keep_debug=False)

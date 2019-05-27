@@ -20,7 +20,7 @@ _bazel_build
 
 #export TF_PRINT_TIMESTAMP=yes
 
-#python3 $IML_DRILL/tests/iml_test_harness.py --test-name pong_redo_01 --train-script ~/clone/baselines/baselines/deepq/experiments/run_atari.py --env PongNoFrameskip-v4 --iml-start-measuring-call 1 --checkpoint-path IML_DIRECTORY --iml-trace-time-sec 40
+#python3 $IML_DRILL/tests/iml_test.py --test-name pong_redo_01 --train-script ~/clone/baselines/baselines/deepq/experiments/run_atari.py --env PongNoFrameskip-v4 --iml-start-measuring-call 1 --checkpoint-path IML_DIRECTORY --iml-trace-time-sec 40
 
 # https://stackoverflow.com/questions/2524367/inline-comments-for-bash
 # echo abc `#put your comment here` \

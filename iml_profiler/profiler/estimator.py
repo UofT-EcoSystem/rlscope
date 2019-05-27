@@ -17,7 +17,7 @@ but we COULD wrap it (minigo doesn't use it).
 
 import tensorflow as tf
 
-from iml_profiler.profiler import glbl
+import iml_profiler
 
 from tensorflow.python.training.training import CheckpointSaverListener
 
@@ -58,11 +58,11 @@ class EstimatorWrapper:
 
         if hooks is None:
             hooks = []
-        hooks = hooks + [TrainEstimatorHook(glbl.prof)]
+        hooks = hooks + [TrainEstimatorHook(iml_profiler.api.prof)]
 
         if saving_listeners is None:
             saving_listeners = []
-        saving_listeners = saving_listeners + [SaveModelEstimatorHook(glbl.prof)]
+        saving_listeners = saving_listeners + [SaveModelEstimatorHook(iml_profiler.api.prof)]
 
         return self.estimator.train(
             input_fn,
@@ -81,7 +81,7 @@ class EstimatorWrapper:
 
         if hooks is None:
             hooks = []
-        hooks = hooks + [PredictEstimatorHook(glbl.prof)]
+        hooks = hooks + [PredictEstimatorHook(iml_profiler.api.prof)]
 
         return self.estimator.predict(
             input_fn,
@@ -95,7 +95,7 @@ class EstimatorWrapper:
 
         if hooks is None:
             hooks = []
-        hooks = hooks + [EvaluateEstimatorHook(glbl.prof)]
+        hooks = hooks + [EvaluateEstimatorHook(iml_profiler.api.prof)]
 
         return self.estimator.evaluate(
             input_fn,
@@ -132,7 +132,7 @@ class ProfileEstimatorHook(tf.train.SessionRunHook):
         """
         self.operation = operation
         if prof is None:
-            self.prof = glbl.prof
+            self.prof = iml_profiler.api.prof
         else:
             self.prof = prof
         assert self.prof is not None
@@ -153,7 +153,7 @@ class SaveModelEstimatorHook(CheckpointSaverListener):
     def __init__(self, prof=None):
         self.operation = 'estimator_save_model'
         if prof is None:
-            self.prof = glbl.prof
+            self.prof = iml_profiler.api.prof
         else:
             self.prof = prof
         assert self.prof is not None

@@ -12,9 +12,5 @@ source $SH_DIR/make_utils.sh
 
 _check_env
 
-#BAZEL_BUILD_FLAGS=(--compilation_mode=dbg)
-_set_bazel_dbg_build_flags
-
-BAZEL_EXPLAIN_LOG="$BAZEL_BUILD_DIR/bazel_explain.dbg.log"
 cd $TENSORFLOW_DIR
-_bazel_build
+yes "" | ./configure

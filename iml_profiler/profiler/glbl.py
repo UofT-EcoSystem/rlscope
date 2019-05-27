@@ -5,20 +5,22 @@ Manage a singleton instance to a Profiler object.
 from iml_profiler.profiler import profilers
 import tensorflow as tf
 
-prof = None
+import iml_profiler
+
+# prof = None
 session = None
 
-def get_profiler():
-    global prof
-    # if prof is None:
-    #     prof = profilers.Profiler(*args, **kwargs)
-    return prof
+# def get_profiler():
+#     # global prof
+#     # if prof is None:
+#     #     prof = profilers.Profiler(*args, **kwargs)
+#     return iml_profiler.api.prof
 
 def init_profiler(*args, **kwargs):
-    global prof
-    assert prof is None
-    prof = profilers.Profiler(*args, **kwargs)
-    return prof
+    # global prof
+    assert iml_profiler.api.prof is None
+    iml_profiler.api.prof = profilers.Profiler(*args, **kwargs)
+    return iml_profiler.api.prof
 
 def init_session(**kwargs):
     global session

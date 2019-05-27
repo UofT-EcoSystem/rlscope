@@ -233,6 +233,13 @@ slice_sets:
                type: string
                isfullarg: true
                interpolate_arg: true
+           run_args_optional:
+             type: list
+             default: []
+             schema:
+               type: string
+               isfullarg: true
+               interpolate_arg: true
 
 releases:
   type: dict
@@ -408,24 +415,26 @@ def get_slice_sets_and_required_args(slice_sets, tag_spec):
 # IDEAL:
 # BAZEL_BUILD_DIR can EITHER be provided via environment variable, or via --run_arg.
 # If both are present, use env.BAZEL_BUILD_DIR.
-def gather_tag_args(slices, cli_input_args, required_args=None, args_field='args'):
+def gather_tag_args(slices, cli_input_args, required_args=None, spec_field='args', cmd_opt=None):
   """Build a dictionary of all the CLI and slice-specified args for a tag."""
+  if cmd_opt is None:
+    cmd_opt = spec_field.rstrip('s')
+
   args = dict()
 
   for s in slices:
-    if args_field in s:
-      args = update_args_dict(args, s[args_field])
+    if spec_field in s:
+      args = update_args_dict(args, s[spec_field])
 
-  field = args_field.rstrip('s')
   # Only keep environment variables that have been "declared" in the spec.yml file.
   # e.g.
   # CHECKOUT_TF_SRC=
   for env_var, env_value in os.environ.items():
     if env_var in args:
-      print("> Using environment variable {env}={val} for --{field}".format(
+      print("> Using environment variable {env}={val} for --{cmd_opt}".format(
         env=env_var,
         val=env_value,
-        field=field))
+        cmd_opt=cmd_opt))
       args[env_var] = env_value
 
   args = update_args_dict(args, cli_input_args)
@@ -434,9 +443,9 @@ def gather_tag_args(slices, cli_input_args, required_args=None, args_field='args
       if arg not in args:
         eprint(('> Error: {arg} is not a valid slice_set, and also isn\'t an arg '
                 'provided on the command line. If it is an arg, please specify '
-                'it with --{field}. If not, check the slice_sets list.'.format(
+                'it with --{cmd_opt}. If not, check the slice_sets list.'.format(
           arg=arg,
-          field=field,
+          cmd_opt=cmd_opt,
         )))
         exit(1)
 
@@ -456,7 +465,7 @@ def find_first_slice_value(slices, key):
   return None
 
 
-def assemble_tags(spec, cli_args, cli_run_args, enabled_releases, all_partials):
+def assemble_tags(spec, cli_args, cli_run_args, cli_run_args_optional, enabled_releases, all_partials):
   """Gather all the tags based on our spec.
 
   Args:
@@ -484,7 +493,8 @@ def assemble_tags(spec, cli_args, cli_run_args, enabled_releases, all_partials):
 
         tag_args = gather_tag_args(slices, cli_args, required_cli_args)
         tag_args.update(get_implicit_build_args())
-        run_args = gather_tag_args(slices, cli_run_args, args_field='run_args')
+        run_args = gather_tag_args(slices, cli_run_args, spec_field='run_args')
+        run_args_optional = gather_tag_args(slices, cli_run_args_optional, spec_field='run_args_optional', cmd_opt='run_arg')
         tag_name = build_name_from_slices(tag_spec, slices, tag_args,
                                           release['is_dockerfiles'])
         used_partials = gather_slice_list_items(slices, 'partials')
@@ -502,6 +512,7 @@ def assemble_tags(spec, cli_args, cli_run_args, enabled_releases, all_partials):
             'upload_images': release['upload_images'],
             'cli_args': tag_args,
             'run_args': run_args,
+            'run_args_optional': run_args_optional,
             'dockerfile_subdirectory': dockerfile_subdirectory or '',
             'partials': used_partials,
             'tests': used_tests,
@@ -616,9 +627,22 @@ def get_docker_run_env(tag_def):
         spec="spec.yml"))
       sys.exit(1)
 
-  # if 'run_args' in tag_def:
-  #   env.update(tag_def['run_args'])
+  if 'run_args_optional' in tag_def:
+    # We DON'T check that run_args_optional is set (default is '' from spec.yml is allowed)
+    env = update_args_dict(env, tag_def['run_args_optional'], keep_original=True)
+
   return env
+
+def get_docker_runtime(tag_def):
+  runtime = None
+  if tag_def['test_runtime'] == 'nvidia':
+    runtime = 'nvidia'
+  else:
+    # Use runtime=None for rocm.
+    runtime = None
+
+  return runtime
+
 
 def main(argv):
   if not _e('./spec.yml'):
@@ -654,7 +678,15 @@ def main(argv):
   tag_spec = v.normalized(tag_spec)
 
   # Assemble tags and images used to build them
-  all_tags = assemble_tags(tag_spec, FLAGS.arg, FLAGS.run_arg, FLAGS.release, partials)
+  run_arg_required = []
+  run_arg_optional = []
+  for run_arg in FLAGS.run_arg:
+    var, value = parse_build_arg(run_arg)
+    if is_required_run_arg(var):
+      run_arg_required.append(run_arg)
+    else:
+      run_arg_optional.append(run_arg)
+  all_tags = assemble_tags(tag_spec, FLAGS.arg, run_arg_required, run_arg_optional, FLAGS.release, partials)
 
   # Empty Dockerfile directory if building new Dockerfiles
   if FLAGS.construct_dockerfiles:
@@ -782,9 +814,13 @@ def main(argv):
           # Could be improved by backgrounding, but would need better
           # multiprocessing support to track failures properly.
 
+
+          # ROCM_EXTRA_PARAMS="--device=/dev/kfd --device=/dev/dri --group-add video"
+
           if FLAGS.run:
             # Run the container.
             iml_volumes = get_iml_volumes(docker_run_env)
+            runtime = get_docker_runtime(tag_def)
             run_kwargs = dict(
               image=image,
               # command='/tests/' + test,
@@ -802,8 +838,20 @@ def main(argv):
               #   }
               # },
               remove=True,
-              runtime=tag_def['test_runtime'],
+              runtime=runtime,
             )
+            if tag_def['test_runtime'] == 'rocm':
+              def device_opt(path):
+                return '{path}:{path}:rwm'.format(path=path)
+              # --device=/dev/kfd --device=/dev/dri
+              run_kwargs['devices'] = [
+                device_opt('/dev/kfd'),
+                device_opt('/dev/dri'),
+              ]
+              # --group-add video
+              run_kwargs['group_add'] = [
+                'video',
+              ]
             run_cmd = get_docker_cmdline('run', **run_kwargs)
             # pprint.pprint({'run_cmd': run_cmd})
             eprint("> CMD:\n"
@@ -819,6 +867,8 @@ def main(argv):
               eprint('>> Testing {}...'.format(test))
 
               os.makedirs(docker_run_env['IML_TEST_DIR'], exist_ok=True)
+
+              runtime = get_docker_runtime(tag_def)
 
               test_kwargs = dict(
                 image=image,
@@ -838,7 +888,7 @@ def main(argv):
                     'mode': 'ro'
                   }
                 },
-                runtime=tag_def['test_runtime'],
+                runtime=runtime,
               )
 
               if FLAGS.debug:
@@ -998,6 +1048,23 @@ def get_implicit_run_args():
   }
   return run_args
 
+RUN_ARGS_REQUIRED = [
+  'IML_DIR',
+  # The --iml-directory argument to training scripts, which is where trace-data files are stored.
+  'IML_TEST_DIR',
+  # The root directory of a 'patched' TensorFlow checkout
+  'TENSORFLOW_DIR',
+  # The local path where we should output bazel objects (overrides $HOME/.cache/bazel)
+  'BAZEL_BUILD_DIR',
+]
+RUN_ARGS_OPTIONAL = [
+  # The root directory of a checkout of TensorFlow benchmarks repo (https://github.com/tensorflow/benchmarks)
+  'TENSORFLOW_BENCHMARKS_DIR',
+]
+
+def is_required_run_arg(var):
+  return var in RUN_ARGS_REQUIRED
+
 def get_iml_volumes(run_args):
   """
   --build-arg USER_ID=$(id -u ${USER})
@@ -1006,16 +1073,12 @@ def get_iml_volumes(run_args):
   :return:
   """
   volumes = dict()
-  dir_args = [
-    'IML_DIR',
-    # The --iml-directory argument to training scripts, which is where trace-data files are stored.
-    'IML_TEST_DIR',
-    # The root directory of a 'patched' TensorFlow checkout
-    'TENSORFLOW_DIR',
-    # The local path where we should output bazel objects (overrides $HOME/.cache/bazel)
-    'BAZEL_BUILD_DIR',
-  ]
-  for arg in dir_args:
+  for arg in RUN_ARGS_REQUIRED:
+    direc = run_args[arg]
+    volumes[direc] = direc
+  for arg in RUN_ARGS_OPTIONAL:
+    if arg not in run_args:
+      continue
     direc = run_args[arg]
     volumes[direc] = direc
   return volumes
@@ -1083,6 +1146,9 @@ def get_docker_cmdline(docker_command='run', **kwargs):
   :param kwargs:
   :return:
   """
+  print("> docker.cmdline.kwargs")
+  pprint.pprint({'docker.cmdline.kwargs':kwargs})
+
   if docker_command == 'run':
     cmd = ["docker", docker_command, "-i", "-t"]
   else:
@@ -1100,7 +1166,7 @@ def get_docker_cmdline(docker_command='run', **kwargs):
     return cmd_opt
 
   def add_opt(name):
-    if name not in kwargs:
+    if name not in kwargs or kwargs[name] is None:
       return
     value = str(kwargs[name])
     cmd_opt = as_cmd_opt(name)
@@ -1130,6 +1196,15 @@ def get_docker_cmdline(docker_command='run', **kwargs):
   add_opt_from('workdir', 'working_dir')
 
   add_opt_from('rm', 'remove', opt_type=bool)
+
+  def add_opt_list(opt_name, from_name):
+    if from_name in kwargs:
+      for value in kwargs[from_name]:
+        add_opt_value(opt_name, value)
+
+  add_opt_list('group-add', 'group_add')
+
+  add_opt_list('device', 'devices')
 
   if 'volumes' in kwargs:
     for host_dir, container_dir in kwargs['volumes'].items():
