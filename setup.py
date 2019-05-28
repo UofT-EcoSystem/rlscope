@@ -36,21 +36,18 @@ DOCLINES = __doc__.split('\n')
 # result for pip.
 _VERSION = '1.0.0'
 
+#
+# NOTE: this is identical to requirements found in requirements.txt.
+# (please keep in sync)
+#
 REQUIRED_PACKAGES = [
-    # 'absl-py >= 0.1.6',
-    # 'astor >= 0.6.0',
-    # 'gast >= 0.2.0',
-    # 'keras_applications >= 1.0.6',
-    # 'keras_preprocessing >= 1.0.5',
-    # 'numpy >= 1.13.3',
-    # 'six >= 1.10.0',
-    # 'protobuf >= 3.6.1',
-    # 'tensorboard >= 1.13.0, < 1.14.0',
-    # 'tensorflow_estimator >= 1.13.0, < 1.14.0rc0',
-    # 'termcolor >= 1.1.0',
     'protobuf >= 3.6.1',
     'numpy >= 1.13.3',
-    'tensorflow >= 1.3.1',
+    #
+    # NOTE: DON'T explicitly depend on tensorflow, since we need a modified tensorflow library to run.
+    # Instead, EXPECT that it will get installed externally.
+    #
+    # 'tensorflow >= 1.3.1',
     'psutil >= 5.6.2',
     'GPUtil >= 1.4.0',
     # 'matplotlib >= 3.0.3',
@@ -62,6 +59,15 @@ REQUIRED_PACKAGES = [
     'seaborn >= 0.9.0',
     'tqdm >= 4.31.1',
     'py-cpuinfo == 4.0.0',
+
+    # Trying to get nvidia dockerfile to run with assembler.py
+    'absl-py==0.6.1',
+    'Cerberus==1.3.1',
+    'docker==4.0.1',
+    'PyYAML==5.1',
+
+    # iml-analyze
+    'psycopg2==2.7.7',
 ]
 
 # NOTE: dependencies for building docker images are defined in dockerfiles/requirements.txt

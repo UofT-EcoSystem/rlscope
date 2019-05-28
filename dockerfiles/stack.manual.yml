@@ -1,0 +1,98 @@
+# Use postgres/example user/password credentials
+version: '3.1'
+
+services:
+
+  db:
+    image: postgres
+    restart: always
+    environment:
+      # Use the current user as postgres user (default when using psql)
+      POSTGRES_USER: ${USER}
+      # Don't user a password (current default for iml).
+#      POSTGRES_PASSWORD: postgres
+    ports:
+      # NOTE:
+#      - 7123:5432
+      - 5432:5432
+    networks:
+      - iml_network
+
+  adminer:
+    image: adminer
+    restart: always
+    ports:
+      - 6116:8080
+
+  # "Bash" development environment.
+  #
+  # Original docker cmd:
+  # $ docker run -i -t
+  #     --runtime nvidia
+  #     --workdir /
+  #     --rm
+  #     --volume /mnt/data/james/clone/iml/test_results:/mnt/data/james/clone/iml/test_results
+  #     --volume /home/james/clone/tensorflow.patch:/home/james/clone/tensorflow.patch
+  #     --volume /mnt/data/james/clone/bazel/tensorflow.patch:/mnt/data/james/clone/bazel/tensorflow.patch
+  #     --volume /home/james/clone/baselines:/home/james/clone/baselines
+  #     --volume /home/james/clone/iml-drill:/home/james/clone/iml-drill
+  #     --volume /mnt/data/james/clone/benchmarks:/mnt/data/james/clone/benchmarks
+  #     --volume /mnt/data/james/clone/iml:/mnt/data/james/clone/iml
+  #     -e IML_DRILL_DIR=/home/james/clone/iml-drill
+  #     -e TENSORFLOW_BENCHMARKS_DIR=/mnt/data/james/clone/benchmarks
+  #     -e IML_DIR=/mnt/data/james/clone/iml
+  #     -e TENSORFLOW_DIR=/home/james/clone/tensorflow.patch
+  #     -e BAZEL_BUILD_DIR=/mnt/data/james/clone/bazel/tensorflow.patch
+  #     -e IML_TEST_DIR=/mnt/data/james/clone/iml/test_results
+  #     -e BASELINES_DIR=/home/james/clone/baselines
+  #     --log-driver journald
+  #     tensorflow:devel-iml-gpu-cuda
+  bash:
+    #
+    # NOTE:
+    # - "docker stack deploy" does NOT support 'build:', so this container must be
+    #   built separately via "docker build ..."
+    #
+    # build: ./dockerfiles/devel-iml-gpu-cuda.Dockerfile
+
+    image: tensorflow:devel-iml-gpu-cuda
+    depends_on:
+      - db
+    restart: always
+    networks:
+    - iml_network
+    # Fails, not supported yet: instead for now just manually edit /etc/docker/daemon.json
+    # as described below:
+    # https://github.com/NVIDIA/k8s-device-plugin#preparing-your-gpu-nodes
+    # In particular, add the line show below:
+    # {
+    #     "default-runtime": "nvidia",  // <-- add this ABOVE "runtimes"
+    #     "runtimes": {
+    #      ...
+    #      }
+    # }
+#    runtime: nvidia
+    volumes:
+    - /mnt/data/james/clone/iml/test_results:/mnt/data/james/clone/iml/test_results
+    - /home/james/clone/tensorflow.patch:/home/james/clone/tensorflow.patch
+    - /mnt/data/james/clone/bazel/tensorflow.patch:/mnt/data/james/clone/bazel/tensorflow.patch
+    - /home/james/clone/baselines:/home/james/clone/baselines
+    - /home/james/clone/iml-drill:/home/james/clone/iml-drill
+    - /mnt/data/james/clone/benchmarks:/mnt/data/james/clone/benchmarks
+    - /mnt/data/james/clone/iml:/mnt/data/james/clone/iml
+    environment:
+    - IML_DRILL_DIR=/home/james/clone/iml-drill
+    - TENSORFLOW_BENCHMARKS_DIR=/mnt/data/james/clone/benchmarks
+    - IML_DIR=/mnt/data/james/clone/iml
+    - TENSORFLOW_DIR=/home/james/clone/tensorflow.patch
+    - BAZEL_BUILD_DIR=/mnt/data/james/clone/bazel/tensorflow.patch
+    - IML_TEST_DIR=/mnt/data/james/clone/iml/test_results
+    - BASELINES_DIR=/home/james/clone/baselines
+    logging:
+      driver: journald
+    stdin_open: true
+    tty: true
+    entrypoint: /bin/bash
+
+networks:
+  iml_network:

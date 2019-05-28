@@ -12,22 +12,24 @@ source $SH_DIR/make_utils.sh
 
 _check_env
 
-_check_DOPAMINE_DIR
+_check_BASELINES_DIR
 
-cd $DOPAMINE_DIR
+cd $BASELINES_DIR
+
+py_maybe_install 'baselines' install_baselines.sh
 
 if [ "$OUTPUT_DIR" = '' ]; then
-    OUTPUT_DIR="$DOPAMINE_DIR/output/docker"
+    OUTPUT_DIR="$BASELINES_DIR/output/PongNoFrameskip-v4/docker"
     echo "> env.OUTPUT_DIR not set; defaulting to:"
     echo "  OUTPUT_DIR=$OUTPUT_DIR"
 fi
 mkdir -p $OUTPUT_DIR
 
-# Train Pong (the default "atari_lib.create_atari_environment.game_name" in dqn.gin)
-
-# To override, do (for e.g. to run Breakout):
-# $ run_dopamine.sh --gin_bindings="atari_lib.create_atari_environment.game_name=Breakout"
-python -um dopamine.discrete_domains.train \
-  --base_dir="$OUTPUT_DIR" \
-  --gin_files="$DOPAMINE_DIR/dopamine/agents/dqn/configs/dqn.gin" \
-  "$@"
+python $BASELINES_DIR/baselines/deepq/experiments/run_atari.py \
+    --env PongNoFrameskip-v4 \
+    --iml-start-measuring-call 1 \
+    --checkpoint-path $OUTPUT_DIR \
+    --iml-num-calls=100 \
+    --iml-num-traces 2 \
+    --iml-trace-time-sec 40 \
+    --iml-python

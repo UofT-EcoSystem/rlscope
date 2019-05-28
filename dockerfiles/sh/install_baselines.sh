@@ -12,11 +12,22 @@ source $SH_DIR/make_utils.sh
 
 _check_env
 
-if [ "${IML_DIR}" = "" ]; then
+_check_BASELINES_DIR
+
+# mpi4py
+sudo apt-get -y install libopenmpi-dev
+
+# TODO: remove this dependency (I caused it...)
+pip install 'cymem==2.0.2' 'Cython==0.29.7'
+
+if [ "${BASELINES_DIR}" = "" ]; then
     # Install directly from git repo.
-    pip install git+https://github.com/UofT-EcoSystem/iml.git
+    pip install git+https://github.com/jagleeso/baselines.git
 else
     # Install from local checkout of repo.
-    cd "${IML_DIR}"
+    cd "${BASELINES_DIR}"
     python setup.py develop
+    # NOTE: setup.py will install mujoco_py; however we DON'T want mujoco_py installed since
+    # without the actual libmujoco.so + license installed, baselines will complain it's not setup.
+    pip uninstall -y mujoco_py
 fi

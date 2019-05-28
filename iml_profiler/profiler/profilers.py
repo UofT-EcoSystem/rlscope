@@ -2319,7 +2319,7 @@ def get_available_cpus():
 
 def get_visible_gpu_ids():
     if 'CUDA_VISIBLE_DEVICES' not in ENV:
-        return []
+        return None
     gpu_ids = sorted(int(gpu_id) for gpu_id in re.split(r'\s*,\s*', ENV['CUDA_VISIBLE_DEVICES']))
     return gpu_ids
 
@@ -2340,7 +2340,8 @@ def get_available_gpus():
                 "device_name":m.group('gpu_name'),
             })
     visible_gpu_ids = get_visible_gpu_ids()
-    keep_devices = [gpu for gpu in device_dicts if gpu['device_number'] in visible_gpu_ids]
+    keep_devices = [gpu for gpu in device_dicts
+                    if visible_gpu_ids is None or gpu['device_number'] in visible_gpu_ids]
     return keep_devices
 
     # Don't user TensorFlow to do this since it allocates the GPU when it runs...

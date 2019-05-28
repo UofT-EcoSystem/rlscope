@@ -29,6 +29,7 @@ from os.path import join as _j, abspath as _a, exists as _e, dirname as _d, base
 
 import subprocess
 import os
+import argparse
 import pwd
 import collections
 import pprint
@@ -42,8 +43,8 @@ import shutil
 import sys
 import textwrap
 
-from absl import app
-from absl import flags
+# from absl import app
+# from absl import flags
 import cerberus
 import docker
 from docker.models.images import Image
@@ -53,35 +54,50 @@ from io import BytesIO
 from docker import APIClient
 
 from iml_profiler import py_config
-# TODO: replace:
-# - {IML_DIR} with py_config.IML_DIR in args
-# - {IML_DIR} with py_config.IML_DIR in args
 
-FLAGS = flags.FLAGS
+parser = argparse.ArgumentParser(description=__doc__)
 
-# flags.DEFINE_string('hub_username', None,
-#                     'Dockerhub username, only used with --upload_to_hub')
+# parser.add_argument('--hub_username',
+#                     help='Dockerhub username, only used with --upload_to_hub')
 
-# flags.DEFINE_string(
-#     'hub_password', None,
-#     ('Dockerhub password, only used with --upload_to_hub. Use from an env param'
+# parser.add_argument(
+#     '--hub_password',
+#     help=('Dockerhub password, only used with --upload_to_hub. Use from an env param'
 #      'so your password isn\'t in your history.'))
 
-flags.DEFINE_integer('hub_timeout', 3600,
-                     'Abort Hub upload if it takes longer than this.')
+parser.add_argument('--hub_timeout', default=3600,
+                     type=int,
+                     help='Abort Hub upload if it takes longer than this.')
 
-flags.DEFINE_string(
-    'repository', 'tensorflow',
-    'Tag local images as {repository}:tag (in addition to the '
-    'hub_repository, if uploading to hub)')
+parser.add_argument(
+  '--repository', default='tensorflow',
+  help='Tag local images as {repository}:tag (in addition to the '
+  'hub_repository, if uploading to hub)')
 
-flags.DEFINE_string(
-    'hub_repository', None,
-    'Push tags to this Docker Hub repository, e.g. tensorflow/tensorflow')
+parser.add_argument(
+  '--volume',
+  action='append',
+  help=textwrap.dedent("""\
+  Translates into docker --volume option. 
+  We mount the path at the same path as it is in the host.
+  i.e. 
+  # assembler.py option:
+  --volume /one/two
+  #
+  # becomes
+  #
+  # `docker run` option:
+  --volume /one/two:/one/two
+  """).rstrip())
 
-flags.DEFINE_boolean(
-    'debug', False,
-    textwrap.dedent("""
+parser.add_argument(
+  '--hub_repository',
+  help='Push tags to this Docker Hub repository, e.g. tensorflow/tensorflow')
+
+parser.add_argument(
+  '--debug',
+  action='store_true',
+  help=textwrap.dedent("""
     In the generated dockerfiles, print start/end markers for the partial files its composed of; for e.g.:
       START: dockerfiles/partials/ubuntu/devel-nvidia.partial.Dockerfile
       RUN ...
@@ -90,97 +106,225 @@ flags.DEFINE_boolean(
       END: dockerfiles/partials/ubuntu/devel-nvidia.partial.Dockerfile
     """))
 
-# flags.DEFINE_boolean(
-#     'upload_to_hub',
-#     False,
-#     ('Push built images to Docker Hub (you must also provide --hub_username, '
+# parser.add_argument(
+#     '--upload_to_hub', '-u',
+#     help=('Push built images to Docker Hub (you must also provide --hub_username, '
 #      '--hub_password, and --hub_repository)'),
-#     short_name='u',
 # )
 
-flags.DEFINE_boolean(
-    'construct_dockerfiles', False, 'Do not build images', short_name='d')
+parser.add_argument(
+  '--construct_dockerfiles', '-d',
+  action='store_true',
+  help='Do not build images')
 
-flags.DEFINE_boolean(
-    'keep_temp_dockerfiles',
-    False,
-    'Retain .temp.Dockerfiles created while building images.',
-    short_name='k')
+parser.add_argument(
+  '--keep_temp_dockerfiles', '-k',
+  action='store_true',
+  help='Retain .temp.Dockerfiles created while building images.')
 
-flags.DEFINE_boolean(
-    'build_images', False, 'Do not build images', short_name='b')
+parser.add_argument(
+  '--build_images', '-b',
+  action='store_true',
+  help='Do not build images')
 
-flags.DEFINE_boolean(
-  'run', False, 'Run built images')
+parser.add_argument(
+  '--run',
+  action='store_true',
+  help='Run built images')
 
-flags.DEFINE_string(
-    'run_tests_path', None,
-    ('Execute test scripts on generated Dockerfiles before pushing them. '
-     'Flag value must be a full path to the "tests" directory, which is usually'
-     ' $(realpath ./tests). A failed tests counts the same as a failed build.'))
+parser.add_argument(
+  '--run_tests_path',
+  help=('Execute test scripts on generated Dockerfiles before pushing them. '
+   'Flag value must be a full path to the "tests" directory, which is usually'
+   ' $(realpath ./tests). A failed tests counts the same as a failed build.'))
 
-flags.DEFINE_boolean(
-    'stop_on_failure', False,
-    ('Stop processing tags if any one build fails. If False or not specified, '
-     'failures are reported but do not affect the other images.'))
+parser.add_argument(
+  '--stop_on_failure',
+  action='store_true',
+  help=('Stop processing tags if any one build fails. If False or not specified, '
+   'failures are reported but do not affect the other images.'))
 
-flags.DEFINE_boolean(
-    'dry_run',
-    False,
-    'Do not build or deploy anything at all.',
-    short_name='n',
+parser.add_argument(
+  '--dry_run', '-n',
+  action='store_true',
+  help='Do not build or deploy anything at all.',
 )
 
-flags.DEFINE_string(
-    'exclude_tags_matching',
-    None,
-    ('Regular expression that skips processing on any tag it matches. Must '
-     'match entire string, e.g. ".*gpu.*" ignores all GPU tags.'),
-    short_name='x')
+parser.add_argument(
+  '--exclude_tags_matching', '-x',
+  help=('Regular expression that skips processing on any tag it matches. Must '
+   'match entire string, e.g. ".*gpu.*" ignores all GPU tags.'),
+  )
 
-flags.DEFINE_string(
-    'only_tags_matching',
-    None,
-    ('Regular expression that skips processing on any tag it does not match. '
-     'Must match entire string, e.g. ".*gpu.*" includes only GPU tags.'),
-    short_name='i')
+parser.add_argument(
+  '--only_tags_matching', '-i',
+  help=('Regular expression that skips processing on any tag it does not match. '
+   'Must match entire string, e.g. ".*gpu.*" includes only GPU tags.'),
+  )
 
-flags.DEFINE_string(
-    'dockerfile_dir',
-    './dockerfiles', 'Path to an output directory for Dockerfiles.'
-    ' Will be created if it doesn\'t exist.'
-    ' Existing files in this directory will be deleted when new Dockerfiles'
-    ' are made.',
-    short_name='o')
+parser.add_argument(
+  '--dockerfile_dir', '-o',
+  default='./dockerfiles',
+  help='Path to an output directory for Dockerfiles.'
+       ' Will be created if it doesn\'t exist.'
+       ' Existing files in this directory will be deleted when new Dockerfiles'
+       ' are made.',
+)
 
-flags.DEFINE_string(
-    'partial_dir',
-    './partials',
-    'Path to a directory containing foo.partial.Dockerfile partial files.'
-    ' can have subdirectories, e.g. "bar/baz.partial.Dockerfile".',
-    short_name='p')
+parser.add_argument(
+  '--partial_dir', '-p',
+  default='./partials',
+  help='Path to a directory containing foo.partial.Dockerfile partial files.'
+       ' can have subdirectories, e.g. "bar/baz.partial.Dockerfile".',
+  )
 
-flags.DEFINE_multi_string(
-    'release', [],
-    'Set of releases to build and tag. Defaults to every release type.',
-    short_name='r')
+parser.add_argument(
+  '--release', '-r', default=[], action='append',
+  help='Set of releases to build and tag. Defaults to every release type.',
+  )
 
-flags.DEFINE_multi_string(
-    'arg', [],
-    ('Extra build arguments. These are used for expanding tag names if needed '
-     '(e.g. --arg _TAG_PREFIX=foo) and for using as build arguments (unused '
-     'args will print a warning).'),
-    short_name='a')
+parser.add_argument(
+  '--arg', '-a', default=[], action='append',
+  help=('Extra build arguments. These are used for expanding tag names if needed '
+   '(e.g. --arg _TAG_PREFIX=foo) and for using as build arguments (unused '
+   'args will print a warning).'),
+  )
 
-flags.DEFINE_multi_string(
-  'run_arg', [],
-  ('Extra container run arguments (NOT build).'))
+parser.add_argument(
+  '--run_arg', default=[], action='append',
+  help=('Extra container run arguments (NOT build).'))
 
-flags.DEFINE_string(
-    'spec_file',
-    './spec.yml',
-    'Path to the YAML specification file',
-    short_name='s')
+parser.add_argument(
+  '--spec_file', '-s',
+  default='./spec.yml',
+  help='Path to the YAML specification file',
+  )
+
+
+# FLAGS = flags.FLAGS
+#
+# # flags.DEFINE_string('hub_username', None,
+# #                     'Dockerhub username, only used with --upload_to_hub')
+#
+# # flags.DEFINE_string(
+# #     'hub_password', None,
+# #     ('Dockerhub password, only used with --upload_to_hub. Use from an env param'
+# #      'so your password isn\'t in your history.'))
+#
+# flags.DEFINE_integer('hub_timeout', 3600,
+#                      'Abort Hub upload if it takes longer than this.')
+#
+# flags.DEFINE_string(
+#     'repository', 'tensorflow',
+#     'Tag local images as {repository}:tag (in addition to the '
+#     'hub_repository, if uploading to hub)')
+#
+# flags.DEFINE_string(
+#     'hub_repository', None,
+#     'Push tags to this Docker Hub repository, e.g. tensorflow/tensorflow')
+#
+# flags.DEFINE_boolean(
+#     'debug', False,
+#     textwrap.dedent("""
+#     In the generated dockerfiles, print start/end markers for the partial files its composed of; for e.g.:
+#       START: dockerfiles/partials/ubuntu/devel-nvidia.partial.Dockerfile
+#       RUN ...
+#       RUN ...
+#       ...
+#       END: dockerfiles/partials/ubuntu/devel-nvidia.partial.Dockerfile
+#     """))
+#
+# # flags.DEFINE_boolean(
+# #     'upload_to_hub',
+# #     False,
+# #     ('Push built images to Docker Hub (you must also provide --hub_username, '
+# #      '--hub_password, and --hub_repository)'),
+# #     short_name='u',
+# # )
+#
+# flags.DEFINE_boolean(
+#     'construct_dockerfiles', False, 'Do not build images', short_name='d')
+#
+# flags.DEFINE_boolean(
+#     'keep_temp_dockerfiles',
+#     False,
+#     'Retain .temp.Dockerfiles created while building images.',
+#     short_name='k')
+#
+# flags.DEFINE_boolean(
+#     'build_images', False, 'Do not build images', short_name='b')
+#
+# flags.DEFINE_boolean(
+#   'run', False, 'Run built images')
+#
+# flags.DEFINE_string(
+#     'run_tests_path', None,
+#     ('Execute test scripts on generated Dockerfiles before pushing them. '
+#      'Flag value must be a full path to the "tests" directory, which is usually'
+#      ' $(realpath ./tests). A failed tests counts the same as a failed build.'))
+#
+# flags.DEFINE_boolean(
+#     'stop_on_failure', False,
+#     ('Stop processing tags if any one build fails. If False or not specified, '
+#      'failures are reported but do not affect the other images.'))
+#
+# flags.DEFINE_boolean(
+#     'dry_run',
+#     False,
+#     'Do not build or deploy anything at all.',
+#     short_name='n',
+# )
+#
+# flags.DEFINE_string(
+#     'exclude_tags_matching',
+#     None,
+#     ('Regular expression that skips processing on any tag it matches. Must '
+#      'match entire string, e.g. ".*gpu.*" ignores all GPU tags.'),
+#     short_name='x')
+#
+# flags.DEFINE_string(
+#     'only_tags_matching',
+#     None,
+#     ('Regular expression that skips processing on any tag it does not match. '
+#      'Must match entire string, e.g. ".*gpu.*" includes only GPU tags.'),
+#     short_name='i')
+#
+# flags.DEFINE_string(
+#     'dockerfile_dir',
+#     './dockerfiles', 'Path to an output directory for Dockerfiles.'
+#     ' Will be created if it doesn\'t exist.'
+#     ' Existing files in this directory will be deleted when new Dockerfiles'
+#     ' are made.',
+#     short_name='o')
+#
+# flags.DEFINE_string(
+#     'partial_dir',
+#     './partials',
+#     'Path to a directory containing foo.partial.Dockerfile partial files.'
+#     ' can have subdirectories, e.g. "bar/baz.partial.Dockerfile".',
+#     short_name='p')
+#
+# flags.DEFINE_multi_string(
+#     'release', [],
+#     'Set of releases to build and tag. Defaults to every release type.',
+#     short_name='r')
+#
+# flags.DEFINE_multi_string(
+#     'arg', [],
+#     ('Extra build arguments. These are used for expanding tag names if needed '
+#      '(e.g. --arg _TAG_PREFIX=foo) and for using as build arguments (unused '
+#      'args will print a warning).'),
+#     short_name='a')
+#
+# flags.DEFINE_multi_string(
+#   'run_arg', [],
+#   ('Extra container run arguments (NOT build).'))
+#
+# flags.DEFINE_string(
+#     'spec_file',
+#     './spec.yml',
+#     'Path to the YAML specification file',
+#     short_name='s')
 
 # Schema to verify the contents of tag-spec.yml with Cerberus.
 # Must be converted to a dict from yaml to work.
@@ -644,35 +788,55 @@ def get_docker_runtime(tag_def):
   return runtime
 
 
-def main(argv):
+def get_docker_run_argv(argv):
+  """
+  absl will preserve "extra" arguments that were unparsed by the FLAGS specification.
+  We pass all of these arguments directly to the "docker run" command.
+  This makes it easy to:
+  - Define additional environment variables (outside of required ones)
+  - Define additional volume mounts (outside of required ones)
+
+  :param argv:
+    argv = ["assembler.py" "extra_argument[0]", ...]
+  :return:
+  """
+  return argv[1:]
+
+# def main(argv):
+def main():
+  args, extra_argv = parser.parse_known_args()
+
+  pprint.pprint({'extra_argv':extra_argv})
+  # sys.exit(0)
+
   if not _e('./spec.yml'):
     print("ERROR: You must execute assembly.py from dockerfiles/assembler.py")
     sys.exit(1)
 
-  if len(argv) > 1:
-    raise app.UsageError('Too many command-line arguments.')
+  # if len(argv) > 1:
+  #   raise parser.error('Too many command-line arguments.')
 
   # Read the full spec file, used for everything
-  with open(FLAGS.spec_file, 'r') as spec_file:
+  with open(args.spec_file, 'r') as spec_file:
     tag_spec = yaml.load(spec_file)
 
-  for arg in FLAGS.arg:
+  for arg in args.arg:
     key, value = parse_build_arg(arg)
     validate_interpolate_arg(value)
 
-  for run_arg in FLAGS.run_arg:
+  for run_arg in args.run_arg:
     key, value = parse_build_arg(run_arg)
     validate_interpolate_arg(value)
 
   # Get existing partial contents
-  partials = gather_existing_partials(FLAGS.partial_dir)
+  partials = gather_existing_partials(args.partial_dir)
 
   # Abort if spec.yaml is invalid
   schema = yaml.load(SCHEMA_TEXT)
   v = TfDockerTagValidator(schema, partials=partials)
   if not v.validate(tag_spec):
     eprint('> Error: {} is an invalid spec! The errors are:'.format(
-        FLAGS.spec_file))
+        args.spec_file))
     eprint(yaml.dump(v.errors, indent=2))
     exit(1)
   tag_spec = v.normalized(tag_spec)
@@ -680,24 +844,24 @@ def main(argv):
   # Assemble tags and images used to build them
   run_arg_required = []
   run_arg_optional = []
-  for run_arg in FLAGS.run_arg:
+  for run_arg in args.run_arg:
     var, value = parse_build_arg(run_arg)
     if is_required_run_arg(var):
       run_arg_required.append(run_arg)
     else:
       run_arg_optional.append(run_arg)
-  all_tags = assemble_tags(tag_spec, FLAGS.arg, run_arg_required, run_arg_optional, FLAGS.release, partials)
+  all_tags = assemble_tags(tag_spec, args.arg, run_arg_required, run_arg_optional, args.release, partials)
 
   # Empty Dockerfile directory if building new Dockerfiles
-  if FLAGS.construct_dockerfiles:
-    eprint('> Emptying Dockerfile dir "{}"'.format(FLAGS.dockerfile_dir))
-    shutil.rmtree(FLAGS.dockerfile_dir, ignore_errors=True)
-    mkdir_p(FLAGS.dockerfile_dir)
+  if args.construct_dockerfiles:
+    eprint('> Emptying Dockerfile dir "{}"'.format(args.dockerfile_dir))
+    shutil.rmtree(args.dockerfile_dir, ignore_errors=True)
+    mkdir_p(args.dockerfile_dir)
 
   # pprint.pprint({
   #   'FLAGS': FLAGS,
-  #   'FLAGS.__dict__': FLAGS.__dict__,
-  #   'FLAGS.flag_values_dict()': FLAGS.flag_values_dict(),
+  #   'args.__dict__': args.__dict__,
+  #   'args.flag_values_dict()': args.flag_values_dict(),
   # })
 
   # Set up Docker helper
@@ -707,20 +871,20 @@ def main(argv):
   # Q: Do we need to pass environment variables (like docker.from_env())?
 
   # # Login to Docker if uploading images
-  # if FLAGS.upload_to_hub:
-  #   if not FLAGS.hub_username:
+  # if args.upload_to_hub:
+  #   if not args.hub_username:
   #     eprint('> Error: please set --hub_username when uploading to Dockerhub.')
   #     exit(1)
-  #   if not FLAGS.hub_repository:
+  #   if not args.hub_repository:
   #     eprint(
   #         '> Error: please set --hub_repository when uploading to Dockerhub.')
   #     exit(1)
-  #   if not FLAGS.hub_password:
+  #   if not args.hub_password:
   #     eprint('> Error: please set --hub_password when uploading to Dockerhub.')
   #     exit(1)
   #   dock.login(
-  #       username=FLAGS.hub_username,
-  #       password=FLAGS.hub_password,
+  #       username=args.hub_username,
+  #       password=args.hub_password,
   #   )
 
   # Each tag has a name ('tag') and a definition consisting of the contents
@@ -731,46 +895,46 @@ def main(argv):
       docker_run_env = get_docker_run_env(tag_def)
       eprint('> Working on {}'.format(tag))
 
-      if FLAGS.exclude_tags_matching and re.match(FLAGS.exclude_tags_matching,
+      if args.exclude_tags_matching and re.match(args.exclude_tags_matching,
                                                   tag):
         eprint('>> Excluded due to match against "{}".'.format(
-            FLAGS.exclude_tags_matching))
+            args.exclude_tags_matching))
         continue
 
-      if FLAGS.only_tags_matching and not re.match(FLAGS.only_tags_matching,
+      if args.only_tags_matching and not re.match(args.only_tags_matching,
                                                    tag):
         eprint('>> Excluded due to failure to match against "{}".'.format(
-            FLAGS.only_tags_matching))
+            args.only_tags_matching))
         continue
 
       if tag == "devel-iml-gpu-py3":
           import ipdb; ipdb.set_trace()
 
       # Write releases marked "is_dockerfiles" into the Dockerfile directory
-      if FLAGS.construct_dockerfiles and tag_def['is_dockerfiles']:
-        path = os.path.join(FLAGS.dockerfile_dir,
+      if args.construct_dockerfiles and tag_def['is_dockerfiles']:
+        path = os.path.join(args.dockerfile_dir,
                             tag_def['dockerfile_subdirectory'],
                             tag + '.Dockerfile')
         eprint('>> Writing {}...'.format(path))
-        if not FLAGS.dry_run:
+        if not args.dry_run:
           mkdir_p(os.path.dirname(path))
           with open(path, 'w') as f:
             f.write(tag_def['dockerfile_contents'])
 
       # Don't build any images for dockerfile-only releases
-      if not FLAGS.build_images:
+      if not args.build_images:
         continue
 
       # Generate a temporary Dockerfile to use to build, since docker-py
       # needs a filepath relative to the build context (i.e. the current
       # directory)
-      dockerfile = os.path.join(FLAGS.dockerfile_dir, tag + '.temp.Dockerfile')
-      if not FLAGS.dry_run:
+      dockerfile = os.path.join(args.dockerfile_dir, tag + '.temp.Dockerfile')
+      if not args.dry_run:
         with open(dockerfile, 'w') as f:
           f.write(tag_def['dockerfile_contents'])
       eprint('>> (Temporary) writing {}...'.format(dockerfile))
 
-      repo_tag = '{}:{}'.format(FLAGS.repository, tag)
+      repo_tag = '{}:{}'.format(args.repository, tag)
       eprint('>> Building {} using build args:'.format(repo_tag))
       for arg, value in tag_def['cli_args'].items():
         eprint('>>> {}={}'.format(arg, value))
@@ -781,16 +945,16 @@ def main(argv):
       # implied local build cache.
       tag_failed = False
       image, logs = None, []
-      if not FLAGS.dry_run:
+      if not args.dry_run:
         try:
           build_kwargs = dict(
-            timeout=FLAGS.hub_timeout,
+            timeout=args.hub_timeout,
             path='.',
             dockerfile=dockerfile,
             buildargs=tag_def['cli_args'],
             tag=repo_tag,
           )
-          if FLAGS.debug:
+          if args.debug:
             print("> dock.images.build")
             print(textwrap.indent(pprint.pformat(build_kwargs), prefix="  "))
 
@@ -798,7 +962,7 @@ def main(argv):
           response = tee_docker(
             build_output_generator,
             file=get_build_logfile(repo_tag),
-            to_stdout=FLAGS.debug)
+            to_stdout=args.debug)
           check_docker_response(response, dockerfile, repo_tag)
 
           image = dock.images.get(repo_tag)
@@ -817,9 +981,9 @@ def main(argv):
 
           # ROCM_EXTRA_PARAMS="--device=/dev/kfd --device=/dev/dri --group-add video"
 
-          if FLAGS.run:
+          if args.run:
             # Run the container.
-            iml_volumes = get_iml_volumes(docker_run_env)
+            iml_volumes = get_iml_volumes(docker_run_env, args.volume)
             runtime = get_docker_runtime(tag_def)
             run_kwargs = dict(
               image=image,
@@ -832,7 +996,7 @@ def main(argv):
               environment=docker_run_env,
               volumes=iml_volumes,
               # volumes={
-              #   FLAGS.run_tests_path: {
+              #   args.run_tests_path: {
               #     'bind': '/tests',
               #     'mode': 'ro'
               #   }
@@ -852,7 +1016,9 @@ def main(argv):
               run_kwargs['group_add'] = [
                 'video',
               ]
-            run_cmd = get_docker_cmdline('run', **run_kwargs)
+            # docker_run_argv = get_docker_run_argv(argv)
+            docker_run_argv = extra_argv
+            run_cmd = get_docker_cmdline('run', docker_run_argv, **run_kwargs)
             # pprint.pprint({'run_cmd': run_cmd})
             eprint("> CMD:\n"
                    "  {cmd}".format(
@@ -860,7 +1026,7 @@ def main(argv):
             subprocess.check_call(run_cmd, stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr)
             # Q: Save output?
 
-          if FLAGS.run_tests_path:
+          if args.run_tests_path:
             if not tag_def['tests']:
               eprint('>>> No tests to run.')
             for test in tag_def['tests']:
@@ -881,7 +1047,7 @@ def main(argv):
                 stdout=True,
                 environment=docker_run_env,
                 volumes={
-                  # FLAGS.run_tests_path: {
+                  # args.run_tests_path: {
                   docker_run_env['IML_TEST_SH']: {
                     # 'bind': '/tests',
                     'bind': docker_run_env['IML_TEST_SH'],
@@ -891,7 +1057,7 @@ def main(argv):
                 runtime=runtime,
               )
 
-              if FLAGS.debug:
+              if args.debug:
                 print("> TEST: dock.containers.run")
                 print(textwrap.indent(pprint.pformat(test_kwargs), prefix="  "))
 
@@ -916,7 +1082,7 @@ def main(argv):
                     repo_tag, code))
                 failed_tags.append(tag)
                 tag_failed = True
-                if FLAGS.stop_on_failure:
+                if args.stop_on_failure:
                   eprint('>> ABORTING due to --stop_on_failure!')
                   exit(1)
               else:
@@ -930,26 +1096,26 @@ def main(argv):
           eprint(''.join(log_lines))
           failed_tags.append(tag)
           tag_failed = True
-          if FLAGS.stop_on_failure:
+          if args.stop_on_failure:
             eprint('>> ABORTING due to --stop_on_failure!')
             exit(1)
 
         # Clean temporary dockerfiles if they were created earlier
-        if not FLAGS.keep_temp_dockerfiles:
+        if not args.keep_temp_dockerfiles:
           os.remove(dockerfile)
 
       # # Upload new images to DockerHub as long as they built + passed tests
-      # if FLAGS.upload_to_hub:
+      # if args.upload_to_hub:
       #   if not tag_def['upload_images']:
       #     continue
       #   if tag_failed:
       #     continue
       #
-      #   eprint('>> Uploading to {}:{}'.format(FLAGS.hub_repository, tag))
-      #   if not FLAGS.dry_run:
+      #   eprint('>> Uploading to {}:{}'.format(args.hub_repository, tag))
+      #   if not args.dry_run:
       #     p = multiprocessing.Process(
       #         target=upload_in_background,
-      #         args=(FLAGS.hub_repository, dock, image, tag))
+      #         args=(args.hub_repository, dock, image, tag))
       #     p.start()
 
   if failed_tags:
@@ -1050,6 +1216,7 @@ def get_implicit_run_args():
 
 RUN_ARGS_REQUIRED = [
   'IML_DIR',
+  'IML_DRILL_DIR',
   # The --iml-directory argument to training scripts, which is where trace-data files are stored.
   'IML_TEST_DIR',
   # The root directory of a 'patched' TensorFlow checkout
@@ -1065,7 +1232,7 @@ RUN_ARGS_OPTIONAL = [
 def is_required_run_arg(var):
   return var in RUN_ARGS_REQUIRED
 
-def get_iml_volumes(run_args):
+def get_iml_volumes(run_args, extra_volumes):
   """
   --build-arg USER_ID=$(id -u ${USER})
   --build-arg GROUP_ID=$(id -u ${USER})
@@ -1080,6 +1247,13 @@ def get_iml_volumes(run_args):
     if arg not in run_args:
       continue
     direc = run_args[arg]
+    volumes[direc] = direc
+  for i, direc in enumerate(extra_volumes):
+    env_name = 'CMDLINE_VOLUME_{i}'.format(i=i)
+    assert env_name not in volumes
+    # If this fails you're probably using --volume wrong; see usage info.
+    assert ':' not in direc
+    # volumes[env_name] = direc
     volumes[direc] = direc
   return volumes
 
@@ -1137,13 +1311,15 @@ class DockerError(Exception):
     message = ''.join("{line}\n".format(line=line) for line in lines)
     return message
 
-def get_docker_cmdline(docker_command='run', **kwargs):
+def get_docker_cmdline(docker_command='run', extra_argv=[], **kwargs):
   """
   kwargs = kwargs accepted by docker-py
   See: https://docker-py.readthedocs.io/en/stable/containers.html
 
   :param docker_command:
   :param kwargs:
+  :param extra_argv:
+    Append these to the end of the generated docker command-line.
   :return:
   """
   print("> docker.cmdline.kwargs")
@@ -1225,6 +1401,9 @@ def get_docker_cmdline(docker_command='run', **kwargs):
     if 'type' in log_config:
       add_opt_value('log-driver', log_config['type'])
 
+  # NOTE: We MUST add "docker run" options BEFORE the image/tag.
+  cmd.extend(extra_argv)
+
   if 'image' in kwargs:
     image = kwargs['image']
     if isinstance(image, Image) and len(image.tags) > 0:
@@ -1237,4 +1416,5 @@ def get_docker_cmdline(docker_command='run', **kwargs):
   return cmd
 
 if __name__ == '__main__':
-  app.run(main)
+  main()
+  # app.run(main)

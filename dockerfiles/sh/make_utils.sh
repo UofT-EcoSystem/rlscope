@@ -142,6 +142,34 @@ _check_DOPAMINE_DIR() {
     _check_env_var DOPAMINE_DIR "$description"
 }
 
+_check_BASELINES_DIR() {
+    local description="The root directory of a checkout of the baselines repo (https://github.com/openai/baselines)"
+    _check_env_var BASELINES_DIR "$description"
+}
+
+py_module_installed() {
+    local py_module="$1"
+    shift 1
+    # Returns 1 if ImportError is thrown.
+    # Returns 0 if import succeeds.
+    python -c 'import ${py_module}' > /dev/null 2>&1
+}
+
+py_maybe_install() {
+    local py_module="$1"
+    local sh_install="$2"
+    shift 2
+
+    if ! py_module_installed $py_module; then
+        echo "> Installed python module $py_module: $sh_install"
+        ${sh_install}
+        if ! py_module_installed $py_module; then
+            echo "ERROR: $py_module still failed even after running $sh_install"
+        fi
+        echo "> $py_module installed"
+    fi
+
+}
 
 #_check_container_env() {
 #}

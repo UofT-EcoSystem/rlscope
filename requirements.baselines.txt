@@ -1,0 +1,5 @@
+#
+# pip requirements needed for dockerfiles/sh/run_baselines.sh
+#
+cymem==2.0.2
+Cython==0.29.7
