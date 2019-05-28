@@ -29,6 +29,7 @@ from os.path import join as _j, abspath as _a, exists as _e, dirname as _d, base
 
 import subprocess
 import os
+import time
 import argparse
 import pwd
 import collections
@@ -55,150 +56,12 @@ from docker import APIClient
 
 from iml_profiler import py_config
 
-parser = argparse.ArgumentParser(description=__doc__)
 
-# parser.add_argument('--hub_username',
-#                                         help='Dockerhub username, only used with --upload_to_hub')
+DEFAULT_POSTGRES_PORT = 5432
 
-# parser.add_argument(
-#         '--hub_password',
-#         help=('Dockerhub password, only used with --upload_to_hub. Use from an env param'
-#            'so your password isn\'t in your history.'))
-
-parser.add_argument('--hub_timeout', default=3600,
-                    type=int,
-                    help='Abort Hub upload if it takes longer than this.')
-
-parser.add_argument(
-    '--repository', default='tensorflow',
-    help='Tag local images as {repository}:tag (in addition to the '
-         'hub_repository, if uploading to hub)')
-
-parser.add_argument(
-    '--volume',
-    action='append',
-    help=textwrap.dedent("""\
-    Translates into docker --volume option. 
-    We mount the path at the same path as it is in the host.
-    i.e. 
-    # assembler.py option:
-    --volume /one/two
-    #
-    # becomes
-    #
-    # `docker run` option:
-    --volume /one/two:/one/two
-    """).rstrip())
-
-parser.add_argument(
-    '--hub_repository',
-    help='Push tags to this Docker Hub repository, e.g. tensorflow/tensorflow')
-
-parser.add_argument(
-    '--debug',
-    action='store_true',
-    help=textwrap.dedent("""
-        In the generated dockerfiles, print start/end markers for the partial files its composed of; for e.g.:
-            START: dockerfiles/partials/ubuntu/devel-nvidia.partial.Dockerfile
-            RUN ...
-            RUN ...
-            ...
-            END: dockerfiles/partials/ubuntu/devel-nvidia.partial.Dockerfile
-        """))
-
-# parser.add_argument(
-#         '--upload_to_hub', '-u',
-#         help=('Push built images to Docker Hub (you must also provide --hub_username, '
-#            '--hub_password, and --hub_repository)'),
-# )
-
-parser.add_argument(
-    '--construct_dockerfiles', '-d',
-    action='store_true',
-    help='Do not build images')
-
-parser.add_argument(
-    '--keep_temp_dockerfiles', '-k',
-    action='store_true',
-    help='Retain .temp.Dockerfiles created while building images.')
-
-parser.add_argument(
-    '--build_images', '-b',
-    action='store_true',
-    help='Do not build images')
-
-parser.add_argument(
-    '--run',
-    action='store_true',
-    help='Run built images')
-
-parser.add_argument(
-    '--run_tests_path',
-    help=('Execute test scripts on generated Dockerfiles before pushing them. '
-          'Flag value must be a full path to the "tests" directory, which is usually'
-          ' $(realpath ./tests). A failed tests counts the same as a failed build.'))
-
-parser.add_argument(
-    '--stop_on_failure',
-    action='store_true',
-    help=('Stop processing tags if any one build fails. If False or not specified, '
-          'failures are reported but do not affect the other images.'))
-
-parser.add_argument(
-    '--dry_run', '-n',
-    action='store_true',
-    help='Do not build or deploy anything at all.',
-)
-
-parser.add_argument(
-    '--exclude_tags_matching', '-x',
-    help=('Regular expression that skips processing on any tag it matches. Must '
-          'match entire string, e.g. ".*gpu.*" ignores all GPU tags.'),
-)
-
-parser.add_argument(
-    '--only_tags_matching', '-i',
-    help=('Regular expression that skips processing on any tag it does not match. '
-          'Must match entire string, e.g. ".*gpu.*" includes only GPU tags.'),
-)
-
-parser.add_argument(
-    '--dockerfile_dir', '-o',
-    default='./dockerfiles',
-    help='Path to an output directory for Dockerfiles.'
-         ' Will be created if it doesn\'t exist.'
-         ' Existing files in this directory will be deleted when new Dockerfiles'
-         ' are made.',
-)
-
-parser.add_argument(
-    '--partial_dir', '-p',
-    default='./partials',
-    help='Path to a directory containing foo.partial.Dockerfile partial files.'
-         ' can have subdirectories, e.g. "bar/baz.partial.Dockerfile".',
-)
-
-parser.add_argument(
-    '--release', '-r', default=[], action='append',
-    help='Set of releases to build and tag. Defaults to every release type.',
-)
-
-parser.add_argument(
-    '--arg', '-a', default=[], action='append',
-    help=('Extra build arguments. These are used for expanding tag names if needed '
-          '(e.g. --arg _TAG_PREFIX=foo) and for using as build arguments (unused '
-          'args will print a warning).'),
-)
-
-parser.add_argument(
-    '--run_arg', default=[], action='append',
-    help=('Extra container run arguments (NOT build).'))
-
-parser.add_argument(
-    '--spec_file', '-s',
-    default='./spec.yml',
-    help='Path to the YAML specification file',
-)
+# How long should we wait for /bin/bash (iml_bash)
+# to appear after running "docker stack deploy"?
+DOCKER_DEPLOY_TIMEOUT_SEC = 10
 
 # Schema to verify the contents of tag-spec.yml with Cerberus.
 # Must be converted to a dict from yaml to work.
@@ -614,7 +477,7 @@ def interpolate_arg(arg):
 
     return arg.format(**ARG_VALUES)
 
-def get_docker_run_env(tag_def):
+def get_docker_run_env(tag_def, env_list):
     # Same as docker.from_env(); inherit current environment variables.
     # env = dict(os.environ)
 
@@ -649,6 +512,13 @@ def get_docker_run_env(tag_def):
         # We DON'T check that run_args_optional is set (default is '' from spec.yml is allowed)
         env = update_args_dict(env, tag_def['run_args_optional'], keep_original=True)
 
+    for env_str in env_list:
+        assert '=' in env_str
+        var, value = re.split(r'=', env_str)
+        # Duplicate var?
+        assert var not in env
+        env[var] = value
+
     return env
 
 def get_docker_runtime(tag_def):
@@ -677,8 +547,215 @@ def get_docker_run_argv(argv):
     return argv[1:]
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+
+    # parser.add_argument('--hub_username',
+    #                                         help='Dockerhub username, only used with --upload_to_hub')
+
+    # parser.add_argument(
+    #         '--hub_password',
+    #         help=('Dockerhub password, only used with --upload_to_hub. Use from an env param'
+    #            'so your password isn\'t in your history.'))
+
+    parser.add_argument('--hub_timeout', default=3600,
+                        type=int,
+                        help='Abort Hub upload if it takes longer than this.')
+
+    parser.add_argument('--deploy-postgres-port',
+                        default=DEFAULT_POSTGRES_PORT,
+                        type=int,
+                        help='What port to run postgres on (when running "docker stack deploy -c stack.yml iml")')
+
+    parser.add_argument(
+        '--repository', default='tensorflow',
+        help='Tag local images as {repository}:tag (in addition to the '
+             'hub_repository, if uploading to hub)')
+
+    parser.add_argument(
+        '--volume',
+        action='append',
+        help=textwrap.dedent("""\
+        Translates into docker --volume option. 
+        We mount the path at the same path as it is in the host.
+        i.e. 
+        # assembler.py option:
+        --volume /one/two
+        #
+        # becomes
+        #
+        # `docker run` option:
+        --volume /one/two:/one/two
+        """).rstrip())
+
+    parser.add_argument(
+        '--env',
+        '-e',
+        action='append',
+        help=textwrap.dedent("""\
+        Translates into docker --env option. 
+        """).rstrip())
+
+    parser.add_argument(
+        '--hub_repository',
+        help='Push tags to this Docker Hub repository, e.g. tensorflow/tensorflow')
+
+    parser.add_argument(
+        '--debug',
+        action='store_true',
+        help=textwrap.dedent("""
+            In the generated dockerfiles, print start/end markers for the partial files its composed of; for e.g.:
+                START: dockerfiles/partials/ubuntu/devel-nvidia.partial.Dockerfile
+                RUN ...
+                RUN ...
+                ...
+                END: dockerfiles/partials/ubuntu/devel-nvidia.partial.Dockerfile
+            """))
+
+    # parser.add_argument(
+    #         '--upload_to_hub', '-u',
+    #         help=('Push built images to Docker Hub (you must also provide --hub_username, '
+    #            '--hub_password, and --hub_repository)'),
+    # )
+
+    parser.add_argument(
+        '--construct_dockerfiles', '-d',
+        action='store_true',
+        help='Do not build images')
+
+    parser.add_argument(
+        '--keep_temp_dockerfiles', '-k',
+        action='store_true',
+        help='Retain .temp.Dockerfiles created while building images.')
+
+    parser.add_argument(
+        '--build_images', '-b',
+        action='store_true',
+        help='Do not build images')
+
+    parser.add_argument(
+        '--deploy',
+        action='store_true',
+        help=
+        textwrap.dedent("""\
+        Deploy the IML development environment using 
+        "docker stack deploy -c stack.yml iml".
+        
+        In particular:
+        - iml: 
+          The python library that collects profiling info.
+          
+        - tensorflow.patched: 
+          tensorflow patched with C++ modifications to support iml tracing.
+          
+        - iml-drill: 
+          The web server for visualizing collected data.
+          
+        - postgres: 
+          Used by iml for storing/analyzing trace-data.
+          
+        The development environment takes care of installing dependencies needed 
+        for building tensorflow.patched.
+        
+        Scripts are provided on your $PATH; some common ones:
+        - make_tflow.sh:
+          Build tensorflow.patched from source.
+          
+        - run_baselines.sh:
+          Run Atari pong benchmark from baselines repo.
+          
+        For more scripts:
+        - See <REPO>/dockerfiles/sh in the repo for all the scripts, OR
+        - See /home/{USER}/dockerfiles/sh in the deployed container
+        """.format(USER=get_username())))
+
+    parser.add_argument(
+        '--run',
+        action='store_true',
+        help='Run built images; use --deploy if you want to deploy the whole IML development environment')
+
+    parser.add_argument(
+        '--run_tests_path',
+        help=('Execute test scripts on generated Dockerfiles before pushing them. '
+              'Flag value must be a full path to the "tests" directory, which is usually'
+              ' $(realpath ./tests). A failed tests counts the same as a failed build.'))
+
+    parser.add_argument(
+        '--stop_on_failure',
+        action='store_true',
+        help=('Stop processing tags if any one build fails. If False or not specified, '
+              'failures are reported but do not affect the other images.'))
+
+    parser.add_argument(
+        '--dry_run', '-n',
+        action='store_true',
+        help='Do not build or deploy anything at all.',
+    )
+
+    parser.add_argument(
+        '--exclude_tags_matching', '-x',
+        help=('Regular expression that skips processing on any tag it matches. Must '
+              'match entire string, e.g. ".*gpu.*" ignores all GPU tags.'),
+    )
+
+    parser.add_argument(
+        '--only_tags_matching', '-i',
+        help=('Regular expression that skips processing on any tag it does not match. '
+              'Must match entire string, e.g. ".*gpu.*" includes only GPU tags.'),
+    )
+
+    parser.add_argument(
+        '--dockerfile_dir', '-o',
+        default='./dockerfiles',
+        help='Path to an output directory for Dockerfiles.'
+             ' Will be created if it doesn\'t exist.'
+             ' Existing files in this directory will be deleted when new Dockerfiles'
+             ' are made.',
+    )
+
+    parser.add_argument(
+        '--partial_dir', '-p',
+        default='./partials',
+        help='Path to a directory containing foo.partial.Dockerfile partial files.'
+             ' can have subdirectories, e.g. "bar/baz.partial.Dockerfile".',
+    )
+
+    parser.add_argument(
+        '--release', '-r', default=[], action='append',
+        help='Set of releases to build and tag. Defaults to every release type.',
+    )
+
+    parser.add_argument(
+        '--arg', '-a', default=[], action='append',
+        help=('Extra build arguments. These are used for expanding tag names if needed '
+              '(e.g. --arg _TAG_PREFIX=foo) and for using as build arguments (unused '
+              'args will print a warning).'),
+    )
+
+    parser.add_argument(
+        '--run_arg', default=[], action='append',
+        help=('Extra container run arguments (NOT build).'))
+
+    parser.add_argument(
+        '--spec_file', '-s',
+        default='./spec.yml',
+        help='Path to the YAML specification file',
+    )
+
+    parser.add_argument(
+        '--output_stack_yml',
+        default='./stack.yml',
+        help='Path to the generated YAML "Docker Compose" file for '
+             'use with "docker stack deploy -c stack.yml iml"',
+    )
+
     argv = list(sys.argv)
     args, extra_argv = parser.parse_known_args()
+
+    if args.deploy and args.run:
+        parser.error(
+            "Provide either --deploy or --run.  "
+            "Use --deploy to deploy the IML development environment (probably what you want)")
+
     assembler = Assembler(parser, argv, args, extra_argv)
     assembler.run()
 
@@ -756,7 +833,7 @@ class Assembler:
     def docker_run(self, image, tag_def, extra_argv):
         # Run the container.
         args = self.args
-        docker_run_env = get_docker_run_env(tag_def)
+        docker_run_env = get_docker_run_env(tag_def, args.env)
         iml_volumes = get_iml_volumes(docker_run_env, args.volume)
         runtime = get_docker_runtime(tag_def)
         run_kwargs = dict(
@@ -791,18 +868,142 @@ class Assembler:
                 'video',
             ]
         docker_run_argv = extra_argv
-        run_cmd = get_docker_cmdline('run', docker_run_argv, **run_kwargs)
-        # pprint.pprint({'run_cmd': run_cmd})
-        eprint("> CMD:\n"
-               "    {cmd}".format(
-            cmd=' '.join(run_cmd)))
-        subprocess.check_call(run_cmd, stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr)
+        cmd = get_docker_cmdline('run', docker_run_argv, **run_kwargs)
+        eprint(get_cmd_string(cmd))
+        subprocess.run(cmd, stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr)
         # Q: Save output?
+
+    # def _is_iml_deployed(self):
+    #     self.docker_ps_iml_bash() is not
+
+    def docker_ps_iml_bash(self):
+        # print("(1) run docker ps")
+        p = subprocess.run("docker ps | grep iml_bash",
+                           shell=True,
+                           stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                           # check=True,
+                           )
+        # I've seen this fail with returncode=1, but NO error message...
+        # I feel like its a bug in docker...
+        if p.returncode != 0:
+            return None
+        # print("(2) run docker ps")
+        # p = subprocess.run("docker ps | grep iml_bash",
+        #                    shell=True,
+        #                    stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        #                    check=True,
+        #                    )
+        lines = p.stdout.decode('utf-8').splitlines()
+        for line in lines:
+            if re.search(r'iml_bash', line):
+                fields = re.split(r'\s+', line)
+                container_id = fields[0]
+                return container_id
+        return None
+
+    def _wait_for_bash(self):
+        timeout_sec = time.time() + DOCKER_DEPLOY_TIMEOUT_SEC
+        now_sec = time.time()
+        while now_sec < timeout_sec:
+
+            # services = self.dock_cli.services(filters={'name':'iml_bash'})
+            # if len(services) > 0:
+            #     info = self.dock_cli.inspect_service('iml_bash')
+            #     return info
+
+            containers = self.dock.containers.list(filters={'name': 'iml_bash'})
+            if len(containers) > 0:
+                # containers.name
+                assert len(containers) == 1
+                return containers[0]
+
+            # container_id = self.docker_ps_iml_bash()
+            # if container_id is not None:
+            #     return container_id
+
+            time.sleep(0.5)
+            now_sec = time.time()
+
+        print(("> FAILURE: Waited for /bin/bash (iml_bash) container to appear, but it didn't after {sec} seconds"
+               "  run 'docker ps' to see what's actually running").format(
+            sec=DOCKER_DEPLOY_TIMEOUT_SEC))
+
+        sys.exit(1)
+
+    def _wait_for_iml_to_stop(self):
+        """
+        Wait until all services/processes belonging to the iml dev environment have stopped.
+
+        Currently 'docker stack rm iml' returns immediately even though the container hasn't terminated yet,
+        leading to race conditions when re-creating iml (causes errors when creating iml_default network).
+
+        :param self:
+        :return:
+        """
+        while True:
+            iml_services = self.dock_cli.services(filters={'name': 'iml'})
+            pprint.pprint({'iml_services': iml_services})
+            if len(iml_services) == 0:
+                return
+            time.sleep(0.1)
+
+    def docker_stack_rm(self):
+        services = self.dock.services.list(filters={'name': 'iml'})
+        if len(services) == 0:
+            # IML dev environment not running yet.
+            return
+        print("> Detected old IML dev environment; removing it first")
+        for srv in services:
+            srv.remove()
+        after = self.dock.services.list(filters={'name': 'iml'})
+        assert len(after) == 0
+
+        # IMPORTANT: apparently, removing the services above does NOT immediately remove the containers.
+        # So, instead we busy wait until they dissapear.
+        # We need this to avoid errors when calling 'docker stack deploy'.
+        while True:
+            containers = self.dock.containers.list(filters={'name': 'iml'})
+            if len(containers) == 0:
+                break
+            time.sleep(0.1)
+
+    def docker_deploy(self, extra_argv):
+        """
+        $ docker stack deploy {extra_args} --compose-file stack.yml iml
+        $ docker attach <iml_bash /bin/bash container>
+
+        :param extra_argv:
+            Extra arguments to pass to "stack deploy"
+        :return:
+        """
+
+        # Terminate/remove an existing deployment if it exists first.
+        self.docker_stack_rm()
+
+        cmd = ['docker', 'stack', 'deploy']
+        cmd.extend(extra_argv)
+        cmd.extend([
+            '--compose-file', 'stack.yml',
+            # Name of the created stack.
+            'iml',
+        ])
+        eprint(get_cmd_string(cmd))
+        subprocess.check_call(cmd, stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr)
+        iml_bash_container = self._wait_for_bash()
+
+        ps_cmd = ['docker', 'ps']
+        eprint(get_cmd_string(ps_cmd))
+        subprocess.check_call(ps_cmd, stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr)
+        print("> Deployed IML development environment")
+        print("> Attaching to /bin/bash in the dev environment:")
+        attach_cmd = ['docker', 'attach', iml_bash_container.name]
+        eprint(get_cmd_string(attach_cmd))
+        subprocess.run(attach_cmd, stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr)
 
     def run_tests(self, image, repo_tag, tag, tag_def):
         tag_failed = False
         args = self.args
-        docker_run_env = get_docker_run_env(tag_def)
+        docker_run_env = get_docker_run_env(tag_def, args.env)
         if not tag_def['tests']:
             eprint('>>> No tests to run.')
         for test in tag_def['tests']:
@@ -865,6 +1066,23 @@ class Assembler:
                 eprint('>> Tests look good!')
 
         return tag_failed
+
+    def generate_stack_yml(self, tag_def):
+        args = self.args
+        generator = StackYMLGenerator()
+
+        docker_run_env = get_docker_run_env(tag_def, args.env)
+        iml_volumes = get_iml_volumes(docker_run_env, args.volume)
+
+        yml = generator.generate(
+            assembler_cmd=self.argv,
+            env=docker_run_env,
+            volumes=iml_volumes,
+            postgres_port=args.deploy_postgres_port,
+        )
+        print("> Write 'docker stack deploy' stack.yml file to {path}".format(path=args.output_stack_yml))
+        with open(args.output_stack_yml, 'w') as f:
+            f.write(yml)
 
     def run(self):
         parser = self.parser
@@ -961,6 +1179,8 @@ class Assembler:
                     try:
                         image = self.docker_build(dockerfile, repo_tag, tag_def)
 
+                        self.generate_stack_yml(tag_def)
+
                         # Run tests if requested, and dump output
                         # Could be improved by backgrounding, but would need better
                         # multiprocessing support to track failures properly.
@@ -969,6 +1189,9 @@ class Assembler:
 
                         if args.run:
                             self.docker_run(image, tag_def, extra_argv)
+
+                        if args.deploy:
+                            self.docker_deploy(extra_argv)
 
                         if args.run_tests_path:
                             tag_failed = self.run_tests(image, repo_tag, tag, tag_def)
@@ -1288,8 +1511,6 @@ def get_docker_cmdline(docker_command='run', extra_argv=[], **kwargs):
 
     return cmd
 
-DEFAULT_POSTGRES_PORT = 5432
-
 class StackYMLGenerator:
     """
     Generate stack.yml.
@@ -1299,9 +1520,9 @@ class StackYMLGenerator:
         :param cmd
             assembler.py command.
         """
-        self.template = textwrap.dedent("""
+        self.template = textwrap.dedent("""\
         # DO NOT MODIFY!
-        # Automatically generated using assembler.py:
+        # Automatically generated using assembler.py with the following command/working-directory:
         #     > CMD: {assembler_cmd}
         #       PWD: {PWD}
 
@@ -1322,8 +1543,6 @@ class StackYMLGenerator:
                     POSTGRES_USER: {USER}
                 ports:
                     - {postgres_port}:{DEFAULT_POSTGRES_PORT}
-                networks:
-                    - iml_network
 
             # "Bash" development environment.
             #
@@ -1341,67 +1560,51 @@ class StackYMLGenerator:
                 depends_on:
                     - db
                 restart: always
-                networks:
-                - iml_network
                 
                 # Fails, not supported yet: instead for now just manually edit /etc/docker/daemon.json
                 # as described below:
-                # https://github.com/NVIDIA/k8s-device-plugin#preparing-your-gpu-nodes
+                #
+                #   https://github.com/NVIDIA/k8s-device-plugin#preparing-your-gpu-nodes
+                #
                 # In particular, add the line show below:
-                # {
-                #         "default-runtime": "nvidia",    // <-- add this ABOVE "runtimes"
-                #         "runtimes": {
-                #            ...
-                #            }
-                # }
+                #   {{
+                #           "default-runtime": "nvidia",    // <-- add this ABOVE "runtimes"
+                #           "runtimes": {{
+                #              ...
+                #            }}
+                #   }}
+                #
                 # runtime: nvidia
                 
                 volumes:
-                {volumes_list}
-                # - /mnt/data/james/clone/iml/test_results:/mnt/data/james/clone/iml/test_results
-                # - /home/james/clone/tensorflow.patch:/home/james/clone/tensorflow.patch
-                # - /mnt/data/james/clone/bazel/tensorflow.patch:/mnt/data/james/clone/bazel/tensorflow.patch
-                # - /home/james/clone/baselines:/home/james/clone/baselines
-                # - /home/james/clone/iml-drill:/home/james/clone/iml-drill
-                # - /mnt/data/james/clone/benchmarks:/mnt/data/james/clone/benchmarks
-                # - /mnt/data/james/clone/iml:/mnt/data/james/clone/iml
+                {volume_list}
                 
                 environment:
                 {env_list}
-                # - IML_DRILL_DIR=/home/james/clone/iml-drill
-                # - TENSORFLOW_BENCHMARKS_DIR=/mnt/data/james/clone/benchmarks
-                # - IML_DIR=/mnt/data/james/clone/iml
-                # - TENSORFLOW_DIR=/home/james/clone/tensorflow.patch
-                # - BAZEL_BUILD_DIR=/mnt/data/james/clone/bazel/tensorflow.patch
-                # - IML_TEST_DIR=/mnt/data/james/clone/iml/test_results
-                # - BASELINES_DIR=/home/james/clone/baselines
                 
                 logging:
                     driver: journald
                 stdin_open: true
                 tty: true
                 entrypoint: /bin/bash
-
-        networks:
-            iml_network:
-        """)
+        """).rstrip()
 
         self.indent_str = 4*' '
 
-    def generate(self, assembler_cmd, envs, volumes, postgres_port=DEFAULT_POSTGRES_PORT):
+    def generate(self, assembler_cmd, env, volumes, postgres_port=DEFAULT_POSTGRES_PORT):
 
         # +1 for "service: ..."
         # +1 for "bash: ..."
         bash_indent = 2
 
+        # return textwrap.dedent(self.template.format(
         return self.template.format(
-            env_list=self.env_list(envs, indent=bash_indent),
+            env_list=self.env_list(env, indent=bash_indent),
             volume_list=self.volume_list(volumes, indent=bash_indent),
             postgres_port=postgres_port,
             USER=get_username(),
-            CMD=assembler_cmd,
+            assembler_cmd=' '.join(assembler_cmd),
             PWD=os.getcwd(),
-            assembler_cmd=assembler_cmd,
             DEFAULT_POSTGRES_PORT=DEFAULT_POSTGRES_PORT,
         )
 
@@ -1410,19 +1613,24 @@ class StackYMLGenerator:
         for value in values:
             yml_lines.append("- {value}".format(
                 value=value))
-        return textwrap.indent('\n'.join(yml_lines), indent*self.indent_str)
+        # NOTE: lstrip() to remove indent from first line, since it's already in the template.
+        return textwrap.indent('\n'.join(yml_lines), indent*self.indent_str).lstrip()
 
-    def volumes_list(self, volumes, indent):
-        for volume in volumes:
-            # {HOST_PATH}:{CONTAINER_PATH}
-            assert ':' in volume
-        return self._yml_list(volumes, indent)
+    def _yml_dict_as_list(self, values : dict, sep, indent):
+        values = ["{var}{sep}{value}".format(var=var, value=values[var], sep=sep)
+                  for var in sorted(values.keys())]
+        return self._yml_list(values, indent)
 
-    def env_list(self, envs, indent):
-        for env in envs:
-            # {VAR}={VALUE}
-            assert '=' in env
-        return self._yml_list(envs, indent)
+    def volume_list(self, volumes : dict, indent):
+        return self._yml_dict_as_list(volumes, sep=':', indent=indent)
+
+    def env_list(self, envs : dict, indent):
+        return self._yml_dict_as_list(envs, sep='=', indent=indent)
+
+def get_cmd_string(cmd):
+    return ("> CMD:\n"
+            "  $ {cmd}").format(
+        cmd=' '.join(cmd))
 
 if __name__ == '__main__':
     main()

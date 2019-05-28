@@ -155,6 +155,7 @@ slice_sets:
           - ubuntu/pip_dependencies
           - iml/apt_install
           - iml/install_sh
+          - ubuntu/cd_home
           test_runtime: nvidia
           args:
           # NOTE: must be provided at assembler.py command line
