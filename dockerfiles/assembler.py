@@ -53,11 +53,22 @@ import yaml
 # https://docker-py.readthedocs.io/en/stable/api.html#docker.api.build.BuildApiMixin.build
 from io import BytesIO
 from docker import APIClient
+from pathlib import Path
 
 from iml_profiler import py_config
 
+def get_username():
+    return pwd.getpwuid(os.getuid())[0]
 
+def get_user_id():
+    return os.getuid()
+
+HOME = str(Path.home())
 DEFAULT_POSTGRES_PORT = 5432
+DEFAULT_IML_DRILL_PORT = 8129
+# Default storage location for postgres database
+# (postgres is used for loading raw trace-data and analyzing it).
+DEFAULT_POSTGRES_PGDATA_DIR = _j(HOME, 'iml', 'pgdata')
 
 # How long should we wait for /bin/bash (iml_bash)
 # to appear after running "docker stack deploy"?
@@ -561,10 +572,22 @@ def main():
                         type=int,
                         help='Abort Hub upload if it takes longer than this.')
 
+    parser.add_argument('--deploy-iml-drill-port',
+                        default=DEFAULT_IML_DRILL_PORT,
+                        type=int,
+                        help=('What port to run iml-drill web server on '
+                              '(when running "docker stack deploy -c stack.yml iml")'))
+
     parser.add_argument('--deploy-postgres-port',
                         default=DEFAULT_POSTGRES_PORT,
                         type=int,
-                        help='What port to run postgres on (when running "docker stack deploy -c stack.yml iml")')
+                        help=('What port to run postgres on '
+                              '(when running "docker stack deploy -c stack.yml iml")'))
+
+    parser.add_argument('--deploy-postgres-pgdata-dir',
+                        default=DEFAULT_POSTGRES_PGDATA_DIR,
+                        help=('Default storage location for postgres database '
+                              '(postgres is used for loading raw trace-data and analyzing it).'))
 
     parser.add_argument(
         '--repository', default='tensorflow',
@@ -1078,6 +1101,8 @@ class Assembler:
             assembler_cmd=self.argv,
             env=docker_run_env,
             volumes=iml_volumes,
+            iml_drill_port=args.deploy_iml_drill_port,
+            postgres_pgdata_dir=args.deploy_postgres_pgdata_dir,
             postgres_port=args.deploy_postgres_port,
         )
         print("> Write 'docker stack deploy' stack.yml file to {path}".format(path=args.output_stack_yml))
@@ -1296,12 +1321,6 @@ class ScopedLogFile:
         self.f.flush()
         if self._is_path:
             self.f.close()
-
-def get_username():
-    return pwd.getpwuid(os.getuid())[0]
-
-def get_user_id():
-    return os.getuid()
 
 def get_implicit_build_args():
     """
@@ -1546,9 +1565,20 @@ class StackYMLGenerator:
                     # Use the current user as postgres user (default when using psql).
                     # `psql` at the command-line defaults to this user, as do API's 
                     # for making postgres connections.
-                    POSTGRES_USER: {USER}
+                    - POSTGRES_USER={USER}
                 ports:
                     - {postgres_port}:{DEFAULT_POSTGRES_PORT}
+                volumes:
+                    # Persist processed trace-logs between deployments on the host inside {postgres_pgdata_dir}.
+                    #
+                    # NOTE: {postgres_pgdata_dir} will have different permissions than the host user; 
+                    # We don't bother to fix this since: 
+                    # (1) Fixes are host OS dependent [See "Arbitrary --user Notes" @ https://hub.docker.com/_/postgres]
+                    #     and hence sacrifice reproducibility
+                    # (2) Database access isn't sacrificed since it's still all done through 
+                    #     "psql -h localhost".
+                    #
+                    - {postgres_pgdata_dir}:/var/lib/postgresql/data
 
             # "Bash" development environment.
             #
@@ -1582,6 +1612,10 @@ class StackYMLGenerator:
                 #
                 # runtime: nvidia
                 
+                ports:
+                    # Expose port that the iml-drill web server runs on.
+                    - {iml_drill_port}:{DEFAULT_IML_DRILL_PORT}
+                
                 volumes:
                 {volume_list}
                 
@@ -1598,21 +1632,31 @@ class StackYMLGenerator:
 
         self.indent_str = 4*' '
 
-    def generate(self, assembler_cmd, env, volumes, postgres_port=DEFAULT_POSTGRES_PORT):
+    def generate(self, assembler_cmd, env, volumes,
+                 iml_drill_port=DEFAULT_IML_DRILL_PORT,
+                 postgres_port=DEFAULT_POSTGRES_PORT,
+                 postgres_pgdata_dir=DEFAULT_POSTGRES_PGDATA_DIR):
 
         # +1 for "service: ..."
         # +1 for "bash: ..."
         bash_indent = 2
 
+        print("> Create postgres PGDATA directory @ {path} for storing databases".format(
+            path=postgres_pgdata_dir))
+        os.makedirs(postgres_pgdata_dir, exist_ok=True)
+
         # return textwrap.dedent(self.template.format(
         return self.template.format(
             env_list=self.env_list(env, indent=bash_indent),
             volume_list=self.volume_list(volumes, indent=bash_indent),
+            DEFAULT_POSTGRES_PORT=DEFAULT_POSTGRES_PORT,
             postgres_port=postgres_port,
+            postgres_pgdata_dir=postgres_pgdata_dir,
             USER=get_username(),
             assembler_cmd=' '.join(assembler_cmd),
             PWD=os.getcwd(),
-            DEFAULT_POSTGRES_PORT=DEFAULT_POSTGRES_PORT,
+            DEFAULT_IML_DRILL_PORT=DEFAULT_IML_DRILL_PORT,
+            iml_drill_port=iml_drill_port,
         )
 
     def _yml_list(self, values, indent):
