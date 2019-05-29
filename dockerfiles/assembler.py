@@ -72,7 +72,7 @@ DEFAULT_POSTGRES_PGDATA_DIR = _j(HOME, 'iml', 'pgdata')
 
 # How long should we wait for /bin/bash (iml_bash)
 # to appear after running "docker stack deploy"?
-DOCKER_DEPLOY_TIMEOUT_SEC = 10
+DOCKER_DEPLOY_TIMEOUT_SEC = 60
 
 # Schema to verify the contents of tag-spec.yml with Cerberus.
 # Must be converted to a dict from yaml to work.
@@ -1019,9 +1019,10 @@ class Assembler:
         subprocess.check_call(ps_cmd, stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr)
         print("> Deployed IML development environment")
         print("> Attaching to /bin/bash in the dev environment:")
-        attach_cmd = ['docker', 'attach', iml_bash_container.name]
-        eprint(get_cmd_string(attach_cmd))
-        subprocess.run(attach_cmd, stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr)
+        # Login to existing container using a new /bin/bash shell so we are greeted with the _iml_banner
+        exec_cmd = ['docker', 'exec', '-i', '-t', iml_bash_container.name, '/bin/bash']
+        eprint(get_cmd_string(exec_cmd))
+        subprocess.run(exec_cmd, stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr)
 
     def run_tests(self, image, repo_tag, tag, tag_def):
         tag_failed = False

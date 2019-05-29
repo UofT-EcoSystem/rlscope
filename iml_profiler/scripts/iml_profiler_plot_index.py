@@ -2,6 +2,7 @@ import re
 import numpy as np
 import pprint
 import json
+import textwrap
 
 from os.path import join as _j, abspath as _a, exists as _e, dirname as _d, basename as _b
 
@@ -37,7 +38,7 @@ class _DataIndex:
     def set_debug(self, debug):
         self.debug = debug
 
-    def each_file(self, selector):
+    def each_file(self, selector, debug=False):
         """
         :param selector:
             Sub-select the "sub-tree" of files you wish to consider.
@@ -56,7 +57,7 @@ class _DataIndex:
         else:
             assert False
 
-        for md, entry in _sel_idx(self.index, selector, field):
+        for md, entry in _sel_idx(self.index, selector, field, debug=debug):
             md[field] = selector[field]
             sel_order = SEL_ORDER[selector[field]]
             if self.debug:
@@ -189,7 +190,7 @@ class _DataIndex:
 
         return ident
 
-def _sel_idx(idx, selector, field):
+def _sel_idx(idx, selector, field, debug=False):
     """
     Generalize this code across all the different OverlapType's:
 
@@ -220,12 +221,12 @@ def _sel_idx(idx, selector, field):
     """
     md = dict()
     level = 0
-    for overlap, subtree in _sel(selector, idx, field):
+    for overlap, subtree in _sel(selector, idx, field, debug=debug):
         sel_order = SEL_ORDER[overlap]
-        for md, entry in _sel_all(selector, sel_order, level, md, subtree):
+        for md, entry in _sel_all(selector, sel_order, level, md, subtree, debug=debug):
             yield md, entry
 
-def _sel(selector, idx, sel_field):
+def _sel(selector, idx, sel_field, debug=False):
     """
     Given a subtree (idx) key-ed by sel_field values, iterate over sub-subtree whose values match selector.
 
@@ -241,6 +242,11 @@ def _sel(selector, idx, sel_field):
 
     :return:
     """
+
+    if debug:
+        print("> _sel:")
+        print(textwrap.indent(pprint.pformat(locals()), prefix='  '))
+
     if sel_field in selector and callable(selector[sel_field]):
         for value, subtree in idx.items():
             if selector[sel_field](value):
@@ -258,7 +264,7 @@ def _sel(selector, idx, sel_field):
     for value, subtree in idx.items():
         yield value, subtree
 
-def _sel_all(selector, sel_order, level, md, subtree):
+def _sel_all(selector, sel_order, level, md, subtree, debug=False):
     """
     Given a subtree key-ed like:
     subtree = {
@@ -285,9 +291,9 @@ def _sel_all(selector, sel_order, level, md, subtree):
         yield dict(md), subtree
         return
     field = sel_order[level]
-    for value, next_subtree in _sel(selector, subtree[field], field):
+    for value, next_subtree in _sel(selector, subtree[field], field, debug=debug):
         md[field] = value
-        for md, entry in _sel_all(selector, sel_order, level + 1, md, next_subtree):
+        for md, entry in _sel_all(selector, sel_order, level + 1, md, next_subtree, debug=debug):
             yield md, entry
 
 

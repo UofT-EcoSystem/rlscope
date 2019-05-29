@@ -327,21 +327,6 @@ def main():
                         The first sample of a call to a CUDA API function has been known to take longer than all remaining calls.
                         I suspect this is profiler related overhead (given we've already done warmup runs before 
                         recording, and the only difference on the fist sample being that the profiler is on).
-                        To correct for this
-                        
-                        e.g. of anomaly I'm talking about:
-                        
-                            Type      | Time(%) | Avg                 | Std                  | Std/Avg(%) | Call# | Name          | Sample# | Time
-                            API calls | 18.16%  | 744.1750360000001us | 22.734390363072784ms | 3054.98%   | 0     | cudaLaunch    | 0       | 719.309048ms
-                            API calls | 18.16%  | 744.1750360000001us | 22.734390363072784ms | 3054.98%   | 0     | cudaLaunch    | 1       | 16.817us
-                            API calls | 18.16%  | 744.1750360000001us | 22.734390363072784ms | 3054.98%   | 0     | cudaLaunch    | 2       | 16.058us
-                            ...
-                            API calls | 18.34%  | 751.518926us        | 22.734840524645147ms | 3025.19%   | 1     | cudaLaunch    | 0       | 719.330608ms
-                            ...
-                            API calls | 18.44%  | 755.5107290000001us | 22.735680628346746ms | 3009.31%   | 2     | cudaLaunch    | 0       | 719.3610540000001ms
-                            ...
-                            API calls | 18.02%  | 738.5409140000002us | 22.736257068592472ms | 3078.54%   | 7     | cuEventRecord | 0       | 719.3622639999999ms
-                        
                         """))
     parser.add_argument("--nvprof-enabled",
                         action='store_true',

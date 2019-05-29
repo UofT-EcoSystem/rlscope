@@ -146,6 +146,12 @@ class GeneratePlotIndex:
     def dump_plot_index_py(self):
         cmd = sys.argv
 
+        if not self.dry_run:
+            src = _j(py_config.ROOT, 'iml_profiler/scripts/iml_profiler_plot_index.py')
+            dst = _j(self.out_dir, 'iml_profiler_plot_index.py')
+            print("> cp {src} -> {dst}".format(src=src, dst=dst))
+            shutil.copyfile(src, dst)
+
         os.makedirs(_d(self.plot_index_path), exist_ok=True)
         if _e(self.plot_index_path) and not self.replace:
             print("WARNING: {path} exists; skipping".format(path=self.plot_index_path))
@@ -181,12 +187,6 @@ class GeneratePlotIndex:
 
             if not self.dry_run:
                 f.write(contents)
-
-        if not self.dry_run:
-            shutil.copyfile(
-                _j(py_config.ROOT, 'iml_profiler/scripts/iml_profiler_plot_index.py'),
-                _j(self.out_dir, 'iml_profiler_plot_index.py'),
-            )
 
 def mkd(dic, key):
     if key not in dic:
