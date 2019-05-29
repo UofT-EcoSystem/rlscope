@@ -2169,9 +2169,26 @@ def args_to_cmdline(parser, args,
     def optname(option):
         return "--{s}".format(s=re.sub(r'_', '-', option))
 
-    py_script_idx = 0
-    while not re.search(r'\.py$', sys.argv[py_script_idx]):
-        py_script_idx += 1
+    def is_py_file(path):
+        return re.search(r'\.py$', path)
+    def find_py_file_idx(argv):
+        for i in range(len(argv)):
+            if is_py_file(argv[i]):
+                return i
+        return None
+    py_script_idx = find_py_file_idx(sys.argv)
+    if py_script_idx is None:
+        # No python executable; looks more like this:
+        #
+        # ['iml-test',
+        #      '--train-script',
+        #      'run_baselines.sh',
+        #      '--test-name',
+        #      'PongNoFrameskip-v4/docker',
+        #      '--iml-directory',
+        #      '/home/james/clone/baselines/output']
+        py_script_idx = 0
+
     extra_opts = []
     if keep_debug and hasattr(args, 'debug') and args.debug:
         extra_opts.extend(["-m", "ipdb"])

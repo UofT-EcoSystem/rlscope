@@ -1,2 +1,4 @@
 USER ${USER_NAME}
 WORKDIR ${HOME}
+
+ENTRYPOINT [ "/bin/bash" ]

@@ -3,6 +3,7 @@ import multiprocessing
 from concurrent.futures import ProcessPoolExecutor
 import subprocess
 import progressbar
+import sys
 import tempfile
 import getpass
 import psycopg2
@@ -1459,11 +1460,13 @@ class CSVInserter:
         os.remove(self.tmp_path)
 
 class TracesPostgresConnection:
-    def __init__(self, db_config_path, db_basename='traces'):
+    def __init__(self, db_config_path, db_basename='traces', host=None):
+        self.host = host
         self.rand_suffix_len = 4
         self.db_config_path = db_config_path
         self.db_config = None
         self.db_basename = db_basename
+        self.db_name = None
         self._cursor = None
         self.conn = None
         self.pg_conn = None
@@ -1475,15 +1478,29 @@ class TracesPostgresConnection:
             header = f.readline()
             header = re.split(r',', header)
         col_str = ", ".join(header)
-        c.execute("""
+        # NOTE: When you tell postgres to execute "COPY FROM $path" it expects $path to be available on the same machine as postgres is running.
+        # So, this won't work if postgres is containerized ($path isn't accessible).
+        # Hence, we use psql + "COPY FROM STDIN" instead.
+        copy_from_sql = textwrap.dedent("""\
         COPY {table} ({col_str})
-        FROM '{csv}' 
+        FROM STDIN
         DELIMITER ',' CSV HEADER;
         """.format(
             col_str=col_str,
-            csv=csv_path,
             table=table,
         ))
+        cmd = ['psql']
+        if self.host is not None:
+            cmd.extend(['-h', self.host])
+        # if self.user is not None:
+        #     cmd.extend(['-U', self.user])
+        # if self.port is not None:
+        #     cmd.extend(['-p', self.port])
+        assert self.db_name is not None
+        cmd.extend([self.db_name, '-c', copy_from_sql])
+        # Q: Do we need to disable foreign key checks?
+        with open(csv_path, 'r') as f:
+            subprocess.check_call(cmd, stdin=f)
 
     def commit(self):
         if self.conn is None:
@@ -1542,24 +1559,37 @@ class TracesPostgresConnection:
 
         self._maybe_read_db_config()
 
-        self.conn, self._cursor = self._create_connection(self.db_name)
+        db_exists, self.conn, self._cursor = self._create_connection(self.db_name)
+        return db_exists
 
     def _create_connection(self, db_name):
         """ create a database connection to a SQLite database """
-        conn = psycopg2.connect("dbname={db} user={user}".format(
-            db=db_name,
-            user=self.user,
-        ), isolation_level=None)
+        # conn = psycopg2.connect("dbname={db} user={user}".format(
+        #     db=db_name,
+        #     user=self.user,
+        # ), isolation_level=None)
+        try:
+            conn = psycopg2.connect(
+                dbname=db_name,
+                user=self.user,
+                host=self.host,
+                isolation_level=None)
+        except psycopg2.OperationalError as e:
+            if not re.search(r'database.*does not exist', e.args[0]):
+                raise
+            # Database does not exist; just make a new one.
+            return False, None, None
         conn.set_session(autocommit=True, isolation_level='READ UNCOMMITTED')
 
         cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-        return conn, cursor
+        return True, conn, cursor
 
     def _maybe_create_postgres_connection(self):
         if self.pg_conn is not None:
             return
 
-        self.pg_conn, self.pg_cursor = self._create_connection('postgres')
+        db_exists, self.pg_conn, self.pg_cursor = self._create_connection('postgres')
+        return db_exists
 
     def _maybe_read_db_config(self):
         if self.db_config is None:
@@ -1574,7 +1604,7 @@ class TracesPostgresConnection:
     def _dump_db_config(self):
         do_dump_json(self.db_config, self.db_config_path)
 
-    def _db_exists(self):
+    def _db_config_exists(self):
         return self.db_config is not None
 
     def _drop_connections(self):
@@ -1592,10 +1622,17 @@ class TracesPostgresConnection:
         """.format(db=self.db_name))
         active_pids = c.fetchall()
 
-        proc_info = [{
-            'pid':row['pid'],
-            'cmdline':psutil.Process(row['pid']).cmdline(),
-        } for row in active_pids]
+        proc_info = []
+        for row in active_pids:
+            try:
+                cmdline = psutil.Process(row['pid']).cmdline()
+            except psutil.NoSuchProcess:
+                continue
+            info = {
+                'pid':row['pid'],
+                'cmdline':cmdline,
+            }
+            proc_info.append(info)
 
         c.execute("""
         SELECT pid, pg_terminate_backend(pid) as terminated
@@ -1613,9 +1650,10 @@ class TracesPostgresConnection:
     def create_db(self, recreate):
         if _e(self.db_config_path):
             self._read_db_config()
-            if self._db_exists():
-                self._maybe_create_db_connection()
-                self._drop_connections()
+            if self._db_config_exists():
+                db_exists = self._maybe_create_db_connection()
+                if db_exists:
+                    self._drop_connections()
             if recreate:
                 self._drop_database()
                 self._create_database(self.db_name)
@@ -1637,7 +1675,8 @@ class TracesPostgresConnection:
         if self.conn is not None:
             return
 
-        self.conn, self._cursor = self._create_connection(self.db_name)
+        db_exists, self.conn, self._cursor = self._create_connection(self.db_name)
+        return db_exists
 
     def random_string(self, N):
         """
@@ -1742,8 +1781,11 @@ class TracesPostgresConnection:
         sqlite3 blaz.db -bail -echo -cmd '.read sqlite/tables.sql' -cmd '.quit'
         """
         with open(sql_path, 'r') as sql_f:
-            proc = subprocess.run(["psql", db_name,
-                                   ],
+            psql_cmd = ['psql']
+            if self.host is not None:
+                psql_cmd.extend(['-h', self.host])
+            psql_cmd.extend([db_name])
+            proc = subprocess.run(psql_cmd,
                                   stdin=sql_f,
                                   stdout=subprocess.PIPE,
                                   stderr=subprocess.PIPE)
@@ -1758,8 +1800,9 @@ class TracesPostgresConnection:
 
 
 class TracesSQLiteConnection:
-    def __init__(self, db_path):
+    def __init__(self, db_path, host=None):
         self.db_path = db_path
+        self.host = host
         self._cursor = None
         self.conn = None
 
@@ -1866,6 +1909,9 @@ class TracesSQLiteConnection:
         # This is required for BulkInserter to work,
         # otherwise you'll get an error on 'COMMIT':
         #   sqlite3.OperationalError: cannot commit - no transaction is active
+        if self.host is not None:
+            # Lazy.
+            raise NotImplementedError
         self.conn = sqlite3.connect(self.db_path, isolation_level=None)
         # self.conn = sqlite3.connect(self.db_path)
         assert self.conn.isolation_level is None
@@ -3206,11 +3252,13 @@ def sql_exec_query(cursor, query, params=None, klass=None, debug=False):
     if debug:
         print("> query took {sec} seconds".format(sec=end_t - start_t))
 
-def sql_create_connection(db_path):
+def sql_create_connection(db_path, host=None):
+    if 'IML_POSTGRES_HOST' in os.environ and host is None:
+        host = os.environ['IML_POSTGRES_HOST']
     if py_config.SQL_IMPL == 'psql':
-        return TracesPostgresConnection(db_path)
+        return TracesPostgresConnection(db_path, host=host)
     elif py_config.SQL_IMPL == 'sqlite':
-        return TracesSQLiteConnection(db_path)
+        return TracesSQLiteConnection(db_path, host=host)
     raise NotImplementedError("Not sure how to create connection for SQL_IMPL={impl}".format(
         impl=py_config.SQL_IMPL))
 

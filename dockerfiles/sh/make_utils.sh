@@ -152,7 +152,7 @@ py_module_installed() {
     shift 1
     # Returns 1 if ImportError is thrown.
     # Returns 0 if import succeeds.
-    python -c 'import ${py_module}' > /dev/null 2>&1
+    python -c "import ${py_module}" > /dev/null 2>&1
 }
 
 py_maybe_install() {
@@ -165,6 +165,7 @@ py_maybe_install() {
         ${sh_install}
         if ! py_module_installed $py_module; then
             echo "ERROR: $py_module still failed even after running $sh_install"
+            exit 1
         fi
         echo "> $py_module installed"
     fi

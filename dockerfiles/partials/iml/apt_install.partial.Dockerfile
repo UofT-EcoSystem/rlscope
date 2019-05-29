@@ -4,6 +4,7 @@
 #
 USER root
 RUN apt-get install -y --no-install-recommends \
-    postgresql-client
+    postgresql-client \
+    figlet
 USER ${USER_NAME}
 

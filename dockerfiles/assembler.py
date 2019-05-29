@@ -1094,6 +1094,12 @@ class Assembler:
             print("ERROR: You must execute assembly.py from dockerfiles/assembler.py")
             sys.exit(1)
 
+        # In order to copy $ROOT/requirements.txt into the container,
+        # it can't be in an upper directory (i.e. ../.....).
+        shutil.copy(
+            src=_j(py_config.ROOT, 'requirements.txt'),
+            dst='./requirements.txt')
+
         all_tags = self.read_spec_yml()
 
         # Empty Dockerfile directory if building new Dockerfiles
@@ -1580,6 +1586,7 @@ class StackYMLGenerator:
                 {volume_list}
                 
                 environment:
+                - IML_POSTGRES_HOST=db
                 {env_list}
                 
                 logging:
