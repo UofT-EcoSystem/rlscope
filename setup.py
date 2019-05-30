@@ -68,6 +68,9 @@ REQUIRED_PACKAGES = [
 
     # iml-analyze
     'psycopg2==2.7.7',
+    'luigi==2.8.6',
+    # Debugger used for development
+    'ipdb >= 0.12',
 ]
 
 # NOTE: dependencies for building docker images are defined in dockerfiles/requirements.txt
