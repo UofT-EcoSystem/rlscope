@@ -21,14 +21,6 @@ alias ls="ls --color=auto"
 
 iml-banner() {
 echo -e "\e[1;31m"
-#cat<<TF
-#________                               _______________
-#___  __/__________________________________  ____/__  /________      __
-#__  /  _  _ \_  __ \_  ___/  __ \_  ___/_  /_   __  /_  __ \_ | /| / /
-#_  /   /  __/  / / /(__  )/ /_/ /  /   _  __/   _  / / /_/ /_ |/ |/ /
-#/_/    \___//_/ /_//____/ \____//_/    /_/      /_/  \____/____/|__/
-#
-#TF
 figlet "IML toolkit" && figlet ">> dev env"
 echo -e "\e[0;33m"
 
@@ -65,6 +57,6 @@ iml-install() {
 # Shows when running the container as-is.
 iml-banner
 
-#if [ "$IML_DIR" != "" ]; then
-#    export PATH="$IML_DIR/dockerfiles/sh:$PATH"
-#fi
+if [ "$IML_DIR" != "" ]; then
+    export PATH="$IML_DIR/dockerfiles/sh:$PATH"
+fi

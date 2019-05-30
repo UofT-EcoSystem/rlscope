@@ -154,7 +154,6 @@ slice_sets:
           - ubuntu/pip_dependencies
           - iml/env
           - iml/apt_install
-          - iml/install_sh
           - iml/pip_dependencies
           - iml/user_custom
           - shell

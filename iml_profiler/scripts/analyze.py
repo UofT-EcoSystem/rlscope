@@ -10,6 +10,7 @@ import luigi
 import argparse
 import pprint
 import textwrap
+import multiprocessing
 from iml_profiler.parser import tasks
 
 def main():
@@ -33,6 +34,10 @@ def main():
     parser.add_argument('--task',
                         choices=[klass.__name__ for klass in tasks.IML_TASKS],
                         help="Name of a runnable IMLTask defined in iml_profiler.parser.tasks")
+    parser.add_argument('--workers',
+                        type=int,
+                        default=multiprocessing.cpu_count(),
+                        help="Maximum number of parallel tasks to run (luigi parameter)")
     parser.add_argument('--help', '-h',
                         action='store_true')
     args, luigi_argv = parser.parse_known_args(sys.argv)

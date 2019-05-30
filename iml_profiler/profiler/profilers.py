@@ -1317,7 +1317,7 @@ class Profiler:
             print("IML: Warning; you're already running utilization sampler @ pid={pid}".format(pid=self.util_sampler_pid))
             return
 
-        util_cmdline = [PYTHON_BIN, UTILIZATION_SAMPLER_PY]
+        util_cmdline = ['iml-util-sampler']
         util_cmdline.extend(['--iml-directory', _a(self.directory)])
         if self.debug:
             util_cmdline.append('--iml-debug')

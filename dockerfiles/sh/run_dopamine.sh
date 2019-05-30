@@ -16,7 +16,7 @@ _check_DOPAMINE_DIR
 
 cd $DOPAMINE_DIR
 
-if [ "$OUTPUT_DIR" = '' ]; then
+if [ "$OUTPUT_DIR" == '' ]; then
     OUTPUT_DIR="$DOPAMINE_DIR/output/docker"
     echo "> env.OUTPUT_DIR not set; defaulting to:"
     echo "  OUTPUT_DIR=$OUTPUT_DIR"

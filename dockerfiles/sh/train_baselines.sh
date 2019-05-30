@@ -17,7 +17,7 @@ _check_BASELINES_DIR
 py_maybe_install 'baselines' install_baselines.sh
 
 if [ "$OUTPUT_DIR" == '' ]; then
-    OUTPUT_DIR="$BASELINES_DIR/output/PongNoFrameskip-v4/docker/run_baselines"
+    OUTPUT_DIR="$BASELINES_DIR/output/PongNoFrameskip-v4/docker/train_baselines"
     echo "> env.OUTPUT_DIR not set; defaulting to:"
     echo "  OUTPUT_DIR=$OUTPUT_DIR"
 fi
@@ -25,5 +25,6 @@ mkdir -p $OUTPUT_DIR
 
 python $BASELINES_DIR/baselines/deepq/experiments/run_atari.py \
     --env PongNoFrameskip-v4 \
+    --iml-start-measuring-call 1 \
     --checkpoint-path $OUTPUT_DIR \
-    --iml-trace-time-sec 60
+    --iml-trace-time-sec $((2*60))

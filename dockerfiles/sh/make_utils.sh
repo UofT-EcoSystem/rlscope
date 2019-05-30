@@ -161,8 +161,8 @@ py_maybe_install() {
     shift 2
 
     if ! py_module_installed $py_module; then
-        echo "> Installed python module $py_module: $sh_install"
         ${sh_install}
+        echo "> Installed python module $py_module: $sh_install"
         if ! py_module_installed $py_module; then
             echo "ERROR: $py_module still failed even after running $sh_install"
             exit 1
