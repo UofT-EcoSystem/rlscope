@@ -7,6 +7,7 @@ import psutil
 import platform
 import cpuinfo
 import concurrent.futures
+import sys
 
 from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, basename as _b
 
@@ -389,6 +390,30 @@ def main():
     # where $@ contains all the --iml-* args.
     args, extra_argv = parser.parse_known_args()
     # args = parser.parse_args()
+
+    if args.kill:
+        for proc in psutil.process_iter():
+            # if proc.name() == sys.argv[0]:
+            # pinfo = proc.as_dict(attrs=['pid', 'name', 'username'])
+            pinfo = proc.as_dict(attrs=['pid', 'username', 'cmdline'])
+            pprint.pprint({'pinfo': pinfo})
+            # cmdline = proc.cmdline()
+            try:
+                print(pinfo['cmdline'])
+                if re.search(r'iml-util-sampler', ' '.join(pinfo['cmdline'])) and pinfo['pid'] != os.getpid():
+                    print("> Kill iml-util-sampler: {proc}".format(
+                        proc=proc))
+                    proc.kill()
+            except psutil.NoSuchProcess:
+                pass
+        sys.exit(0)
+
+    if args.iml_directory is None:
+        print("--iml-directory is required: directory where trace-files are saved")
+        parser.print_help()
+        sys.exit(1)
+
+    os.makedirs(args.iml_directory, exist_ok=True)
 
     if args.measure_samples_per_sec:
         measure_samples_per_sec()

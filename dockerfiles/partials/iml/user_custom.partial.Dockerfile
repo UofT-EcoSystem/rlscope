@@ -5,3 +5,8 @@
 #
 
 RUN pip install ipdb
+USER root
+RUN apt-get install -y --no-install-recommends \
+    htop \
+    tree
+USER ${USER_NAME}

@@ -46,7 +46,7 @@ _train_minigo() {
 
     mkdir -p $BASE_DIR
 
-    cd $MLPERF_DIR/reinforcement/tensorflow ~/clone/mlperf_training/reinforcement/tensorflow
+    cd $MLPERF_DIR/reinforcement/tensorflow
 #    ./run_and_time.sh $SEED --iml-keep-traces --iml-disable 2>&1 | tee --ignore-interrupts ${BASE_DIR}/benchmark.txt
     ./run_and_time.sh $SEED --iml-keep-traces 2>&1 | tee --ignore-interrupts ${BASE_DIR}/benchmark.txt
 )

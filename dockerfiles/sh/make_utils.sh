@@ -147,6 +147,11 @@ _check_BASELINES_DIR() {
     _check_env_var BASELINES_DIR "$description"
 }
 
+_check_MLPERF_DIR() {
+    local description="The root directory of a checkout of the mlperf-training repo (https://github.com/mlperf/training)"
+    _check_env_var MLPERF_DIR "$description"
+}
+
 py_module_installed() {
     local py_module="$1"
     shift 1

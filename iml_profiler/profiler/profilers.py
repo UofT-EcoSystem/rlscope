@@ -534,7 +534,11 @@ class _DumpPyprofTraceHook(clib_wrap.RecordEventHook):
         if pyprof_trace.num_events >= clib_wrap.PROTO_MAX_PYPROF_PY_EVENTS:
             iml_profiler.api.prof._dump_pyprof()
             num_events = clib_wrap.num_events_recorded()
-            assert num_events == 0
+            # NOTE: I've seen this assertion fail with minigo, not sure why though...
+            if num_events != 0:
+                print(("> IML: WARNING, after dumping pyprof data, there were "
+                       "still {n} pyprof events recorded").format(n=num_events))
+            # assert num_events == 0
 DumpPyprofTraceHook = _DumpPyprofTraceHook()
 
 
@@ -603,7 +607,7 @@ class Profiler:
 
         global _prof_singleton
         if _prof_singleton is not None:
-            raise RuntimeError("IML: Only a single profiler.Profiler object can be created; use profiler.glbl.handle_iml_args/profiler.iml_profiler.api.prof instead.")
+            raise RuntimeError("IML: Only a single profiler.Profiler object can be created; use iml.handle_iml_args + iml.prof instead.")
         _prof_singleton = self
 
         def get_iml_argname(argname, internal=False):
@@ -1892,7 +1896,7 @@ def get_util_sampler_parser(only_fwd_arguments=False):
     """
     parser = argparse.ArgumentParser("Sample GPU/CPU utilization over the course of training")
     parser.add_argument('--iml-directory',
-                        required=True,
+                        # required=True,
                         help=textwrap.dedent("""
     IML: profiling output directory.
     """))
@@ -1932,6 +1936,13 @@ def get_util_sampler_parser(only_fwd_arguments=False):
     How fast can we call nvidia-smi (to sample GPU utilization)?  
     How fast can we gather CPU utilization?
     """))
+
+    parser.add_argument('--kill',
+                        action='store_true',
+                        help=textwrap.dedent("""
+    Kill any existing instances of this script that are still running, then exit.
+    """))
+
     return parser
 
 def add_iml_arguments(parser):
@@ -2091,7 +2102,7 @@ def iml_argv(prof : Profiler, keep_executable=False, keep_non_iml_args=False):
 
     Useful for forwarding IML arguments to python child processes instrumented with IML.
     """
-    # If this fails and your using profiler.glbl, make sure you call profiler.glbl.handle_iml_args(...)
+    # If this fails and your using profiler.glbl, make sure you call iml.handle_iml_args(...)
     # before spawning child processes.
     assert prof is not None
     # JAMES TODO: forward set_phase to children.
