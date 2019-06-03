@@ -71,6 +71,8 @@ REQUIRED_PACKAGES = [
     'luigi==2.8.6',
     # Debugger used for development
     'ipdb >= 0.12',
+    # Debugger used for pytest
+    'pdbpp >= 0.10.0',
 ]
 
 # NOTE: dependencies for building docker images are defined in dockerfiles/requirements.txt

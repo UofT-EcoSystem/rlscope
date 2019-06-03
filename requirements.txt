@@ -33,3 +33,5 @@ psycopg2==2.7.7
 luigi==2.8.6
 # Debugger used for development
 ipdb >= 0.12
+# Debugger used for pytest
+pdbpp >= 0.10.0

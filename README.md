@@ -1,3 +1,132 @@
+# Architecture overview
+
+The page describes high-level design of the IML codebase, 
+which is useful if you intend to modify IML / add new features.
+
+## TensorFlow modifications
+
+IML uses TensorFlow's `tfprof` for collecting GPU timing information.  
+Internally, `tfprof` uses NVIDIA CUDA's `libcupti` library for collecting GPU times 
+(e.g. time to run a GPU kernel).
+
+We mostly use `tfprof`'s collected data as-is.  However, the original design of `tfprof` 
+puts a lot of profiling overhead on the critical path of what we are measuring.  
+For example, all collected profiling data is serialized into a protobuf and sent from 
+C++ to python.  This can increase the `TensorFlow C++` portion of the profiled 
+execution time, making it seem larger than it is.
+
+So, the modifications made to TensorFlow are just for taking this time off the 
+critical path to avoid artificially inflating `TensorFlow C++` time.
+
+## `iml_profiler.profiler.Profiler`
+
+`Profiler` is the class the implements most of the trace-collection functionality of IML.  
+`Profiler` is a singleton object and gets created at the start of the program (during `iml.handle_args(...)`).
+
+The profiling annotations added by the developer are managed as a simple FIFO stack.
+```python
+with iml.prof.operation('Op1'):
+    # iml.prof._op_stack = ['Op1']
+    # Op1.start = time.time()
+    ...
+    with iml.prof.operation('Op2'):
+        # iml.prof._op_stack = ['Op1', 'Op2']
+        # Op2.start = time.time()
+        ...
+        # Op2.end = time.time()
+        # Record event: Event(name='Op2', start=Op2.start, end=Op2.end)
+    # iml.prof._op_stack = ['Op1']
+    ...
+    # Op1.end = time.time()
+    # Record event: Event(name='Op1', start=Op1.start, end=Op1.end)
+```
+
+During tracing, we don't bother to record the parent/child relationships between Op1/Op2.  
+Instead, during analysis we just use their overlap in time to recover which annotation is active:
+```txt
+RAW EVENTS:
+[         op1          ]
+     [    op2    ]
+     
+PROCESSED EVENTS:
+[op1][    op2    ][ op1]
+```
+This "operation-nest processing" is performed by `process_op_nest_single_thread` in `iml_profiler/parser/db.py`.
+
+## Overlap computation
+
+The heart of the IML profiling analysis is the computation of "overlap" between events, 
+where an event is a duration of time `[start_us, end_us]`.
+
+For example, overlap is important for determining the degree to which CPU and GPU hardware resources overlap.
+
+CPU/GPU overlap can occur within a single process by overlapping CUDA kernel launch with GPU-kernel execution.
+
+CPU/GPU overlap can occur across processes by having multiple processes issuing GPU-kernels (e.g. for minigo).
+
+To visualize these different sources of resource overlap, we provide a `SummaryView`:
+
+[[images/mock_summary_view.png|alt=SummaryView]]
+
+## Async trace-file dumping
+
+To avoid adding delays in training scripts, we asynchronously dump trace-files.
+
+## Collecting times
+
+This describes how we wrap the C++ APIs of TensorFlow and the Atari Pong simulator 
+in order to collect `Simulator` and `Python` times.
+
+### Collecting Python API time
+
+Rather than using python's `pyprof` profiler, instead we manually collect start/end times 
+when TensorFlow's C++ APIs are called.  Hence, any time not spent in TensorFlow's C++ 
+API is considered python time by default.
+
+This works fine, so long as you are careful to ensure any C/C++ APIs 
+(e.g. Atari Pong simulator, Mujoco C++ library) beyond TensorFlow are 
+also accounted for.
+
+### Collecting simulator time
+
+Atari Pong is run from inside a C++ emulator ([link](https://github.com/openai/atari-py)). 
+Similar to the approach with Python times, we simply collect start/end timestamps 
+from within python when we make calls the the simulator C API. 
+
+### Wrapping C/C++ library calls
+
+`tensorflow.pywrap_tensorflow` is the `libtensorflow.so` that has C API functions.  
+`CFuncWrapper` wraps each functions and records start/end timestamps. 
+We do the same thing for simulator times for Atari Pong by wrapping the the shared library exposed at 
+`atari_py.ale_python_interface.ale_lib`.
+
+```python
+# iml_profiler/profiler/clib_wrap.py
+
+DEFAULT_PREFIX = "CLIB__"
+
+def wrap_tensorflow(category=CATEGORY_TF_API):
+    success = wrap_util.wrap_lib(
+        CFuncWrapper,
+        import_libname='tensorflow',
+        wrap_libname='tensorflow.pywrap_tensorflow',
+        wrapper_args=(category, DEFAULT_PREFIX),
+        func_regex='^TF_')
+    assert success
+    
+    
+def wrap_atari(category=CATEGORY_ATARI):
+    try:
+        import atari_py
+    except ImportError:
+        return
+    func_regex = None
+    wrap_util.wrap_module(
+        CFuncWrapper, atari_py.ale_python_interface.ale_lib,
+        wrapper_args=(category, DEFAULT_PREFIX),
+        func_regex=func_regex)
+```
+
 # IML: "irregular" machine learning benchmarking toolkit
 
 "Toolkit" of benchmark tools for measuring "irregular" machine learning workloads e.g. Reinforcement Learning (RL).

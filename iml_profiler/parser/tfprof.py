@@ -2999,6 +2999,34 @@ def test_compute_overlap():
         assert got == expect
     test_08_overlapping_sorted_events()
 
+def test_split():
+
+    xs = list(range(1, 10+1))
+
+    actual = list(split_list(xs, 3))
+    expect = [
+        [1, 2, 3],
+        [4, 5, 6],
+        [7, 8, 9, 10],
+    ]
+    assert actual == expect
+
+    actual = list(split_list(xs, 11))
+    expect = [
+        [1],
+        [2],
+        [3],
+        [4],
+        [5],
+        [6],
+        [7],
+        [8],
+        [9],
+        [10],
+        [],
+    ]
+    assert actual == expect
+
 def merge_adjacent_events(events, inplace=False, debug=False):
     """
     Given a list of events sorted by event.start_time_usec,

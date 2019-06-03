@@ -27,8 +27,9 @@ class KernelTime:
     KernelTime(time_usec=..., start_usec=...)
     KernelTime(start_usec=..., end_usec=...)
     """
-    def __init__(self, time_usec=None, start_usec=None, end_usec=None, name=None, create_from=None):
+    def __init__(self, time_usec=None, start_usec=None, end_usec=None, name=None, process_name=None, create_from=None):
         self.name = name
+        self.process_name = process_name
         if time_usec is None:
             # KernelTime(start_usec=..., end_usec=...)
             self.start_usec = start_usec

@@ -200,6 +200,10 @@ class TfDockerTagValidator(cerberus.Validator):
             self._error(field, '{} should be of the form ARG (no =).'.format(value))
 
     def _validate_interpolate_arg(self, interpolate_arg, field, value):
+        """Test the oddity of a value.
+        The rule's arguments are validated against this schema:
+        {'type': 'boolean'}
+        """
         if interpolate_arg:
             validate_interpolate_arg(value, lambda message: self._error(field, message))
 

@@ -7,7 +7,7 @@ import numpy as np
 import seaborn as sns
 import matplotlib as mpl
 
-def test_heatmap():
+def disable_test_heatmap():
     # https://github.com/mGalarnyk/Python_Tutorials/blob/master/Request/Heat%20Maps%20using%20Matplotlib%20and%20Seaborn.ipynb
     helix = pd.read_csv('helix_parameters.csv')
 
@@ -36,7 +36,7 @@ def test_heatmap():
     plt.savefig('heatmap.png')
     # plt.show()
 
-def test_colorbar():
+def disable_test_colorbar():
     '''
     https://matplotlib.org/examples/api/colorbar_only.html
 
@@ -139,7 +139,7 @@ class HeatScale:
                  # "Values to anchor the colormap, otherwise they are inferred from the
                  # data and other keyword arguments."
                  vmin=None, vmax=None,
-                 width_pixels=None, 
+                 width_pixels=None,
                  height_pixels_per_sec=None,
                  step=None,
                  pixels_per_square=None,
@@ -147,22 +147,22 @@ class HeatScale:
                  cmap_name='Blues',
                  debug=False):
         """
-        
-        :param color_value: 
+
+        :param color_value:
             util
-        :param y_axis: 
+        :param y_axis:
             time_sec
-        :param png: 
-        :param width_pixels: 
-        :param height_pixels_per_sec: 
-        :param step: 
+        :param png:
+        :param width_pixels:
+        :param height_pixels_per_sec:
+        :param step:
             How much change in <y_axis> (e.g. time_sec) should be shown per "square"?
-        :param pixels_per_square: 
+        :param pixels_per_square:
             How many pixels should be shown in a single "sample" of device utilization?
-        :param cbar_width_px: 
-        :param cbar_height_px: 
-        :param cmap_name: 
-        :param debug: 
+        :param cbar_width_px:
+        :param cbar_height_px:
+        :param cmap_name:
+        :param debug:
         """
         self.color_value = color_value
         self.y_axis = y_axis
@@ -182,7 +182,7 @@ class HeatScale:
 
         if self.width_pixels is None:
             self.width_pixels = 480.
-            
+
         self.cbar_width_px = cbar_width_px
         self.cmap_name = cmap_name
         self.cbar_height_px = cbar_height_px
@@ -357,7 +357,7 @@ def exponential_moving_average(time_secs, utils, start_time_sec, step_sec, decay
 
     return sample_time_secs, sample_utils
 
-def test_heatscale(args):
+def disable_test_heatscale(args):
     # - Sample every 1 second over a period of 10 seconds
     # - A sample at every 1 + 0.1 second (i.e. offset by about 0.1 second)
 

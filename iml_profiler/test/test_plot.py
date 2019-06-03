@@ -14,7 +14,7 @@ from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, base
 from iml_profiler.parser.common import *
 from iml_profiler.parser.plot import TimeBreakdownPlot
 
-def test_grouped_stacked_bar_plot(parser, args):
+def disable_test_grouped_stacked_bar_plot(parser, args):
     # Stacked barplot:
     # https://matplotlib.org/gallery/lines_bars_and_markers/bar_stacked.html
     def stacked_barplot():
@@ -211,7 +211,7 @@ def test_grouped_stacked_bar_plot(parser, args):
     grouped_stacked_barplot()
 
 
-def test_legend_position():
+def disable_test_legend_position():
     # https://matplotlib.org/gallery/subplots_axes_and_figures/subplots_adjust.html#sphx-glr-gallery-subplots-axes-and-figures-subplots-adjust-py
 
     # Fixing random state for reproducibility
@@ -228,7 +228,7 @@ def test_legend_position():
     plt.colorbar(cax=cax)
     plt.show()
 
-def test_plot_position():
+def disable_test_plot_position():
     # https://matplotlib.org/gallery/lines_bars_and_markers/scatter_hist.html#sphx-glr-gallery-lines-bars-and-markers-scatter-hist-py
 
     from matplotlib.ticker import NullFormatter
@@ -297,7 +297,7 @@ def test_plot_position():
 
     plt.show()
 
-def test_subplot():
+def disable_test_subplot():
     # https://matplotlib.org/users/transforms_tutorial.html#axes-coordinates
     #
     # This example code.

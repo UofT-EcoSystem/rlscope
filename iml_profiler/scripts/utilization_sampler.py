@@ -317,13 +317,13 @@ def mk_machine_util():
     )
     return machine_util
 
-def test_sample_cpu_util():
+def disable_test_sample_cpu_util():
     tries = 10000
     for i in range(tries):
         cpu_util = sample_cpu_utilization()
         assert 0 <= cpu_util['util'] <= 1
 
-def test_sample_gpu_util():
+def disable_test_sample_gpu_util():
     tries = 100
     import tensorflow as tf
     import multiprocessing

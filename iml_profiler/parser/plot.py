@@ -2594,7 +2594,7 @@ class HeatScalePlot:
     def db_path(self):
         return sql_input_path(self.directory)
 
-def test_pixel_bar():
+def disable_test_pixel_bar():
     """
     Can we make the total height-pixels of a bar-plot have a 1-to-1 correspondence for pixel-per-sec?
 
@@ -2669,7 +2669,7 @@ def test_pixel_bar():
                 # bbox_inches='tight',
                 )
 
-def test_stacked_bar():
+def disable_test_stacked_bar():
     """
     PROBLEM: StackedBarPlotter code is coupled with how data is formatted...
     Really just want it to care about what data it has to plot.
@@ -2781,7 +2781,7 @@ def test_stacked_bar():
 
     plotter.plot()
 
-def test_just_legend():
+def disable_test_just_legend():
     """
     Only show the legend, not the plot.
     """

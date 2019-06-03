@@ -1719,30 +1719,3 @@ class pythunk:
         self.kwargs = kwargs
         return self
 
-def test_split():
-
-    xs = list(range(1, 10+1))
-
-    actual = list(split_list(xs, 3))
-    expect = [
-        [1, 2, 3],
-        [4, 5, 6],
-        [7, 8, 9, 10],
-    ]
-    assert actual == expect
-
-    actual = list(split_list(xs, 11))
-    expect = [
-        [1],
-        [2],
-        [3],
-        [4],
-        [5],
-        [6],
-        [7],
-        [8],
-        [9],
-        [10],
-        [],
-    ]
-    assert actual == expect

@@ -21,7 +21,7 @@ from iml_profiler.profiler.profilers import clib_wrap
 
 from iml_profiler import py_config
 
-def test_timestamp():
+def disable_test_timestamp():
     """
     Make sure pyprof and tfprof timestamps match.
     """
@@ -36,7 +36,7 @@ def test_timestamp():
 
     print("> diff_us = {diff_us} usec".format(diff_us=diff_us))
 
-class TestCallC:
+class CallCTest:
     def __init__(self, args, parser):
         self.args = args
         self.parser = parser
@@ -225,7 +225,7 @@ def main():
     profilers.handle_iml_args(args.directory, parser, args, no_bench_name=True)
 
     args.num_calls = num_calls
-    test_call_c = TestCallC(args, parser)
+    test_call_c = CallCTest(args, parser)
     test_call_c.run()
 
 if __name__ == '__main__':
