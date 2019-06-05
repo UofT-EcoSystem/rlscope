@@ -178,9 +178,6 @@ slice_sets:
           - IML_TEST_DIR=
           # The local path where we should output bazel objects (overrides $HOME/.cache/bazel).
           - BAZEL_BUILD_DIR=
-          run_args_optional:
-          # The root directory of a checkout of TensorFlow benchmarks repo (https://github.com/tensorflow/benchmarks)
-          - TENSORFLOW_BENCHMARKS_DIR=
 
     ubuntu-devel-iml-rocm:
         - add_to_name: "devel-iml-gpu-rocm"
@@ -210,8 +207,6 @@ slice_sets:
           - IML_DRILL_DIR=
           - IML_TEST_DIR=
           - BAZEL_BUILD_DIR=
-          run_args_optional:
-          - TENSORFLOW_BENCHMARKS_DIR=
 
     ubuntu-devel-iml-rocm-upstream:
     - add_to_name: "devel-iml-gpu-rocm-upstream"
@@ -245,8 +240,6 @@ slice_sets:
       - IML_DRILL_DIR=
       - IML_TEST_DIR=
       - BAZEL_BUILD_DIR=
-      run_args_optional:
-      - TENSORFLOW_BENCHMARKS_DIR=
 
     rocm:
     - add_to_name: "rocm"
@@ -273,8 +266,6 @@ slice_sets:
       - IML_DRILL_DIR=
       - IML_TEST_DIR=
       - BAZEL_BUILD_DIR=
-      run_args_optional:
-      - TENSORFLOW_BENCHMARKS_DIR=
 
     nightly:
         - add_to_name: "nightly"

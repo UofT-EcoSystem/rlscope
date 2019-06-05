@@ -354,7 +354,7 @@ def find_first_slice_value(slices, key):
     return None
 
 
-def assemble_tags(spec, cli_args, cli_run_args, cli_run_args_optional, enabled_releases, all_partials):
+def assemble_tags(spec, cli_args, cli_run_args, enabled_releases, all_partials):
     """Gather all the tags based on our spec.
 
     Args:
@@ -809,14 +809,11 @@ class Assembler:
 
         # Assemble tags and images used to build them
         run_arg_required = []
-        run_arg_optional = []
         for run_arg in args.run_arg:
             var, value = parse_build_arg(run_arg)
             if is_required_run_arg(var):
                 run_arg_required.append(run_arg)
-            else:
-                run_arg_optional.append(run_arg)
-        all_tags = assemble_tags(tag_spec, args.arg, run_arg_required, run_arg_optional, args.release, partials)
+        all_tags = assemble_tags(tag_spec, args.arg, run_arg_required, args.release, partials)
 
         return all_tags
 
