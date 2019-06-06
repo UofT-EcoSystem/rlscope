@@ -174,8 +174,6 @@ slice_sets:
           - IML_DIR=
           # The root directory of the iml_drill repo checkout.
           - IML_DRILL_DIR=
-          # The --iml-directory argument to training scripts, which is where trace-data files are stored.
-          - IML_TEST_DIR=
           # The local path where we should output bazel objects (overrides $HOME/.cache/bazel).
           - BAZEL_BUILD_DIR=
 
@@ -205,7 +203,6 @@ slice_sets:
           - TENSORFLOW_DIR=
           - IML_DIR=
           - IML_DRILL_DIR=
-          - IML_TEST_DIR=
           - BAZEL_BUILD_DIR=
 
     ubuntu-devel-iml-rocm-upstream:
@@ -238,7 +235,6 @@ slice_sets:
       - TENSORFLOW_DIR=
       - IML_DIR=
       - IML_DRILL_DIR=
-      - IML_TEST_DIR=
       - BAZEL_BUILD_DIR=
 
     rocm:
@@ -264,7 +260,6 @@ slice_sets:
       - TENSORFLOW_DIR=
       - IML_DIR=
       - IML_DRILL_DIR=
-      - IML_TEST_DIR=
       - BAZEL_BUILD_DIR=
 
     nightly:

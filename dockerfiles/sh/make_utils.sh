@@ -30,6 +30,8 @@ _bazel_build() {
         echo "> Add CUDA to bazel build config: --config=cuda"
         BAZEL_GPU_CONFIG=("${BAZEL_GPU_CONFIG[@]}" --config=cuda)
     fi
+    (
+    cd $TENSORFLOW_DIR
     _do bazel \
         --output_user_root=$BAZEL_BUILD_DIR \
         build \
@@ -42,6 +44,7 @@ _bazel_build() {
         --verbose_explanations \
         --verbose_failures \
         -s
+    )
     BAZEL_BUILD_TARGET=
     BAZEL_BUILD_FLAGS=()
     BAZEL_EXPLAIN_LOG=

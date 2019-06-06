@@ -687,11 +687,11 @@ def main():
         action='store_true',
         help='Run built images; use --deploy if you want to deploy the whole IML development environment')
 
-    parser.add_argument(
-        '--run_tests_path',
-        help=('Execute test scripts on generated Dockerfiles before pushing them. '
-              'Flag value must be a full path to the "tests" directory, which is usually'
-              ' $(realpath ./tests). A failed tests counts the same as a failed build.'))
+    # parser.add_argument(
+    #     '--run_tests_path',
+    #     help=('Execute test scripts on generated Dockerfiles before pushing them. '
+    #           'Flag value must be a full path to the "tests" directory, which is usually'
+    #           ' $(realpath ./tests). A failed tests counts the same as a failed build.'))
 
     parser.add_argument(
         '--stop_on_failure',
@@ -1022,8 +1022,6 @@ class Assembler:
         for test in tag_def['tests']:
             eprint('>> Testing {}...'.format(test))
 
-            os.makedirs(docker_run_env['IML_TEST_DIR'], exist_ok=True)
-
             runtime = get_docker_runtime(tag_def)
 
             test_kwargs = dict(
@@ -1214,8 +1212,8 @@ class Assembler:
                         if args.deploy:
                             self.docker_deploy(extra_argv)
 
-                        if args.run_tests_path:
-                            tag_failed = self.run_tests(image, repo_tag, tag, tag_def)
+                        # if args.run_tests_path:
+                        #     tag_failed = self.run_tests(image, repo_tag, tag, tag_def)
 
                     except docker.errors.BuildError as e:
                         eprint('>> {} failed to build with message: "{}"'.format(
@@ -1333,15 +1331,12 @@ def get_implicit_build_args():
 def get_implicit_run_args():
     run_args = {
         "IML_DIR": py_config.IML_DIR,
-        "IML_TEST_DIR": py_config.IML_TEST_DIR,
     }
     return run_args
 
 RUN_ARGS_REQUIRED = [
     'IML_DIR',
     'IML_DRILL_DIR',
-    # The --iml-directory argument to training scripts, which is where trace-data files are stored.
-    'IML_TEST_DIR',
     # The root directory of a 'patched' TensorFlow checkout
     'TENSORFLOW_DIR',
     # The local path where we should output bazel objects (overrides $HOME/.cache/bazel)
@@ -1622,7 +1617,7 @@ class StackYMLGenerator:
         # but it doesn't work with "docker stack deploy",
         # since it ignores these options.
         # But, these options DO work with "docker run".
-        textwrap.dedent("""\
+        textwrap.dedent("""
         bash:
             cap_add:
             # Allow attaching to processes using "gdb -p <PID>" inside the container.
@@ -1632,10 +1627,10 @@ class StackYMLGenerator:
             - seccomp = unconfined
         """).rstrip()
 
-def generate(self, assembler_cmd, env, volumes,
-                 iml_drill_port=DEFAULT_IML_DRILL_PORT,
-                 postgres_port=DEFAULT_POSTGRES_PORT,
-                 postgres_pgdata_dir=DEFAULT_POSTGRES_PGDATA_DIR):
+    def generate(self, assembler_cmd, env, volumes,
+            iml_drill_port=DEFAULT_IML_DRILL_PORT,
+            postgres_port=DEFAULT_POSTGRES_PORT,
+            postgres_pgdata_dir=DEFAULT_POSTGRES_PGDATA_DIR):
 
         # +1 for "service: ..."
         # +1 for "bash: ..."

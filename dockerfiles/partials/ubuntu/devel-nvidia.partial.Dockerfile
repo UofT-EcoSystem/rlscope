@@ -1,16 +1,25 @@
-FROM nvidia/cuda:10.0-base-ubuntu${UBUNTU_VERSION} as base
+ARG CUDA=10.0
+#FROM nvidia/cuda:10.0-base-ubuntu${UBUNTU_VERSION} as base
+FROM nvidia/cuda:${CUDA}-base-ubuntu${UBUNTU_VERSION} as base
+# ARCH and CUDA are specified again because the FROM directive resets ARGs
+# (but their default value is retained if set previously)
+ARG CUDA
+ARG CUDNN=7.4.1.5-1
+#ARG CUDNN=7.6.0.64-1
+ARG CUDNN_MAJOR_VERSION=7
 
+# Needed for string substitution
+SHELL ["/bin/bash", "-c"]
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential \
-        cuda-command-line-tools-10-0 \
-        cuda-cublas-dev-10-0 \
-        cuda-cudart-dev-10-0 \
-        cuda-cufft-dev-10-0 \
-        cuda-curand-dev-10-0 \
-        cuda-cusolver-dev-10-0 \
-        cuda-cusparse-dev-10-0 \
-        libcudnn7=7.4.1.5-1+cuda10.0 \
-        libcudnn7-dev=7.4.1.5-1+cuda10.0 \
+        cuda-command-line-tools-${CUDA/./-} \
+        cuda-cublas-dev-${CUDA/./-} \
+        cuda-cufft-dev-${CUDA/./-} \
+        cuda-curand-dev-${CUDA/./-} \
+        cuda-cusolver-dev-${CUDA/./-} \
+        cuda-cusparse-dev-${CUDA/./-} \
+        libcudnn7=${CUDNN}+cuda${CUDA} \
+        libcudnn7-dev=${CUDNN}+cuda${CUDA} \
         libcurl3-dev \
         libfreetype6-dev \
         libhdf5-serial-dev \
@@ -28,11 +37,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     find /usr/local/cuda-10.0/lib64/ -type f -name 'lib*_static.a' -not -name 'libcudart_static.a' -delete && \
     rm /usr/lib/x86_64-linux-gnu/libcudnn_static_v7.a
 
-RUN apt-get update && \
-        apt-get install nvinfer-runtime-trt-repo-ubuntu1604-5.0.2-ga-cuda10.0 \
+RUN { apt-get update && \
+        apt-get install nvinfer-runtime-trt-repo-ubuntu1604-5.0.2-ga-cuda${CUDA} \
         && apt-get update \
-        && apt-get install -y --no-install-recommends libnvinfer-dev=5.0.2-1+cuda10.0 \
-        && rm -rf /var/lib/apt/lists/*
+        && apt-get install -y --no-install-recommends \
+            libnvinfer5=5.0.2-1+cuda${CUDA} \
+            libnvinfer-dev=5.0.2-1+cuda${CUDA} \
+        && apt-get clean \
+        && rm -rf /var/lib/apt/lists/*; }
 
 # Configure the build for our CUDA configuration.
 #ENV CI_BUILD_PYTHON python
