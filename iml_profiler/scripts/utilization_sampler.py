@@ -1,3 +1,4 @@
+import logging
 import signal
 import time
 import subprocess
@@ -66,7 +67,7 @@ class UtilizationSampler:
             trace_id = self.trace_id
 
             if self.debug:
-                print("> {klass}: Dump CPU/GPU utilization after {sec} seconds (# samples = {n}, sampled every {every_ms} ms) @ {path}".format(
+                logging.info("> {klass}: Dump CPU/GPU utilization after {sec} seconds (# samples = {n}, sampled every {every_ms} ms) @ {path}".format(
                     klass=self.__class__.__name__,
                     sec=self.util_dump_frequency_sec,
                     every_ms=self.util_sample_frequency_sec*MILLISECONDS_IN_SECOND,
@@ -96,7 +97,7 @@ class UtilizationSampler:
 
     def run(self):
         if self.debug:
-            print("> {klass}: Start collecting CPU/GPU utilization samples".format(
+            logging.info("> {klass}: Start collecting CPU/GPU utilization samples".format(
                 klass=self.__class__.__name__,
             ))
         self.last_dump_sec = time.time()
@@ -108,7 +109,7 @@ class UtilizationSampler:
                 after = time.time()
                 one_ms = after - before
                 if self.debug:
-                    print("> {klass}: Slept for {ms} ms".format(
+                    logging.info("> {klass}: Slept for {ms} ms".format(
                         klass=self.__class__.__name__,
                         ms=one_ms*MILLISECONDS_IN_SECOND,
                     ))
@@ -117,7 +118,7 @@ class UtilizationSampler:
 
                 if SigTermWatcher.kill_now:
                     if self.debug:
-                        print("> {klass}: Got SIGINT; dumping remaining collected samples and exiting".format(
+                        logging.info("> {klass}: Got SIGINT; dumping remaining collected samples and exiting".format(
                             klass=self.__class__.__name__,
                         ))
                         # Dump any remaining samples we have not dumped yet.
@@ -128,7 +129,7 @@ class UtilizationSampler:
                 self._maybe_dump(cur_time_sec)
 
                 if self.debug:
-                    print("> {klass}: # Samples = {n} @ {sec}".format(
+                    logging.info("> {klass}: # Samples = {n} @ {sec}".format(
                         klass=self.__class__.__name__,
                         sec=cur_time_sec,
                         n=self.n_samples,
@@ -139,7 +140,7 @@ class UtilizationSampler:
                 cpu_util = sample_cpu_utilization()
                 gpu_utils = sample_gpu_utilization()
                 if self.debug:
-                    print("> {klass}: utils = \n{utils}".format(
+                    logging.info("> {klass}: utils = \n{utils}".format(
                         klass=self.__class__.__name__,
                         utils=textwrap.indent(
                             pprint.pformat({'cpu_util':cpu_util, 'gpu_utils':gpu_utils}),
@@ -190,7 +191,7 @@ def measure_samples_per_sec():
             func()
         end_sec = time.time()
         calls_per_sec = (end_sec - start_sec)/float(iterations)
-        print("> {name}: {calls_per_sec} calls/sec, measured over {iters} calls".format(
+        logging.info("> {name}: {calls_per_sec} calls/sec, measured over {iters} calls".format(
             name=name,
             calls_per_sec=calls_per_sec,
             iters=iterations))
@@ -222,7 +223,7 @@ def dump_machine_util(directory, trace_id, machine_util, debug):
         f.write(machine_util.SerializeToString())
 
     if debug:
-        print("> Dumped @ {path}".format(path=trace_path))
+        logging.info("> Dumped @ {path}".format(path=trace_path))
 
 def get_trace_path(directory, trace_id):
     path = _j(directory, 'machine_util{trace}.proto'.format(
@@ -380,7 +381,9 @@ def disable_test_sample_gpu_util():
         gpu_runner.join(timeout=2)
         gpu_runner.terminate()
 
+from iml_profiler.profiler import glbl
 def main():
+    glbl.setup_logging()
     parser = get_util_sampler_parser()
     # To make it easy to launch utilization sampler manually in certain code bases,
     # allow ignoring all the --iml-* arguments:
@@ -399,9 +402,9 @@ def main():
             pprint.pprint({'pinfo': pinfo})
             # cmdline = proc.cmdline()
             try:
-                print(pinfo['cmdline'])
+                logging.info(pinfo['cmdline'])
                 if re.search(r'iml-util-sampler', ' '.join(pinfo['cmdline'])) and pinfo['pid'] != os.getpid():
-                    print("> Kill iml-util-sampler: {proc}".format(
+                    logging.info("> Kill iml-util-sampler: {proc}".format(
                         proc=proc))
                     proc.kill()
             except psutil.NoSuchProcess:
@@ -409,7 +412,7 @@ def main():
         sys.exit(0)
 
     if args.iml_directory is None:
-        print("--iml-directory is required: directory where trace-files are saved")
+        logging.info("--iml-directory is required: directory where trace-files are saved")
         parser.print_help()
         sys.exit(1)
 

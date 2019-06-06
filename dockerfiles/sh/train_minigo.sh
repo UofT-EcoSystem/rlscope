@@ -33,5 +33,4 @@ export GOPARAMS=$MLPERF_DIR/reinforcement/tensorflow/minigo/params/multiple_work
 mkdir -p $BASE_DIR
 
 cd $MLPERF_DIR/reinforcement/tensorflow
-./run_and_time.sh $SEED --iml-keep-traces 2>&1 | \
-    tee --ignore-interrupts ${BASE_DIR}/benchmark.txt
+./run_and_time.sh $SEED --iml-keep-traces

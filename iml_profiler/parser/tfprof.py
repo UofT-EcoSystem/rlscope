@@ -1,3 +1,4 @@
+import logging
 import itertools
 from os.path import join as _j, dirname as _d
 
@@ -114,7 +115,7 @@ class ComputeOverlap:
         end_merge_t = time.time()
         sec_merge = end_merge_t - start_merge_t
         if self.debug:
-            print("> {klass}.compute_merge took {sec} seconds".format(
+            logging.info("> {klass}.compute_merge took {sec} seconds".format(
                 klass=self.__class__.__name__,
                 sec=end_merge_t))
         start_compute_t = end_merge_t
@@ -122,7 +123,7 @@ class ComputeOverlap:
         end_compute_t = time.time()
         sec_compute = end_compute_t - start_compute_t
         if self.debug:
-            print("> {klass}.compute_times took {sec} seconds".format(
+            logging.info("> {klass}.compute_times took {sec} seconds".format(
                 klass=self.__class__.__name__,
                 sec=sec_compute))
 
@@ -453,14 +454,14 @@ def compute_overlap_single_thread(
     pop_start(min_category, min_ktime)
 
     if debug:
-        print("> Start computing overlap; choose initial start (curtime)")
+        logging.info("> Start computing overlap; choose initial start (curtime)")
         pprint.pprint({
             'min_category': min_category,
             'min_ktime': min_ktime,
             'start_or_end': start_or_end.name,
             'curtime': curtime,
         })
-        print()
+        logging.info()
 
     total_events = CategoryTimesWrapper.total_left(by_start, by_end)
     bar = progress(desc="compute_overlap", show_progress=show_progress, total=total_events)
@@ -510,21 +511,21 @@ def compute_overlap_single_thread(
                 'start_or_end': start_or_end.name,
                 'update':"times[{s}] += {t}".format(s=categories_key, t=time_chunk),
             })
-            print()
+            logging.info()
 
         if start_or_end.type_code == CategoryTimesWrapper.START:
             if debug:
                 pprint.pprint({'cur_categories':cur_categories,
                                'add': min_category,
                                'curtime': next_time})
-                print()
+                logging.info()
             pop_start(min_category, min_ktime)
         else:
             if debug:
                 pprint.pprint({'cur_categories':cur_categories,
                                'remove': min_category,
                                'curtime': next_time})
-                print()
+                logging.info()
             # NOTE: I think this bug will occur if you have two events from the same category
             # that overlap each other (EITHER partially or fully).
             # Perhaps this is happening inadvertantly when I form the 'CPU'
@@ -590,7 +591,7 @@ class TotalTimeParser(ProfilerParserCommonMixin):
         self.config_path = src_files.get('config_json', bench_name, or_none=True)
         if self.config_path is not None:
             self.config = load_json(self.config_path)
-            print("> Found optional config_json @ {f}".format(f=self.config_path))
+            logging.info("> Found optional config_json @ {f}".format(f=self.config_path))
         else:
             self.config = {
             }
@@ -833,7 +834,7 @@ class TraceEventsParser:
                     # Just grab the very first operation from the very first process.
                     0, 1):
 
-                print("> Generate traceEvents for step={step}".format(step=step))
+                logging.info("> Generate traceEvents for step={step}".format(step=step))
 
                 trace_events_dumper = TraceEventsDumper(
                     category_times,
@@ -1345,12 +1346,12 @@ class OverlapComputer:
         # assert len(categories) > 0
         end_parse_timeline_t = time.time()
         parse_timeline_sec = end_parse_timeline_t - start_parse_timeline_t
-        print("> parse_timeline took {sec} seconds".format(sec=parse_timeline_sec))
+        logging.info("> parse_timeline took {sec} seconds".format(sec=parse_timeline_sec))
 
         # # This can take a while since the timeline can be large...
         # if self.debug:
         #     start_t = time.time()
-        #     print("> DEBUG: write process timeline traceEvents @ {path}".format(
+        #     logging.info("> DEBUG: write process timeline traceEvents @ {path}".format(
         #         path=self._debug_process_timeline_json_path()))
         #     new_category_times = dict((_as_category_key(operation_types, proc_types, proc_key=proc_key), value)
         #                               for proc_key, value in category_times.items())
@@ -1359,7 +1360,7 @@ class OverlapComputer:
         #                         print_log=False,
         #                         category_as_str=traceEvents_key_str)
         #     end_t = time.time()
-        #     print("  Took {sec} seconds".format(sec=end_t - start_t))
+        #     logging.info("  Took {sec} seconds".format(sec=end_t - start_t))
 
         # We only want to keep CATEGORY_OPERATION times.
         # However, the operation-types have replaced CATEGORY_OPERATION.
@@ -1379,7 +1380,7 @@ class OverlapComputer:
                 if len(category_key.ops) > 1:
                     # Operations can only overlap cross-process, not within a single-process
                     if not( len(category_key.procs) > 1 ):
-                        print("> Detected unexpected CategoryKey when computing overlap:")
+                        logging.info("> Detected unexpected CategoryKey when computing overlap:")
                         pprint.pprint({
                             'category_key':category_key,
                             'md':md})
@@ -1494,7 +1495,7 @@ class OverlapComputer:
     #         'total_trace_time_sec':total_trace_time_sec,
     #     }
     #     _add_cpu_gpu_stats(js_stats, self.plotter)
-    #     print("> Save plot stats to {path}".format(path=self._stats()))
+    #     logging.info("> Save plot stats to {path}".format(path=self._stats()))
     #     do_dump_json(js_stats, self._stats())
     #     return js_stats
 
@@ -1537,7 +1538,7 @@ class OverlapComputer:
                     step=step_suffix(step),
                     bench=bench_suffix(bench_name),
                 ))
-                print("> DEBUG: dump trace events AFTER process_op_nest @ {path}".format(path=json_path))
+                logging.info("> DEBUG: dump trace events AFTER process_op_nest @ {path}".format(path=json_path))
                 dump_category_times(category_times, json_path, print_log=False)
 
             for ktime in category_times.get(CATEGORY_OPERATION, []):
@@ -1556,7 +1557,7 @@ class OverlapComputer:
             end_overlap_t = time.time()
             sec_overlap = end_overlap_t - start_overlap_t
             if OverlapComputer.DEBUG_COMPUTE_PER_OPERATION_OVERLAP:
-                print("> compute_overlap(process={proc}, step={step}) took {sec} seconds".format(
+                logging.info("> compute_overlap(process={proc}, step={step}) took {sec} seconds".format(
                     proc=process_name,
                     step=step,
                     sec=sec_overlap))
@@ -1622,7 +1623,7 @@ class OverlapComputer:
 
     def _dump_per_operation_json(self, bench_name, json_output):
         path = self._per_operation_json_path(bench_name)
-        print("> DEBUG: dump per-operation compute overlap @ {path}".format(path=path))
+        logging.info("> DEBUG: dump per-operation compute overlap @ {path}".format(path=path))
         do_dump_json(json_output, path)
 
     def _per_operation_json_path(self, bench_name):
@@ -1708,12 +1709,12 @@ class OverlapTypeInterface:
             path = self._overlap_json(directory, process_name, phase_name)
         if venn_js_path is None:
             venn_js_path = self._overlap_venn_js_json(directory, process_name, phase_name)
-        print("> Dump data for {overlap_type} @ {path}".format(path=path, overlap_type=self.overlap_type))
+        logging.info("> Dump data for {overlap_type} @ {path}".format(path=path, overlap_type=self.overlap_type))
         dumper = OverlapJSONDumper(operation_overlap, metadata)
         dumper.dump(path)
 
         if venn_js_path is not None:
-            print("> Dump data for {overlap_type} venn.js plot @ {path}".format(path=venn_js_path, overlap_type=self.overlap_type))
+            logging.info("> Dump data for {overlap_type} venn.js plot @ {path}".format(path=venn_js_path, overlap_type=self.overlap_type))
             # converter = OverlapJSONToVennConverter(js=js)
             converter = OverlapJSONToVennConverter(path=path)
             venn_js = converter.dump(venn_js_path)
@@ -1726,7 +1727,7 @@ class OverlapTypeInterface:
             path = self._overlap_json(directory, process_name, phase_name)
         # if venn_js_path is None:
         #     venn_js_path = self._overlap_venn_js_json(directory, process_name, phase_name)
-        print("> Dump data for {overlap_type} @ {path}".format(path=path, overlap_type=self.overlap_type))
+        logging.info("> Dump data for {overlap_type} @ {path}".format(path=path, overlap_type=self.overlap_type))
         js = js_friendly({
             'overlap': operation_overlap,
             'metadata': metadata,
@@ -1870,7 +1871,7 @@ class OverlapTypeInterface:
                     break
             if skip:
                 # if self.debug:
-                #     print("> DELETE OVERLAP:")
+                #     logging.info("> DELETE OVERLAP:")
                 #     pprint.pprint({
                 #         'overlap_key':overlap_key,
                 #         'proc':skip_proc,
@@ -3076,7 +3077,7 @@ def merge_adjacent_events(events, inplace=False, debug=False):
         if new_events[-1].start_time_usec <= event.start_time_usec <= event.end_time_usec <= new_events[-1].end_time_usec:
             # case 1: subsume
             if debug:
-                print("Subsume: {e1} subsumes {e2}".format(e1=new_events[-1], e2=event))
+                logging.info("Subsume: {e1} subsumes {e2}".format(e1=new_events[-1], e2=event))
             new_events[-1].set_start_end(
                 start_usec=new_events[-1].start_usec,
                 end_usec=max(new_events[-1].end_usec, event.end_usec),
@@ -3084,7 +3085,7 @@ def merge_adjacent_events(events, inplace=False, debug=False):
         elif new_events[-1].start_time_usec <= event.start_time_usec <= new_events[-1].end_time_usec <= event.end_time_usec:
             # case 2: partial overlap
             if debug:
-                print("Partial: {e1} partial {e2}".format(e1=new_events[-1], e2=event))
+                logging.info("Partial: {e1} partial {e2}".format(e1=new_events[-1], e2=event))
             new_events[-1].set_start_end(
                 start_usec=new_events[-1].start_usec,
                 end_usec=max(new_events[-1].end_usec, event.end_usec),
@@ -3092,7 +3093,7 @@ def merge_adjacent_events(events, inplace=False, debug=False):
         else:
             # case 3: no overlap
             if debug:
-                print("No-overlap: {e1} no-overlap {e2}".format(e1=new_events[-1], e2=event))
+                logging.info("No-overlap: {e1} no-overlap {e2}".format(e1=new_events[-1], e2=event))
             new_events.append(get_event(event))
 
         if debug:

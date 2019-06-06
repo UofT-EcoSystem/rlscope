@@ -1,3 +1,4 @@
+import logging
 import contextlib
 
 from iml_profiler.parser.common import *
@@ -76,7 +77,7 @@ class PyprofTrace:
         self.step = step
         if step not in self.pyprof.steps:
             if tensorflow_profile_context.DEBUG:
-                print("> ADD PYPROF STEP: {s}".format(s=self.step))
+                logging.info("> ADD PYPROF STEP: {s}".format(s=self.step))
 
             self.pyprof.steps.extend([step])
 
@@ -90,7 +91,7 @@ class PyprofTrace:
         self.pyprof.phase = phase
 
         with open(path, 'wb') as f:
-            print("> dump pyprof.steps:")
+            logging.info("> dump pyprof.steps:")
             pprint.pprint({
                 'len(pyprof.steps)':len(self.pyprof.steps),
                 'pyprof.process_name':self.pyprof.process_name,
@@ -201,7 +202,7 @@ class CFuncWrapper:
         #
 
         name = self.wrapper_name(func.__name__)
-        print("> call.name = {name}".format(name=name))
+        logging.info("> call.name = {name}".format(name=name))
         # c = call.func_code
         # Python3
         c = call.__code__

@@ -1,3 +1,4 @@
+import logging
 import traceback
 import textwrap
 
@@ -18,7 +19,7 @@ class FuzzFuncWrapper:
 
     def __call__(self, *args, **kwargs):
         stacktrace = get_stacktrace()
-        print(textwrap.dedent("""
+        logging.info(textwrap.dedent("""
         > IML: Call to session.run(...):
         {stack}
         """.format(stack=textwrap.indent(

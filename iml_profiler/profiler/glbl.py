@@ -2,6 +2,9 @@
 Manage a singleton instance to a Profiler object.
 """
 
+import logging
+import sys
+
 from iml_profiler.profiler import profilers
 import tensorflow as tf
 
@@ -61,6 +64,8 @@ def handle_iml_args(parser, args, directory=None):
     else:
         iml_directory = directory
 
+    setup_logging()
+
     if iml_directory is None:
         raise RuntimeError("IML: you must provide a location to store trace files: --iml-directory <dir>")
 
@@ -71,3 +76,7 @@ def handle_iml_args(parser, args, directory=None):
         directory=iml_directory,
         args=args,
     )
+
+def setup_logging():
+    format = 'PID={process}/{processName} @ {filename}:{lineno} :: {asctime} {levelname}: {message}'
+    logging.basicConfig(format=format, style='{', level=logging.DEBUG)

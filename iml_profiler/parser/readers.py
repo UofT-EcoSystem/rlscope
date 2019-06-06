@@ -1,3 +1,4 @@
+import logging
 from tensorflow.core.profiler.tfprof_log_pb2 import ProfileProto
 from iml_profiler.protobuf.pyprof_pb2 import Pyprof
 
@@ -72,13 +73,13 @@ class TFProfCategoryTimesReader:
 
         # self.kernel_times()
         # self.api_times()
-        # print("HELLO PROTO 1")
-        # print(self.proto)
+        # logging.info("HELLO PROTO 1")
+        # logging.info(self.proto)
         # PSEUDOCODE:
         # for step in steps:
         #
         # import ipdb; ipdb.set_trace()
-        # print("HELLO PROTO 2")
+        # logging.info("HELLO PROTO 2")
 
         # for step in self.proto.steps:
         # Categories:
@@ -224,7 +225,7 @@ class PyprofCategoryTimesReader:
         category_times = dict()
 
         if step not in self.proto.steps:
-            print("> WARNING: didn't find step in pyprof @ {path}".format(
+            logging.info("> WARNING: didn't find step in pyprof @ {path}".format(
                 path=self.profile_path))
             return category_times
 

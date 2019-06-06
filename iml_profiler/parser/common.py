@@ -1,3 +1,4 @@
+import logging
 import re
 import traceback
 import decimal
@@ -362,7 +363,7 @@ class ProfilerParserCommonMixin:
         matching_paths = dict()
         j = 0
         if debug:
-            print("> allow_multiple={v}".format(v=allow_multiple))
+            logging.info("> allow_multiple={v}".format(v=allow_multiple))
         while j < len(regexes):
             regex_name, regex = regexes_left[j]
 
@@ -376,14 +377,14 @@ class ProfilerParserCommonMixin:
                     and m.groupdict().get('bench_name', None) is not None \
                     and re.search(ignore_bench_re, m.group('bench_name')):
                     if debug:
-                        print("> regex={regex}, ignore_bench_re={ignore_regex} matches _b(path)={path}".format(
+                        logging.info("> regex={regex}, ignore_bench_re={ignore_regex} matches _b(path)={path}".format(
                             regex=regex,
                             ignore_regex=ignore_bench_re,
                             path=_b(path)))
                     del paths_left[i]
                 elif m:
                     if debug:
-                        print("> regex={regex} matches _b(path)={path}".format(regex=regex, path=_b(path)))
+                        logging.info("> regex={regex} matches _b(path)={path}".format(regex=regex, path=_b(path)))
                     # PSEUDOCODE:
                     # if uses bench_name:
                     #     src_files.get('profile_path', bench_name)[bench_name]
@@ -411,7 +412,7 @@ class ProfilerParserCommonMixin:
                         break
                 else:
                     if debug:
-                        print("> regex={regex} DOES NOT MATCH _b(path)={path}".format(regex=regex, path=_b(path)))
+                        logging.info("> regex={regex} DOES NOT MATCH _b(path)={path}".format(regex=regex, path=_b(path)))
                     i += 1
 
             if len(paths_left) == 0:
@@ -629,7 +630,7 @@ class ProfilerParser(ProfilerParserCommonMixin):
             for line in it:
 
                 if self.args.debug:
-                    print("> {klass}, line :: {line}".format(
+                    logging.info("> {klass}, line :: {line}".format(
                         klass=self.__class__.__name__,
                         line=line))
 
@@ -752,7 +753,7 @@ class SrcFilesMixin:
 
     def check_has_all_required_paths(self, ParserKlass):
         if not self.has_all_required_paths:
-            print(
+            logging.info(
                 textwrap.dedent("""
 ERROR: Didn't find all required source files in directory={dir} for parser={parser}
   src_files =
@@ -1590,7 +1591,7 @@ def progress(xs=None, desc=None, total=None, show_progress=False):
         elif hasattr(xs, 'rowcount') and getattr(xs, 'rowcount') != -1:
             total = xs.rowcount
         else:
-            print("> WARNING: not sure what total to use for progress(desc={desc})".format(
+            logging.info("> WARNING: not sure what total to use for progress(desc={desc})".format(
                 desc=desc))
     return tqdm_progress(xs, desc=desc, total=total)
 

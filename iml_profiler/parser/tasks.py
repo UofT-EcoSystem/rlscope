@@ -4,6 +4,7 @@ Define IML DAG execution graph using "luigi" DAG execution framework.
 For luigi documetation, see:
 https://luigi.readthedocs.io/en/stable/index.html
 """
+import logging
 import luigi
 
 import textwrap
@@ -75,7 +76,7 @@ class IMLTask(luigi.Task):
 
     def mark_done(self, start_t, end_t):
         if self.skip_output:
-            print("> Skipping output={path} for task {name}".format(
+            logging.info("> Skipping output={path} for task {name}".format(
                 path=self._done_file,
                 name=self._task_name))
             return
@@ -192,7 +193,9 @@ def print_cmd(cmd, file=sys.stdout):
         pwd=os.getcwd(),
     ), file=file)
 
+from iml_profiler.profiler import glbl
 def main(argv=None):
+    glbl.setup_logging()
     if argv is None:
         argv = list(sys.argv[1:])
     luigi.run(cmdline_args=argv)

@@ -1,3 +1,4 @@
+import logging
 import argparse
 import re
 import sys
@@ -513,8 +514,8 @@ class PlotSummary(ProfilerParserCommonMixin):
             plot_df['device_order'] = self.device_order_key(device)
             dfs.append(plot_df)
         total_rows = pd.concat(dfs)
-        print("> Added Total column for field={field}:".format(field=field))
-        print(total_rows)
+        logging.info("> Added Total column for field={field}:".format(field=field))
+        logging.info(total_rows)
         df = pd.concat([total_rows, df])
         df = self._sort_df(df)
 
@@ -539,7 +540,7 @@ class PlotSummary(ProfilerParserCommonMixin):
 
         sns.set(style="whitegrid")
 
-        print("> DataFrame:")
+        logging.info("> DataFrame:")
 
         mean_df = DataFrame.get_mean_std(df, self.value_field)
         plot_data_path = self._plot_data_path(field)
@@ -661,7 +662,7 @@ class CategoryOverlapPlot:
             # > compute_per_operation_overlap(bench_name=tree_search) took 400.79692363739014 seconds
             # > compute_per_operation_overlap(bench_name=eval_game) took 778.2323503494263 seconds
             # This thing takes a LONG time.
-            print("> compute_per_operation_overlap(bench_name={op}) took {sec} seconds".format(
+            logging.info("> compute_per_operation_overlap(bench_name={op}) took {sec} seconds".format(
                 op=bench_name,
                 sec=end_t - start_t,
             ))
@@ -814,7 +815,7 @@ class StackedBarPlotter:
         # Need enough distinct hash-styles to fit categories.
         # assert len(xs) <= len(HATCH_STYLES)
         if len(xs) > len(HATCH_STYLES):
-            print("> WARNING: We only have {h} HATCH_STYLES, but there are {x} category-overlap labels".format(
+            logging.info("> WARNING: We only have {h} HATCH_STYLES, but there are {x} category-overlap labels".format(
                 h=len(HATCH_STYLES),
                 x=len(xs),
             ))
@@ -937,7 +938,7 @@ class StackedBarPlotter:
 
             with open(self.get_plot_data_pt(bench_name), 'w') as f:
                 DataFrame.print_df(bench_df, file=f)
-            print("> DataFrame:")
+            logging.info("> DataFrame:")
             print(bench_df)
 
             self._add_lines(bench_name)
@@ -1037,12 +1038,12 @@ class StackedBarPlotter:
         categories = [k for k in json.get_categories() if k in self.category_order]
         # categories = self._get_categories(json_data)
         if debug:
-            print("> bench_name={op}, json_data = ".format(op=bench_name))
-            print(textwrap.indent(pprint.pformat(json_data), prefix="  "))
-            print("  > categories = {c}".format(c=categories))
+            logging.info("> bench_name={op}, json_data = ".format(op=bench_name))
+            logging.info(textwrap.indent(pprint.pformat(json_data), prefix="  "))
+            logging.info("  > categories = {c}".format(c=categories))
         for category in categories:
             if debug:
-                print("> add category={c}: {times}".format(
+                logging.info("> add category={c}: {times}".format(
                     c=category,
                     times=json.get_times_sec(category)))
                     # times=json_data[category]))
@@ -1196,13 +1197,13 @@ class StackedBarPlotter:
         self.orig_df = pd.DataFrame(self.df_data)
 
         self.df = DataFrame.get_mean_std(self.orig_df, self.value_field)
-        print("> DATAFRAME BEFORE SORT:")
-        print(self.df)
+        logging.info("> DATAFRAME BEFORE SORT:")
+        logging.info(self.df)
         self.df = self.df.sort_values(by=['impl_name_order', 'device_order', 'bench_name_order', 'category_order'])
         # self.df = self.df.sort_values(by=['impl_name_order', 'device_order', 'bench_name_order', 'category_order'], ascending=False)
         # self.df = self.df.sort_values(by=['bench_name_order'])
-        print("> DATAFRAME AFTER SORT:")
-        print(self.df)
+        logging.info("> DATAFRAME AFTER SORT:")
+        logging.info(self.df)
         # groupby_cols = DataFrame.get_groupby_cols(self.orig_df, value_field)
         self.df['std_div_mean_percent'] = 100 * self.df['std']/self.df['mean']
 
@@ -1348,7 +1349,7 @@ class TFProfReader:
             if category == cat_str:
                 # Ignore the first time since it includes libcupti.so load time.
                 return times_sec[1:]
-        print("> json_data = ")
+        logging.info("> json_data = ")
         pprint.pprint(self.json_data, indent=2)
         raise RuntimeError("Couldn't find category=\"{cat}\"".format(cat=category))
 
@@ -1401,7 +1402,7 @@ class ProcessTimelineReader:
         #     if category == cat_str:
         #         # Ignore the first time since it includes libcupti.so load time.
         #         return times_sec[1:]
-        print("> json_data = ")
+        logging.info("> json_data = ")
         pprint.pprint(self.json_data, indent=2)
         raise RuntimeError("Couldn't find category=\"{cat}\"".format(cat=category))
 
@@ -1657,7 +1658,7 @@ class LegendMaker:
     #             legend.set_bbox_to_anchor((0, 1.04))
     #         art = plt.gca().add_artist(legend)
     #         # art = ax.add_artist(legend)
-    #         # print('HI')
+    #         # logging.info('HI')
     #         # import ipdb; ipdb.set_trace()
     #     return legends
 
@@ -1779,7 +1780,7 @@ class CombinedProfileParser(ProfilerParserCommonMixin):
         combined = make_json_serializable(combined_nd)
         # combined['CppAndGPUTimeSec']
         do_dump_json(combined, json_path)
-        print("> Created combined profile breakdown @ {path}".format(path=json_path))
+        logging.info("> Created combined profile breakdown @ {path}".format(path=json_path))
 
     def dump(self, bench_name):
         pass
@@ -2034,7 +2035,7 @@ class ResourceOverlapPlotData:
         }
         update_dict(js_stats, proc_stats)
         _add_cpu_gpu_stats(js_stats, self.plotter)
-        print("> Save plot stats to {path}".format(path=self._stats()))
+        logging.info("> Save plot stats to {path}".format(path=self._stats()))
         do_dump_json(js_stats, self._stats(), cls=DecimalEncoder)
         return js_stats
 
@@ -2335,7 +2336,7 @@ class UtilizationPlot:
 
     def _dump_process_timeline_json(self, operation_overlap):
         path = self._process_timeline_json_path()
-        print("> DEBUG: dump process timeline compute overlap @ {path}".format(path=path))
+        logging.info("> DEBUG: dump process timeline compute overlap @ {path}".format(path=path))
 
         # PROBLEM: overlap JSON file is usually for a single operation.
         # However, now we have multiple operations for a given overlap calculation.
@@ -2392,7 +2393,7 @@ class UtilizationPlot:
         }
         update_dict(js_stats, proc_stats)
         _add_cpu_gpu_stats(js_stats, self.plotter)
-        print("> Save plot stats to {path}".format(path=self._stats()))
+        logging.info("> Save plot stats to {path}".format(path=self._stats()))
         do_dump_json(js_stats, self._stats(), cls=DecimalEncoder)
         return js_stats
 
@@ -2547,8 +2548,8 @@ class HeatScalePlot:
                     'util':samples['util'],
                     'start_time_sec':raw_centered_time_secs,
                 }).astype(float)
-                print("> DEBUG: Unadjusted raw utilization measurements for device={dev}".format(dev=device))
-                print(raw_df)
+                logging.info("> DEBUG: Unadjusted raw utilization measurements for device={dev}".format(dev=device))
+                logging.info(raw_df)
             norm_time_secs, norm_utils = exponential_moving_average(
                 samples['start_time_sec'], samples['util'],
                 start_time_sec, self.step_sec, self.decay)
@@ -2588,7 +2589,7 @@ class HeatScalePlot:
         print("> HeatScalePlot @ plot data @ {path}".format(path=path))
         with open(path, 'w') as f:
             DataFrame.print_df(plot_df, file=f)
-        print(plot_df)
+        logging.info(plot_df)
 
     @property
     def db_path(self):
@@ -2794,7 +2795,9 @@ def disable_test_just_legend():
         'test_just_legend.png',
         bbox_inches="tight")
 
+from iml_profiler.profiler import glbl
 def main():
+    glbl.setup_logging()
     p = argparse.ArgumentParser()
     p.add_argument('--test-stacked-bar', action='store_true')
     p.add_argument('--test-pixel-bar', action='store_true')

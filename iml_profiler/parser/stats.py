@@ -1,4 +1,5 @@
 # pip install progressbar2
+import logging
 import progressbar
 
 from iml_profiler.parser.common import *
@@ -328,7 +329,7 @@ class Stat:
         num_calls = iterations * repetitions
         :return:
         """
-        # print("> Split func={name}".format(
+        # logging.info("> Split func={name}".format(
         #     name=self.name))
         assert not self._has_split
 
@@ -347,7 +348,7 @@ class Stat:
             # of times we expect it to have been called (num_calls = iterations*repetitions);
             # instead, just make num_calls = 1.
             if self.debug:
-                print("[n_calls={n_calls}, num_calls={num_calls}] Use num_calls=1 for function={name}".format(
+                logging.info("[n_calls={n_calls}, num_calls={num_calls}] Use num_calls=1 for function={name}".format(
                     n_calls=n_calls,
                     num_calls=num_calls,
                     name=self.name))
@@ -364,7 +365,7 @@ class Stat:
             self.num_diff_calls = int(n_calls / num_calls)
 
             if self.debug:
-                print("[n_calls={n_calls}, num_calls={num_calls}] Use num_calls={num_calls} for function={name}".format(
+                logging.info("[n_calls={n_calls}, num_calls={num_calls}] Use num_calls={num_calls} for function={name}".format(
                     n_calls=n_calls,
                     num_calls=num_calls,
                     name=self.name))
@@ -642,7 +643,7 @@ class Stats:
                     # This warning goes off a LOT for CUDA API stuff.
                     #
                     # if not self.has_overlap:
-                    #     print(textwrap.dedent("""
+                    #     logging.info(textwrap.dedent("""
                     #     WARNING: ktime_a={a} overlaps ktime_b={b}
                     #     > {a}
                     #       start = {a_start}
@@ -668,7 +669,7 @@ class Stats:
             total_times[call_num] = total_time
 
         if self.debug:
-            print(textwrap.dedent("""
+            logging.info(textwrap.dedent("""
             > {name} stats:
               num_calls = {num_calls}
               api_calls.not_divisible = {not_divisible}

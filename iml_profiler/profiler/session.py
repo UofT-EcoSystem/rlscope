@@ -5,6 +5,7 @@ These are the sessions we need to check for trace-data during the DUMP phase of 
 
 See SessionWrapper for details.
 """
+import logging
 import tensorflow as tf
 import threading
 import pprint
@@ -170,12 +171,12 @@ def _get_next_session_id():
     global _NEXT_SESSION_ID
     session_id = _NEXT_SESSION_ID
     if DEBUG:
-        print("> DEBUG: session.py: alloc session_id = {id}".format(id=session_id))
+        logging.info("> DEBUG: session.py: alloc session_id = {id}".format(id=session_id))
     _NEXT_SESSION_ID += 1
     return session_id
 
 def _wrapped_BaseSession_init(self, *args, **kwargs):
-    # print("> Wrapped: {name}".format(
+    # logging.info("> Wrapped: {name}".format(
     #     name=_wrapped_BaseSession_init.__name__,
     # ))
     self.session_id = _get_next_session_id()
@@ -197,7 +198,7 @@ def _wrapped_BaseSession_run(self, *args, **kwargs):
     # A: If we wrap the original session.run(...), then the dump-callback will be called in the middle of pctx code.
     #    This could be bad, if we decide to modify pctx state (I don't think we do...)
     #
-    # print("> Wrapped: {name}".format(
+    # logging.info("> Wrapped: {name}".format(
     #     name=_wrapped_BaseSession_run.__name__,
     # ))
     _before_run_hooks(session=self)
@@ -210,7 +211,7 @@ def _wrapped_BaseSession_close(self):
     A session is inactive if:
     1. The Session has been closed.
     """
-    # print("> Wrapped: {name}".format(
+    # logging.info("> Wrapped: {name}".format(
     #     name=_wrapped_BaseSession_close.__name__,
     # ))
     _before_inactive_hooks(session=self)

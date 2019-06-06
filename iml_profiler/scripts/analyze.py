@@ -1,6 +1,7 @@
 """
 iml-analyze script for processing trace-data produced from an ML script.
 """
+import logging
 import subprocess
 import sys
 import os
@@ -12,8 +13,11 @@ import pprint
 import textwrap
 import multiprocessing
 from iml_profiler.parser import tasks
+from iml_profiler.profiler import glbl
 
+from iml_profiler.profiler import glbl
 def main():
+    glbl.setup_logging()
     parser = argparse.ArgumentParser(
         textwrap.dedent("""\
         Process trace-files collected from running an ML script with the IML profiler.
@@ -90,7 +94,7 @@ def print_cmd(cmd, file=sys.stdout):
 
 def register_pdb_breakpoint():
     def pdb_breakpoint(task, ex):
-        print("> Detected unhandled exception {ex} in {task}; entering pdb".format(
+        logging.info("> Detected unhandled exception {ex} in {task}; entering pdb".format(
             ex=ex.__class__.__name__,
             task=task.__class__.__name__,
         ))

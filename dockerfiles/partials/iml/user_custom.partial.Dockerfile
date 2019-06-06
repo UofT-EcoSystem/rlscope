@@ -8,5 +8,8 @@ RUN pip install ipdb
 USER root
 RUN apt-get install -y --no-install-recommends \
     htop \
-    tree
+    tree \
+    python3-dbg \
+    gdb \
+    strace
 USER ${USER_NAME}

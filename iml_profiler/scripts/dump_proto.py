@@ -1,5 +1,7 @@
+import logging
 import argparse
 import textwrap
+import sys
 
 from tensorflow.core.profiler.tfprof_log_pb2 import ProfileProto
 from iml_profiler.protobuf.pyprof_pb2 import Pyprof
@@ -7,7 +9,7 @@ from iml_profiler.protobuf.pyprof_pb2 import Pyprof
 from iml_profiler.parser.common import *
 
 def dump_proto_txt(path, ProtoKlass, stream):
-    print("> DUMP: {name} @ {path}".format(
+    logging.info("> DUMP: {name} @ {path}".format(
         name=ProtoKlass.__name__,
         path=path))
     with open(path, 'rb') as f:
@@ -15,7 +17,9 @@ def dump_proto_txt(path, ProtoKlass, stream):
         proto.ParseFromString(f.read())
     print(proto, file=stream)
 
+from iml_profiler.profiler import glbl
 def main():
+    glbl.setup_logging()
     parser = argparse.ArgumentParser("Dump protobuf files to txt")
     parser.add_argument("--proto",
                         required=True,
@@ -34,7 +38,7 @@ def main():
         call_times_data = read_pyprof_call_times_file(args.proto)
         pprint.pprint(call_times_data)
     else:
-        print("ERROR: Not sure what protobuf class to use for files like \"{path}\"".format(
+        logging.info("ERROR: Not sure what protobuf class to use for files like \"{path}\"".format(
             path=args.proto))
         sys.exit(1)
 

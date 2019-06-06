@@ -1,3 +1,4 @@
+import logging
 import re
 import numpy as np
 import pprint
@@ -244,8 +245,8 @@ def _sel(selector, idx, sel_field, debug=False):
     """
 
     if debug:
-        print("> _sel:")
-        print(textwrap.indent(pprint.pformat(locals()), prefix='  '))
+        logging.info("> _sel:")
+        logging.info(textwrap.indent(pprint.pformat(locals()), prefix='  '))
 
     if sel_field in selector and callable(selector[sel_field]):
         for value, subtree in idx.items():
@@ -399,7 +400,7 @@ INDEX = \
 def test_sel():
 
     for i, (value, subtree) in enumerate(_sel({'overlap_type':'ResourceSubplot'}, INDEX, 'overlap_type')):
-        print(" HI1 ")
+        logging.info(" HI1 ")
         assert i == 0
         assert subtree == INDEX['ResourceSubplot']
 
@@ -407,7 +408,7 @@ def test_sel():
             {'overlap_type':'ResourceSubplot', 'process':'loop_train_eval'},
             INDEX['ResourceSubplot']['process'],
             'process')):
-        print(" HI2 ")
+        logging.info(" HI2 ")
         assert i == 0
         assert subtree == INDEX['ResourceSubplot']['process']['loop_train_eval']
 

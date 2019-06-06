@@ -1,3 +1,4 @@
+import logging
 import re
 import sys
 import os
@@ -187,11 +188,11 @@ class CUDAProfileParser(ProfilerParser):
     def post_parse(self, bench_name):
         assert ( self.has_error or self.no_cuda_calls_expected ) or self.header is not None
         if self.no_cuda_calls_expected:
-            print("> Skip pretty cuda profile; didn't see any CUDA calls in {path}".format(path=self.profile_path(bench_name)))
+            logging.info("> Skip pretty cuda profile; didn't see any CUDA calls in {path}".format(path=self.profile_path(bench_name)))
             self.skip = True
 
         if self.has_error:
-            print("> Skip pretty cuda profile; WARNING: saw an ERROR in {path}".format(path=self.profile_path(bench_name)))
+            logging.info("> Skip pretty cuda profile; WARNING: saw an ERROR in {path}".format(path=self.profile_path(bench_name)))
             self.skip = True
 
     def each_line(self):
@@ -228,7 +229,7 @@ class CUDASQLiteParser(ProfilerParserCommonMixin):
         self.config_path = src_files.get('config_json', bench_name, or_none=True)
         if self.config_path is not None:
             self.config = load_json(self.config_path)
-            print("> Found optional config_json @ {f}".format(f=self.config_path))
+            logging.info("> Found optional config_json @ {f}".format(f=self.config_path))
         else:
             self.config = {
             }
@@ -300,7 +301,7 @@ class CUDASQLiteParser(ProfilerParserCommonMixin):
         else:
             num_calls = 1
 
-        print("> num_calls = {num_calls}".format(
+        logging.info("> num_calls = {num_calls}".format(
             num_calls=num_calls))
         return num_calls
 
@@ -412,7 +413,7 @@ class CUDASQLiteParser(ProfilerParserCommonMixin):
             # select func_name,
             #   ordered by order of occurrence when executing 1000 repetitions.
             # num_gpus = self.gpu_count()
-            # print("> num_gpus = {num_gpus}".format(num_gpus=num_gpus))
+            # logging.info("> num_gpus = {num_gpus}".format(num_gpus=num_gpus))
 
             self.kernel_times()
             self.api_times()
@@ -444,10 +445,10 @@ class CUDASQLiteParser(ProfilerParserCommonMixin):
             with open(self._variable_path(bench_name), 'w') as f_variable:
 
                 def dump_data(stats, profile_data_type, skip_header=False):
-                    print("> {t}".format(t=profile_data_type))
+                    logging.info("> {t}".format(t=profile_data_type))
                     stats.dump(f, profile_data_type, skip_header=skip_header, summary_type=summary_type)
                     stats.dump_variable(f_variable, profile_data_type, skip_header=skip_header)
-                    print()
+                    logging.info()
 
                 dump_data(self.kernel_stats, profile_data_type='GPU activities')
                 dump_data(self.api_stats, profile_data_type='API calls', skip_header=True)

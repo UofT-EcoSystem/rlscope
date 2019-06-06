@@ -130,6 +130,7 @@ class ProfileEstimatorHook(tf.train.SessionRunHook):
         :param operation:
             The name of the operation to use for prof.set_operation(...).
         """
+        self.is_running = False
         self.operation = operation
         if prof is None:
             self.prof = iml_profiler.api.prof
@@ -142,12 +143,26 @@ class ProfileEstimatorHook(tf.train.SessionRunHook):
 
     def before_run(self, run_context):
         self.prof.set_operation(self.operation)
+        self.is_running = True
 
     def after_run(self, run_context, run_values):
         self.prof.end_operation(self.operation)
+        self.is_running = False
 
-    # def end(self, session):
-    #     pass
+    def end(self, session):
+        """
+        If sess.run()) raises OutOfRangeError or StopIteration,
+        after_run will not get called.
+
+        Nevertheless, make sure to stop profiling.
+
+        NOTE: this won't get called if other exceptions occur though.
+
+        Q: Why would OutOfRangeError or StopIteration be raised?
+        """
+        if self.is_running:
+            self.prof.end_operation(self.operation)
+            self.is_running = False
 
 class SaveModelEstimatorHook(CheckpointSaverListener):
     def __init__(self, prof=None):
