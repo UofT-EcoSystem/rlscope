@@ -2531,15 +2531,15 @@ class HeatScalePlot:
         start_time_sec = self.sql_reader.trace_start_time_sec
         for device in self.sql_reader.util_devices:
             samples = self.sql_reader.util_samples(device)
-            png = self.get_util_scale_png(device.device_id, device.device_name)
-            plotter = HeatScale(
-                color_value='util', y_axis='start_time_sec',
-                png=png,
-                pixels_per_square=self.pixels_per_square,
-                # Anchor colormap colors using min/max utilization values.
-                vmin=0.0, vmax=1.0,
-                # 1 second
-                step=1.)
+            # png = self.get_util_scale_png(device.device_id, device.device_name)
+            # plotter = HeatScale(
+            #     color_value='util', y_axis='start_time_sec',
+            #     png=png,
+            #     pixels_per_square=self.pixels_per_square,
+            #     # Anchor colormap colors using min/max utilization values.
+            #     vmin=0.0, vmax=1.0,
+            #     # 1 second
+            #     step=1.)
 
             if self.debug:
                 # Print the unadjusted raw utilization + timestamp data, centered @ start_time_sec.
@@ -2561,9 +2561,9 @@ class HeatScalePlot:
             plot_df = pd.DataFrame(norm_samples).astype(float)
             self.dump_plot_data(plot_df, device)
             self.dump_js_data(norm_samples, device, start_time_sec)
-            plotter.add_data(norm_samples)
-            print("> HeatScalePlot @ {path}".format(path=png))
-            plotter.plot()
+            # plotter.add_data(norm_samples)
+            # print("> HeatScalePlot @ {path}".format(path=png))
+            # plotter.plot()
 
     def dump_js_data(self, norm_samples, device, start_time_sec):
         js = {

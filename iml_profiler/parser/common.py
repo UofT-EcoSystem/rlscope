@@ -1480,7 +1480,8 @@ def is_trace_file(path):
            is_pyprof_call_times_file(path) or \
            is_machine_util_file(path) or \
            is_unit_test_once_file(path) or \
-           is_unit_test_multiple_file(path)
+           is_unit_test_multiple_file(path) or \
+           is_config_file(path)
 
 def is_process_trace_file(path):
     """

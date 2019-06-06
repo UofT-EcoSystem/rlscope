@@ -71,6 +71,10 @@ def main():
 
     if args.pdb:
         register_pdb_breakpoint()
+        # Debugger is useless when multithreaded.
+        args.workers = 1
+
+    luigi_argv.extend(['--workers', str(args.workers)])
 
     # pprint.pprint({
     #     'luigi_argv':luigi_argv,

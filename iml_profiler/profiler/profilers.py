@@ -875,7 +875,7 @@ class Profiler:
                 path = _j(dirpath, base)
                 # logging.info("> Consider {path}".format(path=path))
                 if is_trace_file(path):
-                    logging.info("> HELLO_THERE RM {path}".format(path=path))
+                    logging.info("> RM {path}".format(path=path))
                     os.remove(path)
                     # trace_id = int(m.group('trace_id'))
                     # self.next_trace_id = max(self.next_trace_id, trace_id + 1)
