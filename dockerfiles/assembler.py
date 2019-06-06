@@ -428,7 +428,7 @@ def merge_partials(header, used_partials, all_partials):
 # def upload_in_background(hub_repository, dock, image, tag):
 #     """Upload a docker image (to be used by multiprocessing)."""
 #     image.tag(hub_repository, tag=tag)
-#     print(dock.images.push(hub_repository, tag=tag))
+#     logging.info(dock.images.push(hub_repository, tag=tag))
 
 
 def mkdir_p(path):
@@ -849,8 +849,7 @@ class Assembler:
         build_output_generator = self.dock_cli.build(decode=True, **build_kwargs)
         response = tee_docker(
             build_output_generator,
-            file=get_build_logfile(repo_tag),
-            to_stdout=args.debug)
+            file=get_build_logfile(repo_tag))
         check_docker_response(response, dockerfile, repo_tag)
 
         image = self.dock.images.get(repo_tag)
@@ -880,6 +879,8 @@ class Assembler:
             #     }
             # },
             remove=True,
+            cap_add=['SYS_PTRACE'],
+            security_opt=['seccomp=unconfined'],
             runtime=runtime,
         )
         if tag_def['test_runtime'] == 'rocm':
@@ -904,7 +905,7 @@ class Assembler:
     #     self.docker_ps_iml_bash() is not
 
     def docker_ps_iml_bash(self):
-        # print("(1) run docker ps")
+        # logging.info("(1) run docker ps")
         p = subprocess.run("docker ps | grep iml_bash",
                            shell=True,
                            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -914,7 +915,7 @@ class Assembler:
         # I feel like its a bug in docker...
         if p.returncode != 0:
             return None
-        # print("(2) run docker ps")
+        # logging.info("(2) run docker ps")
         # p = subprocess.run("docker ps | grep iml_bash",
         #                    shell=True,
         #                    stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -1508,6 +1509,10 @@ def get_docker_cmdline(docker_command='run', extra_argv=[], **kwargs):
 
     add_opt_list('device', 'devices')
 
+    add_opt_list('cap-add', 'cap_add')
+
+    add_opt_list('security-opt', 'security_opt')
+
     if 'volumes' in kwargs:
         for host_dir, container_dir in kwargs['volumes'].items():
             add_opt_value('volume', "{host_dir}:{container_dir}".format(
@@ -1637,7 +1642,22 @@ class StackYMLGenerator:
 
         self.indent_str = 4*' '
 
-    def generate(self, assembler_cmd, env, volumes,
+    def doesnt_work(self):
+        # I tried added this to allow doing "gdb -p",
+        # but it doesn't work with "docker stack deploy",
+        # since it ignores these options.
+        # But, these options DO work with "docker run".
+        textwrap.dedent("""\
+        bash:
+            cap_add:
+            # Allow attaching to processes using "gdb -p <PID>" inside the container.
+            - SYS_PTRACE
+
+            security_opt:
+            - seccomp = unconfined
+        """).rstrip()
+
+def generate(self, assembler_cmd, env, volumes,
                  iml_drill_port=DEFAULT_IML_DRILL_PORT,
                  postgres_port=DEFAULT_POSTGRES_PORT,
                  postgres_pgdata_dir=DEFAULT_POSTGRES_PGDATA_DIR):
