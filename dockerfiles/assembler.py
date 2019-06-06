@@ -125,13 +125,6 @@ slice_sets:
                              type: string
                              isfullarg: true
                              interpolate_arg: true
-                     run_args_optional:
-                         type: list
-                         default: []
-                         schema:
-                             type: string
-                             isfullarg: true
-                             interpolate_arg: true
 
 releases:
     type: dict
@@ -361,7 +354,7 @@ def find_first_slice_value(slices, key):
     return None
 
 
-def assemble_tags(spec, cli_args, cli_run_args, cli_run_args_optional, enabled_releases, all_partials):
+def assemble_tags(spec, cli_args, cli_run_args, enabled_releases, all_partials):
     """Gather all the tags based on our spec.
 
     Args:
@@ -390,7 +383,6 @@ def assemble_tags(spec, cli_args, cli_run_args, cli_run_args_optional, enabled_r
                 tag_args = gather_tag_args(slices, cli_args, required_cli_args)
                 tag_args.update(get_implicit_build_args())
                 run_args = gather_tag_args(slices, cli_run_args, spec_field='run_args')
-                run_args_optional = gather_tag_args(slices, cli_run_args_optional, spec_field='run_args_optional', cmd_opt='run_arg')
                 tag_name = build_name_from_slices(tag_spec, slices, tag_args,
                                                   release['is_dockerfiles'])
                 used_partials = gather_slice_list_items(slices, 'partials')
@@ -408,7 +400,6 @@ def assemble_tags(spec, cli_args, cli_run_args, cli_run_args_optional, enabled_r
                     'upload_images': release['upload_images'],
                     'cli_args': tag_args,
                     'run_args': run_args,
-                    'run_args_optional': run_args_optional,
                     'dockerfile_subdirectory': dockerfile_subdirectory or '',
                     'partials': used_partials,
                     'tests': used_tests,
@@ -522,10 +513,6 @@ def get_docker_run_env(tag_def, env_list):
                 var=var,
                 spec="spec.yml"))
             sys.exit(1)
-
-    if 'run_args_optional' in tag_def:
-        # We DON'T check that run_args_optional is set (default is '' from spec.yml is allowed)
-        env = update_args_dict(env, tag_def['run_args_optional'], keep_original=True)
 
     for env_str in env_list:
         assert '=' in env_str
@@ -822,14 +809,11 @@ class Assembler:
 
         # Assemble tags and images used to build them
         run_arg_required = []
-        run_arg_optional = []
         for run_arg in args.run_arg:
             var, value = parse_build_arg(run_arg)
             if is_required_run_arg(var):
                 run_arg_required.append(run_arg)
-            else:
-                run_arg_optional.append(run_arg)
-        all_tags = assemble_tags(tag_spec, args.arg, run_arg_required, run_arg_optional, args.release, partials)
+        all_tags = assemble_tags(tag_spec, args.arg, run_arg_required, args.release, partials)
 
         return all_tags
 
@@ -1363,10 +1347,6 @@ RUN_ARGS_REQUIRED = [
     # The local path where we should output bazel objects (overrides $HOME/.cache/bazel)
     'BAZEL_BUILD_DIR',
 ]
-RUN_ARGS_OPTIONAL = [
-    # The root directory of a checkout of TensorFlow benchmarks repo (https://github.com/tensorflow/benchmarks)
-    'TENSORFLOW_BENCHMARKS_DIR',
-]
 
 def is_required_run_arg(var):
     return var in RUN_ARGS_REQUIRED
@@ -1380,11 +1360,6 @@ def get_iml_volumes(run_args, extra_volumes):
     """
     volumes = dict()
     for arg in RUN_ARGS_REQUIRED:
-        direc = run_args[arg]
-        volumes[direc] = direc
-    for arg in RUN_ARGS_OPTIONAL:
-        if arg not in run_args:
-            continue
         direc = run_args[arg]
         volumes[direc] = direc
     for i, direc in enumerate(extra_volumes):
