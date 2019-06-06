@@ -19,4 +19,5 @@ _check_env
 
 WHL_DIR=$TENSORFLOW_DIR/tmp/pip
 mkdir -p $WHL_DIR
+cd $TENSORFLOW_DIR
 ./bazel-bin/tensorflow/tools/pip_package/build_pip_package $WHL_DIR

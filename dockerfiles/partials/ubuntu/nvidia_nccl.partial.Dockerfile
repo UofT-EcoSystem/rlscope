@@ -22,3 +22,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN mkdir -p /usr/local/cuda-${CUDA}/lib &&  \
     ln -s /usr/lib/x86_64-linux-gnu/libnccl.so.2 /usr/local/cuda/lib/libnccl.so.2 && \
     ln -s /usr/include/nccl.h /usr/local/cuda/include/nccl.h
+
+# TensorFlow v1.3.1 has includes like this:
+#
+# e.g. inside tensorflow/core/kernels/cuda_solvers.cc
+# #include "cuda/include/cublas_v2.h"
+#
+# I'm not sure why I was able to compile this before, but it's failing now.
+# HACK: create symlink: /usr/include/cuda -> /usr/local/cuda
+# As a result, compiler should find /usr/include/cuda/include/cublas_v2.h
+#
+# NOTE: in newever versions I think they are including CUDA headers in the tensorflow
+# source tree (e.g. third_party/gpus/cuda/include/cublas_v2.h).
+RUN ln -s -T /usr/local/cuda /usr/include/cuda
