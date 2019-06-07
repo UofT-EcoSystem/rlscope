@@ -69,6 +69,9 @@ DEFAULT_IML_DRILL_PORT = 8129
 # Default storage location for postgres database
 # (postgres is used for loading raw trace-data and analyzing it).
 DEFAULT_POSTGRES_PGDATA_DIR = _j(HOME, 'iml', 'pgdata')
+# The tag used for a locally built "bash" IML dev environment
+LOCAL_IML_IMAGE_TAG = 'tensorflow:devel-iml-gpu-cuda'
+DEFAULT_REMOTE_IML_IMAGE_TAG = 'jagleeso/iml:1.0.0'
 
 # How long should we wait for /bin/bash (iml_bash)
 # to appear after running "docker stack deploy"?
@@ -563,6 +566,20 @@ def main():
                         type=int,
                         help='Abort Hub upload if it takes longer than this.')
 
+    parser.add_argument('--pull', action='store_true',
+                        help=textwrap.dedent("""
+                        Pull pre-built IML dev environment image from DockerHub, 
+                        instead of building locally.
+                        
+                        See --pull-image for specifying the image to pull.
+                        """))
+
+    parser.add_argument('--pull-image', default=DEFAULT_REMOTE_IML_IMAGE_TAG,
+                        help=textwrap.dedent("""
+                        IML dev environment image to pull from DockerHub
+                        using "docker pull <pull_img>"
+                        """))
+
     parser.add_argument('--deploy-iml-drill-port',
                         default=DEFAULT_IML_DRILL_PORT,
                         type=int,
@@ -1013,6 +1030,16 @@ class Assembler:
         eprint(get_cmd_string(exec_cmd))
         subprocess.run(exec_cmd, stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr)
 
+    def docker_pull(self, pull_img):
+        """
+        $ docker pull <pull_img>
+        """
+        cmd = ['docker', 'pull', pull_img]
+        eprint(get_cmd_string(cmd))
+        subprocess.check_call(cmd, stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr)
+        image = self.dock.images.get(pull_img)
+        return image
+
     def run_tests(self, image, repo_tag, tag, tag_def):
         tag_failed = False
         args = self.args
@@ -1085,6 +1112,11 @@ class Assembler:
         docker_run_env = get_docker_run_env(tag_def, args.env)
         iml_volumes = get_iml_volumes(docker_run_env, args.volume)
 
+        if args.pull:
+            iml_image = args.pull_image
+        else:
+            iml_image = LOCAL_IML_IMAGE_TAG
+
         yml = generator.generate(
             assembler_cmd=self.argv,
             env=docker_run_env,
@@ -1092,6 +1124,7 @@ class Assembler:
             iml_drill_port=args.deploy_iml_drill_port,
             postgres_pgdata_dir=args.deploy_postgres_pgdata_dir,
             postgres_port=args.deploy_postgres_port,
+            iml_image=iml_image,
         )
         print("> Write 'docker stack deploy' stack.yml file to {path}".format(path=args.output_stack_yml))
         with open(args.output_stack_yml, 'w') as f:
@@ -1196,9 +1229,11 @@ class Assembler:
                 image, logs = None, []
                 if not args.dry_run:
                     try:
-                        image = self.docker_build(dockerfile, repo_tag, tag_def)
 
-                        self.generate_stack_yml(tag_def)
+                        if args.pull:
+                            image = self.docker_pull(args.pull_image)
+                        else:
+                            image = self.docker_build(dockerfile, repo_tag, tag_def)
 
                         # Run tests if requested, and dump output
                         # Could be improved by backgrounding, but would need better
@@ -1210,6 +1245,7 @@ class Assembler:
                             self.docker_run(image, tag_def, extra_argv)
 
                         if args.deploy:
+                            self.generate_stack_yml(tag_def)
                             self.docker_deploy(extra_argv)
 
                         # if args.run_tests_path:
@@ -1571,7 +1607,7 @@ class StackYMLGenerator:
                 #     built separately via "docker build ..."
                 #
                 # build: ./dockerfiles/devel-iml-gpu-cuda.Dockerfile
-                image: tensorflow:devel-iml-gpu-cuda
+                image: {iml_image}
                 
                 depends_on:
                     - db
@@ -1627,10 +1663,12 @@ class StackYMLGenerator:
             - seccomp = unconfined
         """).rstrip()
 
-    def generate(self, assembler_cmd, env, volumes,
-            iml_drill_port=DEFAULT_IML_DRILL_PORT,
-            postgres_port=DEFAULT_POSTGRES_PORT,
-            postgres_pgdata_dir=DEFAULT_POSTGRES_PGDATA_DIR):
+    def generate(self,
+                 assembler_cmd, env, volumes,
+                 iml_drill_port=DEFAULT_IML_DRILL_PORT,
+                 postgres_port=DEFAULT_POSTGRES_PORT,
+                 postgres_pgdata_dir=DEFAULT_POSTGRES_PGDATA_DIR,
+                 iml_image=LOCAL_IML_IMAGE_TAG):
 
         # +1 for "service: ..."
         # +1 for "bash: ..."
@@ -1652,6 +1690,7 @@ class StackYMLGenerator:
             PWD=os.getcwd(),
             DEFAULT_IML_DRILL_PORT=DEFAULT_IML_DRILL_PORT,
             iml_drill_port=iml_drill_port,
+            iml_image=iml_image,
         )
 
     def _yml_list(self, values, indent):
