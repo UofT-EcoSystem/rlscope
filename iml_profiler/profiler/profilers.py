@@ -79,9 +79,14 @@ PYTHON_BIN = 'python3'
 # If we exceed 1000 session.run(...) calls without dumping a trace, only print a warning every 100 calls.
 WARN_EVERY_CALL_MODULO = 100
 
+# For warnings that go off all the time, how frequently should we inform the user about them?
+WARN_EVERY_SEC = 10
+
 # Number of steps before we dump a trace file
 # STEPS_PER_TRACE = 1000
 # STEPS_PER_TRACE = 10
+
+MP_SPAWN_CTX = multiprocessing.get_context('spawn')
 
 _TF_MODIFIED = False
 def modify_tensorflow():
@@ -244,7 +249,7 @@ class _ProfileContextManager:
 
         del self._session_to_context[session]
 
-class MyProcess(multiprocessing.Process):
+class MyProcess(MP_SPAWN_CTX.Process):
     """
     Record exceptions in child process, and make them accessible
     in the parent process after the child exits.
@@ -269,12 +274,12 @@ class MyProcess(multiprocessing.Process):
     """
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self._pconn, self._cconn = multiprocessing.Pipe()
+        self._pconn, self._cconn = MP_SPAWN_CTX.Pipe()
         self._exception = None
 
     def run(self):
         try:
-            multiprocessing.Process.run(self)
+            super().run()
             self._cconn.send(None)
         except Exception as e:
             tb = traceback.format_exc()
@@ -302,13 +307,12 @@ class ForkedProcessPool:
     """
     WAIT_WORKERS_TIMEOUT_SEC = 0.01
     UNLIMITED = 0
-    def __init__(self, name=None, max_workers=UNLIMITED, debug=False, mp_context=multiprocessing.get_context('spawn')):
+    def __init__(self, name=None, max_workers=UNLIMITED, debug=False):
         self.name = name
         self.process = None
         self.max_workers = max_workers
         self.active_workers = []
         self.debug = debug
-        self.mp_context = mp_context
         # self.inactive_workers = []
 
     def _join_finished_workers(self):
@@ -450,7 +454,8 @@ class PyprofDumper:
                  pyprof_proto_path,
                  pyprof_call_times_path,
                  pyprof_step,
-                 pyprof_trace,
+                 pyprof_dump_manager,
+                 pyprof_trace_key,
                  debug=False):
         self.trace_id = trace_id
         self.config_path = config_path
@@ -465,7 +470,8 @@ class PyprofDumper:
         self.pyprof_proto_path = pyprof_proto_path
         self.pyprof_call_times_path = pyprof_call_times_path
         self.pyprof_step = pyprof_step
-        self.pyprof_trace = pyprof_trace
+        self.pyprof_dump_manager = pyprof_dump_manager
+        self.pyprof_trace_key = pyprof_trace_key
         self.debug = debug
 
     def dump(self):
@@ -493,47 +499,9 @@ class PyprofDumper:
                     process_name=self.process_name,
                     **self.config_kwargs) # <-- this triggers GPU allocation
 
-        # clib_wrap.dump_pyprof(self.pyprof_proto_path(self.trace_id), self.process_name, self.phase)
-        self.pyprof_trace.dump(self.pyprof_proto_path, self.process_name, self.phase)
+        pyprof_trace = self.pyprof_dump_manager.get(self.pyprof_trace_key)
+        pyprof_trace.dump(self.pyprof_proto_path, self.process_name, self.phase)
 
-        # self.pyprof.dump(self.pyprof_call_times_path, self.process_name, self.phase)
-
-        # if self.tfprof:
-        #     # Rename: profile_100 -> profile_100.q_forward.proto
-        #     tfprof_protos = [path for path in glob("{dir}/profile_*".format(dir=self.out_dir))
-        #                      if re.search(r'^profile_\d+$', _b(path))]
-        #     if len(tfprof_protos) > 1:
-        #         pprint.pprint({'tf_protos':tfprof_protos})
-        #     assert len(tfprof_protos) <= 1
-        #     if len(tfprof_protos) > 0:
-        #         # If the sub-operation doesn't call sess.run(...), a profile_100 file won't be created.
-        #         tf_proto = tfprof_protos[0]
-        #         tf_proto_dir = _d(tf_proto)
-        #
-        #         new_tf_proto = self.tfprof_path(....)
-        #         os.rename(tf_proto, new_tf_proto)
-        #         # self._fixup_tfprof(new_tf_proto)
-        #     else:
-        #         logging.info(("> WARNING: bench_name={bench} did not run session.run(...), "
-        #                "so no tfprof output was generated for it").format(bench=self.bench_name))
-
-        # Discards profiling data now that it has been recorded.
-        # self._discard_profiling_data()
-        # dump_end_us = now_us()
-
-        # #
-        # # NOTE: we need to record DUMP events separate from other events,
-        # # since start/end timestamps boundary serialization of other events.
-        # # So, we dump the "DUMP" events into a separate Pyprof file that looks like:
-        # # - dump_event.trace_0.proto
-        # #
-        # clib_wrap.set_step(self._pyprof_step,
-        #                    expect_traced=True,
-        #                    ignore_disable=True)
-        # clib_wrap.record_event(CATEGORY_PROFILING, PROFILING_DUMP_TRACE, self.dump_start_us, dump_end_us,
-        #                        ignore_disable=True)
-        # clib_wrap.dump_pyprof(self.dump_event_proto_path(trace_id), self.process_name, self.phase)
-        # self._discard_profiling_data()
         if self.debug:
             logging.info("PyprofDumper.dump done, path={path}".format(
                 path=self.pyprof_proto_path))
@@ -649,7 +617,7 @@ class _DumpPyprofTraceHook(clib_wrap.RecordEventHook):
         pass
 
     def after_record_event(self, pyprof_trace, event):
-        if pyprof_trace.num_events >= clib_wrap.PROTO_MAX_PYPROF_PY_EVENTS:
+        if pyprof_trace.get_num_events() >= clib_wrap.PROTO_MAX_PYPROF_PY_EVENTS:
             iml_profiler.api.prof._dump_pyprof()
             num_events = clib_wrap.num_events_recorded()
             # NOTE: I've seen this assertion fail with minigo, not sure why though...
@@ -722,6 +690,8 @@ class Profiler:
                  args=None):
         modify_tensorflow()
 
+        self.manager = multiprocessing.Manager()
+        self.pyprof_dump_manager = clib_wrap.PyprofDumpManager(self.manager)
 
         global _prof_singleton
         if _prof_singleton is not None:
@@ -775,7 +745,8 @@ class Profiler:
 
         # TODO: bind process to a different core to avoid interference?
         # self.bg_dumper = ProcessPoolExecutor(max_workers=1)
-        self.bg_dumper = ForkedProcessPool(name="bg_dumper", debug=True)
+        self.debug = get_argval('debug', debug, False)
+        self.bg_dumper = ForkedProcessPool(name="bg_dumper", debug=self.debug)
 
         self._op_stack = []
         self._start_us = None
@@ -804,6 +775,8 @@ class Profiler:
         self.repetition_time_limit_sec = repetition_time_limit_sec
         self.num_calls = get_argval('num_calls', num_calls, None)
         self.trace_time_sec = get_argval('trace_time_sec', trace_time_sec, None)
+        self._last_warned_trace_time_sec = None
+        self._should_finish_idx = 0
         self.start_trace_time_sec = None
         self.num_traces = get_argval('num_traces', num_traces, None)
         self.keep_traces = get_argval('keep_traces', keep_traces, False)
@@ -816,7 +789,6 @@ class Profiler:
         self.phase = get_internal_argval('phase', DEFAULT_PHASE)
 
         self.start_measuring_call = get_argval('start_measuring_call', start_measuring_call, None)
-        self.debug = get_argval('debug', debug, False)
 
         self.unit_test = get_argval('unit_test', unit_test, False)
         self.unit_test_name = get_argval('unit_test_name', unit_test_name, None)
@@ -1162,7 +1134,7 @@ class Profiler:
             self._terminate_utilization_sampler()
 
         self._maybe_end_operations()
-        self._maybe_finish(finish_now=True, skip_finish=False, should_exit=False)
+        self._maybe_finish(finish_now=True, should_exit=False)
 
     def _start_tfprof(self):
         """
@@ -1269,8 +1241,8 @@ class Profiler:
         ):
             return
 
-        if DEBUG:
-            logging.info("> set_operation(op={op})".format(op=bench_name))
+        # if DEBUG:
+        #     logging.info("> set_operation(op={op})".format(op=bench_name))
 
         self._push_operation(bench_name)
         # if len(self._op_stack) == 1:
@@ -1382,6 +1354,12 @@ class Profiler:
         if self.disable:
             return
 
+        # if DEBUG:
+        #     logging.info('> end_operation({op}), tracing time = {sec}'.format(
+        #         sec=self._total_trace_time_sec(),
+        #         op=bench_name))
+
+
         # if self.calls_traced > self.num_calls and len(self._op_stack) > 0 and self.calls_traced % WARN_EVERY_CALL_MODULO == 0:
         #     logging.info("> IML: WARNING, use more fine grained operations so we can free memory by dumping traces more frequently")
         #     logging.info("  - calls traced = {calls_traced}, number of calls per-trace = {num_calls}".format(
@@ -1410,9 +1388,6 @@ class Profiler:
                 b2=bench_name,
             )))
 
-        if DEBUG:
-            logging.info("> end_operation(op={op})".format(op=bench_name))
-
         self.end_call_us[bench_name] = clib_wrap.now_us()
         self.disable_profiling(bench_name, num_calls=1)
         # Record the last amount of time in between returning
@@ -1430,13 +1405,37 @@ class Profiler:
         del self.end_call_us[bench_name]
 
         self._pop_operation(bench_name)
+
+        if self.trace_time_sec is not None and \
+                self._total_trace_time_sec() > self.trace_time_sec and \
+                len(self._op_stack) > 0 and \
+                ( self._last_warned_trace_time_sec is None or time.time() - self._last_warned_trace_time_sec >= WARN_EVERY_SEC ):
+            stacktrace = get_stacktrace()
+            logging.warning(textwrap.dedent("""\
+            IML: Warning; tracing time (sec) has exceeded limit (--iml-trace-time-sec {limit_sec}), but annotations are still active:
+              process_name = {proc}
+              phase_name = {phase}
+              Active annotations:
+                {annotations}
+              Stacktrace:
+            {stack}
+            """).format(
+                sec=self._total_trace_time_sec(),
+                limit_sec=self.trace_time_sec,
+                proc=self.process_name,
+                phase=self.phase,
+                annotations=self._op_stack,
+                stack=textwrap.indent(''.join(stacktrace), prefix="  "*2),
+            ))
+            self._last_warned_trace_time_sec = time.time()
+
         if len(self._op_stack) == 0:
             self.steps += 1
             # self._stop_pyprof()
             # self._stop_tfprof()
 
-            if not skip_finish:
-                self._maybe_finish(skip_finish=False, debug=True)
+        if not skip_finish:
+            self._maybe_finish(debug=self.debug)
 
     def set_process_name(self, process_name):
         self.process_name = process_name
@@ -1533,9 +1532,11 @@ class Profiler:
         # Q: How frequently should we dump pyprof data?
         # A: We'd like to keep it under a file-size limit...but computing exact proto-size isn't practical.
         #    Instead, lets just roughly count the # of events, and use that as a proxy for proto file size.
-        logging.info("> IML: _dump_pyprof")
-        self._dump_pyprof(debug=True)
-        logging.info("> IML: _dump_pyprof done")
+        if self.debug:
+            logging.info("> IML: _dump_pyprof")
+        self._dump_pyprof(debug=self.debug)
+        if self.debug:
+            logging.info("> IML: _dump_pyprof done")
 
         # if self._should_dump_pyprof:
         #     self._dump_pyprof()
@@ -1679,34 +1680,41 @@ class Profiler:
         return clib_wrap.should_dump_pyprof()
 
     # TODO: decide where to call dump_tfprof / dump_pyprof from.
-    # def _dump(self, dump_start_us, config_kwargs=dict()):
     def _dump_pyprof(self, config_kwargs=dict(), debug=False):
+        start_sec = time.time()
         pyprof_trace = clib_wrap.get_pyprof_trace()
         trace_id = self.next_trace_id
+        pyprof_trace_key = self.pyprof_proto_path(trace_id)
+        self.pyprof_dump_manager.put(pyprof_trace_key, pyprof_trace)
         pyprof_dumper = PyprofDumper(
-            trace_id,
-            self.config_path(trace_id),
-            self.c_lib_func_pyprof_pattern,
-            self.num_calls,
-            self.start_measuring_call,
-            # profile_sec=self.profile_sec,
-            # no_profile_sec=self.no_profile_sec,
-            self.average_time_per_call_sec,
-            self.average_time_per_call_no_profile_sec,
-            config_kwargs,
-            self.process_name,
-            self.phase,
-            self.pyprof_proto_path(trace_id),
-            self.pyprof_call_times_path(trace_id),
-            self._pyprof_step,
-            pyprof_trace,
-            debug)
+            trace_id=trace_id,
+            config_path=self.config_path(trace_id),
+            c_lib_func_pyprof_pattern=self.c_lib_func_pyprof_pattern,
+            num_calls=self.num_calls,
+            start_measuring_call=self.start_measuring_call,
+            average_time_per_call_sec=self.average_time_per_call_sec,
+            average_time_per_call_no_profile_sec=self.average_time_per_call_no_profile_sec,
+            config_kwargs=config_kwargs,
+            process_name=self.process_name,
+            phase=self.phase,
+            pyprof_proto_path=self.pyprof_proto_path(trace_id),
+            pyprof_call_times_path=self.pyprof_call_times_path(trace_id),
+            pyprof_step=self._pyprof_step,
+            pyprof_dump_manager=self.pyprof_dump_manager,
+            pyprof_trace_key=pyprof_trace_key,
+            debug=debug)
         self.next_trace_id += 1
         self.bg_dumper.submit(
             name="PyprofDumper.dump({path})".format(
                 path=self.pyprof_proto_path(trace_id)),
             fn=pyprof_dumper.dump,
-            sync=True)
+        )
+        end_sec = time.time()
+        time_sec = end_sec - start_sec
+        if DEBUG:
+            logging.info("Dump pyprof took {sec} seconds on the critical path".format(
+                sec=time_sec,
+            ))
 
     def _fixup_tfprof(self, path):
         """
@@ -1724,78 +1732,26 @@ class Profiler:
         with open(path, 'wb') as f:
             f.write(proto.SerializeToString())
 
-    # @property
-    # def calls_traced(self):
-    #     return tensorflow_profile_context.get_session_run_calls_traced()
-
-    # def should_dump_trace(self, finish_now=False, debug=False):
-    #     # ret = finish_now or (
-    #     #     self.step_start_tracing is not None and
-    #     #     # self.steps >= self.step_start_tracing + min(self.num_calls, STEPS_PER_TRACE)
-    #     #     self.steps >= self.step_start_tracing + self.num_calls
-    #     # )
-    #     ret = finish_now or (
-    #         # self.step_start_tracing is not None and
-    #         # self.steps >= self.step_start_tracing + min(self.num_calls, STEPS_PER_TRACE)
-    #         self.calls_traced >= self.num_calls
-    #     )
-    #     if DEBUG_OP_STACK and debug:
-    #         logging.info(textwrap.dedent("""
-    #         > SHOULD_DUMP_TRACE = {ret}
-    #         - finish_now = {finish_now}""".format(
-    #             ret=ret,
-    #             finish_now=finish_now,
-    #         )))
-    #         # if self.step_start_tracing is not None:
-    #         #     logging.info(textwrap.dedent("""
-    #         #     - step_start_tracing = {step_start_tracing}
-    #         #       - steps >= step_start_tracing + num_calls = {cond}
-    #         #       - steps = {steps}
-    #         #       - step_start_tracing + num_calls = {step_plus_num_calls}
-    #         #         - num_calls = {num_calls}""".format(
-    #         #         step_start_tracing=self.step_start_tracing,
-    #         #         cond=(
-    #         #             self.steps >= self.step_start_tracing + self.num_calls
-    #         #         ),
-    #         #         steps=self.steps,
-    #         #         step_plus_num_calls=self.step_start_tracing + self.num_calls,
-    #         #         num_calls=self.num_calls,
-    #         #     )))
-    #         logging.info(textwrap.dedent("""
-    #         - calls_traced >= num_calls = {cond}
-    #           - calls_traced = {calls_traced}
-    #           - num_calls = {num_calls}""".format(
-    #             calls_traced=self.calls_traced,
-    #             cond=self.calls_traced >= self.num_calls,
-    #             num_calls=self.num_calls,
-    #         )))
-    #     return ret
-
     def should_finish(self, finish_now=False, skip_finish=False):
         total_trace_time_sec = self._total_trace_time_sec()
         ret = finish_now or (
-            not skip_finish
-            and (
                 (
-                    self.num_traces is not None and
-                    self.next_trace_id >= self.num_traces
-                 ) or (
-                    self.trace_time_sec is not None
-                    and total_trace_time_sec >= self.trace_time_sec
+                        self.num_traces is not None and
+                        self.next_trace_id >= self.num_traces
+                ) or (
+                        self.trace_time_sec is not None
+                        and total_trace_time_sec >= self.trace_time_sec
                 )
-            )
         )
-        if ret and DEBUG:
-            logging.info("> FINISH:")
+        self._should_finish_idx += 1
+        if DEBUG and (ret or self._should_finish_idx % 1000 == 0):
             logging.info(textwrap.indent(textwrap.dedent("""
             - process_name = {proc}
-            
             - finish_now = {finish_now}
-            
             - skip_finish = {skip_finish}
             """.format(
                 proc=self.process_name,
-                finish_now=finish_now,
+                finish_now=ret,
                 skip_finish=skip_finish,
             )), prefix="  "))
             if self.num_traces is not None:
@@ -1824,12 +1780,6 @@ class Profiler:
         now_sec = time.time()
         return now_sec - self.start_trace_time_sec
 
-    # def _maybe_dump_trace(self, finish_now=False, debug=False):
-    #     dump_trace = self.should_dump_trace(finish_now, debug=debug)
-    #     if dump_trace:
-    #         self.dump_trace(finish_now, debug=debug)
-    #     return dump_trace
-
     def _record_process_event(self):
         self._stop_us = now_us()
         # Record a "special" operation event that spans the prof.start()/stop() calls
@@ -1846,27 +1796,18 @@ class Profiler:
         clib_wrap.record_event(CATEGORY_OPERATION, event_name, self._start_us, self._stop_us,
                                ignore_disable=True)
 
-    def _maybe_finish(self, finish_now=False, skip_finish=False, should_exit=True, debug=False):
-        should_finish = self.should_finish(finish_now, skip_finish)
+    def _maybe_finish(self, finish_now=False, should_exit=True, debug=False):
+        should_finish = self.should_finish(finish_now)
+        if not should_finish:
+            return
 
-        if should_finish:
-            self._stop_us = now_us()
+        self._stop_us = now_us()
 
-        # self._maybe_dump_trace(should_finish, debug)
+        while len(self._op_stack) > 0:
+            # Pass skip_finish=True to avoid recursively calling this.
+            self.end_operation(self._cur_operation, skip_finish=True)
 
-        if should_finish:
-            self.finish(should_exit=should_exit)
-
-    # def next_step(self, skip_finish=False):
-    #     """
-    #     If we've recorded enough samples, dump trace files.
-    #
-    #     If we've dumped enough trace files, exit (we're done).
-    #     """
-    #     self._maybe_end_operations()
-    #     self._maybe_finish(finish_now=False,
-    #                        skip_finish=skip_finish)
-    #     self.steps += 1
+        self.finish(should_exit=should_exit)
 
     def done_measuring(self):
         return self.num_calls is not None and \

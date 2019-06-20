@@ -155,6 +155,16 @@ _check_MLPERF_DIR() {
     _check_env_var MLPERF_DIR "$description"
 }
 
+_check_STABLE_BASELINES_DIR() {
+    local description="The root directory of a checkout of the stable-baselines repo (https://github.com/hill-a/stable-baselines)"
+    _check_env_var STABLE_BASELINES_DIR "$description"
+}
+
+_check_RL_BASELINES_ZOO_DIR() {
+    local description="The root directory of a checkout of the rl-baselines-zoo repo (https://github.com/araffin/rl-baselines-zoo)"
+    _check_env_var RL_BASELINES_ZOO_DIR "$description"
+}
+
 py_module_installed() {
     local py_module="$1"
     shift 1

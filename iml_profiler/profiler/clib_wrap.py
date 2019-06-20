@@ -1,5 +1,7 @@
 import logging
 import contextlib
+import multiprocessing
+import multiprocessing.managers
 
 from iml_profiler.parser.common import *
 
@@ -22,6 +24,13 @@ DEFAULT_PREFIX = "CLIB__"
 
 # 39870 events in Pyprof ~ 1.6M
 PROTO_MAX_PYPROF_PY_EVENTS = 40000
+
+# Store PyprofTrace's in a shared-memory process to speedup async dumping of PyprofTrace's.
+# In particular, each PyprofTrace.record_event instead results in a remote method call.
+#
+# NOTE: we DON'T use this, since I noticed it significantly slows down training with DQN + Atari.
+# i.e. speeding up async dumping delays come at the cost of slowing down trace-collection.
+USE_PROXY_PYPROF_TRACE = False
 
 # PROBLEM: We're only counting the number C++ API calls;
 # we AREN'T counting python events being collected via the pyprof profiler!
@@ -65,19 +74,24 @@ def unregister_record_event_hook(hook : RecordEventHook):
 class PyprofTrace:
     def __init__(self):
         self.pyprof = Pyprof()
-        self.num_events = 0
+        self._num_events = 0
 
     def finish(self, process_name, phase):
         self.pyprof.process_name = process_name
         self.pyprof.phase = phase
 
+    def get_step(self):
+        return self._step
+    def get_num_events(self):
+        return self._num_events
+
     def set_step(self, step):
         if step is None:
             return
-        self.step = step
+        self._step = step
         if step not in self.pyprof.steps:
             if tensorflow_profile_context.DEBUG:
-                logging.info("> ADD PYPROF STEP: {s}".format(s=self.step))
+                logging.info("> ADD PYPROF STEP: {s}".format(s=self._step))
 
             self.pyprof.steps.extend([step])
 
@@ -115,7 +129,7 @@ class PyprofTrace:
         else:
             self.pyprof.clibs[step].clibs[category].events.extend([event])
 
-        self.num_events += 1
+        self._num_events += 1
 
         # Call any RecordEvent callbacks
         # (e.g. you could register a hook to dump this PyprofTrace
@@ -133,10 +147,51 @@ class PyprofTrace:
         self.record_event(step, CATEGORY_PYTHON, name, start_us, end_us,
                           python_event=True)
 
+class PyprofDumpManager:
+    """
+    NOTE: In the future, we could make pyprof_trace a Proxy object itself to avoid serialization
+    during DumpManager.put.
+    """
+    # def __init__(self):
+    def __init__(self, manager):
+        # self._manager = multiprocessing.Manager()
+        # self.pyprof_traces = self._manager.dict()
+        # self.lock = self._manager.Lock()
+
+        self.pyprof_traces = manager.dict()
+        self.lock = manager.Lock()
+
+    def put(self, key, pyprof_trace):
+        with self.lock:
+            self.pyprof_traces[key] = pyprof_trace
+            # self.pyprof_traces.append(pyprof_trace)
+
+    def get(self, key):
+        with self.lock:
+            pyprof_trace = self.pyprof_traces[key]
+            del self.pyprof_traces[key]
+            # if len(self.pyprof_traces) == 0:
+            #     return None
+            # pyprof_trace = self.pyprof_traces.get()
+        return pyprof_trace
+
+class MyManager(multiprocessing.managers.BaseManager):
+    pass
+MyManager.register('PyprofTrace', PyprofTrace)
+if USE_PROXY_PYPROF_TRACE:
+    _manager = MyManager()
+    _manager.start()
+
+def mk_PyprofTrace():
+    if USE_PROXY_PYPROF_TRACE:
+        return _manager.PyprofTrace()
+    else:
+        return PyprofTrace()
+
 #
 # Module globals.
 #
-_pyprof_trace = PyprofTrace()
+_pyprof_trace = mk_PyprofTrace()
 _step = None
 _process_name = None
 _phase = None
@@ -147,7 +202,7 @@ _TRACING_ON = False
 
 def clear_pyprof_profiling():
     global _pyprof_trace, _python_start_us, _process_name
-    _pyprof_trace = PyprofTrace()
+    _pyprof_trace = mk_PyprofTrace()
     _pyprof_trace.set_step(_step)
     _python_start_us = now_us()
 def get_pyprof_trace():
@@ -160,11 +215,11 @@ def get_pyprof_trace():
 
 def num_events_recorded():
     global _pyprof_trace
-    return _pyprof_trace.num_events
+    return _pyprof_trace.get_num_events()
 
 def should_dump_pyprof():
     global _pyprof_trace
-    return _pyprof_trace.num_events >= PROTO_MAX_PYPROF_PY_EVENTS
+    return _pyprof_trace.get_num_events() >= PROTO_MAX_PYPROF_PY_EVENTS
 
 def set_step(step, expect_traced=False, ignore_disable=False):
     global _pyprof_trace, _step, _python_start_us
@@ -274,11 +329,11 @@ class CFuncWrapper:
             #     name=name)
 
             _pyprof_trace.record_python_event(
-                _pyprof_trace.step, name,
+                _pyprof_trace.get_step(), name,
                 start_us=_python_start_us,
                 end_us=start_us)
             _pyprof_trace.record_event(
-                _pyprof_trace.step, self.category, name,
+                _pyprof_trace.get_step(), self.category, name,
                 start_us=start_us,
                 end_us=end_us)
 
@@ -297,7 +352,7 @@ def record_event(category, name, start_us, end_us, attrs=None, python_event=Fals
 
     if _TRACING_ON or ignore_disable:
         _pyprof_trace.record_event(
-            _pyprof_trace.step, category, name, start_us, end_us,
+            _pyprof_trace.get_step(), category, name, start_us, end_us,
             attrs=attrs, python_event=python_event)
 
 def record_python_event(name, end_us, ignore_disable=False):

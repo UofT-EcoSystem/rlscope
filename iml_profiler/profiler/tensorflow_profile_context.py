@@ -137,30 +137,30 @@ def _profiled_run(self,
     step = None
     locked = False
 
-  if DEBUG:
-    logging.info(textwrap.dedent("""
-    > _profile_run:
-      - profile_context = {pctx}
-      - step = {step}
-      - locked = {locked}
-    """.format(
-      pctx=profile_context,
-      step=step,
-      locked=locked,
-    )))
-    if profile_context is not None:
-      logging.info(textwrap.dedent("""
-      - not self.profile_context._is_fast_path(step) = {fast_path_bool}
-        - self.profile_context._disable = {disable}
-        - self.profile_context._trace_all = {trace_all}
-      """.format(
-          fast_path_bool=not self.profile_context._is_fast_path(step),
-          disable=self.profile_context._disable,
-          trace_all=self.profile_context._trace_all,
-        )))
-    # else:
-    #   # Q: Why isn't this Session object being traced with a ProfileContext object?
-    #   import ipdb; ipdb.set_trace()
+  # if DEBUG:
+  #   logging.info(textwrap.dedent("""
+  #   > _profile_run:
+  #     - profile_context = {pctx}
+  #     - step = {step}
+  #     - locked = {locked}
+  #   """.format(
+  #     pctx=profile_context,
+  #     step=step,
+  #     locked=locked,
+  #   )))
+  #   if profile_context is not None:
+  #     logging.info(textwrap.dedent("""
+  #     - not self.profile_context._is_fast_path(step) = {fast_path_bool}
+  #       - self.profile_context._disable = {disable}
+  #       - self.profile_context._trace_all = {trace_all}
+  #     """.format(
+  #         fast_path_bool=not self.profile_context._is_fast_path(step),
+  #         disable=self.profile_context._disable,
+  #         trace_all=self.profile_context._trace_all,
+  #       )))
+  #   # else:
+  #   #   # Q: Why isn't this Session object being traced with a ProfileContext object?
+  #   #   import ipdb; ipdb.set_trace()
 
   # logging.info("> tfprof debug: {vars}".format(vars={
   #   'locked': locked,
@@ -178,8 +178,8 @@ def _profiled_run(self,
 
     # Maybe trace this step.
     if self.profile_context._should_trace(step, self.graph, fetches):
-      if DEBUG:
-        logging.info("tfprof> with step={step}".format(step=step))
+      # if DEBUG:
+      #   logging.info("tfprof> with step={step}".format(step=step))
       if self.profile_context._debug:
         sys.stderr.write('debug: tracing step: %d\n' % step)
       # Enable tracing, perform auto profiling or auto dump.
@@ -525,10 +525,10 @@ class ProfileContext(object):
     #     logging.info("> tfprof: step={step}, locked={locked}".format(
     #       step=self._step,
     #       locked=acquired))
-    if DEBUG:
-      logging.info("> tfprof: step={step}".format(
-        step=self._step,
-      ))
+    # if DEBUG:
+    #   logging.info("> tfprof: step={step}".format(
+    #     step=self._step,
+    #   ))
     yield (self._step, acquired)
     # if DEBUG:
     #   logging.info("> tfprof: AFTER step={step}, locked={locked}".format(
@@ -592,7 +592,7 @@ class ProfileContext(object):
           phase=self.phase,
         ))
     c_api_util.dump_trace_data_async(sess, dump_path, process_name, self.phase)
-      
+
   def old_dump(self, dump_path, process_name):
     assert self.phase is not None
     sess = self._cur_session(allow_none=True)
@@ -842,8 +842,8 @@ def now_in_usec():
   return time_us
 
 def preallocate_tracer(step, sess):
-  if DEBUG:
-    logging.info("> PREALLOCATE_TRACER for step={step}".format(step=step))
+  # if DEBUG:
+  #   logging.info("> PREALLOCATE_TRACER for step={step}".format(step=step))
   assert sess is not None
   # sess = tf.get_default_session()
   # logging.info("> preallocate_tracer: _session = {session}".format(session=sess._session))
