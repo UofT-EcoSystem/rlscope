@@ -1,1 +1,1 @@
-ENV IML_ROOT /home/${USER_NAME}/bin/iml
+ENV IML_ROOT /root/bin/iml

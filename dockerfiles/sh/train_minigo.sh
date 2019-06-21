@@ -4,7 +4,9 @@
 # NOTE: It's up to you to call ./configure from inside the TENSORFLOW_DIR of the container!
 # This script is just meant for doing iterative rebuilds (i.e. "make")
 set -e
-set -x
+if [ "$DEBUG" == 'yes' ]; then
+    set -x
+fi
 SH_DIR="$(readlink -f "$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )")"
 cd "$SH_DIR"
 
@@ -13,6 +15,9 @@ source $SH_DIR/make_utils.sh
 _check_env
 
 _check_MLPERF_DIR
+
+_check_tensorflow
+_check_iml
 
 #py_maybe_install 'baselines' install_baselines.sh
 
@@ -33,4 +38,4 @@ export GOPARAMS=$MLPERF_DIR/reinforcement/tensorflow/minigo/params/multiple_work
 mkdir -p $BASE_DIR
 
 cd $MLPERF_DIR/reinforcement/tensorflow
-./run_and_time.sh $SEED --iml-keep-traces
+_do ./run_and_time.sh $SEED --iml-keep-traces

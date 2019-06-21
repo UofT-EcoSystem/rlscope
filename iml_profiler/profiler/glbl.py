@@ -10,6 +10,8 @@ import tensorflow as tf
 
 import iml_profiler
 
+logger = logging.getLogger('iml')
+
 # prof = None
 session = None
 
@@ -79,4 +81,11 @@ def handle_iml_args(parser, args, directory=None):
 
 def setup_logging():
     format = 'PID={process}/{processName} @ {filename}:{lineno} :: {asctime} {levelname}: {message}'
-    logging.basicConfig(format=format, style='{', level=logging.DEBUG)
+    logging.basicConfig(format=format, style='{', level=logging.INFO)
+
+    # Trying to disable excessive DEBUG logging messages coming from luigi,
+    # but it's not working....
+    luigi_logger = logging.getLogger('luigi-interface')
+    luigi_logger.setLevel(logging.INFO)
+    luigi_logger = logging.getLogger('luigi')
+    luigi_logger.setLevel(logging.INFO)

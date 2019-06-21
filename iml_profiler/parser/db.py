@@ -3256,6 +3256,7 @@ def sql_exec_query(cursor, query, params=None, klass=None, debug=False):
 def sql_create_connection(db_path, host=None):
     if 'IML_POSTGRES_HOST' in os.environ and host is None:
         host = os.environ['IML_POSTGRES_HOST']
+    logging.info("Using DB_HOST = {host}".format(host=host))
     if py_config.SQL_IMPL == 'psql':
         return TracesPostgresConnection(db_path, host=host)
     elif py_config.SQL_IMPL == 'sqlite':

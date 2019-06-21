@@ -28,6 +28,7 @@ from __future__ import print_function
 from os.path import join as _j, abspath as _a, exists as _e, dirname as _d, basename as _b
 
 import subprocess
+import re
 import os
 import time
 import argparse
@@ -62,6 +63,9 @@ def get_username():
 
 def get_user_id():
     return os.getuid()
+
+def get_group_id():
+    return os.getgid()
 
 HOME = str(Path.home())
 DEFAULT_POSTGRES_PORT = 5432
@@ -416,7 +420,9 @@ def assemble_tags(spec, cli_args, cli_run_args, enabled_releases, all_partials):
 def merge_partials(header, used_partials, all_partials):
     """Merge all partial contents with their header."""
     used_partials = list(used_partials)
-    return '\n'.join([header] + [all_partials[u] for u in used_partials])
+    ret = '\n'.join([header] + [all_partials[u] for u in used_partials])
+
+    return ret
 
 
 # def upload_in_background(hub_repository, dock, image, tag):
@@ -448,7 +454,7 @@ def gather_existing_partials(partial_path):
     for path, _, files in os.walk(partial_path):
         for name in files:
             fullpath = os.path.join(path, name)
-            if '.partial.Dockerfile' not in fullpath:
+            if not re.search(r'\.partial\.Dockerfile$', _b(fullpath)):
                 eprint(('> Probably not a problem: skipping {}, which is not a '
                         'partial.').format(fullpath))
                 continue
@@ -456,8 +462,28 @@ def gather_existing_partials(partial_path):
             simple_name = fullpath[len(partial_path) + 1:-len('.partial.dockerfile')]
             with open(fullpath, 'r') as f:
                 partial_contents = f.read()
+                check_null_byte(fullpath, partial_contents)
             partials[simple_name] = partial_contents
     return partials
+
+def check_null_byte(name, string):
+    null_idx = string.find('\x00')
+    if null_idx != -1:
+        eprint("Found null byte in {name}:".format(name=name))
+        eprint((
+            "> Before null byte:\n"
+            "{str}"
+        ).format(str=textwrap.indent(
+            string[:null_idx],
+            prefix='  ',
+        )))
+        eprint((
+            "> After null byte:\n"
+            "{str}"
+        ).format(str=textwrap.indent(
+            string[null_idx:],
+            prefix='  ')))
+        import ipdb; ipdb.set_trace()
 
 def get_build_logfile(repo_tag):
     return "{repo_tag}.build.log.txt".format(
@@ -523,6 +549,10 @@ def get_docker_run_env(tag_def, env_list):
         # Duplicate var?
         assert var not in env
         env[var] = value
+
+    env['IML_USER'] = get_username()
+    env['IML_USER_ID'] = get_user_id()
+    env['IML_GROUP_ID'] = get_group_id()
 
     return env
 
@@ -834,7 +864,7 @@ class Assembler:
 
         return all_tags
 
-    def docker_build(self, dockerfile, repo_tag, tag_def):
+    def docker_build(self, dockerfile, repo_tag, tag_def, debug):
         args = self.args
         build_kwargs = dict(
             timeout=args.hub_timeout,
@@ -850,8 +880,13 @@ class Assembler:
         build_output_generator = self.dock_cli.build(decode=True, **build_kwargs)
         response = tee_docker(
             build_output_generator,
-            file=get_build_logfile(repo_tag))
-        check_docker_response(response, dockerfile, repo_tag)
+            file=get_build_logfile(repo_tag),
+            debug=debug)
+        # I've seen "docker build" fail WITHOUT any error indication
+        # (e.g. return code, raising dockers.errors.APIError),
+        # so just grep for "error" in the response['message'].
+        build_cmd = get_docker_cmdline('build', **build_kwargs)
+        check_docker_response(response, dockerfile, repo_tag, cmd=build_cmd)
 
         image = self.dock.images.get(repo_tag)
 
@@ -1233,7 +1268,7 @@ class Assembler:
                         if args.pull:
                             image = self.docker_pull(args.pull_image)
                         else:
-                            image = self.docker_build(dockerfile, repo_tag, tag_def)
+                            image = self.docker_build(dockerfile, repo_tag, tag_def, args.debug)
 
                         # Run tests if requested, and dump output
                         # Could be improved by backgrounding, but would need better
@@ -1263,6 +1298,10 @@ class Assembler:
                             eprint('>> ABORTING due to --stop_on_failure!')
                             exit(1)
 
+                    except DockerError as e:
+                        eprint(e.message)
+                        sys.exit(1)
+
                     # Clean temporary dockerfiles if they were created earlier
                     if not args.keep_temp_dockerfiles:
                         os.remove(dockerfile)
@@ -1287,7 +1326,7 @@ class Assembler:
                 'errors: {}'.format(','.join(self.failed_tags)))
             exit(1)
 
-def tee_docker(generator, file=None, to_stdout=True, append=False, flush=True):
+def tee_docker(generator, file=None, to_stdout=True, append=False, flush=True, debug=False):
     def output_line(line):
         if to_stdout:
             sys.stdout.write(line)
@@ -1297,6 +1336,8 @@ def tee_docker(generator, file=None, to_stdout=True, append=False, flush=True):
     with ScopedLogFile(file=file, append=append) as f:
         last_dic = None
         for dic in generator:
+            if debug:
+                pprint.pprint(dic)
             if 'stream' in dic:
                 line = dic['stream']
                 output_line(line)
@@ -1307,12 +1348,15 @@ def tee_docker(generator, file=None, to_stdout=True, append=False, flush=True):
             last_dic = dic
         return last_dic
 
-def check_docker_response(response, path, repo_tag):
-    if is_docker_error_reponse(response):
-        raise DockerError(path, repo_tag, response)
+def check_docker_response(response, path, repo_tag, cmd=None):
+    if is_docker_error_response(response):
+        raise DockerError(path, repo_tag, response, cmd=cmd)
 
-def is_docker_error_reponse(reponse):
-    return 'error' in reponse
+def is_docker_error_response(response):
+    return 'error' in response or (
+            'message' in response and
+            re.search(r'\berror\b', response['message'], flags=re.IGNORECASE)
+    )
 
 class ScopedLogFile:
     def __init__(self, file, append=False):
@@ -1353,11 +1397,12 @@ def get_implicit_build_args():
     --build-arg USER_NAME=${USER}
     :return:
     """
-    build_args = {
-        "USER_ID": get_user_id(),
-        "GROUP_ID": get_user_id(),
-        "USER_NAME": get_username(),
-    }
+    # build_args = {
+    #     "USER_ID": get_user_id(),
+    #     "GROUP_ID": get_user_id(),
+    #     "USER_NAME": get_username(),
+    # }
+    build_args = {}
     for k in build_args.keys():
         # Otherwise, when we do dock_cli.build we get:
         #     docker.errors.APIError: 400 Client Error: Bad Request ("error reading build args: json: cannot unmarshal number into Go value of type string")
@@ -1409,38 +1454,51 @@ class DockerError(Exception):
     :param repo_tag
         Identifier for build
     """
-    def __init__(self, path, repo_tag, response):
+    def __init__(self, path, repo_tag, response, cmd=None):
         self.path = path
         self.repo_tag = repo_tag
         self.response = response
+        self.cmd = cmd
         message = self.construct_message()
         super().__init__(message)
 
     def construct_message(self):
+        # This format of response is very undocumented...
+        # Print it out in case we miss something.
         pprint.pprint({
             'response': self.response,
         })
 
-        # code = self.response['errorDetail']['code']
-        # err = self.response['errorDetail']['message']
         lines = []
         lines.append(
             "Failed to build dockerfile {path} with repo_tag={repo_tag}.".format(
                 path=_a(self.path),
                 repo_tag=self.repo_tag))
-        if 'code' in self.response['errorDetail']:
-            lines.append("    Exit status: {code}".format(
-                code=self.response['errorDetail']['code'],
-            ))
-
-        lines.append("    Error message:")
-        lines.append(
-            "{err}".format(
-                err=textwrap.indent(
-                    self.response['errorDetail']['message'],
-                    prefix="    "*2),
+        if 'errorDetail' in self.response and 'code' in self.response['errorDetail']:
+            lines.append(
+                ind("Exit status: {code}".format(
+                    code=self.response['errorDetail']['code'],
+                ), indent=1)
             )
-        )
+
+        if self.cmd is not None:
+            lines.append(get_cmd_string(self.cmd))
+
+        lines.append("> Failed with:")
+
+        if 'message' in self.response:
+            lines.append(ind(self.response['message'], indent=1))
+
+        if 'errorDetail' in self.response and 'message' in self.response['errorDetail']:
+            # lines.append("    Error message:")
+            lines.append(
+                "{err}".format(
+                    err=ind(
+                        self.response['errorDetail']['message'],
+                        indent=2),
+                )
+            )
+
         message = ''.join("{line}\n".format(line=line) for line in lines)
         return message
 
@@ -1511,6 +1569,19 @@ def get_docker_cmdline(docker_command='run', extra_argv=[], **kwargs):
             for value in kwargs[from_name]:
                 add_opt_value(opt_name, value)
 
+    def add_opt_dict(opt_name, from_name):
+        if from_name in kwargs:
+            for key, value in kwargs[from_name].items():
+                opt_value = "{key}={value}".format(key=key, value=value)
+                add_opt_value(opt_name, opt_value)
+
+    # if docker_command == 'build':
+    add_opt_dict('build-arg', 'buildargs')
+
+    add_opt_from('file', 'dockerfile')
+
+    add_opt_from('tag', 'tag')
+
     add_opt_list('group-add', 'group_add')
 
     add_opt_list('device', 'devices')
@@ -1550,6 +1621,9 @@ def get_docker_cmdline(docker_command='run', extra_argv=[], **kwargs):
 
         add_pos_opt_value(tag)
 
+    if docker_command == 'build' and 'path' in kwargs:
+        add_pos_opt_value(kwargs['path'])
+
     return cmd
 
 class StackYMLGenerator:
@@ -1574,6 +1648,12 @@ class StackYMLGenerator:
             # Postgres instance.
             #
             # iml uses this for storing/analyzing trace data.
+            #
+            # NOTE: 
+            # - To connect to postgres from inside the container:
+            #   $ psql -h db
+            # - To connect to postgres from host (OUTSIDE container):
+            #   $ psql -h localhost
             db:
                 image: postgres
                 restart: always
@@ -1702,9 +1782,8 @@ class StackYMLGenerator:
         return textwrap.indent('\n'.join(yml_lines), indent*self.indent_str).lstrip()
 
     def _yml_dict_as_list(self, values : dict, sep, indent):
-        values = ["{var}{sep}{value}".format(var=var, value=values[var], sep=sep)
-                  for var in sorted(values.keys())]
-        return self._yml_list(values, indent)
+        envs = dict_as_env_list(values, sep)
+        return self._yml_list(envs, indent)
 
     def volume_list(self, volumes : dict, indent):
         return self._yml_dict_as_list(volumes, sep=':', indent=indent)
@@ -1712,10 +1791,18 @@ class StackYMLGenerator:
     def env_list(self, envs : dict, indent):
         return self._yml_dict_as_list(envs, sep='=', indent=indent)
 
+def dict_as_env_list(values : dict, sep='='):
+    envs = ["{var}{sep}{value}".format(var=var, value=values[var], sep=sep)
+            for var in sorted(values.keys())]
+    return envs
+
 def get_cmd_string(cmd):
     return ("> CMD:\n"
             "  $ {cmd}").format(
         cmd=' '.join(cmd))
+
+def ind(string, indent=1):
+    textwrap.indent(string, prefix='  '*indent)
 
 if __name__ == '__main__':
     main()

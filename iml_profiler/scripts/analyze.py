@@ -18,6 +18,7 @@ from iml_profiler.profiler import glbl
 from iml_profiler.profiler import glbl
 def main():
     glbl.setup_logging()
+
     parser = argparse.ArgumentParser(
         textwrap.dedent("""\
         Process trace-files collected from running an ML script with the IML profiler.

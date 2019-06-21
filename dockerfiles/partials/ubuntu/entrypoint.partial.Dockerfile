@@ -1,0 +1,1 @@
+ENTRYPOINT [ "/bin/bash" ]

@@ -245,7 +245,7 @@ class _ProfileContextManager:
 
         # SOLUTION: delay the dump in a DumpThunk.
         # add_dump_thunk(session, pctx)
-        iml_profiler.api.prof._dump_tfprof(session)
+        iml_profiler.api.prof._dump_tfprof(session, debug=iml_profiler.api.prof.debug)
 
         del self._session_to_context[session]
 
@@ -599,7 +599,7 @@ class _MaybeDumperTfprofContextHook(iml_profiler.profiler.session.SessionRunHook
             session._iml_num_runs_traced = 0
 
         if session._iml_num_runs_traced >= iml_profiler.api.prof.num_calls:
-            iml_profiler.api.prof._dump_tfprof(session)
+            iml_profiler.api.prof._dump_tfprof(session, debug=iml_profiler.api.prof.debug)
             session._iml_num_runs_traced = 0
         else:
             session._iml_num_runs_traced += 1
@@ -1241,8 +1241,8 @@ class Profiler:
         ):
             return
 
-        # if DEBUG:
-        #     logging.info("> set_operation(op={op})".format(op=bench_name))
+        if DEBUG:
+            logging.info("> set_operation(op={op})".format(op=bench_name))
 
         self._push_operation(bench_name)
         # if len(self._op_stack) == 1:
@@ -1354,10 +1354,12 @@ class Profiler:
         if self.disable:
             return
 
-        # if DEBUG:
-        #     logging.info('> end_operation({op}), tracing time = {sec}'.format(
-        #         sec=self._total_trace_time_sec(),
-        #         op=bench_name))
+        if DEBUG:
+            should_finish = self.should_finish()
+            logging.info('> end_operation({op}), tracing time = {sec}, should_finish = {should_finish}'.format(
+                sec=self._total_trace_time_sec(),
+                should_finish=should_finish,
+                op=bench_name))
 
 
         # if self.calls_traced > self.num_calls and len(self._op_stack) > 0 and self.calls_traced % WARN_EVERY_CALL_MODULO == 0:
@@ -1527,7 +1529,7 @@ class Profiler:
         #   self.dump_tfprof(sess)
         logging.info("> IML: Schedule any remaining traces to be dumped.")
         for session in iml_profiler.profiler.session.ACTIVE_SESSIONS:
-            self._dump_tfprof(session, debug=True)
+            self._dump_tfprof(session, debug=self.debug)
         # At the very least, make sure to dump the [PROC:<process_name>] we recorded above.
         # Q: How frequently should we dump pyprof data?
         # A: We'd like to keep it under a file-size limit...but computing exact proto-size isn't practical.

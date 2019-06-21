@@ -122,6 +122,30 @@ _check_env() {
 
 }
 
+_check_tensorflow() {
+    if ! py_module_installed "tensorflow"; then
+        echo "ERROR: doesn't look like you installed tensorflow with IML modifications yet."
+        echo "  You have two options:"
+        echo "    (1) Install a pre-compiled TensorFlow with IML modifications from https://github.com/UofT-EcoSystem/iml/releases"
+        echo "    (2) Compile it yourself, then run install_tensorflow.sh"
+        echo "  For details, see the wiki: "
+        echo "    https://github.com/UofT-EcoSystem/iml/wiki/Installing-tensorflow-with-IML-modifications"
+        exit 1
+    fi
+}
+
+_check_iml() {
+    if ! py_module_installed "iml_profiler"; then
+        install_iml.sh
+        if ! py_module_installed "iml_profiler"; then
+            echo "ERROR: tried to install iml_profiler but failed:"
+            echo "> CMD:"
+            echo "  $ install_iml.sh"
+            exit 1
+        fi
+    fi
+}
+
 _check_env_var() {
     local varname="$1"
     local description="$2"

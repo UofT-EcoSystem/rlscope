@@ -4,7 +4,9 @@
 # NOTE: It's up to you to call ./configure from inside the TENSORFLOW_DIR of the container!
 # This script is just meant for doing iterative rebuilds (i.e. "make")
 set -e
-set -x
+if [ "$DEBUG" == 'yes' ]; then
+    set -x
+fi
 SH_DIR="$(readlink -f "$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )")"
 cd "$SH_DIR"
 
@@ -14,8 +16,14 @@ _check_env
 
 _check_BASELINES_DIR
 
+_check_tensorflow
+_check_iml
+
 # mpi4py
-sudo apt-get -y install libopenmpi-dev
+# Install OpenMPI from source.
+# For details, see https://github.com/UofT-EcoSystem/iml/wiki/Issues-and-TODOs
+#
+# sudo apt-get -y install libopenmpi-dev
 
 # TODO: remove this dependency (I caused it...)
 pip install 'cymem==2.0.2' 'Cython==0.29.7'

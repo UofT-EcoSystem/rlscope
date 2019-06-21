@@ -19,7 +19,22 @@ export TERM=xterm-256color
 alias grep="grep --color=auto"
 alias ls="ls --color=auto"
 
+export _IML_DEBUG_BASHRC=no
+#export _IML_DEBUG_BASHRC=yes
+
+_debug_bashrc() {
+    [ "$_IML_DEBUG_BASHRC" == "yes" ]
+}
+
+_is_iml_user() {
+    [ "$USER" == "$IML_USER" ]
+}
+
 iml-banner() {
+    if ! _is_iml_user; then
+        # Initial root-login; don't show banner.
+        return
+    fi
 echo -e "\e[1;31m"
 figlet "IML toolkit" && figlet ">> dev env"
 echo -e "\e[0;33m"
@@ -49,14 +64,241 @@ iml-install() {
     # Install (precompiled) tensorflow.patched, iml-drill, and iml.
     set -e
     set -x
+
     install_tensorflow.sh
     install_iml.sh
 )
 }
 
-# Shows when running the container as-is.
-iml-banner
+CHECK_ENV_QUIET=
+_check_env_var() {
+    local varname="$1"
+    local description="$2"
+    shift 2
 
-if [ "$IML_DIR" != "" ]; then
-    export PATH="$IML_DIR/dockerfiles/sh:$PATH"
-fi
+    eval "local varvalue=\"\$${varname}\""
+
+    if [ "$varvalue" = "" ]; then
+        if [ "$CHECK_ENV_QUIET" != 'yes' ]; then
+            echo "ERROR: environment variable $varname should be set to: $description"
+            echo "showing environment variables:"
+            echo "$ env"
+            env
+        fi
+        return 1
+    fi
+}
+
+_as_iml_user() {
+    # This function will run as $IML_USER on login
+    # (after $IML_USER is all set up).
+    #
+    # If you want to run commands after you login to the container, do it here.
+    if _debug_bashrc; then
+        echo "> Environment variables for $IML_USER"
+        env
+    fi
+
+    if [ -d "$HOME/venv/bin" ]; then
+        export PATH="$HOME/venv/bin:$PATH"
+    fi
+
+    if [ -d "$IML_DIR" ]; then
+        export PATH="$IML_DIR/dockerfiles/sh:$PATH"
+    fi
+
+    # Shows when running the container as-is.
+    iml-banner
+}
+
+_login_iml_user() {
+    (
+    set -e
+
+    if ! _debug_bashrc; then
+        CHECK_ENV_QUIET=yes
+    fi
+    _check_env_var IML_USER "host user name"
+    _check_env_var IML_GROUP_ID "host group-id"
+    _check_env_var IML_USER_ID "host user-id"
+    CHECK_ENV_QUIET=
+    )
+    local ret=$?
+    if [ "$ret" != 0 ]; then
+        # Don't exit...maybe they did "sudo su" to be root
+        return $ret
+    fi
+
+    if [ "$IML_LOGGED_IN" == 'yes' ]; then
+        # We are executing as $IML_USER after having moved stuff from /root to /home/$IML_USER.
+        # Set some env variables correctly then give the user the shell prompt.
+        if _debug_bashrc; then
+            echo "> Saw IML_LOGGED_IN=$IML_LOGGED_IN"
+        fi
+#        set -x
+        export USER=$IML_USER
+        export MAIL=/var/mail/$IML_USER
+        export HOME=/home/$IML_USER
+        export LOGNAME=$IML_USER
+        (
+        set -e
+        _is_iml_user
+        )
+        _as_iml_user
+        return
+    fi
+
+    # We are executing as root; we have JUST logged into the container.
+    # Move/copy/link stuff that was installed in /root into /home/$IML_USER.
+
+
+#    if _is_iml_user; then
+#        return
+#    fi
+
+    if ! id -u $IML_USER > /dev/null 2>&1; then
+        (
+        set -e
+        _setup_iml_user
+        )
+        local ret=$?
+        if [ "$ret" != 0 ]; then
+            exit $ret
+        fi
+    fi
+
+    # Login as the host user.
+    export IML_LOGGED_IN='yes'
+
+    cd /home/$IML_USER
+    if _debug_bashrc; then
+        echo "> Environment variables before switch"
+        env
+        echo "> Switching to host user: $IML_USER"
+    fi
+
+    _do su -p -l $IML_USER
+    local ret=$?
+    if _debug_bashrc; then
+        echo "> Exiting from 'su -l $IML_USER' with ret=$ret"
+    fi
+    exit $ret
+}
+
+_setup_iml_user() {
+    (
+    set -e
+
+    echo "> Setting up user $IML_USER"
+    addgroup $IML_USER --gid $IML_GROUP_ID
+    local home_dir_exists="$(_yes_no test -d /home/$IML_USER )"
+    adduser $IML_USER --disabled-password --uid $IML_USER_ID --gid $IML_GROUP_ID --gecos ""
+    usermod -a -G sudo $IML_USER
+    # No password required for login
+    passwd -d $IML_USER
+
+    _do chown $IML_USER:$IML_USER /home/$IML_USER
+
+    if [ "$home_dir_exists" == "yes" ]; then
+        # A volume is mounted that intersects with /home/$IML_USER.
+        # So, adduser will say that the home directory already exists and
+        # skip doing "cp /etc/skel/* /home/$IML_USER".
+        # In that case, do it ourselves.
+        _install_files /etc/skel /home/$IML_USER cp
+    fi
+
+    INSTALL_FILES_SKIP_REGEX='/(.bashrc|.profile)$'
+    _install_files /root /home/$IML_USER ln
+    INSTALL_FILES_SKIP_REGEX=
+
+    )
+    local ret=$?
+    if [ "$ret" != 0 ]; then
+        exit $ret
+    fi
+    echo "> Success: setup user $IML_USER"
+}
+
+_do() {
+    echo "$ $@"
+    "$@"
+}
+
+INSTALL_FILES_SKIP_REGEX=
+_install_files() {
+    (
+    set -e
+
+    local src_dir="$1"
+    local dst_dir="$2"
+    local mode="$3"
+    shift 2
+
+    # Include hidden files
+    shopt -s dotglob nullglob
+
+    should_skip() {
+        local path="$1"
+        shift 1
+
+        [ "$INSTALL_FILES_SKIP_REGEX" != "" ] && \
+            grep --quiet --perl-regexp "$INSTALL_FILES_SKIP_REGEX" <<< "$path"
+    }
+
+    # Move everything in $src_dir/* into /home/$IML_USER.
+    # If something already exists because of a mounted volume (e.g. /home/$IML_USER/bin), warn the user.
+    for f in $src_dir/*; do
+        if should_skip "$f"; then
+            continue
+        fi
+        local dst="/home/$IML_USER/$(basename "$f")"
+        if [ -e "$dst" ]; then
+            echo "> WARNING: skipped 'mv $f $dst' since $dst already exists in a mounted volume; please unmount that volume"
+            continue
+        fi
+
+        if _debug_bashrc; then
+            du -sh "$f"
+        fi
+
+        # chown ...
+        #   Change permissions of anything create in $src_dir directory during "docker build" to match host user-id
+        #   (e.g. python virtualenv /root/venv)
+        #
+        # [cp|mv] --no-clobber ...
+        #   Make extra sure we don't clobber anything in our host's file-system.
+        if [ "$mode" == 'mv' ]; then
+            _do mv --no-clobber "$f" "$dst"
+            chown -R $IML_USER:$IML_USER "$dst"
+        elif [ "$mode" == 'cp' ]; then
+            _do cp --no-clobber "$f" "$dst"
+            chown -R $IML_USER:$IML_USER "$dst"
+        elif [ "$mode" == 'ln' ]; then
+            _do ln -s -T "$f" "$dst"
+            # NOTE: We assume the Dockerfile has already set permissions for us in advance:
+            # $ chmod -R ugo+rwx /root
+            # Don't do this at container start...it's real slow for /root/venv.
+            # chown -R $IML_USER:$IML_USER "$f"
+            # chmod go-rwx "$f"
+        else
+            echo "> Internal error: unknown mode '$mode' for _install_files in bashrc"
+            exit 1
+        fi
+        # chown -R $IML_USER:$IML_USER "$dst"
+
+    done
+    )
+}
+
+_yes_no() {
+    if "$@"; then
+        echo 'yes'
+    else
+        echo 'no'
+    fi
+}
+
+_login_iml_user
+
+# NOTE: If you want to run commands after you login to the container,
+# add it to the bottom of the _as_iml_user function, not here.

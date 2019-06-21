@@ -148,8 +148,8 @@ slice_sets:
           - ubuntu/nvidia_nccl
           - ubuntu/nvidia_rtx_2070_env
           - ubuntu/add_user
-          - ubuntu/as_user
           - ubuntu/pip_download_tf_v1.13.1
+          - ubuntu/openmpi_from_src
           - ubuntu/virtualenv
           - ubuntu/pip_dependencies
           - iml/env
@@ -157,7 +157,7 @@ slice_sets:
           - iml/pip_dependencies
           - iml/user_custom
           - shell
-          - ubuntu/cd_home
+          - ubuntu/entrypoint
           test_runtime: nvidia
           args:
           # NOTE: must be provided at assembler.py command line
@@ -189,8 +189,6 @@ slice_sets:
           - ubuntu/rocm_tf_dependencies
           - ubuntu/add_user
           - shell
-          - iml/install_sh
-          - ubuntu/as_user
           - ubuntu/virtualenv
           - ubuntu/pip_dependencies
           - ubuntu/rocm_path
@@ -217,8 +215,6 @@ slice_sets:
       - ubuntu/rocm_tf_dependencies
       - ubuntu/add_user
       - shell
-      - iml/install_sh
-      - ubuntu/as_user
       - ubuntu/virtualenv
       - ubuntu/pip_dependencies
       - ubuntu/rocm_path
@@ -248,8 +244,6 @@ slice_sets:
       - ubuntu/amd_rocm_env
 #      - ubuntu/add_user
       - shell
-#      - iml/install_sh
-#      - ubuntu/as_user
 #      - ubuntu/virtualenv
       - ubuntu/rocm_path
       test_runtime: rocm

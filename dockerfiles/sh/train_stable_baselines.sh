@@ -7,7 +7,9 @@
 #
 # NOTE: This should run inside a docker container.
 set -e
-set -x
+if [ "$DEBUG" == 'yes' ]; then
+    set -x
+fi
 SH_DIR="$(readlink -f "$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )")"
 cd "$SH_DIR"
 
@@ -17,6 +19,9 @@ _check_env
 
 _check_STABLE_BASELINES_DIR
 _check_RL_BASELINES_ZOO_DIR
+
+_check_tensorflow
+_check_iml
 
 setup_display() {
     local display="$1"
@@ -77,7 +82,7 @@ cd $RL_BASELINES_ZOO_DIR
 # For quick debugging:
 #    --iml-trace-time-sec $((40))
 
-python $RL_BASELINES_ZOO_DIR/train.py \
+_do python $RL_BASELINES_ZOO_DIR/train.py \
     --algo $ALGO \
     --env $ENV_ID \
     --log-folder $OUTPUT_DIR \

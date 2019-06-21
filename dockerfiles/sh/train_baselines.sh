@@ -4,7 +4,9 @@
 # NOTE: It's up to you to call ./configure from inside the TENSORFLOW_DIR of the container!
 # This script is just meant for doing iterative rebuilds (i.e. "make")
 set -e
-set -x
+if [ "$DEBUG" == 'yes' ]; then
+    set -x
+fi
 SH_DIR="$(readlink -f "$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )")"
 cd "$SH_DIR"
 
@@ -13,6 +15,9 @@ source $SH_DIR/make_utils.sh
 _check_env
 
 _check_BASELINES_DIR
+
+_check_tensorflow
+_check_iml
 
 py_maybe_install 'baselines' install_baselines.sh
 
@@ -23,7 +28,7 @@ if [ "$OUTPUT_DIR" == '' ]; then
 fi
 mkdir -p $OUTPUT_DIR
 
-python $BASELINES_DIR/baselines/deepq/experiments/run_atari.py \
+_do python $BASELINES_DIR/baselines/deepq/experiments/run_atari.py \
     --env PongNoFrameskip-v4 \
     --iml-start-measuring-call 1 \
     --checkpoint-path $OUTPUT_DIR \

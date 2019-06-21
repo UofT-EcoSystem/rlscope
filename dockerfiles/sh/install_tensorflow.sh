@@ -2,7 +2,9 @@
 # NOTE: This should run OUTSIDE a docker container.
 # This script is used to build AND start the docker container.
 set -e
-set -x
+if [ "$DEBUG" == 'yes' ]; then
+    set -x
+fi
 SH_DIR="$(readlink -f "$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )")"
 cd "$SH_DIR"
 
