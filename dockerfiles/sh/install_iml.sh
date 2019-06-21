@@ -16,19 +16,19 @@ _check_env
 
 if [ "${IML_DIR}" = "" ]; then
     # Install directly from git repo.
-    pip install git+https://github.com/UofT-EcoSystem/iml.git
+    _do pip install git+https://github.com/UofT-EcoSystem/iml.git
 else
     # Install from local checkout of repo.
-    cd "${IML_DIR}"
-    python setup.py develop
+    _do cd "${IML_DIR}"
+    _do python setup.py develop
 fi
 
 if [ "${IML_DRILL_DIR}" = "" ]; then
     # Install directly from git repo.
-    pip install git+https://github.com/jagleeso/iml-drill.git
+    _do pip install git+https://github.com/jagleeso/iml-drill.git
 else
     # Install from local checkout of repo.
-    cd "${IML_DRILL_DIR}"
-    python setup.py develop
+    _do cd "${IML_DRILL_DIR}"
+    _do python setup.py develop
 fi
 

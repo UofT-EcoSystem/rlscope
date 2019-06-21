@@ -30,12 +30,12 @@ pip install 'cymem==2.0.2' 'Cython==0.29.7'
 
 if [ "${BASELINES_DIR}" = "" ]; then
     # Install directly from git repo.
-    pip install git+https://github.com/jagleeso/baselines.git
+    _do pip install git+https://github.com/jagleeso/baselines.git
 else
     # Install from local checkout of repo.
-    cd "${BASELINES_DIR}"
-    python setup.py develop
+    _do cd "${BASELINES_DIR}"
+    _do python setup.py develop
     # NOTE: setup.py will install mujoco_py; however we DON'T want mujoco_py installed since
     # without the actual libmujoco.so + license installed, baselines will complain it's not setup.
-    pip uninstall -y mujoco_py
+    _do pip uninstall -y mujoco_py
 fi

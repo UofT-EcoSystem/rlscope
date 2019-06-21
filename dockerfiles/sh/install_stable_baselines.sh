@@ -53,9 +53,9 @@ pip install \
 
 if [ "${STABLE_BASELINES_DIR}" = "" ]; then
     # Install directly from git repo.
-    pip install git+https://github.com/jagleeso/stable-baselines.git@iml
+    _do pip install git+https://github.com/jagleeso/stable-baselines.git@iml
 else
     # Install from local checkout of repo.
-    cd "${STABLE_BASELINES_DIR}"
-    python setup.py develop
+    _do cd "${STABLE_BASELINES_DIR}"
+    _do python setup.py develop
 fi

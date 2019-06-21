@@ -24,8 +24,8 @@ fi
 #exit 0
 
 # Uninstall existing tensorflow install if there is on.
-pip uninstall -y tensorflow || true
+_do pip uninstall -y tensorflow || true
 
 # Q: Should we use a container-local directory instead...?
-cd $install_dir
-python setup.py develop
+_do cd $install_dir
+_do python setup.py develop
