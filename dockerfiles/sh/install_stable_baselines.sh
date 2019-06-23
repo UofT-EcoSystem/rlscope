@@ -38,6 +38,13 @@ sudo apt-get -y install python-dev python3-dev \
                    swig cmake zlib1g-dev ffmpeg \
                    freeglut3-dev xvfb
 
+# As of roughly June 21 2019, "pip install atari-py==0.2.0" has stopped
+# working for python3.5.  Looks like the python3.5 package is no longer
+# present at https://pypi.org/project/atari-py/#files
+#
+# Work-around: install atari-py 0.2.0 straight from github using tag=0.2.0
+pip install git+https://github.com/openai/atari-py.git@0.2.0
+
 # NOTE: we DON'T install stable-baselines from pip;
 #   we want to use our custom stable-baselines repo with IML annotations added ($STABLE_BASELINES_DIR).
 pip install \

@@ -150,6 +150,7 @@ slice_sets:
           - ubuntu/add_user
           - ubuntu/pip_download_tf_v1.13.1
           - ubuntu/openmpi_from_src
+          - ubuntu/nodejs
           - ubuntu/virtualenv
           - ubuntu/pip_dependencies
           - iml/env
