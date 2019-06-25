@@ -121,7 +121,7 @@ _check_env() {
 
 }
 
-_check_tensorflow_build() {
+check_tensorflow_build() {
     # environment variables that should be defined for tensorflow builds.
 
     if [ "$TENSORFLOW_DIR" = "" ] || [ ! -d "$TENSORFLOW_DIR" ]; then

@@ -100,7 +100,8 @@ _as_iml_user() {
     fi
 
     if [ -d "$HOME/venv/bin" ]; then
-        export PATH="$HOME/venv/bin:$PATH"
+#        export PATH="$HOME/venv/bin:$PATH"
+        source $HOME/venv/bin/activate
     fi
 
     if [ -d "$IML_DIR" ]; then

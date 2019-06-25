@@ -151,6 +151,7 @@ slice_sets:
           - ubuntu/pip_download_tf_v1.13.1
           - ubuntu/openmpi_from_src
           - ubuntu/nodejs
+          - ubuntu/python36_from_src
           - ubuntu/virtualenv
           - ubuntu/pip_dependencies
           - iml/env
