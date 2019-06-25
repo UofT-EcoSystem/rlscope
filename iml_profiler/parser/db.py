@@ -1461,7 +1461,7 @@ class CSVInserter:
         os.remove(self.tmp_path)
 
 class TracesPostgresConnection:
-    def __init__(self, db_config_path, db_basename='traces', host=None):
+    def __init__(self, db_config_path, db_basename='traces', host='localhost'):
         self.host = host
         self.rand_suffix_len = 4
         self.db_config_path = db_config_path
@@ -1575,6 +1575,7 @@ class TracesPostgresConnection:
                 user=self.user,
                 host=self.host,
                 isolation_level=None)
+            psycopg2.connect(dbname=db_name, user=self.user, host=self.host, isolation_level=None)
         except psycopg2.OperationalError as e:
             if not re.search(r'database.*does not exist', e.args[0]):
                 raise
@@ -3253,7 +3254,7 @@ def sql_exec_query(cursor, query, params=None, klass=None, debug=False):
     if debug:
         logging.info("> query took {sec} seconds".format(sec=end_t - start_t))
 
-def sql_create_connection(db_path, host=None):
+def sql_create_connection(db_path, host='localhost'):
     if 'IML_POSTGRES_HOST' in os.environ and host is None:
         host = os.environ['IML_POSTGRES_HOST']
     logging.info("Using DB_HOST = {host}".format(host=host))
