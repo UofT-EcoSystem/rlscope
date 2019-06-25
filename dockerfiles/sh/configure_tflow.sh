@@ -12,7 +12,7 @@ cd "$SH_DIR"
 
 source $SH_DIR/make_utils.sh
 
-_check_env
+check_tensorflow_build
 
 cd $TENSORFLOW_DIR
 yes "" | ./configure

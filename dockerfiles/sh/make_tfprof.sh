@@ -10,7 +10,7 @@ cd "$SH_DIR"
 
 source $SH_DIR/make_utils.sh
 
-_check_env
+check_tensorflow_build
 
 #BAZEL_BUILD_FLAGS=(--compilation_mode=dbg)
 _set_bazel_dbg_build_flags

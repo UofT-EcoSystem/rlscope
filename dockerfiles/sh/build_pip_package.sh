@@ -15,7 +15,7 @@ cd "$SH_DIR"
 
 source $SH_DIR/make_utils.sh
 
-_check_env
+check_tensorflow_build
 
 WHL_DIR=$TENSORFLOW_DIR/tmp/pip
 mkdir -p $WHL_DIR

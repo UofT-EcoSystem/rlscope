@@ -105,6 +105,25 @@ _check_env() {
     #
     # TODO: these should be optional (i.e. if TENSORFLOW_DIR isn't provided, install it from a fresh git repo checkout).
     #
+
+    if [ "$IML_DIR" = "" ] || [ ! -d "$IML_DIR" ]; then
+        echo "ERROR: environment variable IML_DIR should be set to: The root directory of the iml_profiler repo checkout."
+        exit 1
+    fi
+
+    if ! which install_iml.sh; then
+        export PATH="$IML_DIR/dockerfiles/sh:$PATH"
+        if ! which install_iml.sh; then
+            echo "ERROR: failed trying to push $IML_DIR/dockerfiles/sh on \$PATH."
+            exit 1
+        fi
+    fi
+
+}
+
+_check_tensorflow_build() {
+    # environment variables that should be defined for tensorflow builds.
+
     if [ "$TENSORFLOW_DIR" = "" ] || [ ! -d "$TENSORFLOW_DIR" ]; then
         echo "ERROR: environment variable TENSORFLOW_DIR should be set to: The root directory of a 'patched' TensorFlow checkout."
         exit 1
@@ -112,11 +131,6 @@ _check_env() {
 
     if [ "$BAZEL_BUILD_DIR" = "" ] || [ ! -d "$BAZEL_BUILD_DIR" ]; then
         echo "ERROR: environment variable TENSORFLOW_DIR should be set to: The local path where we should output bazel objects (overrides $HOME/.cache/bazel)."
-        exit 1
-    fi
-
-    if [ "$IML_DIR" = "" ] || [ ! -d "$IML_DIR" ]; then
-        echo "ERROR: environment variable IML_DIR should be set to: The root directory of the iml_profiler repo checkout."
         exit 1
     fi
 
@@ -189,12 +203,18 @@ _check_RL_BASELINES_ZOO_DIR() {
     _check_env_var RL_BASELINES_ZOO_DIR "$description"
 }
 
+PY_MODULE_INSTALLED_SILENT=no
 py_module_installed() {
     local py_module="$1"
     shift 1
     # Returns 1 if ImportError is thrown.
     # Returns 0 if import succeeds.
-    python -c "import ${py_module}" > /dev/null 2>&1
+    if [ "$PY_MODULE_INSTALLED_SILENT" == 'yes' ]; then
+        python -c "import ${py_module}" > /dev/null 2>&1
+    else
+        echo "> Make sure we can import ${py_module}"
+        _do python -c "import ${py_module}"
+    fi
 }
 
 py_maybe_install() {
