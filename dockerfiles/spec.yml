@@ -154,6 +154,7 @@ slice_sets:
           - ubuntu/python36_from_src
           - ubuntu/virtualenv
           - ubuntu/pip_dependencies
+          - ubuntu/protobuf_from_src
           - iml/env
           - iml/apt_install
           - iml/pip_dependencies
