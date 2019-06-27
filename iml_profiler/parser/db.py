@@ -3254,9 +3254,11 @@ def sql_exec_query(cursor, query, params=None, klass=None, debug=False):
     if debug:
         logging.info("> query took {sec} seconds".format(sec=end_t - start_t))
 
-def sql_create_connection(db_path, host='localhost'):
+def sql_create_connection(db_path, host=None):
     if 'IML_POSTGRES_HOST' in os.environ and host is None:
         host = os.environ['IML_POSTGRES_HOST']
+    else:
+        host = 'localhost'
     logging.info("Using DB_HOST = {host}".format(host=host))
     if py_config.SQL_IMPL == 'psql':
         return TracesPostgresConnection(db_path, host=host)

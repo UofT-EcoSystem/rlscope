@@ -82,7 +82,12 @@ cd $RL_BASELINES_ZOO_DIR
 # For quick debugging:
 #    --iml-trace-time-sec $((40))
 
-_do python $RL_BASELINES_ZOO_DIR/train.py \
+if [ "$DEBUG" == 'yes' ]; then
+    PYTHON=(python -m ipdb)
+else
+    PYTHON=(python)
+fi
+_do "${PYTHON[@]}" $RL_BASELINES_ZOO_DIR/train.py \
     --algo $ALGO \
     --env $ENV_ID \
     --log-folder $OUTPUT_DIR \

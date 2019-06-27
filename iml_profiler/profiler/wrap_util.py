@@ -54,6 +54,9 @@ def unwrap_lib(FuncWrapperKlass, wrap_libname):
 def wrap_module(FuncWrapperKlass, module, wrapper_args,
                 func_regex=None, ignore_func_regex="^_"):
     for name in dir(module):
+        if re.search(ignore_func_regex, name):
+            logging.info("  Skip func={name}".format(name=name))
+            continue
         if not re.search(ignore_func_regex, name) and (
             func_regex is None or re.search(func_regex, name)
         ):

@@ -16,3 +16,8 @@ from iml_profiler.protobuf.pyprof_pb2 import \
 from iml_profiler.protobuf.unit_test_pb2 import \
   IMLUnitTestOnce, \
   IMLUnitTestMultiple
+
+from iml_profiler.profiler.clib_wrap import \
+  wrap_module, unwrap_module, \
+  register_wrap_module, \
+  wrap_entire_module, unwrap_entire_module

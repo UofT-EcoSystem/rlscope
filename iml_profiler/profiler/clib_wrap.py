@@ -1,5 +1,6 @@
 import logging
 import contextlib
+import sys
 import multiprocessing
 import multiprocessing.managers
 
@@ -237,17 +238,23 @@ def set_phase(phase):
     _phase = phase
 
 class CFuncWrapper:
-    def __init__(self, func, category, prefix=DEFAULT_PREFIX):
+    def __init__(self, func, category, prefix=DEFAULT_PREFIX, debug=False):
         # NOTE: to be as compatible as possible with intercepting existing code,
         # we forward setattr/getattr on this object back to the func we are wrapping
         # (e.g. func might be some weird SWIG object).
         super().__setattr__('func', func)
         super().__setattr__('prefix', prefix)
         super().__setattr__('category', category)
+        super().__setattr__('debug', debug)
+
+        name = self.wrapper_name(func.__name__)
+        logging.info("> call.name = {name}".format(name=name))
 
         def call(*args, **kwargs):
             # NOTE: for some reason, if we don't use a local variable here,
             # it will return None!  Bug in python3...?
+            if self.debug:
+                logging.info("call: {name}".format(name=name))
             ret = self.func(*args, **kwargs)
             return ret
 
@@ -256,8 +263,6 @@ class CFuncWrapper:
         # Not sure WHY.
         #
 
-        name = self.wrapper_name(func.__name__)
-        logging.info("> call.name = {name}".format(name=name))
         # c = call.func_code
         # Python3
         c = call.__code__
@@ -434,31 +439,71 @@ class tracing_as:
 # Some pre-written C++ library wrappers.
 #
 
+class WrappedModule:
+    def __init__(self, wrap_module, unwrap_module):
+        self.wrap_module = wrap_module
+        self.unwrap_module = unwrap_module
+
+WRAPPED_MODULES = []
+def register_wrap_module(wrap_module, unwrap_module):
+    if _LIBS_WRAPPED:
+        raise RuntimeError("IML ERROR: Registering module too late; you must call iml.register_wrap_module(...) right after calling iml.add_iml_arguments(...)")
+    WRAPPED_MODULES.append(WrappedModule(wrap_module, unwrap_module))
+
 _LIBS_WRAPPED = False
 def wrap_libs():
     global _LIBS_WRAPPED
     if _LIBS_WRAPPED:
         return
-    wrap_tensorflow()
-    wrap_atari()
+    for wrapped_module in WRAPPED_MODULES:
+        wrapped_module.wrap_module()
     _LIBS_WRAPPED = True
 def unwrap_libs():
     global _LIBS_WRAPPED
     if not _LIBS_WRAPPED:
         return
-    unwrap_tensorflow()
-    unwrap_atari()
+    for wrapped_module in reversed(WRAPPED_MODULES):
+        wrapped_module.unwrap_module()
     _LIBS_WRAPPED = False
 
-def wrap_tensorflow(category=CATEGORY_TF_API):
+SETUP_DONE = False
+def setup(allow_skip=False):
+    global SETUP_DONE
+    if allow_skip and SETUP_DONE:
+        return
+    assert not SETUP_DONE
+
+    register_detected_libs()
+    wrap_libs()
+
+    SETUP_DONE = True
+
+def register_detected_libs():
+    try:
+        import atari_py
+        register_wrap_module(wrap_atari, unwrap_atari)
+    except ImportError:
+        pass
+
+    try:
+        import tensorflow
+        register_wrap_module(wrap_tensorflow, unwrap_tensorflow)
+    except ImportError:
+        pass
+
+def wrap_tensorflow(category=CATEGORY_TF_API, debug=False):
+    logging.info("> IML: Wrapping module=tensorflow call with category={category} annotations".format(
+        category=category,
+    ))
     success = wrap_util.wrap_lib(
         CFuncWrapper,
         import_libname='tensorflow',
         wrap_libname='tensorflow.pywrap_tensorflow',
-        wrapper_args=(category, DEFAULT_PREFIX),
+        wrapper_args=(category, DEFAULT_PREFIX, debug),
         func_regex='^TF_')
     assert success
 def unwrap_tensorflow():
+    logging.info("> IML: Unwrapping module=tensorflow")
     wrap_util.unwrap_lib(CFuncWrapper, 'tensorflow.pywrap_tensorflow')
 
 def wrap_atari(category=CATEGORY_ATARI):
@@ -466,11 +511,7 @@ def wrap_atari(category=CATEGORY_ATARI):
         import atari_py
     except ImportError:
         return
-    func_regex = None
-    wrap_util.wrap_module(
-        CFuncWrapper, atari_py.ale_python_interface.ale_lib,
-        wrapper_args=(category, DEFAULT_PREFIX),
-        func_regex=func_regex)
+    wrap_module(atari_py.ale_python_interface.ale_lib, category)
 def unwrap_atari():
     try:
         import atari_py
@@ -479,3 +520,99 @@ def unwrap_atari():
     wrap_util.unwrap_module(
         CFuncWrapper,
         atari_py.ale_python_interface.ale_lib)
+
+def wrap_module(module, category, debug=False, **kwargs):
+    logging.info("> IML: Wrapping module={mod} call with category={category} annotations".format(
+        mod=module,
+        category=category,
+    ))
+    wrap_util.wrap_module(
+        CFuncWrapper, module,
+        wrapper_args=(category, DEFAULT_PREFIX, debug), **kwargs)
+def unwrap_module(module):
+    logging.info("> IML: Unwrapping module={mod}".format(
+        mod=module))
+    wrap_util.unwrap_module(
+        CFuncWrapper,
+        module)
+
+
+class LibWrapper:
+    """
+    Yet another way of wrapping a python module.
+    Instead modifying the .so module object (wrap_module), we replace the entire py-module object
+    with a wrapper.
+
+    NOTE: Don't use this class directly, use iml.wrap_entire_module instead.
+
+    Details:
+
+    # Say you want to replace the pybullet library, which is a C++ library.
+
+    # This imports pybullet as a shared-library .so file
+    import pybullet
+
+    # LibWrapper is a wrapper-class around the .so file
+    import sys
+    lib_wrapper = LibWrapper(pybullet)
+    # Get rid of original import
+    del sys.modules['pybullet']
+
+    # Replace imported pybullet with wrapper;
+    # when other run "import pybullet", the wrapper will be imported.
+    sys.modules['pybullet'] = lib_wrapper
+
+    ...
+    import pybullet
+    # Accessing some_func will return a CFuncWrapper around the original pybullet.some_func.
+    pybullet.some_func()
+    """
+    def __init__(self, lib, category, debug=False, prefix=DEFAULT_PREFIX):
+        self.lib = lib
+        self.category = category
+        self.prefix = prefix
+        self.debug = debug
+
+    def __getattr__(self, name):
+        """
+        __getattr__ gets called is LibWrapper.name didn't exist.
+        In that case, they're probably trying to call a function from the .so lib (self.lib).
+        We wrap the function with CFuncWrapper(lib[name]), and set it as:
+          LibWrapper[name] = CFuncWrapper(lib[name])
+        Subsequent calls to lib[name] WON'T come through here (since LibWrapper[name] is set).
+
+        :param name:
+          Name of a .so function they're trying to call (probably, could be constant though).
+        :return:
+        """
+        func = getattr(self.lib, name)
+        if not callable(func):
+            return func
+
+        if self.debug:
+            logging.info("Wrap: {name}".format(name=name))
+        func_wrapper = CFuncWrapper(func, self.category, self.prefix, self.debug)
+        setattr(self, name, func_wrapper)
+        return func_wrapper
+
+def wrap_entire_module(import_libname, category, debug=False, **kwargs):
+    logging.info("> IML: Wrapping module={mod} call with category={category} annotations".format(
+        mod=import_libname,
+        category=category,
+    ))
+    exec("import {import_lib}".format(import_lib=import_libname))
+    wrap_libname = import_libname
+    lib = eval("{wrap_lib}".format(wrap_lib=wrap_libname))
+    assert lib is not None
+    if import_libname in sys.modules:
+        del sys.modules[import_libname]
+    lib_wrapper = LibWrapper(lib, category, debug, **kwargs)
+    # "import pybullet" will now return LibWrapper(pybullet)
+    sys.modules[import_libname] = lib_wrapper
+def unwrap_entire_module(import_libname):
+    if import_libname not in sys.modules:
+        return
+    logging.info("> IML: Unwrapping module={mod}".format(
+        mod=import_libname))
+    lib_wrapper = sys.modules[import_libname]
+    sys.modules[import_libname] = lib_wrapper.lib

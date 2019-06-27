@@ -59,7 +59,8 @@ import iml_profiler.profiler.session
 
 from iml_profiler import py_config
 
-DEBUG = tensorflow_profile_context.DEBUG
+DEBUG = False
+# DEBUG = tensorflow_profile_context.DEBUG
 # DEBUG_OP_STACK = True
 DEBUG_OP_STACK = False
 
@@ -98,6 +99,7 @@ def modify_tensorflow():
     iml_profiler.profiler.session.setup()
     iml_profiler.profiler.estimator.setup()
     iml_profiler.profiler.tensorflow_profile_context.setup()
+    clib_wrap.setup()
 
     # from tensorflow.python.profiler import profile_context
     # profile_context.MAX_TRACED_STEPS = 99999999
@@ -746,6 +748,10 @@ class Profiler:
         # TODO: bind process to a different core to avoid interference?
         # self.bg_dumper = ProcessPoolExecutor(max_workers=1)
         self.debug = get_argval('debug', debug, False)
+        if self.debug:
+            global DEBUG
+            tensorflow_profile_context.DEBUG = self.debug
+            DEBUG = self.debug
         self.bg_dumper = ForkedProcessPool(name="bg_dumper", debug=self.debug)
 
         self._op_stack = []
@@ -1306,7 +1312,7 @@ class Profiler:
         if self._pyprof_enabled:
             return
         self._init_trace_time()
-        clib_wrap.wrap_libs()
+        # clib_wrap.wrap_libs()
         # if self.step_start_tracing is None:
         #     self.step_start_tracing = self.steps
         clib_wrap.enable_tracing()
@@ -1562,6 +1568,10 @@ class Profiler:
         c_api_util.await_trace_data_dumps()
 
         logging.info("> IML: Done")
+
+        # Prevent weird bugs from happening at exit, like exceptions thrown during __del__ functions.
+        clib_wrap.unwrap_libs()
+
         if should_exit:
             logging.info("> IML: Exiting training script early")
             sys.exit(0)
