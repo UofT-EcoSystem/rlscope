@@ -61,6 +61,9 @@ def main():
     extra_argv = [
         '--module', 'iml_profiler.parser.tasks',
         '--local-scheduler',
+        # Default log-level from luigi is DEBUG which is too noisy.
+        # Make the default level INFO instead.
+        '--log-level', 'INFO',
     ]
     luigi_argv.extend(extra_argv)
     if args.task:
