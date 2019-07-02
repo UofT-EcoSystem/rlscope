@@ -9,6 +9,7 @@ import platform
 import cpuinfo
 import concurrent.futures
 import sys
+import numpy as np
 
 from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, basename as _b
 
@@ -213,6 +214,7 @@ def dump_machine_util(directory, trace_id, machine_util, debug):
     """
     NOTE: Run in a separate thread/process; should NOT perform state modifications.
     """
+    # Q: Do both windows and linux multiprocessing.Process inherit CPU affinity...?
     if type(machine_util) != MachineUtilization:
         machine_util_str = machine_util
         machine_util = MachineUtilization()
@@ -270,6 +272,11 @@ def sample_cpu_utilization():
     if we choose to do that in the future.
     """
     cpu_util = psutil.cpu_percent()/100.
+    # cpu_utils = [util/100. for util in psutil.cpu_percent(percpu=True)]
+    # runnable_cpus = set(get_runnable_cpus())
+    # runnable_utils = [util for cpu, util in enumerate(cpu_utils) if cpu in runnable_cpus]
+    # # Q: Should we only collect utilization of the CPUs the process is assigned to?
+    # cpu_util = np.mean(runnable_utils)
     epoch_time_usec = now_us()
     device_name = CPU_INFO['brand']
     return {
@@ -417,6 +424,13 @@ def main():
         sys.exit(1)
 
     os.makedirs(args.iml_directory, exist_ok=True)
+
+    # proc = psutil.Process(pid=os.getpid())
+    # dump_cpus = get_dump_cpus()
+    # proc.cpu_affinity(dump_cpus)
+    # logging.info("> Set CPU affinity of iml-util-sampler to: {cpus}".format(
+    #     cpus=dump_cpus,
+    # ))
 
     if args.measure_samples_per_sec:
         measure_samples_per_sec()

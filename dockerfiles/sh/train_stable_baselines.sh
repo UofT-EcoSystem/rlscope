@@ -83,15 +83,23 @@ cd $RL_BASELINES_ZOO_DIR
 #    --iml-trace-time-sec $((40))
 
 if [ "$DEBUG" == 'yes' ]; then
-    PYTHON=(python -m ipdb)
+    IML_TRACE_TIME_SEC=$((40))
 else
-    PYTHON=(python)
+    IML_TRACE_TIME_SEC=$((2*60))
 fi
+
+#if [ "$DEBUG" == 'yes' ]; then
+#    PYTHON=(python -m ipdb)
+#else
+#    PYTHON=(python)
+#fi
+PYTHON=(python)
+
 _do "${PYTHON[@]}" $RL_BASELINES_ZOO_DIR/train.py \
     --algo $ALGO \
     --env $ENV_ID \
     --log-folder $OUTPUT_DIR \
     --log-interval 1 \
     --iml-start-measuring-call 1 \
-    --iml-trace-time-sec $((2*60)) \
+    --iml-trace-time-sec $IML_TRACE_TIME_SEC \
     "$@"

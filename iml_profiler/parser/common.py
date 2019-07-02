@@ -1,5 +1,6 @@
 import logging
 import re
+import psutil
 import traceback
 import decimal
 import numpy as np
@@ -1643,6 +1644,35 @@ def pyprof_func_std_string(func_tuple): # match what old profile produced
 
 def as_type(value, klass):
     return klass(value)
+
+def num_dump_cpus():
+    """
+    To minimize interference from profiling,
+    reserve the last num_dump_cores() cpus for doing profiling operations
+    (i.e. dumping data from DRAM to disk).
+
+    Current huuristic:
+    We aim to use <= 1/8-th of the CPU-cores
+
+    NOTE: we should probably consider physical cores, not logical ones.
+    """
+    num_cpus = psutil.cpu_count()
+    if num_cpus <= 8:
+        return 1
+    if num_cpus <= 16:
+        return 2
+    # if num_cpus <= 32:
+    return 4
+
+def get_dump_cpus():
+    num_cpus = psutil.cpu_count()
+    dump_cpus = num_dump_cpus()
+    return list(range(num_cpus - dump_cpus, num_cpus))
+
+def get_runnable_cpus():
+    num_cpus = psutil.cpu_count()
+    dump_cpus = num_dump_cpus()
+    return list(range(0, num_cpus - dump_cpus))
 
 def js_friendly(obj):
     """

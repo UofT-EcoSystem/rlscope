@@ -309,10 +309,11 @@ class ForkedProcessPool:
     """
     WAIT_WORKERS_TIMEOUT_SEC = 0.01
     UNLIMITED = 0
-    def __init__(self, name=None, max_workers=UNLIMITED, debug=False):
+    def __init__(self, name=None, max_workers=UNLIMITED, debug=False, cpu_affinity=None):
         self.name = name
         self.process = None
         self.max_workers = max_workers
+        self.cpu_affinity = cpu_affinity
         self.active_workers = []
         self.debug = debug
         # self.inactive_workers = []
@@ -349,6 +350,12 @@ class ForkedProcessPool:
             return fn(*args, **kwargs)
         self._wait_for_workers()
         # proc = multiprocessing.Process(target=fn, name=name, args=args, kwargs=kwargs)
+        # def fn_wrapper(*args, **kwargs):
+        #     if self.cpu_affinity is not None:
+        #         proc = psutil.Process(pid=os.getpid())
+        #         proc.cpu_affinity(self.cpu_affinity)
+        #     return fn(*args, **kwargs)
+        # proc = MyProcess(target=fn_wrapper, name=name, args=args, kwargs=kwargs)
         proc = MyProcess(target=fn, name=name, args=args, kwargs=kwargs)
         proc.start()
         if self.debug:
@@ -752,7 +759,10 @@ class Profiler:
             global DEBUG
             tensorflow_profile_context.DEBUG = self.debug
             DEBUG = self.debug
-        self.bg_dumper = ForkedProcessPool(name="bg_dumper", debug=self.debug)
+        # dump_cpus = get_dump_cpus()
+        self.bg_dumper = ForkedProcessPool(name="bg_dumper", debug=self.debug,
+                                           # cpu_affinity=dump_cpus,
+                                           )
 
         self._op_stack = []
         self._start_us = None
