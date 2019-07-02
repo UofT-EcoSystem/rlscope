@@ -32,6 +32,13 @@ STABLE_BASELINES_ANNOTATED_ALGOS = [
     'dqn',
     'sac',
     'ddpg',
+    # Should we include this?
+    # It's not A3C, and that's what people will expect.
+    # This is a single A3C worker (I think)?
+    # I don't think they implement it correctly either...
+    # They claim to be using SubprocEnv (run steps in parallel), but they're
+    # doing DummyEnv (steps in serial).
+    # 'a2c',
 ]
 STABLE_BASELINES_AVAIL_ENV_IDS = None
 STABLE_BASELINES_UNAVAIL_ENV_IDS = None
