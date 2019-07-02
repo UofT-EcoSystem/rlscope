@@ -75,9 +75,6 @@ def handle_iml_args(parser, args, directory=None):
     if not success:
         sys.exit(1)
 
-    profilers.handle_iml_args(output_directory=iml_directory,
-                              parser=parser,
-                              args=args)
     init_profiler(
         directory=iml_directory,
         args=args,
