@@ -151,6 +151,7 @@ class GeneratePlotIndex:
             src = _j(py_config.ROOT, 'iml_profiler/scripts/iml_profiler_plot_index.py')
             dst = _j(self.out_dir, 'iml_profiler_plot_index.py')
             logging.info("> cp {src} -> {dst}".format(src=src, dst=dst))
+            os.makedirs(_d(dst), exist_ok=True)
             shutil.copyfile(src, dst)
 
         os.makedirs(_d(self.plot_index_path), exist_ok=True)

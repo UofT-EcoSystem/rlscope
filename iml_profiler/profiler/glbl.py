@@ -71,6 +71,10 @@ def handle_iml_args(parser, args, directory=None):
     if iml_directory is None:
         raise RuntimeError("IML: you must provide a location to store trace files: --iml-directory <dir>")
 
+    success = profilers.check_avail_gpus()
+    if not success:
+        sys.exit(1)
+
     profilers.handle_iml_args(output_directory=iml_directory,
                               parser=parser,
                               args=args)

@@ -6,6 +6,10 @@ import sys
 from tensorflow.core.profiler.tfprof_log_pb2 import ProfileProto
 from iml_profiler.protobuf.pyprof_pb2 import Pyprof
 
+from iml_profiler.protobuf.unit_test_pb2 import \
+    IMLUnitTestOnce, \
+    IMLUnitTestMultiple
+
 from iml_profiler.parser.common import *
 
 def dump_proto_txt(path, ProtoKlass, stream):
@@ -32,6 +36,10 @@ def main():
         dump_proto_txt(args.proto, ProfileProto, sys.stdout)
     elif is_pyprof_file(args.proto) or is_dump_event_file(args.proto):
         dump_proto_txt(args.proto, Pyprof, sys.stdout)
+    elif is_unit_test_once_file(args.proto):
+        dump_proto_txt(args.proto, IMLUnitTestOnce, sys.stdout)
+    elif is_unit_test_multiple_file(args.proto):
+        dump_proto_txt(args.proto, IMLUnitTestMultiple, sys.stdout)
     elif is_machine_util_file(args.proto):
         dump_proto_txt(args.proto, MachineUtilization, sys.stdout)
     elif is_pyprof_call_times_file(args.proto):

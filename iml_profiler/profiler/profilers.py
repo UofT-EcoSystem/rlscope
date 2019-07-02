@@ -510,6 +510,7 @@ class PyprofDumper:
 
         pyprof_trace = self.pyprof_dump_manager.get(self.pyprof_trace_key)
         pyprof_trace.dump(self.pyprof_proto_path, self.process_name, self.phase)
+        assert os.path.exists(self.pyprof_proto_path)
 
         if self.debug:
             logging.info("PyprofDumper.dump done, path={path}".format(
@@ -627,7 +628,7 @@ class _DumpPyprofTraceHook(clib_wrap.RecordEventHook):
 
     def after_record_event(self, pyprof_trace, event):
         if pyprof_trace.get_num_events() >= clib_wrap.PROTO_MAX_PYPROF_PY_EVENTS:
-            iml_profiler.api.prof._dump_pyprof()
+            iml_profiler.api.prof._dump_pyprof(debug=DEBUG)
             num_events = clib_wrap.num_events_recorded()
             # NOTE: I've seen this assertion fail with minigo, not sure why though...
             if num_events != 0:
@@ -1726,6 +1727,7 @@ class Profiler:
             pyprof_trace_key=pyprof_trace_key,
             debug=debug)
         self.next_trace_id += 1
+        logging.info("HELLO WORLD: PYPROF")
         self.bg_dumper.submit(
             name="PyprofDumper.dump({path})".format(
                 path=self.pyprof_proto_path(trace_id)),
@@ -2231,15 +2233,6 @@ def is_iml_file(path):
 
 # ProfileGlobals = _ProfileGlobals()
 
-def handle_iml_args(output_directory, parser, args, no_bench_name=False):
-    pass
-    # ProfileGlobals.files_before = ls_files(output_directory)
-
-    # if args.iml_trace_time_sec is None and args.iml_num_traces is None:
-    #     logging.info('IML: ERROR, you must provided at least one of --iml-trace-time-sec or --iml-num-traces')
-    #     sys.exit(1)
-
-
 def iml_argv(prof : Profiler, keep_executable=False, keep_non_iml_args=False):
     """
     Return a list of string arguments related to IML that were passed to the current running python process.
@@ -2377,14 +2370,8 @@ def args_to_cmdline(parser, args,
 
     return [str(x) for x in cmdline]
 
-# If you search for function names matching this pattern in pyprof output, they will match TensorFlow C++ API calls.
-CLIB_TENSORFLOW_REGEX = r'(?:built-in.*pywrap_tensorflow)'
-# We can manually wrap a c-library in order to record C API call times.  See test_call_c.py for how to do this.
-CLIB_WRAPPER_REGEX = r'CLIB__.*'
-def dump_config(path, **kwargs):
-    config = dict()
-
-    avail_gpus = get_available_gpus() # <-- This triggers entire GPU allocation...wtf!
+def check_avail_gpus():
+    avail_gpus = get_available_gpus()
     avail_cpus = get_available_cpus()
     # We want to be CERTAIN about which device TensorFlow is using.
     # If no GPUs are available, TF will use the CPU.
@@ -2393,7 +2380,7 @@ def dump_config(path, **kwargs):
             (len(avail_gpus) == 0 and len(avail_cpus) == 1) ):
         CUDA_VISIBLE_DEVICES = ENV.get('CUDA_VISIBLE_DEVICES', None)
         logging.info(textwrap.dedent("""
-        ERROR: Multiple GPUs were found; IML benchmark requires only one GPU to be visible to TensorFlow via (for example) "export CUDA_VISIBLE_DEVICES=0".
+        > IML ERROR: Multiple GPUs were found; IML benchmark requires only one GPU to be visible to TensorFlow via (for example) "export CUDA_VISIBLE_DEVICES=0".
         Use one of the below available GPUs:
         """))
         pprint.pprint({
@@ -2401,7 +2388,34 @@ def dump_config(path, **kwargs):
             'avail_cpus':avail_cpus,
             'CUDA_VISIBLE_DEVICES':CUDA_VISIBLE_DEVICES,
         }, indent=2)
-        sys.exit(1)
+        return False
+    return True
+
+# If you search for function names matching this pattern in pyprof output, they will match TensorFlow C++ API calls.
+CLIB_TENSORFLOW_REGEX = r'(?:built-in.*pywrap_tensorflow)'
+# We can manually wrap a c-library in order to record C API call times.  See test_call_c.py for how to do this.
+CLIB_WRAPPER_REGEX = r'CLIB__.*'
+def dump_config(path, **kwargs):
+    config = dict()
+
+    avail_gpus = get_available_gpus()
+    avail_cpus = get_available_cpus()
+    # We want to be CERTAIN about which device TensorFlow is using.
+    # If no GPUs are available, TF will use the CPU.
+    # If a GPU is available, make sure only 1 is available so we are certain it's using that one.
+    if not( (len(avail_gpus) == 1) or
+            (len(avail_gpus) == 0 and len(avail_cpus) == 1) ):
+        CUDA_VISIBLE_DEVICES = ENV.get('CUDA_VISIBLE_DEVICES', None)
+        pprint.pprint({
+            'avail_gpus':avail_gpus,
+            'avail_cpus':avail_cpus,
+            'CUDA_VISIBLE_DEVICES':CUDA_VISIBLE_DEVICES,
+        }, indent=2)
+        msg = textwrap.dedent("""
+        > IML ERROR: Multiple GPUs were found; IML benchmark requires only one GPU to be visible to TensorFlow via (for example) "export CUDA_VISIBLE_DEVICES=0".
+        Use one of the below available GPUs:
+        """)
+        raise RuntimeError(msg)
     if len(avail_gpus) == 1:
         device_dict = avail_gpus[0]
     else:

@@ -42,10 +42,10 @@ def get_NOT_RUNNABLE_TASKS():
 
 def get_IML_TASKS():
     global NOT_RUNNABLE_TASKS
-    iml_tasks = []
+    iml_tasks = set()
     for name, cls in globals().items():
         if isinstance(cls, type) and issubclass(cls, IMLTask) and cls not in NOT_RUNNABLE_TASKS:
-            iml_tasks.append(cls)
+            iml_tasks.add(cls)
     return iml_tasks
 
 class IMLTask(luigi.Task):
@@ -180,6 +180,89 @@ class HeatScaleTask(IMLTask):
         )
         self.heat_scale.run()
 
+class TraceEventsTask(luigi.Task):
+    iml_directory = luigi.Parameter(description="Location of trace-files")
+    debug = luigi.BoolParameter(description="debug")
+    debug_single_thread = luigi.BoolParameter(description=textwrap.dedent("""
+        Run any multiprocessing stuff using a single thread for debugging.
+        """))
+
+    overlaps_event_id = luigi.IntParameter(description="show events that overlap with this event (identified by its event_id)", default=None)
+    op_name = luigi.Parameter(description="operation name (e.g. q_forward)", default=None)
+    process_name = luigi.Parameter(description="show events belonging to this process", default=None)
+    start_usec = luigi.FloatParameter(description="Show events whose start-time is >= start_usec", default=None)
+    end_usec = luigi.FloatParameter(description="Show events whose end-time is <= end_usec", default=None)
+
+    skip_output = False
+
+    def requires(self):
+        return [
+            SQLParserTask(iml_directory=self.iml_directory, debug=self.debug, debug_single_thread=self.debug_single_thread),
+        ]
+
+    def output(self):
+        # return luigi.LocalTarget(self._done_file)
+        return []
+
+    # @property
+    # def _done_file(self):
+    #     """
+    #     e.g.
+    #
+    #     <--iml-directory>/SQLParserTask.task
+    #     """
+    #     return "{dir}/{name}.task".format(
+    #         dir=self.iml_directory, name=self._task_name)
+
+    # @property
+    # def _task_name(self):
+    #     return self.__class__.__name__
+
+    # def mark_done(self, start_t, end_t):
+    #     if self.skip_output:
+    #         logging.info("> Skipping output={path} for task {name}".format(
+    #             path=self._done_file,
+    #             name=self._task_name))
+    #         return
+    #     with self.output().open('w') as f:
+    #         print_cmd(cmd=sys.argv, file=f)
+    #         delta = end_t - start_t
+    #         minutes, seconds = divmod(delta.total_seconds(), 60)
+    #         print(textwrap.dedent("""\
+    #         > Started running at {start}
+    #         > Ended running at {end}
+    #         > Took {min} minutes and {sec} seconds.
+    #         """.format(
+    #             start=start_t,
+    #             end=end_t,
+    #             min=minutes,
+    #             sec=seconds,
+    #         )), file=f)
+
+    # def iml_run(self):
+    #     raise NotImplementedError("{klass} must override iml_run()".format(
+    #         klass=self.__class__.__name__))
+
+    def run(self):
+        self.dumper = TraceEventsParser(
+            directory=self.iml_directory,
+            debug=self.debug,
+            overlaps_event_id=self.overlaps_event_id,
+            op_name=self.op_name,
+            process_name=self.process_name,
+            # process_op_nest=False,
+            start_usec=self.start_usec,
+            end_usec=self.end_usec,
+        )
+        self.dumper.run()
+
+        # start_t = datetime.datetime.now()
+        # self.iml_run()
+        # end_t = datetime.datetime.now()
+        #
+        # self.mark_done(start_t, end_t)
+
+
 def print_cmd(cmd, file=sys.stdout):
     if type(cmd) == list:
         cmd_str = " ".join([str(x) for x in cmd])
@@ -202,6 +285,7 @@ def main(argv=None):
 
 NOT_RUNNABLE_TASKS = get_NOT_RUNNABLE_TASKS()
 IML_TASKS = get_IML_TASKS()
+IML_TASKS.add(TraceEventsTask)
 
 if __name__ == "__main__":
     main()

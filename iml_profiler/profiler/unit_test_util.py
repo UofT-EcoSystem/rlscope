@@ -336,6 +336,9 @@ class UnitTestDataDumper:
         # self.old_start()
 
     def stop(self):
+        if self.stopped:
+            logging.info("> Already ran UnitTestDataDumper.stop; ignoring.")
+            return
         assert not self.stopped
         # self.unwrapped_prof.stop()
         time_t = now_us()

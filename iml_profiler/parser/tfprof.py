@@ -824,8 +824,10 @@ class TraceEventsParser:
         if CATEGORY_DUMMY_EVENT in ignore_cats:
             ignore_cats.remove(CATEGORY_DUMMY_EVENT)
 
+        logging.info("op_names = {op_names}".format(op_names=self.op_names))
+        logging.info("process_names = {procs}".format(procs=self.sql_reader.process_names))
         for op_name in self.op_names:
-
+            logging.info("op_name = {op_name}".format(op_name=op_name))
             for process_name, step, category_times in itertools.islice(
                     self.sql_reader.each_op_instance(op_name,
                                                      group_by_device=True,
@@ -833,6 +835,7 @@ class TraceEventsParser:
                                                      debug=self.debug),
                     # Just grab the very first operation from the very first process.
                     0, 1):
+                logging.info("  process_name = {proc}, step = {step}".format(proc=process_name, step=step))
 
                 logging.info("> Generate traceEvents for step={step}".format(step=step))
 
@@ -943,6 +946,35 @@ class TraceEventsParser:
             trace_func = self._trace_first_step
 
         trace_func()
+
+    def get_output_path(self):
+        if self.overlaps_event_id is not None:
+            event = self.sql_reader.event_by_id(self.overlaps_event_id, self.debug)
+            return self._trace_event_overlap_path(event)
+        elif self.start_usec is not None:
+            return self._trace_event_time_range_path()
+        else:
+            return None
+            # ignore_cats = list(DEFAULT_ignore_categories)
+            # if CATEGORY_DUMMY_EVENT in ignore_cats:
+            #     ignore_cats.remove(CATEGORY_DUMMY_EVENT)
+            #
+            # for op_name in self.op_names:
+            #     for process_name, step, category_times in itertools.islice(
+            #             self.sql_reader.each_op_instance(op_name,
+            #                                              group_by_device=True,
+            #                                              ignore_categories=ignore_cats,
+            #                                              debug=self.debug),
+            #             # Just grab the very first operation from the very first process.
+            #             0, 1):
+            #
+            #         logging.info("> Generate traceEvents for step={step}".format(step=step))
+            #
+            #         trace_events_dumper = TraceEventsDumper(
+            #             category_times,
+            #             json_path=self._trace_first_step_path(process_name, step, op_name),
+            #             debug=self.debug)
+            #         trace_events_dumper.dump()
 
     def dump(self, bench_name):
         if self.skip:

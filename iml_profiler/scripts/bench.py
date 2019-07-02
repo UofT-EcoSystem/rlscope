@@ -72,6 +72,12 @@ def main():
         '--debug',
         action='store_true')
     parser.add_argument(
+        '--replace',
+        action='store_true')
+    parser.add_argument(
+        '--dry-run',
+        action='store_true')
+    parser.add_argument(
         '--dir',
         default='.',
         help='directory to store log files in')
@@ -128,19 +134,38 @@ def detect_available_env(env_ids):
 
 def train_stable_baselines(parser, args, extra_argv):
 
+    def already_ran(to_file):
+        if not _e(to_file):
+            return False
+        with open(to_file) as f:
+            for line in f:
+                line = line.rstrip()
+                if re.search(r'IML BENCH DONE', line):
+                    return True
+        return False
+
     def _run(algo, env_id):
         env = dict(os.environ)
         env['ENV_ID'] = env_id
         env['ALGO'] = algo
 
-        tee(
-            cmd=['train_stable_baselines.sh'] + extra_argv,
-            to_file=_j(args.dir, 'train_stable_baselines.algo_{algo}.env_id_{env_id}.log'.format(
-                algo=algo,
-                env_id=env_id,
-            )),
-            env=env,
-        )
+        to_file = _j(args.dir, 'train_stable_baselines.algo_{algo}.env_id_{env_id}.log'.format(
+            algo=algo,
+            env_id=env_id,
+        ))
+        iml_directory = _j(args.dir, algo, env_id)
+        if args.replace or not already_ran(to_file):
+            tee(
+                cmd=['train_stable_baselines.sh', "--iml-directory", iml_directory] + extra_argv,
+                to_file=to_file,
+                env=env,
+                dry_run=args.dry_run,
+            )
+        if not args.dry_run:
+            with open(to_file, 'a') as f:
+                f.write("IML BENCH DONE")
+        if not args.dry_run or _e(to_file):
+            assert already_ran(to_file)
 
     def is_supported(algo, env_id):
         for expr in stable_baselines_exprs:
@@ -181,7 +206,11 @@ def train_stable_baselines(parser, args, extra_argv):
         _run(algo, env_id)
 
 
-def tee(cmd, to_file, append=False, check=True, **kwargs):
+def tee(cmd, to_file, append=False, check=True, dry_run=False, **kwargs):
+    if dry_run:
+        print_cmd(cmd, files=[sys.stdout], env=kwargs.get('env', None), dry_run=dry_run)
+        return
+
     with ScopedLogFile(to_file, append) as f:
         print_cmd(cmd, files=[sys.stdout, f], env=kwargs.get('env', None))
 
@@ -361,17 +390,21 @@ add_stable_baselines_expr('a2c', 'Walker2DBulletEnv-v0', 618.318, 291.293, 14923
 STABLE_BASELINES_ALGOS = sorted(set(expr.algo for expr in stable_baselines_exprs))
 STABLE_BASELINES_ENV_IDS = sorted(set(expr.env_id for expr in stable_baselines_exprs))
 
-def print_cmd(cmd, files=sys.stdout, env=None):
+def print_cmd(cmd, files=sys.stdout, env=None, dry_run=False):
     if type(cmd) == list:
         cmd_str = " ".join([str(x) for x in cmd])
     else:
         cmd_str = cmd
 
-    lines = [
-        "> CMD:",
+    lines = []
+    if dry_run:
+        lines.append("> CMD [dry-run]:")
+    else:
+        lines.append("> CMD:")
+    lines.extend([
         "  $ {cmd}".format(cmd=cmd_str),
         "  PWD={pwd}".format(pwd=os.getcwd()),
-    ]
+    ])
 
     if env is not None and len(env) > 0:
         env_vars = sorted(env.keys())

@@ -1969,8 +1969,8 @@ class SQLCategoryTimesReader:
 
         self._steps = dict()
 
-    def steps(self, process_name, bench_name):
-        return list(range(self.num_steps(process_name, bench_name)))
+    def steps(self, process_name, bench_name, debug=False):
+        return list(range(self.num_steps(process_name, bench_name, debug=debug)))
 
     @property
     def util_devices(self):
@@ -2074,8 +2074,8 @@ class SQLCategoryTimesReader:
         rows = [row_as_phase(row) for row in c.fetchall()]
         return rows
 
-    def keep_steps(self, process_name, bench_name, skip_first_step=True):
-        steps = self.steps(process_name, bench_name)
+    def keep_steps(self, process_name, bench_name, skip_first_step=True, debug=False):
+        steps = self.steps(process_name, bench_name, debug=debug)
 
         # Skip the first step, since it includes profiler initialization stuff.
         # In particular, the libcupti NVIDIA library gets loaded on-demand during
@@ -2132,13 +2132,13 @@ class SQLCategoryTimesReader:
 
 
     DEBUG_FETCH_STEPS = False
-    def _fetch_steps(self, process_name, bench_name):
+    def _fetch_steps(self, process_name, bench_name, debug=False):
         if process_name in self._steps and bench_name in self._steps[process_name]:
             return
 
         start_fetch_t = time.time()
         c = self.conn.cursor
-        c.execute("""
+        query = """
         SELECT e1.event_name, e1.start_time_us, e1.duration_us
         FROM Event AS e1
             NATURAL JOIN Category AS c
@@ -2158,8 +2158,9 @@ class SQLCategoryTimesReader:
             # overlap_clause=sql_overlap_clause('e1', 'e2', indents=3),
             no_dump_overlap_clause=sql_no_dump_overlap_clause('e1', tmp_event_alias_2='e2', tmp_category_alias_2='c2', indents=1),
             p=sql_placeholder(),
-        ),
-            (bench_name, process_name))
+        )
+        params = (bench_name, process_name)
+        sql_exec_query(c, query, params, debug=debug)
 
         # NOT EXISTS (
         #     SELECT *
@@ -2175,16 +2176,21 @@ class SQLCategoryTimesReader:
         if process_name not in self._steps:
             self._steps[process_name] = dict()
         self._steps[process_name][bench_name] = rows
+        if debug:
+            logging.info("fetch_steps(proc={proc}, op={op}) fetched {n} rows.".format(
+                proc=process_name,
+                op=bench_name,
+                n=len(self._steps[process_name][bench_name])))
         end_fetch_t = time.time()
         sec_fetch = end_fetch_t - start_fetch_t
-        if SQLCategoryTimesReader.DEBUG_FETCH_STEPS:
+        if debug or SQLCategoryTimesReader.DEBUG_FETCH_STEPS:
             logging.info("> fetch_steps process={proc}, op={op} took {sec} seconds".format(
                 proc=process_name,
                 op=bench_name,
                 sec=sec_fetch,
             ))
 
-    def num_steps(self, process_name, bench_name):
+    def num_steps(self, process_name, bench_name, debug=False):
         """
         We don't record step numbers in the database.
         Instead, steps are an index into the i-th time this operation occurs in the entire ML-script.
@@ -2192,7 +2198,7 @@ class SQLCategoryTimesReader:
         We tend to want to skip the 1-st time the operation occurs / is profiled, since
         it will include load-time overheads (libcupti).
         """
-        self._fetch_steps(process_name, bench_name)
+        self._fetch_steps(process_name, bench_name, debug=debug)
         return len(self._steps[process_name][bench_name])
 
     def step_event(self, step, process_name, bench_name):
@@ -2211,7 +2217,9 @@ class SQLCategoryTimesReader:
         process_names = self.process_names
         for process_name in process_names:
 
-            keep_steps = self.keep_steps(process_name, bench_name, skip_first_step)
+            keep_steps = self.keep_steps(process_name, bench_name, skip_first_step, debug=debug)
+            if debug:
+                logging.info("keep_steps = {steps}".format(steps=keep_steps))
             if bench_name == NO_BENCH_NAME:
                 pprint.pprint({
                     'name':'SQLCategoryTimesReader.each_op_instance',
