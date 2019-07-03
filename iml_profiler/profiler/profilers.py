@@ -1322,6 +1322,8 @@ class Profiler:
     def _start_pyprof(self):
         if self._pyprof_enabled:
             return
+        if self.debug:
+            logging.info("Start pyprof\n{stack}".format(stack="\n".join(get_stacktrace())))
         self._init_trace_time()
         # clib_wrap.wrap_libs()
         # if self.step_start_tracing is None:
@@ -2569,20 +2571,6 @@ def ls_files(directory):
     if not os.path.isdir(directory):
         return []
     return list_files(directory)
-
-@contextlib.contextmanager
-def _tracing_disabled(prof : Profiler):
-    with clib_wrap.tracing_disabled():
-        # was_tracing = prof.is_tracing()
-        # if was_tracing:
-        #     prof.disable_tracing()
-
-        try:
-            yield
-        finally:
-            pass
-            # if was_tracing:
-            #     prof.enable_tracing()
 
 def process_directory(directory, process_name):
     direc = _j(directory, "process", process_name)

@@ -114,7 +114,7 @@ class PyprofTrace:
             # }, indent=2)
             f.write(self.pyprof.SerializeToString())
 
-    def record_event(self, step, category, name, start_us, end_us, attrs=None, python_event=False):
+    def record_event(self, step, category, name, start_us, end_us, attrs=None, python_event=False, debug=False):
         assert step is not None
 
         event = proto_util.mk_event(
@@ -122,6 +122,13 @@ class PyprofTrace:
             start_us=start_us,
             end_us=end_us,
             attrs=attrs)
+
+        if debug:
+            logging.info("Record event: name={name}, category={cat}, duration={ms} ms".format(
+                name=name,
+                cat=category,
+                ms=(end_us - start_us)*1e3,
+            ))
 
         # NOTE: extend() makes a copy of everything we add, but it's more familiar so who cares.
         # https://developers.google.com/protocol-buffers/docs/reference/python-generated#repeated-message-fields
@@ -200,6 +207,7 @@ _phase = None
 _python_start_us = None
 # By default tracing is OFF.
 _TRACING_ON = False
+# print("LOADING clib_wrap: _TRACING_ON = {val}".format(val=_TRACING_ON))
 
 def clear_pyprof_profiling():
     global _pyprof_trace, _python_start_us, _process_name
@@ -223,7 +231,7 @@ def should_dump_pyprof():
     return _pyprof_trace.get_num_events() >= PROTO_MAX_PYPROF_PY_EVENTS
 
 def set_step(step, expect_traced=False, ignore_disable=False):
-    global _pyprof_trace, _step, _python_start_us
+    global _pyprof_trace, _step, _python_start_us, _TRACING_ON
     _step = step
     _python_start_us = now_us()
     if _TRACING_ON or ignore_disable:
@@ -299,6 +307,14 @@ class CFuncWrapper:
         global _pyprof_trace, _python_start_us, _step, _TRACING_ON
 
         start_us = now_us()
+        # if self.debug:
+        #     logging.info("_TRACING_ON = {val}".format(
+        #         val=_TRACING_ON,
+        #     ))
+        #     # logging.info("_TRACING_ON = {val}\n{stack}".format(
+        #     #     val=_TRACING_ON,
+        #     #     stack="\n".join(get_stacktrace()),
+        #     # ))
         ret = self.call(*args, **kwargs)
         end_us = now_us()
 
@@ -340,7 +356,8 @@ class CFuncWrapper:
             _pyprof_trace.record_event(
                 _pyprof_trace.get_step(), self.category, name,
                 start_us=start_us,
-                end_us=end_us)
+                end_us=end_us,
+                debug=self.debug)
 
         _python_start_us = end_us
 
@@ -393,47 +410,28 @@ def record_operation(start_us, end_us,
                      ignore_disable=ignore_disable)
 
 def is_recording():
+    global _TRACING_ON
     return _TRACING_ON
 
 def should_record(step):
+    global _TRACING_ON
     return _TRACING_ON
-
-@contextlib.contextmanager
-def tracing_disabled():
-    with tracing_as(should_enable=False):
-        try:
-            yield
-        finally:
-            pass
-
-@contextlib.contextmanager
-def tracing_enabled():
-    with tracing_as(should_enable=True):
-        try:
-            yield
-        finally:
-            pass
 
 def enable_tracing():
     global _TRACING_ON
     _TRACING_ON = True
+    if DEBUG:
+        logging.info("Enable pyprof tracing: _TRACING_ON={val}\n{stack}".format(
+            val=_TRACING_ON,
+            stack="\n".join(get_stacktrace())))
 
 def disable_tracing():
     global _TRACING_ON
     _TRACING_ON = False
-
-class tracing_as:
-    def __init__(self, should_enable):
-        self.should_enable = should_enable
-
-    def __enter__(self):
-        global _TRACING_ON
-        self._tracing_on = _TRACING_ON
-        _TRACING_ON = self.should_enable
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        global _TRACING_ON
-        _TRACING_ON = self._tracing_on
+    if DEBUG:
+        logging.info("Disable pyprof tracing: _TRACING_ON={val}\n{stack}".format(
+            val=_TRACING_ON,
+            stack="\n".join(get_stacktrace())))
 
 #
 # Some pre-written C++ library wrappers.

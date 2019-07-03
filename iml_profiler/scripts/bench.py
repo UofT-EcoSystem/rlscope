@@ -26,6 +26,7 @@ from iml_profiler.profiler.profilers import MyProcess, ForkedProcessPool
 
 MODES = [
     'train_stable_baselines.sh',
+    'inference_stable_baselines.sh',
 ]
 
 STABLE_BASELINES_ANNOTATED_ALGOS = [
@@ -39,7 +40,7 @@ STABLE_BASELINES_ANNOTATED_ALGOS = [
     # I don't think they implement it correctly either...
     # They claim to be using SubprocEnv (run steps in parallel), but they're
     # doing DummyEnv (steps in serial).
-    # 'a2c',
+    'a2c',
 ]
 STABLE_BASELINES_AVAIL_ENV_IDS = None
 STABLE_BASELINES_UNAVAIL_ENV_IDS = None
@@ -102,22 +103,36 @@ def main():
         help='sub-command help')
 
     # create the parser for the "a" command
-    parser_stable_baselines = subparsers.add_parser(
+
+    def add_stable_baselines_options(parser_stable_baselines):
+        parser_stable_baselines.add_argument(
+            '--algo',
+            choices=STABLE_BASELINES_ANNOTATED_ALGOS,
+            help='algorithm to run')
+        parser_stable_baselines.add_argument(
+            '--env-id',
+            choices=STABLE_BASELINES_ENV_IDS,
+            help='environment to run')
+        parser_stable_baselines.add_argument(
+            '--bullet',
+            action='store_true',
+            help='Limit environments to physics-based Bullet environments')
+
+    parser_train_stable_baselines = subparsers.add_parser(
         'train_stable_baselines.sh',
-        help='stable-baselines experiments')
-    parser_stable_baselines.add_argument(
-        '--algo',
-        choices=STABLE_BASELINES_ANNOTATED_ALGOS,
-        help='algorithm to run')
-    parser_stable_baselines.add_argument(
-        '--env-id',
-        choices=STABLE_BASELINES_ENV_IDS,
-        help='environment to run')
-    parser_stable_baselines.add_argument(
-        '--bullet',
-        action='store_true',
-        help='Limit environments to physics-based Bullet environments')
-    parser_stable_baselines.set_defaults(func=train_stable_baselines)
+        help='stable-baselines training experiments')
+    add_stable_baselines_options(parser_train_stable_baselines)
+    parser_train_stable_baselines.set_defaults(
+        sh_script='train_stable_baselines.sh',
+        func=run_stable_baselines)
+
+    parser_inference_stable_baselines = subparsers.add_parser(
+        'inference_stable_baselines.sh',
+        help='stable-baselines inference experiments')
+    add_stable_baselines_options(parser_inference_stable_baselines)
+    parser_inference_stable_baselines.set_defaults(
+        sh_script='inference_stable_baselines.sh',
+        func=run_stable_baselines)
 
     args, extra_argv = parser.parse_known_args()
     os.makedirs(args.dir, exist_ok=True)
@@ -146,12 +161,13 @@ def detect_available_env(env_ids):
             unavail_env[env_id] = tb
     return avail_env, unavail_env
 
-def train_stable_baselines(parser, args, extra_argv):
-    obj = TrainStableBaselines(args, extra_argv)
+def run_stable_baselines(parser, args, extra_argv):
+    obj = StableBaselines(args, extra_argv)
+    assert args.sh_script is not None
     obj.run()
 
 
-class TrainStableBaselines:
+class StableBaselines:
     def __init__(self, args, extra_argv):
         # self.parser = parser
         self.args = args
@@ -171,6 +187,10 @@ class TrainStableBaselines:
     def _run_cmd(self, cmd, to_file, env=None):
         args = self.args
 
+        if env is None:
+            # Make sure iml-analyze get IML_POSTGRES_HOST
+            env = dict(os.environ)
+
         if args.replace or not self.already_ran(to_file):
             tee(
                 cmd=cmd + self.extra_argv,
@@ -178,11 +198,11 @@ class TrainStableBaselines:
                 env=env,
                 dry_run=args.dry_run,
             )
-        if not args.dry_run:
-            with open(to_file, 'a') as f:
-                f.write("IML BENCH DONE")
-        if not args.dry_run or _e(to_file):
-            assert self.already_ran(to_file)
+            if not args.dry_run:
+                with open(to_file, 'a') as f:
+                    f.write("IML BENCH DONE")
+            if not args.dry_run or _e(to_file):
+                assert self.already_ran(to_file)
 
     def _analyze(self, algo, env_id):
         args = self.args
@@ -190,31 +210,48 @@ class TrainStableBaselines:
         iml_directory = self.iml_directory(algo, env_id)
         cmd = ['iml-analyze', "--iml-directory", iml_directory]
 
-        to_file = _j(args.dir, 'train_stable_baselines.algo_{algo}.env_id_{env_id}.analyze.log'.format(
-            algo=algo,
-            env_id=env_id,
-        ))
+        to_file = self._get_logfile(algo, env_id, suffix='analyze.log')
 
         self._run_cmd(cmd=cmd, to_file=to_file)
+
+    def _get_logfile(self, algo, env_id, suffix='log'):
+        args = self.args
+
+        m = re.search(r'(?P<sh_name>.*)\.sh$', args.sh_script)
+        sh_name = m.group('sh_name')
+
+        to_file = _j(args.dir, '{sh_name}.algo_{algo}.env_id_{env_id}.{suffix}'.format(
+            sh_name=sh_name,
+            algo=algo,
+            env_id=env_id,
+            suffix=suffix,
+        ))
+        return to_file
 
     def iml_directory(self, algo, env_id):
         iml_directory = _j(self.args.dir, algo, env_id)
         return iml_directory
 
-    def _run(self, algo, env_id):
+    def _sh_env(self, algo, env_id):
         args = self.args
-
-        iml_directory = self.iml_directory(algo, env_id)
-        cmd = ['train_stable_baselines.sh', "--iml-directory", iml_directory]
 
         env = dict(os.environ)
         env['ENV_ID'] = env_id
         env['ALGO'] = algo
+        if args.debug:
+            env['DEBUG'] = 'yes'
 
-        to_file = _j(args.dir, 'train_stable_baselines.algo_{algo}.env_id_{env_id}.log'.format(
-            algo=algo,
-            env_id=env_id,
-        ))
+        return env
+
+    def _run(self, algo, env_id):
+        args = self.args
+
+        iml_directory = self.iml_directory(algo, env_id)
+        cmd = [args.sh_script, "--iml-directory", iml_directory]
+
+        env = self._sh_env(algo, env_id)
+
+        to_file = self._get_logfile(algo, env_id, suffix='log')
 
         self._run_cmd(cmd=cmd, to_file=to_file, env=env)
 
@@ -256,6 +293,9 @@ class TrainStableBaselines:
         else:
             print('Please provide either --env-id or --algo', file=sys.stderr)
             sys.exit(1)
+
+        for algo, env_id in algo_env_pairs:
+            self._run(algo, env_id)
 
         if args.analyze:
             for algo, env_id in algo_env_pairs:

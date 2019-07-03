@@ -1,7 +1,7 @@
 import re
 import logging
 
-DEBUG = True
+DEBUG = False
 
 def wrap_lib(FuncWrapperKlass, import_libname, wrapper_args=tuple(), func_regex=None, wrap_libname=None):
     # wrapper_args = (category, prefix)
@@ -25,42 +25,41 @@ def wrap_lib(FuncWrapperKlass, import_libname, wrapper_args=tuple(), func_regex=
         assert lib is not None
 
         # import tensorflow.pywrap_tensorflow
-        if DEBUG:
-            logging.info('  ... success')
+        logging.info('  ... success')
     except (ImportError, NameError) as e:
         # Failed to import library; skip wrapping the library.
-        if DEBUG:
-            logging.info('  ... FAILED: cannot wrap module {lib}; stacktrace:'.format(lib=wrap_libname))
-            logging.info(e)
+        logging.info('  ... FAILED: cannot wrap module {lib}; stacktrace:'.format(lib=wrap_libname))
+        logging.info(e)
         return False
     wrap_module(FuncWrapperKlass, lib, wrapper_args, func_regex=func_regex)
     return True
 
 def unwrap_lib(FuncWrapperKlass, wrap_libname):
     try:
-        if DEBUG:
-            logging.info('> lookup {libname}...'.format(libname=wrap_libname))
+        logging.info('> lookup {libname}...'.format(libname=wrap_libname))
         # May throw NameError
         lib = eval(wrap_libname)
-        if DEBUG:
-            logging.info('  ... success')
+        logging.info('  ... success')
     except NameError as e:
-        if DEBUG:
-            logging.info('  ... FAILED: cannot unwrap module {lib}; stacktrace:'.format(lib=wrap_libname))
-            logging.info(e)
+        logging.info('  ... FAILED: cannot unwrap module {lib}; stacktrace:'.format(lib=wrap_libname))
+        logging.info(e)
         return
     unwrap_module(FuncWrapperKlass, lib)
 
 def wrap_module(FuncWrapperKlass, module, wrapper_args,
-                func_regex=None, ignore_func_regex="^_"):
+                func_regex=None, ignore_func_regex="^_", should_wrap=None):
     for name in dir(module):
         if re.search(ignore_func_regex, name):
             logging.info("  Skip func={name}".format(name=name))
             continue
+        func = getattr(module, name)
         if not re.search(ignore_func_regex, name) and (
-            func_regex is None or re.search(func_regex, name)
+                (
+                        func_regex is None or re.search(func_regex, name)
+                ) or (
+                        should_wrap is not None and should_wrap(name, func)
+                )
         ):
-            func = getattr(module, name)
             if type(func) == FuncWrapperKlass or not callable(func):
                 continue
             func_wrapper = FuncWrapperKlass(func, *wrapper_args)

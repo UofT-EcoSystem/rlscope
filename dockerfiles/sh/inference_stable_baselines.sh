@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Train an RL algorithm using a particular environment.
+# Run inference using a pre-trained RL algorithm using a particular environment.
 # Defaults to Atari Pong and DQN.
 #
 # Usage:
@@ -69,9 +69,10 @@ if [ "$ALGO" = "" ]; then
 fi
 
 #OUTPUT_DIR="$RL_BASELINES_ZOO_DIR/retrained_agents"
-OUTPUT_DIR="$RL_BASELINES_ZOO_DIR/output"
+#OUTPUT_DIR="$RL_BASELINES_ZOO_DIR/output"
 
-echo "> Training ALGO = $ALGO, ENV_ID = $ENV_ID, OUTPUT_DIR = $OUTPUT_DIR"
+#echo "> Inference ALGO = $ALGO, ENV_ID = $ENV_ID, OUTPUT_DIR = $OUTPUT_DIR"
+echo "> Inference ALGO = $ALGO, ENV_ID = $ENV_ID"
 
 # NOTE: train.py expects to find hyperparams/*.yml,
 # so we must cd into $RL_BASELINES_ZOO_DIR
@@ -82,12 +83,14 @@ cd $RL_BASELINES_ZOO_DIR
 # For quick debugging:
 #    --iml-trace-time-sec $((40))
 
-if [ "$DEBUG" == 'yes' ]; then
+#if [ "$DEBUG" == 'yes' ]; then
 #    IML_TRACE_TIME_SEC=$((40))
-    IML_TRACE_TIME_SEC=$((10))
-else
-    IML_TRACE_TIME_SEC=$((2*60))
-fi
+#else
+#    IML_TRACE_TIME_SEC=$((2*60))
+#fi
+
+# Debug simulator time...
+IML_TRACE_TIME_SEC=$((10))
 
 #if [ "$DEBUG" == 'yes' ]; then
 #    PYTHON=(python -m ipdb)
@@ -96,11 +99,11 @@ fi
 #fi
 PYTHON=(python)
 
-_do "${PYTHON[@]}" $RL_BASELINES_ZOO_DIR/train.py \
+#    --folder $OUTPUT_DIR
+_do "${PYTHON[@]}" $RL_BASELINES_ZOO_DIR/enjoy.py \
     --algo $ALGO \
     --env $ENV_ID \
-    --log-folder $OUTPUT_DIR \
-    --log-interval 1 \
     --iml-start-measuring-call 1 \
     --iml-trace-time-sec $IML_TRACE_TIME_SEC \
+    --no-render \
     "$@"

@@ -1483,7 +1483,7 @@ class CSVInserter:
         os.remove(self.tmp_path)
 
 class TracesPostgresConnection:
-    def __init__(self, db_config_path, db_basename='traces', host='localhost', user=None, password=None):
+    def __init__(self, db_config_path, db_basename='traces', host=None, user=None, password=None):
         self.host = host
         self.user = user
         self.password = password

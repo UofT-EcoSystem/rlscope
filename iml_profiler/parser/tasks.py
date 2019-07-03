@@ -52,9 +52,9 @@ def get_IML_TASKS():
 def get_username():
     return pwd.getpwuid(os.getuid())[0]
 
-param_postgres_password = luigi.Parameter(description="Postgres password; default: env.PGPASSWORD", default=os.environ.get('PGPASSWORD', None))
-param_postgres_user = luigi.Parameter(description="Postgres user", default=get_username())
-param_postgres_host = luigi.Parameter(description="Postgres host", default='localhost')
+param_postgres_password = luigi.Parameter(description="Postgres password; default: env.PGPASSWORD", default=None)
+param_postgres_user = luigi.Parameter(description="Postgres user", default=None)
+param_postgres_host = luigi.Parameter(description="Postgres host", default=None)
 
 class IMLTask(luigi.Task):
     iml_directory = luigi.Parameter(description="Location of trace-files")
