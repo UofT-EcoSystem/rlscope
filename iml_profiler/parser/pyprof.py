@@ -379,7 +379,7 @@ class PythonProfileParser:
         # # assert len(self.bench_names) == len(unique(self.bench_names))
         # # self.categories = self.sql_reader.categories
         #
-        # overlap_computer = OverlapComputer(self.db_path, debug=self.debug, debug_ops=self.debug_ops)
+        # overlap_computer = OverlapComputer(self.db_path, host=self.host, user=self.user, password=self.password, debug=self.debug, debug_ops=self.debug_ops)
         #
         # operation_overlap, proc_stats = overlap_computer.compute_process_timeline_overlap(
         #     debug_memoize=self.debug_memoize)

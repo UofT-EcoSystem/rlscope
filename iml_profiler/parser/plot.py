@@ -652,7 +652,7 @@ class CategoryOverlapPlot:
         assert len(self.bench_names) == len(unique(self.bench_names))
         self.categories = self.sql_reader.categories
 
-        overlap_computer = OverlapComputer(self.db_path, debug=self.debug)
+        overlap_computer = OverlapComputer(self.db_path, host=self.host, user=self.user, password=self.password, debug=self.debug)
 
         all_categories = set()
         json_datas = []
@@ -1930,6 +1930,7 @@ class ResourceOverlapPlotData:
         # self.categories = self.sql_reader.categories
 
         overlap_computer = OverlapComputer(self.db_path,
+                                           host=self.host, user=self.user, password=self.password,
                                            debug=self.debug,
                                            debug_ops=self.debug_ops)
 
@@ -2238,6 +2239,7 @@ class UtilizationPlot:
         )
 
         overlap_computer = OverlapComputer(self.db_path,
+                                           host=self.host, user=self.user, password=self.password,
                                            debug=self.debug,
                                            debug_ops=self.debug_ops)
 
