@@ -49,6 +49,9 @@ def get_IML_TASKS():
             iml_tasks.add(cls)
     return iml_tasks
 
+def get_username():
+    return pwd.getpwuid(os.getuid())[0]
+
 param_postgres_password = luigi.Parameter(description="Postgres password; default: env.PGPASSWORD", default=os.environ.get('PGPASSWORD', None))
 param_postgres_user = luigi.Parameter(description="Postgres user", default=get_username())
 param_postgres_host = luigi.Parameter(description="Postgres host", default='localhost')
@@ -114,9 +117,6 @@ class IMLTask(luigi.Task):
         end_t = datetime.datetime.now()
 
         self.mark_done(start_t, end_t)
-
-def get_username():
-    return pwd.getpwuid(os.getuid())[0]
 
 class SQLParserTask(IMLTask):
     def requires(self):
