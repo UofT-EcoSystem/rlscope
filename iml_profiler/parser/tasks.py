@@ -49,12 +49,20 @@ def get_IML_TASKS():
             iml_tasks.add(cls)
     return iml_tasks
 
+param_postgres_password = luigi.Parameter(description="Postgres password; default: env.PGPASSWORD", default=os.environ.get('PGPASSWORD', None))
+param_postgres_user = luigi.Parameter(description="Postgres user", default=get_username())
+param_postgres_host = luigi.Parameter(description="Postgres host", default='localhost')
+
 class IMLTask(luigi.Task):
     iml_directory = luigi.Parameter(description="Location of trace-files")
     debug = luigi.BoolParameter(description="debug")
     debug_single_thread = luigi.BoolParameter(description=textwrap.dedent("""
         Run any multiprocessing stuff using a single thread for debugging.
         """))
+
+    postgres_password = param_postgres_password
+    postgres_user = param_postgres_user
+    postgres_host = param_postgres_host
 
     skip_output = False
 
@@ -110,15 +118,7 @@ class IMLTask(luigi.Task):
 def get_username():
     return pwd.getpwuid(os.getuid())[0]
 
-param_postgres_password = luigi.Parameter(description="Postgres password; default: env.PGPASSWORD", default=os.environ.get('PGPASSWORD', None))
-param_postgres_user = luigi.Parameter(description="Postgres user", default=get_username())
-param_postgres_host = luigi.Parameter(description="Postgres host", default='localhost')
-
 class SQLParserTask(IMLTask):
-    postgres_password = param_postgres_password
-    postgres_user = param_postgres_user
-    postgres_host = param_postgres_host
-
     def requires(self):
         return []
 
@@ -134,10 +134,6 @@ class SQLParserTask(IMLTask):
         self.sql_parser.run()
 
 class _UtilizationPlotTask(IMLTask):
-    postgres_password = param_postgres_password
-    postgres_user = param_postgres_user
-    postgres_host = param_postgres_host
-
     def requires(self):
         return [
             SQLParserTask(iml_directory=self.iml_directory, debug=self.debug, debug_single_thread=self.debug_single_thread,
@@ -190,10 +186,6 @@ class HeatScaleTask(IMLTask):
     # step_sec=1.,
     # pixels_per_square=10,
     # decay=0.99,
-    postgres_password = param_postgres_password
-    postgres_user = param_postgres_user
-    postgres_host = param_postgres_host
-
     def requires(self):
         return [
             SQLParserTask(iml_directory=self.iml_directory, debug=self.debug, debug_single_thread=self.debug_single_thread,

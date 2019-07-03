@@ -22,6 +22,7 @@ except ImportError:
 from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, basename as _b
 
 from iml_profiler.profiler import glbl
+from iml_profiler.profiler.profilers import MyProcess, ForkedProcessPool
 
 MODES = [
     'train_stable_baselines.sh',
@@ -71,6 +72,11 @@ def main():
     parser.add_argument(
         '--debug',
         action='store_true')
+    parser.add_argument('--debug-single-thread',
+                        action='store_true',
+                        help=textwrap.dedent("""
+    Debug with single thread.
+    """))
     parser.add_argument(
         '--replace',
         action='store_true')
@@ -80,6 +86,11 @@ def main():
     parser.add_argument(
         '--analyze',
         action='store_true')
+    parser.add_argument(
+        '--workers',
+        type=int,
+        help="Number of simultaneous iml-analyze jobs; memory is the limitation here, not CPUs",
+        default=2)
     parser.add_argument(
         '--dir',
         default='.',
@@ -136,15 +147,16 @@ def detect_available_env(env_ids):
     return avail_env, unavail_env
 
 def train_stable_baselines(parser, args, extra_argv):
-    obj = TrainStableBaselines(parser, args, extra_argv)
+    obj = TrainStableBaselines(args, extra_argv)
     obj.run()
 
 
 class TrainStableBaselines:
-    def __init__(self, parser, args, extra_argv):
-        self.parser = parser
+    def __init__(self, args, extra_argv):
+        # self.parser = parser
         self.args = args
         self.extra_argv = extra_argv
+        self.pool = ForkedProcessPool(name="iml_analyze_pool", max_workers=args.workers, debug=self.args.debug)
 
     def already_ran(self, to_file):
         if not _e(to_file):
@@ -221,7 +233,6 @@ class TrainStableBaselines:
 
     def run(self):
         args = self.args
-        parser = self.parser
 
         if args.env_id is not None and args.env_id in STABLE_BASELINES_UNAVAIL_ENV_IDS:
             print("ERROR: env_id={env} is not available since gym.make('{env}') failed.".format(
@@ -243,11 +254,17 @@ class TrainStableBaselines:
                     continue
                 algo_env_pairs.append((args.algo, env_id))
         else:
-            parser.error('Please provide either --env-id or --algo')
+            print('Please provide either --env-id or --algo', file=sys.stderr)
+            sys.exit(1)
 
         if args.analyze:
             for algo, env_id in algo_env_pairs:
-                self._analyze(algo, env_id)
+                # self._analyze(algo, env_id)
+                self.pool.submit(
+                    'iml-analyze --iml-directory {iml}'.format(iml=self.iml_directory(algo, env_id)),
+                    self._analyze,
+                    algo, env_id,
+                    sync=self.args.debug_single_thread)
 
 def tee(cmd, to_file, append=False, check=True, dry_run=False, **kwargs):
     if dry_run:
