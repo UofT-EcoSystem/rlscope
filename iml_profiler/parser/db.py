@@ -1517,15 +1517,18 @@ class TracesPostgresConnection:
         cmd = ['psql']
         if self.host is not None:
             cmd.extend(['-h', self.host])
-        # if self.user is not None:
-        #     cmd.extend(['-U', self.user])
+        if self.user is not None:
+            cmd.extend(['-U', self.user])
+        env = dict(os.environ)
+        if self.password is not None:
+            env['PGPASSWORD'] = self.password
         # if self.port is not None:
         #     cmd.extend(['-p', self.port])
         assert self.db_name is not None
         cmd.extend([self.db_name, '-c', copy_from_sql])
         # Q: Do we need to disable foreign key checks?
         with open(csv_path, 'r') as f:
-            subprocess.check_call(cmd, stdin=f)
+            subprocess.check_call(cmd, stdin=f, env=env)
 
     def commit(self):
         if self.conn is None:
