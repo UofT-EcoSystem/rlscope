@@ -595,12 +595,18 @@ class CategoryOverlapPlot:
     OVERLAP_TYPES = OverlapComputer.OVERLAP_TYPES
 
     def __init__(self, directory,
+                 host=None,
+                 user=None,
+                 password=None,
                  debug=False,
                  group_by_phase=False,
                  # Swallow any excess arguments
                  **kwargs):
         self.directory = directory
         self.debug = debug
+        self.host = host
+        self.user = user
+        self.password = password
 
         self.bar_width = 0.25
         self.show = False
@@ -641,7 +647,7 @@ class CategoryOverlapPlot:
 
         """
 
-        self.sql_reader = SQLCategoryTimesReader(self.db_path)
+        self.sql_reader = SQLCategoryTimesReader(self.db_path, host=self.host, user=self.user, password=self.password)
         self.bench_names = self.sql_reader.bench_names()
         assert len(self.bench_names) == len(unique(self.bench_names))
         self.categories = self.sql_reader.categories
@@ -1827,6 +1833,9 @@ class ResourceOverlapPlotData:
     CPU/GPU utilization over training.
     """
     def __init__(self, directory,
+                 host=None,
+                 user=None,
+                 password=None,
                  step_sec=1.,
                  pixels_per_square=10,
                  dynamic_size=False,
@@ -1858,6 +1867,9 @@ class ResourceOverlapPlotData:
         :param kwargs:
         """
         self.directory = directory
+        self.host = host
+        self.user = user
+        self.password = password
         self.step_sec = step_sec
         self.pixels_per_square = pixels_per_square
         self.dynamic_size = dynamic_size
@@ -1892,7 +1904,7 @@ class ResourceOverlapPlotData:
         return UtilizationPlot.get_plot_data_path(self.directory, bench_name, self.debug_ops)
 
     def run(self):
-        self.sql_reader = SQLCategoryTimesReader(self.db_path, debug_ops=self.debug_ops)
+        self.sql_reader = SQLCategoryTimesReader(self.db_path, host=self.host, user=self.user, password=self.password, debug_ops=self.debug_ops)
 
         if self.entire_trace:
             # Plot a single plot for the entire trace across ALL processes.
@@ -2047,6 +2059,9 @@ class UtilizationPlot:
     # DEBUG_MINIGO = True
     RESOURCE_TYPES = [CATEGORY_CPU, CATEGORY_GPU]
     def __init__(self, directory,
+                 host=None,
+                 user=None,
+                 password=None,
                  step_sec=1.,
                  pixels_per_square=10,
                  dynamic_size=False,
@@ -2092,6 +2107,9 @@ class UtilizationPlot:
         self.resource_type = resource_type
         self.operation_overlap_resource = frozenset(operation_overlap_resource)
         self.directory = directory
+        self.host = host
+        self.user = user
+        self.password = password
         self.step_sec = step_sec
         self.pixels_per_square = pixels_per_square
         self.dynamic_size = dynamic_size
@@ -2164,7 +2182,7 @@ class UtilizationPlot:
         return UtilizationPlot.get_plot_data_path(self.directory, bench_name, self.debug_ops)
 
     def run(self):
-        self.sql_reader = SQLCategoryTimesReader(self.db_path, debug_ops=self.debug_ops)
+        self.sql_reader = SQLCategoryTimesReader(self.db_path, host=self.host, user=self.user, password=self.password, debug_ops=self.debug_ops)
 
         if self.entire_trace:
             # Plot a single plot for the entire trace across ALL processes.
@@ -2435,6 +2453,9 @@ class HeatScalePlot:
     HeatScale/colormap of overall device (CPU/GPU) utilization.
     """
     def __init__(self, directory,
+                 host=None,
+                 user=None,
+                 password=None,
                  debug=False,
                  step_sec=1.,
                  pixels_per_square=10,
@@ -2460,6 +2481,9 @@ class HeatScalePlot:
         :param kwargs:
         """
         self.directory = directory
+        self.host = host
+        self.user = user
+        self.password = password
         self.debug = debug
 
         self.step_sec = step_sec
@@ -2488,7 +2512,7 @@ class HeatScalePlot:
         ))
 
     def run(self):
-        self.sql_reader = SQLCategoryTimesReader(self.db_path)
+        self.sql_reader = SQLCategoryTimesReader(self.db_path, host=self.host, user=self.user, password=self.password)
 
         # for device_name, device_id in sql_reader.devices:
         #   samples = SELECT all utilization samples for <device_name>

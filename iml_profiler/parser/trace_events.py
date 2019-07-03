@@ -90,9 +90,9 @@ class TraceEventsDumper:
                     self.js_add_section(category_name)
                     tid_to_times = self.js_split_into_tids(all_times)
                     for tid, times in tid_to_times.items():
-                        for time_sec in times:
+                        for ktime in times:
                             name = self._ktime_name(ktime)
-                            self.js_add_time(name, category_name, time_sec, tid)
+                            self.js_add_time(name, category_name, ktime, tid)
             # elif category == CATEGORY_GPU:
             #     ...
             elif self.reproduce_tfprof and category in [CATEGORY_PYTHON, CATEGORY_TF_API]:

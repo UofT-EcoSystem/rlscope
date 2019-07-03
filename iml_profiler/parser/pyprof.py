@@ -28,11 +28,17 @@ FLAME_GRAPH_PERL = _j(py_config.ROOT, 'third_party', 'FlameGraph', 'flamegraph.p
 
 class PythonFlameGraphParser:
     def __init__(self, directory,
+                 host=None,
+                 user=None,
+                 password=None,
                  op_name=None,
                  debug=False,
                  # Swallow any excess arguments
                  **kwargs):
         self.directory = directory
+        self.host = host
+        self.user = user
+        self.password = password
         self.debug = debug
         self.op_name = op_name
 
@@ -230,7 +236,7 @@ class PythonFlameGraphParser:
 
 
     def run(self):
-        self.sql_reader = SQLCategoryTimesReader(self.db_path)
+        self.sql_reader = SQLCategoryTimesReader(self.db_path, host=self.host, user=self.user, password=self.password)
 
         if self.op_name is not None:
             op_names = [self.op_name]
@@ -313,10 +319,16 @@ class PythonProfileParser:
 
     """
     def __init__(self, directory,
+                 host=None,
+                 user=None,
+                 password=None,
                  debug=False,
                  # Swallow any excess arguments
                  **kwargs):
         self.directory = directory
+        self.host = host
+        self.user = user
+        self.password = password
         self.debug = debug
 
         self.num_calls = None
@@ -355,14 +367,14 @@ class PythonProfileParser:
     #         num_calls=self.num_calls))
 
     def run(self):
-        self.sql_reader = SQLCategoryTimesReader(self.db_path)
+        self.sql_reader = SQLCategoryTimesReader(self.db_path, host=self.host, user=self.user, password=self.password)
 
         op_names = self.sql_reader.op_names()
         for op_name in op_names:
             self.parse_call_times(op_name)
 
         # # from UtilizationPlot:
-        # self.sql_reader = SQLCategoryTimesReader(self.db_path, debug_ops=self.debug_ops)
+        # self.sql_reader = SQLCategoryTimesReader(self.db_path, host=self.host, user=self.user, password=self.password, debug_ops=self.debug_ops)
         # # self.bench_names = self.sql_reader.bench_names(self.debug_ops) + [NO_BENCH_NAME]
         # # assert len(self.bench_names) == len(unique(self.bench_names))
         # # self.categories = self.sql_reader.categories

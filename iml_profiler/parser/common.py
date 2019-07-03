@@ -1,5 +1,6 @@
 import logging
 import re
+import pwd
 import psutil
 import traceback
 import decimal
@@ -1673,6 +1674,9 @@ def get_runnable_cpus():
     num_cpus = psutil.cpu_count()
     dump_cpus = num_dump_cpus()
     return list(range(0, num_cpus - dump_cpus))
+
+def get_username():
+    return pwd.getpwuid(os.getuid())[0]
 
 def js_friendly(obj):
     """

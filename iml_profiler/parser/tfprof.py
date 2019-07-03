@@ -760,6 +760,9 @@ class TraceEventsParser:
 
     # def __init__(self, parser, args, src_files, bench_name=NO_BENCH_NAME, data=None):
     def __init__(self, directory,
+                 host=None,
+                 user=None,
+                 password=None,
                  # Swallow any excess arguments
                  debug=False,
                  show_progress=False,
@@ -773,6 +776,9 @@ class TraceEventsParser:
                  **kwargs):
 
         self.directory = directory
+        self.host = host
+        self.user = user
+        self.password = password
         self.debug = debug
         self.start_usec = start_usec
         self.end_usec = end_usec
@@ -927,7 +933,7 @@ class TraceEventsParser:
 
     def run(self):
 
-        self.sql_reader = SQLCategoryTimesReader(sql_input_path(self.directory))
+        self.sql_reader = SQLCategoryTimesReader(sql_input_path(self.directory), host=self.host, user=self.user, password=self.password)
         if self.op_name is not None:
             self.op_names = [self.op_name]
         else:
@@ -1045,11 +1051,17 @@ class OverlapComputer:
     """
 
     def __init__(self, db_path,
+                 host=None,
+                 user=None,
+                 password=None,
                  debug=False,
                  debug_ops=False,
                  # Swallow any excess arguments
                  **kwargs):
         self.db_path = db_path
+        self.host = host
+        self.user = user
+        self.password = password
         self.debug = debug
         self.debug_ops = debug_ops
 
@@ -1339,7 +1351,7 @@ class OverlapComputer:
         :param debug_memoize:
         :return:
         """
-        sql_reader = SQLCategoryTimesReader(self.db_path)
+        sql_reader = SQLCategoryTimesReader(self.db_path, host=self.host, user=self.user, password=self.password)
 
         # Overlap, computed across different "steps".
         # overlaps = []
@@ -1553,7 +1565,7 @@ class OverlapComputer:
         # Would be nice to know CPU is every executing anything else...
         # thread-pool threads are just blocked, but is the "main" thread doing anything?
 
-        sql_reader = SQLCategoryTimesReader(self.db_path)
+        sql_reader = SQLCategoryTimesReader(self.db_path, host=self.host, user=self.user, password=self.password)
 
         # Overlap, computed across different "steps".
         overlaps = []

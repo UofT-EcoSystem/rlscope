@@ -78,6 +78,9 @@ def main():
         '--dry-run',
         action='store_true')
     parser.add_argument(
+        '--analyze',
+        action='store_true')
+    parser.add_argument(
         '--dir',
         default='.',
         help='directory to store log files in')
@@ -133,8 +136,17 @@ def detect_available_env(env_ids):
     return avail_env, unavail_env
 
 def train_stable_baselines(parser, args, extra_argv):
+    obj = TrainStableBaselines(parser, args, extra_argv)
+    obj.run()
 
-    def already_ran(to_file):
+
+class TrainStableBaselines:
+    def __init__(self, parser, args, extra_argv):
+        self.parser = parser
+        self.args = args
+        self.extra_argv = extra_argv
+
+    def already_ran(self, to_file):
         if not _e(to_file):
             return False
         with open(to_file) as f:
@@ -144,19 +156,12 @@ def train_stable_baselines(parser, args, extra_argv):
                     return True
         return False
 
-    def _run(algo, env_id):
-        env = dict(os.environ)
-        env['ENV_ID'] = env_id
-        env['ALGO'] = algo
+    def _run_cmd(self, cmd, to_file, env=None):
+        args = self.args
 
-        to_file = _j(args.dir, 'train_stable_baselines.algo_{algo}.env_id_{env_id}.log'.format(
-            algo=algo,
-            env_id=env_id,
-        ))
-        iml_directory = _j(args.dir, algo, env_id)
-        if args.replace or not already_ran(to_file):
+        if args.replace or not self.already_ran(to_file):
             tee(
-                cmd=['train_stable_baselines.sh', "--iml-directory", iml_directory] + extra_argv,
+                cmd=cmd + self.extra_argv,
                 to_file=to_file,
                 env=env,
                 dry_run=args.dry_run,
@@ -165,46 +170,84 @@ def train_stable_baselines(parser, args, extra_argv):
             with open(to_file, 'a') as f:
                 f.write("IML BENCH DONE")
         if not args.dry_run or _e(to_file):
-            assert already_ran(to_file)
+            assert self.already_ran(to_file)
 
-    def is_supported(algo, env_id):
-        for expr in stable_baselines_exprs:
+    def _analyze(self, algo, env_id):
+        args = self.args
+
+        iml_directory = self.iml_directory(algo, env_id)
+        cmd = ['iml-analyze', "--iml-directory", iml_directory]
+
+        to_file = _j(args.dir, 'train_stable_baselines.algo_{algo}.env_id_{env_id}.analyze.log'.format(
+            algo=algo,
+            env_id=env_id,
+        ))
+
+        self._run_cmd(cmd=cmd, to_file=to_file)
+
+    def iml_directory(self, algo, env_id):
+        iml_directory = _j(self.args.dir, algo, env_id)
+        return iml_directory
+
+    def _run(self, algo, env_id):
+        args = self.args
+
+        iml_directory = self.iml_directory(algo, env_id)
+        cmd = ['train_stable_baselines.sh', "--iml-directory", iml_directory]
+
+        env = dict(os.environ)
+        env['ENV_ID'] = env_id
+        env['ALGO'] = algo
+
+        to_file = _j(args.dir, 'train_stable_baselines.algo_{algo}.env_id_{env_id}.log'.format(
+            algo=algo,
+            env_id=env_id,
+        ))
+
+        self._run_cmd(cmd=cmd, to_file=to_file, env=env)
+
+    def is_supported(self, algo, env_id):
+        for expr in STABLE_BASELINES_EXPRS:
             if expr.algo == algo and expr.env_id == env_id:
                 return expr
         return None
 
-    def should_run(algo, env_id):
-        if not is_supported(algo, env_id):
+    def should_run(self, algo, env_id):
+        if not self.is_supported(algo, env_id):
             return False
-        if args.bullet and not is_bullet_env(env_id):
+        if self.args.bullet and not is_bullet_env(env_id):
             return False
         return True
 
-    if args.env_id is not None and args.env_id in STABLE_BASELINES_UNAVAIL_ENV_IDS:
-        print("ERROR: env_id={env} is not available since gym.make('{env}') failed.".format(
-            env=args.env_id))
-        sys.exit(1)
+    def run(self):
+        args = self.args
+        parser = self.parser
 
-    if args.env_id is not None and args.algo is not None:
-        algo_env_pairs = [(args.algo, args.env_id)]
-    elif args.env_id is not None:
-        algo_env_pairs = []
-        for algo in STABLE_BASELINES_ANNOTATED_ALGOS:
-            if not should_run(algo, args.env_id):
-                continue
-            algo_env_pairs.append((algo, args.env_id))
-    elif args.algo is not None:
-        algo_env_pairs = []
-        for env_id in STABLE_BASELINES_AVAIL_ENV_IDS:
-            if not should_run(args.algo, env_id):
-                continue
-            algo_env_pairs.append((args.algo, env_id))
-    else:
-        parser.error('Please provide either --env-id or --algo')
+        if args.env_id is not None and args.env_id in STABLE_BASELINES_UNAVAIL_ENV_IDS:
+            print("ERROR: env_id={env} is not available since gym.make('{env}') failed.".format(
+                env=args.env_id))
+            sys.exit(1)
 
-    for algo, env_id in algo_env_pairs:
-        _run(algo, env_id)
+        if args.env_id is not None and args.algo is not None:
+            algo_env_pairs = [(args.algo, args.env_id)]
+        elif args.env_id is not None:
+            algo_env_pairs = []
+            for algo in STABLE_BASELINES_ANNOTATED_ALGOS:
+                if not self.should_run(algo, args.env_id):
+                    continue
+                algo_env_pairs.append((algo, args.env_id))
+        elif args.algo is not None:
+            algo_env_pairs = []
+            for env_id in STABLE_BASELINES_AVAIL_ENV_IDS:
+                if not self.should_run(args.algo, env_id):
+                    continue
+                algo_env_pairs.append((args.algo, env_id))
+        else:
+            parser.error('Please provide either --env-id or --algo')
 
+        if args.analyze:
+            for algo, env_id in algo_env_pairs:
+                self._analyze(algo, env_id)
 
 def tee(cmd, to_file, append=False, check=True, dry_run=False, **kwargs):
     if dry_run:
@@ -270,12 +313,12 @@ class StableBaselinesExpr:
         self.n_timesteps = n_timesteps
         self.n_episodes = n_episodes
 
-stable_baselines_exprs = []
+STABLE_BASELINES_EXPRS = []
 def add_stable_baselines_expr(*args, **kwargs):
     expr = StableBaselinesExpr(*args, **kwargs)
-    stable_baselines_exprs.append(expr)
-env_to_stable_baselines_exprs = dict((expr.env_id, expr) for expr in stable_baselines_exprs)
-algo_to_stable_baselines_exprs = dict((expr.algo, expr) for expr in stable_baselines_exprs)
+    STABLE_BASELINES_EXPRS.append(expr)
+ENV_TO_STABLE_BASELINES_EXPRS = dict((expr.env_id, expr) for expr in STABLE_BASELINES_EXPRS)
+ALGO_TO_STABLE_BASELINES_EXPRS = dict((expr.algo, expr) for expr in STABLE_BASELINES_EXPRS)
 
 add_stable_baselines_expr('ppo2', 'Acrobot-v1', -85.137, 26.272, 149963, 1741)
 add_stable_baselines_expr('a2c', 'Acrobot-v1', -86.616, 25.097, 149997, 1712)
@@ -387,8 +430,8 @@ add_stable_baselines_expr('sac', 'Walker2DBulletEnv-v0', 2052.646, 13.631, 15000
 add_stable_baselines_expr('ddpg', 'Walker2DBulletEnv-v0', 1954.753, 368.613, 149152, 155)
 add_stable_baselines_expr('ppo2', 'Walker2DBulletEnv-v0', 1276.848, 504.586, 149959, 179)
 add_stable_baselines_expr('a2c', 'Walker2DBulletEnv-v0', 618.318, 291.293, 149234, 187)
-STABLE_BASELINES_ALGOS = sorted(set(expr.algo for expr in stable_baselines_exprs))
-STABLE_BASELINES_ENV_IDS = sorted(set(expr.env_id for expr in stable_baselines_exprs))
+STABLE_BASELINES_ALGOS = sorted(set(expr.algo for expr in STABLE_BASELINES_EXPRS))
+STABLE_BASELINES_ENV_IDS = sorted(set(expr.env_id for expr in STABLE_BASELINES_EXPRS))
 
 def print_cmd(cmd, files=sys.stdout, env=None, dry_run=False):
     if type(cmd) == list:

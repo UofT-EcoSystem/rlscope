@@ -1,5 +1,6 @@
 import logging
 import psutil
+import os
 import multiprocessing
 from concurrent.futures import ProcessPoolExecutor
 import subprocess
@@ -76,12 +77,18 @@ class SQLParser:
     """
 
     def __init__(self, directory,
+                 host=None,
+                 user=None,
+                 password=None,
                  # Swallow any excess arguments
                  debug=False,
                  debug_single_thread=False,
                  **kwargs):
         self.directory = directory
-        self.conn = sql_create_connection(self.db_path)
+        self.host = host
+        self.user = user
+        self.password = password
+        self.conn = sql_create_connection(self.db_path, host=self.host, user=self.user, password=self.password)
         self.debug = debug
         self.debug_single_thread = debug_single_thread
         self.block_size = 50000
@@ -383,7 +390,7 @@ class SQLParser:
         self.conn.commit()
 
 
-        # name_to_id_obj = NameToID(self.db_path, debug=self.debug)
+        # name_to_id_obj = NameToID(self.db_path, host=self.host, user=self.user, password=self.password, debug=self.debug)
         # name_to_id_obj.run()
         #
         # self.process_to_id = name_to_id_obj.process_to_id
@@ -424,6 +431,9 @@ class SQLParser:
                 'block_size':self.block_size,
                 'id_field':id_field,
                 'directory':self.directory,
+                'host':self.host,
+                'user':self.user,
+                'password':self.password,
                 'debug':self.debug,
             }
         worker_kwargs = [get_worker_kwargs(path) for path in src_files]
@@ -883,13 +893,19 @@ def CSVInserterWorker(kwargs):
 class NameToID:
 
     def __init__(self, db_path,
+                 host=None,
+                 user=None,
+                 password=None,
                  debug=False,
                  ):
         self.db_path = db_path
+        self.host = host
+        self.user = user
+        self.password = password
         self.debug = debug
 
     def run(self):
-        self.conn = sql_create_connection(self.db_path)
+        self.conn = sql_create_connection(self.db_path, host=self.host, user=self.user, password=self.password)
 
         self.process_to_id = self.build_name_to_id('Process', 'process_id', 'process_name')
         self.phase_to_id = self.build_name_to_id('Phase', 'phase_id', 'phase_name')
@@ -930,11 +946,17 @@ class _CSVInserterWorker:
     #              debug=False,
     #              ):
     def __init__(self, path, db_path, table, block_size=50000, id_field=None, directory=None,
+                 host=None,
+                 user=None,
+                 password=None,
                  # fields=None,
                  debug=False,
                  csv_path=None,
                  ):
         self.path = path
+        self.host = host
+        self.user = user
+        self.password = password
         self.db_path = db_path
         self.table = table
         self.block_size = block_size
@@ -987,7 +1009,7 @@ class _CSVInserterWorker:
     def run(self):
         self._init()
 
-        self.conn = sql_create_connection(self.db_path)
+        self.conn = sql_create_connection(self.db_path, host=self.host, user=self.user, password=self.password)
 
         self.process_to_id = self.build_name_to_id('Process', 'process_id', 'process_name')
         self.phase_to_id = self.build_name_to_id('Phase', 'phase_id', 'phase_name')
@@ -1461,8 +1483,10 @@ class CSVInserter:
         os.remove(self.tmp_path)
 
 class TracesPostgresConnection:
-    def __init__(self, db_config_path, db_basename='traces', host='localhost'):
+    def __init__(self, db_config_path, db_basename='traces', host='localhost', user=None, password=None):
         self.host = host
+        self.user = user
+        self.password = password
         self.rand_suffix_len = 4
         self.db_config_path = db_config_path
         self.db_config = None
@@ -1550,10 +1574,6 @@ class TracesPostgresConnection:
             colnames=colnames,
         ), all_values)
 
-    @property
-    def user(self):
-        return getpass.getuser()
-
     def create_connection(self):
         if self.conn is not None:
             return
@@ -1565,17 +1585,22 @@ class TracesPostgresConnection:
 
     def _create_connection(self, db_name):
         """ create a database connection to a SQLite database """
+
+        # conn = psycopg2.connect( dbname=db_name, user=self.user, host=self.host, isolation_level=None)
         # conn = psycopg2.connect("dbname={db} user={user}".format(
         #     db=db_name,
         #     user=self.user,
         # ), isolation_level=None)
         try:
+            kwargs = dict()
+            if self.password is not None:
+                kwargs['password'] = self.password
             conn = psycopg2.connect(
                 dbname=db_name,
                 user=self.user,
                 host=self.host,
-                isolation_level=None)
-            psycopg2.connect(dbname=db_name, user=self.user, host=self.host, isolation_level=None)
+                isolation_level=None,
+                **kwargs)
         except psycopg2.OperationalError as e:
             if not re.search(r'database.*does not exist', e.args[0]):
                 raise
@@ -1786,11 +1811,17 @@ class TracesPostgresConnection:
             psql_cmd = ['psql']
             if self.host is not None:
                 psql_cmd.extend(['-h', self.host])
+            if self.user is not None:
+                psql_cmd.extend(['-U', self.user])
             psql_cmd.extend([db_name])
+            env = dict(os.environ)
+            if self.password is not None:
+                env['PGPASSWORD'] = self.password
             proc = subprocess.run(psql_cmd,
                                   stdin=sql_f,
                                   stdout=subprocess.PIPE,
-                                  stderr=subprocess.PIPE)
+                                  stderr=subprocess.PIPE,
+                                  env=env)
         if proc.returncode != 0:
             if proc.stdout is not None:
                 print(proc.stdout.decode('utf-8'))
@@ -1961,9 +1992,12 @@ class SQLCategoryTimesReader:
 
         NOTE: start/end tuples are in sorted order (by their start time)
     """
-    def __init__(self, db_path, debug_ops=False):
+    def __init__(self, db_path, host=None, user=None, password=None, debug_ops=False):
         self.db_path = db_path
-        self.conn = sql_create_connection(db_path)
+        self.host = host
+        self.user = user
+        self.password = password
+        self.conn = sql_create_connection(db_path, host=self.host, user=self.user, password=self.password)
         self.parse_debug = False
         self.debug_ops = debug_ops
 
@@ -3262,14 +3296,29 @@ def sql_exec_query(cursor, query, params=None, klass=None, debug=False):
     if debug:
         logging.info("> query took {sec} seconds".format(sec=end_t - start_t))
 
-def sql_create_connection(db_path, host=None):
-    if 'IML_POSTGRES_HOST' in os.environ and host is None:
-        host = os.environ['IML_POSTGRES_HOST']
-    else:
-        host = 'localhost'
+def sql_create_connection(db_path, host=None, user=None, password=None):
+    if host is None:
+        if 'IML_POSTGRES_HOST' in os.environ:
+            host = os.environ['IML_POSTGRES_HOST']
+        elif 'PGHOST' in os.environ:
+            host = os.environ['PGHOST']
+        else:
+            host = 'localhost'
+
+    if user is None:
+        if 'PGUSER' in os.environ:
+            user = os.environ['PGUSER']
+        else:
+            user = get_username()
+
+    if password is None:
+        if 'PGPASSWORD' in os.environ:
+            password = os.environ['PGPASSWORD']
+        # No default password.
+
     logging.info("Using DB_HOST = {host}".format(host=host))
     if py_config.SQL_IMPL == 'psql':
-        return TracesPostgresConnection(db_path, host=host)
+        return TracesPostgresConnection(db_path, host=host, user=user, password=password)
     elif py_config.SQL_IMPL == 'sqlite':
         return TracesSQLiteConnection(db_path, host=host)
     raise NotImplementedError("Not sure how to create connection for SQL_IMPL={impl}".format(

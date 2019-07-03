@@ -1727,7 +1727,6 @@ class Profiler:
             pyprof_trace_key=pyprof_trace_key,
             debug=debug)
         self.next_trace_id += 1
-        logging.info("HELLO WORLD: PYPROF")
         self.bg_dumper.submit(
             name="PyprofDumper.dump({path})".format(
                 path=self.pyprof_proto_path(trace_id)),

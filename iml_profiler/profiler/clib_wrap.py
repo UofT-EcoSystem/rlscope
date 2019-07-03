@@ -106,12 +106,12 @@ class PyprofTrace:
         self.pyprof.phase = phase
 
         with open(path, 'wb') as f:
-            logging.info("> dump pyprof.steps:")
-            pprint.pprint({
-                'len(pyprof.steps)':len(self.pyprof.steps),
-                'pyprof.process_name':self.pyprof.process_name,
-                'pyprof.phase':self.pyprof.phase,
-            }, indent=2)
+            # logging.info("> dump pyprof.steps:")
+            # pprint.pprint({
+            #     'len(pyprof.steps)':len(self.pyprof.steps),
+            #     'pyprof.process_name':self.pyprof.process_name,
+            #     'pyprof.phase':self.pyprof.phase,
+            # }, indent=2)
             f.write(self.pyprof.SerializeToString())
 
     def record_event(self, step, category, name, start_us, end_us, attrs=None, python_event=False):

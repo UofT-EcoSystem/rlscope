@@ -7,6 +7,7 @@ https://luigi.readthedocs.io/en/stable/index.html
 import logging
 import luigi
 
+import pwd
 import textwrap
 import datetime
 import pprint
@@ -106,28 +107,50 @@ class IMLTask(luigi.Task):
 
         self.mark_done(start_t, end_t)
 
+def get_username():
+    return pwd.getpwuid(os.getuid())[0]
+
+param_postgres_password = luigi.Parameter(description="Postgres password; default: env.PGPASSWORD", default=os.environ.get('PGPASSWORD', None))
+param_postgres_user = luigi.Parameter(description="Postgres user", default=get_username())
+param_postgres_host = luigi.Parameter(description="Postgres host", default='localhost')
+
 class SQLParserTask(IMLTask):
+    postgres_password = param_postgres_password
+    postgres_user = param_postgres_user
+    postgres_host = param_postgres_host
+
     def requires(self):
         return []
 
     def iml_run(self):
         self.sql_parser = SQLParser(
             directory=self.iml_directory,
+            host=self.postgres_host,
+            user=self.postgres_user,
+            password=self.postgres_password,
             debug=self.debug,
             debug_single_thread=self.debug_single_thread,
         )
         self.sql_parser.run()
 
 class _UtilizationPlotTask(IMLTask):
+    postgres_password = param_postgres_password
+    postgres_user = param_postgres_user
+    postgres_host = param_postgres_host
+
     def requires(self):
         return [
-            SQLParserTask(iml_directory=self.iml_directory, debug=self.debug, debug_single_thread=self.debug_single_thread),
+            SQLParserTask(iml_directory=self.iml_directory, debug=self.debug, debug_single_thread=self.debug_single_thread,
+                          postgres_host=self.postgres_host, postgres_user=self.postgres_user, postgres_password=self.postgres_password),
         ]
 
     def iml_run(self):
         self.sql_parser = UtilizationPlot(
             overlap_type=self.overlap_type,
             directory=self.iml_directory,
+            host=self.postgres_host,
+            user=self.postgres_user,
+            password=self.postgres_password,
             debug=self.debug,
             debug_single_thread=self.debug_single_thread,
         )
@@ -167,15 +190,22 @@ class HeatScaleTask(IMLTask):
     # step_sec=1.,
     # pixels_per_square=10,
     # decay=0.99,
+    postgres_password = param_postgres_password
+    postgres_user = param_postgres_user
+    postgres_host = param_postgres_host
 
     def requires(self):
         return [
-            SQLParserTask(iml_directory=self.iml_directory, debug=self.debug, debug_single_thread=self.debug_single_thread),
+            SQLParserTask(iml_directory=self.iml_directory, debug=self.debug, debug_single_thread=self.debug_single_thread,
+                          postgres_host=self.postgres_host, postgres_user=self.postgres_user, postgres_password=self.postgres_password),
         ]
 
     def iml_run(self):
         self.heat_scale = HeatScalePlot(
             directory=self.iml_directory,
+            host=self.postgres_host,
+            user=self.postgres_user,
+            password=self.postgres_password,
             debug=self.debug,
         )
         self.heat_scale.run()
@@ -187,6 +217,10 @@ class TraceEventsTask(luigi.Task):
         Run any multiprocessing stuff using a single thread for debugging.
         """))
 
+    postgres_password = param_postgres_password
+    postgres_user = param_postgres_user
+    postgres_host = param_postgres_host
+
     overlaps_event_id = luigi.IntParameter(description="show events that overlap with this event (identified by its event_id)", default=None)
     op_name = luigi.Parameter(description="operation name (e.g. q_forward)", default=None)
     process_name = luigi.Parameter(description="show events belonging to this process", default=None)
@@ -197,7 +231,8 @@ class TraceEventsTask(luigi.Task):
 
     def requires(self):
         return [
-            SQLParserTask(iml_directory=self.iml_directory, debug=self.debug, debug_single_thread=self.debug_single_thread),
+            SQLParserTask(iml_directory=self.iml_directory, debug=self.debug, debug_single_thread=self.debug_single_thread,
+                          postgres_host=self.postgres_host, postgres_user=self.postgres_user, postgres_password=self.postgres_password),
         ]
 
     def output(self):
@@ -246,6 +281,9 @@ class TraceEventsTask(luigi.Task):
     def run(self):
         self.dumper = TraceEventsParser(
             directory=self.iml_directory,
+            host=self.postgres_host,
+            user=self.postgres_user,
+            password=self.postgres_password,
             debug=self.debug,
             overlaps_event_id=self.overlaps_event_id,
             op_name=self.op_name,
