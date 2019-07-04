@@ -117,6 +117,13 @@ def main():
             '--bullet',
             action='store_true',
             help='Limit environments to physics-based Bullet environments')
+        parser_stable_baselines.add_argument(
+            '--all',
+            action='store_true',
+            help=textwrap.dedent("""
+        Run all (algo, env_id) pairs.
+        Make this explicit to avoid running everything by accident.
+        """))
 
     parser_train_stable_baselines = subparsers.add_parser(
         'train_stable_baselines.sh',
@@ -290,6 +297,13 @@ class StableBaselines:
                 if not self.should_run(args.algo, env_id):
                     continue
                 algo_env_pairs.append((args.algo, env_id))
+        elif args.all:
+            algo_env_pairs = []
+            for algo in STABLE_BASELINES_ANNOTATED_ALGOS:
+                for env_id in STABLE_BASELINES_AVAIL_ENV_IDS:
+                    if not self.should_run(algo, env_id):
+                        continue
+                    algo_env_pairs.append((algo, env_id))
         else:
             print('Please provide either --env-id or --algo', file=sys.stderr)
             sys.exit(1)
