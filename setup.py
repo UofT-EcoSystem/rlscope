@@ -59,6 +59,7 @@ REQUIRED_PACKAGES = [
     'seaborn >= 0.9.0',
     'tqdm >= 4.31.1',
     'py-cpuinfo == 4.0.0',
+    'gym == 0.13.0',
 
     # Trying to get nvidia dockerfile to run with assembler.py
     'absl-py==0.6.1',

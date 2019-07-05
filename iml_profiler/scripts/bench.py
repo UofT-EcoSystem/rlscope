@@ -85,6 +85,13 @@ def main():
         '--dry-run',
         action='store_true')
     parser.add_argument(
+        '--skip-error',
+        action='store_true',
+        help=textwrap.dedent("""
+    If a script fails and there's more left to run, ignore it and continue.
+    (NOTE: don't worry, stderr error will still get captured to a logfile).
+    """))
+    parser.add_argument(
         '--analyze',
         action='store_true')
     parser.add_argument(
@@ -139,6 +146,17 @@ def main():
     add_stable_baselines_options(parser_inference_stable_baselines)
     parser_inference_stable_baselines.set_defaults(
         sh_script='inference_stable_baselines.sh',
+        func=run_stable_baselines)
+
+    parser_dummy_error = subparsers.add_parser(
+        'dummy_error.sh',
+        help='test: make sure errors in bench.py are handled correctly')
+    parser_dummy_error.add_argument(
+        '--error',
+        action='store_true',
+        help='If set, run a command with non-zero exit status')
+    parser_dummy_error.set_defaults(
+        sh_script='dummy_error.sh',
         func=run_stable_baselines)
 
     args, extra_argv = parser.parse_known_args()
@@ -199,17 +217,34 @@ class StableBaselines:
             env = dict(os.environ)
 
         if args.replace or not self.already_ran(to_file):
-            tee(
-                cmd=cmd + self.extra_argv,
-                to_file=to_file,
-                env=env,
-                dry_run=args.dry_run,
-            )
-            if not args.dry_run:
-                with open(to_file, 'a') as f:
-                    f.write("IML BENCH DONE")
-            if not args.dry_run or _e(to_file):
-                assert self.already_ran(to_file)
+
+            try:
+                tee(
+                    cmd=cmd + self.extra_argv,
+                    to_file=to_file,
+                    env=env,
+                    dry_run=args.dry_run,
+                )
+                failed = False
+            except subprocess.CalledProcessError as e:
+                if not args.skip_error:
+                    logging.info((
+                                     "> Command failed: see {path}; exiting early "
+                                     "(use --skip-error to ignore individual experiment errors)"
+                                 ).format(path=to_file))
+                    raise
+                logging.info(
+                    "> Command failed; see {path}; continuing (--skip-error was set)".format(
+                        path=to_file,
+                    ))
+                failed = True
+
+            if not failed:
+                if not args.dry_run:
+                    with open(to_file, 'a') as f:
+                        f.write("IML BENCH DONE\n")
+                if not args.dry_run or _e(to_file):
+                    assert self.already_ran(to_file)
 
     def _analyze(self, algo, env_id):
         args = self.args
@@ -218,6 +253,18 @@ class StableBaselines:
         cmd = ['iml-analyze', "--iml-directory", iml_directory]
 
         to_file = self._get_logfile(algo, env_id, suffix='analyze.log')
+
+        self._run_cmd(cmd=cmd, to_file=to_file)
+
+    def _error(self):
+        args = self.args
+
+        if args.error:
+            cmd = ['ls', "-z"]
+        else:
+            cmd = ['ls', "-l"]
+
+        to_file = _j(args.dir, 'error.txt')
 
         self._run_cmd(cmd=cmd, to_file=to_file)
 
@@ -277,6 +324,10 @@ class StableBaselines:
 
     def run(self):
         args = self.args
+
+        if args.sh_script == 'dummy_error.sh':
+            self._error()
+            return
 
         if args.env_id is not None and args.env_id in STABLE_BASELINES_UNAVAIL_ENV_IDS:
             print("ERROR: env_id={env} is not available since gym.make('{env}') failed.".format(

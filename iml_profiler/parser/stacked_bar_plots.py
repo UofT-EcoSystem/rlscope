@@ -1,6 +1,7 @@
 import logging
 import argparse
 import re
+import copy
 import importlib
 import sys
 
@@ -9,10 +10,14 @@ import seaborn as sns
 import pandas as pd
 import matplotlib.pyplot as plt
 
+from os.path import join as _j, abspath as _a, exists as _e, dirname as _d, basename as _b
+
 from iml_profiler.parser.db import SQLCategoryTimesReader, sql_get_source_files, sql_input_path
 from iml_profiler.parser.plot_index import _DataIndex
 
 from iml_profiler.parser.common import *
+
+USEC_IN_SEC = 1e6
 
 class OverlapStackedBarPlot:
     """
@@ -48,9 +53,20 @@ class OverlapStackedBarPlot:
     May nee to add --algos --env-ids option in the future though.
 
     """
+    SUPPORTED_OVERLAP_TYPES = ['ResourceOverlap', 'OperationOverlap', 'CategoryOverlap']
+    SUPPORTED_X_TYPES = ['algo-comparison', 'env-comparison', 'rl-comparison']
+    SUPPORTED_Y_TYPES = ['percent', 'seconds']
+
     def __init__(self,
                  iml_directories,
+                 directory,
                  overlap_type,
+                 title=None,
+                 x_type='rl-comparison',
+                 y_type='percent',
+                 show_title=True,
+                 show_legend=True,
+                 suffix=None,
                  host=None,
                  user=None,
                  password=None,
@@ -75,23 +91,121 @@ class OverlapStackedBarPlot:
         :param decay:
         :param kwargs:
         """
-        self.overlap_type = overlap_type
-        assert self.overlap_type in ['ResourceOverlap', 'OperationOverlap', 'CategoryOverlap']
+        assert overlap_type in OverlapStackedBarPlot.SUPPORTED_OVERLAP_TYPES
+        assert x_type in OverlapStackedBarPlot.SUPPORTED_X_TYPES
+        assert y_type in OverlapStackedBarPlot.SUPPORTED_Y_TYPES
         self.iml_directories = iml_directories
+        self.directory = directory
+        self.overlap_type = overlap_type
+        self.title = title
+        self.x_type = x_type
+        self.y_type = y_type
+        self.show_title = show_title
+        self.show_legend = show_legend
+        self.suffix = suffix
         self.host = host
         self.user = user
         self.password = password
         self.debug = debug
 
-    def _plot_data_path(self, device_id, device_name):
-        return _j(self.directory, "util_scale.plot_data{dev}.txt".format(
-            dev=device_id_suffix(device_id, device_name),
+    def _get_plot_path(self, ext):
+        if self.suffix is not None:
+            suffix_str = '.{suffix}'.format(self.suffix)
+        else:
+            suffix_str = ''
+        return _j(self.directory, "OverlapStackedBarPlot.overlap_type_{ov}{suffix}.{ext}".format(
+            ov=self.overlap_type,
+            suffix=suffix_str,
+            ext=ext,
         ))
 
-    def _json_path(self, device_id, device_name):
-        return _j(self.directory, "util_scale{dev}.js_path.json".format(
-            dev=device_id_suffix(device_id, device_name),
-        ))
+    @property
+    def _plot_data_path(self):
+        return self._get_plot_path(ext='txt')
+
+    @property
+    def _plot_path(self):
+        return self._get_plot_path(ext='png')
+
+    # def _json_path(self, device_id, device_name):
+    #     return _j(self.directory, "util_scale{dev}.js_path.json".format(
+    #         dev=device_id_suffix(device_id, device_name),
+    #     ))
+
+    def _get_algo_or_env(self, algo_or_env):
+        assert algo_or_env in {'env', 'algo'}
+
+        def _get_value(iml_dir):
+            algo, env = self._get_algo_env_from_dir(iml_dir)
+            if algo_or_env == 'algo':
+                value = algo
+            else:
+                value = env
+            return value
+
+        if algo_or_env == 'algo':
+            field = 'algorithm'
+        else:
+            field = 'environment'
+
+        values = set()
+        for iml_dir in self.iml_directories:
+            value = _get_value(iml_dir)
+            if len(values) == 1 and value not in values:
+                raise RuntimeError("Expected {field}={expect} but saw {field}={saw} for --iml-directory {dir}".format(
+                    field=field,
+                    expect=list(values)[0],
+                    saw=value,
+                    dir=iml_dir,
+                ))
+            values.add(value)
+        assert len(values) == 1
+        return list(values)[0]
+
+    @property
+    def algorithm(self):
+        return self._get_algo_or_env('algo')
+
+    @property
+    def environment(self):
+        return self._get_algo_or_env('env')
+
+    @property
+    def plot_x_axis_label(self):
+        if self.x_type == 'rl-comparison':
+            return "(RL algorithm, Environment)"
+        elif self.x_type == 'env-comparison':
+            return "Environment"
+        elif self.x_type == 'algo-comparison':
+            return "RL algorithm"
+        raise NotImplementedError
+
+    @property
+    def plot_y_axis_label(self):
+        if self.y_type == 'percent':
+            return "Time breakdown (percent)"
+        elif self.y_type == 'seconds':
+            return "Time breakdown (seconds)"
+        raise NotImplementedError
+
+    @property
+    def plot_title(self):
+        if self.title is not None:
+            return self.title
+
+        if not self.show_title:
+            return None
+
+        if self.x_type == 'rl-comparison':
+            title = "Comparing RL workloads"
+        elif self.x_type == 'env-comparison':
+            title = "Comparing environments when training {algorithm}".format(algorithm=self.algorithm)
+        elif self.x_type == 'algo-comparison':
+            title = "Comparing algorithms when training {environment}".format(environment=self.environment)
+        else:
+            raise NotImplementedError
+
+        return title
 
     def _get_algo_env_id(self, iml_dir):
         sql_reader = self.sql_readers[iml_dir]
@@ -103,32 +217,77 @@ class OverlapStackedBarPlot:
         env_id = m.group('env_id')
         return (algo, env_id)
 
+    def _get_algo_env_from_dir(self, iml_dir):
+        # .../<algo>/<env_id>
+        path = os.path.normpath(iml_dir)
+        components = path.split(os.sep)
+        env_id = components[-1]
+        algo = components[-2]
+        return (algo, env_id)
+
     def get_index(self, iml_dir):
+
+        def _del_module(import_path):
+            if import_path in sys.modules:
+                del sys.modules[import_path]
+
+        def _del_index_module():
+            _del_module('iml_profiler_plot_index')
+            _del_module('iml_profiler_plot_index_data')
+
+
+        _del_index_module()
+
         sys.path.insert(0, iml_dir)
         iml_profiler_plot_index = importlib.import_module("iml_profiler_plot_index")
         index = iml_profiler_plot_index.DataIndex
         del sys.path[0]
-        if 'iml_profiler_plot_index' in sys.modules:
-            del sys.modules['iml_profiler_plot_index']
-        return index
 
-    def run(self):
+        _del_index_module()
+
+        # Check that env_id's match
+        assert _b(iml_dir) == _b(index.directory)
+
+        # return index
+
+        # NOTE: if trace-files were processed on a different machine, the _DataIndex.directory will be different;
+        # handle this by re-creating the _DataIndex with iml_dir.
+        my_index = _DataIndex(index.index, iml_dir, debug=self.debug)
+        return my_index
+
+    def _init_directories(self):
+        """
+        Initialize SQL / DataIndex needed for reading plot-data from iml-analyze'd --iml-directory's.
+
+        :return:
+        """
         self.data_index = dict()
         self.sql_readers = dict()
 
         for iml_dir in self.iml_directories:
             self.sql_readers[iml_dir] = SQLCategoryTimesReader(self.db_path(iml_dir), host=self.host, user=self.user, password=self.password)
             index = self.get_index(iml_dir)
-            idx = _DataIndex(index, iml_dir, debug=self.debug)
-            self.data_index[iml_dir] = idx
+            # idx = _DataIndex(index, iml_dir, debug=self.debug)
+            self.data_index[iml_dir] = index
 
+    def _read_df(self):
+        """
+        Read venn_js data of several --iml-directory's into a single data-frame.
+
+        :return:
+        """
         self.data = {
             'algo':[],
             'env':[],
         }
-        self.all_labels = None
+        self.all_groups = None
         for iml_dir in self.iml_directories:
             idx = self.data_index[iml_dir]
+
+            algo, env = self._get_algo_env_from_dir(iml_dir)
+            self.data['algo'].append(algo)
+            self.data['env'].append(env)
+
             # Q: There's only one ResourceOverlap plot...
             # However, there are many OperationOverlap plots; how can we select
             # among them properly?
@@ -137,17 +296,102 @@ class OverlapStackedBarPlot:
             })
             vd = VennData(entry['venn_js_path'])
             vd_dict = vd.as_dict()
-            for label, size_us in vd_dict.items():
-                if self.all_labels is None:
-                    self.all_labels = set(vd_dict.keys())
+            for group, size_us in vd_dict.items():
+                if self.all_groups is None:
+                    self.all_groups = set(vd_dict.keys())
                 else:
                     # All venn_js_path files should have the same categories in them.
                     # If not, we must do something to make 1 file look like another.
-                    assert label in self.all_labels
-                if label not in self.data:
-                    self.data[label] = []
-                self.data[label].append(size_us)
+                    assert group in self.all_groups
+                if group not in self.data:
+                    self.data[group] = []
+                self.data[group].append(size_us)
         self.df = pd.DataFrame(self.data)
+
+    def _normalize_df(self):
+        """
+        Transform raw venn_js file into appropriate units for plotting
+        (i.e. convert us to seconds).
+        """
+        def transform_usec_to_sec(df, group):
+            return df[group]/USEC_IN_SEC
+
+        def transform_usec_to_percent(df):
+            """
+            GOAL:
+            CPU = CPU / ([CPU] + [CPU, GPU] + [GPU])
+
+            :param df:
+            :param group:
+            :return:
+            """
+
+            # e.g.
+            # summation = [CPU] + [CPU, GPU] + [GPU]
+            summation = None
+            for g in self.all_groups:
+                if summation is None:
+                    summation = df[g]
+                else:
+                    summation = summation + df[g]
+
+            ret = dict()
+            for g in self.all_groups:
+                # e.g.
+                # CPU = CPU / ([CPU] + [CPU, GPU] + [GPU])
+                ret[g] = 100 * df[g]/summation
+
+            return ret
+
+        if self.y_type == 'seconds':
+            for group in self.all_groups:
+                self.df[group] = transform_usec_to_sec(self.df, group)
+        elif self.y_type == 'percent':
+            ret = transform_usec_to_percent(self.df)
+            for group in ret.keys():
+                self.df[group] = ret[group]
+        else:
+            raise NotImplementedError
+
+    def _plot_df(self):
+        logging.info("Dataframe:\n{df}".format(df=self.df))
+
+        def group_to_label(group):
+            label = ' + '.join(group)
+            return label
+        x_fields = []
+        for index, row in self.df.iterrows():
+            x_field = "({algo}, {env})".format(
+                algo=row['algo'],
+                env=row['env'],
+            )
+            x_fields.append(x_field)
+        self.df['x_field'] = x_fields
+
+        stacked_bar_plot = StackedBarPlot(
+            data=self.df,
+            path=self._plot_path,
+            groups=sorted(self.all_groups),
+            x_field='x_field',
+            x_axis_label=self.plot_x_axis_label,
+            y_axis_label=self.plot_y_axis_label,
+            title=self.plot_title,
+            # groups: the "keys" into the data dictionary, which are the "stacks" found in each bar.
+            group_to_label=group_to_label,
+        )
+        self.dump_plot_data(self.df)
+        stacked_bar_plot.plot()
+
+    def run(self):
+        self._init_directories()
+        self._read_df()
+        self._normalize_df()
+        self._plot_df()
+
+        # self.dump_js_data(norm_samples, device, start_time_sec)
+        # plotter.add_data(norm_samples)
+        # print("> HeatScalePlot @ {path}".format(path=png))
+        # plotter.plot()
 
         # TODO: read data into this format:
         # data = {
@@ -159,110 +403,36 @@ class OverlapStackedBarPlot:
         # df = pandas.DataFrame(data)
         # # Transform df to handle the different "subsumes" relationships between categories.
 
+    # def dump_js_data(self, norm_samples, device, start_time_sec):
+    #     js = {
+    #         'metadata': {
+    #             'plot_type': 'OverlappedStackedBar',
+    #             # 'device_id': device.device_id,
+    #             # 'device_name': device.device_name,
+    #             # 'start_time_usec': float(start_time_sec)*MICROSECONDS_IN_SECOND,
+    #             # 'step_usec': self.step_sec*MICROSECONDS_IN_SECOND,
+    #             # 'decay': self.decay,
+    #         },
+    #         'data': {
+    #             'util': norm_samples['util'],
+    #             'start_time_sec': norm_samples['start_time_sec'],
+    #         },
+    #     }
+    #     path = self._json_path(device.device_id, device.device_name)
+    #     print("> HeatScalePlot @ plot data @ {path}".format(path=path))
+    #     do_dump_json(js, path)
 
-        # for device_name, device_id in sql_reader.devices:
-        #   samples = SELECT all utilization samples for <device_name>
-        #   plotter.plot(samples) @ png=util_scale.<device_id>.png
-
-        # The start time of all traced Events / utilization samples.
-        # Use this as the "starting point" of the heat-scale.
-
-        # TODO: How can we make things "match up" with the SummaryView?
-        # Options:
-        #
-        # 1. Show utilization from [start_time_usec .. start_time_usec + duration_sec].
-        #
-        #    We currently use start_time_usec from events to decide on initial plot locations;
-        #    so ideally we would sample the utilization samples running from:
-        #    [start_time_usec .. start_time_usec + duration_sec] for each phase.
-        #    PROBLEM:
-        #    - actual time shown in subplots spans ~ 531 seconds;
-        #    - total time according to utilization data is ~ 1244 seconds.
-        #
-        #    PRO: utilization will "appear" to match up with ResourceSubplot.
-        #    CON: utilization will not actually match up with ResourceSubplot.
-        #    PRO: easiest to implement.
-        #
-        # 2. "Condense" utilization from [subplot.start_time_usec .. subplot.end_time_usec] to fit within subplot height;
-        #    don't show time-scale.
-        #
-        #    "Operations" may not capture all CPU/GPU activity.
-        #    However, we can still show a condensed view of overall hardware utilization during that time.
-        #
-        #    CON: if "operations" are wrong, maybe we didn't capture high activity and so our ResourceSubplot subplot
-        #         will look wrong in comparison.
-        #    PRO: true hardware utilization is shown for "some" interval of time
-        #
-        # 3. Only keeps utilization samples that "match up" with the spans of time that make up our ResourceSubplot plots.
-        #    PRO: ResourceOverlap and HeatScale will "match up".
-        #    CON: We may be missing actual hardware utilization (programmer annotations are wrong)
-        #    CON: time-consuming to implement.
-
-        start_time_sec = self.sql_reader.trace_start_time_sec
-        for device in self.sql_reader.util_devices:
-            samples = self.sql_reader.util_samples(device)
-            # png = self.get_util_scale_png(device.device_id, device.device_name)
-            # plotter = HeatScale(
-            #     color_value='util', y_axis='start_time_sec',
-            #     png=png,
-            #     pixels_per_square=self.pixels_per_square,
-            #     # Anchor colormap colors using min/max utilization values.
-            #     vmin=0.0, vmax=1.0,
-            #     # 1 second
-            #     step=1.)
-
-            if self.debug:
-                # Print the unadjusted raw utilization + timestamp data, centered @ start_time_sec.
-                raw_centered_time_secs = (np.array(samples['start_time_sec']) - start_time_sec).tolist()
-                raw_df = pd.DataFrame({
-                    'util':samples['util'],
-                    'start_time_sec':raw_centered_time_secs,
-                }).astype(float)
-                logging.info("> DEBUG: Unadjusted raw utilization measurements for device={dev}".format(dev=device))
-                logging.info(raw_df)
-            norm_time_secs, norm_utils = exponential_moving_average(
-                samples['start_time_sec'], samples['util'],
-                start_time_sec, self.step_sec, self.decay)
-            centered_time_secs = (np.array(norm_time_secs) - start_time_sec).tolist()
-            norm_samples = {
-                'util':norm_utils,
-                'start_time_sec':centered_time_secs,
-            }
-            plot_df = pd.DataFrame(norm_samples).astype(float)
-            self.dump_plot_data(plot_df, device)
-            self.dump_js_data(norm_samples, device, start_time_sec)
-            # plotter.add_data(norm_samples)
-            # print("> HeatScalePlot @ {path}".format(path=png))
-            # plotter.plot()
-
-    def dump_js_data(self, norm_samples, device, start_time_sec):
-        js = {
-            'metadata': {
-                'plot_type': 'HeatScale',
-                'device_id': device.device_id,
-                'device_name': device.device_name,
-                'start_time_usec': float(start_time_sec)*MICROSECONDS_IN_SECOND,
-                'step_usec': self.step_sec*MICROSECONDS_IN_SECOND,
-                'decay': self.decay,
-            },
-            'data': {
-                'util': norm_samples['util'],
-                'start_time_sec': norm_samples['start_time_sec'],
-            },
-        }
-        path = self._json_path(device.device_id, device.device_name)
-        print("> HeatScalePlot @ plot data @ {path}".format(path=path))
-        do_dump_json(js, path)
-
-    def dump_plot_data(self, plot_df, device):
-        path = self._plot_data_path(device.device_id, device.device_name)
-        print("> HeatScalePlot @ plot data @ {path}".format(path=path))
+    def dump_plot_data(self, plot_df):
+        path = self._plot_data_path
+        print("> {name} @ plot data @ {path}".format(
+            name=self.__class__.__name__,
+            path=path))
         with open(path, 'w') as f:
             DataFrame.print_df(plot_df, file=f)
         logging.info(plot_df)
 
     def db_path(self, iml_dir):
-        return sql_input_path(self.iml_dir)
+        return sql_input_path(iml_dir)
 
 class VennData:
     def __init__(self, path):
@@ -288,12 +458,12 @@ class VennData:
         self.idx_to_label = dict()
         for venn_data in self.venn['venn']:
             if len(venn_data['sets']) == 1:
-                assert 'label' in venn_data:
+                assert 'label' in venn_data
                 idx = venn_data['sets'][0]
                 self.idx_to_label[idx] = venn_data['label']
 
     def _indices_to_labels(self, indices):
-        return sorted(tuple(self.idx_to_label[i] for i in indices))
+        return tuple(sorted(self.idx_to_label[i] for i in indices))
 
     def as_dict(self):
         """
@@ -330,7 +500,248 @@ def test_stacked_bar():
     logging.info('Save figure to {path}'.format(path=path))
     plt.savefig(path)
 
+class StackedBarPlot:
+    def __init__(self,
+                 data, path,
+                 groups=None,
+                 x_field=None,
+                 x_axis_label="X-axis label",
+                 y_axis_label="Y-axis label",
+                 title=None,
+                 rotation=10,
+                 # fontsize=16,
+                 fontsize=None,
+                 group_to_label=None):
+        assert groups is not None
+        assert x_field is not None
+        self.data = pd.DataFrame(data)
+        self.path = path
+        self.x_axis_label = x_axis_label
+        self.y_axis_label = y_axis_label
+        self.title = title
+        self.rotation = rotation
+        self.fontsize = fontsize
+        self.groups = groups
+        self.x_field = x_field
+        self.fontsize = fontsize
+        self.group_to_label = group_to_label
+
+    def _group_to_label(self, group):
+        if self.group_to_label is not None:
+            label = self.group_to_label(group)
+            return label
+        label = group
+        return label
+
+    def plot(self):
+
+        #Set general plot properties
+
+        sns.set_style("white")
+        # fig = plt.figure()
+        # ax = plt.subplot()
+        # ax_list = fig.axes
+        # plt.subplot()
+        # fig, ax = plt.subplots()
+        # ax.set_xs
+        # sns.set_context({"figure.figsize": (24, 10)})
+
+        if self.fontsize is not None:
+            sns.set_style('font', {
+                'size': self.fontsize,
+            })
+
+        # plt.rc('xtick', rotation=40)
+        # sns.set_style('xtick', {
+        #     'rotation': 40,
+        # })
+
+        # TODO:
+        # - Make it so plot legends appear to right of the plot
+        # - Make it so we can choose NOT to show plot legend (ideally just make it invisible...)
+        # - All fonts should be same size
+
+        colors = sns.color_palette("hls", len(self.groups))
+
+        n_bars = len(self.data[self.groups[0]])
+        accum_ys = np.zeros(n_bars)
+        barplot_kwargs = []
+        for i, group in enumerate(self.groups):
+            accum_ys += self.data[group]
+            ys = copy.copy(accum_ys)
+            barplot_kwargs.append(
+                {
+                    'x': self.data[self.x_field],
+                    'y': ys,
+                    'color': colors[i]
+                }
+            )
+
+        barplots = []
+        for kwargs in reversed(barplot_kwargs):
+            # TODO: color?
+            barplot = sns.barplot(**kwargs)
+            barplots.append(barplot)
+        barplots.reverse()
+
+        # #Plot 1 - background - "total" (top) series
+        # sns.barplot(x = self.data.Group, y = self.data.total, color = "red")
+        #
+        # #Plot 2 - overlay - "bottom" series
+        # bottom_plot = sns.barplot(x = self.data.Group, y = self.data.Series1, color = "#0000A3")
+
+        bottom_plot = barplots[-1]
+
+        legend_rects = []
+        for i, group in enumerate(self.groups):
+            legend_rect = plt.Rectangle((0, 0), 1, 1, fc=colors[i], edgecolor='none')
+            legend_rects.append(legend_rect)
+        legend_labels = [self._group_to_label(group) for group in self.groups]
+        # leg = plt.legend(legend_rects, legend_labels, loc=1, ncol=2)
+        leg = plt.legend(legend_rects, legend_labels,
+                         bbox_to_anchor=(1.05, 1), loc=2, borderaxespad=0.)
+
+        # , prop={'size': self.fontsize}
+
+        # topbar = plt.Rectangle((0,0),1,1,fc="red", edgecolor = 'none')
+        # bottombar = plt.Rectangle((0,0),1,1,fc='#0000A3',  edgecolor = 'none')
+        # l = plt.legend([bottombar, topbar], ['Bottom Bar', 'Top Bar'], loc=1, ncol = 2, prop={'size':16})
+
+        leg.draw_frame(False)
+
+        #Optional code - Make plot look nicer
+        sns.despine(left=True)
+        bottom_plot.set_ylabel(self.y_axis_label)
+        bottom_plot.set_xlabel(self.x_axis_label)
+        if self.title is not None:
+            bottom_plot.set_title(self.title)
+
+
+        if self.rotation is not None:
+            ax = bottom_plot.axes
+            ax.set_xticklabels(ax.get_xticklabels(), rotation=self.rotation)
+
+        # Suggestions about how to prevent x-label overlap with matplotlib:
+        #
+        # https://stackoverflow.com/questions/42528921/how-to-prevent-overlapping-x-axis-labels-in-sns-countplot
+
+        # #Set fonts to consistent 16pt size
+        # for item in ([bottom_plot.xaxis.label, bottom_plot.yaxis.label] +
+        #              bottom_plot.get_xticklabels() + bottom_plot.get_yticklabels()):
+        #     if self.fontsize is not None:
+        #         item.set_fontsize(self.fontsize)
+
+        logging.info('Save figure to {path}'.format(path=self.path))
+        plt.tight_layout()
+        plt.savefig(self.path)
+
 def test_stacked_bar_sns():
+    """
+    https://randyzwitch.com/creating-stacked-bar-chart-seaborn/
+
+    Stacked-bar chart is really just "overlaying" bars on top of each other.
+
+    :return:
+    """
+
+    # # Plot parameters
+    # x_axis_label = "X-axis label"
+    # y_axis_label = "Y-axis label"
+    # # groups: the "keys" into the data dictionary, which are the "stacks" found in each bar.
+    # groups = ['Series1', 'Series2']
+    def group_to_label(group):
+        '''
+        Convert a "key" representing a stack into a legend-label.
+
+        :param group:
+            e.g. ('CPU',) => 'CPU'
+        :return:
+        '''
+        return group
+    # # The value to use for the x-axis
+    # x_field = 'Group'
+    data = {
+        'Group': [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+            19,
+            20,
+        ],
+        'Series1':[
+            3.324129347,
+            3.109298649,
+            3.603703815,
+            5.030113742,
+            6.555816091,
+            7.478125262,
+            8.201300407,
+            8.306264399,
+            6.622167472,
+            4.272699487,
+            2.393412671,
+            1.228434178,
+            0.611171616,
+            0.30351888,
+            0.151165323,
+            0.077035502,
+            0.039631096,
+            0.021068686,
+            0.011522874,
+            0.006190799,
+        ],
+        'Series2': [
+            8.733030097,
+            5.621414891,
+            4.830770027,
+            4.84697594,
+            4.126257144,
+            3.321003992,
+            2.667565198,
+            1.976072963,
+            1.220086585,
+            0.656404386,
+            0.32202138,
+            0.15599814,
+            0.076945636,
+            0.039381467,
+            0.021178522,
+            0.011502903,
+            0.006440428,
+            0.003664553,
+            0.002106869,
+            0.001308056,
+        ],
+    }
+
+    stacked_bar_plot = StackedBarPlot(
+        data=data,
+        path='./test_stacked_bar_sns.png',
+        groups=['Series1', 'Series2'],
+        x_field='Group',
+        x_axis_label="X-axis label",
+        y_axis_label="Y-axis label",
+        # groups: the "keys" into the data dictionary, which are the "stacks" found in each bar.
+        group_to_label=group_to_label,
+    )
+    stacked_bar_plot.plot()
+
+def test_stacked_bar_sns_old():
     """
     https://randyzwitch.com/creating-stacked-bar-chart-seaborn/
 
@@ -438,7 +849,7 @@ def test_stacked_bar_sns():
                  bottom_plot.get_xticklabels() + bottom_plot.get_yticklabels()):
         item.set_fontsize(16)
 
-    path = './test_stacked_bar_sns.png'
+    path = './test_stacked_bar_sns_old.png'
     logging.info('Save figure to {path}'.format(path=path))
     plt.savefig(path)
 
@@ -463,12 +874,20 @@ def main():
     Test how to plot multi-bar stacked bar-chart.
     """))
 
+    parser.add_argument('--test-stacked-bar-sns-old',
+                        action='store_true',
+                        help=textwrap.dedent("""
+    Test how to plot multi-bar stacked bar-chart.
+    """))
+
     args = parser.parse_args()
 
     if args.test_stacked_bar:
         test_stacked_bar()
     elif args.test_stacked_bar_sns:
         test_stacked_bar_sns()
+    elif args.test_stacked_bar_sns_old:
+        test_stacked_bar_sns_old()
 
 if __name__ == '__main__':
     main()

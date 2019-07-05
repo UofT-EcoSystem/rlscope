@@ -15,7 +15,6 @@ import multiprocessing
 from iml_profiler.parser import tasks
 from iml_profiler.profiler import glbl
 
-from iml_profiler.profiler import glbl
 def main():
     glbl.setup_logging()
 

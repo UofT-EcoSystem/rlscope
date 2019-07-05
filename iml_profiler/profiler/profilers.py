@@ -47,7 +47,7 @@ from os import environ as ENV
 from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, basename as _b
 
 from iml_profiler.parser.common import *
-from iml_profiler.profiler import cudaprofile
+# from iml_profiler.profiler import cudaprofile
 from iml_profiler.profiler import clib_wrap
 from iml_profiler.profiler.clib_wrap import MICROSECONDS_IN_SECOND
 from iml_profiler.profiler import tensorflow_profile_context
@@ -812,8 +812,8 @@ class Profiler:
         if self.unit_test:
             self.ut = unit_test_util.UnitTestDataDumper(debug=self.debug)
 
-        if not self.tfprof:
-            self.cuda_profiler = CUDAProfiler()
+        # if not self.tfprof:
+        #     self.cuda_profiler = CUDAProfiler()
         self.start_t = dict()
         self.end_t = dict()
         self.time_sec = dict()
@@ -1851,31 +1851,31 @@ class Profiler:
         return self.exit_early and \
                self.done_measuring()
 
-class CUDAProfiler:
-    def __init__(self):
-        # NOTE: CUDA profiling output has already been specified when this script was launched.
-        # self.profile_basename = profile_basename
-        self.already_enabled = False
-
-    def start(self):
-        # NOTE: we assume the CUDA
-        self.already_enabled = cudaprofile.is_profiler_enabled()
-        if not self.already_enabled:
-            cudaprofile.start()
-
-    def stop(self):
-        if not self.already_enabled:
-            cudaprofile.stop()
-
-    def dump(self):
-        # Dumping is performed externally by nvprof once the program terminates.
-        pass
-
-    def __enter__(self):
-        self.start()
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self.stop()
+# class CUDAProfiler:
+#     def __init__(self):
+#         # NOTE: CUDA profiling output has already been specified when this script was launched.
+#         # self.profile_basename = profile_basename
+#         self.already_enabled = False
+#
+#     def start(self):
+#         # NOTE: we assume the CUDA
+#         self.already_enabled = cudaprofile.is_profiler_enabled()
+#         if not self.already_enabled:
+#             cudaprofile.start()
+#
+#     def stop(self):
+#         if not self.already_enabled:
+#             cudaprofile.stop()
+#
+#     def dump(self):
+#         # Dumping is performed externally by nvprof once the program terminates.
+#         pass
+#
+#     def __enter__(self):
+#         self.start()
+#
+#     def __exit__(self, exc_type, exc_val, exc_tb):
+#         self.stop()
 
 class Operation:
     def __init__(self, operation, prof):

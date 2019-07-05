@@ -7,6 +7,7 @@ https://luigi.readthedocs.io/en/stable/index.html
 import logging
 import luigi
 
+import re
 import pwd
 import textwrap
 import datetime
@@ -18,6 +19,7 @@ from iml_profiler.parser.tfprof import TotalTimeParser, TraceEventsParser
 from iml_profiler.parser.pyprof import PythonProfileParser, PythonFlameGraphParser, PythonProfileTotalParser
 from iml_profiler.parser.plot import TimeBreakdownPlot, PlotSummary, CombinedProfileParser, CategoryOverlapPlot, UtilizationPlot, HeatScalePlot
 from iml_profiler.parser.db import SQLParser
+from iml_profiler.parser.stacked_bar_plots import OverlapStackedBarPlot
 
 PARSER_KLASSES = [PythonProfileParser, PythonFlameGraphParser, PlotSummary, TimeBreakdownPlot, CategoryOverlapPlot, UtilizationPlot, HeatScalePlot, TotalTimeParser, TraceEventsParser, SQLParser]
 PARSER_NAME_TO_KLASS = dict((ParserKlass.__name__, ParserKlass) \
@@ -56,12 +58,14 @@ param_postgres_password = luigi.Parameter(description="Postgres password; defaul
 param_postgres_user = luigi.Parameter(description="Postgres user", default=None)
 param_postgres_host = luigi.Parameter(description="Postgres host", default=None)
 
+param_debug_single_thread = luigi.BoolParameter(description=textwrap.dedent("""
+        Run any multiprocessing stuff using a single thread for debugging.
+        """))
+
 class IMLTask(luigi.Task):
     iml_directory = luigi.Parameter(description="Location of trace-files")
     debug = luigi.BoolParameter(description="debug")
-    debug_single_thread = luigi.BoolParameter(description=textwrap.dedent("""
-        Run any multiprocessing stuff using a single thread for debugging.
-        """))
+    debug_single_thread = param_debug_single_thread
 
     postgres_password = param_postgres_password
     postgres_user = param_postgres_user
@@ -136,8 +140,7 @@ class SQLParserTask(IMLTask):
 class _UtilizationPlotTask(IMLTask):
     def requires(self):
         return [
-            SQLParserTask(iml_directory=self.iml_directory, debug=self.debug, debug_single_thread=self.debug_single_thread,
-                          postgres_host=self.postgres_host, postgres_user=self.postgres_user, postgres_password=self.postgres_password),
+            mk_SQLParserTask(self),
         ]
 
     def iml_run(self):
@@ -188,8 +191,7 @@ class HeatScaleTask(IMLTask):
     # decay=0.99,
     def requires(self):
         return [
-            SQLParserTask(iml_directory=self.iml_directory, debug=self.debug, debug_single_thread=self.debug_single_thread,
-                          postgres_host=self.postgres_host, postgres_user=self.postgres_user, postgres_password=self.postgres_password),
+            mk_SQLParserTask(self),
         ]
 
     def iml_run(self):
@@ -205,9 +207,7 @@ class HeatScaleTask(IMLTask):
 class TraceEventsTask(luigi.Task):
     iml_directory = luigi.Parameter(description="Location of trace-files")
     debug = luigi.BoolParameter(description="debug")
-    debug_single_thread = luigi.BoolParameter(description=textwrap.dedent("""
-        Run any multiprocessing stuff using a single thread for debugging.
-        """))
+    debug_single_thread = param_debug_single_thread
 
     postgres_password = param_postgres_password
     postgres_user = param_postgres_user
@@ -223,52 +223,11 @@ class TraceEventsTask(luigi.Task):
 
     def requires(self):
         return [
-            SQLParserTask(iml_directory=self.iml_directory, debug=self.debug, debug_single_thread=self.debug_single_thread,
-                          postgres_host=self.postgres_host, postgres_user=self.postgres_user, postgres_password=self.postgres_password),
+            mk_SQLParserTask(self),
         ]
 
     def output(self):
-        # return luigi.LocalTarget(self._done_file)
         return []
-
-    # @property
-    # def _done_file(self):
-    #     """
-    #     e.g.
-    #
-    #     <--iml-directory>/SQLParserTask.task
-    #     """
-    #     return "{dir}/{name}.task".format(
-    #         dir=self.iml_directory, name=self._task_name)
-
-    # @property
-    # def _task_name(self):
-    #     return self.__class__.__name__
-
-    # def mark_done(self, start_t, end_t):
-    #     if self.skip_output:
-    #         logging.info("> Skipping output={path} for task {name}".format(
-    #             path=self._done_file,
-    #             name=self._task_name))
-    #         return
-    #     with self.output().open('w') as f:
-    #         print_cmd(cmd=sys.argv, file=f)
-    #         delta = end_t - start_t
-    #         minutes, seconds = divmod(delta.total_seconds(), 60)
-    #         print(textwrap.dedent("""\
-    #         > Started running at {start}
-    #         > Ended running at {end}
-    #         > Took {min} minutes and {sec} seconds.
-    #         """.format(
-    #             start=start_t,
-    #             end=end_t,
-    #             min=minutes,
-    #             sec=seconds,
-    #         )), file=f)
-
-    # def iml_run(self):
-    #     raise NotImplementedError("{klass} must override iml_run()".format(
-    #         klass=self.__class__.__name__))
 
     def run(self):
         self.dumper = TraceEventsParser(
@@ -286,12 +245,130 @@ class TraceEventsTask(luigi.Task):
         )
         self.dumper.run()
 
-        # start_t = datetime.datetime.now()
-        # self.iml_run()
-        # end_t = datetime.datetime.now()
-        #
-        # self.mark_done(start_t, end_t)
+class OverlapStackedBarTask(luigi.Task):
+    iml_directories = luigi.ListParameter(description="Multiple --iml-directory entries for finding overlap_type files: *.venn_js.js")
+    directory = luigi.Parameter(description="Output directory", default=".")
+    title = luigi.Parameter(description="Plot title", default=None)
+    rotation = luigi.FloatParameter(description="x-axis title rotation", default=10.)
+    overlap_type = luigi.ChoiceParameter(choices=OverlapStackedBarPlot.SUPPORTED_OVERLAP_TYPES, description="What type of <overlap_type>*.venn_js.js files should we read from?")
+    y_type = luigi.ChoiceParameter(choices=OverlapStackedBarPlot.SUPPORTED_Y_TYPES, default='percent',
+                                   description=textwrap.dedent("""\
+                                   What should we show on the y-axis of the stacked bar-plot?
+                                   
+                                   percent:
+                                     Don't show total training time.
+                                     Useful if you just want to show a percent breakdown using a partial trace of training.
+                                     
+                                   seconds:
+                                     Show absolute training time on the y-axis.
+                                     TODO: we should extrapolate total training time based on number of timestamps ran, 
+                                     and number of timesteps that will be run.
+                                   """))
+    x_type = luigi.ChoiceParameter(choices=OverlapStackedBarPlot.SUPPORTED_X_TYPES,
+                                   default='rl-comparison',
+                                   description=textwrap.dedent("""\
+                                   What should we show on the x-axis and title of the stacked bar-plot?
+                                   
+                                   algo-comparison:
+                                     You want to make a plot that supports a statement across all RL algorithms, 
+                                     when training a specific environment.
+                                     
+                                                     Comparing algorithms 
+                                                  when training {environment}
+                                                |
+                                        Time    |
+                                      breakdown |
+                                                |
+                                                |---------------------------
+                                                 algo_1,     ...,     algo_n
+                                                         RL algorithm
+                                              
+                                     
+                                     i.e. your experiments involve:
+                                     - SAME environment
+                                     - DIFFERENT algorithms
+                                     
+                                   env-comparison:
+                                     You want to make a plot that supports a statement across all environments, 
+                                     when training a specific RL algorithm.
+                                     
+                                                   Comparing environments
+                                                  when training {algorithm}
+                                                |
+                                        Time    |
+                                      breakdown |
+                                                |
+                                                |---------------------------
+                                                 env_1,      ...,      env_n
+                                                         Environment 
+                                              
+                                     
+                                     i.e. your experiments involve:
+                                     - DIFFERENT environment
+                                     - SAME algorithm
+                                   
+                                   rl-comparison:
+                                     You want to make a plot that supports a statement across ALL RL workloads;
+                                     i.e. across all (algorithm, environment) combinations.
+                                     
+                                                          Comparing RL workloads
+                                                |
+                                        Time    |
+                                      breakdown |
+                                                |
+                                                |---------------------------------------
+                                                 (algo_1, env_1),  ...,  (algo_n, env_n)
+                                                       (RL algorithm, Environment)
+                                     
+                                     i.e. your experiments involve:
+                                     - DIFFERENT environments
+                                     - DIFFERENT algorithms
+                                   """))
+    # postgres_host = param_postgres_host
+    # postgres_user = param_postgres_user
+    # postgres_password = param_postgres_password
+    show_title = luigi.BoolParameter(description="Whether to add a title to the plot", default=True)
+    show_legend = luigi.BoolParameter(description="Whether show the legend", default=True)
+    debug = luigi.BoolParameter(description="debug")
+    debug_single_thread = param_debug_single_thread
+    suffix = luigi.Parameter(description="Add suffix to output files: OverlapStackedBarPlot.overlap_type_*.{suffix}.{ext}", default=None)
 
+    skip_output = False
+
+    def requires(self):
+        # TODO: we require (exactly 1) <overlap_type>.venn_js.js in each iml_dir.
+        # TODO: we need to sub-select if there are multiple venn_js.js files...need selector arguments
+        return [
+            # mk_SQLParserTask(self),
+        ]
+
+    def output(self):
+        return []
+
+    def run(self):
+        kwargs = kwargs_from_task(self)
+        self.dumper = OverlapStackedBarPlot(**kwargs)
+        self.dumper.run()
+
+def kwargs_from_task(task):
+    kwargs = dict()
+    for key, value in task.__dict__.items():
+        name = key
+
+        m = re.search('^_', key)
+        if m:
+            continue
+
+        m = re.search('^postgres_(?P<name>.*)', key)
+        if m:
+            name = m.group('name')
+
+        kwargs[name] = value
+    return kwargs
+
+def mk_SQLParserTask(task):
+    return SQLParserTask(iml_directory=task.iml_directory, debug=task.debug, debug_single_thread=task.debug_single_thread,
+                         postgres_host=task.postgres_host, postgres_user=task.postgres_user, postgres_password=task.postgres_password),
 
 def print_cmd(cmd, file=sys.stdout):
     if type(cmd) == list:
@@ -316,6 +393,7 @@ def main(argv=None):
 NOT_RUNNABLE_TASKS = get_NOT_RUNNABLE_TASKS()
 IML_TASKS = get_IML_TASKS()
 IML_TASKS.add(TraceEventsTask)
+IML_TASKS.add(OverlapStackedBarTask)
 
 if __name__ == "__main__":
     main()
