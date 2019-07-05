@@ -327,8 +327,9 @@ class OverlapStackedBarTask(luigi.Task):
     # postgres_host = param_postgres_host
     # postgres_user = param_postgres_user
     # postgres_password = param_postgres_password
-    show_title = luigi.BoolParameter(description="Whether to add a title to the plot", default=True)
-    show_legend = luigi.BoolParameter(description="Whether show the legend", default=True)
+    show_title = luigi.BoolParameter(description="Whether to add a title to the plot", default=True, parsing=luigi.BoolParameter.EXPLICIT_PARSING)
+    show_legend = luigi.BoolParameter(description="Whether show the legend", default=True, parsing=luigi.BoolParameter.EXPLICIT_PARSING)
+    keep_zero = luigi.BoolParameter(description="If a stacked-bar element is zero in all the bar-charts, still show it in the legend.", default=True, parsing=luigi.BoolParameter.EXPLICIT_PARSING)
     debug = luigi.BoolParameter(description="debug")
     debug_single_thread = param_debug_single_thread
     suffix = luigi.Parameter(description="Add suffix to output files: OverlapStackedBarPlot.overlap_type_*.{suffix}.{ext}", default=None)

@@ -1678,6 +1678,15 @@ def get_runnable_cpus():
 def get_username():
     return pwd.getpwuid(os.getuid())[0]
 
+def pprint_msg(dic, prefix='  '):
+    """
+    Give logging.info a string for neatly printing a dictionary.
+
+    Usage:
+    logging.info(pprint_msg(arbitrary_object))
+    """
+    return "\n" + textwrap.indent(pprint.pformat(dic), prefix=prefix)
+
 def js_friendly(obj):
     """
     Dict keys in json can only be numbers/strings/booleans/null, they CANNOT be lists/dicts/sets.

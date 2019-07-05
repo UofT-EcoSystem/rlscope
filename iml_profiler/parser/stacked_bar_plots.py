@@ -66,6 +66,7 @@ class OverlapStackedBarPlot:
                  y_type='percent',
                  show_title=True,
                  show_legend=True,
+                 keep_zero=True,
                  suffix=None,
                  host=None,
                  user=None,
@@ -102,6 +103,7 @@ class OverlapStackedBarPlot:
         self.y_type = y_type
         self.show_title = show_title
         self.show_legend = show_legend
+        self.keep_zero = keep_zero
         self.suffix = suffix
         self.host = host
         self.user = user
@@ -295,10 +297,12 @@ class OverlapStackedBarPlot:
                 'overlap_type':self.overlap_type,
             })
             vd = VennData(entry['venn_js_path'])
-            vd_dict = vd.as_dict()
-            for group, size_us in vd_dict.items():
+            stacked_dict = vd.stacked_bar_dict()
+            if self.debug:
+                logging.info(pprint_msg({'stacked_dict': stacked_dict}))
+            for group, size_us in stacked_dict.items():
                 if self.all_groups is None:
-                    self.all_groups = set(vd_dict.keys())
+                    self.all_groups = set(stacked_dict.keys())
                 else:
                     # All venn_js_path files should have the same categories in them.
                     # If not, we must do something to make 1 file look like another.
@@ -377,6 +381,7 @@ class OverlapStackedBarPlot:
             y_axis_label=self.plot_y_axis_label,
             title=self.plot_title,
             show_legend=self.show_legend,
+            keep_zero=self.keep_zero,
             # groups: the "keys" into the data dictionary, which are the "stacks" found in each bar.
             group_to_label=group_to_label,
         )
@@ -436,10 +441,83 @@ class OverlapStackedBarPlot:
         return sql_input_path(iml_dir)
 
 class VennData:
+    """
+    Regarding venn_js format.
+
+    The "size" of each "circle" in the venn diagram is specified in a list of regions:
+    # ppo2/HumanoidBulletEnv-v0/ResourceOverlap.process_ppo2_HumanoidBulletEnv-v0.phase_ppo2_HumanoidBulletEnv-v0.venn_js.json
+    self.venn['venn'] = {
+        {
+            "label": "CPU",
+            "sets": [
+                0
+            ],
+            # This the size of the blue "CPU" circle.
+            "size": 117913583.0
+        },
+        {
+            "label": "GPU",
+            "sets": [
+                1
+            ],
+            # This the size of the orange "GPU" circle.
+            "size": 1096253.0
+        },
+        {
+            "sets": [
+                0,
+                1
+            ],
+            # This the size of the region of intersection between the "CPU" and "GPU" circles.
+            # Since CPU time SUBSUMES GPU time, this is the same as the GPU time.
+            "size": 1096253.0
+        }
+    }
+
+    NOTE:
+    - In our current diagram, CPU-time SUBSUMES GPU-time.
+    - [CPU, GPU] time is time where both the CPU AND the GPU are being used.
+    - If you just want to know CPU ONLY time (i.e. no GPU in-use), you must compute:
+      [CPU only] = [CPU] - [CPU, GPU]
+    - Since stacked-bar charts cannot show overlap between adjacent squares, we need to
+      create a separate stacked-bar "label" for each combination of resource overlaps.
+    - In order to obtain this stack-bar data, we want to compute:
+      - 'CPU' = [CPU only]
+      - 'GPU' = [GPU only]
+      - 'CPU + GPU' = [CPU-GPU only]
+    - In our example, we have:
+      - 'CPU' = 117913583.0 - (any group that has 'CPU' in it)
+              = 117913583.0 - 1096253.0
+      - 'GPU' = 1096253.0 - 1096253.0
+              = 0
+      - 'CPU + GPU' = 1096253.0 - (any group that has BOTH 'CPU' and 'GPU' in it, but NOT 'CPU'/'GPU' only)
+    """
     def __init__(self, path):
         with open(path) as f:
             self.venn = json.load(f)
         self._build_idx_to_label()
+
+    def stacked_bar_dict(self):
+        """
+        In order to obtain stack-bar data, we must compute:
+        - 'CPU' = [CPU only]
+        - 'GPU' = [GPU only]
+        - 'CPU + GPU' = [CPU-GPU only]
+
+        See VennData NOTE above for details.
+        """
+        venn_dict = self.as_dict()
+        stacked_dict = dict()
+        # e.g. group = ['CPU']
+        for group in venn_dict.keys():
+            # Currently, stacked_dic['CPU'] includes overlap time from ['CPU', 'GPU']
+            stacked_dict[group] = venn_dict[group]
+            # e.g. member = ['CPU']
+            for other_group in venn_dict.keys():
+                # e.g. ['CPU'] subset-of ['CPU', 'GPU']
+                if group != other_group and set(group).issubset(set(other_group)):
+                    stacked_dict[group] = stacked_dict[group] - venn_dict[other_group]
+        return stacked_dict
 
     @property
     def total_size(self):
@@ -510,6 +588,7 @@ class StackedBarPlot:
                  y_axis_label="Y-axis label",
                  title=None,
                  show_legend=True,
+                 keep_zero=True,
                  rotation=10,
                  # fontsize=16,
                  fontsize=None,
@@ -522,6 +601,7 @@ class StackedBarPlot:
         self.y_axis_label = y_axis_label
         self.title = title
         self.show_legend = show_legend
+        self.keep_zero = keep_zero
         self.rotation = rotation
         self.fontsize = fontsize
         self.groups = groups
@@ -535,6 +615,23 @@ class StackedBarPlot:
             return label
         label = group
         return label
+
+    def _all_zero(self, group):
+        return (self.data[group] == 0.).all()
+
+    def _add_legend(self):
+        legend_rects = []
+        for i, group in enumerate(self.groups):
+            if not self.keep_zero and self._all_zero(group):
+                # If a stacked-bar element is zero in all the bar-charts, don't show it in the legend (--keep-zero false).
+                continue
+            legend_rect = plt.Rectangle((0, 0), 1, 1, fc=self.colors[i], edgecolor='none')
+            legend_rects.append(legend_rect)
+        legend_labels = [self._group_to_label(group) for group in self.groups]
+        # leg = plt.legend(legend_rects, legend_labels, loc=1, ncol=2)
+        leg = plt.legend(legend_rects, legend_labels,
+                         bbox_to_anchor=(1.05, 1), loc=2, borderaxespad=0.)
+        leg.draw_frame(False)
 
     def plot(self):
 
@@ -564,7 +661,7 @@ class StackedBarPlot:
         # - Make it so we can choose NOT to show plot legend (ideally just make it invisible...)
         # - All fonts should be same size
 
-        colors = sns.color_palette("hls", len(self.groups))
+        self.colors = sns.color_palette("hls", len(self.groups))
 
         n_bars = len(self.data[self.groups[0]])
         accum_ys = np.zeros(n_bars)
@@ -576,7 +673,7 @@ class StackedBarPlot:
                 {
                     'x': self.data[self.x_field],
                     'y': ys,
-                    'color': colors[i]
+                    'color': self.colors[i]
                 }
             )
 
@@ -596,15 +693,7 @@ class StackedBarPlot:
         bottom_plot = barplots[-1]
 
         if self.show_legend:
-            legend_rects = []
-            for i, group in enumerate(self.groups):
-                legend_rect = plt.Rectangle((0, 0), 1, 1, fc=colors[i], edgecolor='none')
-                legend_rects.append(legend_rect)
-            legend_labels = [self._group_to_label(group) for group in self.groups]
-            # leg = plt.legend(legend_rects, legend_labels, loc=1, ncol=2)
-            leg = plt.legend(legend_rects, legend_labels,
-                             bbox_to_anchor=(1.05, 1), loc=2, borderaxespad=0.)
-            leg.draw_frame(False)
+            self._add_legend()
 
         # , prop={'size': self.fontsize}
 
