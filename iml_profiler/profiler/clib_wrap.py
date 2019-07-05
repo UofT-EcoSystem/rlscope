@@ -8,8 +8,6 @@ from iml_profiler.parser.common import *
 
 from iml_profiler.protobuf.pyprof_pb2 import Pyprof, Event
 
-from iml_profiler.profiler import tensorflow_profile_context
-
 from iml_profiler.profiler import proto_util
 
 # https://stackoverflow.com/questions/9386636/profiling-a-system-with-extensively-reused-decorators
@@ -18,8 +16,7 @@ import types
 MICROSECONDS_IN_SECOND = float(1e6)
 
 from iml_profiler.profiler import wrap_util
-
-DEBUG = wrap_util.DEBUG
+from iml_profiler import py_config
 
 DEFAULT_PREFIX = "CLIB__"
 
@@ -91,12 +88,12 @@ class PyprofTrace:
             return
         self._step = step
         if step not in self.pyprof.steps:
-            if tensorflow_profile_context.DEBUG:
+            if py_config.DEBUG:
                 logging.info("> ADD PYPROF STEP: {s}".format(s=self._step))
 
             self.pyprof.steps.extend([step])
 
-            if tensorflow_profile_context.DEBUG:
+            if py_config.DEBUG:
                 pprint.pprint({
                     'len(self.pyprof.steps)':len(self.pyprof.steps),
                 }, indent=2)
@@ -420,7 +417,7 @@ def should_record(step):
 def enable_tracing():
     global _TRACING_ON
     _TRACING_ON = True
-    if DEBUG:
+    if py_config.DEBUG:
         logging.info("Enable pyprof tracing: _TRACING_ON={val}\n{stack}".format(
             val=_TRACING_ON,
             stack="\n".join(get_stacktrace())))
@@ -428,7 +425,7 @@ def enable_tracing():
 def disable_tracing():
     global _TRACING_ON
     _TRACING_ON = False
-    if DEBUG:
+    if py_config.DEBUG:
         logging.info("Disable pyprof tracing: _TRACING_ON={val}\n{stack}".format(
             val=_TRACING_ON,
             stack="\n".join(get_stacktrace())))

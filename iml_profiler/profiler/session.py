@@ -10,9 +10,7 @@ import tensorflow as tf
 import threading
 import pprint
 
-from iml_profiler.profiler import tensorflow_profile_context
-
-DEBUG = tensorflow_profile_context.DEBUG
+from iml_profiler import py_config
 
 """
 Wrap tf.Session / tf.InteractiveSession.
@@ -170,7 +168,7 @@ _NEXT_SESSION_ID = 0
 def _get_next_session_id():
     global _NEXT_SESSION_ID
     session_id = _NEXT_SESSION_ID
-    if DEBUG:
+    if py_config.DEBUG:
         logging.info("> DEBUG: session.py: alloc session_id = {id}".format(id=session_id))
     _NEXT_SESSION_ID += 1
     return session_id

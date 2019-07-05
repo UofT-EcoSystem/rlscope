@@ -376,6 +376,7 @@ class OverlapStackedBarPlot:
             x_axis_label=self.plot_x_axis_label,
             y_axis_label=self.plot_y_axis_label,
             title=self.plot_title,
+            show_legend=self.show_legend,
             # groups: the "keys" into the data dictionary, which are the "stacks" found in each bar.
             group_to_label=group_to_label,
         )
@@ -508,6 +509,7 @@ class StackedBarPlot:
                  x_axis_label="X-axis label",
                  y_axis_label="Y-axis label",
                  title=None,
+                 show_legend=True,
                  rotation=10,
                  # fontsize=16,
                  fontsize=None,
@@ -519,6 +521,7 @@ class StackedBarPlot:
         self.x_axis_label = x_axis_label
         self.y_axis_label = y_axis_label
         self.title = title
+        self.show_legend = show_legend
         self.rotation = rotation
         self.fontsize = fontsize
         self.groups = groups
@@ -592,22 +595,22 @@ class StackedBarPlot:
 
         bottom_plot = barplots[-1]
 
-        legend_rects = []
-        for i, group in enumerate(self.groups):
-            legend_rect = plt.Rectangle((0, 0), 1, 1, fc=colors[i], edgecolor='none')
-            legend_rects.append(legend_rect)
-        legend_labels = [self._group_to_label(group) for group in self.groups]
-        # leg = plt.legend(legend_rects, legend_labels, loc=1, ncol=2)
-        leg = plt.legend(legend_rects, legend_labels,
-                         bbox_to_anchor=(1.05, 1), loc=2, borderaxespad=0.)
+        if self.show_legend:
+            legend_rects = []
+            for i, group in enumerate(self.groups):
+                legend_rect = plt.Rectangle((0, 0), 1, 1, fc=colors[i], edgecolor='none')
+                legend_rects.append(legend_rect)
+            legend_labels = [self._group_to_label(group) for group in self.groups]
+            # leg = plt.legend(legend_rects, legend_labels, loc=1, ncol=2)
+            leg = plt.legend(legend_rects, legend_labels,
+                             bbox_to_anchor=(1.05, 1), loc=2, borderaxespad=0.)
+            leg.draw_frame(False)
 
         # , prop={'size': self.fontsize}
 
         # topbar = plt.Rectangle((0,0),1,1,fc="red", edgecolor = 'none')
         # bottombar = plt.Rectangle((0,0),1,1,fc='#0000A3',  edgecolor = 'none')
         # l = plt.legend([bottombar, topbar], ['Bottom Bar', 'Top Bar'], loc=1, ncol = 2, prop={'size':16})
-
-        leg.draw_frame(False)
 
         #Optional code - Make plot look nicer
         sns.despine(left=True)

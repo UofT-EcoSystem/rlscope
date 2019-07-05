@@ -1498,37 +1498,73 @@ class TracesPostgresConnection:
         self.pg_cursor = None
 
     def insert_csv(self, csv_path, table):
-        c = self.cursor
-        with open(csv_path) as f:
-            header = f.readline()
-            header = re.split(r',', header)
-        col_str = ", ".join(header)
-        # NOTE: When you tell postgres to execute "COPY FROM $path" it expects $path to be available on the same machine as postgres is running.
-        # So, this won't work if postgres is containerized ($path isn't accessible).
-        # Hence, we use psql + "COPY FROM STDIN" instead.
-        copy_from_sql = textwrap.dedent("""\
-        COPY {table} ({col_str})
-        FROM STDIN
-        DELIMITER ',' CSV HEADER;
-        """.format(
-            col_str=col_str,
-            table=table,
-        ))
+        def build_copy_from_sql():
+            with open(csv_path) as f:
+                header = f.readline()
+                header = re.split(r',', header)
+            col_str = ", ".join(header)
+            # NOTE: When you tell postgres to execute "COPY FROM $path" it expects $path to be available on the same machine as postgres is running.
+            # So, this won't work if postgres is containerized ($path isn't accessible).
+            # Hence, we use psql + "COPY FROM STDIN" instead.
+            copy_from_sql = textwrap.dedent("""\
+            COPY {table} ({col_str})
+            FROM STDIN
+            DELIMITER ',' CSV HEADER;
+            """.format(
+                col_str=col_str,
+                table=table,
+            ))
+            return copy_from_sql
+
+        copy_from_sql = build_copy_from_sql()
+        cmd_kwargs = self._psql_cmd_args(self.db_name, command=copy_from_sql)
+        # Q: Do we need to disable foreign key checks?
+        with open(csv_path, 'r') as f:
+            subprocess.check_call(stdin=f, **cmd_kwargs)
+
+    def _psql_cmd_args(self, db_name, command=None):
+        """
+        Construct args for running
+        $ psql ...
+
+        :param db_name:
+          Database name
+        :param command:
+          An SQL string to execute.
+
+          NOTE: this is the same as shell option:
+          $ psql --command
+        :return:
+        """
+
+        # subprocess.run(**kwargs)
+        kwargs = dict()
+
         cmd = ['psql']
+
+        # Construct:
+        # $ psql [OPTION]... [DBNAME [USERNAME]]
+
         if self.host is not None:
             cmd.extend(['-h', self.host])
+
         if self.user is not None:
             cmd.extend(['-U', self.user])
+
+        if command is not None:
+            cmd.extend(['-c', command])
+
+        cmd.append(db_name)
+
+        # Pass psql password via environment variable.
         env = dict(os.environ)
         if self.password is not None:
             env['PGPASSWORD'] = self.password
-        # if self.port is not None:
-        #     cmd.extend(['-p', self.port])
-        assert self.db_name is not None
-        cmd.extend([self.db_name, '-c', copy_from_sql])
-        # Q: Do we need to disable foreign key checks?
-        with open(csv_path, 'r') as f:
-            subprocess.check_call(cmd, stdin=f, env=env)
+
+        kwargs['args'] = cmd
+        kwargs['env'] = env
+
+        return kwargs
 
     def commit(self):
         if self.conn is None:
@@ -1811,28 +1847,20 @@ class TracesPostgresConnection:
         sqlite3 blaz.db -bail -echo -cmd '.read sqlite/tables.sql' -cmd '.quit'
         """
         with open(sql_path, 'r') as sql_f:
-            psql_cmd = ['psql']
-            if self.host is not None:
-                psql_cmd.extend(['-h', self.host])
-            if self.user is not None:
-                psql_cmd.extend(['-U', self.user])
-            psql_cmd.extend([db_name])
-            env = dict(os.environ)
-            if self.password is not None:
-                env['PGPASSWORD'] = self.password
-            proc = subprocess.run(psql_cmd,
-                                  stdin=sql_f,
-                                  stdout=subprocess.PIPE,
-                                  stderr=subprocess.PIPE,
-                                  env=env)
+            cmd_kwargs = self._psql_cmd_args(db_name)
+            proc = subprocess.run(
+                stdin=sql_f,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                **cmd_kwargs)
         if proc.returncode != 0:
             if proc.stdout is not None:
                 print(proc.stdout.decode('utf-8'))
             if proc.stderr is not None:
                 print(proc.stderr.decode('utf-8'))
-            print("ERROR: failed to run sql file @ {path}; ret={ret}".format(
+            # raise RuntimeError to be compatiable with ForkedProcessPool
+            raise RuntimeError("ERROR: failed to run sql file @ {path}; ret={ret}".format(
                 ret=proc.returncode, path=db_name))
-            sys.exit(1)
 
 
 class TracesSQLiteConnection:

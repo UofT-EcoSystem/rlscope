@@ -81,8 +81,6 @@ def _check_single_threaded():
 WARMUP_STEPS = 10
 MAX_TRACED_STEPS = 100
 
-DEBUG = False
-# DEBUG = True
 DEBUG_THREADS = False
 # DEBUG_THREADS = True
 # DEBUG_DISABLE_TRACING = True
@@ -137,7 +135,7 @@ def _profiled_run(self,
     step = None
     locked = False
 
-  # if DEBUG:
+  # if py_config.DEBUG:
   #   logging.info(textwrap.dedent("""
   #   > _profile_run:
   #     - profile_context = {pctx}
@@ -165,7 +163,7 @@ def _profiled_run(self,
   # logging.info("> tfprof debug: {vars}".format(vars={
   #   'locked': locked,
   #   'step': step,
-  #   'DEBUG': DEBUG,
+  #   'py_config.DEBUG': py_config.DEBUG,
   #   'is_fast_path': self.profile_context._is_fast_path(step),
   #   'should_trace': self.profile_context._should_trace(step, self.graph, fetches),
   # }))
@@ -173,12 +171,12 @@ def _profiled_run(self,
   # Fast path if no need for profiling.
   if locked and not self.profile_context._is_fast_path(step):
 
-    if DEBUG and not self.profile_context._should_trace(step, self.graph, fetches):
+    if py_config.DEBUG and not self.profile_context._should_trace(step, self.graph, fetches):
         logging.info("tfprof> SKIP step={step}".format(step=step))
 
     # Maybe trace this step.
     if self.profile_context._should_trace(step, self.graph, fetches):
-      # if DEBUG:
+      # if py_config.DEBUG:
       #   logging.info("tfprof> with step={step}".format(step=step))
       if self.profile_context._debug:
         sys.stderr.write('debug: tracing step: %d\n' % step)
@@ -203,7 +201,7 @@ def _profiled_run(self,
       # preallocate_tracer(tfprof_step, sess)
       preallocate_tracer(step, sess)
 
-      if DEBUG:
+      if py_config.DEBUG:
         sess = self
         tracer_is_set = c_api_util.get_is_tracer_set(sess)
         assert tracer_is_set
@@ -227,7 +225,7 @@ def _profiled_run(self,
       end_add_step_t = time.time()
       options.trace_level = old_trace_level
 
-      # if DEBUG:
+      # if py_config.DEBUG:
       #     # For q_backward, if profiling overhead from add_step is the issue, I expect:
       #     #   _profiler_run_internal to take ~ 0.10199415534734727 sec
       #     #   add_step to take ~ 1.196728 - 0.10199415534734727 = 1.0947338 sec
@@ -240,7 +238,7 @@ def _profiled_run(self,
       #                add_step_sec=end_add_step_t - start_add_step_t)))
 
     else:
-      # if DEBUG:
+      # if py_config.DEBUG:
       #   logging.info("tfprof> (1) SKIP step={step}".format(step=step))
       ret = self._profiler_run_internal(fetches, feed_dict, options)
 
@@ -272,7 +270,7 @@ def _profiled_run(self,
   if profile_context is not None:
     profile_context_state.__exit__(None, None, None)
   # Fast no lock path.
-  # if DEBUG:
+  # if py_config.DEBUG:
   #     logging.info("tfprof> (2) SKIP step={step}".format(step=step))
   return self._profiler_run_internal(
       fetches, feed_dict, options, run_metadata)
@@ -499,7 +497,7 @@ class ProfileContext(object):
     if not gfile.Exists(self._profiler_dir):
       gfile.MakeDirs(self._profiler_dir)
 
-    if DEBUG:
+    if py_config.DEBUG:
       logging.info("tfprof> Dump @ step={step}".format(step=step))
     filename = os.path.join(compat.as_bytes(self._profiler_dir),
                             compat.as_bytes('profile_%d' % step))
@@ -521,16 +519,16 @@ class ProfileContext(object):
       # However, the caller uses this flag to decide whether to profile.
       # So just set it to True.
       acquired = True
-    # if DEBUG:
+    # if py_config.DEBUG:
     #     logging.info("> tfprof: step={step}, locked={locked}".format(
     #       step=self._step,
     #       locked=acquired))
-    # if DEBUG:
+    # if py_config.DEBUG:
     #   logging.info("> tfprof: step={step}".format(
     #     step=self._step,
     #   ))
     yield (self._step, acquired)
-    # if DEBUG:
+    # if py_config.DEBUG:
     #   logging.info("> tfprof: AFTER step={step}, locked={locked}".format(
     #     step=self._step,
     #     locked=acquired))
@@ -576,7 +574,7 @@ class ProfileContext(object):
              "  cmd: {cmd}").format(cmd=" ".join(sys.argv)))
       return
 
-    if DEBUG and self._disable:
+    if py_config.DEBUG and self._disable:
       logging.info("> SKIP pctx.clear(); --iml-disable")
       return
 
@@ -585,7 +583,7 @@ class ProfileContext(object):
   def dump(self, dump_path, process_name):
     assert self.phase is not None
     sess = self._cur_session(allow_none=True)
-    if DEBUG:
+    if py_config.DEBUG:
         logging.info("> c_api_util.dump_trace_data_async: dump_path={path}, process={proc}, phase={phase}".format(
           path=dump_path,
           proc=process_name,
@@ -608,7 +606,7 @@ class ProfileContext(object):
                "  cmd: {cmd}").format(cmd=" ".join(sys.argv)))
         return
 
-    if DEBUG and self._disable:
+    if py_config.DEBUG and self._disable:
         logging.info("> SKIP pctx.dump(dump_path={path}, process={proc}); --iml-disable".format(
           path=dump_path,
           proc=process_name))
@@ -842,7 +840,7 @@ def now_in_usec():
   return time_us
 
 def preallocate_tracer(step, sess):
-  # if DEBUG:
+  # if py_config.DEBUG:
   #   logging.info("> PREALLOCATE_TRACER for step={step}".format(step=step))
   assert sess is not None
   # sess = tf.get_default_session()

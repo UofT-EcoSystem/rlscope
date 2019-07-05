@@ -19,6 +19,8 @@ from setuptools import setup
 # from distutils.command.clean import clean as _clean
 from distutils.spawn import find_executable
 
+DEBUG = False
+
 # Find the Protocol Compiler.
 if 'PROTOC' in os.environ and os.path.exists(os.environ['PROTOC']):
   protoc = os.environ['PROTOC']

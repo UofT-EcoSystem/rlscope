@@ -7,6 +7,8 @@ IML_DIR = ROOT
 
 IML_TEST_DIR = _j(IML_DIR, 'test_results')
 
+DEBUG = False
+
 BUILD_DIR = None
 DEBUG_BUILD_DIR = _j(ROOT, "Debug")
 RELEASE_BUILD_DIR = _j(ROOT, "Release")

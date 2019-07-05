@@ -1,8 +1,6 @@
 import re
 import logging
 
-DEBUG = False
-
 def wrap_lib(FuncWrapperKlass, import_libname, wrapper_args=tuple(), func_regex=None, wrap_libname=None):
     # wrapper_args = (category, prefix)
     if wrap_libname is None:
@@ -10,7 +8,7 @@ def wrap_lib(FuncWrapperKlass, import_libname, wrapper_args=tuple(), func_regex=
     lib = None
     try:
 
-        # if DEBUG:
+        # if py_config.DEBUG:
         #     logging.info('> import {libname}...'.format(libname=import_libname))
         # importlib.import_module(import_libname)
 

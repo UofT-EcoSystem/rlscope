@@ -1,4 +1,5 @@
 import logging
+import pytest
 import cProfile, pstats, io
 import codecs
 import sys
@@ -59,8 +60,6 @@ import iml_profiler.profiler.session
 
 from iml_profiler import py_config
 
-DEBUG = False
-# DEBUG = tensorflow_profile_context.DEBUG
 # DEBUG_OP_STACK = True
 DEBUG_OP_STACK = False
 
@@ -144,7 +143,7 @@ def setup(allow_skip=False):
 #     old_BaseSession_as_default = getattr(session.BaseSession, 'as_default')
 #     setattr(session.BaseSession, 'as_default', wrap_BaseSession_as_default)
 # def wrap_BaseSession_as_default(self):
-#     if DEBUG:
+#     if py_config.DEBUG:
 #         print_stacktrace("> wrapped sess.as_default()")
 #     for prof in PROFILERS:
 #         prof.set_session(self)
@@ -306,9 +305,15 @@ class ForkedProcessPool:
 
     NOTE: We make this class explicit, since ProcessPoolExecutor DOESN'T fork a
     process on every call to pool.submit(...)
+
+    TODO: add test-case to make sure child processes that fail with sys.exit(1) are detected
+    (I don't think they current are...)
     """
     WAIT_WORKERS_TIMEOUT_SEC = 0.01
     UNLIMITED = 0
+    # Used for unit-testing; regex should match exception message when a child does sys.exit(1)
+    NONZERO_EXIT_STATUS_ERROR_REGEX = r''
+
     def __init__(self, name=None, max_workers=UNLIMITED, debug=False, cpu_affinity=None):
         self.name = name
         self.process = None
@@ -381,6 +386,8 @@ class ForkedProcessPool:
 
     def _join_child(self, proc):
         proc.join()
+
+        # If child process raised an exception, re-raise it in the parent.
         if proc.exception:
             ex, tb_string = proc.exception
             ExceptionKlass = type(ex)
@@ -392,6 +399,62 @@ class ForkedProcessPool:
                 error=ex.args[0],
                 tb=proc.exception[1]))
             raise parent_ex
+
+        # If child process did sys.exit(1), raise a RuntimeError in the parent.
+        # (if we don't this, we'll end up ignoring a failed child!)
+        if proc.exitcode is not None and proc.exitcode > 0:
+            msg = (
+                "Child process pid={pid} proc={proc} of ForkedProcessPool(name={name}) "
+                "exited with non-zero exit-status: sys.exit({ret}).\n"
+            ).format(
+                name=self.name,
+                pid=proc.pid,
+                proc=proc,
+                ret=proc.exitcode,
+            )
+            assert re.search(ForkedProcessPool.NONZERO_EXIT_STATUS_ERROR_REGEX, msg)
+            parent_ex = RuntimeError(msg)
+            raise parent_ex
+
+def _sys_exit_1():
+    """
+    For unit-testing.
+    """
+    logging.info("Running child in ForkedProcessPool that exits with sys.exit(1)")
+    sys.exit(1)
+
+def _exception():
+    """
+    For unit-testing.
+    """
+    logging.info("Running child in ForkedProcessPool that raises an exception")
+    raise RuntimeError("Child process exception")
+
+def test_forked_process_pool():
+
+    def test_01_sys_exit_1():
+        """
+        Check that processes that exit with sys.exit(1) are detected.
+
+        :return:
+        """
+        pool = ForkedProcessPool(name=test_01_sys_exit_1.__name__)
+        with pytest.raises(RuntimeError, match=ForkedProcessPool.NONZERO_EXIT_STATUS_ERROR_REGEX) as exec_info:
+            pool.submit(_sys_exit_1.__name__, _sys_exit_1)
+            pool.shutdown()
+    test_01_sys_exit_1()
+
+    def test_02_exception():
+        """
+        Check that processes that exit with sys.exit(1) are detected.
+
+        :return:
+        """
+        pool = ForkedProcessPool(name=test_02_exception.__name__)
+        with pytest.raises(RuntimeError, match="Child process exception") as exec_info:
+            pool.submit(_exception.__name__, _exception)
+            pool.shutdown()
+    test_02_exception()
 
 class TfprofDumper:
     def __init__(self,
@@ -628,7 +691,7 @@ class _DumpPyprofTraceHook(clib_wrap.RecordEventHook):
 
     def after_record_event(self, pyprof_trace, event):
         if pyprof_trace.get_num_events() >= clib_wrap.PROTO_MAX_PYPROF_PY_EVENTS:
-            iml_profiler.api.prof._dump_pyprof(debug=DEBUG)
+            iml_profiler.api.prof._dump_pyprof(debug=py_config.DEBUG)
             num_events = clib_wrap.num_events_recorded()
             # NOTE: I've seen this assertion fail with minigo, not sure why though...
             if num_events != 0:
@@ -757,9 +820,7 @@ class Profiler:
         # self.bg_dumper = ProcessPoolExecutor(max_workers=1)
         self.debug = get_argval('debug', debug, False)
         if self.debug:
-            global DEBUG
-            tensorflow_profile_context.DEBUG = self.debug
-            DEBUG = self.debug
+            py_config.DEBUG = self.debug
         # dump_cpus = get_dump_cpus()
         self.bg_dumper = ForkedProcessPool(name="bg_dumper", debug=self.debug,
                                            # cpu_affinity=dump_cpus,
@@ -899,7 +960,7 @@ class Profiler:
             self._delete_traces()
             self.next_trace_id = 0
 
-        if DEBUG:
+        if py_config.DEBUG:
             logging.info("> Using next_trace_id = {id}".format(id=self.next_trace_id))
 
     def _init_num_calls(self, bench_name, func, *args, **kwargs):
@@ -1091,7 +1152,7 @@ class Profiler:
     #     if self.disable:
     #         return
     #
-    #     if DEBUG:
+    #     if py_config.DEBUG:
     #         print_stacktrace("> set_session = {sess}".format(sess=sess))
     #
     #     assert sess is not None
@@ -1258,7 +1319,7 @@ class Profiler:
         ):
             return
 
-        if DEBUG:
+        if py_config.DEBUG:
             logging.info("> set_operation(op={op})".format(op=bench_name))
 
         self._push_operation(bench_name)
@@ -1330,7 +1391,7 @@ class Profiler:
         #     self.step_start_tracing = self.steps
         clib_wrap.enable_tracing()
         clib_wrap.set_step(self._pyprof_step, expect_traced=True)
-        if (tensorflow_profile_context.DEBUG or TF_PRINT_TIMESTAMP) and clib_wrap.is_recording():
+        if (py_config.DEBUG or TF_PRINT_TIMESTAMP) and clib_wrap.is_recording():
             logging.info("> RECORDING pyprof_step = {step}".format(step=self._pyprof_step))
         if self.python:
             self.pyprof.enable()
@@ -1373,7 +1434,7 @@ class Profiler:
         if self.disable:
             return
 
-        if DEBUG:
+        if py_config.DEBUG:
             should_finish = self.should_finish()
             logging.info('> end_operation({op}), tracing time = {sec}, should_finish = {should_finish}'.format(
                 sec=self._total_trace_time_sec(),
@@ -1736,7 +1797,7 @@ class Profiler:
         )
         end_sec = time.time()
         time_sec = end_sec - start_sec
-        if DEBUG:
+        if py_config.DEBUG:
             logging.info("Dump pyprof took {sec} seconds on the critical path".format(
                 sec=time_sec,
             ))
@@ -1769,7 +1830,7 @@ class Profiler:
                 )
         )
         self._should_finish_idx += 1
-        if DEBUG and (ret or self._should_finish_idx % 1000 == 0):
+        if py_config.DEBUG and (ret or self._should_finish_idx % 1000 == 0):
             logging.info(textwrap.indent(textwrap.dedent("""
             - process_name = {proc}
             - finish_now = {finish_now}
