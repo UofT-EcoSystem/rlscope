@@ -26,14 +26,8 @@ _do() {
 
 _run_bench() {
     local all_dir=$IML_DIR/output/iml_bench/all
-    # (1) On vs off policy:
-    _do iml-bench --dir $all_dir "$@" train_stable_baselines.sh --env-id PongNoFrameskip-v4
-    # (2) Compare environments:
-    _do iml-bench --dir $all_dir "$@" train_stable_baselines.sh --bullet --algo ppo2
-    # (3) Compare algorithms:
-    _do iml-bench --dir $all_dir "$@" train_stable_baselines.sh --env-id Walker2DBulletEnv-v0
-    # (4) Compare all RL workloads:
-    _do iml-bench --dir $all_dir "$@" train_stable_baselines.sh --all --bullet
+
+    _do iml-bench --dir $all_dir "$@" stable-baselines
 }
 
 _run_bench "$@"

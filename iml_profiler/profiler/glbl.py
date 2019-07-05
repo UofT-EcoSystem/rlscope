@@ -81,7 +81,7 @@ def handle_iml_args(parser, args, directory=None):
     )
 
 def setup_logging():
-    format = 'PID={process}/{processName} @ {filename}:{lineno} :: {asctime} {levelname}: {message}'
+    format = 'PID={process}/{processName} @ {funcName}, {filename}:{lineno} :: {asctime} {levelname}: {message}'
     logging.basicConfig(format=format, style='{', level=logging.INFO)
 
     # Trying to disable excessive DEBUG logging messages coming from luigi,

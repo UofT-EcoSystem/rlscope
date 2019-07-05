@@ -1,25 +1,25 @@
-import logging
-import re
-import pwd
-import psutil
-import traceback
-import decimal
-import numpy as np
-import time
-import pickle
-import pandas as pd
-import os
-import csv
-import textwrap
-import pprint
-from io import StringIO
-import json
 import codecs
+import csv
+import decimal
+import json
+import logging
+import os
+import pickle
+import pprint
+import re
+import textwrap
+import time
+import traceback
+from io import StringIO
 from os.path import join as _j, dirname as _d, exists as _e, basename as _b
-from tqdm import tqdm as tqdm_progress
 
+import numpy as np
+import pandas as pd
+import psutil
+import pwd
 from iml_profiler.protobuf.pyprof_pb2 import Pyprof, MachineUtilization
 from iml_profiler.protobuf.unit_test_pb2 import IMLUnitTestOnce, IMLUnitTestMultiple
+from tqdm import tqdm as tqdm_progress
 
 CATEGORY_TF_API = "Framework API C"
 CATEGORY_PYTHON = 'Python'
@@ -593,7 +593,7 @@ class ProfilerParser(ProfilerParserCommonMixin):
         self.skip = False
 
     def parse_columns(self, line, it):
-        raise NotImplemented
+        raise NotImplementedError()
 
     def profile_path(self, bench_name):
         return self.src_files.get('profile_path', bench_name)
@@ -723,7 +723,7 @@ class ProfilerParser(ProfilerParserCommonMixin):
                 writer.writerow(row)
 
     def each_line(self):
-        raise NotImplemented
+        raise NotImplementedError()
 
 class SrcFilesMixin:
     def get_bench_name(self, ParserKlass, allow_none=False):

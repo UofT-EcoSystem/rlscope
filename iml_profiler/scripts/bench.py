@@ -2,6 +2,7 @@
 iml-bench script for running lots of different experiments/benchmarks.
 """
 import re
+import copy
 import logging
 import subprocess
 import sys
@@ -23,6 +24,8 @@ from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, base
 
 from iml_profiler.profiler import glbl
 from iml_profiler.profiler.profilers import MyProcess, ForkedProcessPool
+
+from iml_profiler.profiler.profilers import args_to_cmdline
 
 MODES = [
     'train_stable_baselines.sh',
@@ -105,26 +108,27 @@ def main():
         help='directory to store log files in')
 
     subparsers = parser.add_subparsers(
+        dest='subcommand',
         description='valid sub-commands, identified by bash training script wrapper',
         title='sub-commands',
         help='sub-command help')
 
     # create the parser for the "a" command
 
-    def add_stable_baselines_options(parser_stable_baselines):
-        parser_stable_baselines.add_argument(
+    def add_stable_baselines_options(pars):
+        pars.add_argument(
             '--algo',
             choices=STABLE_BASELINES_ANNOTATED_ALGOS,
             help='algorithm to run')
-        parser_stable_baselines.add_argument(
+        pars.add_argument(
             '--env-id',
             choices=STABLE_BASELINES_ENV_IDS,
             help='environment to run')
-        parser_stable_baselines.add_argument(
+        pars.add_argument(
             '--bullet',
             action='store_true',
             help='Limit environments to physics-based Bullet environments')
-        parser_stable_baselines.add_argument(
+        pars.add_argument(
             '--all',
             action='store_true',
             help=textwrap.dedent("""
@@ -137,16 +141,16 @@ def main():
         help='stable-baselines training experiments')
     add_stable_baselines_options(parser_train_stable_baselines)
     parser_train_stable_baselines.set_defaults(
-        sh_script='train_stable_baselines.sh',
-        func=run_stable_baselines)
+        func=run_stable_baselines,
+        subparser=parser_train_stable_baselines)
 
     parser_inference_stable_baselines = subparsers.add_parser(
         'inference_stable_baselines.sh',
         help='stable-baselines inference experiments')
     add_stable_baselines_options(parser_inference_stable_baselines)
     parser_inference_stable_baselines.set_defaults(
-        sh_script='inference_stable_baselines.sh',
-        func=run_stable_baselines)
+        func=run_stable_baselines,
+        subparser=parser_inference_stable_baselines)
 
     parser_dummy_error = subparsers.add_parser(
         'dummy_error.sh',
@@ -156,8 +160,15 @@ def main():
         action='store_true',
         help='If set, run a command with non-zero exit status')
     parser_dummy_error.set_defaults(
-        sh_script='dummy_error.sh',
-        func=run_stable_baselines)
+        func=run_stable_baselines,
+        subparser=parser_dummy_error)
+
+    parser_stable_baselines = subparsers.add_parser(
+        'stable-baselines',
+        help='iml-bench group: run ALL the stable-baselines experiments')
+    parser_stable_baselines.set_defaults(
+        func=run_group,
+        subparser=parser_stable_baselines)
 
     args, extra_argv = parser.parse_known_args()
     os.makedirs(args.dir, exist_ok=True)
@@ -188,16 +199,22 @@ def detect_available_env(env_ids):
 
 def run_stable_baselines(parser, args, extra_argv):
     obj = StableBaselines(args, extra_argv)
-    assert args.sh_script is not None
-    obj.run()
+    assert args.subcommand is not None
+    obj.run(parser)
 
+class Experiment:
 
-class StableBaselines:
-    def __init__(self, args, extra_argv):
-        # self.parser = parser
-        self.args = args
-        self.extra_argv = extra_argv
-        self.pool = ForkedProcessPool(name="iml_analyze_pool", max_workers=args.workers, debug=self.args.debug)
+    @property
+    def _sub_cmd(self):
+        args = self.args
+
+        sub_cmd = args.subcommand
+
+        m = re.search(r'(?P<sh_name>.*)\.sh$', args.subcommand)
+        if m:
+            sub_cmd = m.group('sh_name')
+
+        return sub_cmd
 
     def already_ran(self, to_file):
         if not _e(to_file):
@@ -246,6 +263,91 @@ class StableBaselines:
                 if not args.dry_run or _e(to_file):
                     assert self.already_ran(to_file)
 
+
+class ExperimentGroup(Experiment):
+    def __init__(self, args, extra_argv):
+        self.args = args
+        self.extra_argv = extra_argv
+        # self.pool = ForkedProcessPool(name="iml_analyze_pool", max_workers=args.workers, debug=self.args.debug)
+
+    def stable_baselines(self, parser):
+        """
+        To avoid running everything more than once, we will stick ALL (algo, env_id) pairs inside of $IML_DIR/output/iml_bench/all.
+
+        (1) On vs off policy:
+        Run Atari Pong on all environments that support it (that we have annotated):
+        - Ppo2 [sort of on-policy]
+        - A2c [on-policy]
+        - Dqn [off-policy]
+        We can use this to compare on-policy vs off-policy
+
+        (2) Compare environments:
+        Run ALL bullet environments for at least one algorithm (ppo2).
+
+        (3) Compare algorithms:
+        Run ALL algorithms on 1 bullet environment (Walker)
+
+        (4) Compare all RL workloads:
+        Run ALL algorithms on ALL bullet environments
+        """
+
+        # (1) On vs off policy:
+        self.iml_bench(parser, 'train_stable_baselines.sh', ['--env-id', 'PongNoFrameskip-v4'], suffix="on_vs_off_policy.log")
+        # (2) Compare environments:
+        self.iml_bench(parser, 'train_stable_baselines.sh', ['--bullet', '--algo', 'ppo2'], suffix="environments.log")
+        # (3) Compare algorithms:
+        self.iml_bench(parser, 'train_stable_baselines.sh', ['--env-id', 'Walker2DBulletEnv-v0'], suffix="algorithms.log")
+        # (4) Compare all RL workloads:
+        self.iml_bench(parser, 'train_stable_baselines.sh', ['--all', '--bullet'], suffix="all_rl_workloads.log")
+
+    def iml_bench(self, parser, subcommand, subcmd_args, suffix='log'):
+        main_cmd = self._get_main_cmd(parser, subcommand)
+        cmd = main_cmd + subcmd_args
+        to_file = self._get_logfile(suffix=suffix)
+        self._run_cmd(cmd=cmd, to_file=to_file)
+
+    def _get_main_cmd(self, parser, subcommand):
+        args = self.args
+        cmd_args = copy.copy(args)
+        cmd_args.subcommand = subcommand
+        main_cmd = args_to_cmdline(parser, cmd_args,
+                                   subparser=args.subparser,
+                                   subparser_argname='subcommand',
+                                   use_pdb=False,
+                                   ignore_unhandled_types=True,
+                                   ignore_argnames=['func', 'subparser'],
+                                   debug=args.debug)
+        return main_cmd
+
+    def run(self, parser):
+        args = self.args
+        if args.subcommand == 'stable-baselines':
+            self.stable_baselines(parser)
+        else:
+            raise NotImplementedError
+
+    def _get_logfile(self, suffix='log'):
+        args = self.args
+
+        to_file = _j(args.dir, '{sub}.{suffix}'.format(
+            sub=self._sub_cmd,
+            suffix=suffix,
+        ))
+        return to_file
+
+def run_group(parser, args, extra_argv):
+    obj = ExperimentGroup(args, extra_argv)
+    assert args.subcommand is not None
+    obj.run(parser)
+
+
+class StableBaselines(Experiment):
+    def __init__(self, args, extra_argv):
+        # self.parser = parser
+        self.args = args
+        self.extra_argv = extra_argv
+        self.pool = ForkedProcessPool(name="iml_analyze_pool", max_workers=args.workers, debug=self.args.debug)
+
     def _analyze(self, algo, env_id):
         args = self.args
 
@@ -271,11 +373,8 @@ class StableBaselines:
     def _get_logfile(self, algo, env_id, suffix='log'):
         args = self.args
 
-        m = re.search(r'(?P<sh_name>.*)\.sh$', args.sh_script)
-        sh_name = m.group('sh_name')
-
-        to_file = _j(args.dir, '{sh_name}.algo_{algo}.env_id_{env_id}.{suffix}'.format(
-            sh_name=sh_name,
+        to_file = _j(args.dir, '{sub}.algo_{algo}.env_id_{env_id}.{suffix}'.format(
+            sub=self._sub_cmd,
             algo=algo,
             env_id=env_id,
             suffix=suffix,
@@ -301,7 +400,7 @@ class StableBaselines:
         args = self.args
 
         iml_directory = self.iml_directory(algo, env_id)
-        cmd = [args.sh_script, "--iml-directory", iml_directory]
+        cmd = [args.subcommand, "--iml-directory", iml_directory]
 
         env = self._sh_env(algo, env_id)
 
@@ -322,10 +421,10 @@ class StableBaselines:
             return False
         return True
 
-    def run(self):
+    def run(self, parser):
         args = self.args
 
-        if args.sh_script == 'dummy_error.sh':
+        if args.subcommand == 'dummy_error.sh':
             self._error()
             return
 

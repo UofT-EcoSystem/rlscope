@@ -120,7 +120,7 @@ class CUDAProfileParser(ProfilerParser):
         elif unit == 'ns':
             return time_as_unit/NANOSECONDS_IN_SECOND
         else:
-            raise NotImplemented
+            raise NotImplementedError()
 
     def as_value(self, x):
         if re.search(r'%$', x):
