@@ -13,6 +13,8 @@ fi
 SH_DIR="$(readlink -f "$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )")"
 cd "$SH_DIR"
 
+# TODO: Make this runnable on Ubuntu 16.04/18.04 from outside of docker-env by removing dependency on env-variables being set.
+
 source $SH_DIR/make_utils.sh
 
 _check_env

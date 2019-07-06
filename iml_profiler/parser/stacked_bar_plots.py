@@ -61,6 +61,8 @@ class OverlapStackedBarPlot:
                  iml_directories,
                  directory,
                  overlap_type,
+                 resource_overlap=None,
+                 ignore_inconsistent_overlap_regions=False,
                  title=None,
                  x_type='rl-comparison',
                  y_type='percent',
@@ -95,9 +97,16 @@ class OverlapStackedBarPlot:
         assert overlap_type in OverlapStackedBarPlot.SUPPORTED_OVERLAP_TYPES
         assert x_type in OverlapStackedBarPlot.SUPPORTED_X_TYPES
         assert y_type in OverlapStackedBarPlot.SUPPORTED_Y_TYPES
+        if len(iml_directories) == 0:
+            raise ValueError("OverlapStackedBarPlot expects at least 1 trace-file directory for iml_directories")
         self.iml_directories = iml_directories
         self.directory = directory
         self.overlap_type = overlap_type
+        self.resource_overlap = resource_overlap
+        self.ignore_inconsistent_overlap_regions = ignore_inconsistent_overlap_regions
+        if self.resource_overlap is not None:
+            # Normalize ('GPU', 'CPU') into ('CPU', 'GPU') for equality checks,
+            self.resource_overlap = tuple(sorted(self.resource_overlap))
         self.title = title
         self.x_type = x_type
         self.y_type = y_type
@@ -254,7 +263,8 @@ class OverlapStackedBarPlot:
 
         # NOTE: if trace-files were processed on a different machine, the _DataIndex.directory will be different;
         # handle this by re-creating the _DataIndex with iml_dir.
-        my_index = _DataIndex(index.index, iml_dir, debug=self.debug)
+        # my_index = _DataIndex(index.index, iml_dir, debug=self.debug)
+        my_index = _DataIndex(index.index, iml_dir)
         return my_index
 
     def _init_directories(self):
@@ -269,8 +279,117 @@ class OverlapStackedBarPlot:
         for iml_dir in self.iml_directories:
             self.sql_readers[iml_dir] = SQLCategoryTimesReader(self.db_path(iml_dir), host=self.host, user=self.user, password=self.password)
             index = self.get_index(iml_dir)
-            # idx = _DataIndex(index, iml_dir, debug=self.debug)
             self.data_index[iml_dir] = index
+
+    def _add_or_suggest_selector_field(self, idx, selector, field_name):
+        """
+        For e.g. field_name = 'resource_overlap' (['CPU'], or ['CPU', 'GPU']).
+
+        If they provided --resource-overlap:
+          Use that as selector['resource_overlap']
+        Else If there's only available choice for --resource-overlap
+          Use that.
+        Else:
+          Tell the user about the available choices for --resource-overlap.
+
+        :param field_name:
+            e.g. 'resource_overlap' for --resource-overlap
+        """
+
+        def optname(option):
+            return "--{s}".format(s=re.sub(r'_', '-', option))
+
+        # Oops, forgot to add self.resource_overlap in constructor.
+        assert hasattr(self, field_name)
+
+        value = getattr(self, field_name)
+        if value is not None:
+            selector[field_name] = value
+        else:
+            choices = idx.available_values(selector, field_name)
+            # NOTE: if there's only one choice, we don't need to add it to selector.
+            if len(choices) > 1:
+                raise RuntimeError("Please provide {opt}: choices = {choices}".format(
+                    opt=optname(field_name),
+                    choices=choices,
+                ))
+                selector[field_name] = avail[0]
+
+    def each_stacked_dict(self):
+        for iml_dir in self.iml_directories:
+            idx = self.data_index[iml_dir]
+
+            algo, env = self._get_algo_env_from_dir(iml_dir)
+
+            # Q: There's only one ResourceOverlap plot...
+            # However, there are many OperationOverlap plots; how can we select
+            # among them properly?
+            selector = {
+                'overlap_type': self.overlap_type,
+            }
+
+            self._add_or_suggest_selector_field(idx, selector, 'resource_overlap')
+
+            md, entry, ident = idx.get_file(selector=selector)
+            vd = VennData(entry['venn_js_path'])
+            stacked_dict = vd.stacked_bar_dict()
+            path = entry['venn_js_path']
+            yield (algo, env), path, stacked_dict
+
+    def _check_overlap_json_files(self):
+        regions_to_paths = dict()
+        for (algo, env), path, stacked_dict in self.each_stacked_dict():
+            regions = frozenset(stacked_dict.keys())
+            if regions not in regions_to_paths:
+                regions_to_paths[regions] = []
+            regions_to_paths[regions].append(path)
+        for k in list(regions_to_paths.keys()):
+            regions_to_paths[k].sort()
+
+        if len(regions_to_paths) > 1:
+            """
+            Output an error message:
+            
+            ERROR: *.venn_js.json files have inconsistent overlap regions:
+            - overlap-regions (1):
+              - regions: [...]
+              - *.venn_js.json files:
+                path/to/file_01.json
+                path/to/file_02.json
+            - overlap-regions (2):
+              ...
+            """
+            err_lines = []
+
+            if self.ignore_inconsistent_overlap_regions:
+                msg_type = 'WARNING'
+            else:
+                msg_type = 'ERROR'
+
+            err_lines.append("{msg_type}: *.venn_js.json files have inconsistent overlap regions:".format(
+                msg_type=msg_type,
+            ))
+            for i, (regions, paths) in enumerate(regions_to_paths.items(), start=1):
+                err_lines.append("- overlap region ({i})".format(i=i))
+                err_lines.append("  - regions: {regions}".format(regions=sorted(regions)))
+                err_lines.append("  - *.venn_js.json files:")
+                for path in paths:
+                    err_lines.append("    {path}".format(path=path))
+            msg = '\n'.join(err_lines)
+            if self.ignore_inconsistent_overlap_regions:
+                raise RuntimeError(msg)
+            else:
+                logging.info(msg)
+
+        regions_by_num_files = sorted(
+            regions_to_paths.keys(),
+            key=lambda regions: (len(regions_to_paths[regions]), regions_to_paths[regions]))
+        use_overlap_regions = regions_by_num_files[-1]
+        if self.debug:
+            logging.info(pprint_msg({
+                'regions_to_paths': regions_to_paths,
+                'use_overlap_regions': use_overlap_regions}))
+        return use_overlap_regions
 
     def _read_df(self):
         """
@@ -283,23 +402,27 @@ class OverlapStackedBarPlot:
             'env':[],
         }
         self.all_groups = None
-        for iml_dir in self.iml_directories:
-            idx = self.data_index[iml_dir]
 
-            algo, env = self._get_algo_env_from_dir(iml_dir)
+        use_overlap_regions = self._check_overlap_json_files()
+
+        for (algo, env), path, stacked_dict in self.each_stacked_dict():
+
+            overlap_regions = set(stacked_dict.keys())
+            if overlap_regions != use_overlap_regions:
+                logging.info("Skipping {path} (--ignore-inconsistent-overlap-regions)".format(
+                    path=path,
+                ))
+                continue
+
+            if self.debug:
+                logging.info(pprint_msg({
+                    'path': path,
+                    'stacked_dict': stacked_dict}))
+
             self.data['algo'].append(algo)
             self.data['env'].append(env)
-
-            # Q: There's only one ResourceOverlap plot...
-            # However, there are many OperationOverlap plots; how can we select
-            # among them properly?
-            md, entry, ident = idx.get_file(selector={
-                'overlap_type':self.overlap_type,
-            })
-            vd = VennData(entry['venn_js_path'])
-            stacked_dict = vd.stacked_bar_dict()
-            if self.debug:
-                logging.info(pprint_msg({'stacked_dict': stacked_dict}))
+            # Add each overlap region to self.data.
+            # e.g. self.data[('CPU', 'GPU')].append(time in seconds)
             for group, size_us in stacked_dict.items():
                 if self.all_groups is None:
                     self.all_groups = set(stacked_dict.keys())
@@ -430,7 +553,7 @@ class OverlapStackedBarPlot:
 
     def dump_plot_data(self, plot_df):
         path = self._plot_data_path
-        print("> {name} @ plot data @ {path}".format(
+        logging.info("> {name} @ plot data @ {path}".format(
             name=self.__class__.__name__,
             path=path))
         with open(path, 'w') as f:

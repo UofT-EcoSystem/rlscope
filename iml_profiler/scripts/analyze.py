@@ -73,6 +73,7 @@ def main():
         luigi_argv.extend(['--help'])
 
     if args.pdb:
+        logging.info("Registering pdb breakpoint (--pdb)")
         register_pdb_breakpoint()
         # Debugger is useless when multithreaded.
         args.workers = 1
@@ -84,7 +85,7 @@ def main():
     #     'sys.argv':sys.argv,
     # })
 
-    tasks.main(argv=luigi_argv[1:])
+    tasks.main(argv=luigi_argv[1:], should_exit=False)
 
 def print_cmd(cmd, file=sys.stdout):
     if type(cmd) == list:
@@ -100,14 +101,20 @@ def print_cmd(cmd, file=sys.stdout):
     ), file=file)
 
 def register_pdb_breakpoint():
+
     def pdb_breakpoint(task, ex):
         logging.info("> Detected unhandled exception {ex} in {task}; entering pdb".format(
             ex=ex.__class__.__name__,
             task=task.__class__.__name__,
         ))
         ipdb.post_mortem()
-    register_failure_event = luigi.Task.event_handler(luigi.Event.FAILURE)
-    register_failure_event(pdb_breakpoint)
+
+    def register_pdb_on(luigi_event):
+        register_failure_event = luigi.Task.event_handler(luigi_event)
+        register_failure_event(pdb_breakpoint)
+
+    register_pdb_on(luigi.Event.FAILURE)
+    register_pdb_on(luigi.Event.PROCESS_FAILURE)
 
 if __name__ == '__main__':
     main()

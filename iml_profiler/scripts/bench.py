@@ -2,6 +2,8 @@
 iml-bench script for running lots of different experiments/benchmarks.
 """
 import re
+import json
+import shlex
 import copy
 import logging
 import subprocess
@@ -15,6 +17,12 @@ import textwrap
 import multiprocessing
 import importlib
 import gym
+# TODO: remove hard dependency on pybullet_envs;
+# i.e. we need it for:
+#   $ iml-bench stable-baselines --mode [run|all]
+# but we don't need pybullet for:
+#   $ iml-bench stable-baselines --mode plot
+# (assuming all the data is there...)
 try:
     import pybullet_envs
 except ImportError:
@@ -48,6 +56,27 @@ STABLE_BASELINES_ANNOTATED_ALGOS = [
 STABLE_BASELINES_AVAIL_ENV_IDS = None
 STABLE_BASELINES_UNAVAIL_ENV_IDS = None
 
+def add_stable_baselines_options(pars):
+    pars.add_argument(
+        '--algo',
+        choices=STABLE_BASELINES_ANNOTATED_ALGOS,
+        help='algorithm to run')
+    pars.add_argument(
+        '--env-id',
+        choices=STABLE_BASELINES_ENV_IDS,
+        help='environment to run')
+    pars.add_argument(
+        '--bullet',
+        action='store_true',
+        help='Limit environments to physics-based Bullet environments')
+    pars.add_argument(
+        '--all',
+        action='store_true',
+        help=textwrap.dedent("""
+        Run all (algo, env_id) pairs.
+        Make this explicit to avoid running everything by accident.
+        """))
+
 def main():
     glbl.setup_logging()
     parser = argparse.ArgumentParser(
@@ -68,14 +97,18 @@ def main():
     # parser.add_argument('--mode',
     #                     choices=MODES,
     #                     required=True,
-    #                     help=textwrap.dedent("""
-    #                     train_stable_baselines.sh
-    #                       Run stable-baselines experiments.
-    #                     """))
 
     parser.add_argument(
         '--debug',
         action='store_true')
+    # Don't support --pdb for iml-bench since I haven't figured out how to
+    # both (1) log stdout/stderr of a command, (2) allow pdb debugger prompt
+    # to be fully functional.
+    # Even if we could...you probably don't want to log your pdb session
+    # and all its color-codes anyway.
+    # parser.add_argument(
+    #     '--pdb',
+    #     action='store_true')
     parser.add_argument('--debug-single-thread',
                         action='store_true',
                         help=textwrap.dedent("""
@@ -104,8 +137,17 @@ def main():
         default=2)
     parser.add_argument(
         '--dir',
-        default='.',
-        help='directory to store log files in')
+        default='./output/iml_bench/all',
+        help=textwrap.dedent("""\
+        Directory to store stuff in for the subcommand.
+        
+        all subcommands: 
+          log files
+        train_stable_baselines.sh / stable-baselines:
+          trace-files @ <algo>/<env>
+        plot-stable-baselines:
+          plots
+        """.rstrip()))
 
     subparsers = parser.add_subparsers(
         dest='subcommand',
@@ -114,27 +156,6 @@ def main():
         help='sub-command help')
 
     # create the parser for the "a" command
-
-    def add_stable_baselines_options(pars):
-        pars.add_argument(
-            '--algo',
-            choices=STABLE_BASELINES_ANNOTATED_ALGOS,
-            help='algorithm to run')
-        pars.add_argument(
-            '--env-id',
-            choices=STABLE_BASELINES_ENV_IDS,
-            help='environment to run')
-        pars.add_argument(
-            '--bullet',
-            action='store_true',
-            help='Limit environments to physics-based Bullet environments')
-        pars.add_argument(
-            '--all',
-            action='store_true',
-            help=textwrap.dedent("""
-        Run all (algo, env_id) pairs.
-        Make this explicit to avoid running everything by accident.
-        """))
 
     parser_train_stable_baselines = subparsers.add_parser(
         'train_stable_baselines.sh',
@@ -165,7 +186,24 @@ def main():
 
     parser_stable_baselines = subparsers.add_parser(
         'stable-baselines',
-        help='iml-bench group: run ALL the stable-baselines experiments')
+        help=textwrap.dedent("""
+        iml-bench group: 
+        
+        Run ALL the stable-baselines experiments.
+        
+        If you just want to plot stuff, you can use: 
+        $ iml-bench stable-baselines --mode plot
+        
+        See --mode for more.
+        """))
+    parser_stable_baselines.add_argument(
+        '--mode',
+        choices=['plot', 'run', 'all'],
+        default='all',
+        help=textwrap.dedent("""
+        train_stable_baselines.sh
+          Run stable-baselines experiments.
+        """))
     parser_stable_baselines.set_defaults(
         func=run_group,
         subparser=parser_stable_baselines)
@@ -226,6 +264,54 @@ class Experiment:
                     return True
         return False
 
+    def is_supported(self, algo, env_id):
+        for expr in STABLE_BASELINES_EXPRS:
+            if expr.algo == algo and expr.env_id == env_id:
+                return expr
+        return None
+
+    def should_run(self, algo, env_id, bullet):
+        if not self.is_supported(algo, env_id):
+            return False
+        if bullet and not is_bullet_env(env_id):
+            return False
+        return True
+
+    def _gather_algo_env_pairs(self, algo=None, env_id=None, all=False, bullet=False, debug=False):
+        if debug:
+            import ipdb; ipdb.set_trace()
+
+        if env_id is not None and algo is not None:
+            algo_env_pairs = [(algo, env_id)]
+            return algo_env_pairs
+
+        if env_id is not None:
+            algo_env_pairs = []
+            for algo in STABLE_BASELINES_ANNOTATED_ALGOS:
+                if not self.should_run(algo, env_id, bullet):
+                    continue
+                algo_env_pairs.append((algo, env_id))
+            return algo_env_pairs
+
+        if algo is not None:
+            algo_env_pairs = []
+            for env_id in STABLE_BASELINES_AVAIL_ENV_IDS:
+                if not self.should_run(algo, env_id, bullet):
+                    continue
+                algo_env_pairs.append((algo, env_id))
+            return algo_env_pairs
+
+        if all:
+            algo_env_pairs = []
+            for algo in STABLE_BASELINES_ANNOTATED_ALGOS:
+                for env_id in STABLE_BASELINES_AVAIL_ENV_IDS:
+                    if not self.should_run(algo, env_id, bullet):
+                        continue
+                    algo_env_pairs.append((algo, env_id))
+            return algo_env_pairs
+
+        return None
+
     def _run_cmd(self, cmd, to_file, env=None):
         args = self.args
 
@@ -233,10 +319,11 @@ class Experiment:
             # Make sure iml-analyze get IML_POSTGRES_HOST
             env = dict(os.environ)
 
+        proc = None
         if args.replace or not self.already_ran(to_file):
 
             try:
-                tee(
+                proc = tee(
                     cmd=cmd + self.extra_argv,
                     to_file=to_file,
                     env=env,
@@ -249,7 +336,7 @@ class Experiment:
                                      "> Command failed: see {path}; exiting early "
                                      "(use --skip-error to ignore individual experiment errors)"
                                  ).format(path=to_file))
-                    raise
+                    sys.exit(1)
                 logging.info(
                     "> Command failed; see {path}; continuing (--skip-error was set)".format(
                         path=to_file,
@@ -262,6 +349,8 @@ class Experiment:
                         f.write("IML BENCH DONE\n")
                 if not args.dry_run or _e(to_file):
                     assert self.already_ran(to_file)
+
+        return proc
 
 
 class ExperimentGroup(Experiment):
@@ -291,16 +380,121 @@ class ExperimentGroup(Experiment):
         Run ALL algorithms on ALL bullet environments
         """
 
+        args = self.args
+
+        def bench_log(expr):
+            return "{expr}.log".format(expr=expr)
+
+        def plot_log(expr, overlap_type):
+            return "{expr}.{ov}.plot.log".format(
+                expr=expr,
+                ov=overlap_type,
+            )
+
+        self.will_run = False
+        self.will_plot = False
+
+        if args.mode in ['all', 'run']:
+            self.will_run = True
+
+        if args.mode in ['all', 'plot']:
+            self.will_plot = True
+
+        # def _run(expr, train_stable_baselines_opts, stacked_args):
+        #     self.iml_bench(parser, 'train_stable_baselines.sh', train_stable_baselines_opts, suffix=bench_log(expr))
+        #     self.stacked_plot(stacked_args, train_stable_baselines_opts, suffix=plot_log(expr))
+
         # (1) On vs off policy:
-        self.iml_bench(parser, 'train_stable_baselines.sh', ['--env-id', 'PongNoFrameskip-v4'], suffix="on_vs_off_policy.log")
+        expr = 'on_vs_off_policy'
+        opts = ['--env-id', 'PongNoFrameskip-v4']
+        self.iml_bench(parser, 'train_stable_baselines.sh', opts, suffix=bench_log(expr))
+        overlap_type = 'ResourceOverlap'
+        self.stacked_plot([
+            '--overlap-type', overlap_type,
+            '--y-type', 'percent',
+        ], opts, suffix=plot_log(expr, overlap_type))
+
         # (2) Compare environments:
-        self.iml_bench(parser, 'train_stable_baselines.sh', ['--bullet', '--algo', 'ppo2'], suffix="environments.log")
+        expr = 'environments'
+        opts = ['--bullet', '--algo', 'ppo2']
+        self.iml_bench(parser, 'train_stable_baselines.sh', opts, suffix=bench_log(expr))
+        overlap_type = 'OperationOverlap'
+        self.stacked_plot([
+            '--overlap-type', overlap_type,
+            '--resource-overlap', json.dumps(['CPU', 'GPU']),
+            '--y-type', 'percent',
+        ], opts, suffix=plot_log(expr, overlap_type))
+
         # (3) Compare algorithms:
-        self.iml_bench(parser, 'train_stable_baselines.sh', ['--env-id', 'Walker2DBulletEnv-v0'], suffix="algorithms.log")
+        expr = 'algorithms'
+        opts = ['--env-id', 'Walker2DBulletEnv-v0']
+        self.iml_bench(parser, 'train_stable_baselines.sh', opts, suffix=bench_log(expr))
+
         # (4) Compare all RL workloads:
-        self.iml_bench(parser, 'train_stable_baselines.sh', ['--all', '--bullet'], suffix="all_rl_workloads.log")
+        expr = 'all_rl_workloads'
+        opts = ['--all', '--bullet']
+        self.iml_bench(parser, 'train_stable_baselines.sh', opts, suffix=bench_log(expr))
+
+    def iml_directory(self, algo, env_id):
+        iml_directory = _j(self.args.dir, algo, env_id)
+        return iml_directory
+
+    def stacked_plot(self, stacked_args, train_stable_baselines_opts, suffix, debug=False):
+        if not self.will_plot:
+            return
+        args = self.args
+        cmd = [
+            'iml-analyze',
+        ]
+        cmd.extend([
+            '--task', 'OverlapStackedBarTask',
+        ])
+
+        if args.debug:
+            cmd.append('--debug')
+        # if args.pdb:
+        #     cmd.append('--pdb')
+
+        parser_train_stable_baselines = argparse.ArgumentParser()
+        add_stable_baselines_options(parser_train_stable_baselines)
+        train_stable_baselines_args = parser_train_stable_baselines.parse_args(train_stable_baselines_opts)
+
+        algo_env_pairs = self._gather_algo_env_pairs(debug=debug, **vars(train_stable_baselines_args))
+        assert algo_env_pairs is not None
+        if len(algo_env_pairs) == 0:
+            logging.info(
+                textwrap.dedent("""\
+                Not sure what to use for --iml-directories.
+                Didn't see any (algo, env) pairs for
+                  $ train_stable_baselines.sh {opts}
+                """.rstrip().format(opts=' '.join(train_stable_baselines_opts))))
+            if args.skip_error:
+                logging.info("Skipping plot (--skip-error)")
+                return
+            else:
+                logging.info("Exiting due to failed plot; use --skip-error to ignore")
+                sys.exit(1)
+        iml_dirs = [self.iml_directory(algo, env_id) for algo, env_id in algo_env_pairs]
+        cmd.extend([
+            '--iml-directories', json.dumps(iml_dirs),
+        ])
+
+        cmd.extend([
+            # Output directory for the png plots.
+            '--directory', args.dir,
+        ])
+
+        cmd.extend(stacked_args)
+
+        cmd.extend(self.extra_argv)
+
+        to_file = self._get_logfile(suffix=suffix)
+
+        self._run_cmd(cmd=cmd, to_file=to_file)
 
     def iml_bench(self, parser, subcommand, subcmd_args, suffix='log'):
+        if not self.will_run:
+            return
         main_cmd = self._get_main_cmd(parser, subcommand)
         cmd = main_cmd + subcmd_args
         to_file = self._get_logfile(suffix=suffix)
@@ -408,18 +602,6 @@ class StableBaselines(Experiment):
 
         self._run_cmd(cmd=cmd, to_file=to_file, env=env)
 
-    def is_supported(self, algo, env_id):
-        for expr in STABLE_BASELINES_EXPRS:
-            if expr.algo == algo and expr.env_id == env_id:
-                return expr
-        return None
-
-    def should_run(self, algo, env_id):
-        if not self.is_supported(algo, env_id):
-            return False
-        if self.args.bullet and not is_bullet_env(env_id):
-            return False
-        return True
 
     def run(self, parser):
         args = self.args
@@ -433,29 +615,13 @@ class StableBaselines(Experiment):
                 env=args.env_id))
             sys.exit(1)
 
-        if args.env_id is not None and args.algo is not None:
-            algo_env_pairs = [(args.algo, args.env_id)]
-        elif args.env_id is not None:
-            algo_env_pairs = []
-            for algo in STABLE_BASELINES_ANNOTATED_ALGOS:
-                if not self.should_run(algo, args.env_id):
-                    continue
-                algo_env_pairs.append((algo, args.env_id))
-        elif args.algo is not None:
-            algo_env_pairs = []
-            for env_id in STABLE_BASELINES_AVAIL_ENV_IDS:
-                if not self.should_run(args.algo, env_id):
-                    continue
-                algo_env_pairs.append((args.algo, env_id))
-        elif args.all:
-            algo_env_pairs = []
-            for algo in STABLE_BASELINES_ANNOTATED_ALGOS:
-                for env_id in STABLE_BASELINES_AVAIL_ENV_IDS:
-                    if not self.should_run(algo, env_id):
-                        continue
-                    algo_env_pairs.append((algo, env_id))
-        else:
-            print('Please provide either --env-id or --algo', file=sys.stderr)
+        algo_env_pairs = self._gather_algo_env_pairs(
+            algo=args.algo,
+            env_id=args.env_id,
+            all=args.all,
+            bullet=args.bullet)
+        if algo_env_pairs is None:
+            logging.info('Please provide either --env-id or --algo')
             sys.exit(1)
 
         for algo, env_id in algo_env_pairs:
@@ -656,7 +822,7 @@ STABLE_BASELINES_ENV_IDS = sorted(set(expr.env_id for expr in STABLE_BASELINES_E
 
 def print_cmd(cmd, files=sys.stdout, env=None, dry_run=False):
     if type(cmd) == list:
-        cmd_str = " ".join([str(x) for x in cmd])
+        cmd_str = " ".join([shlex.quote(str(x)) for x in cmd])
     else:
         cmd_str = cmd
 

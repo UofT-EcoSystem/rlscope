@@ -76,6 +76,26 @@ class _DataIndex:
                 entry[key] = _j(self.directory, entry[key])
         return entry
 
+    def get_files(self, selector):
+        return list(self.each_file(selector))
+
+    def available_values(self, selector, field):
+        files = self.get_files(selector)
+        if len(files) > 0:
+            md, entry, indent = files[0]
+            if field not in md:
+                choices = sorted(md.keys())
+                raise ValueError((
+                    "_DataIndex.available_values(selector={sel}, field={field}): "
+                    "couldn't find \"{field}\"; choices for field are {choices}"
+                ).format(
+                    field=field,
+                    choices=choices,
+                    sel=selector,
+                ))
+        values = [md[field] for md, entry, ident in files]
+        return values
+
     def get_file(self, selector):
         files = list(self.each_file(selector))
         assert len(files) == 1

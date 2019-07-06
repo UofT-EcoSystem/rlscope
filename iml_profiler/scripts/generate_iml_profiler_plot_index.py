@@ -204,7 +204,7 @@ from iml_profiler.profiler import glbl
 def main():
     glbl.setup_logging()
     parser = argparse.ArgumentParser("Generate index of *.venn_js.json files.")
-    parser.add_argument('--directory',
+    parser.add_argument('--iml-directory',
                         required=True,
                         help=textwrap.dedent("""
     Look for *.venn_js.json rooted at this directory.
@@ -239,10 +239,10 @@ def main():
     args = parser.parse_args()
 
     if args.out_dir is None:
-        args.out_dir = args.directory
+        args.out_dir = args.iml_directory
 
     obj = GeneratePlotIndex(
-        directory=args.directory,
+        directory=args.iml_directory,
         out_dir=args.out_dir,
         basename=args.basename,
         debug=args.debug,

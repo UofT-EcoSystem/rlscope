@@ -4,9 +4,10 @@ Define IML DAG execution graph using "luigi" DAG execution framework.
 For luigi documetation, see:
 https://luigi.readthedocs.io/en/stable/index.html
 """
-import logging
 import luigi
 
+import logging
+import subprocess
 import re
 import pwd
 import textwrap
@@ -14,6 +15,8 @@ import datetime
 import pprint
 import sys
 import os
+
+from os.path import join as _j, abspath as _a, exists as _e, dirname as _d, basename as _b
 
 from iml_profiler.parser.tfprof import TotalTimeParser, TraceEventsParser
 from iml_profiler.parser.pyprof import PythonProfileParser, PythonFlameGraphParser, PythonProfileTotalParser
@@ -58,13 +61,14 @@ param_postgres_password = luigi.Parameter(description="Postgres password; defaul
 param_postgres_user = luigi.Parameter(description="Postgres user", default=None)
 param_postgres_host = luigi.Parameter(description="Postgres host", default=None)
 
+param_debug = luigi.BoolParameter(description="debug")
 param_debug_single_thread = luigi.BoolParameter(description=textwrap.dedent("""
         Run any multiprocessing stuff using a single thread for debugging.
         """))
 
 class IMLTask(luigi.Task):
     iml_directory = luigi.Parameter(description="Location of trace-files")
-    debug = luigi.BoolParameter(description="debug")
+    debug = param_debug
     debug_single_thread = param_debug_single_thread
 
     postgres_password = param_postgres_password
@@ -206,7 +210,7 @@ class HeatScaleTask(IMLTask):
 
 class TraceEventsTask(luigi.Task):
     iml_directory = luigi.Parameter(description="Location of trace-files")
-    debug = luigi.BoolParameter(description="debug")
+    debug = param_debug
     debug_single_thread = param_debug_single_thread
 
     postgres_password = param_postgres_password
@@ -245,12 +249,52 @@ class TraceEventsTask(luigi.Task):
         )
         self.dumper.run()
 
+class GeneratePlotIndexTask(luigi.Task):
+    iml_directory = luigi.Parameter(description="Location of trace-files")
+    # out_dir = luigi.Parameter(description="Location of trace-files", default=None)
+    # replace = luigi.BoolParameter(description="debug", parsing=luigi.BoolParameter.EXPLICIT_PARSING)
+    debug = param_debug
+    debug_single_thread = param_debug_single_thread
+
+    postgres_password = param_postgres_password
+    postgres_user = param_postgres_user
+    postgres_host = param_postgres_host
+
+    skip_output = False
+
+    def requires(self):
+        # Requires that traces files have been collected...
+        # So, lets just depend on the SQL parser to have loaded everything.
+        return [
+            mk_SQLParserTask(self),
+        ]
+
+    def output(self):
+        # Q: What about --replace?  Conditionally include this output...?
+        return [
+            luigi.LocalTarget(_j(self.iml_directory, 'iml_profiler_plot_index_data.py')),
+        ]
+
+    def run(self):
+        cmd = ['iml-generate-plot-index']
+        cmd.extend(['--iml-directory', self.iml_directory])
+        if self.debug:
+            cmd.extend(['--debug'])
+        subprocess.check_call(cmd)
+
 class OverlapStackedBarTask(luigi.Task):
     iml_directories = luigi.ListParameter(description="Multiple --iml-directory entries for finding overlap_type files: *.venn_js.js")
     directory = luigi.Parameter(description="Output directory", default=".")
     title = luigi.Parameter(description="Plot title", default=None)
     rotation = luigi.FloatParameter(description="x-axis title rotation", default=10.)
     overlap_type = luigi.ChoiceParameter(choices=OverlapStackedBarPlot.SUPPORTED_OVERLAP_TYPES, description="What type of <overlap_type>*.venn_js.js files should we read from?")
+    resource_overlap = luigi.ListParameter(description="What resources are we looking at for things like --overlap-type=OperationOverlap? e.g. ['CPU'], ['CPU', 'GPU']", default=None)
+    # For some reason, (ppo2, MinitaurBulletEnv-v0) only has:
+    # - regions: [('sample_action',)]
+    # Whereas, for ppo2 we expect:
+    # - regions: [('compute_advantage_estimates',), ('optimize_surrogate',), ('sample_action',)]
+    # TODO: re-run MinitaurBulletEnv-v0
+    ignore_inconsistent_overlap_regions = luigi.BoolParameter(description="If *.venn_js.json overlap data have inconsistent overlap regions, just use files that agree the most and ignore the rest", parsing=luigi.BoolParameter.EXPLICIT_PARSING)
     y_type = luigi.ChoiceParameter(choices=OverlapStackedBarPlot.SUPPORTED_Y_TYPES, default='percent',
                                    description=textwrap.dedent("""\
                                    What should we show on the y-axis of the stacked bar-plot?
@@ -330,7 +374,7 @@ class OverlapStackedBarTask(luigi.Task):
     show_title = luigi.BoolParameter(description="Whether to add a title to the plot", default=True, parsing=luigi.BoolParameter.EXPLICIT_PARSING)
     show_legend = luigi.BoolParameter(description="Whether show the legend", default=True, parsing=luigi.BoolParameter.EXPLICIT_PARSING)
     keep_zero = luigi.BoolParameter(description="If a stacked-bar element is zero in all the bar-charts, still show it in the legend.", default=True, parsing=luigi.BoolParameter.EXPLICIT_PARSING)
-    debug = luigi.BoolParameter(description="debug")
+    debug = param_debug
     debug_single_thread = param_debug_single_thread
     suffix = luigi.Parameter(description="Add suffix to output files: OverlapStackedBarPlot.overlap_type_*.{suffix}.{ext}", default=None)
 
@@ -339,9 +383,13 @@ class OverlapStackedBarTask(luigi.Task):
     def requires(self):
         # TODO: we require (exactly 1) <overlap_type>.venn_js.js in each iml_dir.
         # TODO: we need to sub-select if there are multiple venn_js.js files...need selector arguments
-        return [
-            # mk_SQLParserTask(self),
-        ]
+        requires = []
+        for iml_dir in self.iml_directories:
+            kwargs = forward_kwargs(from_task=self, ToTaskKlass=GeneratePlotIndexTask)
+            requires.append(GeneratePlotIndexTask(
+                iml_directory=iml_dir,
+                **kwargs))
+        return requires
 
     def output(self):
         return []
@@ -350,6 +398,15 @@ class OverlapStackedBarTask(luigi.Task):
         kwargs = kwargs_from_task(self)
         self.dumper = OverlapStackedBarPlot(**kwargs)
         self.dumper.run()
+
+def forward_kwargs(from_task, ToTaskKlass, ignore_argnames=None):
+    kwargs = kwargs_from_task(from_task)
+    fwd_kwargs = dict()
+    for attr, value in kwargs.items():
+        if (ignore_argnames is None or attr not in ignore_argnames) and \
+                hasattr(ToTaskKlass, attr) and isinstance(getattr(ToTaskKlass, attr), luigi.Parameter):
+            fwd_kwargs[attr] = value
+    return fwd_kwargs
 
 def kwargs_from_task(task):
     kwargs = dict()
@@ -385,11 +442,22 @@ def print_cmd(cmd, file=sys.stdout):
     ), file=file)
 
 from iml_profiler.profiler import glbl
-def main(argv=None):
+def main(argv=None, should_exit=True):
     glbl.setup_logging()
     if argv is None:
         argv = list(sys.argv[1:])
-    luigi.run(cmdline_args=argv)
+    ret = luigi.run(cmdline_args=argv, detailed_summary=True)
+    retcode = 0
+    if ret.status not in [luigi.LuigiStatusCode.SUCCESS, luigi.LuigiStatusCode.SUCCESS_WITH_RETRY]:
+        retcode = 1
+        logging.info("luigi.run FAILED with {ret}".format(
+            ret=ret))
+        print(textwrap.dedent("""\
+        > Debug pro-tip:
+          - Look for the last "> CMD:" that was run, and re-run it manually 
+            but with the added "--pdb" flag to break when it fails.
+        """))
+    sys.exit(retcode)
 
 NOT_RUNNABLE_TASKS = get_NOT_RUNNABLE_TASKS()
 IML_TASKS = get_IML_TASKS()
