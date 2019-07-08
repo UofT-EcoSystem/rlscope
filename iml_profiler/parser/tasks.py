@@ -286,9 +286,11 @@ class OverlapStackedBarTask(luigi.Task):
     iml_directories = luigi.ListParameter(description="Multiple --iml-directory entries for finding overlap_type files: *.venn_js.js")
     directory = luigi.Parameter(description="Output directory", default=".")
     title = luigi.Parameter(description="Plot title", default=None)
-    rotation = luigi.FloatParameter(description="x-axis title rotation", default=10.)
+    rotation = luigi.FloatParameter(description="x-axis title rotation", default=45.)
     overlap_type = luigi.ChoiceParameter(choices=OverlapStackedBarPlot.SUPPORTED_OVERLAP_TYPES, description="What type of <overlap_type>*.venn_js.js files should we read from?")
     resource_overlap = luigi.ListParameter(description="What resources are we looking at for things like --overlap-type=OperationOverlap? e.g. ['CPU'], ['CPU', 'GPU']", default=None)
+    operation = luigi.Parameter(description="What operation are we looking at for things like --overlap-type=CategoryOverlap? e.g. ['step'], ['sample_action']", default=None)
+    remap_df = luigi.ListParameter(description="Transform df pandas.DataFrame object; useful for remapping regions to new ones", default=None)
     # For some reason, (ppo2, MinitaurBulletEnv-v0) only has:
     # - regions: [('sample_action',)]
     # Whereas, for ppo2 we expect:
@@ -373,6 +375,9 @@ class OverlapStackedBarTask(luigi.Task):
     # postgres_password = param_postgres_password
     show_title = luigi.BoolParameter(description="Whether to add a title to the plot", default=True, parsing=luigi.BoolParameter.EXPLICIT_PARSING)
     show_legend = luigi.BoolParameter(description="Whether show the legend", default=True, parsing=luigi.BoolParameter.EXPLICIT_PARSING)
+    width = luigi.FloatParameter(description="Width of plot in inches", default=None)
+    height = luigi.FloatParameter(description="Height of plot in inches", default=None)
+    long_env = luigi.BoolParameter(description="full environment name: Humanoid -> HumanoidBulletEnv-v0", default=None)
     keep_zero = luigi.BoolParameter(description="If a stacked-bar element is zero in all the bar-charts, still show it in the legend.", default=True, parsing=luigi.BoolParameter.EXPLICIT_PARSING)
     debug = param_debug
     debug_single_thread = param_debug_single_thread

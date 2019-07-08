@@ -79,11 +79,13 @@ class _DataIndex:
     def get_files(self, selector):
         return list(self.each_file(selector))
 
-    def available_values(self, selector, field):
+    def available_values(self, selector, field, can_ignore=False):
         files = self.get_files(selector)
         if len(files) > 0:
             md, entry, indent = files[0]
             if field not in md:
+                if can_ignore:
+                    return []
                 choices = sorted(md.keys())
                 raise ValueError((
                     "_DataIndex.available_values(selector={sel}, field={field}): "
@@ -93,7 +95,7 @@ class _DataIndex:
                     choices=choices,
                     sel=selector,
                 ))
-        values = [md[field] for md, entry, ident in files]
+        values = sorted(set([md[field] for md, entry, ident in files]))
         return values
 
     def get_file(self, selector):

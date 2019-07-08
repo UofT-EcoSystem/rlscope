@@ -4,6 +4,13 @@ import re
 import copy
 import importlib
 import sys
+import textwrap
+
+import matplotlib
+# NOTE: If we don't do this, then with ForwardX11 enabled in ~/.ssh/config we get an error on python script exit:
+#   XIO:  fatal IO error 0 (Success) on X server "localhost:10.0"
+#         after 348 requests (348 known processed) with 1 events remaining.
+matplotlib.use('agg')
 
 import matplotlib as mpl
 import seaborn as sns
@@ -62,12 +69,18 @@ class OverlapStackedBarPlot:
                  directory,
                  overlap_type,
                  resource_overlap=None,
+                 operation=None,
+                 remap_df=None,
                  ignore_inconsistent_overlap_regions=False,
                  title=None,
+                 rotation=None,
                  x_type='rl-comparison',
                  y_type='percent',
                  show_title=True,
                  show_legend=True,
+                 width=None,
+                 height=None,
+                 long_env=False,
                  keep_zero=True,
                  suffix=None,
                  host=None,
@@ -103,15 +116,21 @@ class OverlapStackedBarPlot:
         self.directory = directory
         self.overlap_type = overlap_type
         self.resource_overlap = resource_overlap
+        self.operation = operation
+        self.remap_df = remap_df
         self.ignore_inconsistent_overlap_regions = ignore_inconsistent_overlap_regions
         if self.resource_overlap is not None:
             # Normalize ('GPU', 'CPU') into ('CPU', 'GPU') for equality checks,
             self.resource_overlap = tuple(sorted(self.resource_overlap))
         self.title = title
+        self.rotation = rotation
         self.x_type = x_type
         self.y_type = y_type
         self.show_title = show_title
         self.show_legend = show_legend
+        self.width = width
+        self.height = height
+        self.long_env = long_env
         self.keep_zero = keep_zero
         self.suffix = suffix
         self.host = host
@@ -121,7 +140,7 @@ class OverlapStackedBarPlot:
 
     def _get_plot_path(self, ext):
         if self.suffix is not None:
-            suffix_str = '.{suffix}'.format(self.suffix)
+            suffix_str = '.{suffix}'.format(suffix=self.suffix)
         else:
             suffix_str = ''
         return _j(self.directory, "OverlapStackedBarPlot.overlap_type_{ov}{suffix}.{ext}".format(
@@ -210,9 +229,9 @@ class OverlapStackedBarPlot:
         if self.x_type == 'rl-comparison':
             title = "Comparing RL workloads"
         elif self.x_type == 'env-comparison':
-            title = "Comparing environments when training {algorithm}".format(algorithm=self.algorithm)
+            title = "Comparing environments when training {algo}".format(algo=self.algorithm)
         elif self.x_type == 'algo-comparison':
-            title = "Comparing algorithms when training {environment}".format(environment=self.environment)
+            title = "Comparing algorithms when training {env}".format(env=self.get_x_env(self.environment))
         else:
             raise NotImplementedError
 
@@ -281,7 +300,7 @@ class OverlapStackedBarPlot:
             index = self.get_index(iml_dir)
             self.data_index[iml_dir] = index
 
-    def _add_or_suggest_selector_field(self, idx, selector, field_name):
+    def _add_or_suggest_selector_field(self, idx, selector, field_name, can_ignore=False):
         """
         For e.g. field_name = 'resource_overlap' (['CPU'], or ['CPU', 'GPU']).
 
@@ -306,16 +325,16 @@ class OverlapStackedBarPlot:
         if value is not None:
             selector[field_name] = value
         else:
-            choices = idx.available_values(selector, field_name)
-            # NOTE: if there's only one choice, we don't need to add it to selector.
+            choices = idx.available_values(selector, field_name, can_ignore=can_ignore)
             if len(choices) > 1:
                 raise RuntimeError("Please provide {opt}: choices = {choices}".format(
                     opt=optname(field_name),
                     choices=choices,
                 ))
-                selector[field_name] = avail[0]
+            # NOTE: if there's only one choice, we don't need to add it to selector.
+            # selector[field_name] = choices[0]
 
-    def each_stacked_dict(self):
+    def each_df(self):
         for iml_dir in self.iml_directories:
             idx = self.data_index[iml_dir]
 
@@ -328,23 +347,47 @@ class OverlapStackedBarPlot:
                 'overlap_type': self.overlap_type,
             }
 
-            self._add_or_suggest_selector_field(idx, selector, 'resource_overlap')
+            # 'CategoryOverlap': ['process', 'phase', 'resource_overlap', 'operation'],
+            # 'ResourceOverlap': ['process', 'phase'],
+            # 'ResourceSubplot': ['process', 'phase'],
+            # 'OperationOverlap': ['process', 'phase', 'resource_overlap'],
+            # 'HeatScale': ['device_name'],
+
+            # NOTE: we should really add more fields here for multi-process support (e.g. 'process' and 'phase');
+            # For now this just support single-process results.
+            self._add_or_suggest_selector_field(idx, selector, 'resource_overlap', can_ignore=True)
+            self._add_or_suggest_selector_field(idx, selector, 'operation', can_ignore=self.overlap_type not in ['CategoryOverlap'])
 
             md, entry, ident = idx.get_file(selector=selector)
             vd = VennData(entry['venn_js_path'])
             stacked_dict = vd.stacked_bar_dict()
             path = entry['venn_js_path']
-            yield (algo, env), path, stacked_dict
+
+            def as_list(v):
+                if type(v) == list:
+                    return v
+                return [v]
+            new_stacked_dict = dict((k, as_list(v)) for k, v in stacked_dict.items())
+            new_stacked_dict['algo'] = as_list(algo)
+            new_stacked_dict['env'] = as_list(env)
+            df = pd.DataFrame(new_stacked_dict)
+
+            df = self._remap_df(df)
+
+            yield (algo, env), self._regions(df), path, df
 
     def _check_overlap_json_files(self):
         regions_to_paths = dict()
-        for (algo, env), path, stacked_dict in self.each_stacked_dict():
-            regions = frozenset(stacked_dict.keys())
+        for (algo, env), regions, path, df in self.each_df():
+            regions = frozenset(regions)
             if regions not in regions_to_paths:
                 regions_to_paths[regions] = []
             regions_to_paths[regions].append(path)
         for k in list(regions_to_paths.keys()):
             regions_to_paths[k].sort()
+
+        if self.debug:
+            logging.info(pprint_msg({'regions_to_paths': regions_to_paths}))
 
         if len(regions_to_paths) > 1:
             """
@@ -384,12 +427,52 @@ class OverlapStackedBarPlot:
         regions_by_num_files = sorted(
             regions_to_paths.keys(),
             key=lambda regions: (len(regions_to_paths[regions]), regions_to_paths[regions]))
-        use_overlap_regions = regions_by_num_files[-1]
+        use_regions = regions_by_num_files[-1]
         if self.debug:
             logging.info(pprint_msg({
                 'regions_to_paths': regions_to_paths,
-                'use_overlap_regions': use_overlap_regions}))
-        return use_overlap_regions
+                'use_regions': use_regions}))
+        return use_regions
+
+    def _is_region(self, region):
+        return type(region) == tuple
+
+    def _regions(self, obj):
+        assert type(obj) in [pd.DataFrame, dict]
+        return set(key for key in obj.keys() if self._is_region(key))
+
+    def _remap_df(self, orig_df):
+        if self.remap_df is None:
+            return orig_df
+
+        not_regions = [key for key in orig_df.keys() if not self._is_region(key)]
+
+        # eval context:
+        # TODO: limit locals/globals to these? Don't want to limit numpy/pandas access though.
+        df = copy.copy(orig_df)
+        regions = self._regions(df)
+        new_df = df[not_regions]
+
+        for df_transformation in self.remap_df:
+            # e.g.
+            # new_df[('other',)] = df[('compute_advantage_estimates',)] +
+            #                      df[('optimize_surrogate',)]
+            if self.debug:
+                logging.info("--remap-df:\n{trans}".format(trans=textwrap.indent(df_transformation, prefix='  ')))
+            exec(df_transformation)
+        # Make sure they didn't modify df; they SHOULD be modifying new_df
+        # (i.e. adding regions to a "fresh" slate)
+        assert np.all(df == orig_df)
+
+        if self.debug:
+            logging.info("--remap-df complete")
+            logging.info("Old dataframe; regions={regions}".format(regions=self._regions(orig_df)))
+            logging.info(pprint_msg(orig_df))
+
+            logging.info("New dataframe after --remap-df; regions={regions}".format(regions=self._regions(new_df)))
+            logging.info(pprint_msg(new_df))
+
+        return new_df
 
     def _read_df(self):
         """
@@ -401,39 +484,40 @@ class OverlapStackedBarPlot:
             'algo':[],
             'env':[],
         }
-        self.all_groups = None
+        self.regions = None
 
-        use_overlap_regions = self._check_overlap_json_files()
+        # Process each df separately, since they have DIFFERENT keys.
+        # Then, check that the groups for the df match.
 
-        for (algo, env), path, stacked_dict in self.each_stacked_dict():
+        use_regions = self._check_overlap_json_files()
 
-            overlap_regions = set(stacked_dict.keys())
-            if overlap_regions != use_overlap_regions:
-                logging.info("Skipping {path} (--ignore-inconsistent-overlap-regions)".format(
-                    path=path,
-                ))
+        dfs = []
+        for (algo, env), regions, path, df in self.each_df():
+
+            if regions != use_regions:
+                logging.info(
+                    textwrap.dedent("""\
+                    Skipping {path} (--ignore-inconsistent-overlap-regions)
+                      regions = {regions}
+                      use_regions = {use_regions}
+                    """).lstrip().format(
+                        path=path,
+                        regions=regions,
+                        use_regions=use_regions,
+                    ))
                 continue
+
+            if self.regions is None:
+                self.regions = set(regions)
 
             if self.debug:
                 logging.info(pprint_msg({
                     'path': path,
-                    'stacked_dict': stacked_dict}))
+                    'df': df}))
 
-            self.data['algo'].append(algo)
-            self.data['env'].append(env)
-            # Add each overlap region to self.data.
-            # e.g. self.data[('CPU', 'GPU')].append(time in seconds)
-            for group, size_us in stacked_dict.items():
-                if self.all_groups is None:
-                    self.all_groups = set(stacked_dict.keys())
-                else:
-                    # All venn_js_path files should have the same categories in them.
-                    # If not, we must do something to make 1 file look like another.
-                    assert group in self.all_groups
-                if group not in self.data:
-                    self.data[group] = []
-                self.data[group].append(size_us)
-        self.df = pd.DataFrame(self.data)
+            dfs.append(df)
+
+        self.df = pd.concat(dfs)
 
     def _normalize_df(self):
         """
@@ -456,14 +540,14 @@ class OverlapStackedBarPlot:
             # e.g.
             # summation = [CPU] + [CPU, GPU] + [GPU]
             summation = None
-            for g in self.all_groups:
+            for g in self.regions:
                 if summation is None:
                     summation = df[g]
                 else:
                     summation = summation + df[g]
 
             ret = dict()
-            for g in self.all_groups:
+            for g in self.regions:
                 # e.g.
                 # CPU = CPU / ([CPU] + [CPU, GPU] + [GPU])
                 ret[g] = 100 * df[g]/summation
@@ -471,7 +555,7 @@ class OverlapStackedBarPlot:
             return ret
 
         if self.y_type == 'seconds':
-            for group in self.all_groups:
+            for group in self.regions:
                 self.df[group] = transform_usec_to_sec(self.df, group)
         elif self.y_type == 'percent':
             ret = transform_usec_to_percent(self.df)
@@ -479,6 +563,34 @@ class OverlapStackedBarPlot:
                 self.df[group] = ret[group]
         else:
             raise NotImplementedError
+
+    def get_x_env(self, env):
+        short_env = env
+        if not self.long_env:
+            short_env = re.sub(r'-v\d+$', '', short_env)
+            short_env = re.sub(r'BulletEnv$', '', short_env)
+            short_env = re.sub(r'NoFrameskip', '', short_env)
+            short_env = re.sub(r'Inverted', 'Inv', short_env)
+            short_env = re.sub(r'Double', 'Dbl', short_env)
+            short_env = re.sub(r'Pendulum', 'Pndlm', short_env)
+            short_env = re.sub(r'Swingup', 'Swing', short_env)
+        return short_env
+
+    def get_x_field(self, algo, env):
+        short_env = self.get_x_env(env)
+        if self.x_type == 'rl-comparison':
+            # x_field = "({algo}, {env})".format(
+            x_field = "{algo}\n{env}".format(
+                algo=algo,
+                env=short_env,
+            )
+        elif self.x_type == 'env-comparison':
+            x_field = short_env
+        elif self.x_type == 'algo-comparison':
+            x_field = algo
+        else:
+            raise NotImplementedError
+        return x_field
 
     def _plot_df(self):
         logging.info("Dataframe:\n{df}".format(df=self.df))
@@ -488,23 +600,23 @@ class OverlapStackedBarPlot:
             return label
         x_fields = []
         for index, row in self.df.iterrows():
-            x_field = "({algo}, {env})".format(
-                algo=row['algo'],
-                env=row['env'],
-            )
+            x_field = self.get_x_field(row['algo'], row['env'])
             x_fields.append(x_field)
         self.df['x_field'] = x_fields
 
         stacked_bar_plot = StackedBarPlot(
             data=self.df,
             path=self._plot_path,
-            groups=sorted(self.all_groups),
+            groups=sorted(self.regions),
             x_field='x_field',
             x_axis_label=self.plot_x_axis_label,
             y_axis_label=self.plot_y_axis_label,
             title=self.plot_title,
             show_legend=self.show_legend,
+            width=self.width,
+            height=self.height,
             keep_zero=self.keep_zero,
+            rotation=self.rotation,
             # groups: the "keys" into the data dictionary, which are the "stacks" found in each bar.
             group_to_label=group_to_label,
         )
@@ -711,8 +823,10 @@ class StackedBarPlot:
                  y_axis_label="Y-axis label",
                  title=None,
                  show_legend=True,
+                 width=None,
+                 height=None,
                  keep_zero=True,
-                 rotation=10,
+                 rotation=None,
                  # fontsize=16,
                  fontsize=None,
                  group_to_label=None):
@@ -724,6 +838,11 @@ class StackedBarPlot:
         self.y_axis_label = y_axis_label
         self.title = title
         self.show_legend = show_legend
+        self.width = width
+        self.height = height
+        if ( self.width is not None and self.height is None ) or \
+                (self.width is None and self.height is not None ):
+            raise ValueError("You must provide both --width and --height")
         self.keep_zero = keep_zero
         self.rotation = rotation
         self.fontsize = fontsize
@@ -742,7 +861,7 @@ class StackedBarPlot:
     def _all_zero(self, group):
         return (self.data[group] == 0.).all()
 
-    def _add_legend(self):
+    def _add_legend(self, fig, loc, bbox_to_anchor):
         legend_rects = []
         for i, group in enumerate(self.groups):
             if not self.keep_zero and self._all_zero(group):
@@ -751,17 +870,24 @@ class StackedBarPlot:
             legend_rect = plt.Rectangle((0, 0), 1, 1, fc=self.colors[i], edgecolor='none')
             legend_rects.append(legend_rect)
         legend_labels = [self._group_to_label(group) for group in self.groups]
-        # leg = plt.legend(legend_rects, legend_labels, loc=1, ncol=2)
-        leg = plt.legend(legend_rects, legend_labels,
-                         bbox_to_anchor=(1.05, 1), loc=2, borderaxespad=0.)
+        leg = fig.legend(legend_rects, legend_labels,
+                         bbox_to_anchor=bbox_to_anchor, loc=loc, borderaxespad=0.)
         leg.draw_frame(False)
 
     def plot(self):
 
+        if self.width is not None and self.height is not None:
+            figsize = (self.width, self.height)
+            logging.info("Setting figsize = {fig}".format(fig=figsize))
+            # sns.set_context({"figure.figsize": figsize})
+        else:
+            figsize = None
+        # This is causing XIO error....
+        fig = plt.figure(figsize=figsize)
+
         #Set general plot properties
 
         sns.set_style("white")
-        # fig = plt.figure()
         # ax = plt.subplot()
         # ax_list = fig.axes
         # plt.subplot()
@@ -796,7 +922,7 @@ class StackedBarPlot:
                 {
                     'x': self.data[self.x_field],
                     'y': ys,
-                    'color': self.colors[i]
+                    'color': self.colors[i],
                 }
             )
 
@@ -815,8 +941,19 @@ class StackedBarPlot:
 
         bottom_plot = barplots[-1]
 
+        figlegend = plt.figure()
+        self._add_legend(
+            figlegend,
+            loc='center',
+            bbox_to_anchor=None,
+        )
+
         if self.show_legend:
-            self._add_legend()
+            self._add_legend(
+                fig,
+                loc='upper left',
+                bbox_to_anchor=(1.05, 1),
+            )
 
         # , prop={'size': self.fontsize}
 
@@ -825,12 +962,11 @@ class StackedBarPlot:
         # l = plt.legend([bottombar, topbar], ['Bottom Bar', 'Top Bar'], loc=1, ncol = 2, prop={'size':16})
 
         #Optional code - Make plot look nicer
-        sns.despine(left=True)
+        sns.despine(fig=fig, left=True)
         bottom_plot.set_ylabel(self.y_axis_label)
         bottom_plot.set_xlabel(self.x_axis_label)
         if self.title is not None:
             bottom_plot.set_title(self.title)
-
 
         if self.rotation is not None:
             ax = bottom_plot.axes
@@ -847,8 +983,85 @@ class StackedBarPlot:
         #         item.set_fontsize(self.fontsize)
 
         logging.info('Save figure to {path}'.format(path=self.path))
-        plt.tight_layout()
-        plt.savefig(self.path)
+        fig.tight_layout()
+        fig.savefig(self.path)
+        plt.close(fig)
+
+        figlegend.tight_layout()
+        figlegend.savefig(self.legend_path, bbox_inches='tight', pad_inches=0)
+        plt.close(figlegend)
+
+    @property
+    def legend_path(self):
+        return re.sub(r'(\.[^.]+)$', r'.legend\1', self.path)
+
+# Unused class; just some documentation
+class RegionDataFrame:
+    """
+    Here's what the data-frame looks like for:
+    # OverlapStackedBarPlot.overlap_type_OperationOverlap.txt
+    $ train_stable_baselines.sh --env-id Walker2DBulletEnv-v0
+
+       (compute_advantage_estimates,)  (sample_action,)                                  env  algo  (optimize_surrogate,)                                      x_field
+    0                        0.007635         12.188267                      AntBulletEnv-v0  ppo2              87.804098                      (ppo2, AntBulletEnv-v0)
+    1                        0.004305         50.264176              HalfCheetahBulletEnv-v0  ppo2              49.731519              (ppo2, HalfCheetahBulletEnv-v0)
+    2                        0.002083         29.895073                   HopperBulletEnv-v0  ppo2              70.102843                   (ppo2, HopperBulletEnv-v0)
+    3                        0.004586         47.460603                 HumanoidBulletEnv-v0  ppo2              52.534812                 (ppo2, HumanoidBulletEnv-v0)
+    4                        0.005242         49.675716   InvertedDoublePendulumBulletEnv-v0  ppo2              50.319042   (ppo2, InvertedDoublePendulumBulletEnv-v0)
+    5                        0.005556         47.268527  InvertedPendulumSwingupBulletEnv-v0  ppo2              52.725917  (ppo2, InvertedPendulumSwingupBulletEnv-v0)
+    6                        0.005479         46.588143                  ReacherBulletEnv-v0  ppo2              53.406377                  (ppo2, ReacherBulletEnv-v0)
+    7                        0.004384         58.306973                 Walker2DBulletEnv-v0  ppo2              41.688643                 (ppo2, Walker2DBulletEnv-v0)
+
+    If we add two regions together:
+    e.g.
+      remap['other'] = regions['sample_action'] +
+                       regions['optimize_surrogate'] +
+                       regions['compute_advantage_estimates']
+    then we want to perform this addition for each matching pair of
+    rl-workloads measured.
+    i.e.
+    NOTE: we could just expose pandas syntax directly to the user.
+      new_df[('other',)] = df[('compute_advantage_estimates',)] +
+                           df[('optimize_surrogate',)]
+    - Syntactic sugar (1): auto-tuplify single-name regions
+      PROBLEM: loses generality, cannot reference 'env' or 'algo' now... not a bad thing really.
+      new_df['other'] = df['compute_advantage_estimates'] +
+                        df['optimize_surrogate']
+    - Syntactic sugar (2): remove reference to new_df and df, replace strings with barename
+      PROBLEM: loses generality, cannot use python syntax now.
+      new_df['other'] = df['compute_advantage_estimates'] +
+                        df['optimize_surrogate']
+
+    Region-remapping operations/syntax we wish to support:
+
+    E.g.
+        remap['step'] = step
+        remap['other'] = sum(r for r in regions if r != step)
+
+    Region-remapping may be specific to a particular algorithm.
+    E.g. to obtain generic breakdown from ppo2:
+
+        remap['inference'] = sample_action
+        remap['backward_pass'] = optimize_surrogate
+
+    :param other:
+    :return:
+    """
+    def __init__(self, df, groups):
+        self.df = df
+        self.groups = groups
+
+
+    # TODO: overload all the things pandas.DataFrame overloads and pass them to self.df
+    # Q: Why not just extend pandas.DataFrame?
+    # A: because we'd like to retain the base-class instance __setitem__ behaviour...
+    #    we CANNOT convert a RegionDataFrame to a pandas.DataFrame since __setitem__ becomes forever overloaded... annoying.
+
+    def __setitem__(self, key, value):
+        # TODO: only allow region-names as keys; check if key is a region-name; if not raise a informative error
+        # TODO: tuplify string key into a single-element tuple.
+        pass
+
 
 def test_stacked_bar_sns():
     """
