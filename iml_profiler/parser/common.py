@@ -1522,6 +1522,35 @@ def get_stacktrace(n_skip=0):
     keep_stack = stack[:-n_skip_total]
     return traceback.format_list(keep_stack)
 
+def get_stacktrace_string(n_skip=1, indent=None):
+    """
+    Return a stacktrace ready for printing; usage:
+    # Dump the stack of the current location of this line.
+    '\n'.join(get_stacktrace(0))
+    logging.info("First line before stacktrace\n{stack}".format(
+        stack=get_stacktrace())
+    # Outputs to stdout:
+    ID=14751/MainProcess @ finish, profilers.py:1658 :: 2019-07-09 15:52:26,015 INFO: First line before stacktrace
+      File "*.py", line 375, in <module>
+          ...
+      ...
+      File "*.py", line 1658, in finish
+        logging.info("First line before stacktrace\n{stack}".format(
+    :param n_skip:
+        Number of stack-levels to skip in the caller.
+        By default we skip the first one, since it's the call to traceback.extrace_stack()
+        inside the get_stacktrace() function.
+        If you make n_skip=2, then it will skip you function-call to get_stacktrace() as well.
+    :return:
+    """
+    stack = traceback.extract_stack()
+    stack_list = traceback.format_list(stack)
+    stack_list_keep = stack_list[0:len(stack_list)-n_skip]
+    stack_str = ''.join(stack_list_keep)
+    if indent is not None:
+        stack_str = textwrap.indent(stack_str, prefix="  "*indent)
+    return stack_str
+
 def print_stacktrace(msg, n_skip=0):
     # Doesn't include "print_stacktrace"
     # stacktrace = get_stacktrace(n_skip + 1)

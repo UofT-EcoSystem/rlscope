@@ -194,8 +194,8 @@ def _profiled_run(self,
         options.trace_level = config_pb2.RunOptions.FULL_TRACE
 
       # tfprof_step = self.profile_context._step
+      self.profile_context.iml_traced_calls += 1
       SESSION_RUN_CALLS_TRACED += 1
-      assert profile_context is self.profile_context
       assert step is not None
       sess = self
       # preallocate_tracer(tfprof_step, sess)
@@ -336,6 +336,7 @@ class ProfileContext(object):
     # self.phase = phase
     self._sess = session
     self.phase = phase
+    self.iml_traced_calls = 0
     assert self._sess is not None
     self._trace_all = trace_all
     self._disable = False
@@ -581,8 +582,16 @@ class ProfileContext(object):
     # c_api_util.clear_trace_data(sess)
 
   def dump(self, dump_path, process_name):
+
+    if py_config.DEBUG_TRACE_SESSION:
+        sess = self._cur_session(allow_none=True)
+        logging.info("[trace-session : ProfileContext.dump] session={sess}, phase={phase}".format(
+          sess=sess,
+          phase=self.phase,
+        ))
+
     assert self.phase is not None
-    sess = self._cur_session(allow_none=True)
+    sess = self._cur_session()
     if py_config.DEBUG:
         logging.info("> c_api_util.dump_trace_data_async: dump_path={path}, process={proc}, phase={phase}".format(
           path=dump_path,
@@ -655,6 +664,9 @@ class ProfileContext(object):
   def _cur_session(self, allow_none=False):
     if self._sess is not None:
       return self._sess
+
+    if allow_none:
+      return None
 
     # sess = tf.get_default_session()
     # if sess is None and not allow_none:
