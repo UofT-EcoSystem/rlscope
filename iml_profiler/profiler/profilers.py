@@ -1647,9 +1647,18 @@ class Profiler:
         :return:
         """
         pctx = ProfileContextManager.get_profile_context(session)
+
         trace_id = self.next_trace_id
-        # tfprof_path = self.tfprof_path(ses)
         tfprof_path = self.tfprof_path(session.session_id, trace_id)
+
+        if pctx.iml_traced_calls == 0:
+            # Silently skip dumping this pctx since it contains no trace-data (unless --iml-debug).
+            if pctx.phase is None and debug:
+                logging.info("Skip dumping tfprof @ {path}: your training script creates a tf.Session() object that never gets used so it has 0 traced-calls.")
+            elif debug:
+                logging.info("Skip dumping tfprof @ {path}: since it has 0 traced-calls.")
+            return
+
         tfprof_dumper = TfprofDumper(trace_id, session, self.process_name, tfprof_path, debug=debug)
         tfprof_dumper.dump()
 

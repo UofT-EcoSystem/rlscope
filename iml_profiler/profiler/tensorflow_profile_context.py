@@ -196,6 +196,7 @@ def _profiled_run(self,
         options.trace_level = config_pb2.RunOptions.FULL_TRACE
 
       # tfprof_step = self.profile_context._step
+      self.iml_traced_calls += 1
       SESSION_RUN_CALLS_TRACED += 1
       assert profile_context is self.profile_context
       assert step is not None
@@ -338,6 +339,7 @@ class ProfileContext(object):
     # self.phase = phase
     self._sess = session
     self.phase = phase
+    self.iml_traced_calls = 0
     assert self._sess is not None
     self._trace_all = trace_all
     self._disable = False
