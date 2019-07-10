@@ -585,12 +585,12 @@ class ProfileContext(object):
 
   def dump(self, dump_path, process_name):
 
-    sess = self._cur_session(allow_none=True)
-    logging.info("[null-phase : ProfileContext.dump] session={sess}, phase={phase}".format(
-      sess=sess,
-      phase=self.phase,
-      # stack=get_stacktrace_string(indent=1)
-    ))
+    if py_config.DEBUG_TRACE_SESSION:
+        sess = self._cur_session(allow_none=True)
+        logging.info("[trace-session : ProfileContext.dump] session={sess}, phase={phase}".format(
+          sess=sess,
+          phase=self.phase,
+        ))
 
     assert self.phase is not None
     sess = self._cur_session()

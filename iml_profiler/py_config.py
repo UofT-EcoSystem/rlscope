@@ -25,6 +25,12 @@ assert SQL_IMPL in {'psql', 'sqlite'}
 ANALYSIS_PY = _j(ROOT, "python/scripts", "analyze.py")
 GENERATE_INDEX_PY = _j(ROOT, "python/scripts", "generate_iml_profiler_plot_index.py")
 
+# If true, when you provide --iml-debug, log messages when:
+# - A session is created by calling tf.Session()
+# - A session is used by calling sess.run()
+# - IML trace-data belonging to a session is dumped
+DEBUG_TRACE_SESSION = False
+
 # Use a custom-built/modified version of TF for benchmarking things.
 # Modifies C++ code to make tfprof add less overhead to the critical path.
 # CUSTOM_TF = True
