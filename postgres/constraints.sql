@@ -13,6 +13,8 @@ ALTER TABLE Category ADD CONSTRAINT Category_fk_01
 
 ALTER TABLE Process ADD CONSTRAINT Process_fk_01
   UNIQUE(process_name);
+ALTER TABLE Process ADD CONSTRAINT Process_fk_02
+  FOREIGN KEY(parent_process_id) REFERENCES Process(process_id);
 
 ALTER TABLE ProcessDependency ADD CONSTRAINT ProcessDependency_fk_01
   UNIQUE(process_name_parent, process_name_child);

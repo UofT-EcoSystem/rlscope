@@ -127,6 +127,11 @@ def _profiled_run(self,
     if profile_context.phase is None:
       assert iml_profiler.api.prof.phase is not None
       profile_context.phase = iml_profiler.api.prof.phase
+
+    if profile_context.machine_name is None:
+      assert iml_profiler.api.prof.machine_name is not None
+      profile_context.machine_name = iml_profiler.api.prof.machine_name
+
     elif profile_context.phase != iml_profiler.api.prof.phase:
       raise RuntimeError("IML: Internal error; detected ProfileContext being used across multiple phases.")
 
@@ -331,11 +336,13 @@ class ProfileContext(object):
                # phase=None,
                trace_all=False,
                session=None,
-               phase=None):
+               phase=None,
+               machine_name=None):
     # self.process_name = process_name
     # self.phase = phase
     self._sess = session
     self.phase = phase
+    self.machine_name = machine_name
     assert self._sess is not None
     self._trace_all = trace_all
     self._disable = False
@@ -582,14 +589,16 @@ class ProfileContext(object):
 
   def dump(self, dump_path, process_name):
     assert self.phase is not None
+    assert self.machine_name is not None
     sess = self._cur_session(allow_none=True)
-    if py_config.DEBUG:
-        logging.info("> c_api_util.dump_trace_data_async: dump_path={path}, process={proc}, phase={phase}".format(
-          path=dump_path,
-          proc=process_name,
-          phase=self.phase,
-        ))
-    c_api_util.dump_trace_data_async(sess, dump_path, process_name, self.phase)
+    # if py_config.DEBUG:
+    logging.info("> c_api_util.dump_trace_data_async: dump_path={path}, process={proc}, phase={phase}, machine_name={machine_name}".format(
+      path=dump_path,
+      proc=process_name,
+      phase=self.phase,
+      machine_name=self.machine_name,
+    ))
+    c_api_util.dump_trace_data_async(sess, dump_path, process_name, self.phase, self.machine_name)
 
   def old_dump(self, dump_path, process_name):
     assert self.phase is not None

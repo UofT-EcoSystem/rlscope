@@ -4,7 +4,7 @@ from os.path import join as _j, dirname as _d
 
 from iml_profiler.parser.common import *
 from tensorflow.core.profiler.tfprof_log_pb2 import ProfileProto
-from iml_profiler.protobuf.pyprof_pb2 import Pyprof
+from iml_profiler.protobuf.pyprof_pb2 import Pyprof, ProcessMetadata
 
 from iml_profiler.profiler import proto_util
 
@@ -831,7 +831,7 @@ class TraceEventsParser:
             ignore_cats.remove(CATEGORY_DUMMY_EVENT)
 
         logging.info("op_names = {op_names}".format(op_names=self.op_names))
-        logging.info("process_names = {procs}".format(procs=self.sql_reader.process_names))
+        logging.info("process_names = {procs}".format(procs=self.sql_reader.process_names()))
         for op_name in self.op_names:
             logging.info("op_name = {op_name}".format(op_name=op_name))
             for process_name, step, category_times in itertools.islice(
@@ -943,7 +943,7 @@ class TraceEventsParser:
         if self.overlaps_event_id is not None:
             trace_func = self._trace_event_overlap
         elif self.start_usec is not None:
-            process_names = self.sql_reader.process_names
+            process_names = self.sql_reader.process_names()
             if self.end_usec is None or self.process_name is None:
                 raise RuntimeError("Need --start-usec, --end-usec, and --process-name for TraceEventsParser time-range;\n  process_names = {procs}".format(
                     procs=process_names))
@@ -1697,19 +1697,27 @@ class OverlapTypeInterface:
             operation_overlap[new_key] = value
         return operation_overlap
 
-    def dump_json_files(self, new_overlap, new_overlap_metadata, directory, process_name, phase_name):
+    def dump_json_files(self, new_overlap, new_overlap_metadata, directory, process_metadata, process_name, phase_name):
+        assert type(process_metadata) == ProcessMetadata
         operation_overlap = self.as_js_dict(new_overlap)
         overlap_metadata_dict = self.as_js_dict(new_overlap_metadata.regions)
-        self.dump_overlap(operation_overlap, overlap_metadata_dict,
+        self.dump_overlap(operation_overlap, overlap_metadata_dict, process_metadata,
                           directory=directory, process_name=process_name, phase_name=phase_name,
                           path=self._overlap_json(directory, process_name, phase_name),
                           venn_js_path=self._overlap_venn_js_json(directory, process_name, phase_name))
 
-    def _add_overlap_region_metadata(self, overlap_metadata_dict, md):
+    def _add_overlap_region_metadata(self, overlap_metadata_dict, process_metadata, md):
+        assert type(process_metadata) == ProcessMetadata
         overlap_region = OverlapMetadata.merge_regions(overlap_metadata_dict.values())
         md['start_time_usec'] = overlap_region.start_time_usec
         md['end_time_usec'] = overlap_region.end_time_usec
         md['num_events'] = overlap_region.num_events
+        # TODO: add md[percent_complete, num_timesteps, total_timesteps]
+        md['percent_complete'] = process_metadata.training_progress.percent_complete
+        if process_metadata.training_progress.HasField("num_timesteps"):
+            md['num_timesteps'] = process_metadata.training_progress.num_timesteps
+        if process_metadata.training_progress.HasField("total_timesteps"):
+            md['total_timesteps'] = process_metadata.training_progress.total_timesteps
 
     def _overlap_json(self, directory, process_name, phase_name):
         return _j(directory, "{OverlapType}{proc}{phase}.overlap_js.json".format(
@@ -1725,7 +1733,7 @@ class OverlapTypeInterface:
             phase=phase_suffix(phase_name),
         ))
 
-    def dump_overlap(self, operation_overlap, overlap_metadata_dict,
+    def dump_overlap(self, operation_overlap, overlap_metadata_dict, process_metadata,
                      directory=None, process_name=None, phase_name=None,
                      path=None, venn_js_path=None):
         md = dict()
@@ -1734,7 +1742,7 @@ class OverlapTypeInterface:
             md['process'] = process_name
         if phase_name is not None:
             md['phase'] = phase_name
-        self._add_overlap_region_metadata(overlap_metadata_dict, md)
+        self._add_overlap_region_metadata(overlap_metadata_dict, process_metadata, md)
         if self.should_dump_as_is:
             return self.dump_overlap_as_is(operation_overlap, md,
                      directory=directory, process_name=process_name, phase_name=phase_name,
@@ -2186,7 +2194,8 @@ class OperationOverlapType(OverlapTypeInterface):
             resources=resources_suffix(resources),
         ))
 
-    def dump_json_files(self, new_overlap, new_overlap_metadata, directory, process_name, phase_name):
+    def dump_json_files(self, new_overlap, new_overlap_metadata, directory, process_metadata, process_name, phase_name):
+        assert type(process_metadata) == ProcessMetadata
         # Q: Why don't we need to call as_js_dict here?
         # JAMES LEFT OFF
         overlap = self.as_js_dict(new_overlap)
@@ -2206,7 +2215,7 @@ class OperationOverlapType(OverlapTypeInterface):
                 'phase': phase_name,
                 'resource_overlap': sorted(resources),
             })
-            self._add_overlap_region_metadata(overlap_metadata_dict[resources], md)
+            self._add_overlap_region_metadata(overlap_metadata_dict[resources], process_metadata, md)
             self._dump_overlap(
                 op_overlap, md,
                 path=self._operation_overlap_json(directory, process_name, phase_name, resources),
@@ -2352,7 +2361,7 @@ class CategoryOverlapType(OverlapTypeInterface):
             resources=resources_suffix(resources),
         ))
 
-    def dump_json_files(self, new_overlap, new_overlap_metadata, directory, process_name, phase_name):
+    def dump_json_files(self, new_overlap, new_overlap_metadata, directory, process_metadata, process_name, phase_name):
         """
         For op in ops(process, phases):
           key = CategoryKey[ops=[op]]
@@ -2367,6 +2376,7 @@ class CategoryOverlapType(OverlapTypeInterface):
         :param phase_name:
         :return:
         """
+        assert type(process_metadata) == ProcessMetadata
         overlap = self.as_js_dict(new_overlap)
         overlap_metadata_dict = self.as_js_dict(new_overlap_metadata.regions)
         if self.debug:
@@ -2379,7 +2389,7 @@ class CategoryOverlapType(OverlapTypeInterface):
             op = next(iter(ops))
             for resources, category_overlap in resource_to_category_overlap.items():
                 md = dict()
-                self._add_overlap_region_metadata(overlap_metadata_dict[ops][resources], md)
+                self._add_overlap_region_metadata(overlap_metadata_dict[ops][resources], process_metadata, md)
                 md.update({
                     'overlap_type': self.overlap_type,
                     'process': process_name,

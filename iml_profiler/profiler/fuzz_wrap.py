@@ -18,13 +18,10 @@ class FuzzFuncWrapper:
         super().__setattr__('func', func)
 
     def __call__(self, *args, **kwargs):
-        stacktrace = get_stacktrace()
         logging.info(textwrap.dedent("""
         > IML: Call to session.run(...):
         {stack}
-        """.format(stack=textwrap.indent(
-            '\n'.join(stacktrace),
-            prefix="  "))))
+        """.format(stack=get_stacktrace())))
         ret = self.func(*args, **kwargs)
         return ret
 

@@ -310,7 +310,7 @@ class CFuncWrapper:
         #     ))
         #     # logging.info("_TRACING_ON = {val}\n{stack}".format(
         #     #     val=_TRACING_ON,
-        #     #     stack="\n".join(get_stacktrace()),
+        #     #     stack=get_stacktrace(),
         #     # ))
         ret = self.call(*args, **kwargs)
         end_us = now_us()
@@ -420,7 +420,7 @@ def enable_tracing():
     if py_config.DEBUG:
         logging.info("Enable pyprof tracing: _TRACING_ON={val}\n{stack}".format(
             val=_TRACING_ON,
-            stack="\n".join(get_stacktrace())))
+            stack=get_stacktrace()))
 
 def disable_tracing():
     global _TRACING_ON
@@ -428,7 +428,7 @@ def disable_tracing():
     if py_config.DEBUG:
         logging.info("Disable pyprof tracing: _TRACING_ON={val}\n{stack}".format(
             val=_TRACING_ON,
-            stack="\n".join(get_stacktrace())))
+            stack=get_stacktrace()))
 
 #
 # Some pre-written C++ library wrappers.
@@ -499,7 +499,10 @@ def wrap_tensorflow(category=CATEGORY_TF_API, debug=False):
     assert success
 def unwrap_tensorflow():
     logging.info("> IML: Unwrapping module=tensorflow")
-    wrap_util.unwrap_lib(CFuncWrapper, 'tensorflow.pywrap_tensorflow')
+    wrap_util.unwrap_lib(
+        CFuncWrapper,
+        import_libname='tensorflow',
+        wrap_libname='tensorflow.pywrap_tensorflow')
 
 def wrap_atari(category=CATEGORY_ATARI):
     try:

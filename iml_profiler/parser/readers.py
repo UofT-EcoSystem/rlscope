@@ -45,6 +45,10 @@ class TFProfCategoryTimesReader:
         return self.proto.process_name
 
     @property
+    def machine_name(self):
+        return self.proto.machine_name
+
+    @property
     def phase(self):
         return self.proto.phase
     @property

@@ -1,3 +1,4 @@
+import platform
 import codecs
 import csv
 import decimal
@@ -17,7 +18,7 @@ import numpy as np
 import pandas as pd
 import psutil
 import pwd
-from iml_profiler.protobuf.pyprof_pb2 import Pyprof, MachineUtilization
+from iml_profiler.protobuf.pyprof_pb2 import Pyprof, MachineUtilization, ProcessMetadata
 from iml_profiler.protobuf.unit_test_pb2 import IMLUnitTestOnce, IMLUnitTestMultiple
 from tqdm import tqdm as tqdm_progress
 
@@ -1037,6 +1038,11 @@ def process_suffix(process_name):
         return ".process_{proc}".format(proc=process_name)
     return ""
 
+def machine_suffix(machine_name):
+    if machine_name is not None:
+        return ".machine_{mach}".format(mach=machine_name)
+    return ""
+
 def phase_suffix(phase_name):
     # assert phase_name is not None
     if phase_name is not None:
@@ -1369,36 +1375,30 @@ def IsCPUTime(device):
     # We must match the whole device string to match tfprof behaviour.
     return re.fullmatch(".*/(device:gpu|gpu|device:cpu|cpu|device:sycl):\\d+", device)
 
+def read_proto(ProtoKlass, path):
+    with open(path, 'rb') as f:
+        proto = ProtoKlass()
+        proto.ParseFromString(f.read())
+    return proto
+
 def read_tfprof_file(path):
     from tensorflow.core.profiler.tfprof_log_pb2 import ProfileProto
-    with open(path, 'rb') as f:
-        proto = ProfileProto()
-        proto.ParseFromString(f.read())
-    return proto
+    return read_proto(ProfileProto, path)
 
 def read_machine_util_file(path):
-    with open(path, 'rb') as f:
-        proto = MachineUtilization()
-        proto.ParseFromString(f.read())
-    return proto
+    return read_proto(MachineUtilization, path)
 
 def read_pyprof_file(path):
-    with open(path, 'rb') as f:
-        proto = Pyprof()
-        proto.ParseFromString(f.read())
-    return proto
+    return read_proto(Pyprof, path)
+
+def read_process_metadata_file(path):
+    return read_proto(ProcessMetadata, path)
 
 def read_unit_test_once_file(path):
-    with open(path, 'rb') as f:
-        proto = IMLUnitTestOnce()
-        proto.ParseFromString(f.read())
-    return proto
+    return read_proto(IMLUnitTestOnce, path)
 
 def read_unit_test_multiple_file(path):
-    with open(path, 'rb') as f:
-        proto = IMLUnitTestMultiple()
-        proto.ParseFromString(f.read())
-    return proto
+    return read_proto(IMLUnitTestMultiple, path)
 
 def read_pyprof_call_times_file(path):
     with open(path, 'rb') as f:
@@ -1407,7 +1407,7 @@ def read_pyprof_call_times_file(path):
 
 def is_tfprof_file(path):
     base = _b(path)
-    m = re.search(r'profile{bench}{trace}{sess}.proto'.format(
+    m = re.search(r'profile{bench}{trace}{sess}\.proto'.format(
         bench=BENCH_SUFFIX_RE,
         trace=TRACE_SUFFIX_RE,
         sess=SESSION_SUFFIX_RE,
@@ -1424,7 +1424,7 @@ def is_unit_test_once_file(path):
 
 def is_unit_test_multiple_file(path):
     base = _b(path)
-    m = re.search(r'unit_test_multiple{bench}{trace}.proto'.format(
+    m = re.search(r'unit_test_multiple{bench}{trace}\.proto'.format(
         bench=BENCH_SUFFIX_RE,
         trace=TRACE_SUFFIX_RE,
     ), base)
@@ -1432,14 +1432,14 @@ def is_unit_test_multiple_file(path):
 
 def is_machine_util_file(path):
     base = _b(path)
-    m = re.search(r'machine_util{trace}.proto'.format(
+    m = re.search(r'machine_util{trace}\.proto'.format(
         trace=TRACE_SUFFIX_RE,
     ), base)
     return m
 
 def is_pyprof_call_times_file(path):
     base = _b(path)
-    m = re.search(r'pyprof_call_times{bench}{trace}.pickle'.format(
+    m = re.search(r'pyprof_call_times{bench}{trace}\.pickle'.format(
         bench=BENCH_SUFFIX_RE,
         trace=TRACE_SUFFIX_RE,
     ), base)
@@ -1447,7 +1447,15 @@ def is_pyprof_call_times_file(path):
 
 def is_pyprof_file(path):
     base = _b(path)
-    m = re.search(r'pyprof{bench}{trace}.proto'.format(
+    m = re.search(r'pyprof{bench}{trace}\.proto'.format(
+        bench=BENCH_SUFFIX_RE,
+        trace=TRACE_SUFFIX_RE,
+    ), base)
+    return m
+
+def is_process_metadata_file(path):
+    base = _b(path)
+    m = re.search(r'process_metadata{bench}{trace}\.proto'.format(
         bench=BENCH_SUFFIX_RE,
         trace=TRACE_SUFFIX_RE,
     ), base)
@@ -1455,7 +1463,7 @@ def is_pyprof_file(path):
 
 def is_dump_event_file(path):
     base = _b(path)
-    m = re.search(r'dump_event{bench}{trace}.proto'.format(
+    m = re.search(r'dump_event{bench}{trace}\.proto'.format(
         bench=BENCH_SUFFIX_RE,
         trace=TRACE_SUFFIX_RE,
     ), base)
@@ -1483,7 +1491,8 @@ def is_trace_file(path):
            is_machine_util_file(path) or \
            is_unit_test_once_file(path) or \
            is_unit_test_multiple_file(path) or \
-           is_config_file(path)
+           is_config_file(path) or \
+           is_process_metadata_file(path)
 
 def is_process_trace_file(path):
     """
@@ -1504,34 +1513,39 @@ def is_config_file(path):
 def now_us():
     return time.time()*MICROSECONDS_IN_SECOND
 
-def get_stacktrace(n_skip=0):
+def get_stacktrace(n_skip=1, indent=None):
     """
     Return a stacktrace ready for printing; usage:
 
     # Dump the stack of the current location of this line.
     '\n'.join(get_stacktrace(0))
+    logging.info("First line before stacktrace\n{stack}".format(
+        stack=get_stacktrace())
+
+    # Outputs to stdout:
+    ID=14751/MainProcess @ finish, profilers.py:1658 :: 2019-07-09 15:52:26,015 INFO: First line before stacktrace
+      File "*.py", line 375, in <module>
+          ...
+      ...
+      File "*.py", line 1658, in finish
+        logging.info("First line before stacktrace\n{stack}".format(
 
     :param n_skip:
         Number of stack-levels to skip in the caller.
+        By default we skip the first one, since it's the call to traceback.extrace_stack()
+        inside the get_stacktrace() function.
+
+        If you make n_skip=2, then it will skip you function-call to get_stacktrace() as well.
 
     :return:
     """
-    # We want to skip "get_stacktrace", plus whatever the caller wishes to skip.
-    n_skip_total = n_skip + 2
     stack = traceback.extract_stack()
-    keep_stack = stack[:-n_skip_total]
-    return traceback.format_list(keep_stack)
-
-def print_stacktrace(msg, n_skip=0):
-    # Doesn't include "print_stacktrace"
-    # stacktrace = get_stacktrace(n_skip + 1)
-    stacktrace = get_stacktrace(n_skip)
-    print(textwrap.dedent("""
-    {msg}
-    {stack}
-    """.format(
-        msg=msg,
-        stack=''.join(stacktrace))))
+    stack_list = traceback.format_list(stack)
+    stack_list_keep = stack_list[0:len(stack_list)-n_skip]
+    stack_str = ''.join(stack_list_keep)
+    if indent is not None:
+        stack_str = textwrap.indent(stack_str, prefix="  "*indent)
+    return stack_str
 
 def get_category_from_device(device):
     if IsGPUTime(device):
@@ -1764,3 +1778,24 @@ class pythunk:
         self.kwargs = kwargs
         return self
 
+
+def get_machine_name():
+    """
+    Portable way of calling hostname shell-command.
+
+    Regarding docker containers:
+
+      NOTE: If we are running from inside the docker-dev environment, then $(hostname) will return
+      the container-id by default.
+
+      For now we leave that behaviour.
+      We can override it in the future by passing --hostname to the container.
+
+      Documentation:
+      https://docs.docker.com/config/containers/container-networking/#ip-address-and-hostname
+
+    :return:
+        Unique name for a node in the cluster
+    """
+    machine_name = platform.node()
+    return machine_name

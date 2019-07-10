@@ -244,16 +244,6 @@ class _SigTermWatcher:
 
 SigTermWatcher = _SigTermWatcher()
 
-def get_machine_name():
-    """
-    Portable way of calling hostname shell-command.
-
-    :return:
-        Unique name for a node in the cluster
-    """
-    machine_name = platform.node()
-    return machine_name
-
 # Cache cpuinfo, since this call takes 1 second to run, and we need to sample at millisecond frequency.
 # NOTE: This has all sorts of CPU architecture information (e.g. l2 cache size)
 CPU_INFO = cpuinfo.get_cpu_info()

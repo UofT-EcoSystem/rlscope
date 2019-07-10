@@ -1,3 +1,5 @@
+-- noinspection SqlNoDataSourceInspectionForFile
+
 -- These tables map directly to the protobuf data format we use for data collection.
 --
 -- see: protobuf/pyprof.proto
@@ -100,18 +102,28 @@ CREATE TABLE Category (
 
 CREATE TABLE Process (
   process_id SERIAL NOT NULL PRIMARY KEY,
-  process_name TEXT
+  process_name TEXT,
+  parent_process_id INTEGER,
+  machine_id INTEGER NOT NULL,
+  -- ProcessMetadata.TrainingProgress
+  percent_complete FLOAT,
+  num_timesteps INTEGER,
+  total_timesteps INTEGER
 --   UNIQUE (process_name)
+--   FOREIGN KEY(parent_process_id) REFERENCES Process(process_id),
 );
 
-CREATE TABLE ProcessDependency (
-  process_id_parent SERIAL NOT NULL PRIMARY KEY,
-  process_name_parent TEXT,
-  process_id_child SERIAL NOT NULL PRIMARY KEY,
-  process_name_child TEXT,
-  PRIMARY KEY(process_id_parent, process_id_child)
---   UNIQUE (process_name_parent, process_name_child)
-);
+-- NOTE: this allows many-to-many relationships between processes.
+-- I might have done this with arbitrary RPC's in mind.
+-- However, those won't be supported, so screw it.
+-- CREATE TABLE ProcessDependency (
+--   process_id_parent SERIAL NOT NULL PRIMARY KEY,
+--   process_name_parent TEXT,
+--   process_id_child SERIAL NOT NULL PRIMARY KEY,
+--   process_name_child TEXT,
+--   PRIMARY KEY(process_id_parent, process_id_child)
+-- --   UNIQUE (process_name_parent, process_name_child)
+-- );
 
 CREATE TABLE Phase (
   phase_id SERIAL NOT NULL PRIMARY KEY,
@@ -121,7 +133,8 @@ CREATE TABLE Phase (
 
 CREATE TABLE Device (
   device_id SERIAL NOT NULL PRIMARY KEY,
-  device_name TEXT
+  device_name TEXT,
+  machine_id INTEGER NOT NULL
 --   UNIQUE (device_name)
 );
 

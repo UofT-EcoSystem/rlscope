@@ -1911,7 +1911,7 @@ class ResourceOverlapPlotData:
             self.plot_process_phase()
             return
 
-        process_names = self.sql_reader.process_names
+        process_names = self.sql_reader.process_names()
 
         for process_name in process_names:
             # phases = self.sql_reader.process_phase_start_end_times(process_name, debug=self.debug)
@@ -2074,6 +2074,7 @@ class UtilizationPlot:
                  # If overlap_type = OperationOverlap, then dump this resource-type.
                  operation_overlap_resource=None,
                  # CategoryOverlap
+                 machine_name=None,
                  process_name=None,
                  phase_name=None,
                  resource_type=None,
@@ -2103,6 +2104,7 @@ class UtilizationPlot:
         if operation_overlap_resource is None:
             operation_overlap_resource = [CATEGORY_CPU]
         self.overlap_type = overlap_type
+        self.machine_name = machine_name
         self.process_name = process_name
         self.phase_name = phase_name
         self.resource_type = resource_type
@@ -2126,47 +2128,54 @@ class UtilizationPlot:
     def get_source_files(self):
         return sql_get_source_files(self.__class__, self.directory)
 
-    def get_process_timeline_png(self, process_name, phase_name, bench_name, debug_ops):
-        return _j(self.directory, "process_timeline{proc}{phase}{bench}{debug}.png".format(
+    def get_process_timeline_png(self, machine_name, process_name, phase_name, bench_name, debug_ops):
+        return _j(self.directory, "process_timeline{mach}{proc}{phase}{bench}{debug}.png".format(
+            mach=machine_suffix(machine_name),
             proc=process_suffix(process_name),
             phase=phase_suffix(phase_name),
             bench=bench_suffix(bench_name),
             debug=debug_suffix(debug_ops),
         ))
 
-    def _resource_overlap_json(self, process_name, phase_name):
-        return _j(self.directory, "ResourceOverlap{proc}{phase}.json".format(
+    def _resource_overlap_json(self, machine_name, process_name, phase_name):
+        return _j(self.directory, "ResourceOverlap{mach}{proc}{phase}.json".format(
+            mach=machine_suffix(machine_name),
             proc=process_suffix(process_name),
             phase=phase_suffix(phase_name),
         ))
 
-    def _resource_overlap_venn_js_json(self, process_name, phase_name):
-        return _j(self.directory, "ResourceOverlap{proc}{phase}.venn_js.json".format(
+    def _resource_overlap_venn_js_json(self, machine_name, process_name, phase_name):
+        return _j(self.directory, "ResourceOverlap{mach}{proc}{phase}.venn_js.json".format(
+            mach=machine_suffix(machine_name),
             proc=process_suffix(process_name),
             phase=phase_suffix(phase_name),
         ))
 
-    def _resource_overlap_subplot_json(self, process_name, phase_name):
-        return _j(self.directory, "ResourceOverlapSubplot{proc}{phase}.json".format(
+    def _resource_overlap_subplot_json(self, machine_name, process_name, phase_name):
+        return _j(self.directory, "ResourceOverlapSubplot{mach}{proc}{phase}.json".format(
+            mach=machine_suffix(machine_name),
             proc=process_suffix(process_name),
             phase=phase_suffix(phase_name),
         ))
 
-    def _resource_overlap_subplot_venn_js_json(self, process_name, phase_name):
-        return _j(self.directory, "ResourceOverlapSubplot{proc}{phase}.venn_js.json".format(
+    def _resource_overlap_subplot_venn_js_json(self, machine_name, process_name, phase_name):
+        return _j(self.directory, "ResourceOverlapSubplot{mach}{proc}{phase}.venn_js.json".format(
+            mach=machine_suffix(machine_name),
             proc=process_suffix(process_name),
             phase=phase_suffix(phase_name),
         ))
 
-    def _operation_overlap_json(self, process_name, phase_name, resources):
-        return _j(self.directory, "OperationOverlap{proc}{phase}{resources}.json".format(
+    def _operation_overlap_json(self, machine_name, process_name, phase_name, resources):
+        return _j(self.directory, "OperationOverlap{mach}{proc}{phase}{resources}.json".format(
+            mach=machine_suffix(machine_name),
             proc=process_suffix(process_name),
             phase=phase_suffix(phase_name),
             resources=resources_suffix(resources),
         ))
 
-    def _operation_overlap_venn_js_json(self, process_name, phase_name, resources):
-        return _j(self.directory, "OperationOverlap{proc}{phase}.venn_js.json".format(
+    def _operation_overlap_venn_js_json(self, machine_name, process_name, phase_name, resources):
+        return _j(self.directory, "OperationOverlap{mach}{proc}{phase}.venn_js.json".format(
+            mach=machine_suffix(machine_name),
             proc=process_suffix(process_name),
             phase=phase_suffix(phase_name),
             resources=resources_suffix(resources),
@@ -2206,27 +2215,32 @@ class UtilizationPlot:
         # debug_process_names = ['selfplay_worker_1']
         # debug_phases = ['selfplay_worker_1']
 
-        if not UtilizationPlot.DEBUG_MINIGO:
-            process_names = self.sql_reader.process_names
-        else:
-            process_names = debug_process_names
+        # if not UtilizationPlot.DEBUG_MINIGO:
+        #     process_names = self.sql_reader.process_names()
+        # else:
+        #     process_names = debug_process_names
 
-        # for process_name in debug_process_names:
-        for process_name in process_names:
+        machine_names = self.sql_reader.machine_names
 
-            # phase_names = self.sql_reader.process_phases(process_name, debug=self.debug)
-            # phases = [self.sql_reader.process_phase(process_name, phase_name, debug=self.debug)
-            #           for phase_name in phase_names]
-            phases = self.sql_reader.process_phases(process_name, debug=self.debug)
-            if UtilizationPlot.DEBUG_MINIGO:
-                phases = [phase for phase in phases if phase.phase_name in debug_phases]
+        for machine_name in machine_names:
+            process_names = self.sql_reader.process_names(machine_name)
 
-            for phase in phases:
-                pprint.pprint({'process_name':process_name, 'phase': phase})
-                # self.plot_process_phase(process_name, phase['phase_name'])
-                self.plot_process_phase(process_name, phase=phase)
+            # for process_name in debug_process_names:
+            for process_name in process_names:
 
-    def plot_process_phase(self, process_name=None, phase_name=None, phase=None):
+                # phase_names = self.sql_reader.process_phases(machine_name, process_name, debug=self.debug)
+                # phases = [self.sql_reader.process_phase(process_name, phase_name, debug=self.debug)
+                #           for phase_name in phase_names]
+                phases = self.sql_reader.process_phases(machine_name, process_name, debug=self.debug)
+                # if UtilizationPlot.DEBUG_MINIGO:
+                #     phases = [phase for phase in phases if phase.phase_name in debug_phases]
+
+                for phase in phases:
+                    pprint.pprint({'process_name':process_name, 'phase': phase})
+                    # self.plot_process_phase(process_name, phase['phase_name'])
+                    self.plot_process_phase(machine_name, process_name, phase)
+
+    def plot_process_phase(self, machine_name=None, process_name=None, phase_name=None, phase=None):
         if phase is not None and phase_name is None:
             phase_name = phase.phase_name
 
@@ -2273,14 +2287,14 @@ class UtilizationPlot:
         new_overlap, new_overlap_metadata = overlap_obj.post_reduce(new_overlap, overlap_metadata)
         # assert len(new_overlap) > 0
 
-        overlap_obj.dump_json_files(new_overlap, new_overlap_metadata, self.directory, process_name, phase_name)
+        overlap_obj.dump_json_files(new_overlap, new_overlap_metadata, self.directory, process_metadata, process_name, phase_name)
 
         if self.overlap_type == 'default':
             operation_overlap = overlap_obj.as_js_dict(new_overlap)
             # assert len(operation_overlap) > 0
-            self._do_plot_process_phase(operation_overlap, proc_stats, process_name, phase_name)
+            self._do_plot_process_phase(operation_overlap, proc_stats, machine_name, process_name, phase_name)
 
-    def _do_plot_process_phase(self, operation_overlap, proc_stats, process_name=None, phase_name=None):
+    def _do_plot_process_phase(self, operation_overlap, proc_stats, machine_name=None, process_name=None, phase_name=None):
         assert ( process_name is None and phase_name is None ) or \
                ( process_name is not None and phase_name is not None )
 
@@ -2295,7 +2309,7 @@ class UtilizationPlot:
         pprint.pprint({'all_categories': all_categories})
 
         def get_png(bench_name):
-            return self.get_process_timeline_png(process_name, phase_name, bench_name, self.debug_ops)
+            return self.get_process_timeline_png(machine_name, process_name, phase_name, bench_name, self.debug_ops)
 
         self.category_order = sorted(all_categories)
         # self.bench_name_labels = DQN_BENCH_NAME_LABELS
@@ -2592,15 +2606,26 @@ class HeatScalePlot:
             # plotter.plot()
 
     def dump_js_data(self, norm_samples, device, start_time_sec):
+
+        def add_device_metadata(md, device):
+            md['device_name'] = device.device_name
+            md['device_id'] = device.device_id
+            md['machine_id'] = device.machine_id
+            md['machine_name'] = device.machine_name
+
+        def add_HeatScale_metadata(md):
+            md['plot_type'] = 'HeatScale'
+            md['start_time_usec'] = float(start_time_sec)*MICROSECONDS_IN_SECOND
+            md['step_usec'] = self.step_sec*MICROSECONDS_IN_SECOND
+            md['decay'] = self.decay
+
+        md = dict()
+
+        add_device_metadata(md, device)
+        add_HeatScale_metadata(md)
+
         js = {
-            'metadata': {
-                'plot_type': 'HeatScale',
-                'device_id': device.device_id,
-                'device_name': device.device_name,
-                'start_time_usec': float(start_time_sec)*MICROSECONDS_IN_SECOND,
-                'step_usec': self.step_sec*MICROSECONDS_IN_SECOND,
-                'decay': self.decay,
-            },
+            'metadata': md,
             'data': {
                 'util': norm_samples['util'],
                 'start_time_sec': norm_samples['start_time_sec'],

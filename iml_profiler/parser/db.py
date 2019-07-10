@@ -55,7 +55,7 @@ def Worker_get_device_names(kwargs):
             'tfprof_file':kwargs['tfprof_file']})
         logging.info("> Stop: Worker_get_device_names tfprof_file={path}".format(path=kwargs['tfprof_file']))
 
-    return device_names
+    return reader.machine_name, device_names
 
 class SQLParser:
     """
@@ -93,18 +93,29 @@ class SQLParser:
         self.debug_single_thread = debug_single_thread
         self.block_size = 50000
 
-    def get_source_files(self):
+    def get_source_files(self, should_keep, allow_empty=False, description='tfprof/pyprof'):
+        """
+        Visit every file in iml trace directory, and see whether we
+        should insert in to the SQL database.
+
+        :param allow_empty:
+        :param should_keep:
+            func: path -> bool
+
+            Return true if we should keep/return this file.
+        """
         src_files = []
         for dirpath, dirnames, filenames in os.walk(self.directory):
             for base in filenames:
                 path = _j(dirpath, base)
-                if is_insertable_file(path):
+                if should_keep(path):
                     src_files.append(path)
-        if len(src_files) == 0:
+        if not allow_empty and len(src_files) == 0:
             raise MissingInputFiles(textwrap.dedent("""
-            {klass}: Couldn't find any tfprof/pyprof files root at {dir}.
+            {klass}: Couldn't find any {desc} files root at {dir}.
             """.format(
                 klass=self.__class__.__name__,
+                desc=description,
                 dir=self.directory,
             )))
         return src_files
@@ -286,7 +297,7 @@ class SQLParser:
         self.device_to_id = dict()
         self.machine_to_id = dict()
 
-        src_files = self.get_source_files()
+        src_files = self.get_source_files(should_keep=is_insertable_file)
         pprint.pprint({
             'rule':self.__class__.__name__,
             'src_files':src_files,
@@ -294,32 +305,6 @@ class SQLParser:
 
         if self.debug:
             logging.info("> Read metadata.")
-
-        process_trace_metas = []
-        for path in src_files:
-            if not is_process_trace_file(path):
-                continue
-            if self.debug:
-                logging.info("> get_process_trace_metadata path={path}".format(path=path))
-            md = get_process_trace_metadata(path)
-            process_trace_metas.append(md)
-
-        if self.debug:
-            logging.info("> Insert processes.")
-
-        process_names = sorted(meta['process_name'] for meta in process_trace_metas)
-        for process_name in process_names:
-            self.insert_process_name(process_name)
-
-        if self.debug:
-            logging.info("> Insert phases.")
-
-        phase_names = sorted(meta['phase_name'] for meta in process_trace_metas)
-        for phase_name in phase_names:
-            self.insert_phase_name(phase_name)
-
-        if self.debug:
-            logging.info("> Read util metadata.")
 
         # Read metadata from CPU/GPU utilization files
         # e.g. machine_util.trace_0.proto
@@ -332,11 +317,16 @@ class SQLParser:
             md = get_util_metadata(path)
             util_metas.append(md)
         util_machine_names = set()
-        util_device_names = set()
+        # util_device_names = set()
+        machine_name_to_device_names = dict()
+        for util_meta in util_metas:
+            if util_meta['machine_name'] not in machine_name_to_device_names:
+                machine_name_to_device_names[util_meta['machine_name']] = set()
+            machine_name_to_device_names[util_meta['machine_name']].update(util_meta['device_names'])
         for util_meta in util_metas:
             util_machine_names.add(util_meta['machine_name'])
-        for util_meta in util_metas:
-            util_device_names.update(util_meta['device_names'])
+        # for util_meta in util_metas:
+        #     util_device_names.update(util_meta['device_names'])
 
         if self.debug:
             logging.info("> Insert util machine names.")
@@ -344,9 +334,72 @@ class SQLParser:
             self.insert_machine_name(machine_name)
 
         if self.debug:
-            logging.info("> Insert util devices.")
-        for device_name in util_device_names:
-            self.insert_device_name(device_name)
+            logging.info("> Insert devices.")
+        for machine_name, device_names in machine_name_to_device_names.items():
+            machine_id = self.machine_to_id[machine_name]
+            for device_name in device_names:
+                self.insert_device_name(device_name, fields={
+                    'machine_id': machine_id,
+                })
+
+        process_trace_metas = []
+        for path in src_files:
+            if not is_process_trace_file(path):
+                continue
+            if self.debug:
+                logging.info("> get_process_trace_metadata path={path}".format(path=path))
+            md = get_process_trace_metadata(path)
+            process_trace_metas.append(md)
+
+        # ProcessMetadata
+        process_metadata_paths = self.get_source_files(
+            should_keep=is_process_metadata_file,
+            allow_empty=False,
+            description='ProcessMetadata protobuf')
+        process_metadatas = [read_process_metadata_file(path) for path in process_metadata_paths
+                             if is_process_metadata_file(path)]
+
+        if self.debug:
+            logging.info("> Insert processes.")
+
+        # Options
+        # 1. Insert each process in reference order
+        # 2. Sort process_name's, assign process_id's in name-order, then bulk-insert processes using back-reference to assign parent_id's
+        #    PRO: bulk-insert friendly
+
+        # process_names = sorted(meta['process_name'] for meta in process_trace_metas)
+        process_names = set([md.process_name for md in process_metadatas])
+        process_to_assigned_id = dict((process_name, ident) for ident, process_name in enumerate(process_names, start=1))
+
+        if self.debug:
+            logging.info(pprint_msg({'process_to_assigned_id': process_to_assigned_id}))
+
+        for md in process_metadatas:
+            fields = {
+                'process_id': process_to_assigned_id[md.process_name],
+                'machine_id': self.machine_to_id[md.machine_name],
+            }
+            if md.parent_process_name:
+                fields['parent_process_id'] = process_to_assigned_id[md.parent_process_name]
+            # TODO: We should use better defaults for unset values in protobuf (e.g. -1)
+            if md.percent_complete != 0.:
+                fields['percent_complete'] = md.percent_complete
+            if md.num_timesteps != 0:
+                fields['num_timesteps'] = md.num_timesteps
+            if md.total_timesteps != 0:
+                fields['total_timesteps'] = md.total_timesteps
+            self.insert_process_name(md.process_name, fields=fields, debug=True)
+
+        if self.debug:
+            logging.info("> Insert phases.")
+
+        phase_names = sorted(meta['phase_name'] for meta in process_trace_metas)
+        for phase_name in phase_names:
+            self.insert_phase_name(phase_name)
+
+        if self.debug:
+            logging.info("> Read util metadata.")
+
 
         if self.debug:
             logging.info("> Insert categories.")
@@ -356,8 +409,6 @@ class SQLParser:
 
         if self.debug:
             logging.info("> Insert tfprof device names.")
-
-        device_names = set()
 
         def get_Worker_get_device_names_kwargs(tfprof_file):
             return {'tfprof_file':tfprof_file, 'debug':self.debug}
@@ -371,40 +422,39 @@ class SQLParser:
         else:
             imap_iter = self.single_thread_iter(Worker_get_device_names, device_names_kwargs)
 
-        for names in tqdm_progress(imap_iter, desc='Device names', total=len(device_names_kwargs)):
-            device_names.update(names)
+        machine_to_device_names = dict()
+        for machine_name, dev_names in tqdm_progress(imap_iter, desc='Device names', total=len(device_names_kwargs)):
+            if machine_name not in machine_to_device_names:
+                machine_to_device_names[machine_name] = set()
+            machine_to_device_names[machine_name].update(dev_names)
             # if is_tfprof_file(path):
             #     reader = TFProfCategoryTimesReader(path)
             #     device_names.update(reader.get_device_names())
-        pprint.pprint({'tfprof.device_names':device_names})
+        if self.debug:
+            logging.info(pprint_msg({'machine_to_device_names':machine_to_device_names}))
 
         if not self.debug_single_thread:
             device_name_pool.close()
             device_name_pool.join()
 
-        for device_name in device_names:
-            self.insert_device_name(device_name)
+        for machine_name, device_names in machine_to_device_names.items():
+            machine_id = self.machine_to_id[machine_name]
+            for device_name in device_names:
+                self.insert_device_name(device_name, fields={
+                    'machine_id': machine_id,
+                })
 
         if self.debug:
             logging.info("> Commit.")
         self.conn.commit()
 
-
-        # name_to_id_obj = NameToID(self.db_path, host=self.host, user=self.user, password=self.password, debug=self.debug)
-        # name_to_id_obj.run()
-        #
-        # self.process_to_id = name_to_id_obj.process_to_id
-        # self.category_to_id = name_to_id_obj.category_to_id
-        # self.device_to_id = name_to_id_obj.device_to_id
-        # self.machine_to_id = name_to_id_obj.machine_to_id
-
-        pprint.pprint({
-            'process_to_id':self.process_to_id,
-            'category_to_id':self.category_to_id,
-            'device_to_id':self.device_to_id,
-            'machine_to_id':self.machine_to_id,
-        })
-        # sys.exit(0)
+        logging.info("Entity id maps:\n{maps}".format(
+            maps=textwrap.indent(pprint.pformat({
+                'process_to_id':self.process_to_id,
+                'category_to_id':self.category_to_id,
+                'device_to_id':self.device_to_id,
+                'machine_to_id':self.machine_to_id,
+            }), prefix='  ')))
 
         if not self.debug_single_thread:
             pool = multiprocessing.Pool()
@@ -572,66 +622,123 @@ class SQLParser:
     #             ]
     #             bulk.add_insert(insert)
 
-    def insert_process_name(self, process_name):
+    def insert_process_name(self, process_name, fields=None, debug=False):
         return self._insert_name(
             'Process',
             'process_id', 'process_name',
             self.process_to_id,
-            process_name)
+            process_name,
+            fields=fields,
+            debug=debug,
+            # TODO: add fields: parent_process_id, machine_id
+            # TODO: parent process must be inserted BEFORE child process; do we generate id's locally to avoid this?
+            # TODO: make sure machine_id is inserted before process that references it
+        )
 
-    def insert_phase_name(self, phase_name):
+    def insert_phase_name(self, phase_name, fields=None):
         return self._insert_name(
             'Phase',
             'phase_id', 'phase_name',
             self.phase_to_id,
-            phase_name)
+            phase_name,
+            fields=fields,
+        )
 
-    def insert_device_name(self, device_name):
+    def insert_device_name(self, device_name, fields=None):
         return self._insert_name(
             'Device',
             'device_id', 'device_name',
             self.device_to_id,
-            device_name)
+            device_name,
+            fields=fields,
+        )
 
-    def insert_machine_name(self, machine_name):
+    def insert_machine_name(self, machine_name, fields=None):
         return self._insert_name(
             'Machine',
             'machine_id', 'machine_name',
             self.machine_to_id,
-            machine_name)
+            machine_name,
+            fields=fields,
+        )
 
-    def insert_category_name(self, category_name):
+    def insert_category_name(self, category_name, fields=None):
         return self._insert_name(
             'Category',
             'category_id', 'category_name',
             self.category_to_id,
-            category_name)
+            category_name,
+            fields=fields,
+        )
 
     @property
     def cursor(self):
         return self.conn.cursor
 
-    def _insert_name(self, table, id_field, name_field, name_to_id, name):
+    def _insert_name(self, table, id_field, name_field, name_to_id, name, fields=None, debug=False):
+        """
+        Insert into a table like this, if a row does not exist already.
+
+        CREATE TABLE Table (
+          table_id SERIAL NOT NULL PRIMARY KEY,
+          table_name TEXT,
+          UNIQUE (table_name)
+        );
+
+        :param table:
+            e.g. 'Table' in the above schema.
+        :param id_field:
+            e.g. 'table_id' in the above schema.
+        :param name_field:
+            e.g. 'table_name' in the above schema.
+        :param name_to_id:
+            dict: primary-key -> string
+            A cached mapping primary-key to table_name from table-row.
+        :param name:
+            Name to store inside table_name row field.
+        :param fields:
+            A dict mapping from Table.attr to row-value.
+            Extra fields to insert for this row.
+        :return:
+        """
+
+        # See if the row is cached.
         if name in name_to_id:
             return name_to_id[name]
+
+        # See if the row already exists.
         c = self.cursor
-        c.execute("""
+        query = textwrap.dedent("""
         SELECT {id_field} from {table} WHERE {name_field} = {p}
         """.format(
             id_field=id_field,
             table=table,
             name_field=name_field,
             p=sql_placeholder(),
-        ), (name,))
+        ))
+        params = (name,)
+        sql_exec_query(c, query, params, debug=debug)
         rows = c.fetchall()
+
         if len(rows) == 0:
-            self.conn.insert_dict(table, {
+            # Row doesn't exist; insert it and obtain the insert id (if autoincrement).
+            dic = {
                 name_field: name,
-            })
+            }
+            if fields is not None:
+                dic.update(fields)
+            self.conn.insert_dict(table, dic)
             ident = c.lastrowid
         else:
+            # Row exists; obtain primary-key.
             ident = rows[0][id_field]
 
+        if debug:
+            logging.info("Cache entity: {table}['{name}'] = {id}".format(
+                table=table,
+                name=name,
+                id=ident,
+            ))
         name_to_id[name] = ident
 
         return ident
@@ -725,7 +832,6 @@ class SQLParser:
 
 @contextlib.contextmanager
 def transaction(conn):
-    # print_stacktrace('> IML: BEGIN TRANSACTION')
     conn.cursor.execute('BEGIN TRANSACTION')
     try:
         yield
@@ -1172,7 +1278,6 @@ class _CSVInserterWorker:
                         'pyprof_function':pyprof_function,
                         'pyprof_line_description':pyprof_line_description,
                     }
-                    # import ipdb; ipdb.set_trace()
 
                     # ipdb> pp ins
                     # {'category_id': 8,
@@ -2113,11 +2218,13 @@ class SQLCategoryTimesReader:
 
     def process_phases(
             self,
+            machine_name,
             process_name,
             debug=False):
         c = self.conn.cursor
         query = textwrap.dedent("""
         SELECT 
+            m.machine_name,
             p.process_name, 
             ph.phase_name, 
             MIN(e.start_time_us) AS phase_start_time_us, 
@@ -2127,15 +2234,17 @@ class SQLCategoryTimesReader:
             Event AS e
             NATURAL JOIN Phase AS ph
             NATURAL JOIN Process AS p
+            NATURAL JOIN Machine AS m
         WHERE
-            p.process_name = {p}
+            m.machine_name = '{machine_name}' AND
+            p.process_name = '{process_name}'
         GROUP BY
-            p.process_name, ph.phase_name
+            m.machine_name, p.process_name, ph.phase_name
         """).format(
-            p=sql_placeholder(),
+            machine_name=machine_name,
+            process_name=process_name,
         )
-        params = (process_name,)
-        sql_exec_query(c, query, params, debug=debug)
+        sql_exec_query(c, query, debug=debug)
         rows = [row_as_phase(row) for row in c.fetchall()]
         return rows
 
@@ -2185,15 +2294,43 @@ class SQLCategoryTimesReader:
         category_names = [row['category_name'] for row in c.fetchall()]
         return category_names
 
-    @property
-    def process_names(self):
+    def process_names(self, machine_name):
         c = self.conn.cursor
         c.execute("""
-        SELECT process_name FROM Process
+        SELECT process_name 
+            FROM Process
+            NATURAL JOIN Machine
+        WHERE machine_name = '{machine_name}'
         ORDER BY process_name ASC
-        """)
+        """.format(
+            machine_name=machine_name))
         process_names = [row['process_name'] for row in c.fetchall()]
         return process_names
+
+    @property
+    def processes(self):
+        c = self.conn.cursor
+        query = textwrap.dedent("""
+        SELECT *
+        FROM Process AS p
+            NATURAL JOIN Machine AS m
+        """)
+        params = None
+        sql_exec_query(c, query, params, self.__class__, self.debug_ops)
+        rows = c.fetchall()
+        devices = [Process.from_row(row) for row in rows]
+        return devices
+
+    @property
+    def machine_names(self):
+        c = self.conn.cursor
+        c.execute("""
+        SELECT machine_name 
+        FROM Machine
+        ORDER BY machine_name ASC
+        """)
+        machine_names = [row['machine_name'] for row in c.fetchall()]
+        return machine_names
 
 
     DEBUG_FETCH_STEPS = False
@@ -2847,7 +2984,6 @@ class SQLCategoryTimesReader:
         if SQLCategoryTimesReader.DEBUG_PARSE:
             start_parse_query_t = time.time()
         sql_exec_query(c, query, params, self.__class__, debug)
-        # import ipdb; ipdb.set_trace()
         category_times = dict()
         debug_label = "process={proc}, step={step}".format(
             proc=process_name,
@@ -3413,6 +3549,7 @@ class Phase:
         self.phase_name = phase_name
 
     def _add_row_fields(self, row):
+        self.machine_name = row['machine_name']
         self.process_name = row['process_name']
         self.phase_start_time_us = row['phase_start_time_us']
         self.phase_end_time_us = row['phase_end_time_us']
@@ -4179,6 +4316,7 @@ def get_process_trace_metadata(path):
         meta = {
             'process_name':proto.process_name,
             'phase_name':proto.phase,
+            'machine_name':proto.machine_name,
         }
         return meta
     elif is_pyprof_file(path) or is_dump_event_file(path):
@@ -4186,6 +4324,7 @@ def get_process_trace_metadata(path):
         meta = {
             'process_name':proto.process_name,
             'phase_name':proto.phase,
+            'machine_name':proto.machine_name,
         }
         return meta
     elif is_pyprof_call_times_file(path):
@@ -4193,6 +4332,7 @@ def get_process_trace_metadata(path):
         meta = {
             'process_name':call_times_data['process_name'],
             'phase_name':call_times_data['phase'],
+            'machine_name':call_times_data['machine_name'],
         }
         return meta
     else:
@@ -4218,10 +4358,13 @@ def get_util_metadata(path):
 
 class Device:
     def __init__(self, device_name, device_id,
+                 machine_name, machine_id,
                  # Swallow any excess arguments
                  **kwargs):
         self.device_name = device_name
         self.device_id = device_id
+        self.machine_name = machine_name
+        self.machine_id = machine_id
 
     @staticmethod
     def from_row(row):
@@ -4232,9 +4375,44 @@ class Device:
         return device
 
     def __str__(self):
-        return 'Device(name="{name}", id={id})'.format(
+        return 'Device(name="{name}", id={id}, machine_name="{machine_name}")'.format(
             name=self.device_name,
-            id=self.device_id)
+            id=self.device_id,
+            machine_name=self.machine_name,
+            # machine_id=self.machine_id,
+        )
+
+class Process:
+    def __init__(self, process_name, process_id,
+                 machine_name, machine_id,
+                 percent_complete=None,
+                 num_timesteps=None,
+                 total_timesteps=None,
+                 # Swallow any excess arguments
+                 **kwargs):
+        self.process_name = process_name
+        self.process_id = process_id
+        self.machine_name = machine_name
+        self.machine_id = machine_id
+        self.percent_complete = percent_complete
+        self.num_timesteps = num_timesteps
+        self.total_timesteps = total_timesteps
+
+    @staticmethod
+    def from_row(row):
+        process = Process(**row)
+        for attr, value in row.items():
+            if not hasattr(process, attr):
+                setattr(process, attr, value)
+        return process
+
+    def __str__(self):
+        return 'Process(name="{name}", id={id}, machine_name="{machine_name}")'.format(
+            name=self.process_name,
+            id=self.process_id,
+            machine_name=self.machine_name,
+            # machine_id=self.machine_id,
+        )
 
 def test_merge_sorted():
 

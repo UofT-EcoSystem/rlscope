@@ -86,7 +86,7 @@ cd $RL_BASELINES_ZOO_DIR
 
 if [ "$DEBUG" == 'yes' ]; then
 #    IML_TRACE_TIME_SEC=$((40))
-    IML_TRACE_TIME_SEC=$((10))
+    IML_TRACE_TIME_SEC=$((20))
 else
     IML_TRACE_TIME_SEC=$((2*60))
 fi

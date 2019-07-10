@@ -239,7 +239,7 @@ class OverlapStackedBarPlot:
 
     def _get_algo_env_id(self, iml_dir):
         sql_reader = self.sql_readers[iml_dir]
-        procs = sql_reader.process_names
+        procs = sql_reader.process_names()
         assert len(procs) == 1
         proc = procs[0]
         m = re.search(r'(?P<algo>[^_]+)_(?P<env_id>.+)', proc)

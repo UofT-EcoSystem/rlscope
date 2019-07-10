@@ -8,18 +8,8 @@ def wrap_lib(FuncWrapperKlass, import_libname, wrapper_args=tuple(), func_regex=
     lib = None
     try:
 
-        # if py_config.DEBUG:
-        #     logging.info('> import {libname}...'.format(libname=import_libname))
-        # importlib.import_module(import_libname)
-
-        # May throw NameError
-        # stmt = "import {import_lib}; lib = {wrap_lib}".format(import_lib=import_libname, wrap_lib=wrap_libname)
-        # lib = eval(wrap_libname)
-        # lib = eval(stmt)
         exec("import {import_lib}".format(import_lib=import_libname))
-        # exec("lib = {wrap_lib}".format(wrap_lib=wrap_libname))
         lib = eval("{wrap_lib}".format(wrap_lib=wrap_libname))
-        # exec(stmt)
         assert lib is not None
 
         # import tensorflow.pywrap_tensorflow
@@ -32,11 +22,14 @@ def wrap_lib(FuncWrapperKlass, import_libname, wrapper_args=tuple(), func_regex=
     wrap_module(FuncWrapperKlass, lib, wrapper_args, func_regex=func_regex)
     return True
 
-def unwrap_lib(FuncWrapperKlass, wrap_libname):
+def unwrap_lib(FuncWrapperKlass, import_libname, wrap_libname):
     try:
         logging.info('> lookup {libname}...'.format(libname=wrap_libname))
+
+        exec("import {import_lib}".format(import_lib=import_libname))
         # May throw NameError
-        lib = eval(wrap_libname)
+        lib = eval("{wrap_lib}".format(wrap_lib=wrap_libname))
+
         logging.info('  ... success')
     except NameError as e:
         logging.info('  ... FAILED: cannot unwrap module {lib}; stacktrace:'.format(lib=wrap_libname))

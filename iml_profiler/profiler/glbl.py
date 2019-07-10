@@ -51,7 +51,7 @@ def init_session(**kwargs):
 
     return session
 
-def handle_iml_args(parser, args, directory=None):
+def handle_iml_args(parser, args, directory=None, reports_progress=False):
     """
     Build an argument parser,
     :return:
@@ -77,6 +77,7 @@ def handle_iml_args(parser, args, directory=None):
 
     init_profiler(
         directory=iml_directory,
+        reports_progress=reports_progress,
         args=args,
     )
 

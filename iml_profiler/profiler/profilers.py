@@ -38,6 +38,7 @@ from tensorflow.python.client import session
 from iml_profiler.profiler import unit_test_util
 
 from tensorflow.core.profiler.tfprof_log_pb2 import ProfileProto
+from iml_profiler.protobuf.pyprof_pb2 import ProcessMetadata, TrainingProgress, TP_NO_PROGRESS, TP_HAS_PROGRESS
 
 # pip install py-cpuinfo
 import cpuinfo
@@ -75,6 +76,9 @@ TF_PRINT_TIMESTAMP = ENV.get('TF_PRINT_TIMESTAMP', 'no') == 'yes'
 
 UTILIZATION_SAMPLER_PY = _j(py_config.ROOT, 'python', 'scripts', 'utilization_sampler.py')
 PYTHON_BIN = 'python3'
+
+# Warn about forgetting to call iml.prof.report_progress(...) every 30 seconds.
+REPORT_PROGRESS_WARN_EVERY_SEC = 10.
 
 # If we exceed 1000 session.run(...) calls without dumping a trace, only print a warning every 100 calls.
 WARN_EVERY_CALL_MODULO = 100
@@ -134,31 +138,20 @@ def setup(allow_skip=False):
 
     SETUP_DONE = True
 
-# """
-# Wrap sess.as_default().
-# """
-# old_BaseSession_as_default = None
-# def setup_wrap_BaseSession_as_default():
-#     global old_BaseSession_as_default
-#     old_BaseSession_as_default = getattr(session.BaseSession, 'as_default')
-#     setattr(session.BaseSession, 'as_default', wrap_BaseSession_as_default)
-# def wrap_BaseSession_as_default(self):
-#     if py_config.DEBUG:
-#         print_stacktrace("> wrapped sess.as_default()")
-#     for prof in PROFILERS:
-#         prof.set_session(self)
-#     return old_BaseSession_as_default(self)
-
 class _ProfileContextManager:
     def __init__(self):
         self._session_to_context = dict()
 
-    def add_profile_context(self, session, phase=None):
+    def add_profile_context(self, session, phase=None, machine_name=None):
         assert session not in self._session_to_context
         if iml_profiler.api.prof is not None:
             disabled = not iml_profiler.api.prof.is_tfprof_enabled
         else:
             disabled = False
+
+        # assert phase is not None
+        # assert machine_name is not None
+
         pctx = tensorflow_profile_context.ProfileContext(
             # We handle dumping explicitly.
             # Do NOT set this to true; otherwise we'll start dumping during the critical path
@@ -169,7 +162,8 @@ class _ProfileContextManager:
             trace_steps=[],
             trace_all=True,
             session=session,
-            phase=phase)
+            phase=phase,
+            machine_name=machine_name)
         if disabled:
             pctx.disable_tracing()
         pctx.__enter__()
@@ -184,22 +178,22 @@ class _ProfileContextManager:
         pctx = self._session_to_context[session]
         return pctx
 
-    def recreate_sessions_profile_contexts(self, phase=None):
+    def recreate_sessions_profile_contexts(self, phase=None, machine_name=None):
         sessions = self._session_to_context.keys()
         # NOTE: tfprof files have a phase_name attribute; we need to dump whatever events we have in the current phase.
         # In particular, we must avoid accidentally putting events from the next phase into the file labelled as
         # the previous phase.
         for session in sessions:
-            self.recreate_profile_context(session, phase)
+            self.recreate_profile_context(session, phase, machine_name)
 
-    def recreate_profile_context(self, session, phase=None):
+    def recreate_profile_context(self, session, phase=None, machine_name=None):
         """
         We are about to switches phases.
         Dump the current profile-context for this session,
         and initialize a new profile-context.
         """
         self.remove_profile_context(session)
-        pctx = self.add_profile_context(session, phase)
+        pctx = self.add_profile_context(session, phase, machine_name)
         return pctx
 
         # assert session not in self._session_to_context
@@ -589,6 +583,36 @@ def get_tfprof_path(directory, bench_name, session_id, trace_id):
         ))
     return tfprof_path
 
+class ProcessMetadataDumper:
+    def __init__(self,
+                 trace_id,
+                 process_metadata,
+                 process_metadata_proto_path,
+                 debug=False):
+        assert type(process_metadata) == ProcessMetadata
+        self.trace_id = trace_id,
+        self.process_metadata = process_metadata
+        self.process_metadata_proto_path = process_metadata_proto_path
+        self.debug = debug
+
+    def dump(self):
+        """
+        Dump ProcessMetadata to:
+        - process_metadata.trace_<next_trace_id>.proto
+        """
+        if self.debug:
+            logging.info("{klass}.dump start, path={path}".format(
+                klass=self.__class__.__name__,
+                path=self.process_metadata_proto_path))
+
+        with open(self.process_metadata_proto_path, 'wb') as f:
+            f.write(self.process_metadata.SerializeToString())
+
+        if self.debug:
+            logging.info("{klass}.dump done, path={path}".format(
+                klass=self.__class__.__name__,
+                path=self.process_metadata_proto_path))
+
 # class DumpThunk:
 #     """
 #     A Session object has become inactive (i.e. sess.close()).
@@ -739,6 +763,19 @@ class Profiler:
         This time can be compared/validated against the total time reported
         by the profiler (nvprof/pyprof).
 
+    :param reports_progress
+        Whether or not the current process will call:
+
+            iml.prof.report_progress(percent_complete)
+
+        If this is true, then if --iml-trace-time-sec expires, we will WAIT
+        until iml.prof.report_progress is called prior to exiting, and we will warn
+        if it hasn't been called.
+
+        Q: Can't we imply this from whether it ever calls report_progress?
+        A: No, since it may just take a really long time before report_progress ever
+           gets called.
+
     :param exit_early
         if True, exit ML script immediately after benchmarking bench_name.
         Othwerwise, continue executing ML script until it finishes.
@@ -750,6 +787,7 @@ class Profiler:
                  num_traces=None,
                  keep_traces=None,
                  tfprof=True,
+                 reports_progress=False,
                  c_lib_func_pyprof_pattern=None,
                  # tfprof=True,
                  repetition_time_limit_sec=10.,
@@ -816,11 +854,16 @@ class Profiler:
                                 allow_none=allow_none, internal=True)
             return argval
 
+        self.machine_name = get_machine_name()
+
         # TODO: bind process to a different core to avoid interference?
         # self.bg_dumper = ProcessPoolExecutor(max_workers=1)
         self.debug = get_argval('debug', debug, False)
         if self.debug:
             py_config.DEBUG = self.debug
+        self.percent_complete = None
+        self.num_timesteps = None
+        self.total_timesteps = None
         # dump_cpus = get_dump_cpus()
         self.bg_dumper = ForkedProcessPool(name="bg_dumper", debug=self.debug,
                                            # cpu_affinity=dump_cpus,
@@ -838,6 +881,7 @@ class Profiler:
         self.start_call_us = dict()
         self.end_call_us = dict()
 
+        self._is_finishing = False
         self.next_trace_id = None
         self.process_name = None
         # self.init_trace_id()
@@ -849,11 +893,13 @@ class Profiler:
         self.python = get_argval('python', python, False)
         self.exit_early = exit_early
         self.tfprof = tfprof
+        self.reports_progress = reports_progress
         self.c_lib_func_pyprof_pattern = c_lib_func_pyprof_pattern
         self.repetition_time_limit_sec = repetition_time_limit_sec
         self.num_calls = get_argval('num_calls', num_calls, None)
         self.trace_time_sec = get_argval('trace_time_sec', trace_time_sec, None)
         self._last_warned_trace_time_sec = None
+        self._last_warned_report_progress_idx = None
         self._should_finish_idx = 0
         self.start_trace_time_sec = None
         self.num_traces = get_argval('num_traces', num_traces, None)
@@ -865,6 +911,8 @@ class Profiler:
 
         self.start_trace_time_sec = get_internal_argval('start_trace_time_sec')
         self.phase = get_internal_argval('phase', DEFAULT_PHASE)
+
+        self.parent_process_name = get_internal_argval('parent_process_name')
 
         self.start_measuring_call = get_argval('start_measuring_call', start_measuring_call, None)
 
@@ -1148,37 +1196,6 @@ class Profiler:
         self.time_sec[bench_name] = self.time_sec.get(bench_name, 0.) + end_time_sec - self.start_t[bench_name]
         self.code_count[bench_name] = self.code_count.get(bench_name, 0) + num_calls
 
-    # def set_session(self, sess):
-    #     if self.disable:
-    #         return
-    #
-    #     if py_config.DEBUG:
-    #         print_stacktrace("> set_session = {sess}".format(sess=sess))
-    #
-    #     assert sess is not None
-    #
-    #     if self.sess is not None:
-    #         raise NotImplementedError("Haven't implemented profiling using multiple session objects.")
-    #     self.sess = sess
-    #
-    #     if self.pctx is not None:
-    #         self.pctx.set_session(self.sess)
-    #
-    #     if self._cur_operation != NO_BENCH_NAME and not self._tfprof_enabled:
-    #         self._start_tfprof(allow_skip=False)
-
-    # def _cur_session(self, allow_none=False):
-    #     if self.sess is not None:
-    #         return self.sess
-    #
-    #     sess = tf.get_default_session()
-    #     if sess is None and not allow_none:
-    #         raise RuntimeError(
-    #             "Couldn't find current session; you either need to call Profiler.set_session(sess), "
-    #             "or do \"with sess.as_default():\"")
-    #
-    #     return sess
-
     def start(self, start_utilization_sampler=False, handle_utilization_sampler=False):
         PROFILERS.append(self)
 
@@ -1384,7 +1401,7 @@ class Profiler:
         if self._pyprof_enabled:
             return
         if self.debug:
-            logging.info("Start pyprof\n{stack}".format(stack="\n".join(get_stacktrace())))
+            logging.info("Start pyprof\n{stack}".format(stack=get_stacktrace()))
         self._init_trace_time()
         # clib_wrap.wrap_libs()
         # if self.step_start_tracing is None:
@@ -1488,45 +1505,31 @@ class Profiler:
 
         self._pop_operation(bench_name)
 
-        if self.trace_time_sec is not None and \
-                self._total_trace_time_sec() > self.trace_time_sec and \
-                len(self._op_stack) > 0 and \
-                ( self._last_warned_trace_time_sec is None or time.time() - self._last_warned_trace_time_sec >= WARN_EVERY_SEC ):
-            stacktrace = get_stacktrace()
-            logging.warning(textwrap.dedent("""\
-            IML: Warning; tracing time (sec) has exceeded limit (--iml-trace-time-sec {limit_sec}), but annotations are still active:
-              process_name = {proc}
-              phase_name = {phase}
-              Active annotations:
-                {annotations}
-              Stacktrace:
-            {stack}
-            """).format(
-                sec=self._total_trace_time_sec(),
-                limit_sec=self.trace_time_sec,
-                proc=self.process_name,
-                phase=self.phase,
-                annotations=self._op_stack,
-                stack=textwrap.indent(''.join(stacktrace), prefix="  "*2),
-            ))
-            self._last_warned_trace_time_sec = time.time()
+        # We terminate annotations if they're been going for too long.
+        # if not self.reports_progress:
+        #     self._maybe_warn_live_annotations()
 
         if len(self._op_stack) == 0:
             self.steps += 1
             # self._stop_pyprof()
             # self._stop_tfprof()
 
-        if not skip_finish:
+        self._maybe_warn_report_progress()
+
+        if not skip_finish and not self.reports_progress:
+            # Regarding self.reports_progress:
+            # - If this process reports training progress (self.reports_progress),
+            #   exit AFTER --iml-trace-time-sec is up AND iml.prof.report_progress has JUST been called.
+            # - If this process does NOT report training progress, just exit once --iml-trace-time-sec is up.
             self._maybe_finish(debug=self.debug)
 
     def set_process_name(self, process_name):
+        if process_name == '':
+            raise ValueError("IML ERROR: You cannot use an empty-string for process_name")
         self.process_name = process_name
         clib_wrap.set_process_name(process_name)
         self.init_trace_id()
         # self._maybe_init_profile_context()
-
-    def set_machine_name(self, machine_name):
-        self.machine_name = machine_name
 
     @property
     def is_root_process(self):
@@ -1580,8 +1583,8 @@ class Profiler:
         # assert self.session.pctx.phase is not None
         # Record the current tfprof for the current phase as a DumpThunk.
         # Also, create a new pctx for the next phase.
-        # ProfileContextManager.recreate_profile_context(self.session, phase)
-        ProfileContextManager.recreate_sessions_profile_contexts(phase)
+        # ProfileContextManager.recreate_profile_context(self.session, phase, machine_name)
+        ProfileContextManager.recreate_sessions_profile_contexts(phase, self.machine_name)
         # Dump the DumpThunk's.
         # self.dump_trace(finish_now=False, debug=self.debug)
 
@@ -1596,6 +1599,22 @@ class Profiler:
             self._terminate_utilization_sampler(warn_terminated)
 
     def finish(self, should_exit=True):
+        if self._is_finishing:
+            # We've already called this function to terminate tracing.
+            #
+            # Multiple calls happen to this function since users write their code like this:
+            #
+            #   with iml.prof.profiler(...):          # -> This registers a iml.prof.stop() handler to be called on exit
+            #     iml.prof.report_progress(...)       # -> This calls sys.exit(0) during Profiler.finish()
+            #                                         # -> We exit the with block; iml.prof.stop() is called
+            #                                         #    and calls into iml.prof.finish()
+            return
+        if should_exit:
+            self._is_finishing = True
+
+        if self.debug:
+            logging.info("> IML: finishing profiling\n{stack}".format(stack=get_stacktrace(indent=1)))
+
         if self.unit_test:
             self.ut.stop()
 
@@ -1608,17 +1627,14 @@ class Profiler:
         # for sess in ACTIVE_SESSIONS:
         #   self.dump_tfprof(sess)
         logging.info("> IML: Schedule any remaining traces to be dumped.")
-        for session in iml_profiler.profiler.session.ACTIVE_SESSIONS:
-            self._dump_tfprof(session, debug=self.debug)
+        for sess in iml_profiler.profiler.session.ACTIVE_SESSIONS:
+            self._dump_tfprof(sess, debug=self.debug)
         # At the very least, make sure to dump the [PROC:<process_name>] we recorded above.
         # Q: How frequently should we dump pyprof data?
         # A: We'd like to keep it under a file-size limit...but computing exact proto-size isn't practical.
         #    Instead, lets just roughly count the # of events, and use that as a proxy for proto file size.
-        if self.debug:
-            logging.info("> IML: _dump_pyprof")
         self._dump_pyprof(debug=self.debug)
-        if self.debug:
-            logging.info("> IML: _dump_pyprof done")
+        self._dump_process_metadata(debug=self.debug)
 
         # if self._should_dump_pyprof:
         #     self._dump_pyprof()
@@ -1649,43 +1665,6 @@ class Profiler:
         if should_exit:
             logging.info("> IML: Exiting training script early")
             sys.exit(0)
-
-    # def dump_trace(self, finish_now, debug=False):
-    #     # We shouldn't be in the middle of measuring an operation.
-    #     start_us = now_us()
-    #     assert self._cur_operation == NO_BENCH_NAME
-    #
-    #     self._stop_pyprof()
-    #     self._stop_tfprof()
-    #
-    #     if finish_now:
-    #         # Record a "special" operation event that spans the prof.start()/stop() calls
-    #         # for the currently running process.
-    #         assert self._start_us is not None
-    #         assert self._stop_us is not None
-    #         event_name = op_process_event_name(self.process_name)
-    #         clib_wrap.set_step(self._pyprof_step,
-    #                            ignore_disable=True)
-    #         # BUG TODO: Should we use our own CATEGORY_PROCESS for process-events?
-    #         # Otherwise, we may be unable to disambiguate from a CATEGORY_OPERATION of the same name as the process.
-    #         # Looks like we recorded it as [PROC:<process-name>] to prevent conflicts.
-    #         # I cannot remember how this is handled downstream during analysis.
-    #         clib_wrap.record_event(CATEGORY_OPERATION, event_name, self._start_us, self._stop_us,
-    #                                ignore_disable=True)
-    #
-    #     assert not self._tfprof_enabled
-    #     assert not self._pyprof_enabled
-    #     # self._stop_tfprof()
-    #
-    #     # ProfileGlobals.files_after = ls_files(self.out_dir)
-    #
-    #     # Put this here to test that cleanup_files doesn't delete nvprof/pyprof files
-    #     self._dump(start_us)
-    #
-    #     self.step_start_tracing = self.steps
-
-    # def _discard_profiling_data(self):
-    #     clib_wrap.clear_pyprof_profiling()
 
     def _dump_tfprof(self, session, debug=False):
         """
@@ -1802,6 +1781,63 @@ class Profiler:
                 sec=time_sec,
             ))
 
+    def _dump_process_metadata(self, debug=False, sync=False):
+        start_sec = time.time()
+        trace_id = self.next_trace_id
+        process_metadata = ProcessMetadata()
+
+        process_metadata.process_name = self.process_name
+        process_metadata.phase = self.phase
+        process_metadata.machine_name = self.machine_name
+
+        if self.parent_process_name is not None:
+            process_metadata.parent_process_name = self.parent_process_name
+
+        # Q: multiple processes reporting training progress...consider that an error?
+        if self.reports_progress and self.percent_complete is None:
+            raise RuntimeError("IML ERROR: profiler was created with iml.handle_iml_args(..., reports_progress=True), but process NEVER called iml.prof.report_progress(...)")
+
+        # This should be prevented from self.report_progress(...)
+        assert not(not self.reports_progress and self.percent_complete is not None)
+
+        if self.percent_complete is not None:
+            process_metadata.training_progress.content_code = TP_HAS_PROGRESS
+            process_metadata.training_progress.percent_complete = self.percent_complete
+            # Q: Is this safe is self.num_timestamps is None? NO
+            if self.num_timesteps is not None:
+                process_metadata.training_progress.num_timesteps = self.num_timesteps
+            if self.total_timesteps is not None:
+                process_metadata.training_progress.total_timesteps = self.total_timesteps
+        else:
+            process_metadata.training_progress.content_code = TP_NO_PROGRESS
+
+        process_metadata_proto_path = self._process_metadata_proto_path(trace_id)
+        dumper = ProcessMetadataDumper(
+            trace_id=trace_id,
+            process_metadata=process_metadata,
+            process_metadata_proto_path=process_metadata_proto_path,
+            debug=debug)
+        self.next_trace_id += 1
+        self.bg_dumper.submit(
+            name="ProcessMetadataDumper.dump({path})".format(
+                path=process_metadata_proto_path),
+            fn=dumper.dump,
+            sync=sync,
+        )
+        end_sec = time.time()
+        time_sec = end_sec - start_sec
+        if py_config.DEBUG:
+            logging.info("Dump ProcessMetaData took {sec} seconds on the critical path".format(
+                sec=time_sec,
+            ))
+
+    def _process_metadata_proto_path(self, trace_id):
+        ret = _j(self.out_dir, "process_metadata{bench}{trace}.proto".format(
+            bench=bench_suffix(self.bench_name),
+            trace=trace_suffix(trace_id),
+        ))
+        return ret
+
     def _fixup_tfprof(self, path):
         """
         Add profiler specific data to ProfileProto tfprof protobuf file.
@@ -1818,7 +1854,74 @@ class Profiler:
         with open(path, 'wb') as f:
             f.write(proto.SerializeToString())
 
+    def _maybe_warn_live_annotations(self):
+        """
+        If we've exceed tracing time-limit (--iml-trace-time-sec), but there are still live annotations,
+        warn the user.
+        """
+        if self.trace_time_sec is not None and \
+                self._total_trace_time_sec() > self.trace_time_sec and \
+                len(self._op_stack) > 0 and \
+                ( self._last_warned_trace_time_sec is None or time.time() - self._last_warned_trace_time_sec >= WARN_EVERY_SEC ):
+            logging.warning(textwrap.dedent("""\
+            IML: Warning; tracing time (sec) has exceeded limit (--iml-trace-time-sec {limit_sec}), 
+            but annotations are still active:
+              process_name = {proc}
+              phase_name = {phase}
+              Active annotations:
+                {annotations}
+              Stacktrace:
+            {stack}
+            """).format(
+                sec=self._total_trace_time_sec(),
+                limit_sec=self.trace_time_sec,
+                proc=self.process_name,
+                phase=self.phase,
+                annotations=self._op_stack,
+                stack=get_stacktrace(indent=2),
+            ))
+            self._last_warned_trace_time_sec = time.time()
+
+    def _maybe_warn_report_progress(self):
+        """
+        If the process is responsible for calling iml.prof.report_progress(...) and we have been
+        collecting trace-data for much longer than we intended, they may have forgotten to call
+        iml.prof.report_progress(...).
+
+        Warn them every 30 seconds in that case.
+        """
+        if self.trace_time_sec is None:
+            return
+        total_trace_time_sec = self._total_trace_time_sec()
+        warn_idx = int((total_trace_time_sec - self.trace_time_sec) / REPORT_PROGRESS_WARN_EVERY_SEC)
+        if total_trace_time_sec > self.trace_time_sec and (
+            warn_idx > 1 and (
+                self._last_warned_report_progress_idx is None or
+                warn_idx > self._last_warned_report_progress_idx
+            )
+        ):
+            logging.warning(textwrap.dedent("""\
+            IML: Warning; tracing time so far ({sec} sec) has exceeded tracing time-limit (--iml-trace-time-sec {limit_sec}), but process={proc} 
+            hasn't called iml.prof.report_progress(...); did you forget to call this in that process?
+              process_name = {proc}
+              phase_name = {phase}
+              Active annotations:
+                {annotations}
+              Stacktrace:
+            {stack}
+            """).format(
+                sec=self._total_trace_time_sec(),
+                limit_sec=self.trace_time_sec,
+                proc=self.process_name,
+                phase=self.phase,
+                annotations=self._op_stack,
+                stack=get_stacktrace(indent=2),
+            ))
+            self._last_warned_report_progress_idx = warn_idx
+
     def should_finish(self, finish_now=False, skip_finish=False):
+
+
         total_trace_time_sec = self._total_trace_time_sec()
         ret = finish_now or (
                 (
@@ -1882,7 +1985,32 @@ class Profiler:
         clib_wrap.record_event(CATEGORY_OPERATION, event_name, self._start_us, self._stop_us,
                                ignore_disable=True)
 
+    def report_progress(self, percent_complete, num_timesteps=None, total_timesteps=None):
+        if not self.reports_progress:
+            raise RuntimeError(
+                textwrap.dedent("""\
+                IML ERROR: profiler was created with iml.handle_iml_args(..., reports_progress=False), but process made unexpected call to iml.prof.report_progress(...).
+                If you wish to have process_name={proc} record training progress, call iml.handle_iml_args(..., reports_progress=True), 
+                and make sure its the ONLY process that does so.
+                """).format(proc=self.process_name))
+
+        if self.num_timesteps is not None:
+            self.num_timesteps = num_timesteps
+
+        if self.total_timesteps is not None:
+            self.total_timesteps = total_timesteps
+
+        if self.percent_complete is not None and percent_complete < self.percent_complete:
+            raise RuntimeError("IML ERROR: percent_complete should be monotonically increasing but saw {from_perc} -> {to_perc}".format(
+                from_perc=self.percent_complete,
+                to_perc=percent_complete,
+            ))
+        self.percent_complete = percent_complete
+
+        self._maybe_finish(debug=self.debug)
+
     def _maybe_finish(self, finish_now=False, should_exit=True, debug=False):
+
         should_finish = self.should_finish(finish_now)
         if not should_finish:
             return
