@@ -664,6 +664,11 @@ class _AddProfileContextHook(iml_profiler.profiler.session.SessionActiveHook):
         """
         Run after tf.Session() is called, in case we wish to do anything that requires the C++ API.
         """
+        if py_config.DEBUG and py_config.DEBUG_TRACE_SESSION:
+            logging.info("[trace-session : tf.Session()] session={sess}\n{stack}".format(
+                sess=session,
+                stack=get_stacktrace(indent=1)
+            ))
         ProfileContextManager.add_profile_context(session)
 AddProfileContextHook = _AddProfileContextHook()
 
@@ -700,6 +705,16 @@ class _MaybeDumperTfprofContextHook(iml_profiler.profiler.session.SessionRunHook
             session._iml_num_runs_traced = 0
         else:
             session._iml_num_runs_traced += 1
+
+        if py_config.DEBUG and py_config.DEBUG_TRACE_SESSION:
+            phase = None
+            pctx = getattr(session, 'profile_context', None)
+            if pctx is not None:
+                phase = pctx.phase
+            logging.info("[trace-session : after run] session={sess}, session.pctx.phase={phase}".format(
+                sess=session,
+                phase=phase
+            ))
 MaybeDumperTfprofContextHook = _MaybeDumperTfprofContextHook()
 
 class _DumpPyprofTraceHook(clib_wrap.RecordEventHook):
@@ -1676,9 +1691,18 @@ class Profiler:
         :return:
         """
         pctx = ProfileContextManager.get_profile_context(session)
+
         trace_id = self.next_trace_id
-        # tfprof_path = self.tfprof_path(ses)
         tfprof_path = self.tfprof_path(session.session_id, trace_id)
+
+        if pctx.iml_traced_calls == 0:
+            # Silently skip dumping this pctx since it contains no trace-data (unless --iml-debug).
+            if pctx.phase is None and debug:
+                logging.info("Skip dumping tfprof @ {path}: your training script creates a tf.Session() object that never gets used so it has 0 traced-calls.")
+            elif debug:
+                logging.info("Skip dumping tfprof @ {path}: since it has 0 traced-calls.")
+            return
+
         tfprof_dumper = TfprofDumper(trace_id, session, self.process_name, tfprof_path, debug=debug)
         tfprof_dumper.dump()
 
