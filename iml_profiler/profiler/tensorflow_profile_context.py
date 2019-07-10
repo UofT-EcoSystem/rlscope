@@ -583,7 +583,7 @@ class ProfileContext(object):
 
   def dump(self, dump_path, process_name):
 
-    if py_config.DEBUG_TRACE_SESSION:
+    if py_config.DEBUG and py_config.DEBUG_TRACE_SESSION:
         sess = self._cur_session(allow_none=True)
         logging.info("[trace-session : ProfileContext.dump] session={sess}, phase={phase}".format(
           sess=sess,
