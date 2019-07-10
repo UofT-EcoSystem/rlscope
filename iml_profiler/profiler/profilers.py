@@ -577,6 +577,10 @@ class _AddProfileContextHook(iml_profiler.profiler.session.SessionActiveHook):
         """
         Run after tf.Session() is called, in case we wish to do anything that requires the C++ API.
         """
+        logging.info("[null-phase : tf.Session()] session={sess}\n{stack}".format(
+            sess=session,
+            stack=get_stacktrace_string(indent=1)
+        ))
         ProfileContextManager.add_profile_context(session)
 AddProfileContextHook = _AddProfileContextHook()
 
@@ -613,6 +617,15 @@ class _MaybeDumperTfprofContextHook(iml_profiler.profiler.session.SessionRunHook
             session._iml_num_runs_traced = 0
         else:
             session._iml_num_runs_traced += 1
+
+        phase = None
+        pctx = getattr(session, 'profile_context', None)
+        if pctx is not None:
+            phase = pctx.phase
+        logging.info("[null-phase : after run] session={sess}, session.pctx.phase={phase}".format(
+            sess=session,
+            phase=phase
+        ))
 MaybeDumperTfprofContextHook = _MaybeDumperTfprofContextHook()
 
 class _DumpPyprofTraceHook(clib_wrap.RecordEventHook):

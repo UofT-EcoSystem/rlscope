@@ -583,8 +583,16 @@ class ProfileContext(object):
     # c_api_util.clear_trace_data(sess)
 
   def dump(self, dump_path, process_name):
-    assert self.phase is not None
+
     sess = self._cur_session(allow_none=True)
+    logging.info("[null-phase : ProfileContext.dump] session={sess}, phase={phase}".format(
+      sess=sess,
+      phase=self.phase,
+      # stack=get_stacktrace_string(indent=1)
+    ))
+
+    assert self.phase is not None
+    sess = self._cur_session()
     if DEBUG:
         logging.info("> c_api_util.dump_trace_data_async: dump_path={path}, process={proc}, phase={phase}".format(
           path=dump_path,
@@ -657,6 +665,9 @@ class ProfileContext(object):
   def _cur_session(self, allow_none=False):
     if self._sess is not None:
       return self._sess
+
+    if allow_none:
+      return None
 
     # sess = tf.get_default_session()
     # if sess is None and not allow_none:
