@@ -5,6 +5,7 @@ import re
 import json
 import shlex
 import copy
+from glob import glob
 import logging
 import subprocess
 import sys
@@ -27,7 +28,21 @@ import gym
 try:
     import pybullet_envs
 except ImportError:
+    print(textwrap.dedent("""\
+    ERROR: You need to use pip to install pybullet to run iml-bench:
+    $ pip install pybullet==2.5.1
+    """.rstrip()))
+    sys.exit(1)
     pybullet_envs = None
+
+try:
+    import atari_py
+except ImportError:
+    print(textwrap.dedent("""\
+    ERROR: You need to use pip to install atari-py to run iml-bench:
+    $ pip install git+https://github.com/openai/atari-py.git@0.2.0
+    """.rstrip()))
+    sys.exit(1)
 
 from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, basename as _b
 
@@ -417,7 +432,7 @@ class ExperimentGroup(Experiment):
             '--overlap-type', overlap_type,
             '--y-type', 'percent',
             '--x-type', 'algo-comparison',
-        ], opts, suffix=plot_log(expr, overlap_type))
+        ], suffix=plot_log(expr, overlap_type), train_stable_baselines_opts=opts)
 
         # (2) Compare environments:
         expr = 'environments'
@@ -429,7 +444,7 @@ class ExperimentGroup(Experiment):
             '--resource-overlap', json.dumps(['CPU']),
             '--y-type', 'percent',
             '--x-type', 'env-comparison',
-        ], opts, suffix=plot_log(expr, overlap_type))
+        ], suffix=plot_log(expr, overlap_type), train_stable_baselines_opts=opts)
 
         # (3) Compare algorithms:
         # Want to show on-policy vs off-policy.
@@ -453,7 +468,7 @@ class ExperimentGroup(Experiment):
             '--remap-df', json.dumps([textwrap.dedent("""
             # Keep 'step' region
             new_df[('step',)] = df[('step',)]
-            
+
             # Sum up regions besides 'step'
             new_df[('other',)] = 0.
             for r in regions:
@@ -463,7 +478,7 @@ class ExperimentGroup(Experiment):
             """)]),
             '--y-type', 'percent',
             '--x-type', 'algo-comparison',
-        ], opts, suffix=plot_log(expr, overlap_type))
+        ], suffix=plot_log(expr, overlap_type), train_stable_baselines_opts=opts)
 
         # (4) Compare all RL workloads:
         expr = 'all_rl_workloads'
@@ -484,7 +499,7 @@ class ExperimentGroup(Experiment):
         self.stacked_plot([
             '--overlap-type', overlap_type,
             '--y-type', 'percent',
-        ] + rl_workload_dims, opts, suffix=plot_log(expr, overlap_type))
+        ] + rl_workload_dims, suffix=plot_log(expr, overlap_type), train_stable_baselines_opts=opts)
         # - 2nd plot shows where CPU time is going
         #   TODO: we want categories to be 'C++ framework', 'CUDA API C', 'Python' (CategoryOverlap)
         #   TODO: For WHAT GPU operation...? We need to merge everyone into an 'Inference' category first.
@@ -523,7 +538,7 @@ class ExperimentGroup(Experiment):
                 # """)]),
 
                 '--y-type', 'percent',
-            ] + rl_workload_dims, opts, suffix=plot_log(expr, overlap_type, gpu_operation))
+            ] + rl_workload_dims, suffix=plot_log(expr, overlap_type, gpu_operation), train_stable_baselines_opts=opts)
 
         # - Statement: GPU operations are dominated by CPU time. In particular, CUDA API C
         #   time is a dominant contributor.
@@ -539,25 +554,59 @@ class ExperimentGroup(Experiment):
         #   currently I don't think that's easy to do since it would involve "merging"
         #   two *.venn_js.json files, one from ['CPU', 'GPU'] and one from ['CPU']
 
+        # # (5) Different RL algorithms on the industrial-scale simulator: AirLearning environment:
+        # expr = 'beefy_simulator'
+        # # opts = ['--bullet', '--algo', 'ppo2']
+        # # self.iml_bench(parser, 'train_stable_baselines.sh', opts, suffix=bench_log(expr))
+        # overlap_type = 'OperationOverlap'
+        # iml_dirs  = self.iml_dirs_air_learning()
+        # self.stacked_plot([
+        #     '--overlap-type', overlap_type,
+        #     '--resource-overlap', json.dumps(['CPU']),
+        #     '--y-type', 'percent',
+        #     '--x-type', 'algo-comparison',
+        # ], suffix=plot_log(expr, overlap_type), iml_dirs=iml_dirs)
+
     def iml_directory(self, algo, env_id):
         iml_directory = _j(self.args.dir, algo, env_id)
         return iml_directory
 
-    def stacked_plot(self, stacked_args, train_stable_baselines_opts, suffix, debug=False):
-        if not self.will_plot:
-            return
-        args = self.args
-        cmd = [
-            'iml-analyze',
-        ]
-        cmd.extend([
-            '--task', 'OverlapStackedBarTask',
-        ])
+    def _is_env_dir(self, path):
+        return os.path.isdir(path) and re.search('Env', path)
 
-        if args.debug:
-            cmd.append('--debug')
-        # if args.pdb:
-        #     cmd.append('--pdb')
+    def _is_algo_dir(self, path):
+        return os.path.isdir(path)
+
+    def algo_env_pairs(self):
+        args = self.args
+        algo_env_pairs = []
+        for algo_path in glob(_j(args.dir, '*')):
+            if not self._is_algo_dir(algo_path):
+                logging.info("Skip algo_path={dir}".format(dir=algo_path))
+                continue
+            algo = _b(algo_path)
+            for env_path in glob(_j(algo_path, '*')):
+                if not self._is_env_dir(env_path):
+                    logging.info("Skip env_path={dir}".format(dir=env_path))
+                    continue
+                env = _b(env_path)
+                algo_env_pairs.append((algo, env))
+        return algo_env_pairs
+
+    def _is_air_learning_env(self, env):
+        return re.search(r'AirLearning', env)
+
+    def iml_dirs_air_learning(self, debug=False):
+        algo_env_pairs = [(algo, env) for algo, env in self.algo_env_pairs() \
+                          if self._is_air_learning_env(env)]
+        logging.info(pprint_msg({
+            'self.algo_env_pairs()': self.algo_env_pairs(),
+            'algo_env_pairs': algo_env_pairs}))
+        iml_dirs = [self.iml_directory(algo, env) for algo, env in algo_env_pairs]
+        return iml_dirs
+
+    def iml_dirs_train_stable_baselines(self, train_stable_baselines_opts, debug=False):
+        args = self.args
 
         parser_train_stable_baselines = argparse.ArgumentParser()
         add_stable_baselines_options(parser_train_stable_baselines)
@@ -579,6 +628,33 @@ class ExperimentGroup(Experiment):
                 logging.info("Exiting due to failed plot; use --skip-error to ignore")
                 sys.exit(1)
         iml_dirs = [self.iml_directory(algo, env_id) for algo, env_id in algo_env_pairs]
+        return iml_dirs
+
+    def stacked_plot(self, stacked_args, suffix, iml_dirs=None, train_stable_baselines_opts=None, debug=False):
+        if not self.will_plot:
+            return
+        args = self.args
+        cmd = [
+            'iml-analyze',
+        ]
+        cmd.extend([
+            '--task', 'OverlapStackedBarTask',
+        ])
+
+        if args.debug:
+            cmd.append('--debug')
+        # if args.pdb:
+        #     cmd.append('--pdb')
+
+        if train_stable_baselines_opts is not None:
+            iml_dirs = self.iml_dirs_train_stable_baselines(train_stable_baselines_opts, debug=debug)
+            cmd.extend([
+                '--iml-directories', json.dumps(iml_dirs),
+            ])
+        if iml_dirs is None:
+            raise NotImplementedError("Not sure what to use for --iml-directories")
+        if len(iml_dirs) == 0:
+            raise NotImplementedError("Need at least one directory for --iml-directories but saw 0.")
         cmd.extend([
             '--iml-directories', json.dumps(iml_dirs),
         ])

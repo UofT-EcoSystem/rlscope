@@ -282,8 +282,13 @@ class OverlapStackedBarPlot:
 
         _del_index_module()
 
-        # Check that env_id's match
-        assert _b(iml_dir) == _b(index.directory)
+        # Check that env_id's match; otherwise, warn the user.
+        # This can happen when generating trace files on one machine, and changing the directory structure on another.
+        if _b(iml_dir) != _b(index.directory):
+            logging.warning("iml_dir={iml_dir} != index.directory={index_dir}; make sure these paths use the same (algo, env)!".format(
+                iml_dir=iml_dir,
+                index_dir=index.directory,
+            ))
 
         # return index
 
@@ -332,7 +337,7 @@ class OverlapStackedBarPlot:
         if value is not None:
             selector[field_name] = value
         else:
-            choices = idx.available_values(selector, field_name, can_ignore=can_ignore)
+            choices = idx.available_values(selector, field_name, can_ignore=can_ignore, skip_missing_fields=True)
             if len(choices) > 1:
                 raise RuntimeError("Please provide {opt}: choices = {choices}".format(
                     opt=optname(field_name),
@@ -365,7 +370,7 @@ class OverlapStackedBarPlot:
             self._add_or_suggest_selector_field(idx, selector, 'resource_overlap', can_ignore=True)
             self._add_or_suggest_selector_field(idx, selector, 'operation', can_ignore=self.overlap_type not in ['CategoryOverlap'])
 
-            md, entry, ident = idx.get_file(selector=selector)
+            md, entry, ident = idx.get_file(selector=selector, skip_missing_fields=True)
             vd = VennData(entry['venn_js_path'])
             yield (algo, env), vd
 

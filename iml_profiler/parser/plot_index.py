@@ -38,7 +38,7 @@ class _DataIndex:
     def set_debug(self, debug):
         self.debug = debug
 
-    def each_file(self, selector, debug=False):
+    def each_file(self, selector, skip_missing_fields=False, debug=False):
         """
         :param selector:
             Sub-select the "sub-tree" of files you wish to consider.
@@ -57,13 +57,13 @@ class _DataIndex:
         else:
             assert False
 
-        for md, entry in _sel_idx(self.index, selector, field, debug=debug):
+        for md, entry in _sel_idx(self.index, selector, field, skip_missing_fields=skip_missing_fields, debug=debug):
             md = dict(md)
             md[field] = selector[field]
             sel_order = SEL_ORDER[selector[field]]
             if self.debug:
                 pprint.pprint({'entry':entry})
-            ident = self.md_id(md, sel_order)
+            ident = self.md_id(md, sel_order, skip_missing_fields=skip_missing_fields)
             new_entry = self._adjust_paths(entry)
             if self.debug:
                 pprint.pprint({'md':md, 'entry':new_entry, 'ident':ident})
@@ -76,11 +76,11 @@ class _DataIndex:
                 entry[key] = _j(self.directory, entry[key])
         return entry
 
-    def get_files(self, selector):
-        return list(self.each_file(selector))
+    def get_files(self, selector, skip_missing_fields=False, debug=False):
+        return list(self.each_file(selector, skip_missing_fields=skip_missing_fields, debug=debug))
 
-    def available_values(self, selector, field, can_ignore=False):
-        files = self.get_files(selector)
+    def available_values(self, selector, field, can_ignore=False, skip_missing_fields=False, debug=False):
+        files = self.get_files(selector, skip_missing_fields=skip_missing_fields, debug=debug)
         if len(files) > 0:
             md, entry, indent = files[0]
             if field not in md:
@@ -98,8 +98,8 @@ class _DataIndex:
         values = sorted(set([md[field] for md, entry, ident in files]))
         return values
 
-    def get_file(self, selector):
-        files = list(self.each_file(selector))
+    def get_file(self, selector, skip_missing_fields=False, debug=False):
+        files = list(self.each_file(selector, skip_missing_fields=skip_missing_fields, debug=debug))
         assert len(files) == 1
         return files[0]
 
@@ -159,7 +159,7 @@ class _DataIndex:
 
         return title
 
-    def md_id(self, md, sel_order):
+    def md_id(self, md, sel_order, skip_missing_fields=False):
         """
         Valid <div id=*> format for id's in HTML:
 
@@ -188,7 +188,8 @@ class _DataIndex:
         for field in sel_order:
             if self.debug:
                 pprint.pprint({'field': field, 'md': md, 'sel_order':sel_order})
-            assert field in md
+            if not skip_missing_fields:
+                assert field in md
 
         field_value_sep = '_'
         sub_id_sep = '-'
@@ -207,13 +208,13 @@ class _DataIndex:
             )
 
         def id_str():
-            return sub_id_sep.join([sub_id(field) for field in sel_order])
+            return sub_id_sep.join([sub_id(field) for field in sel_order if field in md])
 
         ident = id_str()
 
         return ident
 
-def _sel_idx(idx, selector, field, debug=False):
+def _sel_idx(idx, selector, field, skip_missing_fields=False, debug=False):
     """
     Generalize this code across all the different OverlapType's:
 
@@ -244,12 +245,12 @@ def _sel_idx(idx, selector, field, debug=False):
     """
     md = dict()
     level = 0
-    for overlap, subtree in _sel(selector, idx, field, debug=debug):
+    for overlap, subtree in _sel(selector, idx, field, skip_missing_fields=skip_missing_fields, debug=debug):
         sel_order = SEL_ORDER[overlap]
-        for md, entry in _sel_all(selector, sel_order, level, md, subtree, debug=debug):
+        for md, entry in _sel_all(selector, sel_order, level, md, subtree, skip_missing_fields=skip_missing_fields, debug=debug):
             yield md, entry
 
-def _sel(selector, idx, sel_field, debug=False):
+def _sel(selector, idx, sel_field, skip_missing_fields=False, debug=False):
     """
     Given a subtree (idx) key-ed by sel_field values, iterate over sub-subtree whose values match selector.
 
@@ -287,7 +288,7 @@ def _sel(selector, idx, sel_field, debug=False):
     for value, subtree in idx.items():
         yield value, subtree
 
-def _sel_all(selector, sel_order, level, md, subtree, debug=False):
+def _sel_all(selector, sel_order, level, md, subtree, skip_missing_fields=False, debug=False):
     """
     Given a subtree key-ed like:
     subtree = {
@@ -310,13 +311,22 @@ def _sel_all(selector, sel_order, level, md, subtree, debug=False):
 
     :return:
     """
-    if level == len(sel_order):
-        yield dict(md), subtree
-        return
-    field = sel_order[level]
-    for value, next_subtree in _sel(selector, subtree[field], field, debug=debug):
+    while True:
+        if level == len(sel_order):
+            yield dict(md), subtree
+            return
+        field = sel_order[level]
+
+        if field not in subtree and skip_missing_fields:
+            # Subtree is missing field, but there's only one choice of field-value to use.
+            logging.warning("Skipping field={field} since it is missing".format(field=field))
+            level += 1
+        elif field in subtree:
+            break
+
+    for value, next_subtree in _sel(selector, subtree[field], field, skip_missing_fields=skip_missing_fields, debug=debug):
         md[field] = value
-        for md, entry in _sel_all(selector, sel_order, level + 1, md, next_subtree, debug=debug):
+        for md, entry in _sel_all(selector, sel_order, level + 1, md, next_subtree, skip_missing_fields=skip_missing_fields, debug=debug):
             yield md, entry
 
 def test_sel():
