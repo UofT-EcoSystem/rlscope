@@ -13,7 +13,8 @@ import numpy as np
 
 from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, basename as _b
 
-import GPUtil
+# import GPUtil
+from iml_profiler import GPUtil
 
 from iml_profiler.protobuf.pyprof_pb2 import Pyprof, MachineUtilization, DeviceUtilization, UtilizationSample
 
@@ -274,6 +275,20 @@ def sample_cpu_utilization():
         'device_name':device_name,
         'epoch_time_usec':epoch_time_usec,
     }
+
+def sample_cpu_total_resident_memory_bytes(pid):
+    parent = psutil.Process(pid=pid)
+    children = psutil.Process.children(recursive=True)
+    mem_infos = [proc.memory_info() for proc in [parent] + children]
+    total_resident_memory_bytes = np.sum(m.rss for m in mem_infos)
+    return total_resident_memory_bytes
+
+def sample_gpu_total_resident_memory_bytes(pid):
+    parent = psutil.Process(pid=pid)
+    children = psutil.Process.children(recursive=True)
+    mem_infos = [proc.memory_info() for proc in [parent] + children]
+    total_resident_memory_bytes = np.sum(m.rss for m in mem_infos)
+    return total_resident_memory_bytes
 
 def sample_gpu_utilization():
     """
