@@ -401,7 +401,7 @@ class ExperimentGroup(Experiment):
         if args.mode in ['all', 'run']:
             self.will_run = True
 
-        if args.mode in ['all', 'plot']:
+        if args.mode in ['plot']:
             self.will_plot = True
 
         # def _run(expr, train_stable_baselines_opts, stacked_args):
@@ -615,7 +615,7 @@ class ExperimentGroup(Experiment):
                                    subparser_argname='subcommand',
                                    use_pdb=False,
                                    ignore_unhandled_types=True,
-                                   ignore_argnames=['func', 'subparser'],
+                                   ignore_argnames=['func', 'subparser', 'mode'],
                                    debug=args.debug)
         return main_cmd
 

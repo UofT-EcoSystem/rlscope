@@ -32,3 +32,4 @@ _run_bench() {
 
 _run_bench "$@"
 _run_bench "$@" --analyze
+_run_bench "$@" --mode plot
