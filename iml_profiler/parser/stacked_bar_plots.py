@@ -73,6 +73,7 @@ class OverlapStackedBarPlot:
                  training_time=False,
                  remap_df=None,
                  ignore_inconsistent_overlap_regions=False,
+                 skip_plot=False,
                  title=None,
                  rotation=None,
                  x_type='rl-comparison',
@@ -122,6 +123,7 @@ class OverlapStackedBarPlot:
         self.operation = operation
         self.remap_df = remap_df
         self.ignore_inconsistent_overlap_regions = ignore_inconsistent_overlap_regions
+        self.skip_plot = skip_plot
         if self.resource_overlap is not None:
             # Normalize ('GPU', 'CPU') into ('CPU', 'GPU') for equality checks,
             self.resource_overlap = tuple(sorted(self.resource_overlap))
@@ -155,6 +157,10 @@ class OverlapStackedBarPlot:
     @property
     def _plot_data_path(self):
         return self._get_plot_path(ext='txt')
+
+    @property
+    def _plot_csv_path(self):
+        return self._get_plot_path(ext='csv')
 
     @property
     def _plot_path(self):
@@ -616,14 +622,19 @@ class OverlapStackedBarPlot:
             short_env = re.sub(r'Swingup', 'Swing', short_env)
         return short_env
 
-    def get_x_field(self, algo, env):
+    def get_x_field(self, algo, env, human_readable=False):
         short_env = self.get_x_env(env)
         if self.x_type == 'rl-comparison':
-            # x_field = "({algo}, {env})".format(
-            x_field = "{algo}\n{env}".format(
-                algo=algo,
-                env=short_env,
-            )
+            if human_readable:
+                x_field = "({algo}, {env})".format(
+                    algo=algo,
+                    env=short_env,
+                )
+            else:
+                x_field = "{algo}\n{env}".format(
+                    algo=algo,
+                    env=short_env,
+                )
         elif self.x_type == 'env-comparison':
             x_field = short_env
         elif self.x_type == 'algo-comparison':
@@ -634,15 +645,6 @@ class OverlapStackedBarPlot:
 
     def _plot_df(self):
         logging.info("Dataframe:\n{df}".format(df=self.df))
-
-        def group_to_label(group):
-            label = ' + '.join(group)
-            return label
-        x_fields = []
-        for index, row in self.df.iterrows():
-            x_field = self.get_x_field(row['algo'], row['env'])
-            x_fields.append(x_field)
-        self.df['x_field'] = x_fields
 
         if self.training_time:
             y2_field = 'total_training_time'
@@ -665,17 +667,41 @@ class OverlapStackedBarPlot:
             keep_zero=self.keep_zero,
             rotation=self.rotation,
             # groups: the "keys" into the data dictionary, which are the "stacks" found in each bar.
-            group_to_label=group_to_label,
+            group_to_label=self.group_to_label,
         )
-        self.dump_plot_data(self.df)
         stacked_bar_plot.plot()
+
+    def _add_df_fields(self, df, human_readable=False):
+        """
+        Add any additional fields to the data-frame.
+
+        In particular 'x_field' is a string used for the "x-tick" labels of the plot.
+        :param human_readable
+            If True, make it csv friendly (i.e. don't use newlines in string)
+        :return:
+        """
+
+        x_fields = []
+        for index, row in df.iterrows():
+            x_field = self.get_x_field(row['algo'], row['env'], human_readable=human_readable)
+            x_fields.append(x_field)
+        df['x_field'] = x_fields
+
+    def group_to_label(self, group):
+        label = ' + '.join(group)
+        return label
 
     def run(self):
         self._init_directories()
         self._check_can_add_training_time()
         self._read_df()
         self._normalize_df()
-        self._plot_df()
+        self._add_df_fields(self.df)
+        self.dump_plot_data()
+        if self.skip_plot:
+            logging.info("Skipping plotting {path} (--skip-plot)".format(path=self._plot_path))
+        else:
+            self._plot_df()
 
         # self.dump_js_data(norm_samples, device, start_time_sec)
         # plotter.add_data(norm_samples)
@@ -711,14 +737,41 @@ class OverlapStackedBarPlot:
     #     print("> HeatScalePlot @ plot data @ {path}".format(path=path))
     #     do_dump_json(js, path)
 
-    def dump_plot_data(self, plot_df):
-        path = self._plot_data_path
-        logging.info("> {name} @ plot data @ {path}".format(
+    def dump_plot_data(self):
+        human_df = self.human_df()
+
+        logging.info("> {name} @ human readable plot data @ {path}".format(
             name=self.__class__.__name__,
-            path=path))
-        with open(path, 'w') as f:
-            DataFrame.print_df(plot_df, file=f)
-        logging.info(plot_df)
+            path=self._plot_data_path))
+        with open(self._plot_data_path, 'w') as f:
+            DataFrame.print_df(human_df, file=f)
+
+        logging.info("> {name} @ csv plot data @ {path}".format(
+            name=self.__class__.__name__,
+            path=self._plot_csv_path))
+
+        human_df.to_csv(self._plot_csv_path, index=False)
+
+        # Print human readable plot data to stdout
+        logging.info(pprint_msg(human_df))
+
+    def human_df(self):
+        """
+        Convert tuple keys in data-frame to user-visible labels
+        ('CPU', 'GPU') => "CPU + GPU"
+        :return:
+        """
+        human_df = copy.copy(self.df)
+
+        self._add_df_fields(human_df, human_readable=True)
+
+        groups = [g for g in human_df.keys() if self._is_region(g)]
+        for group in groups:
+            human_group = self.group_to_label(group)
+            assert human_group not in human_df
+            human_df[human_group] = human_df[group]
+            del human_df[group]
+        return human_df
 
     def db_path(self, iml_dir):
         return sql_input_path(iml_dir)

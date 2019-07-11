@@ -299,6 +299,7 @@ class OverlapStackedBarTask(luigi.Task):
     # - regions: [('compute_advantage_estimates',), ('optimize_surrogate',), ('sample_action',)]
     # TODO: re-run MinitaurBulletEnv-v0
     ignore_inconsistent_overlap_regions = luigi.BoolParameter(description="If *.venn_js.json overlap data have inconsistent overlap regions, just use files that agree the most and ignore the rest", parsing=luigi.BoolParameter.EXPLICIT_PARSING)
+    skip_plot = luigi.BoolParameter(description="Don't plot *.png file; just output the *.csv file we WOULD plot", parsing=luigi.BoolParameter.EXPLICIT_PARSING)
     y_type = luigi.ChoiceParameter(choices=OverlapStackedBarPlot.SUPPORTED_Y_TYPES, default='percent',
                                    description=textwrap.dedent("""\
                                    What should we show on the y-axis of the stacked bar-plot?
