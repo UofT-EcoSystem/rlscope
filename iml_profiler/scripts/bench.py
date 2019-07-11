@@ -236,6 +236,9 @@ def main():
     print("Unavailable env ids:")
     print(textwrap.indent("\n".join(sorted(STABLE_BASELINES_UNAVAIL_ENV_IDS.keys())), prefix='  '))
 
+    if args.debug:
+        logging.info(pprint_msg({'args': args.__dict__}))
+
     args.func(parser, args, extra_argv)
 
 def detect_available_env(env_ids):
@@ -276,9 +279,13 @@ class Experiment:
         if not _e(to_file):
             return False
         with open(to_file) as f:
-            for line in f:
+            for lineno, line in enumerate(f, start=1):
                 line = line.rstrip()
                 if re.search(r'IML BENCH DONE', line):
+                    if self.args.debug:
+                        logging.info("Saw \"IML BENCH DONE\" in {path} @ line {lineno}; skipping.".format(
+                            lineno=lineno,
+                            path=to_file))
                     return True
         return False
 
@@ -400,7 +407,13 @@ class ExperimentGroup(Experiment):
 
         args = self.args
 
+        subparser = self.args.subparser
+        # Not multiprocessing friendly (cannot pickle)
+        del self.args.subparser
+
         def bench_log(expr):
+            if args.analyze:
+                return "{expr}.analyze.log".format(expr=expr)
             return "{expr}.log".format(expr=expr)
 
         def plot_log(expr, overlap_type, operation=None):
@@ -420,13 +433,13 @@ class ExperimentGroup(Experiment):
             self.will_plot = True
 
         # def _run(expr, train_stable_baselines_opts, stacked_args):
-        #     self.iml_bench(parser, 'train_stable_baselines.sh', train_stable_baselines_opts, suffix=bench_log(expr))
+        #     self.iml_bench(parser, subparser, 'train_stable_baselines.sh', train_stable_baselines_opts, suffix=bench_log(expr))
         #     self.stacked_plot(stacked_args, train_stable_baselines_opts, suffix=plot_log(expr))
 
         # (1) On vs off policy:
         expr = 'on_vs_off_policy'
         opts = ['--env-id', 'PongNoFrameskip-v4']
-        self.iml_bench(parser, 'train_stable_baselines.sh', opts, suffix=bench_log(expr))
+        self.iml_bench(parser, subparser, 'train_stable_baselines.sh', opts, suffix=bench_log(expr))
         overlap_type = 'ResourceOverlap'
         self.stacked_plot([
             '--overlap-type', overlap_type,
@@ -437,7 +450,7 @@ class ExperimentGroup(Experiment):
         # (2) Compare environments:
         expr = 'environments'
         opts = ['--bullet', '--algo', 'ppo2']
-        self.iml_bench(parser, 'train_stable_baselines.sh', opts, suffix=bench_log(expr))
+        self.iml_bench(parser, subparser, 'train_stable_baselines.sh', opts, suffix=bench_log(expr))
         overlap_type = 'OperationOverlap'
         self.stacked_plot([
             '--overlap-type', overlap_type,
@@ -460,7 +473,7 @@ class ExperimentGroup(Experiment):
         #     other = sum(r for r in regions if r != step)
         expr = 'algorithms'
         opts = ['--env-id', 'Walker2DBulletEnv-v0']
-        self.iml_bench(parser, 'train_stable_baselines.sh', opts, suffix=bench_log(expr))
+        self.iml_bench(parser, subparser, 'train_stable_baselines.sh', opts, suffix=bench_log(expr))
         overlap_type = 'OperationOverlap'
         self.stacked_plot([
             '--overlap-type', overlap_type,
@@ -489,7 +502,7 @@ class ExperimentGroup(Experiment):
             '--show-legend', 'False',
             '--rotation', '45',
         ]
-        self.iml_bench(parser, 'train_stable_baselines.sh', opts, suffix=bench_log(expr))
+        self.iml_bench(parser, subparser, 'train_stable_baselines.sh', opts, suffix=bench_log(expr))
         # - Statement: GPU utilization is low across all workloads.
         # - Plot: ResourceOverlap that compares [CPU] vs [CPU + GPU] breakdown
         # Need 2 plots
@@ -557,7 +570,7 @@ class ExperimentGroup(Experiment):
         # # (5) Different RL algorithms on the industrial-scale simulator: AirLearning environment:
         # expr = 'beefy_simulator'
         # # opts = ['--bullet', '--algo', 'ppo2']
-        # # self.iml_bench(parser, 'train_stable_baselines.sh', opts, suffix=bench_log(expr))
+        # # self.iml_bench(parser, subparser, 'train_stable_baselines.sh', opts, suffix=bench_log(expr))
         # overlap_type = 'OperationOverlap'
         # iml_dirs  = self.iml_dirs_air_learning()
         # self.stacked_plot([
@@ -674,20 +687,20 @@ class ExperimentGroup(Experiment):
 
         self._run_cmd(cmd=cmd, to_file=to_file, replace=True)
 
-    def iml_bench(self, parser, subcommand, subcmd_args, suffix='log'):
+    def iml_bench(self, parser, subparser, subcommand, subcmd_args, suffix='log'):
         if not self.will_run:
             return
-        main_cmd = self._get_main_cmd(parser, subcommand)
+        main_cmd = self._get_main_cmd(parser, subparser, subcommand)
         cmd = main_cmd + subcmd_args
         to_file = self._get_logfile(suffix=suffix)
         self._run_cmd(cmd=cmd, to_file=to_file)
 
-    def _get_main_cmd(self, parser, subcommand):
+    def _get_main_cmd(self, parser, subparser, subcommand):
         args = self.args
         cmd_args = copy.copy(args)
         cmd_args.subcommand = subcommand
         main_cmd = args_to_cmdline(parser, cmd_args,
-                                   subparser=args.subparser,
+                                   subparser=subparser,
                                    subparser_argname='subcommand',
                                    use_pdb=False,
                                    ignore_unhandled_types=True,
@@ -722,7 +735,9 @@ class StableBaselines(Experiment):
         # self.parser = parser
         self.args = args
         self.extra_argv = extra_argv
-        self.pool = ForkedProcessPool(name="iml_analyze_pool", max_workers=args.workers, debug=self.args.debug)
+        self.pool = ForkedProcessPool(name="iml_analyze_pool", max_workers=args.workers,
+                                      # debug=self.args.debug,
+                                      )
 
     def _analyze(self, algo, env_id):
         args = self.args
@@ -788,6 +803,13 @@ class StableBaselines(Experiment):
     def run(self, parser):
         args = self.args
 
+        subparser = self.args.subparser
+        # Not multiprocessing friendly (cannot pickle)
+        del self.args.subparser
+
+        # if args.debug:
+        # logging.info(pprint_msg({'StableBaselines.args': args.__dict__}))
+
         if args.subcommand == 'dummy_error.sh':
             self._error()
             return
@@ -806,10 +828,9 @@ class StableBaselines(Experiment):
             logging.info('Please provide either --env-id or --algo')
             sys.exit(1)
 
-        for algo, env_id in algo_env_pairs:
-            self._run(algo, env_id)
-
         if args.analyze:
+            if args.debug:
+                logging.info("Run --analyze")
             for algo, env_id in algo_env_pairs:
                 # self._analyze(algo, env_id)
                 self.pool.submit(
@@ -817,6 +838,9 @@ class StableBaselines(Experiment):
                     self._analyze,
                     algo, env_id,
                     sync=self.args.debug_single_thread)
+        else:
+            for algo, env_id in algo_env_pairs:
+                self._run(algo, env_id)
 
 def tee(cmd, to_file, append=False, check=True, dry_run=False, **kwargs):
     if dry_run:
