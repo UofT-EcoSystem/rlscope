@@ -608,6 +608,7 @@ class OverlapStackedBarPlot:
         if not self.long_env:
             short_env = re.sub(r'-v\d+$', '', short_env)
             short_env = re.sub(r'BulletEnv$', '', short_env)
+            short_env = re.sub(r'Env$', '', short_env)
             short_env = re.sub(r'NoFrameskip', '', short_env)
             short_env = re.sub(r'Inverted', 'Inv', short_env)
             short_env = re.sub(r'Double', 'Dbl', short_env)
@@ -1003,8 +1004,12 @@ class StackedBarPlot:
         for i, group in enumerate(self.groups):
             accum_ys += self.data[group]
             ys = copy.copy(accum_ys)
+            if self.y2_field is not None:
+                xs = ind
+            else:
+                xs = ind + bar_width/2
             bar_kwargs = {
-                'x': ind,
+                'x': xs,
                 # 'y': ys,
                 'height': ys,
                 'color': self.colors[i],

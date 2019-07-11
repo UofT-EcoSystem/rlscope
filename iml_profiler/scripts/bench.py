@@ -452,12 +452,13 @@ class ExperimentGroup(Experiment):
         opts = ['--bullet', '--algo', 'ppo2']
         self.iml_bench(parser, subparser, 'train_stable_baselines.sh', opts, suffix=bench_log(expr))
         overlap_type = 'OperationOverlap'
+        algo_env_pairs = self.pairs_by_algo('ppo2')
         self.stacked_plot([
             '--overlap-type', overlap_type,
             '--resource-overlap', json.dumps(['CPU']),
             '--y-type', 'percent',
             '--x-type', 'env-comparison',
-        ], suffix=plot_log(expr, overlap_type), train_stable_baselines_opts=opts)
+        ], suffix=plot_log(expr, overlap_type), algo_env_pairs=algo_env_pairs)
 
         # (3) Compare algorithms:
         # Want to show on-policy vs off-policy.
@@ -475,6 +476,7 @@ class ExperimentGroup(Experiment):
         opts = ['--env-id', 'Walker2DBulletEnv-v0']
         self.iml_bench(parser, subparser, 'train_stable_baselines.sh', opts, suffix=bench_log(expr))
         overlap_type = 'OperationOverlap'
+        algo_env_pairs = self.pairs_by_env('Walker2DBulletEnv-v0')
         self.stacked_plot([
             '--overlap-type', overlap_type,
             '--resource-overlap', json.dumps(['CPU']),
@@ -491,7 +493,7 @@ class ExperimentGroup(Experiment):
             """)]),
             '--y-type', 'percent',
             '--x-type', 'algo-comparison',
-        ], suffix=plot_log(expr, overlap_type), train_stable_baselines_opts=opts)
+        ], suffix=plot_log(expr, overlap_type), algo_env_pairs=algo_env_pairs)
 
         # (4) Compare all RL workloads:
         expr = 'all_rl_workloads'
@@ -509,21 +511,36 @@ class ExperimentGroup(Experiment):
         # - 1st plot shows GPU time spent is tiny
         #   TODO: we want categories to be 'CPU', 'CPU + GPU', 'GPU' (ResourceOverlap)
         overlap_type = 'ResourceOverlap'
+        algo_env_pairs = self.algo_env_pairs()
         self.stacked_plot([
             '--overlap-type', overlap_type,
             '--y-type', 'percent',
-        ] + rl_workload_dims, suffix=plot_log(expr, overlap_type), train_stable_baselines_opts=opts)
+        ] + rl_workload_dims, suffix=plot_log(expr, overlap_type), algo_env_pairs=algo_env_pairs)
+
         # - 2nd plot shows where CPU time is going
         #   TODO: we want categories to be 'C++ framework', 'CUDA API C', 'Python' (CategoryOverlap)
         #   TODO: For WHAT GPU operation...? We need to merge everyone into an 'Inference' category first.
         overlap_type = 'CategoryOverlap'
+        # PROBLEM: sample_action is q_forward for DQN... but that means it appears in an entirely separate file.
+        # What we'd like to do:
+        # - read the q_forward CategoryOverlap file.
+        # - IF operation == q_forward, THEN remap it to sample_action.
+        # - SOLUTION:
+        #   - allow specifying multiple selector's; currently we can only specify 1 selector.
+        #     e.g. --selectors "[{selector-1}, {selector-2}]"
+        # - For Sri meeting:
+        #   - remove DQN for now.
+        #   - fix janky plot x-axis alignment
+        # TODO: keep dqn and use --selectors to select different files and remap-df to remap dqn[q_forward] to dqn[sample_action]
+        algo_env_pairs = [(algo, env) for algo, env in algo_env_pairs if not re.search(r'dqn', algo)]
+
         gpu_operations = ['sample_action']
         for gpu_operation in gpu_operations:
             self.stacked_plot([
                 '--overlap-type', overlap_type,
                 '--resource-overlap', json.dumps(['CPU']),
                 '--operation', gpu_operation,
-
+                # '--selectors', gpu_operation,
                 '--remap-df', json.dumps([textwrap.dedent("""
                     keep_regions = [
                         ('Python',),
@@ -551,7 +568,7 @@ class ExperimentGroup(Experiment):
                 # """)]),
 
                 '--y-type', 'percent',
-            ] + rl_workload_dims, suffix=plot_log(expr, overlap_type, gpu_operation), train_stable_baselines_opts=opts)
+            ] + rl_workload_dims, suffix=plot_log(expr, overlap_type, gpu_operation), algo_env_pairs=algo_env_pairs)
 
         # - Statement: GPU operations are dominated by CPU time. In particular, CUDA API C
         #   time is a dominant contributor.
@@ -579,6 +596,18 @@ class ExperimentGroup(Experiment):
         #     '--y-type', 'percent',
         #     '--x-type', 'algo-comparison',
         # ], suffix=plot_log(expr, overlap_type), iml_dirs=iml_dirs)
+
+    def algos(self):
+        return set(algo for algo, env in self.algo_env_pairs())
+
+    def envs(self):
+        return set(env for algo, env in self.algo_env_pairs())
+
+    def pairs_by_algo(self, algo):
+        return set((a, e) for a, e in self.algo_env_pairs() if a == algo)
+
+    def pairs_by_env(self, env):
+        return set((a, e) for a, e in self.algo_env_pairs() if e == env)
 
     def iml_directory(self, algo, env_id):
         iml_directory = _j(self.args.dir, algo, env_id)
@@ -618,7 +647,7 @@ class ExperimentGroup(Experiment):
         iml_dirs = [self.iml_directory(algo, env) for algo, env in algo_env_pairs]
         return iml_dirs
 
-    def iml_dirs_train_stable_baselines(self, train_stable_baselines_opts, debug=False):
+    def algo_env_pairs_train_stable_baselines(self, train_stable_baselines_opts, debug=False):
         args = self.args
 
         parser_train_stable_baselines = argparse.ArgumentParser()
@@ -640,10 +669,11 @@ class ExperimentGroup(Experiment):
             else:
                 logging.info("Exiting due to failed plot; use --skip-error to ignore")
                 sys.exit(1)
-        iml_dirs = [self.iml_directory(algo, env_id) for algo, env_id in algo_env_pairs]
-        return iml_dirs
+        return algo_env_pairs
+        # iml_dirs = [self.iml_directory(algo, env_id) for algo, env_id in algo_env_pairs]
+        # return iml_dirs
 
-    def stacked_plot(self, stacked_args, suffix, iml_dirs=None, train_stable_baselines_opts=None, debug=False):
+    def stacked_plot(self, stacked_args, suffix, algo_env_pairs=None, train_stable_baselines_opts=None, debug=False):
         if not self.will_plot:
             return
         args = self.args
@@ -659,15 +689,26 @@ class ExperimentGroup(Experiment):
         # if args.pdb:
         #     cmd.append('--pdb')
 
+        if algo_env_pairs is None:
+            algo_env_pairs = []
+        algo_env_pairs = list(algo_env_pairs)
+
         if train_stable_baselines_opts is not None:
-            iml_dirs = self.iml_dirs_train_stable_baselines(train_stable_baselines_opts, debug=debug)
-            cmd.extend([
-                '--iml-directories', json.dumps(iml_dirs),
-            ])
-        if iml_dirs is None:
-            raise NotImplementedError("Not sure what to use for --iml-directories")
-        if len(iml_dirs) == 0:
+            algo_env_pairs.extend(self.algo_env_pairs_train_stable_baselines(train_stable_baselines_opts, debug=debug))
+        # if algo_env_pairs is None:
+        #     raise NotImplementedError("Not sure what to use for --iml-directories")
+        if len(algo_env_pairs) == 0:
             raise NotImplementedError("Need at least one directory for --iml-directories but saw 0.")
+        def sort_key(algo_env):
+            """
+            Show bar graphs order by algo first, then environment.
+            """
+            algo, env = algo_env
+            return (algo, env)
+        # Remove duplicates.
+        algo_env_pairs = list(set(algo_env_pairs))
+        algo_env_pairs.sort(key=sort_key)
+        iml_dirs = [self.iml_directory(algo, env_id) for algo, env_id in algo_env_pairs]
         cmd.extend([
             '--iml-directories', json.dumps(iml_dirs),
         ])
@@ -688,7 +729,10 @@ class ExperimentGroup(Experiment):
         self._run_cmd(cmd=cmd, to_file=to_file, replace=True)
 
     def iml_bench(self, parser, subparser, subcommand, subcmd_args, suffix='log'):
+        args = self.args
         if not self.will_run:
+            return
+        if args.analyze and not self.will_analyze:
             return
         main_cmd = self._get_main_cmd(parser, subparser, subcommand)
         cmd = main_cmd + subcmd_args
