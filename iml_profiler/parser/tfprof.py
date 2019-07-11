@@ -12,7 +12,8 @@ from iml_profiler.parser.stats import KernelTime
 
 from iml_profiler.parser.trace_events import TraceEventsDumper, dump_category_times
 
-from iml_profiler.parser.db import SQLCategoryTimesReader, sql_input_path, sql_get_source_files
+from iml_profiler.parser.db import SQLCategoryTimesReader, sql_input_path, sql_get_source_files, \
+    Machine, Process, Phase
 
 from iml_profiler.parser.readers import TFProfCategoryTimesReader, \
    DEFAULT_group_by_device, \
@@ -1333,6 +1334,7 @@ class OverlapComputer:
     OVERLAP_TYPES = ['OperationOverlap', 'ResourceOverlap', 'ResourceSubplot', 'CategoryOverlap', 'default']
     def compute_process_timeline_overlap(self,
                                          pre_reduce,
+                                         machine_name=None,
                                          process_name=None,
                                          phase_name=None,
                                          start_time_us=None,
@@ -1364,6 +1366,7 @@ class OverlapComputer:
         category_times = sql_reader.parse_timeline(
             process_name=process_name,
             phase_name=phase_name,
+            machine_name=machine_name,
             start_time_us=start_time_us,
             end_time_us=end_time_us,
             pre_reduce=pre_reduce,
@@ -1451,6 +1454,7 @@ class OverlapComputer:
 
         pprint.pprint({
             'overlap_metadata': overlap_metadata,
+            'machine_name':machine_name,
             'process_name':process_name,
             'phase_name':phase_name})
 
@@ -1697,70 +1701,130 @@ class OverlapTypeInterface:
             operation_overlap[new_key] = value
         return operation_overlap
 
-    def dump_json_files(self, new_overlap, new_overlap_metadata, directory, process_metadata, process_name, phase_name):
-        assert type(process_metadata) == ProcessMetadata
+    def dump_json_files(self, sql_reader, new_overlap, new_overlap_metadata, directory, machine_name, process_name, phase_name):
         operation_overlap = self.as_js_dict(new_overlap)
         overlap_metadata_dict = self.as_js_dict(new_overlap_metadata.regions)
-        self.dump_overlap(operation_overlap, overlap_metadata_dict, process_metadata,
-                          directory=directory, process_name=process_name, phase_name=phase_name,
-                          path=self._overlap_json(directory, process_name, phase_name),
-                          venn_js_path=self._overlap_venn_js_json(directory, process_name, phase_name))
+        process = sql_reader.process(machine_name=machine_name, process_name=process_name)
+        machine = sql_reader.machine(machine_name=machine_name)
+        phase = sql_reader.phase(machine_name=machine_name, process_name=process_name, phase_name=phase_name)
+        self.dump_overlap(
+            operation_overlap, overlap_metadata_dict,
+            directory=directory,
+            process=process,
+            machine=machine,
+            phase=phase,
+            path=self._overlap_json(directory, machine, process, phase),
+            venn_js_path=self._overlap_venn_js_json(directory, machine, process, phase))
 
-    def _add_overlap_region_metadata(self, overlap_metadata_dict, process_metadata, md):
-        assert type(process_metadata) == ProcessMetadata
+    def _add_process_md(self, md, process):
+        if process is None:
+            return
+
+        md['process'] = process.process_name
+
+        if process.percent_complete is not None:
+            md['percent_complete'] = process.percent_complete
+
+        if process.num_timesteps is not None:
+            md['num_timesteps'] = process.num_timesteps
+
+        if process.total_timesteps is not None:
+            md['total_timesteps'] = process.total_timesteps
+
+    def _add_machine_md(self, md, machine):
+        if machine is None:
+            return
+
+        md['machine'] = machine.machine_name
+
+    def _add_phase_md(self, md, phase):
+        if phase is None:
+            return
+
+        md['phase'] = phase.phase_name
+
+    def _add_overlap_region_metadata(
+            self, overlap_metadata_dict, md,
+            overlap_type=None,
+            process=None, machine=None, phase=None):
         overlap_region = OverlapMetadata.merge_regions(overlap_metadata_dict.values())
         md['start_time_usec'] = overlap_region.start_time_usec
         md['end_time_usec'] = overlap_region.end_time_usec
         md['num_events'] = overlap_region.num_events
-        # TODO: add md[percent_complete, num_timesteps, total_timesteps]
-        md['percent_complete'] = process_metadata.training_progress.percent_complete
-        if process_metadata.training_progress.HasField("num_timesteps"):
-            md['num_timesteps'] = process_metadata.training_progress.num_timesteps
-        if process_metadata.training_progress.HasField("total_timesteps"):
-            md['total_timesteps'] = process_metadata.training_progress.total_timesteps
 
-    def _overlap_json(self, directory, process_name, phase_name):
-        return _j(directory, "{OverlapType}{proc}{phase}.overlap_js.json".format(
+        if overlap_type is not None:
+            md['overlap_type'] = overlap_type
+
+        self._add_process_md(md, process)
+        self._add_machine_md(md, machine)
+        self._add_phase_md(md, phase)
+
+    def _overlap_json(self, directory, machine_name, process_name, phase_name):
+        if type(machine_name) == Machine:
+            machine_name = machine_name.machine_name
+        if type(process_name) == Process:
+            process_name = process_name.process_name
+        if type(phase_name) == Phase:
+            phase_name = phase_name.phase_name
+        return _j(directory, "{OverlapType}{mach}{proc}{phase}.overlap_js.json".format(
             OverlapType=self.overlap_type,
+            mach=machine_suffix(machine_name),
             proc=process_suffix(process_name),
             phase=phase_suffix(phase_name),
         ))
 
-    def _overlap_venn_js_json(self, directory, process_name, phase_name):
-        return _j(directory, "{OverlapType}{proc}{phase}.venn_js.json".format(
+    def _overlap_venn_js_json(self, directory, machine_name, process_name, phase_name):
+        if type(machine_name) == Machine:
+            machine_name = machine_name.machine_name
+        if type(process_name) == Process:
+            process_name = process_name.process_name
+        if type(phase_name) == Phase:
+            phase_name = phase_name.phase_name
+        return _j(directory, "{OverlapType}{mach}{proc}{phase}.venn_js.json".format(
             OverlapType=self.overlap_type,
+            mach=machine_suffix(machine_name),
             proc=process_suffix(process_name),
             phase=phase_suffix(phase_name),
         ))
 
-    def dump_overlap(self, operation_overlap, overlap_metadata_dict, process_metadata,
-                     directory=None, process_name=None, phase_name=None,
+    def dump_overlap(self, operation_overlap, overlap_metadata_dict,
+                     directory,
+                     process=None, machine=None, phase=None,
                      path=None, venn_js_path=None):
         md = dict()
-        md['overlap_type'] = self.overlap_type
-        if process_name is not None:
-            md['process'] = process_name
-        if phase_name is not None:
-            md['phase'] = phase_name
-        self._add_overlap_region_metadata(overlap_metadata_dict, process_metadata, md)
+        self._add_overlap_region_metadata(overlap_metadata_dict, md,
+                                          overlap_type=self.overlap_type,
+                                          process=process,
+                                          machine=machine,
+                                          phase=phase)
         if self.should_dump_as_is:
-            return self.dump_overlap_as_is(operation_overlap, md,
-                     directory=directory, process_name=process_name, phase_name=phase_name,
-                     path=path)
+            return self.dump_overlap_as_is(
+                operation_overlap, md,
+                directory=directory,
+                process=process, machine=machine, phase=phase,
+                path=path)
 
         # self._add_overlap_region_metadata(new_overlap_metadata, md)
         return self._dump_overlap(operation_overlap, md,
-                                  directory=directory, process_name=process_name, phase_name=phase_name,
+                                  directory=directory,
+                                  machine=machine,
+                                  process=process,
+                                  phase=phase,
                                   path=path, venn_js_path=venn_js_path)
 
 
     def _dump_overlap(self, operation_overlap, metadata,
-                      directory=None, process_name=None, phase_name=None,
+                      directory=None,
+                      machine=None,
+                      process=None,
+                      phase=None,
                       path=None, venn_js_path=None):
         if path is None:
-            path = self._overlap_json(directory, process_name, phase_name)
+            assert directory is not None
+            path = self._overlap_json(directory, machine, process, phase)
         if venn_js_path is None:
-            venn_js_path = self._overlap_venn_js_json(directory, process_name, phase_name)
+            assert directory is not None
+            venn_js_path = self._overlap_venn_js_json(directory, machine, process, phase)
         logging.info("> Dump data for {overlap_type} @ {path}".format(path=path, overlap_type=self.overlap_type))
         dumper = OverlapJSONDumper(operation_overlap, metadata)
         dumper.dump(path)
@@ -1773,10 +1837,11 @@ class OverlapTypeInterface:
             pprint.pprint({'venn_js':venn_js})
 
     def dump_overlap_as_is(self, operation_overlap, metadata,
-                           directory=None, process_name=None, phase_name=None,
+                           directory,
+                           machine=None, process=None, phase=None,
                            path=None):
         if path is None:
-            path = self._overlap_json(directory, process_name, phase_name)
+            path = self._overlap_json(directory, machine, process, phase)
         # if venn_js_path is None:
         #     venn_js_path = self._overlap_venn_js_json(directory, process_name, phase_name)
         logging.info("> Dump data for {overlap_type} @ {path}".format(path=path, overlap_type=self.overlap_type))
@@ -2178,28 +2243,44 @@ class OperationOverlapType(OverlapTypeInterface):
             overlap, overlap_metadata,
             group_self_overlap=True)
 
-    def _operation_overlap_json(self, directory, process_name, phase_name, resources):
-        return _j(directory, "{OverlapType}{proc}{phase}{resources}.overlap_js.json".format(
+    def _operation_overlap_json(self, directory, machine_name, process_name, phase_name, resources):
+        if type(machine_name) == Machine:
+            machine_name = machine_name.machine_name
+        if type(process_name) == Process:
+            process_name = process_name.process_name
+        if type(phase_name) == Phase:
+            phase_name = phase_name.phase_name
+        return _j(directory, "{OverlapType}{mach}{proc}{phase}{resources}.overlap_js.json".format(
             OverlapType=self.overlap_type,
+            mach=machine_suffix(machine_name),
             proc=process_suffix(process_name),
             phase=phase_suffix(phase_name),
             resources=resources_suffix(resources),
         ))
 
-    def _operation_overlap_venn_js_json(self, directory, process_name, phase_name, resources):
-        return _j(directory, "{OverlapType}{proc}{phase}{resources}.venn_js.json".format(
+    def _operation_overlap_venn_js_json(self, directory, machine_name, process_name, phase_name, resources):
+        if type(machine_name) == Machine:
+            machine_name = machine_name.machine_name
+        if type(process_name) == Process:
+            process_name = process_name.process_name
+        if type(phase_name) == Phase:
+            phase_name = phase_name.phase_name
+        return _j(directory, "{OverlapType}{mach}{proc}{phase}{resources}.venn_js.json".format(
             OverlapType=self.overlap_type,
+            mach=machine_suffix(machine_name),
             proc=process_suffix(process_name),
             phase=phase_suffix(phase_name),
             resources=resources_suffix(resources),
         ))
 
-    def dump_json_files(self, new_overlap, new_overlap_metadata, directory, process_metadata, process_name, phase_name):
-        assert type(process_metadata) == ProcessMetadata
+    def dump_json_files(self, sql_reader, new_overlap, new_overlap_metadata, directory, machine_name, process_name, phase_name):
         # Q: Why don't we need to call as_js_dict here?
         # JAMES LEFT OFF
         overlap = self.as_js_dict(new_overlap)
         overlap_metadata_dict = self.as_js_dict(new_overlap_metadata.regions)
+        process = sql_reader.process(machine_name=machine_name, process_name=process_name)
+        machine = sql_reader.machine(machine_name=machine_name)
+        phase = sql_reader.phase(machine_name=machine_name, process_name=process_name, phase_name=phase_name)
         for resources, op_overlap in overlap.items():
             # operation_overlap = self.as_js_dict(new_overlap)
             if self.debug:
@@ -2210,16 +2291,17 @@ class OperationOverlapType(OverlapTypeInterface):
                 })
             md = dict()
             md.update({
-                'overlap_type': self.overlap_type,
-                'process': process_name,
-                'phase': phase_name,
                 'resource_overlap': sorted(resources),
             })
-            self._add_overlap_region_metadata(overlap_metadata_dict[resources], process_metadata, md)
+            self._add_overlap_region_metadata(overlap_metadata_dict[resources], md,
+                                              overlap_type=self.overlap_type,
+                                              process=process,
+                                              machine=machine,
+                                              phase=phase)
             self._dump_overlap(
                 op_overlap, md,
-                path=self._operation_overlap_json(directory, process_name, phase_name, resources),
-                venn_js_path=self._operation_overlap_venn_js_json(directory, process_name, phase_name, resources))
+                path=self._operation_overlap_json(directory, machine, process, phase, resources),
+                venn_js_path=self._operation_overlap_venn_js_json(directory, machine, process, phase, resources))
 
     def as_js_dict(self, new_overlap):
         # def _group_by_resource_ops(self, new_overlap):
@@ -2343,25 +2425,39 @@ class CategoryOverlapType(OverlapTypeInterface):
 
         return new_overlap, new_overlap_metadata
 
-    def _category_overlap_json(self, directory, process_name, phase_name, ops, resources):
-        return _j(directory, "{OverlapType}{proc}{phase}{ops}{resources}.overlap_js.json".format(
+    def _category_overlap_json(self, directory, machine_name, process_name, phase_name, ops, resources):
+        if type(machine_name) == Machine:
+            machine_name = machine_name.machine_name
+        if type(process_name) == Process:
+            process_name = process_name.process_name
+        if type(phase_name) == Phase:
+            phase_name = phase_name.phase_name
+        return _j(directory, "{OverlapType}{mach}{proc}{phase}{ops}{resources}.overlap_js.json".format(
             OverlapType=self.overlap_type,
+            mach=machine_suffix(machine_name),
             proc=process_suffix(process_name),
             phase=phase_suffix(phase_name),
             ops=ops_suffix(ops),
             resources=resources_suffix(resources),
         ))
 
-    def _category_overlap_venn_js_json(self, directory, process_name, phase_name, ops, resources):
-        return _j(directory, "{OverlapType}{proc}{phase}{ops}{resources}.venn_js.json".format(
+    def _category_overlap_venn_js_json(self, directory, machine_name, process_name, phase_name, ops, resources):
+        if type(machine_name) == Machine:
+            machine_name = machine_name.machine_name
+        if type(process_name) == Process:
+            process_name = process_name.process_name
+        if type(phase_name) == Phase:
+            phase_name = phase_name.phase_name
+        return _j(directory, "{OverlapType}{mach}{proc}{phase}{ops}{resources}.venn_js.json".format(
             OverlapType=self.overlap_type,
+            mach=machine_suffix(machine_name),
             proc=process_suffix(process_name),
             phase=phase_suffix(phase_name),
             ops=ops_suffix(ops),
             resources=resources_suffix(resources),
         ))
 
-    def dump_json_files(self, new_overlap, new_overlap_metadata, directory, process_metadata, process_name, phase_name):
+    def dump_json_files(self, sql_reader, new_overlap, new_overlap_metadata, directory, machine_name, process_name, phase_name):
         """
         For op in ops(process, phases):
           key = CategoryKey[ops=[op]]
@@ -2376,9 +2472,11 @@ class CategoryOverlapType(OverlapTypeInterface):
         :param phase_name:
         :return:
         """
-        assert type(process_metadata) == ProcessMetadata
         overlap = self.as_js_dict(new_overlap)
         overlap_metadata_dict = self.as_js_dict(new_overlap_metadata.regions)
+        process = sql_reader.process(machine_name=machine_name, process_name=process_name)
+        machine = sql_reader.machine(machine_name=machine_name)
+        phase = sql_reader.phase(machine_name=machine_name, process_name=process_name, phase_name=phase_name)
         if self.debug:
             pprint.pprint({
                 'name':"{OverlapType}.dump_json_files".format(OverlapType=self.overlap_type),
@@ -2389,11 +2487,12 @@ class CategoryOverlapType(OverlapTypeInterface):
             op = next(iter(ops))
             for resources, category_overlap in resource_to_category_overlap.items():
                 md = dict()
-                self._add_overlap_region_metadata(overlap_metadata_dict[ops][resources], process_metadata, md)
+                self._add_overlap_region_metadata(overlap_metadata_dict[ops][resources], md,
+                                                  overlap_type=self.overlap_type,
+                                                  process=process,
+                                                  machine=machine,
+                                                  phase=phase)
                 md.update({
-                    'overlap_type': self.overlap_type,
-                    'process': process_name,
-                    'phase': phase_name,
                     # TODO: For now we only are computed category overlap for CPU;
                     # in the future we may have more fine-grained GPU categories.
                     # 'resource_overlap': sorted([CATEGORY_CPU]),
@@ -2402,8 +2501,9 @@ class CategoryOverlapType(OverlapTypeInterface):
                 })
                 self._dump_overlap(
                     category_overlap, md,
-                    path=self._category_overlap_json(directory, process_name, phase_name, ops, resources),
-                    venn_js_path=self._category_overlap_venn_js_json(directory, process_name, phase_name, ops, resources))
+                    # No directory; use paths specified by path/venn_js_path
+                    path=self._category_overlap_json(directory, machine, process, phase, ops, resources),
+                    venn_js_path=self._category_overlap_venn_js_json(directory, machine, process, phase, ops, resources))
 
     def as_js_dict(self, new_overlap):
         # def _group_by_resource_ops(self, new_overlap):

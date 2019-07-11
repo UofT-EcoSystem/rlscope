@@ -2018,6 +2018,22 @@ class Profiler:
                 and make sure its the ONLY process that does so.
                 """).format(proc=self.process_name))
 
+        if not ( 0. <= percent_complete <= 1. ):
+            raise RuntimeError(
+                textwrap.dedent("""\
+                IML ERROR: iml.prof.report_progress(percent_complete=...) expects:
+                  0 <= percent_complete <= 1
+                But saw percent_complete={perc}
+                  
+                Typical usage looks like:
+                
+                  # The training loop of your ML script:
+                  for t in range(total_timesteps):
+                      iml.prof.report_progress(percent_complete=t/float(total_timesteps))
+                """).format(
+                    perc=percent_complete,
+                ))
+
         if self.num_timesteps is not None:
             self.num_timesteps = num_timesteps
 

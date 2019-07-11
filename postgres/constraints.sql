@@ -15,6 +15,8 @@ ALTER TABLE Process ADD CONSTRAINT Process_fk_01
   UNIQUE(process_name);
 ALTER TABLE Process ADD CONSTRAINT Process_fk_02
   FOREIGN KEY(parent_process_id) REFERENCES Process(process_id);
+ALTER TABLE Process ADD CONSTRAINT Process_fk_03
+  FOREIGN KEY(machine_id) REFERENCES Machine(machine_id);
 
 ALTER TABLE ProcessDependency ADD CONSTRAINT ProcessDependency_fk_01
   UNIQUE(process_name_parent, process_name_child);
@@ -30,4 +32,6 @@ ALTER TABLE DeviceUtilization ADD CONSTRAINT DeviceUtilization_fk_02
 
 ALTER TABLE Device ADD CONSTRAINT Device_fk_01
   UNIQUE(device_name);
+ALTER TABLE Device ADD CONSTRAINT Device_fk_02
+  FOREIGN KEY(machine_id) REFERENCES Machine(machine_id);
 

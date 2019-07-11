@@ -1915,7 +1915,7 @@ class ResourceOverlapPlotData:
 
         for process_name in process_names:
             # phases = self.sql_reader.process_phase_start_end_times(process_name, debug=self.debug)
-            phases = self.sql_reader.process_phases(process_name, debug=self.debug)
+            phases = self.sql_reader.phases(process_name=process_name, debug=self.debug)
             for phase in phases:
                 pprint.pprint({'process_name':process_name, 'phase': phase})
                 # self.plot_process_phase(process_name, phase['phase_name'])
@@ -2221,24 +2221,35 @@ class UtilizationPlot:
         #     process_names = debug_process_names
 
         machine_names = self.sql_reader.machine_names
+        if self.debug:
+            logging.info(pprint_msg({
+                'machine_names':machine_names}))
 
         for machine_name in machine_names:
-            process_names = self.sql_reader.process_names(machine_name)
+            process_names = self.sql_reader.process_names(machine_name, debug=self.debug)
+            if self.debug:
+                logging.info(pprint_msg({
+                    'machine_name':machine_name,
+                    'process_names':process_names}))
 
             # for process_name in debug_process_names:
             for process_name in process_names:
 
-                # phase_names = self.sql_reader.process_phases(machine_name, process_name, debug=self.debug)
+                # phase_names = self.sql_reader.phases(machine_name, process_name, debug=self.debug)
                 # phases = [self.sql_reader.process_phase(process_name, phase_name, debug=self.debug)
                 #           for phase_name in phase_names]
-                phases = self.sql_reader.process_phases(machine_name, process_name, debug=self.debug)
+                phases = self.sql_reader.phases(machine_name, process_name, debug=self.debug)
+                if self.debug:
+                    logging.info(pprint_msg({
+                        'machine_name':machine_name,
+                        'process_name':process_name,
+                        'phases':phases}))
                 # if UtilizationPlot.DEBUG_MINIGO:
                 #     phases = [phase for phase in phases if phase.phase_name in debug_phases]
 
                 for phase in phases:
-                    pprint.pprint({'process_name':process_name, 'phase': phase})
                     # self.plot_process_phase(process_name, phase['phase_name'])
-                    self.plot_process_phase(machine_name, process_name, phase)
+                    self.plot_process_phase(machine_name, process_name, phase=phase)
 
     def plot_process_phase(self, machine_name=None, process_name=None, phase_name=None, phase=None):
         if phase is not None and phase_name is None:
@@ -2272,6 +2283,7 @@ class UtilizationPlot:
         # else:
         overlap, proc_stats, overlap_metadata = overlap_computer.compute_process_timeline_overlap(
             overlap_obj.pre_reduce,
+            machine_name=machine_name,
             process_name=process_name,
             phase_name=phase_name,
             debug_memoize=self.debug_memoize,
@@ -2287,7 +2299,14 @@ class UtilizationPlot:
         new_overlap, new_overlap_metadata = overlap_obj.post_reduce(new_overlap, overlap_metadata)
         # assert len(new_overlap) > 0
 
-        overlap_obj.dump_json_files(new_overlap, new_overlap_metadata, self.directory, process_metadata, process_name, phase_name)
+        overlap_obj.dump_json_files(
+            self.sql_reader,
+            new_overlap,
+            new_overlap_metadata,
+            self.directory,
+            machine_name=machine_name,
+            process_name=process_name,
+            phase_name=phase_name)
 
         if self.overlap_type == 'default':
             operation_overlap = overlap_obj.as_js_dict(new_overlap)
@@ -2569,7 +2588,7 @@ class HeatScalePlot:
         #    CON: time-consuming to implement.
 
         start_time_sec = self.sql_reader.trace_start_time_sec
-        for device in self.sql_reader.util_devices:
+        for device in self.sql_reader.util_devices():
             samples = self.sql_reader.util_samples(device)
             # png = self.get_util_scale_png(device.device_id, device.device_name)
             # plotter = HeatScale(
@@ -2610,8 +2629,8 @@ class HeatScalePlot:
         def add_device_metadata(md, device):
             md['device_name'] = device.device_name
             md['device_id'] = device.device_id
-            md['machine_id'] = device.machine_id
             md['machine_name'] = device.machine_name
+            md['machine_id'] = device.machine_id
 
         def add_HeatScale_metadata(md):
             md['plot_type'] = 'HeatScale'

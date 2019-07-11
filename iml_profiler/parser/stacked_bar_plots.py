@@ -70,6 +70,7 @@ class OverlapStackedBarPlot:
                  overlap_type,
                  resource_overlap=None,
                  operation=None,
+                 training_time=False,
                  remap_df=None,
                  ignore_inconsistent_overlap_regions=False,
                  title=None,
@@ -113,6 +114,8 @@ class OverlapStackedBarPlot:
         if len(iml_directories) == 0:
             raise ValueError("OverlapStackedBarPlot expects at least 1 trace-file directory for iml_directories")
         self.iml_directories = iml_directories
+        self.training_time = training_time
+        self.should_add_training_time = training_time
         self.directory = directory
         self.overlap_type = overlap_type
         self.resource_overlap = resource_overlap
@@ -217,6 +220,10 @@ class OverlapStackedBarPlot:
         elif self.y_type == 'seconds':
             return "Time breakdown (seconds)"
         raise NotImplementedError
+
+    @property
+    def plot_y2_axis_label(self):
+        return "Total training time (seconds)"
 
     @property
     def plot_title(self):
@@ -334,7 +341,7 @@ class OverlapStackedBarPlot:
             # NOTE: if there's only one choice, we don't need to add it to selector.
             # selector[field_name] = choices[0]
 
-    def each_df(self):
+    def each_vd(self):
         for iml_dir in self.iml_directories:
             idx = self.data_index[iml_dir]
 
@@ -360,21 +367,45 @@ class OverlapStackedBarPlot:
 
             md, entry, ident = idx.get_file(selector=selector)
             vd = VennData(entry['venn_js_path'])
+            yield (algo, env), vd
+
+    def each_df(self):
+        for (algo, env), vd in self.each_vd():
             stacked_dict = vd.stacked_bar_dict()
-            path = entry['venn_js_path']
+            md = vd.metadata()
+            path = vd.path
 
             def as_list(v):
                 if type(v) == list:
                     return v
                 return [v]
-            new_stacked_dict = dict((k, as_list(v)) for k, v in stacked_dict.items())
-            new_stacked_dict['algo'] = as_list(algo)
-            new_stacked_dict['env'] = as_list(env)
+            new_stacked_dict = dict(stacked_dict)
+            new_stacked_dict['algo'] = algo
+            new_stacked_dict['env'] = env
+            if self.should_add_training_time:
+                total_size = vd.total_size()
+                # Extrapolate the total training time using percent_complete
+                assert 'percent_complete' in md
+                total_training_time = extrap_total_training_time(total_size, md['percent_complete'])
+                new_stacked_dict['total_training_time'] = total_training_time
+            new_stacked_dict = dict((k, as_list(v)) for k, v in new_stacked_dict.items())
             df = pd.DataFrame(new_stacked_dict)
 
             df = self._remap_df(df)
 
             yield (algo, env), self._regions(df), path, df
+
+    def _check_can_add_training_time(self):
+        if not self.training_time:
+            return
+        for (algo, env), vd in self.each_vd():
+            if 'percent_complete' not in vd.md:
+                raise RuntimeError((
+                    "Didn't find percent_complete attribute in metadata of overlap plot data @ {path}; "
+                    "remove --training-time to plot without training time").format(
+                    path=vd.path,
+                ))
+        return True
 
     def _check_overlap_json_files(self):
         regions_to_paths = dict()
@@ -554,6 +585,9 @@ class OverlapStackedBarPlot:
 
             return ret
 
+        if 'total_training_time' in self.df:
+            self.df['total_training_time'] = transform_usec_to_sec(self.df, 'total_training_time')
+
         if self.y_type == 'seconds':
             for group in self.regions:
                 self.df[group] = transform_usec_to_sec(self.df, group)
@@ -604,13 +638,20 @@ class OverlapStackedBarPlot:
             x_fields.append(x_field)
         self.df['x_field'] = x_fields
 
+        if self.training_time:
+            y2_field = 'total_training_time'
+        else:
+            y2_field = None
+
         stacked_bar_plot = StackedBarPlot(
             data=self.df,
             path=self._plot_path,
             groups=sorted(self.regions),
             x_field='x_field',
+            y2_field=y2_field,
             x_axis_label=self.plot_x_axis_label,
             y_axis_label=self.plot_y_axis_label,
+            y2_axis_label=self.plot_y2_axis_label,
             title=self.plot_title,
             show_legend=self.show_legend,
             width=self.width,
@@ -625,6 +666,7 @@ class OverlapStackedBarPlot:
 
     def run(self):
         self._init_directories()
+        self._check_can_add_training_time()
         self._read_df()
         self._normalize_df()
         self._plot_df()
@@ -728,9 +770,17 @@ class VennData:
       - 'CPU + GPU' = 1096253.0 - (any group that has BOTH 'CPU' and 'GPU' in it, but NOT 'CPU'/'GPU' only)
     """
     def __init__(self, path):
+        self.path = path
         with open(path) as f:
             self.venn = json.load(f)
         self._build_idx_to_label()
+
+    def metadata(self):
+        return copy.copy(self.venn['metadata'])
+
+    @property
+    def md(self):
+        return self.venn['metadata']
 
     def stacked_bar_dict(self):
         """
@@ -754,7 +804,6 @@ class VennData:
                     stacked_dict[group] = stacked_dict[group] - venn_dict[other_group]
         return stacked_dict
 
-    @property
     def total_size(self):
         total_size = 0.
         # [ size of all regions ] - [ size of overlap regions ]
@@ -819,8 +868,10 @@ class StackedBarPlot:
                  data, path,
                  groups=None,
                  x_field=None,
+                 y2_field=None,
                  x_axis_label="X-axis label",
                  y_axis_label="Y-axis label",
+                 y2_axis_label=None,
                  title=None,
                  show_legend=True,
                  width=None,
@@ -836,6 +887,7 @@ class StackedBarPlot:
         self.path = path
         self.x_axis_label = x_axis_label
         self.y_axis_label = y_axis_label
+        self.y2_axis_label = y2_axis_label
         self.title = title
         self.show_legend = show_legend
         self.width = width
@@ -848,6 +900,7 @@ class StackedBarPlot:
         self.fontsize = fontsize
         self.groups = groups
         self.x_field = x_field
+        self.y2_field = y2_field
         self.fontsize = fontsize
         self.group_to_label = group_to_label
 
@@ -885,9 +938,19 @@ class StackedBarPlot:
         # This is causing XIO error....
         fig = plt.figure(figsize=figsize)
 
+        ax = fig.add_subplot(111)
+        ax2 = None
+        if self.y2_field is not None:
+            ax2 = ax.twinx()
+            # Need to do this, otherwise, training time bar is ABOVE gridlines from ax.
+            ax.set_zorder(ax2.get_zorder()+1)
+            # Need to do this, otherwise training time bar is invisible.
+            ax.patch.set_visible(False)
+
         #Set general plot properties
 
         sns.set_style("white")
+
         # ax = plt.subplot()
         # ax_list = fig.axes
         # plt.subplot()
@@ -910,26 +973,71 @@ class StackedBarPlot:
         # - Make it so we can choose NOT to show plot legend (ideally just make it invisible...)
         # - All fonts should be same size
 
-        self.colors = sns.color_palette("hls", len(self.groups))
+        if self.y2_field is not None:
+            # Total training time bar gets its own color.
+            num_colors = len(self.groups) + 1
+        else:
+            num_colors = len(self.groups)
+        self.colors = sns.color_palette("hls", num_colors)
+
+        if self.y2_field is not None:
+            bar_width = 0.25
+        else:
+            bar_width = 0.5
+
+        ind = np.arange(len(self.data[self.x_field]))
+        ax.set_xticks(ind + bar_width/2)
+        ax.set_xticklabels(self.data[self.x_field])
 
         n_bars = len(self.data[self.groups[0]])
         accum_ys = np.zeros(n_bars)
         barplot_kwargs = []
+        bar_zorder = 0
+        # bar_zorder = -1
+        grid_zorder = 1
         for i, group in enumerate(self.groups):
             accum_ys += self.data[group]
             ys = copy.copy(accum_ys)
-            barplot_kwargs.append(
-                {
-                    'x': self.data[self.x_field],
-                    'y': ys,
-                    'color': self.colors[i],
-                }
-            )
+            bar_kwargs = {
+                'x': ind,
+                # 'y': ys,
+                'height': ys,
+                'color': self.colors[i],
+                # 'ax': ax,
+                # 'position': 0,
+                'zorder': bar_zorder,
+            }
+            if bar_width is not None:
+                bar_kwargs['width'] = bar_width
+            barplot_kwargs.append(bar_kwargs)
+
+        if self.y2_field is not None:
+            # TODO: we need to group rows and sum them based on matching df[group]...?
+            # import ipdb; ipdb.set_trace()
+            # for i, group in enumerate(self.groups):
+            y_color = self.colors[-1]
+            bar_kwargs = {
+                # 'x': self.data[self.x_field],
+                'x': ind + bar_width,
+                'height': self.data[self.y2_field],
+                # 'y': self.data[self.y2_field],
+                'color': y_color,
+                # 'ax': ax2,
+                # 'position': 1,
+                'zorder': bar_zorder,
+            }
+            if bar_width is not None:
+                bar_kwargs['width'] = bar_width
+            # sns.barplot(**bar_kwargs)
+            # plt.bar(**bar_kwargs)
+            ax2.bar(**bar_kwargs)
 
         barplots = []
         for kwargs in reversed(barplot_kwargs):
             # TODO: color?
-            barplot = sns.barplot(**kwargs)
+            # barplot = sns.barplot(**kwargs)
+            # barplot = plt.bar(**kwargs)
+            barplot = ax.bar(**kwargs)
             barplots.append(barplot)
         barplots.reverse()
 
@@ -963,13 +1071,16 @@ class StackedBarPlot:
 
         #Optional code - Make plot look nicer
         sns.despine(fig=fig, left=True)
-        bottom_plot.set_ylabel(self.y_axis_label)
-        bottom_plot.set_xlabel(self.x_axis_label)
+        # bottom_plot.set_ylabel(self.y_axis_label)
+        # bottom_plot.set_xlabel(self.x_axis_label)
+        ax.set_ylabel(self.y_axis_label)
+        ax.set_xlabel(self.x_axis_label)
         if self.title is not None:
-            bottom_plot.set_title(self.title)
+            # bottom_plot.set_title(self.title)
+            ax.set_title(self.title)
 
         if self.rotation is not None:
-            ax = bottom_plot.axes
+            # ax = bottom_plot.axes
             ax.set_xticklabels(ax.get_xticklabels(), rotation=self.rotation)
 
         # Suggestions about how to prevent x-label overlap with matplotlib:
@@ -981,6 +1092,31 @@ class StackedBarPlot:
         #              bottom_plot.get_xticklabels() + bottom_plot.get_yticklabels()):
         #     if self.fontsize is not None:
         #         item.set_fontsize(self.fontsize)
+
+        ax.grid(zorder=grid_zorder)
+        if self.y2_field is not None:
+            # ax2.grid(True)
+
+            if self.y2_axis_label is not None:
+                ax.set_ylabel(self.y2_axis_label)
+
+            # Align training time against percent.
+            # (weird training time labels).
+            #
+            # l = ax.get_ylim()
+            # l2 = ax2.get_ylim()
+            # f = lambda x : l2[0]+(x-l[0])/(l[1]-l[0])*(l2[1]-l2[0])
+            # ticks = f(ax.get_yticks())
+            # ax2.yaxis.set_major_locator(matplotlib.ticker.FixedLocator(ticks))
+
+            # Align percent against training time.
+            # (weird percent labels).
+            #
+            # l = ax2.get_ylim()
+            # l2 = ax.get_ylim()
+            # f = lambda x : l2[0]+(x-l[0])/(l[1]-l[0])*(l2[1]-l2[0])
+            # ticks = f(ax2.get_yticks())
+            # ax.yaxis.set_major_locator(matplotlib.ticker.FixedLocator(ticks))
 
         logging.info('Save figure to {path}'.format(path=self.path))
         fig.tight_layout()
@@ -1062,6 +1198,22 @@ class RegionDataFrame:
         # TODO: tuplify string key into a single-element tuple.
         pass
 
+
+def extrap_total_training_time(time_unit, percent_complete):
+    """
+    10 * (1/0.01) => 100
+    #
+    10 seconds in 1%  0.01
+    ->
+    1000 seconds in 100% 1.0
+
+    :param time_unit:
+    :param percent_complete:
+    :return:
+    """
+    assert 0. <= percent_complete <= 1.
+    total_time_unit = time_unit * (1./percent_complete)
+    return total_time_unit
 
 def test_stacked_bar_sns():
     """
@@ -1281,6 +1433,57 @@ def test_stacked_bar_sns_old():
     logging.info('Save figure to {path}'.format(path=path))
     plt.savefig(path)
 
+def test_double_yaxis():
+
+    # # http://kitchingroup.cheme.cmu.edu/blog/2013/09/13/Plotting-two-datasets-with-very-different-scales/#sec-3
+    # x = np.linspace(0, 2*np.pi)
+    # y1 = np.sin(x);
+    # y2 = 0.01 * np.cos(x);
+    #
+    # fig = plt.figure()
+    # ax1 = fig.add_subplot(111)
+    # ax1.plot(x, y1)
+    # ax1.set_ylabel('y1')
+    #
+    # ax2 = ax1.twinx()
+    # ax2.plot(x, y2, 'r-')
+    # ax2.set_ylabel('y2', color='r')
+    # for tl in ax2.get_yticklabels():
+    #     tl.set_color('r')
+    #
+    # plt.savefig('./test_double_yaxis.png')
+
+    # https://stackoverflow.com/questions/24183101/pandas-bar-plot-with-two-bars-and-two-y-axis
+    s = StringIO("""     amount     price
+    A     40929   4066443
+    B     93904   9611272
+    C    188349  19360005
+    D    248438  24335536
+    E    205622  18888604
+    F    140173  12580900
+    G     76243   6751731
+    H     36859   3418329
+    I     29304   2758928
+    J     39768   3201269
+    K     30350   2867059""")
+
+    df = pd.read_csv(s, index_col=0, delimiter=' ', skipinitialspace=True)
+
+    fig = plt.figure() # Create matplotlib figure
+
+    ax = fig.add_subplot(111) # Create matplotlib axes
+    ax2 = ax.twinx() # Create another axes that shares the same x-axis as ax.
+
+    width = 0.4
+
+    df.amount.plot(kind='bar', color='red', ax=ax, width=width, position=1)
+    df.price.plot(kind='bar', color='blue', ax=ax2, width=width, position=0)
+
+    ax.set_ylabel('Amount')
+    ax2.set_ylabel('Price')
+
+    plt.savefig('./test_double_yaxis.png')
+
 def main():
     parser = argparse.ArgumentParser(
         textwrap.dedent("""\
@@ -1308,6 +1511,12 @@ def main():
     Test how to plot multi-bar stacked bar-chart.
     """))
 
+    parser.add_argument('--test-double-yaxis',
+                        action='store_true',
+                        help=textwrap.dedent("""
+    Test how to plot double y-axis stacked bar-chart.
+    """))
+
     args = parser.parse_args()
 
     if args.test_stacked_bar:
@@ -1316,6 +1525,8 @@ def main():
         test_stacked_bar_sns()
     elif args.test_stacked_bar_sns_old:
         test_stacked_bar_sns_old()
+    elif args.test_double_yaxis:
+        test_double_yaxis()
 
 if __name__ == '__main__':
     main()

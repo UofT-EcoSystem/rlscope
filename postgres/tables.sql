@@ -111,6 +111,7 @@ CREATE TABLE Process (
   total_timesteps INTEGER
 --   UNIQUE (process_name)
 --   FOREIGN KEY(parent_process_id) REFERENCES Process(process_id),
+--   FOREIGN KEY(machine_id) REFERENCES Machine(machine_id);
 );
 
 -- NOTE: this allows many-to-many relationships between processes.
@@ -136,6 +137,7 @@ CREATE TABLE Device (
   device_name TEXT,
   machine_id INTEGER NOT NULL
 --   UNIQUE (device_name)
+--   FOREIGN KEY(machine_id) REFERENCES Machine(machine_id),
 );
 
 CREATE TABLE DeviceUtilization (

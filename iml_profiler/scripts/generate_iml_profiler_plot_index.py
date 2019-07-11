@@ -11,6 +11,8 @@ import platform
 import cpuinfo
 import concurrent.futures
 
+from iml_profiler.parser.plot_index import SEL_ORDER, TITLE_ORDER
+
 from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, basename as _b
 
 # import GPUtil
@@ -65,56 +67,87 @@ class GeneratePlotIndex:
         return md
 
     def lookup_entry(self, md, path=None):
+
+        def map_resource_overlap(field, value):
+            if field == 'resource_overlap':
+                return tuple(value)
+            return value
+
+        def mk_keys(md, plot_type_field, value_map=None):
+            plot_type = md[plot_type_field]
+            keys = [md[plot_type_field]]
+            for field in SEL_ORDER[plot_type]:
+                keys.append(field)
+                value = md[field]
+                if value_map is not None:
+                    value = value_map(field, value)
+                keys.append(value)
+            return keys
+
         if 'overlap_type' in md:
-            if md['overlap_type'] == 'CategoryOverlap':
-
-                # self.index['process'][md['process']] \
-                #     ['phase'][md['phase']] \
-                # ['resource_overlap'][tuple(md['resource_overlap'])] \
-                #     ['operation'][tuple(md['operation'])] \
-                #     ['venn_js_path'] = venn_js_path
-                return mkds(self.index,
-                     md['overlap_type'],
-                     'process', md['process'],
-                     'phase', md['phase'],
-                     'resource_overlap', tuple(md['resource_overlap']),
-                     'operation', md['operation'],
-                     )
-
-            elif md['overlap_type'] in ['ResourceOverlap', 'ResourceSubplot']:
-                return mkds(self.index,
-                     md['overlap_type'],
-                     'process', md['process'],
-                     'phase', md['phase'],
-                     )
-
-            elif md['overlap_type'] == 'OperationOverlap':
-                return mkds(self.index,
-                     md['overlap_type'],
-                     'process', md['process'],
-                     'phase', md['phase'],
-                     'resource_overlap', tuple(md['resource_overlap']),
-                     )
-
-            else:
+            if md['overlap_type'] not in SEL_ORDER:
                 raise NotImplementedError(
                     ("Not sure how to insert OverlapType={OverlapType} for path={path} into index; "
                      "metadata = {md}").format(
                         OverlapType=md['overlap_type'],
                         path=path,
                         md=md))
+            keys = mk_keys(md, 'overlap_type', value_map=map_resource_overlap)
+            dic = mkds(self.index, *keys)
+            return dic
         elif 'plot_type' in md:
-            if md['plot_type'] == 'HeatScale':
-                return mkds(self.index,
-                            md['plot_type'],
-                            'device_name', md['device_name'])
-            else:
+            if md['plot_type'] not in SEL_ORDER:
                 raise NotImplementedError(
                     ("Not sure how to insert plot_type={PlotType} for path={path} into index; "
                      "metadata = {md}").format(
                         OverlapType=md['plot_type'],
                         path=path,
                         md=md))
+            keys = mk_keys(md, 'plot_type', value_map=map_resource_overlap)
+            dic = mkds(self.index, *keys)
+            return dic
+        else:
+            raise NotImplementedError("Not sure what plot-type this metadata contains:\n{md}".format(
+                md=textwrap.indent(pprint.pformat(md), prefix='  ')
+            ))
+
+        #     if md['overlap_type'] == 'CategoryOverlap':
+        #
+        #         # self.index['process'][md['process']] \
+        #         #     ['phase'][md['phase']] \
+        #         # ['resource_overlap'][tuple(md['resource_overlap'])] \
+        #         #     ['operation'][tuple(md['operation'])] \
+        #         #     ['venn_js_path'] = venn_js_path
+        #         return mkds(self.index,
+        #              md['overlap_type'],
+        #              'process', md['process'],
+        #              'phase', md['phase'],
+        #              'resource_overlap', tuple(md['resource_overlap']),
+        #              'operation', md['operation'],
+        #              )
+        #
+        #     elif md['overlap_type'] in ['ResourceOverlap', 'ResourceSubplot']:
+        #         return mkds(self.index,
+        #              md['overlap_type'],
+        #              'process', md['process'],
+        #              'phase', md['phase'],
+        #              )
+        #
+        #     elif md['overlap_type'] == 'OperationOverlap':
+        #         return mkds(self.index,
+        #              md['overlap_type'],
+        #              'process', md['process'],
+        #              'phase', md['phase'],
+        #              'resource_overlap', tuple(md['resource_overlap']),
+        #              )
+        #
+        #     else:
+        # elif 'plot_type' in md:
+        #     if md['plot_type'] == 'HeatScale':
+        #         return mkds(self.index,
+        #                     md['plot_type'],
+        #                     'device_name', md['device_name'])
+        #     else:
 
     def run(self):
         for path in self.each_file():
@@ -183,7 +216,6 @@ class GeneratePlotIndex:
                 pwd=os.getcwd(),
             )
             if self.debug:
-                logging.info()
                 logging.info("> Generated file: {path}".format(path=self.plot_index_path))
                 logging.info(contents)
 

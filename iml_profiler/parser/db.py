@@ -37,6 +37,8 @@ from iml_profiler.parser.stats import category_times_add_time
 
 from iml_profiler.parser.stats import KernelTime
 
+from iml_profiler.protobuf.pyprof_pb2 import Pyprof, MachineUtilization, ProcessMetadata, TP_HAS_PROGRESS, TP_NO_PROGRESS
+
 SQLITE_TABLE_SQL = _j(py_config.ROOT, "sqlite", "tables.sql")
 SQLITE_INDICES_SQL = _j(py_config.ROOT, "sqlite", "indices.sql")
 
@@ -316,22 +318,17 @@ class SQLParser:
                 logging.info("> get_util_metadata path={path}".format(path=path))
             md = get_util_metadata(path)
             util_metas.append(md)
-        util_machine_names = set()
-        # util_device_names = set()
         machine_name_to_device_names = dict()
         for util_meta in util_metas:
             if util_meta['machine_name'] not in machine_name_to_device_names:
                 machine_name_to_device_names[util_meta['machine_name']] = set()
             machine_name_to_device_names[util_meta['machine_name']].update(util_meta['device_names'])
-        for util_meta in util_metas:
-            util_machine_names.add(util_meta['machine_name'])
-        # for util_meta in util_metas:
-        #     util_device_names.update(util_meta['device_names'])
 
         if self.debug:
-            logging.info("> Insert util machine names.")
-        for machine_name in util_machine_names:
-            self.insert_machine_name(machine_name)
+            logging.info("> Insert machines.")
+            logging.info(pprint_msg({'machine_name_to_device_names':machine_name_to_device_names}))
+        for machine_name in machine_name_to_device_names.keys():
+            self.insert_machine_name(machine_name, debug=self.debug)
 
         if self.debug:
             logging.info("> Insert devices.")
@@ -379,15 +376,15 @@ class SQLParser:
                 'process_id': process_to_assigned_id[md.process_name],
                 'machine_id': self.machine_to_id[md.machine_name],
             }
+            # TODO: We should use better defaults for unset values in protobuf (e.g. -1 for ints/floats)
             if md.parent_process_name:
                 fields['parent_process_id'] = process_to_assigned_id[md.parent_process_name]
-            # TODO: We should use better defaults for unset values in protobuf (e.g. -1)
-            if md.percent_complete != 0.:
-                fields['percent_complete'] = md.percent_complete
-            if md.num_timesteps != 0:
-                fields['num_timesteps'] = md.num_timesteps
-            if md.total_timesteps != 0:
-                fields['total_timesteps'] = md.total_timesteps
+            if md.training_progress.content_code == TP_HAS_PROGRESS:
+                fields['percent_complete'] = md.training_progress.percent_complete
+                if md.training_progress.num_timesteps != 0:
+                    fields['num_timesteps'] = md.training_progress.num_timesteps
+                if md.training_progress.total_timesteps != 0:
+                    fields['total_timesteps'] = md.training_progress.total_timesteps
             self.insert_process_name(md.process_name, fields=fields, debug=True)
 
         if self.debug:
@@ -635,40 +632,44 @@ class SQLParser:
             # TODO: make sure machine_id is inserted before process that references it
         )
 
-    def insert_phase_name(self, phase_name, fields=None):
+    def insert_phase_name(self, phase_name, fields=None, debug=False):
         return self._insert_name(
             'Phase',
             'phase_id', 'phase_name',
             self.phase_to_id,
             phase_name,
             fields=fields,
+            debug=debug,
         )
 
-    def insert_device_name(self, device_name, fields=None):
+    def insert_device_name(self, device_name, fields=None, debug=False):
         return self._insert_name(
             'Device',
             'device_id', 'device_name',
             self.device_to_id,
             device_name,
             fields=fields,
+            debug=debug,
         )
 
-    def insert_machine_name(self, machine_name, fields=None):
+    def insert_machine_name(self, machine_name, fields=None, debug=False):
         return self._insert_name(
             'Machine',
             'machine_id', 'machine_name',
             self.machine_to_id,
             machine_name,
             fields=fields,
+            debug=debug,
         )
 
-    def insert_category_name(self, category_name, fields=None):
+    def insert_category_name(self, category_name, fields=None, debug=False):
         return self._insert_name(
             'Category',
             'category_id', 'category_name',
             self.category_to_id,
             category_name,
             fields=fields,
+            debug=debug,
         )
 
     @property
@@ -727,11 +728,18 @@ class SQLParser:
             }
             if fields is not None:
                 dic.update(fields)
-            self.conn.insert_dict(table, dic)
-            ident = c.lastrowid
+            if debug:
+                logging.info(pprint_msg({'insert_dict':dic}))
+            ident = self.conn.insert_dict(table, dic, id_field=id_field, debug=debug)
         else:
             # Row exists; obtain primary-key.
             ident = rows[0][id_field]
+            if debug:
+                logging.info("Row exists but primary-key wasn't cached: {table}['{name}'] = {id}".format(
+                    table=table,
+                    name=name,
+                    id=ident,
+                ))
 
         if debug:
             logging.info("Cache entity: {table}['{name}'] = {id}".format(
@@ -1686,16 +1694,41 @@ class TracesPostgresConnection:
             self.create_connection()
         return self._cursor
 
-    def insert_dict(self, table, dic):
+    def insert_dict(self, table, dic, id_field=None, debug=False):
         c = self._cursor
         cols, placeholders, colnames = self._get_insert_info(dic)
         values = [dic[col] for col in cols]
-        c.execute("INSERT INTO {table} ({colnames}) VALUES ({placeholders})".format(
-            placeholders=placeholders,
-            table=table,
-            colnames=colnames,
-        ), values)
-        return c.lastrowid
+        if debug:
+            logging.info(pprint_msg({
+                'cols':cols, 'colnames':colnames, 'values':values,
+            }))
+        query_lines = [
+            "INSERT INTO {table} ({colnames})".format(
+                table=table,
+                colnames=colnames,
+            ),
+            "VALUES ({placeholders})".format(
+                placeholders=placeholders,
+            )
+        ]
+        if id_field is not None:
+            query_lines.append(
+                "RETURNING {id_field}".format(
+                    id_field=id_field))
+        query = "\n".join(query_lines)
+        params = values
+        sql_exec_query(c, query, params, debug=debug)
+        if id_field is not None:
+            id_rows = c.fetchall()
+            assert len(id_rows) == 1
+            id_row = id_rows[0]
+            assert len(id_row) == 1
+            primary_key = id_row[0]
+        else:
+            primary_key = c.lastrowid
+        if debug:
+            logging.info("Autoincrement id = {id}".format(id=primary_key))
+        return primary_key
 
     def _get_insert_info(self, dic):
         cols = sorted(dic.keys())
@@ -1902,6 +1935,7 @@ class TracesPostgresConnection:
             self.conn = None
 
     def _drop_database(self):
+        logging.info("> Drop database = {db}".format(db=self.db_name))
         self._maybe_create_postgres_connection()
         self._maybe_close_db_connection()
         c = self.pg_cursor
@@ -1911,6 +1945,9 @@ class TracesPostgresConnection:
 
     def _drop_tables(self):
         tables = self.tables
+        logging.info("> Drop database tables: db={db}, tables={tables}".format(
+            db=self.db_name,
+            tables=tables))
 
         self._maybe_create_db_connection()
         c = self.cursor
@@ -1940,6 +1977,10 @@ class TracesPostgresConnection:
         self.run_sql_file(self.db_name, PSQL_INDICES_SQL)
 
     def _load_tables(self):
+        logging.info("> Load table schema into {db} from {path}".format(
+            db=self.db_name,
+            path=PSQL_TABLE_SQL,
+        ))
         self.run_sql_file(self.db_name, PSQL_TABLE_SQL)
 
     def run_sql_file(self, db_name, sql_path):
@@ -2142,8 +2183,7 @@ class SQLCategoryTimesReader:
     def steps(self, process_name, bench_name, debug=False):
         return list(range(self.num_steps(process_name, bench_name, debug=debug)))
 
-    @property
-    def util_devices(self):
+    def util_devices(self, machine_name=None):
         """
         Select devices that have CPU/GPU utilization info recorded.
         :return:
@@ -2154,12 +2194,15 @@ class SQLCategoryTimesReader:
         FROM Device AS d1
             NATURAL JOIN Machine AS m
         WHERE
+            {machine_clause} AND
             EXISTS (
                 SELECT *
                 FROM DeviceUtilization AS du
                 WHERE du.device_id = d1.device_id
             )
-        """)
+        """.format(
+            machine_clause=sql_machine_clause(machine_name, 'm', indents=1, allow_none=True),
+        ))
         params = None
         sql_exec_query(c, query, params, self.__class__, self.debug_ops)
         rows = c.fetchall()
@@ -2171,6 +2214,7 @@ class SQLCategoryTimesReader:
         Select devices that have CPU/GPU utilization info recorded.
         :return:
         """
+        assert type(device) == Device
         c = self.conn.cursor
         query = textwrap.dedent("""
         SELECT 
@@ -2216,17 +2260,26 @@ class SQLCategoryTimesReader:
         row = c.fetchone()
         return row['start_time_sec']
 
-    def process_phases(
+    def phase(self, *args, **kwargs):
+        phases = self.phases(*args, **kwargs)
+        assert len(phases) == 1
+        return phases[0]
+
+    def phases(
             self,
-            machine_name,
-            process_name,
+            machine_name=None,
+            process_name=None,
+            phase_name=None,
             debug=False):
         c = self.conn.cursor
         query = textwrap.dedent("""
         SELECT 
             m.machine_name,
+            m.machine_id,
             p.process_name, 
+            p.process_id, 
             ph.phase_name, 
+            ph.phase_id, 
             MIN(e.start_time_us) AS phase_start_time_us, 
             MAX(e.end_time_us) AS phase_end_time_us
 
@@ -2236,16 +2289,18 @@ class SQLCategoryTimesReader:
             NATURAL JOIN Process AS p
             NATURAL JOIN Machine AS m
         WHERE
-            m.machine_name = '{machine_name}' AND
-            p.process_name = '{process_name}'
+            {machine_clause} AND
+            {process_clause} AND
+            {phase_clause}
         GROUP BY
-            m.machine_name, p.process_name, ph.phase_name
+            m.machine_name, m.machine_id, p.process_name, p.process_id, ph.phase_name, ph.phase_id
         """).format(
-            machine_name=machine_name,
-            process_name=process_name,
+            machine_clause=sql_machine_clause(machine_name, 'm', indents=1, allow_none=True),
+            process_clause=sql_process_clause(process_name, 'p', indents=1, allow_none=True),
+            phase_clause=sql_phase_clause(phase_name, 'ph', indents=1, allow_none=True),
         )
         sql_exec_query(c, query, debug=debug)
-        rows = [row_as_phase(row) for row in c.fetchall()]
+        rows = [Phase.from_row(row) for row in c.fetchall()]
         return rows
 
     def keep_steps(self, process_name, bench_name, skip_first_step=True, debug=False):
@@ -2294,9 +2349,9 @@ class SQLCategoryTimesReader:
         category_names = [row['category_name'] for row in c.fetchall()]
         return category_names
 
-    def process_names(self, machine_name):
+    def process_names(self, machine_name, debug=False):
         c = self.conn.cursor
-        c.execute("""
+        query = textwrap.dedent("""
         SELECT process_name 
             FROM Process
             NATURAL JOIN Machine
@@ -2304,22 +2359,54 @@ class SQLCategoryTimesReader:
         ORDER BY process_name ASC
         """.format(
             machine_name=machine_name))
+        sql_exec_query(c, query, debug=debug)
         process_names = [row['process_name'] for row in c.fetchall()]
         return process_names
 
-    @property
-    def processes(self):
+    def process(self, *args, **kwargs):
+        processes = self.processes(*args, **kwargs)
+        assert len(processes) == 1
+        return processes[0]
+
+    def processes(self, machine_name=None, process_name=None):
         c = self.conn.cursor
         query = textwrap.dedent("""
         SELECT *
         FROM Process AS p
             NATURAL JOIN Machine AS m
-        """)
+        WHERE
+            {machine_clause} AND
+            {process_clause}
+        """.format(
+            machine_clause=sql_machine_clause(machine_name, 'm', indents=1, allow_none=True),
+            process_clause=sql_process_clause(process_name, 'p', indents=1, allow_none=True),
+        ))
         params = None
         sql_exec_query(c, query, params, self.__class__, self.debug_ops)
         rows = c.fetchall()
-        devices = [Process.from_row(row) for row in rows]
-        return devices
+        processes = [Process.from_row(row) for row in rows]
+        return processes
+
+    def machine(self, *args, **kwargs):
+        machines = self.machines(*args, **kwargs)
+        assert len(machines) == 1
+        return machines[0]
+
+    def machines(self, machine_name=None):
+        c = self.conn.cursor
+        query = textwrap.dedent("""
+        SELECT *
+        FROM Machine AS m
+        WHERE
+            {machine_clause}
+        """.format(
+            machine_clause=sql_machine_clause(machine_name, 'm', indents=1, allow_none=True),
+        ))
+        params = None
+        sql_exec_query(c, query, params, self.__class__, self.debug_ops)
+        rows = c.fetchall()
+        machines = [Machine.from_row(row) for row in rows]
+        return machines
 
     @property
     def machine_names(self):
@@ -2456,6 +2543,7 @@ class SQLCategoryTimesReader:
     def parse_timeline(self,
                        process_name=None,
                        phase_name=None,
+                       machine_name=None,
                        start_time_us=None,
                        end_time_us=None,
                        pre_reduce=None,
@@ -2543,6 +2631,7 @@ class SQLCategoryTimesReader:
             process_category_times = self.process_events(
                 process_name=process_name,
                 phase_name=phase_name,
+                machine_name=machine_name,
                 ignore_categories=ignore_categories,
                 start_time_us=start_time_us,
                 end_time_us=end_time_us,
@@ -2556,25 +2645,26 @@ class SQLCategoryTimesReader:
             # assert len(proc_category_times) > 0
             # assert len(proc_category_times[CATEGORY_OPERATION]) > 0
 
-            for proc in process_category_times.keys():
+            for machine_name in process_category_times.keys():
+                for proc in process_category_times[machine_name].keys():
 
-                # assert CATEGORY_OPERATION in proc_category_times
-                if CATEGORY_OPERATION in process_category_times[proc]:
-                    """
-                    Replace proc_category_times[CATEGORY_OPERATION], handle operation nesting.
-                    We are assuming a single process is single-threaded here, so any operation 
-                    nesting is form a single-threaded "call-stack".
-                    """
-                    process_category_times[proc][CATEGORY_OPERATION] = process_op_nest_single_thread(
-                        process_category_times[proc][CATEGORY_OPERATION],
-                        show_progress=debug,
-                        debug_label=process_label)
-                    # Doesn't speed anything up on "test_load"
-                    # proc_category_times[CATEGORY_OPERATION] = process_op_nest_parallel(
-                    #     proc_category_times[CATEGORY_OPERATION],
-                    #     show_progress=debug,
-                    #     debug_label=process_label)
-                    assert len(process_category_times[proc][CATEGORY_OPERATION]) > 0
+                    # assert CATEGORY_OPERATION in proc_category_times
+                    if CATEGORY_OPERATION in process_category_times[machine_name][proc]:
+                        """
+                        Replace proc_category_times[CATEGORY_OPERATION], handle operation nesting.
+                        We are assuming a single process is single-threaded here, so any operation 
+                        nesting is form a single-threaded "call-stack".
+                        """
+                        process_category_times[machine_name][proc][CATEGORY_OPERATION] = process_op_nest_single_thread(
+                            process_category_times[machine_name][proc][CATEGORY_OPERATION],
+                            show_progress=debug,
+                            debug_label=process_label)
+                        # Doesn't speed anything up on "test_load"
+                        # proc_category_times[CATEGORY_OPERATION] = process_op_nest_parallel(
+                        #     proc_category_times[CATEGORY_OPERATION],
+                        #     show_progress=debug,
+                        #     debug_label=process_label)
+                        assert len(process_category_times[machine_name][proc][CATEGORY_OPERATION]) > 0
 
             # proc_category = proc_as_category(process_name)
             # proc_types.add(proc_category)
@@ -2589,17 +2679,18 @@ class SQLCategoryTimesReader:
             #    i.e. merged_category_times = merge(ctimes_1[c], ctimes_2[c],
             #                                       by=event.start_time_usec)
             #    I'm not sure if we'll overcome the single-threaded merge time...
-            for proc in process_category_times.keys():
-                bin_category_times_single_thread(
-                    # process_name, proc_category_times,
-                    process_category_times[proc],
-                    pre_reduce=pre_reduce,
-                    # categories=categories, operation_types=operation_types,
-                    category_times=category_times, debug=debug)
-                # Doesn't speed anything up on "test_load"
-                # bin_category_times_parallel(
-                #     process_name, proc_category_times,
-                #     categories, category_times, operation_types, debug)
+            for machine_name in process_category_times.keys():
+                for proc in process_category_times[machine_name].keys():
+                    bin_category_times_single_thread(
+                        # process_name, proc_category_times,
+                        process_category_times[machine_name][proc],
+                        pre_reduce=pre_reduce,
+                        # categories=categories, operation_types=operation_types,
+                        category_times=category_times, debug=debug)
+                    # Doesn't speed anything up on "test_load"
+                    # bin_category_times_parallel(
+                    #     process_name, proc_category_times,
+                    #     categories, category_times, operation_types, debug)
 
         # Sanity check: Events are all sorted.
         for category, events in category_times.items():
@@ -2638,7 +2729,10 @@ class SQLCategoryTimesReader:
         total_time_sec = total_time_us/NumberType(MICROSECONDS_IN_SECOND)
         return total_time_sec
 
-    def process_events(self, process_name=None, phase_name=None,
+    def process_events(self,
+                       process_name=None,
+                       phase_name=None,
+                       machine_name=None,
                        ignore_categories=None,
                        start_time_us=None,
                        end_time_us=None,
@@ -2662,6 +2756,8 @@ class SQLCategoryTimesReader:
             If process_name is None, return events across ALL processes.
         :param phase_name:
             If phase_name is None, return events across ALL phases.
+        :param machine_name:
+            If machine_name is None, return events across ALL machines.
         :param ignore_categories:
             Ignore events belonging to this category.
         :param keep_categories:
@@ -2697,7 +2793,7 @@ class SQLCategoryTimesReader:
         query = textwrap.dedent("""
         SELECT d1.device_name, c1.category_name, e1.event_name, e1.start_time_us, e1.duration_us
             , e1.event_id
-            , p1.process_name, ph1.phase_name
+            , p1.process_name, ph1.phase_name, m.machine_name
             , e1.pyprof_filename
             , e1.pyprof_line_no
             , e1.pyprof_function
@@ -2707,10 +2803,12 @@ class SQLCategoryTimesReader:
             NATURAL JOIN Event as e1
             NATURAL JOIN Process as p1
             NATURAL JOIN Phase as ph1
+            NATURAL JOIN Machine as m 
             NATURAL LEFT JOIN Device as d1
         WHERE 
             {process_clause} AND
             {phase_clause} AND
+            {machine_clause} AND
             {debug_ops_clause} AND
             {ignore_clause} AND
             -- Ignore any events that overlap with when we dump profiling information.
@@ -2730,6 +2828,7 @@ class SQLCategoryTimesReader:
             no_dump_overlap_clause=sql_no_dump_overlap_clause('e1', 'e2', 'c2', indents=1),
             process_clause=sql_process_clause(process_name, 'p1', indents=1, allow_none=True),
             phase_clause=sql_phase_clause(phase_name, 'ph1', indents=1, allow_none=True),
+            machine_clause=sql_machine_clause(machine_name, 'm', indents=1, allow_none=True),
             debug_ops_clause=sql_debug_ops_clause(debug_ops, 'e1', indents=1),
             event_range_clause=sql_event_range_clause('e1', start_time_us, end_time_us, indents=1),
             op_clause=op_clause,
@@ -2782,11 +2881,13 @@ class SQLCategoryTimesReader:
         # process_category_times:
         # process_name -> CATEGORY_* -> times
         process_category_times = dict()
-        for process_name, process_rows in itertools.groupby(rows, key=lambda row: row['process_name']):
-            assert process_name not in process_category_times
-            process_category_times[process_name] = dict()
+        for (machine_name, process_name), process_rows in itertools.groupby(rows, key=lambda row: (row['machine_name'], row['process_name'])):
+            if machine_name not in process_category_times:
+                process_category_times[machine_name] = dict()
+            assert process_name not in process_category_times[machine_name]
+            process_category_times[machine_name][process_name] = dict()
             self._add_event_rows_to_category_times(
-                process_category_times[process_name], process_rows,
+                process_category_times[machine_name][process_name], process_rows,
                 debug=debug,
                 show_progress=debug,
                 debug_label=debug_label)
@@ -3545,14 +3646,24 @@ def row_as_event(row):
     return ktime
 
 class Phase:
-    def __init__(self, phase_name):
+    def __init__(
+            self,
+            phase_name,
+            phase_start_time_us,
+            phase_end_time_us,
+            # Swallow any excess arguments
+            **kwargs):
         self.phase_name = phase_name
+        self.phase_start_time_us = phase_start_time_us
+        self.phase_end_time_us = phase_end_time_us
 
-    def _add_row_fields(self, row):
-        self.machine_name = row['machine_name']
-        self.process_name = row['process_name']
-        self.phase_start_time_us = row['phase_start_time_us']
-        self.phase_end_time_us = row['phase_end_time_us']
+    @staticmethod
+    def from_row(row):
+        phase = Phase(**row)
+        for attr, value in row.items():
+            if not hasattr(phase, attr):
+                setattr(phase, attr, value)
+        return phase
 
     @property
     def time_usec(self):
@@ -3568,10 +3679,6 @@ class Phase:
     def __repr__(self):
         return str(self)
 
-def row_as_phase(row):
-    phase = Phase(row['phase_name'])
-    phase._add_row_fields(row)
-    return phase
 
 def process_op_nest_single_thread(op_events, filter_by_op=None,
                     debug=False,
@@ -4053,6 +4160,9 @@ def sql_process_clause(process_name, process_alias, indents=None, allow_none=Fal
 def sql_phase_clause(phase_name, phase_alias, indents=None, allow_none=False):
     return _sql_eq_clause(phase_name, phase_alias, 'phase_name', indents, allow_none)
 
+def sql_machine_clause(machine_name, machine_alias, indents=None, allow_none=False):
+    return _sql_eq_clause(machine_name, machine_alias, 'machine_name', indents, allow_none)
+
 def _sql_eq_clause(value, alias, field, indents=None, allow_none=False):
     def _as_value(value):
         if type(value) == str:
@@ -4412,6 +4522,27 @@ class Process:
             id=self.process_id,
             machine_name=self.machine_name,
             # machine_id=self.machine_id,
+        )
+
+class Machine:
+    def __init__(self, machine_name, machine_id,
+                 # Swallow any excess arguments
+                 **kwargs):
+        self.machine_name = machine_name
+        self.machine_id = machine_id
+
+    @staticmethod
+    def from_row(row):
+        machine = Machine(**row)
+        for attr, value in row.items():
+            if not hasattr(machine, attr):
+                setattr(machine, attr, value)
+        return machine
+
+    def __str__(self):
+        return 'Machine(name="{name}", id={id})'.format(
+            name=self.machine_name,
+            id=self.machine_id,
         )
 
 def test_merge_sorted():

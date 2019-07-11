@@ -8,13 +8,13 @@ import textwrap
 
 from os.path import join as _j, abspath as _a, exists as _e, dirname as _d, basename as _b
 
-TITLE_ORDER = ['overlap_type', 'process', 'phase', 'resource_overlap', 'operation']
+TITLE_ORDER = ['overlap_type', 'machine', 'process', 'phase', 'resource_overlap', 'operation']
 SEL_ORDER = {
-    'CategoryOverlap': ['process', 'phase', 'resource_overlap', 'operation'],
-    'ResourceOverlap': ['process', 'phase'],
-    'ResourceSubplot': ['process', 'phase'],
-    'OperationOverlap': ['process', 'phase', 'resource_overlap'],
-    'HeatScale': ['device_name'],
+    'CategoryOverlap': ['machine', 'process', 'phase', 'resource_overlap', 'operation'],
+    'ResourceOverlap': ['machine', 'process', 'phase'],
+    'ResourceSubplot': ['machine', 'process', 'phase'],
+    'OperationOverlap': ['machine', 'process', 'phase', 'resource_overlap'],
+    'HeatScale': ['machine_name', 'device_name'],
 }
 
 class _DataIndex:

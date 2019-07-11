@@ -280,6 +280,7 @@ class GeneratePlotIndexTask(luigi.Task):
         cmd.extend(['--iml-directory', self.iml_directory])
         if self.debug:
             cmd.extend(['--debug'])
+        print_cmd(cmd)
         subprocess.check_call(cmd)
 
 class OverlapStackedBarTask(luigi.Task):
@@ -290,6 +291,7 @@ class OverlapStackedBarTask(luigi.Task):
     overlap_type = luigi.ChoiceParameter(choices=OverlapStackedBarPlot.SUPPORTED_OVERLAP_TYPES, description="What type of <overlap_type>*.venn_js.js files should we read from?")
     resource_overlap = luigi.ListParameter(description="What resources are we looking at for things like --overlap-type=OperationOverlap? e.g. ['CPU'], ['CPU', 'GPU']", default=None)
     operation = luigi.Parameter(description="What operation are we looking at for things like --overlap-type=CategoryOverlap? e.g. ['step'], ['sample_action']", default=None)
+    training_time = luigi.BoolParameter(description="Plot a second y-axis with total training time", parsing=luigi.BoolParameter.EXPLICIT_PARSING)
     remap_df = luigi.ListParameter(description="Transform df pandas.DataFrame object; useful for remapping regions to new ones", default=None)
     # For some reason, (ppo2, MinitaurBulletEnv-v0) only has:
     # - regions: [('sample_action',)]
