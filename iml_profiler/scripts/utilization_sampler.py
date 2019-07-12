@@ -14,7 +14,11 @@ import numpy as np
 from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, basename as _b
 
 # import GPUtil
-from iml_profiler import GPUtil
+
+# For some reason GPUtil contains nothing if I do this...
+# from iml_profiler import GPUtil
+
+from iml_profiler.GPUtil import GPUtil
 
 from iml_profiler.protobuf.pyprof_pb2 import Pyprof, MachineUtilization, DeviceUtilization, UtilizationSample
 

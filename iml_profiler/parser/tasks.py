@@ -23,6 +23,7 @@ from iml_profiler.parser.pyprof import PythonProfileParser, PythonFlameGraphPars
 from iml_profiler.parser.plot import TimeBreakdownPlot, PlotSummary, CombinedProfileParser, CategoryOverlapPlot, UtilizationPlot, HeatScalePlot
 from iml_profiler.parser.db import SQLParser
 from iml_profiler.parser.stacked_bar_plots import OverlapStackedBarPlot
+from iml_profiler.parser.common import print_cmd
 
 PARSER_KLASSES = [PythonProfileParser, PythonFlameGraphParser, PlotSummary, TimeBreakdownPlot, CategoryOverlapPlot, UtilizationPlot, HeatScalePlot, TotalTimeParser, TraceEventsParser, SQLParser]
 PARSER_NAME_TO_KLASS = dict((ParserKlass.__name__, ParserKlass) \
@@ -435,19 +436,6 @@ def kwargs_from_task(task):
 def mk_SQLParserTask(task):
     return SQLParserTask(iml_directory=task.iml_directory, debug=task.debug, debug_single_thread=task.debug_single_thread,
                          postgres_host=task.postgres_host, postgres_user=task.postgres_user, postgres_password=task.postgres_password),
-
-def print_cmd(cmd, file=sys.stdout):
-    if type(cmd) == list:
-        cmd_str = " ".join([str(x) for x in cmd])
-    else:
-        cmd_str = cmd
-    print(("> CMD:\n"
-           "  $ {cmd}\n"
-           "  PWD={pwd}"
-           ).format(
-        cmd=cmd_str,
-        pwd=os.getcwd(),
-    ), file=file)
 
 from iml_profiler.profiler import glbl
 def main(argv=None, should_exit=True):

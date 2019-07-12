@@ -13,6 +13,7 @@ import pprint
 import textwrap
 import multiprocessing
 from iml_profiler.parser import tasks
+from iml_profiler.parser.common import print_cmd
 from iml_profiler.profiler import glbl
 
 def main():
@@ -86,19 +87,6 @@ def main():
     # })
 
     tasks.main(argv=luigi_argv[1:], should_exit=False)
-
-def print_cmd(cmd, file=sys.stdout):
-    if type(cmd) == list:
-        cmd_str = " ".join([str(x) for x in cmd])
-    else:
-        cmd_str = cmd
-    print(("> CMD:\n"
-           "  $ {cmd}\n"
-           "  PWD={pwd}"
-           ).format(
-        cmd=cmd_str,
-        pwd=os.getcwd(),
-    ), file=file)
 
 def register_pdb_breakpoint():
 

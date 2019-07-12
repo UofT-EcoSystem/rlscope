@@ -1070,41 +1070,6 @@ add_stable_baselines_expr('a2c', 'Walker2DBulletEnv-v0', 618.318, 291.293, 14923
 STABLE_BASELINES_ALGOS = sorted(set(expr.algo for expr in STABLE_BASELINES_EXPRS))
 STABLE_BASELINES_ENV_IDS = sorted(set(expr.env_id for expr in STABLE_BASELINES_EXPRS))
 
-def print_cmd(cmd, files=sys.stdout, env=None, dry_run=False):
-    if type(cmd) == list:
-        cmd_str = " ".join([shlex.quote(str(x)) for x in cmd])
-    else:
-        cmd_str = cmd
-
-    lines = []
-    if dry_run:
-        lines.append("> CMD [dry-run]:")
-    else:
-        lines.append("> CMD:")
-    lines.extend([
-        "  $ {cmd}".format(cmd=cmd_str),
-        "  PWD={pwd}".format(pwd=os.getcwd()),
-    ])
-
-    if env is not None and len(env) > 0:
-        env_vars = sorted(env.keys())
-        lines.append("  Environment:")
-        for var in env_vars:
-            lines.append("    {var}={val}".format(
-                var=var,
-                val=env[var]))
-    string = '\n'.join(lines)
-
-    if type(files) not in [set, list]:
-        if type(files) in [list]:
-            files = set(files)
-        else:
-            files = set([files])
-
-    for f in files:
-        print(string, file=f)
-        f.flush()
-
 def is_bullet_env(env_id):
     return re.search(r'BulletEnv', env_id)
 

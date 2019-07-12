@@ -36,6 +36,7 @@ from tensorflow.python.framework import c_api_util
 from tensorflow.python.client import session
 
 from iml_profiler.profiler import unit_test_util
+from iml_profiler.parser.common import print_cmd
 
 from tensorflow.core.profiler.tfprof_log_pb2 import ProfileProto
 from iml_profiler.protobuf.pyprof_pb2 import ProcessMetadata, TrainingProgress, TP_NO_PROGRESS, TP_HAS_PROGRESS
@@ -2781,16 +2782,6 @@ def dump_config(path, **kwargs):
         'repetitions' in config
     )
     dump_json(config, path)
-
-def print_cmd(cmd):
-    logging.info(textwrap.dedent("""
-    RUN:
-        cwd = {cwd}
-        cmd = {cmd}
-    """.format(
-        cwd=os.getcwd(),
-        cmd=" ".join([str(x) for x in cmd]),
-    )))
 
 def load_json(path):
     with codecs.open(path, mode='r', encoding='utf-8') as f:

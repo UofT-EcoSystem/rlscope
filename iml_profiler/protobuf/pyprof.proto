@@ -90,6 +90,13 @@ message UtilizationSample {
     int64 start_time_us = 1;
     // Percent utilization: [0..100]
     float util = 2;
+
+    // NEW FIELDS TO MEASURE CPU/MEMORY LIMITATIONS:
+    //
+    // The total number of resident memory bytes used by train.py AND all child-process
+    // (NOTE: important to include child processes since these are the worker processes
+    // when we scale up inference.)
+    int64 total_resident_memory_bytes = 3;
 }
 
 // Q: What unit of time should we use?
