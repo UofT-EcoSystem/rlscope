@@ -1561,8 +1561,13 @@ class Profiler:
 
         util_cmdline = ['iml-util-sampler']
         util_cmdline.extend(['--iml-directory', _a(self.directory)])
+        # Sample memory-usage of the entire process tree rooted at ths process.
+        util_cmdline.extend(['--iml-root-pid', str(os.getpid())])
         if self.debug:
             util_cmdline.append('--iml-debug')
+        # We make sure nvidia-smi runs fast at the VERY START of training
+        # (to avoid false alarms when training is busy with the CPU/GPU).
+        util_cmdline.append('--skip-smi-check')
         # if self.debug:
         logging.info("> CMDLINE: {cmd}".format(cmd=' '.join(util_cmdline)))
         # self.util_sampler_proc = subprocess.Popen(util_cmdline, creationflags=subprocess.DETACHED_PROCESS)
@@ -2292,6 +2297,13 @@ def get_util_sampler_parser(only_fwd_arguments=False):
     IML: How frequently (in seconds) should we sample GPU/CPU utilization?
     default: sample every 500 ms.
     """))
+    parser.add_argument('--iml-root-pid', required=True, type=int,
+                        help=textwrap.dedent("""
+        IML: (internal use)
+        The PID of the root training process on this machine.
+        When sampling memory usage, we sample total memory usage of this 
+        process and its entire process tree (i.e. to support multi-process training).
+    """))
     parser.add_argument('--iml-util-dump-frequency-sec',
                         type=float,
                         default=10.,
@@ -2312,6 +2324,13 @@ def get_util_sampler_parser(only_fwd_arguments=False):
     
     How fast can we call nvidia-smi (to sample GPU utilization)?  
     How fast can we gather CPU utilization?
+    """))
+
+    parser.add_argument('--skip-smi-check',
+                        action='store_true',
+                        help=textwrap.dedent("""
+    If NOT set, we will make sure nvidia-smi runs quickly (i.e. under 1 second); 
+    this is needed for GPU sampling.
     """))
 
     parser.add_argument('--kill',

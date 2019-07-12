@@ -1802,7 +1802,7 @@ def get_machine_name():
     machine_name = platform.node()
     return machine_name
 
-def print_cmd(cmd, files=sys.stdout, env=None, dry_run=False):
+def cmd_debug_msg(cmd, env=None, dry_run=False):
     if type(cmd) == list:
         cmd_str = " ".join([shlex.quote(str(x)) for x in cmd])
     else:
@@ -1827,6 +1827,16 @@ def print_cmd(cmd, files=sys.stdout, env=None, dry_run=False):
                 val=env[var]))
     string = '\n'.join(lines)
 
+    return string
+
+def log_cmd(cmd, env=None, dry_run=False):
+    string = cmd_debug_msg(cmd, env=env, dry_run=dry_run)
+
+    logging.info(string)
+
+def print_cmd(cmd, files=sys.stdout, env=None, dry_run=False):
+    string = cmd_debug_msg(cmd, env=env, dry_run=dry_run)
+
     if type(files) not in [set, list]:
         if type(files) in [list]:
             files = set(files)
@@ -1836,4 +1846,3 @@ def print_cmd(cmd, files=sys.stdout, env=None, dry_run=False):
     for f in files:
         print(string, file=f)
         f.flush()
-

@@ -21,3 +21,6 @@ from iml_profiler.profiler.clib_wrap import \
   wrap_module, unwrap_module, \
   register_wrap_module, \
   wrap_entire_module, unwrap_entire_module
+
+from iml_profiler.scripts.utilization_sampler import \
+  util_sampler

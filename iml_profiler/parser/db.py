@@ -1370,7 +1370,7 @@ class _CSVInserterWorker:
             for device_name, device_util in machine_util.device_util.items():
                 for sample in device_util.samples:
                     device_id = self.device_to_id[device_name]
-                    yield device_id, sample.start_time_us, sample.util
+                    yield device_id, sample.start_time_us, sample.util, sample.total_resident_memory_bytes
 
         def count_samples(machine_util):
             n = 0
@@ -1381,12 +1381,13 @@ class _CSVInserterWorker:
         num_all_samples = count_samples(proto)
 
         with progressbar.ProgressBar(max_value=num_all_samples) as bar:
-            for i, (device_id, start_time_us, util) in enumerate(each_sample(proto)):
+            for i, (device_id, start_time_us, util, total_resident_memory_bytes) in enumerate(each_sample(proto)):
                 ins = {
                     'device_id':device_id,
                     'machine_id':machine_id,
                     'start_time_us':start_time_us,
                     'util':util,
+                    'total_resident_memory_bytes':total_resident_memory_bytes,
                 }
                 device_util_id = self.insert_dict('DeviceUtilization', ins)
                 bar.update(i)

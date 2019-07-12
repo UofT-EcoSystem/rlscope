@@ -16,9 +16,7 @@ from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, base
 # import GPUtil
 
 # For some reason GPUtil contains nothing if I do this...
-# from iml_profiler import GPUtil
-
-from iml_profiler.GPUtil import GPUtil
+from iml_profiler.profiler import nvidia_gpu_query
 
 from iml_profiler.protobuf.pyprof_pb2 import Pyprof, MachineUtilization, DeviceUtilization, UtilizationSample
 
@@ -26,10 +24,33 @@ from iml_profiler.parser.common import *
 
 from iml_profiler.profiler.profilers import trace_suffix, get_util_sampler_parser, MIN_UTIL_SAMPLE_FREQUENCY_SEC
 
+BYTES_IN_KB = 1 << 10
+BYTES_IN_MB = 1 << 20
+
+def CPU_as_util(info):
+    assert type(info) in {MachineProcessCPUInfo}
+    util = {
+        'util':info.cpu_util,
+        'device_name':info.device_name,
+        'epoch_time_usec':info.epoch_time_usec,
+        'total_resident_memory_bytes':info.total_resident_memory_bytes,
+    }
+    return util
+
+def GPU_as_util(gpu, epoch_time_usec, total_resident_memory_bytes):
+    util = {
+        'util': gpu['utilization.gpu'],
+        'device_name': gpu['name'],
+        'epoch_time_usec': epoch_time_usec,
+        'total_resident_memory_bytes': total_resident_memory_bytes,
+    }
+    return util
+
 class UtilizationSampler:
-    def __init__(self, directory, util_dump_frequency_sec, util_sample_frequency_sec,
+    def __init__(self, directory, pid, util_dump_frequency_sec, util_sample_frequency_sec,
                  debug=False, debug_single_thread=False):
         self.directory = directory
+        self.pid = pid
         self.util_dump_frequency_sec = util_dump_frequency_sec
         self.util_sample_frequency_sec = util_sample_frequency_sec
         self.trace_id = 0
@@ -59,6 +80,7 @@ class UtilizationSampler:
         sample = UtilizationSample(
             start_time_us=int(start_time_usec),
             util=util['util'],
+            total_resident_memory_bytes=util['total_resident_memory_bytes'],
         )
         device_util.samples.extend([sample])
 
@@ -143,8 +165,10 @@ class UtilizationSampler:
 
                 self.check_pending_dump_calls()
 
-                cpu_util = sample_cpu_utilization()
-                gpu_utils = sample_gpu_utilization()
+                machine_cpu_info = MachineProcessCPUInfo(self.pid)
+                cpu_util = sample_cpu_utilization(machine_cpu_info)
+                machine_gpu_info = nvidia_gpu_query.MachineGPUInfo()
+                gpu_utils = sample_gpu_utilization(machine_gpu_info, self.pid)
                 if self.debug:
                     logging.info("> {klass}: utils = \n{utils}".format(
                         klass=self.__class__.__name__,
@@ -207,11 +231,13 @@ def measure_samples_per_sec():
     report_calls_per_sec('nvidia-smi', run_nvidia_smi, iterations=100)
 
     def run_sample_gpu_utilization():
-        return sample_gpu_utilization()
+        machine_gpu_info = nvidia_gpu_query.MachineGPUInfo()
+        return sample_gpu_utilization(machine_gpu_info, pid=os.getpid())
     report_calls_per_sec('sample_gpu_utilization', run_sample_gpu_utilization, iterations=100)
 
     def run_sample_cpu_utilization():
-        return sample_cpu_utilization()
+        machine_cpu_info = MachineProcessCPUInfo()
+        return sample_cpu_utilization(machine_cpu_info)
     report_calls_per_sec('sample_cpu_utilization', run_sample_cpu_utilization, iterations=100)
 
 
@@ -252,7 +278,7 @@ SigTermWatcher = _SigTermWatcher()
 # Cache cpuinfo, since this call takes 1 second to run, and we need to sample at millisecond frequency.
 # NOTE: This has all sorts of CPU architecture information (e.g. l2 cache size)
 CPU_INFO = cpuinfo.get_cpu_info()
-def sample_cpu_utilization():
+def sample_cpu_utilization(machine_cpu_info):
     """
     Report a single [0..1] value representing current system-wide CPU utilization.
 
@@ -266,35 +292,69 @@ def sample_cpu_utilization():
     NOTE: It's also possible to get INDIVIDUAL utilization for each CPU,
     if we choose to do that in the future.
     """
-    cpu_util = psutil.cpu_percent()/100.
-    # cpu_utils = [util/100. for util in psutil.cpu_percent(percpu=True)]
-    # runnable_cpus = set(get_runnable_cpus())
-    # runnable_utils = [util for cpu, util in enumerate(cpu_utils) if cpu in runnable_cpus]
-    # # Q: Should we only collect utilization of the CPUs the process is assigned to?
-    # cpu_util = np.mean(runnable_utils)
-    epoch_time_usec = now_us()
-    device_name = CPU_INFO['brand']
-    return {
-        'util':cpu_util,
-        'device_name':device_name,
-        'epoch_time_usec':epoch_time_usec,
-    }
+    util = CPU_as_util(machine_cpu_info)
+    return util
 
-def sample_cpu_total_resident_memory_bytes(pid):
+class MachineProcessCPUInfo:
+    """
+    Collect all possible information about a CPU process running on this machine from psutil.
+
+    We use this to maintain consistency of information collected.
+    """
+    def __init__(self, pid, epoch_time_usec=None, debug=False):
+        self.pid = pid
+        if epoch_time_usec is None:
+            epoch_time_usec = now_us()
+        self.debug = debug
+        self.epoch_time_usec = epoch_time_usec
+        self.process_tree = get_process_tree(pid)
+        self.total_resident_memory_bytes = self._sample_cpu_total_resident_memory_bytes(self.process_tree)
+        self.cpu_util = self._sample_cpu_util()
+        self.device_name = CPU_INFO['brand']
+
+    def _sample_cpu_util(self):
+        return psutil.cpu_percent()/100.
+
+    def _sample_cpu_total_resident_memory_bytes(self, procs):
+        mem_infos = []
+        for proc in procs:
+            try:
+                mem_info = proc.memory_info()
+                mem_infos.append(mem_info)
+            except psutil.NoSuchProcess as e:
+                if self.debug:
+                    logging.info((
+                        "Tried to sample resident memory from proc={proc}, "
+                        "but it looks like it exited; skipping").format(
+                        proc=proc))
+        total_resident_memory_bytes = np.sum(m.rss for m in mem_infos)
+        return total_resident_memory_bytes
+
+def get_process_tree(pid):
     parent = psutil.Process(pid=pid)
-    children = psutil.Process.children(recursive=True)
-    mem_infos = [proc.memory_info() for proc in [parent] + children]
-    total_resident_memory_bytes = np.sum(m.rss for m in mem_infos)
+    children = parent.children(recursive=True)
+    procs = [parent] + children
+
+    pids_set = set(proc.pid for proc in procs)
+    pids_list = [proc.pid for proc in procs]
+    assert len(pids_set) == len(pids_list)
+
+    return procs
+
+def sample_gpu_total_resident_memory_bytes(machine_gpu_info, gpu, pid):
+    procs = get_process_tree(pid)
+
+    pids = set(proc.pid for proc in procs)
+
+    gpu_procs = machine_gpu_info.processes(gpu)
+    total_resident_memory_bytes = 0
+    for gpu_proc in gpu_procs:
+        if gpu_proc['pid'] in pids:
+            total_resident_memory_bytes += gpu_proc['used_gpu_memory'] * BYTES_IN_MB
+
     return total_resident_memory_bytes
 
-def sample_gpu_total_resident_memory_bytes(pid):
-    parent = psutil.Process(pid=pid)
-    children = psutil.Process.children(recursive=True)
-    mem_infos = [proc.memory_info() for proc in [parent] + children]
-    total_resident_memory_bytes = np.sum(m.rss for m in mem_infos)
-    return total_resident_memory_bytes
-
-def sample_gpu_utilization():
+def sample_gpu_utilization(machine_gpu_info, pid):
     """
     Report a single [0..1] value representing current GPU utilization.
     Report a separate value for EACH GPU in the system.
@@ -303,29 +363,132 @@ def sample_gpu_utilization():
     The module looks kinda meh, but it does the job of
     parsing nvidia-smi on both Windows/Linux for us.
     """
-    # gpus[0].__dict__
-    #
-    # {'display_active': 'Enabled',
-    #  'display_mode': 'Enabled',
-    #  'driver': '418.43',
-    #  'id': 0,
-    #  'load': 0.0,
-    #  'memoryFree': 7910.0,
-    #  'memoryTotal': 7951.0,
-    #  'memoryUsed': 41.0,
-    #  'memoryUtil': 0.005156584077474532,
-    #  'name': 'GeForce RTX 2070',
-    #  'serial': '[Not Supported]',
-    #  'temperature': 33.0,
-    #  'uuid': 'GPU-e9c6b1d8-2b80-fee2-b750-08c5adcaac3f'}
-
-    gpus = GPUtil.getGPUs()
+    gpus = machine_gpu_info.gpus()
     epoch_time_usec = now_us()
-    return [{
-        'device_name':gpu.name,
-        'util':gpu.load,
-        'epoch_time_usec':epoch_time_usec,
-    } for gpu in gpus]
+    gpu_utils = []
+    for gpu in gpus:
+        total_resident_memory_bytes = sample_gpu_total_resident_memory_bytes(machine_gpu_info, gpu, pid)
+        gpu_util = GPU_as_util(
+            gpu,
+            epoch_time_usec=epoch_time_usec,
+            total_resident_memory_bytes=total_resident_memory_bytes)
+        gpu_utils.append(gpu_util)
+    return gpu_utils
+
+    # gpu_procs looks like:
+    #
+    # [{'gpu_bus_id': '00000000:07:00.0',
+    #   'gpu_name': 'GeForce RTX 2070',
+    #   'gpu_serial': None,
+    #   'gpu_uuid': 'GPU-e9c6b1d8-2b80-fee2-b750-08c5adcaac3f',
+    #   'pid': 9994,
+    #   'process_name': 'python',
+    #   'timestamp': datetime.time(10, 58, 18, 239000),
+    #   'used_gpu_memory': 649}]
+
+    # gpus looks like:
+    #
+    # [{'accounting.buffer_size': 4000,
+    #   'accounting.mode': 'Disabled',
+    #   'clocks.applications.graphics': None,
+    #   'clocks.applications.memory': None,
+    #   'clocks.current.graphics': 300,
+    #   'clocks.current.memory': 405,
+    #   'clocks.current.sm': 300,
+    #   'clocks.current.video': 540,
+    #   'clocks.default_applications.graphics': None,
+    #   'clocks.default_applications.memory': None,
+    #   'clocks.max.graphics': 2100,
+    #   'clocks.max.memory': 7001,
+    #   'clocks.max.sm': 2100,
+    #   'clocks_throttle_reasons.active': '0x0000000000000001',
+    #   'clocks_throttle_reasons.applications_clocks_setting': 'Not Active',
+    #   'clocks_throttle_reasons.gpu_idle': 'Active',
+    #   'clocks_throttle_reasons.hw_power_brake_slowdown': 'Not Active',
+    #   'clocks_throttle_reasons.hw_slowdown': 'Not Active',
+    #   'clocks_throttle_reasons.hw_thermal_slowdown': 'Not Active',
+    #   'clocks_throttle_reasons.supported': '0x00000000000001FF',
+    #   'clocks_throttle_reasons.sw_power_cap': 'Not Active',
+    #   'clocks_throttle_reasons.sw_thermal_slowdown': 'Not Active',
+    #   'clocks_throttle_reasons.sync_boost': 'Not Active',
+    #   'compute_mode': 'Default',
+    #   'count': 1,
+    #   'display_active': 'Enabled',
+    #   'display_mode': 'Enabled',
+    #   'driver_model.current': None,
+    #   'driver_model.pending': None,
+    #   'driver_version': '418.67',
+    #   'ecc.errors.corrected.aggregate.device_memory': None,
+    #   'ecc.errors.corrected.aggregate.l1_cache': None,
+    #   'ecc.errors.corrected.aggregate.l2_cache': None,
+    #   'ecc.errors.corrected.aggregate.register_file': None,
+    #   'ecc.errors.corrected.aggregate.texture_memory': None,
+    #   'ecc.errors.corrected.aggregate.total': None,
+    #   'ecc.errors.corrected.volatile.device_memory': None,
+    #   'ecc.errors.corrected.volatile.l1_cache': None,
+    #   'ecc.errors.corrected.volatile.l2_cache': None,
+    #   'ecc.errors.corrected.volatile.register_file': None,
+    #   'ecc.errors.corrected.volatile.texture_memory': None,
+    #   'ecc.errors.corrected.volatile.total': None,
+    #   'ecc.errors.uncorrected.aggregate.device_memory': None,
+    #   'ecc.errors.uncorrected.aggregate.l1_cache': None,
+    #   'ecc.errors.uncorrected.aggregate.l2_cache': None,
+    #   'ecc.errors.uncorrected.aggregate.register_file': None,
+    #   'ecc.errors.uncorrected.aggregate.texture_memory': None,
+    #   'ecc.errors.uncorrected.aggregate.total': None,
+    #   'ecc.errors.uncorrected.volatile.device_memory': None,
+    #   'ecc.errors.uncorrected.volatile.l1_cache': None,
+    #   'ecc.errors.uncorrected.volatile.l2_cache': None,
+    #   'ecc.errors.uncorrected.volatile.register_file': None,
+    #   'ecc.errors.uncorrected.volatile.texture_memory': None,
+    #   'ecc.errors.uncorrected.volatile.total': None,
+    #   'ecc.mode.current': None,
+    #   'ecc.mode.pending': None,
+    #   'encoder.stats.averageFps': 0,
+    #   'encoder.stats.averageLatency': 0,
+    #   'encoder.stats.sessionCount': 0,
+    #   'enforced.power.limit': 175.0,
+    #   'fan.speed': 30,
+    #   'gom.current': None,
+    #   'gom.pending': None,
+    #   'index': 0,
+    #   'inforom.ecc': None,
+    #   'inforom.img': 'G001.0000.02.04',
+    #   'inforom.oem': 1.1,
+    #   'inforom.pwr': None,
+    #   'memory.free': 7252,
+    #   'memory.total': 7952,
+    #   'memory.used': 700,
+    #   'name': 'GeForce RTX 2070',
+    #   'pci.bus': '0x07',
+    #   'pci.bus_id': '00000000:07:00.0',
+    #   'pci.device': '0x00',
+    #   'pci.device_id': '0x1F0210DE',
+    #   'pci.domain': '0x0000',
+    #   'pci.sub_device_id': '0x251619DA',
+    #   'pcie.link.gen.current': 1,
+    #   'pcie.link.gen.max': 3,
+    #   'pcie.link.width.current': 16,
+    #   'pcie.link.width.max': 16,
+    #   'persistence_mode': 'Disabled',
+    #   'power.default_limit': 175.0,
+    #   'power.draw': 9.48,
+    #   'power.limit': 175.0,
+    #   'power.management': 'Enabled',
+    #   'power.max_limit': 200.0,
+    #   'power.min_limit': 125.0,
+    #   'pstate': 'P8',
+    #   'retired_pages.double_bit.count': None,
+    #   'retired_pages.pending': None,
+    #   'retired_pages.single_bit_ecc.count': None,
+    #   'serial': None,
+    #   'temperature.gpu': 33,
+    #   'temperature.memory': 'N/A',
+    #   'timestamp': datetime.time(10, 58, 7, 443000),
+    #   'utilization.gpu': 0.0,
+    #   'utilization.memory': 0.02,
+    #   'uuid': 'GPU-e9c6b1d8-2b80-fee2-b750-08c5adcaac3f',
+    #   'vbios_version': '90.06.18.00.8D'}]
 
 def mk_machine_util():
     machine_name = get_machine_name()
@@ -337,7 +500,8 @@ def mk_machine_util():
 def disable_test_sample_cpu_util():
     tries = 10000
     for i in range(tries):
-        cpu_util = sample_cpu_utilization()
+        machine_cpu_info = MachineProcessCPUInfo()
+        cpu_util = sample_cpu_utilization(machine_cpu_info)
         assert 0 <= cpu_util['util'] <= 1
 
 def disable_test_sample_gpu_util():
@@ -387,7 +551,8 @@ def disable_test_sample_gpu_util():
 
     try:
         for i in range(tries):
-            gpu_utils = sample_gpu_utilization()
+            machine_gpu_info = nvidia_gpu_query.MachineGPUInfo()
+            gpu_utils = sample_gpu_utilization(machine_gpu_info, pid=os.getpid())
             for gpu_util in gpu_utils:
                 pprint.pprint({'gpu_util':gpu_util})
                 assert 0 <= gpu_util['util'] <= 1
@@ -409,6 +574,10 @@ def main():
     # where $@ contains all the --iml-* args.
     args, extra_argv = parser.parse_known_args()
     # args = parser.parse_args()
+
+    # NOTE: During profiling, we depend on this being called from the root training script.
+    if not args.skip_smi_check:
+        nvidia_gpu_query.check_nvidia_smi()
 
     if args.kill:
         for proc in psutil.process_iter():
@@ -453,12 +622,87 @@ def main():
 
     util_sampler = UtilizationSampler(
         directory=args.iml_directory,
+        pid=args.iml_root_pid,
         util_dump_frequency_sec=args.iml_util_dump_frequency_sec,
         util_sample_frequency_sec=args.iml_util_sample_frequency_sec,
         debug=args.iml_debug,
         debug_single_thread=args.iml_debug_single_thread,
     )
     util_sampler.run()
+
+class UtilSamplerProcess:
+    def __init__(self, iml_directory, debug=False):
+        self.iml_directory = iml_directory
+        self.debug = debug
+        self.proc = None
+        self.proc_pid = None
+
+    def _launch_utilization_sampler(self):
+        if not self.is_root_process:
+            logging.info("IML: Warning; you are starting the utilization sampler later than expected (this is not the root process of your training script")
+
+        if self.util_sampler_pid is not None:
+            logging.info("IML: Warning; you're already running utilization sampler @ pid={pid}".format(pid=self.util_sampler_pid))
+            return
+
+        util_cmdline = ['iml-util-sampler']
+        util_cmdline.extend(['--iml-directory', self.iml_directory])
+        # Sample memory-usage of the entire process tree rooted at ths process.
+        util_cmdline.extend(['--iml-root-pid', str(os.getpid())])
+        if self.debug:
+            util_cmdline.append('--iml-debug')
+        # We make sure nvidia-smi runs fast at the VERY START of training
+        # (to avoid false alarms when training is busy with the CPU/GPU).
+        # util_cmdline.append('--skip-smi-check')
+        if self.debug:
+            log_cmd(util_cmdline)
+        self.proc = subprocess.Popen(util_cmdline)
+        self.proc_pid = self.proc.pid
+        logging.info("IML: CPU/GPU utilization sampler running @ pid={pid}".format(pid=self.util_sampler_pid))
+
+    def _terminate_utilization_sampler(self, warn_terminated=True):
+        assert self.proc_pid is not None
+        logging.info("IML: terminating CPU/GPU utilization sampler @ pid={pid}".format(pid=self.proc_pid))
+
+        try:
+            proc = psutil.Process(self.proc_pid)
+        except psutil.NoSuchProcess as e:
+            if warn_terminated:
+                logging.info("IML: Warning; tried to terminate utilization sampler @ pid={pid} but it wasn't running".format(pid=self.proc_pid))
+            return
+
+        proc.terminate()
+
+    def __enter__(self):
+        self._launch_utilization_sampler()
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self.proc is not None:
+            self._terminate_utilization_sampler()
+
+def util_sampler(*args, **kwargs):
+    """
+    Sample machine CPU/GPU utilization, and output trace-files to <iml_directory>.
+
+    NOTE:
+    - This is meant to be used WITHOUT iml profiling active
+    - You should be running vanilla tensorflow (not IML modified tensorflow)
+
+    :param iml_directory:
+        Where to store trace-files containing CPU/GPU utilization info.
+    :param debug:
+        Extra logging.
+    """
+    import iml_profiler.api
+    if iml_profiler.api.prof is not None:
+        raise RuntimeError(textwrap.dedent("""\
+            IML ERROR: 
+            When using iml.util_sampler(...) to collect CPU/GPU utilization information, 
+            you should not be doing any other profiling with IML.
+            
+            In particular, you should NOT call iml.handle_iml_args(...).
+            """))
+    return UtilSamplerProcess(*args, **kwargs)
 
 if __name__ == '__main__':
     main()

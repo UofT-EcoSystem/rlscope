@@ -24,6 +24,7 @@ from iml_profiler.parser.plot import TimeBreakdownPlot, PlotSummary, CombinedPro
 from iml_profiler.parser.db import SQLParser
 from iml_profiler.parser.stacked_bar_plots import OverlapStackedBarPlot
 from iml_profiler.parser.common import print_cmd
+from iml_profiler.parser.cpu_gpu_util import UtilParser
 
 PARSER_KLASSES = [PythonProfileParser, PythonFlameGraphParser, PlotSummary, TimeBreakdownPlot, CategoryOverlapPlot, UtilizationPlot, HeatScalePlot, TotalTimeParser, TraceEventsParser, SQLParser]
 PARSER_NAME_TO_KLASS = dict((ParserKlass.__name__, ParserKlass) \
@@ -102,7 +103,7 @@ class IMLTask(luigi.Task):
                 name=self._task_name))
             return
         with self.output().open('w') as f:
-            print_cmd(cmd=sys.argv, file=f)
+            print_cmd(cmd=sys.argv, files=[f])
             delta = end_t - start_t
             minutes, seconds = divmod(delta.total_seconds(), 60)
             print(textwrap.dedent("""\
@@ -248,6 +249,25 @@ class TraceEventsTask(luigi.Task):
             start_usec=self.start_usec,
             end_usec=self.end_usec,
         )
+        self.dumper.run()
+
+class UtilTask(luigi.Task):
+    iml_directories = luigi.ListParameter(description="Multiple --iml-directory entries for finding overlap_type files: *.venn_js.js")
+    directory = luigi.Parameter(description="Output directory", default=".")
+    debug = param_debug
+    debug_single_thread = param_debug_single_thread
+
+    skip_output = False
+
+    def requires(self):
+        return []
+
+    def output(self):
+        return []
+
+    def run(self):
+        kwargs = kwargs_from_task(self)
+        self.dumper = UtilParser(**kwargs)
         self.dumper.run()
 
 class GeneratePlotIndexTask(luigi.Task):
@@ -459,6 +479,7 @@ NOT_RUNNABLE_TASKS = get_NOT_RUNNABLE_TASKS()
 IML_TASKS = get_IML_TASKS()
 IML_TASKS.add(TraceEventsTask)
 IML_TASKS.add(OverlapStackedBarTask)
+IML_TASKS.add(UtilTask)
 
 if __name__ == "__main__":
     main()

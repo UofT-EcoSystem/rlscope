@@ -6,6 +6,7 @@ import logging
 import sys
 
 from iml_profiler.profiler import profilers
+from iml_profiler.profiler import nvidia_gpu_query
 import tensorflow as tf
 
 import iml_profiler
@@ -74,6 +75,8 @@ def handle_iml_args(parser, args, directory=None, reports_progress=False):
     success = profilers.check_avail_gpus()
     if not success:
         sys.exit(1)
+
+    nvidia_gpu_query.check_nvidia_smi()
 
     init_profiler(
         directory=iml_directory,

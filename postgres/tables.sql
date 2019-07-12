@@ -145,7 +145,7 @@ CREATE TABLE DeviceUtilization (
   machine_id INTEGER NOT NULL,
   start_time_us NUMERIC NOT NULL,
   util FLOAT NOT NULL,
-  total_resident_memory_bytes INTEGER NOT NULL;
+  total_resident_memory_bytes BIGINT NOT NULL
 );
 
 CREATE TABLE Machine (
