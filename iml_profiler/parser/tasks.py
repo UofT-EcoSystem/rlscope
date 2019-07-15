@@ -457,9 +457,9 @@ def mk_SQLParserTask(task):
     return SQLParserTask(iml_directory=task.iml_directory, debug=task.debug, debug_single_thread=task.debug_single_thread,
                          postgres_host=task.postgres_host, postgres_user=task.postgres_user, postgres_password=task.postgres_password),
 
-from iml_profiler.profiler import glbl
+from iml_profiler.profiler import iml_logging
 def main(argv=None, should_exit=True):
-    glbl.setup_logging()
+    iml_logging.setup_logging()
     if argv is None:
         argv = list(sys.argv[1:])
     ret = luigi.run(cmdline_args=argv, detailed_summary=True)

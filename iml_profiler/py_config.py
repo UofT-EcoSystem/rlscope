@@ -33,6 +33,21 @@ GENERATE_INDEX_PY = _j(ROOT, "python/scripts", "generate_iml_profiler_plot_index
 # - IML trace-data belonging to a session is dumped
 DEBUG_TRACE_SESSION = False
 
+# In case docker causes different runtime behaviour, we can use this switch.
+#
+# Current issues:
+# - nvidia-smi doesn't work properly from within a container.
+#   Docker uses a DIFFERENT pid namespace within the container.
+#   i.e. the pid of the proc in the container will be DIFFERENT
+#   from the proc outside the the container, when you look at it with 'top'.
+#   HOWEVER, nvidia-smi within the container still reports the pid of process
+#   OUTSIDE the container.
+#   - This bug affects GPU memory/compute utilization sampling;
+#     if we're in a docker container just sample the entire memory usage of a GPU.
+IS_DOCKER = False
+if 'IML_LOGGED_IN' in ENV:
+  IS_DOCKER = True
+
 # Use a custom-built/modified version of TF for benchmarking things.
 # Modifies C++ code to make tfprof add less overhead to the critical path.
 # CUSTOM_TF = True

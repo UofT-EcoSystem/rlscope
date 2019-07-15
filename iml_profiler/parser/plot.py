@@ -2865,9 +2865,9 @@ def disable_test_just_legend():
         'test_just_legend.png',
         bbox_inches="tight")
 
-from iml_profiler.profiler import glbl
+from iml_profiler.profiler import iml_logging
 def main():
-    glbl.setup_logging()
+    iml_logging.setup_logging()
     p = argparse.ArgumentParser()
     p.add_argument('--test-stacked-bar', action='store_true')
     p.add_argument('--test-pixel-bar', action='store_true')

@@ -231,8 +231,22 @@ def run_nvidia_smi(cmd_opts=[], debug=False):
           ] + cmd_opts
     if debug:
         print_cmd(cmd)
-    output = subprocess.check_output(cmd, stderr=subprocess.STDOUT).decode('utf-8')
-    return output
+    # output = subprocess.check_output(cmd, stderr=subprocess.STDOUT).decode('utf-8')
+    lines = run_cmd(cmd)
+    return lines
+
+def run_cmd(cmd, **kwargs):
+    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, bufsize=1, **kwargs)
+    with p:
+        # NOTE: if this blocks it may be because there's a zombie utilization_sampler.py still running
+        # (that was created by the training script) that hasn't been terminated!
+        lines = []
+        for line in p.stdout:
+            # b'\n'-separated lines
+            line = line.decode("utf-8")
+            line = line.rstrip()
+            lines.append(line)
+    return lines
 
 # I expect nvidia-smi to take ~ 0.08 seconds.
 # I've seen it take ~ 2 seconds when it misbehaves.
@@ -280,8 +294,9 @@ def _parse_entity(cmd_opts, csv_fields, post_process_entity=None, debug=False):
 
     if debug:
         print_cmd(cmd)
-    output = subprocess.check_output(cmd, stderr=subprocess.STDOUT).decode('utf-8')
-    lines = output.split(os.linesep)
+    # output = subprocess.check_output(cmd, stderr=subprocess.STDOUT).decode('utf-8')
+    # lines = output.split(os.linesep)
+    lines = run_cmd(cmd)
     entities = []
     for line in lines:
         if re.search('^\s*$', line):

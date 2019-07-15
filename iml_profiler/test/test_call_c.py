@@ -157,9 +157,9 @@ class CallCTest:
 DEFAULT_TIME_SEC = 5
 # DEFAULT_TIME_SEC_DEBUG = 1
 DEFAULT_TIME_SEC_DEBUG = 5
-from iml_profiler.profiler import glbl
+from iml_profiler.profiler import iml_logging
 def main():
-    glbl.setup_logging()
+    iml_logging.setup_logging()
     parser = argparse.ArgumentParser(textwrap.dedent("""
     Test profiling scripts to make sure we correctly measure time spent in Python/C++/GPU.
     """))

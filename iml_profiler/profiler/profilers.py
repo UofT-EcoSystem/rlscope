@@ -17,7 +17,11 @@ import contextlib
 import multiprocessing
 from concurrent.futures.process import ProcessPoolExecutor
 
+from iml_profiler.profiler.concurrent import ForkedProcessPool
+
 import iml_profiler
+
+from iml_profiler.scripts.utilization_sampler import util_sampler
 
 ORIG_EXCEPT_HOOK = sys.excepthook
 def cleanup_profiler_excepthook(exctype, value, traceback):
@@ -55,7 +59,6 @@ from iml_profiler.profiler import clib_wrap
 from iml_profiler.profiler.clib_wrap import MICROSECONDS_IN_SECOND
 from iml_profiler.profiler import tensorflow_profile_context
 
-from iml_profiler.profiler import glbl
 from iml_profiler.profiler import proto_util
 import iml_profiler.profiler.estimator
 import iml_profiler.profiler.session
@@ -90,8 +93,6 @@ WARN_EVERY_SEC = 10
 # Number of steps before we dump a trace file
 # STEPS_PER_TRACE = 1000
 # STEPS_PER_TRACE = 10
-
-MP_SPAWN_CTX = multiprocessing.get_context('spawn')
 
 _TF_MODIFIED = False
 def modify_tensorflow():
@@ -245,211 +246,6 @@ class _ProfileContextManager:
 
         del self._session_to_context[session]
 
-class MyProcess(MP_SPAWN_CTX.Process):
-    """
-    Record exceptions in child process, and make them accessible
-    in the parent process after the child exits.
-
-    e.g.
-
-    def target():
-        raise ValueError('Something went wrong...')
-
-    p = Process(target=target)
-    p.start()
-    p.join()
-
-    if p.exception:
-        error, traceback = p.exception
-        logging.info(traceback)
-
-
-
-    From:
-    https://stackoverflow.com/questions/19924104/python-multiprocessing-handling-child-errors-in-parent
-    """
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self._pconn, self._cconn = MP_SPAWN_CTX.Pipe()
-        self._exception = None
-
-    def run(self):
-        try:
-            super().run()
-            self._cconn.send(None)
-        except Exception as e:
-            tb = traceback.format_exc()
-            self._cconn.send((e, tb))
-            # Re-raise exception so that proc.exitcode
-            # still gets set to non-zero.
-            raise
-
-    @property
-    def exception(self):
-        if self._exception is not None:
-            return self._exception
-
-        if self._pconn.poll():
-            self._exception = self._pconn.recv()
-
-        return self._exception
-
-class ForkedProcessPool:
-    """
-    Fork a child and run "target".
-
-    NOTE: We make this class explicit, since ProcessPoolExecutor DOESN'T fork a
-    process on every call to pool.submit(...)
-
-    TODO: add test-case to make sure child processes that fail with sys.exit(1) are detected
-    (I don't think they current are...)
-    """
-    WAIT_WORKERS_TIMEOUT_SEC = 0.01
-    UNLIMITED = 0
-    # Used for unit-testing; regex should match exception message when a child does sys.exit(1)
-    NONZERO_EXIT_STATUS_ERROR_REGEX = r''
-
-    def __init__(self, name=None, max_workers=UNLIMITED, debug=False, cpu_affinity=None):
-        self.name = name
-        self.process = None
-        self.max_workers = max_workers
-        self.cpu_affinity = cpu_affinity
-        self.active_workers = []
-        self.debug = debug
-        # self.inactive_workers = []
-
-    def _join_finished_workers(self):
-        i = 0
-        while i < len(self.active_workers):
-            if not self.active_workers[i].is_alive():
-                if self.debug:
-                    logging.info("> Pool(name={name}): Join pid={pid} active_workers[i={i}]={proc}".format(
-                        name=self.name,
-                        i=i,
-                        pid=self.active_workers[i].pid,
-                        proc=self.active_workers[i],
-                    ))
-                self._join_child(self.active_workers[i])
-                # self.inactive_workers.append(self.active_workers[i])
-                del self.active_workers[i]
-            else:
-                i += 1
-
-    def _wait_for_workers(self):
-        while True:
-            self._join_finished_workers()
-            if self.max_workers == ForkedProcessPool.UNLIMITED or len(self.active_workers) < self.max_workers:
-                break
-            if self.debug:
-                logging.info("> Pool.sleep for {sec} sec".format(
-                    sec=ForkedProcessPool.WAIT_WORKERS_TIMEOUT_SEC))
-            time.sleep(ForkedProcessPool.WAIT_WORKERS_TIMEOUT_SEC)
-
-    def submit(self, name, fn, *args, sync=False, **kwargs):
-        if sync:
-            return fn(*args, **kwargs)
-        self._wait_for_workers()
-        # proc = multiprocessing.Process(target=fn, name=name, args=args, kwargs=kwargs)
-        # def fn_wrapper(*args, **kwargs):
-        #     if self.cpu_affinity is not None:
-        #         proc = psutil.Process(pid=os.getpid())
-        #         proc.cpu_affinity(self.cpu_affinity)
-        #     return fn(*args, **kwargs)
-        # proc = MyProcess(target=fn_wrapper, name=name, args=args, kwargs=kwargs)
-        proc = MyProcess(target=fn, name=name, args=args, kwargs=kwargs)
-        proc.start()
-        if self.debug:
-            logging.info("> Pool(name={name}): submit pid={pid}, proc={proc}".format(
-                name=self.name,
-                pid=proc.pid,
-                proc=proc))
-        self.active_workers.append(proc)
-
-    def shutdown(self):
-        for proc in self.active_workers:
-            if self.debug:
-                logging.info("> Pool(name={name}): Join pid={pid}, proc={proc}".format(
-                    pid=proc.pid,
-                    name=self.name,
-                    proc=proc))
-            self._join_child(proc)
-            if self.debug:
-                logging.info("> Pool(name={name}): Joined pid={pid}, proc={proc}".format(
-                    pid=proc.pid,
-                    name=self.name,
-                    proc=proc))
-
-    def _join_child(self, proc):
-        proc.join()
-
-        # If child process raised an exception, re-raise it in the parent.
-        if proc.exception:
-            ex, tb_string = proc.exception
-            ExceptionKlass = type(ex)
-            parent_ex = ExceptionKlass(("Exception in child process pid={pid} proc={proc} of ForkedProcessPool(name={name}): {error}\n"
-                                        "{tb}").format(
-                name=self.name,
-                pid=proc.pid,
-                proc=proc,
-                error=ex.args[0],
-                tb=proc.exception[1]))
-            raise parent_ex
-
-        # If child process did sys.exit(1), raise a RuntimeError in the parent.
-        # (if we don't this, we'll end up ignoring a failed child!)
-        if proc.exitcode is not None and proc.exitcode > 0:
-            msg = (
-                "Child process pid={pid} proc={proc} of ForkedProcessPool(name={name}) "
-                "exited with non-zero exit-status: sys.exit({ret}).\n"
-            ).format(
-                name=self.name,
-                pid=proc.pid,
-                proc=proc,
-                ret=proc.exitcode,
-            )
-            assert re.search(ForkedProcessPool.NONZERO_EXIT_STATUS_ERROR_REGEX, msg)
-            parent_ex = RuntimeError(msg)
-            raise parent_ex
-
-def _sys_exit_1():
-    """
-    For unit-testing.
-    """
-    logging.info("Running child in ForkedProcessPool that exits with sys.exit(1)")
-    sys.exit(1)
-
-def _exception():
-    """
-    For unit-testing.
-    """
-    logging.info("Running child in ForkedProcessPool that raises an exception")
-    raise RuntimeError("Child process exception")
-
-def test_forked_process_pool():
-
-    def test_01_sys_exit_1():
-        """
-        Check that processes that exit with sys.exit(1) are detected.
-
-        :return:
-        """
-        pool = ForkedProcessPool(name=test_01_sys_exit_1.__name__)
-        with pytest.raises(RuntimeError, match=ForkedProcessPool.NONZERO_EXIT_STATUS_ERROR_REGEX) as exec_info:
-            pool.submit(_sys_exit_1.__name__, _sys_exit_1)
-            pool.shutdown()
-    test_01_sys_exit_1()
-
-    def test_02_exception():
-        """
-        Check that processes that exit with sys.exit(1) are detected.
-
-        :return:
-        """
-        pool = ForkedProcessPool(name=test_02_exception.__name__)
-        with pytest.raises(RuntimeError, match="Child process exception") as exec_info:
-            pool.submit(_exception.__name__, _exception)
-            pool.shutdown()
-    test_02_exception()
 
 class TfprofDumper:
     def __init__(self,
@@ -792,6 +588,11 @@ class Profiler:
         A: No, since it may just take a really long time before report_progress ever
            gets called.
 
+    :param just_sample_util
+        Just collect machine utilization samples;
+        don't collect any profiling information.
+        This can be run with vanilla tensorflow.
+
     :param exit_early
         if True, exit ML script immediately after benchmarking bench_name.
         Othwerwise, continue executing ML script until it finishes.
@@ -804,6 +605,7 @@ class Profiler:
                  keep_traces=None,
                  tfprof=True,
                  reports_progress=False,
+                 just_sample_util=None,
                  c_lib_func_pyprof_pattern=None,
                  # tfprof=True,
                  repetition_time_limit_sec=10.,
@@ -815,15 +617,6 @@ class Profiler:
                  unit_test=None,
                  unit_test_name=None,
                  args=None):
-        modify_tensorflow()
-
-        self.manager = multiprocessing.Manager()
-        self.pyprof_dump_manager = clib_wrap.PyprofDumpManager(self.manager)
-
-        global _prof_singleton
-        if _prof_singleton is not None:
-            raise RuntimeError("IML: Only a single profiler.Profiler object can be created; use iml.handle_iml_args + iml.prof instead.")
-        _prof_singleton = self
 
         def get_iml_argname(argname, internal=False):
             name = argname
@@ -870,13 +663,32 @@ class Profiler:
                                 allow_none=allow_none, internal=True)
             return argval
 
+        self.debug = get_argval('debug', debug, False)
+        if self.debug:
+            py_config.DEBUG = self.debug
+        self.directory = get_argval('directory', directory, None, allow_none=False)
+        self.disable = get_argval('disable', disable, False)
+        self.just_sample_util = get_argval('just_sample_util', just_sample_util, False)
+        if self.just_sample_util:
+            self.disable = True
+
+        if not self.disable:
+            modify_tensorflow()
+        else:
+            logging.info("IML: note that profiling is disabled for this run")
+
+        self.manager = multiprocessing.Manager()
+        self.pyprof_dump_manager = clib_wrap.PyprofDumpManager(self.manager)
+
+        global _prof_singleton
+        if _prof_singleton is not None:
+            raise RuntimeError("IML: Only a single profiler.Profiler object can be created; use iml.handle_iml_args + iml.prof instead.")
+        _prof_singleton = self
+
         self.machine_name = get_machine_name()
 
         # TODO: bind process to a different core to avoid interference?
         # self.bg_dumper = ProcessPoolExecutor(max_workers=1)
-        self.debug = get_argval('debug', debug, False)
-        if self.debug:
-            py_config.DEBUG = self.debug
         self.percent_complete = None
         self.num_timesteps = None
         self.total_timesteps = None
@@ -888,6 +700,12 @@ class Profiler:
         self._op_stack = []
         self._start_us = None
         self._stop_us = None
+
+        if self.just_sample_util:
+            self.util_sampler = util_sampler(
+                iml_directory=self.directory,
+                debug=self.debug,
+            )
 
         """
         If set, require the user to call prof.end_operation
@@ -904,8 +722,7 @@ class Profiler:
         self._tfprof_enabled = False
         self._pyprof_enabled = False
         self.total_profile_time_sec = 0
-        self.directory = get_argval('directory', directory, None, allow_none=False)
-        self.disable = get_argval('disable', disable, False)
+
         self.python = get_argval('python', python, False)
         self.exit_early = exit_early
         self.tfprof = tfprof
@@ -1215,6 +1032,9 @@ class Profiler:
     def start(self, start_utilization_sampler=False, handle_utilization_sampler=False):
         PROFILERS.append(self)
 
+        if self.just_sample_util:
+            self.util_sampler.__enter__()
+
         if self.disable:
             return
 
@@ -1234,6 +1054,9 @@ class Profiler:
 
     def stop(self, stop_utilization_sampler=False):
         PROFILERS.remove(self)
+
+        if self.just_sample_util:
+            self.util_sampler.__exit__(None, None, None)
 
         if self.disable:
             return
@@ -1391,7 +1214,8 @@ class Profiler:
             prof=self,
             process_name=process_name,
             phase_name=phase_name,
-            handle_utilization_sampler=handle_utilization_sampler)
+            handle_utilization_sampler=handle_utilization_sampler,
+        )
 
     def _start_profiling(self):
         """
@@ -1552,6 +1376,8 @@ class Profiler:
         return self.process_name is None
 
     def _launch_utilization_sampler(self):
+        assert not self.just_sample_util
+
         if not self.is_root_process:
             logging.info("IML: Warning; you are starting the utilization sampler later than expected (this is not the root process of your training script")
 
@@ -1576,6 +1402,8 @@ class Profiler:
         logging.info("IML: CPU/GPU utilization sampler running @ pid={pid}".format(pid=self.util_sampler_pid))
 
     def _terminate_utilization_sampler(self, warn_terminated=True):
+        assert not self.just_sample_util
+
         assert self.util_sampler_pid is not None
         logging.info("IML: terminating CPU/GPU utilization sampler @ pid={pid}".format(pid=self.util_sampler_pid))
 
@@ -2016,6 +1844,9 @@ class Profiler:
                                ignore_disable=True)
 
     def report_progress(self, percent_complete, num_timesteps=None, total_timesteps=None):
+        if self.disable:
+            return
+
         if not self.reports_progress:
             raise RuntimeError(
                 textwrap.dedent("""\
@@ -2137,7 +1968,6 @@ class Profile:
         self.prof.start(handle_utilization_sampler=self.handle_utilization_sampler)
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        # Q: Should we call this when an exception is thrown?
         self.prof.stop()
 
 class PythonProfiler:
@@ -2249,97 +2079,12 @@ class PythonProfiler:
         ret = _j(self.directory, "python_profile.prof")
         return ret
 
-    # @property
-    # def _call_times_path(self):
-    #     return _j(self.directory, "python_profile{bench}.call_times.json".format(
-    #         bench=bench_suffix(self.bench_name)))
-
-    # @property
-    # def _call_times_path(self):
-    #     return _j(self.directory, "pyprof_call_times{bench}.call_times.json".format(
-    #         bench=bench_suffix(self.bench_name)))
-
     @property
     def _stats_path(self):
         return _j(self.directory, "python_profile.txt")
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.stop()
-
-# 100 ms
-MIN_UTIL_SAMPLE_FREQUENCY_SEC = 100/MILLISECONDS_IN_SECOND
-# 500 ms
-DEFAULT_UTIL_SAMPLE_FREQUENCY_SEC = 500/MILLISECONDS_IN_SECOND
-def get_util_sampler_parser(only_fwd_arguments=False):
-    """
-    :param fwd_arguments:
-        Only add arguments that should be forwarded to utilization_sampler.py from ML scripts.
-    :return:
-    """
-    parser = argparse.ArgumentParser("Sample GPU/CPU utilization over the course of training")
-    parser.add_argument('--iml-directory',
-                        # required=True,
-                        help=textwrap.dedent("""
-    IML: profiling output directory.
-    """))
-    parser.add_argument('--iml-debug',
-                        action='store_true',
-                        help=textwrap.dedent("""
-    IML: debug profiler.
-    """))
-    if only_fwd_arguments:
-        return parser
-
-    parser.add_argument('--iml-util-sample-frequency-sec',
-                        type=float,
-                        default=DEFAULT_UTIL_SAMPLE_FREQUENCY_SEC,
-                        help=textwrap.dedent("""
-    IML: How frequently (in seconds) should we sample GPU/CPU utilization?
-    default: sample every 500 ms.
-    """))
-    parser.add_argument('--iml-root-pid', required=True, type=int,
-                        help=textwrap.dedent("""
-        IML: (internal use)
-        The PID of the root training process on this machine.
-        When sampling memory usage, we sample total memory usage of this 
-        process and its entire process tree (i.e. to support multi-process training).
-    """))
-    parser.add_argument('--iml-util-dump-frequency-sec',
-                        type=float,
-                        default=10.,
-                        help=textwrap.dedent("""
-    IML: How frequently (in seconds) should we sample GPU/CPU utilization?
-    default: dump every 10 seconds.
-    """))
-    parser.add_argument('--iml-debug-single-thread',
-                        action='store_true',
-                        help=textwrap.dedent("""
-    IML: debug with single thread.
-    """))
-
-    parser.add_argument('--measure-samples-per-sec',
-                        action='store_true',
-                        help=textwrap.dedent("""
-    Determines reasonable values for --iml-util-sample-frequency-sec.
-    
-    How fast can we call nvidia-smi (to sample GPU utilization)?  
-    How fast can we gather CPU utilization?
-    """))
-
-    parser.add_argument('--skip-smi-check',
-                        action='store_true',
-                        help=textwrap.dedent("""
-    If NOT set, we will make sure nvidia-smi runs quickly (i.e. under 1 second); 
-    this is needed for GPU sampling.
-    """))
-
-    parser.add_argument('--kill',
-                        action='store_true',
-                        help=textwrap.dedent("""
-    Kill any existing instances of this script that are still running, then exit.
-    """))
-
-    return parser
 
 def add_iml_arguments(parser):
     iml_parser = parser.add_argument_group("IML")
@@ -2416,6 +2161,11 @@ def add_iml_arguments(parser):
     iml_parser.add_argument('--iml-disable', action='store_true', help=textwrap.dedent("""
         IML: Skip any profiling.
     """))
+    iml_parser.add_argument('--iml-just-sample-util', action='store_true', help=textwrap.dedent("""
+        IML: collect machine utilization data and output it to --iml-directory.
+        
+        NOTE: this will NOT collect profiling information.
+    """))
     iml_parser.add_argument('--iml-unit-test',
                         action='store_true',
                         help=textwrap.dedent("""
@@ -2453,35 +2203,6 @@ def is_iml_file(path):
         pyprof=PYPROF_REGEX,
         nvprof=NVPROF_REGEX),
         base)
-
-# class _ProfileGlobals:
-#     def __init__(self):
-#         self.files_before = None
-#         self.files_after = None
-#
-#     def cleanup_files(self):
-#         """
-#         PROBLEM: script might output result files, and not be written to handle
-#         re-running itself once those files exist.
-#
-#         - Modify script to overwrite/delete old output files:
-#           Can probably handle this with IML wrapper.
-#           files_before = [ files seen before run ]
-#           files_after  = [ files seen after run ]
-#           iml_files    = [ files output by iml ]
-#           files_to_rm  = files_after - files_before - iml_files
-#         """
-#         # self.iml_files = [path for path in self.files_after if is_iml_file(path)]
-#         self.files_to_rm = set(self.files_after).difference(set(self.files_before))
-#         self.files_to_rm = [path for path in self.files_to_rm if not is_iml_file(path)]
-#         for path in self.files_to_rm:
-#             opts = ""
-#             if os.path.isdir(path):
-#                 opts = "-r "
-#             logging.info("> RM {opts}{f}".format(
-#                 opts=opts, f=path))
-
-# ProfileGlobals = _ProfileGlobals()
 
 def iml_argv(prof : Profiler, keep_executable=False, keep_non_iml_args=False):
     """

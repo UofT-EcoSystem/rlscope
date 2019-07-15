@@ -14,10 +14,10 @@ import textwrap
 import multiprocessing
 from iml_profiler.parser import tasks
 from iml_profiler.parser.common import print_cmd
-from iml_profiler.profiler import glbl
+from iml_profiler.profiler import iml_logging
 
 def main():
-    glbl.setup_logging()
+    iml_logging.setup_logging()
 
     parser = argparse.ArgumentParser(
         textwrap.dedent("""\

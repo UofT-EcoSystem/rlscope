@@ -52,8 +52,6 @@ from iml_profiler import py_config
 from iml_profiler.parser.common import *
 
 
-from iml_profiler.profiler import glbl
-
 # Only allow a single traced session.run(...) call to run at a time.
 # By default, tfprof code enforces this.
 # Q: Will multiple tracers work now...?

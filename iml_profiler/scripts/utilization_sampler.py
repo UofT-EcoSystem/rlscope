@@ -18,14 +18,90 @@ from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, base
 # For some reason GPUtil contains nothing if I do this...
 from iml_profiler.profiler import nvidia_gpu_query
 
+from iml_profiler import py_config
+
 from iml_profiler.protobuf.pyprof_pb2 import Pyprof, MachineUtilization, DeviceUtilization, UtilizationSample
 
 from iml_profiler.parser.common import *
 
-from iml_profiler.profiler.profilers import trace_suffix, get_util_sampler_parser, MIN_UTIL_SAMPLE_FREQUENCY_SEC
-
 BYTES_IN_KB = 1 << 10
 BYTES_IN_MB = 1 << 20
+
+# 100 ms
+MIN_UTIL_SAMPLE_FREQUENCY_SEC = 100/MILLISECONDS_IN_SECOND
+# 500 ms
+DEFAULT_UTIL_SAMPLE_FREQUENCY_SEC = 500/MILLISECONDS_IN_SECOND
+def get_util_sampler_parser(only_fwd_arguments=False):
+    """
+    :param fwd_arguments:
+        Only add arguments that should be forwarded to utilization_sampler.py from ML scripts.
+    :return:
+    """
+    parser = argparse.ArgumentParser("Sample GPU/CPU utilization over the course of training")
+    parser.add_argument('--iml-directory',
+                        # required=True,
+                        help=textwrap.dedent("""
+    IML: profiling output directory.
+    """))
+    parser.add_argument('--iml-debug',
+                        action='store_true',
+                        help=textwrap.dedent("""
+    IML: debug profiler.
+    """))
+    if only_fwd_arguments:
+        return parser
+
+    parser.add_argument('--iml-util-sample-frequency-sec',
+                        type=float,
+                        default=DEFAULT_UTIL_SAMPLE_FREQUENCY_SEC,
+                        help=textwrap.dedent("""
+    IML: How frequently (in seconds) should we sample GPU/CPU utilization?
+    default: sample every 500 ms.
+    """))
+    parser.add_argument('--iml-root-pid', required=True, type=int,
+                        help=textwrap.dedent("""
+        IML: (internal use)
+        The PID of the root training process on this machine.
+        When sampling memory usage, we sample total memory usage of this 
+        process and its entire process tree (i.e. to support multi-process training).
+    """))
+    parser.add_argument('--iml-util-dump-frequency-sec',
+                        type=float,
+                        default=10.,
+                        help=textwrap.dedent("""
+    IML: How frequently (in seconds) should we sample GPU/CPU utilization?
+    default: dump every 10 seconds.
+    """))
+    parser.add_argument('--iml-debug-single-thread',
+                        action='store_true',
+                        help=textwrap.dedent("""
+    IML: debug with single thread.
+    """))
+
+    parser.add_argument('--measure-samples-per-sec',
+                        action='store_true',
+                        help=textwrap.dedent("""
+    Determines reasonable values for --iml-util-sample-frequency-sec.
+    
+    How fast can we call nvidia-smi (to sample GPU utilization)?  
+    How fast can we gather CPU utilization?
+    """))
+
+    parser.add_argument('--skip-smi-check',
+                        action='store_true',
+                        help=textwrap.dedent("""
+    If NOT set, we will make sure nvidia-smi runs quickly (i.e. under 1 second); 
+    this is needed for GPU sampling.
+    """))
+
+    parser.add_argument('--kill',
+                        action='store_true',
+                        help=textwrap.dedent("""
+    Kill any existing instances of this script that are still running, then exit.
+    """))
+
+    return parser
+
 
 def CPU_as_util(info):
     assert type(info) in {MachineProcessCPUInfo}
@@ -124,6 +200,8 @@ class UtilizationSampler:
         # return now_sec
 
     def run(self):
+        SigTermWatcher = _SigTermWatcher()
+
         if self.debug:
             logging.info("> {klass}: Start collecting CPU/GPU utilization samples".format(
                 klass=self.__class__.__name__,
@@ -149,9 +227,9 @@ class UtilizationSampler:
                         logging.info("> {klass}: Got SIGINT; dumping remaining collected samples and exiting".format(
                             klass=self.__class__.__name__,
                         ))
-                        # Dump any remaining samples we have not dumped yet.
-                        self._maybe_dump(cur_time_sec, dump=True)
-                        self.check_pending_dump_calls(wait=True)
+                    # Dump any remaining samples we have not dumped yet.
+                    self._maybe_dump(cur_time_sec, dump=True)
+                    self.check_pending_dump_calls(wait=True)
                     break
 
                 self._maybe_dump(cur_time_sec)
@@ -168,7 +246,7 @@ class UtilizationSampler:
                 machine_cpu_info = MachineProcessCPUInfo(self.pid)
                 cpu_util = sample_cpu_utilization(machine_cpu_info)
                 machine_gpu_info = nvidia_gpu_query.MachineGPUInfo()
-                gpu_utils = sample_gpu_utilization(machine_gpu_info, self.pid)
+                gpu_utils = sample_gpu_utilization(machine_gpu_info, self.pid, debug=self.debug)
                 if self.debug:
                     logging.info("> {klass}: utils = \n{utils}".format(
                         klass=self.__class__.__name__,
@@ -191,7 +269,8 @@ class UtilizationSampler:
                 if ex is not None:
                     raise ex
                 del_indices.append(i)
-        for i in del_indices:
+        # Delete reverse sorted order, otherwise indices will be messed up.
+        for i in reversed(sorted(del_indices)):
             del self.pending_dump_futures[i]
 
 
@@ -273,8 +352,6 @@ class _SigTermWatcher:
     def exit_gracefully(self, signum, frame):
         self.kill_now = True
 
-SigTermWatcher = _SigTermWatcher()
-
 # Cache cpuinfo, since this call takes 1 second to run, and we need to sample at millisecond frequency.
 # NOTE: This has all sorts of CPU architecture information (e.g. l2 cache size)
 CPU_INFO = cpuinfo.get_cpu_info()
@@ -341,20 +418,32 @@ def get_process_tree(pid):
 
     return procs
 
-def sample_gpu_total_resident_memory_bytes(machine_gpu_info, gpu, pid):
+def sample_gpu_total_resident_memory_bytes(machine_gpu_info, gpu, pid, debug=False):
     procs = get_process_tree(pid)
+    if debug:
+        logging.info(pprint_msg({'sample_gpu_bytes.procs': procs, 'pid': pid, 'gpu': gpu}))
 
     pids = set(proc.pid for proc in procs)
 
+
     gpu_procs = machine_gpu_info.processes(gpu)
+    if debug:
+        logging.info(pprint_msg({'sample_gpu_bytes.gpu_procs': gpu_procs}))
     total_resident_memory_bytes = 0
     for gpu_proc in gpu_procs:
-        if gpu_proc['pid'] in pids:
+        if not py_config.IS_DOCKER:
+            if gpu_proc['pid'] in pids:
+                total_resident_memory_bytes += gpu_proc['used_gpu_memory'] * BYTES_IN_MB
+        else:
+            # nvidia-smi BUG: nvidia-smi doesn't respect pid-namespacing of docker container
+            # and uses pids of processes outside the container.
+            #
+            # Instead, get total GPU memory used by summing across ALL GPU processes.
             total_resident_memory_bytes += gpu_proc['used_gpu_memory'] * BYTES_IN_MB
 
     return total_resident_memory_bytes
 
-def sample_gpu_utilization(machine_gpu_info, pid):
+def sample_gpu_utilization(machine_gpu_info, pid, debug=False):
     """
     Report a single [0..1] value representing current GPU utilization.
     Report a separate value for EACH GPU in the system.
@@ -366,8 +455,10 @@ def sample_gpu_utilization(machine_gpu_info, pid):
     gpus = machine_gpu_info.gpus()
     epoch_time_usec = now_us()
     gpu_utils = []
+    if debug:
+        logging.info(pprint_msg({'sample_gpu_bytes.gpus': gpus}))
     for gpu in gpus:
-        total_resident_memory_bytes = sample_gpu_total_resident_memory_bytes(machine_gpu_info, gpu, pid)
+        total_resident_memory_bytes = sample_gpu_total_resident_memory_bytes(machine_gpu_info, gpu, pid, debug=debug)
         gpu_util = GPU_as_util(
             gpu,
             epoch_time_usec=epoch_time_usec,
@@ -562,9 +653,9 @@ def disable_test_sample_gpu_util():
         gpu_runner.join(timeout=2)
         gpu_runner.terminate()
 
-from iml_profiler.profiler import glbl
+from iml_profiler.profiler import iml_logging
 def main():
-    glbl.setup_logging()
+    iml_logging.setup_logging()
     parser = get_util_sampler_parser()
     # To make it easy to launch utilization sampler manually in certain code bases,
     # allow ignoring all the --iml-* arguments:
@@ -638,13 +729,6 @@ class UtilSamplerProcess:
         self.proc_pid = None
 
     def _launch_utilization_sampler(self):
-        if not self.is_root_process:
-            logging.info("IML: Warning; you are starting the utilization sampler later than expected (this is not the root process of your training script")
-
-        if self.util_sampler_pid is not None:
-            logging.info("IML: Warning; you're already running utilization sampler @ pid={pid}".format(pid=self.util_sampler_pid))
-            return
-
         util_cmdline = ['iml-util-sampler']
         util_cmdline.extend(['--iml-directory', self.iml_directory])
         # Sample memory-usage of the entire process tree rooted at ths process.
@@ -658,7 +742,7 @@ class UtilSamplerProcess:
             log_cmd(util_cmdline)
         self.proc = subprocess.Popen(util_cmdline)
         self.proc_pid = self.proc.pid
-        logging.info("IML: CPU/GPU utilization sampler running @ pid={pid}".format(pid=self.util_sampler_pid))
+        logging.info("IML: CPU/GPU utilization sampler running @ pid={pid}".format(pid=self.proc_pid))
 
     def _terminate_utilization_sampler(self, warn_terminated=True):
         assert self.proc_pid is not None
@@ -695,13 +779,16 @@ def util_sampler(*args, **kwargs):
     """
     import iml_profiler.api
     if iml_profiler.api.prof is not None:
-        raise RuntimeError(textwrap.dedent("""\
-            IML ERROR: 
-            When using iml.util_sampler(...) to collect CPU/GPU utilization information, 
-            you should not be doing any other profiling with IML.
-            
-            In particular, you should NOT call iml.handle_iml_args(...).
-            """))
+        assert iml_profiler.api.prof.disabled
+    # import iml_profiler.api
+    # if iml_profiler.api.prof is not None:
+    #     raise RuntimeError(textwrap.dedent("""\
+    #         IML ERROR:
+    #         When using iml.util_sampler(...) to collect CPU/GPU utilization information,
+    #         you should not be doing any other profiling with IML.
+    #
+    #         In particular, you should NOT call iml.handle_iml_args(...).
+    #         """))
     return UtilSamplerProcess(*args, **kwargs)
 
 if __name__ == '__main__':

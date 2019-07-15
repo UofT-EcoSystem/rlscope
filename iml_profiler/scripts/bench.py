@@ -46,7 +46,7 @@ except ImportError:
 
 from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, basename as _b
 
-from iml_profiler.profiler import glbl
+from iml_profiler.profiler import iml_logging
 from iml_profiler.profiler.profilers import MyProcess, ForkedProcessPool
 
 from iml_profiler.profiler.profilers import args_to_cmdline
@@ -96,7 +96,7 @@ def add_stable_baselines_options(pars):
         """))
 
 def main():
-    glbl.setup_logging()
+    iml_logging.setup_logging()
     parser = argparse.ArgumentParser(
         textwrap.dedent("""\
         Run a bunch of experiments for a paper.

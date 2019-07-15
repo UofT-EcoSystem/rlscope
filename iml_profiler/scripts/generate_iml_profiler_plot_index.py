@@ -232,9 +232,9 @@ def mkds(dic, *keys):
         dic = mkd(dic, key)
     return dic
 
-from iml_profiler.profiler import glbl
+from iml_profiler.profiler import iml_logging
 def main():
-    glbl.setup_logging()
+    iml_logging.setup_logging()
     parser = argparse.ArgumentParser("Generate index of *.venn_js.json files.")
     parser.add_argument('--iml-directory',
                         required=True,

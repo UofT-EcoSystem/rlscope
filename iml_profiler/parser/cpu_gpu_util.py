@@ -180,9 +180,20 @@ class UtilParser:
         return data
 
     def flattened_agg_df(self, df):
+        """
+        :param df:
+            The result of a df.groupby([...]).agg([...])
+        :return:
+        """
         # https://stackoverflow.com/questions/19078325/naming-returned-columns-in-pandas-aggregate-function
+        df = df.reset_index()
         old_cols = df.columns.ravel()
-        new_cols = ["_".join(x) for x in df.columns.ravel()]
+        def get_new_col(col_agg):
+            col, agg = col_agg
+            if agg == '':
+                return col
+            return '{col}_{agg}'.format(col=col, agg=agg)
+        new_cols = [get_new_col(col_agg) for col_agg in df.columns.ravel()]
         new_df_data = dict()
         for old_col, new_col in zip(old_cols, new_cols):
             new_df_data[new_col] = df[old_col]
@@ -209,5 +220,6 @@ class UtilParser:
         groupby_cols = sorted(self.added_fields) + ['machine_name', 'device_name']
         df_agg = df.groupby(groupby_cols).agg(['min', 'max', 'mean', 'std'])
         flat_df_agg = self.flattened_agg_df(df_agg)
+        # import ipdb; ipdb.set_trace()
         logging.info("Output min/max/std aggregated machine utilization data @ {path}".format(path=self._agg_csv_path))
         flat_df_agg.to_csv(self._agg_csv_path, index=False)

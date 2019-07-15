@@ -21,9 +21,9 @@ def dump_proto_txt(path, ProtoKlass, stream):
         proto.ParseFromString(f.read())
     print(proto, file=stream)
 
-from iml_profiler.profiler import glbl
+from iml_profiler.profiler import iml_logging
 def main():
-    glbl.setup_logging()
+    iml_logging.setup_logging()
     parser = argparse.ArgumentParser("Dump protobuf files to txt")
     parser.add_argument("--proto",
                         required=True,

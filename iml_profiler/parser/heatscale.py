@@ -396,9 +396,9 @@ def disable_test_heatscale(args):
     heatscale.add_data(dic)
     heatscale.plot()
 
-from iml_profiler.profiler import glbl
+from iml_profiler.profiler import iml_logging
 def main():
-    glbl.setup_logging()
+    iml_logging.setup_logging()
     parser = argparse.ArgumentParser("Dump protobuf files to txt")
     parser.add_argument("--test-heatmap",
                         action='store_true',

@@ -5,6 +5,7 @@ Manage a singleton instance to a Profiler object.
 import logging
 import sys
 
+from iml_profiler.profiler import iml_logging
 from iml_profiler.profiler import profilers
 from iml_profiler.profiler import nvidia_gpu_query
 import tensorflow as tf
@@ -67,7 +68,7 @@ def handle_iml_args(parser, args, directory=None, reports_progress=False):
     else:
         iml_directory = directory
 
-    setup_logging()
+    iml_logging.setup_logging()
 
     if iml_directory is None:
         raise RuntimeError("IML: you must provide a location to store trace files: --iml-directory <dir>")
@@ -83,14 +84,3 @@ def handle_iml_args(parser, args, directory=None, reports_progress=False):
         reports_progress=reports_progress,
         args=args,
     )
-
-def setup_logging():
-    format = 'PID={process}/{processName} @ {funcName}, {filename}:{lineno} :: {asctime} {levelname}: {message}'
-    logging.basicConfig(format=format, style='{', level=logging.INFO)
-
-    # Trying to disable excessive DEBUG logging messages coming from luigi,
-    # but it's not working....
-    luigi_logger = logging.getLogger('luigi-interface')
-    luigi_logger.setLevel(logging.INFO)
-    luigi_logger = logging.getLogger('luigi')
-    luigi_logger.setLevel(logging.INFO)
