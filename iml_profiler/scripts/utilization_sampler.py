@@ -420,15 +420,15 @@ def get_process_tree(pid):
 
 def sample_gpu_total_resident_memory_bytes(machine_gpu_info, gpu, pid, debug=False):
     procs = get_process_tree(pid)
-    if debug:
-        logging.info(pprint_msg({'sample_gpu_bytes.procs': procs, 'pid': pid, 'gpu': gpu}))
+    # if debug:
+    #     logging.info(pprint_msg({'sample_gpu_bytes.procs': procs, 'pid': pid, 'gpu': gpu}))
 
     pids = set(proc.pid for proc in procs)
 
 
     gpu_procs = machine_gpu_info.processes(gpu)
-    if debug:
-        logging.info(pprint_msg({'sample_gpu_bytes.gpu_procs': gpu_procs}))
+    # if debug:
+    #     logging.info(pprint_msg({'sample_gpu_bytes.gpu_procs': gpu_procs}))
     total_resident_memory_bytes = 0
     for gpu_proc in gpu_procs:
         if not py_config.IS_DOCKER:
@@ -455,8 +455,8 @@ def sample_gpu_utilization(machine_gpu_info, pid, debug=False):
     gpus = machine_gpu_info.gpus()
     epoch_time_usec = now_us()
     gpu_utils = []
-    if debug:
-        logging.info(pprint_msg({'sample_gpu_bytes.gpus': gpus}))
+    # if debug:
+    #     logging.info(pprint_msg({'sample_gpu_bytes.gpus': gpus}))
     for gpu in gpus:
         total_resident_memory_bytes = sample_gpu_total_resident_memory_bytes(machine_gpu_info, gpu, pid, debug=debug)
         gpu_util = GPU_as_util(

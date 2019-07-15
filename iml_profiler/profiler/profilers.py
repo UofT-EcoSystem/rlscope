@@ -614,6 +614,7 @@ class Profiler:
                  require_end_operation=False,
                  python=None,
                  disable=None,
+                 delay=None,
                  unit_test=None,
                  unit_test_name=None,
                  args=None):
@@ -668,6 +669,7 @@ class Profiler:
             py_config.DEBUG = self.debug
         self.directory = get_argval('directory', directory, None, allow_none=False)
         self.disable = get_argval('disable', disable, False)
+        self.delay = get_argval('delay', delay, False)
         self.just_sample_util = get_argval('just_sample_util', just_sample_util, False)
         if self.just_sample_util:
             self.disable = True
@@ -690,6 +692,10 @@ class Profiler:
         # TODO: bind process to a different core to avoid interference?
         # self.bg_dumper = ProcessPoolExecutor(max_workers=1)
         self.percent_complete = None
+        self._start_percent_complete = 0.
+        self._start_num_timesteps = 0
+        self._delayed_enable = False
+        # self._delayed_disable = False
         self.num_timesteps = None
         self.total_timesteps = None
         # dump_cpus = get_dump_cpus()
@@ -1009,25 +1015,79 @@ class Profiler:
                 # (self.code_count[bench_name] - 1) >= self.start_measuring_call
         )
 
-    def enable_profiling(self, bench_name=NO_BENCH_NAME):
-        if not self._should_measure_call(bench_name):
-            return False
-
-        self.start_t[bench_name] = time.time()
-        return True
+    # def enable_profiling(self, bench_name=NO_BENCH_NAME):
+    #     if not self._should_measure_call(bench_name):
+    #         return False
+    #
+    #     self.start_t[bench_name] = time.time()
+    #     return True
 
     def profile_time_sec(self, bench_name):
         return self.time_sec[bench_name]
 
-    def disable_profiling(self, bench_name=NO_BENCH_NAME, num_calls=1):
-        if not self._should_measure_call(bench_name):
-            self.code_count[bench_name] = self.code_count.get(bench_name, 0) + 1
+    # def disable_profiling(self, bench_name=NO_BENCH_NAME, num_calls=1):
+    #     if not self._should_measure_call(bench_name):
+    #         self.code_count[bench_name] = self.code_count.get(bench_name, 0) + 1
+    #         return
+    #
+    #     end_time_sec = time.time()
+    #     self.end_t[bench_name] = end_time_sec
+    #     self.time_sec[bench_name] = self.time_sec.get(bench_name, 0.) + end_time_sec - self.start_t[bench_name]
+    #     self.code_count[bench_name] = self.code_count.get(bench_name, 0) + num_calls
+
+    def _check_no_annotations(self, caller_name):
+        if len(self._op_stack) > 0:
+            raise RuntimeError(self._iml_err_msg(
+                "You cannot call {caller} while annotations are active since you'll end up losing tfprof/pyprof event data.".format(
+                    caller=caller_name,
+                ),
+                stack=get_stacktrace(), msg_type="ERROR"))
+
+    def _enable_tracing(self):
+        logging.info("IML: enable tracing")
+
+        self._check_no_annotations(caller_name='iml.prof.enable_tracing()')
+
+        self._start_pyprof()
+        self._start_tfprof()
+
+    @property
+    def tracing_enabled(self):
+        return self._pyprof_enabled and self._tfprof_enabled
+
+    def enable_tracing(self):
+        """
+        Turn on IML tracing.
+
+        :return:
+        """
+        if self.disable:
             return
 
-        end_time_sec = time.time()
-        self.end_t[bench_name] = end_time_sec
-        self.time_sec[bench_name] = self.time_sec.get(bench_name, 0.) + end_time_sec - self.start_t[bench_name]
-        self.code_count[bench_name] = self.code_count.get(bench_name, 0) + num_calls
+        if self.reports_progress:
+            # Wait for iml.prof.report_progress() to get called until we enable tracing.
+            # This ensures that we measure the delta in percent_complete'd over the same interval of time we do tracing for.
+            self._delayed_enable = True
+        else:
+            self._enable_tracing()
+
+    def _disable_tracing(self):
+        logging.info("IML: enable tracing")
+        self._stop_pyprof()
+        self._stop_tfprof()
+
+    # # Calling iml.prof.enable()/disable() repeatedly wouldn't currently support percent_complete tracking...
+    # # So let's just not allow disable() for now.
+    # def disable_tracing(self):
+    #     """
+    #     Turn off IML tracing.
+    #
+    #     :return:
+    #     """
+    #     if self.reports_progress:
+    #         self._delayed_disable = True
+    #     else:
+    #         self._disable_tracing()
 
     def start(self, start_utilization_sampler=False, handle_utilization_sampler=False):
         PROFILERS.append(self)
@@ -1046,7 +1106,10 @@ class Profiler:
 
         if self.unit_test:
             self.ut.start()
-        self._start_profiling()
+
+        # If --iml-delay, delay collecting traces until they explicitly call iml.prof.enable().
+        if not self.delay:
+            self.enable_tracing()
 
     def _maybe_end_operations(self):
         while len(self._op_stack) != 0:
@@ -1183,7 +1246,7 @@ class Profiler:
         #     self._start_tfprof()
         #     self._start_pyprof()
 
-        self.enable_profiling(bench_name)
+        # self.enable_profiling(bench_name)
         self.start_call_us[bench_name] = clib_wrap.now_us()
 
     def operation(self, operation):
@@ -1216,17 +1279,6 @@ class Profiler:
             phase_name=phase_name,
             handle_utilization_sampler=handle_utilization_sampler,
         )
-
-    def _start_profiling(self):
-        """
-        Do any initialization/setup needed to trace events.
-
-        e.g. wrap tensorflow library C++ API calls, wrap simulator API calls, etc.
-
-        :return:
-        """
-        self._start_tfprof()
-        self._start_pyprof()
 
     def _init_trace_time(self):
         """
@@ -1328,7 +1380,8 @@ class Profiler:
             )))
 
         self.end_call_us[bench_name] = clib_wrap.now_us()
-        self.disable_profiling(bench_name, num_calls=1)
+        # self.disable_profiling(bench_name, num_calls=1)
+
         # Record the last amount of time in between returning
         # from a call to q_forward, and finishing benchmarking.
         # This will include time spent in the tensorflow python API
@@ -1351,8 +1404,7 @@ class Profiler:
 
         if len(self._op_stack) == 0:
             self.steps += 1
-            # self._stop_pyprof()
-            # self._stop_tfprof()
+            # self._disable_tracing()
 
         self._maybe_warn_report_progress()
 
@@ -1660,10 +1712,21 @@ class Profiler:
 
         if self.percent_complete is not None:
             process_metadata.training_progress.content_code = TP_HAS_PROGRESS
-            process_metadata.training_progress.percent_complete = self.percent_complete
+            # Measure the delta of training completed over the course of training.
+            # This is important since, if we delay trace collection until warmup completes,
+            # we don't want to inflate the percent_complete'd over that duration of training time.
+            percent_complete = self.percent_complete - self._start_percent_complete
+            if self.debug:
+                logging.info("percent_complete ({perc}) = latest_percent_complete ({latest}) - start_percent_complete ({start})".format(
+                    perc=percent_complete,
+                    latest=self.percent_complete,
+                    start=self._start_percent_complete,
+                ))
+            process_metadata.training_progress.percent_complete = percent_complete
             # Q: Is this safe is self.num_timestamps is None? NO
             if self.num_timesteps is not None:
-                process_metadata.training_progress.num_timesteps = self.num_timesteps
+                num_timesteps = self.num_timesteps - self._start_num_timesteps
+                process_metadata.training_progress.num_timesteps = num_timesteps
             if self.total_timesteps is not None:
                 process_metadata.training_progress.total_timesteps = self.total_timesteps
         else:
@@ -1717,8 +1780,9 @@ class Profiler:
         If we've exceed tracing time-limit (--iml-trace-time-sec), but there are still live annotations,
         warn the user.
         """
-        if self.trace_time_sec is not None and \
-                self._total_trace_time_sec() > self.trace_time_sec and \
+        total_trace_time_sec = self._total_trace_time_sec()
+        if self.trace_time_sec is not None and total_trace_time_sec is not None and \
+                total_trace_time_sec > self.trace_time_sec and \
                 len(self._op_stack) > 0 and \
                 ( self._last_warned_trace_time_sec is None or time.time() - self._last_warned_trace_time_sec >= WARN_EVERY_SEC ):
             logging.warning(textwrap.dedent("""\
@@ -1731,7 +1795,7 @@ class Profiler:
               Stacktrace:
             {stack}
             """).format(
-                sec=self._total_trace_time_sec(),
+                sec=total_trace_time_sec,
                 limit_sec=self.trace_time_sec,
                 proc=self.process_name,
                 phase=self.phase,
@@ -1748,9 +1812,9 @@ class Profiler:
 
         Warn them every 30 seconds in that case.
         """
-        if self.trace_time_sec is None:
-            return
         total_trace_time_sec = self._total_trace_time_sec()
+        if self.trace_time_sec is None or total_trace_time_sec is None:
+            return
         warn_idx = int((total_trace_time_sec - self.trace_time_sec) / REPORT_PROGRESS_WARN_EVERY_SEC)
         if total_trace_time_sec > self.trace_time_sec and (
             warn_idx > 1 and (
@@ -1777,6 +1841,26 @@ class Profiler:
             ))
             self._last_warned_report_progress_idx = warn_idx
 
+    def _iml_err_msg(self, msg, stack=None, msg_type='Warning'):
+        if stack is None:
+            stack = get_stacktrace()
+        return textwrap.dedent("""\
+            IML: {msg_type}; {msg} 
+              process_name = {proc}
+              phase_name = {phase}
+              Active annotations:
+                {annotations}
+              Stacktrace:
+            {stack}
+            """).format(
+            msg_type=msg_type,
+            msg=msg,
+            proc=self.process_name,
+            phase=self.phase,
+            annotations=self._op_stack,
+            stack=textwrap.indent(stack, prefix="  "*2),
+        )
+
     def should_finish(self, finish_now=False, skip_finish=False):
 
 
@@ -1786,6 +1870,7 @@ class Profiler:
                         self.num_traces is not None and
                         self.next_trace_id >= self.num_traces
                 ) or (
+                        total_trace_time_sec is not None and
                         self.trace_time_sec is not None
                         and total_trace_time_sec >= self.trace_time_sec
                 )
@@ -1810,7 +1895,7 @@ class Profiler:
                     next_bool=self.next_trace_id >= self.num_traces,
                     next_trace_id=self.next_trace_id,
                 )), prefix="  "))
-            if self.trace_time_sec is not None:
+            if total_trace_time_sec is not None and self.trace_time_sec is not None:
                 logging.info(textwrap.indent(textwrap.dedent("""
                 - total_trace_time_sec >= self.trace_time_sec = {total_bool}
                   - total_trace_time_sec = {total_trace_time_sec}
@@ -1822,7 +1907,7 @@ class Profiler:
         return ret
 
     def _total_trace_time_sec(self):
-        if self.trace_time_sec is None:
+        if self.start_trace_time_sec is None:
             return None
         now_sec = time.time()
         return now_sec - self.start_trace_time_sec
@@ -1870,6 +1955,16 @@ class Profiler:
                 """).format(
                     perc=percent_complete,
                 ))
+
+        if self._delayed_enable:
+            # We're going to enable tracing now as a result of iml.prof.enable_tracing();
+            # reset flag to prevent future enables.
+            self._delayed_enable = False
+            self._check_no_annotations(caller_name='iml.prof.report_progress()')
+            self._enable_tracing()
+            # percent_complete when tracing begins.
+            self._start_percent_complete = percent_complete
+            self._start_num_timesteps = num_timesteps
 
         if self.num_timesteps is not None:
             self.num_timesteps = num_timesteps
@@ -2160,6 +2255,10 @@ def add_iml_arguments(parser):
     """))
     iml_parser.add_argument('--iml-disable', action='store_true', help=textwrap.dedent("""
         IML: Skip any profiling.
+    """))
+    iml_parser.add_argument('--iml-delay', action='store_true', help=textwrap.dedent("""
+        IML: Delay trace collection until your training scripts has warmed up; 
+        you must signal this to IML by calling iml.prof.enable_tracing() when that happens.
     """))
     iml_parser.add_argument('--iml-just-sample-util', action='store_true', help=textwrap.dedent("""
         IML: collect machine utilization data and output it to --iml-directory.

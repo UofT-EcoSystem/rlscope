@@ -47,7 +47,7 @@ except ImportError:
 from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, basename as _b
 
 from iml_profiler.profiler import iml_logging
-from iml_profiler.profiler.profilers import MyProcess, ForkedProcessPool
+from iml_profiler.profiler.concurrent import ForkedProcessPool
 
 from iml_profiler.profiler.profilers import args_to_cmdline
 
