@@ -173,7 +173,17 @@ class UtilParser:
             dev=device_id_suffix(device_id, device_name),
         ))
 
-    def add_experiment_config(self, directory):
+    def add_experiment_config(self, machine_util_path):
+        """
+        add_fields(machine_util_path)
+
+        We expect to find experiment_config.json where the machine_util.*.proto files live.
+
+        :param machine_util_path:
+        :return:
+        """
+        assert is_machine_util_file(machine_util_path)
+        directory = _d(machine_util_path)
         path = experiment.experiment_config_path(directory)
         if not _e(path):
             if self.debug:
