@@ -105,4 +105,5 @@ _do "${PYTHON[@]}" $RL_BASELINES_ZOO_DIR/train.py \
     --log-interval 1 \
     --iml-start-measuring-call 1 \
     --iml-trace-time-sec $IML_TRACE_TIME_SEC \
+    --iml-delay \
     "$@"

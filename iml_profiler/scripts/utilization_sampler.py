@@ -756,13 +756,26 @@ class UtilSamplerProcess:
             return
 
         proc.terminate()
+        self.proc = None
+        self.proc_pid = None
+
+    @property
+    def running(self):
+        return self.proc is not None
+
+    def start(self):
+        if not self.running:
+            self._launch_utilization_sampler()
+
+    def stop(self):
+        if self.running:
+            self._terminate_utilization_sampler()
 
     def __enter__(self):
-        self._launch_utilization_sampler()
+        self.start()
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        if self.proc is not None:
-            self._terminate_utilization_sampler()
+        self.stop()
 
 def util_sampler(*args, **kwargs):
     """

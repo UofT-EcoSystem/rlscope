@@ -33,6 +33,9 @@ GENERATE_INDEX_PY = _j(ROOT, "python/scripts", "generate_iml_profiler_plot_index
 # - IML trace-data belonging to a session is dumped
 DEBUG_TRACE_SESSION = False
 
+# Verbose debugging: Print calls to set_operation/end_operation
+DEBUG_OPERATIONS = False
+
 # In case docker causes different runtime behaviour, we can use this switch.
 #
 # Current issues:

@@ -671,8 +671,6 @@ class Profiler:
         self.disable = get_argval('disable', disable, False)
         self.delay = get_argval('delay', delay, False)
         self.just_sample_util = get_argval('just_sample_util', just_sample_util, False)
-        if self.just_sample_util:
-            self.disable = True
 
         if not self.disable:
             modify_tensorflow()
@@ -707,6 +705,7 @@ class Profiler:
         self._start_us = None
         self._stop_us = None
 
+        self.util_sampler = None
         if self.just_sample_util:
             self.util_sampler = util_sampler(
                 iml_directory=self.directory,
@@ -1048,11 +1047,18 @@ class Profiler:
 
         self._check_no_annotations(caller_name='iml.prof.enable_tracing()')
 
-        self._start_pyprof()
-        self._start_tfprof()
+        if not self.just_sample_util:
+            self._start_pyprof()
+            self._start_tfprof()
+
+        if self.just_sample_util:
+            self._init_trace_time()
+            self.util_sampler.start()
 
     @property
     def tracing_enabled(self):
+        if self.just_sample_util:
+            return self.util_sampler is not None and self.util_sampler.running
         return self._pyprof_enabled and self._tfprof_enabled
 
     def enable_tracing(self):
@@ -1092,14 +1098,11 @@ class Profiler:
     def start(self, start_utilization_sampler=False, handle_utilization_sampler=False):
         PROFILERS.append(self)
 
-        if self.just_sample_util:
-            self.util_sampler.__enter__()
-
         if self.disable:
             return
 
         self.handle_utilization_sampler = handle_utilization_sampler
-        if start_utilization_sampler or handle_utilization_sampler:
+        if not self.just_sample_util and ( start_utilization_sampler or handle_utilization_sampler ):
             self._launch_utilization_sampler()
 
         self._start_us = now_us()
@@ -1118,13 +1121,13 @@ class Profiler:
     def stop(self, stop_utilization_sampler=False):
         PROFILERS.remove(self)
 
-        if self.just_sample_util:
-            self.util_sampler.__exit__(None, None, None)
-
         if self.disable:
             return
 
-        if stop_utilization_sampler:
+        if self.just_sample_util:
+            self.util_sampler.stop()
+
+        if stop_utilization_sampler and self.util_sampler_pid is not None:
             # Q: Any way to avoid forgetting to terminate utilization sampler?
             # A: Not really...can add a cleanup() script/python-API to call in the code when the programmer expects to terminate...
             # harder to forget than a call to stop() that's missing a parameter.
@@ -1238,7 +1241,7 @@ class Profiler:
         ):
             return
 
-        if py_config.DEBUG:
+        if py_config.DEBUG and py_config.DEBUG_OPERATIONS:
             logging.info("> set_operation(op={op})".format(op=bench_name))
 
         self._push_operation(bench_name)
@@ -1343,7 +1346,7 @@ class Profiler:
         if self.disable:
             return
 
-        if py_config.DEBUG:
+        if py_config.DEBUG and py_config.DEBUG_OPERATIONS:
             should_finish = self.should_finish()
             logging.info('> end_operation({op}), tracing time = {sec}, should_finish = {should_finish}'.format(
                 sec=self._total_trace_time_sec(),
@@ -1406,7 +1409,8 @@ class Profiler:
             self.steps += 1
             # self._disable_tracing()
 
-        self._maybe_warn_report_progress()
+        if self.reports_progress:
+            self._maybe_warn_report_progress()
 
         if not skip_finish and not self.reports_progress:
             # Regarding self.reports_progress:
@@ -1496,7 +1500,7 @@ class Profiler:
         # self._maybe_init_profile_context()
 
     def maybe_terminate_utilization_sampler(self, warn_terminated):
-        if self.handle_utilization_sampler:
+        if self.handle_utilization_sampler and self.util_sampler_pid is not None:
             self._terminate_utilization_sampler(warn_terminated)
 
     def finish(self, should_exit=True):
@@ -1584,9 +1588,9 @@ class Profiler:
         if pctx.iml_traced_calls == 0:
             # Silently skip dumping this pctx since it contains no trace-data (unless --iml-debug).
             if pctx.phase is None and debug:
-                logging.info("Skip dumping tfprof @ {path}: your training script creates a tf.Session() object that never gets used so it has 0 traced-calls.")
+                logging.info("Skip dumping tfprof @ {path}: your training script creates a tf.Session() object that never gets used so it has 0 traced-calls.".format(path=tfprof_path))
             elif debug:
-                logging.info("Skip dumping tfprof @ {path}: since it has 0 traced-calls.")
+                logging.info("Skip dumping tfprof @ {path}: since it has 0 traced-calls.".format(path=tfprof_path))
             return
 
         tfprof_dumper = TfprofDumper(trace_id, session, self.process_name, tfprof_path, debug=debug)
