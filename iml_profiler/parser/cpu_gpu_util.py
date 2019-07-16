@@ -174,7 +174,10 @@ class UtilParser:
         ))
 
     def add_experiment_config(self, directory):
-        if not _e(experiment.experiment_config_path(directory)):
+        path = experiment.experiment_config_path(directory)
+        if not _e(path):
+            if self.debug:
+                logging.info("Didn't find {path}; skip adding experiment columns to csv".format(path=path))
             return None
         data = experiment.load_experiment_config(directory)
         return data
