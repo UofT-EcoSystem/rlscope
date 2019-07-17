@@ -2251,6 +2251,8 @@ class UtilizationPlot:
                     # self.plot_process_phase(process_name, phase['phase_name'])
                     self.plot_process_phase(machine_name, process_name, phase=phase)
 
+        self.sql_reader.close()
+
     def plot_process_phase(self, machine_name=None, process_name=None, phase_name=None, phase=None):
         if phase is not None and phase_name is None:
             phase_name = phase.phase_name
@@ -2548,81 +2550,84 @@ class HeatScalePlot:
 
     def run(self):
         self.sql_reader = SQLCategoryTimesReader(self.db_path, host=self.host, user=self.user, password=self.password)
+        with self.sql_reader:
 
-        # for device_name, device_id in sql_reader.devices:
-        #   samples = SELECT all utilization samples for <device_name>
-        #   plotter.plot(samples) @ png=util_scale.<device_id>.png
+            # for device_name, device_id in sql_reader.devices:
+            #   samples = SELECT all utilization samples for <device_name>
+            #   plotter.plot(samples) @ png=util_scale.<device_id>.png
 
-        # The start time of all traced Events / utilization samples.
-        # Use this as the "starting point" of the heat-scale.
+            # The start time of all traced Events / utilization samples.
+            # Use this as the "starting point" of the heat-scale.
 
-        # TODO: How can we make things "match up" with the SummaryView?
-        # Options:
-        #
-        # 1. Show utilization from [start_time_usec .. start_time_usec + duration_sec].
-        #
-        #    We currently use start_time_usec from events to decide on initial plot locations;
-        #    so ideally we would sample the utilization samples running from:
-        #    [start_time_usec .. start_time_usec + duration_sec] for each phase.
-        #    PROBLEM:
-        #    - actual time shown in subplots spans ~ 531 seconds;
-        #    - total time according to utilization data is ~ 1244 seconds.
-        #
-        #    PRO: utilization will "appear" to match up with ResourceSubplot.
-        #    CON: utilization will not actually match up with ResourceSubplot.
-        #    PRO: easiest to implement.
-        #
-        # 2. "Condense" utilization from [subplot.start_time_usec .. subplot.end_time_usec] to fit within subplot height;
-        #    don't show time-scale.
-        #
-        #    "Operations" may not capture all CPU/GPU activity.
-        #    However, we can still show a condensed view of overall hardware utilization during that time.
-        #
-        #    CON: if "operations" are wrong, maybe we didn't capture high activity and so our ResourceSubplot subplot
-        #         will look wrong in comparison.
-        #    PRO: true hardware utilization is shown for "some" interval of time
-        #
-        # 3. Only keeps utilization samples that "match up" with the spans of time that make up our ResourceSubplot plots.
-        #    PRO: ResourceOverlap and HeatScale will "match up".
-        #    CON: We may be missing actual hardware utilization (programmer annotations are wrong)
-        #    CON: time-consuming to implement.
+            # TODO: How can we make things "match up" with the SummaryView?
+            # Options:
+            #
+            # 1. Show utilization from [start_time_usec .. start_time_usec + duration_sec].
+            #
+            #    We currently use start_time_usec from events to decide on initial plot locations;
+            #    so ideally we would sample the utilization samples running from:
+            #    [start_time_usec .. start_time_usec + duration_sec] for each phase.
+            #    PROBLEM:
+            #    - actual time shown in subplots spans ~ 531 seconds;
+            #    - total time according to utilization data is ~ 1244 seconds.
+            #
+            #    PRO: utilization will "appear" to match up with ResourceSubplot.
+            #    CON: utilization will not actually match up with ResourceSubplot.
+            #    PRO: easiest to implement.
+            #
+            # 2. "Condense" utilization from [subplot.start_time_usec .. subplot.end_time_usec] to fit within subplot height;
+            #    don't show time-scale.
+            #
+            #    "Operations" may not capture all CPU/GPU activity.
+            #    However, we can still show a condensed view of overall hardware utilization during that time.
+            #
+            #    CON: if "operations" are wrong, maybe we didn't capture high activity and so our ResourceSubplot subplot
+            #         will look wrong in comparison.
+            #    PRO: true hardware utilization is shown for "some" interval of time
+            #
+            # 3. Only keeps utilization samples that "match up" with the spans of time that make up our ResourceSubplot plots.
+            #    PRO: ResourceOverlap and HeatScale will "match up".
+            #    CON: We may be missing actual hardware utilization (programmer annotations are wrong)
+            #    CON: time-consuming to implement.
 
-        start_time_sec = self.sql_reader.trace_start_time_sec
-        for device in self.sql_reader.util_devices():
-            samples = self.sql_reader.util_samples(device)
-            # png = self.get_util_scale_png(device.device_id, device.device_name)
-            # plotter = HeatScale(
-            #     color_value='util', y_axis='start_time_sec',
-            #     png=png,
-            #     pixels_per_square=self.pixels_per_square,
-            #     # Anchor colormap colors using min/max utilization values.
-            #     vmin=0.0, vmax=1.0,
-            #     # 1 second
-            #     step=1.)
+            start_time_sec = self.sql_reader.trace_start_time_sec
+            for device in self.sql_reader.util_devices():
+                samples = self.sql_reader.util_samples(device)
+                # png = self.get_util_scale_png(device.device_id, device.device_name)
+                # plotter = HeatScale(
+                #     color_value='util', y_axis='start_time_sec',
+                #     png=png,
+                #     pixels_per_square=self.pixels_per_square,
+                #     # Anchor colormap colors using min/max utilization values.
+                #     vmin=0.0, vmax=1.0,
+                #     # 1 second
+                #     step=1.)
 
-            if self.debug:
-                # Print the unadjusted raw utilization + timestamp data, centered @ start_time_sec.
-                raw_centered_time_secs = (np.array(samples['start_time_sec']) - start_time_sec).tolist()
-                raw_df = pd.DataFrame({
-                    'util':samples['util'],
-                    'start_time_sec':raw_centered_time_secs,
-                }).astype(float)
-                logging.info("> DEBUG: Unadjusted raw utilization measurements for device={dev}".format(dev=device))
-                logging.info(raw_df)
-            norm_time_secs, norm_utils = exponential_moving_average(
-                samples['start_time_sec'], samples['util'],
-                start_time_sec, self.step_sec, self.decay)
-            centered_time_secs = (np.array(norm_time_secs) - start_time_sec).tolist()
-            norm_samples = {
-                'util':norm_utils,
-                'start_time_sec':centered_time_secs,
-            }
-            plot_df = pd.DataFrame(norm_samples).astype(float)
-            self.dump_plot_data(plot_df, device)
-            self.dump_js_data(norm_samples, device, start_time_sec)
-            # plotter.add_data(norm_samples)
-            # print("> HeatScalePlot @ {path}".format(path=png))
-            # plotter.plot()
+                if self.debug:
+                    # Print the unadjusted raw utilization + timestamp data, centered @ start_time_sec.
+                    raw_centered_time_secs = (np.array(samples['start_time_sec']) - start_time_sec).tolist()
+                    raw_df = pd.DataFrame({
+                        'util':samples['util'],
+                        'start_time_sec':raw_centered_time_secs,
+                    }).astype(float)
+                    logging.info("> DEBUG: Unadjusted raw utilization measurements for device={dev}".format(dev=device))
+                    logging.info(raw_df)
+                norm_time_secs, norm_utils = exponential_moving_average(
+                    samples['start_time_sec'], samples['util'],
+                    start_time_sec, self.step_sec, self.decay)
+                centered_time_secs = (np.array(norm_time_secs) - start_time_sec).tolist()
+                norm_samples = {
+                    'util':norm_utils,
+                    'start_time_sec':centered_time_secs,
+                }
+                plot_df = pd.DataFrame(norm_samples).astype(float)
+                self.dump_plot_data(plot_df, device)
+                self.dump_js_data(norm_samples, device, start_time_sec)
+                # plotter.add_data(norm_samples)
+                # print("> HeatScalePlot @ {path}".format(path=png))
+                # plotter.plot()
+
+        self.sql_reader.close()
 
     def dump_js_data(self, norm_samples, device, start_time_sec):
 

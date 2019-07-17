@@ -152,7 +152,25 @@ def main():
         '--workers',
         type=int,
         help="Number of simultaneous iml-analyze jobs; memory is the limitation here, not CPUs",
-        default=2)
+        # For some reason, I'm getting this error when selecting sql_reader.processes:
+        #
+        # psycopg2.OperationalError: server closed the connection unexpectedly
+        # This probably means the server terminated abnormally
+        # before or while processing the request.
+        #
+        # When restarting iml-analyze the problem doesn't re-appear.
+        # I suspect this is related to running multiple jobs but it's hard to know for sure.
+        # Until we figure it out, run 1 job at time.
+        #
+        # NOTE: Just hacked around it and reconnected when "SELECT 1" fails.
+        # Still not sure about root cause.
+        # I don't think it's caused by too many connections; I experienced this error after
+        # a connection was left for about 8-9 minutes without being used.
+        # default=2,
+        #
+        # I think we have memory errors now that op-events have increased...
+        default=1,
+    )
     parser.add_argument(
         '--dir',
         default='./output/iml_bench/all',

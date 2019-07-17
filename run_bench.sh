@@ -30,6 +30,6 @@ _run_bench() {
     _do iml-bench --dir $all_dir "$@" stable-baselines
 }
 
-_run_bench "$@"
+#_run_bench "$@"
 _run_bench "$@" --analyze
 _run_bench "$@" --mode plot
