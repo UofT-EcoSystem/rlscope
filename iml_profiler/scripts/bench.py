@@ -312,8 +312,6 @@ class Experiment:
         return True
 
     def _gather_algo_env_pairs(self, algo=None, env_id=None, all=False, bullet=False, debug=False):
-        if debug:
-            import ipdb; ipdb.set_trace()
 
         if env_id is not None and algo is not None:
             algo_env_pairs = [(algo, env_id)]
@@ -453,6 +451,7 @@ class ExperimentGroup(Experiment):
         expr = 'on_vs_off_policy'
         opts = ['--env-id', 'PongNoFrameskip-v4']
         if self.should_run_expr(expr):
+            logging.info("Running expr = {expr}".format(expr=expr))
             self.iml_bench(parser, subparser, 'train_stable_baselines.sh', opts, suffix=bench_log(expr))
             overlap_type = 'ResourceOverlap'
             self.stacked_plot([
@@ -757,6 +756,7 @@ class ExperimentGroup(Experiment):
         main_cmd = self._get_main_cmd(parser, subparser, subcommand)
         cmd = main_cmd + subcmd_args
         to_file = self._get_logfile(suffix=suffix)
+        logging.info("Logging iml-bench to file {path}".format(path=to_file))
         self._run_cmd(cmd=cmd, to_file=to_file)
 
     def _get_main_cmd(self, parser, subparser, subcommand):
@@ -810,6 +810,7 @@ class StableBaselines(Experiment):
         cmd = ['iml-analyze', "--iml-directory", iml_directory]
 
         to_file = self._get_logfile(algo, env_id, suffix='analyze.log')
+        logging.info("Analyze logfile = {path}".format(path=to_file))
 
         self._run_cmd(cmd=cmd, to_file=to_file)
 
@@ -891,6 +892,9 @@ class StableBaselines(Experiment):
         if algo_env_pairs is None:
             logging.info('Please provide either --env-id or --algo')
             sys.exit(1)
+
+        if args.debug:
+            logging.info({'algo_env_pairs': algo_env_pairs, 'args.analyze': args.analyze})
 
         if args.analyze:
             if args.debug:

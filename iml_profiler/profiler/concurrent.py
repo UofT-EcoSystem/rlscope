@@ -6,6 +6,8 @@ import sys
 import time
 import multiprocessing
 
+from iml_profiler.profiler import iml_logging
+
 MP_SPAWN_CTX = multiprocessing.get_context('spawn')
 
 class ForkedProcessPool:
@@ -156,6 +158,9 @@ class MyProcess(MP_SPAWN_CTX.Process):
 
     def run(self):
         try:
+            # We need to do this otherwise log messages don't appear (on some machines).
+            # Not sure why...
+            iml_logging.setup_logging()
             super().run()
             self._cconn.send(None)
         except Exception as e:
