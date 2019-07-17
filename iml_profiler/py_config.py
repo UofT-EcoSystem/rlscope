@@ -36,6 +36,8 @@ DEBUG_TRACE_SESSION = False
 # Verbose debugging: Print calls to set_operation/end_operation
 DEBUG_OPERATIONS = False
 
+DEBUG_REPORTS_PROGRESS = True
+
 # In case docker causes different runtime behaviour, we can use this switch.
 #
 # Current issues:

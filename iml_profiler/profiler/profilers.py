@@ -732,6 +732,8 @@ class Profiler:
         self.exit_early = exit_early
         self.tfprof = tfprof
         self.reports_progress = reports_progress
+        if py_config.DEBUG_REPORTS_PROGRESS and self.reports_progress:
+            logging.info("reports_progress = {bool}".format(bool=self.reports_progress))
         self.c_lib_func_pyprof_pattern = c_lib_func_pyprof_pattern
         self.repetition_time_limit_sec = repetition_time_limit_sec
         self.num_calls = get_argval('num_calls', num_calls, None)
@@ -1709,6 +1711,11 @@ class Profiler:
 
         # Q: multiple processes reporting training progress...consider that an error?
         if self.reports_progress and self.percent_complete is None:
+            if py_config.DEBUG_REPORTS_PROGRESS:
+                logging.info("Saw reports_progress = {bool}, but percent_complete was {perc}".format(
+                    bool=self.reports_progress,
+                    perc=self.percent_complete,
+                ))
             raise RuntimeError("IML ERROR: profiler was created with iml.handle_iml_args(..., reports_progress=True), but process NEVER called iml.prof.report_progress(...)")
 
         # This should be prevented from self.report_progress(...)
