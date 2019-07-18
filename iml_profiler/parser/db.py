@@ -78,6 +78,15 @@ class SQLParser:
         tfprof.trace_1.prof
     """
 
+    # NOTE: By default postgres only allows 100 connections.  Also, we may be running multiple insert jobs.
+    # So, keep this to a reasonable value.
+    # Otherwise, we will trigger confusing errors like this:
+    #
+    # psycopg2.OperationalError: server closed the connection unexpectedly
+    # This probably means the server terminated abnormally
+    # before or while processing the request.
+    MAX_CSV_WORKERS = 8
+
     def __init__(self, directory,
                  host=None,
                  user=None,
@@ -454,7 +463,7 @@ class SQLParser:
             }), prefix='  ')))
 
         if not self.debug_single_thread:
-            pool = multiprocessing.Pool()
+            pool = multiprocessing.Pool(processes=SQLParser.MAX_CSV_WORKERS)
         # table = 'Event'
         # id_field = 'event_id'
         id_field = None
@@ -1134,6 +1143,9 @@ class _CSVInserterWorker:
         self.insert_file(self.path)
         self.finish()
 
+    def close(self):
+        self.conn.close()
+
     @property
     def cursor(self):
         return self.conn.cursor
@@ -1239,7 +1251,7 @@ class _CSVInserterWorker:
         process_name = call_times_data['process_name']
         phase_name = call_times_data['phase']
 
-        c = self.cursor
+        # c = self.cursor
         # Insert Process
         # process_id = self.insert_process_name(proto.process_name)
         process_id = self.process_to_id[process_name]
@@ -1315,7 +1327,7 @@ class _CSVInserterWorker:
         # if self.debug:
         #     logging.info(proto)
 
-        c = self.cursor
+        # c = self.cursor
         # Insert Process
         # process_id = self.insert_process_name(proto.process_name)
         process_id = self.process_to_id[proto.process_name]
@@ -1461,7 +1473,7 @@ class _CSVInserterWorker:
 
         self.tmp_f.close()
         os.remove(self.tmp_path)
-        self.conn.close()
+        self.close()
 
 class CSVInserter:
     def __init__(self, conn, table, block_size=50000, progress_bar=None, id_field=None, directory=None, fields=None,
@@ -1597,7 +1609,7 @@ class CSVInserter:
         os.remove(self.tmp_path)
 
 class TracesPostgresConnection:
-    def __init__(self, db_config_path, db_basename='traces', host=None, user=None, password=None):
+    def __init__(self, db_config_path, db_basename='traces', host=None, user=None, password=None, keep_alive=True):
         self.host = host
         self.user = user
         self.password = password
@@ -1607,9 +1619,44 @@ class TracesPostgresConnection:
         self.db_basename = db_basename
         self.db_name = None
         self._cursor = None
-        self.conn = None
+        self._conn = None
         self.pg_conn = None
         self.pg_cursor = None
+        self.keep_alive = keep_alive
+
+    def _check_alive(self, allow_reconnect=False):
+        try:
+            self._cursor.execute('SELECT 1')
+            rows = self._cursor.fetchall()
+            assert len(rows) == 1
+            assert len(rows[0]) == 1
+            assert rows[0][0] == 1
+        except psycopg2.OperationalError as e:
+            if not allow_reconnect:
+                logging.info("Detected dead connection to {user}@{host} db={db}; failed reconnect".format(
+                    user=self.user,
+                    host=self.host,
+                    db=self.db_name,
+                ))
+                raise
+            logging.info("Detected closed connection to {user}@{host} db={db}; attempting reconnect".format(
+                user=self.user,
+                host=self.host,
+                db=self.db_name,
+            ))
+            self._conn.close()
+            self._cursor.close()
+            self._conn = None
+            self._cursor = None
+            self._maybe_create_db_connection()
+            self._check_alive(allow_reconnect=False)
+
+    @property
+    def conn(self):
+        if self.keep_alive and self._cursor is not None:
+            self._check_alive(allow_reconnect=True)
+        self._maybe_create_db_connection()
+        return self._conn
 
     def insert_csv(self, csv_path, table):
         def build_copy_from_sql():
@@ -1681,17 +1728,25 @@ class TracesPostgresConnection:
         return kwargs
 
     def commit(self):
-        if self.conn is None:
-            self.create_connection()
+        if self._conn is None:
+            # self.create_connection()
+            return
         self.conn.commit()
 
     def close(self):
-        self.cursor.close()
-        self.conn.close()
+        # if self._cursor is not None:
+        #     self._cursor.close()
+        #     self._cursor = None
+        # self._conn.close()
+        self._maybe_close_db_connection()
+        self._maybe_close_postgres_connection()
 
     @property
     def cursor(self):
-        if self.conn is None:
+        if self.keep_alive and self._cursor is not None:
+            assert self._conn is not None
+            self._check_alive(allow_reconnect=True)
+        if self._conn is None:
             self.create_connection()
         return self._cursor
 
@@ -1753,16 +1808,18 @@ class TracesPostgresConnection:
         ), all_values)
 
     def create_connection(self):
-        if self.conn is not None:
+        if self._conn is not None:
             return
 
         self._maybe_read_db_config()
 
-        db_exists, self.conn, self._cursor = self._create_connection(self.db_name)
+        db_exists, self._conn, self._cursor = self._create_connection(self.db_name)
         return db_exists
 
     def _create_connection(self, db_name):
         """ create a database connection to a SQLite database """
+
+        self._maybe_close_db_connection()
 
         # conn = psycopg2.connect( dbname=db_name, user=self.user, host=self.host, isolation_level=None)
         # conn = psycopg2.connect("dbname={db} user={user}".format(
@@ -1779,6 +1836,18 @@ class TracesPostgresConnection:
                 host=self.host,
                 isolation_level=None,
                 **kwargs)
+            # Q: Will this prevent connections from randomly dying?
+            #
+            # http://initd.org/psycopg/docs/connection.html#connection.autocommit
+            # " default, any query execution, including a simple SELECT will start a transaction:
+            # for long-running programs, if no further action is taken, the session will remain
+            # “idle in transaction”, an undesirable condition for several reasons (locks are
+            # held by the session, tables bloat…). For long lived scripts, either ensure to terminate a
+            # transaction as soon as possible or use an autocommit connection."
+            # logging.info("autocommit before: {auto}".format(auto=conn.autocommit))
+            conn.autocommit = True
+            # logging.info("autocommit after: {auto}".format(auto=conn.autocommit))
+            assert conn.autocommit
         except psycopg2.OperationalError as e:
             if not re.search(r'database.*does not exist', e.args[0]):
                 raise
@@ -1795,6 +1864,15 @@ class TracesPostgresConnection:
 
         db_exists, self.pg_conn, self.pg_cursor = self._create_connection('postgres')
         return db_exists
+
+    def _maybe_close_postgres_connection(self):
+        if self.pg_cursor is not None:
+            self.pg_cursor.close()
+            self.pg_cursor = None
+
+        if self.pg_conn is not None:
+            self.pg_conn.close()
+            self.pg_conn = None
 
     def _maybe_read_db_config(self):
         if self.db_config is None:
@@ -1877,10 +1955,10 @@ class TracesPostgresConnection:
         self._maybe_create_db_connection()
 
     def _maybe_create_db_connection(self):
-        if self.conn is not None:
+        if self._conn is not None:
             return
 
-        db_exists, self.conn, self._cursor = self._create_connection(self.db_name)
+        db_exists, self._conn, self._cursor = self._create_connection(self.db_name)
         return db_exists
 
     def random_string(self, N):
@@ -1931,9 +2009,9 @@ class TracesPostgresConnection:
             self._cursor.close()
             self._cursor = None
 
-        if self.conn is not None:
-            self.conn.close()
-            self.conn = None
+        if self._conn is not None:
+            self._conn.close()
+            self._conn = None
 
     def _drop_database(self):
         logging.info("> Drop database = {db}".format(db=self.db_name))
@@ -2175,7 +2253,7 @@ class SQLCategoryTimesReader:
         self.host = host
         self.user = user
         self.password = password
-        self.conn = sql_create_connection(db_path, host=self.host, user=self.user, password=self.password)
+        self._conn = None
         self.parse_debug = False
         self.debug_ops = debug_ops
 
@@ -2183,6 +2261,26 @@ class SQLCategoryTimesReader:
 
     def steps(self, process_name, bench_name, debug=False):
         return list(range(self.num_steps(process_name, bench_name, debug=debug)))
+
+    @property
+    def conn(self):
+        self._maybe_create_conn()
+        return self._conn
+
+    def _maybe_create_conn(self):
+        if self._conn is None:
+            self._conn = sql_create_connection(self.db_path, host=self.host, user=self.user, password=self.password)
+
+    def close(self):
+        if self._conn is not None:
+            self._conn.close()
+            self._conn = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
 
     def util_devices(self, machine_name=None):
         """

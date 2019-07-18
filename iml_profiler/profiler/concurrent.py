@@ -1,4 +1,6 @@
 import logging
+import os
+import shutil
 import traceback
 import re
 import pytest
@@ -6,7 +8,15 @@ import sys
 import time
 import multiprocessing
 
+from os.path import join as _j, abspath as _a, exists as _e, dirname as _d, basename as _b
+
+from iml_profiler.profiler import iml_logging
+
+from iml_profiler.parser.common import *
+
 MP_SPAWN_CTX = multiprocessing.get_context('spawn')
+MP_FORK_CTX = multiprocessing.get_context('fork')
+MP_CTX = MP_SPAWN_CTX
 
 class ForkedProcessPool:
     """
@@ -30,22 +40,14 @@ class ForkedProcessPool:
         self.cpu_affinity = cpu_affinity
         self.active_workers = []
         self.debug = debug
+        # self.ctx = multiprocessing.get_context('spawn')
         # self.inactive_workers = []
 
     def _join_finished_workers(self):
         i = 0
         while i < len(self.active_workers):
             if not self.active_workers[i].is_alive():
-                if self.debug:
-                    logging.info("> Pool(name={name}): Join pid={pid} active_workers[i={i}]={proc}".format(
-                        name=self.name,
-                        i=i,
-                        pid=self.active_workers[i].pid,
-                        proc=self.active_workers[i],
-                    ))
-                self._join_child(self.active_workers[i])
-                # self.inactive_workers.append(self.active_workers[i])
-                del self.active_workers[i]
+                self._join_child(i)
             else:
                 i += 1
 
@@ -80,20 +82,21 @@ class ForkedProcessPool:
         self.active_workers.append(proc)
 
     def shutdown(self):
-        for proc in self.active_workers:
-            if self.debug:
-                logging.info("> Pool(name={name}): Join pid={pid}, proc={proc}".format(
-                    pid=proc.pid,
-                    name=self.name,
-                    proc=proc))
-            self._join_child(proc)
-            if self.debug:
-                logging.info("> Pool(name={name}): Joined pid={pid}, proc={proc}".format(
-                    pid=proc.pid,
-                    name=self.name,
-                    proc=proc))
+        while len(self.active_workers) > 0:
+            self._join_child(0)
 
-    def _join_child(self, proc):
+    def _join_child(self, i):
+        if self.debug:
+            logging.info("> Pool(name={name}): Join pid={pid} active_workers[i={i}]={proc}".format(
+                name=self.name,
+                i=i,
+                pid=self.active_workers[i].pid,
+                proc=self.active_workers[i],
+            ))
+
+        proc = self.active_workers[i]
+        del self.active_workers[i]
+
         proc.join()
 
         # If child process raised an exception, re-raise it in the parent.
@@ -105,8 +108,8 @@ class ForkedProcessPool:
                 name=self.name,
                 pid=proc.pid,
                 proc=proc,
-                error=ex.args[0],
-                tb=proc.exception[1]))
+                error=ex.args,
+                tb=tb_string))
             raise parent_ex
 
         # If child process did sys.exit(1), raise a RuntimeError in the parent.
@@ -126,7 +129,7 @@ class ForkedProcessPool:
             raise parent_ex
 
 
-class MyProcess(MP_SPAWN_CTX.Process):
+class MyProcess(MP_CTX.Process):
     """
     Record exceptions in child process, and make them accessible
     in the parent process after the child exits.
@@ -151,11 +154,14 @@ class MyProcess(MP_SPAWN_CTX.Process):
     """
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self._pconn, self._cconn = MP_SPAWN_CTX.Pipe()
+        self._pconn, self._cconn = MP_CTX.Pipe()
         self._exception = None
 
     def run(self):
         try:
+            # We need to do this otherwise log messages don't appear (on some machines).
+            # Not sure why...
+            iml_logging.setup_logging()
             super().run()
             self._cconn.send(None)
         except Exception as e:
@@ -189,6 +195,11 @@ def _exception():
     logging.info("Running child in ForkedProcessPool that raises an exception")
     raise RuntimeError("Child process exception")
 
+def _check_dir_exists(path):
+    if not os.path.isdir(path):
+        print("FAIL: path={path} doesn't exist".format(path=path))
+    assert os.path.isdir(path)
+
 def test_forked_process_pool():
 
     def test_01_sys_exit_1():
@@ -215,4 +226,30 @@ def test_forked_process_pool():
             pool.shutdown()
     test_02_exception()
 
+    def test_03_mkdir():
+        """
+        Test that directory created in parent process is seen in child process.
+
+        :return:
+        """
+        TEST_DIR = './iml_test_data.test_03_mkdir'
+        logging.info("TEST_DIR = {path}".format(path=_a(TEST_DIR)))
+
+        def get_dir_path(i):
+            return _j(TEST_DIR, 'dir_{i}'.format(i=i))
+
+        num_dirs = 100
+        if _e(TEST_DIR):
+            shutil.rmtree(TEST_DIR)
+        # debug = True
+        debug = False
+        pool = ForkedProcessPool(name=test_03_mkdir.__name__, debug=debug)
+        for i in range(num_dirs):
+            path = get_dir_path(i)
+            os.makedirs(path, exist_ok=True)
+            name = "{func}(i={i})".format(func=test_03_mkdir.__name__, i=i)
+            pool.submit(name, _check_dir_exists, path)
+        pool.shutdown()
+        shutil.rmtree(TEST_DIR)
+    test_03_mkdir()
 

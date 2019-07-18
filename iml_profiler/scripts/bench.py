@@ -152,7 +152,25 @@ def main():
         '--workers',
         type=int,
         help="Number of simultaneous iml-analyze jobs; memory is the limitation here, not CPUs",
-        default=2)
+        # For some reason, I'm getting this error when selecting sql_reader.processes:
+        #
+        # psycopg2.OperationalError: server closed the connection unexpectedly
+        # This probably means the server terminated abnormally
+        # before or while processing the request.
+        #
+        # When restarting iml-analyze the problem doesn't re-appear.
+        # I suspect this is related to running multiple jobs but it's hard to know for sure.
+        # Until we figure it out, run 1 job at time.
+        #
+        # NOTE: Just hacked around it and reconnected when "SELECT 1" fails.
+        # Still not sure about root cause.
+        # I don't think it's caused by too many connections; I experienced this error after
+        # a connection was left for about 8-9 minutes without being used.
+        # default=2,
+        #
+        # I think we have memory errors now that op-events have increased...
+        default=1,
+    )
     parser.add_argument(
         '--dir',
         default='./output/iml_bench/all',
@@ -221,6 +239,15 @@ def main():
         help=textwrap.dedent("""
         train_stable_baselines.sh
           Run stable-baselines experiments.
+        """))
+    parser_stable_baselines.add_argument(
+        '--expr',
+        choices=['on_vs_off_policy', 'environments', 'algorithms', 'all_rl_workloads'],
+        help=textwrap.dedent("""
+        Only run a specific "experiment".
+        i.e. only run (algo, env) combinations needed for a specific graph.
+        
+        Default: run all (algo, env) combinations for all experiments.
         """))
     parser_stable_baselines.set_defaults(
         func=run_group,
@@ -303,8 +330,6 @@ class Experiment:
         return True
 
     def _gather_algo_env_pairs(self, algo=None, env_id=None, all=False, bullet=False, debug=False):
-        if debug:
-            import ipdb; ipdb.set_trace()
 
         if env_id is not None and algo is not None:
             algo_env_pairs = [(algo, env_id)]
@@ -384,6 +409,9 @@ class ExperimentGroup(Experiment):
         self.extra_argv = extra_argv
         # self.pool = ForkedProcessPool(name="iml_analyze_pool", max_workers=args.workers, debug=self.args.debug)
 
+    def should_run_expr(self, expr):
+        return self.args.expr is None or expr == self.args.expr
+
     def stable_baselines(self, parser):
         """
         To avoid running everything more than once, we will stick ALL (algo, env_id) pairs inside of $IML_DIR/output/iml_bench/all.
@@ -424,6 +452,7 @@ class ExperimentGroup(Experiment):
             return suffix
 
         self.will_run = False
+        # self.will_analyze = False
         self.will_plot = False
 
         if args.mode in ['all', 'run']:
@@ -439,26 +468,31 @@ class ExperimentGroup(Experiment):
         # (1) On vs off policy:
         expr = 'on_vs_off_policy'
         opts = ['--env-id', 'PongNoFrameskip-v4']
-        self.iml_bench(parser, subparser, 'train_stable_baselines.sh', opts, suffix=bench_log(expr))
-        overlap_type = 'ResourceOverlap'
-        self.stacked_plot([
-            '--overlap-type', overlap_type,
-            '--y-type', 'percent',
-            '--x-type', 'algo-comparison',
-        ], suffix=plot_log(expr, overlap_type), train_stable_baselines_opts=opts)
+        if self.should_run_expr(expr):
+            logging.info("Running expr = {expr}".format(expr=expr))
+            self.iml_bench(parser, subparser, 'train_stable_baselines.sh', opts, suffix=bench_log(expr))
+            overlap_type = 'ResourceOverlap'
+            self.stacked_plot([
+                '--overlap-type', overlap_type,
+                '--y-type', 'percent',
+                '--x-type', 'algo-comparison',
+                '--training-time',
+            ], suffix=plot_log(expr, overlap_type), train_stable_baselines_opts=opts)
 
         # (2) Compare environments:
         expr = 'environments'
         opts = ['--bullet', '--algo', 'ppo2']
-        self.iml_bench(parser, subparser, 'train_stable_baselines.sh', opts, suffix=bench_log(expr))
-        overlap_type = 'OperationOverlap'
-        algo_env_pairs = self.pairs_by_algo('ppo2')
-        self.stacked_plot([
-            '--overlap-type', overlap_type,
-            '--resource-overlap', json.dumps(['CPU']),
-            '--y-type', 'percent',
-            '--x-type', 'env-comparison',
-        ], suffix=plot_log(expr, overlap_type), algo_env_pairs=algo_env_pairs)
+        if self.should_run_expr(expr):
+            self.iml_bench(parser, subparser, 'train_stable_baselines.sh', opts, suffix=bench_log(expr))
+            overlap_type = 'OperationOverlap'
+            algo_env_pairs = self.pairs_by_algo('ppo2')
+            self.stacked_plot([
+                '--overlap-type', overlap_type,
+                '--resource-overlap', json.dumps(['CPU']),
+                '--y-type', 'percent',
+                '--x-type', 'env-comparison',
+                '--training-time',
+            ], suffix=plot_log(expr, overlap_type), algo_env_pairs=algo_env_pairs)
 
         # (3) Compare algorithms:
         # Want to show on-policy vs off-policy.
@@ -474,26 +508,28 @@ class ExperimentGroup(Experiment):
         #     other = sum(r for r in regions if r != step)
         expr = 'algorithms'
         opts = ['--env-id', 'Walker2DBulletEnv-v0']
-        self.iml_bench(parser, subparser, 'train_stable_baselines.sh', opts, suffix=bench_log(expr))
-        overlap_type = 'OperationOverlap'
-        algo_env_pairs = self.pairs_by_env('Walker2DBulletEnv-v0')
-        self.stacked_plot([
-            '--overlap-type', overlap_type,
-            '--resource-overlap', json.dumps(['CPU']),
-            '--remap-df', json.dumps([textwrap.dedent("""
-            # Keep 'step' region
-            new_df[('step',)] = df[('step',)]
+        if self.should_run_expr(expr):
+            self.iml_bench(parser, subparser, 'train_stable_baselines.sh', opts, suffix=bench_log(expr))
+            overlap_type = 'OperationOverlap'
+            algo_env_pairs = self.pairs_by_env('Walker2DBulletEnv-v0')
+            self.stacked_plot([
+                '--overlap-type', overlap_type,
+                '--resource-overlap', json.dumps(['CPU']),
+                '--training-time',
+                '--remap-df', json.dumps([textwrap.dedent("""
+                # Keep 'step' region
+                new_df[('step',)] = df[('step',)]
 
-            # Sum up regions besides 'step'
-            new_df[('other',)] = 0.
-            for r in regions:
-                if r == ('step',):
-                    continue
-                new_df[('other',)] = new_df[('other',)] + df[r]
-            """)]),
-            '--y-type', 'percent',
-            '--x-type', 'algo-comparison',
-        ], suffix=plot_log(expr, overlap_type), algo_env_pairs=algo_env_pairs)
+                # Sum up regions besides 'step'
+                new_df[('other',)] = 0.
+                for r in regions:
+                    if r == ('step',):
+                        continue
+                    new_df[('other',)] = new_df[('other',)] + df[r]
+                """)]),
+                '--y-type', 'percent',
+                '--x-type', 'algo-comparison',
+            ], suffix=plot_log(expr, overlap_type), algo_env_pairs=algo_env_pairs)
 
         # (4) Compare all RL workloads:
         expr = 'all_rl_workloads'
@@ -504,71 +540,74 @@ class ExperimentGroup(Experiment):
             '--show-legend', 'False',
             '--rotation', '45',
         ]
-        self.iml_bench(parser, subparser, 'train_stable_baselines.sh', opts, suffix=bench_log(expr))
-        # - Statement: GPU utilization is low across all workloads.
-        # - Plot: ResourceOverlap that compares [CPU] vs [CPU + GPU] breakdown
-        # Need 2 plots
-        # - 1st plot shows GPU time spent is tiny
-        #   TODO: we want categories to be 'CPU', 'CPU + GPU', 'GPU' (ResourceOverlap)
-        overlap_type = 'ResourceOverlap'
-        algo_env_pairs = self.algo_env_pairs()
-        self.stacked_plot([
-            '--overlap-type', overlap_type,
-            '--y-type', 'percent',
-        ] + rl_workload_dims, suffix=plot_log(expr, overlap_type), algo_env_pairs=algo_env_pairs)
-
-        # - 2nd plot shows where CPU time is going
-        #   TODO: we want categories to be 'C++ framework', 'CUDA API C', 'Python' (CategoryOverlap)
-        #   TODO: For WHAT GPU operation...? We need to merge everyone into an 'Inference' category first.
-        overlap_type = 'CategoryOverlap'
-        # PROBLEM: sample_action is q_forward for DQN... but that means it appears in an entirely separate file.
-        # What we'd like to do:
-        # - read the q_forward CategoryOverlap file.
-        # - IF operation == q_forward, THEN remap it to sample_action.
-        # - SOLUTION:
-        #   - allow specifying multiple selector's; currently we can only specify 1 selector.
-        #     e.g. --selectors "[{selector-1}, {selector-2}]"
-        # - For Sri meeting:
-        #   - remove DQN for now.
-        #   - fix janky plot x-axis alignment
-        # TODO: keep dqn and use --selectors to select different files and remap-df to remap dqn[q_forward] to dqn[sample_action]
-        algo_env_pairs = [(algo, env) for algo, env in algo_env_pairs if not re.search(r'dqn', algo)]
-
-        gpu_operations = ['sample_action']
-        for gpu_operation in gpu_operations:
+        if self.should_run_expr(expr):
+            self.iml_bench(parser, subparser, 'train_stable_baselines.sh', opts, suffix=bench_log(expr))
+            # - Statement: GPU utilization is low across all workloads.
+            # - Plot: ResourceOverlap that compares [CPU] vs [CPU + GPU] breakdown
+            # Need 2 plots
+            # - 1st plot shows GPU time spent is tiny
+            #   TODO: we want categories to be 'CPU', 'CPU + GPU', 'GPU' (ResourceOverlap)
+            overlap_type = 'ResourceOverlap'
+            algo_env_pairs = self.algo_env_pairs()
             self.stacked_plot([
                 '--overlap-type', overlap_type,
-                '--resource-overlap', json.dumps(['CPU']),
-                '--operation', gpu_operation,
-                # '--selectors', gpu_operation,
-                '--remap-df', json.dumps([textwrap.dedent("""
-                    keep_regions = [
-                        ('Python',),
-                        ('Framework API C',),
-                    ]
-                    for r in keep_regions:
-                        new_df[r] = df[r]
-                    new_df[('CUDA API CPU',)] = df[('CUDA API CPU', 'Framework API C',)]
-                """)]),
-
-
-                # '--remap-df', json.dumps([textwrap.dedent("""
-                # # Inference:
-                # #   - operations we would use when deploying the trained model in production
-                # # TODO:
-                # # Backward-pass:
-                # #   - additional operations required when training, but NOT from a fully trained model.
-                # # Weight-update:
-                # #   - after gradients are computed, update the weights
-                # inference_ops = set([('step',), ('sample_action',)])
-                # other_ops = set([op for op in regions if op not in inference_ops])
-                # import ipdb; ipdb.set_trace()
-                # new_df[('inference',)] = np.sum(df[inference_ops])
-                # new_df[('other',)] = np.sum(df[other_ops])
-                # """)]),
-
                 '--y-type', 'percent',
-            ] + rl_workload_dims, suffix=plot_log(expr, overlap_type, gpu_operation), algo_env_pairs=algo_env_pairs)
+                '--training-time',
+            ] + rl_workload_dims, suffix=plot_log(expr, overlap_type), algo_env_pairs=algo_env_pairs)
+
+            # - 2nd plot shows where CPU time is going
+            #   TODO: we want categories to be 'C++ framework', 'CUDA API C', 'Python' (CategoryOverlap)
+            #   TODO: For WHAT GPU operation...? We need to merge everyone into an 'Inference' category first.
+            overlap_type = 'CategoryOverlap'
+            # PROBLEM: sample_action is q_forward for DQN... but that means it appears in an entirely separate file.
+            # What we'd like to do:
+            # - read the q_forward CategoryOverlap file.
+            # - IF operation == q_forward, THEN remap it to sample_action.
+            # - SOLUTION:
+            #   - allow specifying multiple selector's; currently we can only specify 1 selector.
+            #     e.g. --selectors "[{selector-1}, {selector-2}]"
+            # - For Sri meeting:
+            #   - remove DQN for now.
+            #   - fix janky plot x-axis alignment
+            # TODO: keep dqn and use --selectors to select different files and remap-df to remap dqn[q_forward] to dqn[sample_action]
+            algo_env_pairs = [(algo, env) for algo, env in algo_env_pairs if not re.search(r'dqn', algo)]
+
+            gpu_operations = ['sample_action']
+            for gpu_operation in gpu_operations:
+                self.stacked_plot([
+                    '--overlap-type', overlap_type,
+                    '--resource-overlap', json.dumps(['CPU']),
+                    '--operation', gpu_operation,
+                    # '--selectors', gpu_operation,
+                    '--training-time',
+                    '--remap-df', json.dumps([textwrap.dedent("""
+                        keep_regions = [
+                            ('Python',),
+                            ('Framework API C',),
+                        ]
+                        for r in keep_regions:
+                            new_df[r] = df[r]
+                        new_df[('CUDA API CPU',)] = df[('CUDA API CPU', 'Framework API C',)]
+                    """)]),
+
+
+                    # '--remap-df', json.dumps([textwrap.dedent("""
+                    # # Inference:
+                    # #   - operations we would use when deploying the trained model in production
+                    # # TODO:
+                    # # Backward-pass:
+                    # #   - additional operations required when training, but NOT from a fully trained model.
+                    # # Weight-update:
+                    # #   - after gradients are computed, update the weights
+                    # inference_ops = set([('step',), ('sample_action',)])
+                    # other_ops = set([op for op in regions if op not in inference_ops])
+                    # import ipdb; ipdb.set_trace()
+                    # new_df[('inference',)] = np.sum(df[inference_ops])
+                    # new_df[('other',)] = np.sum(df[other_ops])
+                    # """)]),
+
+                    '--y-type', 'percent',
+                ] + rl_workload_dims, suffix=plot_log(expr, overlap_type, gpu_operation), algo_env_pairs=algo_env_pairs)
 
         # - Statement: GPU operations are dominated by CPU time. In particular, CUDA API C
         #   time is a dominant contributor.
@@ -732,11 +771,10 @@ class ExperimentGroup(Experiment):
         args = self.args
         if not self.will_run:
             return
-        if args.analyze and not self.will_analyze:
-            return
         main_cmd = self._get_main_cmd(parser, subparser, subcommand)
         cmd = main_cmd + subcmd_args
         to_file = self._get_logfile(suffix=suffix)
+        logging.info("Logging iml-bench to file {path}".format(path=to_file))
         self._run_cmd(cmd=cmd, to_file=to_file)
 
     def _get_main_cmd(self, parser, subparser, subcommand):
@@ -748,7 +786,7 @@ class ExperimentGroup(Experiment):
                                    subparser_argname='subcommand',
                                    use_pdb=False,
                                    ignore_unhandled_types=True,
-                                   ignore_argnames=['func', 'subparser', 'mode'],
+                                   ignore_argnames=['func', 'subparser', 'mode', 'expr'],
                                    debug=args.debug)
         return main_cmd
 
@@ -790,6 +828,7 @@ class StableBaselines(Experiment):
         cmd = ['iml-analyze', "--iml-directory", iml_directory]
 
         to_file = self._get_logfile(algo, env_id, suffix='analyze.log')
+        logging.info("Analyze logfile = {path}".format(path=to_file))
 
         self._run_cmd(cmd=cmd, to_file=to_file)
 
@@ -871,6 +910,9 @@ class StableBaselines(Experiment):
         if algo_env_pairs is None:
             logging.info('Please provide either --env-id or --algo')
             sys.exit(1)
+
+        if args.debug:
+            logging.info({'algo_env_pairs': algo_env_pairs, 'args.analyze': args.analyze})
 
         if args.analyze:
             if args.debug:
