@@ -1,5 +1,6 @@
 import logging
 import os
+from progressbar import progressbar
 import shutil
 import traceback
 import re
@@ -17,6 +18,7 @@ from iml_profiler.parser.common import *
 MP_SPAWN_CTX = multiprocessing.get_context('spawn')
 MP_FORK_CTX = multiprocessing.get_context('fork')
 MP_CTX = MP_SPAWN_CTX
+# MP_CTX = MP_FORK_CTX
 
 class ForkedProcessPool:
     """
@@ -97,20 +99,9 @@ class ForkedProcessPool:
         proc = self.active_workers[i]
         del self.active_workers[i]
 
+        # NOTE: MyProcess, unlike multiprocessing.Process, will re-raise the child-process exception
+        # in the parent during a join.
         proc.join()
-
-        # If child process raised an exception, re-raise it in the parent.
-        if proc.exception:
-            ex, tb_string = proc.exception
-            ExceptionKlass = type(ex)
-            parent_ex = ExceptionKlass(("Exception in child process pid={pid} proc={proc} of ForkedProcessPool(name={name}): {error}\n"
-                                        "{tb}").format(
-                name=self.name,
-                pid=proc.pid,
-                proc=proc,
-                error=ex.args,
-                tb=tb_string))
-            raise parent_ex
 
         # If child process did sys.exit(1), raise a RuntimeError in the parent.
         # (if we don't this, we'll end up ignoring a failed child!)
@@ -164,12 +155,34 @@ class MyProcess(MP_CTX.Process):
             iml_logging.setup_logging()
             super().run()
             self._cconn.send(None)
+            self._cconn.close()
+            self._pconn.close()
         except Exception as e:
             tb = traceback.format_exc()
             self._cconn.send((e, tb))
+            self._cconn.close()
+            self._pconn.close()
             # Re-raise exception so that proc.exitcode
             # still gets set to non-zero.
             raise
+
+    def join(self):
+        super().join()
+
+        # NOTE: querying for exception also forces self._pconn to close
+        # (need to do this to avoid hitting POSIX open file limit!)
+        exception = self.exception
+        if exception:
+            ex, tb_string = exception
+            ExceptionKlass = type(ex)
+            parent_ex = ExceptionKlass(("Exception in child process pid={pid} proc={proc} of ForkedProcessPool(name={name}): {error}\n"
+                                        "{tb}").format(
+                name=self.name,
+                pid=self.pid,
+                proc=self,
+                error=ex.args,
+                tb=tb_string))
+            raise parent_ex
 
     @property
     def exception(self):
@@ -178,6 +191,8 @@ class MyProcess(MP_CTX.Process):
 
         if self._pconn.poll():
             self._exception = self._pconn.recv()
+            self._pconn.close()
+            self._cconn.close()
 
         return self._exception
 
@@ -194,6 +209,9 @@ def _exception():
     """
     logging.info("Running child in ForkedProcessPool that raises an exception")
     raise RuntimeError("Child process exception")
+
+def _do_nothing():
+    pass
 
 def _check_dir_exists(path):
     if not os.path.isdir(path):
@@ -253,3 +271,30 @@ def test_forked_process_pool():
         shutil.rmtree(TEST_DIR)
     test_03_mkdir()
 
+    try:
+        # resource module not supported on Windows
+        import resource
+        run_test_04_file_limit = True
+    except ImportError:
+        run_test_04_file_limit = False
+    def test_04_file_limit():
+        """
+        Test MyProcess doesn't induce open-file limit by creating
+        multiprocessing.Pipe() objects.
+
+        :return:
+        """
+        import resource
+        test_name = test_04_file_limit.__name__
+        logging.info("Running {test}; this may take a minute...".format(
+            test=test_name))
+        soft_file_limit, hard_file_limit = resource.getrlimit(resource.RLIMIT_OFILE)
+        # debug = True
+        debug = False
+        pool = ForkedProcessPool(name=test_name, debug=debug)
+        for i in progressbar(range(soft_file_limit + 10), prefix=test_name):
+            pool.submit(_do_nothing.__name__, _do_nothing)
+        pool.shutdown()
+        # We reached here, test passed.
+    if run_test_04_file_limit:
+        test_04_file_limit()
