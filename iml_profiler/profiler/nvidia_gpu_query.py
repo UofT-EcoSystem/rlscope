@@ -364,3 +364,20 @@ def gpus(debug=False):
         if 'utilization.memory' in proc:
             proc['utilization.memory'] = proc['utilization.memory']/100.
     return _parse_entity(cmd_opts, query_gpu_opts, post_process_entity=post_process_entity, debug=debug)
+
+RUN_STRESS_TEST = False
+
+def test_stress_nvidia_smi():
+
+    # Seems fine.
+    def _test_stress_nvidia_smi():
+        check_nvidia_smi()
+
+        num_samples = 10000
+        from progressbar import progressbar
+        for i in progressbar(range(num_samples)):
+            gpu_info = MachineGPUInfo()
+
+    if RUN_STRESS_TEST:
+        _test_stress_nvidia_smi()
+

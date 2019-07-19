@@ -412,6 +412,16 @@ class ExperimentGroup(Experiment):
     def should_run_expr(self, expr):
         return self.args.expr is None or expr == self.args.expr
 
+    def should_skip_env(self, env):
+        # For some reason, the simulation time for Humanoid is huge when trained with sac.
+        # Until we figure out WHY, let's just leave it out of all the plots.
+        return re.search('Humanoid', env)
+
+    def should_skip_algo(self, algo):
+        # For some reason, AirLearningEnv is missing annotations from the sac algorthim.
+        # I suspect sac is the "cuplrit" for various issues.
+        return re.search('sac', algo)
+
     def stable_baselines(self, parser):
         """
         To avoid running everything more than once, we will stick ALL (algo, env_id) pairs inside of $IML_DIR/output/iml_bench/all.
@@ -492,6 +502,7 @@ class ExperimentGroup(Experiment):
                 '--y-type', 'percent',
                 '--x-type', 'env-comparison',
                 '--training-time',
+                '--y2-logscale',
             ], suffix=plot_log(expr, overlap_type), algo_env_pairs=algo_env_pairs)
 
         # (3) Compare algorithms:
@@ -553,6 +564,7 @@ class ExperimentGroup(Experiment):
                 '--overlap-type', overlap_type,
                 '--y-type', 'percent',
                 '--training-time',
+                '--y2-logscale',
             ] + rl_workload_dims, suffix=plot_log(expr, overlap_type), algo_env_pairs=algo_env_pairs)
 
             # - 2nd plot shows where CPU time is going
@@ -666,11 +678,15 @@ class ExperimentGroup(Experiment):
                 logging.info("Skip algo_path={dir}".format(dir=algo_path))
                 continue
             algo = _b(algo_path)
+            if self.should_skip_algo(algo):
+                continue
             for env_path in glob(_j(algo_path, '*')):
                 if not self._is_env_dir(env_path):
                     logging.info("Skip env_path={dir}".format(dir=env_path))
                     continue
                 env = _b(env_path)
+                if self.should_skip_env(env):
+                    continue
                 algo_env_pairs.append((algo, env))
         return algo_env_pairs
 

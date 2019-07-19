@@ -6,6 +6,7 @@ import importlib
 import sys
 import textwrap
 
+from matplotlib import ticker as mpl_ticker
 import matplotlib
 # NOTE: If we don't do this, then with ForwardX11 enabled in ~/.ssh/config we get an error on python script exit:
 #   XIO:  fatal IO error 0 (Success) on X server "localhost:10.0"
@@ -72,6 +73,7 @@ class OverlapStackedBarPlot:
                  operation=None,
                  training_time=False,
                  remap_df=None,
+                 y2_logscale=False,
                  ignore_inconsistent_overlap_regions=False,
                  skip_plot=False,
                  title=None,
@@ -121,6 +123,7 @@ class OverlapStackedBarPlot:
         self.overlap_type = overlap_type
         self.resource_overlap = resource_overlap
         self.operation = operation
+        self.y2_logscale = y2_logscale
         self.remap_df = remap_df
         self.ignore_inconsistent_overlap_regions = ignore_inconsistent_overlap_regions
         self.skip_plot = skip_plot
@@ -221,15 +224,21 @@ class OverlapStackedBarPlot:
 
     @property
     def plot_y_axis_label(self):
-        if self.y_type == 'percent':
-            return "Time breakdown (percent)"
-        elif self.y_type == 'seconds':
-            return "Time breakdown (seconds)"
-        raise NotImplementedError
+        # if self.y_type == 'percent':
+        #     return "Time breakdown (percent)"
+        # elif self.y_type == 'seconds':
+        #     return "Time breakdown (seconds)"
+        # raise NotImplementedError
+        return "Percent (%)"
 
     @property
     def plot_y2_axis_label(self):
-        return "Total training time (seconds)"
+        if self.y2_logscale:
+            return "Total training time (log2-scale)"
+        else:
+            return "Total training time (sec)"
+
+        return "Total training time"
 
     @property
     def plot_title(self):
@@ -657,6 +666,7 @@ class OverlapStackedBarPlot:
             groups=sorted(self.regions),
             x_field='x_field',
             y2_field=y2_field,
+            y2_logscale=self.y2_logscale,
             x_axis_label=self.plot_x_axis_label,
             y_axis_label=self.plot_y_axis_label,
             y2_axis_label=self.plot_y2_axis_label,
@@ -928,6 +938,7 @@ class StackedBarPlot:
                  groups=None,
                  x_field=None,
                  y2_field=None,
+                 y2_logscale=False,
                  x_axis_label="X-axis label",
                  y_axis_label="Y-axis label",
                  y2_axis_label=None,
@@ -960,6 +971,7 @@ class StackedBarPlot:
         self.groups = groups
         self.x_field = x_field
         self.y2_field = y2_field
+        self.y2_logscale = y2_logscale
         self.fontsize = fontsize
         self.group_to_label = group_to_label
 
@@ -1005,6 +1017,7 @@ class StackedBarPlot:
             ax.set_zorder(ax2.get_zorder()+1)
             # Need to do this, otherwise training time bar is invisible.
             ax.patch.set_visible(False)
+
 
         #Set general plot properties
 
@@ -1104,6 +1117,17 @@ class StackedBarPlot:
             barplots.append(barplot)
         barplots.reverse()
 
+        if self.y2_field is not None and self.y2_logscale:
+            # ax2.set_yscale('log')
+            ax2.set_yscale('log', basey=2)
+
+            # ax2.set_yscale('log')
+            # ax2.set_yticks([1,10,100] + [max(y)])
+            # from matplotlib.ticker import FormatStrFormatter
+
+            # ax2.yaxis.set_major_formatter(mpl_ticker.FormatStrFormatter('%.d'))
+            ax2.yaxis.set_major_formatter(DaysHoursMinutesSecondsFormatter())
+
         # #Plot 1 - background - "total" (top) series
         # sns.barplot(x = self.data.Group, y = self.data.total, color = "red")
         #
@@ -1161,7 +1185,7 @@ class StackedBarPlot:
             # ax2.grid(True)
 
             if self.y2_axis_label is not None:
-                ax.set_ylabel(self.y2_axis_label)
+                ax2.set_ylabel(self.y2_axis_label)
 
             # Align training time against percent.
             # (weird training time labels).
@@ -1546,6 +1570,60 @@ def test_double_yaxis():
     ax2.set_ylabel('Price')
 
     plt.savefig('./test_double_yaxis.png')
+
+
+class DaysHoursMinutesSecondsFormatter(mpl_ticker.Formatter):
+    """
+    Use an old-style ('%' operator) format string to format the tick.
+
+    The format string should have a single variable format (%) in it.
+    It will be applied to the value (not the position) of the tick.
+    """
+    def __init__(self):
+        pass
+
+    def __call__(self, x, pos=None):
+        """
+        Return the formatted label string.
+
+        Only the value `x` is formatted. The position is ignored.
+        """
+        seconds_remaining = x
+
+        SECONDS_PER_MINUTE = 60
+        SECONDS_PER_HOUR = SECONDS_PER_MINUTE*60
+        SECONDS_PER_DAY = SECONDS_PER_HOUR*24
+
+        days = int(seconds_remaining / SECONDS_PER_DAY)
+        seconds_remaining -= days * SECONDS_PER_DAY
+
+        hours = int(seconds_remaining / SECONDS_PER_HOUR)
+        seconds_remaining -= hours * SECONDS_PER_HOUR
+
+        minutes = int(seconds_remaining / SECONDS_PER_MINUTE)
+        seconds_remaining -= minutes * SECONDS_PER_MINUTE
+
+        seconds = int(seconds_remaining)
+
+        # "5 days, 3 hours"
+        # "5 days, 3 hours, 5 seconds"
+        # "5 days, 5 seconds"
+        values = [days, hours, minutes, seconds]
+        names = ['day', 'hr', 'min', 'sec']
+        components = []
+        assert len(values) == len(names)
+        for value, name in zip(values, names):
+            if value == 0:
+                continue
+            string = '{value} {name}'.format(
+                value=value, name=name)
+            components.append(string)
+        if len(components) == 0:
+            label = '0'
+        else:
+            label = ', '.join(components)
+
+        return label
 
 def main():
     parser = argparse.ArgumentParser(
