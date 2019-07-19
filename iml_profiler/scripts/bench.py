@@ -454,11 +454,22 @@ class ExperimentGroup(Experiment):
                 return "{expr}.analyze.log".format(expr=expr)
             return "{expr}.log".format(expr=expr)
 
-        def plot_log(expr, overlap_type, operation=None):
-            suffix = '.'.join([expr, overlap_type])
-            if operation is not None:
-                suffix = '.'.join([suffix, operation])
-            suffix = '.'.join([suffix, 'plot'])
+        def plot_log(expr, overlap_type=None, operation=None):
+            """
+            {expr}.{overlap_type}.{operation}.plot
+            ------
+            if present.
+            """
+            def _add(suffix, string):
+                if string is not None:
+                    suffix = "{suffix}.{string}".format(suffix=suffix, string=string)
+                return suffix
+
+            suffix = expr
+            suffix = _add(suffix, overlap_type)
+            suffix = _add(suffix, operation)
+            suffix = _add(suffix, 'plot')
+
             return suffix
 
         self.will_run = False
@@ -567,6 +578,10 @@ class ExperimentGroup(Experiment):
                 '--y2-logscale',
             ] + rl_workload_dims, suffix=plot_log(expr, overlap_type), algo_env_pairs=algo_env_pairs)
 
+            self.util_plot([
+                '--algo-env-from-dir',
+            ], suffix=plot_log(expr), algo_env_pairs=algo_env_pairs)
+
             # - 2nd plot shows where CPU time is going
             #   TODO: we want categories to be 'C++ framework', 'CUDA API C', 'Python' (CategoryOverlap)
             #   TODO: For WHAT GPU operation...? We need to merge everyone into an 'Inference' category first.
@@ -670,7 +685,15 @@ class ExperimentGroup(Experiment):
     def _is_algo_dir(self, path):
         return os.path.isdir(path)
 
-    def algo_env_pairs(self):
+    def machine_util_files(self, algo, env):
+        iml_directory = self.iml_directory(algo, env)
+        return [path for path in list_files(iml_directory) if is_machine_util_file(path)]
+
+    def has_machine_util(self, algo, env):
+        machine_util_files = self.machine_util_files(algo, env)
+        return len(machine_util_files) > 0
+
+    def algo_env_pairs(self, has_machine_util=False):
         args = self.args
         algo_env_pairs = []
         for algo_path in glob(_j(args.dir, '*')):
@@ -687,6 +710,10 @@ class ExperimentGroup(Experiment):
                 env = _b(env_path)
                 if self.should_skip_env(env):
                     continue
+
+                if has_machine_util and not self.has_machine_util(algo, env):
+                    continue
+
                 algo_env_pairs.append((algo, env))
         return algo_env_pairs
 
@@ -752,6 +779,55 @@ class ExperimentGroup(Experiment):
             algo_env_pairs.extend(self.algo_env_pairs_train_stable_baselines(train_stable_baselines_opts, debug=debug))
         # if algo_env_pairs is None:
         #     raise NotImplementedError("Not sure what to use for --iml-directories")
+        if len(algo_env_pairs) == 0:
+            raise NotImplementedError("Need at least one directory for --iml-directories but saw 0.")
+        def sort_key(algo_env):
+            """
+            Show bar graphs order by algo first, then environment.
+            """
+            algo, env = algo_env
+            return (algo, env)
+        # Remove duplicates.
+        algo_env_pairs = list(set(algo_env_pairs))
+        algo_env_pairs.sort(key=sort_key)
+        iml_dirs = [self.iml_directory(algo, env_id) for algo, env_id in algo_env_pairs]
+        cmd.extend([
+            '--iml-directories', json.dumps(iml_dirs),
+        ])
+
+        cmd.extend([
+            # Output directory for the png plots.
+            '--directory', args.dir,
+            # Add expr-name to png.
+            '--suffix', suffix,
+        ])
+
+        cmd.extend(stacked_args)
+
+        cmd.extend(self.extra_argv)
+
+        to_file = self._get_logfile(suffix="{suffix}.log".format(suffix=suffix))
+
+        self._run_cmd(cmd=cmd, to_file=to_file, replace=True)
+
+    def util_plot(self, stacked_args, suffix, algo_env_pairs=None, debug=False):
+        if not self.will_plot:
+            return
+        args = self.args
+        cmd = [
+            'iml-analyze',
+        ]
+        cmd.extend([
+            '--task', 'UtilTask',
+        ])
+
+        if args.debug:
+            cmd.append('--debug')
+
+        if algo_env_pairs is None:
+            algo_env_pairs = []
+        algo_env_pairs = list(algo_env_pairs)
+
         if len(algo_env_pairs) == 0:
             raise NotImplementedError("Need at least one directory for --iml-directories but saw 0.")
         def sort_key(algo_env):

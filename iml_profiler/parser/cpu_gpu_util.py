@@ -147,6 +147,7 @@ class UtilParser:
     def __init__(self,
                  directory,
                  iml_directories,
+                 algo_env_from_dir=False,
                  debug=False,
                  # Swallow any excess arguments
                  **kwargs):
@@ -156,6 +157,7 @@ class UtilParser:
         """
         self.directory = directory
         self.iml_directories = iml_directories
+        self.algo_env_from_dir = algo_env_from_dir
         self.debug = debug
 
         self.added_fields = set()
@@ -192,6 +194,33 @@ class UtilParser:
         data = experiment.load_experiment_config(directory)
         return data
 
+    def maybe_add_algo_env(self, machine_util_path):
+        assert is_machine_util_file(machine_util_path)
+
+        iml_directory = _d(machine_util_path)
+
+        if self.algo_env_from_dir:
+            return self.add_algo_env_from_dir(machine_util_path)
+        if not _e(experiment.experiment_config_path(iml_directory)):
+            return self.add_experiment_config(machine_util_path)
+
+        # Not sure what (algo, env) is; don't add those columns.
+        return None
+
+    def add_algo_env_from_dir(self, machine_util_path):
+        assert is_machine_util_file(machine_util_path)
+        iml_dir = _d(machine_util_path)
+
+        path = os.path.normpath(iml_dir)
+        components = path.split(os.sep)
+        env_id = components[-1]
+        algo = components[-2]
+        fields = {
+            'algo': algo,
+            'env_id': env_id,
+        }
+        return fields
+
     def flattened_agg_df(self, df):
         """
         :param df:
@@ -218,7 +247,7 @@ class UtilParser:
         for directory in self.iml_directories:
             df_reader = UtilDataframeReader(
                 directory,
-                add_fields=self.add_experiment_config,
+                add_fields=self.maybe_add_algo_env,
                 debug=self.debug)
             df = df_reader.read()
             self.added_fields.update(df_reader.added_fields)

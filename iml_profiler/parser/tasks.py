@@ -254,8 +254,10 @@ class TraceEventsTask(luigi.Task):
 class UtilTask(luigi.Task):
     iml_directories = luigi.ListParameter(description="Multiple --iml-directory entries for finding overlap_type files: *.venn_js.js")
     directory = luigi.Parameter(description="Output directory", default=".")
+    suffix = luigi.Parameter(description="Add suffix to output files: MachineGPUUtil.{suffix}.{ext}", default=None)
     debug = param_debug
     debug_single_thread = param_debug_single_thread
+    algo_env_from_dir = luigi.BoolParameter(description="Add algo/env columns based on directory structure of --iml-directories <algo>/<env>/iml_dir", default=True, parsing=luigi.BoolParameter.EXPLICIT_PARSING)
 
     skip_output = False
 
