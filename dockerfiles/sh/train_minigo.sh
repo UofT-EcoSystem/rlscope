@@ -22,20 +22,27 @@ _check_iml
 #py_maybe_install 'baselines' install_baselines.sh
 
 if [ "$OUTPUT_DIR" == '' ]; then
-    OUTPUT_DIR="$MLPERF_DIR/output/minigo/docker/train_minigo"
+    OUTPUT_DIR="$MLPERF_DIR/output/minigo/docker/train_minigo_asplos2020"
     echo "> env.OUTPUT_DIR not set; defaulting to:"
     echo "  OUTPUT_DIR=$OUTPUT_DIR"
 fi
-mkdir -p $OUTPUT_DIR
+
+if [ -e "$OUTPUT_DIR" ]; then
+    echo "> Deleting files from previous run @ $OUTPUT_DIR"
+    rm -rf "$OUTPUT_DIR"
+fi
+
+mkdir -p "$OUTPUT_DIR"
 
 # K4000
 #export CUDA_VISIBLE_DEVICES="1"
 
 SEED=1
-export BASE_DIR=$OUTPUT_DIR
+export BASE_DIR=$OUTPUT_DIR/minigo_files
 export GOPARAMS=$MLPERF_DIR/reinforcement/tensorflow/minigo/params/multiple_workers.json
+export IML_DIRECTORY=$OUTPUT_DIR/iml_traces
 
 mkdir -p $BASE_DIR
 
 cd $MLPERF_DIR/reinforcement/tensorflow
-_do ./run_and_time.sh $SEED --iml-keep-traces
+_do ./run_and_time.sh $SEED --iml-keep-traces --iml-directory $IML_DIRECTORY "$@"

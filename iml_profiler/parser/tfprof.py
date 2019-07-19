@@ -1722,14 +1722,6 @@ class OverlapTypeInterface:
 
         md['process'] = process.process_name
 
-        if process.percent_complete is not None:
-            md['percent_complete'] = process.percent_complete
-
-        if process.num_timesteps is not None:
-            md['num_timesteps'] = process.num_timesteps
-
-        if process.total_timesteps is not None:
-            md['total_timesteps'] = process.total_timesteps
 
     def _add_machine_md(self, md, machine):
         if machine is None:
@@ -1742,6 +1734,15 @@ class OverlapTypeInterface:
             return
 
         md['phase'] = phase.phase_name
+
+        if phase.percent_complete is not None:
+            md['percent_complete'] = phase.percent_complete
+
+        if phase.num_timesteps is not None:
+            md['num_timesteps'] = phase.num_timesteps
+
+        if phase.total_timesteps is not None:
+            md['total_timesteps'] = phase.total_timesteps
 
     def _add_overlap_region_metadata(
             self, overlap_metadata_dict, md,

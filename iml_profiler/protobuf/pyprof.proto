@@ -42,6 +42,8 @@ message TrainingProgress {
     // the number of gradient updates that have been performed.
     int64 num_timesteps = 3;
     int64 total_timesteps = 4;
+
+    string phase = 7;
 }
 
 // Metadata about a process.
@@ -71,7 +73,7 @@ message ProcessMetadata {
     //       # If it has, then the NEXT call to iml.prof.report_progress will
     //       # terminate profiling.
     //       iml.prof.report_progress(t/total_training_timesteps)
-    TrainingProgress training_progress = 5;
+    map<string, TrainingProgress> phase_training_progress = 5;
 }
 
 // Samples of "overall device utilization" for each device on this machine.

@@ -388,17 +388,24 @@ class SQLParser:
             # TODO: We should use better defaults for unset values in protobuf (e.g. -1 for ints/floats)
             if md.parent_process_name:
                 fields['parent_process_id'] = process_to_assigned_id[md.parent_process_name]
-            if md.training_progress.content_code == TP_HAS_PROGRESS:
-                fields['percent_complete'] = md.training_progress.percent_complete
-                if md.training_progress.num_timesteps != 0:
-                    fields['num_timesteps'] = md.training_progress.num_timesteps
-                if md.training_progress.total_timesteps != 0:
-                    fields['total_timesteps'] = md.training_progress.total_timesteps
             self.insert_process_name(md.process_name, fields=fields, debug=True)
 
         if self.debug:
             logging.info("> Insert phases.")
 
+        for md in process_metadatas:
+            for phase_name, training_progress in md.phase_training_progress.items():
+                if training_progress.content_code == TP_NO_PROGRESS:
+                    continue
+                fields['percent_complete'] = training_progress.percent_complete
+                if training_progress.num_timesteps != 0:
+                    fields['num_timesteps'] = training_progress.num_timesteps
+                if training_progress.total_timesteps != 0:
+                    fields['total_timesteps'] = training_progress.total_timesteps
+            self.insert_phase_name(phase_name, fields=fields)
+
+        # Insert phases that don't have progress reported for them.
+        # (hopefully none since we need it to extrapolate total training time).
         phase_names = sorted(meta['phase_name'] for meta in process_trace_metas)
         for phase_name in phase_names:
             self.insert_phase_name(phase_name)
@@ -2377,8 +2384,7 @@ class SQLCategoryTimesReader:
             m.machine_id,
             p.process_name, 
             p.process_id, 
-            ph.phase_name, 
-            ph.phase_id, 
+            ph.*
             MIN(e.start_time_us) AS phase_start_time_us, 
             MAX(e.end_time_us) AS phase_end_time_us
 
@@ -3750,11 +3756,17 @@ class Phase:
             phase_name,
             phase_start_time_us,
             phase_end_time_us,
+            percent_complete,
+            num_timesteps,
+            total_timesteps,
             # Swallow any excess arguments
             **kwargs):
         self.phase_name = phase_name
         self.phase_start_time_us = phase_start_time_us
         self.phase_end_time_us = phase_end_time_us
+        self.percent_complete = percent_complete
+        self.num_timesteps = num_timesteps
+        self.total_timesteps = total_timesteps
 
     @staticmethod
     def from_row(row):
@@ -4594,18 +4606,12 @@ class Device:
 class Process:
     def __init__(self, process_name, process_id,
                  machine_name, machine_id,
-                 percent_complete=None,
-                 num_timesteps=None,
-                 total_timesteps=None,
                  # Swallow any excess arguments
                  **kwargs):
         self.process_name = process_name
         self.process_id = process_id
         self.machine_name = machine_name
         self.machine_id = machine_id
-        self.percent_complete = percent_complete
-        self.num_timesteps = num_timesteps
-        self.total_timesteps = total_timesteps
 
     @staticmethod
     def from_row(row):

@@ -104,11 +104,7 @@ CREATE TABLE Process (
   process_id SERIAL NOT NULL PRIMARY KEY,
   process_name TEXT,
   parent_process_id INTEGER,
-  machine_id INTEGER NOT NULL,
-  -- ProcessMetadata.TrainingProgress
-  percent_complete FLOAT,
-  num_timesteps INTEGER,
-  total_timesteps INTEGER
+  machine_id INTEGER NOT NULL
 --   UNIQUE (process_name)
 --   FOREIGN KEY(parent_process_id) REFERENCES Process(process_id),
 --   FOREIGN KEY(machine_id) REFERENCES Machine(machine_id);
@@ -128,7 +124,11 @@ CREATE TABLE Process (
 
 CREATE TABLE Phase (
   phase_id SERIAL NOT NULL PRIMARY KEY,
-  phase_name TEXT
+  phase_name TEXT,
+  -- ProcessMetadata.TrainingProgress
+  percent_complete FLOAT,
+  num_timesteps INTEGER,
+  total_timesteps INTEGER
 --   UNIQUE (phase_name)
 );
 

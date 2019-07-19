@@ -58,11 +58,39 @@ class EstimatorWrapper:
 
         if hooks is None:
             hooks = []
-        hooks = hooks + [TrainEstimatorHook(iml_profiler.api.prof)]
+            # TODO: separate hook into 2 hooks, one BEFORE, one AFTER
+            # if iml.prof.
+
+        # Remove EstimatorReportProgressHook from hooks list.
+        #
+        # We need to ensure report_progress gets called BEFORE any set_operation calls,
+        # and AFTER any end_operation calls.
+        i = 0
+        report_progress_hook = None
+        while i < len(hooks):
+            if isinstance(hooks[i], EstimatorReportProgressHook):
+                report_progress_hook = hooks[i]
+                del hooks[i]
+                break
+            i += 1
+        for hook in hooks:
+            assert not isinstance(hook, EstimatorReportProgressHook)
+
+        iml_before_hooks = []
+        if report_progress_hook is not None:
+            iml_before_hooks.append(BeforeRunEstimatorReportProgressHook(report_progress_hook))
+        iml_before_hooks.append(SetOpTrainEstimatorHook())
+
+        iml_after_hooks = []
+        iml_after_hooks.append(EndOpTrainEstimatorHook())
+        if report_progress_hook is not None:
+            iml_after_hooks.append(AfterRunEstimatorReportProgressHook(report_progress_hook))
+
+        hooks = iml_before_hooks + hooks + iml_after_hooks
 
         if saving_listeners is None:
             saving_listeners = []
-        saving_listeners = saving_listeners + [SaveModelEstimatorHook(iml_profiler.api.prof)]
+        saving_listeners = [SetOpSaveEstimatorHook()] + saving_listeners + [EndOpSaveEstimatorHook()]
 
         return self.estimator.train(
             input_fn,
@@ -81,7 +109,7 @@ class EstimatorWrapper:
 
         if hooks is None:
             hooks = []
-        hooks = hooks + [PredictEstimatorHook(iml_profiler.api.prof)]
+        hooks = [SetOpPredictEstimatorHook()] + hooks + [EndOpPredictEstimatorHook()]
 
         return self.estimator.predict(
             input_fn,
@@ -95,7 +123,7 @@ class EstimatorWrapper:
 
         if hooks is None:
             hooks = []
-        hooks = hooks + [EvaluateEstimatorHook(iml_profiler.api.prof)]
+        hooks = [SetOpEvaluateEstimatorHook()] + hooks + [EndOpEvaluateEstimatorHook()]
 
         return self.estimator.evaluate(
             input_fn,
@@ -121,7 +149,100 @@ class EstimatorWrapper:
         # export_savedmodel from 1.0 is deprecated.
         raise NotImplementedError("IML: Haven't bothered to wrap tf.estimator.Estimator.export_saved_model with profiling set_operation/end_operation annotations.")
 
-class ProfileEstimatorHook(tf.train.SessionRunHook):
+class EstimatorReportProgressHook:
+    """
+    Hook for Estimator training callback that reports progress updates before each training time-step
+    (just like what the stable-baselines training loops do manually.)
+
+    NOTE: you need to add this manually to your Estimator.train(hooks=[...]) call.
+    """
+    def __init__(self, total_timesteps, prof=None):
+        self.total_timesteps = total_timesteps
+        self.is_running = False
+        self.timestep = 0
+        if prof is None:
+            self.prof = iml_profiler.api.prof
+        else:
+            self.prof = prof
+        assert self.prof is not None
+
+    def before_run(self, run_context):
+        # NOTE: iml.prof.enable_tracing() should be called externally
+        self.is_running = True
+        self._report_progress()
+
+    def _report_progress(self):
+        percent_complete = self.timestep / self.total_timesteps
+        self.prof.report_progress(percent_complete,
+                                  num_timesteps=self.timestep,
+                                  total_timesteps=self.total_timesteps)
+
+    def after_run(self, run_context, run_values):
+        self.is_running = False
+        self.timestep += 1
+        # To avoid missing the last set of traced events when --iml-trace-time-sec isn't used.
+        self._report_progress()
+
+class BeforeRunEstimatorReportProgressHook(tf.train.SessionRunHook):
+    def __init__(self, hook):
+        assert type(hook) == EstimatorReportProgressHook
+        self.hook = hook
+
+    def before_run(self, run_context):
+        self.hook.before_run(run_context)
+
+class AfterRunEstimatorReportProgressHook(tf.train.SessionRunHook):
+    def __init__(self, hook):
+        assert type(hook) == EstimatorReportProgressHook
+        self.hook = hook
+
+    def after_run(self, run_context, run_values):
+        self.hook.after_run(run_context, run_values)
+
+# class ProfileEstimatorHook(tf.train.SessionRunHook):
+#     def __init__(self, operation, prof=None):
+#         """
+#         Hook for Estimator callback API to add profiling set_operation/end_operation
+#         annotations before/after invoking TensorFlow session.run(...) calls.
+#
+#         :param operation:
+#             The name of the operation to use for prof.set_operation(...).
+#         """
+#         self.is_running = False
+#         self.operation = operation
+#         if prof is None:
+#             self.prof = iml_profiler.api.prof
+#         else:
+#             self.prof = prof
+#         assert self.prof is not None
+#
+#     # def begin(self):
+#     #     pass
+#
+#     def before_run(self, run_context):
+#         self.prof.set_operation(self.operation)
+#         self.is_running = True
+#
+#     def after_run(self, run_context, run_values):
+#         self.prof.end_operation(self.operation)
+#         self.is_running = False
+#
+#     def end(self, session):
+#         """
+#         If sess.run()) raises OutOfRangeError or StopIteration,
+#         after_run will not get called.
+#
+#         Nevertheless, make sure to stop profiling.
+#
+#         NOTE: this won't get called if other exceptions occur though.
+#
+#         Q: Why would OutOfRangeError or StopIteration be raised?
+#         """
+#         if self.is_running:
+#             self.prof.end_operation(self.operation)
+#             self.is_running = False
+
+class BeforeRunSetOpEstimatorHook(tf.train.SessionRunHook):
     def __init__(self, operation, prof=None):
         """
         Hook for Estimator callback API to add profiling set_operation/end_operation
@@ -130,7 +251,6 @@ class ProfileEstimatorHook(tf.train.SessionRunHook):
         :param operation:
             The name of the operation to use for prof.set_operation(...).
         """
-        self.is_running = False
         self.operation = operation
         if prof is None:
             self.prof = iml_profiler.api.prof
@@ -138,59 +258,98 @@ class ProfileEstimatorHook(tf.train.SessionRunHook):
             self.prof = prof
         assert self.prof is not None
 
-    # def begin(self):
-    #     pass
-
     def before_run(self, run_context):
         self.prof.set_operation(self.operation)
-        self.is_running = True
 
-    def after_run(self, run_context, run_values):
-        self.prof.end_operation(self.operation)
-        self.is_running = False
-
-    def end(self, session):
+class AfterRunEndOpEstimatorHook(tf.train.SessionRunHook):
+    def __init__(self, operation, prof=None):
         """
-        If sess.run()) raises OutOfRangeError or StopIteration,
-        after_run will not get called.
+        Hook for Estimator callback API to add profiling set_operation/end_operation
+        annotations before/after invoking TensorFlow session.run(...) calls.
 
-        Nevertheless, make sure to stop profiling.
-
-        NOTE: this won't get called if other exceptions occur though.
-
-        Q: Why would OutOfRangeError or StopIteration be raised?
+        :param operation:
+            The name of the operation to use for prof.set_operation(...).
         """
-        if self.is_running:
-            self.prof.end_operation(self.operation)
-            self.is_running = False
-
-class SaveModelEstimatorHook(CheckpointSaverListener):
-    def __init__(self, prof=None):
-        self.operation = 'estimator_save_model'
+        self.operation = operation
         if prof is None:
             self.prof = iml_profiler.api.prof
         else:
             self.prof = prof
         assert self.prof is not None
 
-    # def begin(self):
-    #     pass
+    def after_run(self, run_context, run_values):
+        self.prof.end_operation(self.operation)
+
+# class SaveModelEstimatorHook(CheckpointSaverListener):
+#     def __init__(self, prof=None):
+#         self.operation = 'estimator_save_model'
+#         if prof is None:
+#             self.prof = iml_profiler.api.prof
+#         else:
+#             self.prof = prof
+#         assert self.prof is not None
+#
+#     def before_save(self, session, global_step_value):
+#         self.prof.set_operation(self.operation)
+#
+#     def after_save(self, session, global_step_value):
+#         self.prof.end_operation(self.operation)
+
+class BeforeSaveSetOpEstimatorHook(CheckpointSaverListener):
+    def __init__(self, operation, prof=None):
+        self.operation = operation
+        if prof is None:
+            self.prof = iml_profiler.api.prof
+        else:
+            self.prof = prof
+        assert self.prof is not None
 
     def before_save(self, session, global_step_value):
         self.prof.set_operation(self.operation)
 
+class AfterSaveEndOpEstimatorHook(CheckpointSaverListener):
+    def __init__(self, operation, prof=None):
+        self.operation = operation
+        if prof is None:
+            self.prof = iml_profiler.api.prof
+        else:
+            self.prof = prof
+        assert self.prof is not None
+
     def after_save(self, session, global_step_value):
         self.prof.end_operation(self.operation)
 
-    # def end(self, session, global_step_value):
-    #     pass
-
-class TrainEstimatorHook(ProfileEstimatorHook):
+class SetOpTrainEstimatorHook(BeforeRunSetOpEstimatorHook):
     def __init__(self, prof=None):
         super().__init__(operation='estimator_train', prof=prof)
-class PredictEstimatorHook(ProfileEstimatorHook):
+class EndOpTrainEstimatorHook(AfterRunEndOpEstimatorHook):
+    def __init__(self, prof=None):
+        super().__init__(operation='estimator_train', prof=prof)
+
+class SetOpPredictEstimatorHook(BeforeRunSetOpEstimatorHook):
     def __init__(self, prof=None):
         super().__init__(operation='estimator_predict', prof=prof)
-class EvaluateEstimatorHook(ProfileEstimatorHook):
+class EndOpPredictEstimatorHook(AfterRunEndOpEstimatorHook):
+    def __init__(self, prof=None):
+        super().__init__(operation='estimator_predict', prof=prof)
+
+class SetOpEvaluateEstimatorHook(BeforeRunSetOpEstimatorHook):
     def __init__(self, prof=None):
         super().__init__(operation='estimator_evaluate', prof=prof)
+class EndOpEvaluateEstimatorHook(AfterRunEndOpEstimatorHook):
+    def __init__(self, prof=None):
+        super().__init__(operation='estimator_evaluate', prof=prof)
+
+class SetOpSaveEstimatorHook(BeforeSaveSetOpEstimatorHook):
+    def __init__(self, prof=None):
+        super().__init__(operation='estimator_save_model', prof=prof)
+class EndOpSaveEstimatorHook(AfterSaveEndOpEstimatorHook):
+    def __init__(self, prof=None):
+        super().__init__(operation='estimator_save_model', prof=prof)
+
+# class PredictEstimatorHook(ProfileEstimatorHook):
+#     def __init__(self, prof=None):
+#         super().__init__(operation='estimator_predict', prof=prof)
+# class EvaluateEstimatorHook(ProfileEstimatorHook):
+#     def __init__(self, prof=None):
+#         super().__init__(operation='estimator_evaluate', prof=prof)

@@ -35,6 +35,18 @@ DEBUG_TRACE_SESSION = False
 
 # Verbose debugging: Print calls to set_operation/end_operation
 DEBUG_OPERATIONS = False
+DEBUG_OPERATIONS_STACKS = False
+
+# If true, have iml-util-sampler log to stdout the GPU/CPU info it queries.
+# This can be noisy.
+DEBUG_UTIL_SAMPLER = False
+
+# If true, dump stack when we initially start recording progress
+# for a phase during iml.prof.report_progress(...)
+DEBUG_REPORT_PROGRESS = True
+# If true, dump stack for ALL calls to iml.prof.report_progress(...) that update progress
+# (not just the first call for a phase)
+DEBUG_REPORT_PROGRESS_ALL = False
 
 # In case docker causes different runtime behaviour, we can use this switch.
 #

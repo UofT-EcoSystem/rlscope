@@ -24,3 +24,6 @@ from iml_profiler.profiler.clib_wrap import \
 
 from iml_profiler.scripts.utilization_sampler import \
   util_sampler
+
+from iml_profiler.profiler.estimator import \
+    EstimatorReportProgressHook

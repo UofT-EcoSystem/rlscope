@@ -88,8 +88,8 @@ class PyprofTrace:
             return
         self._step = step
         if step not in self.pyprof.steps:
-            if py_config.DEBUG:
-                logging.info("> ADD PYPROF STEP: {s}".format(s=self._step))
+            # if py_config.DEBUG:
+            #     logging.info("> ADD PYPROF STEP: {s}".format(s=self._step))
 
             self.pyprof.steps.extend([step])
 

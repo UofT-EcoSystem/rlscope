@@ -669,6 +669,11 @@ class Profiler:
             py_config.DEBUG = self.debug
         self.directory = get_argval('directory', directory, None, allow_none=False)
         self.disable = get_argval('disable', disable, False)
+        # If they provide --iml-disable, then tracing is OFF for the duration of the training script.
+        # The training script can query that --iml-disable was given by checking iml.prof.enabled.
+        # NOTE: if they subsequently call iml.prof.disable_tracing(), we STILL have iml.prof.enabled == True!
+        # That's because iml.prof.enabled is meant to just tell us whether "this is a profiling run".
+        self.enabled = not self.disable
         self.delay = get_argval('delay', delay, False)
         self.just_sample_util = get_argval('just_sample_util', just_sample_util, False)
 
@@ -689,14 +694,10 @@ class Profiler:
 
         # TODO: bind process to a different core to avoid interference?
         # self.bg_dumper = ProcessPoolExecutor(max_workers=1)
-        self.percent_complete = None
-        self._start_percent_complete = 0.
-        self._start_num_timesteps = 0
         self._delayed_enable = False
         # self._delayed_disable = False
-        self.num_timesteps = None
-        self.total_timesteps = None
-        # dump_cpus = get_dump_cpus()
+        # phase -> RecordedTrainingProgress
+        self._training_progress = dict()
         self.bg_dumper = ForkedProcessPool(name="bg_dumper", debug=self.debug,
                                            # cpu_affinity=dump_cpus,
                                            )
@@ -1078,22 +1079,17 @@ class Profiler:
             self._enable_tracing()
 
     def _disable_tracing(self):
-        logging.info("IML: enable tracing")
+        logging.info("IML: disable tracing")
         self._stop_pyprof()
         self._stop_tfprof()
 
-    # # Calling iml.prof.enable()/disable() repeatedly wouldn't currently support percent_complete tracking...
-    # # So let's just not allow disable() for now.
-    # def disable_tracing(self):
-    #     """
-    #     Turn off IML tracing.
-    #
-    #     :return:
-    #     """
-    #     if self.reports_progress:
-    #         self._delayed_disable = True
-    #     else:
-    #         self._disable_tracing()
+    def disable_tracing(self):
+        """
+        Turn off IML tracing.
+
+        :return:
+        """
+        self._disable_tracing()
 
     def start(self, start_utilization_sampler=False, handle_utilization_sampler=False):
         PROFILERS.append(self)
@@ -1118,11 +1114,27 @@ class Profiler:
         while len(self._op_stack) != 0:
             self.end_operation(self._cur_operation, skip_finish=True)
 
-    def stop(self, stop_utilization_sampler=False):
+    def stop(self, stop_utilization_sampler=False, exception_type=None):
         PROFILERS.remove(self)
 
         if self.disable:
             return
+
+        if exception_type is not None:
+            if exception_type not in [KeyboardInterrupt]:
+                logging.info((
+                    "IML: detected unhandled exception {ex}; "
+                    "SKIPPING scheduling dumping of outstanding trace-files for process_name={proc} "
+                    "(NOTE: however, please wait for trace-file dumps already in progress to complete)"
+                ).format(
+                    ex=exception_type.__name__,
+                    proc=self.process_name))
+                if stop_utilization_sampler and self.util_sampler_pid is not None:
+                    self._terminate_utilization_sampler()
+                return
+            logging.info("IML: detected unhandled exception {ex}; scheduling dumping of outstanding trace-files before exit".format(
+                ex=exception_type.__name__,
+            ))
 
         if self.just_sample_util:
             self.util_sampler.stop()
@@ -1242,7 +1254,11 @@ class Profiler:
             return
 
         if py_config.DEBUG and py_config.DEBUG_OPERATIONS:
-            logging.info("> set_operation(op={op})".format(op=bench_name))
+            msg = "> set_operation(op={op})".format(op=bench_name)
+            if py_config.DEBUG_OPERATIONS_STACKS:
+                logging.info("{msg}\n{stack}".format(msg=msg, stack=get_stacktrace(indent=1)))
+            else:
+                logging.info(msg)
 
         self._push_operation(bench_name)
         # if len(self._op_stack) == 1:
@@ -1303,8 +1319,8 @@ class Profiler:
         #     self.step_start_tracing = self.steps
         clib_wrap.enable_tracing()
         clib_wrap.set_step(self._pyprof_step, expect_traced=True)
-        if (py_config.DEBUG or TF_PRINT_TIMESTAMP) and clib_wrap.is_recording():
-            logging.info("> RECORDING pyprof_step = {step}".format(step=self._pyprof_step))
+        # if (py_config.DEBUG or TF_PRINT_TIMESTAMP) and clib_wrap.is_recording():
+        #     logging.info("> RECORDING pyprof_step = {step}".format(step=self._pyprof_step))
         if self.python:
             self.pyprof.enable()
         self._pyprof_enabled = True
@@ -1348,10 +1364,14 @@ class Profiler:
 
         if py_config.DEBUG and py_config.DEBUG_OPERATIONS:
             should_finish = self.should_finish()
-            logging.info('> end_operation({op}), tracing time = {sec}, should_finish = {should_finish}'.format(
+            msg = '> end_operation({op}), tracing time = {sec}, should_finish = {should_finish}'.format(
                 sec=self._total_trace_time_sec(),
                 should_finish=should_finish,
-                op=bench_name))
+                op=bench_name)
+            if py_config.DEBUG_OPERATIONS_STACKS:
+                logging.info("{msg}\n{stack}".format(msg=msg, stack=get_stacktrace(indent=1)))
+            else:
+                logging.info(msg)
 
 
         # if self.calls_traced > self.num_calls and len(self._op_stack) > 0 and self.calls_traced % WARN_EVERY_CALL_MODULO == 0:
@@ -1424,6 +1444,8 @@ class Profiler:
             raise ValueError("IML ERROR: You cannot use an empty-string for process_name")
         self.process_name = process_name
         clib_wrap.set_process_name(process_name)
+        if self.debug:
+            logging.info("set_process_name = {proc}".format(proc=process_name))
         self.init_trace_id()
         # self._maybe_init_profile_context()
 
@@ -1445,7 +1467,7 @@ class Profiler:
         util_cmdline.extend(['--iml-directory', _a(self.directory)])
         # Sample memory-usage of the entire process tree rooted at ths process.
         util_cmdline.extend(['--iml-root-pid', str(os.getpid())])
-        if self.debug:
+        if py_config.DEBUG_UTIL_SAMPLER and self.debug:
             util_cmdline.append('--iml-debug')
         # We make sure nvidia-smi runs fast at the VERY START of training
         # (to avoid false alarms when training is busy with the CPU/GPU).
@@ -1477,6 +1499,9 @@ class Profiler:
 
         if self.disable:
             return
+
+        if self.debug:
+            logging.info("set_phase = {phase}".format(phase=phase))
 
         if self.unit_test:
             self.ut.set_phase(phase)
@@ -1593,6 +1618,7 @@ class Profiler:
                 logging.info("Skip dumping tfprof @ {path}: since it has 0 traced-calls.".format(path=tfprof_path))
             return
 
+        os.makedirs(_d(tfprof_path), exist_ok=True)
         tfprof_dumper = TfprofDumper(trace_id, session, self.process_name, tfprof_path, debug=debug)
         tfprof_dumper.dump()
 
@@ -1665,6 +1691,8 @@ class Profiler:
         trace_id = self.next_trace_id
         pyprof_trace_key = self.pyprof_proto_path(trace_id)
         self.pyprof_dump_manager.put(pyprof_trace_key, pyprof_trace)
+        pyprof_proto_path = self.pyprof_proto_path(trace_id)
+        os.makedirs(_d(pyprof_proto_path), exist_ok=True)
         pyprof_dumper = PyprofDumper(
             trace_id=trace_id,
             config_path=self.config_path(trace_id),
@@ -1676,7 +1704,7 @@ class Profiler:
             config_kwargs=config_kwargs,
             process_name=self.process_name,
             phase=self.phase,
-            pyprof_proto_path=self.pyprof_proto_path(trace_id),
+            pyprof_proto_path=pyprof_proto_path,
             pyprof_call_times_path=self.pyprof_call_times_path(trace_id),
             pyprof_step=self._pyprof_step,
             pyprof_dump_manager=self.pyprof_dump_manager,
@@ -1707,36 +1735,19 @@ class Profiler:
         if self.parent_process_name is not None:
             process_metadata.parent_process_name = self.parent_process_name
 
-        # Q: multiple processes reporting training progress...consider that an error?
-        if self.reports_progress and self.percent_complete is None:
-            raise RuntimeError("IML ERROR: profiler was created with iml.handle_iml_args(..., reports_progress=True), but process NEVER called iml.prof.report_progress(...)")
+        for phase, recorded_training_progress in self._training_progress.items():
+            # Q: multiple processes reporting training progress...consider that an error?
+            if self.reports_progress and recorded_training_progress.percent_complete is None:
+                raise RuntimeError("IML ERROR: profiler was created with iml.handle_iml_args(..., reports_progress=True), but process NEVER called iml.prof.report_progress(...)")
 
-        # This should be prevented from self.report_progress(...)
-        assert not(not self.reports_progress and self.percent_complete is not None)
+            # This should be prevented from self.report_progress(...)
+            assert not(not self.reports_progress and recorded_training_progress.percent_complete is not None)
 
-        if self.percent_complete is not None:
-            process_metadata.training_progress.content_code = TP_HAS_PROGRESS
-            # Measure the delta of training completed over the course of training.
-            # This is important since, if we delay trace collection until warmup completes,
-            # we don't want to inflate the percent_complete'd over that duration of training time.
-            percent_complete = self.percent_complete - self._start_percent_complete
-            if self.debug:
-                logging.info("percent_complete ({perc}) = latest_percent_complete ({latest}) - start_percent_complete ({start})".format(
-                    perc=percent_complete,
-                    latest=self.percent_complete,
-                    start=self._start_percent_complete,
-                ))
-            process_metadata.training_progress.percent_complete = percent_complete
-            # Q: Is this safe is self.num_timestamps is None? NO
-            if self.num_timesteps is not None:
-                num_timesteps = self.num_timesteps - self._start_num_timesteps
-                process_metadata.training_progress.num_timesteps = num_timesteps
-            if self.total_timesteps is not None:
-                process_metadata.training_progress.total_timesteps = self.total_timesteps
-        else:
-            process_metadata.training_progress.content_code = TP_NO_PROGRESS
+            training_progress = recorded_training_progress.as_proto()
+            process_metadata.phase_training_data[phase].MergeFrom(training_progress)
 
         process_metadata_proto_path = self._process_metadata_proto_path(trace_id)
+        os.makedirs(_d(process_metadata_proto_path), exist_ok=True)
         dumper = ProcessMetadataDumper(
             trace_id=trace_id,
             process_metadata=process_metadata,
@@ -1932,9 +1943,21 @@ class Profiler:
         clib_wrap.record_event(CATEGORY_OPERATION, event_name, self._start_us, self._stop_us,
                                ignore_disable=True)
 
-    def report_progress(self, percent_complete, num_timesteps=None, total_timesteps=None):
+    def report_progress(self, percent_complete, num_timesteps=None, total_timesteps=None,
+                        allow_active_annotations=False):
         if self.disable:
             return
+
+        if py_config.DEBUG and py_config.DEBUG_REPORT_PROGRESS_ALL:
+            logging.info("[report-progress] vars={vars}\n{stack}".format(
+                vars=dict(
+                    percent_complete=percent_complete,
+                    num_timesteps=num_timesteps,
+                    total_timesteps=total_timesteps,
+                    phase=self.phase,
+                ),
+                stack=get_stacktrace(indent=1)
+            ))
 
         if not self.reports_progress:
             raise RuntimeError(
@@ -1964,24 +1987,35 @@ class Profiler:
             # We're going to enable tracing now as a result of iml.prof.enable_tracing();
             # reset flag to prevent future enables.
             self._delayed_enable = False
+            # Cannot iml.report_progress during active annotations with --iml-delay.
+            assert not allow_active_annotations
             self._check_no_annotations(caller_name='iml.prof.report_progress()')
             self._enable_tracing()
             # percent_complete when tracing begins.
-            self._start_percent_complete = percent_complete
-            self._start_num_timesteps = num_timesteps
+            if self.phase not in self._training_progress:
+                self._training_progress[self.phase] = RecordedTrainingProgress(self.phase)
+            if py_config.DEBUG and py_config.DEBUG_REPORT_PROGRESS:
+                logging.info("[report-progress] report_start_of_progress vars={vars}\n{stack}".format(
+                    vars=dict(
+                        percent_complete=percent_complete,
+                        num_timesteps=num_timesteps,
+                        total_timesteps=total_timesteps,
+                        phase=self.phase,
+                    ),
+                    stack=get_stacktrace(indent=1)
+                ))
+            self._training_progress[self.phase].report_start_of_progress(percent_complete, num_timesteps, total_timesteps)
 
-        if self.num_timesteps is not None:
-            self.num_timesteps = num_timesteps
-
-        if self.total_timesteps is not None:
-            self.total_timesteps = total_timesteps
-
-        if self.percent_complete is not None and percent_complete < self.percent_complete:
-            raise RuntimeError("IML ERROR: percent_complete should be monotonically increasing but saw {from_perc} -> {to_perc}".format(
-                from_perc=self.percent_complete,
+        if ( self.phase in self._training_progress ) and percent_complete < self._training_progress[self.phase].percent_complete:
+            raise RuntimeError("IML ERROR: percent_complete should be monotonically increasing but saw {from_perc} -> {to_perc} for phase={phase}".format(
+                from_perc=self._training_progress[self.phase].percent_complete,
                 to_perc=percent_complete,
+                phase=self.phase,
             ))
-        self.percent_complete = percent_complete
+
+        if self.phase not in self._training_progress:
+            self._training_progress[self.phase] = RecordedTrainingProgress(self.phase)
+        self._training_progress[self.phase].report_progress(percent_complete, num_timesteps, total_timesteps)
 
         self._maybe_finish(debug=self.debug)
 
@@ -2067,7 +2101,7 @@ class Profile:
         self.prof.start(handle_utilization_sampler=self.handle_utilization_sampler)
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        self.prof.stop()
+        self.prof.stop(exception_type=exc_type)
 
 class PythonProfiler:
     """
@@ -2632,7 +2666,7 @@ def load_json(path):
         return data
 
 def dump_json(data, path):
-    os.makedirs(_d(path), exist_ok=True)
+    # os.makedirs(_d(path), exist_ok=True)
     json.dump(data,
               codecs.open(path, mode='w', encoding='utf-8'),
               sort_keys=True, indent=4,
@@ -2750,3 +2784,59 @@ def phase_directory(directory, process_name, phase):
     direc = _j(process_direc, "phase", str(phase))
     return direc
 
+
+class RecordedTrainingProgress:
+    def __init__(self, phase):
+        self.percent_complete = None
+        self.num_timesteps = None
+        self.total_timesteps = None
+        self.start_num_timesteps = None
+        self.start_percent_complete = None
+        self.phase = phase
+
+    def report_progress(self, percent_complete, num_timesteps, total_timesteps):
+        self.percent_complete = percent_complete
+        self.num_timesteps = num_timesteps
+        self.total_timesteps = total_timesteps
+
+    def report_start_of_progress(self, percent_complete, num_timesteps, total_timesteps):
+        assert self.start_percent_complete is None
+        assert self.start_num_timesteps is None
+        self.report_progress(percent_complete, num_timesteps, total_timesteps)
+        self.start_percent_complete = percent_complete
+        self.start_num_timesteps = num_timesteps
+
+    def _or_zero(self, num):
+        if num is None:
+            return 0
+        return num
+
+    def as_proto(self, training_progress=None):
+        if training_progress is None:
+            training_progress = TrainingProgress()
+
+        if self.percent_complete is None:
+            training_progress.content_code = TP_NO_PROGRESS
+            return training_progress
+
+        training_progress.content_code = TP_HAS_PROGRESS
+        # Measure the delta of training completed over the course of training.
+        # This is important since, if we delay trace collection until warmup completes,
+        # we don't want to inflate the percent_complete'd over that duration of training time.
+        percent_complete = self.percent_complete - self._or_zero(self.start_percent_complete)
+        if self.debug:
+            logging.info("percent_complete ({perc}) = latest_percent_complete ({latest}) - start_percent_complete ({start})".format(
+                perc=percent_complete,
+                latest=self.percent_complete,
+                start=self.start_percent_complete,
+            ))
+        training_progress.phase = self.phase
+        training_progress.percent_complete = percent_complete
+        # Q: Is this safe is self.num_timestamps is None? NO
+        if self.num_timesteps is not None:
+            num_timesteps = self.num_timesteps - self._or_zero(self.start_num_timesteps)
+            training_progress.num_timesteps = num_timesteps
+        if self.total_timesteps is not None:
+            training_progress.total_timesteps = self.total_timesteps
+
+        return training_progress
