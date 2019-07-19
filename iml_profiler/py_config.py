@@ -36,6 +36,9 @@ DEBUG_TRACE_SESSION = False
 # Verbose debugging: Print calls to set_operation/end_operation
 DEBUG_OPERATIONS = False
 
+# If True, disable tfprof.
+DEBUG_DISABLE_TFPROF = True
+
 # In case docker causes different runtime behaviour, we can use this switch.
 #
 # Current issues:

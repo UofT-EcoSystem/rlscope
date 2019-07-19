@@ -1150,6 +1150,11 @@ class Profiler:
             raise RuntimeError("You need to call profiler.set_process_name(...) before profiling.")
         assert self.phase is not None
 
+        if py_config.DEBUG_DISABLE_TFPROF:
+            logging.info("[DEBUG_DISABLE_TFPROF] leave tfprof collection OFF.")
+            assert not self._tfprof_enabled
+            return
+
         if self._tfprof_enabled:
             return
 
