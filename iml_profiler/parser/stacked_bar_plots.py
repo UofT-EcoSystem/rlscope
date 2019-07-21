@@ -619,38 +619,10 @@ class OverlapStackedBarPlot:
             raise NotImplementedError
 
     def get_x_env(self, env):
-        short_env = env
-        if not self.long_env:
-            short_env = re.sub(r'-v\d+$', '', short_env)
-            short_env = re.sub(r'BulletEnv$', '', short_env)
-            short_env = re.sub(r'Env$', '', short_env)
-            short_env = re.sub(r'NoFrameskip', '', short_env)
-            short_env = re.sub(r'Inverted', 'Inv', short_env)
-            short_env = re.sub(r'Double', 'Dbl', short_env)
-            short_env = re.sub(r'Pendulum', 'Pndlm', short_env)
-            short_env = re.sub(r'Swingup', 'Swing', short_env)
-        return short_env
+        return get_x_env(env, long_env=self.long_env)
 
     def get_x_field(self, algo, env, human_readable=False):
-        short_env = self.get_x_env(env)
-        if self.x_type == 'rl-comparison':
-            if human_readable:
-                x_field = "({algo}, {env})".format(
-                    algo=algo,
-                    env=short_env,
-                )
-            else:
-                x_field = "{algo}\n{env}".format(
-                    algo=algo,
-                    env=short_env,
-                )
-        elif self.x_type == 'env-comparison':
-            x_field = short_env
-        elif self.x_type == 'algo-comparison':
-            x_field = algo
-        else:
-            raise NotImplementedError
-        return x_field
+        return get_x_field(algo, env, self.x_type, human_readable=human_readable)
 
     def _plot_df(self):
         logging.info("Dataframe:\n{df}".format(df=self.df))
@@ -1624,6 +1596,40 @@ class DaysHoursMinutesSecondsFormatter(mpl_ticker.Formatter):
             label = ', '.join(components)
 
         return label
+
+def get_x_env(env, long_env=False):
+    short_env = env
+    if not long_env:
+        short_env = re.sub(r'-v\d+$', '', short_env)
+        short_env = re.sub(r'BulletEnv$', '', short_env)
+        short_env = re.sub(r'Env$', '', short_env)
+        short_env = re.sub(r'NoFrameskip', '', short_env)
+        short_env = re.sub(r'Inverted', 'Inv', short_env)
+        short_env = re.sub(r'Double', 'Dbl', short_env)
+        short_env = re.sub(r'Pendulum', 'Pndlm', short_env)
+        short_env = re.sub(r'Swingup', 'Swing', short_env)
+    return short_env
+
+def get_x_field(algo, env, x_type, human_readable=False):
+    short_env = get_x_env(env)
+    if x_type == 'rl-comparison':
+        if human_readable:
+            x_field = "({algo}, {env})".format(
+                algo=algo,
+                env=short_env,
+            )
+        else:
+            x_field = "{algo}\n{env}".format(
+                algo=algo,
+                env=short_env,
+            )
+    elif x_type == 'env-comparison':
+        x_field = short_env
+    elif x_type == 'algo-comparison':
+        x_field = algo
+    else:
+        raise NotImplementedError
+    return x_field
 
 def main():
     parser = argparse.ArgumentParser(

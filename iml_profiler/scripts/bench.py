@@ -4,6 +4,7 @@ iml-bench script for running lots of different experiments/benchmarks.
 import re
 import json
 import shlex
+from glob import glob
 import copy
 from glob import glob
 import logging
@@ -49,7 +50,7 @@ from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, base
 from iml_profiler.profiler import iml_logging
 from iml_profiler.profiler.concurrent import ForkedProcessPool
 
-from iml_profiler.profiler.profilers import args_to_cmdline
+from iml_profiler.profiler.util import args_to_cmdline
 
 from iml_profiler.parser.common import *
 
@@ -556,11 +557,13 @@ class ExperimentGroup(Experiment):
         # (4) Compare all RL workloads:
         expr = 'all_rl_workloads'
         opts = ['--all', '--bullet']
-        rl_workload_dims = [
+        common_dims = [
             '--width', '16',
             '--height', '6',
-            '--show-legend', 'False',
             '--rotation', '45',
+        ]
+        rl_workload_dims = [
+            '--show-legend', 'False',
         ]
         if self.should_run_expr(expr):
             self.iml_bench(parser, subparser, 'train_stable_baselines.sh', opts, suffix=bench_log(expr))
@@ -576,11 +579,13 @@ class ExperimentGroup(Experiment):
                 '--y-type', 'percent',
                 '--training-time',
                 '--y2-logscale',
-            ] + rl_workload_dims, suffix=plot_log(expr, overlap_type), algo_env_pairs=algo_env_pairs)
+            ] + rl_workload_dims + common_dims, suffix=plot_log(expr, overlap_type), algo_env_pairs=algo_env_pairs)
 
             self.util_plot([
                 '--algo-env-from-dir',
-            ], suffix=plot_log(expr), algo_env_pairs=algo_env_pairs)
+            ], plot_args=[
+                '--y-title', 'GPU utilization (%)',
+                         ] + common_dims, suffix=plot_log(expr), algo_env_pairs=algo_env_pairs)
 
             # - 2nd plot shows where CPU time is going
             #   TODO: we want categories to be 'C++ framework', 'CUDA API C', 'Python' (CategoryOverlap)
@@ -634,7 +639,7 @@ class ExperimentGroup(Experiment):
                     # """)]),
 
                     '--y-type', 'percent',
-                ] + rl_workload_dims, suffix=plot_log(expr, overlap_type, gpu_operation), algo_env_pairs=algo_env_pairs)
+                ] + rl_workload_dims + common_dims, suffix=plot_log(expr, overlap_type, gpu_operation), algo_env_pairs=algo_env_pairs)
 
         # - Statement: GPU operations are dominated by CPU time. In particular, CUDA API C
         #   time is a dominant contributor.
@@ -810,54 +815,83 @@ class ExperimentGroup(Experiment):
 
         self._run_cmd(cmd=cmd, to_file=to_file, replace=True)
 
-    def util_plot(self, stacked_args, suffix, algo_env_pairs=None, debug=False):
+    def util_plot(self, stacked_args, suffix, plot_args=None, algo_env_pairs=None, debug=False):
         if not self.will_plot:
             return
+
         args = self.args
-        cmd = [
-            'iml-analyze',
-        ]
-        cmd.extend([
-            '--task', 'UtilTask',
-        ])
 
-        if args.debug:
-            cmd.append('--debug')
+        def _util_csv(algo_env_pairs):
+            util_task_cmd = [
+                'iml-analyze',
+            ]
+            util_task_cmd.extend([
+                '--task', 'UtilTask',
+            ])
 
-        if algo_env_pairs is None:
-            algo_env_pairs = []
-        algo_env_pairs = list(algo_env_pairs)
+            if args.debug:
+                util_task_cmd.append('--debug')
 
-        if len(algo_env_pairs) == 0:
-            raise NotImplementedError("Need at least one directory for --iml-directories but saw 0.")
-        def sort_key(algo_env):
-            """
-            Show bar graphs order by algo first, then environment.
-            """
-            algo, env = algo_env
-            return (algo, env)
-        # Remove duplicates.
-        algo_env_pairs = list(set(algo_env_pairs))
-        algo_env_pairs.sort(key=sort_key)
-        iml_dirs = [self.iml_directory(algo, env_id) for algo, env_id in algo_env_pairs]
-        cmd.extend([
-            '--iml-directories', json.dumps(iml_dirs),
-        ])
+            if algo_env_pairs is None:
+                algo_env_pairs = []
+            algo_env_pairs = list(algo_env_pairs)
 
-        cmd.extend([
-            # Output directory for the png plots.
-            '--directory', args.dir,
-            # Add expr-name to png.
-            '--suffix', suffix,
-        ])
+            if len(algo_env_pairs) == 0:
+                raise NotImplementedError("Need at least one directory for --iml-directories but saw 0.")
+            def sort_key(algo_env):
+                """
+                Show bar graphs order by algo first, then environment.
+                """
+                algo, env = algo_env
+                return (algo, env)
+            # Remove duplicates.
+            algo_env_pairs = list(set(algo_env_pairs))
+            algo_env_pairs.sort(key=sort_key)
+            iml_dirs = [self.iml_directory(algo, env_id) for algo, env_id in algo_env_pairs]
+            util_task_cmd.extend([
+                '--iml-directories', json.dumps(iml_dirs),
+            ])
 
-        cmd.extend(stacked_args)
+            util_task_cmd.extend([
+                # Output directory for the png plots.
+                '--directory', args.dir,
+                # Add expr-name to png.
+                '--suffix', suffix,
+            ])
 
-        cmd.extend(self.extra_argv)
+            util_task_cmd.extend(stacked_args)
 
-        to_file = self._get_logfile(suffix="{suffix}.log".format(suffix=suffix))
+            util_task_cmd.extend(self.extra_argv)
 
-        self._run_cmd(cmd=cmd, to_file=to_file, replace=True)
+            to_file = self._get_logfile(suffix="{suffix}.log".format(suffix=suffix))
+
+            self._run_cmd(cmd=util_task_cmd, to_file=to_file, replace=True)
+
+        def _util_plot():
+            util_plot_cmd = [
+                'iml-analyze',
+                '--task', 'UtilPlotTask',
+            ]
+            if args.debug:
+                util_plot_cmd.append('--debug')
+            util_csv = _j(args.dir, "overall_machine_util.raw.csv")
+            util_plot_cmd.extend([
+                '--csv', util_csv,
+                # Output directory for the png plots.
+                '--directory', args.dir,
+                # Add expr-name to png.
+                '--suffix', suffix,
+            ])
+            if plot_args is not None:
+                util_plot_cmd.extend(plot_args)
+            if not _e(util_csv):
+                logging.info("SKIP UtilTaskPlot; {path} doesn't exist")
+                return
+            to_file = self._get_logfile(suffix="UtilPlot.{suffix}.log".format(suffix=suffix))
+            self._run_cmd(cmd=util_plot_cmd, to_file=to_file, replace=True)
+
+        _util_csv(algo_env_pairs)
+        _util_plot()
 
     def iml_bench(self, parser, subparser, subcommand, subcmd_args, suffix='log'):
         args = self.args

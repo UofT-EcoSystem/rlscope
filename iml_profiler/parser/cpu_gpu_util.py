@@ -1,8 +1,18 @@
+import logging
+import copy
+import itertools
+import argparse
+
 from iml_profiler.protobuf.pyprof_pb2 import Pyprof, MachineUtilization, DeviceUtilization, UtilizationSample
 from iml_profiler.parser.common import *
 from iml_profiler.profiler import experiment
 from os.path import join as _j, abspath as _a, exists as _e, dirname as _d, basename as _b
 import pandas as pd
+import seaborn as sns
+
+from matplotlib import pyplot as plt
+
+from iml_profiler.parser import stacked_bar_plots
 
 def protobuf_to_dict(pb):
     return dict((field.name, value) for field, value in pb.ListFields())
@@ -46,6 +56,7 @@ class UtilDataframeReader:
                 self._add_col('device_name', device_name)
 
                 self._add_col('util', sample.util)
+                self._add_col('start_time_us', sample.start_time_us)
                 self._add_col('total_resident_memory_bytes', sample.total_resident_memory_bytes)
 
                 # sample_fields = protobuf_to_dict(sample)
@@ -254,14 +265,442 @@ class UtilParser:
             dfs.append(df)
         df = pd.concat(dfs)
 
-        logging.info("Output raw un-aggregated machine utilization data @ {path}".format(path=self._raw_csv_path))
-        df.to_csv(self._raw_csv_path, index=False)
-
         # 1. Memory utilization:
         # 2. CPU utilization:
         groupby_cols = sorted(self.added_fields) + ['machine_name', 'device_name']
-        df_agg = df.groupby(groupby_cols).agg(['min', 'max', 'mean', 'std'])
+
+        # df_agg = df.groupby(groupby_cols).agg(['min', 'max', 'mean', 'std'])
+        # flat_df_agg = self.flattened_agg_df(df_agg)
+
+        # - Use start_time_us timestamp to assign each utilization sample an "index" number from [0...1];
+        #   this is trace_percent: the percent time into the collected trace
+        # - Group by (algo, env)
+        #   - Reduce:
+        #     # for each group member, divide by group-max
+        #     - max_time = max(row['start_time_us'])
+        #     - min_time = min(row['start_time_us'])
+        #     - row['trace_percent'] = (row['start_time_us'] - min_time)/max_time
+        # TODO: debug this to see if it works.
+        dfs = []
+        groupby = df.groupby(groupby_cols)
+        for group, df_group in groupby:
+
+            max_time = max(df_group['start_time_us'])
+            start_time = min(df_group['start_time_us'])
+            length_time = max_time - start_time
+            df_group['trace_percent'] = (df_group['start_time_us'] - start_time) / length_time
+            dfs.append(df_group)
+
+            logging.info(pprint_msg({
+                'group': group,
+                'start_time': start_time,
+                'max_time': max_time,
+            }))
+            logging.info(pprint_msg(df_group))
+
+            # import ipdb; ipdb.set_trace()
+
+
+        new_df = pd.concat(dfs)
+
+        # OUTPUT raw thing here.
+        logging.info("Output raw un-aggregated machine utilization data @ {path}".format(path=self._raw_csv_path))
+        new_df.to_csv(self._raw_csv_path, index=False)
+
+        df_agg = new_df.groupby(groupby_cols).agg(['min', 'max', 'mean', 'std'])
         flat_df_agg = self.flattened_agg_df(df_agg)
+
         # import ipdb; ipdb.set_trace()
         logging.info("Output min/max/std aggregated machine utilization data @ {path}".format(path=self._agg_csv_path))
         flat_df_agg.to_csv(self._agg_csv_path, index=False)
+
+class UtilPlot:
+    def __init__(self,
+                 csv,
+                 directory,
+                 x_type,
+                 y_title=None,
+                 suffix=None,
+                 rotation=45.,
+                 width=None,
+                 height=None,
+                 debug=False,
+                 # Swallow any excess arguments
+                 **kwargs):
+        self.csv = csv
+        self.directory = directory
+        self.x_type = x_type
+        self.y_title = y_title
+        self.rotation = rotation
+        self.suffix = suffix
+        self.width = width
+        self.height = height
+        self.debug = debug
+
+    def _read_df(self):
+        self.df = pd.read_csv(self.csv)
+
+        x_fields = []
+        for index, row in self.df.iterrows():
+            if 'env' in row:
+                env = row['env']
+            else:
+                env = row['env_id']
+            x_field = stacked_bar_plots.get_x_field(row['algo'], env, self.x_type)
+            x_fields.append(x_field)
+        self.df['x_field'] = x_fields
+
+    def run(self):
+        self._read_df()
+        self.plot()
+
+    def _get_plot_path(self, ext):
+        if self.suffix is not None:
+            suffix_str = '.{suffix}'.format(suffix=self.suffix)
+        else:
+            suffix_str = ''
+        return _j(self.directory, "UtilPlot{suffix}.{ext}".format(
+            suffix=suffix_str,
+            ext=ext,
+        ))
+
+    def legend_path(self, ext):
+        return re.sub(r'(?P<ext>\.[^.]+)$', r'.legend\g<ext>', self._get_plot_path(ext))
+
+    def plot(self):
+
+        # figlegend.tight_layout()
+        # figlegend.savefig(self.legend_path, bbox_inches='tight', pad_inches=0)
+        # plt.close(figlegend)
+
+        if self.width is not None and self.height is not None:
+            figsize = (self.width, self.height)
+            logging.info("Setting figsize = {fig}".format(fig=figsize))
+            # sns.set_context({"figure.figsize": figsize})
+        else:
+            figsize = None
+        # This is causing XIO error....
+        fig = plt.figure(figsize=figsize)
+
+
+        # ax = fig.add_subplot(111)
+        # ax2 = None
+        # if self.y2_field is not None:
+        #     ax2 = ax.twinx()
+        #     # Need to do this, otherwise, training time bar is ABOVE gridlines from ax.
+        #     ax.set_zorder(ax2.get_zorder()+1)
+        #     # Need to do this, otherwise training time bar is invisible.
+        #     ax.patch.set_visible(False)
+
+        ax = sns.violinplot(x=self.df['x_field'], y=100*self.df['util'],
+                            # hue=self.df['algo'],
+                            # hue=self.df['env_id'],
+                            inner="box", cut=0.)
+
+        if self.rotation is not None:
+            # ax = bottom_plot.axes
+            ax.set_xticklabels(ax.get_xticklabels(), rotation=self.rotation)
+
+        # Default ylim for violinplot is slightly passed bottom/top of data:
+        #   ipdb> ax.get_ylim()
+        #   (-2.3149999976158147, 48.614999949932105)
+        #   ipdb> np.min(100*self.df['util'])
+        #   0.0
+        #   ipdb> np.max(100*self.df['util'])
+        #   46.29999995231629
+        ymin, ymax = ax.get_ylim()
+        ax.set_ylim(0., ymax)
+
+        ax.set_xlabel(self.x_axis_label)
+        if self.y_title is not None:
+            ax.set_ylabel(self.y_title)
+
+        png_path = self._get_plot_path('png')
+        logging.info('Save figure to {path}'.format(path=png_path))
+        fig.tight_layout()
+        fig.savefig(png_path)
+        plt.close(fig)
+
+        # figlegend.tight_layout()
+        # figlegend.savefig(self.legend_path, bbox_inches='tight', pad_inches=0)
+        # plt.close(figlegend)
+
+        return
+
+        #Set general plot properties
+
+        sns.set_style("white")
+
+        # ax = plt.subplot()
+        # ax_list = fig.axes
+        # plt.subplot()
+        # fig, ax = plt.subplots()
+        # ax.set_xs
+        # sns.set_context({"figure.figsize": (24, 10)})
+
+        if self.fontsize is not None:
+            sns.set_style('font', {
+                'size': self.fontsize,
+            })
+
+        # plt.rc('xtick', rotation=40)
+        # sns.set_style('xtick', {
+        #     'rotation': 40,
+        # })
+
+        # TODO:
+        # - Make it so plot legends appear to right of the plot
+        # - Make it so we can choose NOT to show plot legend (ideally just make it invisible...)
+        # - All fonts should be same size
+
+        if self.y2_field is not None:
+            # Total training time bar gets its own color.
+            num_colors = len(self.groups) + 1
+        else:
+            num_colors = len(self.groups)
+        self.colors = sns.color_palette("hls", num_colors)
+
+        if self.y2_field is not None:
+            bar_width = 0.25
+        else:
+            bar_width = 0.5
+
+        ind = np.arange(len(self.data[self.x_field]))
+        ax.set_xticks(ind + bar_width/2)
+        ax.set_xticklabels(self.data[self.x_field])
+
+        n_bars = len(self.data[self.groups[0]])
+        accum_ys = np.zeros(n_bars)
+        barplot_kwargs = []
+        bar_zorder = 0
+        # bar_zorder = -1
+        grid_zorder = 1
+        for i, group in enumerate(self.groups):
+            accum_ys += self.data[group]
+            ys = copy.copy(accum_ys)
+            if self.y2_field is not None:
+                xs = ind
+            else:
+                xs = ind + bar_width/2
+            bar_kwargs = {
+                'x': xs,
+                # 'y': ys,
+                'height': ys,
+                'color': self.colors[i],
+                # 'ax': ax,
+                # 'position': 0,
+                'zorder': bar_zorder,
+            }
+            if bar_width is not None:
+                bar_kwargs['width'] = bar_width
+            barplot_kwargs.append(bar_kwargs)
+
+        if self.y2_field is not None:
+            # TODO: we need to group rows and sum them based on matching df[group]...?
+            # import ipdb; ipdb.set_trace()
+            # for i, group in enumerate(self.groups):
+            y_color = self.colors[-1]
+            bar_kwargs = {
+                # 'x': self.data[self.x_field],
+                'x': ind + bar_width,
+                'height': self.data[self.y2_field],
+                # 'y': self.data[self.y2_field],
+                'color': y_color,
+                # 'ax': ax2,
+                # 'position': 1,
+                'zorder': bar_zorder,
+            }
+            if bar_width is not None:
+                bar_kwargs['width'] = bar_width
+            # sns.barplot(**bar_kwargs)
+            # plt.bar(**bar_kwargs)
+            ax2.bar(**bar_kwargs)
+
+        barplots = []
+        for kwargs in reversed(barplot_kwargs):
+            # TODO: color?
+            # barplot = sns.barplot(**kwargs)
+            # barplot = plt.bar(**kwargs)
+            barplot = ax.bar(**kwargs)
+            barplots.append(barplot)
+        barplots.reverse()
+
+        if self.y2_field is not None and self.y2_logscale:
+            # ax2.set_yscale('log')
+            ax2.set_yscale('log', basey=2)
+
+            # ax2.set_yscale('log')
+            # ax2.set_yticks([1,10,100] + [max(y)])
+            # from matplotlib.ticker import FormatStrFormatter
+
+            # ax2.yaxis.set_major_formatter(mpl_ticker.FormatStrFormatter('%.d'))
+            ax2.yaxis.set_major_formatter(DaysHoursMinutesSecondsFormatter())
+
+        # #Plot 1 - background - "total" (top) series
+        # sns.barplot(x = self.data.Group, y = self.data.total, color = "red")
+        #
+        # #Plot 2 - overlay - "bottom" series
+        # bottom_plot = sns.barplot(x = self.data.Group, y = self.data.Series1, color = "#0000A3")
+
+        bottom_plot = barplots[-1]
+
+        figlegend = plt.figure()
+        self._add_legend(
+            figlegend,
+            loc='center',
+            bbox_to_anchor=None,
+        )
+
+        if self.show_legend:
+            self._add_legend(
+                fig,
+                loc='upper left',
+                bbox_to_anchor=(1.05, 1),
+            )
+
+        # , prop={'size': self.fontsize}
+
+        # topbar = plt.Rectangle((0,0),1,1,fc="red", edgecolor = 'none')
+        # bottombar = plt.Rectangle((0,0),1,1,fc='#0000A3',  edgecolor = 'none')
+        # l = plt.legend([bottombar, topbar], ['Bottom Bar', 'Top Bar'], loc=1, ncol = 2, prop={'size':16})
+
+        #Optional code - Make plot look nicer
+        sns.despine(fig=fig, left=True)
+        # bottom_plot.set_ylabel(self.y_axis_label)
+        # bottom_plot.set_xlabel(self.x_axis_label)
+        ax.set_ylabel(self.y_axis_label)
+        if self.title is not None:
+            # bottom_plot.set_title(self.title)
+            ax.set_title(self.title)
+
+        # Suggestions about how to prevent x-label overlap with matplotlib:
+        #
+        # https://stackoverflow.com/questions/42528921/how-to-prevent-overlapping-x-axis-labels-in-sns-countplot
+
+        # #Set fonts to consistent 16pt size
+        # for item in ([bottom_plot.xaxis.label, bottom_plot.yaxis.label] +
+        #              bottom_plot.get_xticklabels() + bottom_plot.get_yticklabels()):
+        #     if self.fontsize is not None:
+        #         item.set_fontsize(self.fontsize)
+
+        ax.grid(zorder=grid_zorder)
+        if self.y2_field is not None:
+            # ax2.grid(True)
+
+            if self.y2_axis_label is not None:
+                ax2.set_ylabel(self.y2_axis_label)
+
+            # Align training time against percent.
+            # (weird training time labels).
+            #
+            # l = ax.get_ylim()
+            # l2 = ax2.get_ylim()
+            # f = lambda x : l2[0]+(x-l[0])/(l[1]-l[0])*(l2[1]-l2[0])
+            # ticks = f(ax.get_yticks())
+            # ax2.yaxis.set_major_locator(matplotlib.ticker.FixedLocator(ticks))
+
+            # Align percent against training time.
+            # (weird percent labels).
+            #
+            # l = ax2.get_ylim()
+            # l2 = ax.get_ylim()
+            # f = lambda x : l2[0]+(x-l[0])/(l[1]-l[0])*(l2[1]-l2[0])
+            # ticks = f(ax2.get_yticks())
+            # ax.yaxis.set_major_locator(matplotlib.ticker.FixedLocator(ticks))
+
+        logging.info('Save figure to {path}'.format(path=self.path))
+        fig.tight_layout()
+        fig.savefig(self.path)
+        plt.close(fig)
+
+    @property
+    def x_axis_label(self):
+        if self.x_type == 'rl-comparison':
+            return "(RL algorithm, Environment)"
+        elif self.x_type == 'env-comparison':
+            return "Environment"
+        elif self.x_type == 'algo-comparison':
+            return "RL algorithm"
+        raise NotImplementedError
+
+# https://stackoverflow.com/questions/19184484/how-to-add-group-labels-for-bar-charts-in-matplotlib
+
+def test_table():
+    data_table = pd.DataFrame({'Room':['Room A']*4 + ['Room B']*4,
+                               'Shelf':(['Shelf 1']*2 + ['Shelf 2']*2)*2,
+                               'Staple':['Milk','Water','Sugar','Honey','Wheat','Corn','Chicken','Cow'],
+                               'Quantity':[10,20,5,6,4,7,2,1],
+                               'Ordered':np.random.randint(0,10,8)
+                               })
+    return data_table
+
+
+def add_line(ax, xpos, ypos):
+    line = plt.Line2D([xpos, xpos], [ypos + .1, ypos],
+                      transform=ax.transAxes, color='black')
+    line.set_clip_on(False)
+    ax.add_line(line)
+
+def label_len(my_index,level):
+    labels = my_index.get_level_values(level)
+    return [(k, sum(1 for i in g)) for k,g in itertools.groupby(labels)]
+
+def label_group_bar_table(ax, df):
+    ypos = -.1
+    scale = 1./df.index.size
+    for level in range(df.index.nlevels)[::-1]:
+        pos = 0
+        for label, rpos in label_len(df.index,level):
+            lxpos = (pos + .5 * rpos)*scale
+            ax.text(lxpos, ypos, label, ha='center', transform=ax.transAxes)
+            add_line(ax, pos*scale, ypos)
+            pos += rpos
+        add_line(ax, pos*scale , ypos)
+        ypos -= .1
+
+
+def test_grouped_xlabel():
+    # https://stackoverflow.com/questions/19184484/how-to-add-group-labels-for-bar-charts-in-matplotlib
+    sample_df = test_table()
+    df = sample_df.groupby(['Room', 'Shelf', 'Staple']).sum()
+    fig = plt.figure()
+    ax = fig.add_subplot(111)
+
+    df.plot(kind='bar', stacked=True, ax=fig.gca())
+
+    #Below 3 lines remove default labels
+    labels = ['' for item in ax.get_xticklabels()]
+    ax.set_xticklabels(labels)
+    ax.set_xlabel('')
+
+    label_group_bar_table(ax, df)
+
+    # This makes the vertical spacing between x-labels closer.
+    fig.subplots_adjust(bottom=.1*df.index.nlevels)
+
+    png_path = '{func}.png'.format(
+        func=test_grouped_xlabel.__name__,
+    )
+    plt.savefig(png_path, bbox_inches='tight', pad_inches=0)
+
+def main():
+    parser = argparse.ArgumentParser(
+        textwrap.dedent("""\
+        Test plots
+        """),
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+
+    parser.add_argument('--test-grouped-xlabel',
+                        action='store_true',
+                        help=textwrap.dedent("""
+    Test how to group x-labels + sub-labels.
+    """))
+
+    args = parser.parse_args()
+
+    if args.test_grouped_xlabel:
+        test_grouped_xlabel()
+
+if __name__ == '__main__':
+    main()

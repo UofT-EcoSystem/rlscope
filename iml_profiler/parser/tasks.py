@@ -24,7 +24,7 @@ from iml_profiler.parser.plot import TimeBreakdownPlot, PlotSummary, CombinedPro
 from iml_profiler.parser.db import SQLParser
 from iml_profiler.parser.stacked_bar_plots import OverlapStackedBarPlot
 from iml_profiler.parser.common import print_cmd
-from iml_profiler.parser.cpu_gpu_util import UtilParser
+from iml_profiler.parser.cpu_gpu_util import UtilParser, UtilPlot
 
 PARSER_KLASSES = [PythonProfileParser, PythonFlameGraphParser, PlotSummary, TimeBreakdownPlot, CategoryOverlapPlot, UtilizationPlot, HeatScalePlot, TotalTimeParser, TraceEventsParser, SQLParser]
 PARSER_NAME_TO_KLASS = dict((ParserKlass.__name__, ParserKlass) \
@@ -251,6 +251,68 @@ class TraceEventsTask(luigi.Task):
         )
         self.dumper.run()
 
+param_x_type = luigi.ChoiceParameter(choices=OverlapStackedBarPlot.SUPPORTED_X_TYPES,
+                                     default='rl-comparison',
+                                     description=textwrap.dedent("""\
+                               What should we show on the x-axis and title of the stacked bar-plot?
+                               
+                               algo-comparison:
+                                 You want to make a plot that supports a statement across all RL algorithms, 
+                                 when training a specific environment.
+                                 
+                                                 Comparing algorithms 
+                                              when training {environment}
+                                            |
+                                    Time    |
+                                  breakdown |
+                                            |
+                                            |---------------------------
+                                             algo_1,     ...,     algo_n
+                                                     RL algorithm
+                                          
+                                 
+                                 i.e. your experiments involve:
+                                 - SAME environment
+                                 - DIFFERENT algorithms
+                                 
+                               env-comparison:
+                                 You want to make a plot that supports a statement across all environments, 
+                                 when training a specific RL algorithm.
+                                 
+                                               Comparing environments
+                                              when training {algorithm}
+                                            |
+                                    Time    |
+                                  breakdown |
+                                            |
+                                            |---------------------------
+                                             env_1,      ...,      env_n
+                                                     Environment 
+                                          
+                                 
+                                 i.e. your experiments involve:
+                                 - DIFFERENT environment
+                                 - SAME algorithm
+                               
+                               rl-comparison:
+                                 You want to make a plot that supports a statement across ALL RL workloads;
+                                 i.e. across all (algorithm, environment) combinations.
+                                 
+                                                      Comparing RL workloads
+                                            |
+                                    Time    |
+                                  breakdown |
+                                            |
+                                            |---------------------------------------
+                                             (algo_1, env_1),  ...,  (algo_n, env_n)
+                                                   (RL algorithm, Environment)
+                                 
+                                 i.e. your experiments involve:
+                                 - DIFFERENT environments
+                                 - DIFFERENT algorithms
+                               """))
+
+
 class UtilTask(luigi.Task):
     iml_directories = luigi.ListParameter(description="Multiple --iml-directory entries for finding overlap_type files: *.venn_js.js")
     directory = luigi.Parameter(description="Output directory", default=".")
@@ -270,6 +332,35 @@ class UtilTask(luigi.Task):
     def run(self):
         kwargs = kwargs_from_task(self)
         self.dumper = UtilParser(**kwargs)
+        self.dumper.run()
+
+class UtilPlotTask(luigi.Task):
+    csv = luigi.Parameter(description="Path to overall_machine_util.raw.csv [output from UtilTask]")
+    directory = luigi.Parameter(description="Output directory", default=".")
+    x_type = param_x_type
+    y_title = luigi.Parameter(description="y-axis title", default=None)
+    suffix = luigi.Parameter(description="Add suffix to output files: MachineGPUUtil.{suffix}.{ext}", default=None)
+
+    # Plot attrs
+    rotation = luigi.FloatParameter(description="x-axis title rotation", default=45.)
+    width = luigi.FloatParameter(description="Width of plot in inches", default=None)
+    height = luigi.FloatParameter(description="Height of plot in inches", default=None)
+
+    debug = param_debug
+    debug_single_thread = param_debug_single_thread
+    # algo_env_from_dir = luigi.BoolParameter(description="Add algo/env columns based on directory structure of --iml-directories <algo>/<env>/iml_dir", default=True, parsing=luigi.BoolParameter.EXPLICIT_PARSING)
+
+    skip_output = False
+
+    def requires(self):
+        return []
+
+    def output(self):
+        return []
+
+    def run(self):
+        kwargs = kwargs_from_task(self)
+        self.dumper = UtilPlot(**kwargs)
         self.dumper.run()
 
 class GeneratePlotIndexTask(luigi.Task):
@@ -337,66 +428,7 @@ class OverlapStackedBarTask(luigi.Task):
                                      TODO: we should extrapolate total training time based on number of timestamps ran, 
                                      and number of timesteps that will be run.
                                    """))
-    x_type = luigi.ChoiceParameter(choices=OverlapStackedBarPlot.SUPPORTED_X_TYPES,
-                                   default='rl-comparison',
-                                   description=textwrap.dedent("""\
-                                   What should we show on the x-axis and title of the stacked bar-plot?
-                                   
-                                   algo-comparison:
-                                     You want to make a plot that supports a statement across all RL algorithms, 
-                                     when training a specific environment.
-                                     
-                                                     Comparing algorithms 
-                                                  when training {environment}
-                                                |
-                                        Time    |
-                                      breakdown |
-                                                |
-                                                |---------------------------
-                                                 algo_1,     ...,     algo_n
-                                                         RL algorithm
-                                              
-                                     
-                                     i.e. your experiments involve:
-                                     - SAME environment
-                                     - DIFFERENT algorithms
-                                     
-                                   env-comparison:
-                                     You want to make a plot that supports a statement across all environments, 
-                                     when training a specific RL algorithm.
-                                     
-                                                   Comparing environments
-                                                  when training {algorithm}
-                                                |
-                                        Time    |
-                                      breakdown |
-                                                |
-                                                |---------------------------
-                                                 env_1,      ...,      env_n
-                                                         Environment 
-                                              
-                                     
-                                     i.e. your experiments involve:
-                                     - DIFFERENT environment
-                                     - SAME algorithm
-                                   
-                                   rl-comparison:
-                                     You want to make a plot that supports a statement across ALL RL workloads;
-                                     i.e. across all (algorithm, environment) combinations.
-                                     
-                                                          Comparing RL workloads
-                                                |
-                                        Time    |
-                                      breakdown |
-                                                |
-                                                |---------------------------------------
-                                                 (algo_1, env_1),  ...,  (algo_n, env_n)
-                                                       (RL algorithm, Environment)
-                                     
-                                     i.e. your experiments involve:
-                                     - DIFFERENT environments
-                                     - DIFFERENT algorithms
-                                   """))
+    x_type = param_x_type
     # postgres_host = param_postgres_host
     # postgres_user = param_postgres_user
     # postgres_password = param_postgres_password
@@ -483,6 +515,7 @@ IML_TASKS = get_IML_TASKS()
 IML_TASKS.add(TraceEventsTask)
 IML_TASKS.add(OverlapStackedBarTask)
 IML_TASKS.add(UtilTask)
+IML_TASKS.add(UtilPlotTask)
 
 if __name__ == "__main__":
     main()
