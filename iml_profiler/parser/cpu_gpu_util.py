@@ -14,6 +14,8 @@ from matplotlib import pyplot as plt
 
 from iml_profiler.parser import stacked_bar_plots
 
+from iml_profiler.profiler import iml_logging
+
 def protobuf_to_dict(pb):
     return dict((field.name, value) for field, value in pb.ListFields())
 
@@ -392,10 +394,47 @@ class UtilPlot:
         #     # Need to do this, otherwise training time bar is invisible.
         #     ax.patch.set_visible(False)
 
-        ax = sns.violinplot(x=self.df['x_field'], y=100*self.df['util'],
-                            # hue=self.df['algo'],
-                            # hue=self.df['env_id'],
-                            inner="box", cut=0.)
+        def is_cpu(device_name):
+            if re.search(r'Intel|Xeon|CPU', device_name):
+                return True
+            return False
+
+        def is_gpu(device_name):
+            return not is_cpu(device_name)
+
+        def should_keep(row):
+            if row['machine_name'] == 'reddirtx-ubuntu':
+                # Ignore 'Tesla K40c' (unused, 0 util)
+                return row['device_name'] == 'GeForce RTX 2080 Ti'
+            return True
+
+        self.df_gpu = self.df
+
+        self.df_gpu = self.df_gpu[self.df_gpu['device_name'].apply(is_gpu)]
+
+        self.df_gpu = self.df_gpu[self.df_gpu.apply(should_keep, axis=1)]
+
+        logging.info(pprint_msg(self.df_gpu))
+
+        # ax = sns.violinplot(x=self.df_gpu['x_field'], y=100*self.df_gpu['util'],
+        #                     inner="box",
+        #                     # cut=0.,
+        #                     )
+
+        ax = sns.boxplot(x=self.df_gpu['x_field'], y=100*self.df_gpu['util'],
+                         showfliers=False,
+                         )
+
+        # groupby_cols = ['algo', 'env_id']
+        # # label_df = self.df_gpu[list(set(groupby_cols + ['x_field', 'util']))]
+        # label_df = self.df_gpu.groupby(groupby_cols).mean()
+        # add_hierarchical_labels(fig, ax, self.df_gpu, label_df, groupby_cols)
+
+        # df = self.df
+        # ax = sns.violinplot(x=df['x_field'], y=100*df['util'],
+        #                     # hue=df['algo'],
+        #                     # hue=df['env_id'],
+        #                     inner="box", cut=0.)
 
         if self.rotation is not None:
             # ax = bottom_plot.axes
@@ -645,12 +684,19 @@ def label_len(my_index,level):
     labels = my_index.get_level_values(level)
     return [(k, sum(1 for i in g)) for k,g in itertools.groupby(labels)]
 
+def my_label_len(label_df, col):
+    # labels = my_index.get_level_values(level)
+    labels = label_df[col]
+    ret = [(k, sum(1 for i in g)) for k,g in itertools.groupby(labels)]
+    logging.info(pprint_msg({'label_len': ret}))
+    return ret
+
 def label_group_bar_table(ax, df):
     ypos = -.1
     scale = 1./df.index.size
     for level in range(df.index.nlevels)[::-1]:
         pos = 0
-        for label, rpos in label_len(df.index,level):
+        for label, rpos in label_len(df.index, level):
             lxpos = (pos + .5 * rpos)*scale
             ax.text(lxpos, ypos, label, ha='center', transform=ax.transAxes)
             add_line(ax, pos*scale, ypos)
@@ -658,15 +704,37 @@ def label_group_bar_table(ax, df):
         add_line(ax, pos*scale , ypos)
         ypos -= .1
 
+def my_label_group_bar_table(ax, label_df, df, groupby_cols):
+    ypos = -.1
+    # df.index.size = len(['Room', 'Shelf', 'Staple'])
+    scale = 1./len(groupby_cols)
+    # scale = 1./df.index.size
+    # for level in range(df.index.nlevels)[::-1]:
+    for level in range(len(groupby_cols))[::-1]:
+        pos = 0
+        col = groupby_cols[level]
+        for label, rpos in my_label_len(label_df, col):
+            lxpos = (pos + .5 * rpos)*scale
+            ax.text(lxpos, ypos, label, ha='center', transform=ax.transAxes)
+            add_line(ax, pos*scale, ypos)
+            pos += rpos
+        add_line(ax, pos*scale, ypos)
+        ypos -= .1
+
 
 def test_grouped_xlabel():
     # https://stackoverflow.com/questions/19184484/how-to-add-group-labels-for-bar-charts-in-matplotlib
     sample_df = test_table()
-    df = sample_df.groupby(['Room', 'Shelf', 'Staple']).sum()
+    g = sample_df.groupby(['Room', 'Shelf', 'Staple'])
+    df = g.sum()
+    logging.info(pprint_msg(df))
     fig = plt.figure()
     ax = fig.add_subplot(111)
 
+    import ipdb; ipdb.set_trace()
+
     df.plot(kind='bar', stacked=True, ax=fig.gca())
+    # sns.barplot(x=df[''])
 
     #Below 3 lines remove default labels
     labels = ['' for item in ax.get_xticklabels()]
@@ -683,6 +751,21 @@ def test_grouped_xlabel():
     )
     plt.savefig(png_path, bbox_inches='tight', pad_inches=0)
 
+def add_hierarchical_labels(fig, ax, df, label_df, groupby_cols):
+
+    #Below 3 lines remove default labels
+    labels = ['' for item in ax.get_xticklabels()]
+    ax.set_xticklabels(labels)
+    ax.set_xlabel('')
+
+    # label_group_bar_table(ax, df)
+    my_label_group_bar_table(ax, label_df, df, groupby_cols)
+
+
+    # This makes the vertical spacing between x-labels closer.
+    # fig.subplots_adjust(bottom=.1*df.index.nlevels)
+    fig.subplots_adjust(bottom=.1*len(groupby_cols))
+
 def main():
     parser = argparse.ArgumentParser(
         textwrap.dedent("""\
@@ -698,6 +781,8 @@ def main():
     """))
 
     args = parser.parse_args()
+
+    iml_logging.setup_logging()
 
     if args.test_grouped_xlabel:
         test_grouped_xlabel()
