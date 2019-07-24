@@ -84,12 +84,13 @@ cd $RL_BASELINES_ZOO_DIR
 # For quick debugging:
 #    --iml-trace-time-sec $((40))
 
-if [ "$DEBUG" == 'yes' ]; then
-#    IML_TRACE_TIME_SEC=$((40))
-    IML_TRACE_TIME_SEC=$((20))
-else
-    IML_TRACE_TIME_SEC=$((2*60))
-fi
+#if [ "$DEBUG" == 'yes' ]; then
+##    IML_TRACE_TIME_SEC=$((40))
+#    IML_TRACE_TIME_SEC=$((20))
+#elif [ "$IML_TRACE_TIME_SEC" == "" ]; then
+#    IML_TRACE_TIME_SEC=$((2*60))
+#fi
+#    --iml-trace-time-sec $IML_TRACE_TIME_SEC \
 
 #if [ "$DEBUG" == 'yes' ]; then
 #    PYTHON=(python -m ipdb)
@@ -104,6 +105,8 @@ _do "${PYTHON[@]}" $RL_BASELINES_ZOO_DIR/train.py \
     --log-folder $OUTPUT_DIR \
     --log-interval 1 \
     --iml-start-measuring-call 1 \
-    --iml-trace-time-sec $IML_TRACE_TIME_SEC \
     --iml-delay \
     "$@"
+# Sanity check that train.py has exited,
+# for those weird runs where iml-bench hangs unexpectedly during p.stdout.readline().
+echo "> train.py has exited"

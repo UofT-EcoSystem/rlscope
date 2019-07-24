@@ -25,6 +25,7 @@ from iml_profiler.parser.db import SQLParser
 from iml_profiler.parser.stacked_bar_plots import OverlapStackedBarPlot
 from iml_profiler.parser.common import print_cmd
 from iml_profiler.parser.cpu_gpu_util import UtilParser, UtilPlot
+from iml_profiler.parser.training_progress import TrainingProgressParser, ProfilingOverheadPlot
 
 PARSER_KLASSES = [PythonProfileParser, PythonFlameGraphParser, PlotSummary, TimeBreakdownPlot, CategoryOverlapPlot, UtilizationPlot, HeatScalePlot, TotalTimeParser, TraceEventsParser, SQLParser]
 PARSER_NAME_TO_KLASS = dict((ParserKlass.__name__, ParserKlass) \
@@ -363,6 +364,57 @@ class UtilPlotTask(luigi.Task):
         self.dumper = UtilPlot(**kwargs)
         self.dumper.run()
 
+class TrainingProgressTask(luigi.Task):
+    iml_directories = luigi.ListParameter(description="Multiple --iml-directory entries for finding overlap_type files: *.venn_js.js")
+    directory = luigi.Parameter(description="Output directory", default=".")
+    # suffix = luigi.Parameter(description="Add suffix to output files: TrainingProgress.{suffix}.{ext}", default=None)
+    debug = param_debug
+    debug_single_thread = param_debug_single_thread
+    algo_env_from_dir = luigi.BoolParameter(description="Add algo/env columns based on directory structure of --iml-directories <algo>/<env>/iml_dir", default=True, parsing=luigi.BoolParameter.EXPLICIT_PARSING)
+    ignore_phase = luigi.BoolParameter(description="Bug workaround: for training progress files that didn't record phase, just ignore it.", default=False, parsing=luigi.BoolParameter.EXPLICIT_PARSING)
+
+    skip_output = False
+
+    def requires(self):
+        return []
+
+    def output(self):
+        return []
+
+    def run(self):
+        kwargs = kwargs_from_task(self)
+        self.dumper = TrainingProgressParser(**kwargs)
+        self.dumper.run()
+
+class ProfilingOverheadPlotTask(luigi.Task):
+    csv = luigi.Parameter(description="Path to overall_machine_util.raw.csv [output from UtilTask]")
+    directory = luigi.Parameter(description="Output directory", default=".")
+    x_type = param_x_type
+    y_title = luigi.Parameter(description="y-axis title", default='Total training time (seconds)')
+    suffix = luigi.Parameter(description="Add suffix to output files: MachineGPUUtil.{suffix}.{ext}", default=None)
+
+    # Plot attrs
+    rotation = luigi.FloatParameter(description="x-axis title rotation", default=45.)
+    width = luigi.FloatParameter(description="Width of plot in inches", default=None)
+    height = luigi.FloatParameter(description="Height of plot in inches", default=None)
+
+    debug = param_debug
+    debug_single_thread = param_debug_single_thread
+    # algo_env_from_dir = luigi.BoolParameter(description="Add algo/env columns based on directory structure of --iml-directories <algo>/<env>/iml_dir", default=True, parsing=luigi.BoolParameter.EXPLICIT_PARSING)
+
+    skip_output = False
+
+    def requires(self):
+        return []
+
+    def output(self):
+        return []
+
+    def run(self):
+        kwargs = kwargs_from_task(self)
+        self.dumper = ProfilingOverheadPlot(**kwargs)
+        self.dumper.run()
+
 class GeneratePlotIndexTask(luigi.Task):
     iml_directory = luigi.Parameter(description="Location of trace-files")
     # out_dir = luigi.Parameter(description="Location of trace-files", default=None)
@@ -516,6 +568,8 @@ IML_TASKS.add(TraceEventsTask)
 IML_TASKS.add(OverlapStackedBarTask)
 IML_TASKS.add(UtilTask)
 IML_TASKS.add(UtilPlotTask)
+IML_TASKS.add(TrainingProgressTask)
+IML_TASKS.add(ProfilingOverheadPlotTask)
 
 if __name__ == "__main__":
     main()

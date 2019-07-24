@@ -10,92 +10,64 @@ from os.path import join as _j, abspath as _a, exists as _e, dirname as _d, base
 import pandas as pd
 import seaborn as sns
 
-from iml_profiler.parser.dataframe import UtilDataframeReader
-
 from matplotlib import pyplot as plt
+
+from iml_profiler.parser.dataframe import TrainingProgressDataframeReader
 
 from iml_profiler.parser import stacked_bar_plots
 
 from iml_profiler.profiler import iml_logging
 
-def protobuf_to_dict(pb):
-    return dict((field.name, value) for field, value in pb.ListFields())
 
-class UtilParser:
+class TrainingProgressParser:
     """
-    Given a directory containing machine_util.trace_*.proto files, output a
-    csv file containing CPU/GPU/memory utilization info useful for plotting.
+    PSEUDOCODE:
+    Read all the training_progress.trace_*.proto files across all configurations
+    into a single data-frame.
+    IML profiling overhead:
+      To compare profiling overhead, compare the last sample of iterations/second for a given configuration
+      (that way we don't need the exact number of timesteps to match up between compared configurations).
+      This also works if we want to compare TOTAL training time; just run training till the very end.
+    IML accuracy:
+      total_training_time['instrumented'] - extrap_training_time['instrumented']
 
-    GOAL: Show that single-machines cannot scale to utilize the entire GPU.
+        df = []
+        For each config in (instrumented, uninstrumented):
+            df.append: Read rows like: [
+                machine, process, phase, algo, env, config,
 
-    1. Memory utilization:
-       - Show that memory gets used up before GPU is fully utilized
-         - X-axis = number of total bytes memory used, OR
-                    % of total machine memory used
-         - Y-axis = Average GPU utilization
-         - Plot: y_gpu_util.x_mem_util.png
+                total_timesteps,
 
+                start_trace_time_us,
 
-    2. CPU utilization:
-       - Show that CPU gets used up before GPU is fully utilized:
-         - X-axis = average CPU utilization (a number in 0..1), OR
-                    absolute CPU utilization (2 cores would be [0%...200%])
-         - Y-axis = Average GPU utilization
-       - Plot: y_gpu_util.x_cpu_util.png
+                start_percent_complete,
+                start_num_timesteps,
+                start_training_time_us,
 
-                      Training {env} using {algo}
+                end_percent_complete,
+                end_training_time_us,
+                end_num_timesteps,
+            ]
 
-                      100 |
-                          |
-                          |              ----
-      GPU utilization (%) |      -----...
-                          | -----
-                        0 |--------------------
-                            1   2   3 ... N
+        #
+        # Keep the very last call to iml.prof.report_progress(...).
+        # We will use this to compare "iterations-per-second".
+        #
+        keep_rows = []
+        For each (machine, process, phase, algo, env):
+            max_time = max(df[machine, process, phase, algo, env]['end_training_time_us'])
+            row = df[machine, process, phase, algo, env, AND max_time]
+            keep_rows.append(
+                row
+            )
 
-                            Number of parallel
-                             inference workers
-
-    IDEALLY:
-    - (algo, env) would be something citable that people have scaled up in the past
-    - e.g. nature papers
-      - (minigo, DQN)
-      - (Atari, DQN)
-
-    Data-frame should be like:
-
-    1. Memory utilization:
-       - algo, env, num_workers, gpu_util, mem_util
-       - NOTE: For gpu_util we include:
-         - gpu_util_min
-         - gpu_util_max
-         - gpu_util_avg
-       - Same for mem_util
-
-    2. CPU utilization:
-       - algo, env, num_workers, gpu_util, cpu_util
-
-    In addition to utilization stuff, each directory should record:
-    - algo
-    - env
-    - num_workers
-
-    We can record this in a JSON file experiment_config.json.
-    {
-        'expr_type': 'OverallMachineUtilization',
-        'algo': ...
-        'env': ...
-        'num_workers': ...
-    }
-
-    TODO:
-    1. Read/output raw data-frame with all the data:
-       - algo, env, num_workers, gpu_util, mem_util
-    2. Read/output pre-processed data-frame (min/max/avg), 1 for each plot.
+        df['training_time_sec'] = (df['end_training_time_us'] - df['start_training_time_us']) / USEC_IN_SEC
+        df['iters_per_sec'] = df['training_time_sec'] / (df['end_num_timesteps'] - df['start_num_timesteps'])
     """
     def __init__(self,
                  directory,
                  iml_directories,
+                 ignore_phase=False,
                  algo_env_from_dir=False,
                  debug=False,
                  # Swallow any excess arguments
@@ -106,6 +78,7 @@ class UtilParser:
         """
         self.directory = directory
         self.iml_directories = iml_directories
+        self.ignore_phase = ignore_phase
         self.algo_env_from_dir = algo_env_from_dir
         self.debug = debug
 
@@ -113,28 +86,27 @@ class UtilParser:
 
     @property
     def _raw_csv_path(self):
-        return _j(self.directory, "overall_machine_util.raw.csv")
+        return _j(self.directory, "overall_training_progress.raw.csv")
 
     @property
-    def _agg_csv_path(self):
-        return _j(self.directory, "overall_machine_util.agg.csv")
+    def _last_agg_csv_path(self):
+        return _j(self.directory, "overall_training_progress.last.agg.csv")
 
-    def _json_path(self, device_id, device_name):
-        return _j(self.directory, "util_scale{dev}.js_path.json".format(
-            dev=device_id_suffix(device_id, device_name),
-        ))
+    @property
+    def _profiling_overhead_agg_csv_path(self):
+        return _j(self.directory, "overall_training_progress.profiling_overhead.agg.csv")
 
-    def add_experiment_config(self, machine_util_path):
+    def add_experiment_config(self, path):
         """
-        add_fields(machine_util_path)
+        add_fields(path)
 
         We expect to find experiment_config.json where the machine_util.*.proto files live.
 
-        :param machine_util_path:
+        :param path:
         :return:
         """
-        assert is_machine_util_file(machine_util_path)
-        directory = _d(machine_util_path)
+        assert is_training_progress_file(path)
+        directory = _d(path)
         path = experiment.experiment_config_path(directory)
         if not _e(path):
             if self.debug:
@@ -143,31 +115,52 @@ class UtilParser:
         data = experiment.load_experiment_config(directory)
         return data
 
-    def maybe_add_algo_env(self, machine_util_path):
-        assert is_machine_util_file(machine_util_path)
+    def maybe_add_algo_env(self, path):
+        assert is_training_progress_file(path)
 
-        iml_directory = _d(machine_util_path)
+        iml_directory = _d(path)
 
         if self.algo_env_from_dir:
-            return self.add_algo_env_from_dir(machine_util_path)
+            return self.add_config_algo_env_from_dir(path)
         if not _e(experiment.experiment_config_path(iml_directory)):
-            return self.add_experiment_config(machine_util_path)
+            return self.add_experiment_config(path)
 
         # Not sure what (algo, env) is; don't add those columns.
         return None
 
-    def add_algo_env_from_dir(self, machine_util_path):
-        assert is_machine_util_file(machine_util_path)
-        iml_dir = _d(machine_util_path)
+    def add_config_algo_env_from_dir(self, path):
+        assert is_training_progress_file(path)
+        iml_dir = _d(path)
+        # Path looks like:
+        # '$HOME/clone/iml/output/iml_bench/all.debug/config_uninstrumented/a2c/PongNoFrameskip-v4/process/a2c_PongNoFrameskip-v4/phase/default_phase/training_progress.trace_3.proto'
+        #  - $HOME
+        #  - clone
+        #  - iml
+        #  - output
+        #  - iml_bench
+        #  - all.debug
+        # -7 - config_uninstrumented
+        # -6 - a2c
+        # -5 - PongNoFrameskip-v4
+        # -4 - process
+        # -3 - a2c_PongNoFrameskip-v4
+        # -2 - phase
+        # -1 - default_phase
 
-        path = os.path.normpath(iml_dir)
-        components = path.split(os.sep)
-        env_id = components[-1]
-        algo = components[-2]
+        norm_path = os.path.normpath(iml_dir)
+        components = norm_path.split(os.sep)
+        env_id = components[-5]
+        algo = components[-6]
         fields = {
             'algo': algo,
             'env_id': env_id,
         }
+        assert is_config_dir(os.sep.join(components[:-7 + 1]))
+        # if is_config_dir(os.sep.join(components[:-7 + 1])):
+        fields['config'] = components[-7]
+        # else:
+        #     # Default to 'instrumented'
+        #     fields['config'] = 'instrumented'
         return fields
 
     def flattened_agg_df(self, df):
@@ -194,65 +187,117 @@ class UtilParser:
     def run(self):
         dfs = []
         for directory in self.iml_directories:
-            df_reader = UtilDataframeReader(
+            df_reader = TrainingProgressDataframeReader(
                 directory,
                 add_fields=self.maybe_add_algo_env,
                 debug=self.debug)
             df = df_reader.read()
             self.added_fields.update(df_reader.added_fields)
             dfs.append(df)
-        df = pd.concat(dfs)
+        raw_df = pd.concat(dfs)
 
-        # 1. Memory utilization:
-        # 2. CPU utilization:
-        groupby_cols = sorted(self.added_fields) + ['machine_name', 'device_name']
-
-        # df_agg = df.groupby(groupby_cols).agg(['min', 'max', 'mean', 'std'])
-        # flat_df_agg = self.flattened_agg_df(df_agg)
-
-        # - Use start_time_us timestamp to assign each utilization sample an "index" number from [0...1];
-        #   this is trace_percent: the percent time into the collected trace
-        # - Group by (algo, env)
-        #   - Reduce:
-        #     # for each group member, divide by group-max
-        #     - max_time = max(row['start_time_us'])
-        #     - min_time = min(row['start_time_us'])
-        #     - row['trace_percent'] = (row['start_time_us'] - min_time)/max_time
-        # TODO: debug this to see if it works.
-        dfs = []
-        groupby = df.groupby(groupby_cols)
-        for group, df_group in groupby:
-
-            max_time = max(df_group['start_time_us'])
-            start_time = min(df_group['start_time_us'])
-            length_time = max_time - start_time
-            df_group['trace_percent'] = (df_group['start_time_us'] - start_time) / length_time
-            dfs.append(df_group)
-
-            logging.info(pprint_msg({
-                'group': group,
-                'start_time': start_time,
-                'max_time': max_time,
-            }))
-            logging.info(pprint_msg(df_group))
-
-            # import ipdb; ipdb.set_trace()
-
-
-        new_df = pd.concat(dfs)
+        # # 1. Memory utilization:
+        # # 2. CPU utilization:
+        # groupby_cols = sorted(self.added_fields) + ['machine_name', 'device_name']
+        #
+        # # df_agg = df.groupby(groupby_cols).agg(['min', 'max', 'mean', 'std'])
+        # # flat_df_agg = self.flattened_agg_df(df_agg)
+        #
+        # # - Use start_time_us timestamp to assign each utilization sample an "index" number from [0...1];
+        # #   this is trace_percent: the percent time into the collected trace
+        # # - Group by (algo, env)
+        # #   - Reduce:
+        # #     # for each group member, divide by group-max
+        # #     - max_time = max(row['start_time_us'])
+        # #     - min_time = min(row['start_time_us'])
+        # #     - row['trace_percent'] = (row['start_time_us'] - min_time)/max_time
+        # # TODO: debug this to see if it works.
+        # dfs = []
+        # groupby = df.groupby(groupby_cols)
+        # for group, df_group in groupby:
+        #
+        #     max_time = max(df_group['start_time_us'])
+        #     start_time = min(df_group['start_time_us'])
+        #     length_time = max_time - start_time
+        #     df_group['trace_percent'] = (df_group['start_time_us'] - start_time) / length_time
+        #     dfs.append(df_group)
+        #
+        #     logging.info(pprint_msg({
+        #         'group': group,
+        #         'start_time': start_time,
+        #         'max_time': max_time,
+        #     }))
+        #     logging.info(pprint_msg(df_group))
+        #
+        #     # import ipdb; ipdb.set_trace()
+        #
+        # new_df = pd.concat(dfs)
 
         # OUTPUT raw thing here.
         logging.info("Output raw un-aggregated machine utilization data @ {path}".format(path=self._raw_csv_path))
-        new_df.to_csv(self._raw_csv_path, index=False)
+        raw_df.to_csv(self._raw_csv_path, index=False)
 
-        df_agg = new_df.groupby(groupby_cols).agg(['min', 'max', 'mean', 'std'])
-        flat_df_agg = self.flattened_agg_df(df_agg)
+        agg_df = raw_df
+        agg_df['timesteps_per_sec'] = \
+            ( agg_df['end_num_timesteps'] - agg_df['start_num_timesteps'] ) / \
+            (( agg_df['end_training_time_us'] - agg_df['start_training_time_us'] ) / USEC_IN_SEC )
+        agg_df['total_trace_time_sec'] = (1. / agg_df['timesteps_per_sec']) * agg_df['total_timesteps']
+
+
+        groupby_cols = set([
+            'process_name',
+            'phase',
+            'machine_name',
+            'algo',
+            'env_id',
+            'config',
+        ])
+        if self.ignore_phase:
+            groupby_cols.remove('phase')
+        groupby_cols = sorted(groupby_cols)
+        groupby = agg_df.groupby(groupby_cols)
+        keep_dfs = []
+        for group, df_group in groupby:
+            # Only keep the last sample of training progress (it will average over total training time the most).
+            max_time = np.max(df_group['end_training_time_us'])
+            df_keep = df_group[df_group['end_training_time_us'] == max_time]
+            keep_dfs.append(df_keep)
+        keep_agg_df = pd.concat(keep_dfs)
+
+        logging.info("Add 'total_training_time_sec' and only keep the 'last' sampled training progress data for each (config, algo, env) @ {path}".format(path=self._last_agg_csv_path))
+        keep_agg_df.to_csv(self._last_agg_csv_path, index=False)
+
+        join_cols = set(groupby_cols)
+        join_cols.remove('config')
+        join_cols = sorted(join_cols)
+
+        # TODO: check that each index only contains 1 row
+        # CONCERN: don't want to mix config=uninstrumented with config=uninstrumented_full
+        ins_df = keep_agg_df[keep_agg_df['config'].apply(lambda config: bool(config_is_instrumented(config)))]
+        ins_df = ins_df.set_index(join_cols)
+        assert ins_df.index.is_unique
+        unins_df = keep_agg_df[keep_agg_df['config'].apply(lambda config: bool(config_is_uninstrumented(config)))]
+        unins_df = unins_df.set_index(join_cols)
+        assert unins_df.index.is_unique
+
+        all_df = ins_df.join(unins_df, lsuffix='_ins', rsuffix='_unins')
+        all_df['profiling_overhead_percent'] = \
+            100. * ( all_df['total_trace_time_sec_ins'] - all_df['total_trace_time_sec_unins'] ) / all_df['total_trace_time_sec_unins']
+        # other_calc = 100. * ( all_df['timesteps_per_sec_unins'] / all_df['timesteps_per_sec_ins'] )
+        other_calc = 100. * ( (1./all_df['timesteps_per_sec_ins']) - (1./all_df['timesteps_per_sec_unins']) ) / (1./all_df['timesteps_per_sec_unins'])
+        assert np.all(np.isclose(all_df['profiling_overhead_percent'], other_calc))
+
+        logging.info("Add 'profiling_overhead_percent' for each (config, algo, env) @ {path}".format(path=self._profiling_overhead_agg_csv_path))
+        all_df.to_csv(self._profiling_overhead_agg_csv_path, index=True)
+
+        # df_agg = new_df.groupby(groupby_cols).agg(['min', 'max', 'mean', 'std'])
+        # flat_df_agg = self.flattened_agg_df(df_agg)
 
         # import ipdb; ipdb.set_trace()
-        logging.info("Output min/max/std aggregated machine utilization data @ {path}".format(path=self._agg_csv_path))
-        flat_df_agg.to_csv(self._agg_csv_path, index=False)
+        # logging.info("Output min/max/std aggregated machine utilization data @ {path}".format(path=self._agg_csv_path))
+        # flat_df_agg.to_csv(self._agg_csv_path, index=False)
 
-class UtilPlot:
+class ProfilingOverheadPlot:
     def __init__(self,
                  csv,
                  directory,
@@ -297,7 +342,7 @@ class UtilPlot:
             suffix_str = '.{suffix}'.format(suffix=self.suffix)
         else:
             suffix_str = ''
-        return _j(self.directory, "UtilPlot{suffix}.{ext}".format(
+        return _j(self.directory, "ProfilingOverheadPlot{suffix}.{ext}".format(
             suffix=suffix_str,
             ext=ext,
         ))
@@ -330,36 +375,155 @@ class UtilPlot:
         #     # Need to do this, otherwise training time bar is invisible.
         #     ax.patch.set_visible(False)
 
-        def is_cpu(device_name):
-            if re.search(r'Intel|Xeon|CPU', device_name):
-                return True
-            return False
+        # def is_cpu(device_name):
+        #     if re.search(r'Intel|Xeon|CPU', device_name):
+        #         return True
+        #     return False
+        #
+        # def is_gpu(device_name):
+        #     return not is_cpu(device_name)
+        #
+        # def should_keep(row):
+        #     if row['machine_name'] == 'reddirtx-ubuntu':
+        #         # Ignore 'Tesla K40c' (unused, 0 util)
+        #         return row['device_name'] == 'GeForce RTX 2080 Ti'
+        #     return True
+        #
+        # self.df_gpu = self.df
+        #
+        # self.df_gpu = self.df_gpu[self.df_gpu['device_name'].apply(is_gpu)]
+        #
+        # self.df_gpu = self.df_gpu[self.df_gpu.apply(should_keep, axis=1)]
 
-        def is_gpu(device_name):
-            return not is_cpu(device_name)
-
-        def should_keep(row):
-            if row['machine_name'] == 'reddirtx-ubuntu':
-                # Ignore 'Tesla K40c' (unused, 0 util)
-                return row['device_name'] == 'GeForce RTX 2080 Ti'
-            return True
-
-        self.df_gpu = self.df
-
-        self.df_gpu = self.df_gpu[self.df_gpu['device_name'].apply(is_gpu)]
-
-        self.df_gpu = self.df_gpu[self.df_gpu.apply(should_keep, axis=1)]
-
-        logging.info(pprint_msg(self.df_gpu))
+        logging.info(pprint_msg(self.df))
 
         # ax = sns.violinplot(x=self.df_gpu['x_field'], y=100*self.df_gpu['util'],
         #                     inner="box",
         #                     # cut=0.,
         #                     )
 
-        ax = sns.boxplot(x=self.df_gpu['x_field'], y=100*self.df_gpu['util'],
-                         showfliers=False,
-                         )
+        # ax = sns.boxplot(x=self.df['x_field'], y=100*self.df['util'],
+        #                  showfliers=False,
+        #                  )
+
+        # We want data that looks like:
+        # algo, env, config,         x_field, total_training_time_sec
+        # ppo2  Pong uninstrumented      ...                      ...
+        # ppo2  Pong instrumented        ...                      ...
+        #
+        # To achieve that, we need to:
+        # - For each row, split it into two rows, one for ins, one for unins.
+        def is_ins(colname):
+            return bool(re.search(r'_ins$', colname))
+        def is_unins(colname):
+            return bool(re.search(r'_unins$', colname))
+        def remove_suffix(colname):
+            m = re.search(r'(?P<col>.*)_(?P<suffix>ins|unins)$', colname)
+            return m.group('col')
+        def is_common_row(colname):
+            return not is_ins(colname) and not is_unins(colname)
+        rows = []
+        common_cols = [col for col in self.df.keys() if is_common_row(col)]
+        ins_cols = [col for col in self.df.keys() if is_ins(col)]
+        # unins_cols = [col for col in self.df.keys() if is_unins(col)]
+        # keep_cols = set([remove_suffix(col) for col in ins_cols]).intersection(
+        #     set([remove_suffix(col) for col in ins_cols])
+        # ).union(common_cols)
+
+        def _extract_row(row, should_keep):
+            data = dict()
+            for field in row.keys():
+                if should_keep(field):
+                    new_field = remove_suffix(field)
+                    assert new_field not in data
+                    data[new_field] = [row[field]]
+                elif is_common_row(field):
+                    assert field not in data
+                    data[field] = [row[field]]
+            return pd.DataFrame(data)
+        for index, row in self.df.iterrows():
+            ins_row = _extract_row(row, is_ins)
+            unins_row = _extract_row(row, is_unins)
+            rows.append(ins_row)
+            rows.append(unins_row)
+        df = pd.concat(rows)
+        # Allows df.loc[row_index]
+        df = df.reset_index()
+
+        def config_pretty(config):
+            m = re.search(r'^config_(?P<config>.*)', config)
+            conf = m.group('config')
+            def upper_repl_01(m):
+                return ' ' + m.group(1).upper()
+            conf = re.sub(r'_(\w)', upper_repl_01, conf)
+            def upper_repl_02(m):
+                return m.group(1).upper()
+            conf = re.sub(r'^(\w)', upper_repl_02, conf)
+            return conf
+
+        df['config_pretty'] = df['config'].apply(config_pretty)
+
+        plot_data_fields = ['x_field', 'total_trace_time_sec', 'profiling_overhead_percent', 'config_pretty']
+        logging.info(pprint_msg(df[plot_data_fields]))
+        ax = sns.barplot(x='x_field', y='total_trace_time_sec', hue='config_pretty', data=df)
+        leg = ax.legend()
+        leg.set_title(None)
+
+        # PROBLEM: (a2c, half-cheetah) profile percent is shown as 188%, but it's actually 222...
+        # 188 is the (ppo, half-cheetah) result...
+        # TODO: index by x_field, retrieve x_field from plot/patches.
+
+        def add_percent_bar_labels(df, ax):
+            logging.info(pprint_msg({
+                'len(patches)': len(ax.patches),
+                'len(df)': len(df),
+            }))
+            xticklabels = ax.get_xticklabels()
+            xticks = ax.get_xticks()
+            ins_df = df[df['config'].apply(lambda config: bool(config_is_instrumented(config)))]
+            bar_width = ax.patches[0].get_width()
+            xticklabel_to_xtick = dict()
+            for xtick, xticklabel in zip(xticks, xticklabels):
+                xticklabel_to_xtick[xticklabel.get_text()] = xtick
+            for i in range(len(ins_df)):
+                row = ins_df.iloc[i]
+
+                x_field = row['x_field']
+
+                # Keep single decimal place.
+                # bar_label = "{perc:.1f}%".format(
+                #     perc=df.loc[i]['profiling_overhead_percent'])
+
+                # Round to nearest percent.
+                # bar_label = "{perc:.0f}%".format(
+                #     perc=df.loc[i]['profiling_overhead_percent'])
+
+                profiling_overhead_percent = row['profiling_overhead_percent']
+                bar_label = "{perc:.0f}%".format(
+                    perc=profiling_overhead_percent)
+
+                total_trace_time_sec = row['total_trace_time_sec']
+
+                xtick = xticklabel_to_xtick[x_field]
+                pos = (xtick - bar_width / 2, total_trace_time_sec)
+
+                logging.info(pprint_msg({
+                    'bar_label': bar_label,
+                    'x_field': x_field,
+                    'pos': pos,
+                    'total_trace_time_sec': total_trace_time_sec,
+                }))
+
+                ax.annotate(
+                    bar_label,
+                    pos,
+                    ha='center',
+                    va='center',
+                    xytext=(0, 10),
+                    textcoords='offset points')
+
+        add_percent_bar_labels(df, ax)
+
 
         # groupby_cols = ['algo', 'env_id']
         # # label_df = self.df_gpu[list(set(groupby_cols + ['x_field', 'util']))]
@@ -375,6 +539,11 @@ class UtilPlot:
         if self.rotation is not None:
             # ax = bottom_plot.axes
             ax.set_xticklabels(ax.get_xticklabels(), rotation=self.rotation)
+
+        # Remove legend-title that seaborn adds:
+        # https://stackoverflow.com/questions/51579215/remove-seaborn-lineplot-legend-title?rq=1
+        # handles, labels = ax.get_legend_handles_labels()
+        # ax.legend(handles=handles[1:], labels=labels[1:])
 
         # Default ylim for violinplot is slightly passed bottom/top of data:
         #   ipdb> ax.get_ylim()
@@ -609,7 +778,6 @@ def test_table():
                                })
     return data_table
 
-
 def add_line(ax, xpos, ypos):
     line = plt.Line2D([xpos, xpos], [ypos + .1, ypos],
                       transform=ax.transAxes, color='black')
@@ -658,35 +826,6 @@ def my_label_group_bar_table(ax, label_df, df, groupby_cols):
         ypos -= .1
 
 
-def test_grouped_xlabel():
-    # https://stackoverflow.com/questions/19184484/how-to-add-group-labels-for-bar-charts-in-matplotlib
-    sample_df = test_table()
-    g = sample_df.groupby(['Room', 'Shelf', 'Staple'])
-    df = g.sum()
-    logging.info(pprint_msg(df))
-    fig = plt.figure()
-    ax = fig.add_subplot(111)
-
-    import ipdb; ipdb.set_trace()
-
-    df.plot(kind='bar', stacked=True, ax=fig.gca())
-    # sns.barplot(x=df[''])
-
-    #Below 3 lines remove default labels
-    labels = ['' for item in ax.get_xticklabels()]
-    ax.set_xticklabels(labels)
-    ax.set_xlabel('')
-
-    label_group_bar_table(ax, df)
-
-    # This makes the vertical spacing between x-labels closer.
-    fig.subplots_adjust(bottom=.1*df.index.nlevels)
-
-    png_path = '{func}.png'.format(
-        func=test_grouped_xlabel.__name__,
-    )
-    plt.savefig(png_path, bbox_inches='tight', pad_inches=0)
-
 def add_hierarchical_labels(fig, ax, df, label_df, groupby_cols):
 
     #Below 3 lines remove default labels
@@ -702,26 +841,3 @@ def add_hierarchical_labels(fig, ax, df, label_df, groupby_cols):
     # fig.subplots_adjust(bottom=.1*df.index.nlevels)
     fig.subplots_adjust(bottom=.1*len(groupby_cols))
 
-def main():
-    parser = argparse.ArgumentParser(
-        textwrap.dedent("""\
-        Test plots
-        """),
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-    )
-
-    parser.add_argument('--test-grouped-xlabel',
-                        action='store_true',
-                        help=textwrap.dedent("""
-    Test how to group x-labels + sub-labels.
-    """))
-
-    args = parser.parse_args()
-
-    iml_logging.setup_logging()
-
-    if args.test_grouped_xlabel:
-        test_grouped_xlabel()
-
-if __name__ == '__main__':
-    main()

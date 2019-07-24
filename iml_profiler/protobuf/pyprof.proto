@@ -44,6 +44,42 @@ message TrainingProgress {
     int64 total_timesteps = 4;
 }
 
+message IncrementalTrainingProgress {
+    // [default = TP_NO_PROGRESS]
+    TrainingProgressContentCode content_code = 1;
+
+    string process_name = 2;
+    string phase = 3;
+    string machine_name = 4;
+
+    // Redundant: end_percent_complete - start_percent_complete
+    // A number in [0..1] that represents the percent of
+    // total training time that has been recorded when profiling completes.
+    // float percent_complete = 2;
+
+    // Redundant: end_num_timesteps - start_num_timesteps
+    // Many RL workloads measuring their in "timesteps" which corresponds to
+    // the number of gradient updates that have been performed.
+    // int64 num_timesteps = 3;
+
+    // The total number of timesteps this RL training session will eventually run for.
+    int64 total_timesteps = 5;
+
+    int64 start_trace_time_us = 6;
+
+    // Time of the first call to iml.prof.report_progress(...).
+    float start_percent_complete = 7;
+    int64 start_num_timesteps = 8;
+    int64 start_training_time_us = 9;
+    // The latest call to iml.prof.report_progress(...) for timestep=<num_timesteps>.
+    float end_percent_complete = 10;
+    int64 end_training_time_us = 11;
+    int64 end_num_timesteps = 12;
+    // Redundant: end_training_time_us - start_training_time_us
+    // int64 total_training_time_us = 12;
+
+}
+
 // Metadata about a process.
 // Only one of these files is written per-process, when the process exits.
 // This captures information that not is not conveniently/efficiently captured by

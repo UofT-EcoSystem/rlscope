@@ -42,7 +42,7 @@ from iml_profiler.profiler import unit_test_util
 from iml_profiler.parser.common import print_cmd
 
 from tensorflow.core.profiler.tfprof_log_pb2 import ProfileProto
-from iml_profiler.protobuf.pyprof_pb2 import ProcessMetadata, TrainingProgress, TP_NO_PROGRESS, TP_HAS_PROGRESS
+from iml_profiler.protobuf.pyprof_pb2 import ProcessMetadata, TrainingProgress, IncrementalTrainingProgress, TP_NO_PROGRESS, TP_HAS_PROGRESS
 
 # pip install py-cpuinfo
 import cpuinfo
@@ -82,6 +82,9 @@ PYTHON_BIN = 'python3'
 
 # Warn about forgetting to call iml.prof.report_progress(...) every 30 seconds.
 REPORT_PROGRESS_WARN_EVERY_SEC = 10.
+
+# Dump training_progress.*.proto files every 10 seconds.
+DUMP_TRAINING_PROGRESS_EVERY_SEC = 10.
 
 # If we exceed 1000 session.run(...) calls without dumping a trace, only print a warning every 100 calls.
 WARN_EVERY_CALL_MODULO = 100
@@ -379,6 +382,37 @@ def get_tfprof_path(directory, bench_name, session_id, trace_id):
         ))
     return tfprof_path
 
+class ProtoDumper:
+    def __init__(self,
+                 name,
+                 trace_id,
+                 proto,
+                 proto_path,
+                 debug=False):
+        self.name = name
+        self.trace_id = trace_id
+        self.proto = proto
+        self.proto_path = proto_path
+        self.debug = debug
+
+    def dump(self):
+        """
+        Dump protobuf to:
+        - {proto}.trace_<next_trace_id>.proto
+        """
+        if self.debug:
+            logging.info("{name}.dump start, path={path}".format(
+                name=self.name,
+                path=self.proto_path))
+
+        with open(self.proto_path, 'wb') as f:
+            f.write(self.proto.SerializeToString())
+
+        if self.debug:
+            logging.info("{name}.dump done, path={path}".format(
+                name=self.name,
+                path=self.proto_path))
+
 class ProcessMetadataDumper:
     def __init__(self,
                  trace_id,
@@ -386,7 +420,7 @@ class ProcessMetadataDumper:
                  process_metadata_proto_path,
                  debug=False):
         assert type(process_metadata) == ProcessMetadata
-        self.trace_id = trace_id,
+        self.trace_id = trace_id
         self.process_metadata = process_metadata
         self.process_metadata_proto_path = process_metadata_proto_path
         self.debug = debug
@@ -605,6 +639,7 @@ class Profiler:
                  tfprof=True,
                  reports_progress=False,
                  just_sample_util=None,
+                 training_progress=None,
                  c_lib_func_pyprof_pattern=None,
                  # tfprof=True,
                  repetition_time_limit_sec=10.,
@@ -670,6 +705,7 @@ class Profiler:
         self.disable = get_argval('disable', disable, False)
         self.delay = get_argval('delay', delay, False)
         self.just_sample_util = get_argval('just_sample_util', just_sample_util, False)
+        self.training_progress = get_argval('training_progress', training_progress, False)
 
         if not self.disable:
             modify_tensorflow()
@@ -689,6 +725,9 @@ class Profiler:
         # TODO: bind process to a different core to avoid interference?
         # self.bg_dumper = ProcessPoolExecutor(max_workers=1)
         self.percent_complete = None
+        self._tracing_enabled = False
+        self._incremental_training_progress = dict()
+        self._last_dumped_training_progress = None
         self._start_percent_complete = 0.
         self._start_num_timesteps = 0
         self._delayed_enable = False
@@ -775,6 +814,9 @@ class Profiler:
 
         if self.python:
             self.pyprof = PythonProfiler(self.directory)
+
+        if self.debug:
+            logging.info(pprint_msg({'Profiler.attrs': self.__dict__}))
 
         # self.sess = None
         # self.pctx = None
@@ -1046,7 +1088,9 @@ class Profiler:
 
         self._check_no_annotations(caller_name='iml.prof.enable_tracing()')
 
-        if not self.just_sample_util:
+        self._init_trace_time()
+
+        if not self.disable:
             self._start_pyprof()
             self._start_tfprof()
 
@@ -1054,11 +1098,11 @@ class Profiler:
             self._init_trace_time()
             self.util_sampler.start()
 
+        self._tracing_enabled = True
+
     @property
     def tracing_enabled(self):
-        if self.just_sample_util:
-            return self.util_sampler is not None and self.util_sampler.running
-        return self._pyprof_enabled and self._tfprof_enabled
+        return self._tracing_enabled
 
     def enable_tracing(self):
         """
@@ -1066,20 +1110,26 @@ class Profiler:
 
         :return:
         """
-        if self.disable:
+        if self.disable and not self.training_progress:
             return
 
         if self.reports_progress:
             # Wait for iml.prof.report_progress() to get called until we enable tracing.
-            # This ensures that we measure the delta in percent_complete'd over the same interval of time we do tracing for.
+            # This ensures that we measure the delta in percent_complete'd over the
+            # same interval of time we do tracing for.
             self._delayed_enable = True
-        else:
+
+        if self.disable:
+            return
+
+        if not self.reports_progress:
             self._enable_tracing()
 
     def _disable_tracing(self):
         logging.info("IML: enable tracing")
         self._stop_pyprof()
         self._stop_tfprof()
+        self._tracing_enabled = False
 
     # # Calling iml.prof.enable()/disable() repeatedly wouldn't currently support percent_complete tracking...
     # # So let's just not allow disable() for now.
@@ -1230,7 +1280,8 @@ class Profiler:
         return self._op_stack[-1]
 
     def set_operation(self, bench_name):
-        if self.disable:
+
+        if self.disable and not self.training_progress:
             return
 
         self._check_profiling_started()
@@ -1342,7 +1393,10 @@ class Profiler:
     def end_operation(self, bench_name, skip_finish=False):
         assert bench_name != NO_BENCH_NAME
 
-        if self.disable:
+        if not self.disable or ( self.disable and self.training_progress ):
+            self._dump_training_progress(debug=self.debug)
+
+        if self.disable and not self.training_progress:
             return
 
         if py_config.DEBUG and py_config.DEBUG_OPERATIONS:
@@ -1444,7 +1498,7 @@ class Profiler:
         util_cmdline.extend(['--iml-directory', _a(self.directory)])
         # Sample memory-usage of the entire process tree rooted at ths process.
         util_cmdline.extend(['--iml-root-pid', str(os.getpid())])
-        if self.debug:
+        if py_config.DEBUG_UTIL_SAMPLER and self.debug:
             util_cmdline.append('--iml-debug')
         # We make sure nvidia-smi runs fast at the VERY START of training
         # (to avoid false alarms when training is busy with the CPU/GPU).
@@ -1474,6 +1528,8 @@ class Profiler:
     def set_phase(self, phase):
         assert type(phase) == str
 
+        self.phase = phase
+
         if self.disable:
             return
 
@@ -1492,7 +1548,6 @@ class Profiler:
         # Dump the DumpThunk's.
         # self.dump_trace(finish_now=False, debug=self.debug)
 
-        self.phase = phase
         clib_wrap.set_phase(phase)
 
         # self.init_trace_id()
@@ -1525,7 +1580,8 @@ class Profiler:
         self.maybe_terminate_utilization_sampler(warn_terminated=False)
 
         # Record an event [PROC:<process_name>] that marks when this process started/finished execution.
-        self._record_process_event()
+        if not self.disable:
+            self._record_process_event()
 
         # For each active session, schedule its results to be dumped.
         # for sess in ACTIVE_SESSIONS:
@@ -1537,8 +1593,10 @@ class Profiler:
         # Q: How frequently should we dump pyprof data?
         # A: We'd like to keep it under a file-size limit...but computing exact proto-size isn't practical.
         #    Instead, lets just roughly count the # of events, and use that as a proxy for proto file size.
-        self._dump_pyprof(debug=self.debug)
+        if clib_wrap.should_dump_pyprof():
+            self._dump_pyprof(debug=self.debug)
         self._dump_process_metadata(debug=self.debug)
+        self._dump_training_progress(debug=self.debug, dump_always=True)
 
         # if self._should_dump_pyprof:
         #     self._dump_pyprof()
@@ -1694,6 +1752,70 @@ class Profiler:
                 sec=time_sec,
             ))
 
+    def _dump_training_progress(self, debug=False, sync=False, dump_always=False):
+        """
+        :param debug:
+        :param sync:
+        :param dump_always:
+            Regardless of whether 10 seconds have expired, dump training progress.
+            Useful for dumping at exit.
+        :return:
+        """
+        start_sec = time.time()
+        trace_id = self.next_trace_id
+
+        now_sec = time.time()
+        if self.phase in self._incremental_training_progress and \
+                self._incremental_training_progress[self.phase].can_dump(self.reports_progress) and (
+                dump_always or \
+                self._last_dumped_training_progress is None or \
+                now_sec - self._last_dumped_training_progress > DUMP_TRAINING_PROGRESS_EVERY_SEC
+        ):
+            self._last_dumped_training_progress = now_sec
+        else:
+            # Skip dumping training_progress, 10 seconds haven't expired yet.
+
+            # logging.info("Skip dumping IncrementalTrainingProgress")
+            # fields = {
+            #     'phase': self.phase,
+            #     'incremental_training_progress': self._incremental_training_progress,
+            #     'dump_always': dump_always,
+            #     'last_dumped_training_progress': self._last_dumped_training_progress,
+            # }
+            # if self.phase in self._incremental_training_progress:
+            #     fields['can_dump'] = self._incremental_training_progress[self.phase].can_dump(self.reports_progress)
+            # logging.info(pprint_msg(fields))
+
+            return
+
+        training_progress = self._incremental_training_progress[self.phase].as_proto()
+        proto_name = training_progress.__class__.__name__
+
+        training_progress_proto_path = self._training_progress_proto_path(trace_id)
+        os.makedirs(_d(training_progress_proto_path), exist_ok=True)
+        dumper = ProtoDumper(
+            name='IncrementalTrainingProgressDumper',
+            trace_id=trace_id,
+            proto=training_progress,
+            proto_path=training_progress_proto_path,
+            debug=debug or py_config.DEBUG)
+
+        self.next_trace_id += 1
+        self.bg_dumper.submit(
+            name="{name}.dump({path})".format(
+                name=dumper.name,
+                path=training_progress_proto_path),
+            fn=dumper.dump,
+            sync=sync,
+        )
+        end_sec = time.time()
+        time_sec = end_sec - start_sec
+        if py_config.DEBUG:
+            logging.info("Dump {proto} took {sec} seconds on the critical path".format(
+                proto=proto_name,
+                sec=time_sec,
+            ))
+
     def _dump_process_metadata(self, debug=False, sync=False):
         start_sec = time.time()
         trace_id = self.next_trace_id
@@ -1757,6 +1879,13 @@ class Profiler:
 
     def _process_metadata_proto_path(self, trace_id):
         ret = _j(self.out_dir, "process_metadata{bench}{trace}.proto".format(
+            bench=bench_suffix(self.bench_name),
+            trace=trace_suffix(trace_id),
+        ))
+        return ret
+
+    def _training_progress_proto_path(self, trace_id):
+        ret = _j(self.out_dir, "training_progress{bench}{trace}.proto".format(
             bench=bench_suffix(self.bench_name),
             trace=trace_suffix(trace_id),
         ))
@@ -1932,8 +2061,22 @@ class Profiler:
                                ignore_disable=True)
 
     def report_progress(self, percent_complete, num_timesteps=None, total_timesteps=None):
-        if self.disable:
+        if not self.disable or ( self.disable and self.training_progress ):
+            self._dump_training_progress(debug=self.debug)
+
+        if self.disable and not self.training_progress:
             return
+
+        if py_config.DEBUG and py_config.DEBUG_REPORT_PROGRESS_ALL:
+            logging.info("[report-progress] vars={vars}\n{stack}".format(
+                vars=dict(
+                    percent_complete=percent_complete,
+                    num_timesteps=num_timesteps,
+                    total_timesteps=total_timesteps,
+                    phase=self.phase,
+                ),
+                stack=get_stacktrace(indent=1)
+            ))
 
         if not self.reports_progress:
             raise RuntimeError(
@@ -1969,6 +2112,10 @@ class Profiler:
             self._start_percent_complete = percent_complete
             self._start_num_timesteps = num_timesteps
 
+            if self.phase not in self._incremental_training_progress:
+                self._incremental_training_progress[self.phase] = RecordedIncrementalTrainingProgress(self.machine_name, self.process_name, self.phase)
+            self._incremental_training_progress[self.phase].report_start_of_progress(percent_complete, num_timesteps, total_timesteps, self.start_trace_time_sec)
+
         if self.num_timesteps is not None:
             self.num_timesteps = num_timesteps
 
@@ -1981,6 +2128,10 @@ class Profiler:
                 to_perc=percent_complete,
             ))
         self.percent_complete = percent_complete
+
+        if self.phase not in self._incremental_training_progress:
+            self._incremental_training_progress[self.phase] = RecordedIncrementalTrainingProgress(self.machine_name, self.process_name, self.phase)
+        self._incremental_training_progress[self.phase].report_progress(percent_complete, num_timesteps, total_timesteps, self.start_trace_time_sec)
 
         self._maybe_finish(debug=self.debug)
 
@@ -2267,6 +2418,11 @@ def add_iml_arguments(parser):
         IML: collect machine utilization data and output it to --iml-directory.
         
         NOTE: this will NOT collect profiling information.
+    """))
+    iml_parser.add_argument('--iml-training-progress', action='store_true', help=textwrap.dedent("""
+        IML: collect training progress data and output it to --iml-directory.
+        
+        NOTE: This is ON by default, except if --iml-disable is given, in which case you must provide this.
     """))
     iml_parser.add_argument('--iml-unit-test',
                         action='store_true',
@@ -2562,4 +2718,109 @@ def phase_directory(directory, process_name, phase):
     process_direc = process_directory(directory, process_name)
     direc = _j(process_direc, "phase", str(phase))
     return direc
+
+
+class RecordedIncrementalTrainingProgress:
+    def __init__(self, machine_name, process_name, phase):
+        self.machine_name = machine_name
+        self.process_name = process_name
+        self.phase = phase
+
+        self.total_timesteps = None
+
+        self.start_trace_time_sec = None
+
+        # NOTE: this won't get filled in if we start collecting traces
+        # from the VERY start of training (e.g. minigo)...
+        # In that case, we want to assume:
+        #   start_num_timesteps = 0
+        #   start_percent_complete = 0
+        #   start_training_time_us =
+        #     (very start of program ideally, since iml.prof.report_progress won't be getting called.)
+        #     Alternatively, we can use the earliest known start time of trace-collection:
+        #     iml.prof.start_trace_time_sec
+        self.start_num_timesteps = None
+        self.start_percent_complete = None
+        self.start_training_time_us = None
+
+        self.end_num_timesteps = None
+        self.end_percent_complete = None
+        self.end_training_time_us = None
+
+    def can_dump(self, reports_progress):
+        if reports_progress:
+            # Wait until report_start_of_progress has been called.
+            return self.start_percent_complete is not None and self.start_trace_time_sec is not None
+        # Assume that tracing starts from the very beginning the ML script starts;
+        # i.e. we don't delay until iml.prof.report_progress() is called.
+        return self.start_trace_time_sec is not None
+
+    def report_progress(self, percent_complete, num_timesteps, total_timesteps, start_trace_time_sec, start_usec=None):
+        self.end_percent_complete = percent_complete
+        self.end_num_timesteps = num_timesteps
+        self.total_timesteps = total_timesteps
+        if start_trace_time_sec is not None:
+            self.start_trace_time_sec = start_trace_time_sec
+
+        if start_usec is None:
+            start_usec = now_us()
+
+        self.end_training_time_us = start_usec
+
+    def report_start_of_progress(self, percent_complete, num_timesteps, total_timesteps, start_trace_time_sec):
+        assert self.start_percent_complete is None
+        assert self.start_num_timesteps is None
+        assert self.start_training_time_us is None
+
+        self.start_percent_complete = percent_complete
+        self.start_num_timesteps = num_timesteps
+        self.start_training_time_us = now_us()
+
+        self.report_progress(
+            percent_complete, num_timesteps, total_timesteps, start_trace_time_sec,
+            start_usec=self.start_training_time_us)
+
+    def _or_zero(self, num):
+        if num is None:
+            return 0
+        return num
+
+    def _or(self, num, default):
+        if num is None:
+            return default
+        return num
+
+    def as_proto(self, training_progress=None):
+        if training_progress is None:
+            training_progress = IncrementalTrainingProgress()
+
+        if self.start_percent_complete is None:
+            training_progress.content_code = TP_NO_PROGRESS
+            return training_progress
+
+        training_progress.content_code = TP_HAS_PROGRESS
+
+        training_progress.total_timesteps = self.total_timesteps
+
+        training_progress.machine_name = self.machine_name
+        training_progress.process_name = self.process_name
+        training_progress.phase = self.phase
+
+        # if self.start_percent_complete is not None:
+        training_progress.start_percent_complete = self._or(self.start_percent_complete, 0.)
+        training_progress.start_num_timesteps = self._or(self.start_num_timesteps, 0)
+        training_progress.start_training_time_us = int(self._or(
+            self.start_training_time_us,
+            self.start_trace_time_sec * USEC_IN_SEC))
+
+        training_progress.end_percent_complete = self.end_percent_complete
+        training_progress.end_training_time_us = int(self.end_training_time_us)
+        training_progress.end_num_timesteps = self.end_num_timesteps
+
+        training_progress.start_trace_time_us = int(self.start_trace_time_sec * USEC_IN_SEC)
+
+        return training_progress
+
+    def __repr__(self):
+        return as_str(self)
 

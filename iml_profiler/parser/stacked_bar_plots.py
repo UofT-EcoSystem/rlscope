@@ -25,8 +25,6 @@ from iml_profiler.parser.plot_index import _DataIndex
 
 from iml_profiler.parser.common import *
 
-USEC_IN_SEC = 1e6
-
 class OverlapStackedBarPlot:
     """
     Plot overlap data output by IML across SEVERAL runs where

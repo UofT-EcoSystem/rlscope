@@ -54,6 +54,9 @@ from iml_profiler.profiler.util import args_to_cmdline
 
 from iml_profiler.parser.common import *
 
+DEFAULT_IML_TRACE_TIME_SEC = 60*2
+DEFAULT_DEBUG_IML_TRACE_TIME_SEC = 20
+
 MODES = [
     'train_stable_baselines.sh',
     'inference_stable_baselines.sh',
@@ -75,6 +78,30 @@ STABLE_BASELINES_ANNOTATED_ALGOS = [
 STABLE_BASELINES_AVAIL_ENV_IDS = None
 STABLE_BASELINES_UNAVAIL_ENV_IDS = None
 
+def add_config_options(pars):
+    pars.add_argument(
+        '--config',
+        default='instrumented',
+        choices=['instrumented', 'uninstrumented', 'instrumented_full', 'uninstrumented_full'],
+        help=
+        textwrap.dedent("""
+        instrumented:
+            Run the script with IML enabled for the entire duration of training (if --iml-trace-time-sec), 
+            record start/end timestamps.
+            $ train.py --iml-directory ...
+            # NOTE: don't use --iml-trace-time-sec here, we want to collect traces for the whole run
+            
+        uninstrumented:
+            Run the script with IML disabled, record start/end timestamp at start/end of training script
+            $ train.py --iml-disable
+            
+        instrumented_full:
+            Run for the ENTIRE training duration (don't stop early)
+            
+        uninstrumented_full:
+            Run for the ENTIRE training duration (don't stop early)
+        """))
+
 def add_stable_baselines_options(pars):
     pars.add_argument(
         '--algo',
@@ -84,6 +111,9 @@ def add_stable_baselines_options(pars):
         '--env-id',
         choices=STABLE_BASELINES_ENV_IDS,
         help='environment to run')
+    pars.add_argument(
+        '--iml-trace-time-sec',
+        help='IML: How long to trace for? (option added by IML to train.py)')
     pars.add_argument(
         '--bullet',
         action='store_true',
@@ -119,6 +149,9 @@ def main():
 
     parser.add_argument(
         '--debug',
+        action='store_true')
+    parser.add_argument(
+        '--iml-debug',
         action='store_true')
     # Don't support --pdb for iml-bench since I haven't figured out how to
     # both (1) log stdout/stderr of a command, (2) allow pdb debugger prompt
@@ -185,6 +218,7 @@ def main():
         plot-stable-baselines:
           plots
         """.rstrip()))
+    add_config_options(parser)
 
     subparsers = parser.add_subparsers(
         dest='subcommand',
@@ -328,6 +362,9 @@ class Experiment:
             return False
         if bullet and not is_bullet_env(env_id):
             return False
+        # if re.search('Acrobat', env_id):
+        #     # Skip Acrobat environment for --analyze and for runs.
+        #     return False
         return True
 
     def _gather_algo_env_pairs(self, algo=None, env_id=None, all=False, bullet=False, debug=False):
@@ -446,6 +483,8 @@ class ExperimentGroup(Experiment):
 
         args = self.args
 
+        os.makedirs(self.root_iml_directory, exist_ok=True)
+
         subparser = self.args.subparser
         # Not multiprocessing friendly (cannot pickle)
         del self.args.subparser
@@ -480,12 +519,16 @@ class ExperimentGroup(Experiment):
         if args.mode in ['all', 'run']:
             self.will_run = True
 
-        if args.mode in ['plot']:
+        if args.mode in ['plot'] and args.config == 'instrumented':
             self.will_plot = True
 
         # def _run(expr, train_stable_baselines_opts, stacked_args):
         #     self.iml_bench(parser, subparser, 'train_stable_baselines.sh', train_stable_baselines_opts, suffix=bench_log(expr))
         #     self.stacked_plot(stacked_args, train_stable_baselines_opts, suffix=plot_log(expr))
+
+
+        # TODO: Run all the same experiments, BUT, under a different configuration.
+        # We only want to plot stuff during the "extrapolated" configuration.
 
         # (1) On vs off policy:
         expr = 'on_vs_off_policy'
@@ -680,8 +723,15 @@ class ExperimentGroup(Experiment):
     def pairs_by_env(self, env):
         return set((a, e) for a, e in self.algo_env_pairs() if e == env)
 
+    @property
+    def root_iml_directory(self):
+        args = self.args
+        root_iml_directory = get_root_iml_directory(args.config, args.dir)
+        return root_iml_directory
+
     def iml_directory(self, algo, env_id):
-        iml_directory = _j(self.args.dir, algo, env_id)
+        args = self.args
+        iml_directory = get_iml_directory(args.config, args.dir, algo, env_id)
         return iml_directory
 
     def _is_env_dir(self, path):
@@ -701,7 +751,9 @@ class ExperimentGroup(Experiment):
     def algo_env_pairs(self, has_machine_util=False):
         args = self.args
         algo_env_pairs = []
-        for algo_path in glob(_j(args.dir, '*')):
+        for algo_path in glob(_j(self.root_iml_directory, '*')):
+            if is_config_dir(algo_path):
+                continue
             if not self._is_algo_dir(algo_path):
                 logging.info("Skip algo_path={dir}".format(dir=algo_path))
                 continue
@@ -802,7 +854,7 @@ class ExperimentGroup(Experiment):
 
         cmd.extend([
             # Output directory for the png plots.
-            '--directory', args.dir,
+            '--directory', self.root_iml_directory,
             # Add expr-name to png.
             '--suffix', suffix,
         ])
@@ -854,7 +906,7 @@ class ExperimentGroup(Experiment):
 
             util_task_cmd.extend([
                 # Output directory for the png plots.
-                '--directory', args.dir,
+                '--directory', self.root_iml_directory,
                 # Add expr-name to png.
                 '--suffix', suffix,
             ])
@@ -874,11 +926,11 @@ class ExperimentGroup(Experiment):
             ]
             if args.debug:
                 util_plot_cmd.append('--debug')
-            util_csv = _j(args.dir, "overall_machine_util.raw.csv")
+            util_csv = _j(self.root_iml_directory, "overall_machine_util.raw.csv")
             util_plot_cmd.extend([
                 '--csv', util_csv,
                 # Output directory for the png plots.
-                '--directory', args.dir,
+                '--directory', self.root_iml_directory,
                 # Add expr-name to png.
                 '--suffix', suffix,
             ])
@@ -893,7 +945,7 @@ class ExperimentGroup(Experiment):
         _util_csv(algo_env_pairs)
         _util_plot()
 
-    def iml_bench(self, parser, subparser, subcommand, subcmd_args, suffix='log'):
+    def iml_bench(self, parser, subparser, subcommand, subcmd_args, suffix='log', env=None):
         args = self.args
         if not self.will_run:
             return
@@ -901,7 +953,7 @@ class ExperimentGroup(Experiment):
         cmd = main_cmd + subcmd_args
         to_file = self._get_logfile(suffix=suffix)
         logging.info("Logging iml-bench to file {path}".format(path=to_file))
-        self._run_cmd(cmd=cmd, to_file=to_file)
+        self._run_cmd(cmd=cmd, to_file=to_file, env=env)
 
     def _get_main_cmd(self, parser, subparser, subcommand):
         args = self.args
@@ -926,7 +978,7 @@ class ExperimentGroup(Experiment):
     def _get_logfile(self, suffix='log'):
         args = self.args
 
-        to_file = _j(args.dir, '{sub}.{suffix}'.format(
+        to_file = _j(self.root_iml_directory, '{sub}.{suffix}'.format(
             sub=self._sub_cmd,
             suffix=suffix,
         ))
@@ -966,14 +1018,38 @@ class StableBaselines(Experiment):
         else:
             cmd = ['ls', "-l"]
 
-        to_file = _j(args.dir, 'error.txt')
+        to_file = _j(self.root_iml_directory, 'error.txt')
 
         self._run_cmd(cmd=cmd, to_file=to_file)
+
+    @property
+    def iml_trace_time_sec(self):
+        args = self.args
+        if args.iml_trace_time_sec is not None:
+            return args.iml_trace_time_sec
+        if args.debug:
+            return DEFAULT_DEBUG_IML_TRACE_TIME_SEC
+        return DEFAULT_IML_TRACE_TIME_SEC
+
+    def _config_opts(self):
+        args = self.args
+
+        opts = []
+
+        if not config_is_full(args.config):
+            # If we DON'T want to run for the full training duration add --iml-trace-time-sec
+            opts.extend(['--iml-trace-time-sec', self.iml_trace_time_sec])
+
+        if config_is_uninstrumented(args.config):
+            # If we want to run uninstrumented, add --iml-disable, but still record training progress
+            opts.extend(['--iml-disable', '--iml-training-progress'])
+
+        return opts
 
     def _get_logfile(self, algo, env_id, suffix='log'):
         args = self.args
 
-        to_file = _j(args.dir, '{sub}.algo_{algo}.env_id_{env_id}.{suffix}'.format(
+        to_file = _j(self.root_iml_directory, '{sub}.algo_{algo}.env_id_{env_id}.{suffix}'.format(
             sub=self._sub_cmd,
             algo=algo,
             env_id=env_id,
@@ -981,8 +1057,15 @@ class StableBaselines(Experiment):
         ))
         return to_file
 
+    @property
+    def root_iml_directory(self):
+        args = self.args
+        root_iml_directory = get_root_iml_directory(args.config, args.dir)
+        return root_iml_directory
+
     def iml_directory(self, algo, env_id):
-        iml_directory = _j(self.args.dir, algo, env_id)
+        args = self.args
+        iml_directory = get_iml_directory(args.config, args.dir, algo, env_id)
         return iml_directory
 
     def _sh_env(self, algo, env_id):
@@ -994,6 +1077,9 @@ class StableBaselines(Experiment):
         if args.debug:
             env['DEBUG'] = 'yes'
 
+        if args.iml_trace_time_sec is not None:
+            env['IML_TRACE_TIME_SEC'] = str(args.iml_trace_time_sec)
+
         return env
 
     def _run(self, algo, env_id):
@@ -1001,6 +1087,10 @@ class StableBaselines(Experiment):
 
         iml_directory = self.iml_directory(algo, env_id)
         cmd = [args.subcommand, "--iml-directory", iml_directory]
+        if args.iml_debug:
+            cmd.append('--iml-debug')
+        config_opts = self._config_opts()
+        cmd.extend(config_opts)
 
         env = self._sh_env(algo, env_id)
 
@@ -1011,6 +1101,8 @@ class StableBaselines(Experiment):
 
     def run(self, parser):
         args = self.args
+
+        os.makedirs(self.root_iml_directory, exist_ok=True)
 
         subparser = self.args.subparser
         # Not multiprocessing friendly (cannot pickle)
@@ -1026,6 +1118,13 @@ class StableBaselines(Experiment):
         if args.env_id is not None and args.env_id in STABLE_BASELINES_UNAVAIL_ENV_IDS:
             print("ERROR: env_id={env} is not available since gym.make('{env}') failed.".format(
                 env=args.env_id))
+            sys.exit(1)
+
+        if args.analyze and config_is_uninstrumented(args.config):
+            logging.info(("Cannot run iml-analyze on --config={config}; config must be instrumented "
+                          "(e.g. --config instrumented), otherwise there are no IML traces to process.").format(
+                config=args.config,
+            ))
             sys.exit(1)
 
         algo_env_pairs = self._gather_algo_env_pairs(
@@ -1055,6 +1154,10 @@ class StableBaselines(Experiment):
                 self._run(algo, env_id)
 
 def tee(cmd, to_file, append=False, check=True, dry_run=False, **kwargs):
+
+    # In case there are int's or float's in cmd.
+    cmd = [str(opt) for opt in cmd]
+
     if dry_run:
         print_cmd(cmd, files=[sys.stdout], env=kwargs.get('env', None), dry_run=dry_run)
         return
@@ -1062,16 +1165,50 @@ def tee(cmd, to_file, append=False, check=True, dry_run=False, **kwargs):
     with ScopedLogFile(to_file, append) as f:
         print_cmd(cmd, files=[sys.stdout, f], env=kwargs.get('env', None))
 
-        p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, bufsize=1, **kwargs)
+        # NOTE: Regarding the bug mentioned below, using p.communicate() STILL hangs.
+        #
+        # p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, **kwargs)
+        # with p:
+        #     outs, errs = p.communicate()
+        #     sys.stdout.write(outs)
+        #     sys.stdout.write(errs)
+        #     sys.stdout.flush()
+        #
+        #     f.write(outs)
+        #     f.write(errs)
+        #     f.flush()
+
+        p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, **kwargs)
         with p:
             # NOTE: if this blocks it may be because there's a zombie utilization_sampler.py still running
             # (that was created by the training script) that hasn't been terminated!
-            for line in p.stdout:
+            # for line in p.stdout:
+
+            while True:
+
+                rc = p.poll()
+                if rc is not None:
+                    break
+
+                # BUG: SOMETIMES (I don't know WHY), this line will HANG even after
+                # train_stable_baselines.sh is terminated (it shows up as a Zombie process in htop/top).
+                # Sadly, this only happens occasionally, and I have yet to understand WHY it happens.
+                line = p.stdout.readline()
+
                 # b'\n'-separated lines
                 line = line.decode("utf-8")
+
+                if line == '':
+                    break
+
                 sys.stdout.write(line)
+                sys.stdout.flush()
+
                 f.write(line)
+                f.flush()
+        sys.stdout.flush()
         f.flush()
+
         if check and p.returncode != 0:
             raise subprocess.CalledProcessError(p.returncode, p.args)
         return p
@@ -1240,6 +1377,25 @@ STABLE_BASELINES_ENV_IDS = sorted(set(expr.env_id for expr in STABLE_BASELINES_E
 
 def is_bullet_env(env_id):
     return re.search(r'BulletEnv', env_id)
+
+def get_root_iml_directory(config, direc):
+    # if config == 'instrumented':
+    #     # The default run --config.
+    #     # Run IML for 2 minutes and collect full traces.
+    #     iml_directory = direc
+    # else:
+    #     # Either 'instrumented' or 'uninstrumented'.
+    #     # Add a --config sub-directory.
+    #     config_dir = "config_{config}".format(config=config)
+    #     iml_directory = _j(direc, config_dir)
+    config_dir = "config_{config}".format(config=config)
+    iml_directory = _j(direc, config_dir)
+    return iml_directory
+
+def get_iml_directory(config, direc, algo, env_id):
+    root_iml_directory = get_root_iml_directory(config, direc)
+    iml_directory = _j(root_iml_directory, algo, env_id)
+    return iml_directory
 
 if __name__ == '__main__':
     main()

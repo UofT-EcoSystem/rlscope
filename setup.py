@@ -6,6 +6,7 @@
 from os.path import join as _j, abspath as _a, exists as _e, dirname as _d, basename as _b
 
 import fnmatch
+import shlex
 import os
 import re
 import subprocess
@@ -19,7 +20,53 @@ from setuptools import setup
 # from distutils.command.clean import clean as _clean
 from distutils.spawn import find_executable
 
-DEBUG = False
+# DEBUG = False
+DEBUG = True
+
+def cmd_debug_msg(cmd, env=None, dry_run=False):
+    if type(cmd) == list:
+        cmd_str = " ".join([shlex.quote(str(x)) for x in cmd])
+    else:
+        cmd_str = cmd
+
+    lines = []
+    if dry_run:
+        lines.append("> CMD [dry-run]:")
+    else:
+        lines.append("> CMD:")
+    lines.extend([
+        "  $ {cmd}".format(cmd=cmd_str),
+        "  PWD={pwd}".format(pwd=os.getcwd()),
+    ])
+
+    if env is not None and len(env) > 0:
+        env_vars = sorted(env.keys())
+        lines.append("  Environment:")
+        for var in env_vars:
+            lines.append("    {var}={val}".format(
+                var=var,
+                val=env[var]))
+    string = '\n'.join(lines)
+
+    return string
+
+# def log_cmd(cmd, env=None, dry_run=False):
+#     string = cmd_debug_msg(cmd, env=env, dry_run=dry_run)
+#
+#     logging.info(string)
+
+def print_cmd(cmd, files=sys.stdout, env=None, dry_run=False):
+    string = cmd_debug_msg(cmd, env=env, dry_run=dry_run)
+
+    if type(files) not in [set, list]:
+        if type(files) in [list]:
+            files = set(files)
+        else:
+            files = set([files])
+
+    for f in files:
+        print(string, file=f)
+        f.flush()
 
 # Find the Protocol Compiler.
 if 'PROTOC' in os.environ and os.path.exists(os.environ['PROTOC']):
@@ -114,7 +161,7 @@ def find_files(pattern, root):
       for filename in fnmatch.filter(files, pattern):
           yield os.path.join(direc, filename)
 
-def generate_proto(source, require=True):
+def generate_proto(source, require=True, regenerate=False):
   """Invokes the Protocol Compiler to generate a _pb2.py from the given
   .proto file.  Does nothing if the output already exists and is newer than
   the input."""
@@ -124,7 +171,8 @@ def generate_proto(source, require=True):
 
   output = source.replace(".proto", "_pb2.py").replace("../src/", "")
 
-  if (not os.path.exists(output) or
+  if regenerate or (
+          not os.path.exists(output) or
           (os.path.exists(source) and
            os.path.getmtime(source) > os.path.getmtime(output))):
       print("Generating %s..." % output)
@@ -143,6 +191,7 @@ def generate_proto(source, require=True):
       # protoc -I$PWD --python_out=. prof_protobuf/*.proto
       # protoc_command = [protoc, "-I.", "--python_out=.", "{dir}/*.proto".format(
       protoc_command = [protoc, "-I.", "--python_out=.", source]
+      print_cmd(protoc_command)
       if subprocess.call(protoc_command) != 0:
           sys.exit(-1)
 
@@ -188,8 +237,8 @@ def main():
 
     def _proto(base):
         return _j(PROTOBUF_DIR, base)
-    generate_proto(_proto('pyprof.proto'))
-    generate_proto(_proto('unit_test.proto'))
+    generate_proto(_proto('pyprof.proto'), regenerate=True)
+    generate_proto(_proto('unit_test.proto'), regenerate=True)
 
     setup(
         name=project_name,

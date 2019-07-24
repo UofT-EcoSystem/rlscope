@@ -20,9 +20,11 @@ import numpy as np
 import pandas as pd
 import psutil
 import pwd
-from iml_profiler.protobuf.pyprof_pb2 import Pyprof, MachineUtilization, ProcessMetadata
+from iml_profiler.protobuf.pyprof_pb2 import Pyprof, MachineUtilization, ProcessMetadata, IncrementalTrainingProgress
 from iml_profiler.protobuf.unit_test_pb2 import IMLUnitTestOnce, IMLUnitTestMultiple
 from tqdm import tqdm as tqdm_progress
+
+USEC_IN_SEC = 1e6
 
 CATEGORY_TF_API = "Framework API C"
 CATEGORY_PYTHON = 'Python'
@@ -171,6 +173,7 @@ BENCH_PREFIX_RE = r"(:?op_(?P<bench_name>{bench})\.)?".format(bench=BENCH_NAME_R
 # we allow trace_id and session_id suffixes to be OPTIONAL.
 TRACE_SUFFIX_RE = r"(?:\.trace_(?P<trace_id>\d+))?"
 SESSION_SUFFIX_RE = r"(?:\.session_(?P<session_id>\d+))?"
+CONFIG_RE = r"(?:config_(?P<config>[^\.]+))"
 
 float_re = r'(?:[-+]?[0-9]*\.?[0-9]+([eE][-+]?[0-9]+)?)'
 
@@ -1390,6 +1393,9 @@ def read_tfprof_file(path):
 def read_machine_util_file(path):
     return read_proto(MachineUtilization, path)
 
+def read_training_progress_file(path):
+    return read_proto(IncrementalTrainingProgress, path)
+
 def read_pyprof_file(path):
     return read_proto(Pyprof, path)
 
@@ -1435,6 +1441,13 @@ def is_unit_test_multiple_file(path):
 def is_machine_util_file(path):
     base = _b(path)
     m = re.search(r'machine_util{trace}\.proto'.format(
+        trace=TRACE_SUFFIX_RE,
+    ), base)
+    return m
+
+def is_training_progress_file(path):
+    base = _b(path)
+    m = re.search(r'training_progress{trace}\.proto'.format(
         trace=TRACE_SUFFIX_RE,
     ), base)
     return m
@@ -1494,7 +1507,8 @@ def is_trace_file(path):
            is_unit_test_once_file(path) or \
            is_unit_test_multiple_file(path) or \
            is_config_file(path) or \
-           is_process_metadata_file(path)
+           is_process_metadata_file(path) or \
+           is_training_progress_file(path)
 
 def is_process_trace_file(path):
     """
@@ -1503,6 +1517,19 @@ def is_process_trace_file(path):
     return is_tfprof_file(path) or \
            is_pyprof_file(path) or is_dump_event_file(path) or \
            is_pyprof_call_times_file(path)
+
+def is_config_dir(path):
+    return os.path.isdir(path) and re.search(CONFIG_RE, _b(path))
+
+def config_is_uninstrumented(config):
+    return re.search(r'uninstrumented', config)
+
+def config_is_instrumented(config):
+    return not config_is_uninstrumented(config) and re.search(r'instrumented', config)
+
+def config_is_full(config):
+    # Does this config run for the full training run (i.e. all timesteps)?
+    return re.search(r'_full', config)
 
 def is_config_file(path):
     base = _b(path)
