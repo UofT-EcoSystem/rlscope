@@ -18,6 +18,7 @@ from iml_profiler.parser import stacked_bar_plots
 
 from iml_profiler.profiler import iml_logging
 
+import PIL
 
 class TrainingProgressParser:
     """
@@ -275,7 +276,11 @@ class TrainingProgressParser:
         # CONCERN: don't want to mix config=uninstrumented with config=uninstrumented_full
         ins_df = keep_agg_df[keep_agg_df['config'].apply(lambda config: bool(config_is_instrumented(config)))]
         ins_df = ins_df.set_index(join_cols)
-        assert ins_df.index.is_unique
+        # We can have multiple different configurations:
+        # - config_instrumented
+        # - config_instrumented_no_pyprof
+        # - config_instrumented_no_tfprof
+        # assert ins_df.index.is_unique
         unins_df = keep_agg_df[keep_agg_df['config'].apply(lambda config: bool(config_is_uninstrumented(config)))]
         unins_df = unins_df.set_index(join_cols)
         assert unins_df.index.is_unique
@@ -297,6 +302,81 @@ class TrainingProgressParser:
         # logging.info("Output min/max/std aggregated machine utilization data @ {path}".format(path=self._agg_csv_path))
         # flat_df_agg.to_csv(self._agg_csv_path, index=False)
 
+        # if conf == 'instrumented':
+        #     label = 'Full IML'
+        # elif conf == 'uninstrumented':
+        #     label = 'Uninstrumented'
+        # elif conf == 'instrumented_no_pyprof':
+        #     label = 'Only tfprof tracing + dumping'
+        # elif conf == 'instrumented_no_tfprof':
+        #     label = 'Only pyprof tracing + dumping'
+        # elif conf == 'instrumented_no_pyprof_no_tfdump':
+        #     label = 'Only tfprof tracing'
+        # elif conf == 'instrumented_no_tfprof_no_pydump':
+        #     label = 'Only pyprof tracing'
+        # elif conf == 'instrumented_no_tfprof_no_pydump_no_pytrace':
+        #     label = r'Only Python$\rightarrow$C++ call interception + no-op func-calls'
+        # elif conf == 'instrumented_no_tfprof_no_pyprof':
+        #     label = r'Only Python$\rightarrow$C++ call interception'
+        # # VERY hard-coded configuration labels
+        # elif conf == 'instrumented_no_tfprof_no_pydump_no_pytrace_02_skip_call_wrapper':
+        #     label = r'Only Python$\rightarrow$C++ call interception (again)'
+        # else:
+        #     label = self.config_pretty(config)
+
+ProfilingOverheadPlot_presets = {
+    'tfprof': {
+        'label_map': {
+            'config_instrumented': 'Full IML',
+            'config_instrumented_no_pyprof': '$-$ pyprof tracing/dumping',
+            'config_instrumented_no_pyprof_cupti_empty_tracing_callbacks_cupti_skip_register_cupti_callbacks': '$-$ libcupti event record callbacks',
+            'config_instrumented_no_pyprof_cupti_empty_tracing_callbacks_cupti_skip_register_cupti_callbacks_disable_cpu_profiling': '$-$ record TensorFlow C++ CPU events',
+            'config_instrumented_no_pyprof_cupti_empty_tracing_callbacks_cupti_skip_register_cupti_callbacks_disable_cpu_profiling_cupti_skip_register_activity': '$-$ enable libcupti activity',
+            'config_instrumented_no_pyprof_cupti_empty_tracing_callbacks_cupti_skip_register_cupti_callbacks_disable_cpu_profiling_cupti_skip_register_activity_debug_loadlib': '$-$ dlopen(libcupti) on critical path',
+            'config_instrumented_no_pyprof_cupti_empty_tracing_callbacks_cupti_skip_register_cupti_callbacks_disable_cpu_profiling_cupti_skip_register_activity_debug_loadlib_disable_cupti': '$-$ dlopen(libcupti)',
+            'config_instrumented_no_pyprof_cupti_empty_tracing_callbacks_cupti_skip_register_cupti_callbacks_disable_cpu_profiling_cupti_skip_register_activity_debug_loadlib_disable_cupti_disable_sessionrun': '$-$ session.run() python wrapper',
+            'config_instrumented_no_tfprof_no_pyprof': r'Only Python$\rightarrow$C++ call interception',
+            'config_uninstrumented': 'Uninstrumented',
+        },
+        'config_order': [
+            'config_instrumented',
+            'config_instrumented_no_pyprof',
+            'config_instrumented_no_pyprof_cupti_empty_tracing_callbacks_cupti_skip_register_cupti_callbacks',
+            'config_instrumented_no_pyprof_cupti_empty_tracing_callbacks_cupti_skip_register_cupti_callbacks_disable_cpu_profiling',
+            'config_instrumented_no_pyprof_cupti_empty_tracing_callbacks_cupti_skip_register_cupti_callbacks_disable_cpu_profiling_cupti_skip_register_activity',
+            'config_instrumented_no_pyprof_cupti_empty_tracing_callbacks_cupti_skip_register_cupti_callbacks_disable_cpu_profiling_cupti_skip_register_activity_debug_loadlib',
+            'config_instrumented_no_pyprof_cupti_empty_tracing_callbacks_cupti_skip_register_cupti_callbacks_disable_cpu_profiling_cupti_skip_register_activity_debug_loadlib_disable_cupti',
+            'config_instrumented_no_pyprof_cupti_empty_tracing_callbacks_cupti_skip_register_cupti_callbacks_disable_cpu_profiling_cupti_skip_register_activity_debug_loadlib_disable_cupti_disable_sessionrun',
+            'config_instrumented_no_tfprof_no_pyprof',
+            'config_uninstrumented',
+        ],
+    },
+    'pyprof': {
+        'label_map': {
+            'config_instrumented': 'Full IML',
+            # 'config_instrumented_no_pyprof_no_tfdump': '$-$ tfprof dump',
+            'config_instrumented_no_tfprof': '$-$ tfprof tracing/dumping',
+            'config_instrumented_no_tfprof_no_pydump': '$-$ pyprof dump',
+            'config_instrumented_no_tfprof_no_pydump_no_pytrace': r'$-$ pyprof tracing: Python$\rightarrow$C++ call interception $+$ no-op func-calls',
+            # 'config_instrumented_no_tfprof_no_pydump_no_pytrace_02_skip_call_wrapper': '',
+            'config_instrumented_no_tfprof_no_pyprof': r'Only Python$\rightarrow$C++ call interception',
+            'config_uninstrumented': 'Uninstrumented',
+            'config_instrumented_no_tfprof_python_profiler': '$+$ native C python profiler',
+        },
+        'config_order': [
+            'config_instrumented',
+            # 'config_instrumented_no_pyprof_no_tfdump',
+            'config_instrumented_no_tfprof',
+            'config_instrumented_no_tfprof_no_pydump',
+            'config_instrumented_no_tfprof_no_pydump_no_pytrace',
+            'config_instrumented_no_tfprof_no_pydump_no_pytrace_02_skip_call_wrapper',
+            'config_instrumented_no_tfprof_no_pyprof',
+            'config_uninstrumented',
+            'config_instrumented_no_tfprof_python_profiler',
+        ],
+    }
+}
+
 class ProfilingOverheadPlot:
     def __init__(self,
                  csv,
@@ -304,6 +384,8 @@ class ProfilingOverheadPlot:
                  x_type,
                  y_title=None,
                  suffix=None,
+                 stacked=False,
+                 preset=None,
                  rotation=45.,
                  width=None,
                  height=None,
@@ -316,13 +398,91 @@ class ProfilingOverheadPlot:
         self.y_title = y_title
         self.rotation = rotation
         self.suffix = suffix
+        self.stacked = stacked
+        self.preset_conf = None
+        self.preset = preset
+        if self.preset is not None:
+            self.preset_conf = ProfilingOverheadPlot_presets[self.preset]
+            self.preset_config_set = set(self.preset_conf['config_order'])
+            # assert set(self.preset_conf['label_map'].keys()).issubset(set(self.preset_conf['config_order']))
+            for config in self.preset_conf['label_map'].keys():
+                assert config in self.preset_config_set
+            assert 'config_uninstrumented' in self.preset_conf['config_order']
         self.width = width
         self.height = height
         self.debug = debug
 
+    def as_legend_label(self, config):
+        if self.preset_conf is not None and config in self.preset_conf['label_map']:
+            label = self.preset_conf['label_map'][config]
+            return label
+
+        # Hard-coded labels.
+        #
+        # Instrumented:
+        # 	- Includes all IML overhead:
+        # 		- Tfprof/pyorof trace collection
+        # 		- Tfprof/pyprof trace dumping
+        #
+        # Instrumented No Pyprof:
+        # - Just overhead of tfprof tracing/dumping
+        #
+        # Instrumented No Tfprof:
+        # - Just overhead of pyprof tracing/dumping
+        #
+        # Instrumented No Tfprof No Pydump:
+        # - Just overhead of pyprof tracing
+        #
+        # Instrumented No Pyprof No Tfdump:
+        # - Just overhead of tfprof tracing
+        #
+        # Instrumented No Tfprof No Pyprof:
+        # - This just includes the overhead of creating wrapper-functions
+        #   in python for intercepting Python->Tensorflow and Python->Simulator
+        #   calls (not no event recording)
+
+        conf = re.sub(r'^config_', '', config)
+
+        if conf == 'instrumented':
+            label = 'Full IML'
+        elif conf == 'uninstrumented':
+            label = 'Uninstrumented'
+        elif conf == 'instrumented_no_pyprof':
+            label = 'Only tfprof tracing + dumping'
+        elif conf == 'instrumented_no_tfprof':
+            label = 'Only pyprof tracing + dumping'
+        elif conf == 'instrumented_no_pyprof_no_tfdump':
+            label = 'Only tfprof tracing'
+        elif conf == 'instrumented_no_tfprof_no_pydump':
+            label = 'Only pyprof tracing'
+        elif conf == 'instrumented_no_tfprof_no_pydump_no_pytrace':
+            label = r'Only Python$\rightarrow$C++ call interception + no-op func-calls'
+        elif conf == 'instrumented_no_tfprof_no_pyprof':
+            label = r'Only Python$\rightarrow$C++ call interception'
+        # VERY hard-coded configuration labels
+        elif conf == 'instrumented_no_tfprof_no_pydump_no_pytrace_02_skip_call_wrapper':
+            label = r'Only Python$\rightarrow$C++ call interception (again)'
+        else:
+            label = self.config_pretty(config)
+
+        return label
+
+    def config_pretty(self, config):
+        m = re.search(r'^config_(?P<config>.*)', config)
+        conf = m.group('config')
+        def upper_repl_01(m):
+            return ' ' + m.group(1).upper()
+        conf = re.sub(r'_(\w)', upper_repl_01, conf)
+        def upper_repl_02(m):
+            return m.group(1).upper()
+        conf = re.sub(r'^(\w)', upper_repl_02, conf)
+        return conf
+
     def _read_df(self):
         self.df = pd.read_csv(self.csv)
 
+        ## Add x_field = (algo, env_id)
+        ##
         x_fields = []
         for index, row in self.df.iterrows():
             if 'env' in row:
@@ -333,15 +493,97 @@ class ProfilingOverheadPlot:
             x_fields.append(x_field)
         self.df['x_field'] = x_fields
 
+
+        ## Un-join the instrumented/uninstrumented configs
+        ##
+        # We want data that looks like:
+        # algo, env, config,         x_field, total_training_time_sec
+        # ppo2  Pong uninstrumented      ...                      ...
+        # ppo2  Pong instrumented        ...                      ...
+        #
+        # To achieve that, we need to:
+        # - For each row, split it into two rows, one for ins, one for unins.
+        def is_ins(colname):
+            return bool(re.search(r'_ins$', colname))
+        def is_unins(colname):
+            return bool(re.search(r'_unins$', colname))
+        def remove_suffix(colname):
+            m = re.search(r'(?P<col>.*)_(?P<suffix>ins|unins)$', colname)
+            return m.group('col')
+        def is_common_row(colname):
+            return not is_ins(colname) and not is_unins(colname)
+        rows = []
+        common_cols = [col for col in self.df.keys() if is_common_row(col)]
+        ins_cols = [col for col in self.df.keys() if is_ins(col)]
+        # unins_cols = [col for col in self.df.keys() if is_unins(col)]
+        # keep_cols = set([remove_suffix(col) for col in ins_cols]).intersection(
+        #     set([remove_suffix(col) for col in ins_cols])
+        # ).union(common_cols)
+
+        def _extract_row(row, should_keep):
+            data = dict()
+            for field in row.keys():
+                if should_keep(field):
+                    new_field = remove_suffix(field)
+                    assert new_field not in data
+                    data[new_field] = [row[field]]
+                elif is_common_row(field):
+                    assert field not in data
+                    data[field] = [row[field]]
+            return pd.DataFrame(data)
+        x_fields_added = set()
+        for index, row in self.df.iterrows():
+            ins_row = _extract_row(row, is_ins)
+            rows.append(ins_row)
+            x_field = ins_row['x_field'].values[0]
+            if x_field in x_fields_added:
+                continue
+            unins_row = _extract_row(row, is_unins)
+            rows.append(unins_row)
+            x_fields_added.add(x_field)
+        self.df = pd.concat(rows)
+
+        self.df['config_pretty'] = self.df['config'].apply(self.as_legend_label)
+
+        self.plot_data_fields = ['x_field', 'total_trace_time_sec', 'profiling_overhead_percent', 'config_pretty']
+
+        ## Only keep config's used in preset conf.
+        ##
+        if self.preset_conf is not None:
+            logging.info("Using preset = {preset}: only keep these configs: {conf}".format(
+                preset=self.preset,
+                conf=sorted(self.preset_config_set)))
+            def is_preset_config(config):
+                return config in self.preset_config_set
+            self.df = self.df[self.df['config'].apply(is_preset_config)]
+
+            config_order_map = dict((config, i) for i, config in enumerate(self.preset_conf['config_order']))
+            def as_config_order(config):
+                return config_order_map[config]
+            self.df['config_order'] = self.df['config'].apply(as_config_order)
+
+            # sort data by:
+            # (algo, env, config_order)
+            self.df = self.df.sort_values(by=['algo', 'env_id', 'config_order'])
+
+        # Allows df.loc[row_index]
+        self.df = self.df.reset_index()
+
     def run(self):
         self._read_df()
         self.plot()
 
     def _get_plot_path(self, ext):
-        if self.suffix is not None:
-            suffix_str = '.{suffix}'.format(suffix=self.suffix)
-        else:
-            suffix_str = ''
+
+        def _add(suffix_str, string):
+            if string is not None:
+                suffix_str = '{s}.{string}'.format(s=suffix_str, string=string)
+            return suffix_str
+
+        suffix_str = ''
+        suffix_str = _add(suffix_str, self.suffix)
+        suffix_str = _add(suffix_str, self.preset)
+
         return _j(self.directory, "ProfilingOverheadPlot{suffix}.{ext}".format(
             suffix=suffix_str,
             ext=ext,
@@ -364,7 +606,9 @@ class ProfilingOverheadPlot:
             figsize = None
         # This is causing XIO error....
         fig = plt.figure(figsize=figsize)
-
+        ax = fig.add_subplot(111)
+        figlegend = plt.figure()
+        ax_leg = figlegend.add_subplot(111)
 
         # ax = fig.add_subplot(111)
         # ax2 = None
@@ -406,89 +650,48 @@ class ProfilingOverheadPlot:
         #                  showfliers=False,
         #                  )
 
-        # We want data that looks like:
-        # algo, env, config,         x_field, total_training_time_sec
-        # ppo2  Pong uninstrumented      ...                      ...
-        # ppo2  Pong instrumented        ...                      ...
-        #
-        # To achieve that, we need to:
-        # - For each row, split it into two rows, one for ins, one for unins.
-        def is_ins(colname):
-            return bool(re.search(r'_ins$', colname))
-        def is_unins(colname):
-            return bool(re.search(r'_unins$', colname))
-        def remove_suffix(colname):
-            m = re.search(r'(?P<col>.*)_(?P<suffix>ins|unins)$', colname)
-            return m.group('col')
-        def is_common_row(colname):
-            return not is_ins(colname) and not is_unins(colname)
-        rows = []
-        common_cols = [col for col in self.df.keys() if is_common_row(col)]
-        ins_cols = [col for col in self.df.keys() if is_ins(col)]
-        # unins_cols = [col for col in self.df.keys() if is_unins(col)]
-        # keep_cols = set([remove_suffix(col) for col in ins_cols]).intersection(
-        #     set([remove_suffix(col) for col in ins_cols])
-        # ).union(common_cols)
+        logging.info(pprint_msg(self.df[self.plot_data_fields]))
+        ax = sns.barplot(x='x_field', y='total_trace_time_sec', hue='config_pretty', data=self.df,
+                         ax=ax)
+        ax.get_legend().remove()
 
-        def _extract_row(row, should_keep):
-            data = dict()
-            for field in row.keys():
-                if should_keep(field):
-                    new_field = remove_suffix(field)
-                    assert new_field not in data
-                    data[new_field] = [row[field]]
-                elif is_common_row(field):
-                    assert field not in data
-                    data[field] = [row[field]]
-            return pd.DataFrame(data)
-        for index, row in self.df.iterrows():
-            ins_row = _extract_row(row, is_ins)
-            unins_row = _extract_row(row, is_unins)
-            rows.append(ins_row)
-            rows.append(unins_row)
-        df = pd.concat(rows)
-        # Allows df.loc[row_index]
-        df = df.reset_index()
-
-        def config_pretty(config):
-            m = re.search(r'^config_(?P<config>.*)', config)
-            conf = m.group('config')
-            def upper_repl_01(m):
-                return ' ' + m.group(1).upper()
-            conf = re.sub(r'_(\w)', upper_repl_01, conf)
-            def upper_repl_02(m):
-                return m.group(1).upper()
-            conf = re.sub(r'^(\w)', upper_repl_02, conf)
-            return conf
-
-        df['config_pretty'] = df['config'].apply(config_pretty)
-
-        plot_data_fields = ['x_field', 'total_trace_time_sec', 'profiling_overhead_percent', 'config_pretty']
-        logging.info(pprint_msg(df[plot_data_fields]))
-        ax = sns.barplot(x='x_field', y='total_trace_time_sec', hue='config_pretty', data=df)
-        leg = ax.legend()
-        leg.set_title(None)
+        # leg = ax.legend()
+        # leg.set_title(None)
 
         # PROBLEM: (a2c, half-cheetah) profile percent is shown as 188%, but it's actually 222...
         # 188 is the (ppo, half-cheetah) result...
         # TODO: index by x_field, retrieve x_field from plot/patches.
 
         def add_percent_bar_labels(df, ax):
-            logging.info(pprint_msg({
-                'len(patches)': len(ax.patches),
-                'len(df)': len(df),
-            }))
             xticklabels = ax.get_xticklabels()
             xticks = ax.get_xticks()
             ins_df = df[df['config'].apply(lambda config: bool(config_is_instrumented(config)))]
             bar_width = ax.patches[0].get_width()
             xticklabel_to_xtick = dict()
+
+            num_bars = len(set(df['config']))
+            bar_order = dict()
+            i = 0
+            for config in df['config']:
+                if config not in bar_order:
+                    bar_order[config] = i
+                    i += 1
+
+            logging.info(pprint_msg({
+                'len(patches)': len(ax.patches),
+                'len(df)': len(df),
+                'bar_width': bar_width,
+                'bar_order': bar_order,
+            }))
+
             for xtick, xticklabel in zip(xticks, xticklabels):
                 xticklabel_to_xtick[xticklabel.get_text()] = xtick
+
             for i in range(len(ins_df)):
                 row = ins_df.iloc[i]
 
                 x_field = row['x_field']
+                config = row['config']
 
                 # Keep single decimal place.
                 # bar_label = "{perc:.1f}%".format(
@@ -503,9 +706,30 @@ class ProfilingOverheadPlot:
                     perc=profiling_overhead_percent)
 
                 total_trace_time_sec = row['total_trace_time_sec']
+                #  _   _
+                # | |_| |_
+                # | | | | |
+                # |_|_|_|_|
+                #     |
+                # ---------
+                # bar_width
+                # bar_order = 0, 1, 2, 3
+                #
+                # Middle tick "|" is at xtick.
+                # Bars are located at:
+                # 1) xtick - 2*bar_width
+                # 2) xtick - 1*bar_width
+                # 3) xtick
+                # 4) xtick + 1*bar_width
+                #
+                # num_bars = 4
+                #
+                # In general, bars are located at:
+                #   xtick + (bar_order - num_bars/2)*bar_width
 
                 xtick = xticklabel_to_xtick[x_field]
-                pos = (xtick - bar_width / 2, total_trace_time_sec)
+                # pos = (xtick - bar_width / 2, total_trace_time_sec)
+                pos = (xtick + (bar_order[config] - num_bars/2)*bar_width + bar_width/2, total_trace_time_sec)
 
                 logging.info(pprint_msg({
                     'bar_label': bar_label,
@@ -522,7 +746,7 @@ class ProfilingOverheadPlot:
                     xytext=(0, 10),
                     textcoords='offset points')
 
-        add_percent_bar_labels(df, ax)
+        add_percent_bar_labels(self.df, ax)
 
 
         # groupby_cols = ['algo', 'env_id']
@@ -565,9 +789,13 @@ class ProfilingOverheadPlot:
         fig.savefig(png_path)
         plt.close(fig)
 
-        # figlegend.tight_layout()
-        # figlegend.savefig(self.legend_path, bbox_inches='tight', pad_inches=0)
-        # plt.close(figlegend)
+        leg = ax_leg.legend(*ax.get_legend_handles_labels(), loc='center')
+        ax_leg.axis('off')
+        leg.set_title(None)
+        figlegend.tight_layout()
+        figlegend.savefig(self.legend_path('png'), bbox_inches='tight', pad_inches=0)
+        plt.close(figlegend)
+        trim_border(self.legend_path('png'))
 
         return
 
@@ -840,4 +1068,15 @@ def add_hierarchical_labels(fig, ax, df, label_df, groupby_cols):
     # This makes the vertical spacing between x-labels closer.
     # fig.subplots_adjust(bottom=.1*df.index.nlevels)
     fig.subplots_adjust(bottom=.1*len(groupby_cols))
+
+def trim_border(path):
+    # https://stackoverflow.com/questions/10615901/trim-whitespace-using-pil
+    im = PIL.Image.open(path)
+    bg = PIL.Image.new(im.mode, im.size, im.getpixel((0,0)))
+    diff = PIL.ImageChops.difference(im, bg)
+    diff = PIL.ImageChops.add(diff, diff, 2.0, -100)
+    bbox = diff.getbbox()
+    if bbox:
+        im = im.crop(bbox)
+        im.save(path)
 

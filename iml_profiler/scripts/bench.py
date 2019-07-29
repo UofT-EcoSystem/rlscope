@@ -79,10 +79,35 @@ STABLE_BASELINES_AVAIL_ENV_IDS = None
 STABLE_BASELINES_UNAVAIL_ENV_IDS = None
 
 def add_config_options(pars):
+
     pars.add_argument(
         '--config',
         default='instrumented',
-        choices=['instrumented', 'uninstrumented', 'instrumented_full', 'uninstrumented_full'],
+        # choices=[
+        #     'instrumented',
+        #     'instrumented_no_tfprof',
+        #     'instrumented_no_pyprof',
+        #
+        #     # Just measure tfprof trace-collection overhead (e.g. libcupti).
+        #     'instrumented_no_pyprof_no_tfdump',
+        #     # Just measure pyprof trace-collection overhead (i.e. python timestamps for wrapped TensorFlow API calls).
+        #     'instrumented_no_tfprof_no_pydump',
+        #     # Just measure small aspects of pyprof trace-collection overhead.
+        #     'instrumented_no_tfprof_no_pydump_no_pytrace',
+        #
+        #     # Sanity check: try --iml-disable-tfprof and --iml-disable-pyprof...performance SHOULD match --iml-disable…
+        #     # RESULT: holds true... Really though...pyprof is THAT BAD?
+        #     # TODO: disable pyprof dumping, JUST do collection
+        #     'instrumented_no_tfprof_no_pyprof',
+        #
+        #     'uninstrumented',
+        #
+        #     'instrumented_full',
+        #     'instrumented_full_no_tfprof',
+        #     'instrumented_full_no_pyprof',
+        #     'instrumented_full_no_tfprof_no_pyprof',
+        #
+        #     'uninstrumented_full'],
         help=
         textwrap.dedent("""
         instrumented:
@@ -277,7 +302,8 @@ def main():
         """))
     parser_stable_baselines.add_argument(
         '--expr',
-        choices=['on_vs_off_policy', 'environments', 'algorithms', 'all_rl_workloads'],
+        choices=['on_vs_off_policy', 'environments', 'algorithms', 'all_rl_workloads',
+                 'debug_prof_overhead'],
         help=textwrap.dedent("""
         Only run a specific "experiment".
         i.e. only run (algo, env) combinations needed for a specific graph.
@@ -530,11 +556,24 @@ class ExperimentGroup(Experiment):
         # TODO: Run all the same experiments, BUT, under a different configuration.
         # We only want to plot stuff during the "extrapolated" configuration.
 
+        # - Debug experiment:
+        #   Choose a particular (algo, env) to use to debug stuff on.
+        expr = 'debug_prof_overhead'
+        opts = ['--env-id', 'HalfCheetahBulletEnv-v0', '--algo', 'ppo2']
+        if self.should_run_expr(expr):
+            self.iml_bench(parser, subparser, 'train_stable_baselines.sh', opts, suffix=bench_log(expr))
+            # overlap_type = 'ResourceOverlap'
+            # self.stacked_plot([
+            #     '--overlap-type', overlap_type,
+            #     '--y-type', 'percent',
+            #     '--x-type', 'algo-comparison',
+            #     '--training-time',
+            # ], suffix=plot_log(expr, overlap_type), train_stable_baselines_opts=opts)
+
         # (1) On vs off policy:
         expr = 'on_vs_off_policy'
         opts = ['--env-id', 'PongNoFrameskip-v4']
         if self.should_run_expr(expr):
-            logging.info("Running expr = {expr}".format(expr=expr))
             self.iml_bench(parser, subparser, 'train_stable_baselines.sh', opts, suffix=bench_log(expr))
             overlap_type = 'ResourceOverlap'
             self.stacked_plot([
@@ -1040,9 +1079,35 @@ class StableBaselines(Experiment):
             # If we DON'T want to run for the full training duration add --iml-trace-time-sec
             opts.extend(['--iml-trace-time-sec', self.iml_trace_time_sec])
 
+        # "Instrumented, no tfprof"
+        # "Instrumented, no pyprof"
+
+        # TODO: I suspect this config-dir names will get overloaded fast...need to use iml_config.json file that stores
+        # Profiler.attrs instead.  Technically, we should store this in the process directory...
+        # {
+        #   'disable_tfprof'
+        # }
+        # 'config_instrumented_no_tfprof'
+        # 'config_instrumented_no_pyprof'
+
         if config_is_uninstrumented(args.config):
             # If we want to run uninstrumented, add --iml-disable, but still record training progress
             opts.extend(['--iml-disable', '--iml-training-progress'])
+
+        if config_is_no_tfprof(args.config):
+            opts.extend(['--iml-disable-tfprof'])
+
+        if config_is_no_pyprof(args.config):
+            opts.extend(['--iml-disable-pyprof'])
+
+        if config_is_no_pydump(args.config):
+            opts.extend(['--iml-disable-pyprof-dump'])
+
+        if config_is_no_pytrace(args.config):
+            opts.extend(['--iml-disable-pyprof-trace'])
+
+        if config_is_no_tfdump(args.config):
+            opts.extend(['--iml-disable-tfprof-dump'])
 
         return opts
 

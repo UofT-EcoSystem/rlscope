@@ -99,7 +99,12 @@ cd $RL_BASELINES_ZOO_DIR
 #fi
 PYTHON=(python)
 
-_do "${PYTHON[@]}" $RL_BASELINES_ZOO_DIR/train.py \
+NVPROF=()
+#if [ "$IML_USE_NVPROF" == "yes" ]; then
+#    NVPROF=(nvprof --source-level-analysis)
+#fi
+
+_do "${NVPROF[@]}" "${PYTHON[@]}" $RL_BASELINES_ZOO_DIR/train.py \
     --algo $ALGO \
     --env $ENV_ID \
     --log-folder $OUTPUT_DIR \

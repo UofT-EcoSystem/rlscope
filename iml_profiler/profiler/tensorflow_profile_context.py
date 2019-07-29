@@ -102,6 +102,135 @@ def get_session_run_calls_traced():
 #   """Overwrites the session.__init__."""
 #   self._profiler_init_internal(target, graph, config)  # pylint: disable=protected-access
 
+# 8% overhead.
+# def _profiled_run_thin_wrapper(self,
+#                   fetches,
+#                   feed_dict=None,
+#                   options=None,
+#                   run_metadata=None):
+#   return self._profiler_run_internal(
+#     fetches, feed_dict, options, run_metadata)
+
+def _profiled_run_thin_wrapper(self,
+                  fetches,
+                  feed_dict=None,
+                  options=None,
+                  run_metadata=None):
+  """Overwrites the session.run()."""
+  # pylint: disable=protected-access
+  # Count the session steps.
+  global SESSION_RUN_CALLS_TRACED
+
+  # if DEBUG_THREADS:
+  #   _check_single_threaded()
+
+  profile_context = getattr(self, 'profile_context', None)
+  if profile_context is not None:
+    profile_context_state = profile_context._new_step()
+    step, locked = profile_context_state.__enter__()
+
+    # Inherit the "phase" from the Profiler object when we first call session.run(...).
+    if profile_context.phase is None:
+      assert iml_profiler.api.prof.phase is not None
+      profile_context.phase = iml_profiler.api.prof.phase
+
+    if profile_context.machine_name is None:
+      assert iml_profiler.api.prof.machine_name is not None
+      profile_context.machine_name = iml_profiler.api.prof.machine_name
+
+    elif profile_context.phase != iml_profiler.api.prof.phase:
+      raise RuntimeError("IML: Internal error; detected ProfileContext being used across multiple phases.")
+
+    assert locked
+  else:
+    step = None
+    locked = False
+
+  # Fast path if no need for profiling.
+  if locked and not self.profile_context._is_fast_path(step):
+
+    if py_config.DEBUG and not self.profile_context._should_trace(step, self.graph, fetches):
+      logging.info("tfprof> SKIP step={step}".format(step=step))
+
+    # Maybe trace this step.
+    if self.profile_context._should_trace(step, self.graph, fetches):
+      # if py_config.DEBUG:
+      #   logging.info("tfprof> with step={step}".format(step=step))
+      if self.profile_context._debug:
+        sys.stderr.write('debug: tracing step: %d\n' % step)
+      # Enable tracing, perform auto profiling or auto dump.
+      copy_run_metadata = True
+      if not run_metadata:
+        copy_run_metadata = False
+        run_metadata = config_pb2.RunMetadata()
+
+      if not options:
+        options = RUN_OPTIONS_FULL_TRACE
+        old_trace_level = options.trace_level
+      else:
+        old_trace_level = options.trace_level
+        options.trace_level = config_pb2.RunOptions.FULL_TRACE
+
+      # tfprof_step = self.profile_context._step
+      self.profile_context.iml_traced_calls += 1
+      SESSION_RUN_CALLS_TRACED += 1
+      assert step is not None
+      sess = self
+      # preallocate_tracer(tfprof_step, sess)
+      preallocate_tracer(step, sess)
+
+      if py_config.DEBUG:
+        sess = self
+        tracer_is_set = c_api_util.get_is_tracer_set(sess)
+        assert tracer_is_set
+
+      start_run_internal_t = time.time()
+      ret = self._profiler_run_internal(
+        fetches, feed_dict, options, run_metadata)
+      end_run_internal_t = time.time()
+      start_add_step_t = end_run_internal_t
+      if self.profile_context._debug:
+        self.profile_context._dump_file(run_metadata, 'run_meta_%d' % step)
+
+      end_add_step_t = time.time()
+      options.trace_level = old_trace_level
+
+    else:
+      ret = self._profiler_run_internal(fetches, feed_dict, options)
+
+    # Maybe dump profile.
+    # self.profile_context._maybe_dump(step)
+
+    # # Maybe profile:
+    # to_profiles = self.profile_context._profile_candidates()
+    # for to_prof in to_profiles:
+    #   cmd, opts, _ = to_prof
+    #   if self.profile_context._debug:
+    #     sys.stderr.write('debug: profiling %s step: %d\n' % (cmd, step))
+    #   if cmd == 'graph':
+    #     self.profile_context.profiler.profile_graph(opts)
+    #   elif cmd == 'scope':
+    #     self.profile_context.profiler.profile_name_scope(opts)
+    #   elif cmd == 'op':
+    #     self.profile_context.profiler.profile_operations(opts)
+    #   elif cmd == 'code':
+    #     self.profile_context.profiler.profile_python(opts)
+    #   else:
+    #     raise ValueError('Unknown cmd: %s\n' % cmd)
+
+    if profile_context is not None:
+      profile_context_state.__exit__(None, None, None)
+
+    return ret
+
+  if profile_context is not None:
+    profile_context_state.__exit__(None, None, None)
+  # Fast no lock path.
+  # if py_config.DEBUG:
+  #     logging.info("tfprof> (2) SKIP step={step}".format(step=step))
+  return self._profiler_run_internal(
+    fetches, feed_dict, options, run_metadata)
+  # pylint: enable=protected-access
 
 def _profiled_run(self,
                   fetches,
@@ -566,7 +695,7 @@ class ProfileContext(object):
     return self
 
   def clear(self):
-    assert self.phase is not None
+    # assert self.phase is not None
     sess = self._cur_session(allow_none=True)
 
     # if process_name is None:
@@ -838,6 +967,8 @@ def setup_wrap_Session():
 
   # Overwrite tf.Session.run(...) and tf.Session.__init__(...)
   setattr(session.BaseSession, 'run', _profiled_run)
+  # setattr(session.BaseSession, 'run', _profiled_run_thin_wrapper)
+
   # setattr(session.BaseSession, '__init__', _profiled_init)
 
   # Keep old tf.Session.run(...) and tf.Session.__init__(...)

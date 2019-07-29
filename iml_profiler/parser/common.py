@@ -1524,6 +1524,21 @@ def is_config_dir(path):
 def config_is_uninstrumented(config):
     return re.search(r'uninstrumented', config)
 
+def config_is_no_tfprof(config):
+    return re.search(r'no_tfprof', config)
+
+def config_is_no_pyprof(config):
+    return re.search(r'no_pyprof', config)
+
+def config_is_no_pytrace(config):
+    return re.search(r'no_pytrace', config)
+
+def config_is_no_pydump(config):
+    return re.search(r'no_pydump', config)
+
+def config_is_no_tfdump(config):
+    return re.search(r'no_tfdump', config)
+
 def config_is_instrumented(config):
     return not config_is_uninstrumented(config) and re.search(r'instrumented', config)
 

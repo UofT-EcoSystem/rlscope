@@ -392,6 +392,8 @@ class ProfilingOverheadPlotTask(luigi.Task):
     x_type = param_x_type
     y_title = luigi.Parameter(description="y-axis title", default='Total training time (seconds)')
     suffix = luigi.Parameter(description="Add suffix to output files: MachineGPUUtil.{suffix}.{ext}", default=None)
+    stacked = luigi.BoolParameter(description="Make stacked bar-plot", default=False, parsing=luigi.BoolParameter.EXPLICIT_PARSING)
+    preset = luigi.Parameter(description="preset configuration for plot bar order and plot labels", default=None)
 
     # Plot attrs
     rotation = luigi.FloatParameter(description="x-axis title rotation", default=45.)

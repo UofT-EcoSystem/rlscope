@@ -114,6 +114,12 @@ class PyprofTrace:
     def record_event(self, step, category, name, start_us, end_us, attrs=None, python_event=False, debug=False):
         assert step is not None
 
+        if not _PYROF_TRACE_FULLY_ENABLED:
+            raise RuntimeError(
+                "ERROR: I incorrectly measured this code path.  I THOUGHT that I disabled this... "
+                "In reality I didn't, which explains why I had a 56% overhead (instead of 6% call interception). "
+                "In reality, I was disabling clib_wrap.record_event(...) which is only used for process events.")
+
         event = proto_util.mk_event(
             name=name,
             start_us=start_us,
@@ -205,6 +211,9 @@ _python_start_us = None
 # By default tracing is OFF.
 _TRACING_ON = False
 # print("LOADING clib_wrap: _TRACING_ON = {val}".format(val=_TRACING_ON))
+
+# Just measure small aspects of pyprof trace-collection overhead.
+_PYROF_TRACE_FULLY_ENABLED = True
 
 def clear_pyprof_profiling():
     global _pyprof_trace, _python_start_us, _process_name
@@ -315,7 +324,11 @@ class CFuncWrapper:
         ret = self.call(*args, **kwargs)
         end_us = now_us()
 
-        if _TRACING_ON:
+        # NOTE: profiling overhead.
+        # Doing "extra stuff" in function-call wrappers for TensorFlow C++ API / Simulators is causing huge overheads
+        # during pyprof tracing.
+        # Even if the record_event() callbacks are just no-op function calls, we still experience the large overheads!
+        if _PYROF_TRACE_FULLY_ENABLED and _TRACING_ON:
             name = self.func.__name__
 
             # We are about to call from python into a C++ API.
@@ -368,6 +381,11 @@ class CFuncWrapper:
 
 def record_event(category, name, start_us, end_us, attrs=None, python_event=False, ignore_disable=False):
     global _pyprof_trace
+
+    if not _PYROF_TRACE_FULLY_ENABLED:
+        # Expectation: by skipping recording events we should have minimal performance impact
+        # ( just the %6 for lib-wrapping ).
+        return
 
     if _TRACING_ON or ignore_disable:
         _pyprof_trace.record_event(
@@ -429,6 +447,22 @@ def disable_tracing():
         logging.info("Disable pyprof tracing: _TRACING_ON={val}\n{stack}".format(
             val=_TRACING_ON,
             stack=get_stacktrace()))
+
+def disable_pyprof_trace():
+    global _PYROF_TRACE_FULLY_ENABLED
+    _PYROF_TRACE_FULLY_ENABLED = False
+    # if py_config.DEBUG:
+    logging.info("Disable pyprof tracing (--iml-disable-pyprof-trace): _PYROF_TRACE_FULLY_ENABLED={val}\n{stack}".format(
+        val=_PYROF_TRACE_FULLY_ENABLED,
+        stack=get_stacktrace()))
+
+def enable_pyprof_trace():
+    global _PYROF_TRACE_FULLY_ENABLED
+    _PYROF_TRACE_FULLY_ENABLED = True
+    # if py_config.DEBUG:
+    logging.info("Enable pyprof tracing (--iml-disable-pyprof-trace): _PYROF_TRACE_FULLY_ENABLED={val}\n{stack}".format(
+        val=_PYROF_TRACE_FULLY_ENABLED,
+        stack=get_stacktrace()))
 
 #
 # Some pre-written C++ library wrappers.

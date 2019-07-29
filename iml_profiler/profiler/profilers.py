@@ -563,7 +563,7 @@ class _DumpPyprofTraceHook(clib_wrap.RecordEventHook):
             iml_profiler.api.prof._dump_pyprof(debug=py_config.DEBUG)
             num_events = clib_wrap.num_events_recorded()
             # NOTE: I've seen this assertion fail with minigo, not sure why though...
-            if num_events != 0:
+            if num_events != 0 and not iml_profiler.api.prof.disable_pyprof_dump:
                 logging.info(("> IML: WARNING, after dumping pyprof data, there were "
                        "still {n} pyprof events recorded").format(n=num_events))
             # assert num_events == 0
@@ -648,6 +648,11 @@ class Profiler:
                  require_end_operation=False,
                  python=None,
                  disable=None,
+                 disable_pyprof=None,
+                 disable_tfprof=None,
+                 disable_pyprof_dump=None,
+                 disable_pyprof_trace=None,
+                 disable_tfprof_dump=None,
                  delay=None,
                  unit_test=None,
                  unit_test_name=None,
@@ -703,9 +708,15 @@ class Profiler:
             py_config.DEBUG = self.debug
         self.directory = get_argval('directory', directory, None, allow_none=False)
         self.disable = get_argval('disable', disable, False)
+        self.disable_pyprof = get_argval('disable_pyprof', disable_pyprof, False)
+        self.disable_tfprof = get_argval('disable_tfprof', disable_tfprof, False)
+        self.disable_pyprof_dump = get_argval('disable_pyprof_dump', disable_pyprof_dump, False)
+        self.disable_pyprof_trace = get_argval('disable_pyprof_trace', disable_pyprof_trace, False)
+        self.disable_tfprof_dump = get_argval('disable_tfprof_dump', disable_tfprof_dump, False)
         self.delay = get_argval('delay', delay, False)
         self.just_sample_util = get_argval('just_sample_util', just_sample_util, False)
         self.training_progress = get_argval('training_progress', training_progress, False)
+        self._loaded_libcupti = False
 
         if not self.disable:
             modify_tensorflow()
@@ -714,6 +725,9 @@ class Profiler:
 
         self.manager = multiprocessing.Manager()
         self.pyprof_dump_manager = clib_wrap.PyprofDumpManager(self.manager)
+
+        if self.disable_pyprof_trace:
+            clib_wrap.disable_pyprof_trace()
 
         global _prof_singleton
         if _prof_singleton is not None:
@@ -1185,7 +1199,7 @@ class Profiler:
         self._maybe_end_operations()
         self._maybe_finish(finish_now=True, should_exit=False)
 
-    def _start_tfprof(self):
+    def _start_tfprof(self, skip_init_trace_time=False):
         """
         Meant to be called right before we start measuring individual operations.
 
@@ -1199,13 +1213,16 @@ class Profiler:
             raise RuntimeError("You need to call profiler.set_process_name(...) before profiling.")
         assert self.phase is not None
 
-        if self._tfprof_enabled:
+        if self._tfprof_enabled or self.disable_tfprof:
+            if self.disable_tfprof:
+                logging.info("Skipping tfprof profiling (--iml-disable-tfprof)")
             return
 
         # if self.step_start_tracing is None:
         #     self.step_start_tracing = self.steps
 
-        self._init_trace_time()
+        if not skip_init_trace_time:
+            self._init_trace_time()
 
         # sess = self._cur_session(allow_none=True)
         # if sess is None:
@@ -1333,6 +1350,20 @@ class Profiler:
             handle_utilization_sampler=handle_utilization_sampler,
         )
 
+    def _dump_iml_config(self):
+        path = self._iml_config_path
+        attrs = dict(self.__dict__)
+        def should_keep(attr):
+            return type(attrs[attr]) in {dict, list, str, int, float, bool, type(None)}
+        for k in list(attrs.keys()):
+            if not should_keep(k):
+                del attrs[k]
+        tensorflow_config = get_tensorflow_config()
+        attrs['tensorflow_config'] = tensorflow_config
+        if self.debug:
+            logging.info("Dump IML configuration information to {path}".format(path=path))
+        dump_json(attrs, path)
+
     def _init_trace_time(self):
         """
         Record the start time-since-epoch of tracing information being collected.
@@ -1343,29 +1374,34 @@ class Profiler:
             self.start_trace_time_sec = time.time()
 
     def _start_pyprof(self):
-        if self._pyprof_enabled:
+        if self._pyprof_enabled or self.disable_pyprof:
+            if self.disable_pyprof:
+                logging.info("Skipping pyprof profiling (--iml-disable-pyprof)")
             return
         if self.debug:
             logging.info("Start pyprof\n{stack}".format(stack=get_stacktrace()))
         self._init_trace_time()
-        # clib_wrap.wrap_libs()
-        # if self.step_start_tracing is None:
-        #     self.step_start_tracing = self.steps
-        clib_wrap.enable_tracing()
-        clib_wrap.set_step(self._pyprof_step, expect_traced=True)
-        if (py_config.DEBUG or TF_PRINT_TIMESTAMP) and clib_wrap.is_recording():
-            logging.info("> RECORDING pyprof_step = {step}".format(step=self._pyprof_step))
         if self.python:
+            # Using cProfile python profiler to collect python events.
+            logging.info("IML: Enabling python cProfile profiler")
             self.pyprof.enable()
+        else:
+            # Use custom function-wrappers around TensorFlow/Simulator C++ libraries to record
+            # events marking "Python" time and "TensorFlow C++" / "Simulator" time.
+            clib_wrap.enable_tracing()
+            clib_wrap.set_step(self._pyprof_step, expect_traced=True)
+            # if (py_config.DEBUG or TF_PRINT_TIMESTAMP) and clib_wrap.is_recording():
+            #     logging.info("> RECORDING pyprof_step = {step}".format(step=self._pyprof_step))
         self._pyprof_enabled = True
 
     def _stop_pyprof(self):
         if not self._pyprof_enabled:
             return
-        clib_wrap.disable_tracing()
-        self._pyprof_enabled = False
         if self.python:
             self.pyprof.disable()
+        else:
+            clib_wrap.disable_tracing()
+        self._pyprof_enabled = False
 
     @property
     def _pyprof_step(self):
@@ -1480,6 +1516,10 @@ class Profiler:
         self.init_trace_id()
         # self._maybe_init_profile_context()
 
+        if self.process_name is not None and self.phase is not None:
+            self._dump_iml_config()
+            self._force_load_libcupti()
+
     @property
     def is_root_process(self):
         return self.process_name is None
@@ -1529,6 +1569,10 @@ class Profiler:
         assert type(phase) == str
 
         self.phase = phase
+
+        if self.process_name is not None and self.phase is not None:
+            self._dump_iml_config()
+            self._force_load_libcupti()
 
         if self.disable:
             return
@@ -1637,9 +1681,20 @@ class Profiler:
         :param pctx:
         :return:
         """
+        should_skip_dump = False
+        if self.disable_tfprof_dump:
+            should_skip_dump = True
+
+        if hasattr(session, 'iml_skip_dump') and session.iml_skip_dump:
+            logging.info('session.iml_skip_dump was set; skipping dumping tfprof for session={s}'.format(
+                s=session,
+            ))
+            should_skip_dump = True
+
         pctx = ProfileContextManager.get_profile_context(session)
 
         trace_id = self.next_trace_id
+        self.next_trace_id += 1
         tfprof_path = self.tfprof_path(session.session_id, trace_id)
 
         if pctx.iml_traced_calls == 0:
@@ -1648,10 +1703,11 @@ class Profiler:
                 logging.info("Skip dumping tfprof @ {path}: your training script creates a tf.Session() object that never gets used so it has 0 traced-calls.".format(path=tfprof_path))
             elif debug:
                 logging.info("Skip dumping tfprof @ {path}: since it has 0 traced-calls.".format(path=tfprof_path))
-            return
+            should_skip_dump = True
 
-        tfprof_dumper = TfprofDumper(trace_id, session, self.process_name, tfprof_path, debug=debug)
-        tfprof_dumper.dump()
+        if not should_skip_dump:
+            tfprof_dumper = TfprofDumper(trace_id, session, self.process_name, tfprof_path, debug=debug)
+            tfprof_dumper.dump()
 
         # self.bg_dumper.submit(
         #     name='TfprofDumper.dump({path})'.format(path=tfprof_path),
@@ -1659,7 +1715,6 @@ class Profiler:
         # After process has forked for dumping trace-data, clear the current process' trace-data.
 
         pctx.clear()
-        self.next_trace_id += 1
 
     def _old_dump_tfprof(self, session, debug=False):
         """
@@ -1717,6 +1772,8 @@ class Profiler:
 
     # TODO: decide where to call dump_tfprof / dump_pyprof from.
     def _dump_pyprof(self, config_kwargs=dict(), debug=False):
+        if self.disable_pyprof_dump:
+            return
         start_sec = time.time()
         pyprof_trace = clib_wrap.get_pyprof_trace()
         trace_id = self.next_trace_id
@@ -1888,6 +1945,13 @@ class Profiler:
         ret = _j(self.out_dir, "training_progress{bench}{trace}.proto".format(
             bench=bench_suffix(self.bench_name),
             trace=trace_suffix(trace_id),
+        ))
+        return ret
+
+    @property
+    def _iml_config_path(self):
+        ret = _j(self.out_dir, "iml_config{bench}.json".format(
+            bench=bench_suffix(self.bench_name),
         ))
         return ret
 
@@ -2166,6 +2230,57 @@ class Profiler:
         return self.exit_early and \
                self.done_measuring()
 
+    def _force_load_libcupti(self):
+        """
+        TensorFlow calls dlopen("libcupti.so") lazily.
+        Instead of modifying tensorflow to load it eagerly, lets just trigger the code-path that loads it.
+        In particular, enable tfprof briefly for a very simple session.run() call.
+
+        libcupti takes about 0.001841 seconds to load with dlopen().
+
+        You can observe this by running like this:
+        $ export TF_DEBUG_LOAD_LIBRARY=yes
+        $ train.py ...
+        ...
+        2019-07-26 15:50:42.337735: I tensorflow/core/platform/posix/load_library.cc:64] > LoadLibrary library=libcupti.so.10.0 took 0.001841 sec
+
+        :return:
+        """
+        if self._loaded_libcupti:
+            return
+
+        logging.info("Forcing libcupti to load before tracing begins.")
+
+        import tensorflow as tf
+        config = tf.ConfigProto()
+        config.gpu_options.allow_growth = True
+        graph = tf.Graph()
+        sess = tf.Session(graph=graph, config=config)
+        # We don't want to keep any of the collected traces from this.
+        sess.iml_skip_dump = True
+
+        # NOTE: we aren't actually beginning tracing for the problem, hence skip_init_trace_time=True.
+        self._start_tfprof(skip_init_trace_time=True)
+
+        name = 'ForceLoadLibcupti'
+        N = 1000
+        zeros = np.zeros((N, N))
+        with sess, tf.name_scope(name):
+            a = tf.placeholder(float, name='a')
+            b = tf.placeholder(float, name='b')
+            c = a * b
+
+            feed_dict = {
+                a: zeros,
+                b: zeros,
+            }
+            c_result = sess.run(c, feed_dict=feed_dict)
+            assert np.equal(c_result, 0.).all()
+
+        self._stop_tfprof()
+
+        self._loaded_libcupti = True
+
 # class CUDAProfiler:
 #     def __init__(self):
 #         # NOTE: CUDA profiling output has already been specified when this script was launched.
@@ -2409,6 +2524,21 @@ def add_iml_arguments(parser):
     """))
     iml_parser.add_argument('--iml-disable', action='store_true', help=textwrap.dedent("""
         IML: Skip any profiling.
+    """))
+    iml_parser.add_argument('--iml-disable-pyprof', action='store_true', help=textwrap.dedent("""
+        IML: Skip any profiling (i.e. trace-collection, trace-dumping) related to python times.
+    """))
+    iml_parser.add_argument('--iml-disable-tfprof', action='store_true', help=textwrap.dedent("""
+        IML: Skip any profiling (i.e. trace-collection, trace-dumping) related to GPU times.
+    """))
+    iml_parser.add_argument('--iml-disable-pyprof-dump', action='store_true', help=textwrap.dedent("""
+        IML: Skip pyprof trace-dumping, but NOT trace-collection.
+    """))
+    iml_parser.add_argument('--iml-disable-tfprof-dump', action='store_true', help=textwrap.dedent("""
+        IML: Skip tfprof trace-dumping, but NOT trace-collection.
+    """))
+    iml_parser.add_argument('--iml-disable-pyprof-trace', action='store_true', help=textwrap.dedent("""
+        IML: Disable most of pyprof trace-collection (but not entirely).
     """))
     iml_parser.add_argument('--iml-delay', action='store_true', help=textwrap.dedent("""
         IML: Delay trace collection until your training scripts has warmed up; 
@@ -2823,4 +2953,20 @@ class RecordedIncrementalTrainingProgress:
 
     def __repr__(self):
         return as_str(self)
+
+def get_tensorflow_config():
+    """
+    Report values of environment variables that affect IML-modified tensorflow execution.
+    """
+    conf = dict()
+    def _add(var, skip_if_missing=True, default=None):
+        if var in os.environ:
+            conf[var] = os.environ[var]
+        elif not skip_if_missing:
+            conf[var] = default
+
+    _add('TF_CUPTI_EMPTY_TRACING_CALLBACKS')
+    _add('TF_CUPTI_SKIP_REGISTER_CUPTI_CALLBACKS')
+
+    return conf
 
