@@ -48,7 +48,7 @@ except ImportError:
 from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, basename as _b
 
 from iml_profiler.profiler import iml_logging
-from iml_profiler.profiler.concurrent import ForkedProcessPool
+from iml_profiler.profiler.concurrent import ForkedProcessPool, FailedProcessException
 
 from iml_profiler.profiler.util import args_to_cmdline
 
@@ -426,7 +426,7 @@ class Experiment:
 
         return None
 
-    def _run_cmd(self, cmd, to_file, env=None, replace=False):
+    def _run_cmd(self, cmd, to_file, env=None, replace=False, debug=False):
         args = self.args
 
         if env is None:
@@ -450,7 +450,13 @@ class Experiment:
                                      "> Command failed: see {path}; exiting early "
                                      "(use --skip-error to ignore individual experiment errors)"
                                  ).format(path=to_file))
-                    sys.exit(1)
+                    ret = 1
+                    if debug:
+                        logging.info("Exiting with ret={ret}\n{stack}".format(
+                            ret=ret,
+                            stack=get_stacktrace(),
+                        ))
+                    sys.exit(ret)
                 logging.info(
                     "> Command failed; see {path}; continuing (--skip-error was set)".format(
                         path=to_file,
@@ -458,6 +464,10 @@ class Experiment:
                 failed = True
 
             if not failed:
+                if proc.returncode != 0:
+                    logging.info("BUG: saw returncode = {ret}, expected 0".format(
+                        ret=proc.returncode))
+                    assert proc.returncode == 0
                 if not args.dry_run:
                     with open(to_file, 'a') as f:
                         f.write("IML BENCH DONE\n")
@@ -561,7 +571,7 @@ class ExperimentGroup(Experiment):
         expr = 'debug_prof_overhead'
         opts = ['--env-id', 'HalfCheetahBulletEnv-v0', '--algo', 'ppo2']
         if self.should_run_expr(expr):
-            self.iml_bench(parser, subparser, 'train_stable_baselines.sh', opts, suffix=bench_log(expr))
+            self.iml_bench(parser, subparser, 'train_stable_baselines.sh', opts, suffix=bench_log(expr), debug=True)
             # overlap_type = 'ResourceOverlap'
             # self.stacked_plot([
             #     '--overlap-type', overlap_type,
@@ -984,7 +994,7 @@ class ExperimentGroup(Experiment):
         _util_csv(algo_env_pairs)
         _util_plot()
 
-    def iml_bench(self, parser, subparser, subcommand, subcmd_args, suffix='log', env=None):
+    def iml_bench(self, parser, subparser, subcommand, subcmd_args, suffix='log', env=None, debug=False):
         args = self.args
         if not self.will_run:
             return
@@ -992,7 +1002,7 @@ class ExperimentGroup(Experiment):
         cmd = main_cmd + subcmd_args
         to_file = self._get_logfile(suffix=suffix)
         logging.info("Logging iml-bench to file {path}".format(path=to_file))
-        self._run_cmd(cmd=cmd, to_file=to_file, env=env)
+        self._run_cmd(cmd=cmd, to_file=to_file, env=env, debug=debug)
 
     def _get_main_cmd(self, parser, subparser, subcommand):
         args = self.args
@@ -1214,6 +1224,14 @@ class StableBaselines(Experiment):
                     self._analyze,
                     algo, env_id,
                     sync=self.args.debug_single_thread)
+            # Wait for processes to finish.
+            # If we forget to do this, even if a child exits with nonzero status, we won't see it!
+            try:
+                self.pool.shutdown()
+            except FailedProcessException as e:
+                # Child has already printed its error message; just forward the exit code.
+                assert e.exitcode != 0
+                sys.exit(e.exitcode)
         else:
             for algo, env_id in algo_env_pairs:
                 self._run(algo, env_id)

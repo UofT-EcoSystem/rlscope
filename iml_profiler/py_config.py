@@ -47,6 +47,11 @@ DEBUG_REPORT_PROGRESS = False
 # (not just the first call for a phase)
 DEBUG_REPORT_PROGRESS_ALL = False
 
+# If True, print out how event are grouped into OpStack's when split_op_stacks.
+DEBUG_SPLIT_STACK_OPS = False
+# If True, skip inserting any profiling-overhead events.
+DEBUG_SKIP_PROFILING_OVERHEAD = False
+
 # In case docker causes different runtime behaviour, we can use this switch.
 #
 # Current issues:

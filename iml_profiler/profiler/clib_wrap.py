@@ -111,7 +111,10 @@ class PyprofTrace:
             # }, indent=2)
             f.write(self.pyprof.SerializeToString())
 
-    def record_event(self, step, category, name, start_us, end_us, attrs=None, python_event=False, debug=False):
+    def record_event(self, step, category, name, start_us, end_us,
+                     start_profiling_overhead_us=None,
+                     duration_profiling_overhead_us=None,
+                     attrs=None, python_event=False, debug=False):
         assert step is not None
 
         if not _PYROF_TRACE_FULLY_ENABLED:
@@ -124,6 +127,8 @@ class PyprofTrace:
             name=name,
             start_us=start_us,
             end_us=end_us,
+            start_profiling_overhead_us=start_profiling_overhead_us,
+            duration_profiling_overhead_us=duration_profiling_overhead_us,
             attrs=attrs)
 
         if debug:
@@ -148,7 +153,10 @@ class PyprofTrace:
         for hook in RECORD_EVENT_HOOKS:
             hook.after_record_event(pyprof_trace=self, event=event)
 
-    def record_python_event(self, step, name, start_us, end_us, ignore_disable=False):
+    def record_python_event(self, step, name, start_us, end_us, ignore_disable=False,
+                            start_profiling_overhead_us=None,
+                            duration_profiling_overhead_us=None,
+                            ):
         """
         Useful for recording the last amount of time in between returning
         from a call to q_forward, and finishing benchmarking.
@@ -156,6 +164,8 @@ class PyprofTrace:
         (i.e. not doing C++ calls, just returning back to the benchmarking script).
         """
         self.record_event(step, CATEGORY_PYTHON, name, start_us, end_us,
+                          start_profiling_overhead_us=start_profiling_overhead_us,
+                          duration_profiling_overhead_us=duration_profiling_overhead_us,
                           python_event=True)
 
 class PyprofDumpManager:
@@ -214,6 +224,45 @@ _TRACING_ON = False
 
 # Just measure small aspects of pyprof trace-collection overhead.
 _PYROF_TRACE_FULLY_ENABLED = True
+
+class _ProfilingOverheadTracker:
+    def __init__(self):
+        self.profiling_overhead_us = 0
+        self.start_t = None
+        self.end_t = None
+        self.started = False
+
+    def start(self, start_t=None):
+        assert not self.started
+        if start_t is None:
+            start_t = now_us()
+        self.start_t = start_t
+        self.started = True
+
+    def end(self):
+        assert self.started
+        self.end_t = now_us()
+        self.profiling_overhead_us = self.profiling_overhead_us + ( self.end_t - self.start_t )
+        self.started = False
+
+    def get_overhead_us(self):
+        assert not self.started
+        start_profiling_overhead_us = self.start_t
+        duration_profiling_overhead_us = self.profiling_overhead_us
+
+        # To ensure subsequent recordings record 0 profiling overhead.
+        self.profiling_overhead_us = 0
+        self.start_t = 0
+
+        self.end_t = 0
+        return start_profiling_overhead_us, duration_profiling_overhead_us
+
+    # def record_overhead(self, event):
+    #     event.profiling_overhead_us = event.profiling_overhead_us + self.get_overhead_us()
+
+
+
+ProfilingOverheadTracker = _ProfilingOverheadTracker()
 
 def clear_pyprof_profiling():
     global _pyprof_trace, _python_start_us, _process_name
@@ -312,6 +361,7 @@ class CFuncWrapper:
     def __call__(self, *args, **kwargs):
         global _pyprof_trace, _python_start_us, _step, _TRACING_ON
 
+
         start_us = now_us()
         # if self.debug:
         #     logging.info("_TRACING_ON = {val}".format(
@@ -323,6 +373,8 @@ class CFuncWrapper:
         #     # ))
         ret = self.call(*args, **kwargs)
         end_us = now_us()
+        start_profiling_overhead_us, duration_profiling_overhead_us = ProfilingOverheadTracker.get_overhead_us()
+        ProfilingOverheadTracker.start(start_t=end_us)
 
         # NOTE: profiling overhead.
         # Doing "extra stuff" in function-call wrappers for TensorFlow C++ API / Simulators is causing huge overheads
@@ -359,16 +411,26 @@ class CFuncWrapper:
             #     thread_id=tid,
             #     name=name)
 
+            # NOTE: record python-side pyprof-related profiling overhead.
+            # Profiling overhead being generated now will be recorded by the NEXT python event gets recorded;
+            # We record profiling overhead for the event before this (profiling_overhead_us).
+            #
+            # NOTE: ProfilingOverheadTracker will ALSO end up capturing async dumping overhead,
+            # since register dumping "hooks" get called at the end of PyprofTrace.record_event.
             _pyprof_trace.record_python_event(
                 _pyprof_trace.get_step(), name,
                 start_us=_python_start_us,
-                end_us=start_us)
+                end_us=start_us,
+                start_profiling_overhead_us=start_profiling_overhead_us,
+                duration_profiling_overhead_us=duration_profiling_overhead_us,
+            )
             _pyprof_trace.record_event(
                 _pyprof_trace.get_step(), self.category, name,
                 start_us=start_us,
                 end_us=end_us,
                 debug=self.debug)
 
+        ProfilingOverheadTracker.end()
         _python_start_us = end_us
 
         return ret

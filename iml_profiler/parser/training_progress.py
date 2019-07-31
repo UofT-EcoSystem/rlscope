@@ -15,10 +15,12 @@ from matplotlib import pyplot as plt
 from iml_profiler.parser.dataframe import TrainingProgressDataframeReader
 
 from iml_profiler.parser import stacked_bar_plots
+from iml_profiler.parser.db import SQLCategoryTimesReader, sql_input_path
 
 from iml_profiler.profiler import iml_logging
 
 import PIL
+
 
 class TrainingProgressParser:
     """

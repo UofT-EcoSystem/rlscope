@@ -2120,6 +2120,8 @@ class UtilizationPlot:
         self.debug = debug
         self.debug_ops = debug_ops
         self.debug_memoize = debug_memoize
+        if self.debug_memoize:
+            logging.info("debug_memoize = {b}".format(b=self.debug_memoize))
         self.entire_trace = entire_trace
 
         self.bar_width = 0.25
@@ -2264,6 +2266,11 @@ class UtilizationPlot:
             self.overlap_type,
             debug=self.debug,
         )
+
+        training_progress = self.sql_reader.training_progress(machine_name=machine_name, process_name=process_name, phase_name=phase_name, allow_none=True)
+        if training_progress is None and phase != DEFAULT_PHASE:
+            logging.info('TrainingProgress was None for ')
+            import ipdb; ipdb.set_trace()
 
         overlap_computer = OverlapComputer(self.db_path,
                                            host=self.host, user=self.user, password=self.password,

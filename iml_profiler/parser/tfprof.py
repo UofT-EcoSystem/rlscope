@@ -766,6 +766,7 @@ class TraceEventsParser:
                  password=None,
                  # Swallow any excess arguments
                  debug=False,
+                 filter_op=True,
                  show_progress=False,
                  overlaps_event_id=None,
                  op_name=None,
@@ -781,6 +782,7 @@ class TraceEventsParser:
         self.user = user
         self.password = password
         self.debug = debug
+        self.filter_op = filter_op
         self.start_usec = start_usec
         self.end_usec = end_usec
         self.overlaps_event_id = overlaps_event_id
@@ -831,12 +833,18 @@ class TraceEventsParser:
         if CATEGORY_DUMMY_EVENT in ignore_cats:
             ignore_cats.remove(CATEGORY_DUMMY_EVENT)
 
+        machines = self.sql_reader.machines()
+        assert len(machines) == 1
+        machine = machines[0]
+
         logging.info("op_names = {op_names}".format(op_names=self.op_names))
-        logging.info("process_names = {procs}".format(procs=self.sql_reader.process_names()))
+        logging.info("process_names = {procs}".format(procs=self.sql_reader.process_names(machine.machine_name)))
         for op_name in self.op_names:
             logging.info("op_name = {op_name}".format(op_name=op_name))
             for process_name, step, category_times in itertools.islice(
                     self.sql_reader.each_op_instance(op_name,
+                                                     machine_name=machine.machine_name,
+                                                     filter_op=self.filter_op,
                                                      group_by_device=True,
                                                      ignore_categories=ignore_cats,
                                                      debug=self.debug),
@@ -1373,6 +1381,28 @@ class OverlapComputer:
             debug=self.debug,
             debug_ops=self.debug_ops,
             debug_memoize=debug_memoize)
+
+        if self.debug:
+            pprint_msg({'category_times.keys()': sorted(category_times.keys())})
+
+            # category_times_path = _j(self.directory, "category_times{over}{proc}{mach}{phase}.debug.txt".format(
+            #     proc=process_suffix(process_name),
+            #     mach=machine_suffix(machine_name),
+            #     phase=phase_suffix(phase_name),
+            #     over=overlap_type_suffix(overlap_type),
+            # ))
+            # logging.info('Write category_times @ {path}'.format(path=category_times_path))
+            # with open(category_times_path, 'w') as f:
+            #     # f.write(pprint_msg(category_times)
+            #     print("> category_times data", file=f)
+            #     print(pprint_msg({
+            #         'process_name': process_name,
+            #         'phase_name': phase_name,
+            #         'machine_name': machine_name,
+            #         'overlap_type': overlap_type,
+            #     }))
+            #     pprint.pprint(category_times, stream=f)
+
         # if self.debug:
         #     def category_as_str(category):
         #         """
@@ -1707,12 +1737,14 @@ class OverlapTypeInterface:
         process = sql_reader.process(machine_name=machine_name, process_name=process_name)
         machine = sql_reader.machine(machine_name=machine_name)
         phase = sql_reader.phase(machine_name=machine_name, process_name=process_name, phase_name=phase_name)
+        training_progress = sql_reader.training_progress(machine_name=machine_name, process_name=process_name, phase_name=phase_name, allow_none=True)
         self.dump_overlap(
             operation_overlap, overlap_metadata_dict,
             directory=directory,
             process=process,
             machine=machine,
             phase=phase,
+            training_progress=training_progress,
             path=self._overlap_json(directory, machine, process, phase),
             venn_js_path=self._overlap_venn_js_json(directory, machine, process, phase))
 
@@ -1722,14 +1754,14 @@ class OverlapTypeInterface:
 
         md['process'] = process.process_name
 
-        if process.percent_complete is not None:
-            md['percent_complete'] = process.percent_complete
-
-        if process.num_timesteps is not None:
-            md['num_timesteps'] = process.num_timesteps
-
-        if process.total_timesteps is not None:
-            md['total_timesteps'] = process.total_timesteps
+        # if process.percent_complete is not None:
+        #     md['percent_complete'] = process.percent_complete
+        #
+        # if process.num_timesteps is not None:
+        #     md['num_timesteps'] = process.num_timesteps
+        #
+        # if process.total_timesteps is not None:
+        #     md['total_timesteps'] = process.total_timesteps
 
     def _add_machine_md(self, md, machine):
         if machine is None:
@@ -1743,10 +1775,33 @@ class OverlapTypeInterface:
 
         md['phase'] = phase.phase_name
 
+    def _add_training_progress_md(self, md, training_progress):
+        if training_progress is None:
+            return
+
+        # Raw training progress fields, for convenience / sanity checks:
+        md['training_progress'] = dict(
+            total_timesteps=training_progress.total_timesteps,
+            start_trace_time_us=training_progress.start_trace_time_us,
+
+            start_percent_complete=training_progress.start_percent_complete,
+            start_num_timesteps=training_progress.start_num_timesteps,
+            start_training_time_us=training_progress.start_training_time_us,
+
+            end_percent_complete=training_progress.end_percent_complete,
+            end_training_time_us=training_progress.end_training_time_us,
+            end_num_timesteps=training_progress.end_num_timesteps,
+        )
+
+        # Minimal fields needed for total training time extrapolation.
+        md['percent_complete'] = training_progress.end_percent_complete - training_progress.start_percent_complete
+        md['num_timesteps'] = training_progress.end_num_timesteps - training_progress.start_num_timesteps
+        md['total_timesteps'] = training_progress.total_timesteps
+
     def _add_overlap_region_metadata(
             self, overlap_metadata_dict, md,
             overlap_type=None,
-            process=None, machine=None, phase=None):
+            process=None, machine=None, phase=None, training_progress=None):
         overlap_region = OverlapMetadata.merge_regions(overlap_metadata_dict.values())
         md['start_time_usec'] = overlap_region.start_time_usec
         md['end_time_usec'] = overlap_region.end_time_usec
@@ -1758,6 +1813,7 @@ class OverlapTypeInterface:
         self._add_process_md(md, process)
         self._add_machine_md(md, machine)
         self._add_phase_md(md, phase)
+        self._add_training_progress_md(md, training_progress)
 
     def _overlap_json(self, directory, machine_name, process_name, phase_name):
         if type(machine_name) == Machine:
@@ -1789,14 +1845,15 @@ class OverlapTypeInterface:
 
     def dump_overlap(self, operation_overlap, overlap_metadata_dict,
                      directory,
-                     process=None, machine=None, phase=None,
+                     process=None, machine=None, phase=None, training_progress=None,
                      path=None, venn_js_path=None):
         md = dict()
         self._add_overlap_region_metadata(overlap_metadata_dict, md,
                                           overlap_type=self.overlap_type,
                                           process=process,
                                           machine=machine,
-                                          phase=phase)
+                                          phase=phase,
+                                          training_progress=training_progress)
         if self.should_dump_as_is:
             return self.dump_overlap_as_is(
                 operation_overlap, md,
@@ -2281,6 +2338,7 @@ class OperationOverlapType(OverlapTypeInterface):
         process = sql_reader.process(machine_name=machine_name, process_name=process_name)
         machine = sql_reader.machine(machine_name=machine_name)
         phase = sql_reader.phase(machine_name=machine_name, process_name=process_name, phase_name=phase_name)
+        training_progress = sql_reader.training_progress(machine_name=machine_name, process_name=process_name, phase_name=phase_name, allow_none=True)
         for resources, op_overlap in overlap.items():
             # operation_overlap = self.as_js_dict(new_overlap)
             if self.debug:
@@ -2297,7 +2355,8 @@ class OperationOverlapType(OverlapTypeInterface):
                                               overlap_type=self.overlap_type,
                                               process=process,
                                               machine=machine,
-                                              phase=phase)
+                                              phase=phase,
+                                              training_progress=training_progress)
             self._dump_overlap(
                 op_overlap, md,
                 path=self._operation_overlap_json(directory, machine, process, phase, resources),

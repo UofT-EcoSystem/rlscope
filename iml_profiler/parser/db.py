@@ -39,6 +39,8 @@ from iml_profiler.parser.stats import KernelTime
 
 from iml_profiler.protobuf.pyprof_pb2 import Pyprof, MachineUtilization, ProcessMetadata, TP_HAS_PROGRESS, TP_NO_PROGRESS
 
+from iml_profiler.parser.dataframe import TrainingProgressDataframeReader
+
 SQLITE_TABLE_SQL = _j(py_config.ROOT, "sqlite", "tables.sql")
 SQLITE_INDICES_SQL = _j(py_config.ROOT, "sqlite", "indices.sql")
 
@@ -388,12 +390,12 @@ class SQLParser:
             # TODO: We should use better defaults for unset values in protobuf (e.g. -1 for ints/floats)
             if md.parent_process_name:
                 fields['parent_process_id'] = process_to_assigned_id[md.parent_process_name]
-            if md.training_progress.content_code == TP_HAS_PROGRESS:
-                fields['percent_complete'] = md.training_progress.percent_complete
-                if md.training_progress.num_timesteps != 0:
-                    fields['num_timesteps'] = md.training_progress.num_timesteps
-                if md.training_progress.total_timesteps != 0:
-                    fields['total_timesteps'] = md.training_progress.total_timesteps
+            # if md.training_progress.content_code == TP_HAS_PROGRESS:
+            #     fields['percent_complete'] = md.training_progress.percent_complete
+            #     if md.training_progress.num_timesteps != 0:
+            #         fields['num_timesteps'] = md.training_progress.num_timesteps
+            #     if md.training_progress.total_timesteps != 0:
+            #         fields['total_timesteps'] = md.training_progress.total_timesteps
             self.insert_process_name(md.process_name, fields=fields, debug=True)
 
         if self.debug:
@@ -478,8 +480,11 @@ class SQLParser:
         def get_worker_kwargs(path):
             if is_machine_util_file(path):
                 table = 'DeviceUtilization'
+            elif is_training_progress_file(path):
+                table = 'TrainingProgress'
             else:
                 table = 'Event'
+
             return {
                 'path':path,
                 'db_path':self.db_path,
@@ -1174,6 +1179,8 @@ class _CSVInserterWorker:
             self.insert_tfprof_file(path)
         elif is_pyprof_file(path) or is_dump_event_file(path):
             self.insert_pyprof_file(path)
+        elif is_training_progress_file(path):
+            self.insert_training_progress_file(path)
         elif is_pyprof_call_times_file(path):
             self.insert_pyprof_call_times_file(path)
         elif is_machine_util_file(path):
@@ -1224,6 +1231,8 @@ class _CSVInserterWorker:
                 'start_time_us':start_time_us,
                 'end_time_us':end_time_us,
                 'duration_us':duration_us,
+                # TODO: record libcupti profiling overhead, add it to tfprof proto file, and record it here.
+                'profiling_overhead_us':0,
                 'event_name':name,
                 'category_id':category_id,
                 'process_id':process_id,
@@ -1318,6 +1327,30 @@ class _CSVInserterWorker:
 
         self.conn.commit()
 
+    def insert_training_progress_file(self, path):
+        proto = read_training_progress_file(path)
+
+        logging.info("> Insert training_progress file: {p}".format(p=path))
+
+        process_id = self.process_to_id[proto.process_name]
+        phase_id = self.phase_to_id[proto.phase]
+
+        fields = {
+            'process_id': process_id,
+            'phase_id': phase_id,
+            'total_timesteps': proto.total_timesteps,
+            'start_trace_time_us': proto.start_trace_time_us,
+            'start_percent_complete': proto.start_percent_complete,
+            'start_num_timesteps': proto.start_num_timesteps,
+            'start_training_time_us': proto.start_training_time_us,
+            'end_percent_complete': proto.end_percent_complete,
+            'end_training_time_us': proto.end_training_time_us,
+            'end_num_timesteps': proto.end_num_timesteps,
+        }
+        self.insert_dict('TrainingProgress', fields)
+
+        self.conn.commit()
+
     def insert_pyprof_file(self, path):
         with open(path, 'rb') as f:
             proto = Pyprof()
@@ -1342,7 +1375,8 @@ class _CSVInserterWorker:
             for event in events:
                 # Insert Event
                 is_debug_event = bool(match_debug_event_name(event.name))
-                event_id = event_conn.insert_dict('Event', {
+
+                event_fields = {
                     'thread_id':event.thread_id,
                     'start_time_us':event.start_time_us,
                     'end_time_us':event.start_time_us + event.duration_us,
@@ -1352,14 +1386,21 @@ class _CSVInserterWorker:
                     'process_id':process_id,
                     'phase_id':phase_id,
                     'is_debug_event':is_debug_event,
-                })
-                # Insert EventAttr
-                # for attr_name, attr_value in event.attrs.items():
-                #     attr_id = eventattr_conn.insert_dict('EventAttr', {
-                #         'event_id':event_id,
-                #         'attr_name':attr_name,
-                #         'attr_value':attr_value,
-                #     })
+                }
+                event_id = event_conn.insert_dict('Event', event_fields)
+                if not py_config.DEBUG_SKIP_PROFILING_OVERHEAD and event.start_profiling_overhead_us != 0:
+                    if category != CATEGORY_PYTHON:
+                        logging.info("Saw category = \"{cat}\" != CATEGORY_PYTHON".format(
+                            cat=category,
+                        ))
+                        assert False
+                    overhead_event_fields = dict(event_fields)
+                    overhead_event_fields['category_id'] = self.category_to_id[CATEGORY_OPERATION]
+                    overhead_event_fields['event_name'] = OPERATION_PYTHON_PROFILING_OVERHEAD
+                    overhead_event_fields['start_time_us'] = event.start_profiling_overhead_us
+                    overhead_event_fields['end_time_us'] = event.start_profiling_overhead_us + event.duration_profiling_overhead_us
+                    overhead_event_fields['duration_us'] = event.duration_profiling_overhead_us
+                    overhead_event_id = event_conn.insert_dict('Event', overhead_event_fields)
 
         num_all_events = sum(len(events) for category, events in self._pyprof_each_category_events(proto))
 
@@ -2259,8 +2300,8 @@ class SQLCategoryTimesReader:
 
         self._steps = dict()
 
-    def steps(self, process_name, bench_name, debug=False):
-        return list(range(self.num_steps(process_name, bench_name, debug=debug)))
+    def steps(self, process_name, machine_name, bench_name, debug=False):
+        return list(range(self.num_steps(process_name, machine_name, bench_name, debug=debug)))
 
     @property
     def conn(self):
@@ -2359,6 +2400,67 @@ class SQLCategoryTimesReader:
         row = c.fetchone()
         return row['start_time_sec']
 
+    def training_progress(self, *args, allow_none=False, **kwargs):
+        training_progresses = self.training_progresses(*args, **kwargs)
+        # Return the last call to iml.prof.report_progress(...)
+        def by_end_training_time_us(training_progress):
+            return training_progress.end_training_time_us
+        training_progresses.sort(key=by_end_training_time_us)
+        if allow_none and len(training_progresses) == 0:
+            logging.warning("Didn't find any TrainingProgress rows for args={args}, kwargs={kwargs}".format(
+                args=args,
+                kwargs=kwargs))
+            return None
+        return training_progresses[-1]
+        # assert len(training_progresses) == 1
+        # return training_progresses[0]
+
+    def training_progresses(
+            self,
+            machine_name=None,
+            process_name=None,
+            phase_name=None,
+            debug=False):
+        c = self.conn.cursor
+        query = textwrap.dedent("""
+        SELECT 
+            tp.total_timesteps,
+            tp.start_trace_time_us,
+
+            tp.start_percent_complete,
+            tp.start_num_timesteps,
+            tp.start_training_time_us,
+
+            tp.end_percent_complete,
+            tp.end_training_time_us,
+            tp.end_num_timesteps,
+            
+            m.machine_name,
+            m.machine_id,
+            p.process_name, 
+            p.process_id, 
+            ph.phase_name, 
+            ph.phase_id
+        FROM
+            TrainingProgress as tp
+            NATURAL JOIN Phase AS ph
+            NATURAL JOIN Process AS p
+            NATURAL JOIN Machine AS m
+        WHERE
+            {machine_clause} AND
+            {process_clause} AND
+            {phase_clause}
+        ORDER BY
+            tp.end_training_time_us
+        """).format(
+            machine_clause=sql_machine_clause(machine_name, 'm', indents=1, allow_none=True),
+            process_clause=sql_process_clause(process_name, 'p', indents=1, allow_none=True),
+            phase_clause=sql_phase_clause(phase_name, 'ph', indents=1, allow_none=True),
+        )
+        sql_exec_query(c, query, debug=debug)
+        rows = [TrainingProgress.from_row(row) for row in c.fetchall()]
+        return rows
+
     def phase(self, *args, **kwargs):
         phases = self.phases(*args, **kwargs)
         assert len(phases) == 1
@@ -2402,8 +2504,8 @@ class SQLCategoryTimesReader:
         rows = [Phase.from_row(row) for row in c.fetchall()]
         return rows
 
-    def keep_steps(self, process_name, bench_name, skip_first_step=True, debug=False):
-        steps = self.steps(process_name, bench_name, debug=debug)
+    def keep_steps(self, process_name, machine_name, bench_name, skip_first_step=True, debug=False):
+        steps = self.steps(process_name, machine_name, bench_name, debug=debug)
 
         # Skip the first step, since it includes profiler initialization stuff.
         # In particular, the libcupti NVIDIA library gets loaded on-demand during
@@ -2520,7 +2622,7 @@ class SQLCategoryTimesReader:
 
 
     DEBUG_FETCH_STEPS = False
-    def _fetch_steps(self, process_name, bench_name, debug=False):
+    def _fetch_steps(self, process_name, machine_name, bench_name, debug=False):
         if process_name in self._steps and bench_name in self._steps[process_name]:
             return
 
@@ -2531,10 +2633,12 @@ class SQLCategoryTimesReader:
         FROM Event AS e1
             NATURAL JOIN Category AS c
             NATURAL JOIN Process AS p
+            NATURAL JOIN Machine AS m
         WHERE 
             c.category_name = '{CATEGORY_OPERATION}' AND
             e1.event_name = {p} AND
             p.process_name = {p} AND 
+            {machine_clause} AND
             {no_dump_overlap_clause}
         ORDER BY e1.start_time_us ASC 
         """.format(
@@ -2545,10 +2649,14 @@ class SQLCategoryTimesReader:
             # indents=3 since {overlap_clause} above has 3 indent-levels in front of it.
             # overlap_clause=sql_overlap_clause('e1', 'e2', indents=3),
             no_dump_overlap_clause=sql_no_dump_overlap_clause('e1', tmp_event_alias_2='e2', tmp_category_alias_2='c2', indents=1),
+            machine_clause=sql_machine_clause(machine_name, 'm', indents=1, allow_none=True),
             p=sql_placeholder(),
         )
         params = (bench_name, process_name)
-        sql_exec_query(c, query, params, debug=debug)
+        sql_exec_query(c, query, params,
+                       debug=True,
+                       # debug=debug,
+        )
 
         # NOT EXISTS (
         #     SELECT *
@@ -2561,14 +2669,16 @@ class SQLCategoryTimesReader:
         # )
 
         rows = rows_as_ktime(c.fetchall())
-        if process_name not in self._steps:
-            self._steps[process_name] = dict()
-        self._steps[process_name][bench_name] = rows
+        if machine_name not in self._steps:
+            self._steps[machine_name] = dict()
+        if process_name not in self._steps[machine_name]:
+            self._steps[machine_name][process_name] = dict()
+        self._steps[machine_name][process_name][bench_name] = rows
         if debug:
             logging.info("fetch_steps(proc={proc}, op={op}) fetched {n} rows.".format(
                 proc=process_name,
                 op=bench_name,
-                n=len(self._steps[process_name][bench_name])))
+                n=len(self._steps[machine_name][process_name][bench_name])))
         end_fetch_t = time.time()
         sec_fetch = end_fetch_t - start_fetch_t
         if debug or SQLCategoryTimesReader.DEBUG_FETCH_STEPS:
@@ -2578,7 +2688,7 @@ class SQLCategoryTimesReader:
                 sec=sec_fetch,
             ))
 
-    def num_steps(self, process_name, bench_name, debug=False):
+    def num_steps(self, process_name, machine_name, bench_name, debug=False):
         """
         We don't record step numbers in the database.
         Instead, steps are an index into the i-th time this operation occurs in the entire ML-script.
@@ -2586,26 +2696,27 @@ class SQLCategoryTimesReader:
         We tend to want to skip the 1-st time the operation occurs / is profiled, since
         it will include load-time overheads (libcupti).
         """
-        self._fetch_steps(process_name, bench_name, debug=debug)
-        return len(self._steps[process_name][bench_name])
+        self._fetch_steps(process_name, machine_name, bench_name, debug=debug)
+        return len(self._steps[machine_name][process_name][bench_name])
 
-    def step_event(self, step, process_name, bench_name):
-        self._fetch_steps(process_name, bench_name)
-        return self._steps[process_name][bench_name][step]
+    def step_event(self, step, process_name, machine_name, bench_name):
+        self._fetch_steps(process_name, machine_name, bench_name)
+        return self._steps[machine_name][process_name][bench_name][step]
 
         # Swallow any excess arguments
     DEBUG_EACH_OP_INSTANCE = False
-    def each_op_instance(self, bench_name,
+    def each_op_instance(self, bench_name, machine_name,
+                         filter_op=True,
                          group_by_device=DEFAULT_group_by_device,
                          ignore_categories=DEFAULT_ignore_categories,
                          debug=DEFAULT_debug,
                          skip_first_step=True,
                          show_progress=True):
         start_t = time.time()
-        process_names = self.process_names
+        process_names = self.process_names(machine_name)
         for process_name in process_names:
 
-            keep_steps = self.keep_steps(process_name, bench_name, skip_first_step, debug=debug)
+            keep_steps = self.keep_steps(process_name, machine_name, bench_name, skip_first_step, debug=debug)
             if debug:
                 logging.info("keep_steps = {steps}".format(steps=keep_steps))
             if bench_name == NO_BENCH_NAME:
@@ -2616,8 +2727,9 @@ class SQLCategoryTimesReader:
             for step in progress(keep_steps,
                                  desc=as_progress_label("each_op_instance", process_name),
                                  show_progress=show_progress):
-                category_times = self.parse(step, process_name, bench_name,
-                                            group_by_device, ignore_categories, debug,
+                category_times = self.parse(step, process_name, machine_name, bench_name,
+                                            filter_op=filter_op,
+                                            group_by_device=group_by_device, ignore_categories=ignore_categories, debug=debug,
                                             show_progress=show_progress)
                 end_t = time.time()
                 sec = end_t - start_t
@@ -3019,7 +3131,8 @@ class SQLCategoryTimesReader:
             category_times_add_time(category_times, row['device_name'], ktime, group_by_device, category=row['category_name'])
 
     DEBUG_PARSE = False
-    def parse(self, step, process_name, bench_name,
+    def parse(self, step, process_name, machine_name, bench_name,
+              filter_op=True,
               group_by_device=DEFAULT_group_by_device,
               ignore_categories=DEFAULT_ignore_categories,
               debug=DEFAULT_debug,
@@ -3048,10 +3161,10 @@ class SQLCategoryTimesReader:
             start_parse_t = time.time()
             start_get_events = time.time()
         assert bench_name != NO_BENCH_NAME
-        n_steps = self.num_steps(process_name, bench_name)
+        n_steps = self.num_steps(process_name, machine_name, bench_name)
         assert 0 <= step < n_steps
 
-        op_event = self.step_event(step, process_name, bench_name)
+        op_event = self.step_event(step, process_name, machine_name, bench_name)
 
         parse_debug = debug or self.parse_debug
         if SQLCategoryTimesReader.DEBUG_PARSE:
@@ -3071,6 +3184,7 @@ class SQLCategoryTimesReader:
         return self.events_that_overlap_with(
             op_event, process_name,
             bench_name=bench_name,
+            filter_op=filter_op,
             step=step,
             group_by_device=group_by_device,
             ignore_categories=ignore_categories,
@@ -3102,6 +3216,7 @@ class SQLCategoryTimesReader:
     def events_that_overlap_with(self, op_event, process_name,
                                  # For debugging self.parse()
                                  bench_name=None,
+                                 filter_op=True,
                                  step=None,
                                  group_by_device=DEFAULT_group_by_device,
                                  ignore_categories=DEFAULT_ignore_categories,
@@ -3110,6 +3225,7 @@ class SQLCategoryTimesReader:
         return self.events_by_time_range(
             op_event.start_time_usec, op_event.end_time_usec, process_name,
             bench_name=bench_name,
+            filter_op=filter_op,
             step=step,
             group_by_device=group_by_device,
             ignore_categories=ignore_categories,
@@ -3119,6 +3235,7 @@ class SQLCategoryTimesReader:
     def events_by_time_range(self, start_time_usec, end_time_usec, process_name,
                                  # For debugging self.parse()
                                  bench_name=None,
+                                 filter_op=True,
                                  step=None,
                                  group_by_device=DEFAULT_group_by_device,
                                  ignore_categories=DEFAULT_ignore_categories,
@@ -3230,8 +3347,11 @@ class SQLCategoryTimesReader:
 
         if SQLCategoryTimesReader.DEBUG_PARSE:
             start_process_op_nest_t = time.time()
+        filter_by_op = None
+        if filter_op:
+            filter_by_op = bench_name
         category_times[CATEGORY_OPERATION] = process_op_nest_single_thread(category_times[CATEGORY_OPERATION],
-                                                             filter_by_op=bench_name,
+                                                             filter_by_op=filter_by_op,
                                                              # Gets in the way of each_op_instance progress bar.
                                                              # show_progress=debug or show_progress,
                                                              show_progress=SQLCategoryTimesReader.DEBUG_PARSE,
@@ -3779,6 +3899,69 @@ class Phase:
         return str(self)
 
 
+class TrainingProgress:
+    def __init__(
+            self,
+
+            total_timesteps,
+            start_trace_time_us,
+
+            start_percent_complete,
+            start_num_timesteps,
+            start_training_time_us,
+
+            end_percent_complete,
+            end_training_time_us,
+            end_num_timesteps,
+
+            machine_name, machine_id,
+            process_name, process_id,
+            phase_name, phase_id,
+
+            # Swallow any excess arguments
+            **kwargs):
+
+        self.total_timesteps = total_timesteps
+        self.start_trace_time_us = start_trace_time_us
+
+        self.start_percent_complete = start_percent_complete
+        self.start_num_timesteps = start_num_timesteps
+        self.start_training_time_us = start_training_time_us
+
+        self.end_percent_complete = end_percent_complete
+        self.end_training_time_us = end_training_time_us
+        self.end_num_timesteps = end_num_timesteps
+
+        self.machine_name = machine_name
+        self.machine_id = machine_id
+
+        self.process_name = process_name
+        self.process_id = process_id
+
+        self.phase_name = phase_name
+        self.phase_id = phase_id
+
+
+    @staticmethod
+    def from_row(row):
+        training_progress = TrainingProgress(**row)
+        for attr, value in row.items():
+            if not hasattr(training_progress, attr):
+                setattr(training_progress, attr, value)
+        return training_progress
+
+    def __str__(self):
+        return "TrainingProgress(machine={mach}, process={proc}, phase={phase}, percent_complete={perc})".format(
+            mach=self.machine_name,
+            proc=self.process_name,
+            phase=self.phase,
+            perc=( self.end_percent_complete - self.start_percent_complete ),
+        )
+
+    def __repr__(self):
+        return str(self)
+
+
 def process_op_nest_single_thread(op_events, filter_by_op=None,
                     debug=False,
                     show_progress=False,
@@ -3823,10 +4006,31 @@ def process_op_nest_single_thread(op_events, filter_by_op=None,
                                                  show_progress=show_progress,
                                                  debug_label=debug_label,
                                                  each_push=False)):
+        if py_config.DEBUG_SPLIT_STACK_OPS:
+            start_i = len(all_events)
+
         for event in op_stack.get_absored_ops():
             if filter_by_op is not None and event.name != filter_by_op:
                 continue
+            if event.process_name is None:
+                logging.warning("Saw process_name = {proc} for event = {ev}".format(
+                    proc=event.process_name,
+                    ev=event,
+                ))
+                assert event.process_name is not None
             all_events.append(event)
+
+        if py_config.DEBUG_SPLIT_STACK_OPS:
+            end_i = len(all_events)
+            logging.info("OpStack[{i}]\n{events}".format(
+                i=i,
+                events=textwrap.indent(pprint.pformat(all_events[start_i:end_i]), prefix="  "),
+            ))
+
+        # logging.info(pprint_msg(all_events))
+        # raise RuntimeError("Exit early")
+
+    # raise RuntimeError("Exit early")
 
     return all_events
 
@@ -4043,7 +4247,33 @@ class OpStack:
         self._insert(op1)
         return op1
 
+    def _sub_ops_key(self, op):
+        return op.start_time_usec
+
     def _insert(self, op1):
+        assert self.subsumes(op1)
+        idx = insort_right(self.sub_ops, op1, key=self._sub_ops_key, skip_insert=True)
+        if idx == 0 or not self.sub_ops[idx - 1].subsumes(op1):
+            op1.parent = self
+            # if len(self.sub_ops) > 0:
+            #     assert op1.ktime.is_after(self.sub_ops[-1].ktime)
+            self.sub_ops.insert(idx, op1)
+        else:
+            self.sub_ops[idx - 1]._insert(op1)
+
+    def _insert_old(self, op1):
+        # PROBLEM: We are doing O(n^2) insertion here...
+        # Basically, for half of the events, everything is subsumed by a single event.
+        # I think it's the "training_loop" annotation.
+        #
+        # PSEUDOCODE for fix:
+        # # NOTE: we are inserting events in sorted order (ordered by event.start_time_usec)
+        # # Hence, the subsume-er event will exist before the subsume-ee
+        # idx = Do binary search on event.start_time_usec to find where we would insert the event.
+        # if idx == 0 or not event[idx-1].subsumes(op1):
+        #   sub_ops.insert(idx, op1)
+        # else:
+        #   sub_ops[idx-1]._insert(op1)
         assert self.subsumes(op1)
         for op2 in self.sub_ops:
             if op2.subsumes(op1):
@@ -4053,8 +4283,6 @@ class OpStack:
             assert op1.ktime.is_after(self.sub_ops[-1].ktime)
         op1.parent = self
         self.sub_ops.append(op1)
-        # into = self
-        # if into.ktime.subsumes(op.ktime):
 
     @property
     def name(self):
@@ -4137,7 +4365,8 @@ class OpStack:
 # Modify to add a key-function.
 #
 def insort_right(a, x, lo=0, hi=None,
-                 key=lambda x: x):
+                 key=lambda x: x,
+                 skip_insert=False):
     """Insert item x in list a, and keep it sorted assuming a is sorted.
 
     If x is already in a, insert it to the right of the rightmost x.
@@ -4156,7 +4385,9 @@ def insort_right(a, x, lo=0, hi=None,
             hi = mid
         else:
             lo = mid+1
-    a.insert(lo, x)
+    if not skip_insert:
+        a.insert(lo, x)
+    return lo
 insort = insort_right   # backward compatibility
 
 def insort_list(xs, ys, key=lambda x: x):
@@ -4591,6 +4822,9 @@ class Device:
             # machine_id=self.machine_id,
         )
 
+    def __repr__(self):
+        return str(self)
+
 class Process:
     def __init__(self, process_name, process_id,
                  machine_name, machine_id,
@@ -4623,6 +4857,9 @@ class Process:
             # machine_id=self.machine_id,
         )
 
+    def __repr__(self):
+        return str(self)
+
 class Machine:
     def __init__(self, machine_name, machine_id,
                  # Swallow any excess arguments
@@ -4643,6 +4880,9 @@ class Machine:
             name=self.machine_name,
             id=self.machine_id,
         )
+
+    def __repr__(self):
+        return str(self)
 
 def test_merge_sorted():
 

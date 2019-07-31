@@ -2,7 +2,10 @@ from iml_profiler.protobuf.pyprof_pb2 import Pyprof, Event
 
 import threading
 
-def mk_event(name, start_us, end_us=None, duration_us=None, tid=None, attrs=None):
+def mk_event(name, start_us, end_us=None, duration_us=None,
+             start_profiling_overhead_us=None,
+             duration_profiling_overhead_us=None,
+             tid=None, attrs=None):
     if tid is None:
         tid = threading.get_ident()
 
@@ -16,6 +19,9 @@ def mk_event(name, start_us, end_us=None, duration_us=None, tid=None, attrs=None
         name=name,
         # Q: Does this work with attrs=None?
         attrs=attrs)
+    if start_profiling_overhead_us is not None:
+        event.start_profiling_overhead_us = int(start_profiling_overhead_us)
+        event.duration_profiling_overhead_us = int(duration_profiling_overhead_us)
 
     return event
 

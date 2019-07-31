@@ -378,6 +378,7 @@ class OverlapStackedBarPlot:
             # 'OperationOverlap': ['process', 'phase', 'resource_overlap'],
             # 'HeatScale': ['device_name'],
 
+            # TODO: support multi-process stuff.
             # NOTE: we should really add more fields here for multi-process support (e.g. 'process' and 'phase');
             # For now this just support single-process results.
             self._add_or_suggest_selector_field(idx, selector, 'resource_overlap', can_ignore=True)
@@ -401,6 +402,9 @@ class OverlapStackedBarPlot:
             new_stacked_dict['algo'] = algo
             new_stacked_dict['env'] = env
             if self.should_add_training_time:
+                # Q: Will this handle scaling phases?  I think so... basically, each phase-file will just have a
+                # different 'percent_complete'. However, I think we need to make OverlapStackedBarPlot have a phase argument,
+                # or run for each phase.
                 total_size = vd.total_size()
                 # Extrapolate the total training time using percent_complete
                 assert 'percent_complete' in md

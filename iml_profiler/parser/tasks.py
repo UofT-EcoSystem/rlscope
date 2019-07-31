@@ -26,6 +26,10 @@ from iml_profiler.parser.stacked_bar_plots import OverlapStackedBarPlot
 from iml_profiler.parser.common import print_cmd
 from iml_profiler.parser.cpu_gpu_util import UtilParser, UtilPlot
 from iml_profiler.parser.training_progress import TrainingProgressParser, ProfilingOverheadPlot
+from iml_profiler.parser.extrapolated_training_time import ExtrapolatedTrainingTimeParser
+from iml_profiler import py_config
+
+from iml_profiler.parser.common import *
 
 PARSER_KLASSES = [PythonProfileParser, PythonFlameGraphParser, PlotSummary, TimeBreakdownPlot, CategoryOverlapPlot, UtilizationPlot, HeatScalePlot, TotalTimeParser, TraceEventsParser, SQLParser]
 PARSER_NAME_TO_KLASS = dict((ParserKlass.__name__, ParserKlass) \
@@ -145,6 +149,8 @@ class SQLParserTask(IMLTask):
         self.sql_parser.run()
 
 class _UtilizationPlotTask(IMLTask):
+    debug_memoize = luigi.BoolParameter(description="If true, memoize partial results for quicker runs", default=False, parsing=luigi.BoolParameter.EXPLICIT_PARSING)
+
     def requires(self):
         return [
             mk_SQLParserTask(self),
@@ -158,6 +164,7 @@ class _UtilizationPlotTask(IMLTask):
             user=self.postgres_user,
             password=self.postgres_password,
             debug=self.debug,
+            debug_memoize=self.debug_memoize,
             debug_single_thread=self.debug_single_thread,
         )
         self.sql_parser.run()
@@ -220,6 +227,8 @@ class TraceEventsTask(luigi.Task):
     postgres_user = param_postgres_user
     postgres_host = param_postgres_host
 
+    filter_op = luigi.BoolParameter(description="If true, JUST show --op-name events not other operations", default=True, parsing=luigi.BoolParameter.EXPLICIT_PARSING)
+
     overlaps_event_id = luigi.IntParameter(description="show events that overlap with this event (identified by its event_id)", default=None)
     op_name = luigi.Parameter(description="operation name (e.g. q_forward)", default=None)
     process_name = luigi.Parameter(description="show events belonging to this process", default=None)
@@ -243,6 +252,7 @@ class TraceEventsTask(luigi.Task):
             user=self.postgres_user,
             password=self.postgres_password,
             debug=self.debug,
+            filter_op=self.filter_op,
             overlaps_event_id=self.overlaps_event_id,
             op_name=self.op_name,
             process_name=self.process_name,
@@ -417,6 +427,37 @@ class ProfilingOverheadPlotTask(luigi.Task):
         self.dumper = ProfilingOverheadPlot(**kwargs)
         self.dumper.run()
 
+class ExtrapolatedTrainingTimeTask(IMLTask):
+    dependency = luigi.Parameter(description="JSON file containing Hard-coded computational dependencies A.phase -> B.phase", default=None)
+    algo_env_from_dir = luigi.BoolParameter(description="Add algo/env columns based on directory structure of --iml-directories <algo>/<env>/iml_dir", default=True, parsing=luigi.BoolParameter.EXPLICIT_PARSING)
+
+    # x_type = param_x_type
+    # y_title = luigi.Parameter(description="y-axis title", default='Total training time (seconds)')
+    # suffix = luigi.Parameter(description="Add suffix to output files: MachineGPUUtil.{suffix}.{ext}", default=None)
+    # stacked = luigi.BoolParameter(description="Make stacked bar-plot", default=False, parsing=luigi.BoolParameter.EXPLICIT_PARSING)
+    # preset = luigi.Parameter(description="preset configuration for plot bar order and plot labels", default=None)
+    #
+    # # Plot attrs
+    # rotation = luigi.FloatParameter(description="x-axis title rotation", default=45.)
+    # width = luigi.FloatParameter(description="Width of plot in inches", default=None)
+    # height = luigi.FloatParameter(description="Height of plot in inches", default=None)
+
+    # algo_env_from_dir = luigi.BoolParameter(description="Add algo/env columns based on directory structure of --iml-directories <algo>/<env>/iml_dir", default=True, parsing=luigi.BoolParameter.EXPLICIT_PARSING)
+
+    def requires(self):
+        return [
+            mk_SQLParserTask(self),
+        ]
+
+    def iml_run(self):
+        kwargs = kwargs_from_task(self)
+        assert 'directory' not in kwargs
+        kwargs['directory'] = kwargs['iml_directory']
+        del kwargs['iml_directory']
+        # logging.info(pprint_msg({'kwargs': kwargs}))
+        self.dumper = ExtrapolatedTrainingTimeParser(**kwargs)
+        self.dumper.run()
+
 class GeneratePlotIndexTask(luigi.Task):
     iml_directory = luigi.Parameter(description="Location of trace-files")
     # out_dir = luigi.Parameter(description="Location of trace-files", default=None)
@@ -562,6 +603,8 @@ def main(argv=None, should_exit=True):
           - Look for the last "> CMD:" that was run, and re-run it manually 
             but with the added "--pdb" flag to break when it fails.
         """))
+    # logging.info("Exiting with ret={ret}".format(
+    #     ret=retcode))
     sys.exit(retcode)
 
 NOT_RUNNABLE_TASKS = get_NOT_RUNNABLE_TASKS()
@@ -572,6 +615,7 @@ IML_TASKS.add(UtilTask)
 IML_TASKS.add(UtilPlotTask)
 IML_TASKS.add(TrainingProgressTask)
 IML_TASKS.add(ProfilingOverheadPlotTask)
+IML_TASKS.add(ExtrapolatedTrainingTimeTask)
 
 if __name__ == "__main__":
     main()

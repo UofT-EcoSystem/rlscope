@@ -100,15 +100,33 @@ CREATE TABLE Category (
 --   UNIQUE (category_name)
 );
 
+CREATE TABLE TrainingProgress (
+  training_progress_id SERIAL NOT NULL PRIMARY KEY,
+
+  process_id INTEGER NOT NULL,
+  phase_id INTEGER NOT NULL,
+
+  total_timesteps NUMERIC NOT NULL,
+  start_trace_time_us NUMERIC NOT NULL,
+
+  start_percent_complete FLOAT NOT NULL,
+  start_num_timesteps NUMERIC NOT NULL,
+  start_training_time_us NUMERIC NOT NULL,
+
+  end_percent_complete FLOAT NOT NULL,
+  end_training_time_us NUMERIC NOT NULL,
+  end_num_timesteps NUMERIC NOT NULL
+
+--     FOREIGN KEY(process_id) REFERENCES Process(process_id),
+--     FOREIGN KEY(phase_id) REFERENCES Phase(phase_id),
+);
+
 CREATE TABLE Process (
   process_id SERIAL NOT NULL PRIMARY KEY,
   process_name TEXT,
   parent_process_id INTEGER,
-  machine_id INTEGER NOT NULL,
-  -- ProcessMetadata.TrainingProgress
-  percent_complete FLOAT,
-  num_timesteps INTEGER,
-  total_timesteps INTEGER
+  machine_id INTEGER NOT NULL
+
 --   UNIQUE (process_name)
 --   FOREIGN KEY(parent_process_id) REFERENCES Process(process_id),
 --   FOREIGN KEY(machine_id) REFERENCES Machine(machine_id);

@@ -22,6 +22,7 @@ SEPARATE_CALLS_HEADER = ['Type', 'Time(%)',
                          'Min', 'Max',
                          ]
 
+KERNEL_TIME_OVERWRITE_NONE = {'process_name'}
 
 class KernelTime:
     """
@@ -48,9 +49,9 @@ class KernelTime:
             assert self.time_usec == self.end_usec - self.start_usec
 
         if create_from is not None:
-            self._get_attrs(create_from)
+            self._get_attrs(create_from, overwrite_none=KERNEL_TIME_OVERWRITE_NONE)
 
-    def _get_attrs(self, ktime):
+    def _get_attrs(self, ktime, overwrite_none):
         """
         OpStack.get_absorbed_ops/split_op_stacks creates new events
         by "splitting" an event into multiple smaller events.
@@ -63,7 +64,7 @@ class KernelTime:
         :return:
         """
         for key, value in ktime.__dict__.items():
-            if not hasattr(self, key):
+            if not hasattr(self, key) or ( key in overwrite_none and getattr(self, key) is None ):
                 setattr(self, key, value)
 
     def copy(self):

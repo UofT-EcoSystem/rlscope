@@ -35,3 +35,7 @@ ALTER TABLE Device ADD CONSTRAINT Device_fk_01
 ALTER TABLE Device ADD CONSTRAINT Device_fk_02
   FOREIGN KEY(machine_id) REFERENCES Machine(machine_id);
 
+ALTER TABLE TrainingProcess ADD CONSTRAINT TrainingProcess_fk_01
+  FOREIGN KEY(process_id) REFERENCES Process(process_id);
+ALTER TABLE TrainingProcess ADD CONSTRAINT TrainingProcess_fk_02
+  FOREIGN KEY(phase_id) REFERENCES Phase(phase_id);

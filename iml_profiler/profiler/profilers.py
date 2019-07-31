@@ -73,8 +73,6 @@ NO_BENCH_NAME = "NoBenchName"
 NO_DEVICE_NAME = "NoDeviceName"
 NO_IMPL_NAME = "NoImplName"
 
-DEFAULT_PHASE = 'default_phase'
-
 TF_PRINT_TIMESTAMP = ENV.get('TF_PRINT_TIMESTAMP', 'no') == 'yes'
 
 UTILIZATION_SAMPLER_PY = _j(py_config.ROOT, 'python', 'scripts', 'utilization_sampler.py')

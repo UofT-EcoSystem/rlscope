@@ -20,6 +20,12 @@ MP_FORK_CTX = multiprocessing.get_context('fork')
 MP_CTX = MP_SPAWN_CTX
 # MP_CTX = MP_FORK_CTX
 
+class FailedProcessException(Exception):
+    def __init__(self, msg, proc, exitcode):
+        super().__init__(msg)
+        self.proc = proc
+        self.exitcode = exitcode
+
 class ForkedProcessPool:
     """
     Fork a child and run "target".
@@ -116,7 +122,7 @@ class ForkedProcessPool:
                 ret=proc.exitcode,
             )
             assert re.search(ForkedProcessPool.NONZERO_EXIT_STATUS_ERROR_REGEX, msg)
-            parent_ex = RuntimeError(msg)
+            parent_ex = FailedProcessException(msg, proc=proc, exitcode=proc.exitcode)
             raise parent_ex
 
 
@@ -227,7 +233,7 @@ def test_forked_process_pool():
         :return:
         """
         pool = ForkedProcessPool(name=test_01_sys_exit_1.__name__)
-        with pytest.raises(RuntimeError, match=ForkedProcessPool.NONZERO_EXIT_STATUS_ERROR_REGEX) as exec_info:
+        with pytest.raises(FailedProcessException, match=ForkedProcessPool.NONZERO_EXIT_STATUS_ERROR_REGEX) as exec_info:
             pool.submit(_sys_exit_1.__name__, _sys_exit_1)
             pool.shutdown()
     test_01_sys_exit_1()
@@ -239,7 +245,7 @@ def test_forked_process_pool():
         :return:
         """
         pool = ForkedProcessPool(name=test_02_exception.__name__)
-        with pytest.raises(RuntimeError, match="Child process exception") as exec_info:
+        with pytest.raises(FailedProcessException, match="Child process exception") as exec_info:
             pool.submit(_exception.__name__, _exception)
             pool.shutdown()
     test_02_exception()

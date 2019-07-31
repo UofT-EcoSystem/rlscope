@@ -26,6 +26,8 @@ from tqdm import tqdm as tqdm_progress
 
 USEC_IN_SEC = 1e6
 
+OPERATION_PYTHON_PROFILING_OVERHEAD = "Python profiling overhead"
+
 CATEGORY_TF_API = "Framework API C"
 CATEGORY_PYTHON = 'Python'
 CATEGORY_PYTHON_PROFILER = 'Python profiler'
@@ -64,6 +66,8 @@ CATEGORIES_ALL = [
     CATEGORY_PROFILING,
     CATEGORY_PYTHON_PROFILER,
 ]
+
+DEFAULT_PHASE = 'default_phase'
 
 # Record a "special" operation event-name (category=CATEGORY_OPERATION)
 # when the prof.start()/stop() is called.
@@ -1054,6 +1058,12 @@ def phase_suffix(phase_name):
         return ".phase_{phase}".format(phase=phase_name)
     return ""
 
+def overlap_type_suffix(overlap_type):
+    # assert overlap_type is not None
+    if overlap_type is not None:
+        return ".overlap_{overlap}".format(overlap=overlap_type)
+    return ""
+
 def ops_suffix(ops):
     if ops is None:
         return ""
@@ -1492,7 +1502,8 @@ def is_insertable_file(path):
            is_pyprof_file(path) or \
            is_dump_event_file(path) or \
            is_pyprof_call_times_file(path) or \
-           is_machine_util_file(path)
+           is_machine_util_file(path) or \
+           is_training_progress_file(path)
 
 def is_trace_file(path):
     """
