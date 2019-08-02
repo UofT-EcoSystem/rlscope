@@ -72,6 +72,7 @@ class TrainingProgressParser:
                  iml_directories,
                  ignore_phase=False,
                  algo_env_from_dir=False,
+                 baseline_config=None,
                  debug=False,
                  # Swallow any excess arguments
                  **kwargs):
@@ -83,6 +84,7 @@ class TrainingProgressParser:
         self.iml_directories = iml_directories
         self.ignore_phase = ignore_phase
         self.algo_env_from_dir = algo_env_from_dir
+        self.baseline_config = baseline_config
         self.debug = debug
 
         self.added_fields = set()
@@ -274,16 +276,26 @@ class TrainingProgressParser:
         join_cols.remove('config')
         join_cols = sorted(join_cols)
 
+        def is_instrumented(config):
+            if self.baseline_config is not None:
+                return config != self.baseline_config
+            return config_is_instrumented(config)
+
+        def is_uninstrumented(config):
+            if self.baseline_config is not None:
+                return config == self.baseline_config
+            return config_is_uninstrumented(config)
+
         # TODO: check that each index only contains 1 row
         # CONCERN: don't want to mix config=uninstrumented with config=uninstrumented_full
-        ins_df = keep_agg_df[keep_agg_df['config'].apply(lambda config: bool(config_is_instrumented(config)))]
+        ins_df = keep_agg_df[keep_agg_df['config'].apply(lambda config: bool(is_instrumented(config)))]
         ins_df = ins_df.set_index(join_cols)
         # We can have multiple different configurations:
         # - config_instrumented
         # - config_instrumented_no_pyprof
         # - config_instrumented_no_tfprof
         # assert ins_df.index.is_unique
-        unins_df = keep_agg_df[keep_agg_df['config'].apply(lambda config: bool(config_is_uninstrumented(config)))]
+        unins_df = keep_agg_df[keep_agg_df['config'].apply(lambda config: bool(is_uninstrumented(config)))]
         unins_df = unins_df.set_index(join_cols)
         assert unins_df.index.is_unique
 
@@ -377,7 +389,35 @@ ProfilingOverheadPlot_presets = {
             'config_instrumented_no_tfprof_python_profiler',
         ],
     }
+
 }
+ProfilingOverheadPlot_presets['tfprof_debug'] = copy.deepcopy(ProfilingOverheadPlot_presets['tfprof'])
+ProfilingOverheadPlot_presets['tfprof_debug']['label_map'].update({
+    'config_instrumented_no_pyprof_overhead_async_libcupti_buffer': "No pyprof, async libcupti buffer",
+    'config_instrumented_no_pyprof_overhead_async_libcupti_buffer_redo': 'No pyprof, async libcupti buffer (redo)',
+    'config_instrumented_no_pyprof_redo_cb0864b': '$-$ pyprof tracing/dumping (redo: cb0864b)',
+    'config_instrumented_no_pyprof_redo_9c10908': '$-$ pyprof tracing/dumping (redo: 9c10908)',
+    'config_instrumented_no_pyprof_cupti_empty_tracing_callbacks_cupti_skip_register_cupti_callbacks_redo_442b702': '$-$ libcupti event record callbacks (redo: 442b702)',
+    'config_instrumented_no_pyprof_cupti_empty_tracing_callbacks_442b702': '$-$ libcupti empty tracing callbacks (442b702)',
+    'config_instrumented_no_pyprof_cupti_empty_tracing_callbacks_cupti_skip_register_api_callbacks_442b702': '$-$ libcupti empty tracing callbacks, skip API callbacks (442b702)',
+    'config_instrumented_no_pyprof_cupti_empty_tracing_callbacks_cupti_skip_register_api_callbacks_cupti_buffer_arena_442b702': '$-$ libcupti empty tracing callbacks, skip API callbacks, libcupti buffer arena (442b702)',
+    'config_instrumented_no_pyprof_cupti_empty_tracing_callbacks_cupti_skip_register_api_callbacks_cupti_buffer_pool_allocator_442b702': '$-$ libcupti empty tracing callbacks, skip API callbacks, libcupti buffer pool allocator (442b702)',
+    'config_instrumented_no_pyprof_cupti_empty_tracing_callbacks_cupti_skip_register_api_callbacks_cupti_buffer_pool_allocator_tcmalloc_442b702': '$-$ libcupti empty tracing callbacks, skip API callbacks, libcupti buffer pool allocator, tcmalloc (442b702)',
+
+})
+
+ProfilingOverheadPlot_presets['tfprof_debug']['config_order'].extend([
+    'config_instrumented_no_pyprof_overhead_async_libcupti_buffer',
+    'config_instrumented_no_pyprof_overhead_async_libcupti_buffer_redo',
+    'config_instrumented_no_pyprof_redo_cb0864b',
+    'config_instrumented_no_pyprof_redo_9c10908',
+    'config_instrumented_no_pyprof_cupti_empty_tracing_callbacks_cupti_skip_register_cupti_callbacks_redo_442b702',
+    'config_instrumented_no_pyprof_cupti_empty_tracing_callbacks_442b702',
+    'config_instrumented_no_pyprof_cupti_empty_tracing_callbacks_cupti_skip_register_api_callbacks_442b702',
+    'config_instrumented_no_pyprof_cupti_empty_tracing_callbacks_cupti_skip_register_api_callbacks_cupti_buffer_arena_442b702',
+    'config_instrumented_no_pyprof_cupti_empty_tracing_callbacks_cupti_skip_register_api_callbacks_cupti_buffer_pool_allocator_442b702',
+    'config_instrumented_no_pyprof_cupti_empty_tracing_callbacks_cupti_skip_register_api_callbacks_cupti_buffer_pool_allocator_tcmalloc_442b702',
+])
 
 class ProfilingOverheadPlot:
     def __init__(self,

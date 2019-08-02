@@ -381,6 +381,7 @@ class TrainingProgressTask(luigi.Task):
     debug = param_debug
     debug_single_thread = param_debug_single_thread
     algo_env_from_dir = luigi.BoolParameter(description="Add algo/env columns based on directory structure of --iml-directories <algo>/<env>/iml_dir", default=True, parsing=luigi.BoolParameter.EXPLICIT_PARSING)
+    baseline_config = luigi.Parameter(description="The baseline configuration to compare all others against; default: config_uninstrumented", default=None)
     ignore_phase = luigi.BoolParameter(description="Bug workaround: for training progress files that didn't record phase, just ignore it.", default=False, parsing=luigi.BoolParameter.EXPLICIT_PARSING)
 
     skip_output = False
