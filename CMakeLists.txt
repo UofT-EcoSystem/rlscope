@@ -16,6 +16,11 @@ if(IS_WINDOWS)
     message("> Detected Windows development machine")
 endif()
 
+if (NOT IS_WINDOWS)
+    message("> Add libcupti include")
+    include_directories(SYSTEM /usr/local/cuda/extras/CUPTI/include)
+endif()
+
 if(IS_WINDOWS)
     set(LANGUAGES CXX)
 else()
@@ -168,6 +173,14 @@ add_executable(epoch_sec
         ./tensorflow/core/platform/default/logging.cc
         tensorflow/core/platform/env_time.cc
         tensorflow/core/platform/posix/env_time.cc)
+
+set(SAMPLE_CUDA_API_DIRS
+        ./src/cuda_api_profiler
+        ${TF_SRC_DIRS}
+        )
+gather_sources(SAMPLE_CUDA_API_SOURCES SAMPLE_CUDA_API_DIRS)
+add_library(sample_cuda_api SHARED
+        ${SAMPLE_CUDA_API_SOURCES})
 
 #./test/py_interface/py_interface_src.cpp
 add_library(py_interface SHARED
