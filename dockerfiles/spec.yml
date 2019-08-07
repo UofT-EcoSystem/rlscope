@@ -155,6 +155,7 @@ slice_sets:
           - ubuntu/virtualenv
           - ubuntu/pip_dependencies
           - ubuntu/protobuf_from_src
+          - ubuntu/cmake_from_src
           - iml/env
           - iml/apt_install
           - iml/pip_dependencies

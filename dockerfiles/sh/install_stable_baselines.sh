@@ -32,10 +32,12 @@ _check_iml
 #
 # sudo apt-get -y install libopenmpi-dev
 
+# Ubuntu 16.04 cmake is out-of-date.
+# sudo apt-get -y install cmake
 sudo apt-get -y install python-dev python3-dev \
                    libglib2.0-0 \
                    libsm6 libxext6 libfontconfig1 libxrender1 \
-                   swig cmake zlib1g-dev ffmpeg \
+                   swig zlib1g-dev ffmpeg \
                    freeglut3-dev xvfb
 
 # As of roughly June 21 2019, "pip install atari-py==0.2.0" has stopped

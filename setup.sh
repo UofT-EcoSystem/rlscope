@@ -158,6 +158,78 @@ setup_json_cpp_library() {
 #    _configure_make_install
 }
 
+ABSEIL_CPP_LIB_DIR="$ROOT/third_party/abseil-cpp"
+setup_abseil_cpp_library() {
+    if [ "$FORCE" != 'yes' ] && [ -e $ABSEIL_CPP_LIB_DIR ]; then
+        return
+    fi
+    local commit="20181200"
+    _clone "$ABSEIL_CPP_LIB_DIR" \
+        git@github.com:abseil/abseil-cpp.git \
+        $commit
+}
+
+GTEST_CPP_LIB_DIR="$ROOT/third_party/googletest"
+setup_gtest_cpp_library() {
+    if [ "$FORCE" != 'yes' ] && [ -e $GTEST_CPP_LIB_DIR ]; then
+        return
+    fi
+    local commit="release-1.8.1"
+    _clone "$GTEST_CPP_LIB_DIR" \
+        git@github.com:google/googletest.git \
+        $commit
+}
+
+NSYNC_CPP_LIB_DIR="$ROOT/third_party/nsync"
+setup_nsync_cpp_library() {
+    if [ "$FORCE" != 'yes' ] && [ -e $NSYNC_CPP_LIB_DIR ]; then
+        return
+    fi
+    local commit="1.21.0"
+    _clone "$NSYNC_CPP_LIB_DIR" \
+        git@github.com:google/nsync.git \
+        $commit
+}
+
+BACKWARD_CPP_LIB_DIR="$ROOT/third_party/backward-cpp"
+setup_backward_cpp_library() {
+    if [ "$FORCE" != 'yes' ] && [ -e $BACKWARD_CPP_LIB_DIR ]; then
+        return
+    fi
+    local commit="v1.4"
+    _clone "$BACKWARD_CPP_LIB_DIR" \
+        git@github.com:bombela/backward-cpp.git \
+        $commit
+}
+
+
+BOOST_CPP_LIB_VERSION="1.70.0"
+BOOST_CPP_LIB_VERSION_UNDERSCORES="$(perl -lape 's/\./_/g'<<<"$BOOST_CPP_LIB_VERSION")"
+BOOST_CPP_LIB_DIR="$ROOT/third_party/boost_${BOOST_CPP_LIB_VERSION_UNDERSCORES}"
+BOOST_CPP_LIB_URL="https://dl.bintray.com/boostorg/release/${BOOST_CPP_LIB_VERSION}/source/boost_${BOOST_CPP_LIB_VERSION_UNDERSCORES}.tar.gz"
+setup_boost_cpp_library() {
+    if [ "$FORCE" != 'yes' ] && [ -e $BOOST_CPP_LIB_DIR/build ]; then
+        return
+    fi
+    _wget_tar "$BOOST_CPP_LIB_URL" "third_party"
+    (
+    cd $BOOST_CPP_LIB_DIR
+    ./bootstrap.sh --prefix=$BOOST_CPP_LIB_DIR/build
+    if [ ! -e project-config.jam.bkup ]; then
+        # https://github.com/boostorg/build/issues/289#issuecomment-515712785
+        # Compiling boost fails inside a virtualenv; complains about pyconfig.h not existing
+        # since include-headers aren't properly detected in a virtualenv.
+        # This is a documented (but not yet upstreamed) work-around.
+        local py_ver="$(python --version | perl -lape 's/^Python //; s/(\d+\.\d+)\.\d+/$1/')";
+        local py_path="$(which python)";
+        local py_include="$(python -c "from sysconfig import get_paths; info = get_paths(); print(info['include']);")";
+        sed --in-place=.bkup "s|using python : .*|using python : ${py_ver} : ${py_path} : ${py_include} ;|" project-config.jam
+    fi
+#    ./b2 -j$(nproc) install
+    ./b2 cxxflags="-fPIC" cflags="-fPIC" -j$(nproc) install
+    )
+}
+
 _configure() {
     local install_dir="$1"
     shift 1
@@ -249,9 +321,15 @@ main() {
     # 1) Build TensorFlow from source and install with pip
     # 2) Build TensorFlow C-API and build against that.
 #    _download_tensorflow_c_api
-    _build_tensorflow_c_api
+#    _build_tensorflow_c_api
     setup_json_cpp_library
-    setup_cmake
+    setup_abseil_cpp_library
+    setup_gtest_cpp_library
+    setup_nsync_cpp_library
+#    setup_boost_cpp_library
+    setup_backward_cpp_library
+    # TODO: setup protobuf
+#    setup_cmake
 }
 
 (

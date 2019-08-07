@@ -192,6 +192,10 @@ def main():
     Debug with single thread.
     """))
     parser.add_argument(
+        '--cuda-api-prof',
+        help="record CUDA API call time and call counts (for uninstrumented runs only)",
+        action='store_true')
+    parser.add_argument(
         '--replace',
         action='store_true')
     parser.add_argument(
@@ -1151,6 +1155,9 @@ class StableBaselines(Experiment):
         env['ALGO'] = algo
         if args.debug:
             env['DEBUG'] = 'yes'
+
+        if args.cuda_api_prof:
+            env['CUDA_API_PROF'] = 'iml-cuda-api-prof'
 
         if args.iml_trace_time_sec is not None:
             env['IML_TRACE_TIME_SEC'] = str(args.iml_trace_time_sec)

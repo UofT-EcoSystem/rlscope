@@ -104,7 +104,14 @@ NVPROF=()
 #    NVPROF=(nvprof --source-level-analysis)
 #fi
 
-_do "${NVPROF[@]}" "${PYTHON[@]}" $RL_BASELINES_ZOO_DIR/train.py \
+
+# NOTE: CUDA_API_PROF, if defined, will be a command (iml-cuda-api-prof) that wraps the training script
+# using LD_PRELOAD=libsample_cuda_api.so in order to sample CUDA API calls during
+# training.  This should be used for uninstrumented runs.
+# Instrumented runs should instead use the profiler built-in to tensorflow to avoid libcupti
+# callback registration conflicts.
+
+_do $CUDA_API_PROF "${NVPROF[@]}" "${PYTHON[@]}" $RL_BASELINES_ZOO_DIR/train.py \
     --algo $ALGO \
     --env $ENV_ID \
     --log-folder $OUTPUT_DIR \

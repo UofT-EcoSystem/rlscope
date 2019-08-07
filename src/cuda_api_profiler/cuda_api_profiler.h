@@ -5,15 +5,17 @@
 #ifndef DNN_TENSORFLOW_CPP_CUDA_API_PROFILER_H
 #define DNN_TENSORFLOW_CPP_CUDA_API_PROFILER_H
 
-#include "tensorflow/core/platform/device_tracer.h"
+#include <cuda.h>
+#include <cupti.h>
 
-#define CUPTI_CALL(call)                                            \
-  do {                                                              \
-    CUptiResult _status = cupti_wrapper_->call;                     \
-    if (_status != CUPTI_SUCCESS) {                                 \
-      LOG(ERROR) << "cuda call " << #call << " failed " << _status; \
-    }                                                               \
-  } while (0)
+#include "tensorflow/core/platform/notification.h"
+
+#include <map>
+#include <string>
+#include <tuple>
+#include <thread>
+
+namespace tensorflow {
 
 struct CUDAAPIStats {
     int64 total_api_time_usec;
@@ -37,9 +39,9 @@ public:
     // (thread-id, api-cbid)
     using APIKey = std::tuple<pid_t, CUpti_CallbackDomain, CUpti_CallbackId>;
     using TimeUsec = int64;
-    std::map<APIKey, TimeUsec> _start_t;
-    std::map<APIKey, TimeUsec> _end_t;
-    std::map<APIKey, CUDAAPIStats> _api_stats;
+    std::map<APIKey, TimeUsec> _start_t GUARDED_BY(_mu);
+    std::map<APIKey, TimeUsec> _end_t GUARDED_BY(_mu);
+    std::map<APIKey, CUDAAPIStats> _api_stats GUARDED_BY(_mu);
     CUDAAPIProfiler() = default;
     ~CUDAAPIProfiler();
     void ApiCallback(
@@ -53,6 +55,30 @@ public:
 
     static std::map<CUpti_CallbackId, std::string> RuntimeCallbackIDToName();
     static std::map<CUpti_CallbackId, std::string> DriverCallbackIDToName();
+
+    mutex _mu;
 };
+
+class CUDAAPIProfilerPrinter {
+    /* Every X seconds, print out the collected CUDA API stats.
+     * (in the future, we will dump the stats to a proto file.)
+     */
+public:
+    Notification _should_stop;
+    CUDAAPIProfiler& _profiler;
+    float _every_sec;
+//    std::thread _printer_thread;
+    std::unique_ptr<std::thread> _printer_thread;
+
+    CUDAAPIProfilerPrinter(CUDAAPIProfiler& profiler, float every_sec);
+    ~CUDAAPIProfilerPrinter();
+    void _Run();
+    void Stop();
+    void _EverySec();
+
+    void Start();
+};
+
+}
 
 #endif //DNN_TENSORFLOW_CPP_CUDA_API_PROFILER_H

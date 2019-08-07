@@ -2,39 +2,95 @@
 #
 # NOTE: make sure to run ./setup.sh before attempting to build this.
 # setup.sh will download the tensorflow C-API.
-cmake_minimum_required(VERSION 3.0 FATAL_ERROR)
+
+# You can use a locally built protobuf (3.9.1), but you will need to provide
+# a path to where you install protobuf's include directory:
+#
+# $ mkdir build
+# $ cd build
+# $ cmake -DProtobuf_INCLUDE_DIR=$HOME/protobuf/include -DProtobuf_LIBRARY=$HOME/protobuf/lib/libprotobuf.so ..
+
+# Need cmake >= 3.8 so that we can do:
+#   set(LANGUAGES CXX CUDA)
+cmake_minimum_required(VERSION 3.8 FATAL_ERROR)
+project(iml)
 #https://github.com/robertmaynard/code-samples/blob/master/posts/cmake/CMakeLists.txt
+
+set(ENABLE_BACKTRACE ON CACHE BOOL "Enable pretty-printed stacktrace during LOG(FATAL) or DCHECK failures; requires adding -g debug symbols")
+
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
+#FIND_PACKAGE(CUDA)
+
+set(ENABLE_DQN_CPP OFF)
+
+set(BOOST_VERSION 1.70.0)
+set(BOOST_VERSION_UNDERSCORES 1_70_0)
+
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
+#message("> CMAKE_MODULE_PATH = ${CMAKE_MODULE_PATH}")
 
 if(MINGW OR CYGWIN OR WIN32 OR MSVC OR CLION)
 #    message(FATAL_ERROR "WHY")
+    message("> Detected Windows development machine")
     set(IS_WINDOWS ON)
 else()
+    message("> Detected Unix setup (build environment)")
     set(IS_WINDOWS OFF)
 endif()
 
-if(IS_WINDOWS)
-    message("> Detected Windows development machine")
-endif()
-
-if (NOT IS_WINDOWS)
-    message("> Add libcupti include")
-    include_directories(SYSTEM /usr/local/cuda/extras/CUPTI/include)
-endif()
+#if (NOT IS_WINDOWS)
+#    message("> Add libcupti include")
+#    include_directories(SYSTEM /usr/local/cuda/extras/CUPTI/include)
+#endif()
 
 if(IS_WINDOWS)
     set(LANGUAGES CXX)
 else()
     set(LANGUAGES CXX CUDA)
 endif()
-project(DNN_Tensorflow_CPP LANGUAGES ${LANGUAGES})
+project(iml LANGUAGES ${LANGUAGES})
 
-set(IGNORE_ERRORS "-Wno-unused")
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 -Wall -Werror ${IGNORE_ERRORS}")
+#NOT EXISTS ${PROJECT_SOURCE_DIR}/external_libs/lib
+if (NOT IS_WINDOWS AND NOT (
+        EXISTS ${PROJECT_SOURCE_DIR}/third_party/json
+        AND EXISTS ${PROJECT_SOURCE_DIR}/third_party/abseil-cpp
+        AND EXISTS ${PROJECT_SOURCE_DIR}/third_party/nsync
+        AND EXISTS ${PROJECT_SOURCE_DIR}/third_party/backward-cpp
+#        AND EXISTS ${PROJECT_SOURCE_DIR}/third_party/boost_${BOOST_VERSION_UNDERSCORES}/build
+        ) )
+    message(FATAL_ERROR
+            "You need to run setup.sh first:\n"
+            "  $ cd ${PROJECT_SOURCE_DIR}\n"
+            "  $ bash ./setup.sh")
+endif()
+
+find_package(GTest REQUIRED)
+include_directories(${GTEST_INCLUDE_DIRS})
+
+# https://github.com/abseil/abseil-cpp/blob/master/CMake/README.md
+set(ABSL_RUN_TESTS OFF)
+set(BUILD_TESTING OFF)
+add_subdirectory(third_party/abseil-cpp)
+unset(BUILD_TESTING)
+
+add_subdirectory(third_party/backward-cpp)
+
+set(NSYNC_ENABLE_TESTS OFF)
+#set(BUILD_SHARED_LIBS ON)
+add_subdirectory(third_party/nsync)
+
+if(NOT IS_WINDOWS)
+    set(JSON_BuildTests OFF CACHE INTERNAL "")
+    add_subdirectory(third_party/json)
+endif()
+
+set(IGNORE_ERRORS "-Wno-unused -Wno-unknown-pragmas")
+set(CMAKE_CXX_STANDARD 11)
+#-std=c++11
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Werror ${IGNORE_ERRORS}")
 SET(CMAKE_EXE_LINKER_FLAGS  "${CMAKE_EXE_LINKER_FLAGS} -demangle")
 
-if (NOT IS_WINDOWS AND NOT EXISTS ${PROJECT_SOURCE_DIR}/external_libs/lib)
-    message(FATAL_ERROR "You need to run setup.sh first.")
-endif()
 
 #if (NOT EXISTS ./external_libs/lib)
 #   message(FATAL_ERROR "You need to run setup.sh first.")
@@ -119,30 +175,30 @@ gather_sources(TEST_SOURCES TEST_DIRS)
 gather_sources(TF_SOURCES TF_SRC_DIRS)
 gather_sources(PY_INTERFACE_LIB_SOURCES PY_INTERFACE_LIB_DIRS)
 
-if(IS_WINDOWS)
-    set(CUPTI_DIRS
-            ./CUPTI/include
-            ./CUPTI/include/GL
-            ./CUPTI/include/openacc
-            ./CUPTI/sample
-            ./CUPTI/sample/activity_trace_async
-            ./CUPTI/sample/callback_event
-            ./CUPTI/sample/callback_metric
-            ./CUPTI/sample/callback_timestamp
-            ./CUPTI/sample/cupti_query
-            ./CUPTI/sample/event_multi_gpu
-            ./CUPTI/sample/event_sampling
-            ./CUPTI/sample/nvlink_bandwidth
-            ./CUPTI/sample/openacc_trace
-            ./CUPTI/sample/pc_sampling
-            ./CUPTI/sample/sass_source_map
-            ./CUPTI/sample/unified_memory
-            )
+#if(IS_WINDOWS)
+#    set(CUPTI_DIRS
+#            ./CUPTI/include
+#            ./CUPTI/include/GL
+#            ./CUPTI/include/openacc
+#            ./CUPTI/sample
+#            ./CUPTI/sample/activity_trace_async
+#            ./CUPTI/sample/callback_event
+#            ./CUPTI/sample/callback_metric
+#            ./CUPTI/sample/callback_timestamp
+#            ./CUPTI/sample/cupti_query
+#            ./CUPTI/sample/event_multi_gpu
+#            ./CUPTI/sample/event_sampling
+#            ./CUPTI/sample/nvlink_bandwidth
+#            ./CUPTI/sample/openacc_trace
+#            ./CUPTI/sample/pc_sampling
+#            ./CUPTI/sample/sass_source_map
+#            ./CUPTI/sample/unified_memory
+#            )
+#    gather_sources(CUPTI_SOURCES CUPTI_DIRS)
 #    message("CUPTI_DIRS = ${CUPTI_DIRS}")
 #    message("CUPTI_SOURCES = ${CUPTI_SOURCES}")
-    gather_sources(CUPTI_SOURCES CUPTI_DIRS)
-    add_executable(cupti_dummy ${CUPTI_SOURCES})
-endif()
+#    add_executable(cupti_dummy ${CUPTI_SOURCES})
+#endif()
 
 message("Sources = ${SOURCES}")
 message("Test sources = ${TEST_SOURCES}")
@@ -157,72 +213,215 @@ if(IS_WINDOWS)
     )
 endif()
 
+# https://cmake.org/cmake/help/v3.9/module/FindProtobuf.html
+find_package(Protobuf REQUIRED)
+message("> Protobuf_INCLUDE_DIRS = ${Protobuf_INCLUDE_DIRS}")
+message("> Protobuf_LIBRARY = ${Protobuf_LIBRARY}")
+include_directories(${Protobuf_INCLUDE_DIRS})
+include_directories(${CMAKE_CURRENT_BINARY_DIR})
+
+# NOTE: We need PROTOBUF_GENERATE_CPP_APPEND_PATH=OFF so that the
+# generated protobuf .pb.cc and .pb.h maintain their original directory structure:
+#   iml/build/tensorflow/core/lib/core/error_codes.pb.h
+# Without this, cmake's FindProtobuf module will still all generated files in the iml/build directory:
+#   iml/build/error_codes.pb.h
+set(PROTOBUF_GENERATE_CPP_APPEND_PATH OFF)
+protobuf_generate_cpp(PROTO_SRCS PROTO_HDRS
+        tensorflow/core/lib/core/error_codes.proto)
+
+#protobuf_generate_cpp(PROTO_SRCS PROTO_HDRS EXPORT_MACRO DLL_EXPORT foo.proto)
+#protobuf_generate_python(PROTO_PY foo.proto)
+
+#add_executable(bar bar.cc ${PROTO_SRCS} ${PROTO_HDRS})
+#target_link_libraries(bar ${Protobuf_LIBRARIES})
+
 # BLAZ
-add_executable(model
-        ./src/drivers/run_model.cpp
-        ${SOURCES})
-add_executable(cartpole
-        ./src/drivers/run_cartpole.cpp
-        ${SOURCES})
-add_executable(tests
-        ./src/drivers/run_tests.cpp
-        ${TEST_SOURCES})
-add_executable(epoch_sec
-        ./src/test/epoch_sec.cpp
-#        ${TF_SOURCES}
-        ./tensorflow/core/platform/default/logging.cc
-        tensorflow/core/platform/env_time.cc
-        tensorflow/core/platform/posix/env_time.cc)
+if (ENABLE_DQN_CPP)
+    add_executable(model
+            ./src/drivers/run_model.cpp
+            ${SOURCES})
+    add_executable(cartpole
+            ./src/drivers/run_cartpole.cpp
+            ${SOURCES})
+    add_executable(tests
+            ./src/drivers/run_tests.cpp
+            ${TEST_SOURCES})
+    add_executable(epoch_sec
+            ./src/test/epoch_sec.cpp
+            #        ${TF_SOURCES}
+            )
+endif()
 
 set(SAMPLE_CUDA_API_DIRS
         ./src/cuda_api_profiler
         ${TF_SRC_DIRS}
         )
+if(IS_WINDOWS)
+    include_directories(./windows_includes/CUPTI/include)
+    include_directories(./windows_includes/cuda/include)
+else()
+    include_directories(/usr/local/cuda/extras/CUPTI/include)
+    include_directories(/usr/local/cuda/include)
+endif()
+
+message("> TF_SOURCES = ${TF_SOURCES}")
 gather_sources(SAMPLE_CUDA_API_SOURCES SAMPLE_CUDA_API_DIRS)
+
+# https://github.com/bombela/backward-cpp/tree/84ae4f5e80381aca765a0810d4c811acae3cd7c7#configuration--dependencies
 add_library(sample_cuda_api SHARED
-        ${SAMPLE_CUDA_API_SOURCES})
+        ${SAMPLE_CUDA_API_SOURCES}
+        ${TF_SOURCES}
+        ${PROTO_SRCS} ${PROTO_HDRS}
+        # This will add backward.cpp to your target
+        ${BACKWARD_ENABLE})
+# This will add libraries, definitions and include directories needed by backward
+# by setting each property on the target.
+add_backward(sample_cuda_api)
+
+target_link_libraries(sample_cuda_api ${Protobuf_LIBRARIES})
+message("> PROTO_SRCS = ${PROTO_SRCS}")
+message("> PROTO_HDRS = ${PROTO_HDRS}")
+#absl::synchronization
+target_link_libraries(sample_cuda_api absl::base absl::strings absl::memory)
+target_link_libraries(sample_cuda_api nsync)
+target_link_libraries(sample_cuda_api nsync_cpp)
+target_link_libraries(sample_cuda_api pthread)
+if(NOT IS_WINDOWS)
+    find_package(Libcupti REQUIRED)
+    target_link_libraries(sample_cuda_api ${Libcupti_LIBRARY})
+    # https://stackoverflow.com/questions/26243169/cmake-target-include-directories-meaning-of-scope
+    # NOTE: I still don't fully understand the PUBLIC/PRIVATE/INTERFACE scope here...
+    target_include_directories(sample_cuda_api PRIVATE ${Libcupti_INCLUDE_DIR})
+#    add_subdirectory(third_party/boost_${BOOST_VERSION_UNDERSCORES})
+
+#    set(BOOST_ROOT ${CMAKE_SOURCE_DIR}/third_party/boost_${BOOST_VERSION_UNDERSCORES}/build)
+#    set(BOOST_INCLUDEDIR ${CMAKE_SOURCE_DIR}/third_party/boost_${BOOST_VERSION_UNDERSCORES}/build/include)
+#    set(BOOST_LIBRARYDIR ${CMAKE_SOURCE_DIR}/third_party/boost_${BOOST_VERSION_UNDERSCORES}/build/lib)
+#    set(Boost_NO_SYSTEM_PATHS ON)
+#    find_package(Boost ${BOOST_VERSION} REQUIRED
+##            COMPONENTS stacktrace
+#            COMPONENTS stacktrace_backtrace
+##            COMPONENTS stacktrace_addr2line
+##            HINTS ${CMAKE_SOURCE_DIR}/third_party/boost_${BOOST_VERSION_UNDERSCORES}/build
+#            )
+#
+#    message("Boost_INCLUDE_DIR = ${Boost_INCLUDE_DIR}")
+#    message("Boost_INCLUDE_DIRS = ${Boost_INCLUDE_DIRS}")
+#
+#    message("Boost_LIBRARY_DIRS = ${Boost_LIBRARY_DIRS}")
+#    message("Boost_LIBRARY = ${Boost_LIBRARY}")
+#    message("Boost_LIBRARIES = ${Boost_LIBRARIES}")
+#
+#    target_link_libraries(sample_cuda_api ${Boost_LIBRARIES})
+#    target_link_directories(sample_cuda_api PRIVATE ${Boost_LIBRARY_DIRS})
+#
+#    target_include_directories(sample_cuda_api PRIVATE ${Boost_INCLUDE_DIRS})
+##    target_link_libraries(sample_cuda_api ${Boost_LIBRARIES})
+
+    find_package(Backtrace REQUIRED)
+    target_link_libraries(sample_cuda_api ${Backtrace_LIBRARY})
+    target_include_directories(sample_cuda_api PRIVATE ${Backtrace_INCLUDE_DIR})
+
+endif()
+
+function(AddFlags TARGET PROPERTY NEW_FLAGS)
+    #https://stackoverflow.com/questions/36662920/xcode-clang-link-build-dynamic-framework-or-dylib-not-embed-dependencies
+#    set(TARGET "sample_cuda_api")
+#    set(NEW_FLAGS "-Wl,-undefined,dynamic_lookup")
+    get_target_property(OLD_FLAGS ${TARGET} ${PROPERTY})
+    if(OLD_FLAGS STREQUAL "OLD_FLAGS-NOTFOUND")
+        SET(OLD_FLAGS "") # Set to empty string
+    else()
+        SET(OLD_FLAGS "${OLD_FLAGS} ") # A space to cleanly separate from existing content
+    endif()
+    # Append our values
+    SET(OLD_FLAGS "${OLD_FLAGS}${NEW_FLAGS}" )
+    set_target_properties(${TARGET} PROPERTIES ${PROPERTY} ${OLD_FLAGS} )
+endfunction()
+
+#set(LD_FLAGS_IGNORE_UNDEFINED "-Wl,-undefined,dynamic_lookup")
+#AddFlags(sample_cuda_api COMPILE_FLAGS ${LD_FLAGS_IGNORE_UNDEFINED})
+#AddFlags(sample_cuda_api LINK_FLAGS ${LD_FLAGS_IGNORE_UNDEFINED})
+#set(LD_FLAGS_DYNAMIC "-rdynamic")
+#AddFlags(sample_cuda_api LINK_FLAGS ${LD_FLAGS_DYNAMIC})
+##AddFlags(sample_cuda_api COMPILE_FLAGS "-DBOOST_STACKTRACE_USE_ADDR2LINE -g")
+##AddFlags(sample_cuda_api LINK_FLAGS "-g")
+#AddFlags(sample_cuda_api COMPILE_FLAGS "-DBOOST_STACKTRACE_USE_BACKTRACE -g")
+#AddFlags(sample_cuda_api LINK_FLAGS "-g")
+
+if (ENABLE_BACKTRACE)
+    set(BACKTRACE_SYMS_FLAGS "-g")
+    AddFlags(sample_cuda_api COMPILE_FLAGS ${BACKTRACE_SYMS_FLAGS})
+    AddFlags(sample_cuda_api LINK_FLAGS ${BACKTRACE_SYMS_FLAGS})
+endif()
+
+##https://stackoverflow.com/questions/36662920/xcode-clang-link-build-dynamic-framework-or-dylib-not-embed-dependencies
+#set(TARGET "sample_cuda_api")
+#set(LD_IGNORE_UNDEFINED_SYM_FLAGS "-Wl,-undefined,dynamic_lookup")
+#get_target_property(NEW_FLAGS ${TARGET} COMPILE_FLAGS)
+#if(NEW_FLAGS STREQUAL "NEW_FLAGS-NOTFOUND")
+#  SET(NEW_FLAGS "") # Set to empty string
+#else()
+#  SET(NEW_FLAGS "${NEW_FLAGS} ") # A space to cleanly separate from existing content
+#endif()
+## Append our values
+#SET(NEW_FLAGS "${NEW_FLAGS}${LD_IGNORE_UNDEFINED_SYM_FLAGS}" )
+#set_target_properties(${TARGET} PROPERTIES COMPILE_FLAGS ${NEW_FLAGS} )
+
+
+
+#message("> NSYNC_INCLUDES = ${NSYNC_INCLUDES}")
+#target_include_directories(sample_cuda_api ${NSYNC_INCLUDES})
+
+add_library(nsync_includes INTERFACE)
+target_include_directories(nsync_includes INTERFACE third_party/nsync/public)
+target_link_libraries(sample_cuda_api nsync_includes)
+
 
 #./test/py_interface/py_interface_src.cpp
-add_library(py_interface SHARED
-        ${PY_INTERFACE_LIB_SOURCES}
-#        ${TF_SOURCES}
-        )
-
-if(NOT IS_WINDOWS)
-    find_package( Boost 1.58 REQUIRED
-            COMPONENTS system filesystem)
-    include_directories( ${Boost_INCLUDE_DIR} )
-    foreach(executable ${EXEC_NAMES})
-        target_link_libraries(${executable}
-                ${Boost_LIBRARIES}
-                #                ${Boost_FILESYSTEM_LIBRARY}
-                #                ${Boost_SYSTEM_LIBRARY}
-                )
-    endforeach()
+if (ENABLE_DQN_CPP)
+    add_library(py_interface SHARED
+            ${PY_INTERFACE_LIB_SOURCES}
+    #        ${TF_SOURCES}
+            )
 endif()
 
-if(NOT IS_WINDOWS)
-    message("> TENSORFLOW_LIB HINT = ${PROJECT_SOURCE_DIR}/external_libs/lib")
-    find_library(TENSORFLOW_LIB tensorflow
-            REQUIRED
-            HINTS "${PROJECT_SOURCE_DIR}/external_libs/lib")
-    message("> TENSORFLOW_LIB = ${TENSORFLOW_LIB}")
-    foreach(executable ${EXEC_NAMES})
-        target_link_libraries(${executable} ${TENSORFLOW_LIB})
-    endforeach()
+if (ENABLE_DQN_CPP)
+    if(NOT IS_WINDOWS)
+        find_package( Boost 1.58 REQUIRED
+                COMPONENTS system filesystem)
+        include_directories( ${Boost_INCLUDE_DIR} )
+        foreach(executable ${EXEC_NAMES})
+            target_link_libraries(${executable}
+                    ${Boost_LIBRARIES}
+                    #                ${Boost_FILESYSTEM_LIBRARY}
+                    #                ${Boost_SYSTEM_LIBRARY}
+                    )
+        endforeach()
+    endif()
 endif()
 
-if(NOT IS_WINDOWS)
-    find_library(GFLAGS_LIB gflags REQUIRED)
-    message("> GFLAGS_LIB = ${GFLAGS_LIB}")
-    foreach(executable ${GFLAGS_EXEC_NAMES})
-        target_link_libraries(${executable} ${GFLAGS_LIB})
-    endforeach()
+if (ENABLE_DQN_CPP)
+    if(NOT IS_WINDOWS)
+        message("> TENSORFLOW_LIB HINT = ${PROJECT_SOURCE_DIR}/external_libs/lib")
+        find_library(TENSORFLOW_LIB tensorflow
+                REQUIRED
+                HINTS "${PROJECT_SOURCE_DIR}/external_libs/lib")
+        message("> TENSORFLOW_LIB = ${TENSORFLOW_LIB}")
+        foreach(executable ${EXEC_NAMES})
+            target_link_libraries(${executable} ${TENSORFLOW_LIB})
+        endforeach()
+    endif()
 endif()
 
-if(NOT IS_WINDOWS)
-    set(JSON_BuildTests OFF CACHE INTERNAL "")
-    add_subdirectory(third_party/json)
+if (ENABLE_DQN_CPP)
+    if(NOT IS_WINDOWS)
+        find_library(GFLAGS_LIB gflags REQUIRED)
+        message("> GFLAGS_LIB = ${GFLAGS_LIB}")
+        foreach(executable ${GFLAGS_EXEC_NAMES})
+            target_link_libraries(${executable} ${GFLAGS_LIB})
+        endforeach()
+    endif()
 endif()
 
 #if(NOT IS_WINDOWS)
@@ -231,21 +430,25 @@ endif()
 #    target_link_libraries(tests ${GTEST_LIB})
 #endif()
 
-if(NOT IS_WINDOWS)
-    message("CMAKE_MODULE_PATH = ${CMAKE_MODULE_PATH}")
-    find_package(GTest REQUIRED)
-    # find_package(gtest REQUIRED)
-    include_directories(${GTEST_INCLUDE_DIRS})
-    target_link_libraries(tests ${GTEST_LIBRARY})
-    foreach(executable ${EXEC_NAMES})
-        target_link_libraries(${executable} pthread)
-        target_link_libraries(${executable} nlohmann_json::nlohmann_json)
-    endforeach()
+if (ENABLE_DQN_CPP)
+    if(NOT IS_WINDOWS)
+        message("CMAKE_MODULE_PATH = ${CMAKE_MODULE_PATH}")
+        find_package(GTest REQUIRED)
+        # find_package(gtest REQUIRED)
+        include_directories(${GTEST_INCLUDE_DIRS})
+        target_link_libraries(tests ${GTEST_LIBRARY})
+        foreach(executable ${EXEC_NAMES})
+            target_link_libraries(${executable} pthread)
+            target_link_libraries(${executable} nlohmann_json::nlohmann_json)
+        endforeach()
+    endif()
 endif()
 
-foreach(trg ${ALL_TARGETS})
-    target_compile_features(${trg} PUBLIC cxx_std_11)
-endforeach()
+if (ENABLE_DQN_CPP)
+    foreach(trg ${ALL_TARGETS})
+        target_compile_features(${trg} PUBLIC cxx_std_11)
+    endforeach()
+endif()
 
 configure_file(normalized_car_features.csv ${CMAKE_CURRENT_BINARY_DIR}/normalized_car_features.csv COPYONLY)
 if(MSVC)
