@@ -11,6 +11,7 @@
 //#include <sys/types.h>
 #include <unistd.h>
 #include <cmath>
+#include <list>
 #include <sys/syscall.h>
 #define gettid() syscall(SYS_gettid)
 
@@ -24,6 +25,38 @@
 
 namespace tensorflow {
 
+
+void EventHandler::EventLoop(std::function<bool()> should_stop) {
+  int64 sleep_for_usec = round(EVENT_LOOP_EVERY_SEC * USEC_IN_SEC);
+  while (not should_stop()) {
+    Env::Default()->SleepForMicroseconds(sleep_for_usec);
+    RunFuncs();
+  }
+}
+
+bool RegisteredFunc::ShouldRun(uint64 now_usec) {
+  DCHECK(last_run_usec <= now_usec);
+  return last_run_usec == 0 or ((float)(now_usec - last_run_usec))/((float)USEC_IN_SEC) >= every_sec;
+}
+
+void RegisteredFunc::Run(uint64 now_usec) {
+  last_run_usec = now_usec;
+  func();
+}
+
+void EventHandler::RegisterFunc(RegisteredFunc::Func func, float every_sec) {
+  _funcs.emplace_back(RegisteredFunc(func, every_sec));
+}
+
+void EventHandler::RunFuncs() {
+  auto now_usec = Env::Default()->NowMicros();
+  for (auto& func : _funcs) {
+    if (func.ShouldRun(now_usec)) {
+      func.Run(now_usec);
+    }
+  }
+}
+
 #define CUPTI_CALL(call)                                            \
   do {                                                              \
     CUptiResult _status = cupti_wrapper_->call;                     \
@@ -36,7 +69,7 @@ const char* runtime_cbid_to_string(CUpti_CallbackId cbid);
 const char* driver_cbid_to_string(CUpti_CallbackId cbid);
 
 CUDAAPIProfiler::~CUDAAPIProfiler() {
-    if (VLOG_IS_ON(INFO)) {
+    if (VLOG_IS_ON(1)) {
         Print(LOG(INFO));
     }
 }
@@ -992,21 +1025,26 @@ const char* driver_cbid_to_string(CUpti_CallbackId cbid) {
 }
 
 CUDAAPIProfilerPrinter::CUDAAPIProfilerPrinter(CUDAAPIProfiler &profiler, float every_sec) :
-        _profiler(profiler),
-        _every_sec(every_sec)
+    _event_handler(0.5),
+    _profiler(profiler),
+    _every_sec(every_sec)
 {
 }
 
 void CUDAAPIProfilerPrinter::_Run() {
-    while (!_should_stop.HasBeenNotified()) {
-        int64 sleep_for_usec = round(_every_sec * USEC_IN_SEC);
-        Env::Default()->SleepForMicroseconds(sleep_for_usec);
-        _EverySec();
-    }
+  _event_handler.RegisterFunc([this]() {
+    this->_EverySec();
+  }, _every_sec);
+
+  _event_handler.EventLoop([this]() {
+    return _should_stop.HasBeenNotified();
+  });
 }
 
 void CUDAAPIProfilerPrinter::_EverySec() {
+  if (VLOG_IS_ON(1)) {
     _profiler.Print(LOG(INFO));
+  }
 }
 
 void CUDAAPIProfilerPrinter::Start() {
@@ -1019,9 +1057,12 @@ void CUDAAPIProfilerPrinter::Start() {
 }
 
 void CUDAAPIProfilerPrinter::Stop() {
-    if (!_should_stop.HasBeenNotified()) {
-        _should_stop.Notify();
-    }
+  if (!_should_stop.HasBeenNotified()) {
+    _should_stop.Notify();
+    VLOG(1) << "Wait for CUDA API stat printer thread to stop...";
+    _printer_thread->join();
+    VLOG(1) << "... printer thread done";
+  }
 }
 
 CUDAAPIProfilerPrinter::~CUDAAPIProfilerPrinter() {

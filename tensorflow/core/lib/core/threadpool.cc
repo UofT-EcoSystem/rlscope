@@ -16,7 +16,8 @@ limitations under the License.
 #include "tensorflow/core/lib/core/threadpool.h"
 
 #define EIGEN_USE_THREADS
-#include "third_party/eigen3/unsupported/Eigen/CXX11/Tensor"
+//#include "third_party/eigen3/unsupported/Eigen/CXX11/Tensor"
+#include "unsupported/Eigen/CXX11/Tensor"
 #include "tensorflow/core/lib/core/blocking_counter.h"
 #include "tensorflow/core/platform/context.h"
 #include "tensorflow/core/platform/denormal.h"

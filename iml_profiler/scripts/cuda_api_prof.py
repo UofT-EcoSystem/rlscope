@@ -1,4 +1,5 @@
 import logging
+import shutil
 import subprocess
 import argparse
 import textwrap
@@ -65,17 +66,25 @@ def main():
     env['LD_PRELOAD'] = "{ld}:{so_path}".format(
         ld=env.get('LD_PRELOAD', ''),
         so_path=so_path)
+
+    exe_path = shutil.which(argv[0])
+    if exe_path is None:
+        print("IML ERROR: couldn't locate {exe} on $PATH; try giving a full path to {exe} perhaps?".format(
+            exe=argv[0],
+        ))
+        sys.exit(1)
     # if args.debug or args.iml_debug:
-    print_cmd(argv, env={
+    # cmd = argv
+    cmd = [exe_path] + argv[1:]
+    print_cmd(cmd, env={
         'LD_PRELOAD': env['LD_PRELOAD'],
     })
 
-    proc = subprocess.run(argv, env=env)
-    sys.exit(proc.returncode)
-
-    # os.execve(argv[1], argv, env)
-    # # Shouldn't return.
-    # assert False
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os.execve(exe_path, cmd, env)
+    # Shouldn't return.
+    assert False
 
 if __name__ == '__main__':
     main()

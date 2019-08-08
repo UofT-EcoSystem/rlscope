@@ -11,34 +11,46 @@
 #include "tensorflow/core/lib/core/error_codes.pb.h"
 #include "tensorflow/core/lib/core/errors.h"
 
+#include <iostream>
+#include <fstream>
+
 #include <memory>
 
+namespace tensorflow {
 
 class Globals {
 public:
-    Globals();
-    ~Globals();
+  Globals();
+  ~Globals();
 
-    std::unique_ptr<tensorflow::DeviceTracer> device_tracer;
+  std::unique_ptr<tensorflow::DeviceTracer> device_tracer;
 };
+Globals globals;
 
 Globals::Globals() {
-    LOG(INFO) << "Initialize globals";
-//    device_tracer.reset(new DeviceTracerImpl());
-//    device_tracer = std::move(tensorflow::CreateDeviceTracer());
-    device_tracer = tensorflow::CreateDeviceTracer();
-
-    LOG(INFO) << "Start tracing";
-    device_tracer->Start();
+  VLOG(1) << "Initialize globals";
+  device_tracer = tensorflow::CreateDeviceTracer();
+  VLOG(1) << "Start tracing";
+  device_tracer->Start();
 }
 
 Globals::~Globals() {
-    LOG(INFO) << "TODO: Stop tracing; collect traces";
-    // Dump CUDA API call counts and total CUDA API time to a protobuf file.
+  // NOTE: some programs will close stdout/stderr BEFORE this gets called.
+  // This will cause log message to be LOST.
+  // HOWEVER, the destructor will still execute.
+  // You can confirm this behaviour by creating a file.
+  //
+  // https://stackoverflow.com/questions/23850624/ld-preload-does-not-work-as-expected
+  //
+//  std::ofstream myfile;
+//  myfile.open("globals.destructor.txt");
+//  myfile << "Writing this to a file.\n";
+//  myfile.close();
+
+  VLOG(1) << "TODO: Stop tracing; collect traces";
+  // Dump CUDA API call counts and total CUDA API time to a protobuf file.
 //    device_tracer->Collect();
 }
-
-Globals globals;
 
 // #define CUPTI_CALL(call) ({
 //      CUptiResult _status = call;
@@ -109,31 +121,32 @@ Globals globals;
 
 using StatusRet = tensorflow::error::Code;
 
- extern "C" {
+extern "C" {
 
-     StatusRet setup() {
-         // Initialize global state.
-         return tensorflow::Status::OK().code();
-     }
+StatusRet setup() {
+  // Initialize global state.
+  return tensorflow::Status::OK().code();
+}
 
-     StatusRet enable_tracing() {
-         // Enable call-backs.
-         globals.device_tracer->Start();
-         return tensorflow::Status::OK().code();
-     }
+StatusRet enable_tracing() {
+  // Enable call-backs.
+  globals.device_tracer->Start();
+  return tensorflow::Status::OK().code();
+}
 
-     StatusRet disable_tracing() {
-         // Disable call-backs.
-         globals.device_tracer->Stop();
-         return tensorflow::Status::OK().code();
-     }
+StatusRet disable_tracing() {
+  // Disable call-backs.
+  globals.device_tracer->Stop();
+  return tensorflow::Status::OK().code();
+}
 
-     StatusRet collect() {
-         // Collect traces (synchronously).
-         globals.device_tracer->Stop();
-         globals.device_tracer->Collect();
-         return tensorflow::Status::OK().code();
-     }
+StatusRet collect() {
+  // Collect traces (synchronously).
+  globals.device_tracer->Stop();
+  globals.device_tracer->Collect();
+  return tensorflow::Status::OK().code();
+}
 
- }
+}
 
+}

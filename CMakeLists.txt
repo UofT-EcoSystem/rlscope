@@ -57,6 +57,7 @@ if (NOT IS_WINDOWS AND NOT (
         AND EXISTS ${PROJECT_SOURCE_DIR}/third_party/abseil-cpp
         AND EXISTS ${PROJECT_SOURCE_DIR}/third_party/nsync
         AND EXISTS ${PROJECT_SOURCE_DIR}/third_party/backward-cpp
+        AND EXISTS ${PROJECT_SOURCE_DIR}/third_party/eigen
 #        AND EXISTS ${PROJECT_SOURCE_DIR}/third_party/boost_${BOOST_VERSION_UNDERSCORES}/build
         ) )
     message(FATAL_ERROR
@@ -75,6 +76,11 @@ add_subdirectory(third_party/abseil-cpp)
 unset(BUILD_TESTING)
 
 add_subdirectory(third_party/backward-cpp)
+
+#add_subdirectory(third_party/eigen)
+#target_include_directories(sample_cuda_api third_party/eigen)
+find_package(Eigen3 REQUIRED
+        HINTS third_party/eigen/build/cmake_install)
 
 set(NSYNC_ENABLE_TESTS OFF)
 #set(BUILD_SHARED_LIBS ON)
@@ -123,11 +129,28 @@ set(ALL_TARGETS
 set(SOURCES)
 # ( cd ~/clone/dnn_tensorflow_cpp; find -type f | grep --perl-regexp '\.(c|cc|cpp|cxx)$' | xargs -n1 dirname | sort --unique | grep -v CMake; ) | cboard
 
+#        ./tensorflow/c
+#        ./tensorflow/core/platform
+#        ./tensorflow/core/platform/default
+#        ./tensorflow/core/platform/posix
+
+# $ find tensorflow -type d
 set(TF_SRC_DIRS
-        ./tensorflow/c
-        ./tensorflow/core/platform
-        ./tensorflow/core/platform/default
-        ./tensorflow/core/platform/posix
+
+        tensorflow
+        tensorflow/c
+        tensorflow/core
+        tensorflow/core/lib
+        tensorflow/core/lib/hash
+        tensorflow/core/lib/core
+        tensorflow/core/lib/io
+        tensorflow/core/lib/strings
+        tensorflow/core/lib/gtl
+        tensorflow/core/platform
+        tensorflow/core/platform/posix
+        tensorflow/core/platform/default
+#        tensorflow/core/platform/windows
+
         )
 
 set(SRC_DIRS
@@ -220,6 +243,21 @@ message("> Protobuf_LIBRARY = ${Protobuf_LIBRARY}")
 include_directories(${Protobuf_INCLUDE_DIRS})
 include_directories(${CMAKE_CURRENT_BINARY_DIR})
 
+# https://cmake.org/cmake/help/v3.9/module/FindProtobuf.html
+include(double_conversion)
+#add_subdirectory(double_conversion)
+
+#find_package(DoubleConversion REQUIRED)
+#message("> DOUBLE_CONVERSION_INCLUDE_DIRS = ${DOUBLE_CONVERSION_INCLUDE_DIRS}")
+#message("> DOUBLE_CONVERSION_LIBRARY = ${DOUBLE_CONVERSION_LIBRARY}")
+
+find_package(DoubleConversion REQUIRED)
+message("> double_conversion_INCLUDE_DIRS = ${double_conversion_INCLUDE_DIRS}")
+#message("> double_conversion_LIBRARY = ${double_conversion_LIBRARY}")
+message("> double_conversion_LIBRARIES = ${double_conversion_LIBRARIES}")
+
+#include_directories(${CMAKE_CURRENT_BINARY_DIR})
+
 # NOTE: We need PROTOBUF_GENERATE_CPP_APPEND_PATH=OFF so that the
 # generated protobuf .pb.cc and .pb.h maintain their original directory structure:
 #   iml/build/tensorflow/core/lib/core/error_codes.pb.h
@@ -272,8 +310,13 @@ add_library(sample_cuda_api SHARED
         ${SAMPLE_CUDA_API_SOURCES}
         ${TF_SOURCES}
         ${PROTO_SRCS} ${PROTO_HDRS}
-        # This will add backward.cpp to your target
-        ${BACKWARD_ENABLE})
+        # Add SIGSEGV handler that prints out stack-trace.
+        # NOTE: For some reason this doesn't always work and gdb is required to debug...
+        # I think that's because the program being executed overrides the SIGSEGV handler
+        # (which is FINE, as long as backward-cpp doesn't override the application handler).
+        ${BACKWARD_ENABLE}
+        )
+add_dependencies(sample_cuda_api double_conversion)
 # This will add libraries, definitions and include directories needed by backward
 # by setting each property on the target.
 add_backward(sample_cuda_api)
@@ -286,6 +329,13 @@ target_link_libraries(sample_cuda_api absl::base absl::strings absl::memory)
 target_link_libraries(sample_cuda_api nsync)
 target_link_libraries(sample_cuda_api nsync_cpp)
 target_link_libraries(sample_cuda_api pthread)
+#target_include_directories(sample_cuda_api PRIVATE ${DOUBLE_CONVERSION_INCLUDE_DIRS})
+target_include_directories(sample_cuda_api PRIVATE ${double_conversion_INCLUDE_DIR})
+#target_link_libraries(sample_cuda_api ${DOUBLE_CONVERSION_LIBRARY})
+#target_link_libraries(sample_cuda_api ${double_conversion_LIBRARIES})
+#target_link_libraries(sample_cuda_api double_conversion)
+target_link_libraries(sample_cuda_api ${double_conversion_LIBRARIES})
+target_link_libraries(sample_cuda_api Eigen3::Eigen)
 if(NOT IS_WINDOWS)
     find_package(Libcupti REQUIRED)
     target_link_libraries(sample_cuda_api ${Libcupti_LIBRARY})

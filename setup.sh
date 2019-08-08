@@ -134,6 +134,24 @@ _clone() {
     CLONE_TAG_PATTERN=
 }
 
+_hg_clone() {
+    local path="$1"
+    local repo="$2"
+    local commit="$3"
+    shift 3
+
+    if [ ! -e "$path" ]; then
+        hg clone $repo $path
+        info "> Hg clone:"
+        info "  Repository: $repo"
+        info "  Directory: $path"
+    fi
+    (
+    cd $path
+    hg update -r $commit
+    )
+}
+
 setup_cmake() {
     if [ "$FORCE" != 'yes' ] && [ -e $ROOT/local/bin/cmake ]; then
         return
@@ -230,6 +248,25 @@ setup_boost_cpp_library() {
     )
 }
 
+EIGEN_CPP_LIB_DIR="$ROOT/third_party/eigen"
+setup_eigen_cpp_library() {
+    if [ "$FORCE" != 'yes' ] && [ -e $EIGEN_CPP_LIB_DIR ]; then
+        return
+    fi
+    local commit="9f48e814419e"
+    _hg_clone "$EIGEN_CPP_LIB_DIR" \
+        https://bitbucket.org/eigen/eigen \
+        $commit
+    (
+    cd $EIGEN_CPP_LIB_DIR
+    mkdir -p build
+    cd build
+    cmake .. -DCMAKE_INSTALL_PREFIX=$PWD/cmake_install
+    make -j$(nproc)
+    make install
+    )
+}
+
 _configure() {
     local install_dir="$1"
     shift 1
@@ -312,6 +349,12 @@ _build_tensorflow_c_api() {
     _untar $output_tar $TENSORFLOW_LIB_DIR
 }
 
+_do() {
+    echo "> CMD: $@"
+    echo "  $ $@"
+    "$@"
+}
+
 main() {
     # PROBLEM: I've found that if you don't use the same
     # version of TensorFlow when sharing trained models across C++ and python, C++ can
@@ -322,12 +365,18 @@ main() {
     # 2) Build TensorFlow C-API and build against that.
 #    _download_tensorflow_c_api
 #    _build_tensorflow_c_api
-    setup_json_cpp_library
-    setup_abseil_cpp_library
-    setup_gtest_cpp_library
-    setup_nsync_cpp_library
-#    setup_boost_cpp_library
-    setup_backward_cpp_library
+
+    if [ $# -gt 0 ]; then
+        _do "$@"
+        return
+    fi
+
+    _do setup_json_cpp_library
+    _do setup_abseil_cpp_library
+    _do setup_gtest_cpp_library
+    _do setup_nsync_cpp_library
+    _do setup_backward_cpp_library
+    _do setup_eigen_cpp_library
     # TODO: setup protobuf
 #    setup_cmake
 }

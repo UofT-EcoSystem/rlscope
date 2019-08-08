@@ -73,6 +73,7 @@ string TraceCollector::ConcatenateNames(StringPiece first, StringPiece second) {
 }
 
 void SetTraceCollector(const TraceCollector* collector) {
+  VLOG(1) << __func__;
   return trace_collector.store(collector, std::memory_order_release);
 }
 

@@ -833,8 +833,12 @@ CUPTIManager *GetCUPTIManager() {
 TF_STATIC_THREAD_LOCAL_POD(const char *, tls_current_annotation);
 
 class TraceCollectorImpl : public tracing::TraceCollector {
- public:
-  TraceCollectorImpl() { tracing::SetTraceCollector(this); }
+public:
+  TraceCollectorImpl() :
+      active_trace_session_(false)
+  {
+    tracing::SetTraceCollector(this);
+  }
 
   ~TraceCollectorImpl() override {
     DCHECK(!active_trace_session_)
