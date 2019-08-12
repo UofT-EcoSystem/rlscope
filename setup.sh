@@ -267,6 +267,30 @@ setup_eigen_cpp_library() {
     )
 }
 
+#PROTOBUF_VERSION='3.6.1.2'
+
+#PROTOBUF_VERSION='3.6.1'
+PROTOBUF_VERSION='3.9.1'
+
+PROTOBUF_CPP_LIB_DIR="$ROOT/third_party/protobuf-${PROTOBUF_VERSION}"
+PROTOBUF_URL="https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOBUF_VERSION}/protobuf-all-${PROTOBUF_VERSION}.tar.gz"
+#PROTOBUF_URL="https://github.com/protocolbuffers/protobuf/archive/v${PROTOBUF_VERSION}.tar.gz"
+setup_protobuf_cpp_library() {
+    if [ "$FORCE" != 'yes' ] && [ -e $PROTOBUF_CPP_LIB_DIR ]; then
+        return
+    fi
+    _wget_tar "$PROTOBUF_URL" "third_party"
+    (
+    cd $PROTOBUF_CPP_LIB_DIR
+    ./configure \
+        "CFLAGS=-fPIC" "CXXFLAGS=-fPIC" \
+        --prefix="${PROTOBUF_CPP_LIB_DIR}/build"
+    make -j$(nproc)
+    make install
+    ${PROTOBUF_CPP_LIB_DIR}/build/bin/protoc --version
+    )
+}
+
 _configure() {
     local install_dir="$1"
     shift 1
@@ -377,6 +401,7 @@ main() {
     _do setup_nsync_cpp_library
     _do setup_backward_cpp_library
     _do setup_eigen_cpp_library
+    _do setup_protobuf_cpp_library
     # TODO: setup protobuf
 #    setup_cmake
 }

@@ -1,7 +1,7 @@
 from iml_profiler.profiler.profilers import \
   Profiler, \
   add_iml_arguments, \
-  iml_argv
+  iml_argv_and_env
 
 from iml_profiler.profiler.util import \
   args_to_cmdline

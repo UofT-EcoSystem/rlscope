@@ -98,6 +98,7 @@ _set_bazel_dbg_build_flags() {
         $(_dbg_subdir_add_per_file_copt "tensorflow/core/common_runtime") \
         $(_dbg_subdir_add_per_file_copt "tensorflow/core/graph") \
         $(_dbg_file_add_per_file_copt   "tensorflow/core/common_runtime/direct_session.cc") \
+        $(_dbg_file_add_per_file_copt   "tensorflow/core/framework/op_kernel.cc") \
     )
 }
 

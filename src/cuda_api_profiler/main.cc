@@ -5,16 +5,20 @@
 #include <cuda.h>
 #include <cupti.h>
 
+#include <string>
+#include <algorithm>
+#include <cctype>
+#include <iostream>
+#include <fstream>
+#include <memory>
+
 #include "tensorflow/core/platform/logging.h"
 #include "tensorflow/core/platform/device_tracer.h"
 #include "tensorflow/core/lib/core/status.h"
 #include "tensorflow/core/lib/core/error_codes.pb.h"
 #include "tensorflow/core/lib/core/errors.h"
 
-#include <iostream>
-#include <fstream>
-
-#include <memory>
+#include "sample_cuda_api_export.h"
 
 namespace tensorflow {
 
@@ -27,11 +31,35 @@ public:
 };
 Globals globals;
 
+bool env_is_on(const char* var, bool dflt) {
+  const char* val = getenv(var);
+  if (val == nullptr) {
+    return dflt;
+  }
+  std::string var_str(var);
+  std::transform(
+      var_str.begin(), var_str.end(), var_str.begin(),
+      [](unsigned char c){ return std::tolower(c); });
+  return var_str == "on"
+         || var_str == "1"
+         || var_str == "true"
+         || var_str == "yes";
+}
+
 Globals::Globals() {
-  VLOG(1) << "Initialize globals";
+
+  std::ifstream cmdline_stream("/proc/self/cmdline");
+  std::string cmdline((std::istreambuf_iterator<char>(cmdline_stream)),
+                      std::istreambuf_iterator<char>());
+
+  VLOG(1) << "Initialize globals\n"
+          << "  CMD = " << cmdline;
+
   device_tracer = tensorflow::CreateDeviceTracer();
-  VLOG(1) << "Start tracing";
-  device_tracer->Start();
+  if (env_is_on("IML_TRACE_AT_START", false)) {
+    VLOG(0) << "Starting tracing at program start (export IML_TRACE_AT_START=yes)";
+    device_tracer->Start();
+  }
 }
 
 Globals::~Globals() {
@@ -123,25 +151,62 @@ using StatusRet = tensorflow::error::Code;
 
 extern "C" {
 
-StatusRet setup() {
+typedef enum SAMPLE_CUDA_API_EXPORT TF_Code {
+  TF_OK = 0,
+  TF_CANCELLED = 1,
+  TF_UNKNOWN = 2,
+  TF_INVALID_ARGUMENT = 3,
+  TF_DEADLINE_EXCEEDED = 4,
+  TF_NOT_FOUND = 5,
+  TF_ALREADY_EXISTS = 6,
+  TF_PERMISSION_DENIED = 7,
+  TF_UNAUTHENTICATED = 16,
+  TF_RESOURCE_EXHAUSTED = 8,
+  TF_FAILED_PRECONDITION = 9,
+  TF_ABORTED = 10,
+  TF_OUT_OF_RANGE = 11,
+  TF_UNIMPLEMENTED = 12,
+  TF_INTERNAL = 13,
+  TF_UNAVAILABLE = 14,
+  TF_DATA_LOSS = 15,
+} TF_Code;
+
+//using RetCode = TF_Code;
+using RetCode = int;
+
+RetCode SAMPLE_CUDA_API_EXPORT setup() {
   // Initialize global state.
+  VLOG(1) << __func__;
   return tensorflow::Status::OK().code();
 }
 
-StatusRet enable_tracing() {
+RetCode SAMPLE_CUDA_API_EXPORT enable_tracing() {
   // Enable call-backs.
+  VLOG(1) << __func__;
   globals.device_tracer->Start();
   return tensorflow::Status::OK().code();
 }
 
-StatusRet disable_tracing() {
+RetCode SAMPLE_CUDA_API_EXPORT is_enabled(int* retval) {
+  VLOG(1) << __func__;
+  if (globals.device_tracer->IsEnabled()) {
+    *retval = 1;
+  } else {
+    *retval = 0;
+  }
+  return tensorflow::Status::OK().code();
+}
+
+RetCode SAMPLE_CUDA_API_EXPORT disable_tracing() {
   // Disable call-backs.
+  VLOG(1) << __func__;
   globals.device_tracer->Stop();
   return tensorflow::Status::OK().code();
 }
 
-StatusRet collect() {
+RetCode SAMPLE_CUDA_API_EXPORT collect() {
   // Collect traces (synchronously).
+  VLOG(1) << __func__;
   globals.device_tracer->Stop();
   globals.device_tracer->Collect();
   return tensorflow::Status::OK().code();

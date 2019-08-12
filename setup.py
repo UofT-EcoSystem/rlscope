@@ -147,7 +147,7 @@ CONSOLE_SCRIPTS = [
     'iml-util-sampler = iml_profiler.scripts.utilization_sampler:main',
     'iml-dump-proto = iml_profiler.scripts.dump_proto:main',
     'iml-bench = iml_profiler.scripts.bench:main',
-    'iml-cuda-api-prof = iml_profiler.scripts.cuda_api_prof:main',
+    'iml-prof = iml_profiler.scripts.cuda_api_prof:main',
     'iml-generate-plot-index = iml_profiler.scripts.generate_iml_profiler_plot_index:main',
 ]
 # pylint: enable=line-too-long

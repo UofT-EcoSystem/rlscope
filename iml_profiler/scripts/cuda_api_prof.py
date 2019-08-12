@@ -4,6 +4,7 @@ import subprocess
 import argparse
 import textwrap
 import sys
+import os
 import numpy as np
 
 from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, basename as _b
@@ -16,13 +17,13 @@ from iml_profiler.profiler import iml_logging
 
 def add_cuda_api_prof_arguments(parser):
     """
-    Arguments parsed by iml-cuda-api-prof that should NOT be forwarded to the training-script.
+    Arguments parsed by iml-prof that should NOT be forwarded to the training-script.
     """
     pass
 
 def add_common_arguments(parser):
     """
-    Arguments parsed by iml-cuda-api-prof that SHOULD be forwarded to the training-script,
+    Arguments parsed by iml-prof that SHOULD be forwarded to the training-script,
     but are also likely recognized by the training script (e.g. --debug)
     """
     parser.add_argument('--debug', action='store_true')
@@ -42,7 +43,7 @@ def main():
 
     env = dict(os.environ)
     # TODO: figure out how to install pre-built .so file with "pip install iml_profiler"
-    so_path = _j(py_config.ROOT, 'build', 'libsample_cuda_api.so')
+    so_path = py_config.LIB_SAMPLE_CUDA_API
     if not _e(so_path):
         sys.stderr.write(textwrap.dedent("""
         IML ERROR: couldn't find CUDA sampling library @ {path}; to build it, do:
@@ -54,18 +55,21 @@ def main():
           $ mkdir build
           $ cd build
           # Assuming you installed protobuf 3.9.1 at --prefix=$HOME/protobuf
-          $ cmake .. -DProtobuf_INCLUDE_DIR=$HOME/protobuf/include
-                     -DProtobuf_LIBRARY=$HOME/protobuf/lib/libprotobuf.so
-                     
+          $ cmake ..
           $ make -j$(nproc)
         """.format(
             root=py_config.ROOT,
             path=so_path,
         )))
         sys.exit(1)
-    env['LD_PRELOAD'] = "{ld}:{so_path}".format(
+    add_env = dict()
+    add_env['LD_PRELOAD'] = "{ld}:{so_path}".format(
         ld=env.get('LD_PRELOAD', ''),
         so_path=so_path)
+
+    if args.debug or args.iml_debug or is_env_true('IML_DEBUG'):
+        logging.info("Detected debug mode; enabling C++ logging statements (export IML_CPP_MIN_VLOG_LEVEL=1)")
+        add_env['IML_CPP_MIN_VLOG_LEVEL'] = 1
 
     exe_path = shutil.which(argv[0])
     if exe_path is None:
@@ -73,18 +77,24 @@ def main():
             exe=argv[0],
         ))
         sys.exit(1)
-    # if args.debug or args.iml_debug:
     # cmd = argv
     cmd = [exe_path] + argv[1:]
-    print_cmd(cmd, env={
-        'LD_PRELOAD': env['LD_PRELOAD'],
-    })
+    print_cmd(cmd, env=add_env)
+
+    env.update(add_env)
+    for k in list(env.keys()):
+        env[k] = str(env[k])
 
     sys.stdout.flush()
     sys.stderr.flush()
     os.execve(exe_path, cmd, env)
     # Shouldn't return.
     assert False
+
+def is_env_true(var, env=None):
+    if env is None:
+        env = os.environ
+    return env.get(var, 'no').lower() not in {'no', 'false', '0', 'None', 'null'}
 
 if __name__ == '__main__':
     main()

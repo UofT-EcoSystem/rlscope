@@ -1418,6 +1418,7 @@ void DeviceTracerImpl::ActivityCallback(const CUpti_Activity &record) {
 
     default:
       VLOG(1) << "ActivityCallback unhandled kind";
+      printActivity(&record);
       break;
   }
 #else

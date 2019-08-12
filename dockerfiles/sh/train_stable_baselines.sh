@@ -105,7 +105,7 @@ NVPROF=()
 #fi
 
 
-# NOTE: CUDA_API_PROF, if defined, will be a command (iml-cuda-api-prof) that wraps the training script
+# NOTE: CUDA_API_PROF, if defined, will be a command (iml-prof) that wraps the training script
 # using LD_PRELOAD=libsample_cuda_api.so in order to sample CUDA API calls during
 # training.  This should be used for uninstrumented runs.
 # Instrumented runs should instead use the profiler built-in to tensorflow to avoid libcupti

@@ -1903,3 +1903,7 @@ def print_cmd(cmd, files=sys.stdout, env=None, dry_run=False):
 def list_files(direc):
     paths = [_j(direc, filename) for filename in os.listdir(direc)]
     return paths
+
+def is_sample_cuda_api_lib(path):
+    return _b(path) == 'libsample_cuda_api.so'
+

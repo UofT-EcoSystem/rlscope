@@ -67,8 +67,10 @@ struct RegisteredFunc {
   uint64 last_run_usec;
   float every_sec;
   RegisteredFunc(Func func, float every_sec) :
-      func(func),
-      last_run_usec(0) {
+      func(func)
+      , last_run_usec(0)
+      , every_sec(every_sec)
+  {
   }
   bool ShouldRun(uint64 now_usec);
   void Run(uint64 now_usec);

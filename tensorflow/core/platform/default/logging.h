@@ -53,7 +53,7 @@ class LogMessage : public std::basic_ostringstream<char> {
   //
   // E.g. if the environment variable TF_CPP_VMODULE contains foo=3 and fname is
   // foo.cc and lvl is <= 3, this will return true. It will also return true if
-  // the level is lower or equal to TF_CPP_MIN_VLOG_LEVEL (default zero).
+  // the level is lower or equal to IML_CPP_MIN_VLOG_LEVEL (default zero).
   //
   // It is expected that the result of this query will be cached in the VLOG-ing
   // call site to avoid repeated lookups. This routine performs a hash-map
@@ -107,7 +107,7 @@ class LogMessageFatal : public LogMessage {
 
 #else
 
-// Otherwise, set TF_CPP_MIN_VLOG_LEVEL environment to update minimum log level
+// Otherwise, set IML_CPP_MIN_VLOG_LEVEL environment to update minimum log level
 // of VLOG, or TF_CPP_VMODULE to set the minimum log level for individual
 // translation units.
 #define VLOG_IS_ON(lvl)                                                     \

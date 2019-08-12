@@ -36,8 +36,17 @@ void EventHandler::EventLoop(std::function<bool()> should_stop) {
 
 bool RegisteredFunc::ShouldRun(uint64 now_usec) {
   DCHECK(last_run_usec <= now_usec);
-  return last_run_usec == 0 or ((float)(now_usec - last_run_usec))/((float)USEC_IN_SEC) >= every_sec;
+  bool ret = last_run_usec == 0 or
+             (now_usec - last_run_usec) >= (every_sec*USEC_IN_SEC);
+  if (ret) {
+    VLOG(1) << "now_usec = " << now_usec
+            << ", last_run_usec = " << last_run_usec
+            << ", time_usec since last ran = " << now_usec - last_run_usec
+            << ", run every usec = " << every_sec*USEC_IN_SEC;
+  }
+  return ret;
 }
+
 
 void RegisteredFunc::Run(uint64 now_usec) {
   last_run_usec = now_usec;
@@ -1059,9 +1068,11 @@ void CUDAAPIProfilerPrinter::Start() {
 void CUDAAPIProfilerPrinter::Stop() {
   if (!_should_stop.HasBeenNotified()) {
     _should_stop.Notify();
-    VLOG(1) << "Wait for CUDA API stat printer thread to stop...";
-    _printer_thread->join();
-    VLOG(1) << "... printer thread done";
+    if (_printer_thread) {
+      VLOG(1) << "Wait for CUDA API stat printer thread to stop...";
+      _printer_thread->join();
+      VLOG(1) << "... printer thread done";
+    }
   }
 }
 

@@ -1155,9 +1155,10 @@ class StableBaselines(Experiment):
         env['ALGO'] = algo
         if args.debug:
             env['DEBUG'] = 'yes'
+            env['IML_DEBUG'] = 'yes'
 
         if args.cuda_api_prof:
-            env['CUDA_API_PROF'] = 'iml-cuda-api-prof'
+            env['CUDA_API_PROF'] = 'iml-prof'
 
         if args.iml_trace_time_sec is not None:
             env['IML_TRACE_TIME_SEC'] = str(args.iml_trace_time_sec)

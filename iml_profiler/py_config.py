@@ -67,6 +67,8 @@ IS_DOCKER = False
 if 'IML_LOGGED_IN' in ENV:
   IS_DOCKER = True
 
+LIB_SAMPLE_CUDA_API = _j(ROOT, 'build', 'libsample_cuda_api.so')
+
 # Use a custom-built/modified version of TF for benchmarking things.
 # Modifies C++ code to make tfprof add less overhead to the critical path.
 # CUSTOM_TF = True

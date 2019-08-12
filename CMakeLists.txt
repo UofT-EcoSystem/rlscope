@@ -27,6 +27,9 @@ set(ENABLE_DQN_CPP OFF)
 set(BOOST_VERSION 1.70.0)
 set(BOOST_VERSION_UNDERSCORES 1_70_0)
 
+#set(PROTOBUF_VERSION 3.6.1)
+set(PROTOBUF_VERSION 3.9.1)
+
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
 #message("> CMAKE_MODULE_PATH = ${CMAKE_MODULE_PATH}")
 
@@ -58,6 +61,7 @@ if (NOT IS_WINDOWS AND NOT (
         AND EXISTS ${PROJECT_SOURCE_DIR}/third_party/nsync
         AND EXISTS ${PROJECT_SOURCE_DIR}/third_party/backward-cpp
         AND EXISTS ${PROJECT_SOURCE_DIR}/third_party/eigen
+        AND EXISTS ${PROJECT_SOURCE_DIR}/third_party/protobuf-${PROTOBUF_VERSION}
 #        AND EXISTS ${PROJECT_SOURCE_DIR}/third_party/boost_${BOOST_VERSION_UNDERSCORES}/build
         ) )
     message(FATAL_ERROR
@@ -92,11 +96,11 @@ if(NOT IS_WINDOWS)
 endif()
 
 set(IGNORE_ERRORS "-Wno-unused -Wno-unknown-pragmas")
+set(ADD_WARNINGS_FLAGS "-Wuninitialized")
 set(CMAKE_CXX_STANDARD 11)
 #-std=c++11
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Werror ${IGNORE_ERRORS}")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${ADD_WARNINGS_FLAGS} -Wall -Werror ${IGNORE_ERRORS} ")
 SET(CMAKE_EXE_LINKER_FLAGS  "${CMAKE_EXE_LINKER_FLAGS} -demangle")
-
 
 #if (NOT EXISTS ./external_libs/lib)
 #   message(FATAL_ERROR "You need to run setup.sh first.")
@@ -237,9 +241,20 @@ if(IS_WINDOWS)
 endif()
 
 # https://cmake.org/cmake/help/v3.9/module/FindProtobuf.html
+set(Protobuf_ROOT_DIR ${PROJECT_SOURCE_DIR}/third_party/protobuf-${PROTOBUF_VERSION}/build)
+
+#set(Protobuf_LIBRARY ${Protobuf_ROOT_DIR}/lib/libprotobuf.so)
+set(Protobuf_LIBRARY ${Protobuf_ROOT_DIR}/lib/libprotobuf.a)
+# HACK: I like to use symlinks, but docker container uses abspath's for mounts
+get_filename_component(Protobuf_LIBRARY ${Protobuf_LIBRARY} REALPATH)
+message("> ABSOLUTE Protobuf_LIBRARY = ${Protobuf_LIBRARY}")
+#set(Protobuf_LIBRARY ${Protobuf_ROOT_DIR}/lib/libprotobuf.a)
+set(Protobuf_INCLUDE_DIR ${Protobuf_ROOT_DIR}/include)
+set(Protobuf_PROTOC_EXECUTABLE ${Protobuf_ROOT_DIR}/bin/protoc)
 find_package(Protobuf REQUIRED)
 message("> Protobuf_INCLUDE_DIRS = ${Protobuf_INCLUDE_DIRS}")
 message("> Protobuf_LIBRARY = ${Protobuf_LIBRARY}")
+message("> Protobuf_LIBRARIES = ${Protobuf_LIBRARIES}")
 include_directories(${Protobuf_INCLUDE_DIRS})
 include_directories(${CMAKE_CURRENT_BINARY_DIR})
 
@@ -321,24 +336,27 @@ add_dependencies(sample_cuda_api double_conversion)
 # by setting each property on the target.
 add_backward(sample_cuda_api)
 
-target_link_libraries(sample_cuda_api ${Protobuf_LIBRARIES})
+target_link_libraries(sample_cuda_api PRIVATE ${Protobuf_LIBRARIES})
 message("> PROTO_SRCS = ${PROTO_SRCS}")
 message("> PROTO_HDRS = ${PROTO_HDRS}")
 #absl::synchronization
-target_link_libraries(sample_cuda_api absl::base absl::strings absl::memory)
-target_link_libraries(sample_cuda_api nsync)
-target_link_libraries(sample_cuda_api nsync_cpp)
-target_link_libraries(sample_cuda_api pthread)
+target_link_libraries(sample_cuda_api PRIVATE
+        absl::base
+        absl::strings
+        absl::memory)
+target_link_libraries(sample_cuda_api PRIVATE nsync)
+target_link_libraries(sample_cuda_api PRIVATE nsync_cpp)
+target_link_libraries(sample_cuda_api PUBLIC pthread)
 #target_include_directories(sample_cuda_api PRIVATE ${DOUBLE_CONVERSION_INCLUDE_DIRS})
 target_include_directories(sample_cuda_api PRIVATE ${double_conversion_INCLUDE_DIR})
 #target_link_libraries(sample_cuda_api ${DOUBLE_CONVERSION_LIBRARY})
 #target_link_libraries(sample_cuda_api ${double_conversion_LIBRARIES})
 #target_link_libraries(sample_cuda_api double_conversion)
-target_link_libraries(sample_cuda_api ${double_conversion_LIBRARIES})
-target_link_libraries(sample_cuda_api Eigen3::Eigen)
+target_link_libraries(sample_cuda_api PRIVATE ${double_conversion_LIBRARIES})
+target_link_libraries(sample_cuda_api PRIVATE Eigen3::Eigen)
 if(NOT IS_WINDOWS)
     find_package(Libcupti REQUIRED)
-    target_link_libraries(sample_cuda_api ${Libcupti_LIBRARY})
+    target_link_libraries(sample_cuda_api PUBLIC ${Libcupti_LIBRARY})
     # https://stackoverflow.com/questions/26243169/cmake-target-include-directories-meaning-of-scope
     # NOTE: I still don't fully understand the PUBLIC/PRIVATE/INTERFACE scope here...
     target_include_directories(sample_cuda_api PRIVATE ${Libcupti_INCLUDE_DIR})
@@ -369,7 +387,7 @@ if(NOT IS_WINDOWS)
 ##    target_link_libraries(sample_cuda_api ${Boost_LIBRARIES})
 
     find_package(Backtrace REQUIRED)
-    target_link_libraries(sample_cuda_api ${Backtrace_LIBRARY})
+    target_link_libraries(sample_cuda_api PUBLIC ${Backtrace_LIBRARY})
     target_include_directories(sample_cuda_api PRIVATE ${Backtrace_INCLUDE_DIR})
 
 endif()
@@ -405,6 +423,21 @@ if (ENABLE_BACKTRACE)
     AddFlags(sample_cuda_api LINK_FLAGS ${BACKTRACE_SYMS_FLAGS})
 endif()
 
+#
+# Ensure only symbols we want exported by our LD_PRELOAD library get exported to the application.
+#
+
+# For our source files, only expose symbols that are marked with SAMPLE_CUDA_API_EXPORT.
+include(GenerateExportHeader)
+generate_export_header(sample_cuda_api)
+set_target_properties(sample_cuda_api PROPERTIES CXX_VISIBILITY_PRESET hidden)
+
+# For static libraries we link to, DON'T expose ANY of their symbols.
+set(HIDE_LINKED_LIB_SYMS_FLAGS "-Wl,--exclude-libs,ALL")
+#AddFlags(sample_cuda_api COMPILE_FLAGS ${HIDE_LINKED_LIB_SYMS_FLAGS})
+AddFlags(sample_cuda_api LINK_FLAGS ${HIDE_LINKED_LIB_SYMS_FLAGS})
+
+
 ##https://stackoverflow.com/questions/36662920/xcode-clang-link-build-dynamic-framework-or-dylib-not-embed-dependencies
 #set(TARGET "sample_cuda_api")
 #set(LD_IGNORE_UNDEFINED_SYM_FLAGS "-Wl,-undefined,dynamic_lookup")
@@ -425,7 +458,7 @@ endif()
 
 add_library(nsync_includes INTERFACE)
 target_include_directories(nsync_includes INTERFACE third_party/nsync/public)
-target_link_libraries(sample_cuda_api nsync_includes)
+target_link_libraries(sample_cuda_api PRIVATE nsync_includes)
 
 
 #./test/py_interface/py_interface_src.cpp

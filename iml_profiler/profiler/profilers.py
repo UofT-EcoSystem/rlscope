@@ -54,6 +54,7 @@ from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, base
 
 from iml_profiler.parser.common import *
 # from iml_profiler.profiler import cudaprofile
+from iml_profiler.clib import sample_cuda_api
 from iml_profiler.profiler import clib_wrap
 from iml_profiler.profiler.clib_wrap import MICROSECONDS_IN_SECOND
 from iml_profiler.profiler import tensorflow_profile_context
@@ -95,16 +96,17 @@ WARN_EVERY_SEC = 10
 # STEPS_PER_TRACE = 10
 
 _TF_MODIFIED = False
-def modify_tensorflow():
+def modify_tensorflow(uninstrumented_run):
     global _TF_MODIFIED
     if _TF_MODIFIED:
         return
 
-    setup()
-    iml_profiler.profiler.session.setup()
-    iml_profiler.profiler.estimator.setup()
-    iml_profiler.profiler.tensorflow_profile_context.setup()
-    clib_wrap.setup()
+    setup(uninstrumented_run)
+    if not uninstrumented_run:
+        iml_profiler.profiler.session.setup()
+        iml_profiler.profiler.estimator.setup()
+        iml_profiler.profiler.tensorflow_profile_context.setup()
+        clib_wrap.setup()
 
     # from tensorflow.python.profiler import profile_context
     # profile_context.MAX_TRACED_STEPS = 99999999
@@ -117,26 +119,30 @@ PROFILERS = []
 
 
 SETUP_DONE = False
-def setup(allow_skip=False):
+def setup(uninstrumented_run, allow_skip=False):
     global SETUP_DONE
     if allow_skip and SETUP_DONE:
         return
     assert not SETUP_DONE
 
-    """
-    Usually TensorFlow only measures 100 steps at most.
-    Set a big upper limit so it will measure each iteration we measure.
-    """
-    tensorflow_profile_context.MAX_TRACED_STEPS = 99999999
+    if not uninstrumented_run:
+        """
+        Usually TensorFlow only measures 100 steps at most.
+        Set a big upper limit so it will measure each iteration we measure.
+        """
+        tensorflow_profile_context.MAX_TRACED_STEPS = 99999999
 
     # setup_wrap_BaseSession_as_default()
 
-    iml_profiler.profiler.session.register_session_active_hook(AddProfileContextHook)
-    iml_profiler.profiler.session.register_session_inactive_hook(RemoveProfileContextHook)
-    iml_profiler.profiler.session.register_session_run_hook(MaybeDumperTfprofContextHook)
-    clib_wrap.register_record_event_hook(DumpPyprofTraceHook)
+    sample_cuda_api.load_library()
 
-    sys.excepthook = cleanup_profiler_excepthook
+    if not uninstrumented_run:
+        iml_profiler.profiler.session.register_session_active_hook(AddProfileContextHook)
+        iml_profiler.profiler.session.register_session_inactive_hook(RemoveProfileContextHook)
+        iml_profiler.profiler.session.register_session_run_hook(MaybeDumperTfprofContextHook)
+        clib_wrap.register_record_event_hook(DumpPyprofTraceHook)
+
+        sys.excepthook = cleanup_profiler_excepthook
 
     SETUP_DONE = True
 
@@ -716,9 +722,8 @@ class Profiler:
         self.training_progress = get_argval('training_progress', training_progress, False)
         self._loaded_libcupti = False
 
-        if not self.disable:
-            modify_tensorflow()
-        else:
+        modify_tensorflow(uninstrumented_run=self.disable)
+        if self.disable:
             logging.info("IML: note that profiling is disabled for this run")
 
         self.manager = multiprocessing.Manager()
@@ -776,6 +781,7 @@ class Profiler:
         # self.init_trace_id()
         self._tfprof_enabled = False
         self._pyprof_enabled = False
+        self._iml_prof_enabled = False
         self.total_profile_time_sec = 0
 
         self.python = get_argval('python', python, False)
@@ -1106,6 +1112,10 @@ class Profiler:
             self._start_pyprof()
             self._start_tfprof()
 
+        if not self.disable or self.training_progress:
+            # NOTE: We want to collect CUDA API call stats for uninstrumented runs also!
+            self._start_iml_prof()
+
         if self.just_sample_util:
             self._init_trace_time()
             self.util_sampler.start()
@@ -1131,8 +1141,8 @@ class Profiler:
             # same interval of time we do tracing for.
             self._delayed_enable = True
 
-        if self.disable:
-            return
+        # if self.disable:
+        #     return
 
         if not self.reports_progress:
             self._enable_tracing()
@@ -1141,6 +1151,7 @@ class Profiler:
         logging.info("IML: enable tracing")
         self._stop_pyprof()
         self._stop_tfprof()
+        self._stop_iml_prof()
         self._tracing_enabled = False
 
     # # Calling iml.prof.enable()/disable() repeatedly wouldn't currently support percent_complete tracking...
@@ -1196,6 +1207,31 @@ class Profiler:
 
         self._maybe_end_operations()
         self._maybe_finish(finish_now=True, should_exit=False)
+
+    def _start_iml_prof(self):
+        if self._iml_prof_enabled or not sample_cuda_api.is_used():
+            return
+
+        logging.info('Start iml-prof libcupti tracing')
+
+        sample_cuda_api.enable_tracing()
+
+        self._iml_prof_enabled = True
+
+    def _stop_iml_prof(self):
+        if not self._iml_prof_enabled:
+            return
+
+        logging.info('Stop iml-prof libcupti tracing')
+
+        assert sample_cuda_api.is_used()
+
+        sample_cuda_api.disable_tracing()
+
+        self._iml_prof_enabled = False
+
+    def _dump_iml_prof(self):
+        raise NotImplementedError("TODO: call C++ function that dumps CUDA API stats to protobuf file (sample_cuda_api.collect())")
 
     def _start_tfprof(self, skip_init_trace_time=False):
         """
@@ -1660,6 +1696,8 @@ class Profiler:
         # Wait for any async tfprof trace file dumps in C++ to finish.
         logging.info("> IML: Wait for tfprof trace-file dumps in TensorFlow C++ to finish.")
         c_api_util.await_trace_data_dumps()
+
+        # TODO: sample_cuda_api.await_trace_dumps()
 
         logging.info("> IML: Done")
 
@@ -2590,7 +2628,22 @@ def is_iml_file(path):
         nvprof=NVPROF_REGEX),
         base)
 
-def iml_argv(prof : Profiler, keep_executable=False, keep_non_iml_args=False):
+def iml_argv_and_env(prof : Profiler, keep_executable=False, keep_non_iml_args=False, env=None):
+    iml_argv = _iml_argv(prof, keep_executable=keep_executable, keep_non_iml_args=keep_non_iml_args, env=env)
+    iml_env = _iml_env(prof, keep_executable=keep_executable, keep_non_iml_args=keep_non_iml_args, env=env)
+    return iml_argv, iml_env
+
+def _iml_env(prof : Profiler, keep_executable=False, keep_non_iml_args=False, env=None):
+    if env is None:
+        env = dict(os.environ)
+    ld_preloads = []
+    if 'LD_PRELOAD' in env:
+        ld_preloads.append(env['LD_PRELOAD'])
+    ld_preloads.append(py_config.LIB_SAMPLE_CUDA_API)
+    env['LD_PRELOAD'] = ':'.join(ld_preloads)
+    return env
+
+def _iml_argv(prof : Profiler, keep_executable=False, keep_non_iml_args=False):
     """
     Return a list of string arguments related to IML that were passed to the current running python process.
 
