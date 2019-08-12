@@ -18,6 +18,8 @@ limitations under the License.
 
 #include "cuda_api_profiler/cuda_api_profiler.h"
 
+#include "iml_profiler/protobuf/iml_prof.pb.h"
+
 #include <cuda.h>
 #include <cupti.h>
 
@@ -101,7 +103,7 @@ printActivity(const CUpti_Activity *record)
   case CUPTI_ACTIVITY_KIND_DEVICE:
     {
       CUpti_ActivityDevice2 *device = (CUpti_ActivityDevice2 *) record;
-      printf("DEVICE %s (%u), capability %u.%u, global memory (bandwidth %u GB/s, size %u MB), "
+      printf("iml-prof: DEVICE %s (%u), capability %u.%u, global memory (bandwidth %u GB/s, size %u MB), "
              "multiprocessors %u, clock %u MHz\n",
              device->name, device->id,
              device->computeCapabilityMajor, device->computeCapabilityMinor,
@@ -113,14 +115,14 @@ printActivity(const CUpti_Activity *record)
   case CUPTI_ACTIVITY_KIND_DEVICE_ATTRIBUTE:
     {
       CUpti_ActivityDeviceAttribute *attribute = (CUpti_ActivityDeviceAttribute *)record;
-      printf("DEVICE_ATTRIBUTE %u, device %u, value=0x%llx\n",
+      printf("iml-prof: DEVICE_ATTRIBUTE %u, device %u, value=0x%llx\n",
              attribute->attribute.cupti, attribute->deviceId, (unsigned long long)attribute->value.vUint64);
       break;
     }
   case CUPTI_ACTIVITY_KIND_CONTEXT:
     {
       CUpti_ActivityContext *context = (CUpti_ActivityContext *) record;
-      printf("CONTEXT %u, device %u, compute API %s, NULL stream %d\n",
+      printf("iml-prof: CONTEXT %u, device %u, compute API %s, NULL stream %d\n",
              context->contextId, context->deviceId,
              getComputeApiKindString((CUpti_ActivityComputeApiKind) context->computeApiKind),
              (int) context->nullStreamId);
@@ -129,7 +131,7 @@ printActivity(const CUpti_Activity *record)
   case CUPTI_ACTIVITY_KIND_MEMCPY:
     {
       CUpti_ActivityMemcpy *memcpy = (CUpti_ActivityMemcpy *) record;
-      printf("MEMCPY %s [ %llu - %llu ] device %u, context %u, stream %u, correlation %u/r%u\n",
+      printf("iml-prof: MEMCPY %s [ %llu - %llu ] device %u, context %u, stream %u, correlation %u/r%u\n",
              getMemcpyKindString((CUpti_ActivityMemcpyKind) memcpy->copyKind),
 //             (unsigned long long) (memcpy->start - startTimestamp),
 //             (unsigned long long) (memcpy->end - startTimestamp),
@@ -142,7 +144,7 @@ printActivity(const CUpti_Activity *record)
   case CUPTI_ACTIVITY_KIND_MEMSET:
     {
       CUpti_ActivityMemset *memset = (CUpti_ActivityMemset *) record;
-      printf("MEMSET value=%u [ %llu - %llu ] device %u, context %u, stream %u, correlation %u\n",
+      printf("iml-prof: MEMSET value=%u [ %llu - %llu ] device %u, context %u, stream %u, correlation %u\n",
              memset->value,
 //             (unsigned long long) (memset->start - startTimestamp),
 //             (unsigned long long) (memset->end - startTimestamp),
@@ -157,7 +159,7 @@ printActivity(const CUpti_Activity *record)
     {
       const char* kindString = (record->kind == CUPTI_ACTIVITY_KIND_KERNEL) ? "KERNEL" : "CONC KERNEL";
       CUpti_ActivityKernel4 *kernel = (CUpti_ActivityKernel4 *) record;
-      printf("%s \"%s\" [ %llu - %llu ] device %u, context %u, stream %u, correlation %u\n",
+      printf("iml-prof: %s \"%s\" [ %llu - %llu ] device %u, context %u, stream %u, correlation %u\n",
              kindString,
              kernel->name,
 //             (unsigned long long) (kernel->start - startTimestamp),
@@ -175,7 +177,7 @@ printActivity(const CUpti_Activity *record)
   case CUPTI_ACTIVITY_KIND_DRIVER:
     {
       CUpti_ActivityAPI *api = (CUpti_ActivityAPI *) record;
-      printf("DRIVER cbid=%u [ %llu - %llu ] process %u, thread %u, correlation %u\n",
+      printf("iml-prof: DRIVER cbid=%u [ %llu - %llu ] process %u, thread %u, correlation %u\n",
              api->cbid,
 //             (unsigned long long) (api->start - startTimestamp),
 //             (unsigned long long) (api->end - startTimestamp),
@@ -187,7 +189,7 @@ printActivity(const CUpti_Activity *record)
   case CUPTI_ACTIVITY_KIND_RUNTIME:
     {
       CUpti_ActivityAPI *api = (CUpti_ActivityAPI *) record;
-      printf("RUNTIME cbid=%u [ %llu - %llu ] process %u, thread %u, correlation %u\n",
+      printf("iml-prof: RUNTIME cbid=%u [ %llu - %llu ] process %u, thread %u, correlation %u\n",
              api->cbid,
 //             (unsigned long long) (api->start - startTimestamp),
 //             (unsigned long long) (api->end - startTimestamp),
@@ -202,7 +204,7 @@ printActivity(const CUpti_Activity *record)
       switch (name->objectKind)
       {
       case CUPTI_ACTIVITY_OBJECT_CONTEXT:
-        printf("NAME  %s %u %s id %u, name %s\n",
+        printf("iml-prof: NAME  %s %u %s id %u, name %s\n",
                getActivityObjectKindString(name->objectKind),
                getActivityObjectKindId(name->objectKind, &name->objectId),
                getActivityObjectKindString(CUPTI_ACTIVITY_OBJECT_DEVICE),
@@ -210,7 +212,7 @@ printActivity(const CUpti_Activity *record)
                name->name);
         break;
       case CUPTI_ACTIVITY_OBJECT_STREAM:
-        printf("NAME %s %u %s %u %s id %u, name %s\n",
+        printf("iml-prof: NAME %s %u %s %u %s id %u, name %s\n",
                getActivityObjectKindString(name->objectKind),
                getActivityObjectKindId(name->objectKind, &name->objectId),
                getActivityObjectKindString(CUPTI_ACTIVITY_OBJECT_CONTEXT),
@@ -220,7 +222,7 @@ printActivity(const CUpti_Activity *record)
                name->name);
         break;
       default:
-        printf("NAME %s id %u, name %s\n",
+        printf("iml-prof: NAME %s id %u, name %s\n",
                getActivityObjectKindString(name->objectKind),
                getActivityObjectKindId(name->objectKind, &name->objectId),
                name->name);
@@ -231,14 +233,14 @@ printActivity(const CUpti_Activity *record)
   case CUPTI_ACTIVITY_KIND_MARKER:
     {
       CUpti_ActivityMarker2 *marker = (CUpti_ActivityMarker2 *) record;
-      printf("MARKER id %u [ %llu ], name %s, domain %s\n",
+      printf("iml-prof: MARKER id %u [ %llu ], name %s, domain %s\n",
              marker->id, (unsigned long long) marker->timestamp, marker->name, marker->domain);
       break;
     }
   case CUPTI_ACTIVITY_KIND_MARKER_DATA:
     {
       CUpti_ActivityMarkerData *marker = (CUpti_ActivityMarkerData *) record;
-      printf("MARKER_DATA id %u, color 0x%x, category %u, payload %llu/%f\n",
+      printf("iml-prof: MARKER_DATA id %u, color 0x%x, category %u, payload %llu/%f\n",
              marker->id, marker->color, marker->category,
              (unsigned long long) marker->payload.metricValueUint64,
              marker->payload.metricValueDouble);
@@ -247,7 +249,7 @@ printActivity(const CUpti_Activity *record)
   case CUPTI_ACTIVITY_KIND_OVERHEAD:
     {
       CUpti_ActivityOverhead *overhead = (CUpti_ActivityOverhead *) record;
-      printf("OVERHEAD %s [ %llu, %llu ] %s id %u\n",
+      printf("iml-prof: OVERHEAD %s [ %llu, %llu ] %s id %u\n",
              getActivityOverheadKindString(overhead->overheadKind),
 //             (unsigned long long) overhead->start - startTimestamp,
 //             (unsigned long long) overhead->end - startTimestamp,
@@ -258,7 +260,7 @@ printActivity(const CUpti_Activity *record)
       break;
     }
   default:
-    printf("  <unknown>\n");
+    printf("iml-prof: <unknown>\n");
     break;
   }
 }
@@ -1217,7 +1219,7 @@ void DeviceTracerImpl::AddCorrelationId(uint32 correlation_id,
                                               const void *cbdata) {
   auto *cbInfo = reinterpret_cast<const CUpti_CallbackData *>(cbdata);
 #ifdef CONFIG_TRACE_STATS
-  if (is_yes("TF_CUPTI_TRACE_API_CALLS", false)) {
+  if (is_yes("IML_CUDA_API_CALLS", false)) {
     DeviceTracerImpl *tracer = reinterpret_cast<DeviceTracerImpl *>(userdata);
     if (domain == CUPTI_CB_DOMAIN_DRIVER_API || domain == CUPTI_CB_DOMAIN_RUNTIME_API) {
       tracer->api_profiler_.ApiCallback(userdata, domain, cbid, cbdata);

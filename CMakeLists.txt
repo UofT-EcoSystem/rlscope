@@ -70,8 +70,10 @@ if (NOT IS_WINDOWS AND NOT (
             "  $ bash ./setup.sh")
 endif()
 
-find_package(GTest REQUIRED)
-include_directories(${GTEST_INCLUDE_DIRS})
+if (NOT IS_WINDOWS)
+    find_package(GTest REQUIRED)
+    include_directories(${GTEST_INCLUDE_DIRS})
+endif()
 
 # https://github.com/abseil/abseil-cpp/blob/master/CMake/README.md
 set(ABSL_RUN_TESTS OFF)
@@ -281,6 +283,8 @@ message("> double_conversion_LIBRARIES = ${double_conversion_LIBRARIES}")
 set(PROTOBUF_GENERATE_CPP_APPEND_PATH OFF)
 protobuf_generate_cpp(PROTO_SRCS PROTO_HDRS
         tensorflow/core/lib/core/error_codes.proto)
+protobuf_generate_cpp(PROTO_SRCS PROTO_HDRS
+        iml_profiler/protobuf/iml_prof.proto)
 
 #protobuf_generate_cpp(PROTO_SRCS PROTO_HDRS EXPORT_MACRO DLL_EXPORT foo.proto)
 #protobuf_generate_python(PROTO_PY foo.proto)
@@ -319,6 +323,11 @@ endif()
 
 message("> TF_SOURCES = ${TF_SOURCES}")
 gather_sources(SAMPLE_CUDA_API_SOURCES SAMPLE_CUDA_API_DIRS)
+
+if(IS_WINDOWS)
+    # Include headers generated from protobuf files.
+    include_directories(./build)
+endif()
 
 # https://github.com/bombela/backward-cpp/tree/84ae4f5e80381aca765a0810d4c811acae3cd7c7#configuration--dependencies
 add_library(sample_cuda_api SHARED

@@ -1,0 +1,88 @@
+syntax = "proto3";
+
+package iml;
+
+//
+// Collect stats about CUDA runtime/driver API calls.
+//
+message CUDAAPIStats {
+    string process_name = 1;
+    string phase = 2;
+    string machine_name = 3;
+
+    string api_name = 4;
+    int64 total_time_us = 5;
+    int64 num_calls = 6;
+}
+
+//
+// PC sampling
+//
+
+message Annotation {
+    // "sgd_updates", "training_loop", ...
+    string name = 1;
+    // "Operation", "Framework API", "Python", ...
+    string category = 2;
+}
+
+message SampleEvents {
+    string process_name = 1;
+    string phase = 2;
+    string machine_name = 3;
+
+    repeated SampleEvent events = 4;
+}
+
+// A SamplingEvent captures all of the sampling-state, at a particular point in time.
+//
+// Ideally, we capture the sampling-state of each thread on the machine.
+message SampleEvent {
+    int64 sample_time_us = 1;
+    repeated CPUSampleState cpu_sample_state = 2;
+    repeated GPUSampleState gpu_sample_state = 3;
+}
+
+message CPUSampleState {
+    int64 thread_id = 1;
+    // The current active "stack" of annotations.
+    repeated Annotation annotations = 2;
+}
+
+message GPUSampleState {
+    string device_name = 1;
+    // Currently, we JUST record whether a GPU kernel is running.
+    // Ideally, in the future we would like to collect more GPU-side information.
+    // Collecting additional GPU information (e.g. hardware counters) will require
+    // the kernel-replay feature which CUDA provides for collecting multiple hardware
+    // counters in separate runs (since register space is a limitation).
+    bool is_gpu_active = 2;
+}
+
+// Q: How do we know if the GPU is active...?
+// PC sampling gives us events about GPU activity.
+// However, currently we don't have set_operation/end_operation for when the GPU is active.
+// Ideally, we would have this so that we know when the GPU is active.
+//
+// Q: Can we add these annotations somehow?
+// - Let cuda_sampling_freq_sec = How often we sample GPU duing PC sampling when the GPU is active.
+// extra_time_between_pc_sampling_callbacks_sec = [ average time between PC sampling callbacks ] - cuda_sampling_freq_sec
+// fudge_factor_sec = 2*extra_time_between_pc_sampling_callbacks_sec
+// def CUDA PC sampling callback:
+//   # PC sampling event for GPU;
+//   # mark GPU as active, and the last time we saw it active.
+//   sampling_state.gpu_active = True
+//   sampling_state.start_gpu_active_usec = now_usec()
+//
+//   # If this is the last PC sampling event we see, we need to set a
+//   # "timeout", after which the GPU is considered "inactive".
+//   schedule callback in cuda_sampling_freq_sec + fudge_factor_sec seconds:
+//     callback:
+//       if sampling_state.gpu_active and
+//          now_usec() - sampling_state.start_gpu_active_usec > cuda_sampling_freq_sec:
+//         # The GPU was last seen as active over cuda_sampling_freq_sec seconds ago,
+//         # but has not been marked as active since.
+//         # Hence we consider it inactive.
+//         sampling_state.gpu_active = False
+//         sampling_state.start_gpu_active_usec = now_usec()
+

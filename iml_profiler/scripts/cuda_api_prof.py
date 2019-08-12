@@ -15,31 +15,23 @@ from iml_profiler.parser.common import *
 
 from iml_profiler.profiler import iml_logging
 
-def add_cuda_api_prof_arguments(parser):
-    """
-    Arguments parsed by iml-prof that should NOT be forwarded to the training-script.
-    """
-    pass
-
-def add_common_arguments(parser):
-    """
-    Arguments parsed by iml-prof that SHOULD be forwarded to the training-script,
-    but are also likely recognized by the training script (e.g. --debug)
-    """
-    parser.add_argument('--debug', action='store_true')
-    parser.add_argument('--iml-debug', action='store_true')
-
 def main():
     iml_logging.setup_logging()
 
-    parser_help = "Sample time spent in CUDA API calls, and call counts."
-    parser = argparse.ArgumentParser(parser_help)
-    add_cuda_api_prof_arguments(parser)
-    _, argv = parser.parse_known_args()
+    iml_prof_argv, cmd_argv = gather_argv(sys.argv[1:])
 
-    opt_parser = argparse.ArgumentParser(parser_help)
-    add_common_arguments(opt_parser)
-    args, _ = opt_parser.parse_known_args(sys.argv[1:])
+    parser = argparse.ArgumentParser("Sample time spent in CUDA API calls, and call counts.")
+    parser.add_argument('--debug', action='store_true')
+    parser.add_argument('--iml-debug', action='store_true')
+    parser.add_argument('--cuda-api-calls', action='store_true',
+                        help=textwrap.dedent("""
+                        Trace CUDA API runtime/driver calls.
+                        
+                        i.e. total number of calls, and total time (usec) spent in a given API call.
+                        
+                        Effect: sets "export IML_CUDA_API_CALLS=1" for libsample_cuda_api.so.
+                        """))
+    args = parser.parse_args(iml_prof_argv)
 
     env = dict(os.environ)
     # TODO: figure out how to install pre-built .so file with "pip install iml_profiler"
@@ -71,14 +63,17 @@ def main():
         logging.info("Detected debug mode; enabling C++ logging statements (export IML_CPP_MIN_VLOG_LEVEL=1)")
         add_env['IML_CPP_MIN_VLOG_LEVEL'] = 1
 
-    exe_path = shutil.which(argv[0])
+    if args.cuda_api_calls:
+        add_env['IML_CUDA_API_CALLS'] = 1
+
+    exe_path = shutil.which(cmd_argv[0])
     if exe_path is None:
         print("IML ERROR: couldn't locate {exe} on $PATH; try giving a full path to {exe} perhaps?".format(
-            exe=argv[0],
+            exe=cmd_argv[0],
         ))
         sys.exit(1)
     # cmd = argv
-    cmd = [exe_path] + argv[1:]
+    cmd = [exe_path] + cmd_argv[1:]
     print_cmd(cmd, env=add_env)
 
     env.update(add_env)
@@ -90,6 +85,40 @@ def main():
     os.execve(exe_path, cmd, env)
     # Shouldn't return.
     assert False
+
+def gather_argv(argv):
+    """
+
+    $ iml-prof [options]         cmd_exec ...
+               ---------         ------------
+               iml_prof_argv     cmd_argv
+
+    Split sys.argv into:
+    - iml_prof_argv: Arguments that iml-prof should handle.
+    - cmd_argv: Arguments that the profiled script should handle.
+
+    :param argv:
+        sys.argv
+    :return:
+    """
+    iml_prof_argv = []
+    i = 0
+    def is_executable(opt):
+        return shutil.which(opt) is not None
+    has_dashes = any(opt == '--' for opt in argv)
+    while i < len(argv):
+
+        if has_dashes:
+            if argv[i] == '--':
+                i += 1
+                break
+        elif is_executable(argv[i]):
+            break
+
+        iml_prof_argv.append(argv[i])
+        i += 1
+    cmd_argv = argv[i:]
+    return iml_prof_argv, cmd_argv
 
 def is_env_true(var, env=None):
     if env is None:
