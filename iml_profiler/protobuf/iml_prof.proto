@@ -19,37 +19,42 @@ message CUDAAPIStats {
 // PC sampling
 //
 
-message Annotation {
+message SampleEventsProto {
+    string process_name = 1;
+    string phase = 2;
+    string machine_name = 3;
+
+    repeated SampleEventProto events = 4;
+}
+
+message AnnotationProto {
     // "sgd_updates", "training_loop", ...
     string name = 1;
     // "Operation", "Framework API", "Python", ...
     string category = 2;
 }
 
-message SampleEvents {
-    string process_name = 1;
-    string phase = 2;
-    string machine_name = 3;
-
-    repeated SampleEvent events = 4;
-}
-
 // A SamplingEvent captures all of the sampling-state, at a particular point in time.
 //
 // Ideally, we capture the sampling-state of each thread on the machine.
-message SampleEvent {
+message SampleEventProto {
     int64 sample_time_us = 1;
-    repeated CPUSampleState cpu_sample_state = 2;
-    repeated GPUSampleState gpu_sample_state = 3;
+    repeated CPUSampleStateProto cpu_sample_state = 2;
+    repeated GPUSampleStateProto gpu_sample_state = 3;
 }
 
-message CPUSampleState {
-    int64 thread_id = 1;
+message CPUSampleStateProto {
+    // CPU name
+    string device_name = 1;
+    // POSIX thread_id
+    int64 tid = 2;
+    // 0-based IML API assigned thread_id.
+    int64 thread_id = 3;
     // The current active "stack" of annotations.
-    repeated Annotation annotations = 2;
+    repeated AnnotationProto annotations = 4;
 }
 
-message GPUSampleState {
+message GPUSampleStateProto {
     string device_name = 1;
     // Currently, we JUST record whether a GPU kernel is running.
     // Ideally, in the future we would like to collect more GPU-side information.

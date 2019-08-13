@@ -17,6 +17,7 @@ limitations under the License.
 #include "tensorflow/core/platform/logging.h"
 
 #include "cuda_api_profiler/cuda_api_profiler.h"
+#include "cuda_api_profiler/get_env_var.h"
 
 #include "iml_profiler/protobuf/iml_prof.pb.h"
 
@@ -93,6 +94,7 @@ const char *getActivityOverheadKindString(CUpti_ActivityOverheadKind kind);
 uint32_t getActivityObjectKindId(CUpti_ActivityObjectKind kind, CUpti_ActivityObjectKindId *id);
 const char * getActivityObjectKindString(CUpti_ActivityObjectKind kind);
 const char * getComputeApiKindString(CUpti_ActivityComputeApiKind kind);
+const char * getStallReasonString(CUpti_ActivityPCSamplingStallReason reason);
 
 
 void
@@ -100,6 +102,53 @@ printActivity(const CUpti_Activity *record)
 {
   switch (record->kind)
   {
+
+    // Activities that fire when CUPTI_CALL(cuptiActivityEnable(CUPTI_ACTIVITY_KIND_PC_SAMPLING)) is called on Quadro P4000.
+    case CUPTI_ACTIVITY_KIND_SOURCE_LOCATOR:
+    {
+      CUpti_ActivitySourceLocator *sourceLocator = (CUpti_ActivitySourceLocator *)record;
+      printf("Source Locator Id %d, File %s Line %d\n", sourceLocator->id, sourceLocator->fileName, sourceLocator->lineNumber);
+      break;
+    }
+    case CUPTI_ACTIVITY_KIND_PC_SAMPLING:
+    {
+      CUpti_ActivityPCSampling3 *psRecord = (CUpti_ActivityPCSampling3 *)record;
+
+      printf("source %u, functionId %u, pc 0x%llx, corr %u, samples %u, stallreason %s\n",
+             psRecord->sourceLocatorId,
+             psRecord->functionId,
+             (unsigned long long)psRecord->pcOffset,
+             psRecord->correlationId,
+             psRecord->samples,
+             getStallReasonString(psRecord->stallReason));
+      break;
+    }
+    case CUPTI_ACTIVITY_KIND_PC_SAMPLING_RECORD_INFO:
+    {
+      CUpti_ActivityPCSamplingRecordInfo *pcsriResult =
+          (CUpti_ActivityPCSamplingRecordInfo *)(void *)record;
+
+      printf("corr %u, totalSamples %llu, droppedSamples %llu\n",
+             pcsriResult->correlationId,
+             (unsigned long long)pcsriResult->totalSamples,
+             (unsigned long long)pcsriResult->droppedSamples);
+      break;
+    }
+    case CUPTI_ACTIVITY_KIND_FUNCTION:
+    {
+      CUpti_ActivityFunction *fResult =
+          (CUpti_ActivityFunction *)record;
+
+      printf("id %u, ctx %u, moduleId %u, functionIndex %u, name %s\n",
+             fResult->id,
+             fResult->contextId,
+             fResult->moduleId,
+             fResult->functionIndex,
+             fResult->name);
+      break;
+    }
+
+
   case CUPTI_ACTIVITY_KIND_DEVICE:
     {
       CUpti_ActivityDevice2 *device = (CUpti_ActivityDevice2 *) record;
@@ -308,6 +357,43 @@ getActivityObjectKindId(CUpti_ActivityObjectKind kind, CUpti_ActivityObjectKindI
 }
 
 const char *
+getStallReasonString(CUpti_ActivityPCSamplingStallReason reason)
+{
+    switch (reason) {
+    case CUPTI_ACTIVITY_PC_SAMPLING_STALL_INVALID:
+        return "Invalid";
+    case CUPTI_ACTIVITY_PC_SAMPLING_STALL_NONE:
+        return "Selected";
+    case CUPTI_ACTIVITY_PC_SAMPLING_STALL_INST_FETCH:
+        return "Instruction fetch";
+    case CUPTI_ACTIVITY_PC_SAMPLING_STALL_EXEC_DEPENDENCY:
+        return "Execution dependency";
+    case CUPTI_ACTIVITY_PC_SAMPLING_STALL_MEMORY_DEPENDENCY:
+        return "Memory dependency";
+    case CUPTI_ACTIVITY_PC_SAMPLING_STALL_TEXTURE:
+        return "Texture";
+    case CUPTI_ACTIVITY_PC_SAMPLING_STALL_SYNC:
+        return "Sync";
+    case CUPTI_ACTIVITY_PC_SAMPLING_STALL_CONSTANT_MEMORY_DEPENDENCY:
+        return "Constant memory dependency";
+    case CUPTI_ACTIVITY_PC_SAMPLING_STALL_PIPE_BUSY:
+        return "Pipe busy";
+    case CUPTI_ACTIVITY_PC_SAMPLING_STALL_MEMORY_THROTTLE:
+        return "Memory throttle";
+    case CUPTI_ACTIVITY_PC_SAMPLING_STALL_NOT_SELECTED:
+        return "Not selected";
+    case CUPTI_ACTIVITY_PC_SAMPLING_STALL_OTHER:
+        return "Other";
+    case CUPTI_ACTIVITY_PC_SAMPLING_STALL_SLEEPING:
+        return "Sleeping";
+    default:
+        break;
+    }
+
+    return "<unknown>";
+}
+
+const char *
 getComputeApiKindString(CUpti_ActivityComputeApiKind kind)
 {
   switch (kind) {
@@ -400,7 +486,9 @@ namespace devicetracer {
   do {                                                              \
     CUptiResult _status = call;                                     \
     if (_status != CUPTI_SUCCESS) {                                 \
-      LOG(ERROR) << "cuda call " << #call << " failed " << _status; \
+      const char *errstr;                                           \
+      cuptiGetResultString(_status, &errstr);                       \
+      LOG(FATAL) << "libcupti call " << #call << " failed with " << errstr; \
     }                                                               \
   } while (0)
 
@@ -578,6 +666,8 @@ class CUPTIManager {
   // Does not take ownership of client.  Client's lifetime must persist
   // until tracing is disabled.
   Status EnableTrace(CUPTIClient *client);
+  Status _EnablePCSampling();
+  Status _DisablePCSampling();
 
   // Disable tracing.  No further events will be delivered to 'client'.
   Status DisableTrace();
@@ -655,6 +745,27 @@ ActivityBuffer::~ActivityBuffer() {
   FreeBuffer();
 }
 
+Status CUPTIManager::_EnablePCSampling() {
+  VLOG(0) << "Enabling PC sampling";
+  CUPTI_CALL(cuptiActivityEnable(CUPTI_ACTIVITY_KIND_PC_SAMPLING));
+
+  CUpti_ActivityPCSamplingConfig configPC;
+  CUcontext cuCtx;
+  configPC.size = sizeof(CUpti_ActivityPCSamplingConfig);
+  configPC.samplingPeriod = CUPTI_ACTIVITY_PC_SAMPLING_PERIOD_MIN;
+  configPC.samplingPeriod2 = 0;
+  cuCtxGetCurrent(&cuCtx);
+
+  CUPTI_CALL(cuptiActivityConfigurePCSampling(cuCtx, &configPC));
+
+  return Status::OK();
+}
+
+Status CUPTIManager::_DisablePCSampling() {
+  CUPTI_CALL(cuptiActivityDisable(CUPTI_ACTIVITY_KIND_PC_SAMPLING));
+  return Status::OK();
+}
+
 Status CUPTIManager::EnableTrace(CUPTIClient *client) {
   mutex_lock l(mu_);
   // TODO(pbar) Work out the minimal set to trace.
@@ -665,14 +776,17 @@ Status CUPTIManager::EnableTrace(CUPTIClient *client) {
   // These might be useful for annotations but require NVTX API.
   // CUPTI_CALL(cuptiActivityEnable(CUPTI_ACTIVITY_KIND_NAME));
   // CUPTI_CALL(cuptiActivityEnable(CUPTI_ACTIVITY_KIND_MARKER));
-
   if (!is_yes("TF_CUPTI_SKIP_REGISTER_ACTIVITY", false)) {
-    CUPTI_CALL(cuptiActivityEnable(CUPTI_ACTIVITY_KIND_DEVICE));
-    CUPTI_CALL(cuptiActivityEnable(CUPTI_ACTIVITY_KIND_KERNEL));
-    CUPTI_CALL(cuptiActivityEnable(CUPTI_ACTIVITY_KIND_MEMCPY));
-    CUPTI_CALL(cuptiActivityEnable(CUPTI_ACTIVITY_KIND_MEMCPY2));
-    CUPTI_CALL(cuptiActivityEnable(CUPTI_ACTIVITY_KIND_MEMSET));
-    CUPTI_CALL(cuptiActivityEnable(CUPTI_ACTIVITY_KIND_OVERHEAD));
+    if (is_yes("IML_PC_SAMPLING", false)) {
+      _EnablePCSampling();
+    } else {
+      CUPTI_CALL(cuptiActivityEnable(CUPTI_ACTIVITY_KIND_DEVICE));
+      CUPTI_CALL(cuptiActivityEnable(CUPTI_ACTIVITY_KIND_KERNEL));
+      CUPTI_CALL(cuptiActivityEnable(CUPTI_ACTIVITY_KIND_MEMCPY));
+      CUPTI_CALL(cuptiActivityEnable(CUPTI_ACTIVITY_KIND_MEMCPY2));
+      CUPTI_CALL(cuptiActivityEnable(CUPTI_ACTIVITY_KIND_MEMSET));
+      CUPTI_CALL(cuptiActivityEnable(CUPTI_ACTIVITY_KIND_OVERHEAD));
+    }
   }
   client_ = client;
   return Status::OK();
@@ -680,6 +794,9 @@ Status CUPTIManager::EnableTrace(CUPTIClient *client) {
 
 Status CUPTIManager::DisableTrace() {
   // We turn off all tracing regardless.
+  if (is_yes("IML_PC_SAMPLING", false)) {
+    _DisablePCSampling();
+  }
   CUPTI_CALL(cuptiActivityDisable(CUPTI_ACTIVITY_KIND_NAME));
   CUPTI_CALL(cuptiActivityDisable(CUPTI_ACTIVITY_KIND_MARKER));
   CUPTI_CALL(cuptiActivityDisable(CUPTI_ACTIVITY_KIND_OVERHEAD));
@@ -1011,32 +1128,10 @@ class DeviceTracerImpl : public DeviceTracer, public CUPTIClient {
   TF_DISALLOW_COPY_AND_ASSIGN(DeviceTracerImpl);
 };
 
-int ParseFloat(const char* str, size_t size) {
-    // Ideally we would use env_var / safe_strto64, but it is
-    // hard to use here without pulling in a lot of dependencies,
-    // so we use std:istringstream instead
-    string integer_str(str, size);
-    std::istringstream ss(integer_str);
-    float val = 0;
-    ss >> val;
-    return val;
-}
-
-static const float TF_CUDA_API_PRINT_EVERY_SEC_DEFAULT = 5.0;
-float PrintCUDAAPIEverySec(float user_value) {
-    if (user_value != 0) {
-        return user_value;
-    }
-    const char* TF_CUDA_API_PRINT_EVERY_SEC = getenv("TF_CUDA_API_PRINT_EVERY_SEC");
-    if (TF_CUDA_API_PRINT_EVERY_SEC == nullptr) {
-        return TF_CUDA_API_PRINT_EVERY_SEC_DEFAULT;
-    }
-    return ParseFloat(TF_CUDA_API_PRINT_EVERY_SEC, strlen(TF_CUDA_API_PRINT_EVERY_SEC));
-}
 
 DeviceTracerImpl::DeviceTracerImpl(CUPTIManager *cupti_manager)
     :
-        api_printer_(api_profiler_, PrintCUDAAPIEverySec(0)),
+        api_printer_(api_profiler_, get_TF_CUDA_API_PRINT_EVERY_SEC(0)),
         cupti_manager_(cupti_manager)
     {
   VLOG(1) << "DeviceTracer created.";

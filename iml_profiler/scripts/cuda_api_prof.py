@@ -31,6 +31,14 @@ def main():
                         
                         Effect: sets "export IML_CUDA_API_CALLS=1" for libsample_cuda_api.so.
                         """))
+    parser.add_argument('--pc-sampling', action='store_true',
+                        help=textwrap.dedent("""
+                        Perform sample-profiling using CUDA's "PC Sampling" API.
+                        
+                        Currently, we're just going to record GPUSamplingState.is_gpu_active.
+                        
+                        Effect: sets "export IML_PC_SAMPLING=1" for libsample_cuda_api.so.
+                        """))
     args = parser.parse_args(iml_prof_argv)
 
     env = dict(os.environ)
@@ -65,6 +73,9 @@ def main():
 
     if args.cuda_api_calls:
         add_env['IML_CUDA_API_CALLS'] = 1
+
+    if args.pc_sampling:
+        add_env['IML_PC_SAMPLING'] = 'yes'
 
     exe_path = shutil.which(cmd_argv[0])
     if exe_path is None:

@@ -15,10 +15,8 @@
 #include <sys/syscall.h>
 #define gettid() syscall(SYS_gettid)
 
-#define USEC_IN_MS (1000)
-#define USEC_IN_SEC (USEC_IN_MS*1000)
-
 #include "cuda_api_profiler/cuda_api_profiler.h"
+#include "cuda_api_profiler/defines.h"
 
 #define XSTR(a) STR(a)
 #define STR(a) #a

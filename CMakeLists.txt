@@ -369,6 +369,19 @@ if(NOT IS_WINDOWS)
     # https://stackoverflow.com/questions/26243169/cmake-target-include-directories-meaning-of-scope
     # NOTE: I still don't fully understand the PUBLIC/PRIVATE/INTERFACE scope here...
     target_include_directories(sample_cuda_api PRIVATE ${Libcupti_INCLUDE_DIR})
+
+    find_package(CUDA REQUIRED)
+    message("> CUDA_LIBRARIES = ${CUDA_LIBRARIES}")
+    message("> CUDA_INCLUDE_DIRS = ${CUDA_INCLUDE_DIRS}")
+
+    target_link_libraries(sample_cuda_api PUBLIC ${CUDA_LIBRARIES})
+    # Link driver API by adding -lcuda:
+    #   https://devtalk.nvidia.com/default/topic/774340/cmake-undefined-reference-cuctxdetach-cumemgetinfo_v2-cuctxcreate_v2-cuinit/
+    target_link_libraries(sample_cuda_api PUBLIC cuda)
+    # https://stackoverflow.com/questions/26243169/cmake-target-include-directories-meaning-of-scope
+    # NOTE: I still don't fully understand the PUBLIC/PRIVATE/INTERFACE scope here...
+    target_include_directories(sample_cuda_api PRIVATE ${CUDA_INCLUDE_DIRS})
+
 #    add_subdirectory(third_party/boost_${BOOST_VERSION_UNDERSCORES})
 
 #    set(BOOST_ROOT ${CMAKE_SOURCE_DIR}/third_party/boost_${BOOST_VERSION_UNDERSCORES}/build)
