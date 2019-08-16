@@ -77,9 +77,13 @@ DEFAULT_POSTGRES_PGDATA_DIR = _j(HOME, 'iml', 'pgdata')
 LOCAL_IML_IMAGE_TAG = 'tensorflow:devel-iml-gpu-cuda'
 DEFAULT_REMOTE_IML_IMAGE_TAG = 'jagleeso/iml:1.0.0'
 
+RELEASE_TO_LOCAL_IMG_TAG = dict()
+RELEASE_TO_LOCAL_IMG_TAG['iml'] = 'tensorflow:devel-iml-gpu-cuda'
+RELEASE_TO_LOCAL_IMG_TAG['iml-cuda-10-1'] = 'tensorflow:devel-iml-gpu-cuda-10-1'
+
 # How long should we wait for /bin/bash (iml_bash)
 # to appear after running "docker stack deploy"?
-DOCKER_DEPLOY_TIMEOUT_SEC = 60
+DOCKER_DEPLOY_TIMEOUT_SEC = 10
 
 # Schema to verify the contents of tag-spec.yml with Cerberus.
 # Must be converted to a dict from yaml to work.
@@ -361,7 +365,7 @@ def find_first_slice_value(slices, key):
     return None
 
 
-def assemble_tags(spec, cli_args, cli_run_args, enabled_releases, all_partials):
+def assemble_tags(spec, cli_args, cli_run_args, enabled_release, all_partials):
     """Gather all the tags based on our spec.
 
     Args:
@@ -377,7 +381,7 @@ def assemble_tags(spec, cli_args, cli_run_args, enabled_releases, all_partials):
 
     for name, release in spec['releases'].items():
         for tag_spec in release['tag_specs']:
-            if enabled_releases and name not in enabled_releases:
+            if enabled_release is not None and name != enabled_release:
                 eprint('> Skipping release {}'.format(name))
                 continue
 
@@ -604,6 +608,12 @@ def main():
                         See --pull-image for specifying the image to pull.
                         """))
 
+    parser.add_argument('--reload', action='store_true',
+                        help=textwrap.dedent("""
+                        Restart running containers, even if the 
+                        underlying docker file hasn't changed.
+                        """))
+
     parser.add_argument('--pull-image', default=DEFAULT_REMOTE_IML_IMAGE_TAG,
                         help=textwrap.dedent("""
                         IML dev environment image to pull from DockerHub
@@ -781,7 +791,7 @@ def main():
     )
 
     parser.add_argument(
-        '--release', '-r', default=[], action='append',
+        '--release', '-r',
         help='Set of releases to build and tag. Defaults to every release type.',
     )
 
@@ -965,7 +975,7 @@ class Assembler:
                 return container_id
         return None
 
-    def _wait_for_bash(self):
+    def _wait_for_bash(self, container_filter):
         timeout_sec = time.time() + DOCKER_DEPLOY_TIMEOUT_SEC
         now_sec = time.time()
         while now_sec < timeout_sec:
@@ -975,7 +985,8 @@ class Assembler:
             #     info = self.dock_cli.inspect_service('iml_bash')
             #     return info
 
-            containers = self.dock.containers.list(filters={'name': 'iml_bash'})
+            # containers = self.dock.containers.list(filters={'name': 'iml_bash'})
+            containers = self.dock.containers.list(filters={'name': container_filter})
             if len(containers) > 0:
                 # containers.name
                 assert len(containers) == 1
@@ -988,10 +999,21 @@ class Assembler:
             time.sleep(0.5)
             now_sec = time.time()
 
-        print(("> FAILURE: Waited for /bin/bash (iml_bash) container to appear, but it didn't after {sec} seconds"
-               "  run 'docker ps' to see what's actually running").format(
-            sec=DOCKER_DEPLOY_TIMEOUT_SEC))
+        print(textwrap.dedent("""
+        > FAILURE: Waited for /bin/bash (iml_bash) container to appear, but it didn't after {sec} seconds.
+          To figure out what went wrong, try the following:
 
+            # Look at docker logs:
+            $ sudo journalctl -u docker.service
+
+            # Look at service logs:
+            $ docker service logs --raw iml_bash
+            
+            # See what's actually running
+            $ docker ps
+        """.format(
+            sec=DOCKER_DEPLOY_TIMEOUT_SEC,
+        )))
         sys.exit(1)
 
     def _wait_for_iml_to_stop(self):
@@ -1031,7 +1053,7 @@ class Assembler:
                 break
             time.sleep(0.1)
 
-    def docker_deploy(self, extra_argv):
+    def docker_deploy(self, extra_argv, reload):
         """
         $ docker stack deploy {extra_args} --compose-file stack.yml iml
         $ docker attach <iml_bash /bin/bash container>
@@ -1044,16 +1066,34 @@ class Assembler:
         # Terminate/remove an existing deployment if it exists first.
         self.docker_stack_rm()
 
-        cmd = ['docker', 'stack', 'deploy']
-        cmd.extend(extra_argv)
+        # cmd = ['docker', 'stack', 'deploy']
+        # cmd.extend(extra_argv)
+        # cmd.extend([
+        #     '--compose-file', 'stack.yml',
+        #     # Name of the created stack.
+        #     'iml',
+        # ])
+        # container_filter = "iml_bash"
+
+        cmd = ['docker-compose']
         cmd.extend([
-            '--compose-file', 'stack.yml',
-            # Name of the created stack.
-            'iml',
+            '--file', 'stack.yml',
         ])
+        cmd.extend([
+            'up',
+            # Run containers in background (similar to docker stack deploy)
+            '--detach',
+            # Name of the created stack.
+            # 'iml',
+        ])
+        if reload:
+            cmd.append('--force-recreate')
+        cmd.extend(extra_argv)
+        container_filter = "dockerfiles_bash"
+
         eprint(get_cmd_string(cmd))
         subprocess.check_call(cmd, stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr)
-        iml_bash_container = self._wait_for_bash()
+        iml_bash_container = self._wait_for_bash(container_filter)
 
         ps_cmd = ['docker', 'ps']
         eprint(get_cmd_string(ps_cmd))
@@ -1147,10 +1187,15 @@ class Assembler:
         docker_run_env = get_docker_run_env(tag_def, args.env)
         iml_volumes = get_iml_volumes(docker_run_env, args.volume)
 
+        if not args.pull:
+            if args.release not in RELEASE_TO_LOCAL_IMG_TAG:
+                eprint("ERROR: Not sure what image tag to use for --release={release}; please modify assembler.py by setting RELEASE_TO_LOCAL_IMG_TAG['{release}']".format(release=args.release))
+                sys.exit(1)
+
         if args.pull:
             iml_image = args.pull_image
         else:
-            iml_image = LOCAL_IML_IMAGE_TAG
+            iml_image = RELEASE_TO_LOCAL_IMG_TAG[args.release]
 
         yml = generator.generate(
             assembler_cmd=self.argv,
@@ -1281,7 +1326,7 @@ class Assembler:
 
                         if args.deploy:
                             self.generate_stack_yml(tag_def)
-                            self.docker_deploy(extra_argv)
+                            self.docker_deploy(extra_argv, reload=args.reload)
 
                         # if args.run_tests_path:
                         #     tag_failed = self.run_tests(image, repo_tag, tag, tag_def)
@@ -1718,6 +1763,11 @@ class StackYMLGenerator:
                 environment:
                 - IML_POSTGRES_HOST=db
                 {env_list}
+                
+                # docker run --cap-add=SYS_ADMIN
+                # We need this, otherwise libcupti PC sampling fails with CUPTI_ERROR_INSUFFICIENT_PRIVILEGES during cuptiActivityConfigurePCSampling.
+                cap_add:
+                - SYS_ADMIN
                 
                 logging:
                     driver: journald

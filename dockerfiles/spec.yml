@@ -43,6 +43,12 @@ releases:
         tag_specs:
             - "{ubuntu-devel-iml}"
 
+    iml-cuda-10-1:
+      is_dockerfiles: true
+      upload_images: false
+      tag_specs:
+        - "{ubuntu-devel-iml-cuda-10-1}"
+
     iml-rocm:
         is_dockerfiles: true
         upload_images: false
@@ -168,6 +174,55 @@ slice_sets:
           - CHECKOUT_TF_SRC=0
           - USE_PYTHON_3_NOT_2=1
           run_args:
+          # NOTE: To make it so we can run the same scripts inside/outside containers:
+          # - Outside containers: we define these environment variables in a source_me.sh
+          # - Inside containers: we require these to be defined when calling assembler.py (docker run)
+          #
+          # The root directory of a 'patched' TensorFlow checkout.
+          - TENSORFLOW_DIR=
+          # The root directory of the iml_profiler repo checkout.
+          - IML_DIR=
+          # The root directory of the iml_drill repo checkout.
+          - IML_DRILL_DIR=
+          # The local path where we should output bazel objects (overrides $HOME/.cache/bazel).
+          - BAZEL_BUILD_DIR=
+
+    ubuntu-devel-iml-cuda-10-1:
+      #
+      # IML profiler:
+      # Build "patched" tensorflow, then run end-to-end Pong training test.
+      #
+      - add_to_name: "devel-iml-gpu-cuda-10-1"
+        dockerfile_exclusive_name: "devel-iml-gpu-cuda-10-1"
+        partials:
+#          - ubuntu/version
+          - ubuntu/devel-nvidia-cuda-10-1
+          - ubuntu/python
+          - ubuntu/bazel
+          - ubuntu/nvidia_nccl
+          - ubuntu/nvidia_rtx_2070_env
+          - ubuntu/add_user
+          - ubuntu/pip_download_tf_v1.13.1
+          - ubuntu/openmpi_from_src
+          - ubuntu/nodejs
+          - ubuntu/python36_from_src
+          - ubuntu/virtualenv
+          - ubuntu/pip_dependencies
+          - ubuntu/protobuf_from_src
+          - ubuntu/cmake_from_src
+          - iml/env
+          - iml/apt_install
+          - iml/pip_dependencies
+          - shell
+          - iml/user_custom
+          - ubuntu/cublas-workaround-cuda-10-1
+          - ubuntu/entrypoint
+        test_runtime: nvidia
+        args:
+          # NOTE: must be provided at assembler.py command line
+          - CHECKOUT_TF_SRC=0
+          - USE_PYTHON_3_NOT_2=1
+        run_args:
           # NOTE: To make it so we can run the same scripts inside/outside containers:
           # - Outside containers: we define these environment variables in a source_me.sh
           # - Inside containers: we require these to be defined when calling assembler.py (docker run)

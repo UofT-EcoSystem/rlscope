@@ -114,7 +114,7 @@ printActivity(const CUpti_Activity *record)
     {
       CUpti_ActivityPCSampling3 *psRecord = (CUpti_ActivityPCSampling3 *)record;
 
-      printf("source %u, functionId %u, pc 0x%llx, corr %u, samples %u, stallreason %s\n",
+      printf("iml-prof: source %u, functionId %u, pc 0x%llx, corr %u, samples %u, stallreason %s\n",
              psRecord->sourceLocatorId,
              psRecord->functionId,
              (unsigned long long)psRecord->pcOffset,
@@ -128,7 +128,7 @@ printActivity(const CUpti_Activity *record)
       CUpti_ActivityPCSamplingRecordInfo *pcsriResult =
           (CUpti_ActivityPCSamplingRecordInfo *)(void *)record;
 
-      printf("corr %u, totalSamples %llu, droppedSamples %llu\n",
+      printf("iml-prof: corr %u, totalSamples %llu, droppedSamples %llu\n",
              pcsriResult->correlationId,
              (unsigned long long)pcsriResult->totalSamples,
              (unsigned long long)pcsriResult->droppedSamples);
@@ -139,7 +139,7 @@ printActivity(const CUpti_Activity *record)
       CUpti_ActivityFunction *fResult =
           (CUpti_ActivityFunction *)record;
 
-      printf("id %u, ctx %u, moduleId %u, functionIndex %u, name %s\n",
+      printf("iml-prof: id %u, ctx %u, moduleId %u, functionIndex %u, name %s\n",
              fResult->id,
              fResult->contextId,
              fResult->moduleId,
@@ -747,12 +747,15 @@ ActivityBuffer::~ActivityBuffer() {
 
 Status CUPTIManager::_EnablePCSampling() {
   VLOG(0) << "Enabling PC sampling";
+
   CUPTI_CALL(cuptiActivityEnable(CUPTI_ACTIVITY_KIND_PC_SAMPLING));
 
   CUpti_ActivityPCSamplingConfig configPC;
   CUcontext cuCtx;
   configPC.size = sizeof(CUpti_ActivityPCSamplingConfig);
+  // REALLY slow.
   configPC.samplingPeriod = CUPTI_ACTIVITY_PC_SAMPLING_PERIOD_MIN;
+//  configPC.samplingPeriod = CUPTI_ACTIVITY_PC_SAMPLING_PERIOD_MAX;
   configPC.samplingPeriod2 = 0;
   cuCtxGetCurrent(&cuCtx);
 
@@ -768,6 +771,7 @@ Status CUPTIManager::_DisablePCSampling() {
 
 Status CUPTIManager::EnableTrace(CUPTIClient *client) {
   mutex_lock l(mu_);
+  VLOG(0) << __func__;
   // TODO(pbar) Work out the minimal set to trace.
   // We can currently manage without driver/runtime tracing.
   // CUPTI_CALL(cuptiActivityEnable(CUPTI_ACTIVITY_KIND_CONTEXT));
@@ -1160,17 +1164,23 @@ Status DeviceTracerImpl::Start() {
   }
 #ifdef CONFIG_TRACE_STATS
   if (!is_yes("TF_CUPTI_SKIP_REGISTER_CUPTI_CALLBACKS", false)) {
+    VLOG(1) << "TF_CUPTI_SKIP_REGISTER_CUPTI_CALLBACKS is not set";
 
     if (!is_yes("TF_CUPTI_SKIP_REGISTER_API_CALLBACKS", false)) {
+      VLOG(1) << "TF_CUPTI_SKIP_REGISTER_API_CALLBACKS is not set";
       // There can only be one CUPTI subscriber.  If we can't create one then
       // there is another trace in progress (possibly by external code).
       CUptiResult ret;
 //      ret = cupti_wrapper_->Subscribe(&subscriber_, static_cast<CUpti_CallbackFunc>(ApiCallback), this);
       ret = cuptiSubscribe(&subscriber_, static_cast<CUpti_CallbackFunc>(ApiCallback), this);
       if (ret == CUPTI_ERROR_MAX_LIMIT_REACHED) {
+        VLOG(1) << "Fail 1";
         return errors::Unavailable("CUPTI subcriber limit reached.");
       } else if (ret != CUPTI_SUCCESS) {
-        return errors::Internal("Failed to create CUPTI subcriber.");
+        VLOG(1) << "Fail 2";
+        const char *errstr;
+        cuptiGetResultString(ret, &errstr);
+        return errors::Internal("Failed to create CUPTI subcriber: ", errstr);
       }
 
       // Register as a TraceEngine to receive ScopedAnnotations.
@@ -1208,6 +1218,7 @@ Status DeviceTracerImpl::Start() {
                                            CUPTI_DRIVER_TRACE_CBID_cuMemcpyDtoDAsync_v2));
     }
 
+    VLOG(1) << "Run EnableTrace";
     TF_RETURN_IF_ERROR(cupti_manager_->EnableTrace(this));
 
     CUPTI_CALL(cuptiGetTimestamp(&start_timestamp_));
@@ -1515,7 +1526,9 @@ void DeviceTracerImpl::ActivityCallback(const CUpti_Activity &record) {
 
     default:
       VLOG(1) << "ActivityCallback unhandled kind";
-      printActivity(&record);
+      if (VLOG_IS_ON(1)) {
+        printActivity(&record);
+      }
       break;
   }
 #else

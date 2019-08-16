@@ -1,1 +1,2 @@
+ENV DEBIAN_FRONTEND=
 ENTRYPOINT [ "/bin/bash" ]

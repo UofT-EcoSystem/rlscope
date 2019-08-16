@@ -22,6 +22,22 @@
 
 namespace tensorflow {
 
+static void MaybeLogError(std::ostream&& out, const char* func, const Status& status) {
+  if (status.code() != Status::OK().code()) {
+    out << "iml-prof C++ API '" << func << "' failed with: " << status;
+  }
+}
+
+#define MAYBE_RETURN(status) \
+  if (status.code() != Status::OK().code()) { \
+    return status.code(); \
+  }
+
+#define MAYBE_EXIT(status) \
+  if (status.code() != Status::OK().code()) { \
+    exit(status.code()); \
+  }
+
 class Globals {
 public:
   Globals();
@@ -31,22 +47,28 @@ public:
 };
 Globals globals;
 
-bool env_is_on(const char* var, bool dflt) {
+bool env_is_on(const char* var, bool dflt, bool debug) {
   const char* val = getenv(var);
   if (val == nullptr) {
+//    VLOG(0) << "Return dflt = " << dflt << " for " << var;
     return dflt;
   }
-  std::string var_str(var);
+  std::string val_str(val);
   std::transform(
-      var_str.begin(), var_str.end(), var_str.begin(),
+      val_str.begin(), val_str.end(), val_str.begin(),
       [](unsigned char c){ return std::tolower(c); });
-  return var_str == "on"
-         || var_str == "1"
-         || var_str == "true"
-         || var_str == "yes";
+  bool ret =
+      val_str == "on"
+         || val_str == "1"
+         || val_str == "true"
+         || val_str == "yes";
+//  VLOG(0) << "val_str = \"" << val_str << "\", " << " ret = " << ret << " for " << var;
+  return ret;
 }
 
 Globals::Globals() {
+
+  Status status = Status::OK();
 
   std::ifstream cmdline_stream("/proc/self/cmdline");
   std::string cmdline((std::istreambuf_iterator<char>(cmdline_stream)),
@@ -56,10 +78,15 @@ Globals::Globals() {
           << "  CMD = " << cmdline;
 
   device_tracer = tensorflow::CreateDeviceTracer();
-  if (env_is_on("IML_TRACE_AT_START", false)) {
+  auto IML_TRACE_AT_START = getenv("IML_TRACE_AT_START");
+  VLOG(0) << "IML_TRACE_AT_START = " << IML_TRACE_AT_START;
+  if (env_is_on("IML_TRACE_AT_START", false, true)) {
     VLOG(0) << "Starting tracing at program start (export IML_TRACE_AT_START=yes)";
-    device_tracer->Start();
+    status = device_tracer->Start();
+    MaybeLogError(LOG(INFO), "DeviceTracerImpl::Start()", status);
+    MAYBE_EXIT(status);
   }
+
 }
 
 Globals::~Globals() {
@@ -183,8 +210,12 @@ RetCode SAMPLE_CUDA_API_EXPORT setup() {
 RetCode SAMPLE_CUDA_API_EXPORT enable_tracing() {
   // Enable call-backs.
   VLOG(1) << __func__;
-  globals.device_tracer->Start();
-  return tensorflow::Status::OK().code();
+  auto status = globals.device_tracer->Start();
+//  if (status.code() != Status::OK()) {
+//    VLOG(0) << "iml-prof C++ API " << __func__ << " failed with: " << status;
+//  }
+  MaybeLogError(LOG(INFO), __func__, status);
+  return status.code();
 }
 
 RetCode SAMPLE_CUDA_API_EXPORT is_enabled(int* retval) {
@@ -200,16 +231,21 @@ RetCode SAMPLE_CUDA_API_EXPORT is_enabled(int* retval) {
 RetCode SAMPLE_CUDA_API_EXPORT disable_tracing() {
   // Disable call-backs.
   VLOG(1) << __func__;
-  globals.device_tracer->Stop();
-  return tensorflow::Status::OK().code();
+  auto status = globals.device_tracer->Stop();
+  MaybeLogError(LOG(INFO), __func__, status);
+  return status.code();
 }
 
 RetCode SAMPLE_CUDA_API_EXPORT collect() {
   // Collect traces (synchronously).
   VLOG(1) << __func__;
-  globals.device_tracer->Stop();
-  globals.device_tracer->Collect();
-  return tensorflow::Status::OK().code();
+  Status status;
+  status = globals.device_tracer->Stop();
+  MaybeLogError(LOG(INFO), __func__, status);
+  MAYBE_RETURN(status);
+  status = globals.device_tracer->Collect();
+  MaybeLogError(LOG(INFO), __func__, status);
+  return status.code();
 }
 
 }

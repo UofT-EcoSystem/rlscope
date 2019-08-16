@@ -47,11 +47,16 @@ endif()
 #    include_directories(SYSTEM /usr/local/cuda/extras/CUPTI/include)
 #endif()
 
-if(IS_WINDOWS)
-    set(LANGUAGES CXX)
-else()
-    set(LANGUAGES CXX CUDA)
-endif()
+set(LANGUAGES CXX)
+#if(IS_WINDOWS)
+#    set(LANGUAGES CXX)
+#else()
+#    find_package(CUDA REQUIRED)
+#    message("> CUDA_LIBRARIES = ${CUDA_LIBRARIES}")
+#    message("> CUDA_INCLUDE_DIRS = ${CUDA_INCLUDE_DIRS}")
+#
+#    set(LANGUAGES CXX CUDA)
+#endif()
 project(iml LANGUAGES ${LANGUAGES})
 
 #NOT EXISTS ${PROJECT_SOURCE_DIR}/external_libs/lib
@@ -71,7 +76,9 @@ if (NOT IS_WINDOWS AND NOT (
 endif()
 
 if (NOT IS_WINDOWS)
-    find_package(GTest REQUIRED)
+#    add_subdirectory(third_party/googletest)
+    find_package(GTest REQUIRED
+            HINTS third_party/googletest/build/cmake_install)
     include_directories(${GTEST_INCLUDE_DIRS})
 endif()
 
@@ -282,9 +289,10 @@ message("> double_conversion_LIBRARIES = ${double_conversion_LIBRARIES}")
 #   iml/build/error_codes.pb.h
 set(PROTOBUF_GENERATE_CPP_APPEND_PATH OFF)
 protobuf_generate_cpp(PROTO_SRCS PROTO_HDRS
-        tensorflow/core/lib/core/error_codes.proto)
-protobuf_generate_cpp(PROTO_SRCS PROTO_HDRS
+        tensorflow/core/lib/core/error_codes.proto
         iml_profiler/protobuf/iml_prof.proto)
+message("> PROTO_SRCS = ${PROTO_SRCS}")
+message("> PROTO_HDRS = ${PROTO_HDRS}")
 
 #protobuf_generate_cpp(PROTO_SRCS PROTO_HDRS EXPORT_MACRO DLL_EXPORT foo.proto)
 #protobuf_generate_python(PROTO_PY foo.proto)
@@ -369,10 +377,6 @@ if(NOT IS_WINDOWS)
     # https://stackoverflow.com/questions/26243169/cmake-target-include-directories-meaning-of-scope
     # NOTE: I still don't fully understand the PUBLIC/PRIVATE/INTERFACE scope here...
     target_include_directories(sample_cuda_api PRIVATE ${Libcupti_INCLUDE_DIR})
-
-    find_package(CUDA REQUIRED)
-    message("> CUDA_LIBRARIES = ${CUDA_LIBRARIES}")
-    message("> CUDA_INCLUDE_DIRS = ${CUDA_INCLUDE_DIRS}")
 
     target_link_libraries(sample_cuda_api PUBLIC ${CUDA_LIBRARIES})
     # Link driver API by adding -lcuda:

@@ -9,11 +9,16 @@
 #
 #libnccl2/unknown 2.4.2-1+cuda10.1 amd64
 #  NVIDIA Collectives Communication Library (NCCL) Runtime
-ARG NCCL_VERSION=2.4.2-1
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        libnccl-dev=${NCCL_VERSION}+cuda${CUDA} \
-        libnccl2=${NCCL_VERSION}+cuda${CUDA}
+#
+# NOTE: nvidia image already includes nccl
+#
+# ARG NCCL_VERSION=2.4.2-1
+# libnccl-dev=${NCCL_VERSION}+cuda${CUDA}
+# libnccl2=${NCCL_VERSION}+cuda${CUDA}
+# RUN apt-get update && apt-get install -y --no-install-recommends \
+#         libnccl-dev \
+#         libnccl2
 
 #libnccl2=2.2.13-1+cuda10.0
 #libnccl-dev=2.2.13-1+cuda10.0

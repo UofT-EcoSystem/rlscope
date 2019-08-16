@@ -39,6 +39,12 @@ def main():
                         
                         Effect: sets "export IML_PC_SAMPLING=1" for libsample_cuda_api.so.
                         """))
+    parser.add_argument('--trace-at-start', action='store_true',
+                        help=textwrap.dedent("""
+                        Start tracing right at application startup.
+                        
+                        Effect: sets "export IML_TRACE_AT_START=yes" for libsample_cuda_api.so.
+                        """))
     args = parser.parse_args(iml_prof_argv)
 
     env = dict(os.environ)
@@ -76,6 +82,9 @@ def main():
 
     if args.pc_sampling:
         add_env['IML_PC_SAMPLING'] = 'yes'
+
+    if args.trace_at_start:
+        add_env['IML_TRACE_AT_START'] = 'yes'
 
     exe_path = shutil.which(cmd_argv[0])
     if exe_path is None:

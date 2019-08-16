@@ -18,6 +18,8 @@ WORKDIR /root/python3.6/Python-${PYTHON_VERSION}
 RUN sed -Ei 's/^# deb-src /deb-src /' /etc/apt/sources.list
 RUN apt-get update
 
+ENV DEBIAN_FRONTEND=noninteractive
+
 # Install build dependencies needed to build all the various python modules:
 # _bz2                  _curses               _curses_panel
 # _dbm                  _gdbm                 _lzma

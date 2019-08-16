@@ -134,7 +134,8 @@ def setup(uninstrumented_run, allow_skip=False):
 
     # setup_wrap_BaseSession_as_default()
 
-    sample_cuda_api.load_library()
+    if sample_cuda_api.is_used():
+        sample_cuda_api.load_library()
 
     if not uninstrumented_run:
         iml_profiler.profiler.session.register_session_active_hook(AddProfileContextHook)

@@ -108,8 +108,9 @@ _untar() {
 CLONE_TAG_PATTERN=
 _clone() {
     local path="$1"
-    local repo="$2"
+    local name_slash_repo="$2"
     shift 2
+    local repo="$(github_url $name_slash_repo)"
     local commit=
     if [ $# -ge 1 ]; then
         commit="$1"
@@ -152,11 +153,22 @@ _hg_clone() {
     )
 }
 
+github_url() {
+    local name_slash_repo="$1"
+    shift 1
+
+    # Doesn't work inside docker container (no ssh key)
+    # echo "git@github.com:$name_slash_repo"
+
+    echo "https://github.com/$name_slash_repo"
+}
+
+CMAKE_VERSION=3.15.1
 setup_cmake() {
     if [ "$FORCE" != 'yes' ] && [ -e $ROOT/local/bin/cmake ]; then
         return
     fi
-    local url=https://cmake.org/files/v3.13/cmake-3.13.0-rc3-Linux-x86_64.sh
+    local url=https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/cmake-${CMAKE_VERSION}-Linux-x86_64.sh
     _wget "$url"
     local path=$(_wget_output_path "$url")
     chmod +x $path
@@ -170,7 +182,7 @@ setup_json_cpp_library() {
     fi
     local commit="v3.4.0"
     _clone "$JSON_CPP_LIB_DIR" \
-        git@github.com:nlohmann/json.git \
+        nlohmann/json.git \
         $commit
 #    cd $JSON_CPP_LIB_DIR
 #    _configure_make_install
@@ -183,7 +195,7 @@ setup_abseil_cpp_library() {
     fi
     local commit="20181200"
     _clone "$ABSEIL_CPP_LIB_DIR" \
-        git@github.com:abseil/abseil-cpp.git \
+        abseil/abseil-cpp.git \
         $commit
 }
 
@@ -194,8 +206,16 @@ setup_gtest_cpp_library() {
     fi
     local commit="release-1.8.1"
     _clone "$GTEST_CPP_LIB_DIR" \
-        git@github.com:google/googletest.git \
+        google/googletest.git \
         $commit
+    (
+    cd $GTEST_CPP_LIB_DIR
+    mkdir -p build
+    cd build
+    cmake .. -DCMAKE_INSTALL_PREFIX=$PWD/cmake_install
+    make -j$(nproc)
+    make install
+    )
 }
 
 NSYNC_CPP_LIB_DIR="$ROOT/third_party/nsync"
@@ -205,7 +225,7 @@ setup_nsync_cpp_library() {
     fi
     local commit="1.21.0"
     _clone "$NSYNC_CPP_LIB_DIR" \
-        git@github.com:google/nsync.git \
+        google/nsync.git \
         $commit
 }
 
@@ -216,7 +236,7 @@ setup_backward_cpp_library() {
     fi
     local commit="v1.4"
     _clone "$BACKWARD_CPP_LIB_DIR" \
-        git@github.com:bombela/backward-cpp.git \
+        bombela/backward-cpp.git \
         $commit
 }
 

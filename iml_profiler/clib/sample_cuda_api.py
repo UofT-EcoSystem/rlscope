@@ -53,7 +53,7 @@ def is_used():
     if _IS_USED is None:
         _IS_USED = any(
             is_sample_cuda_api_lib(path)
-            for path in re.split(r':', os.environ['LD_PRELOAD']))
+            for path in re.split(r':', os.environ.get('LD_PRELOAD', '')))
     return _IS_USED
 
 def load_library(allow_fail=None):
@@ -78,24 +78,48 @@ def load_library(allow_fail=None):
 
     from iml_profiler.clib import sample_cuda_api
 
+    def set_api_wrapper(api_name):
+        func = getattr(_so, api_name)
+        def api_wrapper(*args, **kwargs):
+            ret = func(*args, **kwargs)
+            if ret != TF_OK:
+                raise IMLProfError(ret)
+            return ret
+        setattr(sample_cuda_api, api_name, api_wrapper)
+
     _so.setup.argtypes = []
     _so.setup.restype = c_int
-    sample_cuda_api.setup = _so.setup
+    # sample_cuda_api.setup = _so.setup
+    set_api_wrapper('setup')
 
     _so.enable_tracing.argtypes = []
     _so.enable_tracing.restype = c_int
-    sample_cuda_api.enable_tracing = _so.enable_tracing
+    # sample_cuda_api.enable_tracing = _so.enable_tracing
+    set_api_wrapper('enable_tracing')
 
     _so.is_enabled.argtypes = [POINTER(c_int)]
     # _so.is_enabled.argtypes = [pointer(c_int)]
     _so.is_enabled.restype = c_int
-    sample_cuda_api.is_enabled = _so.is_enabled
+    # sample_cuda_api.is_enabled = _so.is_enabled
+    set_api_wrapper('is_enabled')
 
     _so.collect.argtypes = []
     _so.collect.restype = c_int
-    sample_cuda_api.collect = _so.collect
+    # sample_cuda_api.collect = _so.collect
+    set_api_wrapper('collect')
 
     logging.info("Loaded symbols from libsample_cuda_api.so")
+
+class IMLProfError(Exception):
+    def __init__(self, errcode):
+        self.errcode = errcode
+        super().__init__(self._gen_msg())
+
+    def _gen_msg(self):
+        msg = textwrap.dedent("""\
+        IML API Error-code = {err} (see logs above for detailed C++ error messages)
+        """.format(err=error_string(self.errcode)))
+        return msg
 
 def error_string(retcode):
     return _ret_to_name[retcode]
