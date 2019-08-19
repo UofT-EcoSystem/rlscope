@@ -98,6 +98,11 @@ class LogMessageFatal : public LogMessage {
 
 #define _TF_LOG_QFATAL _TF_LOG_FATAL
 
+#define DECLARE_LOG_INFO(logger_stmt_name) ::tensorflow::internal::LogMessage logger_stmt_name(__FILE__, __LINE__, ::tensorflow::INFO)
+#define DECLARE_LOG_WARNING(logger_stmt_name) ::tensorflow::internal::LogMessage logger_stmt_name(__FILE__, __LINE__, ::tensorflow::WARNING)
+#define DECLARE_LOG_ERROR(logger_stmt_name) ::tensorflow::internal::LogMessage logger_stmt_name(__FILE__, __LINE__, ::tensorflow::ERROR)
+#define DECLARE_LOG_FATAL(logger_stmt_name) ::tensorflow::internal::LogMessageFatal logger_stmt_name(__FILE__, __LINE__)
+
 #define LOG(severity) _TF_LOG_##severity
 
 #ifdef IS_MOBILE_PLATFORM

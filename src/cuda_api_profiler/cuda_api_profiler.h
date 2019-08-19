@@ -8,6 +8,8 @@
 #include <cuda.h>
 #include <cupti.h>
 
+#include "cuda_api_profiler/event_handler.h"
+
 #include "tensorflow/core/platform/notification.h"
 
 #include <map>
@@ -46,7 +48,6 @@ public:
     CUDAAPIProfiler() = default;
     ~CUDAAPIProfiler();
     void ApiCallback(
-            void *userdata,
             CUpti_CallbackDomain domain,
             CUpti_CallbackId cbid,
             const void *cbdata);
@@ -60,35 +61,6 @@ public:
     mutex _mu;
 };
 
-struct RegisteredFunc {
-  using Func = std::function<void()>;
-
-  Func func;
-  uint64 last_run_usec;
-  float every_sec;
-  RegisteredFunc(Func func, float every_sec) :
-      func(func)
-      , last_run_usec(0)
-      , every_sec(every_sec)
-  {
-  }
-  bool ShouldRun(uint64 now_usec);
-  void Run(uint64 now_usec);
-};
-
-#define EVENT_LOOP_EVERY_SEC 0.5
-class EventHandler {
-public:
-  EventHandler(float event_loop_every_sec) :
-  _event_loop_every_sec(event_loop_every_sec)
-  {
-  }
-  void RegisterFunc(RegisteredFunc::Func func, float every_sec);
-  void RunFuncs();
-  void EventLoop(std::function<bool()> should_stop);
-  std::list<RegisteredFunc> _funcs;
-  float _event_loop_every_sec;
-};
 
 class CUDAAPIProfilerPrinter {
     /* Every X seconds, print out the collected CUDA API stats.

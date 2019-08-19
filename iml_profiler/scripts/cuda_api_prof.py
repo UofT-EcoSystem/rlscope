@@ -45,6 +45,12 @@ def main():
                         
                         Effect: sets "export IML_TRACE_AT_START=yes" for libsample_cuda_api.so.
                         """))
+    parser.add_argument('--stream-sampling', action='store_true',
+                        help=textwrap.dedent("""
+                        Poll cudaStreamQuery() to see if the GPU is being used.
+                        
+                        Effect: sets "export IML_STREAM_SAMPLING=yes" for libsample_cuda_api.so.
+                        """))
     args = parser.parse_args(iml_prof_argv)
 
     env = dict(os.environ)
@@ -85,6 +91,9 @@ def main():
 
     if args.trace_at_start:
         add_env['IML_TRACE_AT_START'] = 'yes'
+
+    if args.stream_sampling:
+        add_env['IML_STREAM_SAMPLING'] = 'yes'
 
     exe_path = shutil.which(cmd_argv[0])
     if exe_path is None:

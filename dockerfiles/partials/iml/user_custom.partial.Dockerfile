@@ -12,4 +12,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gdb \
     strace
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    bash-completion
+    bash-completion \
+    silversearcher-ag \
+    vim
