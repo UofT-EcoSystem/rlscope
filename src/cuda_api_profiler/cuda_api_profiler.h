@@ -52,8 +52,7 @@ public:
             CUpti_CallbackId cbid,
             const void *cbdata);
 
-    template <class Stream>
-    void Print(Stream&& out);
+    void Print(std::ostream& out, int indent);
 
     static std::map<CUpti_CallbackId, std::string> RuntimeCallbackIDToName();
     static std::map<CUpti_CallbackId, std::string> DriverCallbackIDToName();

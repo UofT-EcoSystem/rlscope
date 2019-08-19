@@ -69,6 +69,8 @@ class DeviceTracer {
   // It is safe to call 'Stop' on a tracer which is not enabled.
   virtual Status Stop() = 0;
 
+  virtual Status Print() = 0;
+
   // Collect trace results.  Results are added to the specified
   // StepStatsCollector.  Does not clear any existing stats.
   // It is an error to call 'Collect' while a trace is running.

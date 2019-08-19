@@ -103,6 +103,10 @@ Globals::~Globals() {
 //  myfile.close();
 
   VLOG(1) << "TODO: Stop tracing; collect traces";
+  if (device_tracer->IsEnabled()) {
+    VLOG(FATAL) << "Looks like DeviceTracer was still running... "
+                << "please call sample_cuda_api.disable_tracing() in python BEFORE exiting to avoid stranger behavior in C++ destructors during library unload.";
+  }
   // Dump CUDA API call counts and total CUDA API time to a protobuf file.
 //    device_tracer->Collect();
 }
@@ -205,6 +209,13 @@ RetCode SAMPLE_CUDA_API_EXPORT setup() {
   // Initialize global state.
   VLOG(1) << __func__;
   return tensorflow::Status::OK().code();
+}
+
+RetCode SAMPLE_CUDA_API_EXPORT print() {
+  VLOG(1) << __func__;
+  auto status = globals.device_tracer->Print();
+  MaybeLogError(LOG(INFO), __func__, status);
+  return status.code();
 }
 
 RetCode SAMPLE_CUDA_API_EXPORT enable_tracing() {

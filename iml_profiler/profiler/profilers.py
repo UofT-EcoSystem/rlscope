@@ -1149,7 +1149,7 @@ class Profiler:
             self._enable_tracing()
 
     def _disable_tracing(self):
-        logging.info("IML: enable tracing")
+        logging.info("IML: disable tracing")
         self._stop_pyprof()
         self._stop_tfprof()
         self._stop_iml_prof()
@@ -1649,6 +1649,13 @@ class Profiler:
             return
         if should_exit:
             self._is_finishing = True
+
+        self._disable_tracing()
+
+        if sample_cuda_api.is_used():
+            # Print sampling results.
+            # TODO: we should just dump results to a protobuf.
+            sample_cuda_api.print()
 
         if self.debug:
             logging.info("> IML: finishing profiling\n{stack}".format(stack=get_stacktrace(indent=1)))

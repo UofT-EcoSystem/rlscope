@@ -150,7 +150,7 @@ _hg_clone() {
     (
     cd $path
     hg update -r $commit
-    )
+   )
 }
 
 github_url() {

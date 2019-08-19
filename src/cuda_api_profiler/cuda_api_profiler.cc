@@ -30,9 +30,10 @@ namespace tensorflow {
   } while (0)
 
 CUDAAPIProfiler::~CUDAAPIProfiler() {
-    if (VLOG_IS_ON(1)) {
-        Print(LOG(INFO));
-    }
+//  if (VLOG_IS_ON(1)) {
+//    DECLARE_LOG_INFO(info);
+//    this->Print(info, 0);
+//  }
 }
 
 std::map<CUpti_CallbackId, std::string> CUDAAPIProfiler::RuntimeCallbackIDToName() {
@@ -51,10 +52,10 @@ std::map<CUpti_CallbackId, std::string> CUDAAPIProfiler::DriverCallbackIDToName(
     return cbid_to_name;
 }
 
-template <class Stream>
-void CUDAAPIProfiler::Print(Stream&& out) {
+void CUDAAPIProfiler::Print(std::ostream& out, int indent) {
     mutex_lock l(_mu);
-    out << "CUDAAPIProfiler: size = " << _api_stats.size() << "\n";
+    PrintIndent(out, indent);
+    out << "CUDAAPIProfiler: size = " << _api_stats.size();
     for (auto const& pair : _api_stats) {
         auto tid = std::get<0>(pair.first);
         auto domain = std::get<1>(pair.first);
@@ -67,9 +68,18 @@ void CUDAAPIProfiler::Print(Stream&& out) {
         } else {
             name = "UNKNOWN";
         }
-        out << "  " << "(tid=" << tid << ", api=" << name << "):\n"
-            << "    " << "total_api_time_usec = " << pair.second.total_api_time_usec << "\n"
-            << "    " << "n_calls = " << pair.second.n_calls << "\n";
+
+        out << "\n";
+        PrintIndent(out, indent + 1);
+        out << "(tid=" << tid << ", api=" << name << "):";
+
+        out << "\n";
+        PrintIndent(out, indent + 1);
+        out << "total_api_time_usec = " << pair.second.total_api_time_usec;
+
+        out << "\n";
+        PrintIndent(out, indent + 1);
+        out << "n_calls = " << pair.second.n_calls;
     }
 }
 
@@ -120,7 +130,8 @@ void CUDAAPIProfilerPrinter::_Run() {
 
 void CUDAAPIProfilerPrinter::_EverySec() {
   if (VLOG_IS_ON(1)) {
-    _profiler.Print(LOG(INFO));
+    DECLARE_LOG_INFO(info);
+    _profiler.Print(info, 0);
   }
 }
 
@@ -141,6 +152,10 @@ void CUDAAPIProfilerPrinter::Stop() {
       _printer_thread->join();
       VLOG(1) << "... printer thread done";
     }
+//    if (VLOG_IS_ON(1)) {
+//      DECLARE_LOG_INFO(info);
+//      _profiler.Print(info, 0);
+//    }
   }
 }
 

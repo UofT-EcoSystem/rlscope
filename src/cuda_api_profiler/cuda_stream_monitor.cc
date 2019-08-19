@@ -66,10 +66,10 @@ void CudaStreamMonitor::_RunPollingThread() {
 CudaStreamMonitor::~CudaStreamMonitor() {
   Stop();
   _UnregisterCUPTICallbacks();
-  if (VLOG_IS_ON(1)) {
-    DECLARE_LOG_INFO(info);
-    this->Print(info, 0);
-  }
+//  if (VLOG_IS_ON(1)) {
+//    DECLARE_LOG_INFO(info);
+//    this->Print(info, 0);
+//  }
 }
 
 // NOTE: If anyone calls GetCudaStreamMonitor, CUPTI callbacks will immediately be registered.
@@ -260,15 +260,15 @@ void CudaStreamMonitor::Start() {
 
 void CudaStreamMonitor::Stop() {
   if (!_should_stop.HasBeenNotified()) {
-    if (VLOG_IS_ON(1)) {
-      DECLARE_LOG_INFO(info);
-      this->Print(info, 0);
-    }
     _should_stop.Notify();
     if (_polling_thread) {
       VLOG(1) << "Wait for CUDA Stream polling thread to stop...";
       _polling_thread->join();
       VLOG(1) << "... CUDA Stream polling done";
+    }
+    if (VLOG_IS_ON(1)) {
+      DECLARE_LOG_INFO(info);
+      this->Print(info, 0);
     }
   }
 }

@@ -23,6 +23,12 @@ def main():
     parser = argparse.ArgumentParser("Sample time spent in CUDA API calls, and call counts.")
     parser.add_argument('--debug', action='store_true')
     parser.add_argument('--iml-debug', action='store_true')
+    parser.add_argument('--iml-disable', action='store_true', help=textwrap.dedent("""
+        IML: Skip any profiling. Used for uninstrumented runs.
+        Useful for ensuring minimal libcupti registration when we run --cuda-api-calls during config_uninstrumented.
+        
+        Effect: sets "export IML_DISABLE=1" for libsample_cuda_api.so.
+    """))
     parser.add_argument('--cuda-api-calls', action='store_true',
                         help=textwrap.dedent("""
                         Trace CUDA API runtime/driver calls.
@@ -83,8 +89,11 @@ def main():
         logging.info("Detected debug mode; enabling C++ logging statements (export IML_CPP_MIN_VLOG_LEVEL=1)")
         add_env['IML_CPP_MIN_VLOG_LEVEL'] = 1
 
+    if args.iml_disable:
+        add_env['IML_DISABLE'] = 'yes'
+
     if args.cuda_api_calls:
-        add_env['IML_CUDA_API_CALLS'] = 1
+        add_env['IML_CUDA_API_CALLS'] = 'yes'
 
     if args.pc_sampling:
         add_env['IML_PC_SAMPLING'] = 'yes'

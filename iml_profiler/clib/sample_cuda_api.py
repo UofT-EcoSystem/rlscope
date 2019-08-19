@@ -97,6 +97,16 @@ def load_library(allow_fail=None):
     # sample_cuda_api.enable_tracing = _so.enable_tracing
     set_api_wrapper('enable_tracing')
 
+    _so.disable_tracing.argtypes = []
+    _so.disable_tracing.restype = c_int
+    # sample_cuda_api.disable_tracing = _so.disable_tracing
+    set_api_wrapper('disable_tracing')
+
+    _so.print.argtypes = []
+    _so.print.restype = c_int
+    # sample_cuda_api.print = _so.print
+    set_api_wrapper('print')
+
     _so.is_enabled.argtypes = [POINTER(c_int)]
     # _so.is_enabled.argtypes = [pointer(c_int)]
     _so.is_enabled.restype = c_int
