@@ -6,6 +6,12 @@
 #include <cstring>
 #include <sstream>
 
+#include <algorithm>
+#include <cctype>
+#include <iostream>
+#include <fstream>
+#include <memory>
+
 #include "get_env_var.h"
 
 namespace tensorflow {
@@ -38,6 +44,25 @@ float ParseEnvFloatOrDefault(const char* env_name, float user_value, float dflt)
     return dflt;
   }
   return ParseFloat(env_val, strlen(env_val));
+}
+
+bool env_is_on(const char* var, bool dflt, bool debug) {
+  const char* val = getenv(var);
+  if (val == nullptr) {
+//    VLOG(0) << "Return dflt = " << dflt << " for " << var;
+    return dflt;
+  }
+  std::string val_str(val);
+  std::transform(
+      val_str.begin(), val_str.end(), val_str.begin(),
+      [](unsigned char c){ return std::tolower(c); });
+  bool ret =
+      val_str == "on"
+      || val_str == "1"
+      || val_str == "true"
+      || val_str == "yes";
+//  VLOG(0) << "val_str = \"" << val_str << "\", " << " ret = " << ret << " for " << var;
+  return ret;
 }
 
 }

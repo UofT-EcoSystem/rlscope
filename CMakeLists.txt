@@ -16,9 +16,28 @@ cmake_minimum_required(VERSION 3.8 FATAL_ERROR)
 project(iml)
 #https://github.com/robertmaynard/code-samples/blob/master/posts/cmake/CMakeLists.txt
 
+# We want to be able to do std::move() for lambda captures (c++11 doesn't have that).
+set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
 set(ENABLE_BACKTRACE ON CACHE BOOL "Enable pretty-printed stacktrace during LOG(FATAL) or DCHECK failures; requires adding -g debug symbols")
 
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
+#set(WITH_CUDA_LD_PRELOAD ON CACHE BOOL "Wrap CUDA API calls using LD_PRELOAD trick; do this to see whether wrapping CUDA API calls manually is faster than using libcupti.")
+##set(WITH_CUDA_LD_PRELOAD OFF CACHE BOOL "Wrap CUDA API calls using LD_PRELOAD trick; do this to see whether wrapping CUDA API calls manually is faster than using libcupti.")
+
+#set(WITH_CUDA_LD_PRELOAD ON BOOL "Wrap CUDA API calls using LD_PRELOAD trick; do this to see whether wrapping CUDA API calls manually is faster than using libcupti.")
+#set(WITH_CUDA_LD_PRELOAD OFF BOOL "Wrap CUDA API calls using LD_PRELOAD trick; do this to see whether wrapping CUDA API calls manually is faster than using libcupti.")
+#set(WITH_CUDA_LD_PRELOAD OFF BOOL)
+#set(WITH_CUDA_LD_PRELOAD OFF)
+
+# NOTE: don't use a cached cmake variable here, since if we switch the cache variable on/off from this file it WON'T affect
+# the current built (since it's persisted...i.e. the whole purpose of cache variables).
+set(WITH_CUDA_LD_PRELOAD ON)
+#set(WITH_CUDA_LD_PRELOAD OFF)
+#message("> WITH_CUDA_LD_PRELOAD = ${WITH_CUDA_LD_PRELOAD}")
 
 #FIND_PACKAGE(CUDA)
 
@@ -106,7 +125,7 @@ endif()
 
 set(IGNORE_ERRORS "-Wno-unused -Wno-unknown-pragmas")
 set(ADD_WARNINGS_FLAGS "-Wuninitialized")
-set(CMAKE_CXX_STANDARD 11)
+#set(CMAKE_CXX_STANDARD 11)
 #-std=c++11
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${ADD_WARNINGS_FLAGS} -Wall -Werror ${IGNORE_ERRORS} ")
 SET(CMAKE_EXE_LINKER_FLAGS  "${CMAKE_EXE_LINKER_FLAGS} -demangle")
@@ -338,7 +357,8 @@ if(IS_WINDOWS)
 endif()
 
 # https://github.com/bombela/backward-cpp/tree/84ae4f5e80381aca765a0810d4c811acae3cd7c7#configuration--dependencies
-add_library(sample_cuda_api SHARED
+
+set(SAMPLE_CUDA_API_SOURCES
         ${SAMPLE_CUDA_API_SOURCES}
         ${TF_SOURCES}
         ${PROTO_SRCS} ${PROTO_HDRS}
@@ -346,8 +366,19 @@ add_library(sample_cuda_api SHARED
         # NOTE: For some reason this doesn't always work and gdb is required to debug...
         # I think that's because the program being executed overrides the SIGSEGV handler
         # (which is FINE, as long as backward-cpp doesn't override the application handler).
-        ${BACKWARD_ENABLE}
-        )
+        ${BACKWARD_ENABLE})
+if (NOT WITH_CUDA_LD_PRELOAD)
+    message("> WITH_CUDA_LD_PRELOAD not set; don't compile cuda_ld_preload.cc")
+
+    list(FILTER SAMPLE_CUDA_API_SOURCES EXCLUDE REGEX "cuda_api_profiler/cuda_ld_preload.cc")
+    list(FILTER SAMPLE_CUDA_API_SOURCES EXCLUDE REGEX "cuda_api_profiler/cuda_ld_preload.h")
+
+#    list(REMOVE_ITEM SAMPLE_CUDA_API_SOURCES ./src/cuda_api_profiler/cuda_ld_preload.cc)
+#    list(REMOVE_ITEM SAMPLE_CUDA_API_SOURCES ./src/cuda_api_profiler/cuda_ld_preload.h)
+endif()
+
+message("> SAMPLE_CUDA_API_SOURCES: ${SAMPLE_CUDA_API_SOURCES}")
+add_library(sample_cuda_api SHARED ${SAMPLE_CUDA_API_SOURCES})
 add_dependencies(sample_cuda_api double_conversion)
 # This will add libraries, definitions and include directories needed by backward
 # by setting each property on the target.
@@ -378,7 +409,16 @@ if(NOT IS_WINDOWS)
     # NOTE: I still don't fully understand the PUBLIC/PRIVATE/INTERFACE scope here...
     target_include_directories(sample_cuda_api PRIVATE ${Libcupti_INCLUDE_DIR})
 
-    target_link_libraries(sample_cuda_api PUBLIC ${CUDA_LIBRARIES})
+    if (NOT WITH_CUDA_LD_PRELOAD)
+        # CUDA_LIBRARIES = /usr/local/cuda/lib64/libcudart_static.a;-pthread;dl;/usr/lib/x86_64-linux-gnu/librt.so
+        message("> CUDA_LIBRARIES = ${CUDA_LIBRARIES}")
+        target_link_libraries(sample_cuda_api PUBLIC ${CUDA_LIBRARIES})
+    endif()
+
+    if (WITH_CUDA_LD_PRELOAD)
+        target_link_libraries(sample_cuda_api PUBLIC "-ldl")
+    endif()
+
     # Link driver API by adding -lcuda:
     #   https://devtalk.nvidia.com/default/topic/774340/cmake-undefined-reference-cuctxdetach-cumemgetinfo_v2-cuctxcreate_v2-cuinit/
     target_link_libraries(sample_cuda_api PUBLIC cuda)
@@ -456,6 +496,25 @@ endif()
 # For our source files, only expose symbols that are marked with SAMPLE_CUDA_API_EXPORT.
 include(GenerateExportHeader)
 generate_export_header(sample_cuda_api)
+
+if (WITH_CUDA_LD_PRELOAD)
+#    set(BACKTRACE_SYMS_FLAGS "-g")
+
+    # AddFlags fails here for some reason.
+#    AddFlags(sample_cuda_api COMPILE_DEFINITIONS "-DWITH_CUDA_LD_PRELOAD")
+#    set(WITH_CUDA_LD_PRELOAD_FLAGS "-DWITH_CUDA_LD_PRELOAD")
+#    AddFlags(sample_cuda_api COMPILE_DEFINITIONS ${WITH_CUDA_LD_PRELOAD_FLAGS})
+
+#    get_target_property(OLD_DEFS sample_cuda_api COMPILE_DEFINITIONS)
+#    set_target_properties(sample_cuda_api PROPERTIES COMPILE_DEFINITIONS "${OLD_DEFS} -DWITH_CUDA_LD_PRELOAD")
+
+    target_compile_definitions(sample_cuda_api PRIVATE "-DWITH_CUDA_LD_PRELOAD")
+    target_compile_definitions(sample_cuda_api PRIVATE "-DMADEUP")
+
+    # Create CUDA_LD_PRELOAD_EXPORT macro for exporting symbols in cuda_ld_preload.cc
+    generate_export_header(sample_cuda_api
+            BASE_NAME cuda_ld_preload)
+endif()
 set_target_properties(sample_cuda_api PROPERTIES CXX_VISIBILITY_PRESET hidden)
 
 # For static libraries we link to, DON'T expose ANY of their symbols.
@@ -553,11 +612,11 @@ if (ENABLE_DQN_CPP)
     endif()
 endif()
 
-if (ENABLE_DQN_CPP)
-    foreach(trg ${ALL_TARGETS})
-        target_compile_features(${trg} PUBLIC cxx_std_11)
-    endforeach()
-endif()
+#if (ENABLE_DQN_CPP)
+#    foreach(trg ${ALL_TARGETS})
+#        target_compile_features(${trg} PUBLIC cxx_std_11)
+#    endforeach()
+#endif()
 
 configure_file(normalized_car_features.csv ${CMAKE_CURRENT_BINARY_DIR}/normalized_car_features.csv COPYONLY)
 if(MSVC)

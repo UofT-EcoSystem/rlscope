@@ -76,49 +76,60 @@ def load_library(allow_fail=None):
         logging.info("Failed to load libsample_cuda_api.so")
         return
 
-    from iml_profiler.clib import sample_cuda_api
-
-    def set_api_wrapper(api_name):
-        func = getattr(_so, api_name)
-        def api_wrapper(*args, **kwargs):
-            ret = func(*args, **kwargs)
-            if ret != TF_OK:
-                raise IMLProfError(ret)
-            return ret
-        setattr(sample_cuda_api, api_name, api_wrapper)
-
     _so.setup.argtypes = []
     _so.setup.restype = c_int
-    # sample_cuda_api.setup = _so.setup
-    set_api_wrapper('setup')
+    _set_api_wrapper('setup')
 
     _so.enable_tracing.argtypes = []
     _so.enable_tracing.restype = c_int
-    # sample_cuda_api.enable_tracing = _so.enable_tracing
-    set_api_wrapper('enable_tracing')
+    _set_api_wrapper('enable_tracing')
 
     _so.disable_tracing.argtypes = []
     _so.disable_tracing.restype = c_int
-    # sample_cuda_api.disable_tracing = _so.disable_tracing
-    set_api_wrapper('disable_tracing')
+    _set_api_wrapper('disable_tracing')
 
     _so.print.argtypes = []
     _so.print.restype = c_int
-    # sample_cuda_api.print = _so.print
-    set_api_wrapper('print')
+    _set_api_wrapper('print')
 
     _so.is_enabled.argtypes = [POINTER(c_int)]
-    # _so.is_enabled.argtypes = [pointer(c_int)]
     _so.is_enabled.restype = c_int
-    # sample_cuda_api.is_enabled = _so.is_enabled
-    set_api_wrapper('is_enabled')
+    _set_api_wrapper('is_enabled')
 
-    _so.collect.argtypes = []
-    _so.collect.restype = c_int
-    # sample_cuda_api.collect = _so.collect
-    set_api_wrapper('collect')
+    _so.set_metadata.argtypes = [ c_char_p, c_char_p, c_char_p, c_char_p ]
+    _so.set_metadata.restype = c_int
+    # _set_api_wrapper('set_metadata')
+
+    _so.await_dump.argtypes = []
+    _so.await_dump.restype = c_int
+    _set_api_wrapper('await_dump')
+
+    _so.async_dump.argtypes = []
+    _so.async_dump.restype = c_int
+    _set_api_wrapper('async_dump')
 
     logging.info("Loaded symbols from libsample_cuda_api.so")
+
+def _set_api_wrapper(api_name):
+    from iml_profiler.clib import sample_cuda_api
+    func = getattr(_so, api_name)
+    def api_wrapper(*args, **kwargs):
+        ret = func(*args, **kwargs)
+        if ret != TF_OK:
+            raise IMLProfError(ret)
+        return ret
+    setattr(sample_cuda_api, api_name, api_wrapper)
+
+def set_metadata(directory, process_name, machine_name, phase):
+    ret = _so.set_metadata(
+        _as_c_string(directory),
+        _as_c_string(process_name),
+        _as_c_string(machine_name),
+        _as_c_string(phase),
+    )
+    if ret != TF_OK:
+        raise IMLProfError(ret)
+    return ret
 
 class IMLProfError(Exception):
     def __init__(self, errcode):
@@ -134,4 +145,9 @@ class IMLProfError(Exception):
 def error_string(retcode):
     return _ret_to_name[retcode]
 
+def _as_c_string(py_string):
+    return c_char_p(py_string.encode('ascii'))
+
 # Q: Make wrapper that converts status code into exception + error message?
+
+

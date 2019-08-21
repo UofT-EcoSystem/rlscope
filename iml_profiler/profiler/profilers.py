@@ -1551,9 +1551,24 @@ class Profiler:
         self.init_trace_id()
         # self._maybe_init_profile_context()
 
+        self._maybe_set_metadata()
+
         if self.process_name is not None and self.phase is not None:
             self._dump_iml_config()
             self._force_load_libcupti()
+
+    def _maybe_set_metadata(self):
+        if sample_cuda_api.is_used() and \
+            ( self.directory is not None and \
+              self.process_name is not None and \
+              self.machine_name is not None and \
+              self.phase is not None ):
+            sample_cuda_api.set_metadata(
+                self.directory,
+                self.process_name,
+                self.machine_name,
+                self.phase,
+            )
 
     @property
     def is_root_process(self):
@@ -1605,6 +1620,8 @@ class Profiler:
 
         self.phase = phase
 
+        self._maybe_set_metadata()
+
         if self.process_name is not None and self.phase is not None:
             self._dump_iml_config()
             self._force_load_libcupti()
@@ -1654,8 +1671,9 @@ class Profiler:
 
         if sample_cuda_api.is_used():
             # Print sampling results.
-            # TODO: we should just dump results to a protobuf.
             sample_cuda_api.print()
+            # NOTE: ideally, we should run async_dump() for everything, then wait on everything to finish.
+            sample_cuda_api.await_dump()
 
         if self.debug:
             logging.info("> IML: finishing profiling\n{stack}".format(stack=get_stacktrace(indent=1)))

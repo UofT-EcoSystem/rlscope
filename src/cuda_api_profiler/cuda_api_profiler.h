@@ -8,7 +8,10 @@
 #include <cuda.h>
 #include <cupti.h>
 
+#include "iml_profiler/protobuf/iml_prof.pb.h"
+
 #include "cuda_api_profiler/event_handler.h"
+#include "cuda_api_profiler/thread_pool_wrapper.h"
 
 #include "tensorflow/core/platform/notification.h"
 
@@ -16,6 +19,7 @@
 #include <list>
 #include <string>
 #include <tuple>
+#include <memory>
 #include <thread>
 
 namespace tensorflow {
@@ -37,27 +41,58 @@ struct CUDAAPIStats {
 };
 // TODO: We need to dump this information to a protobuf, ideally separate from tfprof protobuf
 // so that we can record/dump this even if tfprof is disabled (uninstrumented runs).
+
+struct CUDAAPIProfilerState {
+  // (thread-id, api-cbid)
+  using APIKey = std::tuple<pid_t, CUpti_CallbackDomain, CUpti_CallbackId>;
+  using TimeUsec = int64;
+
+  std::map<APIKey, TimeUsec> _start_t;
+  std::map<APIKey, TimeUsec> _end_t;
+  std::map<APIKey, CUDAAPIStats> _api_stats;
+  std::string _directory;
+  std::string _process_name;
+  std::string _machine_name;
+  std::string _phase_name;
+  int _next_trace_id;
+  int _trace_id;
+  CUDAAPIProfilerState() :
+      _next_trace_id(0),
+      _trace_id(-1)
+  {
+  }
+
+  bool CanDump();
+  std::string DumpPath(int trace_id);
+  CUDAAPIProfilerState DumpState();
+  std::unique_ptr<iml::CUDAAPIPhaseStatsProto> AsProto();
+
+};
+
 class CUDAAPIProfiler {
 public:
-    // (thread-id, api-cbid)
-    using APIKey = std::tuple<pid_t, CUpti_CallbackDomain, CUpti_CallbackId>;
-    using TimeUsec = int64;
-    std::map<APIKey, TimeUsec> _start_t GUARDED_BY(_mu);
-    std::map<APIKey, TimeUsec> _end_t GUARDED_BY(_mu);
-    std::map<APIKey, CUDAAPIStats> _api_stats GUARDED_BY(_mu);
-    CUDAAPIProfiler() = default;
-    ~CUDAAPIProfiler();
-    void ApiCallback(
-            CUpti_CallbackDomain domain,
-            CUpti_CallbackId cbid,
-            const void *cbdata);
+  ThreadPoolWrapper _pool;
+  mutex _mu;
+  CUDAAPIProfilerState _state;
 
-    void Print(std::ostream& out, int indent);
+  CUDAAPIProfiler();
+  ~CUDAAPIProfiler();
+  void ApiCallback(
+      CUpti_CallbackDomain domain,
+      CUpti_CallbackId cbid,
+      // const void *cbdata
+      CUpti_ApiCallbackSite cb_site);
 
-    static std::map<CUpti_CallbackId, std::string> RuntimeCallbackIDToName();
-    static std::map<CUpti_CallbackId, std::string> DriverCallbackIDToName();
+  void Print(std::ostream& out, int indent);
 
-    mutex _mu;
+  void SetMetadata(const char* directory, const char* process_name, const char* machine_name, const char* phase_name);
+  void AsyncDump();
+  void _AsyncDump();
+  void AwaitDump();
+
+  static std::map<CUpti_CallbackId, std::string> RuntimeCallbackIDToName();
+  static std::map<CUpti_CallbackId, std::string> DriverCallbackIDToName();
+
 };
 
 

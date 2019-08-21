@@ -19,8 +19,6 @@ limitations under the License.
 #include "tensorflow/core/platform/stacktrace.h"
 
 //#include <boost/stacktrace.hpp>
-#include <backward.hpp>
-//using namespace backward;
 
 #if defined(PLATFORM_POSIX_ANDROID)
 #include <android/log.h>
@@ -108,25 +106,7 @@ void LogMessage::GenerateLogMessage() {
     fprintf(stderr, "tid=%d %s.%06d: %c %s:%d] %s\n", tid, time_buffer, micros_remainder,
             "IWEF"[severity_], fname_, line_, str().c_str());
 
-    backward::StackTrace st;
-    const size_t MAX_STACKFRAMES = 32;
-    st.load_here(MAX_STACKFRAMES);
-    // Last 4 frames are always related to backward.hpp or logging.cc.
-    // Skip those frames; make the latest frame the LOG(FAIL) or DCHECK failure.
-    size_t skip_frames = 4;
-    size_t idx;
-    if (st.size() < skip_frames) {
-      // Print the whole thing.
-//      idx = st.size() - 1;
-      idx = 0;
-    } else {
-      // Skip the last 4 frames.
-//      idx = st.size() - skip_frames;
-      idx = skip_frames;
-    }
-    st.load_from(st[idx].addr, MAX_STACKFRAMES);
-    backward::Printer p;
-    p.print(st);
+    BackwardDumpStacktrace(4);
 
   } else {
     fprintf(stderr, "tid=%d %s.%06d: %c %s:%d] %s\n", tid, time_buffer, micros_remainder,

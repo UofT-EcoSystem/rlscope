@@ -18,98 +18,18 @@
 #include "tensorflow/core/lib/core/error_codes.pb.h"
 #include "tensorflow/core/lib/core/errors.h"
 
+#ifdef WITH_CUDA_LD_PRELOAD
+#include "cuda_api_profiler/cuda_ld_preload.h"
+#endif
+
+#include "cuda_api_profiler/cupti_logging.h"
+#include "cuda_api_profiler/globals.h"
+
 #include "sample_cuda_api_export.h"
 
 namespace tensorflow {
 
-static void MaybeLogError(std::ostream&& out, const char* func, const Status& status) {
-  if (status.code() != Status::OK().code()) {
-    out << "iml-prof C++ API '" << func << "' failed with: " << status;
-  }
-}
 
-#define MAYBE_RETURN(status) \
-  if (status.code() != Status::OK().code()) { \
-    return status.code(); \
-  }
-
-#define MAYBE_EXIT(status) \
-  if (status.code() != Status::OK().code()) { \
-    exit(status.code()); \
-  }
-
-class Globals {
-public:
-  Globals();
-  ~Globals();
-
-  std::unique_ptr<tensorflow::DeviceTracer> device_tracer;
-};
-Globals globals;
-
-bool env_is_on(const char* var, bool dflt, bool debug) {
-  const char* val = getenv(var);
-  if (val == nullptr) {
-//    VLOG(0) << "Return dflt = " << dflt << " for " << var;
-    return dflt;
-  }
-  std::string val_str(val);
-  std::transform(
-      val_str.begin(), val_str.end(), val_str.begin(),
-      [](unsigned char c){ return std::tolower(c); });
-  bool ret =
-      val_str == "on"
-         || val_str == "1"
-         || val_str == "true"
-         || val_str == "yes";
-//  VLOG(0) << "val_str = \"" << val_str << "\", " << " ret = " << ret << " for " << var;
-  return ret;
-}
-
-Globals::Globals() {
-
-  Status status = Status::OK();
-
-  std::ifstream cmdline_stream("/proc/self/cmdline");
-  std::string cmdline((std::istreambuf_iterator<char>(cmdline_stream)),
-                      std::istreambuf_iterator<char>());
-
-  VLOG(1) << "Initialize globals\n"
-          << "  CMD = " << cmdline;
-
-  device_tracer = tensorflow::CreateDeviceTracer();
-  auto IML_TRACE_AT_START = getenv("IML_TRACE_AT_START");
-  VLOG(0) << "IML_TRACE_AT_START = " << IML_TRACE_AT_START;
-  if (env_is_on("IML_TRACE_AT_START", false, true)) {
-    VLOG(0) << "Starting tracing at program start (export IML_TRACE_AT_START=yes)";
-    status = device_tracer->Start();
-    MaybeLogError(LOG(INFO), "DeviceTracerImpl::Start()", status);
-    MAYBE_EXIT(status);
-  }
-
-}
-
-Globals::~Globals() {
-  // NOTE: some programs will close stdout/stderr BEFORE this gets called.
-  // This will cause log message to be LOST.
-  // HOWEVER, the destructor will still execute.
-  // You can confirm this behaviour by creating a file.
-  //
-  // https://stackoverflow.com/questions/23850624/ld-preload-does-not-work-as-expected
-  //
-//  std::ofstream myfile;
-//  myfile.open("globals.destructor.txt");
-//  myfile << "Writing this to a file.\n";
-//  myfile.close();
-
-  VLOG(1) << "TODO: Stop tracing; collect traces";
-  if (device_tracer->IsEnabled()) {
-    VLOG(FATAL) << "Looks like DeviceTracer was still running... "
-                << "please call sample_cuda_api.disable_tracing() in python BEFORE exiting to avoid stranger behavior in C++ destructors during library unload.";
-  }
-  // Dump CUDA API call counts and total CUDA API time to a protobuf file.
-//    device_tracer->Collect();
-}
 
 // #define CUPTI_CALL(call) ({
 //      CUptiResult _status = call;
@@ -214,7 +134,18 @@ RetCode SAMPLE_CUDA_API_EXPORT setup() {
 RetCode SAMPLE_CUDA_API_EXPORT print() {
   VLOG(1) << __func__;
   auto status = globals.device_tracer->Print();
-  MaybeLogError(LOG(INFO), __func__, status);
+  MAYBE_LOG_ERROR(LOG(INFO), __func__, status);
+  return status.code();
+}
+
+RetCode SAMPLE_CUDA_API_EXPORT set_metadata(const char* directory, const char* process_name, const char* machine_name, const char* phase_name) {
+  VLOG(1) << __func__
+          << "directory = " << directory
+          << ", " << "process_name = " << process_name
+          << ", " << "machine_name = " << machine_name
+          << ", " << "phase_name = " << phase_name;
+  auto status = globals.device_tracer->SetMetadata(directory, process_name, machine_name, phase_name);
+  MAYBE_LOG_ERROR(LOG(INFO), __func__, status);
   return status.code();
 }
 
@@ -225,7 +156,7 @@ RetCode SAMPLE_CUDA_API_EXPORT enable_tracing() {
 //  if (status.code() != Status::OK()) {
 //    VLOG(0) << "iml-prof C++ API " << __func__ << " failed with: " << status;
 //  }
-  MaybeLogError(LOG(INFO), __func__, status);
+  MAYBE_LOG_ERROR(LOG(INFO), __func__, status);
   return status.code();
 }
 
@@ -243,21 +174,42 @@ RetCode SAMPLE_CUDA_API_EXPORT disable_tracing() {
   // Disable call-backs.
   VLOG(1) << __func__;
   auto status = globals.device_tracer->Stop();
-  MaybeLogError(LOG(INFO), __func__, status);
+  MAYBE_LOG_ERROR(LOG(INFO), __func__, status);
   return status.code();
 }
 
-RetCode SAMPLE_CUDA_API_EXPORT collect() {
-  // Collect traces (synchronously).
+RetCode SAMPLE_CUDA_API_EXPORT async_dump() {
+  // Dump traces (asynchronously).
   VLOG(1) << __func__;
   Status status;
-  status = globals.device_tracer->Stop();
-  MaybeLogError(LOG(INFO), __func__, status);
-  MAYBE_RETURN(status);
-  status = globals.device_tracer->Collect();
-  MaybeLogError(LOG(INFO), __func__, status);
+  status = globals.device_tracer->AsyncDump();
+  MAYBE_LOG_ERROR(LOG(INFO), __func__, status);
   return status.code();
 }
+
+RetCode SAMPLE_CUDA_API_EXPORT await_dump() {
+  // Wait for async dump traces to complete.
+  VLOG(1) << __func__;
+  Status status;
+  status = globals.device_tracer->AsyncDump();
+  MAYBE_RETURN(status);
+  status = globals.device_tracer->AwaitDump();
+  // TODO: call device_tracer->Collect?
+  MAYBE_LOG_ERROR(LOG(INFO), __func__, status);
+  return status.code();
+}
+
+//RetCode SAMPLE_CUDA_API_EXPORT collect() {
+//  // Collect traces (synchronously).
+//  VLOG(1) << __func__;
+//  Status status;
+//  status = globals.device_tracer->Stop();
+//  MAYBE_LOG_ERROR(LOG(INFO), __func__, status);
+//  MAYBE_RETURN(status);
+//  status = globals.device_tracer->Collect();
+//  MAYBE_LOG_ERROR(LOG(INFO), __func__, status);
+//  return status.code();
+//}
 
 }
 

@@ -21,6 +21,17 @@ float get_TF_CUDA_API_PRINT_EVERY_SEC(float user_value);
 static const float IML_SAMPLE_EVERY_SEC_DEFAULT = 1.0;
 float get_IML_SAMPLE_EVERY_SEC(float user_value);
 
+bool env_is_on(const char* var, bool dflt, bool debug);
+
+static inline char path_separator()
+{
+#ifdef _WIN32
+    return '\\';
+#else
+    return '/';
+#endif
+}
+
 }
 
 #endif //IML_GET_ENV_VAR_H

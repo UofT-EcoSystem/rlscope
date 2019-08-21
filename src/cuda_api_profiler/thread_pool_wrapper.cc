@@ -14,25 +14,52 @@ ThreadPoolWrapper::ThreadPoolWrapper(const string& name, int num_threads) :
         async_dump_pool_(Env::Default(), ThreadOptions(), name, num_threads, false),
         all_done_(new Notification()),
         fns_scheduled_(0),
-        waiters_(0)
+        waiters_(0),
+        name_(name)
 {
 }
 
 void ThreadPoolWrapper::Schedule(Func fn) {
+
+  {
+    mutex_lock l(mu_);
+    fns_scheduled_ += 1;
+    VLOG(1) << "ThreadPoolWrapper.name = " << name_ << ", fns_scheduled = " << fns_scheduled_;
+  }
+
+  async_dump_pool_.Schedule([fn, this] {
+    // Run the function.
+    fn();
+
     {
-        mutex_lock l(mu_);
-        fns_scheduled_ += 1;
+      // Notify python-thread waiting for async dumping to finish.
+      mutex_lock l(mu_);
+
+      fns_scheduled_ -= 1;
+      if (fns_scheduled_ == 0) {
+        // We were the last scheduled function to run;
+        // awake anyone that's waiting for us to finish.
+        all_done_->Notify();
+      }
+
+      if (waiters_ == 0 && fns_scheduled_ == 0) {
+        // Notification is one-time use; we need to re-allocate it.
+        _ResetNotification();
+      }
     }
-    async_dump_pool_.Schedule(fn);
+  });
+
 }
 
 void ThreadPoolWrapper::AwaitAll() {
     {
         mutex_lock l(mu_);
         if (fns_scheduled_ == 0) {
+            VLOG(1) << "ThreadPoolWrapper.name = " << name_ << ", fns_scheduled = 0, return";
             return;
         }
         waiters_ += 1;
+        VLOG(1) << "ThreadPoolWrapper.name = " << name_ << ", fns_scheduled = " << fns_scheduled_ << ", waiters = " << waiters_;
     }
     all_done_->WaitForNotification();
     {

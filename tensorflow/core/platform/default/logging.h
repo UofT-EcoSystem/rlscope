@@ -24,6 +24,8 @@ limitations under the License.
 #include "tensorflow/core/platform/macros.h"
 #include "tensorflow/core/platform/types.h"
 
+#include <backward.hpp>
+
 // TODO(mrry): Prevent this Windows.h #define from leaking out of our headers.
 #undef ERROR
 
@@ -35,6 +37,25 @@ const int FATAL = 3;           // base_logging::FATAL;
 const int NUM_SEVERITIES = 4;  // base_logging::NUM_SEVERITIES;
 
 namespace internal {
+
+static inline void BackwardDumpStacktrace(size_t skip_frames) {
+  backward::StackTrace st;
+  const size_t MAX_STACKFRAMES = 32;
+  st.load_here(MAX_STACKFRAMES);
+// Last 4 frames are always related to backward.hpp or logging.cc.
+// Skip those frames; make the latest frame the LOG(FAIL) or DCHECK failure.
+  size_t idx;
+  if (st.size() < skip_frames) {
+// Print the whole thing.
+    idx = 0;
+  } else {
+// Skip the last 4 frames.
+    idx = skip_frames;
+  }
+  st.load_from(st[idx].addr, MAX_STACKFRAMES);
+  backward::Printer p;
+  p.print(st);
+}
 
 class LogMessage : public std::basic_ostringstream<char> {
  public:

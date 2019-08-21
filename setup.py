@@ -240,6 +240,7 @@ def main():
         return _j(PROTOBUF_DIR, base)
     generate_proto(_proto('pyprof.proto'), regenerate=True)
     generate_proto(_proto('unit_test.proto'), regenerate=True)
+    generate_proto(_proto('iml_prof.proto'), regenerate=True)
 
     setup(
         name=project_name,

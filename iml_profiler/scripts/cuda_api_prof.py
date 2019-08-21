@@ -37,6 +37,15 @@ def main():
                         
                         Effect: sets "export IML_CUDA_API_CALLS=1" for libsample_cuda_api.so.
                         """))
+    parser.add_argument('--fuzz-cuda-api', action='store_true',
+                        help=textwrap.dedent("""
+                        Use libcupti to trace ALL CUDA runtime API calls (# of calls, and total time spent in them).
+                        This is useful for determining which CUDA API's we need to "calibrate subtractions" for.
+                        NOTE: this SHOULDN'T be used for finding profiling book-keeping "subtractions", since it 
+                        adds a LOT of overhead to add start/end callbacks to all CUDA API functions.
+                        
+                        Effect: sets "export IML_FUZZ_CUDA_API=yes" for libsample_cuda_api.so.
+                        """))
     parser.add_argument('--pc-sampling', action='store_true',
                         help=textwrap.dedent("""
                         Perform sample-profiling using CUDA's "PC Sampling" API.
@@ -97,6 +106,9 @@ def main():
 
     if args.pc_sampling:
         add_env['IML_PC_SAMPLING'] = 'yes'
+
+    if args.fuzz_cuda_api:
+        add_env['IML_FUZZ_CUDA_API'] = 'yes'
 
     if args.trace_at_start:
         add_env['IML_TRACE_AT_START'] = 'yes'

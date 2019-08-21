@@ -21,6 +21,9 @@ limitations under the License.
 #include "cuda_api_profiler/event_handler.h"
 #include "cuda_api_profiler/cuda_stream_monitor.h"
 #include "cuda_api_profiler/cupti_api_wrapper.h"
+#ifdef WITH_CUDA_LD_PRELOAD
+#include "cuda_api_profiler/cuda_ld_preload.h"
+#endif
 
 #include "iml_profiler/protobuf/iml_prof.pb.h"
 
@@ -655,16 +658,19 @@ class CUPTIManager {
     auto manager = absl::make_unique<CUPTIManager>();
 //    CUptiResult status = manager->cupti_wrapper_->ActivityRegisterCallbacks(
 //        BufferRequested, BufferCompleted);
-//    VLOG(1) << "SKIP: Enable activity callbacks using cuptiActivityRegisterCallbacks";
-    // NOTE: Even just calling cuptiActivityRegisterCallbacks without enabling any activities with cuptiActivityEnable
-    // causes 7% runtime overhead.
-    VLOG(1) << "Enable activity callbacks using cuptiActivityRegisterCallbacks";
-    CUptiResult status = cuptiActivityRegisterCallbacks(
-            BufferRequested,
-            BufferCompleted);
-    if (status != CUPTI_SUCCESS) {
-      LOG(ERROR) << "Failed to initialize CUPTI: " << status;
-      return nullptr;
+    if (is_yes("IML_DISABLE", false)) {
+      VLOG(1) << "SKIP: Enable activity callbacks using cuptiActivityRegisterCallbacks";
+    } else {
+      // NOTE: Even just calling cuptiActivityRegisterCallbacks without enabling any activities with cuptiActivityEnable
+      // causes 7% runtime overhead.
+      VLOG(1) << "Enable activity callbacks using cuptiActivityRegisterCallbacks";
+      CUptiResult status = cuptiActivityRegisterCallbacks(
+          BufferRequested,
+          BufferCompleted);
+      if (status != CUPTI_SUCCESS) {
+        LOG(ERROR) << "Failed to initialize CUPTI: " << status;
+        return nullptr;
+      }
     }
     return manager.release();
   }
@@ -1043,6 +1049,9 @@ class DeviceTracerImpl : public DeviceTracer, public CUPTIClient {
   Status Stop() override;
   Status Print() override;
   Status Collect() override;
+  Status SetMetadata(const char* directory, const char* process_name, const char* machine_name, const char* phase_name) override;
+  Status AsyncDump() override;
+  Status AwaitDump() override;
 
 #ifdef CONFIG_TRACE_STATS
   bool IsEnabled() override;
@@ -1129,13 +1138,18 @@ class DeviceTracerImpl : public DeviceTracer, public CUPTIClient {
   inline int64 NowInUsec() { return Env::Default()->NowMicros(); }
 
   std::vector<std::unique_ptr<ActivityBuffer>> activity_buffers_;
-  CUDAAPIProfiler api_profiler_;
+  CUDAAPIProfiler _api_profiler;
   CUDAAPIProfilerPrinter api_printer_;
   std::shared_ptr<CudaStreamMonitor> stream_monitor_;
   RegisteredFunc::FuncId _cuda_stream_monitor_cbid;
   std::shared_ptr<CuptiAPI> _cupti_api;
   CuptiCallback::FuncId _cupti_api_device_tracer_callback_id;
-  CuptiCallback::FuncId _cupti_api_profiler_callback_id;
+//  CuptiCallback::FuncId _cupti_api_profiler_callback_id;
+
+#ifdef WITH_CUDA_LD_PRELOAD
+  std::vector<CudaAPIRegisteredFuncHandleInterface> _cuda_api_api_profiler_cbs;
+//  CudaAPIRegisteredFuncHandle<cudaLaunchKernel_callback> _cuda_api_cudaLaunchKernel_api_profiler_cb;
+#endif
 
   CUPTIManager *cupti_manager_;
 //  std::unique_ptr<perftools::gputools::profiler::CuptiWrapper> cupti_wrapper_;
@@ -1154,17 +1168,22 @@ class DeviceTracerImpl : public DeviceTracer, public CUPTIClient {
   uint64_t start_timestamp_ GUARDED_BY(mu_);
   uint64_t end_timestamp_ GUARDED_BY(mu_);
 
+  std::string _directory GUARDED_BY(mu_);
+  std::string _process_name GUARDED_BY(mu_);
+  std::string _machine_name GUARDED_BY(mu_);
+  std::string _phase_name GUARDED_BY(mu_);
+
   TF_DISALLOW_COPY_AND_ASSIGN(DeviceTracerImpl);
 };
 
 
 DeviceTracerImpl::DeviceTracerImpl(CUPTIManager *cupti_manager)
     :
-        api_printer_(api_profiler_, get_TF_CUDA_API_PRINT_EVERY_SEC(0)),
+        api_printer_(_api_profiler, get_TF_CUDA_API_PRINT_EVERY_SEC(0)),
         _cuda_stream_monitor_cbid(-1),
         _cupti_api(CuptiAPI::GetCuptiAPI()),
         _cupti_api_device_tracer_callback_id(-1),
-        _cupti_api_profiler_callback_id(-1),
+//        _cupti_api_profiler_callback_id(-1),
         cupti_manager_(cupti_manager)
     {
   VLOG(1) << "DeviceTracer created.";
@@ -1231,19 +1250,48 @@ Status DeviceTracerImpl::Start() {
       CUptiResult ret;
 //      ret = cupti_wrapper_->Subscribe(&subscriber_, static_cast<CUpti_CallbackFunc>(ApiCallback), this);
 
-      if (!is_yes("IML_DISABLE", false)) {
-        VLOG(1) << "Register DeviceTracer CUDA API calls callback";
-        _cupti_api_device_tracer_callback_id = _cupti_api->RegisterCallback(
-            [this](CUpti_CallbackDomain domain, CUpti_CallbackId cbid, const void *cbdata) {
-              this->_ApiCallback(domain, cbid, cbdata);
-            });
-      }
+// IML NOTE: disable CUDA API callbacks for giving labels to kernel execution times.
+// Not needed for IML metrics, and adds runtime overhead.
+//      if (!is_yes("IML_DISABLE", false)) {
+//        VLOG(1) << "Register DeviceTracer CUDA API calls callback";
+//        _cupti_api_device_tracer_callback_id = _cupti_api->RegisterCallback(
+//            [this](CUpti_CallbackDomain domain, CUpti_CallbackId cbid, const void *cbdata) {
+//              this->_ApiCallback(domain, cbid, cbdata);
+//            });
+//      }
+
+//      if (is_yes("IML_DISABLE", false)) {
+//        VLOG(1) << "Register empty CUDA API callback";
+//        _cupti_api_device_tracer_callback_id = _cupti_api->RegisterCallback(
+//            [this](CUpti_CallbackDomain domain, CUpti_CallbackId cbid, const void *cbdata) {
+//              // pass
+//            });
+//      }
+
       if (is_yes("IML_CUDA_API_CALLS", false)) {
         VLOG(1) << "Register CUDA API calls callback";
-        _cupti_api_profiler_callback_id = _cupti_api->RegisterCallback(
-            [this](CUpti_CallbackDomain domain, CUpti_CallbackId cbid, const void *cbdata) {
-              this->api_profiler_.ApiCallback(domain, cbid, cbdata);
-            });
+//        _cupti_api_profiler_callback_id = _cupti_api->RegisterCallback(
+//            [this](CUpti_CallbackDomain domain, CUpti_CallbackId cbid, const void *cbdata) {
+//              this->_api_profiler.ApiCallback(domain, cbid, cbdata);
+//            });
+#ifdef WITH_CUDA_LD_PRELOAD
+        _cuda_api_api_profiler_cbs.emplace_back(
+            GetCudaLibrary()->_cuda_api.cudaLaunchKernel_cbs.RegisterCallback(
+                /*start_cb=*/[this] (const void *func, dim3 gridDim, dim3 blockDim, void **args, size_t sharedMem, cudaStream_t stream) {
+                  this->_api_profiler.ApiCallback(
+                      CUPTI_CB_DOMAIN_RUNTIME_API,
+                      CUPTI_RUNTIME_TRACE_CBID_cudaLaunchKernel_v7000,
+                      CUPTI_API_ENTER);
+                },
+                /*exit_cb=*/[this] (const void *func, dim3 gridDim, dim3 blockDim, void **args, size_t sharedMem, cudaStream_t stream, cudaError_t ret) {
+                  this->_api_profiler.ApiCallback(
+                      CUPTI_CB_DOMAIN_RUNTIME_API,
+                      CUPTI_RUNTIME_TRACE_CBID_cudaLaunchKernel_v7000,
+                      CUPTI_API_EXIT);
+                }));
+#else
+#error "You must re-compile with cmake using WITH_CUDA_LD_PRELOAD=ON to support \"iml-prof --cuda-api-calls\""
+#endif
       }
 
 //      VLOG(1) << "cuptiSubscribe";
@@ -1312,8 +1360,8 @@ Status DeviceTracerImpl::Start() {
             // subscriber_,
                        CUPTI_CB_DOMAIN_DRIVER_API,
                        CUPTI_DRIVER_TRACE_CBID_cuMemcpyDtoDAsync_v2));
-//      }
       }
+//      }
     }
 
     VLOG(1) << "Run EnableTrace";
@@ -1330,7 +1378,7 @@ Status DeviceTracerImpl::Start() {
 Status DeviceTracerImpl::Print() {
   mutex_lock l(mu_);
   DECLARE_LOG_INFO(info);
-  api_profiler_.Print(info, 0);
+  _api_profiler.Print(info, 0);
   if (stream_monitor_) {
     stream_monitor_->Print(info, 0);
   }
@@ -1354,10 +1402,10 @@ Status DeviceTracerImpl::Stop() {
         _cupti_api->UnregisterCallback(_cupti_api_device_tracer_callback_id);
         _cupti_api_device_tracer_callback_id = -1;
       }
-      if (_cupti_api_profiler_callback_id != -1) {
-        _cupti_api->UnregisterCallback(_cupti_api_profiler_callback_id);
-        _cupti_api_profiler_callback_id = -1;
-      }
+//      if (_cupti_api_profiler_callback_id != -1) {
+//        _cupti_api->UnregisterCallback(_cupti_api_profiler_callback_id);
+//        _cupti_api_profiler_callback_id = -1;
+//      }
 //      CUPTI_CALL(cuptiUnsubscribe(subscriber_));
       GlobalDefaultTraceCollector()->Stop();
     }
@@ -1395,12 +1443,18 @@ void DeviceTracerImpl::AddCorrelationId(uint32 correlation_id,
   auto *self = reinterpret_cast<DeviceTracerImpl *>(userdata);
   self->_ApiCallback(domain, cbid, cbdata);
 }
+
+// CorrelationID is used for associating information gathered during a CUDA API runtime callback
+// with information gathered from a GPU-activity-record.
+// This functionality is used by TensorFlow to label each GPU activity record with a string-identifier
+// (an annotation in the TensorFlow source-code at the site of the cudaLaunch call).
+//
+// IML: since we create our own CUDA API wrappers separate from libcupti, we DON'T use this.
 void DeviceTracerImpl::_ApiCallback(
     CUpti_CallbackDomain domain,
     CUpti_CallbackId cbid,
     const void *cbdata) {
   auto *cbInfo = reinterpret_cast<const CUpti_CallbackData *>(cbdata);
-#ifdef CONFIG_TRACE_STATS
   if (!is_yes("TF_CUPTI_EMPTY_TRACING_CALLBACKS", false)) {
       VLOG(2) << "ApiCallback " << domain << ":" << cbid
           << " func: " << cbInfo->functionName;
@@ -1454,59 +1508,6 @@ void DeviceTracerImpl::_ApiCallback(
           VLOG(1) << "Unhandled API Callback for " << domain << " " << cbid;
       }
   }
-#else
-  VLOG(2) << "ApiCallback " << domain << ":" << cbid
-          << " func: " << cbInfo->functionName;
-
-  // API callbacks are invoked synchronously on the thread making the
-  // CUDA API call.  If this pointer is non-null then the ScopedAnnotation
-  // must be valid.
-  const char *tls_annotation = tls_current_annotation.get();
-
-  if ((domain == CUPTI_CB_DOMAIN_DRIVER_API) &&
-      (cbid == CUPTI_DRIVER_TRACE_CBID_cuLaunchKernel)) {
-    if (cbInfo->callbackSite == CUPTI_API_ENTER) {
-      auto *params = reinterpret_cast<const cuLaunchKernel_params *>(
-          cbInfo->functionParams);
-      if (VLOG_IS_ON(2)) {
-        VLOG(2) << "LAUNCH stream " << params->hStream << " correllation "
-                << cbInfo->correlationId << " kernel " << cbInfo->symbolName;
-      }
-      const string annotation =
-          tls_annotation ? tls_annotation : cbInfo->symbolName;
-      this->AddCorrelationId(cbInfo->correlationId, annotation);
-    }
-  } else if ((domain == CUPTI_CB_DOMAIN_RUNTIME_API) &&
-             (cbid == CUPTI_RUNTIME_TRACE_CBID_cudaMemcpy_v3020 ||
-              cbid == CUPTI_RUNTIME_TRACE_CBID_cudaMemcpyAsync_v3020)) {
-    if (cbInfo->callbackSite == CUPTI_API_ENTER) {
-      if (VLOG_IS_ON(2)) {
-        auto *funcParams = reinterpret_cast<const cudaMemcpy_v3020_params *>(
-            cbInfo->functionParams);
-        size_t count = funcParams->count;
-        enum cudaMemcpyKind kind = funcParams->kind;
-        VLOG(2) << "MEMCPY count " << count << " kind " << kind;
-      }
-      if (tls_annotation) {
-        const string annotation = tls_annotation;
-        this->AddCorrelationId(cbInfo->correlationId, annotation);
-      }
-    }
-  } else if ((domain == CUPTI_CB_DOMAIN_DRIVER_API) &&
-             (cbid == CUPTI_DRIVER_TRACE_CBID_cuMemcpyHtoD_v2 ||
-              cbid == CUPTI_DRIVER_TRACE_CBID_cuMemcpyDtoH_v2 ||
-              cbid == CUPTI_DRIVER_TRACE_CBID_cuMemcpyDtoD_v2 ||
-              cbid == CUPTI_DRIVER_TRACE_CBID_cuMemcpyHtoDAsync_v2 ||
-              cbid == CUPTI_DRIVER_TRACE_CBID_cuMemcpyDtoHAsync_v2 ||
-              cbid == CUPTI_DRIVER_TRACE_CBID_cuMemcpyDtoDAsync_v2)) {
-    if (cbInfo->callbackSite == CUPTI_API_EXIT && tls_annotation) {
-      const string annotation = tls_annotation;
-      this->AddCorrelationId(cbInfo->correlationId, annotation);
-    }
-  } else {
-    VLOG(1) << "Unhandled API Callback for " << domain << " " << cbid;
-  }
-#endif // CONFIG_TRACE_STATS
 }
 
 void DeviceTracerImpl::ActivityBufferCallback(std::unique_ptr<ActivityBuffer> activity_buffer) {
@@ -1641,6 +1642,27 @@ bool DeviceTracerImpl::IsEnabled() {
   return enabled_;
 }
 #endif // CONFIG_TRACE_STATS
+
+Status DeviceTracerImpl::SetMetadata(const char* directory, const char* process_name, const char* machine_name, const char* phase_name) {
+  mutex_lock l(mu_);
+  _directory = directory;
+  _process_name = process_name;
+  _machine_name = machine_name;
+  _phase_name = phase_name;
+  _api_profiler.SetMetadata(directory, process_name, machine_name, phase_name);
+  return Status::OK();
+}
+
+Status DeviceTracerImpl::AsyncDump() {
+  mutex_lock l(mu_);
+  _api_profiler.AsyncDump();
+  return Status::OK();
+}
+Status DeviceTracerImpl::AwaitDump() {
+  mutex_lock l(mu_);
+  _api_profiler.AwaitDump();
+  return Status::OK();
+}
 
 Status DeviceTracerImpl::Collect() {
   mutex_lock l(mu_);

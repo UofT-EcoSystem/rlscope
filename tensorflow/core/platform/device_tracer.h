@@ -70,6 +70,9 @@ class DeviceTracer {
   virtual Status Stop() = 0;
 
   virtual Status Print() = 0;
+  virtual Status SetMetadata(const char* directory, const char* process_name, const char* machine_name, const char* phase_name) = 0;
+  virtual Status AsyncDump() = 0;
+  virtual Status AwaitDump() = 0;
 
   // Collect trace results.  Results are added to the specified
   // StepStatsCollector.  Does not clear any existing stats.

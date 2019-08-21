@@ -26,6 +26,7 @@ private:
     mutex mu_;
     int fns_scheduled_ GUARDED_BY(mu_);
     int waiters_ GUARDED_BY(mu_);
+    std::string name_;
 };
 
 }
