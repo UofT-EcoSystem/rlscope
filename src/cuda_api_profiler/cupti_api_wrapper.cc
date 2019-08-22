@@ -24,7 +24,7 @@ static std::shared_ptr<CuptiAPI> _cupti_api;
   return _cupti_api;
 }
 
-/* static */ CuptiCallback::FuncId CuptiAPI::RegisterCallback(CuptiCallback::Callback callback) {
+RegisteredHandle<CuptiCallback::FuncId> CuptiAPI::RegisterCallback(CuptiCallback::Callback callback) {
   mutex_lock lock(_mu);
   CUptiResult ret;
   if (_next_func_id == 0) {
@@ -32,9 +32,12 @@ static std::shared_ptr<CuptiAPI> _cupti_api;
     CHECK_CUPTI_ERROR(LOG(FATAL), ret, "cuptiSubscribe");
   }
   auto func_id = _next_func_id;
+  RegisteredHandle<CuptiCallback::FuncId> handle(func_id, [this] (CuptiCallback::FuncId func_id) {
+    this->UnregisterCallback(func_id);
+  });
   _cupti_subscribe_callbacks.emplace_back(func_id, callback);
   _next_func_id += 1;
-  return func_id;
+  return handle;
 }
 
 /* static */ void CUPTIAPI CuptiAPI::__RunCUPTICallbacks(
@@ -64,8 +67,23 @@ CUptiResult CuptiAPI::EnableCallback(
     CUpti_CallbackDomain domain,
     CUpti_CallbackId cbid) {
   CUptiResult ret;
-  DCHECK(_next_func_id > 0) << "You should call CuptiAPI::RegisterCallback before EnableCallback.";
+  _CheckCallbacksRegistered();
   ret = cuptiEnableCallback(enable, _subscriber, domain, cbid);
+  return ret;
+}
+
+void CuptiAPI::_CheckCallbacksRegistered() {
+  DCHECK(_next_func_id > 0) << "You should call CuptiAPI::RegisterCallback before EnableCallback.";
+}
+
+CUptiResult CuptiAPI::EnableDomain(
+    uint32_t enable,
+    // CUpti_SubscriberHandle subscriber,
+    CUpti_CallbackDomain domain)
+{
+  CUptiResult ret;
+  _CheckCallbacksRegistered();
+  ret = cuptiEnableDomain(enable, _subscriber, domain);
   return ret;
 }
 

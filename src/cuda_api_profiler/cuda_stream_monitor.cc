@@ -34,8 +34,7 @@ CudaStreamMonitor::CudaStreamMonitor() :
                   }),
     _sample_every_sec(SAMPLE_STREAM_EVERY_SEC),
 //    _sample_every_sec(get_IML_SAMPLE_EVERY_SEC(0)),
-    _cupti_api(CuptiAPI::GetCuptiAPI()),
-    _cupti_api_callback_id(-1)
+    _cupti_api(CuptiAPI::GetCuptiAPI())
 {
   _RegisterCUPTICallbacks();
   // Add default stream; there's no call to cudaStreamCreate or cudaStreamDestroy for the default stream.
@@ -65,7 +64,6 @@ void CudaStreamMonitor::_RunPollingThread() {
 
 CudaStreamMonitor::~CudaStreamMonitor() {
   Stop();
-  _UnregisterCUPTICallbacks();
 //  if (VLOG_IS_ON(1)) {
 //    DECLARE_LOG_INFO(info);
 //    this->Print(info, 0);
@@ -234,14 +232,6 @@ void CudaStreamMonitor::_RegisterCUPTICallbacks() {
     CHECK_CUPTI_ERROR(LOG(FATAL), cuptierr, "cuptiEnableDomain");
   }
 
-}
-void CudaStreamMonitor::_UnregisterCUPTICallbacks() {
-//  CUptiResult cuptierr;
-//  cuptierr = cuptiUnsubscribe(subscriber_);
-//  CHECK_CUPTI_ERROR(LOG(FATAL), cuptierr, "cuptiUnsubscribe");
-  if (_cupti_api_callback_id != -1) {
-    _cupti_api->UnregisterCallback(_cupti_api_callback_id);
-  }
 }
 
 void CudaStreamMonitor::Start() {

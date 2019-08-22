@@ -23,6 +23,7 @@ limitations under the License.
 #include "cuda_api_profiler/cupti_api_wrapper.h"
 #ifdef WITH_CUDA_LD_PRELOAD
 #include "cuda_api_profiler/cuda_ld_preload.h"
+#include "cuda_api_profiler/registered_handle.h"
 #endif
 
 #include "iml_profiler/protobuf/iml_prof.pb.h"
@@ -1145,9 +1146,10 @@ class DeviceTracerImpl : public DeviceTracer, public CUPTIClient {
   std::shared_ptr<CuptiAPI> _cupti_api;
   CuptiCallback::FuncId _cupti_api_device_tracer_callback_id;
 //  CuptiCallback::FuncId _cupti_api_profiler_callback_id;
+  RegisteredHandle<CuptiCallback::FuncId> _cupti_fuzzing_cb_handle;
 
 #ifdef WITH_CUDA_LD_PRELOAD
-  std::vector<CudaAPIRegisteredFuncHandleInterface> _cuda_api_api_profiler_cbs;
+  std::vector<RegisteredHandleInterface> _cuda_api_api_profiler_cbs;
 //  CudaAPIRegisteredFuncHandle<cudaLaunchKernel_callback> _cuda_api_cudaLaunchKernel_api_profiler_cb;
 #endif
 
@@ -1268,6 +1270,11 @@ Status DeviceTracerImpl::Start() {
 //            });
 //      }
 
+      DCHECK(!(
+          is_yes("IML_FUZZ_CUDA_API", false) &&
+          is_yes("IML_CUDA_API_CALLS", false) ))
+        << "Can only run iml-prof with --fuzz-cuda-api or --cuda-api-calls, not both";
+
       if (is_yes("IML_CUDA_API_CALLS", false)) {
         VLOG(1) << "Register CUDA API calls callback";
 //        _cupti_api_profiler_callback_id = _cupti_api->RegisterCallback(
@@ -1275,6 +1282,7 @@ Status DeviceTracerImpl::Start() {
 //              this->_api_profiler.ApiCallback(domain, cbid, cbdata);
 //            });
 #ifdef WITH_CUDA_LD_PRELOAD
+        // TODO: use sample_cuda_api.trace_cuda_api("cudaLaunchKernel" / CUPTI_RUNTIME_TRACE_CBID_cudaLaunchKernel_v7000) to enable tracing of cudaLaunchKernel
         _cuda_api_api_profiler_cbs.emplace_back(
             GetCudaLibrary()->_cuda_api.cudaLaunchKernel_cbs.RegisterCallback(
                 /*start_cb=*/[this] (const void *func, dim3 gridDim, dim3 blockDim, void **args, size_t sharedMem, cudaStream_t stream) {
@@ -1292,6 +1300,25 @@ Status DeviceTracerImpl::Start() {
 #else
 #error "You must re-compile with cmake using WITH_CUDA_LD_PRELOAD=ON to support \"iml-prof --cuda-api-calls\""
 #endif
+      }
+
+      if (is_yes("IML_FUZZ_CUDA_API", false)) {
+        this->_api_profiler.EnableFuzzing();
+        // TODO: callback handle auto re-registration
+        _cupti_fuzzing_cb_handle = _cupti_api->RegisterCallback(
+            [this] (CUpti_CallbackDomain domain, CUpti_CallbackId cbid, const void *cbdata) {
+              if (
+                  domain == CUPTI_CB_DOMAIN_RUNTIME_API
+//              || domain == CUPTI_CB_DOMAIN_DRIVER_API
+                  ) {
+                auto *cbInfo = reinterpret_cast<const CUpti_CallbackData *>(cbdata);
+                auto callback_site = cbInfo->callbackSite;
+                this->_api_profiler.ApiCallback(domain, cbid, callback_site);
+              }
+            });
+        // Q: Should we also trace driver API?  What's the difference between the driver API and runtime API?
+        // _cupti_api->EnableAllDomains(/*enable=*/1);
+        _cupti_api->EnableDomain(/*enable=*/1, CUPTI_CB_DOMAIN_RUNTIME_API);
       }
 
 //      VLOG(1) << "cuptiSubscribe";

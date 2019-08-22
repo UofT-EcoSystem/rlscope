@@ -47,7 +47,7 @@ def main():
         dump_proto_txt(args.proto, ProcessMetadata, sys.stdout)
     elif is_training_progress_file(args.proto):
         dump_proto_txt(args.proto, IncrementalTrainingProgress, sys.stdout)
-    elif is_cuda_api_stats_file(args.proto):
+    elif is_cuda_api_stats_file(args.proto) or is_fuzz_cuda_api_stats_file(args.proto):
         dump_proto_txt(args.proto, CUDAAPIPhaseStatsProto, sys.stdout)
     elif is_pyprof_call_times_file(args.proto):
         call_times_data = read_pyprof_call_times_file(args.proto)

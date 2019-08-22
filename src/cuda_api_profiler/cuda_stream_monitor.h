@@ -67,7 +67,7 @@ public:
   std::vector<CUpti_runtime_api_trace_cbid> _callback_ids;
   float _sample_every_sec;
   std::shared_ptr<CuptiAPI> _cupti_api;
-  CuptiCallback::FuncId _cupti_api_callback_id;
+  RegisteredHandle<CuptiCallback::FuncId> _cupti_api_callback_id;
 
   // Singleton.
   static std::shared_ptr<CudaStreamMonitor> GetCudaStreamMonitor();
@@ -100,7 +100,6 @@ public:
   ~CudaStreamMonitor();
 
   void _RegisterCUPTICallbacks();
-  void _UnregisterCUPTICallbacks();
 };
 
 }

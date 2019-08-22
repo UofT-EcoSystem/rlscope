@@ -94,6 +94,9 @@ def main():
         ld=env.get('LD_PRELOAD', ''),
         so_path=so_path)
 
+    if args.fuzz_cuda_api and args.cuda_api_calls:
+        parser.error("Can only run iml-prof with --fuzz-cuda-api or --cuda-api-calls, not both")
+
     if args.debug or args.iml_debug or is_env_true('IML_DEBUG'):
         logging.info("Detected debug mode; enabling C++ logging statements (export IML_CPP_MIN_VLOG_LEVEL=1)")
         add_env['IML_CPP_MIN_VLOG_LEVEL'] = 1

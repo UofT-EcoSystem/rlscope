@@ -22,6 +22,7 @@
 #include "cuda_api_profiler/get_env_var.h"
 #include "cuda_api_profiler/defines.h"
 #include "cuda_api_profiler/cupti_logging.h"
+#include "cuda_api_profiler/util.h"
 
 namespace tensorflow {
 
@@ -55,6 +56,7 @@ CUDAAPIProfilerState CUDAAPIProfilerState::DumpState() {
   state._machine_name = _machine_name;
   state._phase_name = _phase_name;
   state._trace_id = _next_trace_id;
+  state._fuzzing = _fuzzing;
   _next_trace_id += 1;
   state._start_t = std::move(_start_t);
   _start_t.clear();
@@ -141,6 +143,10 @@ void CUDAAPIProfiler::Print(std::ostream& out, int indent) {
     }
 }
 
+void CUDAAPIProfiler::EnableFuzzing() {
+    _state._fuzzing = true;
+}
+
 void CUDAAPIProfiler::ApiCallback(
         CUpti_CallbackDomain domain,
         CUpti_CallbackId cbid,
@@ -183,13 +189,29 @@ bool CUDAAPIProfilerState::CanDump() {
 }
 
 std::string CUDAAPIProfilerState::DumpPath(int trace_id) {
-  DCHECK(_directory != "") << "You forget to call CUDAAPIProfiler.SetMetadata";
+  DCHECK(_directory != "") << "You forgot to call CUDAAPIProfiler.SetMetadata";
+  DCHECK(_phase_name != "") << "You forgot to call CUDAAPIProfiler.SetMetadata";
+  DCHECK(_process_name != "") << "You forgot to call CUDAAPIProfiler.SetMetadata";
 
   std::stringstream ss;
+
   ss << _directory << path_separator();
-  ss << "cuda_api_stats";
+
+  ss << "process" << path_separator() << _process_name << path_separator();
+  ss << "phase" << path_separator() << _phase_name << path_separator();
+
+  if (_fuzzing) {
+    // $ iml-prof --fuzz-cuda-api
+    ss << "fuzz_cuda_api_stats";
+  } else {
+    // $ iml-prof --cuda-api-calls
+    ss << "cuda_api_stats";
+  }
+
   ss << ".trace_" << trace_id;
+
   ss << ".proto";
+
   return ss.str();
 }
 
@@ -243,6 +265,7 @@ void CUDAAPIProfiler::_AsyncDump() {
     auto dump_state = _state.DumpState();
     _pool.Schedule([dump_state = std::move(dump_state)] () mutable {
       auto path = dump_state.DumpPath(dump_state._trace_id);
+      mkdir_p(os_dirname(path));
       auto proto = dump_state.AsProto();
       std::fstream out(path, std::ios::out | std::ios::trunc | std::ios::binary);
       if (!proto->SerializeToOstream(&out)) {

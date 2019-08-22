@@ -12,6 +12,8 @@
 #include <functional>
 #include <memory>
 
+#include "cuda_api_profiler/registered_handle.h"
+
 #include "tensorflow/core/platform/mutex.h"
 
 namespace tensorflow {
@@ -56,13 +58,20 @@ public:
       CUpti_CallbackDomain domain,
       CUpti_CallbackId cbid, const void *cbdata);
 
-  CuptiCallback::FuncId RegisterCallback(CuptiCallback::Callback callback);
+  RegisteredHandle<CuptiCallback::FuncId> RegisterCallback(CuptiCallback::Callback callback);
 
   CUptiResult EnableCallback(
       uint32_t enable,
       // CUpti_SubscriberHandle subscriber,
       CUpti_CallbackDomain domain,
       CUpti_CallbackId cbid);
+
+  CUptiResult EnableDomain(
+      uint32_t enable,
+      // CUpti_SubscriberHandle subscriber,
+      CUpti_CallbackDomain domain);
+
+  void _CheckCallbacksRegistered();
 
   void UnregisterCallback(CuptiCallback::FuncId func_id);
 

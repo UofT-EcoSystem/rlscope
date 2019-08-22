@@ -1457,7 +1457,14 @@ def is_machine_util_file(path):
 
 def is_cuda_api_stats_file(path):
     base = _b(path)
-    m = re.search(r'cuda_api_stats{trace}\.proto'.format(
+    m = re.search(r'^cuda_api_stats{trace}\.proto'.format(
+        trace=TRACE_SUFFIX_RE,
+    ), base)
+    return m
+
+def is_fuzz_cuda_api_stats_file(path):
+    base = _b(path)
+    m = re.search(r'^fuzz_cuda_api_stats{trace}\.proto'.format(
         trace=TRACE_SUFFIX_RE,
     ), base)
     return m
@@ -1518,6 +1525,8 @@ def is_trace_file(path):
     Does this file contain data that should NOT exist if we re-run IML?
     (this is to prevent keeping data from old runs and interpreting it as being from the same run).
     """
+    # Allow this file to persist so we can use it for analysis...?
+    # is_fuzz_cuda_api_stats_file(path)
     return is_tfprof_file(path) or \
            is_pyprof_file(path) or \
            is_dump_event_file(path) or \

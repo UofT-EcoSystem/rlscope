@@ -22,23 +22,23 @@ using namespace tensorflow;
 CudaAPI::CudaAPI() {
   cudaLaunchKernel = nullptr;
 
-  cudaLaunchKernel_cb_empty_01 = std::move(cudaLaunchKernel_cbs.RegisterCallback(
-      /*start_cb=*/ [] (const void *func, dim3 gridDim, dim3 blockDim, void **args, size_t sharedMem, cudaStream_t stream) {
-        // pass
-      },
-      /*end_cb=*/ [] (const void *func, dim3 gridDim, dim3 blockDim, void **args, size_t sharedMem, cudaStream_t stream, cudaError_t ret) {
-        // pass
-      }));
-  VLOG(1) << "Register func_id = " << cudaLaunchKernel_cb_empty_01.func_id;
-
-  cudaLaunchKernel_cb_empty_02 = std::move(cudaLaunchKernel_cbs.RegisterCallback(
-      /*start_cb=*/ [] (const void *func, dim3 gridDim, dim3 blockDim, void **args, size_t sharedMem, cudaStream_t stream) {
-        // pass
-      },
-      /*end_cb=*/ [] (const void *func, dim3 gridDim, dim3 blockDim, void **args, size_t sharedMem, cudaStream_t stream, cudaError_t ret) {
-        // pass
-      }));
-  VLOG(1) << "Register func_id = " << cudaLaunchKernel_cb_empty_02.func_id;
+//  cudaLaunchKernel_cb_empty_01 = std::move(cudaLaunchKernel_cbs.RegisterCallback(
+//      /*start_cb=*/ [] (const void *func, dim3 gridDim, dim3 blockDim, void **args, size_t sharedMem, cudaStream_t stream) {
+//        // pass
+//      },
+//      /*end_cb=*/ [] (const void *func, dim3 gridDim, dim3 blockDim, void **args, size_t sharedMem, cudaStream_t stream, cudaError_t ret) {
+//        // pass
+//      }));
+//  VLOG(1) << "Register func_id = " << cudaLaunchKernel_cb_empty_01.func_id;
+//
+//  cudaLaunchKernel_cb_empty_02 = std::move(cudaLaunchKernel_cbs.RegisterCallback(
+//      /*start_cb=*/ [] (const void *func, dim3 gridDim, dim3 blockDim, void **args, size_t sharedMem, cudaStream_t stream) {
+//        // pass
+//      },
+//      /*end_cb=*/ [] (const void *func, dim3 gridDim, dim3 blockDim, void **args, size_t sharedMem, cudaStream_t stream, cudaError_t ret) {
+//        // pass
+//      }));
+//  VLOG(1) << "Register func_id = " << cudaLaunchKernel_cb_empty_02.func_id;
 
 }
 

@@ -56,9 +56,12 @@ struct CUDAAPIProfilerState {
   std::string _phase_name;
   int _next_trace_id;
   int _trace_id;
+  bool _fuzzing;
+  // WARNING: if you add a member here, don't forget to copy the field in DumpState()!
   CUDAAPIProfilerState() :
       _next_trace_id(0),
-      _trace_id(-1)
+      _trace_id(-1),
+      _fuzzing(false)
   {
   }
 
@@ -77,6 +80,7 @@ public:
 
   CUDAAPIProfiler();
   ~CUDAAPIProfiler();
+  void EnableFuzzing();
   void ApiCallback(
       CUpti_CallbackDomain domain,
       CUpti_CallbackId cbid,
