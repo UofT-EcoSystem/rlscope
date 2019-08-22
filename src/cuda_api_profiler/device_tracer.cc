@@ -1691,9 +1691,6 @@ Status DeviceTracerImpl::AwaitDump() {
   return Status::OK();
 }
 
-// NOTE: This is called OFF the critical path.
-// HOWEVER, it does silly things like grabbing trace_mu_ and accessing kernel_records_...
-// Should really use the DumpState() pattern to std::move(kernel_records_) and minimize contention on trace_mu_.
 Status DeviceTracerImpl::Collect() {
   mutex_lock l(mu_);
   if (enabled_) {
@@ -1720,50 +1717,50 @@ Status DeviceTracerImpl::Collect() {
   mutex_lock l2(trace_mu_);
 
   // SKIP until we start dumping to our own protobuf.
-  for (const auto &rec : kernel_records_) {
-    auto it = correlations_.find(rec.correlation_id);
-    const string name = (it != correlations_.cend()) ? it->second : "unknown";
-    NodeExecStats *ns = new NodeExecStats;
-    ns->set_all_start_micros(start_walltime_us_ +
-                             ((rec.start_timestamp - start_timestamp_) / 1000));
-    ns->set_op_start_rel_micros(0);
-    auto elapsed_us =
-        std::max<int64>((rec.end_timestamp - rec.start_timestamp) / 1000, 1);
-    ns->set_op_end_rel_micros(elapsed_us);
-    ns->set_all_end_rel_micros(elapsed_us);
-    ns->set_node_name(name);
-    // TODO(pbar) Generate details based on the kernel activity record.
-    // ns->set_timeline_label(details);
-    auto nscopy = new NodeExecStats;
-    *nscopy = *ns;
-    collector->Save(strings::StrCat(stream_device, "all"), ns);
-    collector->Save(strings::StrCat(stream_device, rec.stream_id), nscopy);
-  }
-  for (const auto &rec : memcpy_records_) {
-    auto it = correlations_.find(rec.correlation_id);
-    const string name = (it != correlations_.cend()) ? it->second : "unknown";
-    NodeExecStats *ns = new NodeExecStats;
-    ns->set_all_start_micros(start_walltime_us_ +
-                             ((rec.start_timestamp - start_timestamp_) / 1000));
-    ns->set_op_start_rel_micros(0);
-    auto elapsed_us =
-        std::max<int64>((rec.end_timestamp - rec.start_timestamp) / 1000, 1);
-    ns->set_op_end_rel_micros(elapsed_us);
-    ns->set_all_end_rel_micros(elapsed_us);
-    auto copyKind = static_cast<CUpti_ActivityMemcpyKind>(rec.copyKind);
-    auto srcKind = static_cast<CUpti_ActivityMemoryKind>(rec.srcKind);
-    auto dstKind = static_cast<CUpti_ActivityMemoryKind>(rec.dstKind);
-    const string details = strings::Printf(
-        "MEMCPY%s %llu bytes (%s to %s)", getMemcpyKindString(copyKind),
-        rec.bytes, getMemoryKindString(srcKind), getMemoryKindString(dstKind));
-    ns->set_node_name(
-        strings::StrCat(name, ":MEMCPY", getMemcpyKindString(copyKind)));
-    ns->set_timeline_label(details);
-    auto nscopy = new NodeExecStats;
-    *nscopy = *ns;
-    collector->Save(memcpy_device, ns);
-    collector->Save(strings::StrCat(stream_device, rec.stream_id), nscopy);
-  }
+//  for (const auto &rec : kernel_records_) {
+//    auto it = correlations_.find(rec.correlation_id);
+//    const string name = (it != correlations_.cend()) ? it->second : "unknown";
+//    NodeExecStats *ns = new NodeExecStats;
+//    ns->set_all_start_micros(start_walltime_us_ +
+//                             ((rec.start_timestamp - start_timestamp_) / 1000));
+//    ns->set_op_start_rel_micros(0);
+//    auto elapsed_us =
+//        std::max<int64>((rec.end_timestamp - rec.start_timestamp) / 1000, 1);
+//    ns->set_op_end_rel_micros(elapsed_us);
+//    ns->set_all_end_rel_micros(elapsed_us);
+//    ns->set_node_name(name);
+//    // TODO(pbar) Generate details based on the kernel activity record.
+//    // ns->set_timeline_label(details);
+//    auto nscopy = new NodeExecStats;
+//    *nscopy = *ns;
+//    collector->Save(strings::StrCat(stream_device, "all"), ns);
+//    collector->Save(strings::StrCat(stream_device, rec.stream_id), nscopy);
+//  }
+//  for (const auto &rec : memcpy_records_) {
+//    auto it = correlations_.find(rec.correlation_id);
+//    const string name = (it != correlations_.cend()) ? it->second : "unknown";
+//    NodeExecStats *ns = new NodeExecStats;
+//    ns->set_all_start_micros(start_walltime_us_ +
+//                             ((rec.start_timestamp - start_timestamp_) / 1000));
+//    ns->set_op_start_rel_micros(0);
+//    auto elapsed_us =
+//        std::max<int64>((rec.end_timestamp - rec.start_timestamp) / 1000, 1);
+//    ns->set_op_end_rel_micros(elapsed_us);
+//    ns->set_all_end_rel_micros(elapsed_us);
+//    auto copyKind = static_cast<CUpti_ActivityMemcpyKind>(rec.copyKind);
+//    auto srcKind = static_cast<CUpti_ActivityMemoryKind>(rec.srcKind);
+//    auto dstKind = static_cast<CUpti_ActivityMemoryKind>(rec.dstKind);
+//    const string details = strings::Printf(
+//        "MEMCPY%s %llu bytes (%s to %s)", getMemcpyKindString(copyKind),
+//        rec.bytes, getMemoryKindString(srcKind), getMemoryKindString(dstKind));
+//    ns->set_node_name(
+//        strings::StrCat(name, ":MEMCPY", getMemcpyKindString(copyKind)));
+//    ns->set_timeline_label(details);
+//    auto nscopy = new NodeExecStats;
+//    *nscopy = *ns;
+//    collector->Save(memcpy_device, ns);
+//    collector->Save(strings::StrCat(stream_device, rec.stream_id), nscopy);
+//  }
 
   return Status::OK();
 }
