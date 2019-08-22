@@ -141,6 +141,14 @@ include_directories(
         ./
         ./src
         ./external_libs/include
+        # third_party directory from tensorflow git-repo.
+        # TensorFlow's bazel build system downloads eigen and "mixes" together files from
+        # eigen with files from the git-repo; we forcefully segregate these for sanity into:
+        # 1) $ROOT/third_party:
+        #    files downloaded (usually by bazel, but for iml by setup.sh) from third party projects.
+        # 2) $ROOT/tensorflow/third_party_include
+        #    tensorflow git-repo files.
+        ./tensorflow/third_party_include
 )
 
 
@@ -169,19 +177,45 @@ set(SOURCES)
 # $ find tensorflow -type d
 set(TF_SRC_DIRS
 
-        tensorflow
-        tensorflow/c
-        tensorflow/core
-        tensorflow/core/lib
-        tensorflow/core/lib/hash
-        tensorflow/core/lib/core
-        tensorflow/core/lib/io
-        tensorflow/core/lib/strings
-        tensorflow/core/lib/gtl
-        tensorflow/core/platform
-        tensorflow/core/platform/posix
-        tensorflow/core/platform/default
-#        tensorflow/core/platform/windows
+#        tensorflow
+#        tensorflow/c
+#        tensorflow/core
+#        tensorflow/core/lib
+#        tensorflow/core/lib/hash
+#        tensorflow/core/lib/core
+#        tensorflow/core/lib/io
+#        tensorflow/core/lib/strings
+#        tensorflow/core/lib/gtl
+#        tensorflow/core/platform
+#        tensorflow/core/platform/posix
+#        tensorflow/core/platform/default
+##        tensorflow/core/platform/windows
+#        tensorflow/core/common_runtime
+
+
+    tensorflow
+    tensorflow/c
+    tensorflow/core
+    tensorflow/core/common_runtime
+    tensorflow/core/framework
+    tensorflow/core/lib
+    tensorflow/core/lib/core
+    tensorflow/core/lib/gtl
+    tensorflow/core/lib/hash
+    tensorflow/core/lib/io
+    tensorflow/core/lib/strings
+    tensorflow/core/platform
+    tensorflow/core/platform/default
+    tensorflow/core/platform/posix
+    # tensorflow/core/platform/windows
+    tensorflow/third_party_include
+    tensorflow/third_party_include/third_party
+    tensorflow/third_party_include/third_party/eigen3
+    tensorflow/third_party_include/third_party/eigen3/unsupported
+    tensorflow/third_party_include/third_party/eigen3/unsupported/Eigen
+    tensorflow/third_party_include/third_party/eigen3/unsupported/Eigen/CXX11
+    tensorflow/third_party_include/third_party/eigen3/unsupported/Eigen/CXX11/src
+    tensorflow/third_party_include/third_party/eigen3/unsupported/Eigen/CXX11/src/FixedPoint
 
         )
 
@@ -308,8 +342,18 @@ message("> double_conversion_LIBRARIES = ${double_conversion_LIBRARIES}")
 #   iml/build/error_codes.pb.h
 set(PROTOBUF_GENERATE_CPP_APPEND_PATH OFF)
 protobuf_generate_cpp(PROTO_SRCS PROTO_HDRS
+
+        iml_profiler/protobuf/iml_prof.proto
+
         tensorflow/core/lib/core/error_codes.proto
-        iml_profiler/protobuf/iml_prof.proto)
+
+        tensorflow/core/framework/step_stats.proto
+        tensorflow/core/framework/allocation_description.proto
+        tensorflow/core/framework/tensor_description.proto
+        tensorflow/core/framework/tensor_shape.proto
+        tensorflow/core/framework/types.proto
+
+        )
 message("> PROTO_SRCS = ${PROTO_SRCS}")
 message("> PROTO_HDRS = ${PROTO_HDRS}")
 
