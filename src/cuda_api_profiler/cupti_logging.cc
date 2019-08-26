@@ -906,4 +906,388 @@ const char* runtime_cbid_to_string(CUpti_CallbackId cbid) {
 #undef CUPTI_RUNTIME_CASE
 }
 
+const char *getMemcpyKindString(CUpti_ActivityMemcpyKind kind);
+const char *getMemoryKindString(CUpti_ActivityMemoryKind kind);
+const char *getActivityOverheadKindString(CUpti_ActivityOverheadKind kind);
+uint32_t getActivityObjectKindId(CUpti_ActivityObjectKind kind, CUpti_ActivityObjectKindId *id);
+const char * getActivityObjectKindString(CUpti_ActivityObjectKind kind);
+const char * getComputeApiKindString(CUpti_ActivityComputeApiKind kind);
+const char * getStallReasonString(CUpti_ActivityPCSamplingStallReason reason);
+
+void
+printActivity(const CUpti_Activity *record)
+{
+  switch (record->kind)
+  {
+
+    // Activities that fire when CUPTI_CALL(cuptiActivityEnable(CUPTI_ACTIVITY_KIND_PC_SAMPLING)) is called on Quadro P4000.
+    case CUPTI_ACTIVITY_KIND_SOURCE_LOCATOR:
+    {
+      CUpti_ActivitySourceLocator *sourceLocator = (CUpti_ActivitySourceLocator *)record;
+      printf("Source Locator Id %d, File %s Line %d\n", sourceLocator->id, sourceLocator->fileName, sourceLocator->lineNumber);
+      break;
+    }
+    case CUPTI_ACTIVITY_KIND_PC_SAMPLING:
+    {
+      CUpti_ActivityPCSampling3 *psRecord = (CUpti_ActivityPCSampling3 *)record;
+
+      printf("iml-prof: source %u, functionId %u, pc 0x%llx, corr %u, samples %u, stallreason %s\n",
+             psRecord->sourceLocatorId,
+             psRecord->functionId,
+             (unsigned long long)psRecord->pcOffset,
+             psRecord->correlationId,
+             psRecord->samples,
+             getStallReasonString(psRecord->stallReason));
+      break;
+    }
+    case CUPTI_ACTIVITY_KIND_PC_SAMPLING_RECORD_INFO:
+    {
+      CUpti_ActivityPCSamplingRecordInfo *pcsriResult =
+          (CUpti_ActivityPCSamplingRecordInfo *)(void *)record;
+
+      printf("iml-prof: corr %u, totalSamples %llu, droppedSamples %llu\n",
+             pcsriResult->correlationId,
+             (unsigned long long)pcsriResult->totalSamples,
+             (unsigned long long)pcsriResult->droppedSamples);
+      break;
+    }
+    case CUPTI_ACTIVITY_KIND_FUNCTION:
+    {
+      CUpti_ActivityFunction *fResult =
+          (CUpti_ActivityFunction *)record;
+
+      printf("iml-prof: id %u, ctx %u, moduleId %u, functionIndex %u, name %s\n",
+             fResult->id,
+             fResult->contextId,
+             fResult->moduleId,
+             fResult->functionIndex,
+             fResult->name);
+      break;
+    }
+
+
+    case CUPTI_ACTIVITY_KIND_DEVICE:
+    {
+      CUpti_ActivityDevice2 *device = (CUpti_ActivityDevice2 *) record;
+      printf("iml-prof: DEVICE %s (%u), capability %u.%u, global memory (bandwidth %u GB/s, size %u MB), "
+             "multiprocessors %u, clock %u MHz\n",
+             device->name, device->id,
+             device->computeCapabilityMajor, device->computeCapabilityMinor,
+             (unsigned int) (device->globalMemoryBandwidth / 1024 / 1024),
+             (unsigned int) (device->globalMemorySize / 1024 / 1024),
+             device->numMultiprocessors, (unsigned int) (device->coreClockRate / 1000));
+      break;
+    }
+    case CUPTI_ACTIVITY_KIND_DEVICE_ATTRIBUTE:
+    {
+      CUpti_ActivityDeviceAttribute *attribute = (CUpti_ActivityDeviceAttribute *)record;
+      printf("iml-prof: DEVICE_ATTRIBUTE %u, device %u, value=0x%llx\n",
+             attribute->attribute.cupti, attribute->deviceId, (unsigned long long)attribute->value.vUint64);
+      break;
+    }
+    case CUPTI_ACTIVITY_KIND_CONTEXT:
+    {
+      CUpti_ActivityContext *context = (CUpti_ActivityContext *) record;
+      printf("iml-prof: CONTEXT %u, device %u, compute API %s, NULL stream %d\n",
+             context->contextId, context->deviceId,
+             getComputeApiKindString((CUpti_ActivityComputeApiKind) context->computeApiKind),
+             (int) context->nullStreamId);
+      break;
+    }
+    case CUPTI_ACTIVITY_KIND_MEMCPY:
+    {
+      CUpti_ActivityMemcpy *memcpy = (CUpti_ActivityMemcpy *) record;
+      printf("iml-prof: MEMCPY %s [ %llu - %llu ] device %u, context %u, stream %u, correlation %u/r%u\n",
+             getMemcpyKindString((CUpti_ActivityMemcpyKind) memcpy->copyKind),
+//             (unsigned long long) (memcpy->start - startTimestamp),
+//             (unsigned long long) (memcpy->end - startTimestamp),
+             (unsigned long long) (memcpy->start),
+             (unsigned long long) (memcpy->end),
+             memcpy->deviceId, memcpy->contextId, memcpy->streamId,
+             memcpy->correlationId, memcpy->runtimeCorrelationId);
+      break;
+    }
+    case CUPTI_ACTIVITY_KIND_MEMSET:
+    {
+      CUpti_ActivityMemset *memset = (CUpti_ActivityMemset *) record;
+      printf("iml-prof: MEMSET value=%u [ %llu - %llu ] device %u, context %u, stream %u, correlation %u\n",
+             memset->value,
+//             (unsigned long long) (memset->start - startTimestamp),
+//             (unsigned long long) (memset->end - startTimestamp),
+             (unsigned long long) (memset->start),
+             (unsigned long long) (memset->end),
+             memset->deviceId, memset->contextId, memset->streamId,
+             memset->correlationId);
+      break;
+    }
+    case CUPTI_ACTIVITY_KIND_KERNEL:
+    case CUPTI_ACTIVITY_KIND_CONCURRENT_KERNEL:
+    {
+      const char* kindString = (record->kind == CUPTI_ACTIVITY_KIND_KERNEL) ? "KERNEL" : "CONC KERNEL";
+      CUpti_ActivityKernel4 *kernel = (CUpti_ActivityKernel4 *) record;
+      printf("iml-prof: %s \"%s\" [ %llu - %llu ] device %u, context %u, stream %u, correlation %u\n",
+             kindString,
+             kernel->name,
+//             (unsigned long long) (kernel->start - startTimestamp),
+//             (unsigned long long) (kernel->end - startTimestamp),
+             (unsigned long long) (kernel->start),
+             (unsigned long long) (kernel->end),
+             kernel->deviceId, kernel->contextId, kernel->streamId,
+             kernel->correlationId);
+      printf("    grid [%u,%u,%u], block [%u,%u,%u], shared memory (static %u, dynamic %u)\n",
+             kernel->gridX, kernel->gridY, kernel->gridZ,
+             kernel->blockX, kernel->blockY, kernel->blockZ,
+             kernel->staticSharedMemory, kernel->dynamicSharedMemory);
+      break;
+    }
+    case CUPTI_ACTIVITY_KIND_DRIVER:
+    {
+      CUpti_ActivityAPI *api = (CUpti_ActivityAPI *) record;
+      printf("iml-prof: DRIVER cbid=%u [ %llu - %llu ] process %u, thread %u, correlation %u\n",
+             api->cbid,
+//             (unsigned long long) (api->start - startTimestamp),
+//             (unsigned long long) (api->end - startTimestamp),
+             (unsigned long long) (api->start),
+             (unsigned long long) (api->end),
+             api->processId, api->threadId, api->correlationId);
+      break;
+    }
+    case CUPTI_ACTIVITY_KIND_RUNTIME:
+    {
+      CUpti_ActivityAPI *api = (CUpti_ActivityAPI *) record;
+      printf("iml-prof: RUNTIME cbid=%u [ %llu - %llu ] process %u, thread %u, correlation %u\n",
+             api->cbid,
+//             (unsigned long long) (api->start - startTimestamp),
+//             (unsigned long long) (api->end - startTimestamp),
+             (unsigned long long) (api->start),
+             (unsigned long long) (api->end),
+             api->processId, api->threadId, api->correlationId);
+      break;
+    }
+    case CUPTI_ACTIVITY_KIND_NAME:
+    {
+      CUpti_ActivityName *name = (CUpti_ActivityName *) record;
+      switch (name->objectKind)
+      {
+        case CUPTI_ACTIVITY_OBJECT_CONTEXT:
+          printf("iml-prof: NAME  %s %u %s id %u, name %s\n",
+                 getActivityObjectKindString(name->objectKind),
+                 getActivityObjectKindId(name->objectKind, &name->objectId),
+                 getActivityObjectKindString(CUPTI_ACTIVITY_OBJECT_DEVICE),
+                 getActivityObjectKindId(CUPTI_ACTIVITY_OBJECT_DEVICE, &name->objectId),
+                 name->name);
+          break;
+        case CUPTI_ACTIVITY_OBJECT_STREAM:
+          printf("iml-prof: NAME %s %u %s %u %s id %u, name %s\n",
+                 getActivityObjectKindString(name->objectKind),
+                 getActivityObjectKindId(name->objectKind, &name->objectId),
+                 getActivityObjectKindString(CUPTI_ACTIVITY_OBJECT_CONTEXT),
+                 getActivityObjectKindId(CUPTI_ACTIVITY_OBJECT_CONTEXT, &name->objectId),
+                 getActivityObjectKindString(CUPTI_ACTIVITY_OBJECT_DEVICE),
+                 getActivityObjectKindId(CUPTI_ACTIVITY_OBJECT_DEVICE, &name->objectId),
+                 name->name);
+          break;
+        default:
+          printf("iml-prof: NAME %s id %u, name %s\n",
+                 getActivityObjectKindString(name->objectKind),
+                 getActivityObjectKindId(name->objectKind, &name->objectId),
+                 name->name);
+          break;
+      }
+      break;
+    }
+    case CUPTI_ACTIVITY_KIND_MARKER:
+    {
+      CUpti_ActivityMarker2 *marker = (CUpti_ActivityMarker2 *) record;
+      printf("iml-prof: MARKER id %u [ %llu ], name %s, domain %s\n",
+             marker->id, (unsigned long long) marker->timestamp, marker->name, marker->domain);
+      break;
+    }
+    case CUPTI_ACTIVITY_KIND_MARKER_DATA:
+    {
+      CUpti_ActivityMarkerData *marker = (CUpti_ActivityMarkerData *) record;
+      printf("iml-prof: MARKER_DATA id %u, color 0x%x, category %u, payload %llu/%f\n",
+             marker->id, marker->color, marker->category,
+             (unsigned long long) marker->payload.metricValueUint64,
+             marker->payload.metricValueDouble);
+      break;
+    }
+    case CUPTI_ACTIVITY_KIND_OVERHEAD:
+    {
+      CUpti_ActivityOverhead *overhead = (CUpti_ActivityOverhead *) record;
+      printf("iml-prof: OVERHEAD %s [ %llu, %llu ] %s id %u\n",
+             getActivityOverheadKindString(overhead->overheadKind),
+//             (unsigned long long) overhead->start - startTimestamp,
+//             (unsigned long long) overhead->end - startTimestamp,
+             (unsigned long long) overhead->start,
+             (unsigned long long) overhead->end,
+             getActivityObjectKindString(overhead->objectKind),
+             getActivityObjectKindId(overhead->objectKind, &overhead->objectId));
+      break;
+    }
+    default:
+      printf("iml-prof: <unknown>\n");
+      break;
+  }
+}
+
+const char *
+getActivityObjectKindString(CUpti_ActivityObjectKind kind)
+{
+  switch (kind) {
+    case CUPTI_ACTIVITY_OBJECT_PROCESS:
+      return "PROCESS";
+    case CUPTI_ACTIVITY_OBJECT_THREAD:
+      return "THREAD";
+    case CUPTI_ACTIVITY_OBJECT_DEVICE:
+      return "DEVICE";
+    case CUPTI_ACTIVITY_OBJECT_CONTEXT:
+      return "CONTEXT";
+    case CUPTI_ACTIVITY_OBJECT_STREAM:
+      return "STREAM";
+    default:
+      break;
+  }
+
+  return "<unknown>";
+}
+
+uint32_t
+getActivityObjectKindId(CUpti_ActivityObjectKind kind, CUpti_ActivityObjectKindId *id)
+{
+  switch (kind) {
+    case CUPTI_ACTIVITY_OBJECT_PROCESS:
+      return id->pt.processId;
+    case CUPTI_ACTIVITY_OBJECT_THREAD:
+      return id->pt.threadId;
+    case CUPTI_ACTIVITY_OBJECT_DEVICE:
+      return id->dcs.deviceId;
+    case CUPTI_ACTIVITY_OBJECT_CONTEXT:
+      return id->dcs.contextId;
+    case CUPTI_ACTIVITY_OBJECT_STREAM:
+      return id->dcs.streamId;
+    default:
+      break;
+  }
+
+  return 0xffffffff;
+}
+
+const char *
+getStallReasonString(CUpti_ActivityPCSamplingStallReason reason)
+{
+  switch (reason) {
+    case CUPTI_ACTIVITY_PC_SAMPLING_STALL_INVALID:
+      return "Invalid";
+    case CUPTI_ACTIVITY_PC_SAMPLING_STALL_NONE:
+      return "Selected";
+    case CUPTI_ACTIVITY_PC_SAMPLING_STALL_INST_FETCH:
+      return "Instruction fetch";
+    case CUPTI_ACTIVITY_PC_SAMPLING_STALL_EXEC_DEPENDENCY:
+      return "Execution dependency";
+    case CUPTI_ACTIVITY_PC_SAMPLING_STALL_MEMORY_DEPENDENCY:
+      return "Memory dependency";
+    case CUPTI_ACTIVITY_PC_SAMPLING_STALL_TEXTURE:
+      return "Texture";
+    case CUPTI_ACTIVITY_PC_SAMPLING_STALL_SYNC:
+      return "Sync";
+    case CUPTI_ACTIVITY_PC_SAMPLING_STALL_CONSTANT_MEMORY_DEPENDENCY:
+      return "Constant memory dependency";
+    case CUPTI_ACTIVITY_PC_SAMPLING_STALL_PIPE_BUSY:
+      return "Pipe busy";
+    case CUPTI_ACTIVITY_PC_SAMPLING_STALL_MEMORY_THROTTLE:
+      return "Memory throttle";
+    case CUPTI_ACTIVITY_PC_SAMPLING_STALL_NOT_SELECTED:
+      return "Not selected";
+    case CUPTI_ACTIVITY_PC_SAMPLING_STALL_OTHER:
+      return "Other";
+    case CUPTI_ACTIVITY_PC_SAMPLING_STALL_SLEEPING:
+      return "Sleeping";
+    default:
+      break;
+  }
+
+  return "<unknown>";
+}
+
+const char *
+getComputeApiKindString(CUpti_ActivityComputeApiKind kind)
+{
+  switch (kind) {
+    case CUPTI_ACTIVITY_COMPUTE_API_CUDA:
+      return "CUDA";
+    case CUPTI_ACTIVITY_COMPUTE_API_CUDA_MPS:
+      return "CUDA_MPS";
+    default:
+      break;
+  }
+
+  return "<unknown>";
+}
+
+// Maps a MemcpyKind enum to a const string.
+const char *getMemcpyKindString(CUpti_ActivityMemcpyKind kind) {
+  switch (kind) {
+    case CUPTI_ACTIVITY_MEMCPY_KIND_HTOD:
+      return "HtoD";
+    case CUPTI_ACTIVITY_MEMCPY_KIND_DTOH:
+      return "DtoH";
+    case CUPTI_ACTIVITY_MEMCPY_KIND_HTOA:
+      return "HtoA";
+    case CUPTI_ACTIVITY_MEMCPY_KIND_ATOH:
+      return "AtoH";
+    case CUPTI_ACTIVITY_MEMCPY_KIND_ATOA:
+      return "AtoA";
+    case CUPTI_ACTIVITY_MEMCPY_KIND_ATOD:
+      return "AtoD";
+    case CUPTI_ACTIVITY_MEMCPY_KIND_DTOA:
+      return "DtoA";
+    case CUPTI_ACTIVITY_MEMCPY_KIND_DTOD:
+      return "DtoD";
+    case CUPTI_ACTIVITY_MEMCPY_KIND_HTOH:
+      return "HtoH";
+    case CUPTI_ACTIVITY_MEMCPY_KIND_PTOP:
+      return "PtoP";
+    default:
+      break;
+  }
+  return "<unknown>";
+}
+
+// Maps a MemoryKind enum to a const string.
+const char *getMemoryKindString(CUpti_ActivityMemoryKind kind) {
+  switch (kind) {
+    case CUPTI_ACTIVITY_MEMORY_KIND_UNKNOWN:
+      return "Unknown";
+    case CUPTI_ACTIVITY_MEMORY_KIND_PAGEABLE:
+      return "Pageable";
+    case CUPTI_ACTIVITY_MEMORY_KIND_PINNED:
+      return "Pinned";
+    case CUPTI_ACTIVITY_MEMORY_KIND_DEVICE:
+      return "Device";
+    case CUPTI_ACTIVITY_MEMORY_KIND_ARRAY:
+      return "Array";
+    default:
+      break;
+  }
+  return "<unknown>";
+}
+
+// Maps an OverheadKind enum to a const string.
+const char *getActivityOverheadKindString(CUpti_ActivityOverheadKind kind) {
+  switch (kind) {
+    case CUPTI_ACTIVITY_OVERHEAD_DRIVER_COMPILER:
+      return "COMPILER";
+    case CUPTI_ACTIVITY_OVERHEAD_CUPTI_BUFFER_FLUSH:
+      return "BUFFER_FLUSH";
+    case CUPTI_ACTIVITY_OVERHEAD_CUPTI_INSTRUMENTATION:
+      return "INSTRUMENTATION";
+    case CUPTI_ACTIVITY_OVERHEAD_CUPTI_RESOURCE:
+      return "RESOURCE";
+    default:
+      break;
+  }
+  return "<unknown>";
+}
+
 }

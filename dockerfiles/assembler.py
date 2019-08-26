@@ -1767,7 +1767,12 @@ class StackYMLGenerator:
                 # docker run --cap-add=SYS_ADMIN
                 # We need this, otherwise libcupti PC sampling fails with CUPTI_ERROR_INSUFFICIENT_PRIVILEGES during cuptiActivityConfigurePCSampling.
                 cap_add:
-                - SYS_ADMIN
+                  - SYS_ADMIN
+                  - SYS_PTRACE
+                security_opt:
+                  # Allow us to debug with gdb inside container:
+                  # https://stackoverflow.com/questions/35860527/warning-error-disabling-address-space-randomization-operation-not-permitted
+                  - seccomp:unconfined
                 
                 logging:
                     driver: journald

@@ -2,6 +2,38 @@ syntax = "proto3";
 
 package iml;
 
+enum CudaEventType {
+    UNKNOWN = 0;
+    KERNEL = 1;
+    MEMCPY = 2;
+    MEMSET = 3;
+}
+
+// A single event on a GPU (e.g. memcpy, cudaLaunchKernel).
+message CUDAEventProto {
+    string name = 1;
+    CudaEventType cuda_event_type = 2;
+    int64 start_time_us = 3;
+    int64 duration_us = 4;
+}
+
+// Events belonging to a GPU.
+message DevEventsProto {
+    string device_name = 1;
+    repeated CUDAEventProto events = 2;
+}
+
+message MachineDevsEventsProto {
+    string process_name = 1;
+    string phase = 2;
+    string machine_name = 3;
+
+    // One for each device_name.
+//    repeated DevEventsProto events = 4;
+    map<string, DevEventsProto> dev_events = 4;
+}
+
+
 //
 // Collect stats about CUDA runtime/driver API calls.
 //
@@ -14,12 +46,23 @@ message CUDAAPIThreadStatsProto {
     int64 num_calls = 4;
 }
 
+message CUDAAPIEvent {
+    // POSIX thread_id
+    int64 tid = 1;
+    // e.g. cudaLaunchKernel
+    string api_name = 2;
+    int64 start_time_us = 3;
+    int64 duration_us = 4;
+}
+
 // cuda_api_phase_stats*.proto
 message CUDAAPIPhaseStatsProto {
     string process_name = 1;
     string machine_name = 2;
     string phase = 3;
     repeated CUDAAPIThreadStatsProto stats = 4;
+    // Optional: raw start/end timestamps of CUDA API calls.
+    repeated CUDAAPIEvent events = 5;
 }
 
 //

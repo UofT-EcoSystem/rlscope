@@ -47,6 +47,8 @@ std::ostream& PrintIndent(std::ostream& out, int indent);
 const char* runtime_cbid_to_string(CUpti_CallbackId cbid);
 const char* driver_cbid_to_string(CUpti_CallbackId cbid);
 
+void printActivity(const CUpti_Activity *record);
+
 //inline static void MAYBE_LOG_ERROR(std::ostream&& out, const char* func, const Status& status) {
 //  if (status.code() != Status::OK().code()) {
 //    out << "iml-prof C++ API '" << func << "' failed with: " << status;

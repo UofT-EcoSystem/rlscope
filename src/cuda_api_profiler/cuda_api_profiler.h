@@ -42,6 +42,8 @@ struct CUDAAPIStats {
 // TODO: We need to dump this information to a protobuf, ideally separate from tfprof protobuf
 // so that we can record/dump this even if tfprof is disabled (uninstrumented runs).
 
+struct CUDAAPICallRecord;
+
 struct CUDAAPIProfilerState {
   // (thread-id, api-cbid)
   using APIKey = std::tuple<pid_t, CUpti_CallbackDomain, CUpti_CallbackId>;
@@ -57,11 +59,16 @@ struct CUDAAPIProfilerState {
   int _next_trace_id;
   int _trace_id;
   bool _fuzzing;
+  bool _event_recording;
+
+  std::list<CUDAAPICallRecord> _events;
+
   // WARNING: if you add a member here, don't forget to copy the field in DumpState()!
   CUDAAPIProfilerState() :
       _next_trace_id(0),
       _trace_id(-1),
-      _fuzzing(false)
+      _fuzzing(false),
+      _event_recording(false)
   {
   }
 
@@ -69,7 +76,20 @@ struct CUDAAPIProfilerState {
   std::string DumpPath(int trace_id);
   CUDAAPIProfilerState DumpState();
   std::unique_ptr<iml::CUDAAPIPhaseStatsProto> AsProto();
+  std::tuple<pid_t, const char*> _GetTidApiName(APIKey api_key);
 
+};
+
+struct CUDAAPICallRecord {
+  CUDAAPIProfilerState::APIKey api_key;
+  CUDAAPIProfilerState::TimeUsec start_us;
+  CUDAAPIProfilerState::TimeUsec duration_us;
+  CUDAAPICallRecord(CUDAAPIProfilerState::APIKey api_key, CUDAAPIProfilerState::TimeUsec start_us, CUDAAPIProfilerState::TimeUsec duration_us) :
+      api_key(api_key),
+      start_us(start_us),
+      duration_us(duration_us)
+  {
+  }
 };
 
 class CUDAAPIProfiler {
@@ -81,6 +101,7 @@ public:
   CUDAAPIProfiler();
   ~CUDAAPIProfiler();
   void EnableFuzzing();
+  void EnableEventRecording();
   void ApiCallback(
       CUpti_CallbackDomain domain,
       CUpti_CallbackId cbid,

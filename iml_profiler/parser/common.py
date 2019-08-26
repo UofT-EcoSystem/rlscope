@@ -1462,6 +1462,13 @@ def is_cuda_api_stats_file(path):
     ), base)
     return m
 
+def is_cuda_device_events_file(path):
+    base = _b(path)
+    m = re.search(r'^cuda_device_events{trace}\.proto'.format(
+        trace=TRACE_SUFFIX_RE,
+    ), base)
+    return m
+
 def is_fuzz_cuda_api_stats_file(path):
     base = _b(path)
     m = re.search(r'^fuzz_cuda_api_stats{trace}\.proto'.format(
@@ -1518,7 +1525,8 @@ def is_insertable_file(path):
            is_pyprof_call_times_file(path) or \
            is_machine_util_file(path) or \
            is_training_progress_file(path) or \
-           is_cuda_api_stats_file(path)
+           is_cuda_api_stats_file(path) or \
+           is_cuda_device_events_file(path)
 
 def is_trace_file(path):
     """
@@ -1537,7 +1545,8 @@ def is_trace_file(path):
            is_config_file(path) or \
            is_process_metadata_file(path) or \
            is_training_progress_file(path) or \
-           is_cuda_api_stats_file(path)
+           is_cuda_api_stats_file(path) or \
+           is_cuda_device_events_file(path)
 
 def is_process_trace_file(path):
     """

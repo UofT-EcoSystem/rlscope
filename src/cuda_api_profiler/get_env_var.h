@@ -32,6 +32,9 @@ static inline char path_separator()
 #endif
 }
 
+bool is_yes(const char* env_var, bool default_value);
+bool is_no(const char* env_var, bool default_value);
+
 }
 
 #endif //IML_GET_ENV_VAR_H

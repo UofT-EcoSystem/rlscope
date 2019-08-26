@@ -57,7 +57,12 @@ CUDAAPIProfilerState CUDAAPIProfilerState::DumpState() {
   state._phase_name = _phase_name;
   state._trace_id = _next_trace_id;
   state._fuzzing = _fuzzing;
+  state._event_recording = _event_recording;
   _next_trace_id += 1;
+
+  state._events = std::move(_events);
+  _events.clear();
+
   state._start_t = std::move(_start_t);
   _start_t.clear();
   state._end_t = std::move(_end_t);
@@ -68,29 +73,48 @@ CUDAAPIProfilerState CUDAAPIProfilerState::DumpState() {
   return state;
 }
 
+std::tuple<pid_t, const char*> CUDAAPIProfilerState::_GetTidApiName(APIKey api_key) {
+  auto tid = std::get<0>(api_key);
+  auto domain = std::get<1>(api_key);
+  auto cbid = std::get<2>(api_key);
+  const char* name;
+  if (domain == CUPTI_CB_DOMAIN_RUNTIME_API) {
+    name = runtime_cbid_to_string(cbid);
+  } else if (domain == CUPTI_CB_DOMAIN_DRIVER_API) {
+    name = driver_cbid_to_string(cbid);
+  } else {
+    name = "UNKNOWN";
+  }
+  return std::make_tuple(tid, name);
+}
+
 std::unique_ptr<iml::CUDAAPIPhaseStatsProto> CUDAAPIProfilerState::AsProto() {
   std::unique_ptr<iml::CUDAAPIPhaseStatsProto> proto(new iml::CUDAAPIPhaseStatsProto);
   proto->set_process_name(_process_name);
   proto->set_machine_name(_machine_name);
   proto->set_phase(_phase_name);
   for (auto const& pair : _api_stats) {
-    auto tid = std::get<0>(pair.first);
-    auto domain = std::get<1>(pair.first);
-    auto cbid = std::get<2>(pair.first);
-    const char* name;
-    if (domain == CUPTI_CB_DOMAIN_RUNTIME_API) {
-      name = runtime_cbid_to_string(cbid);
-    } else if (domain == CUPTI_CB_DOMAIN_DRIVER_API) {
-      name = driver_cbid_to_string(cbid);
-    } else {
-      name = "UNKNOWN";
-    }
+    auto tid_name = _GetTidApiName(pair.first);
+    auto tid = std::get<0>(tid_name);
+    auto name = std::get<1>(tid_name);
 
     auto thread_stats = proto->add_stats();
     thread_stats->set_tid(tid);
     thread_stats->set_api_name(name);
     thread_stats->set_total_time_us(pair.second.total_api_time_usec);
     thread_stats->set_num_calls(pair.second.n_calls);
+  }
+
+  for (auto const& event : _events) {
+    auto tid_name = _GetTidApiName(event.api_key);
+    auto tid = std::get<0>(tid_name);
+    auto name = std::get<1>(tid_name);
+
+    auto event_proto = proto->add_events();
+    event_proto->set_tid(tid);
+    event_proto->set_api_name(name);
+    event_proto->set_start_time_us(event.start_us);
+    event_proto->set_duration_us(event.duration_us);
   }
 
   return proto;
@@ -147,32 +171,70 @@ void CUDAAPIProfiler::EnableFuzzing() {
     _state._fuzzing = true;
 }
 
+void CUDAAPIProfiler::EnableEventRecording() {
+  _state._event_recording = true;
+}
+
 void CUDAAPIProfiler::ApiCallback(
-        CUpti_CallbackDomain domain,
-        CUpti_CallbackId cbid,
+    CUpti_CallbackDomain domain,
+    CUpti_CallbackId cbid,
 //        const void *cbdata
-        CUpti_ApiCallbackSite cb_site
-        ) {
-    if (domain == CUPTI_CB_DOMAIN_DRIVER_API || domain == CUPTI_CB_DOMAIN_RUNTIME_API) {
+    CUpti_ApiCallbackSite cb_site
+) {
+  if (domain == CUPTI_CB_DOMAIN_DRIVER_API || domain == CUPTI_CB_DOMAIN_RUNTIME_API) {
 //        auto *cbInfo = reinterpret_cast<const CUpti_CallbackData *>(cbdata);
-        std::map<CUDAAPIProfilerState::APIKey, CUDAAPIProfilerState::TimeUsec>* timestamp_map;
-        if (cb_site == CUPTI_API_ENTER) {
-            timestamp_map = &_state._start_t;
-        } else {
-            timestamp_map = &_state._end_t;
+
+//    std::map<CUDAAPIProfilerState::APIKey, CUDAAPIProfilerState::TimeUsec>* timestamp_map;
+//    if (cb_site == CUPTI_API_ENTER) {
+//      timestamp_map = &_state._start_t;
+//    } else {
+//      timestamp_map = &_state._end_t;
+//    }
+
+    auto api_key = std::make_tuple(gettid(), domain, cbid);
+
+    {
+      mutex_lock l(_mu);
+
+      if (cb_site == CUPTI_API_EXIT) {
+
+        auto start_us = _state._start_t.at(api_key);
+        if (_state._event_recording) {
+          // auto duration_us = end_us - start_us;
+          _state._events.emplace_back(api_key, start_us, -1);
         }
-        auto api_key = std::make_tuple(gettid(), domain, cbid);
+        auto& api_stats = _state._api_stats[api_key];
+        auto& end_t = _state._end_t[api_key];
+        // Capture as much profiling book-keeping overhead as we can before getting now_us.
+        // - Looking up stuff in hash-maps.
+        // - Allocating list-entries.
+        auto now_us = Env::Default()->NowMicros();
 
-        {
-            mutex_lock l(_mu);
-
-            (*timestamp_map)[api_key] = Env::Default()->NowMicros();
-            if (cb_site == CUPTI_API_EXIT) {
-                _state._api_stats[api_key].AddCall(_state._start_t.at(api_key), _state._end_t.at(api_key));
-            }
+        if (_state._event_recording) {
+          // Now that we have now_us, fixup the event we recorded with the correct duration_us.
+          auto last = _state._events.end();
+          last--;
+          auto end_us = now_us;
+          auto duration_us = end_us - start_us;
+          DCHECK(last->duration_us == -1);
+          last->duration_us = duration_us;
         }
-
+        auto end_us = now_us;
+        // auto end_us = _state._end_t.at(api_key);
+        // _state._api_stats[api_key].AddCall(start_us, end_us);
+        api_stats.AddCall(start_us, end_us);
+        // _state._end_t[api_key] = now_us;
+        end_t = now_us;
+      } else if (cb_site == CUPTI_API_ENTER) {
+//        auto& start_t = _state._start_t[api_key];
+//        auto now_us = Env::Default()->NowMicros();
+//        start_t = now_us;
+        _state._start_t[api_key] = Env::Default()->NowMicros();
+        // (*timestamp_map)[api_key] = now_us;
+      }
     }
+
+  }
 }
 
 CUDAAPIProfiler::CUDAAPIProfiler() :

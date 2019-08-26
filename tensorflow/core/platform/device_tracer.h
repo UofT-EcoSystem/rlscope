@@ -77,7 +77,7 @@ class DeviceTracer {
   // Collect trace results.  Results are added to the specified
   // StepStatsCollector.  Does not clear any existing stats.
   // It is an error to call 'Collect' while a trace is running.
-  virtual Status Collect() = 0;
+//  virtual Status Collect() = 0;
 
 #ifdef CONFIG_TRACE_STATS
   virtual bool IsEnabled() = 0;

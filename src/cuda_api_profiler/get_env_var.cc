@@ -65,4 +65,17 @@ bool env_is_on(const char* var, bool dflt, bool debug) {
   return ret;
 }
 
+bool is_yes(const char* env_var, bool default_value) {
+  if (getenv(env_var) == nullptr) {
+    return default_value;
+  }
+  return strcmp("yes", getenv(env_var)) == 0;
+}
+bool is_no(const char* env_var, bool default_value) {
+  if (getenv(env_var) == nullptr) {
+    return default_value;
+  }
+  return strcmp("no", getenv(env_var)) == 0;
+}
+
 }

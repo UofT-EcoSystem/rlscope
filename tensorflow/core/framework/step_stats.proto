@@ -15,7 +15,7 @@ message NodeExecStats {
   // the full string name.  Either all processes should agree on a
   // global id (cost_id?) for each node, or we should use a hash of
   // the name.
-  string node_name = 1;
+//  string node_name = 1;
   int64 all_start_micros = 2;
   int64 op_start_rel_micros = 3;
   int64 op_end_rel_micros = 4;
