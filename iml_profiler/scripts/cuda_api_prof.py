@@ -79,6 +79,15 @@ def main():
                         
                         Effect: sets "export IML_STREAM_SAMPLING=yes" for libsample_cuda_api.so.
                         """))
+    parser.add_argument('--config',
+                        choices=['interception',
+                                 'no-interception',
+                                 ],
+                        help=textwrap.dedent("""
+                        Start tracing right at application startup.
+                        
+                        Effect: sets "export IML_TRACE_AT_START=yes" for libsample_cuda_api.so.
+                        """))
     args = parser.parse_args(iml_prof_argv)
 
     env = dict(os.environ)
@@ -106,6 +115,18 @@ def main():
     add_env['LD_PRELOAD'] = "{ld}:{so_path}".format(
         ld=env.get('LD_PRELOAD', ''),
         so_path=so_path)
+
+    if args.config is not None:
+        if args.config == 'interception':
+            "iml-prof --debug --cuda-api-calls --cuda-api-events --iml-disable"
+            args.cuda_api_calls = True
+            args.cuda_api_events = True
+            args.iml_disable = True
+        elif args.config == 'no-interception':
+            "iml-prof --debug --iml-disable"
+            args.iml_disable = True
+        else:
+            raise NotImplementedError()
 
     if args.fuzz_cuda_api and args.cuda_api_calls:
         parser.error("Can only run iml-prof with --fuzz-cuda-api or --cuda-api-calls, not both")

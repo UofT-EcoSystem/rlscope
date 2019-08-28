@@ -193,11 +193,11 @@ void CUDAAPIProfiler::ApiCallback(
 
     auto api_key = std::make_tuple(gettid(), domain, cbid);
 
+    // This code will capture as much "profile-book-keeping overhead" added by this code as possible.
+    // If we want to subtract from CUDA API events, we need those CUDA API events to capture the total overhead.
     {
       mutex_lock l(_mu);
-
       if (cb_site == CUPTI_API_EXIT) {
-
         auto start_us = _state._start_t.at(api_key);
         if (_state._event_recording) {
           // auto duration_us = end_us - start_us;
@@ -209,7 +209,6 @@ void CUDAAPIProfiler::ApiCallback(
         // - Looking up stuff in hash-maps.
         // - Allocating list-entries.
         auto now_us = Env::Default()->NowMicros();
-
         if (_state._event_recording) {
           // Now that we have now_us, fixup the event we recorded with the correct duration_us.
           auto last = _state._events.end();
@@ -226,13 +225,32 @@ void CUDAAPIProfiler::ApiCallback(
         // _state._end_t[api_key] = now_us;
         end_t = now_us;
       } else if (cb_site == CUPTI_API_ENTER) {
-//        auto& start_t = _state._start_t[api_key];
-//        auto now_us = Env::Default()->NowMicros();
-//        start_t = now_us;
         _state._start_t[api_key] = Env::Default()->NowMicros();
-        // (*timestamp_map)[api_key] = now_us;
       }
     }
+
+//    // This code will JUST capture the time spent in the CUDA API call when measuring time.
+//    // In particular, it WON'T include "profile-book-keeping" overhead in the measurement.
+//    {
+//      mutex_lock l(_mu);
+//      if (cb_site == CUPTI_API_EXIT) {
+//        auto now_us = Env::Default()->NowMicros();
+//        auto start_us = _state._start_t.at(api_key);
+//        if (_state._event_recording) {
+//           auto duration_us = end_us - start_us;
+//          _state._events.emplace_back(api_key, start_us, duration_us);
+//        }
+//        auto& api_stats = _state._api_stats[api_key];
+//        auto& end_t = _state._end_t[api_key];
+//        auto end_us = now_us;
+//        api_stats.AddCall(start_us, end_us);
+//        end_t = now_us;
+//      } else if (cb_site == CUPTI_API_ENTER) {
+//        _state._start_t[api_key] = Env::Default()->NowMicros();
+//      }
+//    }
+
+
 
   }
 }

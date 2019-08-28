@@ -22,6 +22,7 @@ import psutil
 import pwd
 from iml_profiler.protobuf.pyprof_pb2 import Pyprof, MachineUtilization, ProcessMetadata, IncrementalTrainingProgress
 from iml_profiler.protobuf.unit_test_pb2 import IMLUnitTestOnce, IMLUnitTestMultiple
+from iml_profiler.protobuf.iml_prof_pb2 import CUDAAPIPhaseStatsProto
 from tqdm import tqdm as tqdm_progress
 
 USEC_IN_SEC = 1e6
@@ -1402,6 +1403,9 @@ def read_tfprof_file(path):
 
 def read_machine_util_file(path):
     return read_proto(MachineUtilization, path)
+
+def read_cuda_api_stats_file(path):
+    return read_proto(CUDAAPIPhaseStatsProto, path)
 
 def read_training_progress_file(path):
     return read_proto(IncrementalTrainingProgress, path)

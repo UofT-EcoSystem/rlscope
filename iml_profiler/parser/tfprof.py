@@ -3,7 +3,7 @@ import itertools
 from os.path import join as _j, dirname as _d
 
 from iml_profiler.parser.common import *
-from tensorflow.core.profiler.tfprof_log_pb2 import ProfileProto
+# from tensorflow.core.profiler.tfprof_log_pb2 import ProfileProto
 from iml_profiler.protobuf.pyprof_pb2 import Pyprof, ProcessMetadata
 
 from iml_profiler.profiler import proto_util

@@ -41,7 +41,7 @@ from tensorflow.python.framework import c_api_util
 from iml_profiler.profiler import unit_test_util
 from iml_profiler.parser.common import print_cmd
 
-from tensorflow.core.profiler.tfprof_log_pb2 import ProfileProto
+# from tensorflow.core.profiler.tfprof_log_pb2 import ProfileProto
 from iml_profiler.protobuf.pyprof_pb2 import ProcessMetadata, TrainingProgress, IncrementalTrainingProgress, TP_NO_PROGRESS, TP_HAS_PROGRESS
 
 # pip install py-cpuinfo
@@ -639,6 +639,7 @@ class Profiler:
                  bench_name=NO_BENCH_NAME,
                  num_calls=None, start_measuring_call=None,
                  trace_time_sec=None,
+                 max_timesteps=None,
                  num_traces=None,
                  keep_traces=None,
                  tfprof=True,
@@ -793,6 +794,7 @@ class Profiler:
         self.repetition_time_limit_sec = repetition_time_limit_sec
         self.num_calls = get_argval('num_calls', num_calls, None)
         self.trace_time_sec = get_argval('trace_time_sec', trace_time_sec, None)
+        self.max_timesteps = get_argval('max_timesteps', max_timesteps, None)
         self._last_warned_trace_time_sec = None
         self._last_warned_report_progress_idx = None
         self._should_finish_idx = 0
@@ -2120,18 +2122,20 @@ class Profiler:
         )
 
     def should_finish(self, finish_now=False, skip_finish=False):
-
-
         total_trace_time_sec = self._total_trace_time_sec()
         ret = finish_now or (
-                (
-                        self.num_traces is not None and
-                        self.next_trace_id >= self.num_traces
-                ) or (
-                        total_trace_time_sec is not None and
-                        self.trace_time_sec is not None
-                        and total_trace_time_sec >= self.trace_time_sec
-                )
+            (
+                self.num_traces is not None and
+                self.next_trace_id >= self.num_traces
+            ) or (
+                total_trace_time_sec is not None and
+                self.trace_time_sec is not None
+                and total_trace_time_sec >= self.trace_time_sec
+            ) or (
+                self.max_timesteps is not None and
+                self.num_timesteps is not None and
+                self.num_timesteps >= self.max_timesteps
+            )
         )
         self._should_finish_idx += 1
         if py_config.DEBUG and (ret or self._should_finish_idx % 1000 == 0):
@@ -2161,6 +2165,15 @@ class Profiler:
                     total_bool=total_trace_time_sec >= self.trace_time_sec,
                     total_trace_time_sec=total_trace_time_sec,
                     trace_time_sec=self.trace_time_sec,
+                )), prefix="  "))
+            if self.max_timesteps is not None and self.num_timesteps is not None:
+                logging.info(textwrap.indent(textwrap.dedent("""
+                - self.num_timesteps >= self.max_timesteps = {bool}
+                  - self.num_timesteps = {num_timesteps}
+                  - self.max_timesteps = {max_timesteps}""".format(
+                    bool=self.num_timesteps >= self.max_timesteps,
+                    num_timesteps=self.num_timesteps,
+                    max_timesteps=self.max_timesteps,
                 )), prefix="  "))
         return ret
 
@@ -2242,7 +2255,10 @@ class Profiler:
                 self._incremental_training_progress[self.phase] = RecordedIncrementalTrainingProgress(self.machine_name, self.process_name, self.phase)
             self._incremental_training_progress[self.phase].report_start_of_progress(percent_complete, num_timesteps, total_timesteps, self.start_trace_time_sec)
 
-        if self.num_timesteps is not None:
+        if self.max_timesteps is not None and num_timesteps is None:
+            raise RuntimeError("IML ERROR: if you use --iml-max-timesteps, you must call iml.prof.report_progress(num_timesteps=NUMBER)")
+
+        if num_timesteps is not None:
             self.num_timesteps = num_timesteps
 
         if self.total_timesteps is not None:
@@ -2531,6 +2547,13 @@ def add_iml_arguments(parser):
                              "tracing will stop when either "
                              "we've collected --iml-num-traces OR "
                              "--iml-trace-time-sec has been exceeded")
+    iml_parser.add_argument('--iml-max-timesteps', type=int,
+                            help=textwrap.dedent("""
+                            IML: how long should we profile for, in timesteps; 
+                            timestep progress is reported by calling 
+                            iml.prof.report_progress(...)
+                            """)
+                               )
     iml_parser.add_argument('--iml-internal-start-trace-time-sec', type=float,
                         help=textwrap.dedent("""
         IML: (internal use)

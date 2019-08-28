@@ -17,7 +17,7 @@ class BaseDataframeReader:
     def __init__(self, directory, add_fields=None, debug=False):
         self.directory = directory
         # column-name -> [values]
-        self.data = dict()
+        self.data = None
         # add_fields(iml_directory) -> dict of fields to add to data-frame
         self.add_fields = add_fields
         self.added_fields = set()
@@ -55,18 +55,38 @@ class BaseDataframeReader:
                 for key, value in extra_fields.items():
                     self._add_col(key, value)
 
-    def _read_df(self):
-        self.df = pd.DataFrame(self.data)
+    # def _read_df(self):
+    #     self.df = pd.DataFrame(self.data)
 
-    def read(self):
+    def _read_data(self):
+        self.data = dict()
+        proto_paths = []
         for dirpath, dirnames, filenames in os.walk(self.directory):
             for base in filenames:
                 path = _j(dirpath, base)
+                # if self.debug:
+                #     logging.info("{klass}.is_proto_file(path={path}) = {ret}".format(
+                #         klass=self.__class__.__name__,
+                #         path=path,
+                #         ret=self.is_proto_file(path),
+                #     ))
                 if self.is_proto_file(path):
+                    proto_paths.append(path)
+                    # if self.debug:
+                    #     logging.info("{klass}: Add proto cols: path = {path}".format(
+                    #         klass=self.__class__.__name__,
+                    #         path=path))
                     self.add_proto_cols(path)
                     self._check_cols()
-        self._read_df()
-        return self.df
+        if len(proto_paths) == 0:
+            raise RuntimeError("Saw 0 proto paths rooted at {dir}".format(
+                dir=self.directory,
+            ))
+
+    def read(self):
+        if self.data is None:
+            self._read_data()
+        return pd.DataFrame(self.data)
 
 class UtilDataframeReader(BaseDataframeReader):
 
@@ -120,3 +140,44 @@ class TrainingProgressDataframeReader(BaseDataframeReader):
                 path=path))
         self._add_columns(colnames, training_progress)
         self._maybe_add_fields(path)
+
+    def last_progress(self):
+        df = self.read()
+        last_df = ( df[df['end_training_time_us'] == np.max(df['end_training_time_us'])] )
+        return last_df
+
+    def training_duration_us(self):
+        df = self.last_progress()
+        training_duration_us = df['end_training_time_us'] - df['start_training_time_us']
+        assert len(training_duration_us) == 1
+        training_duration_us = training_duration_us.values[0]
+        return training_duration_us
+
+class CUDAAPIStatsDataframeReader(BaseDataframeReader):
+    def __init__(self, directory, add_fields=None, debug=False):
+        super().__init__(directory, add_fields=add_fields, debug=debug)
+
+    def is_proto_file(self, path):
+        return is_cuda_api_stats_file(path)
+
+    def add_proto_cols(self, path):
+        proto = read_cuda_api_stats_file(path)
+        if self.debug:
+            logging.info("Read CUDAAPIPhaseStatsProto from {path}".format(path=path))
+
+        for api_thread_stats in proto.stats:
+            self._add_col('process_name', proto.process_name)
+            self._add_col('machine_name', proto.machine_name)
+            self._add_col('phase_name', proto.phase)
+
+            self._add_col('tid', api_thread_stats.tid)
+            self._add_col('api_name', api_thread_stats.api_name)
+            self._add_col('total_time_us', api_thread_stats.total_time_us)
+            self._add_col('num_calls', api_thread_stats.num_calls)
+
+            self._maybe_add_fields(path)
+
+    def n_total_calls(self):
+        df = self.read()
+        n_total_calls = np.sum(df['num_calls'])
+        return n_total_calls

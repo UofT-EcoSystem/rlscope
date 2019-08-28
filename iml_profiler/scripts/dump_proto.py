@@ -3,7 +3,7 @@ import argparse
 import textwrap
 import sys
 
-from tensorflow.core.profiler.tfprof_log_pb2 import ProfileProto
+# from tensorflow.core.profiler.tfprof_log_pb2 import ProfileProto
 from iml_profiler.protobuf.pyprof_pb2 import Pyprof, ProcessMetadata, IncrementalTrainingProgress
 from iml_profiler.protobuf.iml_prof_pb2 import CUDAAPIPhaseStatsProto, MachineDevsEventsProto
 

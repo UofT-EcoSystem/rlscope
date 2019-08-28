@@ -213,6 +213,8 @@ class DeviceTracerImpl : public DeviceTracer {
   Status AsyncDump() override;
   Status AwaitDump() override;
 
+  void _WrapCudaAPICalls();
+
 #ifdef CONFIG_TRACE_STATS
   bool IsEnabled() override;
 #endif
@@ -391,6 +393,51 @@ DeviceTracerImpl::~DeviceTracerImpl() {
   }
 }
 
+
+void DeviceTracerImpl::_WrapCudaAPICalls() {
+#ifdef WITH_CUDA_LD_PRELOAD
+
+#define REGISTER_CUDA_API_CB(cbid, funcname, ...) \
+  _cuda_api_api_profiler_cbs.emplace_back( \
+      GetCudaLibrary()->_cuda_api.funcname ## _cbs.RegisterCallback( \
+          /*start_cb=*/[this](__VA_ARGS__) { \
+            this->_api_profiler.ApiCallback( \
+                CUPTI_CB_DOMAIN_RUNTIME_API, \
+                cbid, \
+                CUPTI_API_ENTER); \
+          }, \
+          /*exit_cb=*/[this](__VA_ARGS__, cudaError_t ret) { \
+            this->_api_profiler.ApiCallback( \
+                CUPTI_CB_DOMAIN_RUNTIME_API, \
+                cbid, \
+                CUPTI_API_EXIT); \
+          }));
+
+  REGISTER_CUDA_API_CB(
+      CUPTI_RUNTIME_TRACE_CBID_cudaLaunchKernel_v7000,
+      cudaLaunchKernel,
+      const void *func, dim3 gridDim, dim3 blockDim, void **args, size_t sharedMem, cudaStream_t stream);
+
+  REGISTER_CUDA_API_CB(
+      CUPTI_RUNTIME_TRACE_CBID_cudaMemcpyAsync_v3020,
+      cudaMemcpyAsync,
+      void *dst, const void *src, size_t count, enum cudaMemcpyKind kind, cudaStream_t stream);
+
+  REGISTER_CUDA_API_CB(
+      CUPTI_RUNTIME_TRACE_CBID_cudaMalloc_v3020,
+      cudaMalloc,
+      void **devPtr, size_t size);
+
+  REGISTER_CUDA_API_CB(
+      CUPTI_RUNTIME_TRACE_CBID_cudaFree_v3020,
+      cudaFree,
+      void *devPtr);
+
+#else
+#error "You must re-compile with cmake using WITH_CUDA_LD_PRELOAD=ON to support \"iml-prof --cuda-api-calls\""
+#endif
+}
+
 Status DeviceTracerImpl::Start() {
   VLOG(1) << "DeviceTracer::Start";
   mutex_lock l(mu_);
@@ -428,22 +475,8 @@ Status DeviceTracerImpl::Start() {
 
       if (is_yes("IML_CUDA_API_CALLS", false)) {
         VLOG(1) << "Register CUDA API calls callback";
+        _WrapCudaAPICalls();
 #ifdef WITH_CUDA_LD_PRELOAD
-        // TODO: use sample_cuda_api.trace_cuda_api("cudaLaunchKernel" / CUPTI_RUNTIME_TRACE_CBID_cudaLaunchKernel_v7000) to enable tracing of cudaLaunchKernel
-        _cuda_api_api_profiler_cbs.emplace_back(
-            GetCudaLibrary()->_cuda_api.cudaLaunchKernel_cbs.RegisterCallback(
-                /*start_cb=*/[this] (const void *func, dim3 gridDim, dim3 blockDim, void **args, size_t sharedMem, cudaStream_t stream) {
-                  this->_api_profiler.ApiCallback(
-                      CUPTI_CB_DOMAIN_RUNTIME_API,
-                      CUPTI_RUNTIME_TRACE_CBID_cudaLaunchKernel_v7000,
-                      CUPTI_API_ENTER);
-                },
-                /*exit_cb=*/[this] (const void *func, dim3 gridDim, dim3 blockDim, void **args, size_t sharedMem, cudaStream_t stream, cudaError_t ret) {
-                  this->_api_profiler.ApiCallback(
-                      CUPTI_CB_DOMAIN_RUNTIME_API,
-                      CUPTI_RUNTIME_TRACE_CBID_cudaLaunchKernel_v7000,
-                      CUPTI_API_EXIT);
-                }));
 #else
 #error "You must re-compile with cmake using WITH_CUDA_LD_PRELOAD=ON to support \"iml-prof --cuda-api-calls\""
 #endif

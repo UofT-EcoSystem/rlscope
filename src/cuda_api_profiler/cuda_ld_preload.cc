@@ -67,11 +67,25 @@ void CudaLibrary::DLOpen() {
     error = DLError();
     LOG(FATAL) << "dlopen(\"libcudart.so\") failed: " << error;
   }
-  _cuda_api.cudaLaunchKernel = reinterpret_cast<cudaLaunchKernel_func>(dlsym(_lib_handle, "cudaLaunchKernel"));
-  if (_cuda_api.cudaLaunchKernel == nullptr) {
-    error = DLError();
-    LOG(FATAL) << "dlsym(\"cudaLaunchKernel\") failed: " << error;
+
+#define LOAD_SYM(funcname) \
+  _cuda_api.funcname = reinterpret_cast<funcname ##_func>(dlsym(_lib_handle, #funcname)); \
+  if (_cuda_api.funcname == nullptr) { \
+    error = DLError(); \
+    LOG(FATAL) << "dlsym(\"" << #funcname << "\") failed: " << error; \
   }
+
+  LOAD_SYM(cudaLaunchKernel);
+  LOAD_SYM(cudaMemcpyAsync);
+  LOAD_SYM(cudaMalloc);
+  LOAD_SYM(cudaFree);
+
+//  _cuda_api.cudaLaunchKernel = reinterpret_cast<cudaLaunchKernel_func>(dlsym(_lib_handle, "cudaLaunchKernel"));
+//  if (_cuda_api.cudaLaunchKernel == nullptr) {
+//    error = DLError();
+//    LOG(FATAL) << "dlsym(\"cudaLaunchKernel\") failed: " << error;
+//  }
+
 }
 
 CudaLibrary::~CudaLibrary() {
@@ -89,10 +103,53 @@ CudaLibrary* GetCudaLibrary() {
 
 extern "C" {
 
-cudaError_t __host__ CUDA_LD_PRELOAD_EXPORT cudaLaunchKernel(const void *func, dim3 gridDim, dim3 blockDim, void **args, size_t sharedMem, cudaStream_t stream) {
+//cudaDeviceGetAttribute
+//cudaEventCreateWithFlags
+//cudaFree
+//cudaGetDevice
+//cudaGetDeviceProperties
+//cudaGetLastError
+//cudaLaunchKernel
+//cudaMalloc
+//cudaMemcpy
+//cudaMemcpyAsync
+
+__host__ cudaError_t CUDA_LD_PRELOAD_EXPORT cudaLaunchKernel(const void *func, dim3 gridDim, dim3 blockDim, void **args, size_t sharedMem, cudaStream_t stream) {
   _cuda_library._cuda_api.cudaLaunchKernel_cbs.StartCallbacks(func, gridDim, blockDim, args, sharedMem, stream);
   auto ret = _cuda_library._cuda_api.cudaLaunchKernel(func, gridDim, blockDim, args, sharedMem, stream);
-  _cuda_library._cuda_api.cudaLaunchKernel_cbs.ExitCallbacks(func, gridDim, blockDim, args, sharedMem, stream, ret);
+  _cuda_library._cuda_api.cudaLaunchKernel_cbs.ExitCallbacks(
+      func, gridDim, blockDim, args, sharedMem, stream,
+      ret);
+  return ret;
+}
+
+//extern __host__ cudaError_t CUDA_LD_PRELOAD_EXPORT cudaMemcpyAsync(void *dst, const void *src, size_t count, enum cudaMemcpyKind kind, cudaStream_t stream __dv(0));
+__host__ cudaError_t CUDA_LD_PRELOAD_EXPORT cudaMemcpyAsync(void *dst, const void *src, size_t count, enum cudaMemcpyKind kind, cudaStream_t stream) {
+  _cuda_library._cuda_api.cudaMemcpyAsync_cbs.StartCallbacks(dst, src, count, kind, stream);
+  auto ret = _cuda_library._cuda_api.cudaMemcpyAsync(dst, src, count, kind, stream);
+  _cuda_library._cuda_api.cudaMemcpyAsync_cbs.ExitCallbacks(
+      dst, src, count, kind, stream,
+      ret);
+  return ret;
+}
+
+//extern __host__ __cudart_builtin__ cudaError_t CUDARTAPI cudaMalloc(void **devPtr, size_t size);
+__host__ cudaError_t CUDA_LD_PRELOAD_EXPORT cudaMalloc(void **devPtr, size_t size) {
+  _cuda_library._cuda_api.cudaMalloc_cbs.StartCallbacks(devPtr, size);
+  auto ret = _cuda_library._cuda_api.cudaMalloc(devPtr, size);
+  _cuda_library._cuda_api.cudaMalloc_cbs.ExitCallbacks(
+      devPtr, size,
+      ret);
+  return ret;
+}
+
+//extern __host__ __cudart_builtin__ cudaError_t CUDARTAPI cudaFree(void *devPtr);
+__host__ cudaError_t CUDA_LD_PRELOAD_EXPORT cudaFree(void *devPtr) {
+  _cuda_library._cuda_api.cudaFree_cbs.StartCallbacks(devPtr);
+  auto ret = _cuda_library._cuda_api.cudaFree(devPtr);
+  _cuda_library._cuda_api.cudaFree_cbs.ExitCallbacks(
+      devPtr,
+      ret);
   return ret;
 }
 

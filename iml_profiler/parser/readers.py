@@ -1,5 +1,5 @@
 import logging
-from tensorflow.core.profiler.tfprof_log_pb2 import ProfileProto
+# from tensorflow.core.profiler.tfprof_log_pb2 import ProfileProto
 from iml_profiler.protobuf.pyprof_pb2 import Pyprof
 
 from iml_profiler.parser.common import *
