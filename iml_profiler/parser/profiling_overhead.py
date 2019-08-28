@@ -76,33 +76,6 @@ class CallInterceptionOverheadParser:
     def _png_path(self):
         return _j(self.directory, "call_interception_overhead.png")
 
-    def get_training_durations(self, directories):
-        training_duration_us = []
-        if type(directories) == str:
-            directories = [directories]
-        for directory in directories:
-            df_reader = TrainingProgressDataframeReader(
-                directory,
-                # add_fields=self.maybe_add_algo_env,
-                debug=self.debug)
-            # df = df_reader.read()
-            # df = df_reader.last_progress()
-            duration_us = df_reader.training_duration_us()
-            training_duration_us.append(duration_us)
-        return training_duration_us
-
-    def get_n_total_calls(self, directories):
-        n_total_calls = []
-        if type(directories) == str:
-            directories = [directories]
-        for directory in directories:
-            df_reader = CUDAAPIStatsDataframeReader(
-                directory,
-                # add_fields=self.maybe_add_algo_env,
-                debug=self.debug)
-            n_total_calls.append(df_reader.n_total_calls())
-        return n_total_calls
-
     def run(self):
         """
         Read total time that the program ran for from training_progress.
@@ -137,13 +110,13 @@ class CallInterceptionOverheadParser:
 
         :return:
         """
-        int_training_duration_us = self.get_training_durations(self.interception_directory)
-        no_int_training_duration_us = self.get_training_durations(self.no_interception_directory)
+        int_training_duration_us = get_training_durations(self.interception_directory, debug=self.debug)
+        no_int_training_duration_us = get_training_durations(self.no_interception_directory, debug=self.debug)
         if len(int_training_duration_us) != len(no_int_training_duration_us):
             raise RuntimeError("You need to run the same number of repetitions for both config_interception and config_no_interception")
 
-        int_total_calls = self.get_n_total_calls(self.interception_directory)
-        # no_int_total_calls = self.get_n_total_calls(self.no_interception_directory)
+        int_total_calls = get_n_total_calls(self.interception_directory, debug=self.debug)
+        # no_int_total_calls = get_n_total_calls(self.no_interception_directory, debug=self.debug)
         # 'no_int_total_calls': no_int_total_calls,
 
         df = pd.DataFrame({
@@ -187,4 +160,254 @@ class CallInterceptionOverheadParser:
         logging.info("Output csv @ {path}".format(path=self._raw_csv_path))
         logging.info("Output json @ {path}".format(path=self._raw_json_path))
 
+class CUPTIOverheadParser:
+    """
+    Compute extra time spent in the CUDA API as a result of turning on CUPTI's GPU activity recording feature.
+    """
+    def __init__(self,
+                 gpu_activities_directory,
+                 no_gpu_activities_directory,
+                 directory,
+                 width=None,
+                 height=None,
+                 debug=False,
+                 # Swallow any excess arguments
+                 **kwargs):
+        """
+        :param directories:
+        :param debug:
+        """
+        self.gpu_activities_directory = gpu_activities_directory
+        self.no_gpu_activities_directory = no_gpu_activities_directory
+        self.directory = directory
+        self.width = width
+        self.height = height
+        # self.iml_directories = iml_directories
+        # self.ignore_phase = ignore_phase
+        # self.algo_env_from_dir = algo_env_from_dir
+        # self.baseline_config = baseline_config
+        self.debug = debug
 
+    def run(self):
+        """
+        For config in 'gpu-activities', 'no-gpu-activities':
+            For api_call in 'cudaKernelLaunch', …:
+                Total_api_time_us = Sum up totall time spent in a specific API call (e.g. cudaLaunchKernel) across ALL calls (all threads)
+                Total_api_calls = Sum up total number of times a specific API call (e.g. cudaLaunchKernel) was made
+                Us_per_call = Total_api_time_us / Total_api_calls
+                data[config][api_call].append(us_per_call)
+
+        Stats to save:
+            # We need this for "subtraction"
+            Per-CUDA API CUPTI-induced profiling overhead (us) =
+                cudaLaunchKernel: {
+                    mean: ...,
+                    std: ...,
+                }
+                ...
+
+            # Useful stat for sanity check:
+            # Is the total time spent in the CUDA API similar across repetitions of the same configuration?
+            Total time spent in CUDA API call:
+                config: {
+                    cudaLaunchKernel: {
+                        total_time_us: ...
+                    }
+                }
+                ...
+
+            # Useful stat for sanity check:
+            # are number of CUDA API calls between runs the same/very similar?
+            Total number of CUDA API calls:
+                config: {
+                    cudaLaunchKernel: {
+                        n_calls: ...
+                    }
+                }
+                ...
+
+        csv output:
+        api_name, config, total_num_calls, total_api_time_us, us_per_call
+        ...
+
+        json output:
+        api_name: {
+            mean_us_per_call:
+            std_us_per_call:
+        }
+        """
+        csv_data = dict()
+        # api_name -> {
+        #   mean_us_per_call: ...,
+        #   std_us_per_call: ...,
+        # }
+        for (config, directories) in [
+            ('gpu-activities', self.gpu_activities_directory),
+            ('no-gpu-activities', self.no_gpu_activities_directory),
+        ]:
+            for directory in directories:
+                per_api_stats = get_per_api_stats(directory, debug=self.debug)
+                logging.info("per_api_stats: " + pprint_msg(per_api_stats))
+                get_per_api_stats(directory, debug=self.debug)
+                for api_name, row in per_api_stats.iterrows():
+                    total_api_time_us = row['total_time_us']
+                    total_num_calls = row['num_calls']
+
+                    add_col(csv_data, 'config', config)
+                    add_col(csv_data, 'api_name', api_name)
+                    add_col(csv_data, 'total_num_calls', total_num_calls)
+                    add_col(csv_data, 'total_api_time_us', total_api_time_us)
+                    us_per_call = total_api_time_us / float(total_num_calls)
+                    add_col(csv_data, 'us_per_call', us_per_call)
+
+        def merge_rows_in_order(df):
+            def get_suffix(config):
+                return "_{config}".format(config=re.sub('-', '_', config))
+
+            groupby_config = df.groupby(['config'])
+            assert len(groupby_config) == 2
+            config_to_dfs = dict()
+            for config, config_df in groupby_config:
+                groupby_api_name = config_df.groupby(['api_name'])
+                config_to_dfs[config] = []
+                for api_name, api_name_df in groupby_api_name:
+                    assert 'join_row_index' not in api_name_df
+                    api_name_df['join_row_index'] = list(range(len(api_name_df)))
+                    config_to_dfs[config].append(api_name_df)
+
+            config_to_df = dict((config, pd.concat(dfs)) for config, dfs in config_to_dfs.items())
+            assert len(config_to_df) == 2
+            configs = sorted(config_to_df.keys())
+
+            join_cols = ['api_name', 'join_row_index']
+
+            config1 = configs[0]
+            df1 = config_to_df[config1]
+            # df1 = df1.set_index(join_cols)
+
+            config2 = configs[1]
+            df2 = config_to_df[config2]
+            # df2 = df2.set_index(join_cols)
+
+            joined_df = df1.merge(df2, on=join_cols, suffixes=(get_suffix(config1), get_suffix(config2)))
+            del joined_df['join_row_index']
+
+            return joined_df
+
+        def colname(col, config):
+            return "{col}_{config}".format(
+                col=col,
+                config=re.sub('-', '_', config))
+
+        df = pd.DataFrame(csv_data)
+        df_csv = df.sort_values(['config', 'api_name', 'us_per_call'])
+        df_csv.to_csv(self._raw_csv_path, index=False)
+        logging.info("per_api_stats: " + pprint_msg(per_api_stats))
+
+        joined_df = merge_rows_in_order(df)
+        joined_df['cupti_overhead_per_call_us'] = joined_df[colname('us_per_call', 'gpu-activities')] - joined_df[colname('us_per_call', 'no-gpu-activities')]
+        json_data = dict()
+        for api_name, df_api_name in joined_df.groupby('api_name'):
+            assert api_name not in json_data
+            json_data[api_name] = dict()
+            json_data[api_name]['mean_cupti_overhead_per_call_us'] = np.mean(df_api_name['cupti_overhead_per_call_us'])
+            json_data[api_name]['std_cupti_overhead_per_call_us'] = np.std(df_api_name['cupti_overhead_per_call_us'])
+            json_data[api_name]['num_cupti_overhead_per_call_us'] = len(df_api_name['cupti_overhead_per_call_us'])
+
+        # api_names = set(df['api_name'])
+        # for api_name in api_names:
+        #     assert api_name not in json_data
+        #     json_data[api_name] = dict()
+        #     df_api_name = df[df['api_name'] == api_name]
+        #     json_data[api_name]['mean_us_per_call'] = np.mean(df_api_name['us_per_call'])
+        #     json_data[api_name]['std_us_per_call'] = np.std(df_api_name['us_per_call'])
+
+        def pretty_config(config):
+            if config == 'gpu-activities':
+                # return 'CUPTI GPU activities enabled'
+                return 'CUPTI enabled'
+            elif config == 'no-gpu-activities':
+                # return 'CUPTI GPU activities disabled'
+                return 'CUPTI disabled'
+            else:
+                raise NotImplementedError()
+        df['pretty_config'] = df['config'].apply(pretty_config)
+
+        logging.info("Output csv @ {path}".format(path=self._raw_csv_path))
+        df.to_csv(self._raw_csv_path, index=False)
+        logging.info("Output json @ {path}".format(path=self._raw_json_path))
+        do_dump_json(json_data, self._raw_json_path)
+
+        if self.width is not None and self.height is not None:
+            figsize = (self.width, self.height)
+            logging.info("Setting figsize = {fig}".format(fig=figsize))
+            # sns.set_context({"figure.figsize": figsize})
+        else:
+            figsize = None
+        # This is causing XIO error....
+        fig = plt.figure(figsize=figsize)
+
+        plot_data = copy.copy(df)
+        # plot_data['field'] = "Per-API-call interception overhead"
+        ax = fig.add_subplot(111)
+        sns.barplot(x='api_name', y='us_per_call', hue='pretty_config', data=plot_data, ax=ax)
+        ax.legend().set_title(None)
+        ax.set_ylabel('Time per call (us)')
+        ax.set_xlabel('CUDA API call')
+        ax.set_title("CUPTI induced profiling overhead per CUDA API call")
+        logging.info("Output plot @ {path}".format(path=self._png_path))
+        fig.savefig(self._png_path)
+        plt.close(fig)
+
+    @property
+    def _raw_csv_path(self):
+        return _j(self.directory, "cupti_overhead.raw.csv")
+
+    @property
+    def _raw_json_path(self):
+        return _j(self.directory, "cupti_overhead.json")
+
+    @property
+    def _png_path(self):
+        return _j(self.directory, "cupti_overhead.png")
+
+def map_readers(DataframeReaderKlass, directories, func, debug=False):
+    xs = []
+
+    if type(directories) == str:
+        dirs = [directories]
+    else:
+        dirs = list(directories)
+
+    for directory in dirs:
+        df_reader = DataframeReaderKlass(
+            directory,
+            # add_fields=self.maybe_add_algo_env,
+            debug=debug)
+        x = func(df_reader)
+        xs.append(x)
+
+    if type(directories) == str:
+        assert len(xs) == 1
+        return xs[0]
+    return xs
+
+def get_training_durations(directories, debug):
+    def get_value(df_reader):
+        return df_reader.training_duration_us()
+    return map_readers(TrainingProgressDataframeReader, directories, get_value, debug=debug)
+
+def get_n_total_calls(directories, debug):
+    def get_value(df_reader):
+        return df_reader.n_total_calls()
+    return map_readers(CUDAAPIStatsDataframeReader, directories, get_value, debug=debug)
+
+def get_per_api_stats(directories, debug):
+    def get_value(df_reader):
+        return df_reader.per_api_stats()
+    return map_readers(CUDAAPIStatsDataframeReader, directories, get_value, debug=debug)
+
+def add_col(data, colname, value):
+    if colname not in data:
+        data[colname] = []
+    data[colname].append(value)

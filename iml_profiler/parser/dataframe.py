@@ -181,3 +181,22 @@ class CUDAAPIStatsDataframeReader(BaseDataframeReader):
         df = self.read()
         n_total_calls = np.sum(df['num_calls'])
         return n_total_calls
+
+    def per_api_stats(self):
+        """
+        Group all CUDA API calls by CUDA API name.
+        # e.g. cudaKernelLaunch
+        - api_name
+        # How much total time (us) was spent in this API call over the course of the program?
+        - total_time_us
+        # How many times was this API call over the course of the program?
+        - num_calls
+        :return:
+        """
+        df = self.read()
+        groupby_cols = ['api_name']
+        keep_cols = sorted(set(groupby_cols + ['total_time_us', 'num_calls']))
+        df_keep = df[keep_cols]
+        groupby = df_keep.groupby(groupby_cols)
+        df_sum = groupby.sum()
+        return df_sum

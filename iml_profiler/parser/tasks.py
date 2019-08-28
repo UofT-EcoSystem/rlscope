@@ -27,7 +27,7 @@ from iml_profiler.parser.common import print_cmd
 from iml_profiler.parser.cpu_gpu_util import UtilParser, UtilPlot
 from iml_profiler.parser.training_progress import TrainingProgressParser, ProfilingOverheadPlot
 from iml_profiler.parser.extrapolated_training_time import ExtrapolatedTrainingTimeParser
-from iml_profiler.parser.profiling_overhead import CallInterceptionOverheadParser
+from iml_profiler.parser.profiling_overhead import CallInterceptionOverheadParser, CUPTIOverheadParser
 from iml_profiler import py_config
 
 from iml_profiler.parser.common import *
@@ -640,6 +640,33 @@ class CallInterceptionOverheadTask(luigi.Task):
         self.dumper = CallInterceptionOverheadParser(**kwargs)
         self.dumper.run()
 
+class CUPTIOverheadTask(luigi.Task):
+    gpu_activities_directory = luigi.ListParameter(description="IML directory that ran with 'iml-prof --config gpu-activities'")
+    no_gpu_activities_directory = luigi.ListParameter(description="IML directory that ran with 'iml-prof --config no-gpu-activities'")
+    directory = luigi.Parameter(description="Output directory", default=".")
+
+    # Plot attrs
+    # rotation = luigi.FloatParameter(description="x-axis title rotation", default=45.)
+    width = luigi.FloatParameter(description="Width of plot in inches", default=None)
+    height = luigi.FloatParameter(description="Height of plot in inches", default=None)
+
+    debug = param_debug
+    debug_single_thread = param_debug_single_thread
+    # algo_env_from_dir = luigi.BoolParameter(description="Add algo/env columns based on directory structure of --iml-directories <algo>/<env>/iml_dir", default=True, parsing=luigi.BoolParameter.EXPLICIT_PARSING)
+
+    skip_output = False
+
+    def requires(self):
+        return []
+
+    def output(self):
+        return []
+
+    def run(self):
+        kwargs = kwargs_from_task(self)
+        self.dumper = CUPTIOverheadParser(**kwargs)
+        self.dumper.run()
+
 NOT_RUNNABLE_TASKS = get_NOT_RUNNABLE_TASKS()
 IML_TASKS = get_IML_TASKS()
 IML_TASKS.add(TraceEventsTask)
@@ -650,6 +677,7 @@ IML_TASKS.add(TrainingProgressTask)
 IML_TASKS.add(ProfilingOverheadPlotTask)
 IML_TASKS.add(ExtrapolatedTrainingTimeTask)
 IML_TASKS.add(CallInterceptionOverheadTask)
+IML_TASKS.add(CUPTIOverheadTask)
 
 if __name__ == "__main__":
     main()

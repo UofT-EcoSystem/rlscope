@@ -82,11 +82,39 @@ def main():
     parser.add_argument('--config',
                         choices=['interception',
                                  'no-interception',
+                                 'gpu-activities',
+                                 'no-gpu-activities',
                                  ],
                         help=textwrap.dedent("""
-                        Start tracing right at application startup.
+                        For measuring LD_PRELOAD CUDA API interception overhead:
+                            interception:
+                                Enable LD_PRELOAD CUDA API interception.
+                                $ iml-prof --debug --cuda-api-calls --cuda-api-events --iml-disable
+                            no-interception:
+                                Disable LD_PRELOAD CUDA API interception.
+                                $ iml-prof --debug --iml-disable
+                                
+                        For measuring CUPTI GPU activity gathering overhead on a per CUDA API call basis.
+                            gpu-activities:
+                                Enable CUPTI GPU activity recording.
+                                $ iml-prof --debug --cuda-api-calls --cuda-activities --iml-disable
+                            no-gpu-activities:
+                                Disable CUPTI GPU activity recording.
+                                $ iml-prof --debug --cuda-api-calls --iml-disable
+                                
+                        Expect:
+                        You should run train.py with these arguments set
                         
-                        Effect: sets "export IML_TRACE_AT_START=yes" for libsample_cuda_api.so.
+                            # We are comparing total training time across each configuration 
+                            --iml-training-progress
+                        
+                            # Since we are comparing total training time, 
+                            # run each configuration with the same number of training loop steps.
+                            --iml-max-timesteps $N
+                            
+                            # Disable any pyprof or old tfprof tracing code.
+                            --iml-disable
+                        
                         """))
     args = parser.parse_args(iml_prof_argv)
 
@@ -119,12 +147,21 @@ def main():
     if args.config is not None:
         if args.config == 'interception':
             "iml-prof --debug --cuda-api-calls --cuda-api-events --iml-disable"
+            args.iml_disable = True
             args.cuda_api_calls = True
             args.cuda_api_events = True
-            args.iml_disable = True
         elif args.config == 'no-interception':
             "iml-prof --debug --iml-disable"
             args.iml_disable = True
+        elif args.config == 'gpu-activities':
+            "$ iml-prof --debug --cuda-api-calls --cuda-activities --iml-disable"
+            args.iml_disable = True
+            args.cuda_api_calls = True
+            args.cuda_activities = True
+        elif args.config == 'no-gpu-activities':
+            "$ iml-prof --debug --cuda-api-calls --iml-disable"
+            args.iml_disable = True
+            args.cuda_api_calls = True
         else:
             raise NotImplementedError()
 
