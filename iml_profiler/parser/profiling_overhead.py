@@ -321,54 +321,11 @@ class CorrectedTrainingTimeParser:
         total_plot_data = get_total_plot_data(total_df)
         # total_plot_data_groupby = total_plot_data.groupby(['overhead_type'])
 
-        def add_stacked_bars(x, y, hue, label=None, data=None, ax=None):
-            # sns.barplot(x=.., y=.., hue=..)
-
-            # Q: Does order of "data" affect groups returned by groupby?
-            if label is not None:
-                groupby_cols = [hue, label]
-            else:
-                groupby_cols = [hue]
-            data_groupby = data.groupby(groupby_cols)
-            groups = [pair[0] for pair in list(data_groupby)]
-            logging.info("groups: " + pprint_msg(groups))
-            means = dict()
-            stds = dict()
-            for group, group_df in data_groupby:
-                means[group] = group_df.groupby([x]).mean().reset_index()
-                stds[group] = group_df.groupby([x]).std().reset_index()
-            bottom = None
-            for group in groups:
-                xs = means[group][x]
-                ys = means[group][y]
-                std = stds[group][y]
-                # plt.bar(x=xs, height=ys, yerr=std, bottom=bottom, ax=ax)
-
-                # Order in which we call this determines order in which stacks appear.
-                if label is not None:
-                    # group = [hue, label]
-                    label_str = group[1]
-                else:
-                    # group = hue
-                    label_str = group
-                barplot = ax.bar(x=xs, height=ys, yerr=std, label=label_str, bottom=bottom)
-
-                if bottom is None:
-                    bottom = ys
-                else:
-                    bottom += ys
-
-            # Reverse legend label order (when making stacked bar its in reverse order)
-            handles, labels = ax.get_legend_handles_labels()
-            # ax.legend(handles[::-1], labels[::-1], title=None, loc='upper left')
-            ax.legend(handles[::-1], labels[::-1])
-
         fig = plt.figure(figsize=figsize)
         # plot_data['field'] = "Per-API-call interception overhead"
         ax = fig.add_subplot(111)
         # sns.barplot(x='x_field', y='training_time_sec', hue='pretty_config', data=training_time_plot_data, ax=ax)
         add_stacked_bars(x='x_field', y='total_overhead_sec',
-                         # hue='pretty_overhead_type',
                          hue='overhead_type_order',
                          label='pretty_overhead_type',
                          data=total_plot_data, ax=ax)
@@ -385,30 +342,6 @@ class CorrectedTrainingTimeParser:
         total_df_csv.to_csv(self._total_csv_path, index=False)
         logging.info("{path}: {msg}".format(path=self._total_csv_path, msg=pprint_msg(total_df_csv)))
         logging.info("Output total csv @ {path}".format(path=self._total_csv_path))
-
-        # stacked_bar_plot = StackedBarPlot(
-        #     # data=total_plot_data_groupby,
-        #     # data=total_plot_data,
-        #     data=dict((group, d) for group, d in total_plot_data.groupby(['overhead_type'])),
-        #     path=self._total_png_path,
-        #     # groups=set(total_plot_data_groupby.keys),
-        #     groups=set(total_plot_data['overhead_type']),
-        #     x_field='x_field',
-        #     # y2_field=y2_field,
-        #     # y2_logscale=self.y2_logscale,
-        #     x_axis_label='(algo, env)',
-        #     y_axis_label='Total training time (sec)',
-        #     # y2_axis_label=self.plot_y2_axis_label,
-        #     title='Breakdown of profiling overhead',
-        #     # show_legend=self.show_legend,
-        #     width=self.width,
-        #     height=self.height,
-        #     # keep_zero=self.keep_zero,
-        #     # rotation=self.rotation,
-        #     # groups: the "keys" into the data dictionary, which are the "stacks" found in each bar.
-        #     # group_to_label=self.group_to_label,
-        # )
-        # stacked_bar_plot.plot()
 
         unins_training_time_us = get_training_durations(self.uninstrumented_directories, self.debug)
         unins_df = pd.DataFrame({
@@ -455,10 +388,25 @@ class CorrectedTrainingTimeParser:
         logging.info("{path}: {msg}".format(path=self._training_time_csv_path, msg=pprint_msg(training_time_df_csv)))
         logging.info("Output training_time csv @ {path}".format(path=self._training_time_csv_path))
 
+        def get_percent_bar_labels(df):
+            # NOTE: need .values otherwise we get NaN's
+            unins_time_sec = df[df['pretty_config'] == 'Uninstrumented']['training_time_sec'].values
+            df['perc'] = ( df['training_time_sec'] - unins_time_sec ) / unins_time_sec
+            def get_label(row):
+                if row['pretty_config'] == 'Uninstrumented':
+                    assert row['perc'] == 0.
+                    return ""
+                return "{perc:.1f}%".format(perc=100*row['perc'])
+
+            bar_labels = df.apply(get_label, axis=1)
+            df['bar_labels'] = bar_labels
+            return bar_labels
+
         fig = plt.figure(figsize=figsize)
-        # plot_data['field'] = "Per-API-call interception overhead"
         ax = fig.add_subplot(111)
         sns.barplot(x='x_field', y='training_time_sec', hue='pretty_config', data=training_time_plot_data, ax=ax)
+        add_bar_labels(y='training_time_sec', hue='pretty_config', ax=ax,
+                       get_bar_labels=get_percent_bar_labels)
         ax.legend().set_title(None)
         ax.set_ylabel('Total training time (sec)')
         ax.set_xlabel('(algo, env)')
@@ -921,3 +869,73 @@ def pretty_overhead_type(overhead_type, unit='us'):
     else:
         return overhead_type
 
+
+def add_stacked_bars(x, y, hue, label=None, data=None, ax=None):
+    # sns.barplot(x=.., y=.., hue=..)
+
+    # Q: Does order of "data" affect groups returned by groupby?
+    if label is not None:
+        groupby_cols = [hue, label]
+    else:
+        groupby_cols = [hue]
+    data_groupby = data.groupby(groupby_cols)
+    groups = [pair[0] for pair in list(data_groupby)]
+    logging.info("groups: " + pprint_msg(groups))
+    means = dict()
+    stds = dict()
+    for group, group_df in data_groupby:
+        means[group] = group_df.groupby([x]).mean().reset_index()
+        stds[group] = group_df.groupby([x]).std().reset_index()
+    bottom = None
+    for group in groups:
+        xs = means[group][x]
+        ys = means[group][y]
+        std = stds[group][y]
+        # plt.bar(x=xs, height=ys, yerr=std, bottom=bottom, ax=ax)
+
+        # Order in which we call this determines order in which stacks appear.
+        if label is not None:
+            # group = [hue, label]
+            label_str = group[1]
+        else:
+            # group = hue
+            label_str = group
+        barplot = ax.bar(x=xs, height=ys, yerr=std, label=label_str, bottom=bottom)
+
+        if bottom is None:
+            bottom = ys
+        else:
+            bottom += ys
+
+    # Reverse legend label order (when making stacked bar its in reverse order)
+    handles, labels = ax.get_legend_handles_labels()
+    # ax.legend(handles[::-1], labels[::-1], title=None, loc='upper left')
+    ax.legend(handles[::-1], labels[::-1])
+
+def add_bar_labels(y, hue, ax=None, get_bar_labels=None):
+    # Iterate through the list of axes' patches
+    # Q: In what order do we iterate the patches?
+
+    if get_bar_labels is not None:
+        # Q: I have NO idea what this would do if there were multiple x_fields... oh well.
+        _, labels = ax.get_legend_handles_labels()
+        ys = [p.get_height() for p in ax.patches]
+        df = pd.DataFrame({
+            hue: labels,
+            y: ys,
+            # Not sure how to get x_field...only xpos.
+            # x: ,
+        })
+        # df['bar_label'] = get_bar_labels(df)
+        bar_labels = get_bar_labels(df)
+
+    for i, (p, label) in enumerate(zip(ax.patches, labels)):
+        xpos = p.get_x() + p.get_width()/2.
+        ypos = p.get_height()
+        if get_bar_labels is None:
+            bar_label = '%d' % int(p.get_height())
+        else:
+            bar_label = bar_labels[i]
+
+        ax.text(xpos, ypos, bar_label,
+                ha='center', va='bottom')
