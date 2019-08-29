@@ -99,6 +99,16 @@ class CorrectedTrainingTimeParser:
             --iml-directory containing profiling data.
         """
 
+        # capsize = 5
+        # plt.style.use('seaborn')
+        # plt.rcParams.update({
+        #     "lines.markeredgewidth" : 1,
+        #     "errorbar.capsize": capsize,
+        # })
+
+        sns_kwargs = get_sns_kwargs()
+        plt_kwargs = get_plt_kwargs()
+
         def load_dfs():
             memoize_path = _j(self.directory, "{klass}.load_dfs.pickle".format(
                 klass=self.__class__.__name__))
@@ -162,7 +172,7 @@ class CorrectedTrainingTimeParser:
 
                 per_api_df['total_overhead_us'] = per_api_df['total_cupti_overhead_us'] + per_api_df['total_interception_overhead_us']
                 per_api_dfs.append(per_api_df)
-                total_cupti_overhead_us = per_api_df['total_cupti_overhead_us']
+                total_cupti_overhead_us = np.sum(per_api_df['total_cupti_overhead_us'])
 
                 # Q: output csv/json with breakdown of overhead per-api call?
                 # per_api_cupti_overhead_us = dict()
@@ -190,11 +200,15 @@ class CorrectedTrainingTimeParser:
 
                 total_training_time_us = get_training_durations(directory, self.debug)
                 total_df = pd.DataFrame({
-                    'total_pyprof_overhead_us': total_pyprof_overhead_us,
-                    'total_cupti_overhead_us': total_cupti_overhead_us,
-                    'total_interception_overhead_us': total_interception_overhead_us,
-                    'total_training_time_us': total_training_time_us,
+                    'total_pyprof_overhead_us': [total_pyprof_overhead_us],
+                    'total_cupti_overhead_us': [total_cupti_overhead_us],
+                    'total_interception_overhead_us': [total_interception_overhead_us],
+                    'total_training_time_us': [total_training_time_us],
                 })
+                # WARNING: protect against bug where we create more than one row unintentionally.
+                # If we mix scalars/lists, pd.DataFrame will "duplicate" the scalars to match the list length.
+                # This can happen if we accidentally include per-api times instead of summing across times.
+                assert len(total_df) == 1
                 total_df['total_overhead_us'] = total_df['total_pyprof_overhead_us'] + total_df['total_cupti_overhead_us'] + total_df['total_interception_overhead_us']
                 total_df['corrected_total_training_time_us'] = total_df['total_training_time_us'] - total_df['total_overhead_us']
                 total_dfs.append(total_df)
@@ -209,15 +223,6 @@ class CorrectedTrainingTimeParser:
 
         total_df, per_api_df = load_dfs()
 
-        total_df_csv = total_df.sort_values(['corrected_total_training_time_us'])
-        total_df_csv.to_csv(self._total_csv_path, index=False)
-        logging.info("{path}: {msg}".format(path=self._total_csv_path, msg=pprint_msg(total_df_csv)))
-        logging.info("Output total csv @ {path}".format(path=self._total_csv_path))
-
-        per_api_df_csv = per_api_df.sort_values(['total_overhead_us'])
-        per_api_df_csv.to_csv(self._per_api_csv_path, index=False)
-        logging.info("{path}: {msg}".format(path=self._per_api_csv_path, msg=pprint_msg(per_api_df_csv)))
-        logging.info("Output per_api csv @ {path}".format(path=self._per_api_csv_path))
 
         # PROBLEM: we need to plot the uninstrumented runtime as well to verify the "corrected" time is correct.
         # TODO: output format that ProfilingOverheadPlot can read, reuse that plotting code.
@@ -259,9 +264,11 @@ class CorrectedTrainingTimeParser:
 
         fig = plt.figure(figsize=figsize)
         per_api_plot_data = get_per_api_plot_data(per_api_df)
-        # plot_data['field'] = "Per-API-call interception overhead"
+        output_csv(per_api_plot_data, self._per_api_csv_path, sort_by=['total_overhead_sec'])
         ax = fig.add_subplot(111)
-        sns.barplot(x='api_name', y='total_overhead_sec', hue='pretty_overhead_type', data=per_api_plot_data, ax=ax)
+        sns.barplot(
+            x='api_name', y='total_overhead_sec', hue='pretty_overhead_type', data=per_api_plot_data, ax=ax,
+            **sns_kwargs)
         ax.legend().set_title(None)
         ax.set_ylabel('Total training time (sec)')
         ax.set_xlabel('CUDA API call')
@@ -325,10 +332,12 @@ class CorrectedTrainingTimeParser:
         # plot_data['field'] = "Per-API-call interception overhead"
         ax = fig.add_subplot(111)
         # sns.barplot(x='x_field', y='training_time_sec', hue='pretty_config', data=training_time_plot_data, ax=ax)
+        output_csv(total_plot_data, self._total_csv_path)
         add_stacked_bars(x='x_field', y='total_overhead_sec',
                          hue='overhead_type_order',
                          label='pretty_overhead_type',
-                         data=total_plot_data, ax=ax)
+                         data=total_plot_data, ax=ax,
+                         **plt_kwargs)
         # ax.legend().set_title(None)
         ax.set_ylabel('Total training time (sec)')
         ax.set_xlabel('(algo, env)')
@@ -336,12 +345,6 @@ class CorrectedTrainingTimeParser:
         logging.info("Output plot @ {path}".format(path=self._total_png_path))
         fig.savefig(self._total_png_path)
         plt.close(fig)
-
-        # total_df_csv = total_plot_data.sort_values(['total_overhead_us'])
-        total_df_csv = total_plot_data
-        total_df_csv.to_csv(self._total_csv_path, index=False)
-        logging.info("{path}: {msg}".format(path=self._total_csv_path, msg=pprint_msg(total_df_csv)))
-        logging.info("Output total csv @ {path}".format(path=self._total_csv_path))
 
         unins_training_time_us = get_training_durations(self.uninstrumented_directories, self.debug)
         unins_df = pd.DataFrame({
@@ -383,10 +386,6 @@ class CorrectedTrainingTimeParser:
             return training_time_plot_data
 
         training_time_plot_data = get_training_time_plot_data(training_time_df)
-        training_time_df_csv = training_time_plot_data.sort_values(['training_time_sec'])
-        training_time_df_csv.to_csv(self._per_api_csv_path, index=False)
-        logging.info("{path}: {msg}".format(path=self._training_time_csv_path, msg=pprint_msg(training_time_df_csv)))
-        logging.info("Output training_time csv @ {path}".format(path=self._training_time_csv_path))
 
         def get_percent_bar_labels(df):
             # NOTE: need .values otherwise we get NaN's
@@ -404,7 +403,10 @@ class CorrectedTrainingTimeParser:
 
         fig = plt.figure(figsize=figsize)
         ax = fig.add_subplot(111)
-        sns.barplot(x='x_field', y='training_time_sec', hue='pretty_config', data=training_time_plot_data, ax=ax)
+        output_csv(training_time_plot_data, self._training_time_csv_path, sort_by=['training_time_sec'])
+        sns.barplot(
+            x='x_field', y='training_time_sec', hue='pretty_config', data=training_time_plot_data, ax=ax,
+            **sns_kwargs)
         add_bar_labels(y='training_time_sec', hue='pretty_config', ax=ax,
                        get_bar_labels=get_percent_bar_labels)
         ax.legend().set_title(None)
@@ -538,6 +540,10 @@ class CallInterceptionOverheadParser:
 
         :return:
         """
+
+        sns_kwargs = get_sns_kwargs()
+        plt_kwargs = get_plt_kwargs()
+
         int_training_duration_us = get_training_durations(self.interception_directory, debug=self.debug)
         no_int_training_duration_us = get_training_durations(self.no_interception_directory, debug=self.debug)
         if len(int_training_duration_us) != len(no_int_training_duration_us):
@@ -577,7 +583,8 @@ class CallInterceptionOverheadParser:
         plot_data['field'] = "Per-API-call interception overhead"
         ax = fig.add_subplot(111)
         ax.set_ylabel('Time (us)')
-        sns.barplot(x='field', y='interception_overhead_per_call_us', data=plot_data, ax=ax)
+        sns.barplot(x='field', y='interception_overhead_per_call_us', data=plot_data, ax=ax,
+                    **sns_kwargs)
         ax.set_ylabel('Time per call (us)')
         ax.set_xlabel(None)
         ax.set_title("Overhead from intercepting CUDA API calls using LD_PRELOAD")
@@ -664,7 +671,12 @@ class CUPTIOverheadParser:
             std_us_per_call:
         }
         """
+
+        sns_kwargs = get_sns_kwargs()
+        plt_kwargs = get_plt_kwargs()
+
         csv_data = dict()
+
         # api_name -> {
         #   mean_us_per_call: ...,
         #   std_us_per_call: ...,
@@ -779,7 +791,8 @@ class CUPTIOverheadParser:
         plot_data = copy.copy(df)
         # plot_data['field'] = "Per-API-call interception overhead"
         ax = fig.add_subplot(111)
-        sns.barplot(x='api_name', y='us_per_call', hue='pretty_config', data=plot_data, ax=ax)
+        sns.barplot(x='api_name', y='us_per_call', hue='pretty_config', data=plot_data, ax=ax,
+                    **sns_kwargs)
         ax.legend().set_title(None)
         ax.set_ylabel('Time per call (us)')
         ax.set_xlabel('CUDA API call')
@@ -870,7 +883,7 @@ def pretty_overhead_type(overhead_type, unit='us'):
         return overhead_type
 
 
-def add_stacked_bars(x, y, hue, label=None, data=None, ax=None):
+def add_stacked_bars(x, y, hue, label=None, data=None, ax=None, **kwargs):
     # sns.barplot(x=.., y=.., hue=..)
 
     # Q: Does order of "data" affect groups returned by groupby?
@@ -900,7 +913,7 @@ def add_stacked_bars(x, y, hue, label=None, data=None, ax=None):
         else:
             # group = hue
             label_str = group
-        barplot = ax.bar(x=xs, height=ys, yerr=std, label=label_str, bottom=bottom)
+        barplot = ax.bar(x=xs, height=ys, yerr=std, label=label_str, bottom=bottom, **kwargs)
 
         if bottom is None:
             bottom = ys
@@ -912,7 +925,17 @@ def add_stacked_bars(x, y, hue, label=None, data=None, ax=None):
     # ax.legend(handles[::-1], labels[::-1], title=None, loc='upper left')
     ax.legend(handles[::-1], labels[::-1])
 
-def add_bar_labels(y, hue, ax=None, get_bar_labels=None):
+def add_bar_labels(y, hue, ax=None, get_bar_labels=None, y_add_factor=0.025):
+    """
+    :param y:
+    :param hue:
+    :param ax:
+    :param get_bar_labels:
+    :param y_add_factor:
+        Multiply y-axis by y_add_factor and add it to label position;
+        useful for preventing overlap with error bars.
+    :return:
+    """
     # Iterate through the list of axes' patches
     # Q: In what order do we iterate the patches?
 
@@ -931,7 +954,9 @@ def add_bar_labels(y, hue, ax=None, get_bar_labels=None):
 
     for i, (p, label) in enumerate(zip(ax.patches, labels)):
         xpos = p.get_x() + p.get_width()/2.
-        ypos = p.get_height()
+        y_bottom, y_top = ax.get_ylim()
+        add_ypos = y_add_factor*(y_top - y_bottom)
+        ypos = p.get_height() + add_ypos
         if get_bar_labels is None:
             bar_label = '%d' % int(p.get_height())
         else:
@@ -939,3 +964,22 @@ def add_bar_labels(y, hue, ax=None, get_bar_labels=None):
 
         ax.text(xpos, ypos, bar_label,
                 ha='center', va='bottom')
+
+def output_csv(plot_df, csv_path, sort_by=None):
+    if sort_by is not None:
+        plot_df = plot_df.sort_values(sort_by)
+    plot_df.to_csv(csv_path, index=False)
+    logging.info("{path}: {msg}".format(path=csv_path, msg=pprint_msg(plot_df)))
+    logging.info("Output total csv @ {path}".format(path=csv_path))
+
+def get_sns_kwargs():
+    sns_kwargs = dict()
+    sns_kwargs['capsize'] = 0.04
+    sns_kwargs['errwidth'] = 1.25
+    return sns_kwargs
+
+def get_plt_kwargs():
+    plt_kwargs = dict()
+    plt_kwargs['capsize'] = 5
+    return plt_kwargs
+

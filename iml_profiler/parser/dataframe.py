@@ -136,10 +136,10 @@ class TrainingProgressDataframeReader(BaseDataframeReader):
             'end_training_time_us',
             'end_num_timesteps',
         ]
-        if self.debug:
-            logging.info("Read {name} from {path}".format(
-                name=training_progress.__class__.__name__,
-                path=path))
+        # if self.debug:
+        #     logging.info("Read {name} from {path}".format(
+        #         name=training_progress.__class__.__name__,
+        #         path=path))
         self._add_columns(colnames, training_progress)
         self._maybe_add_fields(path)
 
@@ -164,8 +164,8 @@ class CUDAAPIStatsDataframeReader(BaseDataframeReader):
 
     def add_proto_cols(self, path):
         proto = read_cuda_api_stats_file(path)
-        if self.debug:
-            logging.info("Read CUDAAPIPhaseStatsProto from {path}".format(path=path))
+        # if self.debug:
+        #     logging.info("Read CUDAAPIPhaseStatsProto from {path}".format(path=path))
 
         for api_thread_stats in proto.stats:
             self._add_col('process_name', proto.process_name)
@@ -212,8 +212,8 @@ class PyprofDataframeReader(BaseDataframeReader):
 
     def add_proto_cols(self, path):
         proto = read_pyprof_file(path)
-        if self.debug:
-            logging.info("Read Pyprof from {path}".format(path=path))
+        # if self.debug:
+        #     logging.info("Read Pyprof from {path}".format(path=path))
 
         # Event from pyprof.proto
         event_colnames = [
