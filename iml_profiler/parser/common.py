@@ -1670,6 +1670,7 @@ def should_load_memo(debug_memoize, path):
     return debug_memoize and _e(path) and os.stat(path).st_size > 0
 
 def load_memo(debug_memoize, path):
+    logging.info("Load memoized file: {path}".format(path=path))
     with open(path, 'rb') as f:
         # -1 specifies highest binary protocol
         ret = pickle.load(f)
@@ -1677,6 +1678,7 @@ def load_memo(debug_memoize, path):
 
 def maybe_memoize(debug_memoize, ret, path):
     if debug_memoize:
+        logging.info("Write memoized file: {path}".format(path=path))
         with open(path, 'wb') as f:
             # -1 specifies highest binary protocol
             pickle.dump(ret, f, -1)

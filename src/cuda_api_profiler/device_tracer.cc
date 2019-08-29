@@ -525,56 +525,56 @@ Status DeviceTracerImpl::Start() {
 
       // Intercept launch and memcpy calls to capture the Op name annotation.
       // TODO(pbar) Add callbacks for memcpy variants.
-      if (!is_yes("IML_DISABLE", false)) {
-        // NOTE: runtime API callbacks cause significant slow-downs.
-        CUPTI_CALL(_cupti_api->EnableCallback(
-            /*enable=*/1,
-            // subscriber_,
-                       CUPTI_CB_DOMAIN_DRIVER_API,
-                       CUPTI_DRIVER_TRACE_CBID_cuLaunchKernel));
 //      if (!is_yes("IML_DISABLE", false)) {
-        CUPTI_CALL(_cupti_api->EnableCallback(
-            /*enable=*/1,
-            // subscriber_,
-                       CUPTI_CB_DOMAIN_RUNTIME_API,
-                       CUPTI_RUNTIME_TRACE_CBID_cudaMemcpy_v3020));
-        CUPTI_CALL(_cupti_api->EnableCallback(
-            /*enable=*/1,
-            // subscriber_,
-                       CUPTI_CB_DOMAIN_RUNTIME_API,
-                       CUPTI_RUNTIME_TRACE_CBID_cudaMemcpyAsync_v3020));
-
-        CUPTI_CALL(_cupti_api->EnableCallback(
-            /*enable=*/1,
-            // subscriber_,
-                       CUPTI_CB_DOMAIN_DRIVER_API,
-                       CUPTI_DRIVER_TRACE_CBID_cuMemcpyDtoH_v2));
-        CUPTI_CALL(_cupti_api->EnableCallback(
-            /*enable=*/1,
-            // subscriber_,
-                       CUPTI_CB_DOMAIN_DRIVER_API,
-                       CUPTI_DRIVER_TRACE_CBID_cuMemcpyDtoHAsync_v2));
-        CUPTI_CALL(_cupti_api->EnableCallback(
-            /*enable=*/1,
-            // subscriber_,
-                       CUPTI_CB_DOMAIN_DRIVER_API,
-                       CUPTI_DRIVER_TRACE_CBID_cuMemcpyHtoD_v2));
-        CUPTI_CALL(_cupti_api->EnableCallback(
-            /*enable=*/1,
-            // subscriber_,
-                       CUPTI_CB_DOMAIN_DRIVER_API,
-                       CUPTI_DRIVER_TRACE_CBID_cuMemcpyHtoDAsync_v2));
-        CUPTI_CALL(_cupti_api->EnableCallback(
-            /*enable=*/1,
-            // subscriber_,
-                       CUPTI_CB_DOMAIN_DRIVER_API,
-                       CUPTI_DRIVER_TRACE_CBID_cuMemcpyDtoD_v2));
-        CUPTI_CALL(_cupti_api->EnableCallback(
-            /*enable=*/1,
-            // subscriber_,
-                       CUPTI_CB_DOMAIN_DRIVER_API,
-                       CUPTI_DRIVER_TRACE_CBID_cuMemcpyDtoDAsync_v2));
-      }
+//        // NOTE: runtime API callbacks cause significant slow-downs.
+//        CUPTI_CALL(_cupti_api->EnableCallback(
+//            /*enable=*/1,
+//            // subscriber_,
+//                       CUPTI_CB_DOMAIN_DRIVER_API,
+//                       CUPTI_DRIVER_TRACE_CBID_cuLaunchKernel));
+////      if (!is_yes("IML_DISABLE", false)) {
+//        CUPTI_CALL(_cupti_api->EnableCallback(
+//            /*enable=*/1,
+//            // subscriber_,
+//                       CUPTI_CB_DOMAIN_RUNTIME_API,
+//                       CUPTI_RUNTIME_TRACE_CBID_cudaMemcpy_v3020));
+//        CUPTI_CALL(_cupti_api->EnableCallback(
+//            /*enable=*/1,
+//            // subscriber_,
+//                       CUPTI_CB_DOMAIN_RUNTIME_API,
+//                       CUPTI_RUNTIME_TRACE_CBID_cudaMemcpyAsync_v3020));
+//
+//        CUPTI_CALL(_cupti_api->EnableCallback(
+//            /*enable=*/1,
+//            // subscriber_,
+//                       CUPTI_CB_DOMAIN_DRIVER_API,
+//                       CUPTI_DRIVER_TRACE_CBID_cuMemcpyDtoH_v2));
+//        CUPTI_CALL(_cupti_api->EnableCallback(
+//            /*enable=*/1,
+//            // subscriber_,
+//                       CUPTI_CB_DOMAIN_DRIVER_API,
+//                       CUPTI_DRIVER_TRACE_CBID_cuMemcpyDtoHAsync_v2));
+//        CUPTI_CALL(_cupti_api->EnableCallback(
+//            /*enable=*/1,
+//            // subscriber_,
+//                       CUPTI_CB_DOMAIN_DRIVER_API,
+//                       CUPTI_DRIVER_TRACE_CBID_cuMemcpyHtoD_v2));
+//        CUPTI_CALL(_cupti_api->EnableCallback(
+//            /*enable=*/1,
+//            // subscriber_,
+//                       CUPTI_CB_DOMAIN_DRIVER_API,
+//                       CUPTI_DRIVER_TRACE_CBID_cuMemcpyHtoDAsync_v2));
+//        CUPTI_CALL(_cupti_api->EnableCallback(
+//            /*enable=*/1,
+//            // subscriber_,
+//                       CUPTI_CB_DOMAIN_DRIVER_API,
+//                       CUPTI_DRIVER_TRACE_CBID_cuMemcpyDtoD_v2));
+//        CUPTI_CALL(_cupti_api->EnableCallback(
+//            /*enable=*/1,
+//            // subscriber_,
+//                       CUPTI_CB_DOMAIN_DRIVER_API,
+//                       CUPTI_DRIVER_TRACE_CBID_cuMemcpyDtoDAsync_v2));
+//      }
 //      }
     }
 

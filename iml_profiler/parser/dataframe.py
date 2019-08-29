@@ -18,6 +18,7 @@ class BaseDataframeReader:
         self.directory = directory
         # column-name -> [values]
         self.data = None
+        self.df = None
         # add_fields(iml_directory) -> dict of fields to add to data-frame
         self.add_fields = add_fields
         self.added_fields = set()
@@ -84,9 +85,10 @@ class BaseDataframeReader:
             ))
 
     def read(self):
-        if self.data is None:
+        if self.df is None:
             self._read_data()
-        return pd.DataFrame(self.data)
+            self.df = pd.DataFrame(self.data)
+        return self.df
 
 class UtilDataframeReader(BaseDataframeReader):
 
@@ -200,3 +202,53 @@ class CUDAAPIStatsDataframeReader(BaseDataframeReader):
         groupby = df_keep.groupby(groupby_cols)
         df_sum = groupby.sum()
         return df_sum
+
+class PyprofDataframeReader(BaseDataframeReader):
+    def __init__(self, directory, add_fields=None, debug=False):
+        super().__init__(directory, add_fields=add_fields, debug=debug)
+
+    def is_proto_file(self, path):
+        return is_pyprof_file(path)
+
+    def add_proto_cols(self, path):
+        proto = read_pyprof_file(path)
+        if self.debug:
+            logging.info("Read Pyprof from {path}".format(path=path))
+
+        # Event from pyprof.proto
+        event_colnames = [
+            'thread_id',
+            'start_time_us',
+            'duration_us',
+            'start_profiling_overhead_us',
+            'duration_profiling_overhead_us',
+            'name',
+        ]
+
+        def add_event(category, event):
+            self._add_col('process_name', proto.process_name)
+            self._add_col('machine_name', proto.machine_name)
+            self._add_col('phase_name', proto.phase)
+
+            self._add_col('category', category)
+
+            self._add_columns(event_colnames, event)
+
+            self._maybe_add_fields(path)
+
+        for step, python_events in proto.python_events.items():
+            for event in python_events.events:
+                add_event(CATEGORY_PYTHON, event)
+
+        for step, clibs in proto.clibs.items():
+            for category, category_clibs in clibs.clibs.items():
+                for event in category_clibs.events:
+                    add_event(category, event)
+
+    def total_pyprof_overhead_us(self):
+        df = self.read()
+        # Filter for events that have profiling overhead recorded.
+        df = df[df['start_profiling_overhead_us'] != 0]
+        total_pyprof_overhead_us = np.sum(df['duration_profiling_overhead_us'])
+        return total_pyprof_overhead_us
+

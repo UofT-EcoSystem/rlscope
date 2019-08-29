@@ -23,12 +23,12 @@ def main():
     parser = argparse.ArgumentParser("Sample time spent in CUDA API calls, and call counts.")
     parser.add_argument('--debug', action='store_true')
     parser.add_argument('--iml-debug', action='store_true')
-    parser.add_argument('--iml-disable', action='store_true', help=textwrap.dedent("""
-        IML: Skip any profiling. Used for uninstrumented runs.
-        Useful for ensuring minimal libcupti registration when we run --cuda-api-calls during config_uninstrumented.
-        
-        Effect: sets "export IML_DISABLE=1" for libsample_cuda_api.so.
-    """))
+    # parser.add_argument('--iml-disable', action='store_true', help=textwrap.dedent("""
+    #     IML: Skip any profiling. Used for uninstrumented runs.
+    #     Useful for ensuring minimal libcupti registration when we run --cuda-api-calls during config_uninstrumented.
+    #
+    #     Effect: sets "export IML_DISABLE=1" for libsample_cuda_api.so.
+    # """))
     parser.add_argument('--cuda-api-calls', action='store_true',
                         help=textwrap.dedent("""
                         Trace CUDA API runtime/driver calls.
@@ -84,6 +84,8 @@ def main():
                                  'no-interception',
                                  'gpu-activities',
                                  'no-gpu-activities',
+                                 'full',
+                                 'uninstrumented',
                                  ],
                         help=textwrap.dedent("""
                         For measuring LD_PRELOAD CUDA API interception overhead:
@@ -102,7 +104,7 @@ def main():
                                 Disable CUPTI GPU activity recording.
                                 $ iml-prof --debug --cuda-api-calls --iml-disable
                                 
-                        Expect:
+                        Expect (for the above configurations):
                         You should run train.py with these arguments set
                         
                             # We are comparing total training time across each configuration 
@@ -114,7 +116,12 @@ def main():
                             
                             # Disable any pyprof or old tfprof tracing code.
                             --iml-disable
-                        
+                                
+                        For collecting full IML traces for using with iml-analyze / iml-drill:
+                            full:
+                                Enable all of tfprof and pyprof collection.
+                                $ iml-prof --cuda-api-calls --cuda-api-events --cuda-activities --iml-disable
+                                NOTE: we still use --iml-disable to prevent "old" tfprof collection.
                         """))
     args = parser.parse_args(iml_prof_argv)
 
@@ -147,21 +154,28 @@ def main():
     if args.config is not None:
         if args.config == 'interception':
             "iml-prof --debug --cuda-api-calls --cuda-api-events --iml-disable"
-            args.iml_disable = True
+            # args.iml_disable = True
             args.cuda_api_calls = True
             args.cuda_api_events = True
-        elif args.config == 'no-interception':
+        elif args.config in ['no-interception', 'uninstrumented']:
             "iml-prof --debug --iml-disable"
-            args.iml_disable = True
+            # args.iml_disable = True
+            pass
         elif args.config == 'gpu-activities':
             "$ iml-prof --debug --cuda-api-calls --cuda-activities --iml-disable"
-            args.iml_disable = True
+            # args.iml_disable = True
             args.cuda_api_calls = True
             args.cuda_activities = True
         elif args.config == 'no-gpu-activities':
             "$ iml-prof --debug --cuda-api-calls --iml-disable"
-            args.iml_disable = True
+            # args.iml_disable = True
             args.cuda_api_calls = True
+        elif args.config == 'full':
+            "$ iml-prof --cuda-api-calls --cuda-api-events --cuda-activities --iml-disable"
+            # args.iml_disable = True
+            args.cuda_api_calls = True
+            args.cuda_api_events = True
+            args.cuda_activities = True
         else:
             raise NotImplementedError()
 
@@ -172,8 +186,8 @@ def main():
         logging.info("Detected debug mode; enabling C++ logging statements (export IML_CPP_MIN_VLOG_LEVEL=1)")
         add_env['IML_CPP_MIN_VLOG_LEVEL'] = 1
 
-    if args.iml_disable:
-        add_env['IML_DISABLE'] = 'yes'
+    # if args.iml_disable:
+    #     add_env['IML_DISABLE'] = 'yes'
 
     if args.cuda_api_calls:
         add_env['IML_CUDA_API_CALLS'] = 'yes'

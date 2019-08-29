@@ -12,12 +12,492 @@ import seaborn as sns
 
 from matplotlib import pyplot as plt
 
-from iml_profiler.parser.dataframe import TrainingProgressDataframeReader, CUDAAPIStatsDataframeReader
+from iml_profiler.parser.dataframe import TrainingProgressDataframeReader, CUDAAPIStatsDataframeReader, PyprofDataframeReader
+from iml_profiler.parser.stacked_bar_plots import StackedBarPlot
 
 from iml_profiler.parser import stacked_bar_plots
 from iml_profiler.parser.db import SQLCategoryTimesReader, sql_input_path
 
 from iml_profiler.profiler import iml_logging
+
+class CorrectedTrainingTimeParser:
+    """
+    Compute total training time, after "subtracting" various sources of profiling overhead.
+    """
+    def __init__(self,
+                 cupti_overhead_json,
+                 call_interception_overhead_json,
+                 iml_directories,
+                 uninstrumented_directories,
+                 directory,
+                 width=None,
+                 height=None,
+                 debug=False,
+                 debug_memoize=False,
+                 # Swallow any excess arguments
+                 **kwargs):
+        """
+        :param directories:
+        :param debug:
+        """
+        self.cupti_overhead_json_path = cupti_overhead_json
+        self.cupti_overhead_json = load_json(self.cupti_overhead_json_path)
+
+        self.call_interception_overhead_json_path = call_interception_overhead_json
+        self.interception_overhead_json = load_json(self.call_interception_overhead_json_path)
+
+        self.iml_directories = iml_directories
+        self.uninstrumented_directories = uninstrumented_directories
+        self.directory = directory
+        self.width = width
+        self.height = height
+        self.debug = debug
+        self.debug_memoize = debug_memoize
+
+    def run(self):
+        """
+        Sources of overhead:
+        - Pyprof overhead = sum(Event.duration_profiling_overhead_us If Event.start_profiling_overhead_us != 0)
+          - Need to parse pyprof Event files
+        - CUPTI overhead = sum(api.n_calls * api.mean_cupti_per_call_overhead_us)
+          - parse api.n_calls using CUDAAPIStatsDataframeReader
+          - parse api.mean_cupti_per_call_overhead_us using cupti_overhead_json
+        - Interception overhead = sum(total_n_calls * api.mean_interception_per_call_overhead_us)
+          - parse total_n_calls using CUDAAPIStatsDataframeReader
+          - parse api.mean_cupti_per_call_overhead_us using call_interception_overhead_json
+        - "Subtracted" time = total_training_time - [ … sum of overheads … ]
+          - parse total_training_time using TrainingProgressDataframeReader
+
+        Stats to save:
+            # Overheads:
+            Pyprof overhead (absolute time, and percent)
+            CUPTI overhead (absolute time, and percent)
+            Interception overhead (absolute time, and percent)
+
+            # Training time:
+            Total training time (before subtraction correction)
+            "Subtracted" total training time
+
+        csv output:
+            overhead_pyprof_sec/perc,
+            overhead_cupti_sec/perc,
+            overhead_interception_sec/perc,
+
+            total_training_time_sec,
+            corrected_total_training_time_sec,
+
+            Q: Should we include data from json files used for computing overheads?
+
+        json output:
+        {
+            [num/std/mean] for all fields in the csv
+            e.g.
+            [num/std/mean]_total_training_time_sec:
+        }
+
+        output directory:
+            --iml-directory containing profiling data.
+        """
+
+        def load_dfs():
+            memoize_path = _j(self.directory, "{klass}.load_dfs.pickle".format(
+                klass=self.__class__.__name__))
+
+            if should_load_memo(self.debug_memoize, memoize_path):
+                ret = load_memo(self.debug_memoize, memoize_path)
+                return ret
+
+            # corrected_training_time.per_api.raw.csv
+            # per-api csv output:
+            #     api_name,
+            #     n_calls,
+            #     total_cupti_overhead_us,
+            #     total_interception_overhead_us,
+            #     total_overhead_us,
+            per_api_dfs = []
+            # total csv output (summed over all api calls over the entire training script):
+            #     total_pyprof_overhead_us
+            #     total_cupti_overhead_us
+            #     total_interception_overhead_us
+            #     total_training_time_us
+            #     total_overhead_us
+            #     total_training_time_us
+            #     corrected_total_training_time_us
+            total_dfs = []
+            for directory in self.iml_directories:
+                """
+                - Pyprof overhead = sum(Event.duration_profiling_overhead_us If Event.start_profiling_overhead_us != 0)
+                  - Need to parse pyprof Event files
+                """
+                total_pyprof_overhead_us = get_pyprof_overhead_us(directory, self.debug)
+
+                """
+                - CUPTI overhead = sum(api.n_calls * api.mean_cupti_per_call_overhead_us for each api)
+                  - parse api.n_calls using CUDAAPIStatsDataframeReader
+                  - parse api.mean_cupti_per_call_overhead_us using cupti_overhead_json
+                """
+                # TODO: make it work for multiple self.directories
+                # Could be nice to see a stacked-bar graph that "breaks down" total training time by its overhead sources...
+                # probably a pretty busy plot though.
+                per_api_stats = get_per_api_stats(directory, self.debug)
+                per_api_stats_df = per_api_stats.reset_index()
+
+                per_api_df = pd.DataFrame({
+                    'api_name': per_api_stats_df['api_name'],
+                    'num_calls': per_api_stats_df['num_calls'],
+                    # 'total_cupti_overhead_us': per_api_stats_df['num_calls'] * self.cupti_overhead_json['mean_cupti_overhead_per_call_us'],
+                    'total_interception_overhead_us': per_api_stats_df['num_calls'] * self.interception_overhead_json['mean_interception_overhead_per_call_us'],
+                })
+                # - make json a df
+                # - join on api_name, make column 'mean_cupti_overhead_per_call_us'
+                # - multiply mean by num_calls
+                cupti_overhead_cols = dict()
+                for api_name, cupti_data in self.cupti_overhead_json.items():
+                    add_col(cupti_overhead_cols, 'api_name', api_name)
+                    for field, value in cupti_data.items():
+                        add_col(cupti_overhead_cols, field, value)
+                cupti_overhead_df = pd.DataFrame(cupti_overhead_cols)
+                per_api_df = per_api_df.merge(cupti_overhead_df, on=['api_name'])
+                per_api_df['total_cupti_overhead_us'] = per_api_df['num_calls'] * per_api_df['mean_cupti_overhead_per_call_us']
+
+                per_api_df['total_overhead_us'] = per_api_df['total_cupti_overhead_us'] + per_api_df['total_interception_overhead_us']
+                per_api_dfs.append(per_api_df)
+                total_cupti_overhead_us = per_api_df['total_cupti_overhead_us']
+
+                # Q: output csv/json with breakdown of overhead per-api call?
+                # per_api_cupti_overhead_us = dict()
+                # for api_name, row in per_api_stats.iterrows():
+                #     per_api_cupti_overhead_us[api_name] = row['num_calls'] * self.cupti_overhead_json['mean_cupti_overhead_per_call_us']
+                # total_cupti_overhead_us = np.sum(per_api_cupti_overhead_us.values())
+
+                """
+                - Interception overhead = sum(total_n_calls * api.mean_interception_per_call_overhead_us)
+                  - parse total_n_calls using CUDAAPIStatsDataframeReader
+                  - parse api.mean_cupti_per_call_overhead_us using call_interception_overhead_json
+                """
+                # per_api_interception_overhead_us = dict()
+                # for api_name, row in per_api_stats.iterrows():
+                #     per_api_interception_overhead_us[api_name] = row['num_calls'] * self.interception_overhead_json['mean_interception_overhead_per_call_us']
+                # total_interception_overhead_us = np.sum(per_api_interception_overhead_us.values())
+
+                # per_api_df['total_interception_overhead_us'] = per_api_df['num_calls'] * self.interception_overhead_json['mean_interception_overhead_per_call_us']
+                total_interception_overhead_us = np.sum(per_api_df['total_interception_overhead_us'])
+
+                """
+                - "Subtracted" time = total_training_time - [ … sum of overheads … ]
+                  - parse total_training_time using TrainingProgressDataframeReader
+                """
+
+                total_training_time_us = get_training_durations(directory, self.debug)
+                total_df = pd.DataFrame({
+                    'total_pyprof_overhead_us': total_pyprof_overhead_us,
+                    'total_cupti_overhead_us': total_cupti_overhead_us,
+                    'total_interception_overhead_us': total_interception_overhead_us,
+                    'total_training_time_us': total_training_time_us,
+                })
+                total_df['total_overhead_us'] = total_df['total_pyprof_overhead_us'] + total_df['total_cupti_overhead_us'] + total_df['total_interception_overhead_us']
+                total_df['corrected_total_training_time_us'] = total_df['total_training_time_us'] - total_df['total_overhead_us']
+                total_dfs.append(total_df)
+
+            total_df = pd.concat(total_dfs)
+            per_api_df = pd.concat(per_api_dfs)
+            ret = (total_df, per_api_df)
+
+            maybe_memoize(self.debug_memoize, ret, memoize_path)
+
+            return ret
+
+        total_df, per_api_df = load_dfs()
+
+        total_df_csv = total_df.sort_values(['corrected_total_training_time_us'])
+        total_df_csv.to_csv(self._total_csv_path, index=False)
+        logging.info("{path}: {msg}".format(path=self._total_csv_path, msg=pprint_msg(total_df_csv)))
+        logging.info("Output total csv @ {path}".format(path=self._total_csv_path))
+
+        per_api_df_csv = per_api_df.sort_values(['total_overhead_us'])
+        per_api_df_csv.to_csv(self._per_api_csv_path, index=False)
+        logging.info("{path}: {msg}".format(path=self._per_api_csv_path, msg=pprint_msg(per_api_df_csv)))
+        logging.info("Output per_api csv @ {path}".format(path=self._per_api_csv_path))
+
+        # PROBLEM: we need to plot the uninstrumented runtime as well to verify the "corrected" time is correct.
+        # TODO: output format that ProfilingOverheadPlot can read, reuse that plotting code.
+
+        # def mean_colname(col):
+        #     return "mean_{col}".format(col=col)
+        # def std_colname(col):
+        #     return "std_{col}".format(col=col)
+        # def num_colname(col):
+        #     return "num_{col}".format(col=col)
+        #
+        # json_data = dict()
+        # for name, values in df.iteritems():
+        #     json_data[mean_colname(name)] = np.mean(values)
+        #     json_data[std_colname(name)] = np.std(values)
+        #     json_data[num_colname(name)] = np.len(values)
+        # logging.info("Output json @ {path}".format(path=self._raw_json_path))
+        # do_dump_json(json_data, self._raw_json_path)
+
+        def get_per_api_plot_data(per_api_df):
+            overhead_cols = ['total_cupti_overhead_us', 'total_interception_overhead_us']
+            keep_cols = ['api_name', 'num_calls'] + overhead_cols
+            # Keep these columns "intact" (remove 'total_overhead_us')
+            id_vars = ['api_name', 'num_calls']
+            keep_df = per_api_df[keep_cols]
+            per_api_plot_data = pd.melt(keep_df, id_vars=id_vars, var_name='overhead_type', value_name='total_overhead_us')
+            per_api_plot_data['pretty_overhead_type'] = per_api_plot_data['overhead_type'].apply(
+                lambda overhead_type: pretty_overhead_type(overhead_type, 'us'))
+            per_api_plot_data['total_overhead_sec'] = per_api_plot_data['total_overhead_us'] / USEC_IN_SEC
+            del per_api_plot_data['total_overhead_us']
+            return per_api_plot_data
+
+        if self.width is not None and self.height is not None:
+            figsize = (self.width, self.height)
+            logging.info("Setting figsize = {fig}".format(fig=figsize))
+            # sns.set_context({"figure.figsize": figsize})
+        else:
+            figsize = None
+
+        fig = plt.figure(figsize=figsize)
+        per_api_plot_data = get_per_api_plot_data(per_api_df)
+        # plot_data['field'] = "Per-API-call interception overhead"
+        ax = fig.add_subplot(111)
+        sns.barplot(x='api_name', y='total_overhead_sec', hue='pretty_overhead_type', data=per_api_plot_data, ax=ax)
+        ax.legend().set_title(None)
+        ax.set_ylabel('Total training time (sec)')
+        ax.set_xlabel('CUDA API call')
+        ax.set_title("Breakdown of profiling overhead by CUDA API call")
+        logging.info("Output plot @ {path}".format(path=self._per_api_png_path))
+        fig.savefig(self._per_api_png_path)
+        plt.close(fig)
+
+        def get_total_plot_data(total_df):
+            #     total_pyprof_overhead_us
+            #     total_cupti_overhead_us
+            #     total_interception_overhead_us
+            #     total_training_time_us
+            #     corrected_total_training_time_us
+            #
+            #     total_overhead_us
+            #     total_training_time_us
+            total_plot_data = copy.copy(total_df)
+            # Ideally, (algo, env), but we don't have that luxury.
+            total_plot_data['x_field'] = ""
+
+            # Melt overhead columns, convert to seconds.
+
+            # We don't have any unique column values for this data-frame, so we cannot use id_vars...
+            id_vars = [
+                # 'total_training_time_us',
+                "x_field",
+            ]
+            overhead_cols = [
+                'total_pyprof_overhead_us',
+                'total_cupti_overhead_us',
+                'total_interception_overhead_us',
+                # 'total_training_time_us',
+                'corrected_total_training_time_us',
+            ]
+
+            # Keep these columns "intact" (remove 'total_overhead_us')
+            keep_cols = id_vars + overhead_cols
+            keep_df = total_plot_data[keep_cols]
+            # total_plot_data = pd.melt(keep_df, id_vars=id_vars, var_name='overhead_type', value_name='total_overhead_us')
+            total_plot_data = pd.melt(keep_df, id_vars=id_vars, var_name='overhead_type', value_name='total_overhead_us')
+            total_plot_data['total_overhead_sec'] = total_plot_data['total_overhead_us'] / USEC_IN_SEC
+            del total_plot_data['total_overhead_us']
+            total_plot_data['pretty_overhead_type'] = total_plot_data['overhead_type'].apply(
+                lambda overhead_type: pretty_overhead_type(overhead_type, 'us'))
+
+            # Q: if we sort do we get consistent order?
+            # total_plot_data = total_plot_data.sort_values(['x_field', 'pretty_overhead_type'])
+
+            overhead_type_map = as_order_map(reversed(overhead_cols))
+            total_plot_data['overhead_type_order'] = total_plot_data['overhead_type'].apply(
+                lambda overhead_type: overhead_type_map[overhead_type])
+            total_plot_data = total_plot_data.sort_values(['x_field', 'overhead_type_order'])
+
+            return total_plot_data
+
+        total_plot_data = get_total_plot_data(total_df)
+        # total_plot_data_groupby = total_plot_data.groupby(['overhead_type'])
+
+        def add_stacked_bars(x, y, hue, label=None, data=None, ax=None):
+            # sns.barplot(x=.., y=.., hue=..)
+
+            # Q: Does order of "data" affect groups returned by groupby?
+            if label is not None:
+                groupby_cols = [hue, label]
+            else:
+                groupby_cols = [hue]
+            data_groupby = data.groupby(groupby_cols)
+            groups = [pair[0] for pair in list(data_groupby)]
+            logging.info("groups: " + pprint_msg(groups))
+            means = dict()
+            stds = dict()
+            for group, group_df in data_groupby:
+                means[group] = group_df.groupby([x]).mean().reset_index()
+                stds[group] = group_df.groupby([x]).std().reset_index()
+            bottom = None
+            for group in groups:
+                xs = means[group][x]
+                ys = means[group][y]
+                std = stds[group][y]
+                # plt.bar(x=xs, height=ys, yerr=std, bottom=bottom, ax=ax)
+
+                # Order in which we call this determines order in which stacks appear.
+                if label is not None:
+                    # group = [hue, label]
+                    label_str = group[1]
+                else:
+                    # group = hue
+                    label_str = group
+                barplot = ax.bar(x=xs, height=ys, yerr=std, label=label_str, bottom=bottom)
+
+                if bottom is None:
+                    bottom = ys
+                else:
+                    bottom += ys
+
+            # Reverse legend label order (when making stacked bar its in reverse order)
+            handles, labels = ax.get_legend_handles_labels()
+            # ax.legend(handles[::-1], labels[::-1], title=None, loc='upper left')
+            ax.legend(handles[::-1], labels[::-1])
+
+        fig = plt.figure(figsize=figsize)
+        # plot_data['field'] = "Per-API-call interception overhead"
+        ax = fig.add_subplot(111)
+        # sns.barplot(x='x_field', y='training_time_sec', hue='pretty_config', data=training_time_plot_data, ax=ax)
+        add_stacked_bars(x='x_field', y='total_overhead_sec',
+                         # hue='pretty_overhead_type',
+                         hue='overhead_type_order',
+                         label='pretty_overhead_type',
+                         data=total_plot_data, ax=ax)
+        # ax.legend().set_title(None)
+        ax.set_ylabel('Total training time (sec)')
+        ax.set_xlabel('(algo, env)')
+        ax.set_title("Breakdown of profiling overhead")
+        logging.info("Output plot @ {path}".format(path=self._total_png_path))
+        fig.savefig(self._total_png_path)
+        plt.close(fig)
+
+        # total_df_csv = total_plot_data.sort_values(['total_overhead_us'])
+        total_df_csv = total_plot_data
+        total_df_csv.to_csv(self._total_csv_path, index=False)
+        logging.info("{path}: {msg}".format(path=self._total_csv_path, msg=pprint_msg(total_df_csv)))
+        logging.info("Output total csv @ {path}".format(path=self._total_csv_path))
+
+        # stacked_bar_plot = StackedBarPlot(
+        #     # data=total_plot_data_groupby,
+        #     # data=total_plot_data,
+        #     data=dict((group, d) for group, d in total_plot_data.groupby(['overhead_type'])),
+        #     path=self._total_png_path,
+        #     # groups=set(total_plot_data_groupby.keys),
+        #     groups=set(total_plot_data['overhead_type']),
+        #     x_field='x_field',
+        #     # y2_field=y2_field,
+        #     # y2_logscale=self.y2_logscale,
+        #     x_axis_label='(algo, env)',
+        #     y_axis_label='Total training time (sec)',
+        #     # y2_axis_label=self.plot_y2_axis_label,
+        #     title='Breakdown of profiling overhead',
+        #     # show_legend=self.show_legend,
+        #     width=self.width,
+        #     height=self.height,
+        #     # keep_zero=self.keep_zero,
+        #     # rotation=self.rotation,
+        #     # groups: the "keys" into the data dictionary, which are the "stacks" found in each bar.
+        #     # group_to_label=self.group_to_label,
+        # )
+        # stacked_bar_plot.plot()
+
+        unins_training_time_us = get_training_durations(self.uninstrumented_directories, self.debug)
+        unins_df = pd.DataFrame({
+            'training_time_us': unins_training_time_us,
+        })
+        unins_df['config'] = 'uninstrumented'
+
+        ins_df = pd.DataFrame({
+            'training_time_us': total_df['total_training_time_us'],
+        })
+        ins_df['config'] = 'instrumented'
+
+        corrected_df = pd.DataFrame({
+            'training_time_us': total_df['corrected_total_training_time_us'],
+        })
+        corrected_df['config'] = 'corrected'
+
+        def pretty_config(config):
+            if config == 'uninstrumented':
+                # return 'CUPTI GPU activities enabled'
+                return 'Uninstrumented'
+            elif config == 'instrumented':
+                # return 'CUPTI GPU activities disabled'
+                return 'Instrumented (uncorrected)'
+            elif config == 'corrected':
+                return 'Instrumented (corrected)'
+            else:
+                raise NotImplementedError()
+        training_time_df = pd.concat([unins_df, ins_df, corrected_df])
+        training_time_df['pretty_config'] = training_time_df['config'].apply(pretty_config)
+
+        def get_training_time_plot_data(training_time_df):
+            training_time_plot_data = copy.copy(training_time_df)
+            # TODO: (algo, env)
+            training_time_plot_data['x_field'] = ""
+
+            training_time_plot_data['training_time_sec'] = training_time_plot_data['training_time_us'] / USEC_IN_SEC
+            del training_time_plot_data['training_time_us']
+            return training_time_plot_data
+
+        training_time_plot_data = get_training_time_plot_data(training_time_df)
+        training_time_df_csv = training_time_plot_data.sort_values(['training_time_sec'])
+        training_time_df_csv.to_csv(self._per_api_csv_path, index=False)
+        logging.info("{path}: {msg}".format(path=self._training_time_csv_path, msg=pprint_msg(training_time_df_csv)))
+        logging.info("Output training_time csv @ {path}".format(path=self._training_time_csv_path))
+
+        fig = plt.figure(figsize=figsize)
+        # plot_data['field'] = "Per-API-call interception overhead"
+        ax = fig.add_subplot(111)
+        sns.barplot(x='x_field', y='training_time_sec', hue='pretty_config', data=training_time_plot_data, ax=ax)
+        ax.legend().set_title(None)
+        ax.set_ylabel('Total training time (sec)')
+        ax.set_xlabel('(algo, env)')
+        ax.set_title("Correcting training time by subtracting profiling overhead")
+        logging.info("Output plot @ {path}".format(path=self._training_time_png_path))
+        fig.savefig(self._training_time_png_path)
+        plt.close(fig)
+
+    @property
+    def _total_csv_path(self):
+        return _j(self.directory, "corrected_training_time.total.raw.csv")
+
+    @property
+    def _per_api_csv_path(self):
+        return _j(self.directory, "corrected_training_time.per_api.raw.csv")
+
+    @property
+    def _total_json_path(self):
+        return _j(self.directory, "corrected_training_time.total.json")
+
+    @property
+    def _per_api_json_path(self):
+        return _j(self.directory, "corrected_training_time.per_api.json")
+
+    @property
+    def _total_png_path(self):
+        return _j(self.directory, "corrected_training_time.total.png")
+
+    @property
+    def _per_api_png_path(self):
+        return _j(self.directory, "corrected_training_time.per_api.png")
+
+    @property
+    def _training_time_png_path(self):
+        return _j(self.directory, "corrected_training_time.training_time.png")
+
+    @property
+    def _training_time_csv_path(self):
+        return _j(self.directory, "corrected_training_time.training_time.csv")
 
 class CallInterceptionOverheadParser:
     """
@@ -305,6 +785,7 @@ class CUPTIOverheadParser:
         logging.info("per_api_stats: " + pprint_msg(per_api_stats))
 
         joined_df = merge_rows_in_order(df)
+        joined_df.to_csv(self._raw_pairs_csv_path, index=False)
         joined_df['cupti_overhead_per_call_us'] = joined_df[colname('us_per_call', 'gpu-activities')] - joined_df[colname('us_per_call', 'no-gpu-activities')]
         json_data = dict()
         for api_name, df_api_name in joined_df.groupby('api_name'):
@@ -364,6 +845,10 @@ class CUPTIOverheadParser:
         return _j(self.directory, "cupti_overhead.raw.csv")
 
     @property
+    def _raw_pairs_csv_path(self):
+        return _j(self.directory, "cupti_overhead.pairs.raw.csv")
+
+    @property
     def _raw_json_path(self):
         return _j(self.directory, "cupti_overhead.json")
 
@@ -407,7 +892,32 @@ def get_per_api_stats(directories, debug):
         return df_reader.per_api_stats()
     return map_readers(CUDAAPIStatsDataframeReader, directories, get_value, debug=debug)
 
+def get_pyprof_overhead_us(directories, debug):
+    def get_value(df_reader):
+        return df_reader.total_pyprof_overhead_us()
+    return map_readers(PyprofDataframeReader, directories, get_value, debug=debug)
+
 def add_col(data, colname, value):
     if colname not in data:
         data[colname] = []
     data[colname].append(value)
+
+def pretty_overhead_type(overhead_type, unit='us'):
+
+    def with_unit(col):
+        return "{col}_{us}".format(
+            col=col, us=unit)
+
+    if overhead_type == with_unit('total_pyprof_overhead'):
+        return "Python overhead"
+    elif overhead_type == with_unit('corrected_total_training_time'):
+        return "Corrected training time"
+    elif overhead_type == with_unit('total_cupti_overhead'):
+        # return 'CUPTI GPU activities enabled'
+        return 'CUPTI overhead'
+    elif overhead_type == with_unit('total_interception_overhead'):
+        # return 'CUPTI GPU activities disabled'
+        return 'LD_PRELOAD interception overhead'
+    else:
+        return overhead_type
+

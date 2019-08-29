@@ -27,7 +27,7 @@ from iml_profiler.parser.common import print_cmd
 from iml_profiler.parser.cpu_gpu_util import UtilParser, UtilPlot
 from iml_profiler.parser.training_progress import TrainingProgressParser, ProfilingOverheadPlot
 from iml_profiler.parser.extrapolated_training_time import ExtrapolatedTrainingTimeParser
-from iml_profiler.parser.profiling_overhead import CallInterceptionOverheadParser, CUPTIOverheadParser
+from iml_profiler.parser.profiling_overhead import CallInterceptionOverheadParser, CUPTIOverheadParser, CorrectedTrainingTimeParser
 from iml_profiler import py_config
 
 from iml_profiler.parser.common import *
@@ -72,6 +72,9 @@ param_postgres_host = luigi.Parameter(description="Postgres host", default=None)
 param_debug = luigi.BoolParameter(description="debug")
 param_debug_single_thread = luigi.BoolParameter(description=textwrap.dedent("""
         Run any multiprocessing stuff using a single thread for debugging.
+        """))
+param_debug_memoize = luigi.BoolParameter(description=textwrap.dedent("""
+        Memoize reading/generation of files to accelerate develop/test code iteration.
         """))
 
 class IMLTask(luigi.Task):
@@ -667,6 +670,36 @@ class CUPTIOverheadTask(luigi.Task):
         self.dumper = CUPTIOverheadParser(**kwargs)
         self.dumper.run()
 
+class CorrectedTrainingTimeTask(luigi.Task):
+    cupti_overhead_json = luigi.Parameter(description="Calibration: mean per-CUDA API CUPTI overhead when GPU activities are recorded (see: CUPTIOverheadTask)")
+    call_interception_overhead_json = luigi.Parameter(description="Calibration: mean overhead for intercepting CUDA API calls with LD_PRELOAD  (see: CallInterceptionOverheadTask)")
+    iml_directories = luigi.ListParameter(description="IML directory that ran with full tracing enabled")
+    uninstrumented_directories = luigi.ListParameter(description="IML directories for uninstrumented runs (iml-prof --config uninstrumented)")
+    directory = luigi.Parameter(description="Output directory", default=".")
+
+    # Plot attrs
+    # rotation = luigi.FloatParameter(description="x-axis title rotation", default=45.)
+    width = luigi.FloatParameter(description="Width of plot in inches", default=None)
+    height = luigi.FloatParameter(description="Height of plot in inches", default=None)
+
+    debug = param_debug
+    debug_memoize = param_debug_memoize
+    debug_single_thread = param_debug_single_thread
+    # algo_env_from_dir = luigi.BoolParameter(description="Add algo/env columns based on directory structure of --iml-directories <algo>/<env>/iml_dir", default=True, parsing=luigi.BoolParameter.EXPLICIT_PARSING)
+
+    skip_output = False
+
+    def requires(self):
+        return []
+
+    def output(self):
+        return []
+
+    def run(self):
+        kwargs = kwargs_from_task(self)
+        self.dumper = CorrectedTrainingTimeParser(**kwargs)
+        self.dumper.run()
+
 NOT_RUNNABLE_TASKS = get_NOT_RUNNABLE_TASKS()
 IML_TASKS = get_IML_TASKS()
 IML_TASKS.add(TraceEventsTask)
@@ -678,6 +711,7 @@ IML_TASKS.add(ProfilingOverheadPlotTask)
 IML_TASKS.add(ExtrapolatedTrainingTimeTask)
 IML_TASKS.add(CallInterceptionOverheadTask)
 IML_TASKS.add(CUPTIOverheadTask)
+IML_TASKS.add(CorrectedTrainingTimeTask)
 
 if __name__ == "__main__":
     main()

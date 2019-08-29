@@ -103,9 +103,9 @@ def modify_tensorflow(uninstrumented_run):
 
     setup(uninstrumented_run)
     if not uninstrumented_run:
-        iml_profiler.profiler.session.setup()
+        # iml_profiler.profiler.session.setup()
         iml_profiler.profiler.estimator.setup()
-        iml_profiler.profiler.tensorflow_profile_context.setup()
+        # iml_profiler.profiler.tensorflow_profile_context.setup()
         clib_wrap.setup()
 
     # from tensorflow.python.profiler import profile_context
@@ -125,12 +125,12 @@ def setup(uninstrumented_run, allow_skip=False):
         return
     assert not SETUP_DONE
 
-    if not uninstrumented_run:
-        """
-        Usually TensorFlow only measures 100 steps at most.
-        Set a big upper limit so it will measure each iteration we measure.
-        """
-        tensorflow_profile_context.MAX_TRACED_STEPS = 99999999
+    # if not uninstrumented_run:
+    #     """
+    #     Usually TensorFlow only measures 100 steps at most.
+    #     Set a big upper limit so it will measure each iteration we measure.
+    #     """
+    #     tensorflow_profile_context.MAX_TRACED_STEPS = 99999999
 
     # setup_wrap_BaseSession_as_default()
 
@@ -138,9 +138,9 @@ def setup(uninstrumented_run, allow_skip=False):
         sample_cuda_api.load_library()
 
     if not uninstrumented_run:
-        iml_profiler.profiler.session.register_session_active_hook(AddProfileContextHook)
-        iml_profiler.profiler.session.register_session_inactive_hook(RemoveProfileContextHook)
-        iml_profiler.profiler.session.register_session_run_hook(MaybeDumperTfprofContextHook)
+        # iml_profiler.profiler.session.register_session_active_hook(AddProfileContextHook)
+        # iml_profiler.profiler.session.register_session_inactive_hook(RemoveProfileContextHook)
+        # iml_profiler.profiler.session.register_session_run_hook(MaybeDumperTfprofContextHook)
         clib_wrap.register_record_event_hook(DumpPyprofTraceHook)
 
         sys.excepthook = cleanup_profiler_excepthook
@@ -715,10 +715,13 @@ class Profiler:
         self.directory = get_argval('directory', directory, None, allow_none=False)
         self.disable = get_argval('disable', disable, False)
         self.disable_pyprof = get_argval('disable_pyprof', disable_pyprof, False)
-        self.disable_tfprof = get_argval('disable_tfprof', disable_tfprof, False)
+        # Disable OLD tfprof tracing code.  We now use iml-prof to trace stuff.
+        self.disable_tfprof = True
+        self.disable_tfprof_dump = True
+        # self.disable_tfprof = get_argval('disable_tfprof', disable_tfprof, False)
         self.disable_pyprof_dump = get_argval('disable_pyprof_dump', disable_pyprof_dump, False)
         self.disable_pyprof_trace = get_argval('disable_pyprof_trace', disable_pyprof_trace, False)
-        self.disable_tfprof_dump = get_argval('disable_tfprof_dump', disable_tfprof_dump, False)
+        # self.disable_tfprof_dump = get_argval('disable_tfprof_dump', disable_tfprof_dump, False)
         self.delay = get_argval('delay', delay, False)
         self.just_sample_util = get_argval('just_sample_util', just_sample_util, False)
         self.training_progress = get_argval('training_progress', training_progress, False)
