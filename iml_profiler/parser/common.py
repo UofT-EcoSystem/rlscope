@@ -1287,6 +1287,19 @@ def get_unit_test_multiple_path(directory, trace_id, bench_name):
     ))
     return ret
 
+def get_iml_config_path(out_dir, bench_name=None):
+    ret = _j(out_dir, "iml_config{bench}.json".format(
+        bench=bench_suffix(bench_name),
+    ))
+    return ret
+
+def is_iml_config_file(path):
+    base = _b(path)
+    m = re.search(r'iml_config{bench}.json$'.format(
+        bench=BENCH_SUFFIX_RE,
+    ), base)
+    return m
+
 def is_microbench_path(path):
     return re.search(r"^microbenchmark\.json$", _b(path))
 
@@ -1940,3 +1953,8 @@ def list_files(direc):
 def is_sample_cuda_api_lib(path):
     return _b(path) == 'libsample_cuda_api.so'
 
+def each_file_recursive(root_dir):
+    for dirpath, dirnames, filenames in os.walk(root_dir):
+        for base in filenames:
+            path = _j(dirpath, base)
+            yield path

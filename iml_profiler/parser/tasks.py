@@ -676,6 +676,28 @@ class CorrectedTrainingTimeTask(luigi.Task):
     iml_directories = luigi.ListParameter(description="IML directory that ran with full tracing enabled")
     uninstrumented_directories = luigi.ListParameter(description="IML directories for uninstrumented runs (iml-prof --config uninstrumented)")
     directory = luigi.Parameter(description="Output directory", default=".")
+    iml_prof_config = luigi.ChoiceParameter(description=textwrap.dedent("""
+    What option did you pass to \"iml-prof --config\"? 
+    We use this to determine what overheads to subtract:
+    
+    instrumented: 
+        We JUST subtract LD_PRELOAD overhead.
+        (i.e. CUPTI is NOT enabled here).
+    # gpu-activity: 
+    #     We subtract:
+    #     - LD_PRELOAD overhead
+    #     - CUPTI overhead
+    full:
+        (default)
+        We subtract:
+        - LD_PRELOAD overhead
+        - CUPTI overhead
+        - Python pyprof overhead (if we detect pyprof events, otherwise this is zero)
+    """), choices=['interception',
+                   'uninstrumented',
+                   # 'gpu-activity',
+                   'full'],
+                                            default='full')
 
     # Plot attrs
     # rotation = luigi.FloatParameter(description="x-axis title rotation", default=45.)

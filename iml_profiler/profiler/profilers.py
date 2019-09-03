@@ -726,6 +726,7 @@ class Profiler:
         self.just_sample_util = get_argval('just_sample_util', just_sample_util, False)
         self.training_progress = get_argval('training_progress', training_progress, False)
         self._loaded_libcupti = False
+        self.metadata = dict()
 
         modify_tensorflow(uninstrumented_run=self.disable)
         if self.disable:
@@ -1400,6 +1401,7 @@ class Profiler:
                 del attrs[k]
         tensorflow_config = get_tensorflow_config()
         attrs['tensorflow_config'] = tensorflow_config
+        attrs['env'] = dict(os.environ)
         if self.debug:
             logging.info("Dump IML configuration information to {path}".format(path=path))
         dump_json(attrs, path)
@@ -1548,6 +1550,28 @@ class Profiler:
             # - If this process does NOT report training progress, just exit once --iml-trace-time-sec is up.
             self._maybe_finish(debug=self.debug)
 
+    def set_metadata(self, variables):
+        """
+        e.g.
+
+        iml.prof.set_metadata({
+            'algo': algo,
+            'env': env,
+        })
+
+        :param variables:
+            Dictionary of key/value pairs to record in iml_config.json file.
+            This is for convenience when running experiments, call this API isn't neccessary.
+        :return:
+        """
+        self.metadata.update(variables)
+
+        self._maybe_dump_iml_config()
+
+    def _maybe_dump_iml_config(self):
+        if self.process_name is not None and self.phase is not None:
+            self._dump_iml_config()
+
     def set_process_name(self, process_name):
         if process_name == '':
             raise ValueError("IML ERROR: You cannot use an empty-string for process_name")
@@ -1559,8 +1583,9 @@ class Profiler:
         self._maybe_set_metadata()
 
         if self.process_name is not None and self.phase is not None:
-            self._dump_iml_config()
             self._force_load_libcupti()
+
+        self._maybe_dump_iml_config()
 
     def _maybe_set_metadata(self):
         if sample_cuda_api.is_used() and \
@@ -1628,8 +1653,9 @@ class Profiler:
         self._maybe_set_metadata()
 
         if self.process_name is not None and self.phase is not None:
-            self._dump_iml_config()
             self._force_load_libcupti()
+
+        self._maybe_dump_iml_config()
 
         if self.disable:
             return
@@ -2017,10 +2043,7 @@ class Profiler:
 
     @property
     def _iml_config_path(self):
-        ret = _j(self.out_dir, "iml_config{bench}.json".format(
-            bench=bench_suffix(self.bench_name),
-        ))
-        return ret
+        return get_iml_config_path(self.out_dir, self.bench_name)
 
     def _fixup_tfprof(self, path):
         """

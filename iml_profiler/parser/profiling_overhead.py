@@ -12,7 +12,7 @@ import seaborn as sns
 
 from matplotlib import pyplot as plt
 
-from iml_profiler.parser.dataframe import TrainingProgressDataframeReader, CUDAAPIStatsDataframeReader, PyprofDataframeReader
+from iml_profiler.parser.dataframe import TrainingProgressDataframeReader, CUDAAPIStatsDataframeReader, PyprofDataframeReader, read_iml_config
 from iml_profiler.parser.stacked_bar_plots import StackedBarPlot
 
 from iml_profiler.parser import stacked_bar_plots
@@ -30,6 +30,7 @@ class CorrectedTrainingTimeParser:
                  iml_directories,
                  uninstrumented_directories,
                  directory,
+                 iml_prof_config,
                  width=None,
                  height=None,
                  debug=False,
@@ -49,6 +50,19 @@ class CorrectedTrainingTimeParser:
         self.iml_directories = iml_directories
         self.uninstrumented_directories = uninstrumented_directories
         self.directory = directory
+        self.iml_prof_config = iml_prof_config
+        assert self.iml_prof_config in ['full', 'interception', 'uninstrumented']
+
+        # 'uninstrumented' (e.g. just_pyprof)
+        self.should_subtract_cupti = False
+        self.should_subtract_LD_PRELOAD = False
+
+        if self.iml_prof_config in ['full']:
+            self.should_subtract_cupti = True
+
+        if self.iml_prof_config in ['full', 'interception']:
+            self.should_subtract_LD_PRELOAD = True
+
         self.width = width
         self.height = height
         self.debug = debug
@@ -109,6 +123,10 @@ class CorrectedTrainingTimeParser:
         sns_kwargs = get_sns_kwargs()
         plt_kwargs = get_plt_kwargs()
 
+        def add_fields(df, iml_config):
+            add_iml_config(df, iml_config)
+            add_x_field(df)
+
         def load_dfs():
             memoize_path = _j(self.directory, "{klass}.load_dfs.pickle".format(
                 klass=self.__class__.__name__))
@@ -129,17 +147,41 @@ class CorrectedTrainingTimeParser:
             #     total_pyprof_overhead_us
             #     total_cupti_overhead_us
             #     total_interception_overhead_us
-            #     total_training_time_us
+            #     total_training_duration_us
             #     total_overhead_us
-            #     total_training_time_us
-            #     corrected_total_training_time_us
+            #     total_training_duration_us
+            #     corrected_total_training_duration_us
             total_dfs = []
             for directory in self.iml_directories:
+
+                iml_config = read_iml_config(directory)
+
                 """
                 - Pyprof overhead = sum(Event.duration_profiling_overhead_us If Event.start_profiling_overhead_us != 0)
                   - Need to parse pyprof Event files
                 """
-                total_pyprof_overhead_us = get_pyprof_overhead_us(directory, self.debug)
+                total_pyprof_overhead_us = get_pyprof_overhead_us(directory, debug=self.debug)
+                # total_pyprof_overhead_df = get_pyprof_overhead_df(directory, debug=self.debug)
+
+                # iml_config_paths = [path for path in each_file_recursive(directory) if is_iml_config_file(path)]
+                # # There should be exactly one iml_config.json file.
+                # # Q: Couldn't there be multiple for multi-process scripts like minigo?
+                # assert len(iml_config_paths) == 1
+                # iml_config_path = iml_config_paths[0]
+                # iml_config = load_json(iml_config_path)
+
+                # if --cuda-api-calls and --cuda-api-events was set:
+                #   # We intercepted API calls to record total-api-time and api-call-count
+                #   # Q: does total-api-time include time spent recording api-events?
+                #   # A: Yeah, config == 'interception' includes that.
+                #   subtract total_interception_overhead_us
+                #
+                # if --cuda-api-calls was set:
+                #   subtract total_cuda_api_calls_overhead_us
+                #
+                # if --cuda-activities was set:
+                #   subtract total_cupti_overhead_us
+                # iml_config['env']['IML_CUDA_API_CALLS']
 
                 """
                 - CUPTI overhead = sum(api.n_calls * api.mean_cupti_per_call_overhead_us for each api)
@@ -149,15 +191,27 @@ class CorrectedTrainingTimeParser:
                 # TODO: make it work for multiple self.directories
                 # Could be nice to see a stacked-bar graph that "breaks down" total training time by its overhead sources...
                 # probably a pretty busy plot though.
-                per_api_stats = get_per_api_stats(directory, self.debug)
-                per_api_stats_df = per_api_stats.reset_index()
 
-                per_api_df = pd.DataFrame({
-                    'api_name': per_api_stats_df['api_name'],
-                    'num_calls': per_api_stats_df['num_calls'],
-                    # 'total_cupti_overhead_us': per_api_stats_df['num_calls'] * self.cupti_overhead_json['mean_cupti_overhead_per_call_us'],
-                    'total_interception_overhead_us': per_api_stats_df['num_calls'] * self.interception_overhead_json['mean_interception_overhead_per_call_us'],
-                })
+
+
+                # TODO: if there are NO per-api stats, make get_per_api_stats return a dataframe with zero rows:
+                # api_name, num_calls, ...
+                per_api_stats = get_per_api_stats(directory, debug=self.debug)
+                per_api_df = copy.copy(per_api_stats.reset_index())
+                if self.should_subtract_LD_PRELOAD:
+                    per_api_df['total_interception_overhead_us'] = per_api_df['num_calls'] * self.interception_overhead_json['mean_interception_overhead_per_call_us']
+                else:
+                    per_api_df['total_interception_overhead_us'] = 0
+                    logging.info("SKIP LD_PRELOAD overhead (total_interception_overhead_us = 0)")
+                add_fields(per_api_df, iml_config)
+
+                # per_api_df = pd.DataFrame({
+                #     'api_name': per_api_stats_df['api_name'],
+                #     'num_calls': per_api_stats_df['num_calls'],
+                #     # 'total_cupti_overhead_us': per_api_stats_df['num_calls'] * self.cupti_overhead_json['mean_cupti_overhead_per_call_us'],
+                #     'total_interception_overhead_us': per_api_stats_df['num_calls'] * self.interception_overhead_json['mean_interception_overhead_per_call_us'],
+                # })
+
                 # - make json a df
                 # - join on api_name, make column 'mean_cupti_overhead_per_call_us'
                 # - multiply mean by num_calls
@@ -168,29 +222,22 @@ class CorrectedTrainingTimeParser:
                         add_col(cupti_overhead_cols, field, value)
                 cupti_overhead_df = pd.DataFrame(cupti_overhead_cols)
                 per_api_df = per_api_df.merge(cupti_overhead_df, on=['api_name'])
-                per_api_df['total_cupti_overhead_us'] = per_api_df['num_calls'] * per_api_df['mean_cupti_overhead_per_call_us']
+                if self.should_subtract_cupti:
+                    per_api_df['total_cupti_overhead_us'] = per_api_df['num_calls'] * per_api_df['mean_cupti_overhead_per_call_us']
+                else:
+                    per_api_df['total_cupti_overhead_us'] = 0
+                    logging.info("SKIP CUPTI overhead (total_cupti_overhead_us = 0)")
 
                 per_api_df['total_overhead_us'] = per_api_df['total_cupti_overhead_us'] + per_api_df['total_interception_overhead_us']
                 per_api_dfs.append(per_api_df)
-                total_cupti_overhead_us = np.sum(per_api_df['total_cupti_overhead_us'])
 
-                # Q: output csv/json with breakdown of overhead per-api call?
-                # per_api_cupti_overhead_us = dict()
-                # for api_name, row in per_api_stats.iterrows():
-                #     per_api_cupti_overhead_us[api_name] = row['num_calls'] * self.cupti_overhead_json['mean_cupti_overhead_per_call_us']
-                # total_cupti_overhead_us = np.sum(per_api_cupti_overhead_us.values())
+                total_cupti_overhead_us = np.sum(per_api_df['total_cupti_overhead_us'])
 
                 """
                 - Interception overhead = sum(total_n_calls * api.mean_interception_per_call_overhead_us)
                   - parse total_n_calls using CUDAAPIStatsDataframeReader
                   - parse api.mean_cupti_per_call_overhead_us using call_interception_overhead_json
                 """
-                # per_api_interception_overhead_us = dict()
-                # for api_name, row in per_api_stats.iterrows():
-                #     per_api_interception_overhead_us[api_name] = row['num_calls'] * self.interception_overhead_json['mean_interception_overhead_per_call_us']
-                # total_interception_overhead_us = np.sum(per_api_interception_overhead_us.values())
-
-                # per_api_df['total_interception_overhead_us'] = per_api_df['num_calls'] * self.interception_overhead_json['mean_interception_overhead_per_call_us']
                 total_interception_overhead_us = np.sum(per_api_df['total_interception_overhead_us'])
 
                 """
@@ -198,19 +245,38 @@ class CorrectedTrainingTimeParser:
                   - parse total_training_time using TrainingProgressDataframeReader
                 """
 
-                total_training_time_us = get_training_durations(directory, self.debug)
+                total_training_duration_us = get_training_durations(directory, debug=self.debug)
+                # total_training_duration_df = get_training_durations_df(directory, debug=self.debug)
+
+                per_api_df_group = per_api_df.groupby(['algo', 'env']).sum().reset_index()
+                # total_df = join_single_rows([
+                #     per_api_df_group,
+                #     total_training_duration_df,
+                #     total_pyprof_overhead_df,
+                # ])
+
                 total_df = pd.DataFrame({
                     'total_pyprof_overhead_us': [total_pyprof_overhead_us],
                     'total_cupti_overhead_us': [total_cupti_overhead_us],
                     'total_interception_overhead_us': [total_interception_overhead_us],
-                    'total_training_time_us': [total_training_time_us],
+                    'total_training_duration_us': [total_training_duration_us],
+                    # 'algo': [algo],
+                    # 'env': [env],
+                    # 'x_field': [x_field],
                 })
+                add_fields(total_df, iml_config)
+
+                # if len(total_df) > 0:
+                #     total_df['algo'] = get_unique(per_api_df['algo'])
+                #     total_df['env'] = get_unique(per_api_df['env'])
+                #     total_df['x_field'] = get_unique(per_api_df['x_field'])
+
                 # WARNING: protect against bug where we create more than one row unintentionally.
                 # If we mix scalars/lists, pd.DataFrame will "duplicate" the scalars to match the list length.
                 # This can happen if we accidentally include per-api times instead of summing across times.
                 assert len(total_df) == 1
                 total_df['total_overhead_us'] = total_df['total_pyprof_overhead_us'] + total_df['total_cupti_overhead_us'] + total_df['total_interception_overhead_us']
-                total_df['corrected_total_training_time_us'] = total_df['total_training_time_us'] - total_df['total_overhead_us']
+                total_df['corrected_total_training_duration_us'] = total_df['total_training_duration_us'] - total_df['total_overhead_us']
                 total_dfs.append(total_df)
 
             total_df = pd.concat(total_dfs)
@@ -222,7 +288,6 @@ class CorrectedTrainingTimeParser:
             return ret
 
         total_df, per_api_df = load_dfs()
-
 
         # PROBLEM: we need to plot the uninstrumented runtime as well to verify the "corrected" time is correct.
         # TODO: output format that ProfilingOverheadPlot can read, reuse that plotting code.
@@ -244,9 +309,11 @@ class CorrectedTrainingTimeParser:
 
         def get_per_api_plot_data(per_api_df):
             overhead_cols = ['total_cupti_overhead_us', 'total_interception_overhead_us']
-            keep_cols = ['api_name', 'num_calls'] + overhead_cols
+            # keep_cols = ['api_name', 'num_calls', 'algo', 'env', 'x_field'] + overhead_cols
+            # keep_cols = ['api_name', 'num_calls'] + overhead_cols
             # Keep these columns "intact" (remove 'total_overhead_us')
-            id_vars = ['api_name', 'num_calls']
+            id_vars = ['api_name', 'num_calls', 'algo', 'env', 'x_field']
+            keep_cols = id_vars + overhead_cols
             keep_df = per_api_df[keep_cols]
             per_api_plot_data = pd.melt(keep_df, id_vars=id_vars, var_name='overhead_type', value_name='total_overhead_us')
             per_api_plot_data['pretty_overhead_type'] = per_api_plot_data['overhead_type'].apply(
@@ -262,47 +329,48 @@ class CorrectedTrainingTimeParser:
         else:
             figsize = None
 
-        fig = plt.figure(figsize=figsize)
         per_api_plot_data = get_per_api_plot_data(per_api_df)
         output_csv(per_api_plot_data, self._per_api_csv_path, sort_by=['total_overhead_sec'])
-        ax = fig.add_subplot(111)
-        sns.barplot(
-            x='api_name', y='total_overhead_sec', hue='pretty_overhead_type', data=per_api_plot_data, ax=ax,
-            **sns_kwargs)
-        ax.legend().set_title(None)
-        ax.set_ylabel('Total training time (sec)')
-        ax.set_xlabel('CUDA API call')
-        ax.set_title("Breakdown of profiling overhead by CUDA API call")
-        logging.info("Output plot @ {path}".format(path=self._per_api_png_path))
-        fig.savefig(self._per_api_png_path)
-        plt.close(fig)
+        if len(per_api_plot_data) > 0:
+            fig = plt.figure(figsize=figsize)
+            ax = fig.add_subplot(111)
+            sns.barplot(
+                x='api_name', y='total_overhead_sec', hue='pretty_overhead_type', data=per_api_plot_data, ax=ax,
+                **sns_kwargs)
+            ax.legend().set_title(None)
+            ax.set_ylabel('Total training time (sec)')
+            ax.set_xlabel('CUDA API call')
+            ax.set_title("Breakdown of profiling overhead by CUDA API call")
+            logging.info("Output plot @ {path}".format(path=self._per_api_png_path))
+            fig.savefig(self._per_api_png_path)
+            plt.close(fig)
 
         def get_total_plot_data(total_df):
             #     total_pyprof_overhead_us
             #     total_cupti_overhead_us
             #     total_interception_overhead_us
-            #     total_training_time_us
-            #     corrected_total_training_time_us
+            #     total_training_duration_us
+            #     corrected_total_training_duration_us
             #
             #     total_overhead_us
-            #     total_training_time_us
+            #     total_training_duration_us
             total_plot_data = copy.copy(total_df)
             # Ideally, (algo, env), but we don't have that luxury.
-            total_plot_data['x_field'] = ""
+            # total_plot_data['x_field'] = ""
 
             # Melt overhead columns, convert to seconds.
 
             # We don't have any unique column values for this data-frame, so we cannot use id_vars...
             id_vars = [
-                # 'total_training_time_us',
+                # 'total_training_duration_us',
                 "x_field",
             ]
             overhead_cols = [
                 'total_pyprof_overhead_us',
                 'total_cupti_overhead_us',
                 'total_interception_overhead_us',
-                # 'total_training_time_us',
-                'corrected_total_training_time_us',
+                # 'total_training_duration_us',
+                'corrected_total_training_duration_us',
             ]
 
             # Keep these columns "intact" (remove 'total_overhead_us')
@@ -326,41 +394,57 @@ class CorrectedTrainingTimeParser:
             return total_plot_data
 
         total_plot_data = get_total_plot_data(total_df)
-        # total_plot_data_groupby = total_plot_data.groupby(['overhead_type'])
-
-        fig = plt.figure(figsize=figsize)
-        # plot_data['field'] = "Per-API-call interception overhead"
-        ax = fig.add_subplot(111)
-        # sns.barplot(x='x_field', y='training_time_sec', hue='pretty_config', data=training_time_plot_data, ax=ax)
         output_csv(total_plot_data, self._total_csv_path)
-        add_stacked_bars(x='x_field', y='total_overhead_sec',
-                         hue='overhead_type_order',
-                         label='pretty_overhead_type',
-                         data=total_plot_data, ax=ax,
-                         **plt_kwargs)
-        # ax.legend().set_title(None)
-        ax.set_ylabel('Total training time (sec)')
-        ax.set_xlabel('(algo, env)')
-        ax.set_title("Breakdown of profiling overhead")
-        logging.info("Output plot @ {path}".format(path=self._total_png_path))
-        fig.savefig(self._total_png_path)
-        plt.close(fig)
+        if len(total_plot_data) > 0:
+            fig = plt.figure(figsize=figsize)
+            # plot_data['field'] = "Per-API-call interception overhead"
+            ax = fig.add_subplot(111)
+            # sns.barplot(x='x_field', y='training_duration_sec', hue='pretty_config', data=training_duration_plot_data, ax=ax)
+            add_stacked_bars(x='x_field', y='total_overhead_sec',
+                             hue='overhead_type_order',
+                             label='pretty_overhead_type',
+                             data=total_plot_data, ax=ax,
+                             **plt_kwargs)
+            # ax.legend().set_title(None)
+            ax.set_ylabel('Total training time (sec)')
+            ax.set_xlabel('(algo, env)')
+            ax.set_title("Breakdown of profiling overhead")
+            logging.info("Output plot @ {path}".format(path=self._total_png_path))
+            fig.savefig(self._total_png_path)
+            plt.close(fig)
 
-        unins_training_time_us = get_training_durations(self.uninstrumented_directories, self.debug)
-        unins_df = pd.DataFrame({
-            'training_time_us': unins_training_time_us,
-        })
+        unins_df = pd.concat(get_training_durations_df(self.uninstrumented_directories, debug=self.debug))
         unins_df['config'] = 'uninstrumented'
 
         ins_df = pd.DataFrame({
-            'training_time_us': total_df['total_training_time_us'],
+            'training_duration_us': total_df['total_training_duration_us'],
+            'algo': total_df['algo'],
+            'env': total_df['env'],
         })
         ins_df['config'] = 'instrumented'
 
         corrected_df = pd.DataFrame({
-            'training_time_us': total_df['corrected_total_training_time_us'],
+            'training_duration_us': total_df['corrected_total_training_duration_us'],
+            'algo': total_df['algo'],
+            'env': total_df['env'],
         })
         corrected_df['config'] = 'corrected'
+
+        # unins_training_duration_us = get_training_durations(self.uninstrumented_directories, debug=self.debug)
+        # unins_df = pd.DataFrame({
+        #     'training_duration_us': unins_training_duration_us,
+        # })
+        # unins_df['config'] = 'uninstrumented'
+        #
+        # ins_df = pd.DataFrame({
+        #     'training_duration_us': total_df['total_training_duration_us'],
+        # })
+        # ins_df['config'] = 'instrumented'
+        #
+        # corrected_df = pd.DataFrame({
+        #     'training_duration_us': total_df['corrected_total_training_duration_us'],
+        # })
+        # corrected_df['config'] = 'corrected'
 
         def pretty_config(config):
             if config == 'uninstrumented':
@@ -373,24 +457,26 @@ class CorrectedTrainingTimeParser:
                 return 'Instrumented (corrected)'
             else:
                 raise NotImplementedError()
-        training_time_df = pd.concat([unins_df, ins_df, corrected_df])
-        training_time_df['pretty_config'] = training_time_df['config'].apply(pretty_config)
+        training_duration_df = pd.concat([unins_df, ins_df, corrected_df])
+        training_duration_df['pretty_config'] = training_duration_df['config'].apply(pretty_config)
+        # add_fields(training_duration_df, iml_config)
+        add_x_field(training_duration_df)
 
-        def get_training_time_plot_data(training_time_df):
-            training_time_plot_data = copy.copy(training_time_df)
+        def get_training_duration_plot_data(training_duration_df):
+            training_duration_plot_data = copy.copy(training_duration_df)
             # TODO: (algo, env)
-            training_time_plot_data['x_field'] = ""
+            # training_duration_plot_data['x_field'] = ""
 
-            training_time_plot_data['training_time_sec'] = training_time_plot_data['training_time_us'] / USEC_IN_SEC
-            del training_time_plot_data['training_time_us']
-            return training_time_plot_data
+            training_duration_plot_data['training_duration_sec'] = training_duration_plot_data['training_duration_us'] / USEC_IN_SEC
+            del training_duration_plot_data['training_duration_us']
+            return training_duration_plot_data
 
-        training_time_plot_data = get_training_time_plot_data(training_time_df)
+        training_duration_plot_data = get_training_duration_plot_data(training_duration_df)
 
         def get_percent_bar_labels(df):
             # NOTE: need .values otherwise we get NaN's
-            unins_time_sec = df[df['pretty_config'] == 'Uninstrumented']['training_time_sec'].values
-            df['perc'] = ( df['training_time_sec'] - unins_time_sec ) / unins_time_sec
+            unins_time_sec = df[df['pretty_config'] == 'Uninstrumented']['training_duration_sec'].values
+            df['perc'] = ( df['training_duration_sec'] - unins_time_sec ) / unins_time_sec
             def get_label(row):
                 if row['pretty_config'] == 'Uninstrumented':
                     assert row['perc'] == 0.
@@ -401,21 +487,22 @@ class CorrectedTrainingTimeParser:
             df['bar_labels'] = bar_labels
             return bar_labels
 
-        fig = plt.figure(figsize=figsize)
-        ax = fig.add_subplot(111)
-        output_csv(training_time_plot_data, self._training_time_csv_path, sort_by=['training_time_sec'])
-        sns.barplot(
-            x='x_field', y='training_time_sec', hue='pretty_config', data=training_time_plot_data, ax=ax,
-            **sns_kwargs)
-        add_bar_labels(y='training_time_sec', hue='pretty_config', ax=ax,
-                       get_bar_labels=get_percent_bar_labels)
-        ax.legend().set_title(None)
-        ax.set_ylabel('Total training time (sec)')
-        ax.set_xlabel('(algo, env)')
-        ax.set_title("Correcting training time by subtracting profiling overhead")
-        logging.info("Output plot @ {path}".format(path=self._training_time_png_path))
-        fig.savefig(self._training_time_png_path)
-        plt.close(fig)
+        output_csv(training_duration_plot_data, self._training_time_csv_path, sort_by=['training_duration_sec'])
+        if len(training_duration_plot_data) > 0:
+            fig = plt.figure(figsize=figsize)
+            ax = fig.add_subplot(111)
+            sns.barplot(
+                x='x_field', y='training_duration_sec', hue='pretty_config', data=training_duration_plot_data, ax=ax,
+                **sns_kwargs)
+            add_bar_labels(y='training_duration_sec', hue='pretty_config', ax=ax,
+                           get_bar_labels=get_percent_bar_labels)
+            ax.legend().set_title(None)
+            ax.set_ylabel('Total training time (sec)')
+            ax.set_xlabel('(algo, env)')
+            ax.set_title("Correcting training time by subtracting profiling overhead")
+            logging.info("Output plot @ {path}".format(path=self._training_time_png_path))
+            fig.savefig(self._training_time_png_path)
+            plt.close(fig)
 
     @property
     def _total_csv_path(self):
@@ -453,12 +540,18 @@ class CallInterceptionOverheadParser:
     """
     config_interception
     Run with interception enabled.
-    $ iml-prof --debug --cuda-api-calls --cuda-api-events --iml-disable
+    $ iml-prof --config interception python train.py --iml-disable-pyprof
+    # --config interception: --cuda-api-calls --cuda-api-events
     # We want to know how much time is spent just intercepting API calls (NOT GPU activities)
 
     config_no_interception
-    Run with interception disabled.
-    $ iml-prof --debug --iml-disable
+    Run with interception disabled, and pyprof disabled (uninstrumented).
+    $ iml-prof --config uninstrumented python train.py --iml-disable-pyprof
+    # Time spent without ANY interception / profiling overhead at all.
+
+    config_pyprof
+    Run with pyprof enabled (but interception disabled).
+    $ iml-prof uninstrumented ... python train.py
     # Time spent without ANY interception / profiling overhead at all.
     """
     def __init__(self,
@@ -595,6 +688,223 @@ class CallInterceptionOverheadParser:
         logging.info("Output csv @ {path}".format(path=self._raw_csv_path))
         logging.info("Output json @ {path}".format(path=self._raw_json_path))
 
+class PyprofOverheadParser:
+    """
+    Compute extra time spent in the CUDA API as a result of turning on CUPTI's GPU activity recording feature.
+    """
+    def __init__(self,
+                 pyprof_directory,
+                 uninstrumented_directory,
+                 directory,
+                 width=None,
+                 height=None,
+                 debug=False,
+                 # Swallow any excess arguments
+                 **kwargs):
+        """
+        :param directories:
+        :param debug:
+        """
+        self.pyprof_directory = pyprof_directory
+        self.uninstrumented_directory = uninstrumented_directory
+        self.directory = directory
+        self.width = width
+        self.height = height
+        self.debug = debug
+
+    def run(self):
+        """
+        For config in 'gpu-activities', 'no-gpu-activities':
+            For api_call in 'cudaKernelLaunch', …:
+                Total_api_time_us = Sum up totall time spent in a specific API call (e.g. cudaLaunchKernel) across ALL calls (all threads)
+                Total_api_calls = Sum up total number of times a specific API call (e.g. cudaLaunchKernel) was made
+                Us_per_call = Total_api_time_us / Total_api_calls
+                data[config][api_call].append(us_per_call)
+
+        Stats to save:
+            # We need this for "subtraction"
+            Per-CUDA API CUPTI-induced profiling overhead (us) =
+                cudaLaunchKernel: {
+                    mean: ...,
+                    std: ...,
+                }
+                ...
+
+            # Useful stat for sanity check:
+            # Is the total time spent in the CUDA API similar across repetitions of the same configuration?
+            Total time spent in CUDA API call:
+                config: {
+                    cudaLaunchKernel: {
+                        total_time_us: ...
+                    }
+                }
+                ...
+
+            # Useful stat for sanity check:
+            # are number of CUDA API calls between runs the same/very similar?
+            Total number of CUDA API calls:
+                config: {
+                    cudaLaunchKernel: {
+                        n_calls: ...
+                    }
+                }
+                ...
+
+        csv output:
+        api_name, config, total_num_calls, total_api_time_us, us_per_call
+        ...
+
+        json output:
+        api_name: {
+            mean_us_per_call:
+            std_us_per_call:
+        }
+        """
+
+        sns_kwargs = get_sns_kwargs()
+        plt_kwargs = get_plt_kwargs()
+
+        csv_data = dict()
+
+        # api_name -> {
+        #   mean_us_per_call: ...,
+        #   std_us_per_call: ...,
+        # }
+        for (config, directories) in [
+            ('uninstrumented', self.uninstrumented_directory),
+            ('pyprof', self.pyprof_directory),
+        ]:
+            for directory in directories:
+                per_api_stats = get_per_api_stats(directory, debug=self.debug)
+                logging.info("per_api_stats: " + pprint_msg(per_api_stats))
+                for api_name, row in per_api_stats.iterrows():
+                    total_api_time_us = row['total_time_us']
+                    total_num_calls = row['num_calls']
+
+                    add_col(csv_data, 'config', config)
+                    add_col(csv_data, 'api_name', api_name)
+                    add_col(csv_data, 'total_num_calls', total_num_calls)
+                    add_col(csv_data, 'total_api_time_us', total_api_time_us)
+                    us_per_call = total_api_time_us / float(total_num_calls)
+                    add_col(csv_data, 'us_per_call', us_per_call)
+
+        def merge_rows_in_order(df):
+            def get_suffix(config):
+                return "_{config}".format(config=re.sub('-', '_', config))
+
+            groupby_config = df.groupby(['config'])
+            assert len(groupby_config) == 2
+            config_to_dfs = dict()
+            for config, config_df in groupby_config:
+                groupby_api_name = config_df.groupby(['api_name'])
+                config_to_dfs[config] = []
+                for api_name, api_name_df in groupby_api_name:
+                    assert 'join_row_index' not in api_name_df
+                    api_name_df['join_row_index'] = list(range(len(api_name_df)))
+                    config_to_dfs[config].append(api_name_df)
+
+            config_to_df = dict((config, pd.concat(dfs)) for config, dfs in config_to_dfs.items())
+            assert len(config_to_df) == 2
+            configs = sorted(config_to_df.keys())
+
+            join_cols = ['api_name', 'join_row_index']
+
+            config1 = configs[0]
+            df1 = config_to_df[config1]
+            # df1 = df1.set_index(join_cols)
+
+            config2 = configs[1]
+            df2 = config_to_df[config2]
+            # df2 = df2.set_index(join_cols)
+
+            joined_df = df1.merge(df2, on=join_cols, suffixes=(get_suffix(config1), get_suffix(config2)))
+            del joined_df['join_row_index']
+
+            return joined_df
+
+        def colname(col, config):
+            return "{col}_{config}".format(
+                col=col,
+                config=re.sub('-', '_', config))
+
+        df = pd.DataFrame(csv_data)
+        df_csv = df.sort_values(['config', 'api_name', 'us_per_call'])
+        df_csv.to_csv(self._raw_csv_path, index=False)
+        logging.info("per_api_stats: " + pprint_msg(per_api_stats))
+
+        joined_df = merge_rows_in_order(df)
+        joined_df.to_csv(self._raw_pairs_csv_path, index=False)
+        joined_df['cupti_overhead_per_call_us'] = joined_df[colname('us_per_call', 'gpu-activities')] - joined_df[colname('us_per_call', 'no-gpu-activities')]
+        json_data = dict()
+        for api_name, df_api_name in joined_df.groupby('api_name'):
+            assert api_name not in json_data
+            json_data[api_name] = dict()
+            json_data[api_name]['mean_cupti_overhead_per_call_us'] = np.mean(df_api_name['cupti_overhead_per_call_us'])
+            json_data[api_name]['std_cupti_overhead_per_call_us'] = np.std(df_api_name['cupti_overhead_per_call_us'])
+            json_data[api_name]['num_cupti_overhead_per_call_us'] = len(df_api_name['cupti_overhead_per_call_us'])
+
+        # api_names = set(df['api_name'])
+        # for api_name in api_names:
+        #     assert api_name not in json_data
+        #     json_data[api_name] = dict()
+        #     df_api_name = df[df['api_name'] == api_name]
+        #     json_data[api_name]['mean_us_per_call'] = np.mean(df_api_name['us_per_call'])
+        #     json_data[api_name]['std_us_per_call'] = np.std(df_api_name['us_per_call'])
+
+        def pretty_config(config):
+            if config == 'gpu-activities':
+                # return 'CUPTI GPU activities enabled'
+                return 'CUPTI enabled'
+            elif config == 'no-gpu-activities':
+                # return 'CUPTI GPU activities disabled'
+                return 'CUPTI disabled'
+            else:
+                raise NotImplementedError()
+        df['pretty_config'] = df['config'].apply(pretty_config)
+
+        logging.info("Output csv @ {path}".format(path=self._raw_csv_path))
+        df.to_csv(self._raw_csv_path, index=False)
+        logging.info("Output json @ {path}".format(path=self._raw_json_path))
+        do_dump_json(json_data, self._raw_json_path)
+
+        if self.width is not None and self.height is not None:
+            figsize = (self.width, self.height)
+            logging.info("Setting figsize = {fig}".format(fig=figsize))
+            # sns.set_context({"figure.figsize": figsize})
+        else:
+            figsize = None
+        # This is causing XIO error....
+        fig = plt.figure(figsize=figsize)
+
+        plot_data = copy.copy(df)
+        # plot_data['field'] = "Per-API-call interception overhead"
+        ax = fig.add_subplot(111)
+        sns.barplot(x='api_name', y='us_per_call', hue='pretty_config', data=plot_data, ax=ax,
+                    **sns_kwargs)
+        ax.legend().set_title(None)
+        ax.set_ylabel('Time per call (us)')
+        ax.set_xlabel('CUDA API call')
+        ax.set_title("CUPTI induced profiling overhead per CUDA API call")
+        logging.info("Output plot @ {path}".format(path=self._png_path))
+        fig.savefig(self._png_path)
+        plt.close(fig)
+
+    @property
+    def _raw_csv_path(self):
+        return _j(self.directory, "cupti_overhead.raw.csv")
+
+    @property
+    def _raw_pairs_csv_path(self):
+        return _j(self.directory, "cupti_overhead.pairs.raw.csv")
+
+    @property
+    def _raw_json_path(self):
+        return _j(self.directory, "cupti_overhead.json")
+
+    @property
+    def _png_path(self):
+        return _j(self.directory, "cupti_overhead.png")
+
 class CUPTIOverheadParser:
     """
     Compute extra time spent in the CUDA API as a result of turning on CUPTI's GPU activity recording feature.
@@ -688,7 +998,6 @@ class CUPTIOverheadParser:
             for directory in directories:
                 per_api_stats = get_per_api_stats(directory, debug=self.debug)
                 logging.info("per_api_stats: " + pprint_msg(per_api_stats))
-                get_per_api_stats(directory, debug=self.debug)
                 for api_name, row in per_api_stats.iterrows():
                     total_api_time_us = row['total_time_us']
                     total_num_calls = row['num_calls']
@@ -838,25 +1147,47 @@ def map_readers(DataframeReaderKlass, directories, func, debug=False):
         return xs[0]
     return xs
 
-def get_training_durations(directories, debug):
+def get_training_durations(directories,
+                           debug=False):
     def get_value(df_reader):
         return df_reader.training_duration_us()
-    return map_readers(TrainingProgressDataframeReader, directories, get_value, debug=debug)
+    return map_readers(TrainingProgressDataframeReader, directories, get_value,
+                       debug=debug)
 
-def get_n_total_calls(directories, debug):
+def get_training_durations_df(directories,
+                              debug=False):
+    def get_value(df_reader):
+        return df_reader.training_duration_df()
+    return map_readers(TrainingProgressDataframeReader, directories, get_value,
+                       debug=debug)
+
+def get_n_total_calls(directories,
+                      debug=False):
     def get_value(df_reader):
         return df_reader.n_total_calls()
-    return map_readers(CUDAAPIStatsDataframeReader, directories, get_value, debug=debug)
+    return map_readers(CUDAAPIStatsDataframeReader, directories, get_value,
+                       debug=debug)
 
-def get_per_api_stats(directories, debug):
+def get_per_api_stats(directories,
+                      debug=False):
     def get_value(df_reader):
         return df_reader.per_api_stats()
-    return map_readers(CUDAAPIStatsDataframeReader, directories, get_value, debug=debug)
+    return map_readers(CUDAAPIStatsDataframeReader, directories, get_value,
+                       debug=debug)
 
-def get_pyprof_overhead_us(directories, debug):
+def get_pyprof_overhead_us(directories,
+                           debug=False):
     def get_value(df_reader):
         return df_reader.total_pyprof_overhead_us()
-    return map_readers(PyprofDataframeReader, directories, get_value, debug=debug)
+    return map_readers(PyprofDataframeReader, directories, get_value,
+                       debug=debug)
+
+def get_pyprof_overhead_df(directories,
+                           debug=False):
+    def get_value(df_reader):
+        return df_reader.total_pyprof_overhead_df()
+    return map_readers(PyprofDataframeReader, directories, get_value,
+                       debug=debug)
 
 def add_col(data, colname, value):
     if colname not in data:
@@ -871,7 +1202,7 @@ def pretty_overhead_type(overhead_type, unit='us'):
 
     if overhead_type == with_unit('total_pyprof_overhead'):
         return "Python overhead"
-    elif overhead_type == with_unit('corrected_total_training_time'):
+    elif overhead_type == with_unit('corrected_total_training_duration'):
         return "Corrected training time"
     elif overhead_type == with_unit('total_cupti_overhead'):
         # return 'CUPTI GPU activities enabled'
@@ -982,4 +1313,46 @@ def get_plt_kwargs():
     plt_kwargs = dict()
     plt_kwargs['capsize'] = 5
     return plt_kwargs
+
+def add_x_field(df):
+    """
+    Add (algo, env) as x_field.
+    """
+    def get_x_field(algo, env):
+        return "({algo}, {env})".format(
+            algo=algo, env=env)
+
+    df['x_field'] = np.vectorize(get_x_field, otypes=[str])(df['algo'], df['env'])
+
+def add_iml_config(df, iml_config):
+    if 'metadata' not in iml_config:
+        return
+    def _add(col):
+        df[col] = iml_config['metadata'].get(col, '')
+    # Q: should we just set ALL the metadata?
+    _add('algo')
+    _add('env')
+
+def get_unique(xs):
+    set_xs = set(xs)
+    assert len(set(xs)) == 1
+    return next(iter(set_xs))
+
+def join_single_rows(dfs, allow_zero=True):
+    all_df = None
+    for df in dfs:
+        assert allow_zero or len(df) == 1
+        df = copy.copy(df)
+        assert 'join_idx' not in df.keys()
+        df['join_idx'] = 0
+        if all_df is None or ( len(all_df) == 0 and len(df) != 0 ):
+            all_df = df
+        elif len(df) == 0:
+            continue
+        else:
+            all_df = all_df.merge(df)
+
+    assert 0 <= len(all_df) <= 1
+    del all_df['join_idx']
+    return all_df
 

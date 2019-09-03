@@ -18,6 +18,13 @@ set -e
 #
 # (4) Compare all RL workloads:
 # Run ALL algorithms on ALL bullet environments
+
+ROOT="$(readlink -f $(dirname "$0"))"
+
+if [ "$DEBUG" = 'yes' ]; then
+    set -x
+fi
+
 _do() {
     echo "> CMD: $@"
     echo "  $ $@"
@@ -31,5 +38,5 @@ _run_bench() {
 }
 
 #_run_bench "$@"
-_run_bench "$@" --analyze
-_run_bench "$@" --mode plot
+#_run_bench "$@" --analyze
+#_run_bench "$@" --mode plot

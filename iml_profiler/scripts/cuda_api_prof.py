@@ -152,27 +152,23 @@ def main():
         so_path=so_path)
 
     if args.config is not None:
+        add_env['IML_CONFIG'] = args.config
         if args.config == 'interception':
-            "iml-prof --debug --cuda-api-calls --cuda-api-events --iml-disable"
-            # args.iml_disable = True
+            "iml-prof --debug --cuda-api-calls --cuda-api-events"
             args.cuda_api_calls = True
             args.cuda_api_events = True
         elif args.config in ['no-interception', 'uninstrumented']:
-            "iml-prof --debug --iml-disable"
-            # args.iml_disable = True
+            "iml-prof --debug"
             pass
         elif args.config == 'gpu-activities':
-            "$ iml-prof --debug --cuda-api-calls --cuda-activities --iml-disable"
-            # args.iml_disable = True
+            "$ iml-prof --debug --cuda-api-calls --cuda-activities"
             args.cuda_api_calls = True
             args.cuda_activities = True
         elif args.config == 'no-gpu-activities':
-            "$ iml-prof --debug --cuda-api-calls --iml-disable"
-            # args.iml_disable = True
+            "$ iml-prof --debug --cuda-api-calls"
             args.cuda_api_calls = True
         elif args.config == 'full':
-            "$ iml-prof --cuda-api-calls --cuda-api-events --cuda-activities --iml-disable"
-            # args.iml_disable = True
+            "$ iml-prof --cuda-api-calls --cuda-api-events --cuda-activities"
             args.cuda_api_calls = True
             args.cuda_api_events = True
             args.cuda_activities = True

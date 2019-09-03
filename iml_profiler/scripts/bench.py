@@ -49,6 +49,7 @@ from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, base
 
 from iml_profiler.profiler import iml_logging
 from iml_profiler.profiler.concurrent import ForkedProcessPool, FailedProcessException
+from iml_profiler.experiment.util import tee
 
 from iml_profiler.profiler.util import args_to_cmdline
 
@@ -1244,98 +1245,7 @@ class StableBaselines(Experiment):
             for algo, env_id in algo_env_pairs:
                 self._run(algo, env_id)
 
-def tee(cmd, to_file, append=False, check=True, dry_run=False, **kwargs):
 
-    # In case there are int's or float's in cmd.
-    cmd = [str(opt) for opt in cmd]
-
-    if dry_run:
-        print_cmd(cmd, files=[sys.stdout], env=kwargs.get('env', None), dry_run=dry_run)
-        return
-
-    with ScopedLogFile(to_file, append) as f:
-        print_cmd(cmd, files=[sys.stdout, f], env=kwargs.get('env', None))
-
-        # NOTE: Regarding the bug mentioned below, using p.communicate() STILL hangs.
-        #
-        # p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, **kwargs)
-        # with p:
-        #     outs, errs = p.communicate()
-        #     sys.stdout.write(outs)
-        #     sys.stdout.write(errs)
-        #     sys.stdout.flush()
-        #
-        #     f.write(outs)
-        #     f.write(errs)
-        #     f.flush()
-
-        p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, **kwargs)
-        with p:
-            # NOTE: if this blocks it may be because there's a zombie utilization_sampler.py still running
-            # (that was created by the training script) that hasn't been terminated!
-            # for line in p.stdout:
-
-            while True:
-
-                rc = p.poll()
-                if rc is not None:
-                    break
-
-                # BUG: SOMETIMES (I don't know WHY), this line will HANG even after
-                # train_stable_baselines.sh is terminated (it shows up as a Zombie process in htop/top).
-                # Sadly, this only happens occasionally, and I have yet to understand WHY it happens.
-                line = p.stdout.readline()
-
-                # b'\n'-separated lines
-                line = line.decode("utf-8")
-
-                if line == '':
-                    break
-
-                sys.stdout.write(line)
-                sys.stdout.flush()
-
-                f.write(line)
-                f.flush()
-        sys.stdout.flush()
-        f.flush()
-
-        if check and p.returncode != 0:
-            raise subprocess.CalledProcessError(p.returncode, p.args)
-        return p
-
-
-class ScopedLogFile:
-    def __init__(self, file, append=False):
-        self.file = file
-        self.append = append
-
-    def __enter__(self):
-        if self._is_path:
-            # if self.append:
-            #         self.mode = 'ab'
-            # else:
-            #         self.mode = 'wb'
-
-            if self.append:
-                self.mode = 'a'
-            else:
-                self.mode = 'w'
-            self.f = open(self.file, self.mode)
-            return self.f
-        else:
-            # We can only append to a stream.
-            self.f = self.file
-            return self.f
-
-    @property
-    def _is_path(self):
-        return type(self.file) == str
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self.f.flush()
-        if self._is_path:
-            self.f.close()
 
 class StableBaselinesExpr:
     def __init__(self, algo, env_id, mean_reward, std_reward, n_timesteps, n_episodes):
