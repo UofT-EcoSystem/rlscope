@@ -199,6 +199,25 @@ RetCode SAMPLE_CUDA_API_EXPORT await_dump() {
   return status.code();
 }
 
+
+RetCode SAMPLE_CUDA_API_EXPORT record_event(
+    const char* category,
+    int64 start_us,
+    int64 duration_us,
+    const char* name) {
+  // Wait for async dump traces to complete.
+  VLOG(1) << __func__;
+  Status status;
+  status = globals.device_tracer->RecordEvent(
+      category,
+      start_us,
+      duration_us,
+      name);
+  MAYBE_LOG_ERROR(LOG(INFO), __func__, status);
+  return status.code();
+}
+
+
 //RetCode SAMPLE_CUDA_API_EXPORT collect() {
 //  // Collect traces (synchronously).
 //  VLOG(1) << __func__;

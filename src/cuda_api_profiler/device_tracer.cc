@@ -22,6 +22,7 @@ limitations under the License.
 #include "cuda_api_profiler/event_handler.h"
 #include "cuda_api_profiler/cuda_stream_monitor.h"
 #include "cuda_api_profiler/cupti_api_wrapper.h"
+#include "cuda_api_profiler/event_profiler.h"
 #ifdef WITH_CUDA_LD_PRELOAD
 #include "cuda_api_profiler/cuda_ld_preload.h"
 #include "cuda_api_profiler/registered_handle.h"
@@ -212,6 +213,11 @@ class DeviceTracerImpl : public DeviceTracer {
   Status SetMetadata(const char* directory, const char* process_name, const char* machine_name, const char* phase_name) override;
   Status AsyncDump() override;
   Status AwaitDump() override;
+  Status RecordEvent(
+      const char* category,
+      int64 start_us,
+      int64 duration_us,
+      const char* name) override;
 
   void _WrapCudaAPICalls();
 
@@ -304,6 +310,7 @@ class DeviceTracerImpl : public DeviceTracer {
   CUDAAPIProfilerPrinter api_printer_;
   CUDAActivityProfiler _activity_profiler;
   std::shared_ptr<CudaStreamMonitor> stream_monitor_;
+  EventProfiler _event_profiler;
   RegisteredFunc::FuncId _cuda_stream_monitor_cbid;
   std::shared_ptr<CuptiAPI> _cupti_api;
   RegisteredHandle<CuptiCallback::FuncId> _cupti_fuzzing_cb_handle;
@@ -605,6 +612,9 @@ Status DeviceTracerImpl::Print() {
   if (stream_monitor_) {
     stream_monitor_->Print(info, 0);
   }
+  // EventProfiler output can get REALLY big...
+  // internally we limit printing to 15 events (per category).
+  _event_profiler.Print(info, 0);
   return Status::OK();
 }
 
@@ -739,6 +749,7 @@ Status DeviceTracerImpl::SetMetadata(const char* directory, const char* process_
   _machine_name = machine_name;
   _phase_name = phase_name;
   _api_profiler.SetMetadata(directory, process_name, machine_name, phase_name);
+  _event_profiler.SetMetadata(directory, process_name, machine_name, phase_name);
   return Status::OK();
 }
 
@@ -748,6 +759,7 @@ Status DeviceTracerImpl::AsyncDump() {
     _activity_profiler.AsyncDump();
   }
   _api_profiler.AsyncDump();
+  _event_profiler.AsyncDump();
   return Status::OK();
 }
 Status DeviceTracerImpl::AwaitDump() {
@@ -757,6 +769,23 @@ Status DeviceTracerImpl::AwaitDump() {
     _activity_profiler.AwaitDump();
   }
   _api_profiler.AwaitDump();
+  _event_profiler.AwaitDump();
+  return Status::OK();
+}
+
+Status DeviceTracerImpl::RecordEvent(
+    const char* category,
+    int64 start_us,
+    int64 duration_us,
+    const char* name) {
+  // NOTE: don't grab the lock, don't need to.
+  // mutex_lock l(mu_);
+  _event_profiler.RecordEvent(
+      category,
+      start_us,
+      duration_us,
+      name);
+
   return Status::OK();
 }
 

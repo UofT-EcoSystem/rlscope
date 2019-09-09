@@ -100,6 +100,10 @@ def load_library(allow_fail=None):
     _so.set_metadata.restype = c_int
     # _set_api_wrapper('set_metadata')
 
+    _so.record_event.argtypes = [ c_char_p, c_int64, c_int64, c_char_p ]
+    _so.record_event.restype = c_int
+    # _set_api_wrapper('record_event')
+
     _so.await_dump.argtypes = []
     _so.await_dump.restype = c_int
     _set_api_wrapper('await_dump')
@@ -126,6 +130,21 @@ def set_metadata(directory, process_name, machine_name, phase):
         _as_c_string(process_name),
         _as_c_string(machine_name),
         _as_c_string(phase),
+    )
+    if ret != TF_OK:
+        raise IMLProfError(ret)
+    return ret
+
+def record_event(
+    category,
+    start_us,
+    duration_us,
+    name):
+    ret = _so.record_event(
+        _as_c_string(category),
+        c_int64(int(start_us)),
+        c_int64(int(duration_us)),
+        _as_c_string(name),
     )
     if ret != TF_OK:
         raise IMLProfError(ret)

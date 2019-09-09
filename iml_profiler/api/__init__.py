@@ -13,7 +13,7 @@ from iml_profiler.profiler.glbl import \
   init_session
 
 from iml_profiler.protobuf.pyprof_pb2 import \
-  Pyprof
+  CategoryEventsProto
 
 from iml_profiler.protobuf.unit_test_pb2 import \
   IMLUnitTestOnce, \

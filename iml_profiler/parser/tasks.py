@@ -27,7 +27,7 @@ from iml_profiler.parser.common import print_cmd
 from iml_profiler.parser.cpu_gpu_util import UtilParser, UtilPlot
 from iml_profiler.parser.training_progress import TrainingProgressParser, ProfilingOverheadPlot
 from iml_profiler.parser.extrapolated_training_time import ExtrapolatedTrainingTimeParser
-from iml_profiler.parser.profiling_overhead import CallInterceptionOverheadParser, CUPTIOverheadParser, CorrectedTrainingTimeParser
+from iml_profiler.parser.profiling_overhead import CallInterceptionOverheadParser, CUPTIOverheadParser, CorrectedTrainingTimeParser, PyprofOverheadParser
 from iml_profiler import py_config
 
 from iml_profiler.parser.common import *
@@ -615,7 +615,7 @@ def main(argv=None, should_exit=True):
 class CallInterceptionOverheadTask(luigi.Task):
     # csv = luigi.Parameter(description="Path to overall_machine_util.raw.csv [output from UtilTask]")
     interception_directory = luigi.ListParameter(description="IML directory that ran with 'iml-prof --config interception'")
-    no_interception_directory = luigi.ListParameter(description="IML directory that ran with 'iml-prof --config interception'")
+    uninstrumented_directory = luigi.ListParameter(description="IML directory that ran with 'iml-prof --config interception'")
     directory = luigi.Parameter(description="Output directory", default=".")
 
     # interception_directories = luigi.ListParameter(description="IML directory that ran with 'iml-prof --config interception'", default=".")
@@ -672,11 +672,13 @@ class CUPTIOverheadTask(luigi.Task):
 
 class CorrectedTrainingTimeTask(luigi.Task):
     cupti_overhead_json = luigi.Parameter(description="Calibration: mean per-CUDA API CUPTI overhead when GPU activities are recorded (see: CUPTIOverheadTask)")
-    call_interception_overhead_json = luigi.Parameter(description="Calibration: mean overhead for intercepting CUDA API calls with LD_PRELOAD  (see: CallInterceptionOverheadTask)")
+    LD_PRELOAD_overhead_json = luigi.Parameter(description="Calibration: mean overhead for intercepting CUDA API calls with LD_PRELOAD  (see: CallInterceptionOverheadTask)")
+    pyprof_overhead_json = luigi.Parameter(description="Calibration: means for (1) Python->C++ interception overhead, (2) operation annotation overhead (see: PyprofOverheadTask)")
     iml_directories = luigi.ListParameter(description="IML directory that ran with full tracing enabled")
     uninstrumented_directories = luigi.ListParameter(description="IML directories for uninstrumented runs (iml-prof --config uninstrumented)")
     directory = luigi.Parameter(description="Output directory", default=".")
-    iml_prof_config = luigi.ChoiceParameter(description=textwrap.dedent("""
+    # iml_prof_config = luigi.ChoiceParameter(description=textwrap.dedent("""
+    iml_prof_config = luigi.Parameter(description=textwrap.dedent("""
     What option did you pass to \"iml-prof --config\"? 
     We use this to determine what overheads to subtract:
     
@@ -693,11 +695,8 @@ class CorrectedTrainingTimeTask(luigi.Task):
         - LD_PRELOAD overhead
         - CUPTI overhead
         - Python pyprof overhead (if we detect pyprof events, otherwise this is zero)
-    """), choices=['interception',
-                   'uninstrumented',
-                   # 'gpu-activity',
-                   'full'],
-                                            default='full')
+    """),
+                                            )
 
     # Plot attrs
     # rotation = luigi.FloatParameter(description="x-axis title rotation", default=45.)
@@ -722,6 +721,34 @@ class CorrectedTrainingTimeTask(luigi.Task):
         self.dumper = CorrectedTrainingTimeParser(**kwargs)
         self.dumper.run()
 
+class PyprofOverheadTask(luigi.Task):
+    uninstrumented_directory = luigi.ListParameter(description="IML directory that ran with 'iml-prof --config uninstrumented train.py --iml-disable --iml-training-progress'")
+    pyprof_annotations_directory = luigi.ListParameter(description="IML directory that ran with 'iml-prof --config uninstrumented train.py --iml-disable-tfprof --iml-disable-pyprof-interceptions --iml-training-progress'")
+    pyprof_interceptions_directory = luigi.ListParameter(description="IML directory that ran with 'iml-prof --config uninstrumented train.py --iml-disable-tfprof --iml-disable-pyprof-annotations --iml-training-progress'")
+    directory = luigi.Parameter(description="Output directory", default=".")
+
+    # Plot attrs
+    # rotation = luigi.FloatParameter(description="x-axis title rotation", default=45.)
+    width = luigi.FloatParameter(description="Width of plot in inches", default=None)
+    height = luigi.FloatParameter(description="Height of plot in inches", default=None)
+
+    debug = param_debug
+    debug_single_thread = param_debug_single_thread
+    # algo_env_from_dir = luigi.BoolParameter(description="Add algo/env columns based on directory structure of --iml-directories <algo>/<env>/iml_dir", default=True, parsing=luigi.BoolParameter.EXPLICIT_PARSING)
+
+    skip_output = False
+
+    def requires(self):
+        return []
+
+    def output(self):
+        return []
+
+    def run(self):
+        kwargs = kwargs_from_task(self)
+        self.dumper = PyprofOverheadParser(**kwargs)
+        self.dumper.run()
+
 NOT_RUNNABLE_TASKS = get_NOT_RUNNABLE_TASKS()
 IML_TASKS = get_IML_TASKS()
 IML_TASKS.add(TraceEventsTask)
@@ -734,6 +761,7 @@ IML_TASKS.add(ExtrapolatedTrainingTimeTask)
 IML_TASKS.add(CallInterceptionOverheadTask)
 IML_TASKS.add(CUPTIOverheadTask)
 IML_TASKS.add(CorrectedTrainingTimeTask)
+IML_TASKS.add(PyprofOverheadTask)
 
 if __name__ == "__main__":
     main()

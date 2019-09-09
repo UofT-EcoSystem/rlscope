@@ -20,7 +20,7 @@ import numpy as np
 import pandas as pd
 import psutil
 import pwd
-from iml_profiler.protobuf.pyprof_pb2 import Pyprof, MachineUtilization, ProcessMetadata, IncrementalTrainingProgress
+from iml_profiler.protobuf.pyprof_pb2 import CategoryEventsProto, MachineUtilization, ProcessMetadata, IncrementalTrainingProgress
 from iml_profiler.protobuf.unit_test_pb2 import IMLUnitTestOnce, IMLUnitTestMultiple
 from iml_profiler.protobuf.iml_prof_pb2 import CUDAAPIPhaseStatsProto
 from tqdm import tqdm as tqdm_progress
@@ -80,6 +80,8 @@ def op_process_event_name(process_name):
     assert process_name is not None
     return "[{proc}]".format(
         proc=process_name)
+def is_op_process_event(event_name, category):
+    return re.search(r'^\[.*\]$', event_name) and category == CATEGORY_OPERATION
 # def match_special_event_name(event_name):
 def match_debug_event_name(event_name):
     return re.search(r'^\[(?P<event_name>.*)\]$', event_name)
@@ -1424,7 +1426,7 @@ def read_training_progress_file(path):
     return read_proto(IncrementalTrainingProgress, path)
 
 def read_pyprof_file(path):
-    return read_proto(Pyprof, path)
+    return read_proto(CategoryEventsProto, path)
 
 def read_process_metadata_file(path):
     return read_proto(ProcessMetadata, path)
@@ -1510,7 +1512,7 @@ def is_pyprof_call_times_file(path):
 
 def is_pyprof_file(path):
     base = _b(path)
-    m = re.search(r'pyprof{bench}{trace}\.proto'.format(
+    m = re.search(r'category_events{bench}{trace}\.proto'.format(
         bench=BENCH_SUFFIX_RE,
         trace=TRACE_SUFFIX_RE,
     ), base)

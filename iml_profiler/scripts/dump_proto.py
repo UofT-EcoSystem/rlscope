@@ -4,7 +4,7 @@ import textwrap
 import sys
 
 # from tensorflow.core.profiler.tfprof_log_pb2 import ProfileProto
-from iml_profiler.protobuf.pyprof_pb2 import Pyprof, ProcessMetadata, IncrementalTrainingProgress
+from iml_profiler.protobuf.pyprof_pb2 import CategoryEventsProto, ProcessMetadata, IncrementalTrainingProgress
 from iml_profiler.protobuf.iml_prof_pb2 import CUDAAPIPhaseStatsProto, MachineDevsEventsProto
 
 from iml_profiler.protobuf.unit_test_pb2 import \
@@ -36,7 +36,7 @@ def main():
     if is_tfprof_file(args.proto):
         dump_proto_txt(args.proto, ProfileProto, sys.stdout)
     elif is_pyprof_file(args.proto) or is_dump_event_file(args.proto):
-        dump_proto_txt(args.proto, Pyprof, sys.stdout)
+        dump_proto_txt(args.proto, CategoryEventsProto, sys.stdout)
     elif is_unit_test_once_file(args.proto):
         dump_proto_txt(args.proto, IMLUnitTestOnce, sys.stdout)
     elif is_unit_test_multiple_file(args.proto):

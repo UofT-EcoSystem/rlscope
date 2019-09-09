@@ -18,7 +18,7 @@ import sqlite3
 
 from os.path import join as _j, dirname as _d, exists as _e
 
-from iml_profiler.protobuf.pyprof_pb2 import Pyprof, MachineUtilization
+from iml_profiler.protobuf.pyprof_pb2 import CategoryEventsProto, MachineUtilization
 
 from iml_profiler import py_config
 
@@ -37,7 +37,7 @@ from iml_profiler.parser.stats import category_times_add_time
 
 from iml_profiler.parser.stats import KernelTime
 
-from iml_profiler.protobuf.pyprof_pb2 import Pyprof, MachineUtilization, ProcessMetadata, TP_HAS_PROGRESS, TP_NO_PROGRESS
+from iml_profiler.protobuf.pyprof_pb2 import CategoryEventsProto, MachineUtilization, ProcessMetadata, TP_HAS_PROGRESS, TP_NO_PROGRESS
 
 from iml_profiler.parser.dataframe import TrainingProgressDataframeReader
 
@@ -76,7 +76,7 @@ class SQLParser:
 
     <direc>/procceses/<process_name>:
         # The first "sampling period"
-        Pyprof.trace_1.prof
+        CategoryEventsProto.trace_1.prof
         tfprof.trace_1.prof
     """
 
@@ -767,7 +767,7 @@ class SQLParser:
 
     # def insert_pyprof_file(self, path):
     #     with open(path, 'rb') as f:
-    #         proto = Pyprof()
+    #         proto = CategoryEventsProto()
     #         proto.ParseFromString(f.read())
     #
     #     logging.info("> Insert pyprof file: {p}".format(p=path))
@@ -1282,7 +1282,7 @@ class _CSVInserterWorker:
                     #   - Annoying/slow: extra joins (NOTE: joins may not be a big deal)
                     # - Add (usually) NULL columns for pyprof-specific fields <-- this is probably the best approach.
                     #   - Do this; assume # of Event's is LARGE ( which is definitely is ), so lets avoid joins.
-                    # - Add Pyprof table with foreign-key reference from Event to Pyprof metadata row (file/line/func-name)
+                    # - Add CategoryEventsProto table with foreign-key reference from Event to CategoryEventsProto metadata row (file/line/func-name)
                     #   - Makes event inserts slower...I don't bother handling foreign key management when doing bulk inserts.
                     #   - extra joins (NOTE: joins may not be a big deal)
                     pyprof_line_description = pyprof_func_std_string(func_tupl)
@@ -1353,7 +1353,7 @@ class _CSVInserterWorker:
 
     def insert_pyprof_file(self, path):
         with open(path, 'rb') as f:
-            proto = Pyprof()
+            proto = CategoryEventsProto()
             proto.ParseFromString(f.read())
 
         logging.info("> Insert pyprof file: {p}".format(p=path))

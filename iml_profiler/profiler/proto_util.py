@@ -1,4 +1,4 @@
-from iml_profiler.protobuf.pyprof_pb2 import Pyprof, Event
+from iml_profiler.protobuf.pyprof_pb2 import CategoryEventsProto, Event
 
 import threading
 

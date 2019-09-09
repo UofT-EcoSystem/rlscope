@@ -296,7 +296,7 @@ class PythonProfileParser:
         For each op_name:
             pyprof_call_times = query_pyprof_call_times(op_name)
             # NOTE: We must group pyprof events by <file, line, func> in order to report a "row" of the csv
-            Report "python_profile.{op_name}.csv" from pyprof_events
+            Report "python_profile.{op_name}.csv" from pyprof_interceptions
 
     def query_pyprof_call_times(op_name):
         # For each "step"/call to op:
@@ -306,14 +306,14 @@ class PythonProfileParser:
                  # ORDER BY <pyprof_filename, pyprof_line_no, pyprof_function>
                  # NOTE: I don't think there's a nice way to preserve this ORDER BY across process_op_nest...
         events[CATEGORY_OPERATION] = process_op_nest(events[CATEGORY_OPERATION])
-        pyprof_events = events.filter {
+        pyprof_interceptions = events.filter {
             Event.category == CATEGORY_PYTHON_PROFILING and
               Event is SUBSUMED by an event with op_type == op.type              # <-- NOTE: we can us OpStack to compute this.
         }
         pyprof_call_times = {
             'call_times':
-              # NOTE: bins should be sorted by start_time_us (guaranteed since pyprof_events is already sorted)
-              Bin pyprof_events into a dict where key = <pyprof_filename, pyprof_line_no, pyprof_function>,
+              # NOTE: bins should be sorted by start_time_us (guaranteed since pyprof_interceptions is already sorted)
+              Bin pyprof_interceptions into a dict where key = <pyprof_filename, pyprof_line_no, pyprof_function>,
         }
         return pyprof_call_times
 

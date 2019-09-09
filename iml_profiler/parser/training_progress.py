@@ -3,7 +3,7 @@ import copy
 import itertools
 import argparse
 
-from iml_profiler.protobuf.pyprof_pb2 import Pyprof, MachineUtilization, DeviceUtilization, UtilizationSample
+from iml_profiler.protobuf.pyprof_pb2 import CategoryEventsProto, MachineUtilization, DeviceUtilization, UtilizationSample
 from iml_profiler.parser.common import *
 from iml_profiler.profiler import experiment
 from os.path import join as _j, abspath as _a, exists as _e, dirname as _d, basename as _b
@@ -466,7 +466,7 @@ class ProfilingOverheadPlot:
         # 		- Tfprof/pyorof trace collection
         # 		- Tfprof/pyprof trace dumping
         #
-        # Instrumented No Pyprof:
+        # Instrumented No CategoryEventsProto:
         # - Just overhead of tfprof tracing/dumping
         #
         # Instrumented No Tfprof:
@@ -475,10 +475,10 @@ class ProfilingOverheadPlot:
         # Instrumented No Tfprof No Pydump:
         # - Just overhead of pyprof tracing
         #
-        # Instrumented No Pyprof No Tfdump:
+        # Instrumented No CategoryEventsProto No Tfdump:
         # - Just overhead of tfprof tracing
         #
-        # Instrumented No Tfprof No Pyprof:
+        # Instrumented No Tfprof No CategoryEventsProto:
         # - This just includes the overhead of creating wrapper-functions
         #   in python for intercepting Python->Tensorflow and Python->Simulator
         #   calls (not no event recording)

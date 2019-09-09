@@ -1,6 +1,6 @@
 import logging
 # from tensorflow.core.profiler.tfprof_log_pb2 import ProfileProto
-from iml_profiler.protobuf.pyprof_pb2 import Pyprof
+from iml_profiler.protobuf.pyprof_pb2 import CategoryEventsProto
 
 from iml_profiler.parser.common import *
 from iml_profiler.parser.stats import KernelTime, category_times_add_time
@@ -212,7 +212,7 @@ class PyprofCategoryTimesReader:
     def __init__(self, profile_path):
         self.profile_path = profile_path
         with open(self.profile_path, 'rb') as f:
-            self.proto = Pyprof()
+            self.proto = CategoryEventsProto()
             self.proto.ParseFromString(f.read())
 
     def print(self, f):

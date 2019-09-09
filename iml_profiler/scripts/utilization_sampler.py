@@ -20,7 +20,7 @@ from iml_profiler.profiler import nvidia_gpu_query
 
 from iml_profiler import py_config
 
-from iml_profiler.protobuf.pyprof_pb2 import Pyprof, MachineUtilization, DeviceUtilization, UtilizationSample
+from iml_profiler.protobuf.pyprof_pb2 import CategoryEventsProto, MachineUtilization, DeviceUtilization, UtilizationSample
 
 from iml_profiler.parser.common import *
 

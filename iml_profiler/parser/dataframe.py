@@ -2,6 +2,7 @@ import pandas as pd
 import copy
 import os
 import pprint
+import progressbar
 import logging
 
 from os.path import join as _j, abspath as _a, exists as _e, dirname as _d, basename as _b
@@ -28,9 +29,10 @@ class BaseDataframeReader:
         self.added_fields = set()
         self.debug = debug
         self.iml_config = read_iml_config(self.directory)
+        self.iml_columns = self._get_iml_columns()
+        self.colnames = self._get_colnames()
 
-    @property
-    def colnames(self):
+    def _get_colnames(self):
         return self._colnames.union(set(self.iml_columns))
 
     def _add_iml_config_columns(self, data=None):
@@ -44,8 +46,7 @@ class BaseDataframeReader:
         _get('algo')
         _get('env')
 
-    @property
-    def iml_columns(self):
+    def _get_iml_columns(self):
         if 'metadata' not in self.iml_config:
             return []
         return ['algo', 'env']
@@ -59,12 +60,22 @@ class BaseDataframeReader:
             data[colname] = []
         data[colname].append(value)
 
+    def _add_col_to_data(self, colname, value):
+        if colname not in self.data:
+            self.data[colname] = []
+        self.data[colname].append(value)
+
     def _add_columns(self, colnames, proto, data=None):
         if data is None:
             data = self.data
         for col in colnames:
             val = getattr(proto, col)
             self._add_col(col, val, data=data)
+
+    def _add_columns_to_data(self, colnames, proto):
+        for col in colnames:
+            val = getattr(proto, col)
+            self._add_col_to_data(col, val)
 
     def _check_cols(self, data=None):
         if data is None:
@@ -109,30 +120,27 @@ class BaseDataframeReader:
             if extra_fields is not None:
                 self.added_fields.update(extra_fields.keys())
                 for key, value in extra_fields.items():
-                    self._add_col(key, value)
+                    self._add_col_to_data(key, value)
 
         self._add_iml_config_columns()
 
-    def _read_df(self):
-        self.data = dict()
+    @property
+    def proto_paths(self):
         proto_paths = []
         for dirpath, dirnames, filenames in os.walk(self.directory):
             for base in filenames:
                 path = _j(dirpath, base)
-                # if self.debug:
-                #     logging.info("{klass}.is_proto_file(path={path}) = {ret}".format(
-                #         klass=self.__class__.__name__,
-                #         path=path,
-                #         ret=self.is_proto_file(path),
-                #     ))
                 if self.is_proto_file(path):
                     proto_paths.append(path)
-                    # if self.debug:
-                    #     logging.info("{klass}: Add proto cols: path = {path}".format(
-                    #         klass=self.__class__.__name__,
-                    #         path=path))
-                    self.add_proto_cols(path)
-                    self._check_cols()
+        return proto_paths
+
+    def _read_df(self):
+        self.data = dict()
+        proto_paths = self.proto_paths
+        for proto_path in progress(proto_paths, desc="{klass}.read dataframe".format(
+            klass=self.__class__.__name__), show_progress=True):
+            self.add_proto_cols(proto_path)
+            self._check_cols()
         if len(proto_paths) == 0:
             logging.warning("{klass}: Saw 0 proto paths rooted at {dir}; returning empty dataframe".format(
                 klass=self.__class__.__name__,
@@ -187,7 +195,7 @@ class UtilDataframeReader(BaseDataframeReader):
 
 class TrainingProgressDataframeReader(BaseDataframeReader):
 
-    def __init__(self, directory, add_fields=None, debug=False):
+    def __init__(self, directory, add_fields=None, debug=False, add_algo_env=False):
 
         colnames = [
             # IncrementalTrainingProgress from pyprof.proto
@@ -205,12 +213,25 @@ class TrainingProgressDataframeReader(BaseDataframeReader):
         ]
 
         super().__init__(directory, add_fields=add_fields, colnames=colnames, debug=debug)
+        self.add_algo_env = add_algo_env
 
     def is_proto_file(self, path):
         return is_training_progress_file(path)
 
     def add_proto_cols(self, path):
         training_progress = read_training_progress_file(path)
+
+        # if self.add_algo_env:
+        #     iml_dir =_d(path)
+        #     iml_config = read_iml_config(iml_dir)
+        #     def _add_col(colname, dflt=''):
+        #         val = dflt
+        #         if 'metadata' in iml_config and colname in iml_config['metadata']:
+        #             val = iml_config['metadata'][colname]
+        #         self._add_col(colname, val)
+        #     _add_col('algo')
+        #     _add_col('env')
+
         # if self.debug:
         #     logging.info("Read {name} from {path}".format(
         #         name=training_progress.__class__.__name__,
@@ -313,7 +334,7 @@ class PyprofDataframeReader(BaseDataframeReader):
     def __init__(self, directory, add_fields=None, debug=False):
 
         colnames = [
-            # Pyprof from pyprof.proto
+            # CategoryEventsProto from pyprof.proto
             'process_name',
             'machine_name',
             'phase_name',
@@ -322,8 +343,6 @@ class PyprofDataframeReader(BaseDataframeReader):
             'thread_id',
             'start_time_us',
             'duration_us',
-            'start_profiling_overhead_us',
-            'duration_profiling_overhead_us',
             'name',
         ]
 
@@ -335,37 +354,51 @@ class PyprofDataframeReader(BaseDataframeReader):
     def add_proto_cols(self, path):
         proto = read_pyprof_file(path)
         # if self.debug:
-        #     logging.info("Read Pyprof from {path}".format(path=path))
+        #     logging.info("Read CategoryEventsProto from {path}".format(path=path))
 
         # Event from pyprof.proto
         event_colnames = [
             'thread_id',
             'start_time_us',
             'duration_us',
-            'start_profiling_overhead_us',
-            'duration_profiling_overhead_us',
             'name',
         ]
 
         def add_event(category, event):
-            self._add_col('process_name', proto.process_name)
-            self._add_col('machine_name', proto.machine_name)
-            self._add_col('phase_name', proto.phase)
+            self._add_col_to_data('process_name', proto.process_name)
+            self._add_col_to_data('machine_name', proto.machine_name)
+            self._add_col_to_data('phase_name', proto.phase)
 
-            self._add_col('category', category)
+            self._add_col_to_data('category', category)
 
-            self._add_columns(event_colnames, event)
+            self._add_columns_to_data(event_colnames, event)
 
             self._maybe_add_fields(path)
 
-        for step, python_events in proto.python_events.items():
-            for event in python_events.events:
-                add_event(CATEGORY_PYTHON, event)
+        if self.debug:
+            num_events = 0
+            for category, event_list in proto.category_events.items():
+                num_events += len(event_list.events)
+            logging.info("{klass}.add_proto_cols path={path}".format(
+                path=path,
+                klass=self.__class__.__name__,
+            ))
+            bar = progressbar.ProgressBar(
+                prefix="{klass}.add_proto_cols".format(
+                    klass=self.__class__.__name__),
+                max_value=num_events)
 
-        for step, clibs in proto.clibs.items():
-            for category, category_clibs in clibs.clibs.items():
-                for event in category_clibs.events:
+        try:
+            i = 0
+            for category, event_list in proto.category_events.items():
+                for event in event_list.events:
                     add_event(category, event)
+                    if self.debug:
+                        bar.update(i)
+                    i += 1
+        finally:
+            if self.debug:
+                bar.finish()
 
     def total_intercepted_calls(self):
         """
@@ -382,9 +415,106 @@ class PyprofDataframeReader(BaseDataframeReader):
         :return:
         """
         df = self.read()
-        python_df = df[df['category'] == CATEGORY_PYTHON]
-        total_intercepted_calls = len(python_df)
+        def is_intercepted_call_event(category):
+            return category not in {CATEGORY_OPERATION, CATEGORY_PYTHON}
+        was_intercepted_call_event = df['category'].apply(is_intercepted_call_event)
+        intercepted_call_event_df = df[was_intercepted_call_event]
+        total_intercepted_calls = len(intercepted_call_event_df)
         return total_intercepted_calls
+
+    @staticmethod
+    def is_op_event(event_name, category):
+        return not is_op_process_event(event_name, category) and category == CATEGORY_OPERATION
+
+    def total_annotations(self):
+        return self.total_op_events()
+
+    def total_op_events(self):
+        """
+        How many times did we record op-events using "with iml.prof.operation(...)"?
+
+        Every time we execute this annotation, we record the following pyprof events:
+
+        Here are some of the events that get recorded during pyprof.
+        - Op-events:
+          Category: CATEGORY_OPERATION, Event(name='sample_action')
+          Operation annotation for the duration of the operation.
+
+        - Process-events:
+          Category: CATEGORY_OPERATION, Event(name='[process_name]')
+          Single operation annotation recorded once at termination that measures
+          the total duration of the process.
+
+        - Remaining python time at end of operation:
+          Category: CATEGORY_PYTHON, Event(name='Finish python benchmark')
+          The amount of time in between returning from the TensorFlow C++ API,
+          and finishing an operation annotation.
+
+        - Python-events:
+          Category: CATEGORY_PYTHON, Event(name=<CLIB__*>)
+          Time spent in python before making a call into a wrapped C library (i.e. simulator, TensorFlow C++).
+
+        - C-events:
+          Category: CATEGORY_TF_API/CATEGORY_SIMULATOR_CPP, Event(name=<CLIB__*>)
+          Time spent in the simulator / TensorFlow C++ code during an API call.
+          NOTE: new categories could be created in the future for other "types" of C-libraries.
+          For that reason, we recommend counting C-events by subtracting all other categories of events
+          (i.e. at the time of writing this: CATEGORY_OPERATION, CATEGORY_PYTHON).
+
+        def total_op_events(self):
+            # PSEUDOCODE:
+            If we want to count the number of iml.prof.operation calls, then we wish to count the number of "Op-events":
+                Number of events where:
+                    event.category == CATEGORY_OPERATION and
+                    not is_op_process_event(event_name, category)
+
+        def total_intercepted_calls(self):
+            # PSEUDOCODE:
+            If we want to count the number of intercepted Python->C++ calls, then we wish to count the number of "C-events":
+                Number of events where:
+                    event.category not in {CATEGORY_OPERATION, CATEGORY_PYTHON}
+
+        :return:
+        """
+        df = self.read()
+        is_op_event = np.vectorize(PyprofDataframeReader.is_op_event, otypes=[np.bool])(df['name'], df['category'])
+        op_df = df[is_op_event]
+        total_op_events = len(op_df)
+        return total_op_events
+
+    def total_op_process_events(self):
+        df = self.read()
+        is_op_proc_event = np.vectorize(PyprofDataframeReader.is_op_process_event, otypes=[np.bool])(df['name'], df['category'])
+        op_proc_df = df[is_op_proc_event]
+        total_op_proc_events = len(op_proc_df)
+        return total_op_proc_events
+
+    # def total_interception_overhead_us(self):
+    #     """
+    #     Overhead from Python->C++ interception.
+    #
+    #     :return:
+    #     """
+    #     total_intercepted_calls = self.total_intercepted_calls()
+    #     total_pyprof_interception_overhead_us = total_intercepted_calls *
+    #     # df = self.read()
+    #     # # Filter for events that have profiling overhead recorded.
+    #     # df = df[df['start_profiling_overhead_us'] != 0]
+    #     # total_pyprof_overhead_us = np.sum(df['duration_profiling_overhead_us'])
+    #     # return total_pyprof_overhead_us
+
+    def check_events(self):
+        df = self.read()
+        total_intercepted_calls = self.total_intercepted_calls()
+        total_op_events = self.total_op_events()
+        total_op_proc_events = self.total_op_process_events()
+
+        # Total category_events recorded:
+        # - Each CATEGORY_PYTHON event should have a corresponding C++ event.
+        # - Then we have op-events
+        # - Plus, we may have some "extra" events like the
+        #   process event Event(category=CATEGORY_OPERATION, name="[<PROC>ppo2_HalfCheetah]")
+        assert 2*total_intercepted_calls + total_op_events + total_op_proc_events == len(df)
 
     def total_pyprof_overhead_us(self):
         df = self.read()
@@ -415,7 +545,32 @@ class PyprofDataframeReader(BaseDataframeReader):
         # total_pyprof_overhead_us = np.sum(df['duration_profiling_overhead_us'])
         # return total_pyprof_overhead_us
 
-def read_iml_config(directory):
+class DataframeMapper:
+    def __init__(self, DataframeReaderKlass, directories, debug=False):
+        self.DataframeReaderKlass = DataframeReaderKlass
+        if type(directories) == str:
+            dirs = [directories]
+        else:
+            dirs = list(directories)
+        self.directories = dirs
+        self.debug = debug
+        self._init_readers()
+
+    def _init_readers(self):
+        self.readers = []
+        for directory in self.directories:
+            df_reader = self.DataframeReaderKlass(directory, debug=self.debug)
+            self.readers.append(df_reader)
+
+    def map(self, func):
+        return [func(reader) for reader in self.readers]
+
+    def map_one(self, func):
+        assert len(self.readers) == 1
+        reader = self.readers[0]
+        return func(reader)
+
+def get_iml_config_path(directory):
     """
     Add (algo, env) from iml_config.json, if they were set by the training script using iml.prof.set_metadata(...).
 
@@ -433,6 +588,72 @@ def read_iml_config(directory):
             msg=pprint_msg(iml_config_paths)))
         assert len(iml_config_paths) == 1
     iml_config_path = iml_config_paths[0]
+    return iml_config_path
+
+def read_iml_config(directory):
+    iml_config_path = get_iml_config_path(directory)
     iml_config = load_json(iml_config_path)
     return iml_config
+
+class IMLConfig:
+    def __init__(self, directory):
+        self.directory = directory
+        self.iml_config_path = get_iml_config_path(directory)
+        self.iml_config = load_json(self.iml_config_path)
+        self.init_iml_prof_args()
+
+    def init_iml_prof_args(self):
+        self.iml_prof_args = dict()
+        if 'env' in self.iml_config:
+            for var, value in self.iml_config['env'].items():
+                if not is_iml_prof_env(var):
+                    continue
+                self.iml_prof_args[iml_prof_varname(var)] = iml_prof_value(var, value)
+
+    def get_env_bool(self, var, dflt=False):
+        return self.iml_prof_args.get(var, dflt)
+
+    def get_env_var(self, var, dflt=None):
+        return self.iml_prof_args.get(var, dflt)
+
+    def must_get_env(self, var):
+        return self.iml_prof_args.get[var]
+
+    def get_bool(self, var, dflt=False):
+        return self.iml_config.get(var, dflt)
+
+    def get_var(self, var, dflt=None):
+        return self.iml_config.get(var, dflt)
+
+    def must_get(self, var):
+        return self.iml_config[var]
+
+def is_iml_prof_env(var):
+    return re.search(r'^IML_', var)
+
+def iml_prof_varname(env_var):
+    var = env_var
+    var = re.sub(r'^IML_', '', var)
+    var = var.lower()
+    return var
+
+def iml_prof_value(var, value):
+    if value == 'yes':
+        return True
+    if value == 'no':
+        return False
+
+    try:
+        num = int(value)
+        return num
+    except ValueError:
+        pass
+
+    try:
+        num = float(value)
+        return num
+    except ValueError:
+        pass
+
+    return value
 

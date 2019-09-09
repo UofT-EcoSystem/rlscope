@@ -309,7 +309,9 @@ message("> double_conversion_LIBRARIES = ${double_conversion_LIBRARIES}")
 set(PROTOBUF_GENERATE_CPP_APPEND_PATH OFF)
 protobuf_generate_cpp(PROTO_SRCS PROTO_HDRS
         tensorflow/core/lib/core/error_codes.proto
-        iml_profiler/protobuf/iml_prof.proto)
+        iml_profiler/protobuf/iml_prof.proto
+        iml_profiler/protobuf/pyprof.proto
+        )
 message("> PROTO_SRCS = ${PROTO_SRCS}")
 message("> PROTO_HDRS = ${PROTO_HDRS}")
 

@@ -4,7 +4,7 @@ from os.path import join as _j, dirname as _d
 
 from iml_profiler.parser.common import *
 # from tensorflow.core.profiler.tfprof_log_pb2 import ProfileProto
-from iml_profiler.protobuf.pyprof_pb2 import Pyprof, ProcessMetadata
+from iml_profiler.protobuf.pyprof_pb2 import CategoryEventsProto, ProcessMetadata
 
 from iml_profiler.profiler import proto_util
 
@@ -601,7 +601,7 @@ class TotalTimeParser(ProfilerParserCommonMixin):
     def required_source_basename_regexes():
         return {
             'tfprof_path': r"^profile{bench}.proto$".format(bench=BENCH_SUFFIX_RE),
-            'pyprof_path': r"^Pyprof{bench}.proto$".format(bench=BENCH_SUFFIX_RE),
+            'pyprof_path': r"^CategoryEventsProto{bench}.proto$".format(bench=BENCH_SUFFIX_RE),
         }
 
     @staticmethod
@@ -648,7 +648,7 @@ class TotalTimeParser(ProfilerParserCommonMixin):
                 self.tf_proto.ParseFromString(f.read())
 
         with open(self.pyprof_path(self.bench_name), 'rb') as f:
-            self.py_proto = Pyprof()
+            self.py_proto = CategoryEventsProto()
             self.py_proto.ParseFromString(f.read())
 
         if self.tf_proto is not None:
