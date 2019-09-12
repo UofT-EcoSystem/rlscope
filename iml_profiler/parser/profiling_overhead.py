@@ -798,6 +798,11 @@ class PyprofOverheadParser:
     def compute_overhead(self, config, instrumented_directory,
                          name, get_num_field,
                          mapper_cb=None):
+        """
+        Given an instrumented_directory and uninstrumented_directory, join row-by-row,
+        and compute the delta in training_duration_us to get "total profiling overhead".
+        Then, use get_num_field to get # of "calls", and divide by this to get "per call profiling overhead".
+        """
 
         # assert name in ['op', 'event']
 
@@ -958,22 +963,17 @@ class PyprofOverheadParser:
             ax.legend().set_title(None)
             return fig, ax
 
-        def _save_plot(fig, ax, png_path):
-            logging.info("Output plot @ {path}".format(path=png_path))
-            fig.savefig(png_path)
-            plt.close(fig)
-
         fig, ax = _plot(x='x_field', y=overhead_per_call_colname('pyprof_interception'), data=pyprof_interceptions_df)
         ax.set_title(r'Python $\rightarrow$ C-library interception overhead')
         ax.set_ylabel('Time per interception (us)')
         ax.set_xlabel('(algo, env)')
-        _save_plot(fig, ax, png_path=self._pyprof_interception_png_path)
+        save_plot(fig, ax, png_path=self._pyprof_interception_png_path)
 
         fig, ax = _plot(x='x_field', y=overhead_per_call_colname('pyprof_annotation'), data=pyprof_annotations_df)
         ax.set_title(r'Python annotation overhead')
         ax.set_ylabel('Time per annotation (us)')
         ax.set_xlabel('(algo, env)')
-        _save_plot(fig, ax, png_path=self._pyprof_annotation_png_path)
+        save_plot(fig, ax, png_path=self._pyprof_annotation_png_path)
 
     @property
     def _pyprof_annotation_csv_path(self):
@@ -999,6 +999,294 @@ class PyprofOverheadParser:
     def _json_path(self):
         return _j(self.directory, "{prefix}.json".format(
             prefix=self.filename_prefix))
+
+class CUPTIScalingOverheadCalculation:
+    def __init__(self, df, json):
+        self.df = df
+        self.json = json
+
+class CUPTIScalingOverheadParser:
+    """
+    See how CUPTI per-api-call time varies as we scale the number of traced training-loop iterations.
+    """
+    def __init__(self,
+                 gpu_activities_api_time_directory,
+                 interception_directory,
+                 directory,
+                 width=None,
+                 height=None,
+                 debug=False,
+                 debug_memoize=False,
+                 # Swallow any excess arguments
+                 **kwargs):
+        """
+        :param directories:
+        :param debug:
+        """
+        self.gpu_activities_api_time_directory = gpu_activities_api_time_directory
+        self.interception_directory = interception_directory
+        self.directory = directory
+        self.width = width
+        self.height = height
+        self.debug = debug
+        self.debug_memoize = debug_memoize
+        self.filename_prefix = 'cupti_scaling_overhead'
+
+    def colname(self, col, config):
+        return "{col}_{config}".format(
+            col=col,
+            config=re.sub('-', '_', config))
+
+    def load_df(self):
+        def read_df():
+            memoize_path = _j(self.directory, "{klass}.read_df.pickle".format(
+                klass=self.__class__.__name__))
+            if should_load_memo(self.debug_memoize, memoize_path):
+                ret = load_memo(self.debug_memoize, memoize_path)
+                return ret
+            df = cupti_read_cuda_api_stats(config_directories_pairs=[
+                ('interception', self.interception_directory),
+                ('gpu-activities-api-time', self.gpu_activities_api_time_directory),
+            ], debug=self.debug)
+            ret = df
+            maybe_memoize(self.debug_memoize, ret, memoize_path)
+            return ret
+
+        df = read_df()
+
+        dataframe_replace_us_with_sec(df, colnames=['per_iteration_us'])
+
+        df_csv = df.sort_values(['config', 'api_name', 'us_per_call'])
+        df_csv.to_csv(self._raw_csv_path, index=False)
+
+        joined_df = cupti_join_config_rows(df)
+        joined_df.to_csv(self._raw_pairs_csv_path, index=False)
+        joined_df['cupti_overhead_per_call_us'] = joined_df[self.colname('us_per_call', 'gpu-activities-api-time')] - joined_df[self.colname('us_per_call', 'interception')]
+        json_data = dict()
+        for api_name, df_api_name in joined_df.groupby('api_name'):
+            assert api_name not in json_data
+            json_data[api_name] = dict()
+            json_data[api_name]['mean_cupti_overhead_per_call_us'] = np.mean(df_api_name['cupti_overhead_per_call_us'])
+            json_data[api_name]['std_cupti_overhead_per_call_us'] = np.std(df_api_name['cupti_overhead_per_call_us'])
+            json_data[api_name]['num_cupti_overhead_per_call_us'] = len(df_api_name['cupti_overhead_per_call_us'])
+
+        def pretty_config(config):
+            if config == 'gpu-activities-api-time':
+                return 'CUPTI enabled'
+            elif config == 'interception':
+                return 'CUPTI disabled'
+            else:
+                raise NotImplementedError()
+        df['pretty_config'] = df['config'].apply(pretty_config)
+
+        logging.info("Output csv @ {path}".format(path=self._raw_csv_path))
+        df.to_csv(self._raw_csv_path, index=False)
+
+        logging.info("Output json @ {path}".format(path=self._raw_json_path))
+        do_dump_json(json_data, self._raw_json_path)
+
+        return df, joined_df
+
+    def run(self):
+        sns_kwargs = get_sns_kwargs()
+        # sns_kwargs['xticks.rotation'] = 45
+        plt_kwargs = get_plt_kwargs()
+
+        # TODO: we want to read files for EACH number of iterations,
+        # need to add a "training_iterations" column.
+
+        df, joined_df = self.load_df()
+
+        def read_per_iteration_df(df):
+            groupby_cols = ['config', 'api_name', 'algo', 'env']
+            keep_cols = ['training_duration_us', 'training_iterations', 'per_iteration_sec', 'pretty_config']
+            per_iteration_dfs = []
+            configs = list(set((df['config'])))
+            for config in configs:
+                groupby = list(df[df['config'] == config].groupby(groupby_cols))
+                group = groupby[0][0]
+                group_df = groupby[0][1]
+                group_df = group_df[groupby_cols + keep_cols]
+                per_iteration_dfs.append(group_df)
+            per_iteration_df = pd.concat(per_iteration_dfs)
+            add_x_field(per_iteration_df)
+            return per_iteration_df
+
+        def _plot():
+            if self.width is not None and self.height is not None:
+                figsize = (self.width, self.height)
+                logging.info("Setting figsize = {fig}".format(fig=figsize))
+                # sns.set_context({"figure.figsize": figsize})
+            else:
+                figsize = None
+            # This is causing XIO error....
+            # fig = plt.figure(figsize=figsize)
+
+            per_iteration_df = read_per_iteration_df(df)
+
+            plot_data = copy.copy(df)
+            # plot_data['field'] = "Per-API-call interception overhead"
+            # ax = fig.add_subplot(111)
+
+            sns.set_style('whitegrid')
+
+
+            g = sns.FacetGrid(data=plot_data, col="training_iterations",
+                              palette=sns.color_palette('muted'))
+            g.map(sns.barplot, 'api_name', 'us_per_call', 'pretty_config', **sns_kwargs)
+            g.add_legend()
+            g.set_ylabels('Time per call (us)')
+            g.set_xlabels('CUDA API call')
+            # g.set_titles("CUDA API time with increased training loop iterations")
+            g.fig.subplots_adjust(top=0.8)
+            g.fig.suptitle("CUDA API time with increased training loop iterations")
+            for ax in g.axes.ravel():
+                ax.set_xticklabels(ax.get_xticklabels(), rotation=15)
+            logging.info("Output plot @ {path}".format(path=self._png_path))
+            g.savefig(self._png_path)
+
+            g = sns.FacetGrid(data=per_iteration_df, col="training_iterations",
+                              palette=sns.color_palette('muted'))
+            g.map(sns.barplot, 'x_field', 'per_iteration_sec', 'pretty_config', **sns_kwargs)
+            g.add_legend()
+            g.set_ylabels('Time per iteration (us)')
+            g.set_xlabels('(algo, env)')
+            # g.set_titles("Training loop iteration time with increased training loop iterations")
+            g.fig.subplots_adjust(top=0.8)
+            g.fig.suptitle("Training loop iteration time with increased training loop iterations")
+            for ax in g.axes.ravel():
+                ax.set_xticklabels(ax.get_xticklabels(), rotation=15)
+            logging.info("Output plot @ {path}".format(path=self._training_loop_png_path))
+            g.savefig(self._training_loop_png_path)
+
+        _plot()
+
+    @property
+    def _json_path(self):
+        return _j(self.directory, "{prefix}.json".format(
+            prefix=self.filename_prefix))
+
+    @property
+    def _raw_csv_path(self):
+        return _j(self.directory, "{prefix}.raw.csv".format(
+            prefix=self.filename_prefix,
+        ))
+
+    @property
+    def _raw_pairs_csv_path(self):
+        return _j(self.directory, "{prefix}.pairs.raw.csv".format(
+            prefix=self.filename_prefix,
+        ))
+
+    @property
+    def _raw_json_path(self):
+        return _j(self.directory, "{prefix}.json".format(
+            prefix=self.filename_prefix,
+        ))
+
+    @property
+    def _png_path(self):
+        return _j(self.directory, "{prefix}.png".format(
+            prefix=self.filename_prefix,
+        ))
+
+    @property
+    def _training_loop_png_path(self):
+        return _j(self.directory, "{prefix}.training_loop.png".format(
+            prefix=self.filename_prefix,
+        ))
+
+
+
+def cupti_read_cuda_api_stats(config_directories_pairs, debug=False):
+    """
+    Read CUDAAPIPhaseStatsProto.CUDAAPIThreadStatsProto data into a dataframe.
+    NOTE: CUDAAPIThreadStatsProto contains accumulated CUDA API time and number of calls,
+    NOT individual CUDA API call time/duration.
+
+    Outputs data like this:
+      algo, env, config, api_name, total_num_calls, total_api_time_us, us_per_call
+
+    :param config_directories_pairs:
+            [('config_name', [iml-directories])]
+    :return:
+    """
+    csv_data = dict()
+
+    # Read (config, directories) into dataframe:
+    #   algo, env, config, api_name, total_num_calls, total_api_time_us, us_per_call
+    for (config, directories) in config_directories_pairs:
+        for directory in directories:
+
+            training_mapper = DataframeMapper(TrainingProgressDataframeReader, directories=[directory], debug=debug)
+            training_iterations = training_mapper.map_one(lambda reader: reader.training_iterations())
+            training_duration_us = training_mapper.map_one(lambda reader: reader.training_duration_us())
+
+            per_api_stats = get_per_api_stats(directory, debug=debug)
+            per_api_stats = per_api_stats.reset_index()
+            logging.info("per_api_stats: " + pprint_msg(per_api_stats))
+            for i, row in per_api_stats.iterrows():
+                total_api_time_us = row['total_time_us']
+                total_num_calls = row['num_calls']
+
+                add_col(csv_data, 'config', config)
+                add_col(csv_data, 'api_name', row['api_name'])
+                add_col(csv_data, 'algo', row['algo'])
+                add_col(csv_data, 'env', row['env'])
+                add_col(csv_data, 'total_num_calls', total_num_calls)
+                add_col(csv_data, 'total_api_time_us', total_api_time_us)
+                us_per_call = total_api_time_us / float(total_num_calls)
+                add_col(csv_data, 'us_per_call', us_per_call)
+                add_col(csv_data, 'training_iterations', training_iterations)
+                add_col(csv_data, 'training_duration_us', training_duration_us)
+
+    df = pd.DataFrame(csv_data)
+    df['per_iteration_us'] = df['training_duration_us'] / df['training_iterations']
+    return df
+
+def cupti_join_config_rows(df):
+    """
+    Given (config, directories) data that looks like:
+
+    join_index
+                  algo, env, config, api_name, total_num_calls, total_api_time_us, us_per_call
+             1               conf1       api1
+             2               conf1       api2
+             3               conf1       api1
+             4               conf1       api2
+
+             1               conf2       api1
+             2               conf2       api2
+             3               conf2       api1
+             4               conf2       api2
+
+    Group dataframe by 'config', then join each group row-by-row, renaming the columns so their suffix
+    is the 'config' value.
+
+
+    :param df:
+    :param groupby_cols:
+        Columns to group-by, in addition to 'config' and 'api_name'.
+    :return:
+    """
+    def get_suffix(group_dict):
+        config = group_dict['config']
+        return "_{config}".format(config=re.sub('-', '_', config))
+
+    groupby_cols = ['config', 'api_name', 'training_iterations']
+    non_config_groupby_cols = list(set(groupby_cols).difference({'config'}))
+
+    groupby = df.groupby(non_config_groupby_cols)
+    dfs = []
+    for group, group_df in groupby:
+        config_df = join_groups_row_by_row(
+            group_df,
+            join_cols=['algo', 'env'],
+            groupby_cols=groupby_cols,
+            get_suffix=get_suffix)
+        dfs.append(config_df)
+    new_df = pd.concat(dfs)
+    return new_df
 
 class CUPTIOverheadParser:
     """
@@ -1027,6 +1315,11 @@ class CUPTIOverheadParser:
         # self.algo_env_from_dir = algo_env_from_dir
         # self.baseline_config = baseline_config
         self.debug = debug
+
+    def colname(self, col, config):
+        return "{col}_{config}".format(
+            col=col,
+            config=re.sub('-', '_', config))
 
     def run(self):
         """
@@ -1080,80 +1373,21 @@ class CUPTIOverheadParser:
         sns_kwargs = get_sns_kwargs()
         plt_kwargs = get_plt_kwargs()
 
-        csv_data = dict()
-
         # api_name -> {
         #   mean_us_per_call: ...,
         #   std_us_per_call: ...,
         # }
-        for (config, directories) in [
+        df = cupti_read_cuda_api_stats(config_directories_pairs=[
             ('gpu-activities', self.gpu_activities_directory),
             ('no-gpu-activities', self.no_gpu_activities_directory),
-        ]:
-            for directory in directories:
-                per_api_stats = get_per_api_stats(directory, debug=self.debug)
-                per_api_stats = per_api_stats.reset_index()
-                logging.info("per_api_stats: " + pprint_msg(per_api_stats))
-                for i, row in per_api_stats.iterrows():
-                    total_api_time_us = row['total_time_us']
-                    total_num_calls = row['num_calls']
+        ], debug=self.debug)
 
-                    add_col(csv_data, 'config', config)
-                    add_col(csv_data, 'api_name', row['api_name'])
-                    add_col(csv_data, 'algo', row['algo'])
-                    add_col(csv_data, 'env', row['env'])
-                    add_col(csv_data, 'total_num_calls', total_num_calls)
-                    add_col(csv_data, 'total_api_time_us', total_api_time_us)
-                    us_per_call = total_api_time_us / float(total_num_calls)
-                    add_col(csv_data, 'us_per_call', us_per_call)
-
-        def merge_rows_in_order(df):
-            def get_suffix(config):
-                return "_{config}".format(config=re.sub('-', '_', config))
-
-            groupby_config = df.groupby(['config'])
-            assert len(groupby_config) == 2
-            config_to_dfs = dict()
-            for config, config_df in groupby_config:
-                groupby_api_name = config_df.groupby(['api_name'])
-                config_to_dfs[config] = []
-                for api_name, api_name_df in groupby_api_name:
-                    assert 'join_row_index' not in api_name_df
-                    api_name_df['join_row_index'] = list(range(len(api_name_df)))
-                    config_to_dfs[config].append(api_name_df)
-
-            config_to_df = dict((config, pd.concat(dfs)) for config, dfs in config_to_dfs.items())
-            assert len(config_to_df) == 2
-            configs = sorted(config_to_df.keys())
-
-            join_cols = ['api_name', 'join_row_index']
-
-            config1 = configs[0]
-            df1 = config_to_df[config1]
-            # df1 = df1.set_index(join_cols)
-
-            config2 = configs[1]
-            df2 = config_to_df[config2]
-            # df2 = df2.set_index(join_cols)
-
-            joined_df = df1.merge(df2, on=join_cols, suffixes=(get_suffix(config1), get_suffix(config2)))
-            del joined_df['join_row_index']
-
-            return joined_df
-
-        def colname(col, config):
-            return "{col}_{config}".format(
-                col=col,
-                config=re.sub('-', '_', config))
-
-        df = pd.DataFrame(csv_data)
         df_csv = df.sort_values(['config', 'api_name', 'us_per_call'])
         df_csv.to_csv(self._raw_csv_path, index=False)
-        logging.info("per_api_stats: " + pprint_msg(per_api_stats))
 
-        joined_df = merge_rows_in_order(df)
+        joined_df = cupti_join_config_rows(df)
         joined_df.to_csv(self._raw_pairs_csv_path, index=False)
-        joined_df['cupti_overhead_per_call_us'] = joined_df[colname('us_per_call', 'gpu-activities')] - joined_df[colname('us_per_call', 'no-gpu-activities')]
+        joined_df['cupti_overhead_per_call_us'] = joined_df[self.colname('us_per_call', 'gpu-activities')] - joined_df[self.colname('us_per_call', 'no-gpu-activities')]
         json_data = dict()
         for api_name, df_api_name in joined_df.groupby('api_name'):
             assert api_name not in json_data
@@ -1161,14 +1395,6 @@ class CUPTIOverheadParser:
             json_data[api_name]['mean_cupti_overhead_per_call_us'] = np.mean(df_api_name['cupti_overhead_per_call_us'])
             json_data[api_name]['std_cupti_overhead_per_call_us'] = np.std(df_api_name['cupti_overhead_per_call_us'])
             json_data[api_name]['num_cupti_overhead_per_call_us'] = len(df_api_name['cupti_overhead_per_call_us'])
-
-        # api_names = set(df['api_name'])
-        # for api_name in api_names:
-        #     assert api_name not in json_data
-        #     json_data[api_name] = dict()
-        #     df_api_name = df[df['api_name'] == api_name]
-        #     json_data[api_name]['mean_us_per_call'] = np.mean(df_api_name['us_per_call'])
-        #     json_data[api_name]['std_us_per_call'] = np.std(df_api_name['us_per_call'])
 
         def pretty_config(config):
             if config == 'gpu-activities':
@@ -1460,17 +1686,67 @@ def check_cols_eq(df1, df2, colnames):
     for colname in colnames:
         assert np.all(np.equal(df1[colname].values, df2[colname].values))
 
-def join_row_by_row(df1, df2, **kwargs):
+def join_row_by_row(df1, df2, on=None, **kwargs):
     # Q: how to account for left/right suffix?
+
+    join_cols = None
+    if on is None:
+        join_cols = ['join_idx']
+    else:
+        join_cols = ['join_idx'] + on
 
     assert 'join_idx' not in df1
     assert 'join_idx' not in df2
     assert len(df1) == len(df2)
     df1['join_idx'] = list(range(len(df1)))
     df2['join_idx'] = list(range(len(df1)))
-    df = df1.merge(df2, on=['join_idx'], **kwargs)
+    df = df1.merge(df2, on=join_cols, **kwargs)
     del df['join_idx']
+    del df1['join_idx']
+    del df2['join_idx']
+    assert 'join_idx' not in df
+    assert 'join_idx' not in df1
+    assert 'join_idx' not in df2
     return df
+
+def join_groups_row_by_row(df, join_cols, groupby_cols, get_suffix):
+    """
+    Use groupby_cols to group the dataframe, then for each group, join them row-by-row.
+    EXPECTS: each group should have the exact same number of rows.
+    """
+    groupby = df.groupby(groupby_cols)
+    # Simplification: only allow two "groups".
+    # assert len(groupby) == 2
+    group_df_sizes = set([len(group_df) for group, group_df in groupby])
+    # Size of all the groups should be identical.
+    assert len(group_df_sizes) == 1
+
+    groups = [group for group, group_df in groupby]
+
+    def as_group_dict(groupby_cols, group):
+        return dict((field, value) for field, value in zip(groupby_cols, group))
+
+    all_df = None
+    for group, group_df in groupby:
+        group_dict = as_group_dict(groupby_cols, group)
+        suffix = get_suffix(group_dict)
+        replace_cols = set(group_df.columns).difference(groupby_cols).difference(join_cols)
+        if all_df is None:
+            all_df = dataframe_add_suffix(group_df, suffix, replace_cols)
+            # import ipdb; ipdb.set_trace()
+            # print("HI1")
+        else:
+            keep_cols = set(group_df.columns).difference(groupby_cols)
+            new_df = join_row_by_row(
+                all_df,
+                dataframe_add_suffix(group_df[keep_cols], suffix, replace_cols),
+                on=join_cols,
+            )
+            # import ipdb; ipdb.set_trace()
+            # print("HI2")
+            all_df = new_df
+
+    return all_df
 
 def overhead_colname(col):
     return "{col}_overhead_us".format(col=col)
@@ -1547,5 +1823,25 @@ def sec_colname(us_colname):
 
     assert False
 
+def save_plot(fig, ax, png_path):
+    logging.info("Output plot @ {path}".format(path=png_path))
+    fig.savefig(png_path)
+    plt.close(fig)
+
 def is_total_overhead_column(colname):
     return re.search(r'^total\b.*\boverhead.*\bus', re.sub(r'_+', ' ', colname))
+
+def dataframe_add_suffix(df, suffix, cols):
+    """
+    Return a new dataframe where each column in <cols> has <suffix> appended to it.
+    """
+    new_df = pd.DataFrame()
+    old_colnames = list(df.columns)
+    for col in old_colnames:
+        if col in cols:
+            new_col = "{col}{suffix}".format(
+                col=col, suffix=suffix)
+            new_df[new_col] = df[col]
+        else:
+            new_df[col] = df[col]
+    return new_df

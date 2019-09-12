@@ -83,6 +83,7 @@ def main():
                         choices=['interception',
                                  'no-interception',
                                  'gpu-activities',
+                                 'gpu-activities-api-time',
                                  'no-gpu-activities',
                                  'full',
                                  'uninstrumented',
@@ -163,6 +164,11 @@ def main():
         elif args.config == 'gpu-activities':
             "$ iml-prof --debug --cuda-api-calls --cuda-activities"
             args.cuda_api_calls = True
+            args.cuda_activities = True
+        elif args.config == 'gpu-activities-api-time':
+            "$ iml-prof --debug --cuda-api-calls --cuda-api-events --cuda-activities"
+            args.cuda_api_calls = True
+            args.cuda_api_events = True
             args.cuda_activities = True
         elif args.config == 'no-gpu-activities':
             "$ iml-prof --debug --cuda-api-calls"

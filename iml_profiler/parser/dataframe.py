@@ -251,6 +251,13 @@ class TrainingProgressDataframeReader(BaseDataframeReader):
         training_duration_us = training_duration_us.values[0]
         return training_duration_us
 
+    def training_iterations(self):
+        df = self.last_progress()
+        training_iterations = df['end_num_timesteps'] - df['start_num_timesteps']
+        assert len(training_iterations) == 1
+        training_iterations = training_iterations.values[0]
+        return training_iterations
+
     def training_duration_df(self):
         df = copy.copy(self.last_progress())
         df['training_duration_us'] = df['end_training_time_us'] - df['start_training_time_us']
@@ -656,4 +663,65 @@ def iml_prof_value(var, value):
         pass
 
     return value
+
+class LinearRegressionSampleReader:
+    def __init__(self, directory, debug=False):
+        self.directory = directory
+        self.debug = debug
+        self.cuda_reader = CUDAAPIStatsDataframeReader(self.directory, debug=self.debug)
+        self.pyprof_reader = PyprofDataframeReader(self.directory, debug=self.debug)
+
+    def feature_names(self):
+        pass
+
+    def feature_df(self):
+        pass
+
+class LinearRegressionReader:
+    """
+    Read a "feature matrix" X to be used in training a linear regression model
+    for predicting the total overhead y.
+
+    The features of the matrix are all of the attributes we manually use for
+    computing average overheads when perform ad-hoc profiling overhead subtraction.
+
+    CUDAAPIStatsDataframeReader
+    CUPTI profiling: CUDA API calls:
+    - # of cudaMemcpy calls
+    - # of cudaLaunchKernel calls
+
+    PyprofDataframeReader
+    Python profiling:
+    - # of intercepted Python->C++ calls.
+    - # of Python "operation" annotations
+
+    Read matrix like:
+
+    FEATURES --->
+    SAMPLES
+    |         [ <# of cudaMemcpy calls> <# of cudaLaunchKernel calls> <# of intercepted Python->C++ calls> ... ]
+    |         [  ...                                                                                           ]
+    |         [  ...                                                                                           ]
+    V         [  ...                                                                                           ]
+
+    We could make the "samples" by the stats aggregated over a single training-loop iteration,
+    or multiple training-loop iteration.
+
+    Our labels will be the "observed" overhead" of the application, which we measure be running an uninstrumented run,
+    and compute the actual "extra time" compared to an instrumented run.
+
+    The easiest thing to do right now in our setup is to just run multiple iterations.
+    """
+    def __init__(self, directory, debug=False):
+        self.directory = directory
+        self.debug = debug
+        self.cuda_reader = CUDAAPIStatsDataframeReader(self.directory, debug=self.debug)
+        self.pyprof_reader = PyprofDataframeReader(self.directory, debug=self.debug)
+        self.cuda_reader.colnames
+
+    def feature_names(self):
+        pass
+
+    def feature_df(self):
+        pass
 
