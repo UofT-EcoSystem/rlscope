@@ -12,6 +12,37 @@ from os.path import join as _j, abspath as _a, exists as _e, dirname as _d, base
 from iml_profiler.parser.common import *
 from iml_profiler.experiment.util import tee, expr_run_cmd, expr_already_ran
 from iml_profiler.profiler.concurrent import ForkedProcessPool
+from iml_profiler.scripts import bench
+from iml_profiler.experiment import expr_config
+
+# ( set -e; set -x; iml-quick-expr --expr total_training_time --repetitions 3 --bullet; )
+# ( set -e; set -x; iml-quick-expr --expr total_training_time --repetitions 3 --bullet --plot; )
+
+
+# algo_envs = [
+#     {'algo': 'Walker2DBulletEnv-v0', 'env': 'ddpg'}
+#     {'algo': 'HopperBulletEnv-v0', 'env': 'a2c'},
+#     {'algo': 'PongNoFrameskip-v4', 'env': 'dqn'},
+# ]
+# ( set -e; set -x; iml-quick-expr --expr subtraction_validation --repetitions 3 --env Walker2DBulletEnv-v0 --algo ddpg; )
+# ( set -e; set -x; iml-quick-expr --expr subtraction_validation --repetitions 3 --env HopperBulletEnv-v0 --algo a2c; )
+# ( set -e; set -x; iml-quick-expr --expr subtraction_validation --repetitions 3 --env PongNoFrameskip-v4 --algo dqn; )
+# ( set -e; set -x; iml-quick-expr --expr subtraction_validation --repetitions 3 --bullet; )
+
+# ( set -e; set -x; iml-quick-expr --expr subtraction_validation --repetitions 3 --bullet --plot; )
+
+# ( set -e; set -x; timesteps=20000; iml-quick-expr --expr total_training_time --repetitions 3 --env HalfCheetahBulletEnv-v0 --subdir debug_n_timesteps_${timesteps} --plot; )
+
+# Experiments to run:
+# - Generalization of calibration:
+#   - Atari Pong, dqn
+#   - Minigo
+#   - Walker2D, ddpg
+#   - Hopper, a2c
+#   - Ideally, all other OpenAI workloads
+# - Full training time:
+#   - Minigo
+#   - All the OpenAI workloads
 
 class QuickExpr:
     """
@@ -30,11 +61,20 @@ class QuickExpr:
 
     @property
     def out_dir(self):
-        return _j(self.args.dir, "expr_{expr}".format(expr=self.args.expr))
+        components = [x for x in [
+            self.args.dir,
+            "expr_{expr}".format(expr=self.args.expr),
+            self.args.subdir,
+        ] if x is not None]
+        return _j(*components)
 
-    def expr_interception_iters(self, extra_argv):
-        expr_interception_iters = ExprInterceptionIters(quick_expr=self, argv=extra_argv)
-        expr_interception_iters.run()
+    def expr_subtraction_validation(self, extra_argv):
+        expr_subtraction_validation = ExprSubtractionValidation(quick_expr=self, argv=extra_argv)
+        expr_subtraction_validation.run()
+
+    def expr_total_training_time(self, extra_argv):
+        expr_total_training_time = ExprTotalTrainingTime(quick_expr=self, argv=extra_argv)
+        expr_total_training_time.run()
 
     def run(self):
         expr_func_name = "expr_{expr}".format(expr=self.args.expr)
@@ -46,7 +86,8 @@ class QuickExpr:
                 func=expr_func_name,
                 klass=self.__class__.__name__,
             ))
-        os.makedirs(self.out_dir, exist_ok=True)
+        if not self.args.dry_run:
+            os.makedirs(self.out_dir, exist_ok=True)
         func = getattr(self, expr_func_name)
         func(self.extra_argv)
 
@@ -65,15 +106,18 @@ def main():
     parser.add_argument(
         '--expr',
         choices=[
-            'interception_iters',
+            'subtraction_validation',
+            'total_training_time',
         ],
         required=True,
         help=textwrap.dedent("""
         --expr my_expr will run experiment QuickExpr.expr_my_expr().
         
-        interception_iters:
+        subtraction_validation:
             See how much unaccounted for overhead % varies as we increase 
             the number of training loop iterations.
+        total_training_time:
+            Run the entire ML training script to measure how long the total training time is.
         """))
     # Don't support --pdb for iml-bench since I haven't figured out how to
     # both (1) log stdout/stderr of a command, (2) allow pdb debugger prompt
@@ -121,16 +165,24 @@ def main():
         plot-stable-baselines:
           plots
         """.rstrip()))
+    parser.add_argument(
+        '--subdir',
+        help=textwrap.dedent("""
+        Store files root at:
+            <--dir>/expr_<--expr>/<--subdir>
+        """))
 
     args, extra_argv = parser.parse_known_args()
     quick_expr = QuickExpr(args, extra_argv)
     quick_expr.run()
 
 
-class ExprInterceptionItersConfig:
-    def __init__(self, expr_interception_iters, iml_prof_config, config_suffix, script_args=[], long_run=False):
-        self.expr_interception_iters = expr_interception_iters
-        self.quick_expr = self.expr_interception_iters.quick_expr
+class ExprSubtractionValidationConfig:
+    def __init__(self, expr, algo, env, iml_prof_config, config_suffix, script_args=[], long_run=False):
+        self.expr = expr
+        self.algo = algo
+        self.env = env
+        self.quick_expr = self.expr.quick_expr
         # $ iml-prof --config ${iml_prof_config}
         self.iml_prof_config = iml_prof_config
         # $ python train.py --iml-directory config_${config_suffix}
@@ -144,7 +196,7 @@ class ExprInterceptionItersConfig:
 
     def out_dir(self, rep, iters):
         return _j(
-            self.quick_expr.out_dir,
+            self.expr.out_dir(self.algo, self.env),
             "config_{config_suffix}_iters_{iters}{rep}".format(
                 config_suffix=self.config_suffix,
                 iters=iters,
@@ -152,7 +204,7 @@ class ExprInterceptionItersConfig:
             ))
 
     def to_string(self):
-        return ("ExprInterceptionItersConfig("
+        return ("ExprSubtractionValidationConfig("
                 "iml_prof_config='{iml_prof_config}'"
                 ", config_suffix='{config_suffix}'"
                 ")").format(
@@ -160,16 +212,12 @@ class ExprInterceptionItersConfig:
             config_suffix=self.config_suffix,
         )
 
-    # @property
-    # def args(self):
-    #     return self.quick_expr.args
-
     def logfile(self, rep, iters):
         logfile = _j(self.out_dir(rep, iters), "logfile.out")
         return logfile
 
     def long_run_iters(self):
-        return 2**self.expr_interception_iters.args.long_run_exponent
+        return 2**self.expr.args.long_run_exponent
 
     def run(self, rep, iters):
         cmd = ['iml-prof',
@@ -180,8 +228,8 @@ class ExprInterceptionItersConfig:
                '--iml-max-timesteps', iters,
                '--iml-training-progress',
 
-               '--algo', self.expr_interception_iters.args.algo,
-               '--env', self.expr_interception_iters.args.env,
+               '--algo', self.algo,
+               '--env', self.env,
 
                '--log-folder', _j(ENV['RL_BASELINES_ZOO_DIR'], 'output'),
                '--log-interval', '1',
@@ -210,14 +258,229 @@ class ExprInterceptionItersConfig:
         Return all --iml-directories whose runs are completed.
         """
         iml_directories = []
-        for rep in range(1, self.expr_interception_iters.args.repetitions+1):
+        for rep in range(1, self.expr.args.repetitions+1):
             if not self.already_ran(rep, iters):
                 continue
             iml_directory = self.out_dir(rep, iters)
             iml_directories.append(iml_directory)
         return iml_directories
 
-class ExprInterceptionIters:
+class ExprTotalTrainingTimeConfig:
+    def __init__(self, expr, algo, env, script_args=[]):
+        self.expr = expr
+        self.quick_expr = self.expr.quick_expr
+        # $ iml-prof --config ${iml_prof_config}
+        # NOTE: we want to run with IML disabled; we just want to know the total training time WITHOUT IML.
+        self.iml_prof_config = 'uninstrumented'
+        # $ python train.py --iml-directory config_${config_suffix}
+        self.config_suffix = self.iml_prof_config
+        self.script_args = script_args
+        self.algo = algo
+        self.env = env
+
+    def out_dir(self, rep):
+        return _j(
+            self.expr.out_dir, self.algo, self.env,
+            "config_{config_suffix}{rep}".format(
+                config_suffix=self.config_suffix,
+                rep=rep_suffix(rep),
+            ))
+
+    def to_string(self):
+        return ("{klass}("
+                "config_suffix='{config_suffix}'"
+                ", algo='{algo}'"
+                ", env='{env}'"
+                ")").format(
+            klass=self.__class__.__name__,
+            config_suffix=self.config_suffix,
+            algo=self.algo,
+            env=self.env,
+        )
+
+    def __str__(self):
+        return self.to_string()
+
+    def __repr__(self):
+        return self.to_string()
+
+    def logfile(self, rep):
+        logfile = _j(self.out_dir(rep), "logfile.out")
+        return logfile
+
+    def run(self, rep, extra_argv=[]):
+        # TODO: this is OpenAI specific; make it work for minigo.
+        cmd = ['iml-prof',
+               '--config', self.iml_prof_config,
+               'python', 'train.py',
+
+               '--iml-directory', _a(self.out_dir(rep)),
+               # '--iml-max-timesteps', iters,
+               '--iml-training-progress',
+
+               # NOTE: we want to run with IML disabled; we just want to know the total training time WITHOUT IML.
+               '--iml-disable',
+
+               '--algo', self.algo,
+               '--env', self.env,
+
+               '--log-folder', _j(ENV['RL_BASELINES_ZOO_DIR'], 'output'),
+               '--log-interval', '1',
+               '--iml-start-measuring-call', '1',
+               '--iml-delay',
+               ]
+        cmd.extend(self.script_args)
+        cmd.extend(extra_argv)
+        logfile = self.logfile(rep)
+        # logging.info("Logging to file {path}".format(
+        #     path=logfile))
+        expr_run_cmd(
+            cmd=cmd,
+            to_file=logfile,
+            cwd=ENV['RL_BASELINES_ZOO_DIR'],
+            replace=self.quick_expr.args.replace,
+            dry_run=self.quick_expr.args.dry_run,
+            skip_error=self.quick_expr.args.skip_error,
+            debug=self.quick_expr.args.debug)
+
+    def already_ran(self, rep):
+        logfile = self.logfile(rep)
+        return expr_already_ran(logfile, debug=self.quick_expr.args.debug)
+
+    def iml_directories(self):
+        """
+        Return all --iml-directories whose runs are completed.
+        """
+        iml_directories = []
+        for rep in range(1, self.expr.args.repetitions+1):
+            if not self.already_ran(rep):
+                continue
+            iml_directory = self.out_dir(rep)
+            iml_directories.append(iml_directory)
+        return iml_directories
+
+class ExprTotalTrainingTime:
+    def __init__(self, quick_expr, argv):
+        self.quick_expr = quick_expr
+        self.argv = argv
+        self._pool = ForkedProcessPool(name='{klass}.pool'.format(
+            klass=self.__class__.__name__))
+
+    @property
+    def out_dir(self):
+        return _j(self.quick_expr.out_dir)
+
+    @property
+    def plot_dir(self):
+        return _j(
+            self.out_dir,
+            "plot")
+
+    @property
+    def plot_logfile(self):
+        logfile = _j(self.plot_dir, "logfile.out")
+        return logfile
+
+    def run(self):
+        parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+        parser.add_argument(
+            '--bullet',
+            action='store_true',
+            help='Limit environments to physics-based Bullet environments')
+        parser.add_argument(
+            '--repetitions',
+            type=int,
+            default=3)
+        parser.add_argument(
+            '--env',
+            )
+        parser.add_argument(
+            '--algo',
+            )
+        parser.add_argument(
+            '--plot',
+            action='store_true')
+        self.args, self.extra_argv = parser.parse_known_args(self.argv)
+
+        self.init_configs()
+
+        if self.args.plot:
+            self.do_plot()
+        else:
+            self.do_run()
+
+    def do_plot(self):
+        """
+        Create bar graph of total training time for each experiment we run:
+        iml_dirs = find_iml_dirs(self.root_dir)
+        $ iml-analyze --task TotalTrainingTimePlot --iml-directories iml-dirs
+        Read data-frame like:
+          algo, env,         x_field, total_training_time_sec
+          ppo2, HalfCheetah, ...,     ...
+          ppo2, HalfCheetah, ...,     ...
+        """
+
+        task = 'TotalTrainingTimeTask'
+
+        iml_directories = []
+        for config in self.configs:
+            config_dirs = config.iml_directories()
+            iml_directories.extend(config_dirs)
+
+        if len(iml_directories) == 0:
+            log_missing_files(self, task, files={
+                'iml_directories': iml_directories,
+            })
+            return
+
+        plot_dir = self.plot_dir
+        if not self.quick_expr.args.dry_run:
+            os.makedirs(plot_dir, exist_ok=True)
+        cmd = ['iml-analyze',
+               '--directory', plot_dir,
+               '--task', task,
+               '--uninstrumented-directory', json.dumps(iml_directories),
+               ]
+        add_iml_analyze_flags(cmd, self.quick_expr.args)
+        cmd.extend(self.extra_argv)
+
+        logfile = self.plot_logfile
+        expr_run_cmd(
+            cmd=cmd,
+            to_file=logfile,
+            # Always re-run plotting script?
+            # replace=True,
+            dry_run=self.quick_expr.args.dry_run,
+            skip_error=self.quick_expr.args.skip_error,
+            debug=self.quick_expr.args.debug)
+
+    def init_configs(self):
+        self.configs = []
+        self.stable_baselines_algo_env = expr_config.stable_baselines_gather_algo_env_pairs(
+            algo=self.args.algo,
+            env_id=self.args.env,
+            all=True,
+            bullet=self.args.bullet,
+            debug=self.quick_expr.args.debug,
+        )
+        for algo, env in self.stable_baselines_algo_env:
+            config = ExprTotalTrainingTimeConfig(
+                expr=self,
+                algo=algo,
+                env=env,
+            )
+            self.configs.append(config)
+        logging.info("configs: " + pprint_msg(self.configs))
+        # TODO: add config for minigo
+        # Q: should we subclass ExprTotalTrainingTimeConfig to specialize running minigo experiment?
+
+    def do_run(self):
+        for config in self.configs:
+            for rep in range(1, self.args.repetitions+1):
+                # For debugging, allow overwriting --n-timesteps in train.py with whatever we want.
+                config.run(rep, extra_argv=self.extra_argv)
+
+class ExprSubtractionValidation:
     def __init__(self, quick_expr, argv):
         self.quick_expr = quick_expr
         self.argv = argv
@@ -225,9 +488,12 @@ class ExprInterceptionIters:
             klass=self.__class__.__name__))
         # 1 min, 2 min, 4 min
 
+    def out_dir(self, algo, env):
+        return _j(self.quick_expr.out_dir, algo, env)
+
     def plot_dir(self, config, iters):
         return _j(
-            self.quick_expr.out_dir,
+            self.out_dir(config.algo, config.env),
             "config_{conf}_iters_{iters}".format(
                 conf=config.config_suffix,
                 iters=iters,
@@ -256,60 +522,60 @@ class ExprInterceptionIters:
                 )
         self._pool.shutdown()
 
-    def cupti_scaling_overhead_dir(self):
+    def cupti_scaling_overhead_dir(self, algo, env):
         return _j(
-            self.quick_expr.out_dir,
+            self.out_dir(algo, env),
             "cupti_scaling_overhead")
 
-    def cupti_scaling_overhead_logfile(self):
+    def cupti_scaling_overhead_logfile(self, algo, env):
         task = "CUPTIScalingOverheadTask"
         logfile = _j(
-            self.cupti_scaling_overhead_dir(),
+            self.cupti_scaling_overhead_dir(algo, env),
             self._logfile_basename(task),
         )
         return logfile
 
-    def cupti_overhead_dir(self, iters):
+    def cupti_overhead_dir(self, algo, env, iters):
         return _j(
-            self.quick_expr.out_dir,
+            self.out_dir(algo, env),
             "cupti_overhead_iters_{iters}".format(
                 iters=iters,
             ))
 
-    def cupti_overhead_logfile(self, iters):
+    def cupti_overhead_logfile(self, algo, env, iters):
         task = "CUPTIOverheadTask"
         logfile = _j(
-            self.cupti_overhead_dir(iters),
+            self.cupti_overhead_dir(algo, env, iters),
             self._logfile_basename(task),
         )
         return logfile
 
-    def LD_PRELOAD_overhead_dir(self, iters):
+    def LD_PRELOAD_overhead_dir(self, algo, env, iters):
         return _j(
-            self.quick_expr.out_dir,
+            self.out_dir(algo, env),
             "LD_PRELOAD_overhead_iters_{iters}".format(
                 iters=iters,
             ))
 
-    def LD_PRELOAD_overhead_logfile(self, iters):
+    def LD_PRELOAD_overhead_logfile(self, algo, env, iters):
         task = "CallInterceptionOverheadTask"
         logfile = _j(
-            self.LD_PRELOAD_overhead_dir(iters),
+            self.LD_PRELOAD_overhead_dir(algo, env, iters),
             self._logfile_basename(task),
         )
         return logfile
 
-    def pyprof_overhead_dir(self, iters):
+    def pyprof_overhead_dir(self, algo, env, iters):
         return _j(
-            self.quick_expr.out_dir,
+            self.out_dir(algo, env),
             "pyprof_overhead_iters_{iters}".format(
                 iters=iters,
             ))
 
-    def pyprof_overhead_logfile(self, iters):
+    def pyprof_overhead_logfile(self, algo, env, iters):
         task = "PyprofOverheadTask"
         logfile = _j(
-            self.pyprof_overhead_dir(iters),
+            self.pyprof_overhead_dir(algo, env, iters),
             self._logfile_basename(task),
         )
         return logfile
@@ -324,30 +590,17 @@ class ExprInterceptionIters:
         return json_paths
 
 
-    def _log_missing_files(self, task, iters, files):
-        logging.info(textwrap.dedent("""
-                {klass}: SKIP iml-analyze --task={task} with iterations={iters}; still need you to collect 
-                some additional runs using "iml-quick-expr".
-                Files present so far:
-                {files}
-                """).format(
-            klass=self.__class__.__name__,
-            task=task,
-            iters=iters,
-            files= textwrap.indent(pprint.pformat(files), prefix='  '),
-        ))
-
-    def compute_cupti_scaling_overhead(self):
+    def compute_cupti_scaling_overhead(self, algo, env):
         task = "CUPTIScalingOverheadTask"
         all_gpu_activities_api_time_directories = []
         all_interception_directories = []
-        assert self.get_iterations(self.conf('gpu_activities_api_time')) == self.get_iterations(self.conf('interception'))
-        iterations = self.get_iterations(self.conf('gpu_activities_api_time'))
+        assert self.get_iterations(self.conf(algo, env, 'gpu_activities_api_time')) == self.get_iterations(self.conf(algo, env, 'interception'))
+        iterations = self.get_iterations(self.conf(algo, env, 'gpu_activities_api_time'))
         for iters in iterations:
-            gpu_activities_api_time_directories = self.conf('gpu_activities_api_time').iml_directories(iters)
-            interception_directories = self.conf('interception').iml_directories(iters)
+            gpu_activities_api_time_directories = self.conf(algo, env, 'gpu_activities_api_time').iml_directories(iters)
+            interception_directories = self.conf(algo, env, 'interception').iml_directories(iters)
             if len(gpu_activities_api_time_directories) != len(interception_directories):
-                self._log_missing_files(task=task, iters=iters, files={
+                log_missing_files(self, task=task, files={
                     'gpu_activities_api_time_directories': gpu_activities_api_time_directories,
                     'interception_directories': interception_directories,
                 })
@@ -355,7 +608,7 @@ class ExprInterceptionIters:
             all_gpu_activities_api_time_directories.extend(gpu_activities_api_time_directories)
             all_interception_directories.extend(interception_directories)
 
-        directory = self.cupti_scaling_overhead_dir()
+        directory = self.cupti_scaling_overhead_dir(algo, env)
         if not self.quick_expr.args.dry_run:
             os.makedirs(directory, exist_ok=True)
         cmd = ['iml-analyze',
@@ -367,7 +620,7 @@ class ExprInterceptionIters:
         add_iml_analyze_flags(cmd, self.quick_expr.args)
         cmd.extend(self.extra_argv)
 
-        logfile = self.cupti_scaling_overhead_logfile()
+        logfile = self.cupti_scaling_overhead_logfile(algo, env)
         expr_run_cmd(
             cmd=cmd,
             to_file=logfile,
@@ -377,21 +630,21 @@ class ExprInterceptionIters:
             skip_error=self.quick_expr.args.skip_error,
             debug=self.quick_expr.args.debug)
 
-    def compute_cupti_overhead(self):
+    def compute_cupti_overhead(self, algo, env):
         task = "CUPTIOverheadTask"
-        assert self.get_iterations(self.conf('gpu_activities_calibration')) == self.get_iterations(self.conf('no_gpu_activities_calibration'))
-        iterations = self.get_iterations(self.conf('gpu_activities_calibration'))
+        assert self.get_iterations(self.conf(algo, env, 'gpu_activities_calibration')) == self.get_iterations(self.conf(algo, env, 'no_gpu_activities_calibration'))
+        iterations = self.get_iterations(self.conf(algo, env, 'gpu_activities_calibration'))
         for iters in iterations:
-            gpu_activities_directories = self.conf('gpu_activities_calibration').iml_directories(iters)
-            no_gpu_activities_directories = self.conf('no_gpu_activities_calibration').iml_directories(iters)
+            gpu_activities_directories = self.conf(algo, env, 'gpu_activities_calibration').iml_directories(iters)
+            no_gpu_activities_directories = self.conf(algo, env, 'no_gpu_activities_calibration').iml_directories(iters)
             if len(gpu_activities_directories) != len(no_gpu_activities_directories):
-                self._log_missing_files(task=task, iters=iters, files={
+                log_missing_files(self, task=task, files={
                     'gpu_activities_directories': gpu_activities_directories,
                     'no_gpu_activities_directories': no_gpu_activities_directories,
                 })
                 continue
 
-            directory = self.cupti_overhead_dir(iters)
+            directory = self.cupti_overhead_dir(algo, env, iters)
             if not self.quick_expr.args.dry_run:
                 os.makedirs(directory, exist_ok=True)
             cmd = ['iml-analyze',
@@ -403,7 +656,7 @@ class ExprInterceptionIters:
             add_iml_analyze_flags(cmd, self.quick_expr.args)
             cmd.extend(self.extra_argv)
 
-            logfile = self.cupti_overhead_logfile(iters)
+            logfile = self.cupti_overhead_logfile(algo, env, iters)
             expr_run_cmd(
                 cmd=cmd,
                 to_file=logfile,
@@ -413,19 +666,19 @@ class ExprInterceptionIters:
                 skip_error=self.quick_expr.args.skip_error,
                 debug=self.quick_expr.args.debug)
 
-    def compute_LD_PRELOAD_overhead(self):
+    def compute_LD_PRELOAD_overhead(self, algo, env):
         task = "CallInterceptionOverheadTask"
         for iters in self.iterations:
-            interception_directories = self.conf('interception_calibration').iml_directories(iters)
-            uninstrumented_directories = self.conf('uninstrumented_calibration').iml_directories(iters)
+            interception_directories = self.conf(algo, env, 'interception_calibration').iml_directories(iters)
+            uninstrumented_directories = self.conf(algo, env, 'uninstrumented_calibration').iml_directories(iters)
             if len(interception_directories) != len(uninstrumented_directories):
-                self._log_missing_files(task=task, iters=iters, files={
+                log_missing_files(self, task=task, files={
                     'interception_directories': interception_directories,
                     'uninstrumented_directories': uninstrumented_directories,
                 })
                 continue
 
-            directory = self.LD_PRELOAD_overhead_dir(iters)
+            directory = self.LD_PRELOAD_overhead_dir(algo, env, iters)
             if not self.quick_expr.args.dry_run:
                 os.makedirs(directory, exist_ok=True)
             cmd = ['iml-analyze',
@@ -437,7 +690,7 @@ class ExprInterceptionIters:
             add_iml_analyze_flags(cmd, self.quick_expr.args)
             cmd.extend(self.extra_argv)
 
-            logfile = self.LD_PRELOAD_overhead_logfile(iters)
+            logfile = self.LD_PRELOAD_overhead_logfile(algo, env, iters)
             expr_run_cmd(
                 cmd=cmd,
                 to_file=logfile,
@@ -447,26 +700,26 @@ class ExprInterceptionIters:
                 skip_error=self.quick_expr.args.skip_error,
                 debug=self.quick_expr.args.debug)
 
-    def compute_pyprof_overhead(self):
+    def compute_pyprof_overhead(self, algo, env):
         task = "PyprofOverheadTask"
         for iters in self.iterations:
-            uninstrumented_directories = self.conf('uninstrumented_calibration').iml_directories(iters)
-            pyprof_annotations_directories = self.conf('just_pyprof_annotations_calibration').iml_directories(iters)
-            pyprof_interceptions_directories = self.conf('just_pyprof_interceptions_calibration').iml_directories(iters)
+            uninstrumented_directories = self.conf(algo, env, 'uninstrumented_calibration').iml_directories(iters)
+            pyprof_annotations_directories = self.conf(algo, env, 'just_pyprof_annotations_calibration').iml_directories(iters)
+            pyprof_interceptions_directories = self.conf(algo, env, 'just_pyprof_interceptions_calibration').iml_directories(iters)
 
             if len({
                 len(uninstrumented_directories),
                 len(pyprof_annotations_directories),
                 len(pyprof_interceptions_directories),
             }) != 1:
-                self._log_missing_files(task=task, iters=iters, files={
+                log_missing_files(self, task=task, files={
                     'uninstrumented_directories': uninstrumented_directories,
                     'pyprof_annotations_directories': pyprof_annotations_directories,
                     'pyprof_interceptions_directories': pyprof_interceptions_directories,
                 })
                 continue
 
-            directory = self.pyprof_overhead_dir(iters)
+            directory = self.pyprof_overhead_dir(algo, env, iters)
             if not self.quick_expr.args.dry_run:
                 os.makedirs(directory, exist_ok=True)
             cmd = ['iml-analyze',
@@ -479,7 +732,7 @@ class ExprInterceptionIters:
             add_iml_analyze_flags(cmd, self.quick_expr.args)
             cmd.extend(self.extra_argv)
 
-            logfile = self.pyprof_overhead_logfile(iters)
+            logfile = self.pyprof_overhead_logfile(algo, env, iters)
             expr_run_cmd(
                 cmd=cmd,
                 to_file=logfile,
@@ -489,11 +742,11 @@ class ExprInterceptionIters:
                 skip_error=self.quick_expr.args.skip_error,
                 debug=self.quick_expr.args.debug)
 
-    def plot_config(self, config):
+    def plot_config(self, algo, env, config):
         # PROBLEM: we only want to call plot if there are "enough" files to plot a "configuration";
         # - skip plot if 0 --iml-directories
         # - skip plot if 0 --uninstrumented-directories
-        assert config != self.config_uninstrumented
+        assert config != self.conf(algo, env, 'uninstrumented')
         task = 'CorrectedTrainingTimeTask'
         # iterations = self.iterations
         iterations = self.get_iterations(config)
@@ -503,24 +756,26 @@ class ExprInterceptionIters:
         # Use the pyprof/CUPTI/LD_PRELOAD overhead we calibrated using one_minute_iterations iterations.
         #
 
-        pyprof_overhead_jsons = self._glob_json_files(self.pyprof_overhead_dir(iters))
+        pyprof_overhead_jsons = self._glob_json_files(self.pyprof_overhead_dir(algo, env, iters))
         assert len(pyprof_overhead_jsons) <= 1
 
-        cupti_overhead_jsons = self._glob_json_files(self.cupti_overhead_dir(iters))
+        cupti_overhead_jsons = self._glob_json_files(self.cupti_overhead_dir(algo, env, iters))
         assert len(cupti_overhead_jsons) <= 1
 
-        LD_PRELOAD_overhead_jsons = self._glob_json_files(self.LD_PRELOAD_overhead_dir(iters))
+        LD_PRELOAD_overhead_jsons = self._glob_json_files(self.LD_PRELOAD_overhead_dir(algo, env, iters))
         assert len(LD_PRELOAD_overhead_jsons) <= 1
+
+        config_uninstrumented = self.conf(algo, env, 'uninstrumented')
 
         for iters in iterations:
             iml_directories = config.iml_directories(iters)
-            uninstrumented_directories = self.config_uninstrumented.iml_directories(iters)
+            uninstrumented_directories = config_uninstrumented.iml_directories(iters)
 
             if ( len({len(iml_directories), len(uninstrumented_directories)}) != 1 ) or \
                 len(pyprof_overhead_jsons) == 0 or \
                 len(cupti_overhead_jsons) == 0 or \
                 len(LD_PRELOAD_overhead_jsons) == 0:
-                self._log_missing_files(task, iters, files={
+                log_missing_files(self, task, files={
                     'iml_directories': iml_directories,
                     'uninstrumented_directories': uninstrumented_directories,
                     'pyprof_overhead_jsons': pyprof_overhead_jsons,
@@ -549,7 +804,8 @@ class ExprInterceptionIters:
             # --debug-memoize
 
             plot_dir = self.plot_dir(config, iters)
-            os.makedirs(plot_dir, exist_ok=True)
+            if not self.quick_expr.args.dry_run:
+                os.makedirs(plot_dir, exist_ok=True)
             cmd = ['iml-analyze',
                    '--directory', plot_dir,
                    '--task', task,
@@ -596,10 +852,36 @@ class ExprInterceptionIters:
                 for rep in range(1, self.args.repetitions+1):
                     config.run(rep, iters)
 
-        self.compute_cupti_scaling_overhead()
-        self.compute_cupti_overhead()
-        self.compute_LD_PRELOAD_overhead()
-        self.compute_pyprof_overhead()
+        for algo, env in self.stable_baselines_algo_env:
+            # self.compute_cupti_scaling_overhead(algo, env)
+            # self.compute_cupti_overhead(algo, env)
+            # self.compute_LD_PRELOAD_overhead(algo, env)
+            # self.compute_pyprof_overhead(algo, env)
+            self._pool.submit(
+                get_func_name(self, 'compute_cupti_scaling_overhead'),
+                self.compute_cupti_scaling_overhead,
+                algo, env,
+                sync=self.quick_expr.args.debug_single_thread,
+            )
+            self._pool.submit(
+                get_func_name(self, 'compute_cupti_overhead'),
+                self.compute_cupti_overhead,
+                algo, env,
+                sync=self.quick_expr.args.debug_single_thread,
+            )
+            self._pool.submit(
+                get_func_name(self, 'compute_LD_PRELOAD_overhead'),
+                self.compute_LD_PRELOAD_overhead,
+                algo, env,
+                sync=self.quick_expr.args.debug_single_thread,
+            )
+            self._pool.submit(
+                get_func_name(self, 'compute_pyprof_overhead'),
+                self.compute_pyprof_overhead,
+                algo, env,
+                sync=self.quick_expr.args.debug_single_thread,
+            )
+        self._pool.shutdown()
 
     @property
     def iterations(self):
@@ -616,19 +898,33 @@ class ExprInterceptionIters:
 
         return iterations
 
-
-    def conf(self, config_suffix):
-        return self.config_suffix_to_obj[config_suffix]
+    def conf(self, algo, env, config_suffix):
+        return self.config_suffix_to_obj[algo][env][config_suffix]
 
     def init_configs(self):
         self.configs = []
+        self.config_suffix_to_obj = dict()
+        self.stable_baselines_algo_env = expr_config.stable_baselines_gather_algo_env_pairs(
+            algo=self.args.algo,
+            env_id=self.args.env,
+            all=True,
+            bullet=self.args.bullet,
+            debug=self.quick_expr.args.debug,
+        )
+        for algo, env in self.stable_baselines_algo_env:
+            self._add_configs(algo, env)
 
+    def _add_configs(self, algo, env):
+
+        algo_env_configs = []
         def add_calibration_config(config):
             config_suffix = "{suffix}_calibration".format(
                 suffix=config.config_suffix,
             )
-            calibration_config = ExprInterceptionItersConfig(
-                expr_interception_iters=self,
+            calibration_config = ExprSubtractionValidationConfig(
+                expr=self,
+                algo=algo,
+                env=env,
                 iml_prof_config=config.iml_prof_config,
                 # Disable tfprof: CUPTI and LD_PRELOAD.
                 config_suffix=config_suffix,
@@ -637,12 +933,14 @@ class ExprInterceptionIters:
                 long_run=False,
             )
             assert calibration_config.is_calibration
-            self.configs.append(calibration_config)
+            algo_env_configs.append(calibration_config)
 
         # Entirely uninstrumented configuration; we use this in many of the overhead calculations to determine
         # how much training time is attributable to the enabled "feature" (e.g. CUPTI activities).
-        config = ExprInterceptionItersConfig(
-            expr_interception_iters=self,
+        config = ExprSubtractionValidationConfig(
+            expr=self,
+            algo=algo,
+            env=env,
             iml_prof_config='uninstrumented',
             config_suffix='uninstrumented',
             # Disable ALL pyprof/tfprof stuff.
@@ -652,52 +950,62 @@ class ExprInterceptionIters:
         # Entirely uninstrumented configuration (CALIBRATION runs);
         # NOTE: we need to re-run the uninstrumented configuration for the calibration runs, so that we can
         # see how well our calibration generalizes.
-        self.config_uninstrumented = config
+        # self.config_uninstrumented = config
         add_calibration_config(config)
-        self.configs.append(config)
+        algo_env_configs.append(config)
 
-        config = ExprInterceptionItersConfig(
-            expr_interception_iters=self,
+        config = ExprSubtractionValidationConfig(
+            expr=self,
+            algo=algo,
+            env=env,
             iml_prof_config='interception',
             config_suffix='interception',
             script_args=['--iml-disable-pyprof'],
             long_run=True,
         )
         add_calibration_config(config)
-        self.configs.append(config)
+        algo_env_configs.append(config)
 
         # CUPTIOverheadTask: CUPTI, and CUDA API stat-tracking overhead correction.
-        config = ExprInterceptionItersConfig(
-            expr_interception_iters=self,
+        config = ExprSubtractionValidationConfig(
+            expr=self,
+            algo=algo,
+            env=env,
             iml_prof_config='gpu-activities',
             config_suffix='gpu_activities',
             script_args=['--iml-disable-pyprof'],
             long_run=True,
         )
         add_calibration_config(config)
-        self.configs.append(config)
-        config = ExprInterceptionItersConfig(
-            expr_interception_iters=self,
+        algo_env_configs.append(config)
+        config = ExprSubtractionValidationConfig(
+            expr=self,
+            algo=algo,
+            env=env,
             iml_prof_config='no-gpu-activities',
             config_suffix='no_gpu_activities',
             script_args=['--iml-disable-pyprof'],
             long_run=True,
         )
         add_calibration_config(config)
-        self.configs.append(config)
-        config = ExprInterceptionItersConfig(
-            expr_interception_iters=self,
+        algo_env_configs.append(config)
+        config = ExprSubtractionValidationConfig(
+            expr=self,
+            algo=algo,
+            env=env,
             iml_prof_config='gpu-activities-api-time',
             config_suffix='gpu_activities_api_time',
             script_args=['--iml-disable-pyprof'],
             long_run=True,
         )
-        self.configs.append(config)
+        algo_env_configs.append(config)
 
         # Evaluate: combined tfprof/pyprof overhead correction.
         # (i.e. full IML trace-collection).
-        config = ExprInterceptionItersConfig(
-            expr_interception_iters=self,
+        config = ExprSubtractionValidationConfig(
+            expr=self,
+            algo=algo,
+            env=env,
             iml_prof_config='full',
             # Enable tfprof: CUPTI and LD_PRELOAD.
             config_suffix='full',
@@ -705,11 +1013,13 @@ class ExprInterceptionIters:
             script_args=[],
             long_run=True,
         )
-        self.configs.append(config)
+        algo_env_configs.append(config)
 
         # Evaluate: tfprof overhead correction in isolation.
-        config = ExprInterceptionItersConfig(
-            expr_interception_iters=self,
+        config = ExprSubtractionValidationConfig(
+            expr=self,
+            algo=algo,
+            env=env,
             iml_prof_config='full',
             # Enable tfprof: CUPTI and LD_PRELOAD.
             config_suffix='just_tfprof',
@@ -717,22 +1027,26 @@ class ExprInterceptionIters:
             script_args=['--iml-disable-pyprof'],
             long_run=True,
         )
-        self.configs.append(config)
+        algo_env_configs.append(config)
 
         # Evaluate: pyprof overhead correction in isolation.
-        config = ExprInterceptionItersConfig(
-            expr_interception_iters=self,
+        config = ExprSubtractionValidationConfig(
+            expr=self,
+            algo=algo,
+            env=env,
             iml_prof_config='uninstrumented',
             # Disable tfprof: CUPTI and LD_PRELOAD.
             config_suffix='just_pyprof',
             # Enable pyprof.
             script_args=['--iml-disable-tfprof'],
         )
-        self.configs.append(config)
+        algo_env_configs.append(config)
 
         # PyprofOverheadTask: Python->C-lib event tracing, and operation annotation overhead correction.
-        config = ExprInterceptionItersConfig(
-            expr_interception_iters=self,
+        config = ExprSubtractionValidationConfig(
+            expr=self,
+            algo=algo,
+            env=env,
             iml_prof_config='uninstrumented',
             # Disable tfprof: CUPTI and LD_PRELOAD.
             config_suffix='just_pyprof_annotations',
@@ -741,9 +1055,11 @@ class ExprInterceptionIters:
             long_run=True,
         )
         add_calibration_config(config)
-        self.configs.append(config)
-        config = ExprInterceptionItersConfig(
-            expr_interception_iters=self,
+        algo_env_configs.append(config)
+        config = ExprSubtractionValidationConfig(
+            expr=self,
+            algo=algo,
+            env=env,
             iml_prof_config='uninstrumented',
             # Disable tfprof: CUPTI and LD_PRELOAD.
             config_suffix='just_pyprof_interceptions',
@@ -752,11 +1068,17 @@ class ExprInterceptionIters:
             long_run=True,
         )
         add_calibration_config(config)
-        self.configs.append(config)
+        algo_env_configs.append(config)
 
-        self.config_suffix_to_obj = dict()
-        for config in self.configs:
-            self.config_suffix_to_obj[config.config_suffix] = config
+        for config in algo_env_configs:
+            if algo not in self.config_suffix_to_obj:
+                self.config_suffix_to_obj[algo] = dict()
+            if env not in self.config_suffix_to_obj[algo]:
+                self.config_suffix_to_obj[algo][env] = dict()
+            assert config.config_suffix not in self.config_suffix_to_obj[algo][env]
+            self.config_suffix_to_obj[algo][env][config.config_suffix] = config
+
+        self.configs.extend(algo_env_configs)
 
     def run(self):
         parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
@@ -790,11 +1112,15 @@ class ExprInterceptionIters:
             type=int,
             default=3)
         parser.add_argument(
+            '--bullet',
+            action='store_true',
+            help='Limit environments to physics-based Bullet environments')
+        parser.add_argument(
             '--env',
-            default="HalfCheetahBulletEnv-v0")
+        )
         parser.add_argument(
             '--algo',
-            default="ppo2")
+        )
         parser.add_argument(
             '--plot',
             action='store_true')
@@ -822,6 +1148,24 @@ def add_iml_analyze_flags(cmd, args):
         cmd.append('--debug-memoize')
     if args.debug_single_thread:
         cmd.append('--debug-single-thread')
+
+def log_missing_files(self, task, files):
+    logging.info(textwrap.dedent("""
+            {klass}: SKIP iml-analyze --task={task}; still need you to collect 
+            some additional runs using "iml-quick-expr".
+            Files present so far:
+            {files}
+            """).format(
+        klass=self.__class__.__name__,
+        task=task,
+        files=textwrap.indent(pprint.pformat(files), prefix='  '),
+    ))
+
+def get_func_name(obj, func):
+    name = "{klass}.{func}".format(
+        klass=obj.__class__.__name__,
+        func=func)
+    return name
 
 if __name__ == '__main__':
     main()

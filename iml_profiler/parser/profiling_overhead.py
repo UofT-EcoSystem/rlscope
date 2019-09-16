@@ -14,6 +14,7 @@ from matplotlib import pyplot as plt
 
 from iml_profiler.parser.dataframe import TrainingProgressDataframeReader, CUDAAPIStatsDataframeReader, PyprofDataframeReader, read_iml_config, DataframeMapper, IMLConfig
 from iml_profiler.parser.stacked_bar_plots import StackedBarPlot
+from iml_profiler.parser import stacked_bar_plots
 
 from iml_profiler.parser import stacked_bar_plots
 from iml_profiler.parser.db import SQLCategoryTimesReader, sql_input_path
@@ -1000,6 +1001,264 @@ class PyprofOverheadParser:
         return _j(self.directory, "{prefix}.json".format(
             prefix=self.filename_prefix))
 
+class TotalTrainingTimeParser:
+    """
+    Plot total training time of uninstrumented run.
+
+    # Run with tfprof disabled, pyprof disabled, AND op-events disabled;
+    # NOTE: we should make --iml-disable do THIS by default.
+    uninstrumented_directory
+    $ iml-prof train.py --iml-disable --iml-disable-ops
+
+    # Run with ONLY pyprof events enabled (nothing else).
+    # i.e. intercept C++ methods and record Python/C++ events.
+    pyprof_interceptions_directory
+    $ iml-prof train.py --iml-disable-tfprof --iml-disable-ops
+
+    # Run with ONLY op-events enabled (nothing else).
+    # i.e. only iml.prof.operation(...) calls are added code.
+    pyprof_annotations_directory
+
+    """
+    def __init__(self,
+                 uninstrumented_directory,
+                 directory,
+                 width=None,
+                 height=None,
+                 debug=False,
+                 # Swallow any excess arguments
+                 **kwargs):
+        """
+        :param directories:
+        :param debug:
+        """
+        self.uninstrumented_directory = uninstrumented_directory
+        self.directory = directory
+        self.width = width
+        self.height = height
+        self.debug = debug
+        self.filename_prefix = 'total_training_time'
+
+    @staticmethod
+    def get_total_intercepted_calls(reader):
+        return reader.total_intercepted_calls()
+
+    @staticmethod
+    def get_total_annotations(reader):
+        return reader.total_annotations()
+
+    @staticmethod
+    def get_overhead_field(reader):
+        return reader.total_op_events()
+
+    def compute_overhead(self, config, instrumented_directory,
+                         name, get_num_field,
+                         mapper_cb=None):
+        """
+        Given an instrumented_directory and uninstrumented_directory, join row-by-row,
+        and compute the delta in training_duration_us to get "total profiling overhead".
+        Then, use get_num_field to get # of "calls", and divide by this to get "per call profiling overhead".
+        """
+
+        # assert name in ['op', 'event']
+
+        unins_df = pd.concat(get_training_durations_df(self.uninstrumented_directory, debug=self.debug))
+        unins_df['config'] = 'uninstrumented'
+
+        # e.g. num_<pyprof_interception>s
+        num_field = "num_{name}s".format(name=name)
+        overhead_field = overhead_colname(name)
+        per_overhead_field = overhead_per_call_colname(name)
+
+        ins_dfs = []
+        for directory in instrumented_directory:
+            training_duration_us = get_training_durations(directory, debug=self.debug)
+
+            pyprof_mapper = DataframeMapper(PyprofDataframeReader, directories=[directory], debug=self.debug)
+            if mapper_cb:
+                mapper_cb(pyprof_mapper)
+
+            num_field_values = pyprof_mapper.map(get_num_field)
+            assert len(num_field_values) == 1
+
+            # overhead_field_values = pyprof_mapper.map(get_overhead_field)
+            # assert len(overhead_field_values) == 1
+
+            ins_df = pd.DataFrame({
+                'training_duration_us': [training_duration_us],
+                num_field: num_field_values,
+                # overhead_field: overhead_field_values,
+            })
+            ins_df['config'] = config
+
+            iml_config = read_iml_config(directory)
+            add_iml_config(ins_df, iml_config)
+
+            assert len(ins_df) == 1
+            ins_dfs.append(ins_df)
+
+        ins_df = pd.concat(ins_dfs)
+
+        unins_join_df = unins_df['training_duration_us']
+        check_cols_eq(ins_df, unins_df, colnames=['algo', 'env'])
+        # TODO: ideally we would join row-by-row on groups with equal (algo, env) to support
+        # multiple different algo/env combinations.
+        df = join_row_by_row(
+            ins_df, unins_df[['training_duration_us']],
+            suffixes=("", "_unins"))
+        add_x_field(df)
+        df[overhead_field] = df['training_duration_us'] - df['training_duration_us_unins']
+        df[per_overhead_field] = df[overhead_field] / df[num_field]
+
+        json = dict()
+        json[mean_per_call_colname(name)] = np.mean(df[per_overhead_field])
+        json[std_per_call_colname(name)] = np.std(df[per_overhead_field])
+        json[num_per_call_colname(name)] = len(df[per_overhead_field])
+
+        # mean_pyprof_interception_overhead_per_call_us
+        # mean_pyprof_annotation_overhead_per_call_us
+
+        calc = PyprofOverheadCalculation(df, json)
+        return calc
+
+    def run(self):
+        """
+        PSEUDOCODE:
+        unins_df = Read data-frame from uninstrumented data:
+            config            training_duration_us
+            uninstrumented    ...
+        ins_df = Read data-frame from instrumented (e.g. pyprof_annotations_directory) data:
+            config          training_duration_us    num_ops
+            pyprof_annotations      ...                     ...
+
+        Assert len(unins_df) == len(ins_df)
+        df = Join row-by-row:
+                unins_df['training_duration_us' as
+                         'uninstrumented_training_duration_us']
+            with
+                and ins_df
+
+        df['<op>_overhead_us'] = df['uninstrumented_training_duration_us'] - df['training_duration_us']
+        df['per_<op>_overhead_us'] = df['<op>_overhead_us'] / df['num_<op>s']
+
+        Add to json:
+            json['(mean/std/len)_<op>_overhead_us'] = np.mean/std/len(df['<op>_overhead_us'])
+
+        Stats to save:
+            # We need this for "subtraction"
+            Per-op profiling overhead (us) =
+            {
+                mean/std/len: ...,
+            }
+
+            Per-event profiling overhead (us) =
+            {
+                mean/std/len: ...,
+            }
+
+        csv output:
+        # pyprof_annotation_overhead.csv
+        config, training_duration_us, uninstrumented_training_duration_us, num_ops, per_pyprof_annotation_overhead_us
+
+        ...
+        # pyprof_interception_overhead.csv
+        config, training_duration_us, uninstrumented_training_duration_us, num_events, per_pyprof_interception_overhead_us
+
+        json output:
+        # pyprof_overhead.json
+        api_name: {
+            # pyprof_annotation_overhead.json
+            (mean/std/len)_pyprof_annotation_overhead_us:
+            # pyprof_interception_overhead.json
+            (mean/std/len)_pyprof_interception_overhead_us:
+        }
+        """
+
+        sns_kwargs = get_sns_kwargs()
+        plt_kwargs = get_plt_kwargs()
+
+        dfs = []
+        for directory in self.uninstrumented_directory:
+            training_mapper = DataframeMapper(TrainingProgressDataframeReader, directories=[directory], debug=self.debug)
+            df = training_mapper.map_one(lambda reader: reader.training_duration_df())
+            assert len(df) == 1
+            dfs.append(df)
+        # algo, env, training_duration_us
+        df = pd.concat(dfs)
+        # algo, env, x_field, training_duration_us
+        add_x_field(df)
+        # algo, env, x_field, training_duration_sec
+        dataframe_replace_us_with_sec(df)
+        # algo, env, short_env, x_field, training_duration_sec
+        add_short_env(df)
+
+        def _plot():
+            if self.width is not None and self.height is not None:
+                figsize = (self.width, self.height)
+                logging.info("Setting figsize = {fig}".format(fig=figsize))
+                # sns.set_context({"figure.figsize": figsize})
+            else:
+                figsize = None
+            # This is causing XIO error....
+            # fig = plt.figure(figsize=figsize)
+
+            # per_iteration_df = read_per_iteration_df(df)
+
+            plot_data = copy.copy(df)
+            # plot_data['field'] = "Per-API-call interception overhead"
+            # ax = fig.add_subplot(111)
+
+            sns.set_style('whitegrid')
+
+            # We can create a "grouped" plot with seaborn using FacetGrid where we split on the "group name";
+            # e.g. group name can be
+            # Algorithm: ppo2, sac, ddpg, a2c
+
+            g = sns.FacetGrid(data=plot_data, col="algo",
+                              palette=sns.color_palette('muted'))
+            g.map(sns.barplot, 'short_env', 'training_duration_sec', **sns_kwargs)
+            g.add_legend()
+            g.set_ylabels('Total training time (sec)')
+            g.set_xlabels('Environment')
+            # g.set_titles("CUDA API time with increased training loop iterations")
+            g.fig.subplots_adjust(top=0.8)
+            g.fig.suptitle(r"Total training time of all $(algo, env)$ workloads")
+            for ax in g.axes.ravel():
+                ax.set_xticklabels(ax.get_xticklabels(), rotation=15)
+
+            # TODO: I have no idea how to create a shared x-label when using FacetGrid :(
+            #
+            # g.fig.subplots_adjust(bottom=0.2)
+            # left, width = .25, .5
+            # bottom, height = .25, .5
+
+            # left, width = 0., 1.
+            # bottom, height = 0., 1.
+            # right = left + width
+            # top = bottom + height
+            # ax = g.fig.add_axes([0, 0, 1, 1])
+            # ax.text(left, bottom, 'center bottom',
+            #         horizontalalignment='center',
+            #         verticalalignment='bottom',
+            #         transform=ax.transAxes)
+            # g.fig.text()
+
+            logging.info("Output plot @ {path}".format(path=self._png_path))
+            g.savefig(self._png_path)
+
+        output_csv(df, self._csv_path, sort_by=['algo', 'env', 'training_duration_sec'])
+        _plot()
+
+    @property
+    def _csv_path(self):
+        return _j(self.directory, "{prefix}.raw.csv".format(
+            prefix=self.filename_prefix))
+
+    @property
+    def _png_path(self):
+        return _j(self.directory, "{prefix}.png".format(
+            prefix=self.filename_prefix))
+
 class CUPTIScalingOverheadCalculation:
     def __init__(self, df, json):
         self.df = df
@@ -1640,13 +1899,26 @@ def get_plt_kwargs():
     plt_kwargs['capsize'] = 5
     return plt_kwargs
 
+def get_short_env(env):
+    short_env = stacked_bar_plots.get_x_env(env)
+    return short_env
+
+def add_short_env(df):
+    df['short_env'] = df['env'].apply(get_short_env)
+
 def add_x_field(df):
     """
     Add (algo, env) as x_field.
     """
+    # def get_x_field(algo, env):
+    #     return "({algo}, {env})".format(
+    #         algo=algo, env=env)
+
     def get_x_field(algo, env):
-        return "({algo}, {env})".format(
-            algo=algo, env=env)
+        return stacked_bar_plots.get_x_field(
+            algo, env,
+            x_type='rl-comparison',
+            human_readable=True)
 
     df['x_field'] = np.vectorize(get_x_field, otypes=[str])(df['algo'], df['env'])
 

@@ -1918,6 +1918,10 @@ class Profiler:
         start_sec = time.time()
         trace_id = self.next_trace_id
 
+        if dump_always:
+            assert self.phase in self._incremental_training_progress
+            assert self._incremental_training_progress[self.phase].can_dump(self.reports_progress, expect_true=True)
+
         now_sec = time.time()
         if self.phase in self._incremental_training_progress and \
                 self._incremental_training_progress[self.phase].can_dump(self.reports_progress) and (
@@ -2235,8 +2239,7 @@ class Profiler:
             name=event_name)
 
     def report_progress(self, percent_complete, num_timesteps=None, total_timesteps=None):
-        if not self.disable or ( self.disable and self.training_progress ):
-            self._dump_training_progress(debug=self.debug)
+        # if not self.disable or ( self.disable and self.training_progress ):
 
         if self.disable and not self.training_progress:
             return
@@ -2309,6 +2312,15 @@ class Profiler:
         if self.phase not in self._incremental_training_progress:
             self._incremental_training_progress[self.phase] = RecordedIncrementalTrainingProgress(self.machine_name, self.process_name, self.phase)
         self._incremental_training_progress[self.phase].report_progress(percent_complete, num_timesteps, total_timesteps, self.start_trace_time_sec)
+
+        dump_always = (percent_complete == 1)
+        if dump_always:
+            # If this fails, then your training loop executed zero iterations,
+            # so iml.prof.report_progress was NEVER called.
+            #
+            # Q: Should we allow this by making the phase basically 0 seconds...?
+            assert self.tracing_enabled
+        self._dump_training_progress(debug=self.debug, dump_always=dump_always)
 
         self._maybe_finish(debug=self.debug)
 
@@ -3018,12 +3030,17 @@ class RecordedIncrementalTrainingProgress:
         self.end_percent_complete = None
         self.end_training_time_us = None
 
-    def can_dump(self, reports_progress):
+    def can_dump(self, reports_progress, expect_true=False):
         if reports_progress:
+            if expect_true:
+                assert self.start_percent_complete is not None
+                assert self.start_trace_time_sec is not None
             # Wait until report_start_of_progress has been called.
             return self.start_percent_complete is not None and self.start_trace_time_sec is not None
         # Assume that tracing starts from the very beginning the ML script starts;
         # i.e. we don't delay until iml.prof.report_progress() is called.
+        if expect_true:
+            assert self.start_trace_time_sec is not None
         return self.start_trace_time_sec is not None
 
     def report_progress(self, percent_complete, num_timesteps, total_timesteps, start_trace_time_sec, start_usec=None):

@@ -27,7 +27,7 @@ from iml_profiler.parser.common import print_cmd
 from iml_profiler.parser.cpu_gpu_util import UtilParser, UtilPlot
 from iml_profiler.parser.training_progress import TrainingProgressParser, ProfilingOverheadPlot
 from iml_profiler.parser.extrapolated_training_time import ExtrapolatedTrainingTimeParser
-from iml_profiler.parser.profiling_overhead import CallInterceptionOverheadParser, CUPTIOverheadParser, CUPTIScalingOverheadParser, CorrectedTrainingTimeParser, PyprofOverheadParser
+from iml_profiler.parser.profiling_overhead import CallInterceptionOverheadParser, CUPTIOverheadParser, CUPTIScalingOverheadParser, CorrectedTrainingTimeParser, PyprofOverheadParser, TotalTrainingTimeParser
 from iml_profiler import py_config
 
 from iml_profiler.parser.common import *
@@ -778,6 +778,31 @@ class PyprofOverheadTask(luigi.Task):
         self.dumper = PyprofOverheadParser(**kwargs)
         self.dumper.run()
 
+class TotalTrainingTimeTask(luigi.Task):
+    uninstrumented_directory = luigi.ListParameter(description="IML directory that ran with 'iml-prof --config uninstrumented train.py --iml-disable --iml-training-progress'")
+    directory = luigi.Parameter(description="Output directory", default=".")
+
+    # Plot attrs
+    # rotation = luigi.FloatParameter(description="x-axis title rotation", default=45.)
+    width = luigi.FloatParameter(description="Width of plot in inches", default=None)
+    height = luigi.FloatParameter(description="Height of plot in inches", default=None)
+
+    debug = param_debug
+    debug_single_thread = param_debug_single_thread
+
+    skip_output = False
+
+    def requires(self):
+        return []
+
+    def output(self):
+        return []
+
+    def run(self):
+        kwargs = kwargs_from_task(self)
+        self.dumper = TotalTrainingTimeParser(**kwargs)
+        self.dumper.run()
+
 NOT_RUNNABLE_TASKS = get_NOT_RUNNABLE_TASKS()
 IML_TASKS = get_IML_TASKS()
 IML_TASKS.add(TraceEventsTask)
@@ -792,6 +817,7 @@ IML_TASKS.add(CUPTIOverheadTask)
 IML_TASKS.add(CorrectedTrainingTimeTask)
 IML_TASKS.add(PyprofOverheadTask)
 IML_TASKS.add(CUPTIScalingOverheadTask)
+IML_TASKS.add(TotalTrainingTimeTask)
 
 if __name__ == "__main__":
     main()
