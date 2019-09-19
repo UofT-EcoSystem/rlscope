@@ -1931,21 +1931,8 @@ class OverlapTypeInterface:
             non_ops = frozenset()
             ops = frozenset([event.name])
         else:
-            # Q: What about category operation...?
-            # We want to KEEP the operation category so we can determine
-            # overlap between q_backward/q_forward across processes...
-            #
-            # I think all we need to do is replace "CATEGORY_OPERATION" for an event
-            # with event.name (it's operation-type).
-            # Then, when we go to plot the category_times data, we "remove" any operation
-            # names from the category (forming an operation_key), and group the data
-            # into an operation-specific dict for plotting.
-            #
-            # We can still test a single process trace without handling this.
-            # (graph should be the same with fewer categories: CPU, GPU, CPU + GPU)
             raise RuntimeError("Not sure how to categorize {cat} into CPU or GPU.".format(
                 cat=category))
-        # new_category = frozenset([cat, proc_category])
         new_key = CategoryKey(ops=ops,
                               non_ops=non_ops,
                               procs=frozenset([event.process_name]))
@@ -2231,17 +2218,31 @@ class ResourceOverlapType(OverlapTypeInterface):
         self.debug = debug or DEBUG_OVERLAP_TYPE
 
     def pre_reduce(self, category, event):
+        """
+        Re-map CPU-like categories to CATEGORY_CPU:
+            e.g.
+            CATEGORY_PYTHON -> CategoryKey(non_ops=[CATEGORY_CPU], procs=event.process_name)
+
+        Keep CATEGORY_OPERATION events.
+            CATEGORY_PYTHON -> CategoryKey(ops=[op], procs=event.process_name)
+
+        :param category:
+        :param event:
+        :return:
+        """
         return self.pre_reduce_cpu_gpu(category, event)
 
     def post_reduce_category_key(self, overlap, overlap_metadata):
         """
         Add modular "post-reduce" function for "adding" CategoryKey's that map to the same key.
 
+        { CategoryKey(op),
+          CategoryKey(CPU) }
+
+        ->
+
         :return:
         """
-        # def reduce_overlap_ResourceOverlap(
-        #         self, overlap,
-        #         categories, operation_types, proc_types):
         """
         Group keys by resource-type (non_ops).
         """
@@ -2391,43 +2392,18 @@ class CategoryOverlapType(OverlapTypeInterface):
         """
         if category in CATEGORIES_CPU:
             # Keep ALL the CPU events, and retain the details of their category.
-
             non_ops = frozenset([category])
-            # Q: If we change this one thing, we SHOULD get the same total_size as OperationOverlap (equivalent code)
-            # A: YES, we do as expected
-            #    => Something caused by using non_ops=raw_category during causes the inflation in overlap time...
-            # non_ops = frozenset([CATEGORY_CPU])
-
             ops = frozenset()
         elif category == CATEGORY_GPU:
             # SKIP GPU events; we just want to measure CPU time.
-            # Q: Won't GPU perhaps overlap with these?
-            #       [ GPU ]
-            # [     CPU     ]
-            # No, I don't think so; GPU events are recorded from the "GPU-side".
-            # "CUDA API C" is recorded from the CPU-side.
-            # return None
             non_ops = frozenset([category])
             ops = frozenset()
         elif category == CATEGORY_OPERATION:
             non_ops = frozenset()
             ops = frozenset([event.name])
         else:
-            # Q: What about category operation...?
-            # We want to KEEP the operation category so we can determine
-            # overlap between q_backward/q_forward across processes...
-            #
-            # I think all we need to do is replace "CATEGORY_OPERATION" for an event
-            # with event.name (it's operation-type).
-            # Then, when we go to plot the category_times data, we "remove" any operation
-            # names from the category (forming an operation_key), and group the data
-            # into an operation-specific dict for plotting.
-            #
-            # We can still test a single process trace without handling this.
-            # (graph should be the same with fewer categories: CPU, GPU, CPU + GPU)
             raise RuntimeError("Not sure how to categorize {cat} into CPU or GPU.".format(
                 cat=category))
-        # new_category = frozenset([cat, proc_category])
         new_key = CategoryKey(ops=ops,
                               non_ops=non_ops,
                               procs=frozenset([event.process_name]))
