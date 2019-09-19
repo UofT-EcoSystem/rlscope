@@ -5,7 +5,7 @@ import sys
 
 # from tensorflow.core.profiler.tfprof_log_pb2 import ProfileProto
 from iml_profiler.protobuf.pyprof_pb2 import CategoryEventsProto, ProcessMetadata, IncrementalTrainingProgress
-from iml_profiler.protobuf.iml_prof_pb2 import CUDAAPIPhaseStatsProto, MachineDevsEventsProto
+from iml_profiler.protobuf.iml_prof_pb2 import CUDAAPIPhaseStatsProto, MachineDevsEventsProto, OpStackProto
 
 from iml_profiler.protobuf.unit_test_pb2 import \
     IMLUnitTestOnce, \
@@ -51,6 +51,8 @@ def main():
         dump_proto_txt(args.proto, CUDAAPIPhaseStatsProto, sys.stdout)
     elif is_cuda_device_events_file(args.proto):
         dump_proto_txt(args.proto, MachineDevsEventsProto, sys.stdout)
+    elif is_op_stack_file(args.proto):
+        dump_proto_txt(args.proto, OpStackProto, sys.stdout)
     elif is_pyprof_call_times_file(args.proto):
         call_times_data = read_pyprof_call_times_file(args.proto)
         pprint.pprint(call_times_data)

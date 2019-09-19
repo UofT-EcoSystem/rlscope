@@ -17,6 +17,28 @@ message CUDAEventProto {
     int64 duration_us = 4;
 }
 
+message OpStackProto {
+    string process_name = 1;
+    string phase = 2;
+    string machine_name = 3;
+
+    // IMLOperation op_stack = 4;
+
+    // overhead-type -> phase-name -> operation-name -> # of overhead events
+    map<string, PhaseOverheadEvents> overhead_events = 4;
+}
+message PhaseOverheadEvents {
+    // phase-name -> operation-name -> # of overhead events
+    map<string, OperationOverheadEvents> phase_overhead_events = 1;
+}
+message OperationOverheadEvents {
+    string operation_name = 1;
+    int64 num_overhead_events = 2;
+}
+//message IMLOperation {
+//    string name = 1;
+//}
+
 // Events belonging to a GPU.
 message DevEventsProto {
     string device_name = 1;
@@ -53,9 +75,13 @@ message CUDAAPIEvent {
     string api_name = 2;
     int64 start_time_us = 3;
     int64 duration_us = 4;
+    // The operation that was active at the top of the operation stack when this CUDA API was called.
+    // We use this to determine where to subtract CUDA API profiling overheads (interception, CUPTI).
+    // e.g. q_forward
+    string active_operation = 5;
 }
 
-// cuda_api_phase_stats*.proto
+// cuda_api_stats*.proto
 message CUDAAPIPhaseStatsProto {
     string process_name = 1;
     string machine_name = 2;

@@ -88,6 +88,8 @@ def main():
                                  'full',
                                  'uninstrumented',
                                  ],
+                        # By default, run with full IML instrumentation.
+                        default='full',
                         help=textwrap.dedent("""
                         For measuring LD_PRELOAD CUDA API interception overhead:
                             interception:

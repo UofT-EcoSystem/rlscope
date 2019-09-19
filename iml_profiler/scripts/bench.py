@@ -181,9 +181,15 @@ def main():
     Debug with single thread.
     """))
     parser.add_argument(
-        '--cuda-api-prof',
-        help="record CUDA API call time and call counts (for uninstrumented runs only)",
-        action='store_true')
+        '--iml-prof',
+        default='iml-prof',
+        help=textwrap.dedent("""
+        Run train.py inside of iml-prof (for uninstrumented runs only)
+          $ iml-prof python train.py
+        This is done by setting IML_PROF=<--iml-prof> inside the train_stable_baselines.sh training script.
+        
+        If for some reason you didn't want to run with iml-prof, you could set this to --iml-prof="".
+        """))
     parser.add_argument(
         '--replace',
         action='store_true')
@@ -296,7 +302,7 @@ def main():
     parser_stable_baselines.add_argument(
         '--expr',
         choices=['on_vs_off_policy', 'environments', 'algorithms', 'all_rl_workloads',
-                 'debug_prof_overhead'],
+                 'debug_expr'],
         help=textwrap.dedent("""
         Only run a specific "experiment".
         i.e. only run (algo, env) combinations needed for a specific graph.
@@ -361,48 +367,13 @@ class Experiment:
                 return expr
         return None
 
-    def should_run(self, algo, env_id, bullet):
-        if not self.is_supported(algo, env_id):
-            return False
-        if bullet and not is_bullet_env(env_id):
-            return False
-        # if re.search('Acrobat', env_id):
-        #     # Skip Acrobat environment for --analyze and for runs.
-        #     return False
-        return True
-
     def _gather_algo_env_pairs(self, algo=None, env_id=None, all=False, bullet=False, debug=False):
-
-        if env_id is not None and algo is not None:
-            algo_env_pairs = [(algo, env_id)]
-            return algo_env_pairs
-
-        if env_id is not None:
-            algo_env_pairs = []
-            for algo in expr_config.STABLE_BASELINES_ANNOTATED_ALGOS:
-                if not self.should_run(algo, env_id, bullet):
-                    continue
-                algo_env_pairs.append((algo, env_id))
-            return algo_env_pairs
-
-        if algo is not None:
-            algo_env_pairs = []
-            for env_id in STABLE_BASELINES_AVAIL_ENV_IDS:
-                if not self.should_run(algo, env_id, bullet):
-                    continue
-                algo_env_pairs.append((algo, env_id))
-            return algo_env_pairs
-
-        if all:
-            algo_env_pairs = []
-            for algo in expr_config.STABLE_BASELINES_ANNOTATED_ALGOS:
-                for env_id in STABLE_BASELINES_AVAIL_ENV_IDS:
-                    if not self.should_run(algo, env_id, bullet):
-                        continue
-                    algo_env_pairs.append((algo, env_id))
-            return algo_env_pairs
-
-        return None
+        return expr_config.stable_baselines_gather_algo_env_pairs(
+            algo=algo,
+            env_id=env_id,
+            all=all,
+            bullet=bullet,
+            debug=debug)
 
     def _run_cmd(self, cmd, to_file, env=None, replace=False, debug=False):
         args = self.args
@@ -546,17 +517,21 @@ class ExperimentGroup(Experiment):
 
         # - Debug experiment:
         #   Choose a particular (algo, env) to use to debug stuff on.
-        expr = 'debug_prof_overhead'
+        expr = 'debug_expr'
         opts = ['--env-id', 'HalfCheetahBulletEnv-v0', '--algo', 'ppo2']
+        # print("HELLO 1")
+        # sys.exit(1)
         if self.should_run_expr(expr):
             self.iml_bench(parser, subparser, 'train_stable_baselines.sh', opts, suffix=bench_log(expr), debug=True)
-            # overlap_type = 'ResourceOverlap'
-            # self.stacked_plot([
-            #     '--overlap-type', overlap_type,
-            #     '--y-type', 'percent',
-            #     '--x-type', 'algo-comparison',
-            #     '--training-time',
-            # ], suffix=plot_log(expr, overlap_type), train_stable_baselines_opts=opts)
+            overlap_type = 'ResourceOverlap'
+            # print("HELLO 2")
+            # sys.exit(1)
+            self.stacked_plot([
+                '--overlap-type', overlap_type,
+                '--y-type', 'percent',
+                '--x-type', 'algo-comparison',
+                '--training-time',
+            ], suffix=plot_log(expr, overlap_type), train_stable_baselines_opts=opts)
 
         # (1) On vs off policy:
         expr = 'on_vs_off_policy'
@@ -820,7 +795,18 @@ class ExperimentGroup(Experiment):
         add_stable_baselines_options(parser_train_stable_baselines)
         train_stable_baselines_args = parser_train_stable_baselines.parse_args(train_stable_baselines_opts)
 
-        algo_env_pairs = self._gather_algo_env_pairs(debug=debug, **vars(train_stable_baselines_args))
+        keep_argnames = {
+            'algo',
+            'env_id',
+            'all',
+            'bullet',
+            'debug',
+        }
+        gather_algo_env_dict = vars(train_stable_baselines_args)
+        for k in list(gather_algo_env_dict.keys()):
+            if k not in keep_argnames:
+                del gather_algo_env_dict[k]
+        algo_env_pairs = self._gather_algo_env_pairs(debug=debug, **gather_algo_env_dict)
         assert algo_env_pairs is not None
         if len(algo_env_pairs) == 0:
             logging.info(
@@ -1131,8 +1117,8 @@ class StableBaselines(Experiment):
             env['DEBUG'] = 'yes'
             env['IML_DEBUG'] = 'yes'
 
-        if args.cuda_api_prof:
-            env['CUDA_API_PROF'] = 'iml-prof'
+        if args.iml_prof:
+            env['IML_PROF'] = args.iml_prof
 
         if args.iml_trace_time_sec is not None:
             env['IML_TRACE_TIME_SEC'] = str(args.iml_trace_time_sec)
@@ -1142,7 +1128,10 @@ class StableBaselines(Experiment):
     def _run(self, algo, env_id):
         args = self.args
 
-        iml_directory = self.iml_directory(algo, env_id)
+        # NOTE: We use absolute path of iml-directory
+        # since some training scripts change cd to a
+        # different directory before they run.
+        iml_directory = _a(self.iml_directory(algo, env_id))
         cmd = [args.subcommand, "--iml-directory", iml_directory]
         if args.iml_debug:
             cmd.append('--iml-debug')
@@ -1218,9 +1207,6 @@ class StableBaselines(Experiment):
             for algo, env_id in algo_env_pairs:
                 self._run(algo, env_id)
 
-
-def is_bullet_env(env_id):
-    return re.search(r'BulletEnv', env_id)
 
 def get_root_iml_directory(config, direc):
     # if config == 'instrumented':

@@ -150,6 +150,44 @@ def record_event(
         raise IMLProfError(ret)
     return ret
 
+def record_overhead_event(
+    overhead_type,
+    num_events):
+    ret = _so.record_overhead_event(
+        _as_c_string(overhead_type),
+        c_int(num_events)
+    )
+    if ret != TF_OK:
+        raise IMLProfError(ret)
+    return ret
+
+def record_overhead_event_for_operation(
+    overhead_type,
+    operation,
+    num_events):
+    ret = _so.record_overhead_event_for_operation(
+        _as_c_string(overhead_type),
+        _as_c_string(operation),
+        c_int(num_events)
+    )
+    if ret != TF_OK:
+        raise IMLProfError(ret)
+    return ret
+
+def push_operation(operation):
+    ret = _so.push_operation(
+        _as_c_string(operation),
+    )
+    if ret != TF_OK:
+        raise IMLProfError(ret)
+    return ret
+
+def pop_operation():
+    ret = _so.pop_operation()
+    if ret != TF_OK:
+        raise IMLProfError(ret)
+    return ret
+
 class IMLProfError(Exception):
     def __init__(self, errcode):
         self.errcode = errcode

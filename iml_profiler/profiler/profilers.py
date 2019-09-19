@@ -1336,10 +1336,12 @@ class Profiler:
         assert bench_name not in self._op_stack
         assert bench_name != NO_BENCH_NAME
         self._op_stack.append(bench_name)
+        sample_cuda_api.push_operation(bench_name)
 
     def _pop_operation(self, bench_name):
         assert self._op_stack[-1] == bench_name
         self._op_stack.pop()
+        sample_cuda_api.pop_operation()
 
     @property
     def _cur_operation(self):
@@ -1547,6 +1549,15 @@ class Profiler:
             del self.end_call_us[bench_name]
 
             self._pop_operation(bench_name)
+            # Attribute overhead event to the parent operation (most operations are occuring)
+            # NOTE: if no operation is still running, where should we attribute it to?
+            # sample_cuda_api.record_overhead_event(overhead_type='pyprof_annotation', num_events=1)
+            if len(self._op_stack) == 0:
+                # Attribute annotation overhead to the operation we just finished
+                sample_cuda_api.record_overhead_event_for_operation(overhead_type='pyprof_annotation', operation=bench_name, num_events=1)
+            else:
+                # Attribute annotation overhead to the parent operation (NOT the one that just finished)
+                sample_cuda_api.record_overhead_event(overhead_type='pyprof_annotation', num_events=1)
 
             # We terminate annotations if they're been going for too long.
             # if not self.reports_progress:

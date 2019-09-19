@@ -10,6 +10,7 @@
 
 #include "iml_profiler/protobuf/iml_prof.pb.h"
 
+#include "cuda_api_profiler/op_stack.h"
 #include "cuda_api_profiler/event_handler.h"
 #include "cuda_api_profiler/thread_pool_wrapper.h"
 
@@ -48,6 +49,7 @@ struct CUDAAPIProfilerState {
   // (thread-id, api-cbid)
   using APIKey = std::tuple<pid_t, CUpti_CallbackDomain, CUpti_CallbackId>;
   using TimeUsec = int64;
+  using OperationName = std::string;
 
   std::map<APIKey, TimeUsec> _start_t;
   std::map<APIKey, TimeUsec> _end_t;
@@ -84,10 +86,12 @@ struct CUDAAPICallRecord {
   CUDAAPIProfilerState::APIKey api_key;
   CUDAAPIProfilerState::TimeUsec start_us;
   CUDAAPIProfilerState::TimeUsec duration_us;
-  CUDAAPICallRecord(CUDAAPIProfilerState::APIKey api_key, CUDAAPIProfilerState::TimeUsec start_us, CUDAAPIProfilerState::TimeUsec duration_us) :
+  CUDAAPIProfilerState::OperationName active_operation;
+  CUDAAPICallRecord(CUDAAPIProfilerState::APIKey api_key, CUDAAPIProfilerState::TimeUsec start_us, CUDAAPIProfilerState::TimeUsec duration_us, const CUDAAPIProfilerState::OperationName& active_operation) :
       api_key(api_key),
       start_us(start_us),
-      duration_us(duration_us)
+      duration_us(duration_us),
+      active_operation(active_operation)
   {
   }
 };
@@ -97,8 +101,9 @@ public:
   ThreadPoolWrapper _pool;
   mutex _mu;
   CUDAAPIProfilerState _state;
+  OpStack& _op_stack;
 
-  CUDAAPIProfiler();
+  CUDAAPIProfiler(OpStack& op_stack);
   ~CUDAAPIProfiler();
   void EnableFuzzing();
   void EnableEventRecording();

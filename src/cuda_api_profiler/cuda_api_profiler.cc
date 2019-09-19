@@ -115,6 +115,7 @@ std::unique_ptr<iml::CUDAAPIPhaseStatsProto> CUDAAPIProfilerState::AsProto() {
     event_proto->set_api_name(name);
     event_proto->set_start_time_us(event.start_us);
     event_proto->set_duration_us(event.duration_us);
+    event_proto->set_active_operation(event.active_operation);
   }
 
   return proto;
@@ -193,15 +194,18 @@ void CUDAAPIProfiler::ApiCallback(
 
     auto api_key = std::make_tuple(gettid(), domain, cbid);
 
+
     // This code will capture as much "profile-book-keeping overhead" added by this code as possible.
     // If we want to subtract from CUDA API events, we need those CUDA API events to capture the total overhead.
     {
       mutex_lock l(_mu);
       if (cb_site == CUPTI_API_EXIT) {
+        auto const& active_operation = _op_stack.ActiveOperation();
+        // _op_stack.RecordOverheadEvent("cuda_api_interception", 1);
         auto start_us = _state._start_t.at(api_key);
         if (_state._event_recording) {
           // auto duration_us = end_us - start_us;
-          _state._events.emplace_back(api_key, start_us, -1);
+          _state._events.emplace_back(api_key, start_us, -1, active_operation);
         }
         auto& api_stats = _state._api_stats[api_key];
         auto& end_t = _state._end_t[api_key];
@@ -255,8 +259,9 @@ void CUDAAPIProfiler::ApiCallback(
   }
 }
 
-CUDAAPIProfiler::CUDAAPIProfiler() :
-    _pool("CUDAAPIProfiler.pool", /*num_threads=*/4)
+CUDAAPIProfiler::CUDAAPIProfiler(OpStack& op_stack) :
+    _pool("CUDAAPIProfiler.pool", /*num_threads=*/4),
+    _op_stack(op_stack)
 {
 }
 

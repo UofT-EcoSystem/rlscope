@@ -22,7 +22,7 @@ import psutil
 import pwd
 from iml_profiler.protobuf.pyprof_pb2 import CategoryEventsProto, MachineUtilization, ProcessMetadata, IncrementalTrainingProgress
 from iml_profiler.protobuf.unit_test_pb2 import IMLUnitTestOnce, IMLUnitTestMultiple
-from iml_profiler.protobuf.iml_prof_pb2 import CUDAAPIPhaseStatsProto
+from iml_profiler.protobuf.iml_prof_pb2 import CUDAAPIPhaseStatsProto, MachineDevsEventsProto, OpStackProto
 from tqdm import tqdm as tqdm_progress
 
 USEC_IN_SEC = 1e6
@@ -1428,6 +1428,18 @@ def read_training_progress_file(path):
 def read_pyprof_file(path):
     return read_proto(CategoryEventsProto, path)
 
+def read_category_events_file(path):
+    return read_proto(CategoryEventsProto, path)
+
+def read_category_events_file(path):
+    return read_proto(CategoryEventsProto, path)
+
+def read_op_stack_file(path):
+    return read_proto(OpStackProto, path)
+
+def read_cuda_device_events_file(path):
+    return read_proto(MachineDevsEventsProto, path)
+
 def read_process_metadata_file(path):
     return read_proto(ProcessMetadata, path)
 
@@ -1488,6 +1500,13 @@ def is_cuda_device_events_file(path):
     ), base)
     return m
 
+def is_op_stack_file(path):
+    base = _b(path)
+    m = re.search(r'^op_stack{trace}\.proto'.format(
+        trace=TRACE_SUFFIX_RE,
+    ), base)
+    return m
+
 def is_fuzz_cuda_api_stats_file(path):
     base = _b(path)
     m = re.search(r'^fuzz_cuda_api_stats{trace}\.proto'.format(
@@ -1510,13 +1529,41 @@ def is_pyprof_call_times_file(path):
     ), base)
     return m
 
-def is_pyprof_file(path):
+def is_category_events_file(path):
     base = _b(path)
     m = re.search(r'category_events{bench}{trace}\.proto'.format(
         bench=BENCH_SUFFIX_RE,
         trace=TRACE_SUFFIX_RE,
     ), base)
     return m
+
+def is_venn_js_file(path):
+    base = _b(path)
+    m = re.search(r'\.venn_js\.json$'.format(
+        bench=BENCH_SUFFIX_RE,
+        trace=TRACE_SUFFIX_RE,
+    ), base)
+    return m
+
+def as_corrected_venn_js_file(path):
+    assert is_venn_js_file(path)
+    new_path = re.sub(r'\.venn_js\.json$', '.venn_js.corrected.json', path)
+    assert is_corrected_venn_js_file(new_path)
+    return new_path
+
+def is_corrected_venn_js_file(path):
+    base = _b(path)
+    m = re.search(r'\.venn_js\.corrected\.json$'.format(
+        bench=BENCH_SUFFIX_RE,
+        trace=TRACE_SUFFIX_RE,
+    ), base)
+    if m:
+        # To avoid accidental double-correction.
+        assert not is_venn_js_file(path)
+    return m
+
+def is_pyprof_file(path):
+    return is_category_events_file(path)
 
 def is_process_metadata_file(path):
     base = _b(path)

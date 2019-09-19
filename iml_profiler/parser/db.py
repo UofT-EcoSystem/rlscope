@@ -24,7 +24,7 @@ from iml_profiler import py_config
 
 from iml_profiler.parser.trace_events import dump_category_times
 
-from iml_profiler.parser.readers import TFProfCategoryTimesReader, \
+from iml_profiler.parser.readers import TFProfCategoryTimesReader, CUDAAPIStatsReader, CategoryEventsReader, CUDADeviceEventsReader, \
     DEFAULT_group_by_device, \
     DEFAULT_ignore_categories, \
     DEFAULT_debug \
@@ -50,14 +50,14 @@ PSQL_CONSTRAINTS_SQL = _j(py_config.ROOT, "postgres", "constraints.sql")
 
 def Worker_get_device_names(kwargs):
     if kwargs['debug']:
-        logging.info("> Start: Worker_get_device_names tfprof_file={path}".format(path=kwargs['tfprof_file']))
-    reader = TFProfCategoryTimesReader(kwargs['tfprof_file'])
+        logging.info("> Start: Worker_get_device_names cuda_device_events_path={path}".format(path=kwargs['cuda_device_events_path']))
+    reader = CUDADeviceEventsReader(kwargs['cuda_device_events_path'])
     device_names = reader.get_device_names()
     if kwargs['debug']:
         pprint.pprint({
-            'tfprof.device_names':device_names,
-            'tfprof_file':kwargs['tfprof_file']})
-        logging.info("> Stop: Worker_get_device_names tfprof_file={path}".format(path=kwargs['tfprof_file']))
+            'device_names':device_names,
+            'cuda_device_events_path':kwargs['cuda_device_events_path']})
+        logging.info("> Stop: Worker_get_device_names cuda_device_events_path={path}".format(path=kwargs['cuda_device_events_path']))
 
     return reader.machine_name, device_names
 
@@ -418,11 +418,11 @@ class SQLParser:
         if self.debug:
             logging.info("> Insert tfprof device names.")
 
-        def get_Worker_get_device_names_kwargs(tfprof_file):
-            return {'tfprof_file':tfprof_file, 'debug':self.debug}
+        def get_Worker_get_device_names_kwargs(cuda_device_events_path):
+            return {'cuda_device_events_path':cuda_device_events_path, 'debug':self.debug}
 
-        device_names_kwargs = [get_Worker_get_device_names_kwargs(tfprof_file)
-                               for tfprof_file in src_files if is_tfprof_file(tfprof_file)]
+        device_names_kwargs = [get_Worker_get_device_names_kwargs(path)
+                               for path in src_files if is_cuda_device_events_file(path)]
 
         if not self.debug_single_thread:
             device_name_pool = multiprocessing.Pool()
@@ -556,82 +556,6 @@ class SQLParser:
     def maybe_commit(self, i):
         if (i + 1) % self.block_size == 0:
             self.conn.commit()
-
-    # def insert_tfprof_file(self, path):
-    #
-    #     reader = TFProfCategoryTimesReader(path)
-    #
-    #     logging.info("> Insert tfprof file: {p}".format(p=path))
-    #     if self.debug:
-    #         reader.logging.info(sys.stdout)
-    #
-    #     process_id = self.insert_process_name(reader.process_name)
-    #     phase_id = self.insert_phase_name(reader.phase_name)
-    #
-    #     inserts = []
-    #     self._total_inserts = 0
-    #
-    #     fields = ['start_time_us',
-    #               'end_time_us',
-    #               'duration_us',
-    #               'event_name',
-    #               'category_id',
-    #               'process_id',
-    #               'phase_id',
-    #               'device_id',
-    #               'is_debug_event']
-    #
-    #
-    #     with progressbar.ProgressBar(max_value=reader.num_all_events()) as bar, \
-    #         bulk_inserter(self.conn, 'Event', self.block_size, bar, directory=self.directory,
-    #                       fields=fields) as bulk:
-    #
-    #         for i, (device, event) in enumerate(reader.all_events(debug=True)):
-    #             category, start_time_us, duration_us, name = event
-    #             category_id = self.insert_category_name(category)
-    #             if category == 'GPU' and self.debug:
-    #                 logging.info("> category = {c}, duration_us = {duration_us}".format(
-    #                     c=category,
-    #                     duration_us=duration_us))
-    #             device_id = self.insert_device_name(device)
-    #             end_time_us = start_time_us + duration_us
-    #             is_debug_event = bool(match_debug_event_name(name))
-    #             # insert = {
-    #             #     # 'thread_id':event.thread_id,
-    #             #     'start_time_us':start_time_us,
-    #             #     'end_time_us':end_time_us,
-    #             #     'duration_us':duration_us,
-    #             #     'event_name':name,
-    #             #     'category_id':category_id,
-    #             #     'process_id':process_id,
-    #             #     'device_id':device_id,
-    #             #     'is_debug_event':is_debug_event,
-    #             # }
-    #             # bulk.add_insert(insert)
-    #
-    #             insert = [
-    #                 # 'thread_id':event.thread_id,
-    #
-    #                 # 'start_time_us'
-    #                 start_time_us,
-    #                 # 'end_time_us'
-    #                 end_time_us,
-    #                 # 'duration_us'
-    #                 duration_us,
-    #                 # 'event_name'
-    #                 name,
-    #                 # 'category_id'
-    #                 category_id,
-    #                 # 'process_id'
-    #                 process_id,
-    #                 # 'phase_id'
-    #                 phase_id,
-    #                 # 'device_id'
-    #                 device_id,
-    #                 # 'is_debug_event'
-    #                 is_debug_event,
-    #             ]
-    #             bulk.add_insert(insert)
 
     def insert_process_name(self, process_name, fields=None, debug=False):
         return self._insert_name(
@@ -1177,70 +1101,73 @@ class _CSVInserterWorker:
     def insert_file(self, path):
         if is_tfprof_file(path):
             self.insert_tfprof_file(path)
-        elif is_pyprof_file(path) or is_dump_event_file(path):
-            self.insert_pyprof_file(path)
+        elif is_category_events_file(path):
+            self.insert_category_events_file(path)
         elif is_training_progress_file(path):
             self.insert_training_progress_file(path)
-        elif is_pyprof_call_times_file(path):
-            self.insert_pyprof_call_times_file(path)
+        # elif is_pyprof_call_times_file(path):
+        #     self.insert_pyprof_call_times_file(path)
         elif is_machine_util_file(path):
             self.insert_machine_util_file(path)
+        elif is_cuda_device_events_file(path):
+            self.insert_cuda_device_events_file(path)
+        elif is_cuda_api_stats_file(path):
+            self.insert_cuda_api_stats_file(path)
         else:
             raise NotImplementedError("Not sure how to insert into path={path} into database".format(path=path))
 
-    def insert_tfprof_file(self, path):
+    def get_cpu_device(self):
+        # We don't bother to record the device-name CUDA API call belongs to;
+        # During analysis we count this as CPU-side events, so we associate
+        # with the single CPU device on the machine.
+        cpu_devices = [dev for dev, ident in self.device_to_id.items() if is_cpu_device(dev)]
+        assert len(cpu_devices) == 1
+        device = cpu_devices[0]
+        return device
 
-        reader = TFProfCategoryTimesReader(path)
+    def insert_cuda_api_stats_file(self, path):
+        reader = CUDAAPIStatsReader(path)
 
-        logging.info("> Insert tfprof file: {p}".format(p=path))
-        # if self.debug:
-        #     reader.logging.info(sys.stdout)
+        logging.info("> Insert CUDA API Stats file: {p}".format(p=path))
 
-        # process_id = self.insert_process_name(reader.process_name)
         process_id = self.process_to_id[reader.process_name]
         phase_id = self.phase_to_id[reader.phase_name]
 
-        # inserts = []
-        self._total_inserts = 0
+        device = self.get_cpu_device()
 
-        # with progressbar.ProgressBar(max_value=reader.num_all_events()) as bar, \
-        #     bulk_inserter(conn, 'Event', block_size, bar, directory=directory,
-        #                   fields=fields) as bulk:
+        for i, event in enumerate(reader.all_events(debug=True)):
+            category, start_time_us, duration_us, name = event
+            self.insert_event(
+                path, device, process_id, phase_id,
+                category, start_time_us, duration_us, name)
+
+    def insert_cuda_device_events_file(self, path):
+        reader = CUDADeviceEventsReader(path)
+
+        logging.info("> Insert CUDA Device Events file: {p}".format(p=path))
+
+        process_id = self.process_to_id[reader.process_name]
+        phase_id = self.phase_to_id[reader.phase_name]
+
+        for i, event in enumerate(reader.all_events(debug=True)):
+            device, category, start_time_us, duration_us, name = event
+            self.insert_event(
+                path, device, process_id, phase_id,
+                category, start_time_us, duration_us, name)
+
+    def insert_tfprof_file(self, path):
+        reader = TFProfCategoryTimesReader(path)
+
+        logging.info("> Insert tfprof file: {p}".format(p=path))
+
+        process_id = self.process_to_id[reader.process_name]
+        phase_id = self.phase_to_id[reader.phase_name]
 
         for i, (device, event) in enumerate(reader.all_events(debug=True)):
-
             category, start_time_us, duration_us, name = event
-            # category_id = self.insert_category_name(category)
-            category_id = self.category_to_id[category]
-            # if category == 'GPU' and self.debug:
-            #     logging.info("> category = {c}, duration_us = {duration_us}".format(
-            #         c=category,
-            #         duration_us=duration_us))
-            # device_id = self.insert_device_name(device)
-            if device not in self.device_to_id:
-                logging.info("> ERROR: Couldn't find device={dev} in path={path}".format(
-                    dev=device,
-                    path=path))
-                pprint.pprint({
-                    'device_to_id':self.device_to_id})
-            device_id = self.device_to_id[device]
-            end_time_us = start_time_us + duration_us
-            is_debug_event = bool(match_debug_event_name(name))
-            insert = {
-                # 'thread_id':event.thread_id,
-                'start_time_us':start_time_us,
-                'end_time_us':end_time_us,
-                'duration_us':duration_us,
-                # TODO: record libcupti profiling overhead, add it to tfprof proto file, and record it here.
-                'profiling_overhead_us':0,
-                'event_name':name,
-                'category_id':category_id,
-                'process_id':process_id,
-                'phase_id':phase_id,
-                'device_id':device_id,
-                'is_debug_event':is_debug_event,
-            }
-            self.add_insert(insert)
+            self.insert_event(
+                path, device, process_id, phase_id,
+                category, start_time_us, duration_us, name)
 
     def _pyprof_each_category_events(self, pyprof_proto):
         for step, python_events in pyprof_proto.python_events.items():
@@ -1250,82 +1177,82 @@ class _CSVInserterWorker:
             for category, clib_events in clibs.clibs.items():
                 yield category, clib_events.events
 
-    def insert_pyprof_call_times_file(self, path):
-        call_times_data = read_pyprof_call_times_file(path)
-
-        logging.info("> Insert pyprof call_times file: {p}".format(p=path))
-        # if self.debug:
-        #     pprint.pprint({'call_times_data':call_times_data})
-
-        process_name = call_times_data['process_name']
-        phase_name = call_times_data['phase']
-
-        # c = self.cursor
-        # Insert Process
-        # process_id = self.insert_process_name(proto.process_name)
-        process_id = self.process_to_id[process_name]
-        phase_id = self.phase_to_id[phase_name]
-
-        num_all_events = sum(len(epoch_duration_sec_pairs) \
-                             for func_tupl, epoch_duration_sec_pairs in call_times_data['call_times'].items())
-
-        with progressbar.ProgressBar(max_value=num_all_events) as bar:
-            category = CATEGORY_PYTHON_PROFILER
-            category_id = self.category_to_id[category]
-            i = 0
-            for func_tupl, epoch_duration_sec_pairs in call_times_data['call_times'].items():
-                pyprof_filename, pyprof_line_no, pyprof_function = func_tupl
-                for start_epoch_sec, duration_sec in epoch_duration_sec_pairs:
-                    # Q: Should we define a separate table for python profiling data to avoid cramming file/line/func-name data into a single field?
-                    # Options:
-                    # - Use EventAttribute's
-                    #   - Annoying/slow: extra joins (NOTE: joins may not be a big deal)
-                    # - Add (usually) NULL columns for pyprof-specific fields <-- this is probably the best approach.
-                    #   - Do this; assume # of Event's is LARGE ( which is definitely is ), so lets avoid joins.
-                    # - Add CategoryEventsProto table with foreign-key reference from Event to CategoryEventsProto metadata row (file/line/func-name)
-                    #   - Makes event inserts slower...I don't bother handling foreign key management when doing bulk inserts.
-                    #   - extra joins (NOTE: joins may not be a big deal)
-                    pyprof_line_description = pyprof_func_std_string(func_tupl)
-                    # Insert Event
-                    is_debug_event = False
-                    start_time_us = sec_to_us(start_epoch_sec)
-                    duration_us = sec_to_us(duration_sec)
-                    end_time_us = start_time_us + duration_us
-                    ins = {
-                        # 'thread_id':event.thread_id,
-                        'start_time_us':start_time_us,
-                        'end_time_us':end_time_us,
-                        'duration_us':duration_us,
-                        # Q: function name alone can be vague without knowing the filename.
-                        'event_name':pyprof_function,
-                        'category_id':category_id,
-                        'process_id':process_id,
-                        'phase_id':phase_id,
-                        'is_debug_event':is_debug_event,
-                        'pyprof_filename':pyprof_filename,
-                        'pyprof_line_no':pyprof_line_no,
-                        'pyprof_function':pyprof_function,
-                        'pyprof_line_description':pyprof_line_description,
-                    }
-
-                    # ipdb> pp ins
-                    # {'category_id': 8,
-                    #  'duration_us': 10.735000000000001,
-                    #  'end_time_us': 1550795540176821.2,
-                    #  'event_name': 'set_operation',
-                    #  'is_debug_event': False,
-                    #  'process_id': 1,
-                    #  'pyprof_filename': '/mnt/data/james/clone/dnn_tensorflow_cpp/python/profiler/profilers.py',
-                    #  'pyprof_function': 'set_operation',
-                    #  'pyprof_line_description': '/mnt/data/james/clone/dnn_tensorflow_cpp/python/profiler/profilers.py:788(set_operation)',
-                    #  'pyprof_line_no': 788,
-                    #  'start_time_us': 1550795540176810.5}
-
-                    event_id = self.insert_dict('Event', ins)
-                    i += 1
-                    bar.update(i)
-
-        self.conn.commit()
+    # def insert_pyprof_call_times_file(self, path):
+    #     call_times_data = read_pyprof_call_times_file(path)
+    #
+    #     logging.info("> Insert pyprof call_times file: {p}".format(p=path))
+    #     # if self.debug:
+    #     #     pprint.pprint({'call_times_data':call_times_data})
+    #
+    #     process_name = call_times_data['process_name']
+    #     phase_name = call_times_data['phase']
+    #
+    #     # c = self.cursor
+    #     # Insert Process
+    #     # process_id = self.insert_process_name(proto.process_name)
+    #     process_id = self.process_to_id[process_name]
+    #     phase_id = self.phase_to_id[phase_name]
+    #
+    #     num_all_events = sum(len(epoch_duration_sec_pairs) \
+    #                          for func_tupl, epoch_duration_sec_pairs in call_times_data['call_times'].items())
+    #
+    #     with progressbar.ProgressBar(max_value=num_all_events) as bar:
+    #         category = CATEGORY_PYTHON_PROFILER
+    #         category_id = self.category_to_id[category]
+    #         i = 0
+    #         for func_tupl, epoch_duration_sec_pairs in call_times_data['call_times'].items():
+    #             pyprof_filename, pyprof_line_no, pyprof_function = func_tupl
+    #             for start_epoch_sec, duration_sec in epoch_duration_sec_pairs:
+    #                 # Q: Should we define a separate table for python profiling data to avoid cramming file/line/func-name data into a single field?
+    #                 # Options:
+    #                 # - Use EventAttribute's
+    #                 #   - Annoying/slow: extra joins (NOTE: joins may not be a big deal)
+    #                 # - Add (usually) NULL columns for pyprof-specific fields <-- this is probably the best approach.
+    #                 #   - Do this; assume # of Event's is LARGE ( which is definitely is ), so lets avoid joins.
+    #                 # - Add CategoryEventsProto table with foreign-key reference from Event to CategoryEventsProto metadata row (file/line/func-name)
+    #                 #   - Makes event inserts slower...I don't bother handling foreign key management when doing bulk inserts.
+    #                 #   - extra joins (NOTE: joins may not be a big deal)
+    #                 pyprof_line_description = pyprof_func_std_string(func_tupl)
+    #                 # Insert Event
+    #                 is_debug_event = False
+    #                 start_time_us = sec_to_us(start_epoch_sec)
+    #                 duration_us = sec_to_us(duration_sec)
+    #                 end_time_us = start_time_us + duration_us
+    #                 ins = {
+    #                     # 'thread_id':event.thread_id,
+    #                     'start_time_us':start_time_us,
+    #                     'end_time_us':end_time_us,
+    #                     'duration_us':duration_us,
+    #                     # Q: function name alone can be vague without knowing the filename.
+    #                     'event_name':pyprof_function,
+    #                     'category_id':category_id,
+    #                     'process_id':process_id,
+    #                     'phase_id':phase_id,
+    #                     'is_debug_event':is_debug_event,
+    #                     'pyprof_filename':pyprof_filename,
+    #                     'pyprof_line_no':pyprof_line_no,
+    #                     'pyprof_function':pyprof_function,
+    #                     'pyprof_line_description':pyprof_line_description,
+    #                 }
+    #
+    #                 # ipdb> pp ins
+    #                 # {'category_id': 8,
+    #                 #  'duration_us': 10.735000000000001,
+    #                 #  'end_time_us': 1550795540176821.2,
+    #                 #  'event_name': 'set_operation',
+    #                 #  'is_debug_event': False,
+    #                 #  'process_id': 1,
+    #                 #  'pyprof_filename': '/mnt/data/james/clone/dnn_tensorflow_cpp/python/profiler/profilers.py',
+    #                 #  'pyprof_function': 'set_operation',
+    #                 #  'pyprof_line_description': '/mnt/data/james/clone/dnn_tensorflow_cpp/python/profiler/profilers.py:788(set_operation)',
+    #                 #  'pyprof_line_no': 788,
+    #                 #  'start_time_us': 1550795540176810.5}
+    #
+    #                 event_id = self.insert_dict('Event', ins)
+    #                 i += 1
+    #                 bar.update(i)
+    #
+    #     self.conn.commit()
 
     def insert_training_progress_file(self, path):
         proto = read_training_progress_file(path)
@@ -1351,64 +1278,111 @@ class _CSVInserterWorker:
 
         self.conn.commit()
 
-    def insert_pyprof_file(self, path):
-        with open(path, 'rb') as f:
-            proto = CategoryEventsProto()
-            proto.ParseFromString(f.read())
+    def insert_category_events_file(self, path):
+        reader = CategoryEventsReader(path)
 
-        logging.info("> Insert pyprof file: {p}".format(p=path))
-        # if self.debug:
-        #     logging.info(proto)
+        logging.info("> Insert Category Events file: {p}".format(p=path))
 
-        # c = self.cursor
-        # Insert Process
-        # process_id = self.insert_process_name(proto.process_name)
-        process_id = self.process_to_id[proto.process_name]
-        phase_id = self.phase_to_id[proto.phase]
+        process_id = self.process_to_id[reader.process_name]
+        phase_id = self.phase_to_id[reader.phase_name]
 
-        # categories = set()
-        def insert_category_events(event_conn, eventattr_conn, category, events):
-            # Insert Category
-            # categories.add(category)
-            # category_id = self.insert_category_name(category)
-            category_id = self.category_to_id[category]
-            for event in events:
-                # Insert Event
-                is_debug_event = bool(match_debug_event_name(event.name))
+        device = self.get_cpu_device()
 
-                event_fields = {
-                    'thread_id':event.thread_id,
-                    'start_time_us':event.start_time_us,
-                    'end_time_us':event.start_time_us + event.duration_us,
-                    'duration_us':event.duration_us,
-                    'event_name':event.name,
-                    'category_id':category_id,
-                    'process_id':process_id,
-                    'phase_id':phase_id,
-                    'is_debug_event':is_debug_event,
-                }
-                event_id = event_conn.insert_dict('Event', event_fields)
-                if not py_config.DEBUG_SKIP_PROFILING_OVERHEAD and event.start_profiling_overhead_us != 0:
-                    if category != CATEGORY_PYTHON:
-                        logging.info("Saw category = \"{cat}\" != CATEGORY_PYTHON".format(
-                            cat=category,
-                        ))
-                        assert False
-                    overhead_event_fields = dict(event_fields)
-                    overhead_event_fields['category_id'] = self.category_to_id[CATEGORY_OPERATION]
-                    overhead_event_fields['event_name'] = OPERATION_PYTHON_PROFILING_OVERHEAD
-                    overhead_event_fields['start_time_us'] = event.start_profiling_overhead_us
-                    overhead_event_fields['end_time_us'] = event.start_profiling_overhead_us + event.duration_profiling_overhead_us
-                    overhead_event_fields['duration_us'] = event.duration_profiling_overhead_us
-                    overhead_event_id = event_conn.insert_dict('Event', overhead_event_fields)
+        for i, event in enumerate(reader.all_events(debug=True)):
+            category, start_time_us, duration_us, name = event
+            self.insert_event(
+                path, device, process_id, phase_id,
+                category, start_time_us, duration_us, name)
 
-        num_all_events = sum(len(events) for category, events in self._pyprof_each_category_events(proto))
+    def insert_event(self, path, device, process_id, phase_id,
+                     category, start_time_us, duration_us, name,
+                     thread_id=None):
+        """
+        Insert a row into Event.
+        """
+        category_id = self.category_to_id[category]
+        if device not in self.device_to_id:
+            logging.info("> ERROR: Couldn't find device={dev} in path={path}".format(
+                dev=device,
+                path=path))
+            pprint.pprint({
+                'device_to_id':self.device_to_id})
+        device_id = self.device_to_id[device]
+        end_time_us = start_time_us + duration_us
+        is_debug_event = bool(match_debug_event_name(name))
+        insert = {
+            'start_time_us':start_time_us,
+            'end_time_us':end_time_us,
+            'duration_us':duration_us,
+            'event_name':name,
+            'category_id':category_id,
+            'process_id':process_id,
+            'phase_id':phase_id,
+            'device_id':device_id,
+            'is_debug_event':is_debug_event,
+        }
+        if thread_id is not None:
+            insert['thread_id'] = thread_id
+        self.add_insert(insert)
 
-        with progressbar.ProgressBar(max_value=num_all_events) as bar:
-            for category, events in self._pyprof_each_category_events(proto):
-                insert_category_events(self, self, category, events)
-
-        self.conn.commit()
+    # def insert_pyprof_file(self, path):
+    #     with open(path, 'rb') as f:
+    #         proto = CategoryEventsProto()
+    #         proto.ParseFromString(f.read())
+    #
+    #     logging.info("> Insert pyprof file: {p}".format(p=path))
+    #     # if self.debug:
+    #     #     logging.info(proto)
+    #
+    #     # c = self.cursor
+    #     # Insert Process
+    #     # process_id = self.insert_process_name(proto.process_name)
+    #     process_id = self.process_to_id[proto.process_name]
+    #     phase_id = self.phase_to_id[proto.phase]
+    #
+    #     # categories = set()
+    #     def insert_category_events(event_conn, eventattr_conn, category, events):
+    #         # Insert Category
+    #         # categories.add(category)
+    #         # category_id = self.insert_category_name(category)
+    #         category_id = self.category_to_id[category]
+    #         for event in events:
+    #             # Insert Event
+    #             is_debug_event = bool(match_debug_event_name(event.name))
+    #
+    #             event_fields = {
+    #                 'thread_id':event.thread_id,
+    #                 'start_time_us':event.start_time_us,
+    #                 'end_time_us':event.start_time_us + event.duration_us,
+    #                 'duration_us':event.duration_us,
+    #                 'event_name':event.name,
+    #                 'category_id':category_id,
+    #                 'process_id':process_id,
+    #                 'phase_id':phase_id,
+    #                 'is_debug_event':is_debug_event,
+    #             }
+    #             event_id = event_conn.insert_dict('Event', event_fields)
+    #             if not py_config.DEBUG_SKIP_PROFILING_OVERHEAD and event.start_profiling_overhead_us != 0:
+    #                 if category != CATEGORY_PYTHON:
+    #                     logging.info("Saw category = \"{cat}\" != CATEGORY_PYTHON".format(
+    #                         cat=category,
+    #                     ))
+    #                     assert False
+    #                 overhead_event_fields = dict(event_fields)
+    #                 overhead_event_fields['category_id'] = self.category_to_id[CATEGORY_OPERATION]
+    #                 overhead_event_fields['event_name'] = OPERATION_PYTHON_PROFILING_OVERHEAD
+    #                 overhead_event_fields['start_time_us'] = event.start_profiling_overhead_us
+    #                 overhead_event_fields['end_time_us'] = event.start_profiling_overhead_us + event.duration_profiling_overhead_us
+    #                 overhead_event_fields['duration_us'] = event.duration_profiling_overhead_us
+    #                 overhead_event_id = event_conn.insert_dict('Event', overhead_event_fields)
+    #
+    #     num_all_events = sum(len(events) for category, events in self._pyprof_each_category_events(proto))
+    #
+    #     with progressbar.ProgressBar(max_value=num_all_events) as bar:
+    #         for category, events in self._pyprof_each_category_events(proto):
+    #             insert_category_events(self, self, category, events)
+    #
+    #     self.conn.commit()
 
     def insert_machine_util_file(self, path):
         proto = read_machine_util_file(path)
@@ -2492,7 +2466,7 @@ class SQLCategoryTimesReader:
         WHERE
             {machine_clause} AND
             {process_clause} AND
-            {phase_clause}
+            {phase_clause} AND
         GROUP BY
             m.machine_name, m.machine_id, p.process_name, p.process_id, ph.phase_name, ph.phase_id
         """).format(
@@ -2502,6 +2476,53 @@ class SQLCategoryTimesReader:
         )
         sql_exec_query(c, query, debug=debug)
         rows = [Phase.from_row(row) for row in c.fetchall()]
+        return rows
+
+    def operation(self, *args, **kwargs):
+        phases = self.phases(*args, **kwargs)
+        assert len(phases) == 1
+        return phases[0]
+
+    def operations(
+        self,
+        machine_name=None,
+        process_name=None,
+        phase_name=None,
+        debug=False):
+        c = self.conn.cursor
+        query = textwrap.dedent("""
+        SELECT 
+            e.event_name as operation_name,
+            m.machine_name,
+            m.machine_id,
+            p.process_name, 
+            p.process_id, 
+            ph.phase_name, 
+            ph.phase_id
+        FROM
+            Event AS e
+            NATURAL JOIN Phase AS ph
+            NATURAL JOIN Process AS p
+            NATURAL JOIN Machine AS m
+            NATURAL JOIN Category AS c
+        WHERE
+            {machine_clause} AND
+            {process_clause} AND
+            {phase_clause} AND
+            c.category_name = '{CATEGORY_OPERATION}'
+        GROUP BY
+            m.machine_name, m.machine_id, 
+            p.process_name, p.process_id,
+            ph.phase_name, ph.phase_id,
+            operation_name
+        """).format(
+            machine_clause=sql_machine_clause(machine_name, 'm', indents=1, allow_none=True),
+            process_clause=sql_process_clause(process_name, 'p', indents=1, allow_none=True),
+            phase_clause=sql_phase_clause(phase_name, 'ph', indents=1, allow_none=True),
+            CATEGORY_OPERATION=CATEGORY_OPERATION,
+        )
+        sql_exec_query(c, query, debug=debug)
+        rows = [Operation.from_row(row) for row in c.fetchall()]
         return rows
 
     def keep_steps(self, process_name, machine_name, bench_name, skip_first_step=True, debug=False):
@@ -3898,6 +3919,29 @@ class Phase:
     def __repr__(self):
         return str(self)
 
+class Operation:
+    def __init__(
+        self,
+        operation_name,
+        # Swallow any excess arguments
+        **kwargs):
+        self.operation_name = operation_name
+
+    @staticmethod
+    def from_row(row):
+        phase = Operation(**row)
+        for attr, value in row.items():
+            if not hasattr(phase, attr):
+                setattr(phase, attr, value)
+        return phase
+
+    def __str__(self):
+        return "Operation(name={name})".format(
+            name=self.operation_name)
+
+    def __repr__(self):
+        return str(self)
+
 
 class TrainingProgress:
     def __init__(
@@ -4883,6 +4927,13 @@ class Machine:
 
     def __repr__(self):
         return str(self)
+
+
+def is_cpu_device(device_name):
+    return re.search(r'Intel|AMD', device_name)
+
+def is_gpu_device(device_name):
+    return not is_cpu_device(device_name)
 
 def test_merge_sorted():
 

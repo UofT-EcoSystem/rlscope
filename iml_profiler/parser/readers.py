@@ -5,6 +5,8 @@ from iml_profiler.protobuf.pyprof_pb2 import CategoryEventsProto
 from iml_profiler.parser.common import *
 from iml_profiler.parser.stats import KernelTime, category_times_add_time
 
+from iml_profiler.protobuf import iml_prof_pb2
+
 DEFAULT_group_by_device = False
 DEFAULT_ignore_categories = {CATEGORY_DUMMY_EVENT, CATEGORY_UNKNOWN}
 DEFAULT_debug = False
@@ -157,10 +159,7 @@ class TFProfCategoryTimesReader:
             yield category, start_us, duration_us, name
 
     def num_all_events(self):
-        n = 0
-        for _ in self.all_events():
-            n += 1
-        return n
+        return _num_all_events(self)
 
     def _events_for(self, step, node, get_execs):
         devices = self.each_device(step, node, get_execs)
@@ -256,3 +255,184 @@ class PyprofCategoryTimesReader:
             ktime = KernelTime(start_usec=event.start_time_us, time_usec=event.duration_us, name=name)
             ktimes.append(ktime)
 
+class CUDADeviceEventsReader:
+    """
+    Read GPU-side events (kernel, memcpy, memset).
+    """
+    def __init__(self, profile_path):
+        self.profile_path = profile_path
+        self.proto = read_cuda_device_events_file(self.profile_path)
+
+    def print(self, f):
+        print(self.proto, file=f)
+
+    @property
+    def process_name(self):
+        return self.proto.process_name
+
+    @property
+    def machine_name(self):
+        return self.proto.machine_name
+
+    @property
+    def phase(self):
+        return self.proto.phase
+    @property
+    def phase_name(self):
+        return self.phase
+
+    def num_all_events(self):
+        return _num_all_events(self)
+
+    def get_device_names(self):
+        device_names = set()
+
+        for device_name, dev_events_proto in self.proto.dev_events.items():
+            device_names.add(device_name)
+
+        return device_names
+
+    def all_events(self, debug=False):
+
+        def get_event_name(event):
+            if event.name != "" and event.name is not None:
+                return event.name
+
+            if event.cuda_event_type == iml_prof_pb2.UNKNOWN:
+                return "Unknown"
+            elif event.cuda_event_type == iml_prof_pb2.KERNEL:
+                return "Kernel"
+            elif event.cuda_event_type == iml_prof_pb2.MEMCPY:
+                return "Memcpy"
+            elif event.cuda_event_type == iml_prof_pb2.MEMSET:
+                return "Memset"
+            else:
+                raise NotImplementedError("Not sure what Event.name to use for event.cuda_event_type == {code}".format(
+                    code=event.cuda_event_type,
+                ))
+
+        category = CATEGORY_GPU
+        for device_name, dev_events_proto in self.proto.dev_events.items():
+            for event in dev_events_proto.events:
+                name = get_event_name(event)
+                yield device_name, category, event.start_time_us, event.duration_us, name
+
+class CUDAAPIStatsReader:
+    """
+    Read CUDA API events (cudaLaunchKernel, cudaMemcpyAsync).
+    """
+    def __init__(self, profile_path):
+        self.profile_path = profile_path
+        self.proto = read_cuda_api_stats_file(self.profile_path)
+
+    def print(self, f):
+        print(self.proto, file=f)
+
+    @property
+    def process_name(self):
+        return self.proto.process_name
+
+    @property
+    def machine_name(self):
+        return self.proto.machine_name
+
+    @property
+    def phase(self):
+        return self.proto.phase
+    @property
+    def phase_name(self):
+        return self.phase
+
+    def num_all_events(self):
+        return _num_all_events(self)
+
+    def all_events(self, debug=False):
+        category = CATEGORY_CUDA_API_CPU
+        for event in self.proto.events:
+            name = event.api_name
+            yield category, event.start_time_us, event.duration_us, name
+
+    def cuda_api_call_events(self, debug=False):
+        # category = CATEGORY_CUDA_API_CPU
+        # name = event.api_name
+        # yield category, event.start_time_us, event.duration_us, name
+        for event in self.proto.events:
+            yield event
+
+class CategoryEventsReader:
+    """
+    Read Category events (e.g. python events).
+    """
+    def __init__(self, profile_path):
+        self.profile_path = profile_path
+        self.proto = read_category_events_file(self.profile_path)
+
+    def print(self, f):
+        print(self.proto, file=f)
+
+    @property
+    def process_name(self):
+        return self.proto.process_name
+
+    @property
+    def machine_name(self):
+        return self.proto.machine_name
+
+    @property
+    def phase(self):
+        return self.proto.phase
+    @property
+    def phase_name(self):
+        return self.phase
+
+    def num_all_events(self):
+        return _num_all_events(self)
+
+    def all_events(self, debug=False):
+        for category, event_list in self.proto.category_events.items():
+            for event in event_list.events:
+                name = event.name
+                yield category, event.start_time_us, event.duration_us, name
+
+class OpStackReader:
+    """
+    Read OpStack overhead events (e.g. number of pyprof_annotation's).
+    """
+    def __init__(self, profile_path):
+        self.profile_path = profile_path
+        self.proto = read_op_stack_file(self.profile_path)
+
+    def print(self, f):
+        print(self.proto, file=f)
+
+    @property
+    def process_name(self):
+        return self.proto.process_name
+
+    @property
+    def machine_name(self):
+        return self.proto.machine_name
+
+    @property
+    def phase(self):
+        return self.proto.phase
+    @property
+    def phase_name(self):
+        return self.phase
+
+    def num_all_events(self):
+        return _num_all_events(self)
+
+    def all_events(self, debug=False):
+        for overhead_type, phase_overhead_events in self.proto.overhead_events.items():
+            for overhead_type, phase_overhead_events in self.proto.overhead_events.items():
+                for phase, operation_overhead_events in phase_overhead_events.items():
+                    operation_name = operation_overhead_events.operation_name
+                    num_overhead_events = operation_overhead_events.num_overhead_events
+                    yield overhead_type, phase, operation_name, num_overhead_events
+
+def _num_all_events(self):
+    n = 0
+    for _ in self.all_events():
+        n += 1
+    return n

@@ -16,6 +16,8 @@ limitations under the License.
 #include "tensorflow/core/platform/device_tracer.h"
 #include "tensorflow/core/platform/logging.h"
 
+#include "cuda_api_profiler/op_stack.h"
+#include "cuda_api_profiler/cuda_api_profiler.h"
 #include "cuda_api_profiler/cupti_manager.h"
 #include "cuda_api_profiler/cuda_api_profiler.h"
 #include "cuda_api_profiler/get_env_var.h"
@@ -219,6 +221,16 @@ class DeviceTracerImpl : public DeviceTracer {
       int64 duration_us,
       const char* name) override;
 
+  Status PushOperation(const char* operation) override;
+  Status RecordOverheadEvent(
+      const char* overhead_type,
+      int64 num_events) override;
+  Status RecordOverheadEventForOperation(
+      const char* overhead_type,
+      const char* operation,
+      int64 num_events) override;
+  Status PopOperation() override;
+
   void _WrapCudaAPICalls();
 
 #ifdef CONFIG_TRACE_STATS
@@ -306,6 +318,7 @@ class DeviceTracerImpl : public DeviceTracer {
   inline int64 NowInUsec() { return Env::Default()->NowMicros(); }
 
   std::vector<std::unique_ptr<ActivityBuffer>> activity_buffers_;
+  OpStack _op_stack;
   CUDAAPIProfiler _api_profiler;
   CUDAAPIProfilerPrinter api_printer_;
   CUDAActivityProfiler _activity_profiler;
@@ -349,6 +362,7 @@ class DeviceTracerImpl : public DeviceTracer {
 
 DeviceTracerImpl::DeviceTracerImpl(CUPTIManager *cupti_manager)
     :
+        _api_profiler(_op_stack),
         api_printer_(_api_profiler, get_TF_CUDA_API_PRINT_EVERY_SEC(0)),
         _activity_profiler(cupti_manager),
         _cuda_stream_monitor_cbid(-1),
@@ -605,6 +619,7 @@ Status DeviceTracerImpl::Start() {
 Status DeviceTracerImpl::Print() {
   mutex_lock l(mu_);
   DECLARE_LOG_INFO(info);
+  _op_stack.Print(info, 0);
   _api_profiler.Print(info, 0);
   if (is_yes("IML_CUDA_ACTIVITIES", false)) {
     _activity_profiler.Print(info, 0);
@@ -743,6 +758,7 @@ bool DeviceTracerImpl::IsEnabled() {
 
 Status DeviceTracerImpl::SetMetadata(const char* directory, const char* process_name, const char* machine_name, const char* phase_name) {
   mutex_lock l(mu_);
+  _op_stack.SetMetadata(directory, process_name, machine_name, phase_name);
   _activity_profiler.SetMetadata(directory, process_name, machine_name, phase_name);
   _directory = directory;
   _process_name = process_name;
@@ -755,6 +771,7 @@ Status DeviceTracerImpl::SetMetadata(const char* directory, const char* process_
 
 Status DeviceTracerImpl::AsyncDump() {
   mutex_lock l(mu_);
+  _op_stack.AsyncDump();
   if (is_yes("IML_CUDA_ACTIVITIES", false)) {
     _activity_profiler.AsyncDump();
   }
@@ -765,6 +782,7 @@ Status DeviceTracerImpl::AsyncDump() {
 Status DeviceTracerImpl::AwaitDump() {
   // Q: Do we need to grab this...?
   mutex_lock l(mu_);
+  _op_stack.AwaitDump();
   if (is_yes("IML_CUDA_ACTIVITIES", false)) {
     _activity_profiler.AwaitDump();
   }
@@ -786,6 +804,33 @@ Status DeviceTracerImpl::RecordEvent(
       duration_us,
       name);
 
+  return Status::OK();
+}
+
+Status DeviceTracerImpl::PushOperation(const char* operation) {
+  _op_stack.PushOperation(operation);
+  return Status::OK();
+}
+Status DeviceTracerImpl::RecordOverheadEvent(
+    const char* overhead_type,
+    int64 num_events) {
+  _op_stack.RecordOverheadEvent(
+      overhead_type,
+      num_events);
+  return Status::OK();
+}
+Status DeviceTracerImpl::RecordOverheadEventForOperation(
+    const char* overhead_type,
+    const char* operation,
+    int64 num_events) {
+  _op_stack.RecordOverheadEventForOperation(
+      overhead_type,
+      operation,
+      num_events);
+  return Status::OK();
+}
+Status DeviceTracerImpl::PopOperation() {
+  _op_stack.PopOperation();
   return Status::OK();
 }
 

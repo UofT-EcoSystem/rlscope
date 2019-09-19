@@ -378,6 +378,9 @@ class CFuncWrapper:
             #                 |               |          |
             #         _python_start_us     start_us   end_us
 
+            # NOTE: if there's not operation active this will fail... should probably allow for that.
+            sample_cuda_api.record_overhead_event(overhead_type='pyprof_interception', num_events=1)
+
             sample_cuda_api.record_event(
                 category=CATEGORY_PYTHON,
                 start_us=_python_start_us,

@@ -217,18 +217,49 @@ RetCode SAMPLE_CUDA_API_EXPORT record_event(
   return status.code();
 }
 
+RetCode SAMPLE_CUDA_API_EXPORT record_overhead_event(
+    const char* overhead_type,
+    int num_events) {
+  VLOG(1) << __func__;
+  Status status;
+  status = globals.device_tracer->RecordOverheadEvent(
+      overhead_type,
+      num_events);
+  MAYBE_LOG_ERROR(LOG(INFO), __func__, status);
+  return status.code();
+}
 
-//RetCode SAMPLE_CUDA_API_EXPORT collect() {
-//  // Collect traces (synchronously).
-//  VLOG(1) << __func__;
-//  Status status;
-//  status = globals.device_tracer->Stop();
-//  MAYBE_LOG_ERROR(LOG(INFO), __func__, status);
-//  MAYBE_RETURN(status);
-//  status = globals.device_tracer->Collect();
-//  MAYBE_LOG_ERROR(LOG(INFO), __func__, status);
-//  return status.code();
-//}
+RetCode SAMPLE_CUDA_API_EXPORT record_overhead_event_for_operation(
+    const char* overhead_type,
+    const char* operation,
+    int num_events) {
+  VLOG(1) << __func__;
+  Status status;
+  status = globals.device_tracer->RecordOverheadEventForOperation(
+      overhead_type,
+      operation,
+      num_events);
+  MAYBE_LOG_ERROR(LOG(INFO), __func__, status);
+  return status.code();
+}
+
+RetCode SAMPLE_CUDA_API_EXPORT push_operation(
+    const char* operation) {
+  VLOG(1) << __func__;
+  Status status;
+  status = globals.device_tracer->PushOperation(
+      operation);
+  MAYBE_LOG_ERROR(LOG(INFO), __func__, status);
+  return status.code();
+}
+
+RetCode SAMPLE_CUDA_API_EXPORT pop_operation() {
+  VLOG(1) << __func__;
+  Status status;
+  status = globals.device_tracer->PopOperation();
+  MAYBE_LOG_ERROR(LOG(INFO), __func__, status);
+  return status.code();
+}
 
 }
 

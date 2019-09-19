@@ -16,6 +16,16 @@ SEL_ORDER = {
     'OperationOverlap': ['machine', 'process', 'phase', 'resource_overlap'],
     'HeatScale': ['machine_name', 'device_name'],
 }
+KEY_TYPE = {
+    'CategoryOverlap': ['category'],
+    'ResourceOverlap': ['resource_overlap'],
+    'ResourceSubplot': ['resource_overlap'],
+    'OperationOverlap': ['operation'],
+}
+# Sadly, we don't currently handle "correcting" ResourceSubplot.
+# Total time is really [CPU, GPU]; to correct this we should handle it like we handle ResourceOverlap:
+# First subtract from the largest time (CPU), then subtract remaining stuff with CPU in it i.e. "Total"/[CPU, GPU].
+OVERLAP_PLOT_TYPES = set(SEL_ORDER.keys()).difference(['HeatScale', 'ResourceSubplot'])
 
 class _DataIndex:
     """
@@ -287,6 +297,7 @@ def _sel(selector, idx, sel_field, skip_missing_fields=False, debug=False):
 
     for value, subtree in idx.items():
         yield value, subtree
+
 
 def _sel_all(selector, sel_order, level, md, subtree, skip_missing_fields=False, debug=False):
     """

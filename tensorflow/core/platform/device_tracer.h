@@ -79,6 +79,16 @@ class DeviceTracer {
       int64 duration_us,
       const char* name) = 0;
 
+  virtual Status PushOperation(const char* operation) = 0;
+  virtual Status RecordOverheadEvent(
+      const char* overhead_type,
+      int64 num_events) = 0;
+  virtual Status RecordOverheadEventForOperation(
+      const char* overhead_type,
+      const char* operation,
+      int64 num_events) = 0;
+  virtual Status PopOperation() = 0;
+
   // Collect trace results.  Results are added to the specified
   // StepStatsCollector.  Does not clear any existing stats.
   // It is an error to call 'Collect' while a trace is running.
