@@ -1,5 +1,6 @@
 import logging
 import itertools
+import functools
 from os.path import join as _j, dirname as _d
 
 from iml_profiler.parser.common import *
@@ -11,9 +12,12 @@ from iml_profiler.profiler import proto_util
 from iml_profiler.parser.stats import KernelTime
 
 from iml_profiler.parser.trace_events import TraceEventsDumper, dump_category_times
+from iml_profiler.profiler.concurrent import ForkedProcessPool, FailedProcessException
+
+from concurrent.futures import ProcessPoolExecutor
 
 from iml_profiler.parser.db import SQLCategoryTimesReader, sql_input_path, sql_get_source_files, \
-    Machine, Process, Phase
+    Machine, Process, Phase, EventSplit
 
 from iml_profiler.parser.readers import TFProfCategoryTimesReader, \
    DEFAULT_group_by_device, \
@@ -386,6 +390,28 @@ class OverlapMetadata:
             region.merge_inplace(r)
         return region
 
+    @staticmethod
+    def merge_overlap_metadata_pair(overlap_metadata1, overlap_metadata2):
+        assert type(overlap_metadata1) == OverlapMetadata
+        assert type(overlap_metadata2) == OverlapMetadata
+
+        merged_od = OverlapMetadata()
+        for od in [overlap_metadata1, overlap_metadata2]:
+            for category_key, region in od.items():
+                merged_od.merge_region(category_key, region)
+        return merged_od
+
+    @staticmethod
+    def merge_overlap_metadata(overlap_metadatas):
+        overlap_metadata = functools.reduce(
+            OverlapMetadata.merge_overlap_metadata_pair,
+            overlap_metadatas,
+            OverlapMetadata())
+        return overlap_metadata
+
+    def items(self):
+        return self.regions.items()
+
     def merge_keys(self, category_key1, category_key2, new_category_key):
         region1 = self.regions[category_key1]
         region2 = self.regions[category_key2]
@@ -438,6 +464,7 @@ def compute_overlap_single_thread(
     def pop_end(category):
         by_end.pop_time(category)
         if category not in cur_categories:
+            # Q: Under what circumstances might this occur?  What information do we need to backtrack?
             import ipdb; ipdb.set_trace()
         cur_categories.remove(category)
         if check_key:
@@ -1048,6 +1075,148 @@ def traceEvents_key_str(category_key):
         exec_prefix=exec_prefix,
         op_prefix=op_prefix)
 
+
+
+class EventSplitter:
+    def __init__(self,
+                 process_name=None,
+                 phase_name=None,
+                 machine_name=None,
+                 start_time_us=None,
+                 end_time_us=None,
+                 debug=False):
+        self.process_name = process_name
+        self.phase_name = phase_name
+        self.machine_name = machine_name
+        self.start_time_us = start_time_us
+        self.end_time_us = end_time_us
+        self.debug = debug
+
+    # IDEA: to make a more robust approximation, we could do some SQL queries to guesstimate
+    # what time duration is needed to achieve events_per_split by looking at the number
+    # of events in the first split and extrapolating:
+    #
+    # select max(e.end_time_usec) as end_time_usec,
+    # ordered by e.start_time_usec
+    # limit {events_per_split}
+    #
+    # Q: Will this do what I think it should?
+    # i.e. Will this sort the events by start-time, then give me the maximum of just the LIMIT rows (not outside the limit)?
+    # A: No... but we CAN do that with a subselect query:
+    # https://stackoverflow.com/questions/1150715/how-can-i-use-max-and-limit-together-in-mysql
+    #
+    # select max(end_time_usec) from (
+    #     select e.end_time_usec from events
+    #     ordered by e.start_time_usec
+    #     limit {events_per_split}
+    # )
+    #
+    # IDEA: If we want to be precise, we can iteratively perform this same query, except we specify that
+    # e.start_time_usec >= LAST_CHUNK.end_time_usec.
+
+    def events_per_event_splits(self, sql_reader, events_per_split, min_splits=1):
+        """
+        Given that we want approximately events_per_split for each split,
+        perform a crude approximation to return splits of equal trace-time duration.
+
+        Crude approximation for load-balancing splits:
+            ASSUMPTION: events are equally distributed across the trace.
+
+            NOTE: this is not precisely true, but the workload is at least iterative
+            so the sequence of events should repeat themselves at each iteration, which will be captured
+            for a large enough events_per_split.
+
+        :param sql_reader:
+        :param events_per_split:
+        :return:
+        """
+
+        # Reasonable lower bound...otherwise there's no work to be done in one split.
+        # Generally, we'd like this to capture at least 10 iterations of the computation we are measuring...
+        # but it's not the end of the world if it doesn't (just means splits will be unbalanced...).
+        assert events_per_split > 1000
+
+        period = sql_reader.query_trace_period(
+            machine_name=self.machine_name,
+            process_name=self.process_name,
+            phase_name=self.phase_name)
+        logging.info("Tracing period: {msg}".format(msg=pprint_msg(period)))
+
+        # Approximation:
+        # number of splits = 1/(events / split) * [total events]
+        # total events = SQL: select count(*) from event-trace
+        desired_splits = int(np.ceil(
+            (1/events_per_split) * period.total_events
+        ))
+        n_splits = max(
+            min_splits,
+            desired_splits,
+        )
+
+        logging.info("Total events = {n}".format(
+            n=period.total_events))
+
+        logging.info("Desired splits = {splits}".format(
+            splits=desired_splits))
+
+        event_splits = self._n_splits(period, n_splits)
+        return event_splits
+
+    def equal_time_event_splits(self, sql_reader, n_splits):
+        """
+        Return splits computed based on equal chunks of time over the tracing-time.
+
+        Rationale: workload is iterative, so the number
+        of events per-split will be roughly balanced.
+
+        :param n_splits:
+        :return:
+        """
+        assert n_splits >= 1
+        period = sql_reader.query_trace_period(
+            machine_name=self.machine_name,
+            process_name=self.process_name,
+            phase_name=self.phase_name)
+        logging.info("Tracing period: {msg}".format(msg=pprint_msg(period)))
+        event_splits = self._n_splits(period, n_splits)
+        return event_splits
+
+    def _n_splits(self, period, n_splits):
+        """
+        Return n_splits of equal time-duration over the trace-period.
+        """
+        # E.g.
+        # split = 2
+        # start_time = 5
+        # end_time = 10
+        # duration = 5
+        # duration_per_split = 2.5
+        # splits = [5, 7.5] [7.5, 10]
+        # splits = [
+        #     [start_time + i * duration_per_split,
+        #      start_time + (i + 1) * duration_per_split]
+        #   for i in range(n_splits)]
+        duration_us = period.duration_us
+
+        # NumberType = type(duration_us)
+        # n_splits = NumberType(n_splits)
+
+        duration_per_split_us = duration_us/n_splits
+        event_splits = [
+            EventSplit(
+                period.start_time_us + i*duration_per_split_us,
+                period.start_time_us + (i + 1)*duration_per_split_us)
+            for i in range(n_splits)]
+        assert event_splits[0].start_time_us == period.start_time_us
+        assert event_splits[-1].end_time_us == period.end_time_us
+        return event_splits
+
+def split_overlap_computation_Worker(kwargs):
+    kwargs = dict(kwargs)
+    self = kwargs['self']
+    del kwargs['self']
+    return self._split_overlap_computation(**kwargs)
+
 class OverlapComputer:
     """
     Computes a json file containing the overlap between event categories across different steps,
@@ -1064,6 +1233,7 @@ class OverlapComputer:
                  user=None,
                  password=None,
                  debug=False,
+                 debug_single_thread=False,
                  debug_ops=False,
                  # Swallow any excess arguments
                  **kwargs):
@@ -1072,6 +1242,7 @@ class OverlapComputer:
         self.user = user
         self.password = password
         self.debug = debug
+        self.debug_single_thread = debug_single_thread
         self.debug_ops = debug_ops
 
     @property
@@ -1345,8 +1516,8 @@ class OverlapComputer:
                                          machine_name=None,
                                          process_name=None,
                                          phase_name=None,
-                                         start_time_us=None,
-                                         end_time_us=None,
+                                         n_workers=1,
+                                         events_per_split=10000,
                                          debug_memoize=False,
                                          overlap_type=None):
         """
@@ -1361,26 +1532,81 @@ class OverlapComputer:
         :param debug_memoize:
         :return:
         """
+
+        # TODO: run this function on EACH event-split for a particular (machine, process, phase).
         sql_reader = SQLCategoryTimesReader(self.db_path, host=self.host, user=self.user, password=self.password)
 
-        # Overlap, computed across different "steps".
-        # overlaps = []
         if overlap_type is None:
             overlap_type = 'default'
         assert overlap_type in OverlapComputer.OVERLAP_TYPES
 
+        event_splitter = EventSplitter(
+            process_name=process_name,
+            phase_name=phase_name,
+            machine_name=machine_name,
+            # debug=self.debug,
+            debug=True,
+        )
+        event_splits = event_splitter.events_per_event_splits(sql_reader, events_per_split,
+            # At least maximize potential parallelism.
+            min_splits=n_workers)
+        # if self.debug:
+        logging.info("event_splits: {msg}".format(
+            msg=pprint_msg(event_splits)))
+        logging.info("Using n_splits = {n_splits}, n_workers = {n_workers}".format(
+            n_splits=len(event_splits),
+            n_workers=n_workers,
+        ))
+        sql_reader.close()
+
+        def split_overlap_computation_Args(event_split):
+            return dict(
+                self=self,
+                event_split=event_split,
+                pre_reduce=pre_reduce,
+                machine_name=machine_name,
+                process_name=process_name,
+                phase_name=phase_name,
+                debug_memoize=debug_memoize,
+                overlap_type=overlap_type,
+            )
+        with ProcessPoolExecutor(n_workers) as pool:
+            kwargs_list = [split_overlap_computation_Args(event_split) for event_split in event_splits]
+            split_overlap_results = map_pool(pool, split_overlap_computation_Worker, kwargs_list,
+                     desc="OverlapComputer.splits",
+                     show_progress=True,
+                     sync=self.debug_single_thread)
+
+        overlap_results = [result[0] for result in split_overlap_results]
+        overlap_metadata_results = [result[1] for result in split_overlap_results]
+
+        merged_overlap = functools.reduce(merge_ComputeOverlap, overlap_results, dict())
+        merged_overlap_metadata = OverlapMetadata.merge_overlap_metadata(overlap_metadata_results)
+
+        return merged_overlap, merged_overlap_metadata
+
+
+    def _split_overlap_computation(self, event_split,
+                                   pre_reduce,
+                                   machine_name=None,
+                                   process_name=None,
+                                   phase_name=None,
+                                   debug_memoize=False,
+                                   overlap_type=None):
+
+        sql_reader = SQLCategoryTimesReader(self.db_path, host=self.host, user=self.user, password=self.password)
+
         start_parse_timeline_t = time.time()
-        # category_times, categories, operation_types, proc_types = sql_reader.parse_timeline(
         category_times = sql_reader.parse_timeline(
             process_name=process_name,
             phase_name=phase_name,
             machine_name=machine_name,
-            start_time_us=start_time_us,
-            end_time_us=end_time_us,
+            start_time_us=event_split.start_time_us,
+            end_time_us=event_split.end_time_us,
             pre_reduce=pre_reduce,
             debug=self.debug,
-            debug_ops=self.debug_ops,
             debug_memoize=debug_memoize)
+        sql_reader.close()
 
         if self.debug:
             pprint_msg({'category_times.keys()': sorted(category_times.keys())})
@@ -1403,48 +1629,10 @@ class OverlapComputer:
             #     }))
             #     pprint.pprint(category_times, stream=f)
 
-        # if self.debug:
-        #     def category_as_str(category):
-        #         """
-        #         frozenset({'PROC:loop_train_eval', 'estimator_save_model'})
-        #         ->
-        #         ['estimator_save_model', 'PROC:loop_train_eval']
-        #         ->
-        #         'estimator_save_model + PROC:loop_train_eval'
-        #         """
-        #         category_str = ' + '.join(sorted(category))
-        #         return category_str
-        #     trace_events_dumper = TraceEventsDumper(
-        #         category_times,
-        #         json_path=self._debug_trace_events_path(process_name, phase_name),
-        #         category_as_str=category_as_str)
-        #     trace_events_dumper.dump()
-        # assert len(operation_types) > 0
-        # assert len(categories) > 0
         end_parse_timeline_t = time.time()
         parse_timeline_sec = end_parse_timeline_t - start_parse_timeline_t
-        logging.info("> parse_timeline took {sec} seconds".format(sec=parse_timeline_sec))
-
-        # # This can take a while since the timeline can be large...
-        # if self.debug:
-        #     start_t = time.time()
-        #     logging.info("> DEBUG: write process timeline traceEvents @ {path}".format(
-        #         path=self._debug_process_timeline_json_path()))
-        #     new_category_times = dict((_as_category_key(operation_types, proc_types, proc_key=proc_key), value)
-        #                               for proc_key, value in category_times.items())
-        #     # reduce_category_keys(category_times, categories, operation_types, proc_types)
-        #     dump_category_times(new_category_times, self._debug_process_timeline_json_path(),
-        #                         print_log=False,
-        #                         category_as_str=traceEvents_key_str)
-        #     end_t = time.time()
-        #     logging.info("  Took {sec} seconds".format(sec=end_t - start_t))
-
-        # We only want to keep CATEGORY_OPERATION times.
-        # However, the operation-types have replaced CATEGORY_OPERATION.
-
-        # if should_load_memo(debug_memoize, self._compute_overlap_memo_path()):
-        #     overlap = load_memo(debug_memoize, self._compute_overlap_memo_path())
-        # else:
+        if self.debug:
+            logging.info("> parse_timeline took {sec} seconds".format(sec=parse_timeline_sec))
 
         check_key = None
 
@@ -1482,20 +1670,16 @@ class OverlapComputer:
         # maybe_memoize(debug_memoize, overlap, self._compute_overlap_memo_path())
         # assert len(overlap) > 0
 
-        pprint.pprint({
-            'overlap_metadata': overlap_metadata,
-            'machine_name':machine_name,
-            'process_name':process_name,
-            'phase_name':phase_name})
+        # pprint.pprint({
+        #     'overlap_metadata': overlap_metadata,
+        #     'machine_name':machine_name,
+        #     'process_name':process_name,
+        #     'phase_name':phase_name})
 
         # if self.debug:
         #     pprint.pprint({'overlap.keys()':list(overlap.keys())})
 
-        # proc_stats = self._compute_process_timeline_stats(sql_reader, overlap)
-        proc_stats = None
-
-        # return operation_overlap, proc_stats
-        return overlap, proc_stats, overlap_metadata
+        return overlap, overlap_metadata
 
     def _group_by_ops_resource(self, new_overlap):
         # set(operation categories) -> set(non-operation categories) -> [ CPU, GPU, CPU/GPU ] time
@@ -2916,6 +3100,55 @@ def _merge_key(new_overlap, key, merge_values, new_value):
 
 def compute_total_size(overlap):
     return np.sum(list(overlap.values()))
+
+def merge_ComputeOverlap(overlap1, overlap2):
+    def merge_func(set_of_category_key, overlap1_time, overlap2_time):
+        return overlap1_time + overlap2_time
+    return merge_dicts(overlap1, overlap2, merge_func)
+
+def merge_dicts(dict1, dict2, merge_func):
+    """
+    Merge two dictionaries.
+    Use merge_func to resolve key-conflicts.
+    merge_func(k, value1, value2) returns the result of merging value1/value2.
+
+    Returns a dictionary dic where dic.keys() == Union[dict1.keys(), dict2.keys()]
+
+    :param dict1:
+    :param dict2:
+    :param merge_func:
+        [value(dict1), value(dict2)] -> value
+    :return:
+    """
+    dic = dict(dict1)
+    for k, v in dict2.items():
+        if k not in dic:
+            dic[k] = v
+        else:
+            dic[k] = merge_func(k, dic[k], v)
+    return dic
+
+def map_pool(pool, func, kwargs_list, desc=None, show_progress=False, sync=False):
+    if len(kwargs_list) == 1 or sync:
+        logging.info("Running map_pool synchronously")
+        # Run it on the current thread.
+        # Easier to debug with pdb.
+        results = []
+        for kwargs in kwargs_list:
+            result = func(kwargs)
+            results.append(result)
+        return results
+
+    logging.info("Running map_pool in parallel with n_workers")
+    results = []
+    for i, result in enumerate(progress(
+        pool.map(func, kwargs_list),
+        desc=desc,
+        total=len(kwargs_list),
+        show_progress=show_progress)
+    ):
+        results.append(result)
+    return results
 
 def test_merge_adjacent_events():
 

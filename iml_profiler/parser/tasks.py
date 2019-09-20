@@ -8,6 +8,7 @@ import luigi
 
 import logging
 import subprocess
+import multiprocessing
 import re
 import pwd
 import textwrap
@@ -154,6 +155,36 @@ class SQLParserTask(IMLTask):
 
 class _UtilizationPlotTask(IMLTask):
     debug_memoize = luigi.BoolParameter(description="If true, memoize partial results for quicker runs", default=False, parsing=luigi.BoolParameter.EXPLICIT_PARSING)
+    # Q: Is there a good way to choose this automatically...?
+    # PROBLEM: n_workers should be the size of the pool...but how should we choose the number of splits to make...?
+    # If we choose n_splits == n_workers, then the ENTIRE event trace will STILL get swallowed into memory....
+    # Ideally, we should choose n_split such that n_workers*( [total event trace size]/n_splits ) << [total memory size]
+    # However I don't see an obvious way of calculating [total event trace size]...
+    # I guess we could "configure/calibrate" it, but that's a pain in the butt.
+    # IDEAL: specify a time interval like 10 seconds, such that a chunk is chosen such that it takes ~ 10 seconds to process;
+    # that would ensure that we don't waste ALL our time on synchronization/serialization.
+    # SOLUTION: just manually add a reasonable default value on our system, and make it configurable for future uses.
+    n_workers = luigi.IntParameter(
+        description="How many threads to simultaneously run overlap-computation; if --debug-single-thread, uses 1",
+        default=multiprocessing.cpu_count())
+    # n_splits = luigi.IntParameter(description=textwrap.dedent("""
+    # Overlap-computation is parallelized by \"splitting\" into n-splits, and processing using a pool of --n-workers thread;
+    # when processing a trace, how many splits should we make?
+    #
+    # Default if not provided: --n-workers
+    # NOTE: this reads the whole event-trace into memory.
+    # """), default=None)
+    # This is easier to tune than --n-splits
+    # (the effect of --n-splits is workload dependent)
+    events_per_split = luigi.IntParameter(
+        description=textwrap.dedent("""
+        Approximately how many events per split should there be? 
+        Assuming events_per_split is > 10x the number of events per iteration, 
+        events_per_split should roughly linearly correlate with memory usage and processing time of the split.
+        
+        Minimum: 1000
+        """),
+        default=10000)
 
     def requires(self):
         return [
@@ -166,10 +197,12 @@ class _UtilizationPlotTask(IMLTask):
             directory=self.iml_directory,
             host=self.postgres_host,
             user=self.postgres_user,
+            n_workers=self.n_workers,
+            events_per_split=self.events_per_split,
             password=self.postgres_password,
             debug=self.debug,
-            debug_memoize=self.debug_memoize,
             debug_single_thread=self.debug_single_thread,
+            debug_memoize=self.debug_memoize,
         )
         self.sql_parser.run()
 

@@ -101,7 +101,7 @@ class SQLParser:
         self.host = host
         self.user = user
         self.password = password
-        self.conn = sql_create_connection(self.db_path, host=self.host, user=self.user, password=self.password)
+        self.conn = sql_create_connection(self.db_path, host=self.host, user=self.user, password=self.password, debug=debug)
         self.debug = debug
         self.debug_single_thread = debug_single_thread
         self.block_size = 50000
@@ -957,7 +957,7 @@ class NameToID:
         self.debug = debug
 
     def run(self):
-        self.conn = sql_create_connection(self.db_path, host=self.host, user=self.user, password=self.password)
+        self.conn = sql_create_connection(self.db_path, host=self.host, user=self.user, password=self.password, debug=self.debug)
 
         self.process_to_id = self.build_name_to_id('Process', 'process_id', 'process_name')
         self.phase_to_id = self.build_name_to_id('Phase', 'phase_id', 'phase_name')
@@ -1061,7 +1061,7 @@ class _CSVInserterWorker:
     def run(self):
         self._init()
 
-        self.conn = sql_create_connection(self.db_path, host=self.host, user=self.user, password=self.password)
+        self.conn = sql_create_connection(self.db_path, host=self.host, user=self.user, password=self.password, debug=self.debug)
 
         self.process_to_id = self.build_name_to_id('Process', 'process_id', 'process_name')
         self.phase_to_id = self.build_name_to_id('Phase', 'phase_id', 'phase_name')
@@ -2263,7 +2263,7 @@ class SQLCategoryTimesReader:
 
         NOTE: start/end tuples are in sorted order (by their start time)
     """
-    def __init__(self, db_path, host=None, user=None, password=None, debug_ops=False):
+    def __init__(self, db_path, host=None, user=None, password=None, debug_ops=False, debug=False):
         self.db_path = db_path
         self.host = host
         self.user = user
@@ -2271,6 +2271,7 @@ class SQLCategoryTimesReader:
         self._conn = None
         self.parse_debug = False
         self.debug_ops = debug_ops
+        self.debug = debug
 
         self._steps = dict()
 
@@ -2284,7 +2285,7 @@ class SQLCategoryTimesReader:
 
     def _maybe_create_conn(self):
         if self._conn is None:
-            self._conn = sql_create_connection(self.db_path, host=self.host, user=self.user, password=self.password)
+            self._conn = sql_create_connection(self.db_path, host=self.host, user=self.user, password=self.password, debug=self.debug or self.debug_ops)
 
     def close(self):
         if self._conn is not None:
@@ -2466,7 +2467,7 @@ class SQLCategoryTimesReader:
         WHERE
             {machine_clause} AND
             {process_clause} AND
-            {phase_clause} AND
+            {phase_clause}
         GROUP BY
             m.machine_name, m.machine_id, p.process_name, p.process_id, ph.phase_name, ph.phase_id
         """).format(
@@ -2779,10 +2780,7 @@ class SQLCategoryTimesReader:
                        start_time_us=None,
                        end_time_us=None,
                        pre_reduce=None,
-                       # group_by_device=DEFAULT_group_by_device,
-                       ignore_categories=DEFAULT_ignore_categories,
                        debug=DEFAULT_debug,
-                       debug_ops=False,
                        debug_memoize=False):
         """
         Return all the Event's belonging to specific process(es), and a specific phase(s).
@@ -2860,17 +2858,14 @@ class SQLCategoryTimesReader:
                 ...
             }
             """
-            process_category_times = self.process_events(
+            process_category_times = self.process_events_split(
                 process_name=process_name,
                 phase_name=phase_name,
                 machine_name=machine_name,
-                ignore_categories=ignore_categories,
                 start_time_us=start_time_us,
                 end_time_us=end_time_us,
                 debug=debug,
-                debug_ops=debug_ops,
                 debug_label=process_label,
-                # fetchall=False,
                 fetchall=True,
             )
             # assert len(proc_events) > 0
@@ -2960,6 +2955,156 @@ class SQLCategoryTimesReader:
         NumberType = type(total_time_us)
         total_time_sec = total_time_us/NumberType(MICROSECONDS_IN_SECOND)
         return total_time_sec
+
+    def query_trace_period(self,
+                          process_name=None,
+                          phase_name=None,
+                          machine_name=None,
+                          debug=False):
+        """
+        Get the start/end time-bound for a given (machine, process, phase)
+        """
+        c = self.conn.cursor
+        query = textwrap.dedent("""
+        SELECT 
+            MIN(e1.start_time_us) as start_time_us,
+            MAX(e1.end_time_us) as end_time_us,
+            COUNT(*) as total_events
+        FROM 
+            Category AS c1
+            NATURAL JOIN Event as e1
+            NATURAL JOIN Process as p1
+            NATURAL JOIN Phase as ph1
+            NATURAL JOIN Machine as m 
+        WHERE 
+            {process_clause} AND
+            {phase_clause} AND
+            {machine_clause}
+        """).format(
+            process_clause=sql_process_clause(process_name, 'p1', indents=1, allow_none=True),
+            phase_clause=sql_phase_clause(phase_name, 'ph1', indents=1, allow_none=True),
+            machine_clause=sql_machine_clause(machine_name, 'm', indents=1, allow_none=True),
+            p=sql_placeholder(),
+        )
+        params = None
+        sql_exec_query(c, query, params, self.__class__, debug)
+        rows = c.fetchall()
+        assert len(rows) == 1
+        row = rows[0]
+        row = dict(row)
+        row.update({
+            'process_name': process_name,
+            'machine_name': machine_name,
+            'phase_name': phase_name,
+        })
+        trace_period = TracePeriod.from_row(row)
+        return trace_period
+
+    def process_events_split(self,
+                       process_name=None,
+                       phase_name=None,
+                       machine_name=None,
+                       start_time_us=None,
+                       end_time_us=None,
+                       debug=False,
+                       debug_label=None,
+                       fetchall=True):
+
+        assert ( start_time_us is None and end_time_us is None ) or \
+               ( start_time_us is not None and end_time_us is not None )
+
+        c = self.conn.cursor
+
+        query = textwrap.dedent("""
+        SELECT d1.device_name, c1.category_name, e1.event_name, e1.start_time_us, e1.duration_us
+            , e1.event_id
+            , p1.process_name, ph1.phase_name, m.machine_name
+            , e1.pyprof_filename
+            , e1.pyprof_line_no
+            , e1.pyprof_function
+            , e1.pyprof_line_description
+        FROM 
+            Category AS c1
+            NATURAL JOIN Event as e1
+            NATURAL JOIN Process as p1
+            NATURAL JOIN Phase as ph1
+            NATURAL JOIN Machine as m 
+            NATURAL LEFT JOIN Device as d1
+        WHERE 
+            {process_clause} AND
+            {phase_clause} AND
+            {machine_clause} AND
+            -- Keep events within a EventSplit(start, end) time range.
+            {event_split_range_clause}
+        ORDER BY 
+            p1.process_name, e1.start_time_us ASC 
+        """).format(
+            process_clause=sql_process_clause(process_name, 'p1', indents=1, allow_none=True),
+            phase_clause=sql_phase_clause(phase_name, 'ph1', indents=1, allow_none=True),
+            machine_clause=sql_machine_clause(machine_name, 'm', indents=1, allow_none=True),
+            event_split_range_clause=sql_event_split_range_clause('e1', start_time_us, end_time_us, indents=1),
+        )
+
+        params = None
+        sql_exec_query(c, query, params, self.__class__, debug)
+
+        rows = self._fetch_rows(c, fetchall, debug=debug)
+
+        event_split = None
+        if start_time_us is not None and end_time_us is not None:
+            event_split = EventSplit(start_time_us=start_time_us, end_time_us=end_time_us)
+
+        if fetchall and event_split is not None and debug:
+            logging.info("{event_split} has {n} event-rows".format(
+                event_split=event_split,
+                n=len(rows),
+            ))
+
+        process_category_times = self._rows_as_category_times(
+            rows,
+            event_split=event_split,
+            debug=debug,
+            debug_label=debug_label)
+        return process_category_times
+
+    def _fetch_rows(self, c, fetchall, debug=False):
+        if fetchall:
+            query_start_t = time.time()
+            # logging.info("START fetchall")
+            rows = c.fetchall()
+            # logging.info("STOP fetchall")
+            query_end_t = time.time()
+            time_sec = query_end_t - query_start_t
+            if debug:
+                logging.info("> query.fetchall took {sec} seconds".format(
+                    sec=time_sec,
+                ))
+        else:
+            if debug:
+                logging.info("> fetchall = {fetchall}".format(
+                    fetchall=fetchall,
+                ))
+            rows = c
+        return rows
+
+    def _rows_as_category_times(self, rows, event_split=None, debug=False, debug_label=None):
+        process_category_times = dict()
+        def groupby_key(row):
+            return (row['machine_name'], row['process_name'])
+        for (machine_name, process_name), process_rows in itertools.groupby(rows, key=groupby_key):
+            if machine_name not in process_category_times:
+                process_category_times[machine_name] = dict()
+            assert process_name not in process_category_times[machine_name]
+            process_category_times[machine_name][process_name] = dict()
+            self._add_event_rows_to_category_times(
+                process_category_times[machine_name][process_name], process_rows,
+                event_split=event_split,
+                debug=debug,
+                # show_progress=debug,
+                show_progress=False,
+                debug_label=debug_label)
+
+        return process_category_times
 
     def process_events(self,
                        process_name=None,
@@ -3054,9 +3199,6 @@ class SQLCategoryTimesReader:
             p1.process_name, e1.start_time_us ASC 
         """).format(
             ignore_clause=sql_ignore_clause('c1', ignore_categories, keep_categories, indents=1),
-            # CATEGORY_PROFILING=CATEGORY_PROFILING,
-            # PROFILING_DUMP_TRACE=PROFILING_DUMP_TRACE,
-            # overlap_clause=sql_overlap_clause('e1', 'dump_event', indents=3),
             no_dump_overlap_clause=sql_no_dump_overlap_clause('e1', 'e2', 'c2', indents=1),
             process_clause=sql_process_clause(process_name, 'p1', indents=1, allow_none=True),
             phase_clause=sql_phase_clause(phase_name, 'ph1', indents=1, allow_none=True),
@@ -3067,75 +3209,19 @@ class SQLCategoryTimesReader:
             p=sql_placeholder(),
         )
 
-        # NOT EXISTS (
-        #     SELECT *
-        #     FROM Event as dump_event
-        # NATURAL JOIN Category as c2
-        # WHERE
-        # c2.category_name = '{CATEGORY_PROFILING}' AND
-        # dump_event.event_name = '{PROFILING_DUMP_TRACE}' AND
-        # {overlap_clause}
-        # ) AND
-
-        # query = textwrap.dedent("""
-        # SELECT device_name, category_name, event_name, start_time_us, duration_us
-        # FROM
-        #   Category AS c
-        #   NATURAL JOIN Event as e
-        #   NATURAL JOIN Process as p
-        #   NATURAL LEFT JOIN Device as d
-        # ORDER BY start_time_us ASC
-        # """.format(
-        #     ignore_clause=ignore_clause,
-        # ))
-
         params = None
         sql_exec_query(c, query, params, self.__class__, debug)
 
-        if fetchall:
-            query_start_t = time.time()
-            rows = c.fetchall()
-            query_end_t = time.time()
-            time_sec = query_end_t - query_start_t
-            if debug:
-                logging.info("> query took {sec} seconds".format(
-                    sec=time_sec,
-                ))
-        else:
-            if debug:
-                logging.info("> fetchall = {fetchall}".format(
-                    fetchall=fetchall,
-                ))
-            rows = c
+        rows = self._fetch_rows(c, fetchall, debug=debug)
 
-        # start_t = time.time()
-
-        # process_category_times:
-        # process_name -> CATEGORY_* -> times
-        process_category_times = dict()
-        for (machine_name, process_name), process_rows in itertools.groupby(rows, key=lambda row: (row['machine_name'], row['process_name'])):
-            if machine_name not in process_category_times:
-                process_category_times[machine_name] = dict()
-            assert process_name not in process_category_times[machine_name]
-            process_category_times[machine_name][process_name] = dict()
-            self._add_event_rows_to_category_times(
-                process_category_times[machine_name][process_name], process_rows,
-                debug=debug,
-                show_progress=debug,
-                debug_label=debug_label)
-
-        # end_t = time.time()
-        # if debug:
-        #     time_sec = end_t - start_t
-        #     logging.info("> process_name={proc}: _add_event_rows_to_category_times took {sec} seconds".format(
-        #         proc=process_name,
-        #         sec=time_sec,
-        #     ))
-
+        process_category_times = self._rows_as_category_times(
+            rows,
+            debug=debug,
+            debug_label=debug_label)
         return process_category_times
 
-
     def _add_event_rows_to_category_times(self, category_times, rows,
+                                          event_split=None,
                                           group_by_device=DEFAULT_group_by_device,
                                           debug=False,
                                           show_progress=False,
@@ -3148,7 +3234,7 @@ class SQLCategoryTimesReader:
             progress_label = '_add_event_rows_to_category_times: {debug_label}'.format(
                 debug_label=debug_label)
         for row in progress(rows, desc=progress_label, show_progress=show_progress):
-            ktime = row_as_ktime(row)
+            ktime = row_as_ktime(row, event_split=event_split)
             category_times_add_time(category_times, row['device_name'], ktime, group_by_device, category=row['category_name'])
 
     DEBUG_PARSE = False
@@ -3804,7 +3890,51 @@ def sql_exec_query(cursor, query, params=None, klass=None, debug=False):
     if debug:
         logging.info("> query took {sec} seconds".format(sec=end_t - start_t))
 
-def sql_create_connection(db_path, host=None, user=None, password=None):
+def sql_compose_inequality(ineq_symbol, exprs, tautology_pairs=[], indents=None):
+    """
+    Express composed inequalities in SQL, for example:
+
+    Condition (not supported by SQL syntax):
+        event_split.start <= e.start <= e.end <= event_split.end
+
+    Expanded (to support SQL binary-inequality syntax):
+        event_split.start <= e.start AND
+                             e.start <= e.end AND
+                                        e.end <= event_split.end
+    Simplified (remove tautology_pairs):
+        event_split.start <= e.start AND
+
+                                        e.end <= event_split.end
+
+    :param ineq_symbol:
+        An inequality symbol; i.e. one of {'<=', '>=', '<', '>'}
+    :param exprs:
+        list of SQL expressions (could be constants, column-names, etc.)
+    :param tautology_pairs:
+        e.g. for ineq_symbol '<='
+        List of (expr1, expr2), such that:
+            expr1 <= expr2
+        Is ALWAYS true, and can be safely removed from the "expanded" SQL expression.
+    :return:
+    """
+    assert ineq_symbol in {'<=', '>=', '<', '>'}
+    assert len(exprs) >= 2
+    expr_pairs = []
+    for expr1, expr2 in zip(exprs, exprs[1:]):
+        if (expr1, expr2) in tautology_pairs:
+            continue
+        expr_pair = "( {expr1} ) {ineq} ( {expr2} )".format(
+            expr1=expr1,
+            ineq=ineq_symbol,
+            expr2=expr2,
+        )
+        expr_pairs.append(expr_pair)
+    sql_expr_joined = " AND ".join(expr_pairs)
+    sql_expr_bracketed = "( {sql} )".format(sql=sql_expr_joined)
+    sql_expr_indented = maybe_indent(sql_expr_bracketed, indents)
+    return sql_expr_indented
+
+def sql_create_connection(db_path, host=None, user=None, password=None, debug=False):
     if host is None:
         if 'IML_POSTGRES_HOST' in os.environ:
             host = os.environ['IML_POSTGRES_HOST']
@@ -3824,7 +3954,9 @@ def sql_create_connection(db_path, host=None, user=None, password=None):
             password = os.environ['PGPASSWORD']
         # No default password.
 
-    logging.info("Using DB_HOST = {host}".format(host=host))
+    if debug:
+        logging.info("Using DB_HOST = {host}".format(host=host))
+
     if py_config.SQL_IMPL == 'psql':
         return TracesPostgresConnection(db_path, host=host, user=user, password=password)
     elif py_config.SQL_IMPL == 'sqlite':
@@ -3840,19 +3972,40 @@ def sql_placeholder():
     raise NotImplementedError("Not sure how to create connection for SQL_IMPL={impl}".format(
         impl=py_config.SQL_IMPL))
 
-def rows_as_ktime(rows):
-    return [row_as_ktime(row) for row in rows]
+def rows_as_ktime(rows, event_split=None):
+    return [row_as_ktime(row, event_split=event_split) for row in rows]
 
-def row_as_ktime(row):
+def row_as_ktime(row, event_split=None):
     """
     Row should be a result of "Event NATURAL JOIN Category", and hence contain at least:
     - start_time_us
     - duration_us
     - event_name
     """
+    if event_split is None:
+        start_usec = row['start_time_us']
+        end_usec = row['start_time_us'] + row['duration_us']
+    else:
+        """
+        Trimming event to fit within event-split:
+
+        ALL event types, regardless of how they were categorized during the SQL query, 
+        can be trimmed using the same simple code:
+
+        new_event = Event(
+            start=max(event_split.start, e.start),
+            end=min(event_split.end, e.end))
+        """
+        start_usec = max(
+            event_split.start_time_us,
+            row['start_time_us'])
+        end_usec = min(
+            event_split.end_time_us,
+            row['start_time_us'] + row['duration_us'])
+
     ktime = KernelTime(
-        start_usec=row['start_time_us'],
-        end_usec=row['start_time_us'] + row['duration_us'],
+        start_usec=start_usec,
+        end_usec=end_usec,
         name=row['event_name'],
     )
     event_maybe_add_pyprof_fields(ktime, row)
@@ -3876,8 +4029,8 @@ def event_maybe_add_process_phase_fields(ktime, row):
     if 'event_id' in row:
         ktime.event_id = row['event_id']
 
-def row_as_event(row):
-    ktime = row_as_ktime(row)
+def row_as_event(row, event_split=None):
+    ktime = row_as_ktime(row, event_split=event_split)
     # Add additional attributes to KernelTime.
     ktime.event_id = row['event_id']
     ktime.device_name = row['device_name']
@@ -3899,11 +4052,7 @@ class Phase:
 
     @staticmethod
     def from_row(row):
-        phase = Phase(**row)
-        for attr, value in row.items():
-            if not hasattr(phase, attr):
-                setattr(phase, attr, value)
-        return phase
+        return obj_from_row(Phase, row)
 
     @property
     def time_usec(self):
@@ -3929,11 +4078,7 @@ class Operation:
 
     @staticmethod
     def from_row(row):
-        phase = Operation(**row)
-        for attr, value in row.items():
-            if not hasattr(phase, attr):
-                setattr(phase, attr, value)
-        return phase
+        return obj_from_row(Operation, row)
 
     def __str__(self):
         return "Operation(name={name})".format(
@@ -3942,6 +4087,49 @@ class Operation:
     def __repr__(self):
         return str(self)
 
+class TracePeriod:
+    def __init__(
+        self,
+        start_time_us,
+        end_time_us,
+        total_events,
+        process_name=None,
+        phase_name=None,
+        machine_name=None,
+        # Swallow any excess arguments
+        **kwargs):
+        self.start_time_us = start_time_us
+        self.end_time_us = end_time_us
+        self.total_events = total_events
+        self.process_name = process_name
+        self.phase_name = phase_name
+        self.machine_name = machine_name
+
+    @staticmethod
+    def from_row(row):
+        return obj_from_row(TracePeriod, row)
+
+    @property
+    def duration_us(self):
+        return self.end_time_us - self.start_time_us
+
+    def __str__(self):
+        bldr = ToStringBuilder(obj=self)
+        if self.process_name is not None:
+            bldr.add_param('process', self.process_name)
+        if self.machine_name is not None:
+            bldr.add_param('machine', self.machine_name)
+        if self.phase_name is not None:
+            bldr.add_param('phase', self.phase_name)
+
+        bldr.add_param('start', usec_string(self.start_time_us))
+        bldr.add_param('end', usec_string(self.end_time_us))
+        bldr.add_param('total_events', (self.total_events))
+
+        return bldr.to_string()
+
+    def __repr__(self):
+        return str(self)
 
 class TrainingProgress:
     def __init__(
@@ -3988,11 +4176,7 @@ class TrainingProgress:
 
     @staticmethod
     def from_row(row):
-        training_progress = TrainingProgress(**row)
-        for attr, value in row.items():
-            if not hasattr(training_progress, attr):
-                setattr(training_progress, attr, value)
-        return training_progress
+        return obj_from_row(TrainingProgress, row)
 
     def __str__(self):
         return "TrainingProgress(machine={mach}, process={proc}, phase={phase}, percent_complete={perc})".format(
@@ -4528,6 +4712,94 @@ def sql_event_range_clause(event_alias, start_time_us, end_time_us, indents=None
     txt = maybe_indent(txt, indents)
     return txt
 
+def sql_event_split_range_clause(event_alias, start_time_us, end_time_us, indents=None):
+    """
+    4 Different cases when gather event split:
+
+        NOTE: "tautologies" that we can remove from "Condition" to form "Simplified":
+        (a) e.start <= e.end
+        (b) event_split.start <= event_split.end
+
+        1. Within event split:
+            select all events e where
+
+            Condition:
+                event_split.start <= e.start <= e.end <= event_split.end
+
+                Captures: 2, 3
+                Doesn't capture: 1, 4, 5
+
+        2. Straddle start of event split:
+            select all events e where
+
+            Condition:
+                e.start <= event_split.start <= e.end <= event_split.end
+
+                Captures: 1
+                Doesn't capture: 2,3,4,5
+
+        3. Straddle end of event split:
+            select all events e where
+
+            Condition:
+                event_split.start <= e.start <= event_split.end <= e.end
+
+                Captures: 4
+                Doesn't capture: 1,2,3,5
+
+        4. Subsumes event split:
+            select all events e where
+
+            Condition:
+                e.start <= event_split.start <= event_split.end <= e.end
+
+                Captures: 5
+                Doesn't capture: 1,2,3,4
+
+    """
+    assert ( start_time_us is None and end_time_us is None ) or \
+           ( start_time_us is not None and end_time_us is not None )
+
+    if start_time_us is None and end_time_us is None:
+        txt = "TRUE"
+    else:
+        event_split_start = start_time_us
+        event_split_end = end_time_us
+        assert event_split_start <= event_split_end
+        e_start = "{e}.start_time_us".format(e=event_alias)
+        e_end = "{e}.end_time_us".format(e=event_alias)
+
+        tautology_pairs = [(e_start, e_end), (event_split_start, event_split_end)]
+        def leq_clause(exprs):
+            clause = sql_compose_inequality("<=", exprs,
+                tautology_pairs=tautology_pairs,
+                indents=1)
+            return clause
+        txt = textwrap.dedent("""\
+        (
+            -- When querying events spanning an "EventSplit(start={start}, end={end})", 
+            -- there are 4 different ways an event could "belong" to a split.
+            
+            -- 1. Within event split:
+            {clause_01} OR
+            -- 2. Straddle start of event split:
+            {clause_02} OR
+            -- 3. Straddle end of event split:
+            {clause_03} OR
+            -- 4. Subsumes event split:
+            {clause_04}
+        )
+        """.format(
+            start=start_time_us, end=end_time_us,
+            clause_01=leq_clause([event_split_start, e_start, e_end, event_split_end]),
+            clause_02=leq_clause([e_start, event_split_start, e_end, event_split_end]),
+            clause_03=leq_clause([event_split_start, e_start, event_split_end, e_end]),
+            clause_04=leq_clause([e_start, event_split_start, event_split_end, e_end]),
+        )).rstrip()
+
+    txt = maybe_indent(txt, indents)
+    return txt
+
 def sql_process_clause(process_name, process_alias, indents=None, allow_none=False):
     return _sql_eq_clause(process_name, process_alias, 'process_name', indents, allow_none)
 
@@ -4852,11 +5124,7 @@ class Device:
 
     @staticmethod
     def from_row(row):
-        device = Device(**row)
-        for attr, value in row.items():
-            if not hasattr(device, attr):
-                setattr(device, attr, value)
-        return device
+        return obj_from_row(Device, row)
 
     def __str__(self):
         return 'Device(name="{name}", id={id}, machine_name="{machine_name}")'.format(
@@ -4928,12 +5196,59 @@ class Machine:
     def __repr__(self):
         return str(self)
 
+class EventSplit:
+    def __init__(self, start_time_us, end_time_us):
+        self.start_time_us = start_time_us
+        self.end_time_us = end_time_us
+
+    @property
+    def duration_us(self):
+        return self.end_time_us - self.start_time_us
+
+    def __str__(self):
+        return "EventSplit(start_us={start_us} us, duration_us={duration_us})".format(
+            start_us=self.start_time_us,
+            duration_us=self.duration_us,
+        )
+
+    def __repr__(self):
+        return str(self)
 
 def is_cpu_device(device_name):
     return re.search(r'Intel|AMD', device_name)
 
 def is_gpu_device(device_name):
     return not is_cpu_device(device_name)
+
+def obj_from_row(Klass, row):
+    obj = Klass(**row)
+    for attr, value in row.items():
+        if not hasattr(obj, attr):
+            setattr(obj, attr, value)
+    return obj
+
+def usec_string(usec):
+    return "{usec} us".format(usec=usec)
+
+class ToStringBuilder:
+    def __init__(self, obj):
+        self.obj = obj
+        self.name_value_pairs = []
+
+    def add_param(self, name, value):
+        self.name_value_pairs.append((name, value))
+
+    def _val_string(self, val):
+        if type(val) == str:
+            return '"{val}"'.format(val=val)
+        return str(val)
+
+    def to_string(self):
+        return "{Klass}({params})".format(
+            Klass=self.obj.__class__.__name__,
+            params=', '.join([
+                "{name}={val}".format(name=name, val=self._val_string(val))
+                for name, val in self.name_value_pairs]))
 
 def test_merge_sorted():
 

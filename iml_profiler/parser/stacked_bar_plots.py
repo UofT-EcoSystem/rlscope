@@ -2018,7 +2018,8 @@ def main():
 
 def only_selector_fields(selector):
     assert 'plot_type' in selector
-    new_selector = dict((k, v) for k, v in selector.items()
+    new_selector = dict((k, v) for k, v in selector.items())
+    return new_selector
 
 if __name__ == '__main__':
     main()

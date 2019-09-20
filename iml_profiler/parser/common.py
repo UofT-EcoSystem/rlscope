@@ -2002,6 +2002,11 @@ def list_files(direc):
 def is_sample_cuda_api_lib(path):
     return _b(path) == 'libsample_cuda_api.so'
 
+def zero_if_none(x):
+    if x is None:
+        return 0
+    return x
+
 def each_file_recursive(root_dir):
     for dirpath, dirnames, filenames in os.walk(root_dir):
         for base in filenames:

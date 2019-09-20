@@ -599,11 +599,13 @@ class CategoryOverlapPlot:
                  user=None,
                  password=None,
                  debug=False,
+                 debug_single_thread=False,
                  group_by_phase=False,
                  # Swallow any excess arguments
                  **kwargs):
         self.directory = directory
         self.debug = debug
+        self.debug_single_thread = debug_single_thread
         self.host = host
         self.user = user
         self.password = password
@@ -652,7 +654,9 @@ class CategoryOverlapPlot:
         assert len(self.bench_names) == len(unique(self.bench_names))
         self.categories = self.sql_reader.categories
 
-        overlap_computer = OverlapComputer(self.db_path, host=self.host, user=self.user, password=self.password, debug=self.debug)
+        overlap_computer = OverlapComputer(self.db_path, host=self.host, user=self.user, password=self.password,
+                                           debug=self.debug,
+                                           debug_single_thread=self.debug_single_thread)
 
         all_categories = set()
         json_datas = []
@@ -1840,6 +1844,7 @@ class ResourceOverlapPlotData:
                  pixels_per_square=10,
                  dynamic_size=False,
                  debug=False,
+                 debug_single_thread=False,
                  debug_ops=False,
                  debug_memoize=False,
                  entire_trace=False,
@@ -1875,6 +1880,7 @@ class ResourceOverlapPlotData:
         self.dynamic_size = dynamic_size
         self.sec_per_pixel = self.step_sec / float(self.pixels_per_square)
         self.debug = debug
+        self.debug_single_thread = debug_single_thread
         self.debug_ops = debug_ops
         self.debug_memoize = debug_memoize
         self.entire_trace = entire_trace
@@ -1932,9 +1938,10 @@ class ResourceOverlapPlotData:
         overlap_computer = OverlapComputer(self.db_path,
                                            host=self.host, user=self.user, password=self.password,
                                            debug=self.debug,
+                                           debug_single_thread=self.debug_single_thread,
                                            debug_ops=self.debug_ops)
 
-        operation_overlap, proc_stats, metadata = overlap_computer.compute_process_timeline_overlap(
+        operation_overlap, metadata = overlap_computer.compute_process_timeline_overlap(
             process_name=process_name,
             phase_name=phase_name,
             debug_memoize=self.debug_memoize)
@@ -2008,7 +2015,6 @@ class ResourceOverlapPlotData:
 
         # df = self.plotter.dataframe
         # assert len(df) != 0
-        # self._dump_stats(proc_stats)
         # self.plotter.plot(bench_name=None)
 
     @property
@@ -2022,35 +2028,6 @@ class ResourceOverlapPlotData:
     def _stats(self):
         return UtilizationPlot.get_stats(self.directory)
 
-    def _dump_stats(self, proc_stats):
-        """
-        Dump some stats useful for testing the correctness of our plot.
-
-        - Total time spent tracing:
-          We expect total time spent tracing to match that total size of our bar-graph.
-          NOTE: would be nice to measure this with time.time() separately, but oh well!
-
-        -
-        :param bench_name:
-        :return:
-        """
-        total_trace_time_sec = self.sql_reader.total_trace_time_sec(debug=self.debug)
-        # EXPECT:
-        # - total_trace_time_sec    ~ total_time_sec
-        #   --------------------      --------------
-        #   Anything that's traced    Stuff covered by operations
-        # IF FAILS:
-        # - then we aren't profiling part of the code.
-        js_stats = {
-            # Select min(start_time_us) as, max(end_time_us) from Event
-            # (i.e. across all processes)
-            'total_trace_time_sec':total_trace_time_sec,
-        }
-        update_dict(js_stats, proc_stats)
-        _add_cpu_gpu_stats(js_stats, self.plotter)
-        logging.info("> Save plot stats to {path}".format(path=self._stats()))
-        do_dump_json(js_stats, self._stats(), cls=DecimalEncoder)
-        return js_stats
 
 class UtilizationPlot:
     """
@@ -2063,10 +2040,13 @@ class UtilizationPlot:
                  host=None,
                  user=None,
                  password=None,
+                 n_workers=1,
+                 events_per_split=10000,
                  step_sec=1.,
                  pixels_per_square=10,
                  dynamic_size=False,
                  debug=False,
+                 debug_single_thread=False,
                  debug_ops=False,
                  debug_memoize=False,
                  entire_trace=False,
@@ -2118,6 +2098,12 @@ class UtilizationPlot:
         self.dynamic_size = dynamic_size
         self.sec_per_pixel = self.step_sec / float(self.pixels_per_square)
         self.debug = debug
+        self.debug_single_thread = debug_single_thread
+        if self.debug_single_thread:
+            self.n_workers = 1
+        else:
+            self.n_workers = n_workers
+        self.events_per_split = events_per_split
         self.debug_ops = debug_ops
         self.debug_memoize = debug_memoize
         if self.debug_memoize:
@@ -2275,13 +2261,16 @@ class UtilizationPlot:
         overlap_computer = OverlapComputer(self.db_path,
                                            host=self.host, user=self.user, password=self.password,
                                            debug=self.debug,
+                                           debug_single_thread=self.debug_single_thread,
                                            debug_ops=self.debug_ops)
 
-        overlap, proc_stats, overlap_metadata = overlap_computer.compute_process_timeline_overlap(
+        overlap, overlap_metadata = overlap_computer.compute_process_timeline_overlap(
             overlap_obj.pre_reduce,
             machine_name=machine_name,
             process_name=process_name,
             phase_name=phase_name,
+            n_workers=self.n_workers,
+            events_per_split=self.events_per_split,
             debug_memoize=self.debug_memoize,
             overlap_type=self.overlap_type)
 
@@ -2303,9 +2292,9 @@ class UtilizationPlot:
         if self.overlap_type == 'default':
             operation_overlap = overlap_obj.as_js_dict(new_overlap)
             # assert len(operation_overlap) > 0
-            self._do_plot_process_phase(operation_overlap, proc_stats, machine_name, process_name, phase_name)
+            self._do_plot_process_phase(operation_overlap, machine_name, process_name, phase_name)
 
-    def _do_plot_process_phase(self, operation_overlap, proc_stats, machine_name=None, process_name=None, phase_name=None):
+    def _do_plot_process_phase(self, operation_overlap, machine_name=None, process_name=None, phase_name=None):
         assert ( process_name is None and phase_name is None ) or \
                ( process_name is not None and phase_name is not None )
 
@@ -2374,8 +2363,6 @@ class UtilizationPlot:
         # assert len(df) != 0
         self.plotter.plot(bench_name=None)
 
-        if proc_stats is not None:
-            self._dump_stats(proc_stats)
         # Plot the "CPU/GPU Utilization" plot.
         # Other overlap_type's will JUST output the overlap data (to be consumed by iml-drill).
 
@@ -2411,36 +2398,6 @@ class UtilizationPlot:
 
     def _stats(self):
         return UtilizationPlot.get_stats(self.directory)
-
-    def _dump_stats(self, proc_stats):
-        """
-        Dump some stats useful for testing the correctness of our plot.
-
-        - Total time spent tracing:
-          We expect total time spent tracing to match that total size of our bar-graph.
-          NOTE: would be nice to measure this with time.time() separately, but oh well!
-
-        -
-        :param bench_name:
-        :return:
-        """
-        total_trace_time_sec = self.sql_reader.total_trace_time_sec(debug=self.debug)
-        # EXPECT:
-        # - total_trace_time_sec    ~ total_time_sec
-        #   --------------------      --------------
-        #   Anything that's traced    Stuff covered by operations
-        # IF FAILS:
-        # - then we aren't profiling part of the code.
-        js_stats = {
-            # Select min(start_time_us) as, max(end_time_us) from Event
-            # (i.e. across all processes)
-            'total_trace_time_sec':total_trace_time_sec,
-        }
-        update_dict(js_stats, proc_stats)
-        _add_cpu_gpu_stats(js_stats, self.plotter)
-        logging.info("> Save plot stats to {path}".format(path=self._stats()))
-        do_dump_json(js_stats, self._stats(), cls=DecimalEncoder)
-        return js_stats
 
 def _add_cpu_gpu_stats(js_stats, plotter, bench_name=NO_BENCH_NAME):
     bench_df = plotter.plot_data(bench_name)
