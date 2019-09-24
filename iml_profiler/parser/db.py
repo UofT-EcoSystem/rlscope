@@ -469,10 +469,6 @@ class SQLParser:
         # table = 'Event'
         # id_field = 'event_id'
         id_field = None
-        # worker = CSVInserterWorker(
-        #     self.db_path, table, self.block_size, id_field, self.directory,
-        #     debug=self.debug,
-        # )
 
         if self.debug:
             logging.info("> Insert table files.")
@@ -502,11 +498,11 @@ class SQLParser:
         if not self.debug_single_thread:
             if self.debug:
                 logging.info("> Insert table files using thread pool.")
-            imap_iter = pool.imap_unordered(CSVInserterWorker, worker_kwargs)
+            imap_iter = pool.imap_unordered(mk_TraceFileInserter, worker_kwargs)
         else:
             if self.debug:
                 logging.info("> Insert table files using single thread.")
-            imap_iter = self.single_thread_iter(CSVInserterWorker, worker_kwargs)
+            imap_iter = self.single_thread_iter(mk_TraceFileInserter, worker_kwargs)
 
         with progressbar.ProgressBar(max_value=len(src_files), prefix="SQL insert") as bar:
             for i, result in enumerate(imap_iter):
@@ -785,28 +781,6 @@ def transaction(conn):
         raise
     conn.cursor.execute('COMMIT')
 
-# @contextlib.contextmanager
-# # def bulk_inserter(conn, table, block_size=50000, progress_bar=None, id_field=None):
-# def bulk_inserter(*args, **kwargs):
-#     try:
-#         # bulk = BulkInserter(*args, **kwargs)
-#         bulk = CSVInserter(*args, **kwargs)
-#         # bulk = BulkInserter(conn, table, block_size, progress_bar, id_field)
-#         yield bulk
-#     except Exception as e:
-#         raise
-#     bulk.finish()
-#     # conn.commit()
-
-# @contextlib.contextmanager
-# def fast_inserts(conn):
-#     try:
-#         conn.disable_fast_inserts()
-#         yield
-#     except Exception as e:
-#         raise
-#     conn.disable_fast_inserts()
-
 @contextlib.contextmanager
 def connection(conn):
     try:
@@ -938,8 +912,8 @@ class AutoincrementID:
             ident = 0
         return ident
 
-def CSVInserterWorker(kwargs):
-    worker = _CSVInserterWorker(**kwargs)
+def mk_TraceFileInserter(kwargs):
+    worker = TraceFileInserter(**kwargs)
     worker.run()
 
 class NameToID:
@@ -991,31 +965,21 @@ class NameToID:
         name_to_id = dict((row['name'], row['ident']) for row in rows)
         return name_to_id
 
-class _CSVInserterWorker:
-
-    # def __init__(self, path, db_path, table, block_size=50000, id_field=None, directory=None,
-    #              # fields=None,
-    #              debug=False,
-    #              ):
-    def __init__(self, path, db_path, table, block_size=50000, id_field=None, directory=None,
+class CSVInserter:
+    def __init__(self, db_path, table, block_size=50000, id_field=None, directory=None,
                  host=None,
                  user=None,
                  password=None,
-                 # fields=None,
-                 debug=False,
                  csv_path=None,
-                 ):
-        self.path = path
+                 debug=False):
         self.host = host
         self.user = user
         self.password = password
         self.db_path = db_path
         self.table = table
         self.block_size = block_size
-        # self.progress_bar = progress_bar
         self.id_field = id_field
         self.directory = directory
-        # self.fields = fields
         self.debug = debug
 
         if directory is None:
@@ -1027,8 +991,17 @@ class _CSVInserterWorker:
 
         self.csv_path = csv_path
 
-    def _init(self):
+    def __enter__(self):
+        self._init_csv()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.finish()
+
+    def _init_csv(self):
         """
+        If this is being run inside of a multiprocessing.Process,
+        need to make sure database connections get created AFTER entering Process.
         Init after new Process.
         """
         self.fields = None
@@ -1040,26 +1013,15 @@ class _CSVInserterWorker:
             self.tmp_path = self.csv_path
             self.tmp_f = open(self.tmp_path, 'w')
         else:
-            # self.tmp_f = tempfile.TemporaryFile(mode='w', dir=self.directory, prefix=table, suffix=".csv")
             self.tmp_f, self.tmp_path = tempfile.mkstemp(
                 dir=self.directory,
                 prefix="{table}_".format(
                     table=self.table,
                 ),
-                # prefix="{table}{suffix_str}_".format(
-                #     table=table,
-                #     suffix_str="_{suffix}".format(suffix=self.suffix) if self.suffix is not None else ''),
                 suffix=".csv",
                 text=True)
             os.chmod(self.tmp_path, 0o664)
             self.tmp_f = os.fdopen(self.tmp_f, mode='w')
-
-    # def __call__(self, path):
-    #     self.run(path)
-
-
-    def run(self):
-        self._init()
 
         self.conn = sql_create_connection(self.db_path, host=self.host, user=self.user, password=self.password, debug=self.debug)
 
@@ -1068,12 +1030,6 @@ class _CSVInserterWorker:
         self.category_to_id = self.build_name_to_id('Category', 'category_id', 'category_name')
         self.device_to_id = self.build_name_to_id('Device', 'device_id', 'device_name')
         self.machine_to_id = self.build_name_to_id('Machine', 'machine_id', 'machine_name')
-
-        self.insert_file(self.path)
-        self.finish()
-
-    def close(self):
-        self.conn.close()
 
     @property
     def cursor(self):
@@ -1098,216 +1054,17 @@ class _CSVInserterWorker:
         name_to_id = dict((row['name'], row['ident']) for row in rows)
         return name_to_id
 
-    def insert_file(self, path):
-        if is_tfprof_file(path):
-            self.insert_tfprof_file(path)
-        elif is_category_events_file(path):
-            self.insert_category_events_file(path)
-        elif is_training_progress_file(path):
-            self.insert_training_progress_file(path)
-        # elif is_pyprof_call_times_file(path):
-        #     self.insert_pyprof_call_times_file(path)
-        elif is_machine_util_file(path):
-            self.insert_machine_util_file(path)
-        elif is_cuda_device_events_file(path):
-            self.insert_cuda_device_events_file(path)
-        elif is_cuda_api_stats_file(path):
-            self.insert_cuda_api_stats_file(path)
-        else:
-            raise NotImplementedError("Not sure how to insert into path={path} into database".format(path=path))
+    def insert_dict(self, table, insert):
+        assert self.table == table
+        return self.add_insert(insert)
 
-    def get_cpu_device(self):
-        # We don't bother to record the device-name CUDA API call belongs to;
-        # During analysis we count this as CPU-side events, so we associate
-        # with the single CPU device on the machine.
-        cpu_devices = [dev for dev, ident in self.device_to_id.items() if is_cpu_device(dev)]
-        assert len(cpu_devices) == 1
-        device = cpu_devices[0]
-        return device
-
-    def insert_cuda_api_stats_file(self, path):
-        reader = CUDAAPIStatsReader(path)
-
-        logging.info("> Insert CUDA API Stats file: {p}".format(p=path))
-
-        process_id = self.process_to_id[reader.process_name]
-        phase_id = self.phase_to_id[reader.phase_name]
-
-        device = self.get_cpu_device()
-
-        for i, event in enumerate(reader.all_events(debug=True)):
-            category, start_time_us, duration_us, name = event
-            self.insert_event(
-                path, device, process_id, phase_id,
-                category, start_time_us, duration_us, name)
-
-    def insert_cuda_device_events_file(self, path):
-        reader = CUDADeviceEventsReader(path)
-
-        logging.info("> Insert CUDA Device Events file: {p}".format(p=path))
-
-        process_id = self.process_to_id[reader.process_name]
-        phase_id = self.phase_to_id[reader.phase_name]
-
-        for i, event in enumerate(reader.all_events(debug=True)):
-            device, category, start_time_us, duration_us, name = event
-            self.insert_event(
-                path, device, process_id, phase_id,
-                category, start_time_us, duration_us, name)
-
-    def insert_tfprof_file(self, path):
-        reader = TFProfCategoryTimesReader(path)
-
-        logging.info("> Insert tfprof file: {p}".format(p=path))
-
-        process_id = self.process_to_id[reader.process_name]
-        phase_id = self.phase_to_id[reader.phase_name]
-
-        for i, (device, event) in enumerate(reader.all_events(debug=True)):
-            category, start_time_us, duration_us, name = event
-            self.insert_event(
-                path, device, process_id, phase_id,
-                category, start_time_us, duration_us, name)
-
-    def _pyprof_each_category_events(self, pyprof_proto):
-        for step, python_events in pyprof_proto.python_events.items():
-            yield CATEGORY_PYTHON, python_events.events
-
-        for step, clibs in pyprof_proto.clibs.items():
-            for category, clib_events in clibs.clibs.items():
-                yield category, clib_events.events
-
-    # def insert_pyprof_call_times_file(self, path):
-    #     call_times_data = read_pyprof_call_times_file(path)
-    #
-    #     logging.info("> Insert pyprof call_times file: {p}".format(p=path))
-    #     # if self.debug:
-    #     #     pprint.pprint({'call_times_data':call_times_data})
-    #
-    #     process_name = call_times_data['process_name']
-    #     phase_name = call_times_data['phase']
-    #
-    #     # c = self.cursor
-    #     # Insert Process
-    #     # process_id = self.insert_process_name(proto.process_name)
-    #     process_id = self.process_to_id[process_name]
-    #     phase_id = self.phase_to_id[phase_name]
-    #
-    #     num_all_events = sum(len(epoch_duration_sec_pairs) \
-    #                          for func_tupl, epoch_duration_sec_pairs in call_times_data['call_times'].items())
-    #
-    #     with progressbar.ProgressBar(max_value=num_all_events) as bar:
-    #         category = CATEGORY_PYTHON_PROFILER
-    #         category_id = self.category_to_id[category]
-    #         i = 0
-    #         for func_tupl, epoch_duration_sec_pairs in call_times_data['call_times'].items():
-    #             pyprof_filename, pyprof_line_no, pyprof_function = func_tupl
-    #             for start_epoch_sec, duration_sec in epoch_duration_sec_pairs:
-    #                 # Q: Should we define a separate table for python profiling data to avoid cramming file/line/func-name data into a single field?
-    #                 # Options:
-    #                 # - Use EventAttribute's
-    #                 #   - Annoying/slow: extra joins (NOTE: joins may not be a big deal)
-    #                 # - Add (usually) NULL columns for pyprof-specific fields <-- this is probably the best approach.
-    #                 #   - Do this; assume # of Event's is LARGE ( which is definitely is ), so lets avoid joins.
-    #                 # - Add CategoryEventsProto table with foreign-key reference from Event to CategoryEventsProto metadata row (file/line/func-name)
-    #                 #   - Makes event inserts slower...I don't bother handling foreign key management when doing bulk inserts.
-    #                 #   - extra joins (NOTE: joins may not be a big deal)
-    #                 pyprof_line_description = pyprof_func_std_string(func_tupl)
-    #                 # Insert Event
-    #                 is_debug_event = False
-    #                 start_time_us = sec_to_us(start_epoch_sec)
-    #                 duration_us = sec_to_us(duration_sec)
-    #                 end_time_us = start_time_us + duration_us
-    #                 ins = {
-    #                     # 'thread_id':event.thread_id,
-    #                     'start_time_us':start_time_us,
-    #                     'end_time_us':end_time_us,
-    #                     'duration_us':duration_us,
-    #                     # Q: function name alone can be vague without knowing the filename.
-    #                     'event_name':pyprof_function,
-    #                     'category_id':category_id,
-    #                     'process_id':process_id,
-    #                     'phase_id':phase_id,
-    #                     'is_debug_event':is_debug_event,
-    #                     'pyprof_filename':pyprof_filename,
-    #                     'pyprof_line_no':pyprof_line_no,
-    #                     'pyprof_function':pyprof_function,
-    #                     'pyprof_line_description':pyprof_line_description,
-    #                 }
-    #
-    #                 # ipdb> pp ins
-    #                 # {'category_id': 8,
-    #                 #  'duration_us': 10.735000000000001,
-    #                 #  'end_time_us': 1550795540176821.2,
-    #                 #  'event_name': 'set_operation',
-    #                 #  'is_debug_event': False,
-    #                 #  'process_id': 1,
-    #                 #  'pyprof_filename': '/mnt/data/james/clone/dnn_tensorflow_cpp/python/profiler/profilers.py',
-    #                 #  'pyprof_function': 'set_operation',
-    #                 #  'pyprof_line_description': '/mnt/data/james/clone/dnn_tensorflow_cpp/python/profiler/profilers.py:788(set_operation)',
-    #                 #  'pyprof_line_no': 788,
-    #                 #  'start_time_us': 1550795540176810.5}
-    #
-    #                 event_id = self.insert_dict('Event', ins)
-    #                 i += 1
-    #                 bar.update(i)
-    #
-    #     self.conn.commit()
-
-    def insert_training_progress_file(self, path):
-        proto = read_training_progress_file(path)
-
-        logging.info("> Insert training_progress file: {p}".format(p=path))
-
-        process_id = self.process_to_id[proto.process_name]
-        phase_id = self.phase_to_id[proto.phase]
-
-        fields = {
-            'process_id': process_id,
-            'phase_id': phase_id,
-            'total_timesteps': proto.total_timesteps,
-            'start_trace_time_us': proto.start_trace_time_us,
-            'start_percent_complete': proto.start_percent_complete,
-            'start_num_timesteps': proto.start_num_timesteps,
-            'start_training_time_us': proto.start_training_time_us,
-            'end_percent_complete': proto.end_percent_complete,
-            'end_training_time_us': proto.end_training_time_us,
-            'end_num_timesteps': proto.end_num_timesteps,
-        }
-        self.insert_dict('TrainingProgress', fields)
-
-        self.conn.commit()
-
-    def insert_category_events_file(self, path):
-        reader = CategoryEventsReader(path)
-
-        logging.info("> Insert Category Events file: {p}".format(p=path))
-
-        process_id = self.process_to_id[reader.process_name]
-        phase_id = self.phase_to_id[reader.phase_name]
-
-        device = self.get_cpu_device()
-
-        for i, event in enumerate(reader.all_events(debug=True)):
-            category, start_time_us, duration_us, name = event
-            self.insert_event(
-                path, device, process_id, phase_id,
-                category, start_time_us, duration_us, name)
-
-    def insert_event(self, path, device, process_id, phase_id,
+    def insert_event(self, device_id, process_id, phase_id,
                      category, start_time_us, duration_us, name,
                      thread_id=None):
         """
         Insert a row into Event.
         """
         category_id = self.category_to_id[category]
-        if device not in self.device_to_id:
-            logging.info("> ERROR: Couldn't find device={dev} in path={path}".format(
-                dev=device,
-                path=path))
-            pprint.pprint({
-                'device_to_id':self.device_to_id})
-        device_id = self.device_to_id[device]
         end_time_us = start_time_us + duration_us
         is_debug_event = bool(match_debug_event_name(name))
         insert = {
@@ -1324,128 +1081,6 @@ class _CSVInserterWorker:
         if thread_id is not None:
             insert['thread_id'] = thread_id
         self.add_insert(insert)
-
-    # def insert_pyprof_file(self, path):
-    #     with open(path, 'rb') as f:
-    #         proto = CategoryEventsProto()
-    #         proto.ParseFromString(f.read())
-    #
-    #     logging.info("> Insert pyprof file: {p}".format(p=path))
-    #     # if self.debug:
-    #     #     logging.info(proto)
-    #
-    #     # c = self.cursor
-    #     # Insert Process
-    #     # process_id = self.insert_process_name(proto.process_name)
-    #     process_id = self.process_to_id[proto.process_name]
-    #     phase_id = self.phase_to_id[proto.phase]
-    #
-    #     # categories = set()
-    #     def insert_category_events(event_conn, eventattr_conn, category, events):
-    #         # Insert Category
-    #         # categories.add(category)
-    #         # category_id = self.insert_category_name(category)
-    #         category_id = self.category_to_id[category]
-    #         for event in events:
-    #             # Insert Event
-    #             is_debug_event = bool(match_debug_event_name(event.name))
-    #
-    #             event_fields = {
-    #                 'thread_id':event.thread_id,
-    #                 'start_time_us':event.start_time_us,
-    #                 'end_time_us':event.start_time_us + event.duration_us,
-    #                 'duration_us':event.duration_us,
-    #                 'event_name':event.name,
-    #                 'category_id':category_id,
-    #                 'process_id':process_id,
-    #                 'phase_id':phase_id,
-    #                 'is_debug_event':is_debug_event,
-    #             }
-    #             event_id = event_conn.insert_dict('Event', event_fields)
-    #             if not py_config.DEBUG_SKIP_PROFILING_OVERHEAD and event.start_profiling_overhead_us != 0:
-    #                 if category != CATEGORY_PYTHON:
-    #                     logging.info("Saw category = \"{cat}\" != CATEGORY_PYTHON".format(
-    #                         cat=category,
-    #                     ))
-    #                     assert False
-    #                 overhead_event_fields = dict(event_fields)
-    #                 overhead_event_fields['category_id'] = self.category_to_id[CATEGORY_OPERATION]
-    #                 overhead_event_fields['event_name'] = OPERATION_PYTHON_PROFILING_OVERHEAD
-    #                 overhead_event_fields['start_time_us'] = event.start_profiling_overhead_us
-    #                 overhead_event_fields['end_time_us'] = event.start_profiling_overhead_us + event.duration_profiling_overhead_us
-    #                 overhead_event_fields['duration_us'] = event.duration_profiling_overhead_us
-    #                 overhead_event_id = event_conn.insert_dict('Event', overhead_event_fields)
-    #
-    #     num_all_events = sum(len(events) for category, events in self._pyprof_each_category_events(proto))
-    #
-    #     with progressbar.ProgressBar(max_value=num_all_events) as bar:
-    #         for category, events in self._pyprof_each_category_events(proto):
-    #             insert_category_events(self, self, category, events)
-    #
-    #     self.conn.commit()
-
-    def insert_machine_util_file(self, path):
-        proto = read_machine_util_file(path)
-
-        logging.info("> Insert machine CPU/GPU utilization file: {p}".format(p=path))
-        # if self.debug:
-        #     logging.info(proto)
-
-        machine_id = self.machine_to_id[proto.machine_name]
-
-        def each_sample(machine_util):
-            for device_name, device_util in machine_util.device_util.items():
-                for sample in device_util.samples:
-                    device_id = self.device_to_id[device_name]
-                    yield device_id, sample.start_time_us, sample.util, sample.total_resident_memory_bytes
-
-        def count_samples(machine_util):
-            n = 0
-            for device_name, device_util in machine_util.device_util.items():
-                n += len(device_util.samples)
-            return n
-
-        num_all_samples = count_samples(proto)
-
-        with progressbar.ProgressBar(max_value=num_all_samples) as bar:
-            for i, (device_id, start_time_us, util, total_resident_memory_bytes) in enumerate(each_sample(proto)):
-                ins = {
-                    'device_id':device_id,
-                    'machine_id':machine_id,
-                    'start_time_us':start_time_us,
-                    'util':util,
-                    'total_resident_memory_bytes':total_resident_memory_bytes,
-                }
-                device_util_id = self.insert_dict('DeviceUtilization', ins)
-                bar.update(i)
-
-        self.conn.commit()
-
-    def insert_dict(self, table, insert):
-        assert self.table == table
-        return self.add_insert(insert)
-
-    def _csv_val(self, val):
-        if val is None:
-            return ''
-        if type(val) == str:
-            if ',' in val:
-                raise NotImplementedError("Need to escape comma's, or use a quote-char.")
-        return str(val)
-
-    def _write_csv_insert(self, insert):
-        if type(insert) == dict:
-            line = ','.join(self._csv_val(insert[k]) for k in self.fields)
-        else:
-            line = ','.join(self._csv_val(val) for val in insert)
-        self.tmp_f.write(line)
-        self.tmp_f.write("\n")
-        self.is_empty = False
-
-    def _write_csv_header(self):
-        line = ','.join(self.fields)
-        self.tmp_f.write(line)
-        self.tmp_f.write("\n")
 
     def add_insert(self, insert):
         ret = None
@@ -1482,83 +1117,20 @@ class _CSVInserterWorker:
             start_t = time.time()
             self.conn.insert_csv(self.tmp_path, self.table)
             end_t = time.time()
-            # logging.info("> Loading CSV into {table} took {sec} seconds".format(
-            #     table=self.table,
-            #     sec=end_t - start_t))
+            if self.debug:
+                logging.info("> Loading CSV into {table} took {sec} seconds".format(
+                    table=self.table,
+                    sec=end_t - start_t))
 
         self.tmp_f.close()
         os.remove(self.tmp_path)
         self.close()
 
-class CSVInserter:
-    def __init__(self, conn, table, block_size=50000, progress_bar=None, id_field=None, directory=None, fields=None,
-                 # suffix=None,
-                 csv_path=None,
-                 autoincrement=None,
-                 ):
-        """
-        Use Postgres' "COPY FROM" command to insert a csv file into the database.
-        This leads to the best-possible insertion time for data.
+    def close(self):
+        self.conn.close()
 
-        https://www.postgresql.org/docs/9.2/sql-copy.html
-
-        :param conn:
-        :param table:
-        :param block_size:
-        :param progress_bar:
-        :param id_field:
-            The autoincrement primary key of the table.
-            If this is set, query the last insert id, and inject the next id into each add_insert call.
-
-            Useful when bulk inserting multiple tables that reference each other.
-        """
-        self.conn = conn
-        self.table = table
-        # self.inserts = []
-        self.fields = fields
-        self.block_size = block_size
-        self.total_inserts = 0
-        self.progress_bar = progress_bar
-        self.id_field = id_field
-        self.next_id = None
-        self.header_written = False
-
-        if autoincrement is None and id_field is not None:
-            self.autoincrement = AutoincrementID(conn, table, id_field)
-        else:
-            self.autoincrement = autoincrement
-        # self.suffix = suffix
-
-        if directory is None:
-            self.directory = os.getcwd()
-        else:
-            self.directory = directory
-
-        if csv_path is not None:
-            self.tmp_path = csv_path
-            self.tmp_f = open(self.tmp_path, 'w')
-        else:
-            # self.tmp_f = tempfile.TemporaryFile(mode='w', dir=self.directory, prefix=table, suffix=".csv")
-            self.tmp_f, self.tmp_path = tempfile.mkstemp(
-                dir=self.directory,
-                prefix="{table}_".format(
-                    table=table,
-                ),
-                # prefix="{table}{suffix_str}_".format(
-                #     table=table,
-                #     suffix_str="_{suffix}".format(suffix=self.suffix) if self.suffix is not None else ''),
-                suffix=".csv",
-                text=True)
-            os.chmod(self.tmp_path, 0o664)
-            self.tmp_f = os.fdopen(self.tmp_f, mode='w')
-
-        # if self.id_field is not None:
-        #     self.next_id = self._last_insert_id() + 1
-
-    # Match TracesSQLiteConnection interface
-    def insert_dict(self, table, insert):
-        assert self.table == table
-        return self.add_insert(insert)
+    def commit(self):
+        self.conn.commit()
 
     def _csv_val(self, val):
         if val is None:
@@ -1575,53 +1147,207 @@ class CSVInserter:
             line = ','.join(self._csv_val(val) for val in insert)
         self.tmp_f.write(line)
         self.tmp_f.write("\n")
+        self.is_empty = False
 
     def _write_csv_header(self):
         line = ','.join(self.fields)
         self.tmp_f.write(line)
         self.tmp_f.write("\n")
 
-    def add_insert(self, insert):
-        ret = None
+class TraceFileInserter:
+    def __init__(self,
+                 # IML trace file proto.
+                 path,
+                 # CSVInserter fields.
+                 db_path, table, block_size=50000, id_field=None, directory=None,
+                 host=None,
+                 user=None,
+                 password=None,
+                 debug=False,
+                 csv_path=None):
+        # IML trace file proto.
+        self.path = path
+        self.csv_inserter = CSVInserter(
+            db_path, table,
+            block_size=block_size,
+            id_field=id_field,
+            directory=directory,
+            host=host,
+            user=user,
+            password=password,
+            debug=debug,
+            csv_path=csv_path)
+        self.debug = debug
 
-        if self.id_field is not None:
-            next_id = self.autoincrement.next_id()
-            if type(insert) == dict:
-                insert[self.id_field] = next_id
-            else:
-                insert.append(next_id)
-            ret = next_id
-            # self.next_id += 1
+    def run(self):
+        with self.csv_inserter:
+            self.insert_file(self.path)
 
-        if not self.header_written:
-            if self.fields is None:
-                # Already contains id_field if required.
-                self.fields = sorted(insert.keys())
-            elif self.id_field is not None:
-                self.fields.append(self.id_field)
-            self._write_csv_header()
-            self.header_written = True
+    def insert_file(self, path):
+        if is_tfprof_file(path):
+            self.insert_tfprof_file(path)
+        elif is_category_events_file(path):
+            self.insert_category_events_file(path)
+        elif is_training_progress_file(path):
+            self.insert_training_progress_file(path)
+        elif is_machine_util_file(path):
+            self.insert_machine_util_file(path)
+        elif is_cuda_device_events_file(path):
+            self.insert_cuda_device_events_file(path)
+        elif is_cuda_api_stats_file(path):
+            self.insert_cuda_api_stats_file(path)
+        else:
+            raise NotImplementedError("Not sure how to insert into path={path} into database".format(path=path))
 
-        self._write_csv_insert(insert)
+    def get_cpu_device(self):
+        # We don't bother to record the device-name CUDA API call belongs to;
+        # During analysis we count this as CPU-side events, so we associate
+        # with the single CPU device on the machine.
+        cpu_devices = [dev for dev, ident in self.csv_inserter.device_to_id.items() if is_cpu_device(dev)]
+        assert len(cpu_devices) == 1
+        device = cpu_devices[0]
+        return device
 
-        self.total_inserts += 1
-        if self.progress_bar is not None:
-            self.progress_bar.update(self.total_inserts)
+    def lookup_device_id(self, path, device):
+        if device not in self.device_to_id:
+            logging.info("> ERROR: Couldn't find device={dev} in path={path}".format(
+                dev=device,
+                path=path))
+            pprint.pprint({
+                'device_to_id': self.device_to_id})
+        device_id = self.device_to_id[device]
+        return device_id
 
-        return ret
+    def insert_cuda_api_stats_file(self, path):
+        reader = CUDAAPIStatsReader(path)
 
-    def finish(self):
-        self.tmp_f.flush()
+        logging.info("> Insert CUDA API Stats file: {p}".format(p=path))
 
-        start_t = time.time()
-        self.conn.insert_csv(self.tmp_path, self.table)
-        end_t = time.time()
-        logging.info("> Loading CSV into {table} took {sec} seconds".format(
-            table=self.table,
-            sec=end_t - start_t))
+        process_id = self.csv_inserter.process_to_id[reader.process_name]
+        phase_id = self.csv_inserter.phase_to_id[reader.phase_name]
 
-        self.tmp_f.close()
-        os.remove(self.tmp_path)
+        device = self.get_cpu_device()
+
+        for i, event in enumerate(reader.all_events(debug=True)):
+            category, start_time_us, duration_us, name = event
+            device_id = self.lookup_device_id(path, device)
+            self.csv_inserter.insert_event(
+                device_id, process_id, phase_id,
+                category, start_time_us, duration_us, name)
+
+    def insert_cuda_device_events_file(self, path):
+        reader = CUDADeviceEventsReader(path)
+
+        logging.info("> Insert CUDA Device Events file: {p}".format(p=path))
+
+        process_id = self.csv_inserter.process_to_id[reader.process_name]
+        phase_id = self.csv_inserter.phase_to_id[reader.phase_name]
+
+        for i, event in enumerate(reader.all_events(debug=True)):
+            device, category, start_time_us, duration_us, name = event
+            device_id = self.lookup_device_id(path, device)
+            self.csv_inserter.insert_event(
+                device_id, process_id, phase_id,
+                category, start_time_us, duration_us, name)
+
+    def insert_tfprof_file(self, path):
+        reader = TFProfCategoryTimesReader(path)
+
+        logging.info("> Insert tfprof file: {p}".format(p=path))
+
+        process_id = self.csv_inserter.process_to_id[reader.process_name]
+        phase_id = self.csv_inserter.phase_to_id[reader.phase_name]
+
+        for i, (device, event) in enumerate(reader.all_events(debug=True)):
+            category, start_time_us, duration_us, name = event
+            device_id = self.lookup_device_id(path, device)
+            self.csv_inserter.insert_event(
+                device_id, process_id, phase_id,
+                category, start_time_us, duration_us, name)
+
+    def _pyprof_each_category_events(self, pyprof_proto):
+        for step, python_events in pyprof_proto.python_events.items():
+            yield CATEGORY_PYTHON, python_events.events
+
+        for step, clibs in pyprof_proto.clibs.items():
+            for category, clib_events in clibs.clibs.items():
+                yield category, clib_events.events
+
+    def insert_training_progress_file(self, path):
+        proto = read_training_progress_file(path)
+
+        logging.info("> Insert training_progress file: {p}".format(p=path))
+
+        process_id = self.csv_inserter.process_to_id[proto.process_name]
+        phase_id = self.csv_inserter.phase_to_id[proto.phase]
+
+        fields = {
+            'process_id': process_id,
+            'phase_id': phase_id,
+            'total_timesteps': proto.total_timesteps,
+            'start_trace_time_us': proto.start_trace_time_us,
+            'start_percent_complete': proto.start_percent_complete,
+            'start_num_timesteps': proto.start_num_timesteps,
+            'start_training_time_us': proto.start_training_time_us,
+            'end_percent_complete': proto.end_percent_complete,
+            'end_training_time_us': proto.end_training_time_us,
+            'end_num_timesteps': proto.end_num_timesteps,
+        }
+        self.csv_inserter.insert_dict('TrainingProgress', fields)
+
+        self.csv_inserter.commit()
+
+    def insert_category_events_file(self, path):
+        reader = CategoryEventsReader(path)
+
+        logging.info("> Insert Category Events file: {p}".format(p=path))
+
+        process_id = self.csv_inserter.process_to_id[reader.process_name]
+        phase_id = self.csv_inserter.phase_to_id[reader.phase_name]
+
+        device = self.get_cpu_device()
+
+        for i, event in enumerate(reader.all_events(debug=True)):
+            category, start_time_us, duration_us, name = event
+            device_id = self.lookup_device_id(path, device)
+            self.csv_inserter.insert_event(
+                device_id, process_id, phase_id,
+                category, start_time_us, duration_us, name)
+
+    def insert_machine_util_file(self, path):
+        proto = read_machine_util_file(path)
+
+        logging.info("> Insert machine CPU/GPU utilization file: {p}".format(p=path))
+
+        machine_id = self.csv_inserter.machine_to_id[proto.machine_name]
+
+        def each_sample(machine_util):
+            for device_name, device_util in machine_util.device_util.items():
+                for sample in device_util.samples:
+                    device_id = self.csv_inserter.device_to_id[device_name]
+                    yield device_id, sample.start_time_us, sample.util, sample.total_resident_memory_bytes
+
+        def count_samples(machine_util):
+            n = 0
+            for device_name, device_util in machine_util.device_util.items():
+                n += len(device_util.samples)
+            return n
+
+        num_all_samples = count_samples(proto)
+
+        with progressbar.ProgressBar(max_value=num_all_samples) as bar:
+            for i, (device_id, start_time_us, util, total_resident_memory_bytes) in enumerate(each_sample(proto)):
+                ins = {
+                    'device_id':device_id,
+                    'machine_id':machine_id,
+                    'start_time_us':start_time_us,
+                    'util':util,
+                    'total_resident_memory_bytes':total_resident_memory_bytes,
+                }
+                device_util_id = self.csv_inserter.insert_dict('DeviceUtilization', ins)
+                bar.update(i)
+
+        self.csv_inserter.commit()
 
 class TracesPostgresConnection:
     def __init__(self, db_config_path, db_basename='traces', host=None, user=None, password=None, keep_alive=True):
@@ -2660,17 +2386,14 @@ class SQLCategoryTimesReader:
             c.category_name = '{CATEGORY_OPERATION}' AND
             e1.event_name = {p} AND
             p.process_name = {p} AND 
-            {machine_clause} AND
-            {no_dump_overlap_clause}
+            {machine_clause}
         ORDER BY e1.start_time_us ASC 
         """.format(
             CATEGORY_OPERATION=CATEGORY_OPERATION,
-            # CATEGORY_PROFILING=CATEGORY_PROFILING,
             # PROFILING_DUMP_TRACE=PROFILING_DUMP_TRACE,
             # NOTE: We do NOT want to select any steps of an operation that overlap at all with a DUMP event.
             # indents=3 since {overlap_clause} above has 3 indent-levels in front of it.
             # overlap_clause=sql_overlap_clause('e1', 'e2', indents=3),
-            no_dump_overlap_clause=sql_no_dump_overlap_clause('e1', tmp_event_alias_2='e2', tmp_category_alias_2='c2', indents=1),
             machine_clause=sql_machine_clause(machine_name, 'm', indents=1, allow_none=True),
             p=sql_placeholder(),
         )
@@ -2679,16 +2402,6 @@ class SQLCategoryTimesReader:
                        debug=True,
                        # debug=debug,
         )
-
-        # NOT EXISTS (
-        #     SELECT *
-        #     FROM Event AS e2
-        # NATURAL JOIN Category as c2
-        # WHERE
-        # c2.category_name = '{CATEGORY_PROFILING}' AND
-        # e2.event_name = '{PROFILING_DUMP_TRACE}' AND
-        # {overlap_clause}
-        # )
 
         rows = rows_as_ktime(c.fetchall())
         if machine_name not in self._steps:
@@ -3048,7 +2761,7 @@ class SQLCategoryTimesReader:
         params = None
         sql_exec_query(c, query, params, self.__class__, debug)
 
-        rows = self._fetch_rows(c, fetchall, debug=debug)
+        rows = sql_fetch_rows(c, fetchall, debug=debug)
 
         event_split = None
         if start_time_us is not None and end_time_us is not None:
@@ -3066,26 +2779,6 @@ class SQLCategoryTimesReader:
             debug=debug,
             debug_label=debug_label)
         return process_category_times
-
-    def _fetch_rows(self, c, fetchall, debug=False):
-        if fetchall:
-            query_start_t = time.time()
-            # logging.info("START fetchall")
-            rows = c.fetchall()
-            # logging.info("STOP fetchall")
-            query_end_t = time.time()
-            time_sec = query_end_t - query_start_t
-            if debug:
-                logging.info("> query.fetchall took {sec} seconds".format(
-                    sec=time_sec,
-                ))
-        else:
-            if debug:
-                logging.info("> fetchall = {fetchall}".format(
-                    fetchall=fetchall,
-                ))
-            rows = c
-        return rows
 
     def _rows_as_category_times(self, rows, event_split=None, debug=False, debug_label=None):
         process_category_times = dict()
@@ -3188,8 +2881,6 @@ class SQLCategoryTimesReader:
             {machine_clause} AND
             {debug_ops_clause} AND
             {ignore_clause} AND
-            -- Ignore any events that overlap with when we dump profiling information.
-            {no_dump_overlap_clause} AND
             -- Keep events within a start/end time range (e.g. overlap with a specific process phase).
             {event_range_clause} AND
             -- Only keep events that are subsumed by an <op> event.
@@ -3199,7 +2890,6 @@ class SQLCategoryTimesReader:
             p1.process_name, e1.start_time_us ASC 
         """).format(
             ignore_clause=sql_ignore_clause('c1', ignore_categories, keep_categories, indents=1),
-            no_dump_overlap_clause=sql_no_dump_overlap_clause('e1', 'e2', 'c2', indents=1),
             process_clause=sql_process_clause(process_name, 'p1', indents=1, allow_none=True),
             phase_clause=sql_phase_clause(phase_name, 'ph1', indents=1, allow_none=True),
             machine_clause=sql_machine_clause(machine_name, 'm', indents=1, allow_none=True),
@@ -3212,7 +2902,7 @@ class SQLCategoryTimesReader:
         params = None
         sql_exec_query(c, query, params, self.__class__, debug)
 
-        rows = self._fetch_rows(c, fetchall, debug=debug)
+        rows = sql_fetch_rows(c, fetchall, debug=debug)
 
         process_category_times = self._rows_as_category_times(
             rows,
@@ -3889,6 +3579,52 @@ def sql_exec_query(cursor, query, params=None, klass=None, debug=False):
     end_t = time.time()
     if debug:
         logging.info("> query took {sec} seconds".format(sec=end_t - start_t))
+
+def sql_operator_in(expr, values, indents=None):
+    """
+    SELECT column_name(s)
+    FROM table_name
+    WHERE column_name IN (value1, value2, ...);
+          ------------------------------------
+          Generate this part like this:
+          ( {expr} IN (value1, value2, ...) )
+
+    Convenience function:
+      If values are strings, quotifies them.
+      Adds brackets around entire expression.
+
+    :param expr:
+    :param values:
+    :param indents:
+    :return:
+    """
+    assert len(values) >= 1
+    txt = textwrap.dedent("""\
+        ( ( {expr} ) IN ({values}) )
+        """.format(
+        expr=expr,
+        values=', '.join([sql_value_string(value) for value in values])
+    ).rstrip())
+    txt = maybe_indent(txt, indents)
+    return txt
+
+def sql_fetch_rows(c, fetchall, debug=False):
+    if fetchall:
+        query_start_t = time.time()
+        rows = c.fetchall()
+        query_end_t = time.time()
+        time_sec = query_end_t - query_start_t
+        if debug:
+            logging.info("> query.fetchall took {sec} seconds".format(
+                sec=time_sec,
+            ))
+    else:
+        if debug:
+            logging.info("> fetchall = {fetchall}".format(
+                fetchall=fetchall,
+            ))
+        rows = c
+    return rows
 
 def sql_compose_inequality(ineq_symbol, exprs, tautology_pairs=[], indents=None):
     """
@@ -5000,41 +4736,6 @@ def sql_overlap_clause(event_alias_1, event_alias_2,
 
     return clause
 
-def sql_no_dump_overlap_clause(event_alias_1, tmp_event_alias_2, tmp_category_alias_2, indents=None):
-    """
-    Make sure Event's we are selecting from event_alias_1
-    do not overlap with DUMP Event's we are selecting from tmp_event_alias_2.
-
-    :param event_alias_1:
-        The event alias used for Events we are overlapping against.
-    :param tmp_event_alias_2:
-    :param tmp_category_alias_2:
-        Aliases to use for DUMP events.
-    :return:
-    """
-    clause = textwrap.dedent("""
-        NOT EXISTS (
-            SELECT * 
-            FROM Event AS {e2}
-                NATURAL JOIN Category as {c2}
-            WHERE 
-                {c2}.category_name = '{CATEGORY_PROFILING}' AND
-                {e2}.event_name = '{PROFILING_DUMP_TRACE}' AND 
-                {overlap_clause}
-        )
-        """.format(
-        CATEGORY_OPERATION=CATEGORY_OPERATION,
-        CATEGORY_PROFILING=CATEGORY_PROFILING,
-        PROFILING_DUMP_TRACE=PROFILING_DUMP_TRACE,
-        # NOTE: We do NOT want to select any steps of an operation that overlap at all with a DUMP event.
-        # indents=3 since {overlap_clause} above has 3 indent-levels in front of it.
-        e2=tmp_event_alias_2,
-        c2=tmp_category_alias_2,
-        overlap_clause=sql_overlap_clause(event_alias_1, tmp_event_alias_2, indents=indents+2),
-    ))
-    clause = maybe_indent(clause, indents)
-    return clause
-
 def sql_get_source_files(klass, directory):
     """
     SQLite: We want traces.db
@@ -5220,15 +4921,13 @@ def is_cpu_device(device_name):
 def is_gpu_device(device_name):
     return not is_cpu_device(device_name)
 
-def obj_from_row(Klass, row):
-    obj = Klass(**row)
-    for attr, value in row.items():
-        if not hasattr(obj, attr):
-            setattr(obj, attr, value)
-    return obj
-
 def usec_string(usec):
     return "{usec} us".format(usec=usec)
+
+def sql_value_string(value):
+    if type(value) == str:
+        return '"{value}"'.format(value=value)
+    return str(value)
 
 class ToStringBuilder:
     def __init__(self, obj):

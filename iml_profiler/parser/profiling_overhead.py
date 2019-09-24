@@ -19,7 +19,14 @@ from iml_profiler.parser import stacked_bar_plots
 from iml_profiler.parser.stacked_bar_plots import VennData
 
 from iml_profiler.parser import stacked_bar_plots
-from iml_profiler.parser.db import SQLCategoryTimesReader, sql_input_path
+from iml_profiler.parser.db import SQLCategoryTimesReader, CSVInserter, \
+    sql_input_path, \
+    sql_create_connection, \
+    sql_exec_query, \
+    sql_operator_in, \
+    sql_fetch_rows
+
+from iml_profiler.parser.stats import KernelTime
 
 from iml_profiler.profiler import iml_logging
 
@@ -2347,4 +2354,384 @@ class CorrectedVennParser:
     def _json_path(self):
         return _j(self.directory, "{prefix}.json".format(
             prefix=self.filename_prefix))
+
+class SQLOverheadEventsParser:
+    """
+    Insert "profiling overhead events":
+    - CUPTI and LD_PRELOAD:
+      - CUDA API interception:
+        Subtract from:
+        [CPU, q_forward, TensorFlow C++]
+
+      - CUPTI overhead:
+        Subtract from:
+        [CPU, q_forward, CUDA API]
+
+                      T1                                    T2
+                      |                                     |
+      [intercept.call][  cudaLaunchKernel   <   CUPTI   >   ][intercept.return]
+
+      Approximation choices:
+
+                      T1                                    T2
+                      |                                     |
+      [intercept.call][  cudaLaunchKernel   <   CUPTI   >   ][    intercept.return    ]
+                      [ CUPTI.overhead ]                     [intercept.overhead]
+
+      NOTE:
+      - Regarding effect of putting intercept.overhead during call/return:
+        - The aggregate affect on shrunken categories is the same:
+          TensorFlow C time will shrink, NOT the CUDA API calls.
+          NOTE: technically NOT true... if you have high frequency CUDA API events then you may end up overlapping
+          intercept.overhead with a CUDA API call...
+          IDEALLY: intercept.overhead should NOT overlap with a CUDA API call.
+        - validation: empirically see if it has a significant affect.
+      - similar argument for where to put intercept.overhead...
+
+      Insert:
+          # CUPTI:
+          Event(
+              cuda_api.start_time,
+              duration=mean_cupti_overhead_us[cuda_api])
+          # LD_PRELOAD:
+          Event(
+              cuda_api.end_time,
+              duration=mean_LD_PRELOAD_interception_overhead_us)
+
+    - Python -> C-library interception:
+      Subtract from:
+      [CPU, q_forward, Python]
+
+      These happen at call/return transition to/from Python/C++:
+          before: [ Python ][overhead][   C++  ][overhead][ Python ]
+
+      Since we take timestamps immediately before/after C++ call,
+      most overhead is incurred by Python.
+
+      Inaccuracy: hard to know how much of overhead is attributed to call vs return...
+      Approximation choice: call-side overhead is worse [ i.e. (1) ]
+
+      Approximation choices:
+
+          (1) Call-biased:
+
+                                           T1       T2
+                                           |        |
+              [        Python.call        ][ C.call ][       Python.return         ]
+                      [Python interception]
+
+          (2) Equal call/return overhead:
+
+                                           T1       T2
+                                           |        |
+              [        Python.call        ][ C.call ][       Python.return         ]
+                  [1/2 Python interception]          [1/2 Python interception]
+
+          (3) Return-biased:
+              Similar to call-biased.
+
+          Q: How can we verify these assumptions...?
+          A: Create a program that records operation events at high-frequency,
+             and aims to make operation events a fixed duration (e.g. sleep(100us)).
+             Vary the operation duration, and see how it affects accuracy of recorded events.
+             Suspicion: at typical (long) operation durations, it doesn't matter,
+             since aggregate affect is the same.
+
+      Options:
+      - Subtract from before.Python
+      - Subtract equally from before.Python and after.Python
+      - Net effect should be the same...
+        ASSERT: python_event.duration >= subtraction
+
+      Insert:
+          # Python -> C-library interception
+          Event(
+              start=Python.call.end - mean_pyprof_interception_overhead_us,
+              duration=mean_pyprof_interception_overhead_us)
+
+    - Python annotations:
+      Subtract from:
+      [CPU, q_forward, Python]
+
+      NOTE: we COULD make a microbenchmark to measure precise set_operation and end_operation time...
+      Only difference is that current benchmarking is "tailored to a workload", which could work better with
+      hardware concurrency.
+
+      Insert:
+          # Python annotations
+          Event(
+              start=op.end,
+              duration=mean_pyprof_annotation_overhead_us)
+
+      set_operation(op1)                                                                         end_operation(op1)
+      [                                          op1                                             ]
+                  [                              op2                               ]
+                  set_operation(op2)                                               end_operation(op2)
+
+      Approximation choices:
+          NOTE: [overhead] is the total overhead-time added to by a pair of set_operation/end_operation calls.
+
+          (1) Child-biased:
+
+          set_operation(op1)                                                                         end_operation(op1)
+          [                                          op1                                             ]
+                                                                                            [overhead]
+                      [                              op2                               ]
+                      set_operation(op2)                                              end_operation(op2)
+                                                                              [overhead]
+
+          [ set_operation(op1) ][ set_operation(op2) ][ end_operation(op2) ][ end_operation(op1) ]
+                                                       [annotation overhead] [annotation overhead]
+
+          (2) Parent-biased:
+
+          set_operation(op1)                                                                         end_operation(op1)
+          [                                          op1                                             ]
+                                                                                                      [overhead]
+                      [                              op2                               ]
+                      set_operation(op2)                                              end_operation(op2)
+                                                                                        [overhead]
+
+      These overheads happen in Python, but the operation to attribute the overheads to is tricky;
+      difficulties:
+      (1) overhead is distributed between parent/child operations;
+          seems like most overhead is added to parent though based on timestamp locations.
+          Hard to attribute precisely; attribute to parent.
+      (2) overhead is counts set_operation/end_operation calls together;
+          cannot separate overhead of each.
+
+
+    "Subtracting" overhead:
+
+        We handle "subtracting" profiling overhead using event-overlap computation abstraction.
+        In particular, later on after we have compute the overlap, we will simply "discard" the CPU-side time that is
+        due to profiling, being careful to keep [CPU, GPU] time but instead count it as GPU-only time:
+            For Type Overlap.CategoryKey:
+            - Discard CPU-only profiling overhead time:
+                CategoryKey(
+                    non_ops={CATEGORIES_PROF, CPU},
+                    ...
+                )
+                -> DISCARD
+            - For [CPU, GPU] overlap, turn it into GPU-only time and merge with existing GPU-time:
+                CategoryKey(
+                    non_ops={CATEGORIES_PROF, CPU, GPU},
+                    ...
+                )
+                ->
+                CategoryKey(
+                    non_ops={CATEGORIES_PROF,      GPU},
+                    ...
+                )
+    """
+
+    def __init__(self, directory,
+                 cupti_overhead_json,
+                 LD_PRELOAD_overhead_json,
+                 pyprof_overhead_json,
+                 host=None,
+                 user=None,
+                 password=None,
+                 debug=False,
+                 debug_single_thread=False,
+                 # Swallow any excess arguments
+                 **kwargs):
+        self.directory = directory
+        self.cupti_overhead_json = cupti_overhead_json
+        self.LD_PRELOAD_overhead_json = LD_PRELOAD_overhead_json
+        self.pyprof_overhead_json = pyprof_overhead_json
+        self.host = host
+        self.user = user
+        self.password = password
+        self.debug = debug
+        self.debug_single_thread = debug_single_thread
+        self.conn = sql_create_connection(self.db_path, host=self.host, user=self.user, password=self.password, debug=self.debug)
+
+    @property
+    def db_path(self):
+        return sql_input_path(self.directory)
+
+    def run(self):
+        """
+        PSEUDOCODE:
+
+            # Idempotent overhead-event insertion:
+            #   delete overhead-events from previous run of SQLOverheadEventsParser.
+            delete all from Event where e.category in CATEGORIES_PROF
+
+            #
+            # Insert overhead events.
+            #
+
+            # Insert: Python annotations
+            op_events = SQL:
+                select all from Event where e.category == CATEGORY_OPERATION
+            for op in op_events:
+                insert Event(
+                    start=op.end,
+                    duration=mean_pyprof_annotation_overhead_us,
+                    category=CATEGORY_PROF_PYTHON_ANNOTATION)
+
+            # Insert: Python -> C-library interception
+            python_events = SQL:
+                select all from Event where e.category == CATEGORY_PYTHON
+            for python_event python_events:
+                insert Event(
+                    start=Python.call.end - mean_pyprof_interception_overhead_us,
+                    duration=mean_pyprof_interception_overhead_us,
+                    category=CATEGORY_PROF_PYTHON_INTERCEPTION)
+
+            # Insert: CUPTI & LD_PRELOAD
+            cuda_api_events = SQL:
+                select all from Event where e.category == CATEGORY_CUDA_API_CPU
+            for cuda_api_event cuda_api_events:
+                # Insert: CUPTI
+                insert Event(
+                    cuda_api_event.start_time,
+                    duration=mean_cupti_overhead_us[cuda_api_event.name],
+                    category=CATEGORY_PROF_CUPTI)
+                # Insert: LD_PRELOAD
+                insert Event(
+                    cuda_api.end_time,
+                    duration=mean_LD_PRELOAD_interception_overhead_us,
+                    category=CATEGORY_PROF_LD_PRELOAD)
+        """
+        c = self.conn.cursor
+
+        # Idempotent overhead-event insertion:
+        #   delete overhead-events from previous run of SQLOverheadEventsParser.
+        self.delete_profiling_events(c)
+
+        self.csv_inserter = CSVInserter(
+            db_path=self.db_path, table='Event',
+            host=self.host,
+            user=self.user,
+            password=self.password,
+            debug=self.debug)
+        with self.csv_inserter:
+            #
+            # Insert overhead events.
+            #
+
+            # Insert: Python annotations
+            op_events = self.query_op_events(c)
+            for op in op_events:
+                # insert Event(
+                #     start=op.end,
+                #     duration=mean_pyprof_annotation_overhead_us,
+                #     category=CATEGORY_PROF_PYTHON_ANNOTATION)
+                self.insert_overhead_event(
+                    from_event=op,
+                    prof_category=CATEGORY_PROF_PYTHON_ANNOTATION)
+
+            # Insert: Python -> C-library interception
+            """
+            python_events = SQL:
+                select all from Event where e.category == CATEGORY_PYTHON
+            for python_event python_events:
+                insert Event(
+                    start=Python.call.end - mean_pyprof_interception_overhead_us,
+                    duration=mean_pyprof_interception_overhead_us,
+                    category=CATEGORY_PROF_PYTHON_INTERCEPTION)
+            """
+            # PROBLEM: we CANNOT simply use _query_category_events(CATEGORY_PYTHON) since
+            # there are a couple of python events we insert that are NOT interception events (e.g. "Finishing ..." during end_operation).
+            # To figure out EXACTLY which python event to use, look at which python event is inserted during an interception, OR
+            # use the C++ event (PROBLEM: the category for those varies between simulator/tensorflow...)
+            python_events = self.query_python_events(c)
+            for op in python_events:
+                # insert Event(
+                #     start=op.end,
+                #     duration=mean_pyprof_annotation_overhead_us,
+                #     category=CATEGORY_PROF_PYTHON_ANNOTATION)
+                self.insert_overhead_event(
+                    from_event=op,
+                    prof_category=CATEGORY_PROF_PYTHON_ANNOTATION)
+
+
+            # Insert: CUPTI & LD_PRELOAD
+            # Insert: CUPTI
+            # Insert: LD_PRELOAD
+
+    def insert_overhead_event(self, from_event, prof_category):
+        assert prof_category in CATEGORIES_PROF
+        return self.csv_inserter.insert_event(
+            device_id=from_event.device_id, process_id=from_event.process_id, phase_id=from_event.process_id,
+            category=prof_category,
+            start_time_us=from_event.start_time_usec,
+            duration_us=from_event.total_time_usec,
+            # Inherit event name...?
+            name=from_event.name,
+            thread_id=from_event.thread_id,
+        )
+
+
+    def query_op_events(self, c):
+        return self._query_category_events(c, category=CATEGORY_OPERATION)
+
+    def _query_category_events(self, c, category):
+        # TODO: if we wish to parallelize this, we can provide (event_id_lower_bound, event_id_upper_bound)
+        # to limit the "paginate" the full query.  Note however that lower/upper bounds would be formed using a
+        # single serial query; you can approximate the split using the min/max(event_id) or, precisely split by querying
+        # all event_id's (RISK: could be large in memory size).
+        keep_Event_fields = [
+            'thread_id',
+            'process_id',
+            'phase_id',
+            'device_id',
+        ]
+        select_query = textwrap.dedent("""
+            SELECT
+                -- Use KernelTime.field_names
+                e.event_name as name,
+                e.start_time_usec as start_usec,
+                e.duration_us as time_usec,
+                -- Keep Event field for re-inserting overhead-event; 
+                --   We need these fields so that we can create a Event(category=CATEGORY_PROF_ANNOTATION, ...)
+                {keep_Event_fields}
+            FROM 
+                Event AS e
+                NATURAL JOIN Category AS c
+            WHERE 
+                c.category_name = '{category}' 
+            """).format(
+            category=category,
+            keep_Event_fields=', '.join(["e.{field}".format(field=field) for field in keep_Event_fields]),
+        )
+        sql_exec_query(c, select_query, klass=self.__class__, debug=self.debug)
+        rows = sql_fetch_rows(c, fetchall=False, debug=self.debug)
+        rows = [KernelTime.from_row(row) for row in rows]
+        return rows
+
+    def delete_profiling_events(self, c):
+        prof_clause = sql_operator_in('c.category_name', values=CATEGORIES_PROF, indents=1)
+        select_query = textwrap.dedent("""
+            SELECT COUNT(*) as num_rows
+            FROM 
+                Event AS e
+                NATURAL JOIN Category AS c
+            WHERE 
+                {prof_clause}
+            """).format(
+            prof_clause=prof_clause,
+        )
+        sql_exec_query(c, select_query, klass=self.__class__, debug=self.debug)
+        rows = c.fetchall()
+        assert len(rows) == 1
+        num_rows = rows[0]['num_rows']
+        logging.info("Idempotent overhead-event insertion: deleting {n} profiling-overhead-events".format(
+            n=num_rows,
+        ))
+        delete_query = textwrap.dedent("""
+            DELETE e 
+            FROM 
+                Event AS e
+                NATURAL JOIN Category AS c
+            WHERE 
+                {prof_clause}
+            """).format(
+                prof_clause=prof_clause,
+            )
+        sql_exec_query(c, delete_query, klass=self.__class__, debug=self.debug)
+
 

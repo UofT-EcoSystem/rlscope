@@ -78,6 +78,10 @@ param_debug_memoize = luigi.BoolParameter(description=textwrap.dedent("""
         Memoize reading/generation of files to accelerate develop/test code iteration.
         """))
 
+param_cupti_overhead_json = luigi.Parameter(description="Calibration: mean per-CUDA API CUPTI overhead when GPU activities are recorded (see: CUPTIOverheadTask)")
+param_LD_PRELOAD_overhead_json = luigi.Parameter(description="Calibration: mean overhead for intercepting CUDA API calls with LD_PRELOAD  (see: CallInterceptionOverheadTask)")
+param_pyprof_overhead_json = luigi.Parameter(description="Calibration: means for (1) Python->C++ interception overhead, (2) operation annotation overhead (see: PyprofOverheadTask)")
+
 class IMLTask(luigi.Task):
     iml_directory = luigi.Parameter(description="Location of trace-files")
     debug = param_debug
@@ -152,6 +156,36 @@ class SQLParserTask(IMLTask):
             debug_single_thread=self.debug_single_thread,
         )
         self.sql_parser.run()
+
+class SQLOverheadEventsTask(IMLTask):
+    # NOTE: accept calibration JSON files as parameters instead of as DAG dependencies
+    # to allow using calibration files generated from a separate workload.
+    # TODO: we still need to investigate whether calibration using a separate workload generalizes properly.
+    cupti_overhead_json = param_cupti_overhead_json
+    LD_PRELOAD_overhead_json = param_LD_PRELOAD_overhead_json
+    pyprof_overhead_json = param_pyprof_overhead_json
+
+    def requires(self):
+        return [
+            mk_SQLParserTask(self),
+        ]
+
+    def iml_run(self):
+        # TODO: implement SQLOverheadEventsParser to insert overhead events.
+        self.sql_overhead_events_parser = SQLOverheadEventsParser(
+            directory=self.iml_directory,
+            cupti_overhead_json=self.cupti_overhead_json,
+            LD_PRELOAD_overhead_json=self.LD_PRELOAD_overhead_json,
+            pyprof_overhead_json=self.pyprof_overhead_json,
+
+            host=self.postgres_host,
+            user=self.postgres_user,
+            password=self.postgres_password,
+
+            debug=self.debug,
+            debug_single_thread=self.debug_single_thread,
+        )
+        self.sql_overhead_events_parser.run()
 
 class _UtilizationPlotTask(IMLTask):
     debug_memoize = luigi.BoolParameter(description="If true, memoize partial results for quicker runs", default=False, parsing=luigi.BoolParameter.EXPLICIT_PARSING)
@@ -733,9 +767,9 @@ class CUPTIScalingOverheadTask(luigi.Task):
         self.dumper.run()
 
 class CorrectedTrainingTimeTask(luigi.Task):
-    cupti_overhead_json = luigi.Parameter(description="Calibration: mean per-CUDA API CUPTI overhead when GPU activities are recorded (see: CUPTIOverheadTask)")
-    LD_PRELOAD_overhead_json = luigi.Parameter(description="Calibration: mean overhead for intercepting CUDA API calls with LD_PRELOAD  (see: CallInterceptionOverheadTask)")
-    pyprof_overhead_json = luigi.Parameter(description="Calibration: means for (1) Python->C++ interception overhead, (2) operation annotation overhead (see: PyprofOverheadTask)")
+    cupti_overhead_json = param_cupti_overhead_json
+    LD_PRELOAD_overhead_json = param_LD_PRELOAD_overhead_json
+    pyprof_overhead_json = param_pyprof_overhead_json
     iml_directories = luigi.ListParameter(description="IML directory that ran with full tracing enabled")
     uninstrumented_directories = luigi.ListParameter(description="IML directories for uninstrumented runs (iml-prof --config uninstrumented)")
     directory = luigi.Parameter(description="Output directory", default=".")
