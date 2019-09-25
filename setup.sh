@@ -399,6 +399,17 @@ _do() {
     "$@"
 }
 
+_apt_install() {
+    sudo apt install -y "$@"
+}
+
+setup_apt_packages() {
+    _apt_install \
+        mercurial \
+        git \
+
+}
+
 main() {
     # PROBLEM: I've found that if you don't use the same
     # version of TensorFlow when sharing trained models across C++ and python, C++ can
@@ -415,6 +426,7 @@ main() {
         return
     fi
 
+    _do setup_apt_packages
     _do setup_json_cpp_library
     _do setup_abseil_cpp_library
     _do setup_gtest_cpp_library
@@ -424,9 +436,15 @@ main() {
     _do setup_protobuf_cpp_library
     # TODO: setup protobuf
 #    setup_cmake
+    echo "> Success!"
 }
 
-(
-cd $ROOT
-main "$@"
-)
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    (
+    cd $ROOT
+    main "$@"
+    )
+else
+    echo "> BASH: Sourcing ${BASH_SOURCE[0]}"
+fi 
+
