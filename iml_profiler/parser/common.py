@@ -48,12 +48,16 @@ CATEGORY_OPERATION = 'Operation'
 CATEGORY_SIMULATOR_CPP = "Simulator C"
 CATEGORY_ATARI = CATEGORY_SIMULATOR_CPP
 
-# Category captures special profiling events. Currently includes:
-# - event.name = PROFILING_DUMP_TRACE
-#   - tfprof/pyprof files are being dumped; we should NOT use any
-#     events recorded during this time to avoid accidentally measuring
-#     the profiler itself.
-CATEGORY_PROFILING = 'Profiling'
+CATEGORY_PROF_CUPTI = 'Profiling: CUPTI'
+CATEGORY_PROF_LD_PRELOAD = 'Profiling: LD_PRELOAD'
+CATEGORY_PROF_PYTHON_ANNOTATION = 'Profiling: Python annotation'
+CATEGORY_PROF_PYTHON_INTERCEPTION = 'Profiling: Python interception'
+CATEGORIES_PROF = [
+    CATEGORY_PROF_CUPTI,
+    CATEGORY_PROF_LD_PRELOAD,
+    CATEGORY_PROF_PYTHON_ANNOTATION,
+    CATEGORY_PROF_PYTHON_INTERCEPTION,
+]
 
 CATEGORIES_ALL = [
     CATEGORY_TF_API,
@@ -64,7 +68,6 @@ CATEGORIES_ALL = [
     CATEGORY_DUMMY_EVENT,
     CATEGORY_OPERATION,
     CATEGORY_SIMULATOR_CPP,
-    CATEGORY_PROFILING,
     CATEGORY_PYTHON_PROFILER,
 ]
 
@@ -2012,3 +2015,10 @@ def each_file_recursive(root_dir):
         for base in filenames:
             path = _j(dirpath, base)
             yield path
+
+def obj_from_row(Klass, row):
+    obj = Klass(**row)
+    for attr, value in row.items():
+        if not hasattr(obj, attr):
+            setattr(obj, attr, value)
+    return obj

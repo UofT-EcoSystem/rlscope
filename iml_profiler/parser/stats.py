@@ -29,7 +29,9 @@ class KernelTime:
     KernelTime(time_usec=..., start_usec=...)
     KernelTime(start_usec=..., end_usec=...)
     """
-    def __init__(self, time_usec=None, start_usec=None, end_usec=None, name=None, process_name=None, create_from=None):
+    def __init__(self, time_usec=None, start_usec=None, end_usec=None, name=None, process_name=None, create_from=None,
+                 # Swallow any excess arguments
+                 **kwargs):
         self.name = name
         self.process_name = process_name
         if time_usec is None:
@@ -164,6 +166,10 @@ class KernelTime:
         if name is None:
             name = self.name
         return KernelTime(end_usec - start_usec, start_usec, end_usec, name=name)
+
+    @staticmethod
+    def from_row(row):
+        return obj_from_row(KernelTime, row)
 
 #
 # Category time format.
