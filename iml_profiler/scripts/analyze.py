@@ -41,7 +41,12 @@ def main():
                         help="Name of a runnable IMLTask defined in iml_profiler.parser.tasks")
     parser.add_argument('--workers',
                         type=int,
-                        default=multiprocessing.cpu_count(),
+                        # DISABLE --workers for now to prevent opening to many postgres connections by accident;
+                        # we parallelize internally instead
+                        # e.g. ResourceOverlap with 32 worker threads, each of which opens a SQL
+                        # connection.
+                        # default=multiprocessing.cpu_count(),
+                        default=1,
                         help="Maximum number of parallel tasks to run (luigi parameter)")
     parser.add_argument('--help', '-h',
                         action='store_true')
@@ -72,6 +77,10 @@ def main():
 
     if args.help:
         luigi_argv.extend(['--help'])
+
+    if args.workers > 1:
+        logging.warning("Each overlap plot uses all the cores; forcing --workers=1")
+        args.workers = 1
 
     if args.pdb:
         logging.info("Registering pdb breakpoint (--pdb)")

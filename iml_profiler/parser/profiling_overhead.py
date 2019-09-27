@@ -24,7 +24,9 @@ from iml_profiler.parser.db import SQLCategoryTimesReader, CSVInserter, \
     sql_create_connection, \
     sql_exec_query, \
     sql_operator_in, \
-    sql_fetch_rows
+    sql_fetch_rows, \
+    ConnectionPoolManager, \
+    get_sql_connection
 
 from iml_profiler.parser.stats import KernelTime
 
@@ -2545,7 +2547,7 @@ class SQLOverheadEventsParser:
         self.password = password
         self.debug = debug
         self.debug_single_thread = debug_single_thread
-        self.conn = sql_create_connection(self.db_path, host=self.host, user=self.user, password=self.password, debug=self.debug)
+        self.conn = get_sql_connection(db_path=self.db_path, host=self.host, user=self.user, password=self.password, debug=self.debug)
 
     @property
     def db_path(self):

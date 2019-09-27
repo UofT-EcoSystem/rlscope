@@ -413,7 +413,7 @@ class Experiment:
                 failed = True
 
             if not failed:
-                if proc.returncode != 0:
+                if proc is not None and proc.returncode != 0:
                     logging.info("BUG: saw returncode = {ret}, expected 0".format(
                         ret=proc.returncode))
                     assert proc.returncode == 0

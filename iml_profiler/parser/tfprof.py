@@ -17,7 +17,8 @@ from iml_profiler.profiler.concurrent import ForkedProcessPool, FailedProcessExc
 from concurrent.futures import ProcessPoolExecutor
 
 from iml_profiler.parser.db import SQLCategoryTimesReader, sql_input_path, sql_get_source_files, \
-    Machine, Process, Phase, EventSplit
+    Machine, Process, Phase, EventSplit, \
+    GetConnectionPool
 
 from iml_profiler.parser.readers import TFProfCategoryTimesReader, \
    DEFAULT_group_by_device, \
@@ -1215,7 +1216,16 @@ def split_overlap_computation_Worker(kwargs):
     kwargs = dict(kwargs)
     self = kwargs['self']
     del kwargs['self']
-    return self._split_overlap_computation(**kwargs)
+    with GetConnectionPool(conn_kwargs=dict(
+        db_path=self.db_path,
+        host=self.host,
+        user=self.user,
+        password=self.password,
+    ),
+        maxconn=1,
+        # forked child process worker for computing overlap split.
+        new_process=True) as pool:
+        return self._split_overlap_computation(**kwargs)
 
 class OverlapComputer:
     """

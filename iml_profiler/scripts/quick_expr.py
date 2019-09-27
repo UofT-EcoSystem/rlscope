@@ -114,7 +114,7 @@ def main():
         --expr my_expr will run experiment QuickExpr.expr_my_expr().
         
         subtraction_validation:
-            See how much unaccounted for overhead % varies as we increase 
+            See how much unaccounted for overhead percent varies as we increase 
             the number of training loop iterations.
         total_training_time:
             Run the entire ML training script to measure how long the total training time is.

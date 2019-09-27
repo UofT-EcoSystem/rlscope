@@ -10,6 +10,7 @@ import tempfile
 import getpass
 import psycopg2
 import psycopg2.extras
+import psycopg2.pool
 import random
 import string
 import itertools
@@ -47,6 +48,14 @@ SQLITE_INDICES_SQL = _j(py_config.ROOT, "sqlite", "indices.sql")
 PSQL_TABLE_SQL = _j(py_config.ROOT, "postgres", "tables.sql")
 PSQL_INDICES_SQL = _j(py_config.ROOT, "postgres", "indices.sql")
 PSQL_CONSTRAINTS_SQL = _j(py_config.ROOT, "postgres", "constraints.sql")
+
+# If true, then Tasks run with iml-analyze will be forcefully limited to a maximum of
+# 1 Postgres SQL connection per python-process.
+#
+# Ideally, we'd use this to prevent connection leak bugs.
+# Haven't tested this so much, so best to leave it False until then.
+USE_CONNECTION_POOLING = False
+# USE_CONNECTION_POOLING = True
 
 def Worker_get_device_names(kwargs):
     if kwargs['debug']:
@@ -101,7 +110,8 @@ class SQLParser:
         self.host = host
         self.user = user
         self.password = password
-        self.conn = sql_create_connection(self.db_path, host=self.host, user=self.user, password=self.password, debug=debug)
+
+        self.conn = get_sql_connection(db_path=self.db_path, host=self.host, user=self.user, password=self.password, debug=debug)
         self.debug = debug
         self.debug_single_thread = debug_single_thread
         self.block_size = 50000
@@ -913,57 +923,16 @@ class AutoincrementID:
         return ident
 
 def mk_TraceFileInserter(kwargs):
-    worker = TraceFileInserter(**kwargs)
-    worker.run()
+    # Limit trace file insertion worker to 1 postgres connection.
+    with GetConnectionPool(conn_kwargs=dict(
+        db_path=kwargs['db_path'],
+        host=kwargs['host'],
+        user=kwargs['user'],
+        password=kwargs['password'],
+    ), maxconn=1, debug=kwargs['debug']) as pool:
+        worker = TraceFileInserter(**kwargs)
+        worker.run()
 
-class NameToID:
-
-    def __init__(self, db_path,
-                 host=None,
-                 user=None,
-                 password=None,
-                 debug=False,
-                 ):
-        self.db_path = db_path
-        self.host = host
-        self.user = user
-        self.password = password
-        self.debug = debug
-
-    def run(self):
-        self.conn = sql_create_connection(self.db_path, host=self.host, user=self.user, password=self.password, debug=self.debug)
-
-        self.process_to_id = self.build_name_to_id('Process', 'process_id', 'process_name')
-        self.phase_to_id = self.build_name_to_id('Phase', 'phase_id', 'phase_name')
-        self.category_to_id = self.build_name_to_id('Category', 'category_id', 'category_name')
-        self.device_to_id = self.build_name_to_id('Device', 'device_id', 'device_name')
-        self.machine_to_id = self.build_name_to_id('Machine', 'machine_id', 'machine_name')
-
-        # self.insert_file(self.path)
-        # self.finish()
-
-    @property
-    def cursor(self):
-        return self.conn.cursor
-
-    def build_name_to_id(self, table, id_field, name_field):
-        c = self.cursor
-        query = """
-        SELECT {name_field} AS name, {id_field} AS ident 
-        FROM {table} 
-        """.format(
-            id_field=id_field,
-            table=table,
-            name_field=name_field,
-            p=sql_placeholder(),
-        )
-        sql_exec_query(
-            c, query,
-            # klass=self.__class__, debug=self.debug)
-            klass=self.__class__, debug=False)
-        rows = c.fetchall()
-        name_to_id = dict((row['name'], row['ident']) for row in rows)
-        return name_to_id
 
 class CSVInserter:
     def __init__(self, db_path, table, block_size=50000, id_field=None, directory=None,
@@ -1023,7 +992,7 @@ class CSVInserter:
             os.chmod(self.tmp_path, 0o664)
             self.tmp_f = os.fdopen(self.tmp_f, mode='w')
 
-        self.conn = sql_create_connection(self.db_path, host=self.host, user=self.user, password=self.password, debug=self.debug)
+        self.conn = get_sql_connection(db_path=self.db_path, host=self.host, user=self.user, password=self.password, debug=self.debug)
 
         self.process_to_id = self.build_name_to_id('Process', 'process_id', 'process_name')
         self.phase_to_id = self.build_name_to_id('Phase', 'phase_id', 'phase_name')
@@ -1209,13 +1178,13 @@ class TraceFileInserter:
         return device
 
     def lookup_device_id(self, path, device):
-        if device not in self.device_to_id:
+        if device not in self.csv_inserter.device_to_id:
             logging.info("> ERROR: Couldn't find device={dev} in path={path}".format(
                 dev=device,
                 path=path))
             pprint.pprint({
-                'device_to_id': self.device_to_id})
-        device_id = self.device_to_id[device]
+                'device_to_id': self.csv_inserter.device_to_id})
+        device_id = self.csv_inserter.device_to_id[device]
         return device_id
 
     def insert_cuda_api_stats_file(self, path):
@@ -1350,7 +1319,7 @@ class TraceFileInserter:
         self.csv_inserter.commit()
 
 class TracesPostgresConnection:
-    def __init__(self, db_config_path, db_basename='traces', host=None, user=None, password=None, keep_alive=True):
+    def __init__(self, db_config_path, db_basename='traces', host=None, user=None, password=None, keep_alive=True, pool=None):
         self.host = host
         self.user = user
         self.password = password
@@ -1364,6 +1333,13 @@ class TracesPostgresConnection:
         self.pg_conn = None
         self.pg_cursor = None
         self.keep_alive = keep_alive
+        self.pool = pool
+
+    @property
+    def _pool_closed(self):
+        if self.pool is None:
+            return False
+        return self.pool.closed
 
     def _check_alive(self, allow_reconnect=False):
         try:
@@ -1394,6 +1370,7 @@ class TracesPostgresConnection:
 
     @property
     def conn(self):
+        assert not self._pool_closed
         if self.keep_alive and self._cursor is not None:
             self._check_alive(allow_reconnect=True)
         self._maybe_create_db_connection()
@@ -1474,16 +1451,22 @@ class TracesPostgresConnection:
             return
         self.conn.commit()
 
-    def close(self):
-        # if self._cursor is not None:
-        #     self._cursor.close()
-        #     self._cursor = None
-        # self._conn.close()
-        self._maybe_close_db_connection()
-        self._maybe_close_postgres_connection()
+    def close(self, from_pool=False):
+        if not from_pool and self.pool is not None:
+            # Make it convenient to grab a connection from a pool then call conn.close() on it to return it to the pool
+            # (instead of having to call pool.putconn(conn)).
+            self.pool.putconn(conn=self, from_conn=True)
+        else:
+            # Actually close the SQL connection.
+            #
+            # The ConnectionPool wants this connection, or the connection
+            # isn't being managed by a ConnectionPool.
+            self._maybe_close_db_connection()
+            self._maybe_close_postgres_connection()
 
     @property
     def cursor(self):
+        assert not self._pool_closed
         if self.keep_alive and self._cursor is not None:
             assert self._conn is not None
             self._check_alive(allow_reconnect=True)
@@ -1559,6 +1542,7 @@ class TracesPostgresConnection:
 
     def _create_connection(self, db_name):
         """ create a database connection to a SQLite database """
+        assert not self._pool_closed
 
         self._maybe_close_db_connection()
 
@@ -1972,6 +1956,227 @@ class TracesSQLiteConnection:
                 ret=proc.returncode, path=db_path))
             sys.exit(1)
 
+def conn_kwargs_as_set(conn_kwargs_dict):
+    return frozenset((k, v) for k, v in conn_kwargs_dict.items())
+
+def conn_kwargs_as_dict(conn_kwargs_set):
+    return dict((k, v) for k, v in conn_kwargs_set)
+
+class _ConnectionPoolManager:
+    def __init__(self, debug=False):
+        self.debug = debug
+        # Mapping from connection arguments to a pool of connections opened with those arguments.
+        #   { conn_kwargs } -> ConnectionPool
+        self.connection_pools = dict()
+        # Close a pool of connections once no one is using it anymore.
+        #   { conn_kwargs } -> refcnt
+        self.refcnt = dict()
+
+    def _create_connection_pool(self, maxconn, conn_kwargs, debug=False):
+        key = conn_kwargs_as_set(conn_kwargs)
+        assert key not in self.connection_pools
+        self.connection_pools[key] = ConnectionPool(
+            conn_kwargs=conn_kwargs,
+            maxconn=maxconn,
+            debug=self.debug or debug,
+        )
+        # psycopg2.pool.SimpleConnectionPool(
+        # minconn=1, maxconn=maxconn,
+        # **conn_kwargs)
+        return self.connection_pools[key]
+
+    def _get_connection_pool(self, conn_kwargs):
+        key = conn_kwargs_as_set(conn_kwargs)
+        return self.connection_pools[key]
+
+    def _close_connection_pool(self, conn_kwargs):
+        key = conn_kwargs_as_set(conn_kwargs)
+        pool = self.connection_pools[key]
+        pool.closeall()
+        del self.connection_pools[key]
+
+    def get_connection_pool(self, maxconn=5, new_process=False, existing=False, debug=False, **kwargs):
+        conn_kwargs = kwargs
+        pool = self._maybe_create_connection_pool(
+            maxconn, conn_kwargs,
+            new_process=new_process,
+            existing=existing,
+            debug=debug,
+        )
+        key = conn_kwargs_as_set(conn_kwargs)
+        if key not in self.refcnt or new_process:
+            self.refcnt[key] = 0
+        self.refcnt[key] += 1
+        return pool
+
+    def current_connection_pool(self, debug=False, **kwargs):
+        pool = self.get_connection_pool(existing=True, debug=debug, **kwargs)
+        return pool
+
+    def put_connection_pool(self, pool, conn_kwargs):
+        key = conn_kwargs_as_set(conn_kwargs)
+        assert self.refcnt[key] > 0
+        self.refcnt[key] -= 1
+        pool_refcnt = self.refcnt[key]
+        if self.refcnt[key] == 0:
+            assert pool == self.connection_pools[key]
+            self._close_connection_pool(conn_kwargs)
+            del self.refcnt[key]
+        return pool_refcnt
+
+    def _maybe_create_connection_pool(self, maxconn, conn_kwargs, new_process=False, existing=False, debug=False):
+        key = conn_kwargs_as_set(conn_kwargs)
+        if key not in self.connection_pools and existing:
+            raise RuntimeError(
+                textwrap.dedent("""\
+                IML ERROR: couldn't find an existing "with GetConnectionPool(...)" in the current stack-trace; did you forget to make one?
+                    Connection details:
+                {msg}
+                {pools}
+                """).format(
+                    msg=textwrap.indent(pprint.pformat(conn_kwargs), prefix='    '*2),
+                    pools=textwrap.indent(pprint.pformat(self.connection_pools), prefix='    '*2),
+                ).rstrip())
+        if key not in self.connection_pools:
+            pool = self._create_connection_pool(maxconn, conn_kwargs, debug=debug)
+            return pool
+        if new_process:
+            # Close "stale" parent connections
+            self._close_connection_pool(conn_kwargs)
+            # Create new connection pool for child
+            self._create_connection_pool(maxconn, conn_kwargs)
+        return self._get_connection_pool(conn_kwargs)
+
+ConnectionPoolManager = _ConnectionPoolManager()
+
+class GetConnectionPool:
+    def __init__(self, conn_kwargs, maxconn=5, new_process=False, debug=False):
+        self.conn_kwargs = conn_kwargs
+        self.maxconn = maxconn
+        self.new_process = new_process
+        self.debug = debug
+
+    def __enter__(self):
+        self.pool = ConnectionPoolManager.get_connection_pool(
+            maxconn=self.maxconn,
+            new_process=self.new_process,
+            debug=self.debug,
+            **self.conn_kwargs,
+        )
+        return self.pool
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        # If pool refcnt is 0, close all the connections allocated in the pool.
+        # If connections "leak out" from the pool scope, hopefully
+        # we'll get an error when people attempt to use them(?)
+        return ConnectionPoolManager.put_connection_pool(self.pool, self.conn_kwargs)
+
+class ConnectionPool:
+    """
+    Each single-threaded python "Process", upon being launched, has its own TracesConnectionPool.
+
+    We would like to use a global variable to store a singleton TracesConnectionPool
+    that is used across the "Process".
+    PROBLEM:
+    - On Linux (maybe not Windows) the new process is made via a fork(), so we may end up
+      attempting to reuse "stale" connections from the parent...
+      IDEALLY: Process creation should look like this:
+          Process = fork()
+          if child:
+              # Close "stale" parent connections
+              TracesConnectionPool.closeall()
+          else:
+              # Parent continues to use its pool.
+              pass
+
+    This class implements a programming pattern to handle this:
+
+    with GetConnectionPool(# Arguments for creating SQL connection object.
+                           host=..., user=..., password=...,
+                           maxconn=5,
+                           new_process=True) as conn_pool:
+
+        # NOTE: nested functions/classes can use the same "with" pattern;
+        # the returned pool will be identical.
+        # The pool will be closed when the root "with GetConnectionPool" exits.
+
+        conn = conn_pool.getconn()
+        # ... use conn as usual ...
+        # If you forget to call this, the pool will STILL be terminated
+        # after exiting the "with GetConnectionPool".
+        conn_pool.putconn(conn)
+
+
+    # Code that ASSUMES a pool has been created externally for it:
+    conn = GetConnection(host=..., user=..., password=...)
+    PutConnection(conn,
+        host=..., user=..., password=...)
+
+    :param maxconn
+        Anything above 5 sounds like a connection leak to me based on my usage.
+
+    """
+    def __init__(self, conn_kwargs, maxconn=5, close_eagerly=True, debug=False):
+        self.maxconn = maxconn
+        # (5 connections per pool)*(32 cores) == 160 connections >> 100 (default max postgres connections)...
+        # so lets close eagerly to prevent that.
+        self.close_eagerly = close_eagerly
+        self.debug = debug
+        self.conn_kwargs = conn_kwargs
+        self.free_connections = []
+        self.used_connections = []
+        self.closed = False
+
+    @property
+    def n_connections(self):
+        return len(self.used_connections)
+
+    def putconn(self, conn, from_conn=False):
+        assert not self.closed
+        assert conn in self.used_connections
+        self.used_connections.remove(conn)
+        if self.close_eagerly:
+            if not from_conn:
+                conn.close(from_pool=True)
+        else:
+            self.free_connections.append(conn)
+
+    def getconn(self):
+        assert not self.closed
+        assert self.n_connections <= self.maxconn
+        if len(self.free_connections) > 0:
+            conn = self.free_connections.pop()
+        else:
+            assert 'debug' not in self.conn_kwargs
+            conn = sql_create_connection(pool=self, **self.conn_kwargs, debug=self.debug)
+        self.used_connections.append(conn)
+        return conn
+
+    def closeall(self):
+        """
+        Close all the connections allocated in the pool.
+        If connections "leak out" from the pool scope, hopefully
+        we'll get an error when people attempt to use them(?)
+        """
+        for conn in self.used_connections:
+            conn.close(from_pool=True)
+        for conn in self.free_connections:
+            conn.close(from_pool=True)
+        self.used_connections = []
+        self.free_connections = []
+        self.closed = True
+        assert self.n_connections == 0
+
+    def __str__(self):
+        bldr = ToStringBuilder(obj=self)
+        for key, value in self.conn_kwargs.items():
+            bldr.add_param(key, value)
+
+        return bldr.to_string()
+
+    def __repr__(self):
+        return str(self)
+
 class SQLCategoryTimesReader:
     """
     Read category times format from SQLite database containing
@@ -2011,7 +2216,7 @@ class SQLCategoryTimesReader:
 
     def _maybe_create_conn(self):
         if self._conn is None:
-            self._conn = sql_create_connection(self.db_path, host=self.host, user=self.user, password=self.password, debug=self.debug or self.debug_ops)
+            self._conn = get_sql_connection(db_path=self.db_path, host=self.host, user=self.user, password=self.password, debug=self.debug or self.debug_ops)
 
     def close(self):
         if self._conn is not None:
@@ -3670,7 +3875,7 @@ def sql_compose_inequality(ineq_symbol, exprs, tautology_pairs=[], indents=None)
     sql_expr_indented = maybe_indent(sql_expr_bracketed, indents)
     return sql_expr_indented
 
-def sql_create_connection(db_path, host=None, user=None, password=None, debug=False):
+def sql_get_conn_kwargs(db_path, host=None, user=None, password=None, debug=False):
     if host is None:
         if 'IML_POSTGRES_HOST' in os.environ:
             host = os.environ['IML_POSTGRES_HOST']
@@ -3694,9 +3899,44 @@ def sql_create_connection(db_path, host=None, user=None, password=None, debug=Fa
         logging.info("Using DB_HOST = {host}".format(host=host))
 
     if py_config.SQL_IMPL == 'psql':
-        return TracesPostgresConnection(db_path, host=host, user=user, password=password)
+        # TracesPostgresConnection(db_path, host=host, user=user, password=password)
+        return {
+            'db_config_path': db_path,
+            'host': host,
+            'user': user,
+            'password': password,
+        }
     elif py_config.SQL_IMPL == 'sqlite':
-        return TracesSQLiteConnection(db_path, host=host)
+        # TracesSQLiteConnection(db_path, host=host)
+        return {
+            'db_path': db_path,
+            'host': host,
+        }
+    raise NotImplementedError("Not sure how to create connection for SQL_IMPL={impl}".format(
+        impl=py_config.SQL_IMPL))
+
+def get_sql_connection(db_path, host=None, user=None, password=None, debug=False):
+    """
+    Make it easy to enable/disable connection pooling.
+    """
+    if USE_CONNECTION_POOLING:
+        conn = ConnectionPoolManager.current_connection_pool(db_path=db_path, host=host, user=user, password=password, debug=debug).getconn()
+        return conn
+    else:
+        conn = sql_create_connection(db_path=db_path, host=host, user=user, password=password, debug=debug)
+        return conn
+
+def sql_create_connection(db_path, host=None, user=None, password=None, debug=False, pool=None):
+    conn_kwargs = sql_get_conn_kwargs(
+        db_path,
+        host=host,
+        user=user,
+        password=password,
+        debug=debug)
+    if py_config.SQL_IMPL == 'psql':
+        return TracesPostgresConnection(**conn_kwargs, pool=pool)
+    elif py_config.SQL_IMPL == 'sqlite':
+        return TracesSQLiteConnection(**conn_kwargs, pool=pool)
     raise NotImplementedError("Not sure how to create connection for SQL_IMPL={impl}".format(
         impl=py_config.SQL_IMPL))
 
@@ -4928,26 +5168,6 @@ def sql_value_string(value):
     if type(value) == str:
         return '"{value}"'.format(value=value)
     return str(value)
-
-class ToStringBuilder:
-    def __init__(self, obj):
-        self.obj = obj
-        self.name_value_pairs = []
-
-    def add_param(self, name, value):
-        self.name_value_pairs.append((name, value))
-
-    def _val_string(self, val):
-        if type(val) == str:
-            return '"{val}"'.format(val=val)
-        return str(val)
-
-    def to_string(self):
-        return "{Klass}({params})".format(
-            Klass=self.obj.__class__.__name__,
-            params=', '.join([
-                "{name}={val}".format(name=name, val=self._val_string(val))
-                for name, val in self.name_value_pairs]))
 
 def test_merge_sorted():
 

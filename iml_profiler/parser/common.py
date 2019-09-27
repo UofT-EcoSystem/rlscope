@@ -2022,3 +2022,24 @@ def obj_from_row(Klass, row):
         if not hasattr(obj, attr):
             setattr(obj, attr, value)
     return obj
+
+class ToStringBuilder:
+    def __init__(self, obj):
+        self.obj = obj
+        self.name_value_pairs = []
+
+    def add_param(self, name, value):
+        self.name_value_pairs.append((name, value))
+
+    def _val_string(self, val):
+        if type(val) == str:
+            return '"{val}"'.format(val=val)
+        return str(val)
+
+    def to_string(self):
+        return "{Klass}({params})".format(
+            Klass=self.obj.__class__.__name__,
+            params=', '.join([
+                "{name}={val}".format(name=name, val=self._val_string(val))
+                for name, val in self.name_value_pairs]))
+

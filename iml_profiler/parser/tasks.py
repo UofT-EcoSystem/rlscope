@@ -22,7 +22,8 @@ from os.path import join as _j, abspath as _a, exists as _e, dirname as _d, base
 from iml_profiler.parser.tfprof import TotalTimeParser, TraceEventsParser
 from iml_profiler.parser.pyprof import PythonProfileParser, PythonFlameGraphParser, PythonProfileTotalParser
 from iml_profiler.parser.plot import TimeBreakdownPlot, PlotSummary, CombinedProfileParser, CategoryOverlapPlot, UtilizationPlot, HeatScalePlot
-from iml_profiler.parser.db import SQLParser
+from iml_profiler.parser.db import SQLParser, sql_input_path, GetConnectionPool
+from iml_profiler.parser import db
 from iml_profiler.parser.stacked_bar_plots import OverlapStackedBarPlot
 from iml_profiler.parser.common import print_cmd
 from iml_profiler.parser.cpu_gpu_util import UtilParser, UtilPlot
@@ -97,6 +98,10 @@ class IMLTask(luigi.Task):
         return luigi.LocalTarget(self._done_file)
 
     @property
+    def db_path(self):
+        return sql_input_path(self.iml_directory)
+
+    @property
     def _done_file(self):
         """
         e.g.
@@ -111,6 +116,7 @@ class IMLTask(luigi.Task):
         return self.__class__.__name__
 
     def mark_done(self, start_t, end_t):
+        # logging.info("MARK DONE @ {path}".format(path=self.output()))
         if self.skip_output:
             logging.info("> Skipping output={path} for task {name}".format(
                 path=self._done_file,
@@ -131,11 +137,38 @@ class IMLTask(luigi.Task):
                 sec=seconds,
             )), file=f)
 
+
+    @property
+    def maxconn(self):
+        """
+        Maximum number of concurrent postgres connection.
+
+        By default (and to detect connection leaks), only allow at most 1 postgres connection.
+        If a task/parser wants more, just override this with the exact amount.
+        """
+        return 1
+
     def iml_run(self):
         raise NotImplementedError("{klass} must override iml_run()".format(
             klass=self.__class__.__name__))
 
     def run(self):
+        if self.maxconn > 0 and db.USE_CONNECTION_POOLING:
+            # Create a postgres connection pool that allows at most maxconn connections
+            # in the entire python process.
+            with GetConnectionPool(conn_kwargs=dict(
+                db_path=self.db_path,
+                host=self.postgres_host,
+                user=self.postgres_user,
+                password=self.postgres_password,
+            ), maxconn=self.maxconn, new_process=True) as pool:
+                self._run_with_pool()
+        else:
+            # DON'T create a postgres connection pool.
+            self._run_with_pool()
+
+
+    def _run_with_pool(self):
         start_t = datetime.datetime.now()
         self.iml_run()
         end_t = datetime.datetime.now()
