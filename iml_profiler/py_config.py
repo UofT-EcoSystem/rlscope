@@ -52,6 +52,12 @@ DEBUG_SPLIT_STACK_OPS = False
 # If True, skip inserting any profiling-overhead events.
 DEBUG_SKIP_PROFILING_OVERHEAD = False
 
+# If True, then log all calls into libsample_cuda_api.so
+# DEBUG_SAMPLE_CUDA_API = True
+
+# If True, then log all calls into a wrapped library (e.g. TensorFlow, simulator, etc.).
+# DEBUG_C_LIB_CALLS = True
+
 # In case docker causes different runtime behaviour, we can use this switch.
 #
 # Current issues:

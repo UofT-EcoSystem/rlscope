@@ -245,7 +245,7 @@ class UtilizationSampler:
 
                 machine_cpu_info = MachineProcessCPUInfo(self.pid)
                 cpu_util = sample_cpu_utilization(machine_cpu_info)
-                machine_gpu_info = nvidia_gpu_query.MachineGPUInfo()
+                machine_gpu_info = nvidia_gpu_query.MachineGPUInfo(debug=self.debug)
                 gpu_utils = sample_gpu_utilization(machine_gpu_info, self.pid, debug=self.debug)
                 if self.debug:
                     logging.info("> {klass}: utils = \n{utils}".format(

@@ -39,10 +39,12 @@ Globals::Globals() {
   VLOG(1) << "Initialize globals\n"
           << "  CMD = " << cmdline;
 
+
+//  VLOG(1) << "SKIP creating device_tracer";
   device_tracer = tensorflow::CreateDeviceTracer();
   auto IML_TRACE_AT_START = getenv("IML_TRACE_AT_START");
   VLOG(0) << "IML_TRACE_AT_START = " << IML_TRACE_AT_START;
-  if (env_is_on("IML_TRACE_AT_START", false, true)) {
+  if (device_tracer && env_is_on("IML_TRACE_AT_START", false, true)) {
     VLOG(0) << "Starting tracing at program start (export IML_TRACE_AT_START=yes)";
     status = device_tracer->Start();
     MAYBE_LOG_ERROR(LOG(INFO), "DeviceTracerImpl::Start()", status);
@@ -64,10 +66,11 @@ Globals::~Globals() {
 //  myfile << "Writing this to a file.\n";
 //  myfile.close();
 
-  if (device_tracer->IsEnabled()) {
+  if (device_tracer && device_tracer->IsEnabled()) {
     VLOG(FATAL) << "Looks like DeviceTracer was still running... "
                 << "please call sample_cuda_api.disable_tracing() in python BEFORE exiting to avoid stranger behavior in C++ destructors during library unload.";
   }
+
   // Dump CUDA API call counts and total CUDA API time to a protobuf file.
 //    device_tracer->Collect();
 }

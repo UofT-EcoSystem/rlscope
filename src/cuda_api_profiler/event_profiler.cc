@@ -12,8 +12,11 @@
 
 #include "tensorflow/core/platform/logging.h"
 #include "tensorflow/core/platform/env.h"
+#include <unistd.h>
 #include <sys/syscall.h>
 #define gettid() syscall(SYS_gettid)
+
+#include <fstream>
 
 //#define EVENT_PROFILER_MAX_RECORDS_PER_DUMP 1000
 // 1000 -> 28kb per proto.

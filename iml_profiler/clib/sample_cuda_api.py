@@ -6,6 +6,7 @@ from iml_profiler.parser.common import *
 from ctypes import *
 
 from iml_profiler.profiler import iml_logging
+from iml_profiler import py_config
 iml_logging.setup_logging()
 
 TF_OK = 0
@@ -104,6 +105,22 @@ def load_library(allow_fail=None):
     _so.record_event.restype = c_int
     # _set_api_wrapper('record_event')
 
+    _so.record_overhead_event.argtypes = [ c_char_p, c_int ]
+    _so.record_overhead_event.restype = c_int
+    # _set_api_wrapper('record_overhead_event')
+
+    _so.record_overhead_event_for_operation.argtypes = [ c_char_p, c_char_p, c_int ]
+    _so.record_overhead_event_for_operation.restype = c_int
+    # _set_api_wrapper('record_overhead_event_for_operation')
+
+    _so.push_operation.argtypes = [ c_char_p ]
+    _so.push_operation.restype = c_int
+    # _set_api_wrapper('push_operation')
+
+    _so.pop_operation.argtypes = []
+    _so.pop_operation.restype = c_int
+    # _set_api_wrapper('pop_operation')
+
     _so.await_dump.argtypes = []
     _so.await_dump.restype = c_int
     _set_api_wrapper('await_dump')
@@ -187,6 +204,11 @@ def pop_operation():
     if ret != TF_OK:
         raise IMLProfError(ret)
     return ret
+
+
+#
+# API wrapper helpers.
+#
 
 class IMLProfError(Exception):
     def __init__(self, errcode):

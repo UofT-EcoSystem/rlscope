@@ -255,9 +255,6 @@ gather_sources(PY_INTERFACE_LIB_SOURCES PY_INTERFACE_LIB_DIRS)
 #    add_executable(cupti_dummy ${CUPTI_SOURCES})
 #endif()
 
-message("Sources = ${SOURCES}")
-message("Test sources = ${TEST_SOURCES}")
-
 #add_executable(dummy ${SOURCES})
 
 if(IS_WINDOWS)
@@ -312,8 +309,6 @@ protobuf_generate_cpp(PROTO_SRCS PROTO_HDRS
         iml_profiler/protobuf/iml_prof.proto
         iml_profiler/protobuf/pyprof.proto
         )
-message("> PROTO_SRCS = ${PROTO_SRCS}")
-message("> PROTO_HDRS = ${PROTO_HDRS}")
 
 #protobuf_generate_cpp(PROTO_SRCS PROTO_HDRS EXPORT_MACRO DLL_EXPORT foo.proto)
 #protobuf_generate_python(PROTO_PY foo.proto)
@@ -338,9 +333,8 @@ if (ENABLE_DQN_CPP)
             )
 endif()
 
-set(SAMPLE_CUDA_API_DIRS
+set(CUDA_PROF_DIRS
         ./src/cuda_api_profiler
-        ${TF_SRC_DIRS}
         )
 if(IS_WINDOWS)
     include_directories(./windows_includes/CUPTI/include)
@@ -350,8 +344,7 @@ else()
     include_directories(/usr/local/cuda/include)
 endif()
 
-message("> TF_SOURCES = ${TF_SOURCES}")
-gather_sources(SAMPLE_CUDA_API_SOURCES SAMPLE_CUDA_API_DIRS)
+gather_sources(CUDA_PROF_SRCS CUDA_PROF_DIRS)
 
 if(IS_WINDOWS)
     # Include headers generated from protobuf files.
@@ -360,15 +353,24 @@ endif()
 
 # https://github.com/bombela/backward-cpp/tree/84ae4f5e80381aca765a0810d4c811acae3cd7c7#configuration--dependencies
 
+message("> CUDA_PROF_SRCS = ${CUDA_PROF_SRCS}")
+message("> TF_SOURCES = ${TF_SOURCES}")
+message("> PROTO_SRCS = ${PROTO_SRCS}")
+message("> PROTO_HDRS = ${PROTO_HDRS}")
+message("> BACKWARD_ENABLE = ${BACKWARD_ENABLE}")
+
 set(SAMPLE_CUDA_API_SOURCES
-        ${SAMPLE_CUDA_API_SOURCES}
         ${TF_SOURCES}
-        ${PROTO_SRCS} ${PROTO_HDRS}
         # Add SIGSEGV handler that prints out stack-trace.
         # NOTE: For some reason this doesn't always work and gdb is required to debug...
         # I think that's because the program being executed overrides the SIGSEGV handler
         # (which is FINE, as long as backward-cpp doesn't override the application handler).
-        ${BACKWARD_ENABLE})
+        ${BACKWARD_ENABLE}
+        ${PROTO_SRCS} ${PROTO_HDRS}
+        ${CUDA_PROF_SRCS}
+        )
+message("> SAMPLE_CUDA_API_SOURCES = ${SAMPLE_CUDA_API_SOURCES}")
+
 if (NOT WITH_CUDA_LD_PRELOAD)
     message("> WITH_CUDA_LD_PRELOAD not set; don't compile cuda_ld_preload.cc")
 
@@ -387,8 +389,8 @@ add_dependencies(sample_cuda_api double_conversion)
 add_backward(sample_cuda_api)
 
 target_link_libraries(sample_cuda_api PRIVATE ${Protobuf_LIBRARIES})
-message("> PROTO_SRCS = ${PROTO_SRCS}")
-message("> PROTO_HDRS = ${PROTO_HDRS}")
+#message("> PROTO_SRCS = ${PROTO_SRCS}")
+#message("> PROTO_HDRS = ${PROTO_HDRS}")
 #absl::synchronization
 target_link_libraries(sample_cuda_api PRIVATE
         absl::base
@@ -396,7 +398,7 @@ target_link_libraries(sample_cuda_api PRIVATE
         absl::memory)
 target_link_libraries(sample_cuda_api PRIVATE nsync)
 target_link_libraries(sample_cuda_api PRIVATE nsync_cpp)
-target_link_libraries(sample_cuda_api PUBLIC pthread)
+target_link_libraries(sample_cuda_api PRIVATE pthread)
 #target_include_directories(sample_cuda_api PRIVATE ${DOUBLE_CONVERSION_INCLUDE_DIRS})
 target_include_directories(sample_cuda_api PRIVATE ${double_conversion_INCLUDE_DIR})
 #target_link_libraries(sample_cuda_api ${DOUBLE_CONVERSION_LIBRARY})
@@ -455,7 +457,7 @@ if(NOT IS_WINDOWS)
 ##    target_link_libraries(sample_cuda_api ${Boost_LIBRARIES})
 
     find_package(Backtrace REQUIRED)
-    target_link_libraries(sample_cuda_api PUBLIC ${Backtrace_LIBRARY})
+    target_link_libraries(sample_cuda_api PRIVATE ${Backtrace_LIBRARY})
     target_include_directories(sample_cuda_api PRIVATE ${Backtrace_INCLUDE_DIR})
 
 endif()
@@ -521,9 +523,44 @@ set_target_properties(sample_cuda_api PROPERTIES CXX_VISIBILITY_PRESET hidden)
 
 # For static libraries we link to, DON'T expose ANY of their symbols.
 set(HIDE_LINKED_LIB_SYMS_FLAGS "-Wl,--exclude-libs,ALL")
-#AddFlags(sample_cuda_api COMPILE_FLAGS ${HIDE_LINKED_LIB_SYMS_FLAGS})
 AddFlags(sample_cuda_api LINK_FLAGS ${HIDE_LINKED_LIB_SYMS_FLAGS})
 
+
+#
+# !!IMPORTANT!!
+#
+# See we re-used some tensorflow code, we also reused libraries like "absl".
+# Sadly, the absl static libraries export weak symbols.
+# When we use LD_PRELOAD, those weak symbols will OVERRIDE the absl library
+# that tensorflow uses internally.
+# This CAN and DOES cause segfaults
+# (when absl versions of libsample_cuda_api.so don't match tensorflow.so).
+# What makes it extra fun is that the stacktrace we get tells us NOTHING
+# about this.
+# Also, using "hidden" visibility is INSUFFICIENT for solving this, since
+# static library symbols still get "absorbed" by the final linked
+# shared library.
+# Only way around this is the linker version script.
+#
+# TLDR: we NEED a "linker version script" that explicitly says to make all
+# symbols local, except:
+# sample_cuda_api.py API symbols:
+#   - setup, print, set_metadata, enable_tracing, is_enabled, disable_tracing, async_dump, await_dump, record_event, record_overhead_event, record_overhead_event_for_operation, push_operation, pop_operation
+# CUDA API calls we intercept:
+#   - cudaLaunchKernel, cudaMemcpyAsync, cudaMalloc, cudaFree
+#
+# Useful resources:
+# - Stackoverflow question describing our exact issue in simplified form:
+#   https://stackoverflow.com/questions/22102470/link-a-static-library-to-a-shared-library-and-hide-exported-symbols
+# - Linker script syntax:
+#   https://ftp.gnu.org/old-gnu/Manuals/ld-2.9.1/html_node/ld_25.html
+# - Discussion about hidden visibility:
+#   https://labjack.com/news/simple-cpp-symbol-visibility-demo
+#
+set(LD_VERSION_SCRIPT ${PROJECT_SOURCE_DIR}/src/ld.version)
+set(VERSION_LD_SCRIPT_FLAGS "-Wl,--version-script=${LD_VERSION_SCRIPT}")
+AddFlags(sample_cuda_api LINK_FLAGS "${VERSION_LD_SCRIPT_FLAGS}")
+AddFlags(sample_cuda_api LINK_DEPENDS "${LD_VERSION_SCRIPT}")
 
 ##https://stackoverflow.com/questions/36662920/xcode-clang-link-build-dynamic-framework-or-dylib-not-embed-dependencies
 #set(TARGET "sample_cuda_api")
@@ -624,3 +661,6 @@ configure_file(normalized_car_features.csv ${CMAKE_CURRENT_BINARY_DIR}/normalize
 if(MSVC)
     target_compile_definitions(main PRIVATE COMPILER_MSVC)
 endif(MSVC)
+
+set(COMPILE_FLAGS_HIDDEN_VISIBILITY "-fvisibility=hidden")
+AddFlags(sample_cuda_api COMPILE_FLAGS ${COMPILE_FLAGS_HIDDEN_VISIBILITY})

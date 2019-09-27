@@ -12,6 +12,8 @@
 
 #define CONFIG_TRACE_STATS
 
+#include <fstream>
+
 namespace tensorflow {
 
 #define CUPTI_CALL(call)                                            \

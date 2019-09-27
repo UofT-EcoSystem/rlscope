@@ -200,7 +200,12 @@ void CUDAAPIProfiler::ApiCallback(
     {
       mutex_lock l(_mu);
       if (cb_site == CUPTI_API_EXIT) {
+        // After cudaLaunchKernel
         auto const& active_operation = _op_stack.ActiveOperation();
+        if (active_operation == "") {
+          return;
+        }
+
         // _op_stack.RecordOverheadEvent("cuda_api_interception", 1);
         auto start_us = _state._start_t.at(api_key);
         if (_state._event_recording) {
@@ -229,32 +234,10 @@ void CUDAAPIProfiler::ApiCallback(
         // _state._end_t[api_key] = now_us;
         end_t = now_us;
       } else if (cb_site == CUPTI_API_ENTER) {
+        // Before cudaLaunchKernel
         _state._start_t[api_key] = Env::Default()->NowMicros();
       }
     }
-
-//    // This code will JUST capture the time spent in the CUDA API call when measuring time.
-//    // In particular, it WON'T include "profile-book-keeping" overhead in the measurement.
-//    {
-//      mutex_lock l(_mu);
-//      if (cb_site == CUPTI_API_EXIT) {
-//        auto now_us = Env::Default()->NowMicros();
-//        auto start_us = _state._start_t.at(api_key);
-//        if (_state._event_recording) {
-//           auto duration_us = end_us - start_us;
-//          _state._events.emplace_back(api_key, start_us, duration_us);
-//        }
-//        auto& api_stats = _state._api_stats[api_key];
-//        auto& end_t = _state._end_t[api_key];
-//        auto end_us = now_us;
-//        api_stats.AddCall(start_us, end_us);
-//        end_t = now_us;
-//      } else if (cb_site == CUPTI_API_ENTER) {
-//        _state._start_t[api_key] = Env::Default()->NowMicros();
-//      }
-//    }
-
-
 
   }
 }

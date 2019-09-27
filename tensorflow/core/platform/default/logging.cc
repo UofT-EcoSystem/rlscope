@@ -99,13 +99,14 @@ void LogMessage::GenerateLogMessage() {
   // IML: Add thread-id to log statement.
   pid_t tid = gettid();
   if (ShouldPrintStacktrace()) {
+
 //    std::string stacktrace = CurrentStackTrace();
-//    std::string stacktrace = boost::stacktrace::to_string(boost::stacktrace::stacktrace());
+////    std::string stacktrace = boost::stacktrace::to_string(boost::stacktrace::stacktrace());
 //    fprintf(stderr, "tid=%d %s.%06d: %c %s:%d] %s\n%s\n", tid, time_buffer, micros_remainder,
 //            "IWEF"[severity_], fname_, line_, str().c_str(), stacktrace.c_str());
+
     fprintf(stderr, "tid=%d %s.%06d: %c %s:%d] %s\n", tid, time_buffer, micros_remainder,
             "IWEF"[severity_], fname_, line_, str().c_str());
-
     BackwardDumpStacktrace(4);
 
   } else {

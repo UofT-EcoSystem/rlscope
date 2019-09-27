@@ -140,7 +140,7 @@ RetCode SAMPLE_CUDA_API_EXPORT print() {
 
 RetCode SAMPLE_CUDA_API_EXPORT set_metadata(const char* directory, const char* process_name, const char* machine_name, const char* phase_name) {
   VLOG(1) << __func__
-          << "directory = " << directory
+          << ", " << "directory = " << directory
           << ", " << "process_name = " << process_name
           << ", " << "machine_name = " << machine_name
           << ", " << "phase_name = " << phase_name;

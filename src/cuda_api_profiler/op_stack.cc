@@ -195,16 +195,26 @@ void OpStack::AwaitDump() {
 }
 
 std::string OpStack::ActiveOperation() {
+//  VLOG(1) << "OpStack." << __func__ << ", size() == " << _state._operation_stack.size();
+  mutex_lock lock(_mu);
+  if (_state._operation_stack.size() == 0) {
+    // It's possible (though strange) to run GPU kernels without an operation active.
+    return "";
+  }
   DCHECK(_state._operation_stack.size() > 0);
   auto const& operation = _state._operation_stack.back();
   return operation;
 }
 void OpStack::PushOperation(const std::string& operation) {
+//  VLOG(1) << "OpStack." << __func__ << ", operation=" << operation;
+  mutex_lock lock(_mu);
   _state._operation_stack.push_back(operation);
 }
 void OpStack::RecordOverheadEvent(
     const std::string& overhead_type,
     int64 num_events) {
+//  VLOG(1) << "OpStack." << __func__ << ", overhead_type=" << overhead_type << ", num_events = " << num_events;
+  mutex_lock lock(_mu);
   DCHECK(_state._operation_stack.size() > 0);
   DCHECK(_state._phase_name != "");
   auto const& operation = _state._operation_stack.back();
@@ -214,11 +224,15 @@ void OpStack::RecordOverheadEventForOperation(
     const std::string& overhead_type,
     const std::string& operation,
     int64 num_events) {
+//  VLOG(1) << "OpStack." << __func__ << ", overhead_type = " << overhead_type << ", operation=" << operation << ", num_events = " << num_events;
+  mutex_lock lock(_mu);
   DCHECK(_state._phase_name != "");
   _state._overhead_events[overhead_type][_state._phase_name][operation].num_events += num_events;
 }
 
 void OpStack::PopOperation() {
+//  VLOG(1) << "OpStack." << __func__ << ", size() == " << _state._operation_stack.size();
+  mutex_lock lock(_mu);
   DCHECK(_state._operation_stack.size() > 0);
   _state._operation_stack.pop_back();
 }

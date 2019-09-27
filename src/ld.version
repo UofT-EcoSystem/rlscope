@@ -1,0 +1,32 @@
+SAMPLE_CUDA_API_1.0 {
+  global:
+    /* sample_cuda_api.py python API calls */
+    setup;
+    print;
+    set_metadata;
+    enable_tracing;
+    is_enabled;
+    disable_tracing;
+    async_dump;
+    await_dump;
+    record_event;
+    record_overhead_event;
+    record_overhead_event_for_operation;
+    push_operation;
+    pop_operation;
+
+    /* CUDA API calls that we intercept */
+    cudaLaunchKernel;
+    cudaMemcpyAsync;
+    cudaMalloc;
+    cudaFree;
+
+  /* Hide ALL other symbols.
+   *
+   * In particular, hide weakly defined symbols that originate
+   * from statically linked libraries (e.g. absl) that may accidentally
+   * override symbols in tensorflow's library and cause a segfault that
+   * is impossible to trace.
+   */
+  local: *;
+};
