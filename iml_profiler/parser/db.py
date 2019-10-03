@@ -939,11 +939,13 @@ class CSVInserter:
                  host=None,
                  user=None,
                  password=None,
+                 cursor=None,
                  csv_path=None,
                  debug=False):
         self.host = host
         self.user = user
         self.password = password
+        self.cursor = cursor
         self.db_path = db_path
         self.table = table
         self.block_size = block_size
@@ -992,7 +994,9 @@ class CSVInserter:
             os.chmod(self.tmp_path, 0o664)
             self.tmp_f = os.fdopen(self.tmp_f, mode='w')
 
-        self.conn = get_sql_connection(db_path=self.db_path, host=self.host, user=self.user, password=self.password, debug=self.debug)
+        if self.cursor is None:
+            self.conn = get_sql_connection(db_path=self.db_path, host=self.host, user=self.user, password=self.password, debug=self.debug)
+            self.cursor = self.conn.cursor
 
         self.process_to_id = self.build_name_to_id('Process', 'process_id', 'process_name')
         self.phase_to_id = self.build_name_to_id('Phase', 'phase_id', 'phase_name')
@@ -1000,9 +1004,9 @@ class CSVInserter:
         self.device_to_id = self.build_name_to_id('Device', 'device_id', 'device_name')
         self.machine_to_id = self.build_name_to_id('Machine', 'machine_id', 'machine_name')
 
-    @property
-    def cursor(self):
-        return self.conn.cursor
+    # @property
+    # def cursor(self):
+    #     return self.conn.cursor
 
     def build_name_to_id(self, table, id_field, name_field):
         c = self.cursor
@@ -1096,10 +1100,16 @@ class CSVInserter:
         self.close()
 
     def close(self):
-        self.conn.close()
+        # Q: Should we do this...? If someone passes a cursor to us, we'd like THEM to manage its lifetime...
+        # If someone doesn't pass a cursor to us, then self.conn.close() will take care of closing it.
+        # if self.cursor is not None:
+        #     self.cursor.close()
+        if self.conn is not None:
+            self.conn.close()
 
     def commit(self):
-        self.conn.commit()
+        if self.conn is not None:
+            self.conn.commit()
 
     def _csv_val(self, val):
         if val is None:
@@ -1334,6 +1344,7 @@ class TracesPostgresConnection:
         self.pg_cursor = None
         self.keep_alive = keep_alive
         self.pool = pool
+        self._cursors = []
 
     @property
     def _pool_closed(self):
@@ -1377,73 +1388,11 @@ class TracesPostgresConnection:
         return self._conn
 
     def insert_csv(self, csv_path, table):
-        def build_copy_from_sql():
-            with open(csv_path) as f:
-                header = f.readline()
-                header = re.split(r',', header)
-            col_str = ", ".join(header)
-            # NOTE: When you tell postgres to execute "COPY FROM $path" it expects $path to be available on the same machine as postgres is running.
-            # So, this won't work if postgres is containerized ($path isn't accessible).
-            # Hence, we use psql + "COPY FROM STDIN" instead.
-            copy_from_sql = textwrap.dedent("""\
-            COPY {table} ({col_str})
-            FROM STDIN
-            DELIMITER ',' CSV HEADER;
-            """.format(
-                col_str=col_str,
-                table=table,
-            ))
-            return copy_from_sql
-
-        copy_from_sql = build_copy_from_sql()
-        cmd_kwargs = self._psql_cmd_args(self.db_name, command=copy_from_sql)
-        # Q: Do we need to disable foreign key checks?
-        with open(csv_path, 'r') as f:
-            subprocess.check_call(stdin=f, **cmd_kwargs)
-
-    def _psql_cmd_args(self, db_name, command=None):
-        """
-        Construct args for running
-        $ psql ...
-
-        :param db_name:
-          Database name
-        :param command:
-          An SQL string to execute.
-
-          NOTE: this is the same as shell option:
-          $ psql --command
-        :return:
-        """
-
-        # subprocess.run(**kwargs)
-        kwargs = dict()
-
-        cmd = ['psql']
-
-        # Construct:
-        # $ psql [OPTION]... [DBNAME [USERNAME]]
-
-        if self.host is not None:
-            cmd.extend(['-h', self.host])
-
-        if self.user is not None:
-            cmd.extend(['-U', self.user])
-
-        if command is not None:
-            cmd.extend(['-c', command])
-
-        cmd.append(db_name)
-
-        # Pass psql password via environment variable.
-        env = dict(os.environ)
-        if self.password is not None:
-            env['PGPASSWORD'] = self.password
-
-        kwargs['args'] = cmd
-        kwargs['env'] = env
-
-        return kwargs
+        return psql_insert_csv(
+            csv_path, table, self.db_name,
+            host=self.host,
+            user=self.user,
+            password=self.password)
 
     def commit(self):
         if self._conn is None:
@@ -1463,6 +1412,21 @@ class TracesPostgresConnection:
             # isn't being managed by a ConnectionPool.
             self._maybe_close_db_connection()
             self._maybe_close_postgres_connection()
+
+    def get_cursor(self):
+        if self._conn is None:
+            self.create_connection()
+        cursor = self._conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        # Q: Will we still check if the connection is "still alive?"
+        # A: every time we fetch a cursor with "c = self.cursor" it calls self.create_connection;
+        # that's the point at which we will check if the connection is still alive.
+        # So, this is "just as good" as when we use "c = self.cursor".
+        self._cursors.append(cursor)
+        return cursor
+
+    def put_cursor(self, cursor):
+        cursor.close()
+        self._cursors.remove(cursor)
 
     @property
     def cursor(self):
@@ -1729,7 +1693,25 @@ class TracesPostgresConnection:
         tables = [row['tablename'] for row in rows]
         return tables
 
+    def _close_cursors(self):
+        for cursor in self._cursors:
+            cursor.close()
+        self._cursors.clear()
+
+    def with_cursors(self):
+        """
+        # Usage:
+        with conn.with_cursors():
+            c1 = conn.get_cursor()
+            c2 = conn.get_cursor()
+            ...
+        # c1 and c2 are automatically closed.
+        """
+        return CursorContext(conn=self)
+
     def _maybe_close_db_connection(self):
+        self._close_cursors()
+
         if self._cursor is not None:
             self._cursor.close()
             self._cursor = None
@@ -1811,6 +1793,16 @@ class TracesPostgresConnection:
             # raise RuntimeError to be compatiable with ForkedProcessPool
             raise RuntimeError("ERROR: failed to run sql file @ {path}; ret={ret}".format(
                 ret=proc.returncode, path=db_name))
+
+class CursorContext:
+    def __init__(self, conn):
+        self.conn = conn
+
+    def __enter__(self):
+        pass
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.conn._close_cursors()
 
 
 class TracesSQLiteConnection:
@@ -2697,6 +2689,7 @@ class SQLCategoryTimesReader:
                        machine_name=None,
                        start_time_us=None,
                        end_time_us=None,
+                       visible_overhead=False,
                        pre_reduce=None,
                        debug=DEFAULT_debug,
                        debug_memoize=False):
@@ -2829,6 +2822,7 @@ class SQLCategoryTimesReader:
                     bin_category_times_single_thread(
                         # process_name, proc_category_times,
                         process_category_times[machine_name][proc],
+                        visible_overhead=visible_overhead,
                         pre_reduce=pre_reduce,
                         # categories=categories, operation_types=operation_types,
                         category_times=category_times, debug=debug)
@@ -3505,6 +3499,7 @@ def bin_category_times(
     # process_name,
     category,
     events,
+    visible_overhead=False,
     pre_reduce=None,
     # categories=None,
     # operation_types=None,
@@ -3576,7 +3571,7 @@ def bin_category_times(
         # new_category = frozenset([cat, proc_category])
 
         # new_category = pre_reduce(category, event, process_name)
-        new_category = pre_reduce(category, event)
+        new_category = pre_reduce(category, event, visible_overhead)
         if new_category is None:
             # SKIP this event entirely.
             continue
@@ -3598,6 +3593,7 @@ def bin_category_times(
 def bin_category_times_single_thread(
     # process_name,
     proc_category_times,
+    visible_overhead=False,
     pre_reduce=None,
     # categories=None,
     # operation_types=None,
@@ -3629,6 +3625,7 @@ def bin_category_times_single_thread(
         category_times_i = bin_category_times(
             # process_name,
             category, events,
+            visible_overhead=visible_overhead,
             pre_reduce=pre_reduce,
             # categories=categories, operation_types=operation_types, category_times=None,
             category_times=None,
@@ -3747,6 +3744,76 @@ def _sqlite_traces_db_path(directory):
 def _psql_db_config_path(directory):
     return _j(directory, "psql_config.json")
 
+def psql_insert_csv(csv_path, table, db_name, host=None, user=None, password=None):
+    def build_copy_from_sql():
+        with open(csv_path) as f:
+            header = f.readline()
+            header = re.split(r',', header)
+        col_str = ", ".join(header)
+        # NOTE: When you tell postgres to execute "COPY FROM $path" it expects $path to be available on the same machine as postgres is running.
+        # So, this won't work if postgres is containerized ($path isn't accessible).
+        # Hence, we use psql + "COPY FROM STDIN" instead.
+        copy_from_sql = textwrap.dedent("""\
+        COPY {table} ({col_str})
+        FROM STDIN
+        DELIMITER ',' CSV HEADER;
+        """.format(
+            col_str=col_str,
+            table=table,
+        ))
+        return copy_from_sql
+
+    copy_from_sql = build_copy_from_sql()
+    cmd_kwargs = psql_cmd_args(db_name, command=copy_from_sql)
+    # Q: Do we need to disable foreign key checks?
+    with open(csv_path, 'r') as f:
+        subprocess.check_call(stdin=f, **cmd_kwargs)
+
+def psql_cmd_args(db_name, command=None, host=None, user=None, password=None):
+    """
+    Construct args for running
+    $ psql ...
+
+    :param db_name:
+      Database name
+    :param command:
+      An SQL string to execute.
+
+      NOTE: this is the same as shell option:
+      $ psql --command
+    :return:
+    """
+    assert db_name is not None
+
+    # subprocess.run(**kwargs)
+    kwargs = dict()
+
+    cmd = ['psql']
+
+    # Construct:
+    # $ psql [OPTION]... [DBNAME [USERNAME]]
+
+    if host is not None:
+        cmd.extend(['-h', host])
+
+    if user is not None:
+        cmd.extend(['-U', user])
+
+    if command is not None:
+        cmd.extend(['-c', command])
+
+    cmd.append(db_name)
+
+    # Pass psql password via environment variable.
+    env = dict(os.environ)
+    if password is not None:
+        env['PGPASSWORD'] = password
+
+    kwargs['args'] = cmd
+    kwargs['env'] = env
+
+    return kwargs
+
 def sql_input_path(directory):
     if py_config.SQL_IMPL == 'psql':
         return _psql_db_config_path(directory)
@@ -3784,6 +3851,19 @@ def sql_exec_query(cursor, query, params=None, klass=None, debug=False):
     end_t = time.time()
     if debug:
         logging.info("> query took {sec} seconds".format(sec=end_t - start_t))
+
+def sql_count_from(cursor, sql_query, debug=False):
+    count_query = textwrap.dedent("""
+            SELECT COUNT(*) FROM (
+                {sql_query}
+            )
+            """).format(
+        sql_query=maybe_indent(sql_query, indents=1))
+    sql_exec_query(cursor, count_query, debug=debug)
+    row = cursor.fetchone()
+    assert len(row) == 1
+    count = row[0]
+    return count
 
 def sql_operator_in(expr, values, indents=None):
     """

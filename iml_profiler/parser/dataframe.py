@@ -423,7 +423,13 @@ class PyprofDataframeReader(BaseDataframeReader):
         """
         df = self.read()
         def is_intercepted_call_event(category):
-            return category not in {CATEGORY_OPERATION, CATEGORY_PYTHON}
+            # PROBLEM: If we add new categories of events, this will break.
+            # We already DID add new event categories: CATEGORY_PROF_...
+            # All we can really do keep track of a set of "CATEGORIES_C_EVENTS" that represent "Python -> C" interceptions.
+            # However, if we ever add 'custom categories' in the future, that approach will break.
+            # We should check for that somehow...
+            # return category not in {CATEGORY_OPERATION, CATEGORY_PYTHON}
+            return category in CATEGORIES_C_EVENTS
         was_intercepted_call_event = df['category'].apply(is_intercepted_call_event)
         intercepted_call_event_df = df[was_intercepted_call_event]
         total_intercepted_calls = len(intercepted_call_event_df)

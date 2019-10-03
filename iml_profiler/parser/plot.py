@@ -1941,6 +1941,7 @@ class ResourceOverlapPlotData:
                                            debug_single_thread=self.debug_single_thread,
                                            debug_ops=self.debug_ops)
 
+        raise NotImplementedError("Haven't bother to maintain this (e.g. visible_overhead argument).")
         operation_overlap, metadata = overlap_computer.compute_process_timeline_overlap(
             process_name=process_name,
             phase_name=phase_name,
@@ -2040,6 +2041,7 @@ class UtilizationPlot:
                  host=None,
                  user=None,
                  password=None,
+                 visible_overhead=False,
                  n_workers=1,
                  events_per_split=10000,
                  step_sec=1.,
@@ -2099,6 +2101,7 @@ class UtilizationPlot:
         self.sec_per_pixel = self.step_sec / float(self.pixels_per_square)
         self.debug = debug
         self.debug_single_thread = debug_single_thread
+        self.visible_overhead = visible_overhead
         if self.debug_single_thread:
             self.n_workers = 1
         else:
@@ -2266,6 +2269,7 @@ class UtilizationPlot:
 
         overlap, overlap_metadata = overlap_computer.compute_process_timeline_overlap(
             overlap_obj.pre_reduce,
+            visible_overhead=self.visible_overhead,
             machine_name=machine_name,
             process_name=process_name,
             phase_name=phase_name,
@@ -2277,7 +2281,7 @@ class UtilizationPlot:
         new_overlap = overlap
         # assert len(new_overlap) > 0
 
-        new_overlap, new_overlap_metadata = overlap_obj.post_reduce(new_overlap, overlap_metadata)
+        new_overlap, new_overlap_metadata = overlap_obj.post_reduce(new_overlap, overlap_metadata, self.visible_overhead)
         # assert len(new_overlap) > 0
 
         overlap_obj.dump_json_files(

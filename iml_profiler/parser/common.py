@@ -52,24 +52,35 @@ CATEGORY_PROF_CUPTI = 'Profiling: CUPTI'
 CATEGORY_PROF_LD_PRELOAD = 'Profiling: LD_PRELOAD'
 CATEGORY_PROF_PYTHON_ANNOTATION = 'Profiling: Python annotation'
 CATEGORY_PROF_PYTHON_INTERCEPTION = 'Profiling: Python interception'
-CATEGORIES_PROF = [
+CATEGORIES_PROF = {
     CATEGORY_PROF_CUPTI,
     CATEGORY_PROF_LD_PRELOAD,
     CATEGORY_PROF_PYTHON_ANNOTATION,
     CATEGORY_PROF_PYTHON_INTERCEPTION,
-]
+}
 
-CATEGORIES_ALL = [
+
+# Categories that represent C events during a "Python -> C" interception:
+#                                  T1       T2
+#                                  |        |
+#     [        Python.call        ][ C.call ][       Python.return         ]
+CATEGORIES_C_EVENTS = {
     CATEGORY_TF_API,
+    CATEGORY_SIMULATOR_CPP,
+}
+
+CATEGORIES_DEPRECATED = {
+    CATEGORY_UNKNOWN,
+    CATEGORY_DUMMY_EVENT,
+    CATEGORY_PYTHON_PROFILER,
+}
+
+CATEGORIES_ALL = {
     CATEGORY_PYTHON,
     CATEGORY_CUDA_API_CPU,
-    CATEGORY_UNKNOWN,
     CATEGORY_GPU,
-    CATEGORY_DUMMY_EVENT,
     CATEGORY_OPERATION,
-    CATEGORY_SIMULATOR_CPP,
-    CATEGORY_PYTHON_PROFILER,
-]
+}.union(CATEGORIES_C_EVENTS)
 
 DEFAULT_PHASE = 'default_phase'
 

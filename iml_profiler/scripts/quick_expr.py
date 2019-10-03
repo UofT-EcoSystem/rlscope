@@ -885,7 +885,20 @@ class ExprSubtractionValidation:
 
     @property
     def iterations(self):
-        iterations = [self.args.one_minute_iterations*(2**i) for i in range(self.args.num_runs)]
+
+        def iters_from_runs(runs):
+            iterations = [self.args.one_minute_iterations*(2**i) for i in runs]
+            return iterations
+
+        if self.args.only_runs is not None and len(self.args.only_runs) > 0:
+            runs = [run for run in range(self.args.num_runs) if run in self.args.only_runs]
+        else:
+            runs = list(range(self.args.num_runs))
+
+        logging.info("Runs: {msg}".format(
+            msg=pprint_msg(runs)))
+
+        iterations = iters_from_runs(runs)
         return iterations
 
     def get_iterations(self, config=None):
@@ -1086,6 +1099,17 @@ class ExprSubtractionValidation:
             '--num-runs',
             type=int,
             default=3)
+        parser.add_argument(
+            '--only-runs',
+            type=int,
+            nargs='*',
+            # action='append',
+            # default=[],
+            help=textwrap.dedent("""
+            For each configuration, we will run it for:
+              one_minute_iterations * 2**(i)
+              for i in --only-runs
+        """))
         parser.add_argument(
             '--long-run-exponent',
             type=int,

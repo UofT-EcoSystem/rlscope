@@ -25,6 +25,7 @@ from iml_profiler.parser.db import SQLCategoryTimesReader, CSVInserter, \
     sql_exec_query, \
     sql_operator_in, \
     sql_fetch_rows, \
+    sql_count_from, \
     ConnectionPoolManager, \
     get_sql_connection
 
@@ -2604,26 +2605,57 @@ class SQLOverheadEventsParser:
         #   delete overhead-events from previous run of SQLOverheadEventsParser.
         self.delete_profiling_events(c)
 
+        event_insert_cursor = self.conn.get_cursor()
         self.csv_inserter = CSVInserter(
             db_path=self.db_path, table='Event',
             host=self.host,
             user=self.user,
             password=self.password,
+            cursor=event_insert_cursor,
             debug=self.debug)
-        with self.csv_inserter:
+
+        # TODO: we want our queries to use a SEPARATE cursor, and we DON'T want to fetchall rows (we want to iterate over the cursor).
+        # Refactor:
+        # - we DON'T want to query all the rows at once (too much event data)
+        # - instead, we will iteratively fetch events from a cursor in "chunks"
+        # - we will push chunks onto a queue
+        # - workers will pull chunks from the queue, and process them
+        # - workers are responsible for inserting events
+        # Single-threaded version:
+        # - the same thread that pushes chunks, also needs to process chunks;
+        #   SOLUTION:
+        #   - special code-path for single-threaded mode (test with this first)
+        # Q: How to handle multiple Event insertions at the same time?
+        # A: We already did this in SQL parser; follow whatever it did, except
+        # now we send it a chunk of events instead of a path to a file to read from.
+
+        with self.conn.with_cursors(), self.csv_inserter:
             #
             # Insert overhead events.
             #
+            event_iter_cursor = self.conn.get_cursor()
 
             # Insert: Python annotations
-            op_events = self.query_op_events(c)
+            """
+            op_events = SQL:
+                select all from Event where e.category == CATEGORY_OPERATION
             for op in op_events:
-                # insert Event(
-                #     start=op.end,
-                #     duration=mean_pyprof_annotation_overhead_us,
-                #     category=CATEGORY_PROF_PYTHON_ANNOTATION)
+                insert Event(
+                    start=op.end,
+                    duration=mean_pyprof_annotation_overhead_us,
+                    category=CATEGORY_PROF_PYTHON_ANNOTATION)
+            """
+            op_events = self.query_op_events(event_iter_cursor)
+            logging.info("(1) Insert overhead events: Python annotations, num_events={n}".format(
+                n=len(op_events),
+            ))
+            per_pyprof_annotation_overhead_us = self.pyprof_overhead_json['mean_pyprof_annotation_overhead_per_call_us']
+            for op in op_events.each_row():
                 self.insert_overhead_event(
                     from_event=op,
+                    # Parent biased.
+                    start_time_us=op.end_time_usec,
+                    duration_us=per_pyprof_annotation_overhead_us,
                     prof_category=CATEGORY_PROF_PYTHON_ANNOTATION)
 
             # Insert: Python -> C-library interception
@@ -2636,32 +2668,65 @@ class SQLOverheadEventsParser:
                     duration=mean_pyprof_interception_overhead_us,
                     category=CATEGORY_PROF_PYTHON_INTERCEPTION)
             """
-            # PROBLEM: we CANNOT simply use _query_category_events(CATEGORY_PYTHON) since
-            # there are a couple of python events we insert that are NOT interception events (e.g. "Finishing ..." during end_operation).
-            # To figure out EXACTLY which python event to use, look at which python event is inserted during an interception, OR
-            # use the C++ event (PROBLEM: the category for those varies between simulator/tensorflow...)
-            python_events = self.query_python_events(c)
-            for op in python_events:
-                # insert Event(
-                #     start=op.end,
-                #     duration=mean_pyprof_annotation_overhead_us,
-                #     category=CATEGORY_PROF_PYTHON_ANNOTATION)
+            c_events = self.query_c_events(event_iter_cursor)
+            logging.info("(1) Insert overhead events: Python -> C-library interception, num_events={n}".format(
+                n=len(c_events),
+            ))
+            per_pyprof_interception_us = self.pyprof_overhead_json['mean_pyprof_interception_overhead_per_call_us']
+            for event in c_events.each_row():
                 self.insert_overhead_event(
-                    from_event=op,
-                    prof_category=CATEGORY_PROF_PYTHON_ANNOTATION)
-
+                    from_event=event,
+                    start_time_us=event.end_time_usec - per_pyprof_interception_us,
+                    duration_us=per_pyprof_interception_us,
+                    prof_category=CATEGORY_PROF_PYTHON_INTERCEPTION)
 
             # Insert: CUPTI & LD_PRELOAD
-            # Insert: CUPTI
-            # Insert: LD_PRELOAD
+            """
+            cuda_api_events = SQL:
+                select all from Event where e.category == CATEGORY_CUDA_API_CPU
+            for cuda_api_event cuda_api_events:
+                # Insert: CUPTI
+                insert Event(
+                    cuda_api_event.start_time,
+                    duration=mean_cupti_overhead_us[cuda_api_event.name],
+                    category=CATEGORY_PROF_CUPTI)
+                # Insert: LD_PRELOAD
+                insert Event(
+                    cuda_api.end_time,
+                    duration=mean_LD_PRELOAD_interception_overhead_us,
+                    category=CATEGORY_PROF_LD_PRELOAD)
+            """
+            cuda_api_events = self.query_cuda_api_events(event_iter_cursor)
+            logging.info("(1) Insert overhead events: CUPTI & LD_PRELOAD, num_events={n}".format(
+                n=len(cuda_api_events),
+            ))
+            per_LD_PRELOAD_interception_us = self.LD_PRELOAD_overhead_json['mean_interception_overhead_per_call_us']
+            for event in cuda_api_events.each_row():
+                cuda_api_name = event.event_name
+                cupti_overhead_us = self.cupti_overhead_json[cuda_api_name]['mean_cupti_overhead_per_call_us']
+                # Insert: CUPTI
+                self.insert_overhead_event(
+                    from_event=event,
+                    start_time_us=event.start_time_usec,
+                    duration_us=cupti_overhead_us,
+                    prof_category=CATEGORY_PROF_CUPTI)
+                # Insert: LD_PRELOAD
+                self.insert_overhead_event(
+                    from_event=event,
+                    start_time_us=event.end_time_usec,
+                    duration_us=per_LD_PRELOAD_interception_us,
+                    prof_category=CATEGORY_PROF_LD_PRELOAD)
 
-    def insert_overhead_event(self, from_event, prof_category):
+            self.conn.put_cursor(event_insert_cursor)
+            self.conn.put_cursor(event_iter_cursor)
+
+    def insert_overhead_event(self, from_event, start_time_us, duration_us, prof_category):
         assert prof_category in CATEGORIES_PROF
         return self.csv_inserter.insert_event(
             device_id=from_event.device_id, process_id=from_event.process_id, phase_id=from_event.process_id,
             category=prof_category,
-            start_time_us=from_event.start_time_usec,
-            duration_us=from_event.total_time_usec,
+            start_time_us=start_time_us,
+            duration_us=duration_us,
             # Inherit event name...?
             name=from_event.name,
             thread_id=from_event.thread_id,
@@ -2671,26 +2736,17 @@ class SQLOverheadEventsParser:
     def query_op_events(self, c):
         return self._query_category_events(c, category=CATEGORY_OPERATION)
 
+    def query_cuda_api_events(self, c):
+        return self._query_category_events(c, category=CATEGORY_CUDA_API_CPU)
+
     def _query_category_events(self, c, category):
         # TODO: if we wish to parallelize this, we can provide (event_id_lower_bound, event_id_upper_bound)
         # to limit the "paginate" the full query.  Note however that lower/upper bounds would be formed using a
         # single serial query; you can approximate the split using the min/max(event_id) or, precisely split by querying
         # all event_id's (RISK: could be large in memory size).
-        keep_Event_fields = [
-            'thread_id',
-            'process_id',
-            'phase_id',
-            'device_id',
-        ]
         select_query = textwrap.dedent("""
             SELECT
-                -- Use KernelTime.field_names
-                e.event_name as name,
-                e.start_time_usec as start_usec,
-                e.duration_us as time_usec,
-                -- Keep Event field for re-inserting overhead-event; 
-                --   We need these fields so that we can create a Event(category=CATEGORY_PROF_ANNOTATION, ...)
-                {keep_Event_fields}
+                {event_fields}
             FROM 
                 Event AS e
                 NATURAL JOIN Category AS c
@@ -2698,12 +2754,77 @@ class SQLOverheadEventsParser:
                 c.category_name = '{category}' 
             """).format(
             category=category,
-            keep_Event_fields=', '.join(["e.{field}".format(field=field) for field in keep_Event_fields]),
+            event_fields=self.sql_event_fields(event_alias='e', indents=1),
         )
-        sql_exec_query(c, select_query, klass=self.__class__, debug=self.debug)
-        rows = sql_fetch_rows(c, fetchall=False, debug=self.debug)
-        rows = [KernelTime.from_row(row) for row in rows]
+        rows = self._query_event_rows(c, select_query)
         return rows
+
+    def query_c_events(self, c, category):
+        """
+        NOTE: we CANNOT simply use _query_category_events(CATEGORY_PYTHON) since
+        there are a couple of python events we insert that are NOT interception events (e.g. "Finishing ..." during end_operation).
+        To figure out EXACTLY which python event to use, look at which python event is inserted during an interception, OR
+        use the C++ event (PROBLEM: the category for those varies between simulator/tensorflow...)
+
+        See: PyprofDataframeReader.total_intercepted_calls()
+
+        :param c:
+        :param category:
+        :return:
+        """
+        select_query = textwrap.dedent("""
+            SELECT
+                {event_fields}
+            FROM 
+                Event AS e
+                NATURAL JOIN Category AS c
+            WHERE 
+                {category_clause}
+            """).format(
+            category=category,
+            event_fields=self.sql_event_fields(event_alias='e', indents=1),
+            category_clause=sql_operator_in(expr='c.category', values=sorted(CATEGORIES_C_EVENTS), indents=1),
+        )
+        rows = self._query_event_rows(c, select_query)
+        return rows
+
+    def sql_event_fields(self, event_alias, indents=None):
+        """
+        SELECT e.field1, e.field2, ...
+               -----------------------
+               Return this part of a select statement.
+               Need at least these fields to generate "overhead events"
+        FROM Event AS e
+        WHERE
+            ...
+
+        :param c:
+        :param event_alias:
+        :return:
+        """
+        keep_Event_fields = [
+            'thread_id',
+            'process_id',
+            'phase_id',
+            'device_id',
+        ]
+        sql_events = textwrap.dedent("""
+            -- Use KernelTime.field_names
+            {e}.event_name as name,
+            {e}.start_time_usec as start_usec,
+            {e}.duration_us as time_usec,
+            -- Keep Event field for re-inserting overhead-event; 
+            --   We need these fields so that we can create a Event(category=CATEGORY_PROF_ANNOTATION, ...)
+            {keep_Event_fields}
+            """).format(
+            keep_Event_fields=', '.join(["{e}.{field}".format(e=event_alias, field=field) for field in keep_Event_fields]),
+        )
+        sql_events = maybe_indent(sql_events, indents)
+        return sql_events
+
+    def _query_event_rows(self, c, select_query, fetchall=False):
+        row_iter = RowIterator(select_query, cursor=c, RowKlass=KernelTime, debug=self.debug)
+        return row_iter
 
     def delete_profiling_events(self, c):
         prof_clause = sql_operator_in('c.category_name', values=CATEGORIES_PROF, indents=1)
@@ -2736,4 +2857,51 @@ class SQLOverheadEventsParser:
             )
         sql_exec_query(c, delete_query, klass=self.__class__, debug=self.debug)
 
+class RowIterator:
+    def __init__(self, select_query, cursor, RowKlass=None, debug=False):
+        self.select_query = select_query
+        self.cursor = cursor
+        self.debug = debug
+        self.RowKlass = RowKlass
+        self.count = None
+        self._iterating_rows = False
 
+    def _run_select(self):
+        sql_exec_query(self.cursor, self.select_query, klass=self.__class__, debug=self.debug)
+        rows = sql_fetch_rows(self.cursor,
+                              # Iterate over cursor.
+                              fetchall=False, debug=self.debug)
+
+        # Should be a cursor, not a list of rows.
+        assert type(rows) != list
+        assert rows == self.cursor
+
+        return rows
+
+    def each_row(self):
+        # Make it so user can ask for length of query whenever (even inside loop)
+        # NOTE: hopefully this isn't expensive...
+        self._maybe_fetch_count()
+        assert not self._iterating_rows
+        self._iterating_rows = True
+        rows = self._run_select()
+        for row in rows:
+            if self.RowKlass is not None:
+                obj = self.RowKlass.from_row(row)
+            else:
+                obj = row
+            yield obj
+        self._iterating_rows = False
+
+    def _maybe_fetch_count(self):
+        if self.count is not None:
+            return self.count
+        # We use the same cursor to iterate over rows as we do to get a count.
+        # Make sure we don't try to get a count while iterating over rows.
+        assert not self._iterating_rows
+        self.count = sql_count_from(self.cursor, self.select_query)
+        return self.count
+
+    def __len__(self):
+        self._maybe_fetch_count()
+        return self.count

@@ -29,7 +29,7 @@ from iml_profiler.parser.common import print_cmd
 from iml_profiler.parser.cpu_gpu_util import UtilParser, UtilPlot
 from iml_profiler.parser.training_progress import TrainingProgressParser, ProfilingOverheadPlot
 from iml_profiler.parser.extrapolated_training_time import ExtrapolatedTrainingTimeParser
-from iml_profiler.parser.profiling_overhead import CallInterceptionOverheadParser, CUPTIOverheadParser, CUPTIScalingOverheadParser, CorrectedTrainingTimeParser, PyprofOverheadParser, TotalTrainingTimeParser
+from iml_profiler.parser.profiling_overhead import CallInterceptionOverheadParser, CUPTIOverheadParser, CUPTIScalingOverheadParser, CorrectedTrainingTimeParser, PyprofOverheadParser, TotalTrainingTimeParser, SQLOverheadEventsParser
 from iml_profiler import py_config
 
 from iml_profiler.parser.common import *
@@ -67,6 +67,14 @@ def get_IML_TASKS():
 def get_username():
     return pwd.getpwuid(os.getuid())[0]
 
+param_visible_overhead = luigi.BoolParameter(
+    description=textwrap.dedent("""\
+        If true, make profiling overhead visible during iml-drill.  
+        If false (and calibration files are given), then subtract overhead 
+        making it 'invisible' in iml-drill"""),
+    default=False,
+    parsing=luigi.BoolParameter.EXPLICIT_PARSING)
+
 param_postgres_password = luigi.Parameter(description="Postgres password; default: env.PGPASSWORD", default=None)
 param_postgres_user = luigi.Parameter(description="Postgres user", default=None)
 param_postgres_host = luigi.Parameter(description="Postgres host", default=None)
@@ -79,9 +87,47 @@ param_debug_memoize = luigi.BoolParameter(description=textwrap.dedent("""
         Memoize reading/generation of files to accelerate develop/test code iteration.
         """))
 
-param_cupti_overhead_json = luigi.Parameter(description="Calibration: mean per-CUDA API CUPTI overhead when GPU activities are recorded (see: CUPTIOverheadTask)")
-param_LD_PRELOAD_overhead_json = luigi.Parameter(description="Calibration: mean overhead for intercepting CUDA API calls with LD_PRELOAD  (see: CallInterceptionOverheadTask)")
-param_pyprof_overhead_json = luigi.Parameter(description="Calibration: means for (1) Python->C++ interception overhead, (2) operation annotation overhead (see: PyprofOverheadTask)")
+# Luigi's approach of discerning None from
+class NoValueType:
+    def __init__(self):
+        pass
+no_value = NoValueType()
+
+def _get_param(desc, default=no_value):
+    if default == no_value:
+        param = luigi.Parameter(description=desc)
+    else:
+        param = luigi.Parameter(description=desc, default=default)
+    return param
+
+CALIBRATION_OPTS = [
+    'cupti_overhead_json',
+    'LD_PRELOAD_overhead_json',
+    'pyprof_overhead_json',
+]
+
+def get_param_cupti_overhead_json(default=no_value):
+    desc = "Calibration: mean per-CUDA API CUPTI overhead when GPU activities are recorded (see: CUPTIOverheadTask)"
+    return _get_param(desc=desc, default=default)
+def get_param_LD_PRELOAD_overhead_json(default=no_value):
+    desc = "Calibration: mean overhead for intercepting CUDA API calls with LD_PRELOAD  (see: CallInterceptionOverheadTask)"
+    return _get_param(desc=desc, default=default)
+def get_param_pyprof_overhead_json(default=no_value):
+    desc = "Calibration: means for (1) Python->C++ interception overhead, (2) operation annotation overhead (see: PyprofOverheadTask)"
+    return _get_param(desc=desc, default=default)
+
+def calibration_files_present(task):
+    return all(getattr(task, opt) is not None for opt in CALIBRATION_OPTS)
+
+# NOTE: this params REQUIRE a value (since no default is present)
+param_cupti_overhead_json = get_param_cupti_overhead_json()
+param_LD_PRELOAD_overhead_json = get_param_LD_PRELOAD_overhead_json()
+param_pyprof_overhead_json = get_param_pyprof_overhead_json()
+
+# These have optional values.
+param_cupti_overhead_json_optional = get_param_cupti_overhead_json(default=None)
+param_LD_PRELOAD_overhead_json_optional = get_param_LD_PRELOAD_overhead_json(default=None)
+param_pyprof_overhead_json_optional = get_param_pyprof_overhead_json(default=None)
 
 class IMLTask(luigi.Task):
     iml_directory = luigi.Parameter(description="Location of trace-files")
@@ -191,6 +237,51 @@ class SQLParserTask(IMLTask):
         self.sql_parser.run()
 
 class SQLOverheadEventsTask(IMLTask):
+    """
+    How IML handles subtracting CPU-overhead:
+
+    High-level idea:
+
+        - If we want CPU-overhead to be invisible, REMOVE CPU-overhead:
+          (GPU, CPU, CPU-overhead) -> (GPU)
+          (GPU, CPU-overhead)      -> (GPU)
+          (CPU-overhead)           -> IGNORE
+          (CPU, CPU-overhead)      -> IGNORE
+
+        - If we want CPU-overhead to be visible, KEEP CPU-overhead category:
+          (GPU, CPU-overhead) -> (GPU, CPU-overhead)
+          (CPU-overhead)      -> (CPU-overhead)
+
+    Low-level implementation:
+
+        - During ResourceOverlap / ResourceSubplot / OperationOverlap:
+          - If making CPU-overhead visible:
+            Pre-reduce:
+            - Count CATEGORIES_PROF as CATEGORY_CPU
+          - If making CPU-overhead invisible:
+            Pre-reduce:
+            - Keep CATEGORIES_PROF as-is in CategoryKey.non_ops
+              ( we cannot remove yet, since we need to know how to subtract overlap )
+            Post-reduce:
+            - Remove CATEGORIES_PROF from CategoryKey.non_ops, delete "empty" keys
+
+        - During CategoryOverlap:
+          - If making CPU-overhead visible:
+            Pre-reduce:
+            - Keep category (could be in CATEGORIES_PROF, CATEGORIES_CPU, CATEGORY_GPU)
+            Post-reduce:
+            - Keep category
+          - If making CPU-overhead invisible:
+            Pre-reduce:
+            - Keep CATEGORIES_PROF as-is in CategoryKey.non_ops
+              ( we cannot remove yet, since we need to know how to subtract overlap )
+            Post-reduce:
+            - Remove CATEGORIES_PROF from CategoryKey.non_ops, delete "empty" keys
+
+         NOTE: only difference of CategoryOverlap with the rest is that we "keep" low-level category.
+         CPU-overhead should show up at the CategoryOverlap level (i.e. Python, CUDA API C, ...).
+         CPU-overhead here is one of the CATEGORIES_PROF (e.g. CATEGORY_PROF_CUPTI).
+    """
     # NOTE: accept calibration JSON files as parameters instead of as DAG dependencies
     # to allow using calibration files generated from a separate workload.
     # TODO: we still need to investigate whether calibration using a separate workload generalizes properly.
@@ -222,6 +313,7 @@ class SQLOverheadEventsTask(IMLTask):
 
 class _UtilizationPlotTask(IMLTask):
     debug_memoize = luigi.BoolParameter(description="If true, memoize partial results for quicker runs", default=False, parsing=luigi.BoolParameter.EXPLICIT_PARSING)
+    visible_overhead = param_visible_overhead
     # Q: Is there a good way to choose this automatically...?
     # PROBLEM: n_workers should be the size of the pool...but how should we choose the number of splits to make...?
     # If we choose n_splits == n_workers, then the ENTIRE event trace will STILL get swallowed into memory....
@@ -253,17 +345,36 @@ class _UtilizationPlotTask(IMLTask):
         """),
         default=10000)
 
+    # Optional: if user provides overhead calibration files, we can "subtract" overheads.
+    cupti_overhead_json = param_cupti_overhead_json_optional
+    LD_PRELOAD_overhead_json = param_LD_PRELOAD_overhead_json_optional
+    pyprof_overhead_json = param_pyprof_overhead_json_optional
+
     def requires(self):
         return [
-            mk_SQLParserTask(self),
+            mk_SQL_tasks(self),
         ]
 
     def iml_run(self):
+        # If calibration files aren't provided, then overhead will be visible.
+        # If calibration files are provided, we can subtract it:
+        #   Use whatever they want based on --visible-overhead
+        if not calibration_files_present(task=self):
+            logging.warning(
+                ("Calibration files aren't all present; we cannot subtract overhead without "
+                 "all of these options present: {msg}").format(
+                    msg=pprint_msg(CALIBRATION_OPTS),
+                ))
+            visible_overhead = True
+        else:
+            visible_overhead = self.visible_overhead
+
         self.sql_parser = UtilizationPlot(
             overlap_type=self.overlap_type,
             directory=self.iml_directory,
             host=self.postgres_host,
             user=self.postgres_user,
+            visible_overhead=visible_overhead,
             n_workers=self.n_workers,
             events_per_split=self.events_per_split,
             password=self.postgres_password,
@@ -290,14 +401,29 @@ class All(IMLTask):
     # ResourceOverlapTask.task is deleted, we will still re-run it.
     skip_output = True
 
+    # Optional: if user provides overhead calibration files, we can "subtract" overheads.
+    cupti_overhead_json = param_cupti_overhead_json_optional
+    LD_PRELOAD_overhead_json = param_LD_PRELOAD_overhead_json_optional
+    pyprof_overhead_json = param_pyprof_overhead_json_optional
+
+    visible_overhead = param_visible_overhead
+
     def requires(self):
         kwargs = self.param_kwargs
+        def _mk(TaskKlass):
+            task_kwargs = keep_task_kwargs(kwargs, TaskKlass)
+            if kwargs.get('debug', False):
+                logging.info("{klass} kwargs: {msg}".format(
+                    klass=TaskKlass.__name__,
+                    msg=pprint_msg(task_kwargs)))
+            return TaskKlass(**task_kwargs)
+
         return [
-            ResourceOverlapTask(**kwargs),
-            CategoryOverlapTask(**kwargs),
-            ResourceSubplotTask(**kwargs),
-            OperationOverlapTask(**kwargs),
-            HeatScaleTask(**kwargs),
+            _mk(ResourceOverlapTask),
+            _mk(CategoryOverlapTask),
+            _mk(ResourceSubplotTask),
+            _mk(OperationOverlapTask),
+            _mk(HeatScaleTask),
         ]
 
     def iml_run(self):
@@ -309,6 +435,7 @@ class HeatScaleTask(IMLTask):
     # decay=0.99,
     def requires(self):
         return [
+            # NOTE: we DON'T need overhead events.
             mk_SQLParserTask(self),
         ]
 
@@ -343,7 +470,7 @@ class TraceEventsTask(luigi.Task):
 
     def requires(self):
         return [
-            mk_SQLParserTask(self),
+            mk_SQL_tasks(self),
         ]
 
     def output(self):
@@ -551,7 +678,7 @@ class ExtrapolatedTrainingTimeTask(IMLTask):
 
     def requires(self):
         return [
-            mk_SQLParserTask(self),
+            mk_SQL_tasks(self),
         ]
 
     def iml_run(self):
@@ -580,7 +707,7 @@ class GeneratePlotIndexTask(luigi.Task):
         # Requires that traces files have been collected...
         # So, lets just depend on the SQL parser to have loaded everything.
         return [
-            mk_SQLParserTask(self),
+            mk_SQL_tasks(self),
         ]
 
     def output(self):
@@ -688,9 +815,69 @@ def kwargs_from_task(task):
         kwargs[name] = value
     return kwargs
 
+def keep_task_kwargs(kwargs, TaskKlass):
+    keep_kwargs = dict()
+    for opt, value in kwargs.items():
+        if hasattr(TaskKlass, opt):
+            keep_kwargs[opt] = value
+    return keep_kwargs
+
 def mk_SQLParserTask(task):
     return SQLParserTask(iml_directory=task.iml_directory, debug=task.debug, debug_single_thread=task.debug_single_thread,
-                         postgres_host=task.postgres_host, postgres_user=task.postgres_user, postgres_password=task.postgres_password),
+                         postgres_host=task.postgres_host, postgres_user=task.postgres_user, postgres_password=task.postgres_password)
+
+def mk_SQL_tasks(task):
+    """
+    Create Task dependencies for creating SQL database.
+
+    If calibration files are provided, return dependency that ALSO "injects" overhead events
+    so it can be subtracted downstream.
+
+    :param task:
+        Task that depends on having a SQL database, and that has arguments needed for SQL database
+        (e.g. host, user, etc).
+    """
+    overhead_opts = [getattr(task, opt) for opt in CALIBRATION_OPTS]
+
+    # Either ALL overhead calibration files are provided (subtract ALL overheads),
+    # or NONE are provided (subtract NO overheads).
+    if any(getattr(task, opt) is not None for opt in overhead_opts):
+        # assert all(getattr(task, opt) is not None for opt in overhead_opts)
+        for opt in overhead_opts:
+            if getattr(task, opt) is None:
+                raise RuntimeError(textwrap.dedent("""\
+                IML ERROR: If you provide the {opt} calibration file, you must provide all these calibration files:
+                {files}
+                """).format(
+                    files=textwrap.indent(pprint.pformat(CALIBRATION_OPTS), prefix='  '),
+                    opt=opt,
+                ).rstrip())
+
+    has_calibration_files = all(opt is not None for opt in overhead_opts)
+
+    # Add SQLParser args.
+    sql_kwargs = dict(
+        iml_directory=task.iml_directory,
+        debug=task.debug,
+        debug_single_thread=task.debug_single_thread,
+        postgres_host=task.postgres_host,
+        postgres_user=task.postgres_user,
+        postgres_password=task.postgres_password
+    )
+    kwargs = dict()
+    kwargs.update(sql_kwargs)
+
+    if not has_calibration_files:
+        return SQLParserTask(**kwargs)
+
+    calibration_kwargs = dict()
+    for opt in CALIBRATION_OPTS:
+        calibration_kwargs[opt] = getattr(task, opt)
+    # Add calibration files.
+    kwargs.update(calibration_kwargs)
+
+    # NOTE: SQLOverheadEventsParser depends on SQLParserTask.
+    return SQLOverheadEventsParser(**kwargs)
 
 from iml_profiler.profiler import iml_logging
 def main(argv=None, should_exit=True):
