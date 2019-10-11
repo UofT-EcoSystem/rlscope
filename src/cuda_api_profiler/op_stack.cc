@@ -199,7 +199,7 @@ std::string OpStack::ActiveOperation() {
   mutex_lock lock(_mu);
   if (_state._operation_stack.size() == 0) {
     // It's possible (though strange) to run GPU kernels without an operation active.
-    return "";
+    return OPERATION_UNKNOWN;
   }
   DCHECK(_state._operation_stack.size() > 0);
   auto const& operation = _state._operation_stack.back();
@@ -215,9 +215,14 @@ void OpStack::RecordOverheadEvent(
     int64 num_events) {
 //  VLOG(1) << "OpStack." << __func__ << ", overhead_type=" << overhead_type << ", num_events = " << num_events;
   mutex_lock lock(_mu);
-  DCHECK(_state._operation_stack.size() > 0);
+  std::string operation;
+  if (_state._operation_stack.size() == 0) {
+    operation = OPERATION_UNKNOWN;
+  } else {
+    operation = _state._operation_stack.back();
+  }
+//  DCHECK(_state._operation_stack.size() > 0);
   DCHECK(_state._phase_name != "");
-  auto const& operation = _state._operation_stack.back();
   _state._overhead_events[overhead_type][_state._phase_name][operation].num_events += num_events;
 }
 void OpStack::RecordOverheadEventForOperation(

@@ -895,8 +895,8 @@ class ExprSubtractionValidation:
         else:
             runs = list(range(self.args.num_runs))
 
-        logging.info("Runs: {msg}".format(
-            msg=pprint_msg(runs)))
+        # logging.info("Runs: {msg}".format(
+        #     msg=pprint_msg(runs)))
 
         iterations = iters_from_runs(runs)
         return iterations
@@ -904,7 +904,7 @@ class ExprSubtractionValidation:
     def get_iterations(self, config=None):
         iterations = self.iterations
 
-        if config is not None and config.long_run:
+        if config is not None and ( config.long_run and self.args.long_run ):
             long_run_iterations = self.args.one_minute_iterations*(2**self.args.long_run_exponent)
             if long_run_iterations not in iterations:
                 iterations.append(long_run_iterations)
@@ -930,27 +930,29 @@ class ExprSubtractionValidation:
     def _add_configs(self, algo, env):
 
         algo_env_configs = []
-        def add_calibration_config(config):
+        def add_calibration_config(**common_kwargs):
+            config_kwargs = dict(common_kwargs)
+            config_kwargs['long_run'] = True
+            config = ExprSubtractionValidationConfig(**config_kwargs)
+            assert not config.is_calibration
+            algo_env_configs.append(config)
+
             config_suffix = "{suffix}_calibration".format(
                 suffix=config.config_suffix,
             )
-            calibration_config = ExprSubtractionValidationConfig(
-                expr=self,
-                algo=algo,
-                env=env,
-                iml_prof_config=config.iml_prof_config,
+            calibration_config_kwargs = dict(common_kwargs)
+            calibration_config_kwargs.update(dict(
                 # Disable tfprof: CUPTI and LD_PRELOAD.
                 config_suffix=config_suffix,
-                # Only enable GPU/C-lib event collection, not operation annotations.
-                script_args=config.script_args,
                 long_run=False,
-            )
+            ))
+            calibration_config = ExprSubtractionValidationConfig(**calibration_config_kwargs)
             assert calibration_config.is_calibration
             algo_env_configs.append(calibration_config)
 
         # Entirely uninstrumented configuration; we use this in many of the overhead calculations to determine
         # how much training time is attributable to the enabled "feature" (e.g. CUPTI activities).
-        config = ExprSubtractionValidationConfig(
+        add_calibration_config(
             expr=self,
             algo=algo,
             env=env,
@@ -958,50 +960,38 @@ class ExprSubtractionValidation:
             config_suffix='uninstrumented',
             # Disable ALL pyprof/tfprof stuff.
             script_args=['--iml-disable'],
-            long_run=True,
         )
         # Entirely uninstrumented configuration (CALIBRATION runs);
         # NOTE: we need to re-run the uninstrumented configuration for the calibration runs, so that we can
         # see how well our calibration generalizes.
         # self.config_uninstrumented = config
-        add_calibration_config(config)
-        algo_env_configs.append(config)
 
-        config = ExprSubtractionValidationConfig(
+        add_calibration_config(
             expr=self,
             algo=algo,
             env=env,
             iml_prof_config='interception',
             config_suffix='interception',
             script_args=['--iml-disable-pyprof'],
-            long_run=True,
         )
-        add_calibration_config(config)
-        algo_env_configs.append(config)
 
         # CUPTIOverheadTask: CUPTI, and CUDA API stat-tracking overhead correction.
-        config = ExprSubtractionValidationConfig(
+        add_calibration_config(
             expr=self,
             algo=algo,
             env=env,
             iml_prof_config='gpu-activities',
             config_suffix='gpu_activities',
             script_args=['--iml-disable-pyprof'],
-            long_run=True,
         )
-        add_calibration_config(config)
-        algo_env_configs.append(config)
-        config = ExprSubtractionValidationConfig(
+        add_calibration_config(
             expr=self,
             algo=algo,
             env=env,
             iml_prof_config='no-gpu-activities',
             config_suffix='no_gpu_activities',
             script_args=['--iml-disable-pyprof'],
-            long_run=True,
         )
-        add_calibration_config(config)
-        algo_env_configs.append(config)
         config = ExprSubtractionValidationConfig(
             expr=self,
             algo=algo,
@@ -1056,7 +1046,7 @@ class ExprSubtractionValidation:
         algo_env_configs.append(config)
 
         # PyprofOverheadTask: Python->C-lib event tracing, and operation annotation overhead correction.
-        config = ExprSubtractionValidationConfig(
+        add_calibration_config(
             expr=self,
             algo=algo,
             env=env,
@@ -1065,11 +1055,8 @@ class ExprSubtractionValidation:
             config_suffix='just_pyprof_annotations',
             # Only enable GPU/C-lib event collection, not operation annotations.
             script_args=['--iml-disable-tfprof', '--iml-disable-pyprof-interceptions'],
-            long_run=True,
         )
-        add_calibration_config(config)
-        algo_env_configs.append(config)
-        config = ExprSubtractionValidationConfig(
+        add_calibration_config(
             expr=self,
             algo=algo,
             env=env,
@@ -1078,10 +1065,7 @@ class ExprSubtractionValidation:
             config_suffix='just_pyprof_interceptions',
             # Only enable operation annotations, not GPU/C-lib event collection.
             script_args=['--iml-disable-tfprof', '--iml-disable-pyprof-annotations'],
-            long_run=True,
         )
-        add_calibration_config(config)
-        algo_env_configs.append(config)
 
         for config in algo_env_configs:
             if algo not in self.config_suffix_to_obj:
@@ -1139,6 +1123,10 @@ class ExprSubtractionValidation:
             '--bullet',
             action='store_true',
             help='Limit environments to physics-based Bullet environments')
+        parser.add_argument(
+            '--long-run',
+            action='store_true',
+            help='For each calibration, do an extra long 30 minute calibration to make sure it works')
         parser.add_argument(
             '--env',
         )
