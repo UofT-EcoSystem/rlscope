@@ -298,12 +298,19 @@ message("> double_conversion_LIBRARIES = ${double_conversion_LIBRARIES}")
 
 #include_directories(${CMAKE_CURRENT_BINARY_DIR})
 
-# NOTE: We need PROTOBUF_GENERATE_CPP_APPEND_PATH=OFF so that the
-# generated protobuf .pb.cc and .pb.h maintain their original directory structure:
-#   iml/build/tensorflow/core/lib/core/error_codes.pb.h
-# Without this, cmake's FindProtobuf module will still all generated files in the iml/build directory:
-#   iml/build/error_codes.pb.h
-set(PROTOBUF_GENERATE_CPP_APPEND_PATH OFF)
+# With PROTOBUF_GENERATE_CPP_APPEND_PATH=OFF 
+#     In CMake 3.5.1 (Ubuntu 16.04) this makes the  
+#     generated protobuf .pb.cc and .pb.h maintain their original directory structure:
+#       iml/build/tensorflow/core/lib/core/error_codes.pb.h
+#     Without this, cmake's FindProtobuf module will still all generated files in the iml/build directory:
+#       iml/build/error_codes.pb.h
+# HOWEVER; this no longer works in CMake 3.14.5 (Ubuntu 18.04)
+#       The directory structure for generated files becomes:
+#         iml/build/CMakeFiles/tensorflow/core/lib/core/error_codes.pb.h
+#       BUT, PROTO_SRCS still matches this directory structure (non-existent files):
+#         iml/build/error_codes.pb.h
+# TLDR: Oh well, just generate cpp files in iml/build/*.pb.cpp
+# set(PROTOBUF_GENERATE_CPP_APPEND_PATH OFF)
 protobuf_generate_cpp(PROTO_SRCS PROTO_HDRS
         tensorflow/core/lib/core/error_codes.proto
         iml_profiler/protobuf/iml_prof.proto
