@@ -79,6 +79,7 @@ limitations under the License.
 #include "tensorflow/core/platform/mem.h"
 #include "tensorflow/core/platform/mutex.h"
 #include "tensorflow/core/platform/tracing.h"
+#include "cuda_api_profiler/cupti_logging.h"
 
 //#define mutex std::mutex
 //#define mutex_lock std::lock_guard<std::mutex>
@@ -619,17 +620,23 @@ Status DeviceTracerImpl::Start() {
 Status DeviceTracerImpl::Print() {
   mutex_lock l(mu_);
   DECLARE_LOG_INFO(info);
-  _op_stack.Print(info, 0);
-  _api_profiler.Print(info, 0);
+  PrintIndent(info, 0);
+  info << "DeviceTracerImpl:\n";
+  _op_stack.Print(info, 1);
+  info << "\n";
+  _api_profiler.Print(info, 1);
   if (is_yes("IML_CUDA_ACTIVITIES", false)) {
-    _activity_profiler.Print(info, 0);
+    info << "\n";
+    _activity_profiler.Print(info, 1);
   }
   if (stream_monitor_) {
-    stream_monitor_->Print(info, 0);
+    info << "\n";
+    stream_monitor_->Print(info, 1);
   }
   // EventProfiler output can get REALLY big...
   // internally we limit printing to 15 events (per category).
-  _event_profiler.Print(info, 0);
+  info << "\n";
+  _event_profiler.Print(info, 1);
   return Status::OK();
 }
 

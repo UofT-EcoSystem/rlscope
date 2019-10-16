@@ -169,7 +169,7 @@ def is_bullet_env(env_id):
 def is_pong_env(env_id):
     return re.search(r'PongNoFrameskip', env_id)
 
-def stable_baselines_gather_algo_env_pairs(algo=None, env_id=None, all=False, bullet=False, debug=False):
+def stable_baselines_gather_algo_env_pairs(algo=None, env_id=None, all=False, bullet=False, pong=False, debug=False):
 
     def is_supported(algo, env_id):
         for expr in STABLE_BASELINES_EXPRS:
@@ -179,12 +179,16 @@ def stable_baselines_gather_algo_env_pairs(algo=None, env_id=None, all=False, bu
         # logging.info("is_supported algo={algo}, env={env} = False".format(algo=algo, env=env_id))
         return None
 
-    def should_run(algo, env_id, bullet):
+    def should_run(algo, env_id):
         if not is_supported(algo, env_id):
             return False
-        if bullet and not is_bullet_env(env_id):
-            return False
-        return True
+        # If we specify --pong, just run Pong (algo, env) combos.
+        # If we specify --bullet, just run Bullet (algo, env) combos.
+        # If we specify --pong --bullet, run only Pong/Bullet (algo, env) combos.
+        # Otherwise, neither --pong nor --bullet are given, run everything.
+        return ( pong and is_pong_env(env_id) ) or \
+               ( bullet and is_bullet_env(env_id) ) or \
+               ( not pong and not bullet )
 
     avail_env_ids, unavail_env_ids = detect_available_env(STABLE_BASELINES_ENV_IDS)
 
@@ -195,7 +199,7 @@ def stable_baselines_gather_algo_env_pairs(algo=None, env_id=None, all=False, bu
     if env_id is not None:
         algo_env_pairs = []
         for algo in STABLE_BASELINES_ANNOTATED_ALGOS:
-            if not should_run(algo, env_id, bullet):
+            if not should_run(algo, env_id):
                 continue
             algo_env_pairs.append((algo, env_id))
         return algo_env_pairs
@@ -203,7 +207,7 @@ def stable_baselines_gather_algo_env_pairs(algo=None, env_id=None, all=False, bu
     if algo is not None:
         algo_env_pairs = []
         for env_id in avail_env_ids:
-            if not should_run(algo, env_id, bullet):
+            if not should_run(algo, env_id):
                 continue
             algo_env_pairs.append((algo, env_id))
         return algo_env_pairs
@@ -212,7 +216,7 @@ def stable_baselines_gather_algo_env_pairs(algo=None, env_id=None, all=False, bu
         algo_env_pairs = []
         for algo in STABLE_BASELINES_ANNOTATED_ALGOS:
             for env_id in avail_env_ids:
-                if not should_run(algo, env_id, bullet):
+                if not should_run(algo, env_id):
                     continue
                 algo_env_pairs.append((algo, env_id))
         return algo_env_pairs

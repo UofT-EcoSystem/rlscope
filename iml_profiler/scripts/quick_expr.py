@@ -399,6 +399,10 @@ class ExprTotalTrainingTime:
             action='store_true',
             help='Limit environments to physics-based Bullet environments')
         parser.add_argument(
+            '--pong',
+            action='store_true',
+            help='Limit environments to Atari Pong environment')
+        parser.add_argument(
             '--repetitions',
             type=int,
             default=3)
@@ -476,6 +480,7 @@ class ExprTotalTrainingTime:
             env_id=self.args.env,
             all=True,
             bullet=self.args.bullet,
+            pong=self.args.pong,
             debug=self.quick_expr.args.debug,
         )
         for algo, env in self.stable_baselines_algo_env:
@@ -495,8 +500,12 @@ class ExprTotalTrainingTime:
         # Q: should we subclass ExprTotalTrainingTimeConfig to specialize running minigo experiment?
 
     def do_run(self):
-        for config in self.configs:
-            for rep in range(1, self.args.repetitions+1):
+        # Run the repetition 01 of every environment,
+        # Run the repetition 02 of every environment,
+        # ...
+        # (allows us to incrementally plot stuff more easily)
+        for rep in range(1, self.args.repetitions+1):
+            for config in self.configs:
                 # For debugging, allow overwriting --n-timesteps in train.py with whatever we want.
                 config.run(rep, extra_argv=self.extra_argv)
 
@@ -942,6 +951,7 @@ class ExprSubtractionValidation:
             env_id=self.args.env,
             all=True,
             bullet=self.args.bullet,
+            pong=self.args.pong,
             debug=self.quick_expr.args.debug,
         )
         for algo, env in self.stable_baselines_algo_env:
@@ -1143,6 +1153,10 @@ class ExprSubtractionValidation:
             '--bullet',
             action='store_true',
             help='Limit environments to physics-based Bullet environments')
+        parser.add_argument(
+            '--pong',
+            action='store_true',
+            help='Limit environments to Atari Pong environment')
         parser.add_argument(
             '--long-run',
             action='store_true',

@@ -701,6 +701,7 @@ class Profiler:
                 return argval
 
             if not allow_none and default_arg is None:
+                self._failing = True
                 raise RuntimeError("IML: you must provide a value for --{arg}".format(
                     arg=re.sub('_', '-', iml_argname)))
 
@@ -715,6 +716,7 @@ class Profiler:
                                 allow_none=allow_none, internal=True)
             return argval
 
+        self._failing = False
         self.debug = get_argval('debug', debug, False)
         if self.debug:
             py_config.DEBUG = self.debug
@@ -751,6 +753,7 @@ class Profiler:
 
         global _prof_singleton
         if _prof_singleton is not None:
+            self._failing = True
             raise RuntimeError("IML: Only a single profiler.Profiler object can be created; use iml.handle_iml_args + iml.prof instead.")
         _prof_singleton = self
 
@@ -1112,6 +1115,7 @@ class Profiler:
 
     def _check_no_annotations(self, caller_name):
         if len(self._op_stack) > 0:
+            self._failing = True
             raise RuntimeError(self._iml_err_msg(
                 "You cannot call {caller} while annotations are active since you'll end up losing tfprof/pyprof event data.".format(
                     caller=caller_name,
@@ -1261,6 +1265,7 @@ class Profiler:
         :return:
         """
         if self.process_name is None:
+            self._failing = True
             raise RuntimeError("You need to call profiler.set_process_name(...) before profiling.")
         assert self.phase is not None
 
@@ -1327,6 +1332,7 @@ class Profiler:
         global PROFILERS
         started = self in PROFILERS
         if not started:
+            self._failing = True
             raise RuntimeError("IML: You need to call profiler.start() before profiling.")
 
     def _push_operation(self, bench_name):
@@ -1514,6 +1520,7 @@ class Profiler:
                 return
 
             if self._cur_operation != bench_name:
+                self._failing = True
                 raise RuntimeError(textwrap.dedent("""
                 Detected non stack-oriented nesting of profiling statements:
                     prof.set_operation({b1})
@@ -1691,6 +1698,7 @@ class Profiler:
             self.ut.set_phase(phase)
 
         if len(self._op_stack) != 0:
+            self._failing = True
             raise RuntimeError("IML: ERROR, you cannot change phases while operations are in-progress: ops = {ops}".format(
                 ops=self._op_stack))
 
@@ -1749,7 +1757,7 @@ class Profiler:
         # if clib_wrap.should_dump_pyprof():
         #     self._dump_pyprof(debug=self.debug)
         self._dump_process_metadata(debug=self.debug)
-        self._dump_training_progress(debug=self.debug, dump_always=True)
+        self._dump_training_progress(debug=self.debug, dump_always=not self._failing)
 
         if self.unit_test:
             logging.info("> IML: _dump_unit_test")
@@ -1999,6 +2007,7 @@ class Profiler:
 
         # Q: multiple processes reporting training progress...consider that an error?
         if self.reports_progress and self.percent_complete is None:
+            self._failing = True
             raise RuntimeError("IML ERROR: profiler was created with iml.handle_iml_args(..., reports_progress=True), but process NEVER called iml.prof.report_progress(...)")
 
         # This should be prevented from self.report_progress(...)
@@ -2267,6 +2276,7 @@ class Profiler:
             ))
 
         if not self.reports_progress:
+            self._failing = True
             raise RuntimeError(
                 textwrap.dedent("""\
                 IML ERROR: profiler was created with iml.handle_iml_args(..., reports_progress=False), but process made unexpected call to iml.prof.report_progress(...).
@@ -2275,6 +2285,7 @@ class Profiler:
                 """).format(proc=self.process_name))
 
         if not ( 0. <= percent_complete <= 1. ):
+            self._failing = True
             raise RuntimeError(
                 textwrap.dedent("""\
                 IML ERROR: iml.prof.report_progress(percent_complete=...) expects:
@@ -2305,6 +2316,7 @@ class Profiler:
             self._incremental_training_progress[self.phase].report_start_of_progress(percent_complete, num_timesteps, total_timesteps, self.start_trace_time_sec)
 
         if self.max_timesteps is not None and num_timesteps is None:
+            self._failing = True
             raise RuntimeError("IML ERROR: if you use --iml-max-timesteps, you must call iml.prof.report_progress(num_timesteps=NUMBER)")
 
         if num_timesteps is not None:
@@ -2314,6 +2326,7 @@ class Profiler:
             self.total_timesteps = total_timesteps
 
         if self.percent_complete is not None and percent_complete < self.percent_complete:
+            self._failing = True
             raise RuntimeError("IML ERROR: percent_complete should be monotonically increasing but saw {from_perc} -> {to_perc}".format(
                 from_perc=self.percent_complete,
                 to_perc=percent_complete,
@@ -2330,7 +2343,10 @@ class Profiler:
             # so iml.prof.report_progress was NEVER called.
             #
             # Q: Should we allow this by making the phase basically 0 seconds...?
-            assert self.tracing_enabled
+            if not self.tracing_enabled:
+                self._failing = True
+                raise RuntimeError("IML ERROR: profiler was created with iml.handle_iml_args(..., reports_progress=True), but process NEVER called iml.prof.report_progress(...)")
+            # assert self.tracing_enabled
         self._dump_training_progress(debug=self.debug, dump_always=dump_always)
 
         self._maybe_finish(debug=self.debug)
@@ -2777,6 +2793,7 @@ def _iml_argv(prof : Profiler, keep_executable=False, keep_non_iml_args=False):
     args.iml_internal_start_trace_time_sec = prof.get_start_trace_time_sec()
     args.iml_phase = prof.phase
     if prof.process_name is None:
+        prof._failing = True
         raise RuntimeError("IML: You must call iml_profiler.api.prof.set_process_name('some_name') before forking children!")
     args.iml_internal_parent_process_name = prof.process_name
     args.iml_util_sampler_pid = prof.util_sampler_pid

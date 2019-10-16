@@ -42,22 +42,90 @@ run_stable_baselines() {
     _run_bench "$@" --mode plot
 }
 
-DEBUG_ALGO_ENV_ARGS=(--algo ppo2 --env Walker2DBulletEnv-v0)
+RUN_DEBUG_ARGS=(--subdir debug)
+INSTRUMENTED_ARGS=(--instrumented)
+
+_run_debug_ppo_full_training() {
+    local num_training_loop_iterations=1
+    local n_envs=8
+    local n_steps=2048
+    iml-quick-expr "${RUN_DEBUG_ARGS[@]}" --expr total_training_time --repetitions 1 --bullet --instrumented --n-timesteps $((n_envs*n_steps*num_training_loop_iterations)) --algo ppo2 --env MinitaurBulletEnv-v0 "$@"
+}
+_run_debug_dqn_full_training() {
+    iml-quick-expr "${RUN_DEBUG_ARGS[@]}" --expr total_training_time --repetitions 1 --instrumented --n-timesteps 20000 --algo dqn --env PongNoFrameskip-v4 "$@"
+}
+_run_debug_sac_full_training() {
+    iml-quick-expr "${RUN_DEBUG_ARGS[@]}" --expr total_training_time --repetitions 1 --instrumented --n-timesteps 20000 --algo sac --env AntBulletEnv-v0 "$@"
+}
+_run_debug_a2c_full_training() {
+    iml-quick-expr "${RUN_DEBUG_ARGS[@]}" --expr total_training_time --repetitions 1 --instrumented --n-timesteps 20000 --algo a2c --env HopperBulletEnv-v0 "$@"
+}
+_run_debug_ddpg_full_training() {
+    iml-quick-expr "${RUN_DEBUG_ARGS[@]}" --expr total_training_time --repetitions 1 --instrumented --n-timesteps 20000 --algo ddpg --env Walker2DBulletEnv-v0 "$@"
+}
+
+run_debug_ppo_full_training_instrumented() {
+    _run_debug_ppo_full_training "${INSTRUMENTED_ARGS[@]}" "$@"
+}
+run_debug_dqn_full_training_instrumented() {
+    _run_debug_dqn_full_training "${INSTRUMENTED_ARGS[@]}" "$@"
+}
+run_debug_sac_full_training_instrumented() {
+    _run_debug_sac_full_training "${INSTRUMENTED_ARGS[@]}" "$@"
+}
+run_debug_a2c_full_training_instrumented() {
+    _run_debug_a2c_full_training "${INSTRUMENTED_ARGS[@]}" "$@"
+}
+run_debug_ddpg_full_training_instrumented() {
+    _run_debug_ddpg_full_training "${INSTRUMENTED_ARGS[@]}" "$@"
+}
+
+run_debug_ppo_full_training_uninstrumented() {
+    _run_debug_ppo_full_training "$@"
+}
+run_debug_dqn_full_training_uninstrumented() {
+    _run_debug_dqn_full_training "$@"
+}
+run_debug_sac_full_training_uninstrumented() {
+    _run_debug_sac_full_training "$@"
+}
+run_debug_a2c_full_training_uninstrumented() {
+    _run_debug_a2c_full_training "$@"
+}
+run_debug_ddpg_full_training_uninstrumented() {
+    _run_debug_ddpg_full_training "$@"
+}
+
+run_debug_full_training_instrumented() {
+    run_debug_ppo_full_training_instrumented
+    run_debug_dqn_full_training_instrumented
+    run_debug_sac_full_training_instrumented
+    run_debug_a2c_full_training_instrumented
+    run_debug_ddpg_full_training_instrumented
+}
+
+run_debug_full_training_uninstrumented() {
+    run_debug_ppo_full_training_uninstrumented
+    run_debug_dqn_full_training_uninstrumented
+    run_debug_sac_full_training_uninstrumented
+    run_debug_a2c_full_training_uninstrumented
+    run_debug_ddpg_full_training_uninstrumented
+}
 
 run_full_training_instrumented() {
-    iml-quick-expr --expr total_training_time --repetitions 3 --bullet --instrumented
+    iml-quick-expr --expr total_training_time --repetitions 3 --bullet --pong --instrumented "$@"
 }
-run_debug_full_training_instrumented() {
-    iml-quick-expr --expr total_training_time --repetitions 1 --bullet --instrumented \
-        "${DEBUG_ALGO_ENV_ARGS[@]}"
+run_full_training_uninstrumented() {
+    iml-quick-expr --expr total_training_time --repetitions 3 --bullet --pong "$@"
 }
 
-run_full_training_uninstrumented() {
-    iml-quick-expr --expr total_training_time --repetitions 3 --bullet
+run_debug_all() {
+    run_debug_full_training_instrumented
+    run_debug_full_training_uninstrumented
 }
-run_debug_full_training_uninstrumented() {
-    iml-quick-expr --expr total_training_time --repetitions 1 --bullet \
-        "${DEBUG_ALGO_ENV_ARGS[@]}"
+run_all() {
+    run_full_training_instrumented
+    run_full_training_uninstrumented
 }
 
 if [ $# -gt 0 ]; then
@@ -66,10 +134,12 @@ else
     echo "Usage:"
     echo "$ ./run_bench.sh [cmd]:"
     echo "Where cmd is one of:"
+    echo "  run_all"
+    echo "    run_full_training_instrumented"
+    echo "    run_full_training_uninstrumented"
+    echo "  run_debug_all"
+    echo "    run_debug_full_training_instrumented"
+    echo "    run_debug_full_training_uninstrumented"
     echo "  run_stable_baselines"
-    echo "  run_full_training_instrumented"
-    echo "  run_debug_full_training_instrumented"
-    echo "  run_full_training_uninstrumented"
-    echo "  run_debug_full_training_uninstrumented"
     exit 1
 fi
