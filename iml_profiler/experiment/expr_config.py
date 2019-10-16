@@ -166,6 +166,9 @@ def detect_available_env(env_ids):
 def is_bullet_env(env_id):
     return re.search(r'BulletEnv', env_id)
 
+def is_pong_env(env_id):
+    return re.search(r'PongNoFrameskip', env_id)
+
 def stable_baselines_gather_algo_env_pairs(algo=None, env_id=None, all=False, bullet=False, debug=False):
 
     def is_supported(algo, env_id):

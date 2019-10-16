@@ -18,6 +18,9 @@ from iml_profiler.experiment import expr_config
 # ( set -e; set -x; iml-quick-expr --expr total_training_time --repetitions 3 --bullet; )
 # ( set -e; set -x; iml-quick-expr --expr total_training_time --repetitions 3 --bullet --plot; )
 
+# ( set -e; set -x; iml-quick-expr --expr total_training_time --repetitions 3 ---bullet --instrumented; )
+# ( set -e; set -x; iml-quick-expr --expr total_training_time --repetitions 3 --bullet --instrumented --plot; )
+
 
 # algo_envs = [
 #     {'algo': 'Walker2DBulletEnv-v0', 'env': 'ddpg'}
@@ -266,12 +269,12 @@ class ExprSubtractionValidationConfig:
         return iml_directories
 
 class ExprTotalTrainingTimeConfig:
-    def __init__(self, expr, algo, env, script_args=[]):
+    def __init__(self, expr, algo, env, iml_prof_config='uninstrumented', script_args=[]):
         self.expr = expr
         self.quick_expr = self.expr.quick_expr
         # $ iml-prof --config ${iml_prof_config}
         # NOTE: we want to run with IML disabled; we just want to know the total training time WITHOUT IML.
-        self.iml_prof_config = 'uninstrumented'
+        self.iml_prof_config = iml_prof_config
         # $ python train.py --iml-directory config_${config_suffix}
         self.config_suffix = self.iml_prof_config
         self.script_args = script_args
@@ -308,8 +311,7 @@ class ExprTotalTrainingTimeConfig:
         logfile = _j(self.out_dir(rep), "logfile.out")
         return logfile
 
-    def run(self, rep, extra_argv=[]):
-        # TODO: this is OpenAI specific; make it work for minigo.
+    def _get_cmd(self, rep, extra_argv=[]):
         cmd = ['iml-prof',
                '--config', self.iml_prof_config,
                'python', 'train.py',
@@ -317,9 +319,6 @@ class ExprTotalTrainingTimeConfig:
                '--iml-directory', _a(self.out_dir(rep)),
                # '--iml-max-timesteps', iters,
                '--iml-training-progress',
-
-               # NOTE: we want to run with IML disabled; we just want to know the total training time WITHOUT IML.
-               '--iml-disable',
 
                '--algo', self.algo,
                '--env', self.env,
@@ -329,8 +328,20 @@ class ExprTotalTrainingTimeConfig:
                '--iml-start-measuring-call', '1',
                '--iml-delay',
                ]
+        if self.iml_prof_config == 'uninstrumented':
+            cmd.extend([
+                # NOTE: we want to run with IML disabled; we just want to know the total training time WITHOUT IML.
+                '--iml-disable',
+            ])
         cmd.extend(self.script_args)
         cmd.extend(extra_argv)
+        return cmd
+
+    def run(self, rep, extra_argv=[]):
+        # TODO: this is OpenAI specific; make it work for minigo.
+
+        cmd = self._get_cmd(rep, extra_argv)
+
         logfile = self.logfile(rep)
         # logging.info("Logging to file {path}".format(
         #     path=logfile))
@@ -400,6 +411,10 @@ class ExprTotalTrainingTime:
         parser.add_argument(
             '--plot',
             action='store_true')
+        parser.add_argument(
+            '--instrumented',
+            help="Run in fully instrumented mode (needed for creating \"Overhead correction\" figure)",
+            action='store_true')
         self.args, self.extra_argv = parser.parse_known_args(self.argv)
 
         self.init_configs()
@@ -464,10 +479,15 @@ class ExprTotalTrainingTime:
             debug=self.quick_expr.args.debug,
         )
         for algo, env in self.stable_baselines_algo_env:
+            if self.args.instrumented:
+                iml_prof_config = 'full'
+            else:
+                iml_prof_config = 'uninstrumented'
             config = ExprTotalTrainingTimeConfig(
                 expr=self,
                 algo=algo,
                 env=env,
+                iml_prof_config=iml_prof_config,
             )
             self.configs.append(config)
         logging.info("configs: " + pprint_msg(self.configs))
