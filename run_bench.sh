@@ -36,7 +36,40 @@ _run_bench() {
 
     _do iml-bench --dir $all_dir "$@" stable-baselines
 }
+run_stable_baselines() {
+    _run_bench "$@"
+    _run_bench "$@" --analyze
+    _run_bench "$@" --mode plot
+}
 
-#_run_bench "$@"
-#_run_bench "$@" --analyze
-#_run_bench "$@" --mode plot
+DEBUG_ALGO_ENV_ARGS=(--algo ppo2 --env Walker2DBulletEnv-v0)
+
+run_full_training_instrumented() {
+    iml-quick-expr --expr total_training_time --repetitions 3 --bullet --instrumented
+}
+run_debug_full_training_instrumented() {
+    iml-quick-expr --expr total_training_time --repetitions 1 --bullet --instrumented \
+        "${DEBUG_ALGO_ENV_ARGS[@]}"
+}
+
+run_full_training_uninstrumented() {
+    iml-quick-expr --expr total_training_time --repetitions 3 --bullet
+}
+run_debug_full_training_uninstrumented() {
+    iml-quick-expr --expr total_training_time --repetitions 1 --bullet \
+        "${DEBUG_ALGO_ENV_ARGS[@]}"
+}
+
+if [ $# -gt 0 ]; then
+    "$@"
+else
+    echo "Usage:"
+    echo "$ ./run_bench.sh [cmd]:"
+    echo "Where cmd is one of:"
+    echo "  run_stable_baselines"
+    echo "  run_full_training_instrumented"
+    echo "  run_debug_full_training_instrumented"
+    echo "  run_full_training_uninstrumented"
+    echo "  run_debug_full_training_uninstrumented"
+    exit 1
+fi
