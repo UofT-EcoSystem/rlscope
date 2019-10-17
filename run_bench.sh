@@ -120,16 +120,39 @@ run_full_training_uninstrumented() {
 }
 
 run_debug_calibration() {
-    iml-quick-expr --expr subtraction_validation --repetitions 3 --env Walker2DBulletEnv-v0 --algo ppo2 "$@"
+    #Walker2DBulletEnv-v0
+    iml-quick-expr "${RUN_DEBUG_ARGS[@]}" --expr subtraction_validation --repetitions 3 --env HalfCheetahBulletEnv-v0 --algo ppo2 "$@"
+}
+
+run_debug_subtraction_validation() {
+    _cmd() {
+        iml-quick-expr "${RUN_DEBUG_ARGS[@]}" --expr subtraction_validation --calibration-mode validation --repetitions 1 --num-runs 1 --env HalfCheetahBulletEnv-v0 --algo ppo2 "$@"
+    }
+    _cmd "$@"
+    _cmd "$@" --plot
+}
+
+run_debug_subtraction_validation_long() {
+    _cmd() {
+        iml-quick-expr "${RUN_DEBUG_ARGS[@]}" --expr subtraction_validation --calibration-mode validation --repetitions 3 --env HalfCheetahBulletEnv-v0 --algo ppo2 "$@"
+    }
+    # - Run using long iterations (most important...)
+    # - Re-plot stuff.
+    # - Run using different numbers of iterations
+    # - Re-plot stuff.
+    _cmd "$@" --num-runs 0
+    _cmd "$@" --plot
+    _cmd "$@" --num-runs 3
+    _cmd "$@" --num-runs 3 --plot
 }
 
 run_debug_all() {
-    run_debug_full_training_instrumented
     run_debug_full_training_uninstrumented
+    run_debug_full_training_instrumented
 }
 run_all() {
-    run_full_training_instrumented
     run_full_training_uninstrumented
+    run_full_training_instrumented
 }
 
 if [ $# -gt 0 ]; then

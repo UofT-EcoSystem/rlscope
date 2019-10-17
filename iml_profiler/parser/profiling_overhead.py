@@ -1693,6 +1693,9 @@ class CUPTIOverheadParser:
         fig = plt.figure(figsize=figsize)
 
         plot_data = copy.copy(df)
+        # Typically, there will be one big cudaFree/cudaMalloc; ignore it.
+        # Just show cudaLaunchKernel and cudaMemcpyAsync.
+        plot_data = plot_data[plot_data['api_name'].isin(CUDA_API_ASYNC_CALLS)]
         # plot_data['field'] = "Per-API-call interception overhead"
         ax = fig.add_subplot(111)
         sns.barplot(x='api_name', y='us_per_call', hue='pretty_config', data=plot_data, ax=ax,

@@ -84,6 +84,8 @@ CATEGORIES_ALL = {
 
 DEFAULT_PHASE = 'default_phase'
 
+CUDA_API_ASYNC_CALLS = {'cudaLaunchKernel', 'cudaMemcpyAsync'}
+
 # Record a "special" operation event-name (category=CATEGORY_OPERATION)
 # when the prof.start()/stop() is called.
 #

@@ -548,7 +548,7 @@ class ExprSubtractionValidation:
                 self._pool.submit(
                     name,
                     self.plot_config,
-                    config,
+                    self.args.algo, self.args.env, config,
                     sync=self.quick_expr.args.debug_single_thread,
                 )
         self._pool.shutdown()

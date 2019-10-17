@@ -35,8 +35,8 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 # NOTE: don't use a cached cmake variable here, since if we switch the cache variable on/off from this file it WON'T affect
 # the current built (since it's persisted...i.e. the whole purpose of cache variables).
-set(WITH_CUDA_LD_PRELOAD ON)
-#set(WITH_CUDA_LD_PRELOAD OFF)
+#set(WITH_CUDA_LD_PRELOAD ON)
+set(WITH_CUDA_LD_PRELOAD OFF)
 #message("> WITH_CUDA_LD_PRELOAD = ${WITH_CUDA_LD_PRELOAD}")
 
 #FIND_PACKAGE(CUDA)
