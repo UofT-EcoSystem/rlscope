@@ -113,10 +113,10 @@ run_debug_full_training_uninstrumented() {
 }
 
 run_full_training_instrumented() {
-    iml-quick-expr --expr total_training_time --repetitions 3 --bullet --pong --instrumented "$@"
+    iml-quick-expr --expr total_training_time --bullet --pong --instrumented "$@"
 }
 run_full_training_uninstrumented() {
-    iml-quick-expr --expr total_training_time --repetitions 3 --bullet --pong "$@"
+    iml-quick-expr --expr total_training_time --bullet --pong "$@"
 }
 
 run_debug_calibration() {
@@ -151,8 +151,13 @@ run_debug_all() {
     run_debug_full_training_instrumented
 }
 run_all() {
-    run_full_training_uninstrumented
-    run_full_training_instrumented
+    _run_reps() {
+        run_full_training_uninstrumented "$@"
+        run_full_training_instrumented "$@"
+    }
+    _run_reps --repetitions 1 "$@"
+    _run_reps --repetitions 2 "$@"
+    _run_reps --repetitions 3 "$@"
 }
 
 if [ $# -gt 0 ]; then
