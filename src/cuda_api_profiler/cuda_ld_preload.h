@@ -15,8 +15,12 @@
 #include "tensorflow/core/platform/mutex.h"
 
 #include <vector>
+#include <string>
 #include <functional>
 
+typedef CUresult (*cuLaunchKernel_func)(CUfunction f, unsigned int gridDimX, unsigned int gridDimY, unsigned int gridDimZ, unsigned int blockDimX, unsigned int blockDimY, unsigned int blockDimZ, unsigned int sharedMemBytes, CUstream hStream, void **kernelParams, void **extra);
+
+typedef cudaError_t (*cudaLaunchKernel_ptsz_func)(const void *func, dim3 gridDim, dim3 blockDim, void **args, size_t sharedMem, cudaStream_t stream);
 typedef cudaError_t (*cudaLaunchKernel_func)(const void *func, dim3 gridDim, dim3 blockDim, void **args, size_t sharedMem, cudaStream_t stream);
 typedef cudaError_t (*cudaMemcpyAsync_func)(void *dst, const void *src, size_t count, enum cudaMemcpyKind kind, cudaStream_t stream);
 typedef cudaError_t (*cudaMalloc_func)(void **devPtr, size_t size);
@@ -41,15 +45,51 @@ struct CudaAPICallback {
   ExitCallback exit_cb;
 };
 
+class LibHandle {
+public:
+  std::string _so_path;
+  void* _lib_handle;
+  int _flags;
+
+  LibHandle();
+  LibHandle(const std::string& so_path, int flags);
+  LibHandle(const std::string& so_path);
+
+  // To prevent double calls to dlclose(...), only allow for move constructor.
+  LibHandle(const LibHandle&) = delete;
+  LibHandle& operator=(const LibHandle&) = delete;
+  LibHandle& operator=(LibHandle&& other);
+  LibHandle( LibHandle&& other );
+
+  void* LoadSym(const std::string& funcname);
+
+  const char* _DLError();
+  void Open();
+  bool Opened() const;
+  void Close();
+
+  ~LibHandle();
+
+};
+
 //
 // Define CUDA API callbacks using the function types of CUDA runtime functions (cuda_runtime_api.h).
 //
+
+using cuLaunchKernel_start_cb = std::function<void (CUfunction f, unsigned int gridDimX, unsigned int gridDimY, unsigned int gridDimZ, unsigned int blockDimX, unsigned int blockDimY, unsigned int blockDimZ, unsigned int sharedMemBytes, CUstream hStream, void **kernelParams, void **extra)>;
+using cuLaunchKernel_exit_cb = std::function<void (CUfunction f, unsigned int gridDimX, unsigned int gridDimY, unsigned int gridDimZ, unsigned int blockDimX, unsigned int blockDimY, unsigned int blockDimZ, unsigned int sharedMemBytes, CUstream hStream, void **kernelParams, void **extra,
+    CUresult ret)>;
+using cuLaunchKernel_callback = CudaAPICallback<cuLaunchKernel_start_cb, cuLaunchKernel_exit_cb>;
 
 using cudaLaunchKernel_start_cb = std::function<void (const void *func, dim3 gridDim, dim3 blockDim, void **args, size_t sharedMem, cudaStream_t stream)>;
 using cudaLaunchKernel_exit_cb = std::function<void (const void *func, dim3 gridDim, dim3 blockDim, void **args, size_t sharedMem, cudaStream_t stream,
   cudaError_t ret)>;
 using cudaLaunchKernel_callback = CudaAPICallback<cudaLaunchKernel_start_cb, cudaLaunchKernel_exit_cb>;
 
+using cudaLaunchKernel_ptsz_start_cb = std::function<void (const void *func, dim3 gridDim, dim3 blockDim, void **args, size_t sharedMem, cudaStream_t stream)>;
+using cudaLaunchKernel_ptsz_exit_cb = std::function<void (const void *func, dim3 gridDim, dim3 blockDim, void **args, size_t sharedMem, cudaStream_t stream,
+    cudaError_t ret)>;
+using cudaLaunchKernel_ptsz_callback = CudaAPICallback<cudaLaunchKernel_ptsz_start_cb, cudaLaunchKernel_ptsz_exit_cb>;
 
 using cudaMemcpyAsync_start_cb = std::function<void (void *dst, const void *src, size_t count, enum cudaMemcpyKind kind, cudaStream_t stream)>;
 using cudaMemcpyAsync_exit_cb = std::function<void (void *dst, const void *src, size_t count, enum cudaMemcpyKind kind, cudaStream_t stream,
@@ -122,8 +162,14 @@ struct CudaAPICallbacks {
 
 struct CudaAPI {
 
+  cuLaunchKernel_func cuLaunchKernel;
+  CudaAPICallbacks<cuLaunchKernel_callback> cuLaunchKernel_cbs;
+
   cudaLaunchKernel_func cudaLaunchKernel;
   CudaAPICallbacks<cudaLaunchKernel_callback> cudaLaunchKernel_cbs;
+
+  cudaLaunchKernel_ptsz_func cudaLaunchKernel_ptsz;
+  CudaAPICallbacks<cudaLaunchKernel_ptsz_callback> cudaLaunchKernel_ptsz_cbs;
 
   cudaMemcpyAsync_func cudaMemcpyAsync;
   CudaAPICallbacks<cudaMemcpyAsync_callback> cudaMemcpyAsync_cbs;
@@ -144,10 +190,13 @@ class CudaLibrary {
 public:
   CudaLibrary();
   ~CudaLibrary();
+  bool Opened() const;
   void DLOpen();
   void DLClose();
   const char* DLError();
-  void* _lib_handle;
+//  void* _lib_handle;
+  LibHandle _libcudart;
+  LibHandle _libcuda;
   CudaAPI _cuda_api;
 };
 
@@ -156,6 +205,10 @@ CudaLibrary* GetCudaLibrary();
 
 // Use LD_PRELOAD trick to intercept CUDA runtime API function calls.
 extern "C" {
+
+CUresult cuLaunchKernel(CUfunction f, unsigned int gridDimX, unsigned int gridDimY, unsigned int gridDimZ, unsigned int blockDimX, unsigned int blockDimY, unsigned int blockDimZ, unsigned int sharedMemBytes, CUstream hStream, void **kernelParams, void **extra);
+
+extern __host__ cudaError_t cudaLaunchKernel_ptsz(const void *func, dim3 gridDim, dim3 blockDim, void **args, size_t sharedMem, cudaStream_t stream);
 extern __host__ cudaError_t cudaLaunchKernel(const void *func, dim3 gridDim, dim3 blockDim, void **args, size_t sharedMem, cudaStream_t stream);
 extern __host__ cudaError_t cudaMemcpyAsync(void *dst, const void *src, size_t count, enum cudaMemcpyKind kind, cudaStream_t stream);
 extern __host__ cudaError_t cudaMalloc(void **devPtr, size_t size);

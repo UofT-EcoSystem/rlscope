@@ -538,7 +538,9 @@ class ExprSubtractionValidation:
         # ncpus = multiprocessing.cpu_count()
         # with ProcessPoolExecutor(max_workers=ncpus) as pool:
         for config in self.configs:
-            if config.config_suffix != 'uninstrumented' and not config.is_calibration:
+            if config.config_suffix != 'uninstrumented' and \
+                not config.is_calibration and \
+                self.args.calibration_mode == 'validation':
                 # self.plot_config(config)
                 name = "{klass}.{func}".format(
                     klass=self.__class__.__name__,
@@ -623,11 +625,11 @@ class ExprSubtractionValidation:
         task = "CUPTIScalingOverheadTask"
         all_gpu_activities_api_time_directories = []
         all_interception_directories = []
-        assert self.get_iterations(self.conf(algo, env, 'gpu_activities_api_time')) == self.get_iterations(self.conf(algo, env, 'interception'))
-        iterations = self.get_iterations(self.conf(algo, env, 'gpu_activities_api_time'))
+        assert self.get_iterations(self.conf(algo, env, 'gpu_activities_api_time_calibration')) == self.get_iterations(self.conf(algo, env, 'interception_calibration'))
+        iterations = self.get_iterations(self.conf(algo, env, 'gpu_activities_api_time_calibration'))
         for iters in iterations:
-            gpu_activities_api_time_directories = self.conf(algo, env, 'gpu_activities_api_time').iml_directories(iters)
-            interception_directories = self.conf(algo, env, 'interception').iml_directories(iters)
+            gpu_activities_api_time_directories = self.conf(algo, env, 'gpu_activities_api_time_calibration').iml_directories(iters)
+            interception_directories = self.conf(algo, env, 'interception_calibration').iml_directories(iters)
             if len(gpu_activities_api_time_directories) != len(interception_directories):
                 log_missing_files(self, task=task, files={
                     'gpu_activities_api_time_directories': gpu_activities_api_time_directories,
@@ -875,10 +877,10 @@ class ExprSubtractionValidation:
                 debug=self.quick_expr.args.debug)
 
     def do_run(self):
-        for config in self.configs:
-            iterations = self.get_iterations(config)
-            for iters in iterations:
-                for rep in range(1, self.args.repetitions+1):
+        for rep in range(1, self.args.repetitions+1):
+            for config in self.configs:
+                iterations = self.get_iterations(config)
+                for iters in iterations:
                     config.run(rep, iters)
 
         for algo, env in self.stable_baselines_algo_env:
@@ -921,6 +923,9 @@ class ExprSubtractionValidation:
 
         if self.args.only_runs is not None and len(self.args.only_runs) > 0:
             runs = [run for run in range(self.args.num_runs) if run in self.args.only_runs]
+        elif self.args.calibration_mode == 'calibration':
+            # one_minute_iterations*(2**i) for i in [2] => 4 minute runs
+            runs = [2]
         else:
             runs = list(range(self.args.num_runs))
 
@@ -965,7 +970,10 @@ class ExprSubtractionValidation:
             config_kwargs['long_run'] = True
             config = ExprSubtractionValidationConfig(**config_kwargs)
             assert not config.is_calibration
-            algo_env_configs.append(config)
+            if self.args.calibration_mode == 'validation':
+                # *_calibration folders are used for computing average overhead.
+                # Folders without the *_calibration are the runs we subtract the averages from.
+                algo_env_configs.append(config)
 
             config_suffix = "{suffix}_calibration".format(
                 suffix=config.config_suffix,
@@ -1022,58 +1030,62 @@ class ExprSubtractionValidation:
             config_suffix='no_gpu_activities',
             script_args=['--iml-disable-pyprof'],
         )
+        # CUPTIScalingOverheadTask:
         config = ExprSubtractionValidationConfig(
             expr=self,
             algo=algo,
             env=env,
             iml_prof_config='gpu-activities-api-time',
-            config_suffix='gpu_activities_api_time',
+            config_suffix='gpu_activities_api_time_calibration',
             script_args=['--iml-disable-pyprof'],
             long_run=True,
         )
         algo_env_configs.append(config)
 
-        # Evaluate: combined tfprof/pyprof overhead correction.
-        # (i.e. full IML trace-collection).
-        config = ExprSubtractionValidationConfig(
-            expr=self,
-            algo=algo,
-            env=env,
-            iml_prof_config='full',
-            # Enable tfprof: CUPTI and LD_PRELOAD.
-            config_suffix='full',
-            # Enable pyprof.
-            script_args=[],
-            long_run=True,
-        )
-        algo_env_configs.append(config)
+        if self.args.calibration_mode == 'validation':
+            # Evaluate: combined tfprof/pyprof overhead correction.
+            # (i.e. full IML trace-collection).
+            config = ExprSubtractionValidationConfig(
+                expr=self,
+                algo=algo,
+                env=env,
+                iml_prof_config='full',
+                # Enable tfprof: CUPTI and LD_PRELOAD.
+                config_suffix='full',
+                # Enable pyprof.
+                script_args=[],
+                long_run=True,
+            )
+            algo_env_configs.append(config)
 
-        # Evaluate: tfprof overhead correction in isolation.
-        config = ExprSubtractionValidationConfig(
-            expr=self,
-            algo=algo,
-            env=env,
-            iml_prof_config='full',
-            # Enable tfprof: CUPTI and LD_PRELOAD.
-            config_suffix='just_tfprof',
-            # DON'T enable pyprof.
-            script_args=['--iml-disable-pyprof'],
-            long_run=True,
-        )
-        algo_env_configs.append(config)
+        if self.args.calibration_mode == 'validation':
+            # Evaluate: tfprof overhead correction in isolation.
+            config = ExprSubtractionValidationConfig(
+                expr=self,
+                algo=algo,
+                env=env,
+                iml_prof_config='full',
+                # Enable tfprof: CUPTI and LD_PRELOAD.
+                config_suffix='just_tfprof',
+                # DON'T enable pyprof.
+                script_args=['--iml-disable-pyprof'],
+                long_run=True,
+            )
+            algo_env_configs.append(config)
 
-        # Evaluate: pyprof overhead correction in isolation.
-        config = ExprSubtractionValidationConfig(
-            expr=self,
-            algo=algo,
-            env=env,
-            iml_prof_config='uninstrumented',
-            # Disable tfprof: CUPTI and LD_PRELOAD.
-            config_suffix='just_pyprof',
-            # Enable pyprof.
-            script_args=['--iml-disable-tfprof'],
-        )
-        algo_env_configs.append(config)
+        if self.args.calibration_mode == 'validation':
+            # Evaluate: pyprof overhead correction in isolation.
+            config = ExprSubtractionValidationConfig(
+                expr=self,
+                algo=algo,
+                env=env,
+                iml_prof_config='uninstrumented',
+                # Disable tfprof: CUPTI and LD_PRELOAD.
+                config_suffix='just_pyprof',
+                # Enable pyprof.
+                script_args=['--iml-disable-tfprof'],
+            )
+            algo_env_configs.append(config)
 
         # PyprofOverheadTask: Python->C-lib event tracing, and operation annotation overhead correction.
         add_calibration_config(
@@ -1113,6 +1125,32 @@ class ExprSubtractionValidation:
             '--num-runs',
             type=int,
             default=3)
+        parser.add_argument(
+            '--calibration-mode',
+            default='calibration',
+            choices=['calibration', 'validation'],
+            help=textwrap.dedent("""
+            calibration:
+                Only run configurations needed to subtract overhead; i.e.
+                
+                PyprofOverheadTask
+                    uninstrumented
+                    just_pyprof_annotations
+                    just_pyprof_interceptions
+
+                CUPTIOverheadTask
+                    gpu_activities
+                    no_gpu_activities
+
+                CUPTIScalingOverheadTask
+                    gpu_activities_api_time
+                    interception
+            
+            validation:
+                Run additional configurations for "isolating" bugs in overhead correction. 
+                For example, run with just python annotations enabled so we can see if correcting for python annotations in isolation works.
+            """),
+        )
         parser.add_argument(
             '--only-runs',
             type=int,

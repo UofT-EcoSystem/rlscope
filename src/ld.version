@@ -16,6 +16,8 @@ SAMPLE_CUDA_API_1.0 {
     pop_operation;
 
     /* CUDA API calls that we intercept */
+    cuLaunchKernel;
+    cudaLaunchKernel_ptsz;
     cudaLaunchKernel;
     cudaMemcpyAsync;
     cudaMalloc;

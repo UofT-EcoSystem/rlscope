@@ -418,41 +418,66 @@ DeviceTracerImpl::~DeviceTracerImpl() {
 
 void DeviceTracerImpl::_WrapCudaAPICalls() {
 #ifdef WITH_CUDA_LD_PRELOAD
+  VLOG(1) << "Register CUDA API callbacks";
 
-#define REGISTER_CUDA_API_CB(cbid, funcname, ...) \
+#define REGISTER_CUDA_API_CB(domain, cbid, funcname, RetType, ...) \
   _cuda_api_api_profiler_cbs.emplace_back( \
       GetCudaLibrary()->_cuda_api.funcname ## _cbs.RegisterCallback( \
           /*start_cb=*/[this](__VA_ARGS__) { \
+            VLOG(1) << "CUDA_API_INTERCEPT.ENTER: " << #funcname; \
             this->_api_profiler.ApiCallback( \
-                CUPTI_CB_DOMAIN_RUNTIME_API, \
+                domain, \
                 cbid, \
                 CUPTI_API_ENTER); \
           }, \
-          /*exit_cb=*/[this](__VA_ARGS__, cudaError_t ret) { \
+          /*exit_cb=*/[this](__VA_ARGS__, RetType ret) { \
+            VLOG(1) << "CUDA_API_INTERCEPT.EXIT: " << #funcname; \
             this->_api_profiler.ApiCallback( \
-                CUPTI_CB_DOMAIN_RUNTIME_API, \
+                domain, \
                 cbid, \
                 CUPTI_API_EXIT); \
           }));
 
   REGISTER_CUDA_API_CB(
+      CUPTI_CB_DOMAIN_RUNTIME_API,
       CUPTI_RUNTIME_TRACE_CBID_cudaLaunchKernel_v7000,
       cudaLaunchKernel,
+      cudaError_t,
       const void *func, dim3 gridDim, dim3 blockDim, void **args, size_t sharedMem, cudaStream_t stream);
 
   REGISTER_CUDA_API_CB(
+      CUPTI_CB_DOMAIN_DRIVER_API,
+      CUPTI_DRIVER_TRACE_CBID_cuLaunchKernel,
+      cuLaunchKernel,
+      CUresult,
+      CUfunction f, unsigned int gridDimX, unsigned int gridDimY, unsigned int gridDimZ, unsigned int blockDimX, unsigned int blockDimY, unsigned int blockDimZ, unsigned int sharedMemBytes, CUstream hStream, void **kernelParams, void **extra);
+
+  REGISTER_CUDA_API_CB(
+      CUPTI_CB_DOMAIN_RUNTIME_API,
+      CUPTI_RUNTIME_TRACE_CBID_cudaLaunchKernel_ptsz_v7000,
+      cudaLaunchKernel_ptsz,
+      cudaError_t,
+      const void *func, dim3 gridDim, dim3 blockDim, void **args, size_t sharedMem, cudaStream_t stream);
+
+  REGISTER_CUDA_API_CB(
+      CUPTI_CB_DOMAIN_RUNTIME_API,
       CUPTI_RUNTIME_TRACE_CBID_cudaMemcpyAsync_v3020,
       cudaMemcpyAsync,
+      cudaError_t,
       void *dst, const void *src, size_t count, enum cudaMemcpyKind kind, cudaStream_t stream);
 
   REGISTER_CUDA_API_CB(
+      CUPTI_CB_DOMAIN_RUNTIME_API,
       CUPTI_RUNTIME_TRACE_CBID_cudaMalloc_v3020,
       cudaMalloc,
+      cudaError_t,
       void **devPtr, size_t size);
 
   REGISTER_CUDA_API_CB(
+      CUPTI_CB_DOMAIN_RUNTIME_API,
       CUPTI_RUNTIME_TRACE_CBID_cudaFree_v3020,
       cudaFree,
+      cudaError_t,
       void *devPtr);
 
 #else
@@ -496,7 +521,7 @@ Status DeviceTracerImpl::Start() {
         << "Can only run iml-prof with --fuzz-cuda-api or --cuda-api-calls, not both";
 
       if (is_yes("IML_CUDA_API_CALLS", false)) {
-        VLOG(1) << "Register CUDA API calls callback";
+        VLOG(1) << "Register CUDA API callbacks";
         _WrapCudaAPICalls();
 #ifdef WITH_CUDA_LD_PRELOAD
 #else

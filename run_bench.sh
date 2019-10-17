@@ -119,6 +119,10 @@ run_full_training_uninstrumented() {
     iml-quick-expr --expr total_training_time --repetitions 3 --bullet --pong "$@"
 }
 
+run_debug_calibration() {
+    iml-quick-expr --expr subtraction_validation --repetitions 3 --env Walker2DBulletEnv-v0 --algo ppo2 "$@"
+}
+
 run_debug_all() {
     run_debug_full_training_instrumented
     run_debug_full_training_uninstrumented
@@ -129,6 +133,8 @@ run_all() {
 }
 
 if [ $# -gt 0 ]; then
+    echo "> CMD: $@"
+    echo "  $ $@"
     "$@"
 else
     echo "Usage:"
