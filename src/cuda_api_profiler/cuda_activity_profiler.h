@@ -16,7 +16,8 @@
 
 #include "tensorflow/core/platform/types.h"
 
-#include "iml_profiler/protobuf/iml_prof.pb.h"
+//#include "iml_profiler/protobuf/iml_prof.pb.h"
+#include "iml_prof.pb.h"
 
 #include "cuda_api_profiler/cupti_manager.h"
 #include "cuda_api_profiler/thread_pool_wrapper.h"

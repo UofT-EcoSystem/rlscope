@@ -30,7 +30,8 @@ limitations under the License.
 #include "cuda_api_profiler/registered_handle.h"
 #endif
 
-#include "iml_profiler/protobuf/iml_prof.pb.h"
+//#include "iml_profiler/protobuf/iml_prof.pb.h"
+#include "iml_prof.pb.h"
 
 #include "cuda_api_profiler/cuda_activity_profiler.h"
 

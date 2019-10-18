@@ -8,7 +8,8 @@
 #include <cuda.h>
 #include <cupti.h>
 
-#include "iml_profiler/protobuf/iml_prof.pb.h"
+//#include "iml_profiler/protobuf/iml_prof.pb.h"
+#include "iml_prof.pb.h"
 
 #include "cuda_api_profiler/op_stack.h"
 #include "cuda_api_profiler/event_handler.h"

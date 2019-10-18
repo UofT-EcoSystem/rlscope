@@ -18,7 +18,8 @@
 #include <sys/syscall.h>
 #define gettid() syscall(SYS_gettid)
 
-#include "iml_profiler/protobuf/iml_prof.pb.h"
+//#include "iml_profiler/protobuf/iml_prof.pb.h"
+#include "iml_prof.pb.h"
 
 #include "cuda_api_profiler/op_stack.h"
 #include "cuda_api_profiler/get_env_var.h"
