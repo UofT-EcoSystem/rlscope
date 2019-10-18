@@ -625,7 +625,14 @@ class ExprSubtractionValidation:
         task = "CUPTIScalingOverheadTask"
         all_gpu_activities_api_time_directories = []
         all_interception_directories = []
-        assert self.get_iterations(self.conf(algo, env, 'gpu_activities_api_time_calibration')) == self.get_iterations(self.conf(algo, env, 'interception_calibration'))
+        iters_01 = self.get_iterations(self.conf(algo, env, 'gpu_activities_api_time_calibration'))
+        iters_02 = self.get_iterations(self.conf(algo, env, 'interception_calibration'))
+        if iters_01 != iters_02:
+            logging.info("data: {msg}".format(msg=pprint_msg({
+                'iters_01': iters_01,
+                'iters_02': iters_02,
+            })))
+            assert iters_01 == iters_02
         iterations = self.get_iterations(self.conf(algo, env, 'gpu_activities_api_time_calibration'))
         for iters in iterations:
             gpu_activities_api_time_directories = self.conf(algo, env, 'gpu_activities_api_time_calibration').iml_directories(iters)
@@ -938,7 +945,7 @@ class ExprSubtractionValidation:
     def get_iterations(self, config=None):
         iterations = self.iterations
 
-        if config is not None and ( config.long_run and self.args.long_run ):
+        if config is not None and not config.is_calibration and ( config.long_run and self.args.long_run ):
             long_run_iterations = self.args.one_minute_iterations*(2**self.args.long_run_exponent)
             if long_run_iterations not in iterations:
                 iterations.append(long_run_iterations)

@@ -140,7 +140,7 @@ run_debug_subtraction_validation_long() {
     # - Re-plot stuff.
     # - Run using different numbers of iterations
     # - Re-plot stuff.
-    _cmd "$@" --num-runs 0
+    _cmd "$@" --num-runs 0 --long-run
     _cmd "$@" --plot
     _cmd "$@" --num-runs 3
     _cmd "$@" --num-runs 3 --plot

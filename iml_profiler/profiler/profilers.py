@@ -1212,17 +1212,16 @@ class Profiler:
         while len(self._op_stack) != 0:
             self.end_operation(self._cur_operation, skip_finish=True)
 
-    def stop(self, stop_utilization_sampler=False):
+    def stop(self):
         PROFILERS.remove(self)
 
         if self.just_sample_util:
             self.util_sampler.stop()
 
-        if stop_utilization_sampler and self.util_sampler_pid is not None:
-            # Q: Any way to avoid forgetting to terminate utilization sampler?
-            # A: Not really...can add a cleanup() script/python-API to call in the code when the programmer expects to terminate...
-            # harder to forget than a call to stop() that's missing a parameter.
-            self._terminate_utilization_sampler()
+        # Q: Any way to avoid forgetting to terminate utilization sampler?
+        # A: Not really...can add a cleanup() script/python-API to call in the code when the programmer expects to terminate...
+        # harder to forget than a call to stop() that's missing a parameter.
+        self.maybe_terminate_utilization_sampler(warn_terminated=False)
 
         if self.disable:
             return
