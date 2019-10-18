@@ -113,10 +113,10 @@ run_debug_full_training_uninstrumented() {
 }
 
 run_full_training_instrumented() {
-    iml-quick-expr --expr total_training_time --bullet --pong --instrumented "$@"
+    iml-quick-expr --expr total_training_time --instrumented "$@"
 }
 run_full_training_uninstrumented() {
-    iml-quick-expr --expr total_training_time --bullet --pong "$@"
+    iml-quick-expr --expr total_training_time "$@"
 }
 
 run_debug_calibration() {
@@ -150,14 +150,58 @@ run_debug_all() {
     run_debug_full_training_uninstrumented
     run_debug_full_training_instrumented
 }
+
+# If we want to include dqn in every single figure, we need to show a low complexity simulator (simulator time will be understated).
+# If we want to show a medium complexity simulator (Walker2D) we cannot include dqn.
+# So, lets do both and decide later.
+# NOTE: we will run both LunarLander and LunarLanderContinuous for ppo so we can make sure these environment have identical complexity (except for the input type)
+fig_1a_all_algo() {
+    # (1a) All algorithms (low complexity): LunarLander
+    # GOAL: 3 repetitions
+    iml-quick-expr --atari "$@"
+}
+fig_1b_all_algo() {
+    # (1b) Mostly all algorithms (except dqn) (medium complexity): Walker2D
+    # GOAL: 3 repetitions
+    iml-quick-expr --env Walker2DBulletEnv-v0 "$@"
+}
+fig_2_all_env() {
+    # (2) All environments (low and medium complexity): ppo2
+    # GOAL: 3 repetitions
+    iml-quick-expr --atari --bullet --algo ppo2 "$@"
+}
+fig_3_all_algo_env()  {
+    # (3) All (algo, env) combos
+    # GOAL: 1 repetition
+    iml-quick-expr --atari --bullet "$@"
+}
+fig_all() {
+    fig_1a_all_algo "$@"
+    fig_1b_all_algo "$@"
+    fig_2_all_env "$@"
+    fig_3_all_algo_env "$@"
+}
+fig_all_algo_then_all_env() {
+    fig_1a_all_algo "$@"
+    fig_1b_all_algo "$@"
+    fig_2_all_env "$@"
+}
+_run_reps() {
+    "$@" --repetitions 1
+    "$@" --repetitions 2
+    "$@" --repetitions 3
+}
+
 run_all() {
-    _run_reps() {
-        run_full_training_uninstrumented "$@"
-        run_full_training_instrumented "$@"
-    }
-    _run_reps --repetitions 1 "$@"
-    _run_reps --repetitions 2 "$@"
-    _run_reps --repetitions 3 "$@"
+    # Need 1 uninstrumented run for all (algo, env) pairs for generating nvidia-smi utilization figure (Figure 8)
+    fig_all --repetitions 1 "$@"
+    # Prioritize uninstrumented runs (needed for some figures).
+    fig_all_algo_then_all_env --repetitions 1 "$@"
+    # For generating non-extrapolated overhead breakdown.
+    fig_all_algo_then_all_env --repetitions 1 --instrumented "$@"
+
+    # For getting error bounds on "extrapolation justification" figure.
+    fig_all_algo_then_all_env --repetitions 3 "$@"
 }
 
 if [ $# -gt 0 ]; then

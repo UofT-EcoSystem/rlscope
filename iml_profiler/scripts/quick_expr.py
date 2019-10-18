@@ -399,7 +399,7 @@ class ExprTotalTrainingTime:
             action='store_true',
             help='Limit environments to physics-based Bullet environments')
         parser.add_argument(
-            '--pong',
+            '--atari',
             action='store_true',
             help='Limit environments to Atari Pong environment')
         parser.add_argument(
@@ -480,7 +480,7 @@ class ExprTotalTrainingTime:
             env_id=self.args.env,
             all=True,
             bullet=self.args.bullet,
-            pong=self.args.pong,
+            atari=self.args.atari,
             debug=self.quick_expr.args.debug,
         )
         for algo, env in self.stable_baselines_algo_env:
@@ -956,7 +956,7 @@ class ExprSubtractionValidation:
             env_id=self.args.env,
             all=True,
             bullet=self.args.bullet,
-            pong=self.args.pong,
+            atari=self.args.atari,
             debug=self.quick_expr.args.debug,
         )
         for algo, env in self.stable_baselines_algo_env:
@@ -1192,7 +1192,7 @@ class ExprSubtractionValidation:
             action='store_true',
             help='Limit environments to physics-based Bullet environments')
         parser.add_argument(
-            '--pong',
+            '--atari',
             action='store_true',
             help='Limit environments to Atari Pong environment')
         parser.add_argument(

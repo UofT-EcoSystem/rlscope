@@ -166,8 +166,8 @@ def detect_available_env(env_ids):
 def is_bullet_env(env_id):
     return re.search(r'BulletEnv', env_id)
 
-def is_pong_env(env_id):
-    return re.search(r'PongNoFrameskip', env_id)
+def is_atari_env(env_id):
+    return re.search(r'PongNoFrameskip', env_id) or re.search(r'LunarLander', env_id)
 
 def stable_baselines_gather_algo_env_pairs(algo=None, env_id=None, all=False, bullet=False, pong=False, debug=False):
 
@@ -182,11 +182,11 @@ def stable_baselines_gather_algo_env_pairs(algo=None, env_id=None, all=False, bu
     def should_run(algo, env_id):
         if not is_supported(algo, env_id):
             return False
-        # If we specify --pong, just run Pong (algo, env) combos.
+        # If we specify --atari, just run Atari (algo, env) combos.
         # If we specify --bullet, just run Bullet (algo, env) combos.
-        # If we specify --pong --bullet, run only Pong/Bullet (algo, env) combos.
-        # Otherwise, neither --pong nor --bullet are given, run everything.
-        return ( pong and is_pong_env(env_id) ) or \
+        # If we specify --atari --bullet, run only Atari/Bullet (algo, env) combos.
+        # Otherwise, neither --atari nor --bullet are given, run everything.
+        return ( pong and is_atari_env(env_id) ) or \
                ( bullet and is_bullet_env(env_id) ) or \
                ( not pong and not bullet )
 

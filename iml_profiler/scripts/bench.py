@@ -133,7 +133,7 @@ def add_stable_baselines_options(pars):
         action='store_true',
         help='Limit environments to physics-based Bullet environments')
     pars.add_argument(
-        '--pong',
+        '--atari',
         action='store_true',
         help='Limit environments to Atari Pong environment')
     pars.add_argument(
@@ -371,13 +371,13 @@ class Experiment:
                 return expr
         return None
 
-    def _gather_algo_env_pairs(self, algo=None, env_id=None, all=False, bullet=False, pong=False, debug=False):
+    def _gather_algo_env_pairs(self, algo=None, env_id=None, all=False, bullet=False, atari=False, debug=False):
         return expr_config.stable_baselines_gather_algo_env_pairs(
             algo=algo,
             env_id=env_id,
             all=all,
             bullet=bullet,
-            pong=pong,
+            atari=atari,
             debug=debug)
 
     def _run_cmd(self, cmd, to_file, env=None, replace=False, debug=False):
@@ -805,7 +805,7 @@ class ExperimentGroup(Experiment):
             'env_id',
             'all',
             'bullet',
-            'pong',
+            'atari',
             'debug',
         }
         gather_algo_env_dict = vars(train_stable_baselines_args)
@@ -1184,7 +1184,7 @@ class StableBaselines(Experiment):
             env_id=args.env_id,
             all=args.all,
             bullet=args.bullet,
-            pong=args.pong)
+            atari=args.atari)
         if algo_env_pairs is None:
             logging.info('Please provide either --env-id or --algo')
             sys.exit(1)

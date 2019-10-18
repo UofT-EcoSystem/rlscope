@@ -1191,12 +1191,13 @@ class Profiler:
     def start(self, start_utilization_sampler=False, handle_utilization_sampler=False):
         PROFILERS.append(self)
 
-        if self.disable:
-            return
-
+        # Collect GPU utilization info, even for uninstrumented runs.
         self.handle_utilization_sampler = handle_utilization_sampler
         if not self.just_sample_util and ( start_utilization_sampler or handle_utilization_sampler ):
             self._launch_utilization_sampler()
+
+        if self.disable:
+            return
 
         self._start_us = now_us()
 
@@ -1214,9 +1215,6 @@ class Profiler:
     def stop(self, stop_utilization_sampler=False):
         PROFILERS.remove(self)
 
-        if self.disable:
-            return
-
         if self.just_sample_util:
             self.util_sampler.stop()
 
@@ -1225,6 +1223,9 @@ class Profiler:
             # A: Not really...can add a cleanup() script/python-API to call in the code when the programmer expects to terminate...
             # harder to forget than a call to stop() that's missing a parameter.
             self._terminate_utilization_sampler()
+
+        if self.disable:
+            return
 
         self._maybe_end_operations()
         self._maybe_finish(finish_now=True, should_exit=False)
