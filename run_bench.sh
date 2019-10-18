@@ -194,14 +194,14 @@ _run_reps() {
 
 run_all() {
     # Need 1 uninstrumented run for all (algo, env) pairs for generating nvidia-smi utilization figure (Figure 8)
-    fig_all --repetitions 1 "$@"
+    fig_all --expr total_training_time --repetitions 1 "$@"
     # Prioritize uninstrumented runs (needed for some figures).
-    fig_all_algo_then_all_env --repetitions 1 "$@"
+    fig_all_algo_then_all_env --expr total_training_time --repetitions 1 "$@"
     # For generating non-extrapolated overhead breakdown.
-    fig_all_algo_then_all_env --repetitions 1 --instrumented "$@"
+    fig_all_algo_then_all_env --expr total_training_time --repetitions 1 --instrumented "$@"
 
     # For getting error bounds on "extrapolation justification" figure.
-    fig_all_algo_then_all_env --repetitions 3 "$@"
+    fig_all_algo_then_all_env --expr total_training_time --repetitions 3 "$@"
 }
 
 if [ $# -gt 0 ]; then
