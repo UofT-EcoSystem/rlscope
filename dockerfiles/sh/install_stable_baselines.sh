@@ -49,9 +49,10 @@ pip install git+https://github.com/openai/atari-py.git@0.2.0
 
 # NOTE: we DON'T install stable-baselines from pip;
 #   we want to use our custom stable-baselines repo with IML annotations added ($STABLE_BASELINES_DIR).
+# box2d-py==2.3.5
 pip install \
     'pyyaml>=5.1' \
-    box2d-py==2.3.5 \
+    'Box2D==2.3.2' \
     pybullet==2.5.1 \
     gym-minigrid==0.0.4 \
     optuna==0.12.0 \
@@ -59,6 +60,12 @@ pip install \
     progressbar2 \
     ipdb \
     ipython
+
+# LunarLander requires the python package `box2d`.
+# You can install it using ``apt install swig`` and then ``pip install box2d box2d-kengz``
+#sudo apt-get install -y swig
+pip install \
+    'Box2D-kengz==2.3.3'
 
 if [ "${STABLE_BASELINES_DIR}" = "" ]; then
     # Install directly from git repo.
