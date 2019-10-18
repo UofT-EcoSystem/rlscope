@@ -180,7 +180,10 @@ void CUDAActivityProfiler::Print(std::ostream& out, int indent) {
 
 void CUDAActivityProfiler::AsyncDump() {
   mutex_lock lock(_mu);
-  _AsyncDump();
+  {
+    mutex_lock lock(_trace_mu);
+    _AsyncDump();
+  }
 }
 
 void CUDAActivityProfiler::_AsyncDumpWithState(CUDAActivityProfilerState&& dump_state) {
@@ -200,10 +203,7 @@ void CUDAActivityProfiler::_AsyncDumpWithState(CUDAActivityProfilerState&& dump_
 void CUDAActivityProfiler::_AsyncDump() {
   if (_state.CanDump()) {
     CUDAActivityProfilerState dump_state;
-    {
-      mutex_lock lock(_trace_mu);
-      dump_state = _state.DumpState();
-    }
+    dump_state = _state.DumpState();
     _AsyncDumpWithState(std::move(dump_state));
   }
 }
@@ -214,8 +214,11 @@ void CUDAActivityProfiler::AwaitDump() {
 
 void CUDAActivityProfiler::SetMetadata(const char* directory, const char* process_name, const char* machine_name, const char* phase_name) {
   mutex_lock lock(_mu);
-  if (_state.CanDump()) {
-    _AsyncDump();
+  {
+    mutex_lock lock(_trace_mu);
+    if (_state.CanDump()) {
+      _AsyncDump();
+    }
   }
   VLOG(1) << "CUDAActivityProfiler." << __func__
           << " " << "directory = " << directory
@@ -309,10 +312,15 @@ void CUDAActivityProfiler::ActivityCallback(const CUpti_Activity &record) {
       break;
   }
 
+  _MaybeDump();
+
   }
 
+}
+
+void CUDAActivityProfiler::_MaybeDump() {
   if (_state.ShouldDump() && _state.CanDump()) {
-    VLOG(1) << "tfprof saw more than " << CUDA_ACTIVITY_PROFILER_MAX_RECORDS_PER_DUMP << " records; "
+    VLOG(1) << "CUDAActivityProfiler saw more than " << CUDA_ACTIVITY_PROFILER_MAX_RECORDS_PER_DUMP << " records; "
             << "triggering async dump.";
     auto dump_state = _state.DumpState();
     _AsyncDumpWithState(std::move(dump_state));

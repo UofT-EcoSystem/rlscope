@@ -100,6 +100,7 @@ public:
   void _AsyncDump();
   void _AsyncDumpWithState(EventProfilerState&& dump_state);
   void AwaitDump();
+  void _MaybeDump();
 
 };
 

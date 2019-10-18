@@ -75,6 +75,7 @@ struct CUDAAPIProfilerState {
   }
 
   bool CanDump();
+  bool ShouldDump();
   std::string DumpPath(int trace_id);
   CUDAAPIProfilerState DumpState();
   std::unique_ptr<iml::CUDAAPIPhaseStatsProto> AsProto();
@@ -119,6 +120,10 @@ public:
   void AsyncDump();
   void _AsyncDump();
   void AwaitDump();
+
+  bool ShouldDump();
+  void _MaybeDump();
+  void _AsyncDumpWithState(CUDAAPIProfilerState&& dump_state);
 
   static std::map<CUpti_CallbackId, std::string> RuntimeCallbackIDToName();
   static std::map<CUpti_CallbackId, std::string> DriverCallbackIDToName();

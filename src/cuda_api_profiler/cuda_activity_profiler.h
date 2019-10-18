@@ -149,6 +149,7 @@ public:
   void AsyncDump();
   void _AsyncDump();
   void _AsyncDumpWithState(CUDAActivityProfilerState&& dump_state);
+  void _MaybeDump();
   void AwaitDump();
 
   Status Start();

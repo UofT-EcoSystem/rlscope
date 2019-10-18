@@ -24,6 +24,15 @@
 #include "cuda_api_profiler/cupti_logging.h"
 #include "cuda_api_profiler/util.h"
 
+// 1656913 events -> 87092548 bytes (84MB)
+// x              -> 20mb
+//
+// 1656913 / 87092548 = x / (20*1024*1024)
+// x = (1656913 / 87092548) * (20*1024*1024)
+// x = 398 977.7
+// roundup: 400 000
+#define CUDA_API_PROFILER_MAX_RECORDS_PER_DUMP 400000
+
 namespace tensorflow {
 
 #define CUPTI_CALL(call)                                            \
@@ -63,10 +72,15 @@ CUDAAPIProfilerState CUDAAPIProfilerState::DumpState() {
   state._events = std::move(_events);
   _events.clear();
 
-  state._start_t = std::move(_start_t);
-  _start_t.clear();
-  state._end_t = std::move(_end_t);
-  _end_t.clear();
+  // NOTE: _start_t and _end_t are used to record the start/end time of CUDA API calls that are in-progress;
+  // we DON'T serialize these to the protobuf, and doing so will lead to exceptions
+  // (at CUDA API exit, we will expect to find the corresponding start time but it will be missing).
+  // TLDR: Leave start_t/end_t in-tact.
+//  state._start_t = std::move(_start_t);
+//  _start_t.clear();
+//  state._end_t = std::move(_end_t);
+//  _end_t.clear();
+
   state._api_stats = std::move(_api_stats);
   _api_stats.clear();
   DCHECK(_api_stats.size() == 0);
@@ -233,6 +247,13 @@ void CUDAAPIProfiler::ApiCallback(
         api_stats.AddCall(start_us, end_us);
         // _state._end_t[api_key] = now_us;
         end_t = now_us;
+
+        // PROBLEM: we need to dump only state belonging to the current thread;
+        // otherwise we will dump a start time before the end time arrives...
+        // Q: Can we JUST dump _events and leave the start_t/end_t dictionary in place...?
+        // A: Yes I think so.
+        _MaybeDump();
+
       } else if (cb_site == CUPTI_API_ENTER) {
         // Before cudaLaunchKernel
         _state._start_t[api_key] = Env::Default()->NowMicros();
@@ -323,26 +344,46 @@ void CUDAAPIProfiler::SetMetadata(const char* directory, const char* process_nam
 //  _state._machine_name = machine_name;
 //}
 
+void CUDAAPIProfiler::_MaybeDump() {
+  if (_state.ShouldDump() && _state.CanDump()) {
+    VLOG(1) << "CUDAAPIProfiler saw more than " << CUDA_API_PROFILER_MAX_RECORDS_PER_DUMP << " event records; "
+            << "triggering async dump.";
+    auto dump_state = _state.DumpState();
+    _AsyncDumpWithState(std::move(dump_state));
+  }
+}
+
 void CUDAAPIProfiler::AsyncDump() {
   mutex_lock lock(_mu);
   _AsyncDump();
 }
 
+bool CUDAAPIProfilerState::ShouldDump() {
+  return
+    // Number of records is larger than some threshold (~ ... MB).
+      ( _events.size() ) >= CUDA_API_PROFILER_MAX_RECORDS_PER_DUMP;
+}
+
 void CUDAAPIProfiler::_AsyncDump() {
   if (_state.CanDump()) {
-    auto dump_state = _state.DumpState();
-    _pool.Schedule([dump_state = std::move(dump_state)] () mutable {
-      auto path = dump_state.DumpPath(dump_state._trace_id);
-      mkdir_p(os_dirname(path));
-      auto proto = dump_state.AsProto();
-      std::fstream out(path, std::ios::out | std::ios::trunc | std::ios::binary);
-      if (!proto->SerializeToOstream(&out)) {
-        LOG(FATAL) << "Failed to dump " << path;
-      }
-      VLOG(1) << "Dumped " << path;
-    });
-    DCHECK(!_state.CanDump());
+    CUDAAPIProfilerState dump_state;
+    dump_state = _state.DumpState();
+    _AsyncDumpWithState(std::move(dump_state));
   }
+}
+
+void CUDAAPIProfiler::_AsyncDumpWithState(CUDAAPIProfilerState&& dump_state) {
+  _pool.Schedule([dump_state = std::move(dump_state)] () mutable {
+    auto path = dump_state.DumpPath(dump_state._trace_id);
+    mkdir_p(os_dirname(path));
+    auto proto = dump_state.AsProto();
+    std::fstream out(path, std::ios::out | std::ios::trunc | std::ios::binary);
+    if (!proto->SerializeToOstream(&out)) {
+      LOG(FATAL) << "Failed to dump " << path;
+    }
+    VLOG(1) << "Dumped " << path;
+  });
+  DCHECK(!_state.CanDump());
 }
 
 void CUDAAPIProfiler::AwaitDump() {

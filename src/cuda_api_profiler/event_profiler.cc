@@ -197,13 +197,17 @@ void EventProfiler::RecordEvent(
   events.emplace_back(tid, start_us, duration_us, name);
   _state._size += 1;
 
+  _MaybeDump();
+
+}
+
+void EventProfiler::_MaybeDump() {
   if (_state.ShouldDump() && _state.CanDump()) {
-    VLOG(1) << "pyprof saw more than " << EVENT_PROFILER_MAX_RECORDS_PER_DUMP << " records; "
+    VLOG(1) << "EventProfiler saw more than " << EVENT_PROFILER_MAX_RECORDS_PER_DUMP << " records; "
             << "triggering async dump.";
     auto dump_state = _state.DumpState();
     _AsyncDumpWithState(std::move(dump_state));
   }
-
 }
 
 void EventProfiler::_AsyncDumpWithState(EventProfilerState&& dump_state) {
