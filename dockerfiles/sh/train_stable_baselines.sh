@@ -116,7 +116,6 @@ _do $IML_PROF "${NVPROF[@]}" "${PYTHON[@]}" $RL_BASELINES_ZOO_DIR/train.py \
     --env $ENV_ID \
     --log-folder $OUTPUT_DIR \
     --log-interval 1 \
-    --iml-start-measuring-call 1 \
     --iml-delay \
     "$@"
 # Sanity check that train.py has exited,

@@ -1662,9 +1662,9 @@ def config_is_no_tfdump(config):
 def config_is_instrumented(config):
     return not config_is_uninstrumented(config) and re.search(r'instrumented', config)
 
-def config_is_full(config):
-    # Does this config run for the full training run (i.e. all timesteps)?
-    return re.search(r'_full', config)
+# def config_is_full(config):
+#     # Does this config run for the full training run (i.e. all timesteps)?
+#     return re.search(r'_full', config)
 
 def is_config_file(path):
     base = _b(path)

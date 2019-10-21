@@ -169,7 +169,36 @@ def is_bullet_env(env_id):
 def is_atari_env(env_id):
     return re.search(r'PongNoFrameskip', env_id) or re.search(r'LunarLander', env_id)
 
-def stable_baselines_gather_algo_env_pairs(algo=None, env_id=None, all=False, bullet=False, atari=False, debug=False):
+def is_lunar_env(env_id):
+    return re.search(r'LunarLander', env_id)
+
+def is_lunar_discrete_env(env_id):
+    return re.search(r'LunarLander-v2', env_id)
+
+def is_lunar_continuous_env(env_id):
+    return re.search(r'LunarLanderContinuous-v2', env_id)
+
+def is_lunar_combo(algo, env_id):
+    """
+    Use different LunarLander env for each algo, but map them to the same name for the plots:
+      dqn - LunarLander-v2
+      ddpg - LunarLanderContinuous-v2
+      ppo2 - LunarLanderContinuous-v2
+      a2c - LunarLander-v2
+      sac - LunarLanderContinuous-v2
+
+    :param algo:
+    :param env_id:
+    :return:
+    """
+    if algo in {'dqn', 'a2c'}:
+        return is_lunar_discrete_env(env_id)
+    elif algo in {'ddpg', 'ppo2', 'sac'}:
+        return is_lunar_continuous_env(env_id)
+
+    return is_lunar_env(env_id)
+
+def stable_baselines_gather_algo_env_pairs(algo=None, env_id=None, bullet=False, atari=False, lunar=False, debug=False):
 
     def is_supported(algo, env_id):
         for expr in STABLE_BASELINES_EXPRS:
@@ -183,10 +212,12 @@ def stable_baselines_gather_algo_env_pairs(algo=None, env_id=None, all=False, bu
         if not is_supported(algo, env_id):
             return False
         # If we specify --atari, just run Atari (algo, env) combos.
+        # If we specify --lunar, just run LunarLander (algo, env) combos.
         # If we specify --bullet, just run Bullet (algo, env) combos.
         # If we specify --atari --bullet, run only Atari/Bullet (algo, env) combos.
-        # Otherwise, neither --atari nor --bullet are given, run everything.
+        # Otherwise, neither --atari nor --lunar nor --bullet are given, run everything.
         return ( atari and is_atari_env(env_id) ) or \
+               ( lunar and is_lunar_combo(algo, env_id) ) or \
                ( bullet and is_bullet_env(env_id) ) or \
                ( not atari and not bullet )
 
@@ -212,13 +243,10 @@ def stable_baselines_gather_algo_env_pairs(algo=None, env_id=None, all=False, bu
             algo_env_pairs.append((algo, env_id))
         return algo_env_pairs
 
-    if all:
-        algo_env_pairs = []
-        for algo in STABLE_BASELINES_ANNOTATED_ALGOS:
-            for env_id in avail_env_ids:
-                if not should_run(algo, env_id):
-                    continue
-                algo_env_pairs.append((algo, env_id))
-        return algo_env_pairs
-
-    return None
+    algo_env_pairs = []
+    for algo in STABLE_BASELINES_ANNOTATED_ALGOS:
+        for env_id in avail_env_ids:
+            if not should_run(algo, env_id):
+                continue
+            algo_env_pairs.append((algo, env_id))
+    return algo_env_pairs

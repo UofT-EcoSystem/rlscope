@@ -267,6 +267,7 @@ class OverlapStackedBarPlot:
         m = re.search(r'(?P<algo>[^_]+)_(?P<env_id>.+)', proc)
         algo = m.group('algo')
         env_id = m.group('env_id')
+        env_id = self._reduce_env(env_id)
         return (algo, env_id)
 
     def _get_algo_env_from_dir(self, iml_dir):
@@ -275,7 +276,23 @@ class OverlapStackedBarPlot:
         components = path.split(os.sep)
         env_id = components[-1]
         algo = components[-2]
+        env_id = self._reduce_env(env_id)
         return (algo, env_id)
+
+    def _reduce_env(self, env_id):
+        """
+        We want to treat these two environments as the same during analysis:
+        LunarLander-v2
+        LunarLanderContinuous-v2
+
+        HACK: just remove "Continuous"
+
+        :param env_id:
+        :return:
+        """
+        new_env = env_id
+        new_env = re.sub(r'LunarLanderContinuous-v2', 'LunarLander-v2', new_env)
+        return new_env
 
     def get_index(self, iml_dir):
 

@@ -236,7 +236,6 @@ class ExprSubtractionValidationConfig:
 
                '--log-folder', _j(ENV['RL_BASELINES_ZOO_DIR'], 'output'),
                '--log-interval', '1',
-               '--iml-start-measuring-call', '1',
                '--iml-delay',
                ]
         cmd.extend(self.script_args)
@@ -325,7 +324,6 @@ class ExprTotalTrainingTimeConfig:
 
                '--log-folder', _j(ENV['RL_BASELINES_ZOO_DIR'], 'output'),
                '--log-interval', '1',
-               '--iml-start-measuring-call', '1',
                '--iml-delay',
                ]
         if self.iml_prof_config == 'uninstrumented':
@@ -403,6 +401,10 @@ class ExprTotalTrainingTime:
             action='store_true',
             help='Limit environments to Atari Pong environment')
         parser.add_argument(
+            '--lunar',
+            action='store_true',
+            help='Limit environments to LunarLander environments (i.e. LunarLanderContinuous-v2, LunarLander-v2)')
+        parser.add_argument(
             '--repetitions',
             type=int,
             default=3)
@@ -478,9 +480,9 @@ class ExprTotalTrainingTime:
         self.stable_baselines_algo_env = expr_config.stable_baselines_gather_algo_env_pairs(
             algo=self.args.algo,
             env_id=self.args.env,
-            all=True,
             bullet=self.args.bullet,
             atari=self.args.atari,
+            lunar=self.args.lunar,
             debug=self.quick_expr.args.debug,
         )
         for algo, env in self.stable_baselines_algo_env:
@@ -961,9 +963,9 @@ class ExprSubtractionValidation:
         self.stable_baselines_algo_env = expr_config.stable_baselines_gather_algo_env_pairs(
             algo=self.args.algo,
             env_id=self.args.env,
-            all=True,
             bullet=self.args.bullet,
             atari=self.args.atari,
+            lunar=self.args.lunar,
             debug=self.quick_expr.args.debug,
         )
         for algo, env in self.stable_baselines_algo_env:
@@ -1202,6 +1204,10 @@ class ExprSubtractionValidation:
             '--atari',
             action='store_true',
             help='Limit environments to Atari Pong environment')
+        parser.add_argument(
+            '--lunar',
+            action='store_true',
+            help='Limit environments to LunarLander environments (i.e. LunarLanderContinuous-v2, LunarLander-v2)')
         parser.add_argument(
             '--long-run',
             action='store_true',

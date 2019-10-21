@@ -643,7 +643,7 @@ class Profiler:
     """
     def __init__(self, directory=None,
                  bench_name=NO_BENCH_NAME,
-                 num_calls=None, start_measuring_call=None,
+                 num_calls=None,
                  trace_time_sec=None,
                  max_timesteps=None,
                  num_traces=None,
@@ -666,6 +666,8 @@ class Profiler:
                  disable_tfprof=None,
                  disable_pyprof_trace=None,
                  delay=None,
+                 delay_training_loop_iters=None,
+                 max_training_loop_iters=None,
                  unit_test=None,
                  unit_test_name=None,
                  args=None):
@@ -717,6 +719,8 @@ class Profiler:
             return argval
 
         self._failing = False
+        self._has_called_enable_tracing = False
+        self.num_training_loop_iters = 0
         self.debug = get_argval('debug', debug, False)
         if self.debug:
             py_config.DEBUG = self.debug
@@ -730,6 +734,10 @@ class Profiler:
         # Disable OLD tfprof tracing code.  We now use iml-prof to trace stuff.
         self.disable_pyprof_trace = get_argval('disable_pyprof_trace', disable_pyprof_trace, False)
         self.delay = get_argval('delay', delay, False)
+
+        self.delay_training_loop_iters = get_argval('delay_training_loop_iters', delay_training_loop_iters, None)
+        self.max_training_loop_iters = get_argval('max_training_loop_iters', max_training_loop_iters, None)
+
         self.just_sample_util = get_argval('just_sample_util', just_sample_util, False)
         self.training_progress = get_argval('training_progress', training_progress, False)
         self._loaded_libcupti = False
@@ -767,7 +775,6 @@ class Profiler:
         self._last_dumped_training_progress = None
         self._start_percent_complete = 0.
         self._start_num_timesteps = 0
-        self._delayed_enable = False
         # self._delayed_disable = False
         self.num_timesteps = None
         self.total_timesteps = None
@@ -829,8 +836,6 @@ class Profiler:
 
         self.parent_process_name = get_internal_argval('parent_process_name')
 
-        self.start_measuring_call = get_argval('start_measuring_call', start_measuring_call, None)
-
         self.unit_test = get_argval('unit_test', unit_test, False)
         self.unit_test_name = get_argval('unit_test_name', unit_test_name, None)
         if self.unit_test:
@@ -841,9 +846,6 @@ class Profiler:
         self.start_t = dict()
         self.end_t = dict()
         self.time_sec = dict()
-        # How many times has a block of code that we are intending to profile been run?
-        # We expect to run that block of code at least
-        # (self.start_measuring_call + self.num_calls) times.
         self.code_count = dict()
         self.steps = 0
         # clib_wrap.set_step(self._pyprof_step, ignore_disable=True)
@@ -865,10 +867,6 @@ class Profiler:
         # self.no_profile_sec = []
 
         # clib_wrap.wrap_libs()
-
-        # assert ( self.num_calls is None and self.start_measuring_call is None ) or \
-        #        ( self.num_calls is not None and self.start_measuring_call is not None )
-        # assert self.start_measuring_call is not None
 
     def get_start_trace_time_sec(self):
         # NOTE: ML script may fork new python scripts before tracing with pyprof/tfprof even begins
@@ -1084,34 +1082,8 @@ class Profiler:
     def tfprof_path(self, session_id, trace_id):
         return get_tfprof_path(self.out_dir, self.bench_name, session_id, trace_id)
 
-    def _should_measure_call(self, bench_name=NO_BENCH_NAME):
-        # return self.start_measuring_call is None or self.bench_name == bench_name
-        return ( self.bench_name == NO_BENCH_NAME or self.bench_name == bench_name ) and (
-                self.start_measuring_call is None or \
-                # (self.code_count[bench_name] - 1) >= self.start_measuring_call
-                self.steps + 1 >= self.start_measuring_call
-                # (self.code_count[bench_name] - 1) >= self.start_measuring_call
-        )
-
-    # def enable_profiling(self, bench_name=NO_BENCH_NAME):
-    #     if not self._should_measure_call(bench_name):
-    #         return False
-    #
-    #     self.start_t[bench_name] = time.time()
-    #     return True
-
     def profile_time_sec(self, bench_name):
         return self.time_sec[bench_name]
-
-    # def disable_profiling(self, bench_name=NO_BENCH_NAME, num_calls=1):
-    #     if not self._should_measure_call(bench_name):
-    #         self.code_count[bench_name] = self.code_count.get(bench_name, 0) + 1
-    #         return
-    #
-    #     end_time_sec = time.time()
-    #     self.end_t[bench_name] = end_time_sec
-    #     self.time_sec[bench_name] = self.time_sec.get(bench_name, 0.) + end_time_sec - self.start_t[bench_name]
-    #     self.code_count[bench_name] = self.code_count.get(bench_name, 0) + num_calls
 
     def _check_no_annotations(self, caller_name):
         if len(self._op_stack) > 0:
@@ -1134,6 +1106,8 @@ class Profiler:
             self._start_tfprof()
 
         if not self.disable or self.training_progress:
+            # Q: is setting --iml-training-progress going to result in us recording events during uninstrumented runs...?
+            # A: No, the --config option we give to iml-prof ensures various events aren't recorded.
             # NOTE: We want to collect CUDA API call stats for uninstrumented runs also!
             self._start_iml_prof()
 
@@ -1146,6 +1120,12 @@ class Profiler:
     @property
     def tracing_enabled(self):
         return self._tracing_enabled
+
+    def _should_enable_tracing(self):
+        return not self._tracing_enabled and self._has_called_enable_tracing and (
+            self.delay_training_loop_iters is None or
+            self.num_training_loop_iters >= self.delay_training_loop_iters
+        )
 
     def enable_tracing(self):
         """
@@ -1160,7 +1140,7 @@ class Profiler:
             # Wait for iml.prof.report_progress() to get called until we enable tracing.
             # This ensures that we measure the delta in percent_complete'd over the
             # same interval of time we do tracing for.
-            self._delayed_enable = True
+            self._has_called_enable_tracing = True
 
         # if self.disable:
         #     return
@@ -1357,17 +1337,12 @@ class Profiler:
 
     def set_operation(self, bench_name):
 
-        should_skip = self.disable or self.disable_pyprof or self.disable_pyprof_annotations
+        should_skip = self.disable or self.disable_pyprof or self.disable_pyprof_annotations or not self._pyprof_enabled
 
         if should_skip:
             return
 
         self._check_profiling_started()
-
-        if not(
-            self._should_measure_call(bench_name)
-        ):
-            return
 
         if py_config.DEBUG and py_config.DEBUG_OPERATIONS:
             logging.info("> set_operation(op={op})".format(op=bench_name))
@@ -1487,7 +1462,7 @@ class Profiler:
     def end_operation(self, bench_name, skip_finish=False):
         assert bench_name != NO_BENCH_NAME
 
-        should_skip = self.disable or self.disable_pyprof or self.disable_pyprof_annotations
+        should_skip = self.disable or self.disable_pyprof or self.disable_pyprof_annotations or not self._pyprof_enabled
 
         if not should_skip or ( should_skip and self.training_progress ):
             self._dump_training_progress(debug=self.debug)
@@ -1605,6 +1580,92 @@ class Profiler:
     def _maybe_dump_iml_config(self):
         if self.process_name is not None and self.phase is not None:
             self._dump_iml_config()
+
+    def _is_term_opt_set(self):
+        return self.max_timesteps is not None or \
+               self.max_training_loop_iters is not None or \
+               self.trace_time_sec is not None
+
+    def _term_opts(self):
+        return dict(
+            max_timesteps=self.max_timesteps,
+            max_training_loop_iters=self.max_training_loop_iters,
+            trace_time_sec=self.trace_time_sec,
+        )
+
+    def _set_term_opt(self, func, opt, value, skip_if_set):
+        term_opts = self._term_opts()
+        # Should be one of --iml-trace-time-sec, --iml-max-timesteps, --iml-max-training-loop-iters
+        assert opt in term_opts
+        if skip_if_set and self._is_term_opt_set():
+            logging.info(("IML: SKIP {func}({opt}={value}) "
+                          "since trace-termination-options are already set: {opts}").format(
+                func=func,
+                opt=opt,
+                value=value,
+                opts=pprint_msg(self._term_opts()),
+            ))
+            return
+        logging.info("IML: Setting iml.prof.{var} = {val}".format(
+            var=opt,
+            val=value,
+        ))
+        setattr(self, opt, value)
+
+    def set_max_training_loop_iters(self, max_training_loop_iters, skip_if_set):
+        """
+        Set the maximum training loop iterations to collect traces for before exiting the training script early.
+
+        :param: skip_if_set : bool
+            If True, then ONLY set max_training_loop_iters if the following trace-termination-options have not been
+            provided already via cmdline:
+                --iml-max-timesteps
+                --iml-max-training-loop-iters
+                --iml-trace-time-sec
+
+            If False, set max_training_loop_iters (possibly overriding  --iml-max-training-loop-iters)
+
+        :return:
+        """
+        assert not self._tracing_enabled
+        assert not self._has_called_enable_tracing
+        self._set_term_opt('iml.prof.set_max_training_loop_iters',
+                           'max_training_loop_iters', max_training_loop_iters,
+                           skip_if_set)
+        self._maybe_dump_iml_config()
+
+    def set_delay_training_loop_iters(self, delay_training_loop_iters, skip_if_set):
+        """
+        Set the delay in training loop iterations before trace collection begins.
+
+        :param: skip_if_set : bool
+            If True, then ONLY set delay_training_loop_iters if the following have not been
+            provided already via cmdline:
+                --iml-delay-training-loop-iters
+
+            If False, set delay_training_loop_iters (possibly overriding --iml-delay-training-loop-iters)
+
+        :return:
+        """
+        assert not self._tracing_enabled
+        assert not self._has_called_enable_tracing
+        if skip_if_set and self.delay_training_loop_iters is not None:
+            logging.info(("IML: SKIP {func}({opt}={value}) "
+                          "since {opt} is already set: {opts}").format(
+                func='iml.prof.set_delay_training_loop_iters',
+                opt='delay_training_loop_iters',
+                value=delay_training_loop_iters,
+                opts=dict(
+                    delay_training_loop_iters=self.delay_training_loop_iters,
+                ),
+            ))
+            return
+        logging.info("IML: Setting iml.prof.{var} = {val}".format(
+            var='delay_training_loop_iters',
+            val=delay_training_loop_iters,
+        ))
+        self.delay_training_loop_iters = delay_training_loop_iters
+        self._maybe_dump_iml_config()
 
     def set_process_name(self, process_name):
         if process_name == '':
@@ -2189,6 +2250,9 @@ class Profiler:
                 self.max_timesteps is not None and
                 self.num_timesteps is not None and
                 self.num_timesteps >= self.max_timesteps
+            ) or (
+                self.max_training_loop_iters is not None and
+                self.num_training_loop_iters >= zero_if_none(self.delay_training_loop_iters) + self.max_training_loop_iters
             )
         )
         self._should_finish_idx += 1
@@ -2228,6 +2292,17 @@ class Profiler:
                     bool=self.num_timesteps >= self.max_timesteps,
                     num_timesteps=self.num_timesteps,
                     max_timesteps=self.max_timesteps,
+                )), prefix="  "))
+            if self.max_training_loop_iters is not None:
+                logging.info(textwrap.indent(textwrap.dedent("""
+                - self.num_training_loop_iters >= self.delay_training_loop_iters + self.max_timesteps = {bool}
+                  - self.delay_training_loop_iters = {delay_training_loop_iters}
+                  - self.num_training_loop_iters = {num_training_loop_iters}
+                  - self.max_training_loop_iters = {max_training_loop_iters}""".format(
+                    bool=self.num_timesteps >= zero_if_none(self.delay_training_loop_iters) + self.max_training_loop_iters,
+                    num_training_loop_iters=self.num_training_loop_iters,
+                    delay_training_loop_iters=self.delay_training_loop_iters,
+                    max_training_loop_iters=self.max_training_loop_iters,
                 )), prefix="  "))
         return ret
 
@@ -2301,10 +2376,7 @@ class Profiler:
                     perc=percent_complete,
                 ))
 
-        if self._delayed_enable:
-            # We're going to enable tracing now as a result of iml.prof.enable_tracing();
-            # reset flag to prevent future enables.
-            self._delayed_enable = False
+        if self._should_enable_tracing():
             self._check_no_annotations(caller_name='iml.prof.report_progress()')
             self._enable_tracing()
             # percent_complete when tracing begins.
@@ -2351,6 +2423,11 @@ class Profiler:
 
         self._maybe_finish(debug=self.debug)
 
+        if self._has_called_enable_tracing:
+            # They've called iml.prof.enable_tracing() since their algorithm has "warmed up";
+            # start counting training loop iterations.
+            self.num_training_loop_iters += 1
+
     def _maybe_finish(self, finish_now=False, should_exit=True, debug=False):
 
         should_finish = self.should_finish(finish_now)
@@ -2365,22 +2442,11 @@ class Profiler:
 
         self.finish(should_exit=should_exit)
 
-    def done_measuring(self):
-        return self.num_calls is not None and \
-               self.code_count[self.bench_name] >= self.total_calls_to_run
-
     @property
     def total_calls_to_run(self):
         if self.start_measuring_call is None:
             return self.num_calls
         return self.num_calls + self.start_measuring_call - 1
-
-    def should_stop(self):
-        # If your using the profiler this way, you need to provide self.num_calls!
-        # assert self.num_calls is not None
-        # Can only measure one bench_name at a time.
-        return self.exit_early and \
-               self.done_measuring()
 
     # def _force_load_libcupti(self):
     #     """
@@ -2626,8 +2692,21 @@ def add_iml_arguments(parser):
                             IML: how long should we profile for, in timesteps; 
                             timestep progress is reported by calling 
                             iml.prof.report_progress(...)
-                            """)
-                               )
+                            """))
+    iml_parser.add_argument('--iml-max-training-loop-iters', type=int,
+                            help=textwrap.dedent("""
+                            IML: how long should we profile for, in "training loop iterations"; 
+                            a single "training loop iteration" is one call to iml.prof.report_progress. 
+                            NOTE: a training loop iteration is the same as a timestep, if every time an algorithm 
+                            call iml.prof.report_progress, it advances the timestep by one.
+                            - e.g. DDPG advances 100 timesteps (nb_rollout_steps) before calling iml.prof.report_progress
+                            - e.g. DQN advances 1 timestep before calling iml.prof.report_progress
+                            """))
+    iml_parser.add_argument('--iml-delay-training-loop-iters', type=int,
+                            help=textwrap.dedent("""
+                            IML: Delay trace collection for the first X "training loop iterations"; 
+                            see --iml-max-training-loop-iters for a description of training loop iterations.
+                            """))
     iml_parser.add_argument('--iml-internal-start-trace-time-sec', type=float,
                         help=textwrap.dedent("""
         IML: (internal use)
@@ -2708,7 +2787,10 @@ def add_iml_arguments(parser):
     """))
     iml_parser.add_argument('--iml-delay', action='store_true', help=textwrap.dedent("""
         IML: Delay trace collection until your training script has warmed up; 
-        you must signal this to IML by calling iml.prof.enable_tracing() when that happens.
+        you must signal this to IML by calling iml.prof.enable_tracing() when that happens 
+        (as is done in the annotated stable-baselines algorithm implementations e.g. DQN).
+        
+        If you DON'T provide this, then tracing begins immediately starting from "with iml.prof.profiler(...)".
     """))
     iml_parser.add_argument('--iml-just-sample-util', action='store_true', help=textwrap.dedent("""
         IML: collect machine utilization data and output it to --iml-directory.

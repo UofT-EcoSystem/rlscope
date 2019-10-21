@@ -34,12 +34,12 @@ _do() {
 _run_bench() {
     local all_dir=$IML_DIR/output/iml_bench/all
 
-    _do iml-bench --dir $all_dir "$@" stable-baselines
+    _do iml-bench --dir $all_dir "$@"
 }
 run_stable_baselines() {
-    _run_bench "$@"
-    _run_bench "$@" --analyze
-    _run_bench "$@" --mode plot
+    _run_bench "$@" stable-baselines
+    _run_bench "$@" stable-baselines --analyze
+    _run_bench "$@" stable-baselines --mode plot
 }
 
 RUN_DEBUG_ARGS=(--subdir debug)
@@ -158,7 +158,7 @@ run_debug_all() {
 fig_1a_all_algo() {
     # (1a) All algorithms (low complexity): LunarLander
     # GOAL: 3 repetitions
-    iml-quick-expr --atari "$@"
+    iml-quick-expr --lunar "$@"
 }
 fig_1b_all_algo() {
     # (1b) Mostly all algorithms (except dqn) (medium complexity): Walker2D
@@ -168,12 +168,12 @@ fig_1b_all_algo() {
 fig_2_all_env() {
     # (2) All environments (low and medium complexity): ppo2
     # GOAL: 3 repetitions
-    iml-quick-expr --atari --bullet --algo ppo2 "$@"
+    iml-quick-expr --lunar --atari --bullet --algo ppo2 "$@"
 }
 fig_3_all_algo_env()  {
     # (3) All (algo, env) combos
     # GOAL: 1 repetition
-    iml-quick-expr --atari --bullet "$@"
+    iml-quick-expr --lunar --atari --bullet "$@"
 }
 fig_all() {
     fig_1a_all_algo "$@"

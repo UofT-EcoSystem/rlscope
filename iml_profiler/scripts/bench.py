@@ -56,8 +56,8 @@ from iml_profiler.profiler.util import args_to_cmdline
 
 from iml_profiler.parser.common import *
 
-DEFAULT_IML_TRACE_TIME_SEC = 60*2
-DEFAULT_DEBUG_IML_TRACE_TIME_SEC = 20
+# DEFAULT_IML_TRACE_TIME_SEC = 60*2
+# DEFAULT_DEBUG_IML_TRACE_TIME_SEC = 20
 
 MODES = [
     'train_stable_baselines.sh',
@@ -97,8 +97,7 @@ def add_config_options(pars):
         #     'instrumented_full_no_tfprof_no_pyprof',
         #
         #     'uninstrumented_full'],
-        help=
-        textwrap.dedent("""
+        help=textwrap.dedent("""
         instrumented:
             Run the script with IML enabled for the entire duration of training (if --iml-trace-time-sec), 
             record start/end timestamps.
@@ -126,9 +125,6 @@ def add_stable_baselines_options(pars):
         choices=expr_config.STABLE_BASELINES_ENV_IDS,
         help='environment to run')
     pars.add_argument(
-        '--iml-trace-time-sec',
-        help='IML: How long to trace for? (option added by IML to train.py)')
-    pars.add_argument(
         '--bullet',
         action='store_true',
         help='Limit environments to physics-based Bullet environments')
@@ -137,12 +133,9 @@ def add_stable_baselines_options(pars):
         action='store_true',
         help='Limit environments to Atari Pong environment')
     pars.add_argument(
-        '--all',
+        '--lunar',
         action='store_true',
-        help=textwrap.dedent("""
-        Run all (algo, env_id) pairs.
-        Make this explicit to avoid running everything by accident.
-        """))
+        help='Limit environments to LunarLander environments (i.e. LunarLanderContinuous-v2, LunarLander-v2)')
 
 def main():
     iml_logging.setup_logging()
@@ -305,7 +298,11 @@ def main():
         """))
     parser_stable_baselines.add_argument(
         '--expr',
-        choices=['on_vs_off_policy', 'environments', 'algorithms', 'all_rl_workloads',
+        choices=['on_vs_off_policy',
+                 'environment_choice',
+                 'algorithm_choice_1b_med_complexity',
+                 'algorithm_choice_1a_low_complexity',
+                 'all_rl_workloads',
                  'debug_expr'],
         help=textwrap.dedent("""
         Only run a specific "experiment".
@@ -371,13 +368,13 @@ class Experiment:
                 return expr
         return None
 
-    def _gather_algo_env_pairs(self, algo=None, env_id=None, all=False, bullet=False, atari=False, debug=False):
+    def _gather_algo_env_pairs(self, algo=None, env_id=None, bullet=False, atari=False, lunar=False, debug=False):
         return expr_config.stable_baselines_gather_algo_env_pairs(
             algo=algo,
             env_id=env_id,
-            all=all,
             bullet=bullet,
             atari=atari,
+            lunar=lunar,
             debug=debug)
 
     def _run_cmd(self, cmd, to_file, env=None, replace=False, debug=False):
@@ -551,9 +548,9 @@ class ExperimentGroup(Experiment):
                 '--training-time',
             ], suffix=plot_log(expr, overlap_type), train_stable_baselines_opts=opts)
 
-        # (2) Compare environments:
-        expr = 'environments'
-        opts = ['--bullet', '--algo', 'ppo2']
+        # (2) Environment choice:
+        expr = 'environment_choice'
+        opts = ['--atari', '--lunar', '--bullet', '--algo', 'ppo2']
         if self.should_run_expr(expr):
             self.iml_bench(parser, subparser, 'train_stable_baselines.sh', opts, suffix=bench_log(expr))
             overlap_type = 'OperationOverlap'
@@ -567,7 +564,7 @@ class ExperimentGroup(Experiment):
                 '--y2-logscale',
             ], suffix=plot_log(expr, overlap_type), algo_env_pairs=algo_env_pairs)
 
-        # (3) Compare algorithms:
+        # (3) Algorithm choice:
         # Want to show on-policy vs off-policy.
         # e.g. compare DDPG against PPO
         # We want to show that:
@@ -579,34 +576,47 @@ class ExperimentGroup(Experiment):
         # - region-map:
         #     step = step
         #     other = sum(r for r in regions if r != step)
-        expr = 'algorithms'
-        opts = ['--env-id', 'Walker2DBulletEnv-v0']
+
+        def plot_expr_algorithm_choice(expr, algo_env_pairs):
+            if self.should_run_expr(expr):
+                overlap_type = 'OperationOverlap'
+                self.stacked_plot([
+                    '--overlap-type', overlap_type,
+                    '--resource-overlap', json.dumps(['CPU']),
+                    '--training-time',
+                    '--remap-df', json.dumps([textwrap.dedent("""
+                        # Keep 'step' region
+                        new_df[('step',)] = df[('step',)]
+
+                        # Sum up regions besides 'step'
+                        new_df[('other',)] = 0.
+                        for r in regions:
+                            if r == ('step',):
+                                continue
+                            new_df[('other',)] = new_df[('other',)] + df[r]
+                        """)]),
+                    '--y-type', 'percent',
+                    '--x-type', 'algo-comparison',
+                ], suffix=plot_log(expr, overlap_type), algo_env_pairs=algo_env_pairs)
+
+        env_id = 'Walker2DBulletEnv-v0'
+        opts = ['--env-id', env_id]
+        algo_env_pairs = self.pairs_by_env(env_id)
+        expr = 'algorithm_choice_1a_low_complexity'
         if self.should_run_expr(expr):
             self.iml_bench(parser, subparser, 'train_stable_baselines.sh', opts, suffix=bench_log(expr))
-            overlap_type = 'OperationOverlap'
-            algo_env_pairs = self.pairs_by_env('Walker2DBulletEnv-v0')
-            self.stacked_plot([
-                '--overlap-type', overlap_type,
-                '--resource-overlap', json.dumps(['CPU']),
-                '--training-time',
-                '--remap-df', json.dumps([textwrap.dedent("""
-                # Keep 'step' region
-                new_df[('step',)] = df[('step',)]
+        plot_expr_algorithm_choice(expr=expr, algo_env_pairs=algo_env_pairs)
 
-                # Sum up regions besides 'step'
-                new_df[('other',)] = 0.
-                for r in regions:
-                    if r == ('step',):
-                        continue
-                    new_df[('other',)] = new_df[('other',)] + df[r]
-                """)]),
-                '--y-type', 'percent',
-                '--x-type', 'algo-comparison',
-            ], suffix=plot_log(expr, overlap_type), algo_env_pairs=algo_env_pairs)
+        opts = ['--lunar']
+        algo_env_pairs = self.pairs_by_lunar()
+        expr = 'algorithm_choice_1b_med_complexity'
+        if self.should_run_expr(expr):
+            self.iml_bench(parser, subparser, 'train_stable_baselines.sh', opts, suffix=bench_log(expr))
+        plot_expr_algorithm_choice(expr=expr, algo_env_pairs=algo_env_pairs)
 
         # (4) Compare all RL workloads:
         expr = 'all_rl_workloads'
-        opts = ['--all', '--bullet']
+        opts = ['--atari', '--lunar', '--bullet']
         common_dims = [
             '--width', '16',
             '--height', '6',
@@ -730,6 +740,14 @@ class ExperimentGroup(Experiment):
     def pairs_by_env(self, env):
         return set((a, e) for a, e in self.algo_env_pairs() if e == env)
 
+    def pairs_by_func(self, func):
+        return set((a, e) for a, e in self.algo_env_pairs() if func(a, e))
+
+    def pairs_by_lunar(self):
+        def func(algo, env):
+            return expr_config.is_lunar_combo(algo, env)
+        return self.pairs_by_func(func)
+
     @property
     def root_iml_directory(self):
         args = self.args
@@ -803,9 +821,9 @@ class ExperimentGroup(Experiment):
         keep_argnames = {
             'algo',
             'env_id',
-            'all',
             'bullet',
             'atari',
+            'lunar',
             'debug',
         }
         gather_algo_env_dict = vars(train_stable_baselines_args)
@@ -855,7 +873,7 @@ class ExperimentGroup(Experiment):
             algo_env_pairs.extend(self.algo_env_pairs_train_stable_baselines(train_stable_baselines_opts, debug=debug))
         # if algo_env_pairs is None:
         #     raise NotImplementedError("Not sure what to use for --iml-directories")
-        if len(algo_env_pairs) == 0:
+        if len(algo_env_pairs) == 0 and not self.args.dry_run:
             raise NotImplementedError("Need at least one directory for --iml-directories but saw 0.")
         def sort_key(algo_env):
             """
@@ -907,7 +925,7 @@ class ExperimentGroup(Experiment):
                 algo_env_pairs = []
             algo_env_pairs = list(algo_env_pairs)
 
-            if len(algo_env_pairs) == 0:
+            if len(algo_env_pairs) == 0 and not self.args.dry_run:
                 raise NotImplementedError("Need at least one directory for --iml-directories but saw 0.")
             def sort_key(algo_env):
                 """
@@ -1041,23 +1059,14 @@ class StableBaselines(Experiment):
 
         self._run_cmd(cmd=cmd, to_file=to_file)
 
-    @property
-    def iml_trace_time_sec(self):
-        args = self.args
-        if args.iml_trace_time_sec is not None:
-            return args.iml_trace_time_sec
-        if args.debug:
-            return DEFAULT_DEBUG_IML_TRACE_TIME_SEC
-        return DEFAULT_IML_TRACE_TIME_SEC
-
     def _config_opts(self):
         args = self.args
 
         opts = []
 
-        if not config_is_full(args.config):
-            # If we DON'T want to run for the full training duration add --iml-trace-time-sec
-            opts.extend(['--iml-trace-time-sec', self.iml_trace_time_sec])
+        # if not config_is_full(args.config):
+        #     # If we DON'T want to run for the full training duration add --iml-trace-time-sec
+        #     pass
 
         # "Instrumented, no tfprof"
         # "Instrumented, no pyprof"
@@ -1126,9 +1135,6 @@ class StableBaselines(Experiment):
         if args.iml_prof:
             env['IML_PROF'] = args.iml_prof
 
-        if args.iml_trace_time_sec is not None:
-            env['IML_TRACE_TIME_SEC'] = str(args.iml_trace_time_sec)
-
         return env
 
     def _run(self, algo, env_id):
@@ -1182,9 +1188,10 @@ class StableBaselines(Experiment):
         algo_env_pairs = self._gather_algo_env_pairs(
             algo=args.algo,
             env_id=args.env_id,
-            all=args.all,
             bullet=args.bullet,
-            atari=args.atari)
+            atari=args.atari,
+            lunar=args.lunar,
+        )
         if algo_env_pairs is None:
             logging.info('Please provide either --env-id or --algo')
             sys.exit(1)
