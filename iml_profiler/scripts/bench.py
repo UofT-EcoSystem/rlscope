@@ -388,12 +388,14 @@ class Experiment:
         if ( replace or args.replace ) or not self.already_ran(to_file):
 
             try:
+                logging.info("> Calling tee: cmd =\n  $ {cmd}".format(cmd=cmd_as_string(cmd + self.extra_argv)))
                 proc = tee(
                     cmd=cmd + self.extra_argv,
                     to_file=to_file,
                     env=env,
                     dry_run=args.dry_run,
                 )
+                logging.info("> Done calling tee: cmd =\n  $ {cmd}".format(cmd=cmd_as_string(cmd + self.extra_argv)))
                 failed = False
             except subprocess.CalledProcessError as e:
                 if not args.skip_error:

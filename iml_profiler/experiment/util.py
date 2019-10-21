@@ -6,6 +6,7 @@ import os
 from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, basename as _b
 
 from iml_profiler.parser.common import *
+import tempfile
 
 @contextlib.contextmanager
 def in_directory(directory, allow_none=True):
@@ -47,6 +48,8 @@ def tee(cmd, to_file, cwd=None, append=False, makedirs=True, check=True, dry_run
             #     f.write(errs)
             #     f.flush()
 
+            debug = False
+
             p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, **kwargs)
             with p:
                 # NOTE: if this blocks it may be because there's a zombie utilization_sampler.py still running
@@ -55,6 +58,8 @@ def tee(cmd, to_file, cwd=None, append=False, makedirs=True, check=True, dry_run
 
                 while True:
 
+                    if debug:
+                        logging.info("RUN [05]: p.poll()")
                     rc = p.poll()
                     if rc is not None:
                         break
@@ -62,18 +67,39 @@ def tee(cmd, to_file, cwd=None, append=False, makedirs=True, check=True, dry_run
                     # BUG: SOMETIMES (I don't know WHY), this line will HANG even after
                     # train_stable_baselines.sh is terminated (it shows up as a Zombie process in htop/top).
                     # Sadly, this only happens occasionally, and I have yet to understand WHY it happens.
+                    if debug:
+                        logging.info("RUN [06]: line = p.stdout.readline()")
                     line = p.stdout.readline()
 
                     # b'\n'-separated lines
+                    if debug:
+                        logging.info("RUN [07]: line.decode")
                     line = line.decode("utf-8")
 
+                    if debug:
+                        logging.info("RUN [08]: line (\"{line}\") == '' (result={result})".format(
+                            result=(line == ''),
+                            line=line))
                     if line == '':
                         break
 
+                    if re.search(r'> train\.py has exited', line):
+                        pass
+                        # logging.info("> ENABLE TEE DEBUGGING")
+                        # debug = True
+
+                    if debug:
+                        logging.info("RUN [01]: sys.stdout.write(line)")
                     sys.stdout.write(line)
+                    if debug:
+                        logging.info("RUN [02]: sys.stdout.flush()")
                     sys.stdout.flush()
 
+                    if debug:
+                        logging.info("RUN [03]: f.write(line)")
                     f.write(line)
+                    if debug:
+                        logging.info("RUN [04]: f.flush()")
                     f.flush()
             sys.stdout.flush()
             f.flush()
@@ -205,3 +231,28 @@ def expr_already_ran(to_file, debug=False):
                         path=to_file))
                 return True
     return False
+
+def test_tee():
+    def test_tee_01():
+        tmp_fd, tmp_path = tempfile.mkstemp(prefix="test_tee_")
+        tmp_f = os.fdopen(tmp_fd, "w")
+        tmp_f.close()
+        try:
+            with open(tmp_path, 'w') as f:
+                # p = tee(['ls', '-l'], to_file=f)
+                # p = tee(['bash', '-c', 'while true; do sleep 1; date; done'], to_file=f)
+                p = tee(['bash', '-c', 'for i in `seq 1 1000`; do echo $i; done; echo "DONE TEST";'], to_file=f)
+            with open(f.name) as readf:
+                lines = readf.readlines()
+                pprint.pprint({'lines':lines})
+                has_done = any(re.search(r'DONE TEST', line) for line in lines)
+                assert has_done
+        finally:
+            if _e(tmp_path):
+                os.remove(tmp_path)
+    test_tee_01()
+
+    def test_tee_02():
+        for i in range(100):
+            test_tee_01()
+    test_tee_02()

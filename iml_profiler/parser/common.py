@@ -1966,6 +1966,13 @@ def get_machine_name():
     machine_name = platform.node()
     return machine_name
 
+def cmd_as_string(cmd):
+    if type(cmd) == list:
+        cmd_str = " ".join([shlex.quote(str(x)) for x in cmd])
+    else:
+        cmd_str = cmd
+    return cmd
+
 def cmd_debug_msg(cmd, env=None, dry_run=False):
     if type(cmd) == list:
         cmd_str = " ".join([shlex.quote(str(x)) for x in cmd])
