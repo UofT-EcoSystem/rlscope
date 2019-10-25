@@ -72,6 +72,15 @@ message IncrementalTrainingProgress {
 
 }
 
+//message MachineDependencies {
+//    string machine_name = 1;
+//
+//    string process_name = 1;
+//    string process_ident = 2
+//    string phase = 2;
+//    string phase_ident = 3;
+//}
+
 // Metadata about a process.
 // Only one of these files is written per-process, when the process exits.
 // This captures information that not is not conveniently/efficiently captured by

@@ -23,6 +23,11 @@ def main():
     parser = argparse.ArgumentParser("Sample time spent in CUDA API calls, and call counts.")
     parser.add_argument('--debug', action='store_true')
     parser.add_argument('--iml-debug', action='store_true')
+    parser.add_argument('--iml-rm-traces-from', help=textwrap.dedent("""
+    Delete traces rooted at this --iml-directory. 
+    Useful if your training script has multiple training scripts, and you need to use --iml-skip-rm-traces 
+    when launching the other scripts.
+    """))
     # parser.add_argument('--iml-disable', action='store_true', help=textwrap.dedent("""
     #     IML: Skip any profiling. Used for uninstrumented runs.
     #     Useful for ensuring minimal libcupti registration when we run --cuda-api-calls during config_uninstrumented.
@@ -127,6 +132,11 @@ def main():
                                 NOTE: we still use --iml-disable to prevent "old" tfprof collection.
                         """))
     args = parser.parse_args(iml_prof_argv)
+
+    if args.iml_rm_traces_from is not None:
+        logging.info("iml-prof: Delete trace-files rooted at --iml-directory = {dir}".format(
+            dir=args.iml_rm_traces_from))
+        return
 
     env = dict(os.environ)
     # TODO: figure out how to install pre-built .so file with "pip install iml_profiler"

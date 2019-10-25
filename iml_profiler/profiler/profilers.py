@@ -670,6 +670,7 @@ class Profiler:
                  max_training_loop_iters=None,
                  unit_test=None,
                  unit_test_name=None,
+                 skip_rm_traces=None,
                  args=None):
 
         def get_iml_argname(argname, internal=False):
@@ -812,6 +813,7 @@ class Profiler:
         self.total_profile_time_sec = 0
 
         self.python = get_argval('python', python, False)
+        self.skip_rm_traces = get_argval('skip_rm_traces', skip_rm_traces, False)
         self.exit_early = exit_early
         self.tfprof = tfprof
         self.reports_progress = reports_progress
@@ -882,16 +884,10 @@ class Profiler:
         Generally used to delete traces from a PREVIOUS run before re-running the profiler.
         """
         os.makedirs(self.directory, exist_ok=True)
-        logging.info("> Delete trace files rooted at {dir}".format(dir=self.directory))
-        for dirpath, dirnames, filenames in os.walk(self.directory):
-            for base in filenames:
-                path = _j(dirpath, base)
-                # logging.info("> Consider {path}".format(path=path))
-                if is_trace_file(path):
-                    logging.info("> RM {path}".format(path=path))
-                    os.remove(path)
-                    # trace_id = int(m.group('trace_id'))
-                    # self.next_trace_id = max(self.next_trace_id, trace_id + 1)
+        if self.skip_rm_traces:
+            logging.info("IML: SKIP deleting trace-files rooted at {dir} (--iml-skip-rm-traces)")
+            return
+        recursive_delete_trace_files(self.directory)
 
     def _init_trace_id_from_traces(self):
         """
@@ -1998,9 +1994,12 @@ class Profiler:
         start_sec = time.time()
         trace_id = self.next_trace_id
 
-        if dump_always:
-            assert self.phase in self._incremental_training_progress
-            assert self._incremental_training_progress[self.phase].can_dump(self.reports_progress, expect_true=True)
+        # Some training scripts (e.g. minigo) have a more complex training loop that makes it difficult for us to
+        # record training progress; in particular iml.prof.report_progress calls technically needs to happen
+        # "across processes".  Currently we don't support that.
+        # if dump_always:
+        #     assert self.phase in self._incremental_training_progress
+        #     assert self._incremental_training_progress[self.phase].can_dump(self.reports_progress, expect_true=True)
 
         now_sec = time.time()
         if self.phase in self._incremental_training_progress and \
@@ -2828,6 +2827,10 @@ def add_iml_arguments(parser):
                         help=textwrap.dedent("""
     IML: profiling output directory.
     """))
+    parser.add_argument('--iml-skip-rm-traces', action='store_true', help=textwrap.dedent("""
+    DON'T remove traces files from previous runs rooted at --iml-directory.
+    Useful if your training script has multiple training scripts that need to be traced with IML.
+    """))
 
 # Match input/output to PythonProfilerParser
 PYPROF_REGEX = r'(?:python_profile.*|microbenchmark\.json|config.*\.json)'
@@ -2841,7 +2844,7 @@ def is_iml_file(path):
         base)
 
 def iml_argv_and_env(prof : Profiler, keep_executable=False, keep_non_iml_args=False, env=None):
-    iml_argv = _iml_argv(prof, keep_executable=keep_executable, keep_non_iml_args=keep_non_iml_args, env=env)
+    iml_argv = _iml_argv(prof, keep_executable=keep_executable, keep_non_iml_args=keep_non_iml_args)
     iml_env = _iml_env(prof, keep_executable=keep_executable, keep_non_iml_args=keep_non_iml_args, env=env)
     return iml_argv, iml_env
 

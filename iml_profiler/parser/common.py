@@ -2043,6 +2043,16 @@ def obj_from_row(Klass, row):
             setattr(obj, attr, value)
     return obj
 
+def recursive_delete_trace_files(directory):
+    logging.info("> Delete trace files rooted at {dir}".format(dir=directory))
+    for dirpath, dirnames, filenames in os.walk(directory):
+        for base in filenames:
+            path = _j(dirpath, base)
+            # logging.info("> Consider {path}".format(path=path))
+            if is_trace_file(path):
+                logging.info("> RM {path}".format(path=path))
+                os.remove(path)
+
 class ToStringBuilder:
     def __init__(self, obj):
         self.obj = obj
