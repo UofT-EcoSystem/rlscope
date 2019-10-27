@@ -727,6 +727,10 @@ class Profiler:
             py_config.DEBUG = self.debug
         self.directory = get_argval('directory', directory, None, allow_none=False)
         self.disable = get_argval('disable', disable, False)
+        if 'IML_CONFIG' in os.environ:
+            self.iml_config = os.environ['IML_CONFIG']
+            if self.iml_config in 'uninstrumented':
+                self.disable = True
         self.disable_pyprof_annotations = get_argval('disable_pyprof_annotations', disable_pyprof_annotations, False)
         self.disable_pyprof_interceptions = get_argval('disable_pyprof_interceptions', disable_pyprof_interceptions, False)
         self.disable_pyprof = get_argval('disable_pyprof', disable_pyprof, False)
