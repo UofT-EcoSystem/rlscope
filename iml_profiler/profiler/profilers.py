@@ -768,8 +768,6 @@ class Profiler:
 
         self.machine_name = get_machine_name()
 
-        # TODO: bind process to a different core to avoid interference?
-        # self.bg_dumper = ProcessPoolExecutor(max_workers=1)
         self.percent_complete = None
         self._tracing_enabled = False
         self._incremental_training_progress = dict()
@@ -779,10 +777,9 @@ class Profiler:
         # self._delayed_disable = False
         self.num_timesteps = None
         self.total_timesteps = None
-        # dump_cpus = get_dump_cpus()
-        self.bg_dumper = ForkedProcessPool(name="bg_dumper", debug=self.debug,
-                                           # cpu_affinity=dump_cpus,
-                                           )
+        # self.bg_dumper = ForkedProcessPool(name="bg_dumper", debug=self.debug,
+        #                                    # cpu_affinity=dump_cpus,
+        #                                    )
 
         self._op_stack = []
         self._start_us = None
@@ -1209,8 +1206,8 @@ class Profiler:
         if self._iml_prof_enabled or not sample_cuda_api.is_used():
             return
 
-        logging.info('Start iml-prof libcupti tracing')
-
+        if self.debug:
+            logging.info('Start iml-prof libcupti tracing')
         sample_cuda_api.enable_tracing()
 
         self._iml_prof_enabled = True
@@ -1219,7 +1216,8 @@ class Profiler:
         if not self._iml_prof_enabled:
             return
 
-        logging.info('Stop iml-prof libcupti tracing')
+        if self.debug:
+            logging.info('Stop iml-prof libcupti tracing')
 
         assert sample_cuda_api.is_used()
 
@@ -1766,6 +1764,8 @@ class Profiler:
             self._terminate_utilization_sampler(warn_terminated)
 
     def finish(self, should_exit=True):
+        timer = SimpleTimer("Profiler.finish")
+        timer.reset_start_time()
         if self._is_finishing:
             # We've already called this function to terminate tracing.
             #
@@ -1780,6 +1780,7 @@ class Profiler:
             self._is_finishing = True
 
         self._disable_tracing()
+        timer.end_operation('disable_tracing')
 
         if self.debug:
             logging.info("> IML: finishing profiling\n{stack}".format(stack=get_stacktrace(indent=1)))
@@ -1788,6 +1789,7 @@ class Profiler:
             self.ut.stop()
 
         self.maybe_terminate_utilization_sampler(warn_terminated=False)
+        timer.end_operation('maybe_terminate_utilization_sampler')
 
         # Record an event [PROC:<process_name>] that marks when this process started/finished execution.
         if not ( self.disable or self.disable_pyprof_interceptions or self.disable_pyprof ):
@@ -1796,8 +1798,10 @@ class Profiler:
         if sample_cuda_api.is_used():
             # Print sampling results.
             sample_cuda_api.print()
+            timer.end_operation('sample_cuda_api.print')
             # NOTE: ideally, we should run async_dump() for everything, then wait on everything to finish.
             sample_cuda_api.await_dump()
+            timer.end_operation('sample_cuda_api.await_dump')
         # NOTE: don't record any events past this point since they will be lost;
         # we will get an abort() error from C++ if that happens.
 
@@ -1814,11 +1818,14 @@ class Profiler:
         # if clib_wrap.should_dump_pyprof():
         #     self._dump_pyprof(debug=self.debug)
         self._dump_process_metadata(debug=self.debug)
+        timer.end_operation('_dump_process_metadata')
         self._dump_training_progress(debug=self.debug, dump_always=not self._failing)
+        timer.end_operation('_dump_training_progress')
 
         if self.unit_test:
             logging.info("> IML: _dump_unit_test")
             self._dump_unit_test()
+            timer.end_operation('_dump_unit_test')
             logging.info("> IML: _dump_unit_test done")
             # Make sure ALL unit-test data has been recorded before we exit.
             if not self.ut.is_empty:
@@ -1826,9 +1833,9 @@ class Profiler:
                 assert self.ut.is_empty
 
         # Wait on all dump-processes to finish executing.
-        # ForkedProcessPool.shutdown(wait=True)
-        logging.info("> IML: Waiting for trace-dump background threads to complete.")
-        self.bg_dumper.shutdown()
+        # logging.info("> IML: Waiting for trace-dump background threads to complete.")
+        # self.bg_dumper.shutdown()
+        # timer.end_operation('bg_dumper.shutdown')
 
         # Wait for any async tfprof trace file dumps in C++ to finish.
         # logging.info("> IML: Wait for tfprof trace-file dumps in TensorFlow C++ to finish.")
@@ -1836,10 +1843,16 @@ class Profiler:
 
         # TODO: sample_cuda_api.await_trace_dumps()
 
-        logging.info("> IML: Done")
+        # logging.info("> IML: Done")
 
         # Prevent weird bugs from happening at exit, like exceptions thrown during __del__ functions.
         clib_wrap.unwrap_libs()
+        timer.end_operation('clib_wrap.unwrap_libs')
+
+        if py_config.DEBUG_CRITICAL_PATH:
+            logging.info("Profiler.finish critical-path inflation: {msg}".format(
+                msg=pprint_msg(timer),
+            ))
 
         if should_exit:
             logging.info("> IML: Exiting training script early")
@@ -2038,13 +2051,14 @@ class Profiler:
             debug=debug or py_config.DEBUG)
 
         self.next_trace_id += 1
-        self.bg_dumper.submit(
-            name="{name}.dump({path})".format(
-                name=dumper.name,
-                path=training_progress_proto_path),
-            fn=dumper.dump,
-            sync=sync,
-        )
+        # self.bg_dumper.submit(
+        #     name="{name}.dump({path})".format(
+        #         name=dumper.name,
+        #         path=training_progress_proto_path),
+        #     fn=dumper.dump,
+        #     sync=sync,
+        # )
+        dumper.dump()
         end_sec = time.time()
         time_sec = end_sec - start_sec
         if py_config.DEBUG:
@@ -2102,12 +2116,13 @@ class Profiler:
             process_metadata_proto_path=process_metadata_proto_path,
             debug=debug)
         self.next_trace_id += 1
-        self.bg_dumper.submit(
-            name="ProcessMetadataDumper.dump({path})".format(
-                path=process_metadata_proto_path),
-            fn=dumper.dump,
-            sync=sync,
-        )
+        # self.bg_dumper.submit(
+        #     name="ProcessMetadataDumper.dump({path})".format(
+        #         path=process_metadata_proto_path),
+        #     fn=dumper.dump,
+        #     sync=sync,
+        # )
+        dumper.dump()
         end_sec = time.time()
         time_sec = end_sec - start_sec
         if py_config.DEBUG:

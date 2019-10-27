@@ -43,9 +43,9 @@ Globals::Globals() {
 //  VLOG(1) << "SKIP creating device_tracer";
   device_tracer = tensorflow::CreateDeviceTracer();
   auto IML_TRACE_AT_START = getenv("IML_TRACE_AT_START");
-  VLOG(0) << "IML_TRACE_AT_START = " << IML_TRACE_AT_START;
+  VLOG(1) << "IML_TRACE_AT_START = " << IML_TRACE_AT_START;
   if (device_tracer && env_is_on("IML_TRACE_AT_START", false, true)) {
-    VLOG(0) << "Starting tracing at program start (export IML_TRACE_AT_START=yes)";
+    VLOG(1) << "Starting tracing at program start (export IML_TRACE_AT_START=yes)";
     status = device_tracer->Start();
     MAYBE_LOG_ERROR(LOG(INFO), "DeviceTracerImpl::Start()", status);
     MAYBE_EXIT(status);

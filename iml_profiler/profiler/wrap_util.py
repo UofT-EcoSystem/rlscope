@@ -1,6 +1,8 @@
 import re
 import logging
 
+from iml_profiler import py_config
+
 def wrap_lib(FuncWrapperKlass, import_libname, wrapper_args=tuple(), func_regex=None, wrap_libname=None):
     # wrapper_args = (category, prefix)
     if wrap_libname is None:
@@ -13,7 +15,8 @@ def wrap_lib(FuncWrapperKlass, import_libname, wrapper_args=tuple(), func_regex=
         assert lib is not None
 
         # import tensorflow.pywrap_tensorflow
-        logging.info('  ... success')
+        if py_config.DEBUG_WRAP_CLIB:
+            logging.info('  ... success')
     except (ImportError, NameError) as e:
         # Failed to import library; skip wrapping the library.
         logging.info('  ... FAILED: cannot wrap module {lib}; stacktrace:'.format(lib=wrap_libname))
@@ -24,13 +27,15 @@ def wrap_lib(FuncWrapperKlass, import_libname, wrapper_args=tuple(), func_regex=
 
 def unwrap_lib(FuncWrapperKlass, import_libname, wrap_libname):
     try:
-        logging.info('> lookup {libname}...'.format(libname=wrap_libname))
+        if py_config.DEBUG_WRAP_CLIB:
+            logging.info('> lookup {libname}...'.format(libname=wrap_libname))
 
         exec("import {import_lib}".format(import_lib=import_libname))
         # May throw NameError
         lib = eval("{wrap_lib}".format(wrap_lib=wrap_libname))
 
-        logging.info('  ... success')
+        if py_config.DEBUG_WRAP_CLIB:
+            logging.info('  ... success')
     except NameError as e:
         logging.info('  ... FAILED: cannot unwrap module {lib}; stacktrace:'.format(lib=wrap_libname))
         logging.info(e)
@@ -41,7 +46,8 @@ def wrap_module(FuncWrapperKlass, module, wrapper_args,
                 func_regex=None, ignore_func_regex="^_", should_wrap=None):
     for name in dir(module):
         if re.search(ignore_func_regex, name):
-            logging.info("  Skip func={name}".format(name=name))
+            if py_config.DEBUG_WRAP_CLIB:
+                logging.info("  Skip func={name}".format(name=name))
             continue
         func = getattr(module, name)
         if not re.search(ignore_func_regex, name) and (

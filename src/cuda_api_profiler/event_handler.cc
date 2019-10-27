@@ -8,7 +8,15 @@
 #include "tensorflow/core/platform/logging.h"
 #include "tensorflow/core/platform/env.h"
 
+#include <algorithm>
+
 namespace tensorflow {
+
+// Sleep for at MOST 0.5 seconds.
+// We need to be able to terminate quickly, so this sleep time affects that.
+// In particular, in the worst case, the call to sample_cuda_api.disable_tracing()
+// during Profiler.finish() will stall for this time.
+#define MAX_SLEEP_FOR_USEC 5e6
 
 void EventHandler::EventLoop(std::function<bool()> should_stop) {
   while (not should_stop()) {
@@ -18,11 +26,20 @@ void EventHandler::EventLoop(std::function<bool()> should_stop) {
     // - if time is negative, RunFuncs and skip sleeping.
     auto now_usec = Env::Default()->NowMicros();
     RunFuncs(now_usec);
-    auto next_func = std::min_element(
-        _funcs.begin(), _funcs.end(),
-        [now_usec] (const RegisteredFunc& f1, const RegisteredFunc& f2) {
-          return f1.TimeUsecUntilNextRun(now_usec) < f2.TimeUsecUntilNextRun(now_usec); });
-    auto sleep_for_us = next_func->TimeUsecUntilNextRun(now_usec);
+    uint64_t sleep_for_us;
+    if (_funcs.size() > 0) {
+      auto next_func = std::min_element(
+          _funcs.begin(), _funcs.end(),
+          [now_usec] (const RegisteredFunc& f1, const RegisteredFunc& f2) {
+            return f1.TimeUsecUntilNextRun(now_usec) < f2.TimeUsecUntilNextRun(now_usec); });
+      auto us_until_next_func = next_func->TimeUsecUntilNextRun(now_usec);
+      // Sleep for at MOST 0.5 seconds.
+      // We need to be able to terminate quickly, so this sleep time affects that.
+      const uint64_t max_sleep_for_usec = MAX_SLEEP_FOR_USEC;
+      sleep_for_us = std::min(max_sleep_for_usec, us_until_next_func);
+    } else {
+      sleep_for_us = MAX_SLEEP_FOR_USEC;
+    }
     Env::Default()->SleepForMicroseconds(sleep_for_us);
   }
 }

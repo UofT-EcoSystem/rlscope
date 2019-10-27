@@ -11,6 +11,7 @@
 #include <cuda.h>
 
 #include <ostream>
+#include <map>
 
 #define CHECK_CU_ERROR(out, err, cufunc) \
   if (err != CUDA_SUCCESS) { \
@@ -54,6 +55,20 @@ void printActivity(const CUpti_Activity *record);
 //    out << "iml-prof C++ API '" << func << "' failed with: " << status;
 //  }
 //}
+
+class SimpleTimer {
+public:
+  using TimeUsec = int64;
+  std::string _name;
+  std::map<std::string, TimeUsec> _op_duration_usec;
+  TimeUsec _last_time_usec;
+  SimpleTimer(const std::string& name);
+
+  void ResetStartTime();
+  void EndOperation(const std::string& operation);
+  void Print(std::ostream& out, int indent);
+
+};
 
 }
 

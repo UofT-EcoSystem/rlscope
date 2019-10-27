@@ -313,7 +313,8 @@ class CFuncWrapper:
         super().__setattr__('debug', debug)
 
         name = self.wrapper_name(func.__name__)
-        logging.info("> call.name = {name}".format(name=name))
+        if py_config.DEBUG_WRAP_CLIB:
+            logging.info("> call.name = {name}".format(name=name))
 
         def call(*args, **kwargs):
             # NOTE: for some reason, if we don't use a local variable here,
@@ -629,7 +630,8 @@ def wrap_tensorflow(category=CATEGORY_TF_API, debug=False):
         func_regex='^TF_')
     assert success
 def unwrap_tensorflow():
-    logging.info("> IML: Unwrapping module=tensorflow")
+    if py_config.DEBUG_WRAP_CLIB:
+        logging.info("> IML: Unwrapping module=tensorflow")
     wrap_util.unwrap_lib(
         CFuncWrapper,
         import_libname='tensorflow',
@@ -651,16 +653,18 @@ def unwrap_atari():
         atari_py.ale_python_interface.ale_lib)
 
 def wrap_module(module, category, debug=False, **kwargs):
-    logging.info("> IML: Wrapping module={mod} call with category={category} annotations".format(
-        mod=module,
-        category=category,
-    ))
+    if py_config.DEBUG_WRAP_CLIB:
+        logging.info("> IML: Wrapping module={mod} call with category={category} annotations".format(
+            mod=module,
+            category=category,
+        ))
     wrap_util.wrap_module(
         CFuncWrapper, module,
         wrapper_args=(category, DEFAULT_PREFIX, debug), **kwargs)
 def unwrap_module(module):
-    logging.info("> IML: Unwrapping module={mod}".format(
-        mod=module))
+    if py_config.DEBUG_WRAP_CLIB:
+        logging.info("> IML: Unwrapping module={mod}".format(
+            mod=module))
     wrap_util.unwrap_module(
         CFuncWrapper,
         module)
@@ -725,10 +729,11 @@ class LibWrapper:
         return func_wrapper
 
 def wrap_entire_module(import_libname, category, debug=False, **kwargs):
-    logging.info("> IML: Wrapping module={mod} call with category={category} annotations".format(
-        mod=import_libname,
-        category=category,
-    ))
+    if py_config.DEBUG_WRAP_CLIB:
+        logging.info("> IML: Wrapping module={mod} call with category={category} annotations".format(
+            mod=import_libname,
+            category=category,
+        ))
     exec("import {import_lib}".format(import_lib=import_libname))
     wrap_libname = import_libname
     lib = eval("{wrap_lib}".format(wrap_lib=wrap_libname))
@@ -741,7 +746,8 @@ def wrap_entire_module(import_libname, category, debug=False, **kwargs):
 def unwrap_entire_module(import_libname):
     if import_libname not in sys.modules:
         return
-    logging.info("> IML: Unwrapping module={mod}".format(
-        mod=import_libname))
+    if py_config.DEBUG_WRAP_CLIB:
+        logging.info("> IML: Unwrapping module={mod}".format(
+            mod=import_libname))
     lib_wrapper = sys.modules[import_libname]
     sys.modules[import_libname] = lib_wrapper.lib

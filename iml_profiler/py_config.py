@@ -73,6 +73,12 @@ IS_DOCKER = False
 if 'IML_LOGGED_IN' in ENV:
   IS_DOCKER = True
 
+# Print the names of all the TensorFlow/Simulator function calls that get wrapped.
+DEBUG_WRAP_CLIB = False
+
+# Print information about delays that happen during Profiler.finish().
+DEBUG_CRITICAL_PATH = False
+
 LIB_SAMPLE_CUDA_API = _j(ROOT, 'build', 'libsample_cuda_api.so')
 
 # Use a custom-built/modified version of TF for benchmarking things.

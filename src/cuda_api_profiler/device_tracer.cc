@@ -85,6 +85,10 @@ limitations under the License.
 //#define mutex std::mutex
 //#define mutex_lock std::lock_guard<std::mutex>
 
+// Print time of operations that occur during sample_cuda_api.disable_tracing() / DeviceTracerImpl::Stop()
+// that are on the critical-path of the script exiting during Profiler.finish().
+//#define DEBUG_CRITICAL_PATH
+
 namespace {
 
 
@@ -544,7 +548,9 @@ void DeviceTracerImpl::_EnableAllCUDAAPICallbacks() {
 Status DeviceTracerImpl::Start() {
   VLOG(1) << "DeviceTracer::Start";
   mutex_lock l(mu_);
-  api_printer_.Start();
+  if (VLOG_IS_ON(1)) {
+    api_printer_.Start();
+  }
   if (stream_monitor_) {
     stream_monitor_->Start();
   }
@@ -708,19 +714,25 @@ Status DeviceTracerImpl::Print() {
   return Status::OK();
 }
 
+
 Status DeviceTracerImpl::Stop() {
   VLOG(1) << "DeviceTracer::Stop";
   mutex_lock l(mu_);
   // VLOG(1) << "DeviceTracerImpl." << __func__ << ": api_printer.Stop()";
+  SimpleTimer timer("DeviceTracerImpl.Stop");
+  timer.ResetStartTime();
   api_printer_.Stop();
+  timer.EndOperation("api_printer_.Stop");
   if (is_yes("IML_CUDA_ACTIVITIES", false)) {
     // VLOG(1) << "DeviceTracerImpl." << __func__ << ": activity_profiler.Stop()";
     _activity_profiler.Stop();
+    timer.EndOperation("_activity_profiler.Stop");
     // VLOG(1) << "DeviceTracerImpl." << __func__ << ": activity_profiler.Stop() done";
   }
   if (stream_monitor_) {
     // VLOG(1) << "DeviceTracerImpl." << __func__ << ": stream_monitor.Stop()";
     stream_monitor_->Stop();
+    timer.EndOperation("stream_monitor_.Stop");
     // VLOG(1) << "DeviceTracerImpl." << __func__ << ": stream_monitor.Stop() done";
   }
   if (!enabled_) {
@@ -729,6 +741,7 @@ Status DeviceTracerImpl::Stop() {
 #ifdef CONFIG_TRACE_STATS
   // VLOG(1) << "DeviceTracerImpl." << __func__ << ": GlobalDefaultTraceCollector.Stop()";
   GlobalDefaultTraceCollector()->Stop();
+  timer.EndOperation("GlobalDefaultTraceCollector()->Stop()");
   // VLOG(1) << "DeviceTracerImpl." << __func__ << ": GlobalDefaultTraceCollector.Stop() done";
 
 //  TF_RETURN_IF_ERROR(cupti_manager_->DisableTrace());
@@ -743,6 +756,12 @@ Status DeviceTracerImpl::Stop() {
   CUPTI_CALL(cuptiGetTimestamp(&end_timestamp_));
 #endif // CONFIG_TRACE_STATS
   enabled_ = false;
+#ifdef DEBUG_CRITICAL_PATH
+  {
+    DECLARE_LOG_INFO(info);
+    timer.Print(info, 0);
+  }
+#endif // DEBUG_CRITICAL_PATH
   VLOG(1) << "DeviceTracerImpl." << __func__ << ": done";
   return Status::OK();
 }

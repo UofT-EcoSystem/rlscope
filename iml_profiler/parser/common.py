@@ -25,6 +25,8 @@ from iml_profiler.protobuf.unit_test_pb2 import IMLUnitTestOnce, IMLUnitTestMult
 from iml_profiler.protobuf.iml_prof_pb2 import CUDAAPIPhaseStatsProto, MachineDevsEventsProto, OpStackProto
 from tqdm import tqdm as tqdm_progress
 
+from iml_profiler import py_config
+
 USEC_IN_SEC = 1e6
 
 OPERATION_PYTHON_PROFILING_OVERHEAD = "Python profiling overhead"
@@ -2044,13 +2046,15 @@ def obj_from_row(Klass, row):
     return obj
 
 def recursive_delete_trace_files(directory):
-    logging.info("> Delete trace files rooted at {dir}".format(dir=directory))
+    if py_config.DEBUG_WRAP_CLIB:
+        logging.info("> Delete trace files rooted at {dir}".format(dir=directory))
     for dirpath, dirnames, filenames in os.walk(directory):
         for base in filenames:
             path = _j(dirpath, base)
             # logging.info("> Consider {path}".format(path=path))
             if is_trace_file(path):
-                logging.info("> RM {path}".format(path=path))
+                if py_config.DEBUG_WRAP_CLIB:
+                    logging.info("> RM {path}".format(path=path))
                 os.remove(path)
 
 class ToStringBuilder:
@@ -2073,3 +2077,29 @@ class ToStringBuilder:
                 "{name}={val}".format(name=name, val=self._val_string(val))
                 for name, val in self.name_value_pairs]))
 
+
+class SimpleTimer:
+    def __init__(self, name):
+        self.name = name
+        self.op_duration_sec = dict()
+        self.last_time_sec = None
+
+    def reset_start_time(self):
+        now_sec = time.time()
+        self.last_time_sec = now_sec
+
+    def end_operation(self, operation):
+        assert self.last_time_sec is not None
+        now_sec = time.time()
+        assert operation not in self.op_duration_sec
+        self.op_duration_sec[operation] = now_sec - self.last_time_sec
+        self.last_time_sec = now_sec
+
+    def __str__(self):
+        bldr = ToStringBuilder(obj=self)
+        bldr.add_param('name', self.name)
+        bldr.add_param('op_duration_sec', pprint.pformat(self.op_duration_sec))
+        return bldr.to_string()
+
+    def __repr__(self):
+        return str(self)
