@@ -27,7 +27,8 @@ limitations under the License.
 #include <time.h>
 #include <unistd.h>
 
-#include "tensorflow/core/lib/core/error_codes.pb.h"
+//#include "tensorflow/core/lib/core/error_codes.pb.h"
+#include "error_codes.pb.h"
 #include "tensorflow/core/lib/core/status.h"
 #include "tensorflow/core/lib/strings/strcat.h"
 #include "tensorflow/core/platform/env.h"

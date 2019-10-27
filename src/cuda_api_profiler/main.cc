@@ -15,7 +15,8 @@
 #include "tensorflow/core/platform/logging.h"
 #include "tensorflow/core/platform/device_tracer.h"
 #include "tensorflow/core/lib/core/status.h"
-#include "tensorflow/core/lib/core/error_codes.pb.h"
+//#include "tensorflow/core/lib/core/error_codes.pb.h"
+#include "error_codes.pb.h"
 #include "tensorflow/core/lib/core/errors.h"
 
 #ifdef WITH_CUDA_LD_PRELOAD

@@ -20,7 +20,8 @@ limitations under the License.
 #include <iosfwd>
 #include <memory>
 #include <string>
-#include "tensorflow/core/lib/core/error_codes.pb.h"
+//#include "tensorflow/core/lib/core/error_codes.pb.h"
+#include "error_codes.pb.h"
 #include "tensorflow/core/lib/core/stringpiece.h"
 #include "tensorflow/core/platform/logging.h"
 #include "tensorflow/core/platform/macros.h"
