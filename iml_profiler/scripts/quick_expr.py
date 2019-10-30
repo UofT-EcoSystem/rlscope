@@ -636,6 +636,13 @@ class ExprSubtractionValidation:
             })))
             assert iters_01 == iters_02
         iterations = self.get_iterations(self.conf(algo, env, 'gpu_activities_api_time_calibration'))
+
+        if self.quick_expr.args.debug:
+            logging.info("log = {msg}".format(
+                msg=pprint_msg({
+                    'iterations': iterations,
+                })))
+
         for iters in iterations:
             gpu_activities_api_time_directories = self.conf(algo, env, 'gpu_activities_api_time_calibration').iml_directories(iters)
             interception_directories = self.conf(algo, env, 'interception_calibration').iml_directories(iters)
@@ -674,9 +681,25 @@ class ExprSubtractionValidation:
         task = "CUPTIOverheadTask"
         assert self.get_iterations(self.conf(algo, env, 'gpu_activities_calibration')) == self.get_iterations(self.conf(algo, env, 'no_gpu_activities_calibration'))
         iterations = self.get_iterations(self.conf(algo, env, 'gpu_activities_calibration'))
+
+        if self.quick_expr.args.debug:
+            logging.info("log = {msg}".format(
+                msg=pprint_msg({
+                    'iterations': iterations,
+                })))
+
         for iters in iterations:
+
             gpu_activities_directories = self.conf(algo, env, 'gpu_activities_calibration').iml_directories(iters)
             no_gpu_activities_directories = self.conf(algo, env, 'no_gpu_activities_calibration').iml_directories(iters)
+            if self.quick_expr.args.debug:
+                logging.info("log = {msg}".format(
+                    msg=pprint_msg({
+                        'iters': iters,
+                        'gpu_activities_directories': gpu_activities_directories,
+                        'no_gpu_activities_directories': no_gpu_activities_directories,
+                    })))
+
             if len(gpu_activities_directories) != len(no_gpu_activities_directories):
                 log_missing_files(self, task=task, files={
                     'gpu_activities_directories': gpu_activities_directories,
@@ -708,9 +731,30 @@ class ExprSubtractionValidation:
 
     def compute_LD_PRELOAD_overhead(self, algo, env):
         task = "CallInterceptionOverheadTask"
+
+        if self.quick_expr.args.debug:
+            logging.info("log = {msg}".format(
+                msg=pprint_msg({
+                    'iterations': self.iterations,
+                })))
+
         for iters in self.iterations:
             interception_directories = self.conf(algo, env, 'interception_calibration').iml_directories(iters)
             uninstrumented_directories = self.conf(algo, env, 'uninstrumented_calibration').iml_directories(iters)
+            if self.quick_expr.args.debug:
+                logging.info("log = {msg}".format(
+                    msg=pprint_msg({
+                        'iters': iters,
+                        'interception_directories': interception_directories,
+                        'uninstrumented_directories': uninstrumented_directories,
+                    })))
+            if self.quick_expr.args.debug:
+                logging.info("log = {msg}".format(
+                    msg=pprint_msg({
+                        'iters': iters,
+                        'interception_directories': interception_directories,
+                        'uninstrumented_directories': uninstrumented_directories,
+                    })))
             if len(interception_directories) != len(uninstrumented_directories):
                 log_missing_files(self, task=task, files={
                     'interception_directories': interception_directories,
@@ -742,10 +786,25 @@ class ExprSubtractionValidation:
 
     def compute_pyprof_overhead(self, algo, env):
         task = "PyprofOverheadTask"
+
+        if self.quick_expr.args.debug:
+            logging.info("log = {msg}".format(
+                msg=pprint_msg({
+                    'iterations': self.iterations,
+                })))
+
         for iters in self.iterations:
             uninstrumented_directories = self.conf(algo, env, 'uninstrumented_calibration').iml_directories(iters)
             pyprof_annotations_directories = self.conf(algo, env, 'just_pyprof_annotations_calibration').iml_directories(iters)
             pyprof_interceptions_directories = self.conf(algo, env, 'just_pyprof_interceptions_calibration').iml_directories(iters)
+            if self.quick_expr.args.debug:
+                logging.info("log = {msg}".format(
+                    msg=pprint_msg({
+                        'iters': iters,
+                        'uninstrumented_directories': uninstrumented_directories,
+                        'pyprof_annotations_directories': pyprof_annotations_directories,
+                        'pyprof_interceptions_directories': pyprof_interceptions_directories,
+                    })))
 
             if len({
                 len(uninstrumented_directories),
@@ -807,6 +866,15 @@ class ExprSubtractionValidation:
 
         config_uninstrumented = self.conf(algo, env, 'uninstrumented')
 
+        logging.info("log = {msg}".format(
+            msg=pprint_msg({
+                'iterations': iterations,
+                'iters': iters,
+                'pyprof_overhead_jsons': pyprof_overhead_jsons,
+                'cupti_overhead_jsons': cupti_overhead_jsons,
+                'LD_PRELOAD_overhead_jsons': LD_PRELOAD_overhead_jsons,
+            })))
+
         for iters in iterations:
             iml_directories = config.iml_directories(iters)
             uninstrumented_directories = config_uninstrumented.iml_directories(iters)
@@ -829,7 +897,7 @@ class ExprSubtractionValidation:
                     config=config.to_string(),
                     klass=self.__class__.__name__
                 ))
-                import ipdb; ipdb.set_trace()
+                # import ipdb; ipdb.set_trace()
                 continue
 
             # iml-analyze
@@ -886,6 +954,7 @@ class ExprSubtractionValidation:
                 debug=self.quick_expr.args.debug)
 
     def do_run(self):
+
         for rep in range(1, self.args.repetitions+1):
             for config in self.configs:
                 iterations = self.get_iterations(config)
@@ -932,9 +1001,6 @@ class ExprSubtractionValidation:
 
         if self.args.only_runs is not None and len(self.args.only_runs) > 0:
             runs = [run for run in range(self.args.num_runs) if run in self.args.only_runs]
-        elif self.args.calibration_mode == 'calibration':
-            # one_minute_iterations*(2**i) for i in [2] => 4 minute runs
-            runs = [2]
         else:
             runs = list(range(self.args.num_runs))
 

@@ -26,7 +26,7 @@ if [ "$DEBUG" = 'yes' ]; then
 fi
 
 _do() {
-    echo "> CMD: $@"
+    echo "> [run_bench] CMD:"
     echo "  $ $@"
     "$@"
 }
@@ -119,31 +119,39 @@ run_full_training_uninstrumented() {
     iml-quick-expr --expr total_training_time "$@"
 }
 
-run_debug_calibration() {
-    #Walker2DBulletEnv-v0
-    iml-quick-expr "${RUN_DEBUG_ARGS[@]}" --expr subtraction_validation --repetitions 3 --env HalfCheetahBulletEnv-v0 --algo ppo2 "$@"
+run_calibration_all() {
+    run_subtraction_calibration
+    run_subtraction_validation
 }
 
-run_debug_subtraction_validation() {
+run_subtraction_validation() {
     _cmd() {
-        iml-quick-expr "${RUN_DEBUG_ARGS[@]}" --expr subtraction_validation --calibration-mode validation --repetitions 1 --num-runs 1 --env HalfCheetahBulletEnv-v0 --algo ppo2 "$@"
+        _do iml-quick-expr "${RUN_DEBUG_ARGS[@]}" --expr subtraction_validation --calibration-mode validation --repetitions 3 --only-runs 2 --env HalfCheetahBulletEnv-v0 --algo ppo2 "$@"
     }
     _cmd "$@"
     _cmd "$@" --plot
 }
 
-run_debug_subtraction_validation_long() {
+run_subtraction_calibration() {
     _cmd() {
-        iml-quick-expr "${RUN_DEBUG_ARGS[@]}" --expr subtraction_validation --calibration-mode validation --repetitions 3 --env HalfCheetahBulletEnv-v0 --algo ppo2 "$@"
+        _do iml-quick-expr "${RUN_DEBUG_ARGS[@]}" --expr subtraction_validation --calibration-mode calibration --repetitions 3 --only-runs 2 --env HalfCheetahBulletEnv-v0 --algo ppo2 "$@"
+    }
+    _cmd "$@"
+    _cmd "$@" --plot
+}
+
+run_subtraction_validation_long() {
+    _cmd() {
+        _do iml-quick-expr "${RUN_DEBUG_ARGS[@]}" --expr subtraction_validation --calibration-mode validation --repetitions 3 --env HalfCheetahBulletEnv-v0 --algo ppo2 "$@"
     }
     # - Run using long iterations (most important...)
     # - Re-plot stuff.
     # - Run using different numbers of iterations
     # - Re-plot stuff.
     _cmd "$@" --num-runs 0 --long-run
-    _cmd "$@" --plot
-    _cmd "$@" --num-runs 3
-    _cmd "$@" --num-runs 3 --plot
+    _cmd "$@" --num-runs 0 --long-run --plot
+#    _cmd "$@" --num-runs 3
+#    _cmd "$@" --num-runs 3 --plot
 }
 
 run_debug_all() {
