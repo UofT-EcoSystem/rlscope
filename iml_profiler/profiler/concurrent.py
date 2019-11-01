@@ -202,6 +202,29 @@ class MyProcess(MP_CTX.Process):
 
         return self._exception
 
+
+def map_pool(pool, func, kwargs_list, desc=None, show_progress=False, sync=False):
+    if len(kwargs_list) == 1 or sync:
+        logging.info("Running map_pool synchronously")
+        # Run it on the current thread.
+        # Easier to debug with pdb.
+        results = []
+        for kwargs in kwargs_list:
+            result = func(kwargs)
+            results.append(result)
+        return results
+
+    # logging.info("Running map_pool in parallel with n_workers")
+    results = []
+    for i, result in enumerate(progress(
+        pool.map(func, kwargs_list),
+        desc=desc,
+        total=len(kwargs_list),
+        show_progress=show_progress)
+    ):
+        results.append(result)
+    return results
+
 def _sys_exit_1():
     """
     For unit-testing.

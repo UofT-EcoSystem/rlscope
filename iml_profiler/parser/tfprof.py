@@ -14,6 +14,8 @@ from iml_profiler.parser.stats import KernelTime
 from iml_profiler.parser.trace_events import TraceEventsDumper, dump_category_times
 from iml_profiler.profiler.concurrent import ForkedProcessPool, FailedProcessException
 
+from iml_profiler.profiler import concurrent
+
 from concurrent.futures import ProcessPoolExecutor
 
 from iml_profiler.parser.db import SQLCategoryTimesReader, sql_input_path, sql_get_source_files, \
@@ -1584,7 +1586,7 @@ class OverlapComputer:
             )
         with ProcessPoolExecutor(n_workers) as pool:
             kwargs_list = [split_overlap_computation_Args(event_split) for event_split in event_splits]
-            split_overlap_results = map_pool(pool, split_overlap_computation_Worker, kwargs_list,
+            split_overlap_results = concurrent.map_pool(pool, split_overlap_computation_Worker, kwargs_list,
                      desc="OverlapComputer.splits",
                      show_progress=True,
                      sync=self.debug_single_thread)
@@ -3189,28 +3191,6 @@ def merge_dicts(dict1, dict2, merge_func):
         else:
             dic[k] = merge_func(k, dic[k], v)
     return dic
-
-def map_pool(pool, func, kwargs_list, desc=None, show_progress=False, sync=False):
-    if len(kwargs_list) == 1 or sync:
-        logging.info("Running map_pool synchronously")
-        # Run it on the current thread.
-        # Easier to debug with pdb.
-        results = []
-        for kwargs in kwargs_list:
-            result = func(kwargs)
-            results.append(result)
-        return results
-
-    logging.info("Running map_pool in parallel with n_workers")
-    results = []
-    for i, result in enumerate(progress(
-        pool.map(func, kwargs_list),
-        desc=desc,
-        total=len(kwargs_list),
-        show_progress=show_progress)
-    ):
-        results.append(result)
-    return results
 
 def test_merge_adjacent_events():
 

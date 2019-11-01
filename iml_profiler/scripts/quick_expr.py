@@ -6,6 +6,7 @@ import textwrap
 import os
 from os import environ as ENV
 import json
+import functools
 
 from os.path import join as _j, abspath as _a, exists as _e, dirname as _d, basename as _b
 
@@ -14,6 +15,7 @@ from iml_profiler.experiment.util import tee, expr_run_cmd, expr_already_ran
 from iml_profiler.profiler.concurrent import ForkedProcessPool
 from iml_profiler.scripts import bench
 from iml_profiler.experiment import expr_config
+from iml_profiler.parser.dataframe import IMLConfig
 
 # ( set -e; set -x; iml-quick-expr --expr total_training_time --repetitions 3 --bullet; )
 # ( set -e; set -x; iml-quick-expr --expr total_training_time --repetitions 3 --bullet --plot; )
@@ -71,6 +73,10 @@ class QuickExpr:
         ] if x is not None]
         return _j(*components)
 
+    def expr_plot_fig(self, extra_argv):
+        expr_plot_fig = ExprPlotFig(quick_expr=self, argv=extra_argv)
+        expr_plot_fig.run()
+
     def expr_subtraction_validation(self, extra_argv):
         expr_subtraction_validation = ExprSubtractionValidation(quick_expr=self, argv=extra_argv)
         expr_subtraction_validation.run()
@@ -111,6 +117,7 @@ def main():
         choices=[
             'subtraction_validation',
             'total_training_time',
+            'plot_fig',
         ],
         required=True,
         help=textwrap.dedent("""
@@ -1300,6 +1307,350 @@ class ExprSubtractionValidation:
         else:
             self.do_run()
 
+class IMLConfigDir:
+    def __init__(self, iml_config_path):
+        self.iml_config = IMLConfig(iml_config_path=iml_config_path)
+        self.config_dir = self._as_config_dir(iml_config_path)
+
+    def _as_config_dir(self, path):
+        m = re.search(r'(?P<config_dir>.*/{CONFIG_RE})'.format(
+            CONFIG_RE=CONFIG_RE),
+            path)
+        assert m
+        config_dir = m.group('config_dir')
+        assert is_config_dir(config_dir)
+        return config_dir
+
+    @property
+    def algo(self):
+        return self.iml_config.algo()
+
+    @property
+    def env(self):
+        return self.iml_config.env()
+
+    def repetition(self, allow_none=False, dflt=None):
+        return self._repetition_from_config_dir(self.config_dir, allow_none=allow_none, dflt=dflt)
+
+    def _config_component(self, path):
+        m = re.search(r'(?P<config_component>{CONFIG_RE})'.format(
+            CONFIG_RE=CONFIG_RE),
+            path)
+        config_component = m.group('config_component')
+        return config_component
+
+    @property
+    def config(self):
+        config = self._config_component(self.config_dir)
+        config = re.sub(r'_repetition_\d+', '', config)
+        return config
+
+    def _repetition_from_config_dir(self, path, allow_none=False, dflt=None):
+        assert is_config_dir(path)
+        _check_has_config_dir(path)
+        config_component = self._config_component(path)
+        m = re.search(r'repetition_(?P<repetition>\d+)', config_component)
+        assert m or allow_none
+        if not m:
+            return dflt
+        repetition = int(m.group('repetition'))
+        return repetition
+
+
+class ExperimentDirectoryWalker:
+    def __init__(self, root_dir):
+        self.root_dir = root_dir
+        self._init()
+
+    def complete_repetitions(self, configs):
+        """
+        PSEUDOCODE:
+        def complete_repetitions(self):
+            r = start-repetition (0 or 1, or smallest we find.)
+            end-repetition (largest repetition we find)
+            while r <= end-repetition and r in algo_env_pairs and ( (r-1) no in algo_env_pairs or algo_env_pairs[r].issubset(algo_env_pairs[r-1]) ):
+              reps.append( r )
+              r += 1
+            return reps
+        """
+        def reps_for_config(config):
+            r = self.start_repetition(config)
+            end_repetition = self.end_repetition(config)
+            reps = set()
+            while r <= end_repetition and \
+                r in self.algo_env_pairs and \
+                (
+                    (r - 1) not in self.algo_env_pairs or \
+                    self.algo_env_pairs[r-1][config].issubset(self.algo_env_pairs[r][config])
+                ):
+                reps.add(r)
+                r += 1
+            return reps
+        all_reps = [reps_for_config(config) for config in configs]
+        reps = functools.reduce(set.intersection, all_reps)
+        return reps
+
+    def start_repetition(self, config):
+        """
+        r = start-repetition (0 or 1, or smallest we find.)
+        """
+        min_r = None
+        for r in self.algo_env_pairs.keys():
+            if config in self.algo_env_pairs[r]:
+                min_r = min(r, min_r) if min_r is not None else r
+        assert min_r is not None
+        return min_r
+
+    def end_repetition(self, config):
+        """
+        end-repetition (largest repetition we find)
+        """
+        max_r = None
+        for r in self.algo_env_pairs.keys():
+            if config in self.algo_env_pairs[r]:
+                max_r = max(r, max_r) if max_r is not None else r
+        assert max_r is not None
+        return max_r
+
+    def get_iml_config_dir(self, config, algo, env, r):
+        return self._iml_config_dir_dict[(config, algo, env, r)]
+
+    def _init(self):
+        self.iml_config_paths = [
+            path for path in each_file_recursive(self.root_dir)
+            if is_iml_config_file(path) and _b(_d(path)) != DEFAULT_PHASE]
+        for iml_config_path in self.iml_config_paths:
+            _check_has_config_dir(iml_config_path)
+            _check_one_config_dir(iml_config_path)
+
+        self.algo_env_pairs = dict()
+        self._iml_config_dir_dict = dict()
+        for iml_config_path in self.iml_config_paths:
+            iml_config_dir = IMLConfigDir(iml_config_path)
+            config = iml_config_dir.config
+            r = iml_config_dir.repetition(allow_none=True, dflt=0)
+            algo = iml_config_dir.algo
+            env = iml_config_dir.env
+            self._iml_config_dir_dict[(config, algo, env, r)] = iml_config_dir
+            algo_env = (algo, env)
+            if r not in self.algo_env_pairs:
+                self.algo_env_pairs[r] = dict()
+            if config not in self.algo_env_pairs[r]:
+                self.algo_env_pairs[r][config] = set()
+            assert algo_env not in self.algo_env_pairs[r][config]
+            self.algo_env_pairs[r][config].add(algo_env)
+
+    def _all_algo_env_pairs(self, configs, reps):
+        # for r in self.algo_env_pairs.keys():
+        for r in reps:
+            for config in configs:
+                algo_env_pairs = self.algo_env_pairs[r][config]
+                yield algo_env_pairs
+
+    def all_configs(self):
+        def _all_configs():
+            for r in self.algo_env_pairs.keys():
+                yield set(self.algo_env_pairs[r].keys())
+        configs = functools.reduce(set.union, _all_configs())
+        return configs
+
+    def get_configs(self, configs):
+        """
+        config_dict = walker.get_algo_env_pairs(
+            # Could require repetitions, or default to:
+            # - largest number of repetitions with most (algo, env) pairs
+            #   i.e. if bumping the repetitions doesn't LOSE any (algo, env) pairs, do it.
+            repetitions=args.repetitions,
+            configurations=['config_uninstrumented', 'config_full'])
+        # Returns something like:
+        {
+            # Paths appear in (algo, env, repetition) order, and an (algo, env, repetition) MUST appear in ALL lists, or NO lists.
+            'config_uninstrumented': ['path/to/AntBullet/config_uninstrumented_repetition_01', …]
+            'config_full': ['path/to/AntBullet/config_full_repetition_01', …]
+        }
+
+        def get_algo_env_pairs(self):
+            # NOTE: we need to take the intersection of (algo, env) pairs across all repetitions:
+            #   INTERSECT { algo_env_pairs[r][config] } for r in range(repetitions), config in algo_env_pairs[r].keys()
+            algo_env_pairs
+            for config_dir in config_dirs:
+                Algo, env = get_algo_env(config_dir)
+                R = get_repetition(config_dir)
+                Algo_env_pairs[r].add((algo, env))
+
+            reps = complete_repetitions()
+            algo_env_pairs = INTERSECT { algo_env_pairs[r] } for r in reps
+            return algo_env_pairs
+        """
+        all_configs = self.all_configs()
+        for config in configs:
+            assert config in all_configs
+
+        # All the "complete repetitions" the configs have in common.
+        # For a config, a repetition is complete if all repetitions for that config have the same (algo, env) pairs measured.
+        reps = self.complete_repetitions(configs)
+        # The (algo, env) pairs these configs' repetitions have in common.
+        algo_env_pairs_keep = functools.reduce(set.intersection, self._all_algo_env_pairs(configs, reps))
+        config_dict = dict()
+        for algo, env in algo_env_pairs_keep:
+            for r in reps:
+                for config in configs:
+                    iml_config_dir = self.get_iml_config_dir(config, algo, env, r)
+                    if config not in config_dict:
+                        config_dict[config] = []
+                    config_dict[config].append(iml_config_dir.config_dir)
+        return config_dict
+
+    def is_config_dir(self, path):
+        return is_config_dir(path)
+
+    def _as_config_dir(self, path):
+        m = re.search(r'(?P<config_dir>.*/{CONFIG_RE})'.format(
+            CONFIG_RE=CONFIG_RE),
+            path)
+        assert m
+        config_dir = m.group('config_dir')
+        assert self.is_config_dir(config_dir)
+        return config_dir
+
+class ExprPlotFig:
+    def __init__(self, quick_expr, argv):
+        self.quick_expr = quick_expr
+        self.argv = argv
+        self._pool = ForkedProcessPool(name='{klass}.pool'.format(
+            klass=self.__class__.__name__))
+
+    @property
+    def out_dir(self):
+        return _j(self.quick_expr.out_dir)
+
+    def plot_dir(self, fig):
+        return _j(self.out_dir, fig)
+
+    def plot_logfile(self, fig):
+        logfile = _j(self.plot_dir(fig), "logfile.out")
+        return logfile
+
+    def run(self):
+        parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+
+        # parser.add_argument(
+        #     '--bullet',
+        #     action='store_true',
+        #     help='Limit environments to physics-based Bullet environments')
+        # parser.add_argument(
+        #     '--atari',
+        #     action='store_true',
+        #     help='Limit environments to Atari Pong environment')
+        # parser.add_argument(
+        #     '--lunar',
+        #     action='store_true',
+        #     help='Limit environments to LunarLander environments (i.e. LunarLanderContinuous-v2, LunarLander-v2)')
+
+        # parser.add_argument(
+        #     '--env',
+        #     )
+        # parser.add_argument(
+        #     '--algo',
+        #     )
+        # parser.add_argument(
+        #     '--plot',
+        #     action='store_true')
+        # parser.add_argument(
+        #     '--instrumented',
+        #     help="Run in fully instrumented mode (needed for creating \"Overhead correction\" figure)",
+        #     action='store_true')
+
+        parser.add_argument(
+            '--root-dir',
+            help="Root directory that contains ALL the iml-directories and config-dirs as children; we walk this recursively.",
+            required=True)
+
+        parser.add_argument(
+            '--fig',
+            choices=[
+                'fig_13_overhead_correction',
+            ],
+            help="Which paper figure are we making? (naming matches filenames used in Latex)",
+            required=True,
+        )
+
+        parser.add_argument(
+            '--cupti-overhead-json',
+            help="Calibration: mean per-CUDA API CUPTI overhead when GPU activities are recorded (see: CUPTIOverheadTask)",
+            required=True,
+        )
+        parser.add_argument(
+            '--LD-PRELOAD-overhead-json',
+            help="Calibration: mean overhead for intercepting CUDA API calls with LD_PRELOAD  (see: CallInterceptionOverheadTask)",
+            required=True,
+        )
+        parser.add_argument(
+            '--pyprof-overhead-json',
+            help="Calibration: means for (1) Python->C++ interception overhead, (2) operation annotation overhead (see: PyprofOverheadTask)",
+            required=True,
+        )
+
+        self.args, self.extra_argv = parser.parse_known_args(self.argv)
+
+        self.do_run()
+
+    def plot_dir(self, fig):
+        return _j(self.out_dir, fig)
+
+    def plot_logfile(self, fig):
+        logfile = _j(self.plot_dir(fig), "logfile.out")
+        return logfile
+
+    def iml_analyze_cmdline(self, task, argv):
+        plot_dir = self.plot_dir(self.args.fig)
+        cmd = ['iml-analyze',
+               '--directory', plot_dir,
+               '--task', task,
+
+               '--pyprof-overhead-json', self.args.pyprof_overhead_json,
+               '--cupti-overhead-json', self.args.cupti_overhead_json,
+               '--LD-PRELOAD-overhead-json', self.args.LD_PRELOAD_overhead_json,
+               ]
+        cmd.extend(argv)
+        add_iml_analyze_flags(cmd, self.quick_expr.args)
+        cmd.extend(self.extra_argv)
+        return cmd
+
+    def do_run(self):
+        plot_dir = self.plot_dir(self.args.fig)
+        if not self.quick_expr.args.dry_run:
+            os.makedirs(plot_dir, exist_ok=True)
+        walker = ExperimentDirectoryWalker(root_dir=self.args.root_dir)
+        argv = None
+        task = None
+        if self.args.fig == 'fig_13_overhead_correction':
+            configs = walker.get_configs(configs=['config_uninstrumented', 'config_full'])
+            argv = [
+                '--iml-prof-config', 'full',
+                '--iml-directories', json.dumps(configs['config_full']),
+                '--uninstrumented-directories', json.dumps(configs['config_uninstrumented']),
+            ]
+            task = 'CorrectedTrainingTimeTask'
+        else:
+            raise NotImplementedError()
+
+        cmd = self.iml_analyze_cmdline(task=task, argv=argv)
+
+        logfile = self.plot_logfile(self.args.fig)
+        if self.quick_expr.args.debug:
+            logging.info("Logging to file {path}".format(
+                path=logfile))
+        expr_run_cmd(
+            cmd=cmd,
+            to_file=logfile,
+            # Always re-run plotting script?
+            # replace=True,
+            dry_run=self.quick_expr.args.dry_run,
+            skip_error=self.quick_expr.args.skip_error,
+            debug=self.quick_expr.args.debug)
+
+
 def rep_suffix(rep):
     assert rep is not None
     return "_repetition_{rep:02}".format(rep=rep)
@@ -1329,6 +1680,19 @@ def get_func_name(obj, func):
         klass=obj.__class__.__name__,
         func=func)
     return name
+
+def _check_one_config_dir(path):
+    config_matches = re.findall(CONFIG_RE, path)
+    if len(config_matches) > 1:
+        raise RuntimeError("Saw multiple config_* components in {path}; not sure which one to use; choices: \n{choices}".format(
+            path=path,
+            choices=pprint.pformat(config_matches)))
+
+def _check_has_config_dir(path):
+    if not re.search(CONFIG_RE, path):
+        raise RuntimeError("Saw no config_* component in {path}".format(
+            path=path,
+        ))
 
 if __name__ == '__main__':
     main()

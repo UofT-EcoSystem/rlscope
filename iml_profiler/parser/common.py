@@ -198,7 +198,7 @@ BENCH_PREFIX_RE = r"(:?op_(?P<bench_name>{bench})\.)?".format(bench=BENCH_NAME_R
 # we allow trace_id and session_id suffixes to be OPTIONAL.
 TRACE_SUFFIX_RE = r"(?:\.trace_(?P<trace_id>\d+))?"
 SESSION_SUFFIX_RE = r"(?:\.session_(?P<session_id>\d+))?"
-CONFIG_RE = r"(?:config_(?P<config>[^\.]+))"
+CONFIG_RE = r"(?:config_(?P<config>[^/\.]+))"
 
 float_re = r'(?:[-+]?[0-9]*\.?[0-9]+([eE][-+]?[0-9]+)?)'
 
@@ -1800,6 +1800,18 @@ def split_list(xs, n):
     start = (n_chunks - 1)*chunk_size
     yield xs[start:]
 
+def split_list_no_empty(xs, n):
+    assert n > 0
+    n = min(len(xs), n)
+    chunk_size = max(int(len(xs)/float(n)), 1)
+    n_chunks = n
+    for i in range(n_chunks-1):
+        start = i*chunk_size
+        stop = (i + 1)*chunk_size
+        yield xs[start:stop]
+    start = (n_chunks - 1)*chunk_size
+    yield xs[start:]
+
 # Taken from cProfile's Lib/pstats.py;
 # func_name is 3-tuple of (file-path, line#, function_name)
 # e.g.
@@ -2056,6 +2068,7 @@ def recursive_delete_trace_files(directory):
                 if py_config.DEBUG_WRAP_CLIB:
                     logging.info("> RM {path}".format(path=path))
                 os.remove(path)
+
 
 class ToStringBuilder:
     def __init__(self, obj):

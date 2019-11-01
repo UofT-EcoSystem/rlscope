@@ -48,6 +48,7 @@ class CorrectedTrainingTimeParser:
                  width=None,
                  height=None,
                  debug=False,
+                 debug_single_thread=False,
                  debug_memoize=False,
                  # Swallow any excess arguments
                  **kwargs):
@@ -76,6 +77,7 @@ class CorrectedTrainingTimeParser:
         self.width = width
         self.height = height
         self.debug = debug
+        self.debug_single_thread = debug_single_thread
         self.debug_memoize = debug_memoize
 
         iml_config = IMLConfig(self.iml_directories[0])
@@ -235,9 +237,27 @@ class CorrectedTrainingTimeParser:
             #     total_training_duration_us
             #     corrected_total_training_duration_us
             total_dfs = []
-            for directory in self.iml_directories:
+
+            if self.debug:
+                logging.info("load_dfs: {msg}".format(
+                    msg=pprint_msg({
+                        'iml_directories':self.iml_directories,
+                    })
+                ))
+
+            # for directory in self.iml_directories:
+            for directory in progress(self.iml_directories,
+                                 desc="load_dfs.iml_directories",
+                                 show_progress=self.debug):
+
+                if self.debug:
+                    logging.info("iml_directory = {dir}".format(
+                        dir=directory,
+                    ))
 
                 iml_config = read_iml_config(directory)
+
+                total_training_duration_us = get_training_durations(directory, debug=self.debug, debug_single_thread=self.debug_single_thread)
 
                 """
                 - CUPTI overhead = sum(api.n_calls * api.mean_cupti_per_call_overhead_us for each api)
@@ -250,7 +270,7 @@ class CorrectedTrainingTimeParser:
 
                 # TODO: if there are NO per-api stats, make get_per_api_stats return a dataframe with zero rows:
                 # api_name, num_calls, ...
-                per_api_stats = get_per_api_stats(directory, debug=self.debug)
+                per_api_stats = get_per_api_stats(directory, debug=self.debug, debug_single_thread=self.debug_single_thread)
                 per_api_df = copy.copy(per_api_stats.reset_index())
                 if self.should_subtract_LD_PRELOAD:
                     per_api_df['total_interception_overhead_us'] = per_api_df['num_calls'] * self.LD_PRELOAD_overhead_json['mean_interception_overhead_per_call_us']
@@ -316,7 +336,7 @@ class CorrectedTrainingTimeParser:
                   - parse total_training_time using TrainingProgressDataframeReader
                 """
 
-                total_training_duration_us = get_training_durations(directory, debug=self.debug)
+                # total_training_duration_us = get_training_durations(directory, debug=self.debug, debug_single_thread=self.debug_single_thread)
 
                 total_df = pd.DataFrame({
                     'total_cupti_overhead_us': [total_cupti_overhead_us],
@@ -471,7 +491,7 @@ class CorrectedTrainingTimeParser:
             fig.savefig(self._total_png_path)
             plt.close(fig)
 
-        unins_df = pd.concat(get_training_durations_df(self.uninstrumented_directories, debug=self.debug))
+        unins_df = pd.concat(get_training_durations_df(self.uninstrumented_directories, debug=self.debug, debug_single_thread=self.debug_single_thread))
         unins_df['config'] = 'uninstrumented'
 
         ins_df = pd.DataFrame({
@@ -622,6 +642,7 @@ class CallInterceptionOverheadParser:
                  width=None,
                  height=None,
                  debug=False,
+                 debug_single_thread=False,
                  # Swallow any excess arguments
                  **kwargs):
         """
@@ -638,6 +659,7 @@ class CallInterceptionOverheadParser:
         # self.algo_env_from_dir = algo_env_from_dir
         # self.baseline_config = baseline_config
         self.debug = debug
+        self.debug_single_thread = debug_single_thread
 
         # self.added_fields = set()
 
@@ -695,12 +717,12 @@ class CallInterceptionOverheadParser:
         sns_kwargs = get_sns_kwargs()
         plt_kwargs = get_plt_kwargs()
 
-        int_training_duration_us = get_training_durations(self.interception_directory, debug=self.debug)
-        no_int_training_duration_us = get_training_durations(self.uninstrumented_directory, debug=self.debug)
+        int_training_duration_us = get_training_durations(self.interception_directory, debug=self.debug, debug_single_thread=self.debug_single_thread)
+        no_int_training_duration_us = get_training_durations(self.uninstrumented_directory, debug=self.debug, debug_single_thread=self.debug_single_thread)
         if len(int_training_duration_us) != len(no_int_training_duration_us):
             raise RuntimeError("You need to run the same number of repetitions for both config_interception and config_uninstrumented")
 
-        int_total_calls = get_n_total_calls(self.interception_directory, debug=self.debug)
+        int_total_calls = get_n_total_calls(self.interception_directory, debug=self.debug, debug_single_thread=self.debug_single_thread)
         # no_int_total_calls = get_n_total_calls(self.uninstrumented_directory, debug=self.debug)
         # 'no_int_total_calls': no_int_total_calls,
 
@@ -781,6 +803,7 @@ class PyprofOverheadParser:
                  width=None,
                  height=None,
                  debug=False,
+                 debug_single_thread=False,
                  # Swallow any excess arguments
                  **kwargs):
         """
@@ -794,6 +817,7 @@ class PyprofOverheadParser:
         self.width = width
         self.height = height
         self.debug = debug
+        self.debug_single_thread = debug_single_thread
         self.filename_prefix = 'category_events'
 
     @staticmethod
@@ -819,7 +843,7 @@ class PyprofOverheadParser:
 
         # assert name in ['op', 'event']
 
-        unins_df = pd.concat(get_training_durations_df(self.uninstrumented_directory, debug=self.debug))
+        unins_df = pd.concat(get_training_durations_df(self.uninstrumented_directory, debug=self.debug, debug_single_thread=self.debug_single_thread))
         unins_df['config'] = 'uninstrumented'
 
         # e.g. num_<pyprof_interception>s
@@ -829,7 +853,7 @@ class PyprofOverheadParser:
 
         ins_dfs = []
         for directory in instrumented_directory:
-            training_duration_us = get_training_durations(directory, debug=self.debug)
+            training_duration_us = get_training_durations(directory, debug=self.debug, debug_single_thread=self.debug_single_thread)
 
             pyprof_mapper = DataframeMapper(PyprofDataframeReader, directories=[directory], debug=self.debug)
             if mapper_cb:
@@ -1038,6 +1062,7 @@ class TotalTrainingTimeParser:
                  width=None,
                  height=None,
                  debug=False,
+                 debug_single_thread=False,
                  # Swallow any excess arguments
                  **kwargs):
         """
@@ -1049,6 +1074,7 @@ class TotalTrainingTimeParser:
         self.width = width
         self.height = height
         self.debug = debug
+        self.debug_single_thread = debug_single_thread
         self.filename_prefix = 'total_training_time'
 
     @staticmethod
@@ -1074,7 +1100,7 @@ class TotalTrainingTimeParser:
 
         # assert name in ['op', 'event']
 
-        unins_df = pd.concat(get_training_durations_df(self.uninstrumented_directory, debug=self.debug))
+        unins_df = pd.concat(get_training_durations_df(self.uninstrumented_directory, debug=self.debug, debug_single_thread=self.debug_single_thread))
         unins_df['config'] = 'uninstrumented'
 
         # e.g. num_<pyprof_interception>s
@@ -1084,7 +1110,7 @@ class TotalTrainingTimeParser:
 
         ins_dfs = []
         for directory in instrumented_directory:
-            training_duration_us = get_training_durations(directory, debug=self.debug)
+            training_duration_us = get_training_durations(directory, debug=self.debug, debug_single_thread=self.debug_single_thread)
 
             pyprof_mapper = DataframeMapper(PyprofDataframeReader, directories=[directory], debug=self.debug)
             if mapper_cb:
@@ -1287,6 +1313,7 @@ class CUPTIScalingOverheadParser:
                  width=None,
                  height=None,
                  debug=False,
+                 debug_single_thread=False,
                  debug_memoize=False,
                  # Swallow any excess arguments
                  **kwargs):
@@ -1300,6 +1327,7 @@ class CUPTIScalingOverheadParser:
         self.width = width
         self.height = height
         self.debug = debug
+        self.debug_single_thread = debug_single_thread
         self.debug_memoize = debug_memoize
         self.filename_prefix = 'cupti_scaling_overhead'
 
@@ -1318,7 +1346,8 @@ class CUPTIScalingOverheadParser:
             df = cupti_read_cuda_api_stats(config_directories_pairs=[
                 ('interception', self.interception_directory),
                 ('gpu-activities-api-time', self.gpu_activities_api_time_directory),
-            ], debug=self.debug)
+            ], debug=self.debug,
+                debug_single_thread=self.debug_single_thread)
             ret = df
             maybe_memoize(self.debug_memoize, ret, memoize_path)
             return ret
@@ -1469,7 +1498,9 @@ class CUPTIScalingOverheadParser:
 
 
 
-def cupti_read_cuda_api_stats(config_directories_pairs, debug=False):
+def cupti_read_cuda_api_stats(config_directories_pairs,
+                              debug=False,
+                              debug_single_thread=False):
     """
     Read CUDAAPIPhaseStatsProto.CUDAAPIThreadStatsProto data into a dataframe.
     NOTE: CUDAAPIThreadStatsProto contains accumulated CUDA API time and number of calls,
@@ -1493,7 +1524,7 @@ def cupti_read_cuda_api_stats(config_directories_pairs, debug=False):
             training_iterations = training_mapper.map_one(lambda reader: reader.training_iterations())
             training_duration_us = training_mapper.map_one(lambda reader: reader.training_duration_us())
 
-            per_api_stats = get_per_api_stats(directory, debug=debug)
+            per_api_stats = get_per_api_stats(directory, debug=debug, debug_single_thread=debug_single_thread)
             per_api_stats = per_api_stats.reset_index()
             logging.info("per_api_stats: " + pprint_msg(per_api_stats))
             for i, row in per_api_stats.iterrows():
@@ -1570,6 +1601,7 @@ class CUPTIOverheadParser:
                  width=None,
                  height=None,
                  debug=False,
+                 debug_single_thread=False,
                  # Swallow any excess arguments
                  **kwargs):
         """
@@ -1586,6 +1618,7 @@ class CUPTIOverheadParser:
         # self.algo_env_from_dir = algo_env_from_dir
         # self.baseline_config = baseline_config
         self.debug = debug
+        self.debug_single_thread = debug_single_thread
 
     def colname(self, col, config):
         return "{col}_{config}".format(
@@ -1651,7 +1684,8 @@ class CUPTIOverheadParser:
         df = cupti_read_cuda_api_stats(config_directories_pairs=[
             ('gpu-activities', self.gpu_activities_directory),
             ('no-gpu-activities', self.no_gpu_activities_directory),
-        ], debug=self.debug)
+        ], debug=self.debug,
+            debug_single_thread=self.debug_single_thread)
 
         df_csv = df.sort_values(['config', 'api_name', 'us_per_call'])
         df_csv.to_csv(self._raw_csv_path, index=False)
@@ -1724,7 +1758,9 @@ class CUPTIOverheadParser:
     def _png_path(self):
         return _j(self.directory, "cupti_overhead.png")
 
-def map_readers(DataframeReaderKlass, directories, func, debug=False):
+def map_readers(DataframeReaderKlass, directories, func,
+                debug=False,
+                debug_single_thread=False):
     xs = []
 
     if type(directories) == str:
@@ -1736,7 +1772,8 @@ def map_readers(DataframeReaderKlass, directories, func, debug=False):
         df_reader = DataframeReaderKlass(
             directory,
             # add_fields=self.maybe_add_algo_env,
-            debug=debug)
+            debug=debug,
+            debug_single_thread=debug_single_thread)
         x = func(df_reader)
         xs.append(x)
 
@@ -1746,46 +1783,58 @@ def map_readers(DataframeReaderKlass, directories, func, debug=False):
     return xs
 
 def get_training_durations(directories,
-                           debug=False):
+                           debug=False,
+                           debug_single_thread=False):
     def get_value(df_reader):
         return df_reader.training_duration_us()
     return map_readers(TrainingProgressDataframeReader, directories, get_value,
-                       debug=debug)
+                       debug=debug,
+                       debug_single_thread=debug_single_thread)
 
 def get_training_durations_df(directories,
-                              debug=False):
+                              debug=False,
+                              debug_single_thread=False):
     def get_value(df_reader):
         return df_reader.training_duration_df()
     return map_readers(TrainingProgressDataframeReader, directories, get_value,
-                       debug=debug)
+                       debug=debug,
+                       debug_single_thread=debug_single_thread)
 
 def get_n_total_calls(directories,
-                      debug=False):
+                      debug=False,
+                      debug_single_thread=False):
     def get_value(df_reader):
         return df_reader.n_total_calls()
     return map_readers(CUDAAPIStatsDataframeReader, directories, get_value,
-                       debug=debug)
+                       debug=debug,
+                       debug_single_thread=debug_single_thread)
 
 def get_per_api_stats(directories,
-                      debug=False):
+                      debug=False,
+                      debug_single_thread=False):
     def get_value(df_reader):
         return df_reader.per_api_stats()
     return map_readers(CUDAAPIStatsDataframeReader, directories, get_value,
-                       debug=debug)
+                       debug=debug,
+                       debug_single_thread=debug_single_thread)
 
 def get_pyprof_overhead_us(directories,
-                           debug=False):
+                           debug=False,
+                           debug_single_thread=False):
     def get_value(df_reader):
         return df_reader.total_pyprof_overhead_us()
     return map_readers(PyprofDataframeReader, directories, get_value,
-                       debug=debug)
+                       debug=debug,
+                       debug_single_thread=debug_single_thread)
 
 def get_pyprof_overhead_df(directories,
-                           debug=False):
+                           debug=False,
+                           debug_single_thread=False):
     def get_value(df_reader):
         return df_reader.total_pyprof_overhead_df()
     return map_readers(PyprofDataframeReader, directories, get_value,
-                       debug=debug)
+                       debug=debug,
+                       debug_single_thread=debug_single_thread)
 
 def add_col(data, colname, value):
     if colname not in data:

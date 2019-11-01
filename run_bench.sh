@@ -120,8 +120,8 @@ run_full_training_uninstrumented() {
 }
 
 run_calibration_all() {
-    run_subtraction_calibration
-    run_subtraction_validation
+    run_subtraction_calibration "$@"
+    run_subtraction_validation "$@"
 }
 
 run_subtraction_validation() {
