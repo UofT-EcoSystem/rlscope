@@ -659,6 +659,7 @@ class Profiler:
                  exit_early=True,
                  require_end_operation=False,
                  python=None,
+                 calibration=False,
                  disable=None,
                  disable_pyprof_annotations=None,
                  disable_pyprof_interceptions=None,
@@ -727,9 +728,15 @@ class Profiler:
             py_config.DEBUG = self.debug
         self.directory = get_argval('directory', directory, None, allow_none=False)
         self.disable = get_argval('disable', disable, False)
-        if 'IML_CONFIG' in os.environ:
+        if  'IML_CONFIG' in os.environ:
             self.iml_config = os.environ['IML_CONFIG']
-            if self.iml_config in 'uninstrumented':
+            if not self.calibration and self.iml_config == 'uninstrumented':
+                # WARNING: We do NOT do this for --iml-calibration runs, as it will cause a BUG!
+                # In order for calibration to work properly, we need to be able to enable each book-keeping feature in isolation!
+                # Q: What code depends on "--config uninstrumented" (without --iml-calibration) implying --iml-disable?
+                # A: minigo code.
+                logging.warning("DISABLE IML for --config={config} run".format(
+                    config=self.iml_config))
                 self.disable = True
         self.disable_pyprof_annotations = get_argval('disable_pyprof_annotations', disable_pyprof_annotations, False)
         self.disable_pyprof_interceptions = get_argval('disable_pyprof_interceptions', disable_pyprof_interceptions, False)
@@ -830,6 +837,7 @@ class Profiler:
         self.num_traces = get_argval('num_traces', num_traces, None)
         self.keep_traces = get_argval('keep_traces', keep_traces, False)
         self.bench_name = get_argval('bench_name', bench_name, None)
+        self.calibration = get_argval('calibration', calibration, False)
 
         self.util_sampler_pid = get_internal_argval('util_sampler_pid')
         self.handle_utilization_sampler = False
@@ -2780,6 +2788,14 @@ def add_iml_arguments(parser):
     """))
     iml_parser.add_argument('--iml-disable', action='store_true', help=textwrap.dedent("""
         IML: Skip any profiling.
+    """))
+    iml_parser.add_argument('--iml-internal-calibration', action='store_true', help=textwrap.dedent("""
+        IML: (internal use)
+        This is a calibration run. 
+        Calibration runs change the semantics of the "iml-prof --config uninstrumented"; 
+        in particular, usually "--config uninstrumented" would disable all of IML.
+        However, for calibration runs, we use uninstrumented to disable CUPTI/CUDA-API level tracing, BUT 
+        still run with python-level stuff (annotations, interceptions) enabled.
     """))
     iml_parser.add_argument('--iml-disable-pyprof-annotations', action='store_true', help=textwrap.dedent("""
         IML: Skip recording op-events.

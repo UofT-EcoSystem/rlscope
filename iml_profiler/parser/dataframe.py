@@ -358,6 +358,9 @@ class TrainingProgressDataframeReader(BaseDataframeReader):
         # last_df = ( df[df['end_training_time_us'] == np.max(df['end_training_time_us'])] )
         # return last_df
 
+        if len(self.proto_paths) == 0:
+            df = self.empty_dataframe()
+            return df
         split_map_merge = SplitMapMerge_TrainingProgressDataframeReader__last_progress(obj=self)
         last_df = self.split_map_merge(
             'last_progress', split_map_merge.map_fn, split_map_merge.merge_fn,
@@ -554,6 +557,8 @@ class CUDAAPIStatsDataframeReader(BaseDataframeReader):
             self._maybe_add_fields(path, data=data)
 
     def n_total_calls(self):
+        if len(self.proto_paths) == 0:
+            return 0
         split_map_merge = SplitMapMerge_CUDAAPIStatsDataframeReader__n_total_calls(obj=self)
         n_total_calls = self.split_map_merge(
             'n_total_calls', split_map_merge.map_fn, split_map_merge.merge_fn,
@@ -565,6 +570,9 @@ class CUDAAPIStatsDataframeReader(BaseDataframeReader):
         # return n_total_calls
 
     def per_api_stats(self):
+        if len(self.proto_paths) == 0:
+            df = self.empty_dataframe()
+            return df
         split_map_merge = SplitMapMerge_CUDAAPIStatsDataframeReader__per_api_stats(obj=self)
         per_api_stats_df = self.split_map_merge(
             'per_api_stats', split_map_merge.map_fn, split_map_merge.merge_fn,
@@ -758,6 +766,8 @@ class PyprofDataframeReader(BaseDataframeReader):
         # total_intercepted_calls = len(intercepted_call_event_df)
         # return total_intercepted_calls
 
+        if len(self.proto_paths) == 0:
+            return 0
         split_map_merge = SplitMapMerge_PyprofDataframeReader__total_intercepted_calls(obj=self)
         total_intercepted_calls = self.split_map_merge(
             'total_intercepted_calls', split_map_merge.map_fn, split_map_merge.merge_fn,
@@ -825,6 +835,8 @@ class PyprofDataframeReader(BaseDataframeReader):
         # total_op_events = len(op_df)
         # return total_op_events
 
+        if len(self.proto_paths) == 0:
+            return 0
         split_map_merge = SplitMapMerge_PyprofDataframeReader__total_op_events(obj=self)
         total_op_events = self.split_map_merge(
             'total_op_events', split_map_merge.map_fn, split_map_merge.merge_fn,
@@ -839,6 +851,8 @@ class PyprofDataframeReader(BaseDataframeReader):
         # total_op_proc_events = len(op_proc_df)
         # return total_op_proc_events
 
+        if len(self.proto_paths) == 0:
+            return 0
         split_map_merge = SplitMapMerge_PyprofDataframeReader__total_op_process_events(obj=self)
         total_op_proc_events = self.split_map_merge(
             'total_op_process_events', split_map_merge.map_fn, split_map_merge.merge_fn,
@@ -862,6 +876,8 @@ class PyprofDataframeReader(BaseDataframeReader):
     #     # return total_pyprof_overhead_us
 
     def len_df(self):
+        if len(self.proto_paths) == 0:
+            return 0
         split_map_merge = SplitMapMerge_PyprofDataframeReader__len_df(obj=self)
         len_df = self.split_map_merge(
             'len(df)', split_map_merge.map_fn, split_map_merge.merge_fn,
@@ -892,6 +908,8 @@ class PyprofDataframeReader(BaseDataframeReader):
         # total_pyprof_overhead_us = np.sum(df['duration_profiling_overhead_us'])
         # return total_pyprof_overhead_us
 
+        if len(self.proto_paths) == 0:
+            return 0
         split_map_merge = SplitMapMerge_PyprofDataframeReader__total_pyprof_overhead_us(obj=self)
         total_pyprof_overhead_us = self.split_map_merge(
             'total_pyprof_overhead_us', split_map_merge.map_fn, split_map_merge.merge_fn,
@@ -924,6 +942,10 @@ class PyprofDataframeReader(BaseDataframeReader):
 
         # Filter for events that have profiling overhead recorded.
         # df = df[df['start_profiling_overhead_us'] != 0]
+
+        if len(self.proto_paths) == 0:
+            zero_df = self.zero_dataframe(['total_pyprof_overhead_us'])
+            return zero_df
         split_map_merge = SplitMapMerge_PyprofDataframeReader__total_pyprof_overhead_df(obj=self)
         df = self.split_map_merge(
             'total_pyprof_overhead_df', split_map_merge.map_fn, split_map_merge.merge_fn,

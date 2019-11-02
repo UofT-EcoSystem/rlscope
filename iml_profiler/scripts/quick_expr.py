@@ -234,6 +234,11 @@ class ExprSubtractionValidationConfig:
                '--config', self.iml_prof_config,
                'python', 'train.py',
 
+               # IMPORTANT: When we run with "--config uninstrumented" during calibrations runs, we STILL want to
+               # keep "python interceptions" and "python annotations" enabled, so we can measure their overhead in
+               # in isolation!
+               '--iml-calibration',
+
                '--iml-directory', _a(self.out_dir(rep, iters)),
                '--iml-max-timesteps', iters,
                '--iml-training-progress',
