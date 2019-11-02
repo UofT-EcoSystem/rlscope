@@ -31,16 +31,88 @@ _do() {
     "$@"
 }
 
+CALIB_DIR=$IML_DIR/calibration/redo_02
+CALIB_OPTS=( \
+    --cupti-overhead-json $CALIB_DIR/cupti_overhead.json \
+    --pyprof-overhead-json $CALIB_DIR/category_events.json \
+    --LD-PRELOAD-overhead-json $CALIB_DIR/LD_PRELOAD_overhead.json)
+
 _run_bench() {
     local all_dir=$IML_DIR/output/iml_bench/all
 
     _do iml-bench --dir $all_dir "$@"
 }
 run_stable_baselines() {
-#    _run_bench "$@" stable-baselines
-    _run_bench "$@" --analyze stable-baselines
-#    _run_bench "$@" --analyze stable-baselines --mode plot
+    sb_all_reps "$@"
 }
+sb_train() {
+    _run_bench "$@" stable-baselines
+}
+
+sb_analyze() {
+    _run_bench "$@" --analyze stable-baselines "${CALIB_OPTS[@]}"
+}
+
+sb_plot() {
+    _run_bench "$@" --analyze stable-baselines "${CALIB_OPTS[@]}" --mode plot
+}
+
+sb_all_reps() {
+    "$@" --repetition 1
+    "$@" --repetition 2
+    "$@" --repetition 3
+}
+sb_reps_first() {
+    sb_all_reps sb_train "$@"
+    sb_all_reps sb_analyze "$@"
+    sb_all_reps sb_plot "$@"
+}
+
+sb_one_rep() {
+    sb_train "$@"
+    sb_analyze "$@"
+    sb_plot "$@"
+}
+sb_reps_last() {
+    sb_one_rep --repetition 1 "$@"
+    sb_one_rep --repetition 2 "$@"
+    sb_one_rep --repetition 3 "$@"
+}
+
+# 1. Algo choice - medium complexity (Walker2D)
+#    - 511 + 383 + 270 + 44 = 1,208
+# 2. Env choice (PPO2):
+#    - 1.4 + 4.8 + 14 + 14 + 23 + 124 + 489 + 511 + 565 = 1,746.2
+# 3. Algo choice - low complexity (MountainCar)
+#    - 1.4 + 2.9 + 3.0 + 14 + 100 + 292 + 313 = 726.3
+# 4. All RL workloads
+#    - NOTE: we SHOULD be able to skip analyzing all (algo, env) pairs...
+#    - 1.4 + 2.9 + 3.0 + 14 + 100 + 292 + 313 = 726.3
+run_fig_algorithm_choice_1a_med_complexity() {
+    # logan
+    sb_reps_last --algo-env-group algorithm_choice_1a_med_complexity "$@"
+}
+run_fig_environment_choice() {
+    # eco-13
+    sb_reps_last --algo-env-group environment_choice "$@"
+}
+run_fig_algorithm_choice_1b_low_complexity() {
+    # eco-14
+    sb_reps_last --algo-env-group algorithm_choice_1b_low_complexity "$@"
+}
+#run_fig_all_rl_workloads() {
+#    sb_reps_last --algo-env-group all_rl_workloads "$@"
+#}
+run_stable_baselines_all() {
+    run_fig_algorithm_choice_1a_med_complexity "$@"
+    run_fig_environment_choice "$@"
+    run_fig_algorithm_choice_1b_low_complexity "$@"
+    # SKIP: until we can avoid runnning iml-analyze on all (algo, env) pairs.
+#    run_fig_all_rl_workloads "$@"
+}
+#run_fig_on_vs_off_policy() {
+#    sb_reps_last --algo-env-group on_vs_off_policy "$@"
+#}
 
 RUN_DEBUG_ARGS=(--subdir debug)
 INSTRUMENTED_ARGS=(--instrumented)

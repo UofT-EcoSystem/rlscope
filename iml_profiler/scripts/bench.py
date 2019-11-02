@@ -246,6 +246,19 @@ def main():
         e.g. for --repetition 1, --config instrumented
         $IML_DIR/output/iml_bench/all/config_instrumented_repetition_01
         """.rstrip()))
+    parser.add_argument('--algo-env-group',
+                        choices=['on_vs_off_policy',
+                                 'environment_choice',
+                                 'algorithm_choice_1a_med_complexity',
+                                 'algorithm_choice_1b_low_complexity',
+                                 'all_rl_workloads',
+                                 'debug_expr'],
+                        help=textwrap.dedent("""
+        Only run a specific "experiment".
+        i.e. only run (algo, env) combinations needed for a specific graph.
+        
+        Default: run all (algo, env) combinations for all experiments.
+        """))
     add_config_options(parser)
 
     subparsers = parser.add_subparsers(
@@ -303,23 +316,10 @@ def main():
         train_stable_baselines.sh
           Run stable-baselines experiments.
         """))
-    parser_stable_baselines.add_argument(
-        '--expr',
-        choices=['on_vs_off_policy',
-                 'environment_choice',
-                 'algorithm_choice_1b_med_complexity',
-                 'algorithm_choice_1a_low_complexity',
-                 'all_rl_workloads',
-                 'debug_expr'],
-        help=textwrap.dedent("""
-        Only run a specific "experiment".
-        i.e. only run (algo, env) combinations needed for a specific graph.
-        
-        Default: run all (algo, env) combinations for all experiments.
-        """))
     parser_stable_baselines.set_defaults(
         func=run_group,
         subparser=parser_stable_baselines)
+
 
     args, extra_argv = parser.parse_known_args()
     os.makedirs(args.dir, exist_ok=True)
@@ -375,13 +375,14 @@ class Experiment:
                 return expr
         return None
 
-    def _gather_algo_env_pairs(self, algo=None, env_id=None, bullet=False, atari=False, lunar=False, debug=False):
+    def _gather_algo_env_pairs(self, algo=None, env_id=None, bullet=False, atari=False, lunar=False, algo_env_group=None, debug=False):
         return expr_config.stable_baselines_gather_algo_env_pairs(
             algo=algo,
             env_id=env_id,
             bullet=bullet,
             atari=atari,
             lunar=lunar,
+            algo_env_group=algo_env_group,
             debug=debug)
 
     def _run_cmd(self, cmd, to_file, env=None, replace=False, debug=False):
@@ -443,18 +444,14 @@ class ExperimentGroup(Experiment):
         self.extra_argv = extra_argv
         # self.pool = ForkedProcessPool(name="iml_analyze_pool", max_workers=args.workers, debug=self.args.debug)
 
-    def should_run_expr(self, expr):
-        return self.args.expr is None or expr == self.args.expr
+    def should_run_algo_env_group(self, algo_env_group):
+        return self.args.algo_env_group is None or algo_env_group == self.args.algo_env_group
 
-    def should_skip_env(self, env):
-        # For some reason, the simulation time for Humanoid is huge when trained with sac.
-        # Until we figure out WHY, let's just leave it out of all the plots.
-        return re.search('Humanoid', env)
-
-    def should_skip_algo(self, algo):
-        # For some reason, AirLearningEnv is missing annotations from the sac algorthim.
-        # I suspect sac is the "cuplrit" for various issues.
-        return re.search('sac', algo)
+    @property
+    def root_iml_directory(self):
+        args = self.args
+        root_iml_directory = get_root_iml_directory(args.config, args.dir, args.repetition)
+        return root_iml_directory
 
     def stable_baselines(self, parser):
         """
@@ -508,6 +505,16 @@ class ExperimentGroup(Experiment):
 
             return suffix
 
+        def rl_workloads_msg(expr, algo_env_pairs):
+            all_pairs = gather.algo_env_pairs()
+            return "RL workloads: algo_env_group={algo_env_group}: {msg}".format(
+                algo_env_group=expr,
+                msg=pprint_msg({
+                    'all_pairs': all_pairs,
+                    'algo_env_pairs': algo_env_pairs,
+                }),
+            )
+
         self.will_run = False
         # self.will_analyze = False
         self.will_plot = False
@@ -526,28 +533,33 @@ class ExperimentGroup(Experiment):
         # TODO: Run all the same experiments, BUT, under a different configuration.
         # We only want to plot stuff during the "extrapolated" configuration.
 
+        gather = GatherAlgoEnv(args)
+
         # - Debug experiment:
         #   Choose a particular (algo, env) to use to debug stuff on.
         expr = 'debug_expr'
-        opts = ['--env-id', 'HalfCheetahBulletEnv-v0', '--algo', 'ppo2']
-        # print("HELLO 1")
-        # sys.exit(1)
-        if self.should_run_expr(expr):
+        algo = 'ppo2'
+        env = 'HalfCheetahBulletEnv-v0'
+        algo_env_pairs = [(algo, env)]
+        opts = ['--env-id', env, '--algo', algo]
+        if self.should_run_algo_env_group(expr):
+            logging.info(rl_workloads_msg(expr, algo_env_pairs))
             self.iml_bench(parser, subparser, 'train_stable_baselines.sh', opts, suffix=bench_log(expr), debug=True)
             overlap_type = 'ResourceOverlap'
-            # print("HELLO 2")
-            # sys.exit(1)
             self.stacked_plot([
                 '--overlap-type', overlap_type,
                 '--y-type', 'percent',
                 '--x-type', 'algo-comparison',
                 '--training-time',
-            ], suffix=plot_log(expr, overlap_type), train_stable_baselines_opts=opts)
+            ], suffix=plot_log(expr, overlap_type), algo_env_pairs=algo_env_pairs)
 
         # (1) On vs off policy:
         expr = 'on_vs_off_policy'
-        opts = ['--env-id', 'PongNoFrameskip-v4']
-        if self.should_run_expr(expr):
+        env = 'PongNoFrameskip-v4'
+        algo_env_pairs = gather.pairs_by_env(env)
+        opts = ['--env-id', env]
+        if self.should_run_algo_env_group(expr):
+            logging.info(rl_workloads_msg(expr, algo_env_pairs))
             self.iml_bench(parser, subparser, 'train_stable_baselines.sh', opts, suffix=bench_log(expr))
             overlap_type = 'ResourceOverlap'
             self.stacked_plot([
@@ -555,15 +567,18 @@ class ExperimentGroup(Experiment):
                 '--y-type', 'percent',
                 '--x-type', 'algo-comparison',
                 '--training-time',
-            ], suffix=plot_log(expr, overlap_type), train_stable_baselines_opts=opts)
+            ], suffix=plot_log(expr, overlap_type), algo_env_pairs=algo_env_pairs)
 
         # (2) Environment choice:
         expr = 'environment_choice'
-        opts = ['--atari', '--lunar', '--bullet', '--algo', 'ppo2']
-        if self.should_run_expr(expr):
+        algo_env_pairs = gather.pairs_by_algo_env_group(expr)
+        opts = ['--algo-env-group', expr]
+        if self.should_run_algo_env_group(expr):
+            logging.info(rl_workloads_msg(expr, algo_env_pairs))
             self.iml_bench(parser, subparser, 'train_stable_baselines.sh', opts, suffix=bench_log(expr))
             overlap_type = 'OperationOverlap'
-            algo_env_pairs = self.pairs_by_algo('ppo2')
+            # NOTE: gather across ALL ppo directories, including environment we cannot run like AirLearning.
+            algo_env_pairs = gather.pairs_by_algo('ppo2')
             self.stacked_plot([
                 '--overlap-type', overlap_type,
                 '--resource-overlap', json.dumps(['CPU']),
@@ -587,7 +602,7 @@ class ExperimentGroup(Experiment):
         #     other = sum(r for r in regions if r != step)
 
         def plot_expr_algorithm_choice(expr, algo_env_pairs):
-            if self.should_run_expr(expr):
+            if self.should_run_algo_env_group(expr):
                 overlap_type = 'OperationOverlap'
                 self.stacked_plot([
                     '--overlap-type', overlap_type,
@@ -608,24 +623,29 @@ class ExperimentGroup(Experiment):
                     '--x-type', 'algo-comparison',
                 ], suffix=plot_log(expr, overlap_type), algo_env_pairs=algo_env_pairs)
 
-        env_id = 'Walker2DBulletEnv-v0'
-        opts = ['--env-id', env_id]
-        algo_env_pairs = self.pairs_by_env(env_id)
-        expr = 'algorithm_choice_1a_low_complexity'
-        if self.should_run_expr(expr):
+        # env_id = 'Walker2DBulletEnv-v0'
+        expr = 'algorithm_choice_1a_med_complexity'
+        algo_env_pairs = gather.pairs_by_algo_env_group(expr)
+        opts = ['--algo-env-group', expr]
+        if self.should_run_algo_env_group(expr):
+            logging.info(rl_workloads_msg(expr, algo_env_pairs))
             self.iml_bench(parser, subparser, 'train_stable_baselines.sh', opts, suffix=bench_log(expr))
         plot_expr_algorithm_choice(expr=expr, algo_env_pairs=algo_env_pairs)
 
-        opts = ['--lunar']
-        algo_env_pairs = self.pairs_by_lunar()
-        expr = 'algorithm_choice_1b_med_complexity'
-        if self.should_run_expr(expr):
+        # opts = ['--lunar']
+        expr = 'algorithm_choice_1b_low_complexity'
+        algo_env_pairs = gather.pairs_by_algo_env_group(expr)
+        opts = ['--algo-env-group', expr]
+        if self.should_run_algo_env_group(expr):
+            logging.info(rl_workloads_msg(expr, algo_env_pairs))
             self.iml_bench(parser, subparser, 'train_stable_baselines.sh', opts, suffix=bench_log(expr))
         plot_expr_algorithm_choice(expr=expr, algo_env_pairs=algo_env_pairs)
 
         # (4) Compare all RL workloads:
         expr = 'all_rl_workloads'
-        opts = ['--atari', '--lunar', '--bullet']
+        algo_env_pairs = gather.pairs_by_algo_env_group(expr)
+        # opts = ['--atari', '--lunar', '--bullet']
+        opts = ['--algo-env-group', expr]
         common_dims = [
             '--width', '16',
             '--height', '6',
@@ -634,7 +654,8 @@ class ExperimentGroup(Experiment):
         rl_workload_dims = [
             '--show-legend', 'False',
         ]
-        if self.should_run_expr(expr):
+        if self.should_run_algo_env_group(expr):
+            logging.info(rl_workloads_msg(expr, algo_env_pairs))
             self.iml_bench(parser, subparser, 'train_stable_baselines.sh', opts, suffix=bench_log(expr))
             # - Statement: GPU utilization is low across all workloads.
             # - Plot: ResourceOverlap that compares [CPU] vs [CPU + GPU] breakdown
@@ -743,70 +764,14 @@ class ExperimentGroup(Experiment):
     def envs(self):
         return set(env for algo, env in self.algo_env_pairs())
 
-    def pairs_by_algo(self, algo):
-        return set((a, e) for a, e in self.algo_env_pairs() if a == algo)
-
-    def pairs_by_env(self, env):
-        return set((a, e) for a, e in self.algo_env_pairs() if e == env)
-
-    def pairs_by_func(self, func):
-        return set((a, e) for a, e in self.algo_env_pairs() if func(a, e))
-
-    def pairs_by_lunar(self):
-        def func(algo, env):
-            return expr_config.is_lunar_combo(algo, env)
-        return self.pairs_by_func(func)
-
-    @property
-    def root_iml_directory(self):
-        args = self.args
-        root_iml_directory = get_root_iml_directory(args.config, args.dir, args.repetition)
-        return root_iml_directory
-
     def iml_directory(self, algo, env_id):
         args = self.args
         iml_directory = get_iml_directory(args.config, args.dir, algo, env_id, args.repetition)
         return iml_directory
 
-    def _is_env_dir(self, path):
-        return os.path.isdir(path) and re.search('Env', path)
-
-    def _is_algo_dir(self, path):
-        return os.path.isdir(path)
-
-    def machine_util_files(self, algo, env):
-        iml_directory = self.iml_directory(algo, env)
-        return [path for path in list_files(iml_directory) if is_machine_util_file(path)]
-
-    def has_machine_util(self, algo, env):
-        machine_util_files = self.machine_util_files(algo, env)
-        return len(machine_util_files) > 0
-
-    def algo_env_pairs(self, has_machine_util=False):
-        args = self.args
-        algo_env_pairs = []
-        for algo_path in glob(_j(self.root_iml_directory, '*')):
-            if is_config_dir(algo_path):
-                continue
-            if not self._is_algo_dir(algo_path):
-                logging.info("Skip algo_path={dir}".format(dir=algo_path))
-                continue
-            algo = _b(algo_path)
-            if self.should_skip_algo(algo):
-                continue
-            for env_path in glob(_j(algo_path, '*')):
-                if not self._is_env_dir(env_path):
-                    logging.info("Skip env_path={dir}".format(dir=env_path))
-                    continue
-                env = _b(env_path)
-                if self.should_skip_env(env):
-                    continue
-
-                if has_machine_util and not self.has_machine_util(algo, env):
-                    continue
-
-                algo_env_pairs.append((algo, env))
-        return algo_env_pairs
+    def algo_env_pairs(self):
+        gather = GatherAlgoEnv(self.args)
+        return gather.algo_env_pairs()
 
     def _is_air_learning_env(self, env):
         return re.search(r'AirLearning', env)
@@ -820,45 +785,7 @@ class ExperimentGroup(Experiment):
         iml_dirs = [self.iml_directory(algo, env) for algo, env in algo_env_pairs]
         return iml_dirs
 
-    def algo_env_pairs_train_stable_baselines(self, train_stable_baselines_opts, debug=False):
-        args = self.args
-
-        parser_train_stable_baselines = argparse.ArgumentParser()
-        add_stable_baselines_options(parser_train_stable_baselines)
-        train_stable_baselines_args = parser_train_stable_baselines.parse_args(train_stable_baselines_opts)
-
-        keep_argnames = {
-            'algo',
-            'env_id',
-            'bullet',
-            'atari',
-            'lunar',
-            'debug',
-        }
-        gather_algo_env_dict = vars(train_stable_baselines_args)
-        for k in list(gather_algo_env_dict.keys()):
-            if k not in keep_argnames:
-                del gather_algo_env_dict[k]
-        algo_env_pairs = self._gather_algo_env_pairs(debug=debug, **gather_algo_env_dict)
-        assert algo_env_pairs is not None
-        if len(algo_env_pairs) == 0:
-            logging.info(
-                textwrap.dedent("""\
-                Not sure what to use for --iml-directories.
-                Didn't see any (algo, env) pairs for
-                  $ train_stable_baselines.sh {opts}
-                """.rstrip().format(opts=' '.join(train_stable_baselines_opts))))
-            if args.skip_error:
-                logging.info("Skipping plot (--skip-error)")
-                return
-            else:
-                logging.info("Exiting due to failed plot; use --skip-error to ignore")
-                sys.exit(1)
-        return algo_env_pairs
-        # iml_dirs = [self.iml_directory(algo, env_id) for algo, env_id in algo_env_pairs]
-        # return iml_dirs
-
-    def stacked_plot(self, stacked_args, suffix, algo_env_pairs=None, train_stable_baselines_opts=None, debug=False):
+    def stacked_plot(self, stacked_args, suffix, algo_env_pairs=None, debug=False):
         if not self.will_plot:
             return
         args = self.args
@@ -878,8 +805,6 @@ class ExperimentGroup(Experiment):
             algo_env_pairs = []
         algo_env_pairs = list(algo_env_pairs)
 
-        if train_stable_baselines_opts is not None:
-            algo_env_pairs.extend(self.algo_env_pairs_train_stable_baselines(train_stable_baselines_opts, debug=debug))
         # if algo_env_pairs is None:
         #     raise NotImplementedError("Not sure what to use for --iml-directories")
         if len(algo_env_pairs) == 0 and not self.args.dry_run:
@@ -1255,6 +1180,109 @@ def get_iml_directory(config, direc, algo, env_id, repetition):
     root_iml_directory = get_root_iml_directory(config, direc, repetition)
     iml_directory = _j(root_iml_directory, algo, env_id)
     return iml_directory
+
+class GatherAlgoEnv:
+    def __init__(self, args):
+        self.args = args
+
+    def should_skip_env(self, env):
+        # For some reason, the simulation time for Humanoid is huge when trained with sac.
+        # Until we figure out WHY, let's just leave it out of all the plots.
+        # return re.search('Humanoid', env)
+        return False
+
+    def should_skip_algo_env(self, algo, env):
+        return not expr_config.is_paper_env(algo, env)
+
+    def should_skip_algo(self, algo):
+        # For some reason, AirLearningEnv is missing annotations from the sac algorthim.
+        # I suspect sac is the "cuplrit" for various issues.
+        # return re.search('sac', algo)
+        return False
+
+    def _is_env_dir(self, path):
+        return os.path.isdir(path) and re.search('Env|-v\d+$', path)
+
+    def _is_algo_dir(self, path):
+        return os.path.isdir(path)
+
+    def algo_env_pairs(self, has_machine_util=False):
+        args = self.args
+        algo_env_pairs = []
+        for algo_path in glob(_j(self.root_iml_directory, '*')):
+            if is_config_dir(algo_path):
+                continue
+            if not self._is_algo_dir(algo_path):
+                if args.debug:
+                    logging.info("Skip algo_path={dir}".format(dir=algo_path))
+                continue
+            algo = _b(algo_path)
+            if self.should_skip_algo(algo):
+                continue
+            for env_path in glob(_j(algo_path, '*')):
+                if not self._is_env_dir(env_path):
+                    if args.debug:
+                        logging.info("Skip env_path={dir}".format(dir=env_path))
+                    continue
+                env = _b(env_path)
+                if self.should_skip_env(env):
+                    continue
+                if self.should_skip_algo_env(algo, env):
+                    if args.debug:
+                        logging.info("Skip (algo={algo}, env={env}) @ {dir}".format(
+                            algo=algo,
+                            env=env,
+                            dir=env_path))
+                    continue
+
+                if has_machine_util and not self.has_machine_util(algo, env):
+                    continue
+
+                algo_env_pairs.append((algo, env))
+        return algo_env_pairs
+
+    def pairs_by_algo(self, algo):
+        return set((a, e) for a, e in self.algo_env_pairs() if a == algo)
+
+    def pairs_by_env(self, env):
+        return set((a, e) for a, e in self.algo_env_pairs() if e == env)
+
+    def pairs_by_func(self, func):
+        return set((a, e) for a, e in self.algo_env_pairs() if func(a, e))
+
+    def pairs_by_lunar(self):
+        return self.pairs_by_func(expr_config.is_lunar_combo)
+
+    def pairs_by_algo_env_group(self, algo_env_group):
+        def is_algo_env(algo, env):
+            return expr_config.is_algo_env_group_combo(algo_env_group, algo, env)
+        return self.pairs_by_func(is_algo_env)
+
+    # def pairs_by_is_fig_algo_comparison_low_complexity(self):
+    #     return self.pairs_by_func(expr_config.is_fig_algo_comparison_low_complexity)
+    #
+    # def pairs_by_is_fig_algo_comparison_med_complexity(self):
+    #     return self.pairs_by_func(expr_config.is_fig_algo_comparison_med_complexity)
+    #
+    # def pairs_by_is_fig_env_comparison(self):
+    #     return self.pairs_by_func(expr_config.is_fig_env_comparison)
+    #
+    # def pairs_by_is_paper_env(self):
+    #     return self.pairs_by_func(expr_config.is_paper_env)
+
+    @property
+    def root_iml_directory(self):
+        args = self.args
+        root_iml_directory = get_root_iml_directory(args.config, args.dir, args.repetition)
+        return root_iml_directory
+
+    def machine_util_files(self, algo, env):
+        iml_directory = self.iml_directory(algo, env)
+        return [path for path in list_files(iml_directory) if is_machine_util_file(path)]
+
+    def has_machine_util(self, algo, env):
+        machine_util_files = self.machine_util_files(algo, env)
+        return len(machine_util_files) > 0
 
 if __name__ == '__main__':
     main()

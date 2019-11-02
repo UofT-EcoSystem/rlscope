@@ -163,6 +163,30 @@ def detect_available_env(env_ids):
             unavail_env[env_id] = tb
     return avail_env, unavail_env
 
+def is_mountain_car_combo(algo, env_id):
+    if algo in {'a2c', 'ppo2', 'ddpg', 'sac'}:
+        # ONLY look at MountainCarContinuous for [a2c, ppo2]
+        return re.search(r'MountainCarContinuous-v0', env_id)
+    return re.search(r'MountainCar-v0', env_id)
+
+def is_low_complexity_env(algo, env_id):
+    return re.search(r'Pong|CartPole|Acrobot', env_id) or \
+           is_mountain_car_combo(algo, env_id)
+
+def is_med_complexity_env(algo, env_id):
+    return re.search(r'HalfCheetah|Walker2D|Hopper|Ant', env_id)
+
+# ASSUMPTION: we only need to constrain environments, NOT algo.
+def is_fig_algo_comparison_low_complexity(algo, env_id):
+    return is_mountain_car_combo(algo, env_id)
+def is_fig_algo_comparison_med_complexity(algo, env_id):
+    return is_med_complexity_env(algo, env_id)
+def is_fig_env_comparison(algo, env_id):
+    return algo == 'ppo2' and is_paper_env(algo, env_id)
+
+def is_paper_env(algo, env_id):
+    return is_low_complexity_env(algo, env_id) or is_med_complexity_env(algo, env_id)
+
 def is_bullet_env(env_id):
     return re.search(r'BulletEnv', env_id)
 
@@ -198,7 +222,37 @@ def is_lunar_combo(algo, env_id):
 
     return is_lunar_env(env_id)
 
-def stable_baselines_gather_algo_env_pairs(algo=None, env_id=None, bullet=False, atari=False, lunar=False, debug=False):
+def is_algo_env_group_combo(algo_env_group, algo, env):
+    assert algo is not None
+    assert env is not None
+    assert algo_env_group is None or algo_env_group in {
+        'algorithm_choice_1a_med_complexity',
+        'algorithm_choice_1b_low_complexity',
+        'environment_choice',
+        'all_rl_workloads',
+    }
+
+    # 'on_vs_off_policy'
+    # 'all_rl_workloads'
+    # 'debug_algo_env_group'
+
+    return algo_env_group is not None and (
+        (
+            algo_env_group == 'algorithm_choice_1b_low_complexity' and
+            is_fig_algo_comparison_low_complexity(algo, env)
+        ) or (
+            algo_env_group == 'algorithm_choice_1a_med_complexity' and
+            is_fig_algo_comparison_med_complexity(algo, env)
+        ) or (
+            algo_env_group == 'environment_choice' and
+            is_fig_env_comparison(algo, env)
+        ) or (
+            algo_env_group == 'all_rl_workloads' and
+            is_paper_env(algo, env)
+        )
+    )
+
+def stable_baselines_gather_algo_env_pairs(algo=None, env_id=None, bullet=False, atari=False, lunar=False, algo_env_group=None, debug=False):
 
     def is_supported(algo, env_id):
         for expr in STABLE_BASELINES_EXPRS:
@@ -219,6 +273,7 @@ def stable_baselines_gather_algo_env_pairs(algo=None, env_id=None, bullet=False,
         return ( atari and is_atari_env(env_id) ) or \
                ( lunar and is_lunar_combo(algo, env_id) ) or \
                ( bullet and is_bullet_env(env_id) ) or \
+               ( algo_env_group is not None and is_algo_env_group_combo(algo_env_group, algo, env_id) ) or \
                ( not atari and not bullet )
 
     avail_env_ids, unavail_env_ids = detect_available_env(STABLE_BASELINES_ENV_IDS)
