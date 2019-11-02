@@ -724,6 +724,7 @@ class Profiler:
         self._has_called_enable_tracing = False
         self.num_training_loop_iters = 0
         self.debug = get_argval('debug', debug, False)
+        self.calibration = get_argval('calibration', calibration, False)
         if self.debug:
             py_config.DEBUG = self.debug
         self.directory = get_argval('directory', directory, None, allow_none=False)
@@ -837,7 +838,6 @@ class Profiler:
         self.num_traces = get_argval('num_traces', num_traces, None)
         self.keep_traces = get_argval('keep_traces', keep_traces, False)
         self.bench_name = get_argval('bench_name', bench_name, None)
-        self.calibration = get_argval('calibration', calibration, False)
 
         self.util_sampler_pid = get_internal_argval('util_sampler_pid')
         self.handle_utilization_sampler = False
@@ -2789,9 +2789,8 @@ def add_iml_arguments(parser):
     iml_parser.add_argument('--iml-disable', action='store_true', help=textwrap.dedent("""
         IML: Skip any profiling.
     """))
-    iml_parser.add_argument('--iml-internal-calibration', action='store_true', help=textwrap.dedent("""
-        IML: (internal use)
-        This is a calibration run. 
+    iml_parser.add_argument('--iml-calibration', action='store_true', help=textwrap.dedent("""
+        IML: This is a calibration run. 
         Calibration runs change the semantics of the "iml-prof --config uninstrumented"; 
         in particular, usually "--config uninstrumented" would disable all of IML.
         However, for calibration runs, we use uninstrumented to disable CUPTI/CUDA-API level tracing, BUT 
