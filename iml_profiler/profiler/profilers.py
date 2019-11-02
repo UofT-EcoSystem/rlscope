@@ -659,7 +659,10 @@ class Profiler:
                  exit_early=True,
                  require_end_operation=False,
                  python=None,
-                 calibration=False,
+                 # WARNING: MAKE SURE to use None as the default for boolean flags!
+                 # Otherwise, if you set this to False by default, get_argval will ALWAYS return
+                 # False (even if --iml-calibration is set!)
+                 calibration=None,
                  disable=None,
                  disable_pyprof_annotations=None,
                  disable_pyprof_interceptions=None,
@@ -729,7 +732,7 @@ class Profiler:
             py_config.DEBUG = self.debug
         self.directory = get_argval('directory', directory, None, allow_none=False)
         self.disable = get_argval('disable', disable, False)
-        if  'IML_CONFIG' in os.environ:
+        if 'IML_CONFIG' in os.environ:
             self.iml_config = os.environ['IML_CONFIG']
             if not self.calibration and self.iml_config == 'uninstrumented':
                 # WARNING: We do NOT do this for --iml-calibration runs, as it will cause a BUG!

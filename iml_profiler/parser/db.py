@@ -7,6 +7,7 @@ import subprocess
 import progressbar
 import sys
 import tempfile
+from decimal import Decimal
 import getpass
 import psycopg2
 import psycopg2.extras
@@ -952,6 +953,7 @@ class CSVInserter:
         self.id_field = id_field
         self.directory = directory
         self.debug = debug
+        self.conn = None
 
         if directory is None:
             self.directory = os.getcwd()
@@ -1038,7 +1040,7 @@ class CSVInserter:
         Insert a row into Event.
         """
         category_id = self.category_to_id[category]
-        end_time_us = start_time_us + duration_us
+        end_time_us = Decimal(start_time_us) + Decimal(duration_us)
         is_debug_event = bool(match_debug_event_name(name))
         insert = {
             'start_time_us':start_time_us,
@@ -1088,7 +1090,10 @@ class CSVInserter:
 
         if not self.is_empty:
             start_t = time.time()
-            self.conn.insert_csv(self.tmp_path, self.table)
+            if self.conn is not None:
+                self.conn.insert_csv(self.tmp_path, self.table)
+            else:
+                self.cursor.conn.insert_csv(self.tmp_path, self.table)
             end_t = time.time()
             if self.debug:
                 logging.info("> Loading CSV into {table} took {sec} seconds".format(
@@ -1328,6 +1333,41 @@ class TraceFileInserter:
 
         self.csv_inserter.commit()
 
+class Cursor:
+    def __init__(self, cursor, conn):
+        self.cursor = cursor
+        self.conn = conn
+
+    def execute(self, query, vars=None):
+        return self.cursor.execute(query, vars=vars)
+
+    def executemany(self, query, vars_list):
+        return self.cursor.executemany(query, vars_list)
+
+    def fetchall(self):
+        return self.cursor.fetchall()
+
+    def fetchone(self):
+        return self.cursor.fetchone()
+
+    def fetchmany(self, size=None):
+        return self.cursor.fetchall(size)
+
+    @property
+    def rowcount(self):
+        return self.cursor.rowcount
+
+    def close(self):
+        return self.cursor.close()
+
+    def __iter__(self):
+        self._iter = iter(self.cursor)
+        return self
+
+    def __next__(self):
+        row = next(self._iter)
+        return row
+
 class TracesPostgresConnection:
     def __init__(self, db_config_path, db_basename='traces', host=None, user=None, password=None, keep_alive=True, pool=None):
         self.host = host
@@ -1416,7 +1456,8 @@ class TracesPostgresConnection:
     def get_cursor(self):
         if self._conn is None:
             self.create_connection()
-        cursor = self._conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        c = self._conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        cursor = Cursor(cursor=c, conn=self)
         # Q: Will we still check if the connection is "still alive?"
         # A: every time we fetch a cursor with "c = self.cursor" it calls self.create_connection;
         # that's the point at which we will check if the connection is still alive.
@@ -1779,7 +1820,20 @@ class TracesPostgresConnection:
         sqlite3 blaz.db -bail -echo -cmd '.read sqlite/tables.sql' -cmd '.quit'
         """
         with open(sql_path, 'r') as sql_f:
-            cmd_kwargs = self._psql_cmd_args(db_name)
+            # cmd_kwargs = self._psql_cmd_args(db_name)
+            logging.info("run sql file: {msg}".format(
+                msg=pprint_msg({
+                    'host':self.host,
+                    'user':self.user,
+                    'password':self.password,
+                })
+            ))
+            cmd_kwargs = psql_cmd_args(
+                db_name,
+                host=self.host,
+                user=self.user,
+                password=self.password,
+            )
             proc = subprocess.run(
                 stdin=sql_f,
                 stdout=subprocess.PIPE,
@@ -3764,7 +3818,10 @@ def psql_insert_csv(csv_path, table, db_name, host=None, user=None, password=Non
         return copy_from_sql
 
     copy_from_sql = build_copy_from_sql()
-    cmd_kwargs = psql_cmd_args(db_name, command=copy_from_sql)
+    cmd_kwargs = psql_cmd_args(
+        db_name,
+        command=copy_from_sql,
+        host=host, user=user, password=password)
     # Q: Do we need to disable foreign key checks?
     with open(csv_path, 'r') as f:
         subprocess.check_call(stdin=f, **cmd_kwargs)
@@ -3856,7 +3913,7 @@ def sql_count_from(cursor, sql_query, debug=False):
     count_query = textwrap.dedent("""
             SELECT COUNT(*) FROM (
                 {sql_query}
-            )
+            ) AS count_table
             """).format(
         sql_query=maybe_indent(sql_query, indents=1))
     sql_exec_query(cursor, count_query, debug=debug)
@@ -5246,7 +5303,7 @@ def usec_string(usec):
 
 def sql_value_string(value):
     if type(value) == str:
-        return '"{value}"'.format(value=value)
+        return "'{value}'".format(value=value)
     return str(value)
 
 def test_merge_sorted():

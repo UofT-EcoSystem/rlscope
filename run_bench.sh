@@ -37,9 +37,9 @@ _run_bench() {
     _do iml-bench --dir $all_dir "$@"
 }
 run_stable_baselines() {
-    _run_bench "$@" stable-baselines
-    _run_bench "$@" stable-baselines --analyze
-    _run_bench "$@" stable-baselines --mode plot
+#    _run_bench "$@" stable-baselines
+    _run_bench "$@" --analyze stable-baselines
+#    _run_bench "$@" --analyze stable-baselines --mode plot
 }
 
 RUN_DEBUG_ARGS=(--subdir debug)

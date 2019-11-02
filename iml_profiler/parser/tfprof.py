@@ -2406,11 +2406,17 @@ def maybe_remove_overhead(key, visible_overhead):
     prof_categories = CATEGORIES_PROF.intersection(key.non_ops)
     non_ops = key.non_ops
     if len(prof_categories) > 0:
-        cpu_categories = ( CATEGORIES_CPU.union([CATEGORIES_CPU]) ).intersection(key.non_ops)
-        if len(cpu_categories) > 0:
-            # Discard CPU-time that is due to profiling overhead.
-            # NOTE: CATEGORY_GPU won't get discarded.
-            non_ops = non_ops.difference(cpu_categories)
+        # cpu_categories = CATEGORIES_CPU.intersection(key.non_ops)
+        # if len(cpu_categories) > 0:
+        #     # Discard CPU-time that is due to profiling overhead.
+        #     # NOTE: CATEGORY_GPU won't get discarded.
+        #     non_ops = non_ops.difference(cpu_categories)
+
+        # Discard CPU-time that is due to profiling overhead.
+        # NOTE: CATEGORY_GPU won't get discarded.
+        non_ops = non_ops.difference(CATEGORIES_CPU)
+        # Q: Should we remove the profiling category as well...? I think so yes.
+        non_ops = non_ops.difference(CATEGORIES_PROF)
     new_key = CategoryKey(
         ops=key.ops,
         non_ops=non_ops,
@@ -2419,7 +2425,17 @@ def maybe_remove_overhead(key, visible_overhead):
     return new_key
 
 def is_empty_key(category_key):
-    return len(category_key.ops) == 0 and \
+    """
+    We "ignore" an overlap region if:
+    - It contains an op (e.g. sample_action), but no resource category (e.g. CPU, GPU)
+    - It contains a resource category (e.g. CPU, GPU), but no op (e.g. sample_action)
+
+    :param category_key:
+    :return:
+    """
+    # return len(category_key.ops) == 0 and \
+    #        len(category_key.non_ops) == 0
+    return len(category_key.ops) == 0 or \
            len(category_key.non_ops) == 0
 
 def add_overlap_with_key(
@@ -2684,6 +2700,10 @@ class CategoryOverlapType(OverlapTypeInterface):
                 assert len(overlap_key.procs) > 1
 
             assert len(overlap_key.procs) == 1
+            # PROBLEM: Now that we subtract profiling CPU time, we can end up with
+            # non_ops being empty...
+            # This SHOULD have been possible in the past...we'd usually count is as nothing I think...?
+            # _CategoryKey(ops=('sample_action',), non_ops=frozenset(), procs=frozenset({'ppo2_PongNoFrameskip-v4'}))
             assert len(overlap_key.ops) == 1
             assert len(overlap_key.non_ops) >= 1
             new_key = CategoryKey(ops=overlap_key.ops,

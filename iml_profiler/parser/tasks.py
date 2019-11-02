@@ -131,6 +131,7 @@ param_pyprof_overhead_json_optional = get_param_pyprof_overhead_json(default=Non
 
 class IMLTask(luigi.Task):
     iml_directory = luigi.Parameter(description="Location of trace-files")
+    debug_memoize = luigi.BoolParameter(description="If true, memoize partial results for quicker runs", default=False, parsing=luigi.BoolParameter.EXPLICIT_PARSING)
     debug = param_debug
     debug_single_thread = param_debug_single_thread
 
@@ -312,7 +313,6 @@ class SQLOverheadEventsTask(IMLTask):
         self.sql_overhead_events_parser.run()
 
 class _UtilizationPlotTask(IMLTask):
-    debug_memoize = luigi.BoolParameter(description="If true, memoize partial results for quicker runs", default=False, parsing=luigi.BoolParameter.EXPLICIT_PARSING)
     visible_overhead = param_visible_overhead
     # Q: Is there a good way to choose this automatically...?
     # PROBLEM: n_workers should be the size of the pool...but how should we choose the number of splits to make...?
@@ -346,9 +346,14 @@ class _UtilizationPlotTask(IMLTask):
         default=10000)
 
     # Optional: if user provides overhead calibration files, we can "subtract" overheads.
-    cupti_overhead_json = param_cupti_overhead_json_optional
-    LD_PRELOAD_overhead_json = param_LD_PRELOAD_overhead_json_optional
-    pyprof_overhead_json = param_pyprof_overhead_json_optional
+    # cupti_overhead_json = param_cupti_overhead_json_optional
+    # LD_PRELOAD_overhead_json = param_LD_PRELOAD_overhead_json_optional
+    # pyprof_overhead_json = param_pyprof_overhead_json_optional
+
+    # NOT optional (to ensure we remember to do overhead correction).
+    cupti_overhead_json = param_cupti_overhead_json
+    LD_PRELOAD_overhead_json = param_LD_PRELOAD_overhead_json
+    pyprof_overhead_json = param_pyprof_overhead_json
 
     def requires(self):
         return [
@@ -402,9 +407,14 @@ class All(IMLTask):
     skip_output = True
 
     # Optional: if user provides overhead calibration files, we can "subtract" overheads.
-    cupti_overhead_json = param_cupti_overhead_json_optional
-    LD_PRELOAD_overhead_json = param_LD_PRELOAD_overhead_json_optional
-    pyprof_overhead_json = param_pyprof_overhead_json_optional
+    # cupti_overhead_json = param_cupti_overhead_json_optional
+    # LD_PRELOAD_overhead_json = param_LD_PRELOAD_overhead_json_optional
+    # pyprof_overhead_json = param_pyprof_overhead_json_optional
+
+    # NOT optional (to ensure we remember to do overhead correction).
+    cupti_overhead_json = param_cupti_overhead_json
+    LD_PRELOAD_overhead_json = param_LD_PRELOAD_overhead_json
+    pyprof_overhead_json = param_pyprof_overhead_json
 
     visible_overhead = param_visible_overhead
 
@@ -841,16 +851,16 @@ def mk_SQL_tasks(task):
 
     # Either ALL overhead calibration files are provided (subtract ALL overheads),
     # or NONE are provided (subtract NO overheads).
-    if any(getattr(task, opt) is not None for opt in overhead_opts):
+    if any(optval is not None for optval in overhead_opts):
         # assert all(getattr(task, opt) is not None for opt in overhead_opts)
-        for opt in overhead_opts:
-            if getattr(task, opt) is None:
+        for optval in overhead_opts:
+            if optval is None:
                 raise RuntimeError(textwrap.dedent("""\
-                IML ERROR: If you provide the {opt} calibration file, you must provide all these calibration files:
+                IML ERROR: If you provide the {optval} calibration file, you must provide all these calibration files:
                 {files}
                 """).format(
                     files=textwrap.indent(pprint.pformat(CALIBRATION_OPTS), prefix='  '),
-                    opt=opt,
+                    optval=optval,
                 ).rstrip())
 
     has_calibration_files = all(opt is not None for opt in overhead_opts)
@@ -877,7 +887,9 @@ def mk_SQL_tasks(task):
     kwargs.update(calibration_kwargs)
 
     # NOTE: SQLOverheadEventsParser depends on SQLParserTask.
-    return SQLOverheadEventsParser(**kwargs)
+    # logging.info("mk SQLOverheadEventsParser: {msg}".format(
+    #     msg=pprint_msg(kwargs)))
+    return SQLOverheadEventsTask(**kwargs)
 
 from iml_profiler.profiler import iml_logging
 def main(argv=None, should_exit=True):

@@ -2267,16 +2267,34 @@ class UtilizationPlot:
                                            debug_single_thread=self.debug_single_thread,
                                            debug_ops=self.debug_ops)
 
-        overlap, overlap_metadata = overlap_computer.compute_process_timeline_overlap(
-            overlap_obj.pre_reduce,
-            visible_overhead=self.visible_overhead,
-            machine_name=machine_name,
-            process_name=process_name,
-            phase_name=phase_name,
-            n_workers=self.n_workers,
-            events_per_split=self.events_per_split,
-            debug_memoize=self.debug_memoize,
-            overlap_type=self.overlap_type)
+        def compute_overlap():
+            memoize_path = _j(self.directory, "{klass}.{overlap_type}.compute_overlap.pickle".format(
+                klass=self.__class__.__name__,
+                overlap_type=self.overlap_type,
+            ))
+
+            if should_load_memo(self.debug_memoize, memoize_path):
+                ret = load_memo(self.debug_memoize, memoize_path)
+                return ret
+
+            overlap, overlap_metadata = overlap_computer.compute_process_timeline_overlap(
+                overlap_obj.pre_reduce,
+                visible_overhead=self.visible_overhead,
+                machine_name=machine_name,
+                process_name=process_name,
+                phase_name=phase_name,
+                n_workers=self.n_workers,
+                events_per_split=self.events_per_split,
+                debug_memoize=self.debug_memoize,
+                overlap_type=self.overlap_type)
+
+            ret = (overlap, overlap_metadata)
+
+            maybe_memoize(self.debug_memoize, ret, memoize_path)
+
+            return ret
+
+        overlap, overlap_metadata = compute_overlap()
 
         new_overlap = overlap
         # assert len(new_overlap) > 0

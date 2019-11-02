@@ -2,6 +2,7 @@ import logging
 import copy
 import itertools
 import argparse
+from decimal import Decimal
 
 from iml_profiler.protobuf.pyprof_pb2 import CategoryEventsProto, MachineUtilization, DeviceUtilization, UtilizationSample
 from iml_profiler.parser.common import *
@@ -2592,9 +2593,21 @@ class SQLOverheadEventsParser:
                  # Swallow any excess arguments
                  **kwargs):
         self.directory = directory
-        self.cupti_overhead_json = cupti_overhead_json
-        self.LD_PRELOAD_overhead_json = LD_PRELOAD_overhead_json
-        self.pyprof_overhead_json = pyprof_overhead_json
+
+        # self.cupti_overhead_json = cupti_overhead_json
+        # self.LD_PRELOAD_overhead_json = LD_PRELOAD_overhead_json
+        # self.pyprof_overhead_json = pyprof_overhead_json
+
+
+        self.cupti_overhead_json_path = cupti_overhead_json
+        self.cupti_overhead_json = load_json(self.cupti_overhead_json_path)
+
+        self.LD_PRELOAD_overhead_json_path = LD_PRELOAD_overhead_json
+        self.LD_PRELOAD_overhead_json = load_json(self.LD_PRELOAD_overhead_json_path)
+
+        self.pyprof_overhead_json_path = pyprof_overhead_json
+        self.pyprof_overhead_json = load_json(self.pyprof_overhead_json_path)
+
         self.host = host
         self.user = user
         self.password = password
@@ -2698,11 +2711,14 @@ class SQLOverheadEventsParser:
                     category=CATEGORY_PROF_PYTHON_ANNOTATION)
             """
             op_events = self.query_op_events(event_iter_cursor)
-            logging.info("(1) Insert overhead events: Python annotations, num_events={n}".format(
+            desc = "(1) Insert overhead events: Python annotations"
+            logging.info("{desc}, num_events={n}".format(
+                desc=desc,
                 n=len(op_events),
             ))
             per_pyprof_annotation_overhead_us = self.pyprof_overhead_json['mean_pyprof_annotation_overhead_per_call_us']
-            for op in op_events.each_row():
+
+            for op in progress(op_events.each_row(), desc=desc, total=len(op_events), show_progress=True):
                 self.insert_overhead_event(
                     from_event=op,
                     # Parent biased.
@@ -2721,14 +2737,16 @@ class SQLOverheadEventsParser:
                     category=CATEGORY_PROF_PYTHON_INTERCEPTION)
             """
             c_events = self.query_c_events(event_iter_cursor)
-            logging.info("(1) Insert overhead events: Python -> C-library interception, num_events={n}".format(
+            desc = "(2) Insert overhead events: Python -> C-library interception"
+            logging.info("{desc}, num_events={n}".format(
+                desc=desc,
                 n=len(c_events),
             ))
             per_pyprof_interception_us = self.pyprof_overhead_json['mean_pyprof_interception_overhead_per_call_us']
-            for event in c_events.each_row():
+            for event in progress(c_events.each_row(), desc=desc, total=len(c_events), show_progress=True):
                 self.insert_overhead_event(
                     from_event=event,
-                    start_time_us=event.end_time_usec - per_pyprof_interception_us,
+                    start_time_us=Decimal(event.end_time_usec) - Decimal(per_pyprof_interception_us),
                     duration_us=per_pyprof_interception_us,
                     prof_category=CATEGORY_PROF_PYTHON_INTERCEPTION)
 
@@ -2749,12 +2767,14 @@ class SQLOverheadEventsParser:
                     category=CATEGORY_PROF_LD_PRELOAD)
             """
             cuda_api_events = self.query_cuda_api_events(event_iter_cursor)
-            logging.info("(1) Insert overhead events: CUPTI & LD_PRELOAD, num_events={n}".format(
+            desc = "(3) Insert overhead events: CUPTI & LD_PRELOAD"
+            logging.info("{desc}, num_events={n}".format(
+                desc=desc,
                 n=len(cuda_api_events),
             ))
             per_LD_PRELOAD_interception_us = self.LD_PRELOAD_overhead_json['mean_interception_overhead_per_call_us']
-            for event in cuda_api_events.each_row():
-                cuda_api_name = event.event_name
+            for event in progress(cuda_api_events.each_row(), desc=desc, total=len(cuda_api_events), show_progress=True):
+                cuda_api_name = event.name
                 cupti_overhead_us = self.cupti_overhead_json[cuda_api_name]['mean_cupti_overhead_per_call_us']
                 # Insert: CUPTI
                 self.insert_overhead_event(
@@ -2811,7 +2831,7 @@ class SQLOverheadEventsParser:
         rows = self._query_event_rows(c, select_query)
         return rows
 
-    def query_c_events(self, c, category):
+    def query_c_events(self, c):
         """
         NOTE: we CANNOT simply use _query_category_events(CATEGORY_PYTHON) since
         there are a couple of python events we insert that are NOT interception events (e.g. "Finishing ..." during end_operation).
@@ -2821,7 +2841,6 @@ class SQLOverheadEventsParser:
         See: PyprofDataframeReader.total_intercepted_calls()
 
         :param c:
-        :param category:
         :return:
         """
         select_query = textwrap.dedent("""
@@ -2833,9 +2852,8 @@ class SQLOverheadEventsParser:
             WHERE 
                 {category_clause}
             """).format(
-            category=category,
             event_fields=self.sql_event_fields(event_alias='e', indents=1),
-            category_clause=sql_operator_in(expr='c.category', values=sorted(CATEGORIES_C_EVENTS), indents=1),
+            category_clause=sql_operator_in(expr='c.category_name', values=sorted(CATEGORIES_C_EVENTS), indents=1),
         )
         rows = self._query_event_rows(c, select_query)
         return rows
@@ -2863,13 +2881,14 @@ class SQLOverheadEventsParser:
         sql_events = textwrap.dedent("""
             -- Use KernelTime.field_names
             {e}.event_name as name,
-            {e}.start_time_usec as start_usec,
+            {e}.start_time_us as start_usec,
             {e}.duration_us as time_usec,
             -- Keep Event field for re-inserting overhead-event; 
             --   We need these fields so that we can create a Event(category=CATEGORY_PROF_ANNOTATION, ...)
             {keep_Event_fields}
             """).format(
             keep_Event_fields=', '.join(["{e}.{field}".format(e=event_alias, field=field) for field in keep_Event_fields]),
+            e=event_alias,
         )
         sql_events = maybe_indent(sql_events, indents)
         return sql_events
@@ -2897,16 +2916,26 @@ class SQLOverheadEventsParser:
         logging.info("Idempotent overhead-event insertion: deleting {n} profiling-overhead-events".format(
             n=num_rows,
         ))
+        # delete_query = textwrap.dedent("""
+        #     DELETE e.*
+        #     FROM
+        #         Event AS e
+        #         NATURAL JOIN Category AS c
+        #     WHERE
+        #         {prof_clause}
+        #     """).format(
+        #         prof_clause=prof_clause,
+        #     )
         delete_query = textwrap.dedent("""
-            DELETE e 
-            FROM 
-                Event AS e
-                NATURAL JOIN Category AS c
+            DELETE FROM Event AS e
+            USING
+                Category AS c
             WHERE 
+                e.category_id = c.category_id AND
                 {prof_clause}
             """).format(
-                prof_clause=prof_clause,
-            )
+            prof_clause=prof_clause,
+        )
         sql_exec_query(c, delete_query, klass=self.__class__, debug=self.debug)
 
 class RowIterator:

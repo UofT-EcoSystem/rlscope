@@ -239,6 +239,13 @@ def main():
         plot-stable-baselines:
           plots
         """.rstrip()))
+    parser.add_argument(
+        '--repetition',
+        type=int,
+        help=textwrap.dedent("""\
+        e.g. for --repetition 1, --config instrumented
+        $IML_DIR/output/iml_bench/all/config_instrumented_repetition_01
+        """.rstrip()))
     add_config_options(parser)
 
     subparsers = parser.add_subparsers(
@@ -753,12 +760,12 @@ class ExperimentGroup(Experiment):
     @property
     def root_iml_directory(self):
         args = self.args
-        root_iml_directory = get_root_iml_directory(args.config, args.dir)
+        root_iml_directory = get_root_iml_directory(args.config, args.dir, args.repetition)
         return root_iml_directory
 
     def iml_directory(self, algo, env_id):
         args = self.args
-        iml_directory = get_iml_directory(args.config, args.dir, algo, env_id)
+        iml_directory = get_iml_directory(args.config, args.dir, algo, env_id, args.repetition)
         return iml_directory
 
     def _is_env_dir(self, path):
@@ -1116,12 +1123,12 @@ class StableBaselines(Experiment):
     @property
     def root_iml_directory(self):
         args = self.args
-        root_iml_directory = get_root_iml_directory(args.config, args.dir)
+        root_iml_directory = get_root_iml_directory(args.config, args.dir, args.repetition)
         return root_iml_directory
 
     def iml_directory(self, algo, env_id):
         args = self.args
-        iml_directory = get_iml_directory(args.config, args.dir, algo, env_id)
+        iml_directory = get_iml_directory(args.config, args.dir, algo, env_id, args.repetition)
         return iml_directory
 
     def _sh_env(self, algo, env_id):
@@ -1224,7 +1231,7 @@ class StableBaselines(Experiment):
                 self._run(algo, env_id)
 
 
-def get_root_iml_directory(config, direc):
+def get_root_iml_directory(config, direc, repetition):
     # if config == 'instrumented':
     #     # The default run --config.
     #     # Run IML for 2 minutes and collect full traces.
@@ -1234,12 +1241,18 @@ def get_root_iml_directory(config, direc):
     #     # Add a --config sub-directory.
     #     config_dir = "config_{config}".format(config=config)
     #     iml_directory = _j(direc, config_dir)
-    config_dir = "config_{config}".format(config=config)
+    if repetition is not None:
+        config_dir = "config_{config}_repetition_{r:02}".format(
+            config=config,
+            r=repetition)
+    else:
+        config_dir = "config_{config}".format(
+            config=config)
     iml_directory = _j(direc, config_dir)
     return iml_directory
 
-def get_iml_directory(config, direc, algo, env_id):
-    root_iml_directory = get_root_iml_directory(config, direc)
+def get_iml_directory(config, direc, algo, env_id, repetition):
+    root_iml_directory = get_root_iml_directory(config, direc, repetition)
     iml_directory = _j(root_iml_directory, algo, env_id)
     return iml_directory
 
