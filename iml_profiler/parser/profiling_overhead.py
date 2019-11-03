@@ -2773,21 +2773,31 @@ class SQLOverheadEventsParser:
                 n=len(cuda_api_events),
             ))
             per_LD_PRELOAD_interception_us = self.LD_PRELOAD_overhead_json['mean_interception_overhead_per_call_us']
+            missing_cupti_overhead_cuda_api_calls = dict()
             for event in progress(cuda_api_events.each_row(), desc=desc, total=len(cuda_api_events), show_progress=True):
                 cuda_api_name = event.name
-                cupti_overhead_us = self.cupti_overhead_json[cuda_api_name]['mean_cupti_overhead_per_call_us']
-                # Insert: CUPTI
-                self.insert_overhead_event(
-                    from_event=event,
-                    start_time_us=event.start_time_usec,
-                    duration_us=cupti_overhead_us,
-                    prof_category=CATEGORY_PROF_CUPTI)
+                if cuda_api_name not in self.cupti_overhead_json:
+                    missing_cupti_overhead_cuda_api_calls[cuda_api_name] = missing_cupti_overhead_cuda_api_calls.get(cuda_api_name, 0) + 1
+                else:
+                    cupti_overhead_us = self.cupti_overhead_json[cuda_api_name]['mean_cupti_overhead_per_call_us']
+                    # Insert: CUPTI
+                    self.insert_overhead_event(
+                        from_event=event,
+                        start_time_us=event.start_time_usec,
+                        duration_us=cupti_overhead_us,
+                        prof_category=CATEGORY_PROF_CUPTI)
                 # Insert: LD_PRELOAD
                 self.insert_overhead_event(
                     from_event=event,
                     start_time_us=event.end_time_usec,
                     duration_us=per_LD_PRELOAD_interception_us,
                     prof_category=CATEGORY_PROF_LD_PRELOAD)
+
+            if len(missing_cupti_overhead_cuda_api_calls) > 0:
+                logging.warning("Saw CUDA API calls that we didn't have calibrated CUPTI overheads for overheads for in {path}: {msg}".format(
+                    path=self.cupti_overhead_json_path,
+                    msg=pprint_msg(missing_cupti_overhead_cuda_api_calls),
+                ))
 
             self.conn.put_cursor(event_insert_cursor)
             self.conn.put_cursor(event_iter_cursor)

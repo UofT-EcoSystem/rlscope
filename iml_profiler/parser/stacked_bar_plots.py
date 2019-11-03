@@ -1830,20 +1830,30 @@ class VdTree(_DataIndex):
                 ),
                 subtract_sec=pyprof_interception_sec)
 
+
+            missing_cupti_overhead_cuda_api_calls = dict()
             # CUPTI overhead:
             for cuda_api_name, num_api_calls in overhead_event_count_json['cuda_api_call'][machine_name][process_name][phase_name][operation_name].items():
-                per_cuda_api_sec = cupti_overhead_json[cuda_api_name]['mean_cupti_overhead_per_call_us']/USEC_IN_SEC
-                cupti_overhead_sec = per_cuda_api_sec * num_api_calls
-                self.subtract_from_resource(
-                    resource='CPU',
-                    selector=dict(
-                        machine=machine_name,
-                        process=process_name,
-                        phase=phase_name,
-                        operation=operation_name,
-                        category=CATEGORY_CUDA_API_CPU,
-                    ),
-                    subtract_sec=cupti_overhead_sec)
+                if cuda_api_name not in cupti_overhead_json:
+                    missing_cupti_overhead_cuda_api_calls[cuda_api_name] = missing_cupti_overhead_cuda_api_calls.get(cuda_api_name, 0) + 1
+                else:
+                    per_cuda_api_sec = cupti_overhead_json[cuda_api_name]['mean_cupti_overhead_per_call_us']/USEC_IN_SEC
+                    cupti_overhead_sec = per_cuda_api_sec * num_api_calls
+                    self.subtract_from_resource(
+                        resource='CPU',
+                        selector=dict(
+                            machine=machine_name,
+                            process=process_name,
+                            phase=phase_name,
+                            operation=operation_name,
+                            category=CATEGORY_CUDA_API_CPU,
+                        ),
+                        subtract_sec=cupti_overhead_sec)
+            if len(missing_cupti_overhead_cuda_api_calls) > 0:
+                logging.warning("Saw CUDA API calls that we didn't have calibrated CUPTI overheads for overheads for {path}: {msg}".format(
+                    path=self.db_path,
+                    msg=pprint_msg(missing_cupti_overhead_cuda_api_calls),
+                ))
 
             # CUDA API interception:
             total_cuda_api_calls = np.sum([num_api_calls for cuda_api_name, num_api_calls in
