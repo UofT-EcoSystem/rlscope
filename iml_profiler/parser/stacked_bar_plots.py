@@ -292,6 +292,7 @@ class OverlapStackedBarPlot:
         """
         new_env = env_id
         new_env = re.sub(r'LunarLanderContinuous-v2', 'LunarLander-v2', new_env)
+        new_env = re.sub(r'MountainCarContinuous-v0', 'MountainCar-v0', new_env)
         return new_env
 
     def get_index(self, iml_dir):

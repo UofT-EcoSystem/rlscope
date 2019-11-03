@@ -97,14 +97,29 @@ run_fig_algorithm_choice_1a_med_complexity() {
     # logan
     sb_reps_last --algo-env-group algorithm_choice_1a_med_complexity "$@"
 }
+run_fig_algorithm_choice_1a_med_complexity_plot_01() {
+    # logan
+    sb_one_rep --repetition 1 "$@" --algo-env-group algorithm_choice_1a_med_complexity "$@"
+}
+
 run_fig_environment_choice() {
     # eco-13
     sb_reps_last --algo-env-group environment_choice "$@"
 }
+run_fig_environment_choice_plot_01() {
+    # eco-13
+    sb_one_rep --repetition 1 --algo-env-group environment_choice "$@"
+}
+
 run_fig_algorithm_choice_1b_low_complexity() {
     # eco-14
     sb_reps_last --algo-env-group algorithm_choice_1b_low_complexity "$@"
 }
+run_fig_algorithm_choice_1b_low_complexity_plot_01() {
+    # eco-14
+    sb_one_rep --repetition 1 --algo-env-group algorithm_choice_1b_low_complexity "$@"
+}
+
 #run_fig_all_rl_workloads() {
 #    sb_reps_last --algo-env-group all_rl_workloads "$@"
 #}
