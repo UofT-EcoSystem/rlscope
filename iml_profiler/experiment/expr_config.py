@@ -273,11 +273,14 @@ def stable_baselines_gather_algo_env_pairs(algo=None, env_id=None, bullet=False,
         # If we specify --bullet, just run Bullet (algo, env) combos.
         # If we specify --atari --bullet, run only Atari/Bullet (algo, env) combos.
         # Otherwise, neither --atari nor --lunar nor --bullet are given, run everything.
-        return ( atari and is_atari_env(env_id) ) or \
+
+        # NOTE: If they don't provide ANY flags for selecting algo/env to run, we run NOTHING.
+        # We no longer default to running everything (since it's a confusing bug)
+        ret = ( atari and is_atari_env(env_id) ) or \
                ( lunar and is_lunar_combo(algo, env_id) ) or \
                ( bullet and is_bullet_env(env_id) ) or \
-               ( algo_env_group is not None and is_algo_env_group_combo(algo_env_group, algo, env_id) ) or \
-               ( not atari and not bullet )
+               ( algo_env_group is not None and is_algo_env_group_combo(algo_env_group, algo, env_id) )
+        return ret
 
     avail_env_ids, unavail_env_ids = detect_available_env(STABLE_BASELINES_ENV_IDS)
 

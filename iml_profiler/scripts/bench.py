@@ -1129,6 +1129,7 @@ class StableBaselines(Experiment):
             bullet=args.bullet,
             atari=args.atari,
             lunar=args.lunar,
+            algo_env_group=args.algo_env_group,
         )
         if algo_env_pairs is None:
             logging.info('Please provide either --env-id or --algo')
@@ -1138,8 +1139,12 @@ class StableBaselines(Experiment):
             logging.info({'algo_env_pairs': algo_env_pairs, 'args.analyze': args.analyze})
 
         if args.analyze:
-            if args.debug:
-                logging.info("Run --analyze")
+            # if args.debug:
+            logging.info("Run --analyze over (algo, env) pairs: {msg}".format(
+                msg=pprint_msg({
+                    'algo_env_pairs': algo_env_pairs,
+                })
+            ))
             for algo, env_id in algo_env_pairs:
                 # self._analyze(algo, env_id)
                 self.pool.submit(
@@ -1156,6 +1161,11 @@ class StableBaselines(Experiment):
                 assert e.exitcode != 0
                 sys.exit(e.exitcode)
         else:
+            logging.info("Collect trace-data over (algo, env) pairs: {msg}".format(
+                msg=pprint_msg({
+                    'algo_env_pairs': algo_env_pairs,
+                })
+            ))
             for algo, env_id in algo_env_pairs:
                 self._run(algo, env_id)
 
