@@ -433,6 +433,7 @@ class OverlapStackedBarPlot:
             new_stacked_dict = dict((k, as_list(v)) for k, v in new_stacked_dict.items())
             df = pd.DataFrame(new_stacked_dict)
 
+            df = self._HACK_remove_process_operation_df(df)
             df = self._remap_df(df)
 
             yield (algo, env), self._regions(df), path, df
@@ -567,6 +568,12 @@ class OverlapStackedBarPlot:
         dfs = []
         for (algo, env), regions, path, df in self.each_df():
 
+            logging.info("({algo}, {env}): {msg}".format(
+                algo=algo,
+                env=env,
+                msg=pprint_msg(df),
+            ))
+
             if regions != use_regions:
                 logging.info(
                     textwrap.dedent("""\
@@ -591,6 +598,38 @@ class OverlapStackedBarPlot:
             dfs.append(df)
 
         self.df = pd.concat(dfs)
+
+    def _HACK_remove_process_operation_df(self, df):
+        """
+        HACK: BUG: not sure why, but operation overlap contains an operation that looks like the process_name:
+        e.g. 
+        {
+            "label": "[ppo2_Walker2DBulletEnv-v0]",
+            "sets": [
+                0
+            ],
+            "size": 45344.0
+        },
+        Likely reason: we used to have code that checked if a Event.event_name looked like a "process_name"...
+        for some reason that code check has been disabled during analysis.
+        Fix: the time is REALLY small compared to everything else, so we can either:
+        1. add it to the largest time (e.g. step)
+        2. ignore it (should be safe if its an absolute time...not safe if its a percent already)
+        
+        :return: 
+        """
+        remove_cols = set()
+        for colname, coldata in df.iteritems():
+            if self._is_region(colname):
+                op_name = colname[0]
+                if is_op_process_event(op_name, CATEGORY_OPERATION):
+                    logging.info("HACK: remove process_name={proc} from operation dataframe".format(
+                        proc=op_name,
+                    ))
+                    remove_cols.add(colname)
+        for colname in remove_cols:
+            del df[colname]
+        return df
 
     def _normalize_df(self):
         """
@@ -696,6 +735,14 @@ class OverlapStackedBarPlot:
         return label
 
     def run(self):
+        if self.debug:
+            algo_env_pairs = [self._get_algo_env_from_dir(iml_dir) for iml_dir in self.iml_directories]
+            logging.info("{klass}: {msg}".format(
+                klass=self.__class__.__name__,
+                msg=pprint_msg({
+                    'iml_directories': self.iml_directories,
+                    'algo_env_pairs': algo_env_pairs,
+                })))
         self._init_directories()
         self._check_can_add_training_time()
         self._read_df()

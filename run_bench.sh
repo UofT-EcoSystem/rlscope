@@ -78,6 +78,11 @@ sb_one_rep() {
     # SKIP plotting until we fix it, so we can process all the repetitions over night!
 #    sb_plot "$@"
 }
+sb_one_rep_plot() {
+    sb_train "$@"
+    sb_analyze "$@"
+    sb_plot "$@"
+}
 sb_reps_last() {
     sb_one_rep --repetition 1 "$@"
     sb_one_rep --repetition 2 "$@"
@@ -99,7 +104,7 @@ run_fig_algorithm_choice_1a_med_complexity() {
 }
 run_fig_algorithm_choice_1a_med_complexity_plot_01() {
     # logan
-    sb_one_rep --repetition 1 "$@" --algo-env-group algorithm_choice_1a_med_complexity "$@"
+    sb_one_rep_plot --repetition 1 "$@" --algo-env-group algorithm_choice_1a_med_complexity "$@"
 }
 
 run_fig_environment_choice() {
@@ -108,7 +113,7 @@ run_fig_environment_choice() {
 }
 run_fig_environment_choice_plot_01() {
     # eco-13
-    sb_one_rep --repetition 1 --algo-env-group environment_choice "$@"
+    sb_one_rep_plot --repetition 1 --algo-env-group environment_choice "$@"
 }
 
 run_fig_algorithm_choice_1b_low_complexity() {
@@ -117,7 +122,7 @@ run_fig_algorithm_choice_1b_low_complexity() {
 }
 run_fig_algorithm_choice_1b_low_complexity_plot_01() {
     # eco-14
-    sb_one_rep --repetition 1 --algo-env-group algorithm_choice_1b_low_complexity "$@"
+    sb_one_rep_plot --repetition 1 --algo-env-group algorithm_choice_1b_low_complexity "$@"
 }
 
 #run_fig_all_rl_workloads() {
