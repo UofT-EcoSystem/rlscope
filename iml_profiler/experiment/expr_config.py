@@ -176,11 +176,14 @@ def is_low_complexity_env(algo, env_id):
 def is_med_complexity_env(algo, env_id):
     return re.search(r'HalfCheetah|Walker2D|Hopper|Ant', env_id)
 
+def is_walker_env(algo, env_id):
+    return re.search(r'Walker2D', env_id)
+
 # ASSUMPTION: we only need to constrain environments, NOT algo.
 def is_fig_algo_comparison_low_complexity(algo, env_id):
     return is_mountain_car_combo(algo, env_id)
 def is_fig_algo_comparison_med_complexity(algo, env_id):
-    return is_med_complexity_env(algo, env_id)
+    return is_walker_env(algo, env_id)
 def is_fig_env_comparison(algo, env_id):
     return algo == 'ppo2' and is_paper_env(algo, env_id)
 

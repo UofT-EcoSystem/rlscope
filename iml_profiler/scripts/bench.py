@@ -322,6 +322,11 @@ def main():
 
 
     args, extra_argv = parser.parse_known_args()
+    # logging.info("parsed arguments: {msg}".format(
+    #     msg=pprint_msg({
+    #         'args': args,
+    #         'extra_argv': extra_argv,
+    #     })))
     os.makedirs(args.dir, exist_ok=True)
 
     global STABLE_BASELINES_AVAIL_ENV_IDS, STABLE_BASELINES_UNAVAIL_ENV_IDS
@@ -572,7 +577,8 @@ class ExperimentGroup(Experiment):
         # (2) Environment choice:
         expr = 'environment_choice'
         algo_env_pairs = gather.pairs_by_algo_env_group(expr)
-        opts = ['--algo-env-group', expr]
+        # NOTE: --algo-env-group is forwarded automatically since it's an option that belongs to the "main" parser, not the subparser
+        opts = []
         if self.should_run_algo_env_group(expr):
             logging.info(rl_workloads_msg(expr, algo_env_pairs))
             self.iml_bench(parser, subparser, 'train_stable_baselines.sh', opts, suffix=bench_log(expr))
@@ -626,16 +632,15 @@ class ExperimentGroup(Experiment):
         # env_id = 'Walker2DBulletEnv-v0'
         expr = 'algorithm_choice_1a_med_complexity'
         algo_env_pairs = gather.pairs_by_algo_env_group(expr)
-        opts = ['--algo-env-group', expr]
+        opts = []
         if self.should_run_algo_env_group(expr):
             logging.info(rl_workloads_msg(expr, algo_env_pairs))
             self.iml_bench(parser, subparser, 'train_stable_baselines.sh', opts, suffix=bench_log(expr))
         plot_expr_algorithm_choice(expr=expr, algo_env_pairs=algo_env_pairs)
 
-        # opts = ['--lunar']
         expr = 'algorithm_choice_1b_low_complexity'
         algo_env_pairs = gather.pairs_by_algo_env_group(expr)
-        opts = ['--algo-env-group', expr]
+        opts = []
         if self.should_run_algo_env_group(expr):
             logging.info(rl_workloads_msg(expr, algo_env_pairs))
             self.iml_bench(parser, subparser, 'train_stable_baselines.sh', opts, suffix=bench_log(expr))
@@ -644,8 +649,7 @@ class ExperimentGroup(Experiment):
         # (4) Compare all RL workloads:
         expr = 'all_rl_workloads'
         algo_env_pairs = gather.pairs_by_algo_env_group(expr)
-        # opts = ['--atari', '--lunar', '--bullet']
-        opts = ['--algo-env-group', expr]
+        opts = []
         common_dims = [
             '--width', '16',
             '--height', '6',
