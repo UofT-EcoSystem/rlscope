@@ -837,6 +837,7 @@ class VennData:
             self.venn = json.load(f)
         self._metadata = self.venn['metadata']
         self._build_idx_to_label()
+        self.data = None
         self.data = self.as_dict()
 
     def metadata(self):

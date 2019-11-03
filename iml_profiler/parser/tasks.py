@@ -476,6 +476,11 @@ class TraceEventsTask(luigi.Task):
     start_usec = luigi.FloatParameter(description="Show events whose start-time is >= start_usec", default=None)
     end_usec = luigi.FloatParameter(description="Show events whose end-time is <= end_usec", default=None)
 
+    # Needed by mk_SQL_tasks
+    cupti_overhead_json = param_cupti_overhead_json
+    LD_PRELOAD_overhead_json = param_LD_PRELOAD_overhead_json
+    pyprof_overhead_json = param_pyprof_overhead_json
+
     skip_output = False
 
     def requires(self):
@@ -686,6 +691,11 @@ class ExtrapolatedTrainingTimeTask(IMLTask):
 
     # algo_env_from_dir = luigi.BoolParameter(description="Add algo/env columns based on directory structure of --iml-directories <algo>/<env>/iml_dir", default=True, parsing=luigi.BoolParameter.EXPLICIT_PARSING)
 
+    # Needed by mk_SQL_tasks
+    cupti_overhead_json = param_cupti_overhead_json
+    LD_PRELOAD_overhead_json = param_LD_PRELOAD_overhead_json
+    pyprof_overhead_json = param_pyprof_overhead_json
+
     def requires(self):
         return [
             mk_SQL_tasks(self),
@@ -710,6 +720,11 @@ class GeneratePlotIndexTask(luigi.Task):
     postgres_password = param_postgres_password
     postgres_user = param_postgres_user
     postgres_host = param_postgres_host
+
+    # Needed by mk_SQL_tasks
+    cupti_overhead_json = param_cupti_overhead_json
+    LD_PRELOAD_overhead_json = param_LD_PRELOAD_overhead_json
+    pyprof_overhead_json = param_pyprof_overhead_json
 
     skip_output = False
 
@@ -778,6 +793,11 @@ class OverlapStackedBarTask(luigi.Task):
     debug = param_debug
     debug_single_thread = param_debug_single_thread
     suffix = luigi.Parameter(description="Add suffix to output files: OverlapStackedBarPlot.overlap_type_*.{suffix}.{ext}", default=None)
+
+    # Needed by mk_SQL_tasks (for GeneratePlotIndexTask)
+    cupti_overhead_json = param_cupti_overhead_json
+    LD_PRELOAD_overhead_json = param_LD_PRELOAD_overhead_json
+    pyprof_overhead_json = param_pyprof_overhead_json
 
     skip_output = False
 

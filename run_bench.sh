@@ -49,6 +49,10 @@ sb_train() {
     _run_bench "$@" stable-baselines
 }
 
+iml_analyze() {
+    iml-analyze "${CALIB_OPTS[@]}" "$@"
+}
+
 sb_analyze() {
     _run_bench "$@" --analyze stable-baselines "${CALIB_OPTS[@]}"
 }
@@ -71,7 +75,8 @@ sb_reps_first() {
 sb_one_rep() {
     sb_train "$@"
     sb_analyze "$@"
-    sb_plot "$@"
+    # SKIP plotting until we fix it, so we can process all the repetitions over night!
+#    sb_plot "$@"
 }
 sb_reps_last() {
     sb_one_rep --repetition 1 "$@"
