@@ -19,6 +19,8 @@ from iml_profiler.parser.stacked_bar_plots import StackedBarPlot
 from iml_profiler.parser import stacked_bar_plots
 from iml_profiler.parser.stacked_bar_plots import VennData
 
+from iml_profiler.experiment import expr_config
+
 from iml_profiler.parser import stacked_bar_plots
 from iml_profiler.parser.db import SQLCategoryTimesReader, CSVInserter, \
     sql_input_path, \
@@ -390,6 +392,18 @@ class CorrectedTrainingTimeParser:
         # logging.info("Output json @ {path}".format(path=self._raw_json_path))
         # do_dump_json(json_data, self._raw_json_path)
 
+        def pretty_config(config):
+            if config == 'uninstrumented':
+                # return 'CUPTI GPU activities enabled'
+                return 'Uninstrumented'
+            elif config == 'instrumented':
+                # return 'CUPTI GPU activities disabled'
+                return 'Instrumented (uncorrected)'
+            elif config == 'corrected':
+                return 'Instrumented (corrected)'
+            else:
+                raise NotImplementedError()
+
         def get_per_api_plot_data(per_api_df):
             overhead_cols = ['total_cupti_overhead_us', 'total_interception_overhead_us']
             # keep_cols = ['api_name', 'num_calls', 'algo', 'env', 'x_field'] + overhead_cols
@@ -446,6 +460,8 @@ class CorrectedTrainingTimeParser:
             id_vars = [
                 # 'total_training_duration_us',
                 "x_field",
+                'algo',
+                'env',
             ]
             overhead_cols = [
                 col for col in total_df.keys()
@@ -492,7 +508,22 @@ class CorrectedTrainingTimeParser:
             fig.savefig(self._total_png_path)
             plt.close(fig)
 
-        unins_df = pd.concat(get_training_durations_df(self.uninstrumented_directories, debug=self.debug, debug_single_thread=self.debug_single_thread))
+        def load_unins_training_durations_df():
+            memoize_path = _j(self.directory, "{klass}.load_unins_training_durations_df.pickle".format(
+                klass=self.__class__.__name__))
+
+            if should_load_memo(self.debug_memoize, memoize_path):
+                ret = load_memo(self.debug_memoize, memoize_path)
+                return ret
+
+            ret = pd.concat(get_training_durations_df(self.uninstrumented_directories, debug=self.debug, debug_single_thread=self.debug_single_thread))
+
+            maybe_memoize(self.debug_memoize, ret, memoize_path)
+
+            return ret
+
+
+        unins_df = load_unins_training_durations_df()
         unins_df['config'] = 'uninstrumented'
 
         ins_df = pd.DataFrame({
@@ -508,6 +539,111 @@ class CorrectedTrainingTimeParser:
             'env': total_df['env'],
         })
         corrected_df['config'] = 'corrected'
+
+        def get_low_bias_overhead_correction_plot_data(total_plot_data, unins_df):
+            """
+            Get data in csv format needed for "Figure 8: Low-bias overhead correction".
+
+            PSEUDOCODE:
+            Total_df[config] = "instrumented"
+            Total_df_melt = melt total_df into [algo, env, config, overhead_type, total_overhead_us]
+            Unins_df["overhead_type"] = "uninstrumented_total_training_duration_us"
+            Unins_df_melt = Change cols of Unins_df to  match [algo, env, config, overhead_type, total_overhead_us]
+            df = Pd.concat(total_df_melt, unins_df_melt)
+            Df[bar_label] = ""
+            For algo, env in df:
+                Df[config==uninstrumented, overhead_type=uninstrumented_total_training_duration_us, algo==algo, env==env][bar_label] =
+                    ( Df[config==uninstrumented, overhead_type=uninstrumented_total_training_duration_us, algo==algo, env==env][training_duration_us] - Df[config==instrumented, overhead_type=corrected_total_training_time, algo==algo, env==env][training_duration_us] ) /
+            """
+            total_plot_data = copy.copy(total_plot_data)
+
+            # unins_df
+            #    training_duration_us  algo                                  env          config
+            # 0           60486911091   dqn                   PongNoFrameskip-v4  uninstrumented
+            # 0           47663230442  ddpg                 Walker2DBulletEnv-v0  uninstrumented
+            # 0            2403215259   a2c                 Walker2DBulletEnv-v0  uninstrumented
+            # 0           12817289121  ppo2                 HumanoidBulletEnv-v0  uninstrumented
+
+            # total_plot_data
+            #                            x_field                          overhead_type  total_overhead_sec                         pretty_overhead_type  overhead_type_order
+            # 107             (a2c, LunarLander)   corrected_total_training_duration_us          140.016430                      Corrected training time                    0
+            # 85              (a2c, LunarLander)    total_pyprof_annotation_overhead_us            4.261625                   Python annotation overhead                    1
+            # 63              (a2c, LunarLander)  total_pyprof_interception_overhead_us            9.673592  Python $\rightarrow$ C-library interception                    2
+            # 41              (a2c, LunarLander)         total_interception_overhead_us           18.424823             LD_PRELOAD interception overhead                    3
+            # 19              (a2c, LunarLander)                total_cupti_overhead_us            6.890283                               CUPTI overhead                    4
+
+
+            # WANT:
+            # algo, env, x_field, duration_name, duration_pretty_name, config, config_pretty_name, duration_sec
+            keep_cols = ['algo', 'env', 'x_field', 'duration_name', 'duration_pretty_name', 'duration_name_order', 'config', 'config_pretty_name', 'duration_sec']
+
+            def as_config_pretty_name(config):
+                if config == 'uninstrumented':
+                    return 'Uninstrumented'
+                elif config == 'instrumented':
+                    return 'Instrumented'
+                else:
+                    raise NotImplementedError()
+
+            # Transform unins_df
+            unins_df['duration_us'] = unins_df['training_duration_us']
+            add_x_field(unins_df)
+            unins_df['duration_name'] = 'uninstrumented_total_training_duration_us'
+            unins_df['config_pretty_name'] = unins_df['config'].apply(as_config_pretty_name)
+            unins_df['duration_pretty_name'] = unins_df['duration_name'].apply(
+                lambda overhead_type: pretty_overhead_type(overhead_type, 'us'))
+            unins_df['duration_name_order'] = 0
+            # , colnames=['duration_us']
+            unins_df = dataframe_replace_us_with_sec(unins_df)
+            unins_df = unins_df[keep_cols]
+
+            total_plot_data['config'] = 'instrumented'
+            total_plot_data['config_pretty_name'] = total_plot_data['config'].apply(as_config_pretty_name)
+            total_plot_data['duration_name'] = total_plot_data['overhead_type']
+            total_plot_data['duration_name'] = total_plot_data['overhead_type']
+            total_plot_data['duration_pretty_name'] = total_plot_data['pretty_overhead_type']
+            total_plot_data['duration_sec'] = total_plot_data['total_overhead_sec']
+            total_plot_data['duration_name_order'] = total_plot_data['overhead_type_order']
+            total_plot_data = total_plot_data[keep_cols]
+
+            low_bias_df = pd.concat([unins_df, total_plot_data])
+
+            # Calculate bar-label: 100*(corrected - unins)/unins
+            low_bias_df['bar_label'] = ''
+            low_bias_df['percent_wrong'] = 0.
+            groupby = low_bias_df.groupby(['algo', 'env'])
+            for group, df_group in groupby:
+                algo, env = group
+                corrected = df_group[df_group['duration_name']=='corrected_total_training_duration_us']['duration_sec']
+                assert len(corrected) == 1
+                corrected = corrected.values[0]
+                unins = df_group[df_group['duration_name']=='uninstrumented_total_training_duration_us']['duration_sec']
+                assert len(unins) == 1
+                unins = unins.values[0]
+                percent_wrong = 100*(corrected - unins)/unins
+                bar_label = '{percent:.1f}%'.format(percent=percent_wrong)
+
+                # df_group[df_group['duration_name']=='uninstrumented_total_training_duration_us']['percent_wrong'] = percent_wrong
+                # df_group[df_group['duration_name']=='uninstrumented_total_training_duration_us']['bar_label'] = bar_label
+
+                selection = (low_bias_df['algo'] == algo) & \
+                            (low_bias_df['env'] == env) & \
+                            (low_bias_df['duration_name'] == 'uninstrumented_total_training_duration_us')
+
+                low_bias_df.loc[selection, 'percent_wrong'] = percent_wrong
+                low_bias_df.loc[selection, 'bar_label'] = bar_label
+
+
+            # Only keep (algo, env) pairs that we want in the paper.
+            is_in_paper = np.vectorize(expr_config.is_paper_env, otypes=[np.bool])(low_bias_df['algo'], low_bias_df['env'])
+            low_bias_df = low_bias_df[is_in_paper]
+
+            low_bias_df = low_bias_df.sort_values(['algo', 'env', 'config', 'duration_name_order'])
+
+            return low_bias_df
+
+        low_bias_df = get_low_bias_overhead_correction_plot_data(total_plot_data, unins_df)
+        output_csv(low_bias_df, self._overhead_correction_csv_path)
 
         # unins_training_duration_us = get_training_durations(self.uninstrumented_directories, debug=self.debug)
         # unins_df = pd.DataFrame({
@@ -525,17 +661,6 @@ class CorrectedTrainingTimeParser:
         # })
         # corrected_df['config'] = 'corrected'
 
-        def pretty_config(config):
-            if config == 'uninstrumented':
-                # return 'CUPTI GPU activities enabled'
-                return 'Uninstrumented'
-            elif config == 'instrumented':
-                # return 'CUPTI GPU activities disabled'
-                return 'Instrumented (uncorrected)'
-            elif config == 'corrected':
-                return 'Instrumented (corrected)'
-            else:
-                raise NotImplementedError()
         training_duration_df = pd.concat([unins_df, ins_df, corrected_df])
         training_duration_df['pretty_config'] = training_duration_df['config'].apply(pretty_config)
         # add_fields(training_duration_df, iml_config)
@@ -567,21 +692,22 @@ class CorrectedTrainingTimeParser:
             return bar_labels
 
         output_csv(training_duration_plot_data, self._training_time_csv_path, sort_by=['training_duration_sec'])
-        if len(training_duration_plot_data) > 0:
-            fig = plt.figure(figsize=figsize)
-            ax = fig.add_subplot(111)
-            sns.barplot(
-                x='x_field', y='training_duration_sec', hue='pretty_config', data=training_duration_plot_data, ax=ax,
-                **sns_kwargs)
-            add_bar_labels(y='training_duration_sec', hue='pretty_config', ax=ax,
-                           get_bar_labels=get_percent_bar_labels)
-            ax.legend().set_title(None)
-            ax.set_ylabel('Total training time (sec)')
-            ax.set_xlabel('(algo, env)')
-            ax.set_title("Correcting training time by subtracting profiling overhead")
-            logging.info("Output plot @ {path}".format(path=self._training_time_png_path))
-            fig.savefig(self._training_time_png_path)
-            plt.close(fig)
+        # Fails on some runs... ignore.
+        # if len(training_duration_plot_data) > 0:
+        #     fig = plt.figure(figsize=figsize)
+        #     ax = fig.add_subplot(111)
+        #     sns.barplot(
+        #         x='x_field', y='training_duration_sec', hue='pretty_config', data=training_duration_plot_data, ax=ax,
+        #         **sns_kwargs)
+        #     add_bar_labels(y='training_duration_sec', hue='pretty_config', ax=ax,
+        #                    get_bar_labels=get_percent_bar_labels)
+        #     ax.legend().set_title(None)
+        #     ax.set_ylabel('Total training time (sec)')
+        #     ax.set_xlabel('(algo, env)')
+        #     ax.set_title("Correcting training time by subtracting profiling overhead")
+        #     logging.info("Output plot @ {path}".format(path=self._training_time_png_path))
+        #     fig.savefig(self._training_time_png_path)
+        #     plt.close(fig)
 
     @property
     def _total_csv_path(self):
@@ -614,6 +740,10 @@ class CorrectedTrainingTimeParser:
     @property
     def _training_time_csv_path(self):
         return _j(self.directory, "corrected_training_time.training_time.csv")
+
+    @property
+    def _overhead_correction_csv_path(self):
+        return _j(self.directory, "corrected_training_time.overhead_correction.csv")
 
 class CallInterceptionOverheadParser:
     """
@@ -1849,17 +1979,19 @@ def pretty_overhead_type(overhead_type, unit='us'):
             col=col, us=unit)
 
     if overhead_type == with_unit('total_pyprof_annotation_overhead'):
-        return "Python annotation overhead"
+        return "Python annotations"
     elif overhead_type == with_unit('total_pyprof_interception_overhead'):
-        return r"Python $\rightarrow$ C-library interception"
+        return r"Python $\leftrightarrow$ C interception"
     elif overhead_type == with_unit('corrected_total_training_duration'):
         return "Corrected training time"
     elif overhead_type == with_unit('total_cupti_overhead'):
         # return 'CUPTI GPU activities enabled'
-        return 'CUPTI overhead'
+        return 'CUPTI'
     elif overhead_type == with_unit('total_interception_overhead'):
         # return 'CUPTI GPU activities disabled'
-        return 'LD_PRELOAD interception overhead'
+        return 'CUDA API interception'
+    elif overhead_type == with_unit('uninstrumented_total_training_duration_us'):
+        return 'Uninstrumented training time'
     else:
         return overhead_type
 
