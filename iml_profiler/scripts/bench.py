@@ -624,6 +624,34 @@ class ExperimentGroup(Experiment):
         #     other = sum(r for r in regions if r != step)
 
         def plot_expr_algorithm_choice(expr, algo_env_pairs):
+            """
+            Map all algorithm operations to uniform, simplified labels:
+            - Inference: choosing an action to perform by consulting a neural network
+            - Simulation: interacting with a simulator
+            - Backpropagation: forward/backward pass, update network, maintain target network
+
+            A2C:
+                Inference = sample_action
+                Simulation = step
+                Backpropagation = train_step + training_loop
+
+            DDPG:
+                Inference = sample_action
+                Simulation = step
+                Backpropagation = evaluate + train_step + training_loop + update_target_network
+                ...seems like evaluate may belong to inference...not sure though...
+                IDEA: just delete / ignore it... these are RAW times so we CAN do that....HOWEVER training time still includes it so its WRONG to show that.
+
+            PPO2:
+                Inference = sample_action
+                Simulation = step
+                Backpropagation = compute_advantage_estimates + optimize_surrogate + training_loop
+
+            SAC:
+                Inference = sample_action
+                Simulation = step
+                Backpropgation = training_loop + update_actor_and_critic + update_target_network
+            """
             if self.should_run_algo_env_group(expr):
                 overlap_type = 'OperationOverlap'
                 self.stacked_plot([
@@ -631,25 +659,74 @@ class ExperimentGroup(Experiment):
                     '--resource-overlap', json.dumps(['CPU']),
                     '--training-time',
                     '--remap-df', json.dumps([textwrap.dedent("""
-                        # IDEALLY: we should categorize ALL RL algorithms into simple categories:
-                        # Inference, Simulation, Backpropgation
-                        # AND, we should show all 3 of those categories, NOT just Simulation and Other...
-                        # Q: How do we do that...? insert breakpoint or pprint df?
+                        # Categorize ALL RL algorithms into simplified categories:
+                        #   Inference, Simulation, Backpropgation
                         import pprint
                         pprint.pprint({
                             'algorithm_choice.remap_df.original_df': df,
                             'regions': regions,
+                            '(algo, env)': "({algo}, {env})".format(algo=algo, env=env),
                         })
                         
                         # Keep 'step' region
-                        new_df[('Simulation',)] = df[('Simulation',)]
-
-                        # Sum up regions besides 'Simulation'
-                        new_df[('Other',)] = 0.
-                        for r in regions:
-                            if r == ('Simulation',):
-                                continue
-                            new_df[('Other',)] = new_df[('Other',)] + df[r]
+                        if algo == 'ppo2':
+                            # Inference = sample_action
+                            # Simulation = step
+                            # Backpropagation = compute_advantage_estimates + optimize_surrogate + training_loop
+                            assert regions.issubset({
+                                ('step',),
+                                ('sample_action',),
+                                ('compute_advantage_estimates',), 
+                                ('optimize_surrogate',),
+                                ('training_loop',),
+                            })
+                            new_df[('Simulation',)] = df[('step',)]
+                            new_df[('Inference',)] = df[('sample_action',)]
+                            new_df[('Backpropagation',)] = df[('compute_advantage_estimates',)] + df[('optimize_surrogate',)] + df[('training_loop',)]
+                        elif algo == 'ddpg':
+                            # Inference = sample_action
+                            # Simulation = step
+                            # Backpropagation = evaluate + train_step + training_loop + update_target_network
+                            assert regions.issubset({
+                                ('step',),
+                                ('sample_action',),
+                                ('evaluate',), 
+                                ('train_step',), 
+                                ('training_loop',),
+                                ('update_target_network',),
+                            })
+                            new_df[('Simulation',)] = df[('step',)]
+                            new_df[('Inference',)] = df[('sample_action',)]
+                            new_df[('Backpropagation',)] = df[('evaluate',)] + df[('train_step',)] + df[('training_loop',)] + df[('update_target_network',)]
+                        elif algo == 'a2c':
+                            # Inference = sample_action
+                            # Simulation = step
+                            # Backpropagation = train_step + training_loop
+                            assert regions.issubset({
+                                ('step',),
+                                ('sample_action',),
+                                ('train_step',), 
+                                ('training_loop',),
+                            })
+                            new_df[('Simulation',)] = df[('step',)]
+                            new_df[('Inference',)] = df[('sample_action',)]
+                            new_df[('Backpropagation',)] = df[('train_step',)] + df[('training_loop',)]
+                        elif algo == 'sac':
+                            # Inference = sample_action
+                            # Simulation = step
+                            # Backpropgation = training_loop + update_actor_and_critic + update_target_network
+                            assert regions.issubset({
+                                ('step',),
+                                ('sample_action',),
+                                ('update_actor_and_critic',), 
+                                ('update_target_network',), 
+                                ('training_loop',),
+                            })
+                            new_df[('Simulation',)] = df[('step',)]
+                            new_df[('Inference',)] = df[('sample_action',)]
+                            new_df[('Backpropagation',)] = df[('training_loop',)] + df[('update_actor_and_critic',)] + df[('update_target_network',)]
+                        else:
+                            raise NotImplementedError("Not sure how to remap operation labels {labels} into simplified labels=[Inference, Simulation, Backpropgation] for algo={algo}".format(labels=regions, algo=algo))
                         """)]),
                     '--y-type', 'percent',
                     '--x-type', 'algo-comparison',

@@ -434,7 +434,7 @@ class OverlapStackedBarPlot:
             df = pd.DataFrame(new_stacked_dict)
 
             df = self._HACK_remove_process_operation_df(df)
-            df = self._remap_df(df)
+            df = self._remap_df(df, algo, env)
 
             yield (algo, env), self._regions(df), path, df
 
@@ -515,7 +515,7 @@ class OverlapStackedBarPlot:
         assert type(obj) in [pd.DataFrame, dict]
         return set(key for key in obj.keys() if self._is_region(key))
 
-    def _remap_df(self, orig_df):
+    def _remap_df(self, orig_df, algo, env):
         if self.remap_df is None:
             return orig_df
 
@@ -526,6 +526,8 @@ class OverlapStackedBarPlot:
         df = copy.copy(orig_df)
         regions = self._regions(df)
         new_df = df[not_regions]
+        # algo
+        # env
 
         for df_transformation in self.remap_df:
             # e.g.
