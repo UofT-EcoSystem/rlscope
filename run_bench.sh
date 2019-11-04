@@ -53,6 +53,13 @@ iml_analyze() {
     iml-analyze "${CALIB_OPTS[@]}" "$@"
 }
 
+run_total_training_time_plot() {
+    iml-quick-expr --expr plot_fig --fig fig_13_overhead_correction \
+        "${CALIB_OPTS[@]}" \
+        --root-dir $IML_DATA_DIR/iml/output/expr_total_training_time \
+        --debug-memoize "$@"
+}
+
 sb_analyze() {
     _run_bench "$@" --analyze stable-baselines "${CALIB_OPTS[@]}"
 }
@@ -79,8 +86,8 @@ sb_one_rep() {
 #    sb_plot "$@"
 }
 sb_one_rep_plot() {
-    sb_train "$@"
-    sb_analyze "$@"
+#    sb_train "$@"
+#    sb_analyze "$@"
     sb_plot "$@"
 }
 sb_reps_last() {
