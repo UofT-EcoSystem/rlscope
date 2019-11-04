@@ -2205,6 +2205,7 @@ class UtilizationPlot:
 
         # debug_process_names = ['selfplay_worker_1']
         # debug_phases = ['selfplay_worker_1']
+        # debug_process_names = ['selfplay_worker_0_generation_0']
 
         # if not UtilizationPlot.DEBUG_MINIGO:
         #     process_names = self.sql_reader.process_names()
@@ -2256,10 +2257,10 @@ class UtilizationPlot:
             debug=self.debug,
         )
 
-        training_progress = self.sql_reader.training_progress(machine_name=machine_name, process_name=process_name, phase_name=phase_name, allow_none=True)
-        if training_progress is None and phase != DEFAULT_PHASE:
-            logging.info('TrainingProgress was None for ')
-            import ipdb; ipdb.set_trace()
+        # training_progress = self.sql_reader.training_progress(machine_name=machine_name, process_name=process_name, phase_name=phase_name, allow_none=True)
+        # if training_progress is None and phase != DEFAULT_PHASE:
+        #     logging.info('TrainingProgress was None for ')
+        #     import ipdb; ipdb.set_trace()
 
         overlap_computer = OverlapComputer(self.db_path,
                                            host=self.host, user=self.user, password=self.password,
