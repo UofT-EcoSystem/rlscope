@@ -176,6 +176,9 @@ def is_low_complexity_env(algo, env_id):
 def is_med_complexity_env(algo, env_id):
     return re.search(r'HalfCheetah|Walker2D|Hopper|Ant', env_id)
 
+def is_high_complexity_env(algo, env_id):
+    return re.search(r'airlearning', env_id.lower())
+
 def is_walker_env(algo, env_id):
     return re.search(r'Walker2D', env_id)
 
@@ -188,7 +191,9 @@ def is_fig_env_comparison(algo, env_id):
     return algo == 'ppo2' and is_paper_env(algo, env_id)
 
 def is_paper_env(algo, env_id):
-    return is_low_complexity_env(algo, env_id) or is_med_complexity_env(algo, env_id)
+    return is_low_complexity_env(algo, env_id) or \
+           is_med_complexity_env(algo, env_id) or \
+           is_high_complexity_env(algo, env_id)
 
 def is_bullet_env(env_id):
     return re.search(r'BulletEnv', env_id)

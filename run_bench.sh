@@ -87,7 +87,7 @@ sb_one_rep() {
 }
 sb_one_rep_plot() {
 #    sb_train "$@"
-#    sb_analyze "$@"
+    sb_analyze "$@"
     sb_plot "$@"
 }
 sb_reps_last() {

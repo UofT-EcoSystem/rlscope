@@ -588,6 +588,22 @@ class ExperimentGroup(Experiment):
             self.stacked_plot([
                 '--overlap-type', overlap_type,
                 '--resource-overlap', json.dumps(['CPU']),
+                '--remap-df', json.dumps([textwrap.dedent("""
+                        # Replace ppo2 operations with simple (Inference, Simulation, Backpropagation) labels 
+                        # established in Background discussion of typical RL workloads.
+                        
+                        # Sanity check to make sure we don't forget any operations.
+                        assert regions.issubset({
+                            ('step',),
+                            ('sample_action',),
+                            ('compute_advantage_estimates',), 
+                            ('optimize_surrogate',),
+                            ('training_loop',),
+                        })
+                        new_df[('Simulation',)] = df[('step',)]
+                        new_df[('Inference',)] = df[('sample_action',)]
+                        new_df[('Backpropagation',)] = df[('compute_advantage_estimates',)] + df[('optimize_surrogate',)] + df[('training_loop',)]
+                        """)]),
                 '--y-type', 'percent',
                 '--x-type', 'env-comparison',
                 '--training-time',
@@ -615,15 +631,25 @@ class ExperimentGroup(Experiment):
                     '--resource-overlap', json.dumps(['CPU']),
                     '--training-time',
                     '--remap-df', json.dumps([textwrap.dedent("""
+                        # IDEALLY: we should categorize ALL RL algorithms into simple categories:
+                        # Inference, Simulation, Backpropgation
+                        # AND, we should show all 3 of those categories, NOT just Simulation and Other...
+                        # Q: How do we do that...? insert breakpoint or pprint df?
+                        import pprint
+                        pprint.pprint({
+                            'algorithm_choice.remap_df.original_df': df,
+                            'regions': regions,
+                        })
+                        
                         # Keep 'step' region
-                        new_df[('step',)] = df[('step',)]
+                        new_df[('Simulation',)] = df[('Simulation',)]
 
-                        # Sum up regions besides 'step'
-                        new_df[('other',)] = 0.
+                        # Sum up regions besides 'Simulation'
+                        new_df[('Other',)] = 0.
                         for r in regions:
-                            if r == ('step',):
+                            if r == ('Simulation',):
                                 continue
-                            new_df[('other',)] = new_df[('other',)] + df[r]
+                            new_df[('Other',)] = new_df[('Other',)] + df[r]
                         """)]),
                     '--y-type', 'percent',
                     '--x-type', 'algo-comparison',
@@ -1123,22 +1149,10 @@ class StableBaselines(Experiment):
             ))
             sys.exit(1)
 
-        algo_env_pairs = self._gather_algo_env_pairs(
-            algo=args.algo,
-            env_id=args.env_id,
-            bullet=args.bullet,
-            atari=args.atari,
-            lunar=args.lunar,
-            algo_env_group=args.algo_env_group,
-        )
-        if algo_env_pairs is None:
-            logging.info('Please provide either --env-id or --algo')
-            sys.exit(1)
-
-        if args.debug:
-            logging.info({'algo_env_pairs': algo_env_pairs, 'args.analyze': args.analyze})
 
         if args.analyze:
+            gather = GatherAlgoEnv(args)
+            algo_env_pairs = gather.pairs_by_args()
             # if args.debug:
             logging.info("Run --analyze over (algo, env) pairs: {msg}".format(
                 msg=pprint_msg({
@@ -1161,6 +1175,23 @@ class StableBaselines(Experiment):
                 assert e.exitcode != 0
                 sys.exit(e.exitcode)
         else:
+            # Gather (algo, env) pairs whose environments we can run.
+            # (GatherAlgoEnv only looks at existing runs in output/all/iml_bench)
+            algo_env_pairs = self._gather_algo_env_pairs(
+                algo=args.algo,
+                env_id=args.env_id,
+                bullet=args.bullet,
+                atari=args.atari,
+                lunar=args.lunar,
+                algo_env_group=args.algo_env_group,
+            )
+            if algo_env_pairs is None:
+                logging.info('Please provide either --env-id or --algo')
+                sys.exit(1)
+
+            if args.debug:
+                logging.info({'algo_env_pairs': algo_env_pairs, 'args.analyze': args.analyze})
+
             logging.info("Collect trace-data over (algo, env) pairs: {msg}".format(
                 msg=pprint_msg({
                     'algo_env_pairs': algo_env_pairs,
@@ -1257,6 +1288,18 @@ class GatherAlgoEnv:
 
     def pairs_by_algo(self, algo):
         return set((a, e) for a, e in self.algo_env_pairs() if a == algo)
+
+    def pairs_by_args(self):
+        args = self.args
+        def should_keep(algo, env):
+            # NOTE: If they don't provide ANY flags for selecting algo/env to run, we run NOTHING.
+            # We no longer default to running everything (since it's a confusing bug)
+            ret = ( args.atari and expr_config.is_atari_env(env) ) or \
+                  ( args.lunar and expr_config.is_lunar_combo(algo, env) ) or \
+                  ( args.bullet and expr_config.is_bullet_env(env) ) or \
+                  ( args.algo_env_group is not None and expr_config.is_algo_env_group_combo(args.algo_env_group, algo, env) )
+            return ret
+        return self.pairs_by_func(should_keep)
 
     def pairs_by_env(self, env):
         return set((a, e) for a, e in self.algo_env_pairs() if e == env)
