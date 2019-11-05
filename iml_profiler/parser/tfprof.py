@@ -2,6 +2,12 @@ import logging
 import itertools
 import functools
 from os.path import join as _j, dirname as _d
+import copy
+
+import types
+import numba
+import numba as nb
+from numba import jit, jitclass, njit
 
 from iml_profiler.parser.common import *
 # from tensorflow.core.profiler.tfprof_log_pb2 import ProfileProto
@@ -25,7 +31,9 @@ from iml_profiler.parser.db import SQLCategoryTimesReader, sql_input_path, sql_g
 from iml_profiler.parser.readers import TFProfCategoryTimesReader, \
    DEFAULT_group_by_device, \
    DEFAULT_ignore_categories, \
-   DEFAULT_debug \
+   DEFAULT_debug
+
+from iml_profiler import py_config
 
 class ComputeOverlap:
     # DEBUG = True
@@ -100,7 +108,7 @@ class ComputeOverlap:
                  check_key=None,
                  debug=False,
                  show_progress=False):
-        self.debug = ComputeOverlap.DEBUG and debug
+        self.debug = ( ComputeOverlap.DEBUG or py_config.IML_DEBUG_UNIT_TESTS ) and debug
         self.check_key = check_key
         self.show_progress = show_progress
         self.overlaps_with = overlaps_with
@@ -197,12 +205,32 @@ class ComputeOverlap:
         return new_times
 
     def _compute_overlap(self, category_times):
-        return compute_overlap_single_thread(
-            category_times,
-            self.overlaps_with,
-            self.check_key,
-            self.debug,
-            self.show_progress)
+        if py_config.IML_USE_NUMBA:
+            overlap, overlap_metadata = compute_overlap_single_thread_numba(
+                category_times,
+                self.overlaps_with,
+                self.check_key,
+                self.debug,
+                self.show_progress)
+        else:
+            overlap, overlap_metadata = compute_overlap_single_thread(
+                category_times,
+                self.overlaps_with,
+                self.check_key,
+                self.debug,
+                self.show_progress)
+
+        if self.overlaps_with is not None:
+            del_keys = []
+            for categories_key in overlap.keys():
+                if len(self.overlaps_with.intersection(categories_key)) == 0:
+                    del_keys.append(categories_key)
+
+            for categories_key in del_keys:
+                del overlap[categories_key]
+
+        return overlap, overlap_metadata
+
 
 def split_category_times(category_times, n):
     pass
@@ -261,8 +289,6 @@ class CategoryTimesWrapper:
         self.reversed_key = reversed_key
         self.name = name
         self.by_key = _sort_category_times_by(ctimes, key=self.reversed_key)
-        # for k in list(self.by_key.keys()):
-        #     self.by_key[k] = ListWrapper(self.by_key[k])
         self.type_code = CategoryTimesWrapper.NAME_TO_TYPE_CODE[self.name]
         self._num_events = self._count_times_left()
 
@@ -279,21 +305,9 @@ class CategoryTimesWrapper:
                     min_category = category
                     min_ktime = ktime
 
-        # if len(self.by_key[category]) > 0:
-        #     ktimes.append((category, self.by_key[category][-1]))
-        # category, ktime = min(ktimes, key=lambda time_ktime: self.key(time_ktime[1]))
-
-        # ktimes = []
-        # for category in self.by_key.keys():
-        #     if len(self.by_key[category]) > 0:
-        #         ktimes.append((category, self.by_key[category][-1]))
-        # category, ktime = min(ktimes, key=lambda time_ktime: self.key(time_ktime[1]))
-        # return category, ktime
-
         return min_category, min_ktime
 
     def has_times_left(self):
-        # return any(len(ctimes_for_category) > 0 for ctimes_for_category in self.by_key.values())
         return self._num_events > 0
 
     def count_times_left(self):
@@ -303,7 +317,6 @@ class CategoryTimesWrapper:
         return sum(len(ctimes_for_category) for ctimes_for_category in self.by_key.values())
 
     def pop_time(self, category):
-        # del self.by_key[category][0]
         self.by_key[category].pop()
         self._num_events -= 1
 
@@ -330,11 +343,11 @@ class CategoryTimesWrapper:
         return by_start.count_times_left() + by_end.count_times_left()
 
 class RegionMetadata:
-    def __init__(self, category_key=None):
+    def __init__(self, category_key=None, start_time_usec=None, end_time_usec=None, num_events=0):
         self.category_key = category_key
-        self.start_time_usec = None
-        self.end_time_usec = None
-        self.num_events = 0
+        self.start_time_usec = start_time_usec
+        self.end_time_usec = end_time_usec
+        self.num_events = num_events
 
     def add_event(self, event):
         if self.start_time_usec is None or event.start_time_usec < self.start_time_usec:
@@ -357,6 +370,20 @@ class RegionMetadata:
             default=None)
         region1.num_events = region1.num_events + region2.num_events
         return region1
+
+    @staticmethod
+    def from_NumbaRegionMetadata(numba_region_metadata, category_to_idx, idx_to_category):
+        category_key = category_key_from_bitset(
+            numba_region_metadata.category_key,
+            category_to_idx,
+            idx_to_category)
+        region_metadata = RegionMetadata(
+            category_key=category_key,
+            start_time_usec=numba_region_metadata.start_time_usec,
+            end_time_usec=numba_region_metadata.end_time_usec,
+            num_events=numba_region_metadata.num_events,
+        )
+        return region_metadata
 
     def __str__(self):
         return "(key={key}, start_usec={start}, end_usec={end}, num_events={num_events})".format(
@@ -434,8 +461,488 @@ class OverlapMetadata:
             self.regions[category_key] = RegionMetadata(category_key)
         self.regions[category_key].merge_inplace(region)
 
+    def _add_region(self, category_key, region_metadata):
+        assert category_key not in self.regions
+        self.regions[category_key] = region_metadata
+
+    @staticmethod
+    def from_NumbaOverlapMetadata(numba_overlap_metadata, category_to_idx, idx_to_category):
+        overlap_metadata = OverlapMetadata()
+        for category_key_bitset, numba_region_metadata in numba_overlap_metadata.regions.items():
+            category_key = category_key_from_bitset(category_key_bitset, category_to_idx, idx_to_category)
+            region_metadata = RegionMetadata.from_NumbaRegionMetadata(numba_region_metadata, category_to_idx, idx_to_category)
+            overlap_metadata._add_region(category_key, region_metadata)
+        return overlap_metadata
+
     def __str__(self):
         return "OverlapMetadata(regions={regions})".format(regions=self.regions)
+
+@njit
+def best_by_index_start(lle, cindices):
+    """
+    Find next minimum start-time.
+
+    :param lle: [[Events]]
+        Category times, represented as a List-of-List-of-Events (lle).
+    :param cindices:
+        Next category time to consider, for each Category categories[i].
+    :return:
+    """
+    best = -1
+    best_time = sys.maxsize
+    for i in range(len(cindices)):
+        if cindices[i] < len(lle[i]) and \
+            lle[i][cindices[i]].start_time_usec <= best_time:
+                best_time = lle[i][cindices[i]].start_time_usec
+                best = i
+    return best, best_time
+
+@njit
+def best_by_index_end(lle, cindices):
+    """
+    Same as best_by_index_start, but find next minimum end-time.
+    """
+    best = -1
+    best_time = sys.maxsize
+    for i in range(len(cindices)):
+        if cindices[i] < len(lle[i]) and \
+            lle[i][cindices[i]].end_time_usec <= best_time:
+                best_time = lle[i][cindices[i]].end_time_usec
+                best = i
+    return best, best_time
+
+"""
+Individual categories have one bit set:
+    Category[0] = 0b0001
+    Category[1] = 0b0010
+    Category[2] = 0b0100
+    Category[3] = 0b1000
+    ...
+
+Set Union:
+    { Category[0], Category[3] } = 0b1001
+
+Removing elements from the set:
+    Remove Category[0] from { Category[0], Category[3] } = 0b1000
+                                                                -
+                                                                flipped this bit to 0
+Adding elements to the set:
+    Add Category[1] from { Category[0], Category[3] } = 0b1011
+                                                            -
+                                                            flipped this bit to 1
+"""
+@njit
+def bitset_add(bitset, idx):
+    return bitset | (1 << idx)
+@njit
+def bitset_remove(bitset, idx):
+    return bitset & ~(1 << idx)
+@njit
+def bitset_contains(bitset, idx):
+    return bitset & (1 << idx)
+@njit
+def bitset_union(bitset1, bitset2):
+    return bitset1 | bitset2
+@njit
+def bitset_empty_set():
+    return 0
+@njit
+def bitset_full_set(N):
+    """
+    e.g. N = 4
+    0b1111
+        == 0b10000 - 1
+        == (1 << N) - 1
+
+
+    :param N:
+        Number of elements in the set.
+    :return:
+        A bitset containing all members {0, 1, 2, ..., N-1}
+    """
+    return (1 << N) - 1
+@njit
+def bitset_is_empty(bitset):
+    return bitset == 0
+@njit
+def bitset_indices(bitset):
+    bits_left = bitset
+    if py_config.NUMBA_DISABLE_JIT:
+        indices = []
+    else:
+        indices = numba.typed.List.empty_list(nb.int64)
+    idx = 0
+    while not bitset_is_empty(bits_left):
+        if bitset_contains(bitset, idx):
+            indices.append(idx)
+            bits_left = bitset_remove(bits_left, idx)
+        idx += 1
+    return indices
+
+# https://numba.pydata.org/numba-doc/dev/user/jitclass.html
+NumbaRegionMetadata_Fields = [
+    ('category_key', nb.int64),
+    ('start_time_usec', nb.int64),
+    ('end_time_usec', nb.int64),
+    ('num_events', nb.int64),
+]
+@jitclass(NumbaRegionMetadata_Fields)
+class NumbaRegionMetadata:
+    """
+    Numbified version of RegionMetadata class.
+    RegionMetadata is used to track the following statistics about each overlap region:
+
+        self.start_time_usec = None
+        self.end_time_usec = None
+        self.num_events = 0
+    - min(event.start_time)
+    - max(event.start_time)
+    - number of events in overlap region
+
+    NOTE: I'm not sure if these statistics are entirely necessary, but they're just nice-to-have for debugging.
+    """
+    def __init__(self, category_key=0):
+        self.category_key = category_key
+        self.start_time_usec = 0
+        self.end_time_usec = 0
+        self.num_events = 0
+
+    def add_event(self, event):
+        if self.start_time_usec == 0 or event.start_time_usec < self.start_time_usec:
+            self.start_time_usec = event.start_time_usec
+
+        if self.end_time_usec == 0 or event.end_time_usec > self.end_time_usec:
+            self.end_time_usec = event.end_time_usec
+
+        self.num_events += 1
+
+
+# Nested jitclass types.
+#
+# https://stackoverflow.com/questions/38682260/how-to-nest-numba-jitclass
+NumbaRegionMetadata_type = numba.deferred_type()
+# Fails with NUMBA_DISABLE_JIT=1
+if not py_config.NUMBA_DISABLE_JIT:
+    NumbaRegionMetadata_type.define(NumbaRegionMetadata.class_type.instance_type)
+
+NumbaOverlapMetadata_Fields = [
+    ('start_time_usec', nb.int64),
+    ('end_time_usec', nb.int64),
+    ('num_events', nb.int64),
+]
+@jitclass(NumbaOverlapMetadata_Fields)
+class NumbaOverlapMetadata:
+    """
+    Numbafied version of OverlapMetadata.
+    """
+    def __init__(self):
+        # CategoryKey -> RegionMetadata
+        if py_config.NUMBA_DISABLE_JIT:
+            self.regions = dict()
+        else:
+            self.regions = numba.typed.Dict.empty(
+                key_type=np.float64,
+                value_type=NumbaRegionMetadata_type,
+            )
+
+    def add_event(self, category_key, event):
+        if category_key not in self.regions:
+            self.regions[category_key] = NumbaRegionMetadata(category_key)
+
+        self.regions[category_key].add_event(event)
+NumbaOverlapMetadata_type = numba.deferred_type()
+if not py_config.NUMBA_DISABLE_JIT:
+    NumbaOverlapMetadata_type.define(NumbaOverlapMetadata.class_type.instance_type)
+
+NumbaOverlap_Fields = [
+    ('overlap_regions', numba.types.DictType(nb.int64, nb.int64)),
+]
+@jitclass(NumbaOverlap_Fields)
+class NumbaOverlap:
+    """
+    Numbafied version of OverlapMetadata.
+    """
+    def __init__(self):
+        # CategoryKey -> Int64
+        if py_config.NUMBA_DISABLE_JIT:
+            self.overlap_regions = dict()
+        else:
+            self.overlap_regions = numba.typed.Dict.empty(
+                key_type=nb.int64,
+                value_type=nb.int64,
+            )
+
+    def add_time(self, category_key, time_usec):
+        if category_key not in self.overlap_regions:
+            self.overlap_regions[category_key] = 0
+        self.overlap_regions[category_key] += time_usec
+NumbaOverlap_type = numba.deferred_type()
+if not py_config.NUMBA_DISABLE_JIT:
+    NumbaOverlap_type.define(NumbaOverlap.class_type.instance_type)
+
+def category_key_from_bitset(bitset, category_to_idx, idx_to_category, freeze=True):
+    category_key = set()
+    indices = bitset_indices(bitset)
+    for idx in indices:
+        category = idx_to_category[idx]
+        category_key.add(category)
+    if freeze:
+        category_key = frozenset(category_key)
+    return category_key
+
+class Overlap:
+    """
+    Numbafied version of OverlapMetadata.
+    """
+    def __init__(self):
+        # CategoryKey -> Int64
+        # self.overlap_regions = dict()
+        raise NotImplementedError()
+
+    @staticmethod
+    def from_NumbaOverlap(numba_overlap, category_to_idx, idx_to_category):
+        overlap = dict()
+        for category_key_bitset, time_usec in numba_overlap.overlap_regions.items():
+            category_key = category_key_from_bitset(category_key_bitset, category_to_idx, idx_to_category)
+            overlap[category_key] = time_usec
+        return overlap
+
+NumbaEvent_Fields = [
+    ('start_time_usec', nb.int64),
+    ('end_time_usec', nb.int64),
+]
+@jitclass(NumbaEvent_Fields)
+class NumbaEvent:
+    """
+    Numbafied version of KernelTime.
+    """
+    def __init__(self, start_time_usec, end_time_usec):
+        self.start_time_usec = start_time_usec
+        self.end_time_usec = end_time_usec
+NumbaEvent_type = numba.deferred_type()
+if not py_config.NUMBA_DISABLE_JIT:
+    NumbaEvent_type.define(NumbaEvent.class_type.instance_type)
+
+@njit
+def numba_compute_overlap(
+    by_start, by_end,
+    show_progress=False,
+    debug=False):
+    """
+    Convert event overlap computation into something that is optimizable by numba.
+    In particular:
+        - avoid classes and complicated Python data-structures (dicts, lists, sets, combinations thereof)
+        - use numpy operations/arrays (e.g. broadcasting adds)
+    To get an idea of what numba can optimize and cannot, see the following:
+        https://numba.pydata.org/numba-doc/dev/user/5minguide.html
+
+    :param by_start:
+        Category -> [Event]
+        Represented as [[Event]]
+        In particular, by_start[i][...] are all the Event's that belong to Category=categories[i]
+        Events in each list are sorted by start time.
+    :param by_end:
+        Category -> [Event]
+        Represented as [[Event]]
+        Same as by_start, except Events in each list are sorted by end time.
+    :return: overlap:
+         { Category }     ->          Int64
+         ------------                 -----
+        Overlap region        Duration of overlap
+
+        Mapping from a set of Categories (a.k.a. overlap region) to total time (in microseconds).
+        An "overlap region" is a set of overlapping categories, and the total duration of the overlap.
+
+    # :param categories
+    #     List of strings representing category names:
+    #     e.g. {"CPU", "GPU", ...}
+    """
+
+    # NOTE: assertions cause unsupported opcode error:
+    #   Use of unknown opcode 'IMPORT_NAME'
+    # Work-around: push the assertions up into our python caller.
+    # assert len(by_start) == len(by_end)
+    k = len(by_start)
+
+    overlap = NumbaOverlap()
+
+    # How many events are in each Category.
+    lengths = np.array([len(l) for l in by_start], dtype=int)
+
+    if debug:
+        # NOTE: we use print instead of logging.info so that
+        # these will print when running Numba JIT compiled code.
+        print("(1) after lengths = ...")
+
+    overlap_metadata = NumbaOverlapMetadata()
+    if len(lengths) == 0 or np.sum(lengths) == 0:
+        # Either no categories, or no
+        return overlap, overlap_metadata
+
+    if debug:
+        print("(2) NumbaOverlapMetadata()")
+
+    start_index = np.zeros(k, dtype=int)
+    end_index = np.zeros(k, dtype=int)
+
+    # cur_categories = set()
+    cur_categories = bitset_empty_set()
+    min_by_start, min_time_by_start = best_by_index_start(by_start, start_index)
+    if debug:
+        print("(3) after finding start time of earliest event with best_by_index_start")
+    cur_time = min_time_by_start
+    # cur_categories.add(min_by_start)
+    cur_categories = bitset_add(cur_categories, min_by_start)
+
+    while (start_index < lengths).any() or (end_index < lengths).any():
+        min_by_start, min_time_by_start = best_by_index_start(by_start, start_index)
+        if debug:
+            print("(4) after best_by_index_start")
+        min_by_end, min_time_by_end = best_by_index_end(by_end, end_index)
+        if debug:
+            print("(5) after best_by_index_end")
+        # assert min_by_start >= 0 or min_by_end >= 0
+
+        if min_time_by_start <= min_time_by_end:
+            min_time = min_time_by_start
+            event = by_start[min_by_start][start_index[min_by_start]]
+            if debug:
+                print("(6) after by_start[min_by_start]")
+            min_category = min_by_start
+            is_start = True
+        else:
+            min_time = min_time_by_end
+            event = by_end[min_by_end][end_index[min_by_end]]
+            if debug:
+                print("(7) after by_end[min_by_end]")
+            min_category = min_by_end
+            is_start = False
+
+        time_chunk = min_time - cur_time
+
+        # if len(cur_categories) > 0 and time_chunk > 0:
+        if not bitset_is_empty(cur_categories) and time_chunk > 0:
+            # Don't bother recording empty gaps between times.
+            # categories_key = frozenset(cur_categories)
+
+            # if cur_categories not in overlap:
+            #     overlap[cur_categories] = 0
+            # overlap[cur_categories] += time_chunk
+            overlap.add_time(cur_categories, time_chunk)
+            if debug:
+                print("(8) overlap.add_time")
+            overlap_metadata.add_event(cur_categories, event)
+            if debug:
+                print("(8) overlap_metadata.add_event")
+
+        if is_start:
+            start_index[min_by_start] += 1
+            # cur_categories.add(min_category)
+            cur_categories = bitset_add(cur_categories, min_category)
+            if debug:
+                print("(9) after is_start")
+        else:
+            end_index[min_by_end] += 1
+            # cur_categories.remove(min_category)
+            cur_categories = bitset_remove(cur_categories, min_category)
+            if debug:
+                print("(9) after not is_start")
+
+        # if show_progress:
+        #     count_left = CategoryTimesWrapper.total_left(by_start, by_end)
+        #     bar.update(total_events - count_left)
+
+        cur_time = min_time
+
+    # assert len(cur_categories) == 0
+
+    return overlap, overlap_metadata
+
+def AsNumbaLLE(category_times, category_to_idx, idx_to_category):
+
+    def AsNumbaLE(times):
+        if py_config.NUMBA_DISABLE_JIT:
+            le = []
+        else:
+            # le = numba.typed.List()
+            le = numba.typed.List.empty_list(NumbaRegionMetadata_type)
+
+        for time in times:
+            start_time_usec = time.start_time_usec
+            end_time_usec = time.end_time_usec
+            event = NumbaEvent(start_time_usec, end_time_usec)
+            le.append(event)
+        return le
+
+    if py_config.NUMBA_DISABLE_JIT:
+        by_start_lle = []
+        by_end_lle = []
+    else:
+        # by_start_lle = numba.typed.List()
+        # by_end_lle = numba.typed.List()
+        by_start_lle = numba.typed.List.empty_list(
+            numba.typed.List(lsttype=numba.types.ListType(NumbaEvent_type)),
+        )
+        by_end_lle = numba.typed.List.empty_list(
+            numba.typed.List(lsttype=numba.types.ListType(NumbaEvent_type)),
+        )
+
+    # if debug:
+    #     logging.info("converting to NumbaEvent's: {msg}".format(
+    #         msg=pprint_msg({
+    #             'category_times': category_times,
+    #         }),
+    #     ))
+
+    for category_key, times_by_start in category_times.items():
+        times_by_end = sorted(times_by_start, key=lambda ktime: ktime.end_time_usec)
+        # Events in category_times should be sorted by start_time_usec.
+        for i in range(1, len(times_by_start)):
+            assert times_by_start[i-1].start_time_usec <= times_by_start[i-1].start_time_usec
+        # No need to check, we just sorted them!
+        # for i in range(1, len(times_by_end)):
+        #     assert times_by_end[i-1].end_time_usec <= times_by_end[i-1].end_time_usec
+        by_start_lle.append(AsNumbaLE(times_by_start))
+        by_end_lle.append(AsNumbaLE(times_by_end))
+    return by_start_lle, by_end_lle
+
+def category_to_idx_maps(categories):
+    categories_order = sorted(categories)
+    category_to_idx = dict()
+    idx_to_category = dict()
+    for i, category in enumerate(categories_order):
+        category_to_idx[category] = i
+        idx_to_category[i] = category
+    return category_to_idx, idx_to_category
+
+def compute_overlap_single_thread_numba(
+    category_times,
+    overlaps_with=None,
+    check_key=None,
+    debug=False,
+    show_progress=False):
+
+    # Python -> Numba:
+    #   Convert Python types to Numba types.
+    category_to_idx, idx_to_category = category_to_idx_maps(category_times)
+    by_start, by_end = AsNumbaLLE(
+        category_times, category_to_idx, idx_to_category,
+        # debug=debug,
+    )
+
+    assert len(by_start) == len(by_end)
+    # Call into Numba
+    numba_overlap, numba_overlap_metadata = numba_compute_overlap(
+        by_start, by_end,
+        show_progress=show_progress,
+        debug=debug)
+
+    # Numba -> Python:
+    #   Convert Numba types back to Python types.
+    overlap_metadata = OverlapMetadata.from_NumbaOverlapMetadata(numba_overlap_metadata, category_to_idx, idx_to_category)
+    overlap = Overlap.from_NumbaOverlap(numba_overlap, category_to_idx, idx_to_category)
+
+    return overlap, overlap_metadata
 
 def compute_overlap_single_thread(
     category_times,
@@ -443,8 +950,6 @@ def compute_overlap_single_thread(
     check_key=None,
     debug=False,
     show_progress=False):
-    # categories = set(category_times.keys())
-    # JAMES TODO: compute the progress of this function... I think it takes forever with minigo
 
     overlap_metadata = OverlapMetadata()
 
@@ -582,15 +1087,6 @@ def compute_overlap_single_thread(
         # We may get artificial overlaps even if two categories are synchronous,
         # if the next category starts exactly when the last one ends.
         if times[categories_key] == 0:
-            del times[categories_key]
-
-    if overlaps_with is not None:
-        del_keys = []
-        for categories_key in times.keys():
-            if len(overlaps_with.intersection(categories_key)) == 0:
-                del_keys.append(categories_key)
-
-        for categories_key in del_keys:
             del times[categories_key]
 
     return times, overlap_metadata
@@ -3223,266 +3719,307 @@ def test_merge_adjacent_events():
         assert got == expect
     test_01_merge_adj_events()
 
-def test_compute_overlap():
-    # Set to true to print info.
-    # debug = False
-    debug = True
 
+##
+## Event overlap unit tests.
+##
+"""
+Environment variables that effect unit-tests:
+    IML_DEBUG_UNIT_TESTS=[0/1]
+        Default: 0
+        Enable more verbose debugging information during unit-tests.
+        
+    IML_USE_NUMBA=[0/1]
+        Default: 0
+        Use numbafied event overlap computation.
+        
+    NUMBA_DISABLE_JIT=[0/1]
+        Default: 0
+        numba library specific option; 
+        when turned off, disables all JIT compilation (i.e. code runs as regular python code).
+        Makes it easier to debug segfaults.
+        For details: 
+            https://numba.pydata.org/numba-doc/dev/user/troubleshoot.html#disabling-jit-compilation
+            
+Common usage:
+
+    # cd to root directory of iml repo checkout.
+    $ cd ~/clone/iml
+
+    # To run numbaified code with JIT compilation enabled:
+    $ IML_USE_NUMBA=1 pytest -vv -s --pdb iml_profiler/parser/tfprof.py
+
+    # To run numbaified code WITHOUT JIT enabled (e.g. if you segfault and don't know why):
+    $ IML_USE_NUMBA=1 NUMBA_DISABLE_JIT=1 pytest -vv -s --pdb iml_profiler/parser/tfprof.py
+    
+    # To run un-numbafied code:
+    $ pytest -vv -s --pdb iml_profiler/parser/tfprof.py
+
+
+"""
+
+def test_01_complete():
     from test.test_util import sec, T, flatten_category_times as flat
-
-    def test_01_complete():
-        category_times = {
-            'c1':[
-                [
-                    T(3, 4), T(8, 10),
-                ],
-                [
-                    T(3.5, 7),
-                ],
+    # Q: Any way to automate this by checking if a pytest is running...?
+    py_config.IS_UNIT_TEST = True
+    category_times = {
+        'c1':[
+            [
+                T(3, 4), T(8, 10),
             ],
-            'c2':[
-                [
-                    T(1, 4), T(6, 9),
-                ],
+            [
+                T(3.5, 7),
             ],
-            'c3':[
-                [
-                    T(2, 3), T(4, 5), T(7, 8),
-                ],
-                [
-                    T(3, 4), T(11, 12),
-                ],
-            ],
-        }
-        compute_overlap = ComputeOverlap(flat(category_times), debug=debug)
-        compute_overlap.compute_merge()
-        got = compute_overlap.get_merged_categories()
-        expect = {
-            'c1':[
-                T(3, 7), T(8, 10),
-            ],
-            'c2':[
+        ],
+        'c2':[
+            [
                 T(1, 4), T(6, 9),
             ],
-            'c3':[
-                T(2, 5), T(7, 8), T(11, 12),
+        ],
+        'c3':[
+            [
+                T(2, 3), T(4, 5), T(7, 8),
             ],
-        }
-        assert got == expect
-
-        # compute_overlap.compute()
-        compute_overlap.compute_times()
-        got = compute_overlap.get_category_times()
-        expect = {
-            frozenset({'c1'}):sec(2),
-            frozenset({'c2'}):sec(1),
-            frozenset({'c3'}):sec(1),
-            frozenset({'c1', 'c2'}):sec(2),
-            frozenset({'c1', 'c3'}):sec(1),
-            frozenset({'c2', 'c3'}):sec(2),
-            frozenset({'c1', 'c2', 'c3'}):sec(1),
-        }
-        assert got == expect
-    test_01_complete()
-
-    def test_02_overlaps_with():
-        category_times = {
-            'c1':[
-                [
-                    T(3, 4), T(8, 10),
-                ],
-                [
-                    T(3.5, 7),
-                ],
+            [
+                T(3, 4), T(11, 12),
             ],
-            'c2':[
-                [
-                    T(1, 4), T(6, 9),
-                ],
+        ],
+    }
+    compute_overlap = ComputeOverlap(flat(category_times), debug=py_config.IML_DEBUG_UNIT_TESTS)
+    compute_overlap.compute_merge()
+    got = compute_overlap.get_merged_categories()
+    expect = {
+        'c1':[
+            T(3, 7), T(8, 10),
+        ],
+        'c2':[
+            T(1, 4), T(6, 9),
+        ],
+        'c3':[
+            T(2, 5), T(7, 8), T(11, 12),
+        ],
+    }
+    assert got == expect
+
+    # compute_overlap.compute()
+    compute_overlap.compute_times()
+    got = compute_overlap.get_category_times()
+    expect = {
+        frozenset({'c1'}):sec(2),
+        frozenset({'c2'}):sec(1),
+        frozenset({'c3'}):sec(1),
+        frozenset({'c1', 'c2'}):sec(2),
+        frozenset({'c1', 'c3'}):sec(1),
+        frozenset({'c2', 'c3'}):sec(2),
+        frozenset({'c1', 'c2', 'c3'}):sec(1),
+    }
+    assert got == expect
+
+def test_02_overlaps_with():
+    from test.test_util import sec, T, flatten_category_times as flat
+    py_config.IS_UNIT_TEST = True
+    category_times = {
+        'c1':[
+            [
+                T(3, 4), T(8, 10),
             ],
-            'c3':[
-                [
-                    T(2, 3), T(4, 5), T(7, 8),
-                ],
-                [
-                    T(3, 4), T(11, 12),
-                ],
+            [
+                T(3.5, 7),
             ],
-        }
-        compute_overlap = ComputeOverlap(flat(category_times), overlaps_with=['c1'], debug=debug)
-
-        compute_overlap.compute()
-        got = compute_overlap.get_category_times()
-        expect = {
-            frozenset({'c1'}):sec(2),
-            frozenset({'c1', 'c2'}):sec(2),
-            frozenset({'c1', 'c3'}):sec(1),
-            frozenset({'c1', 'c2', 'c3'}):sec(1),
-        }
-        assert got == expect
-    test_02_overlaps_with()
-
-    def test_03_error_partial_overlap():
-        category_times = {
-            'c1':[
-                [
-                    T(3, 5), T(4, 6),
-                ],
+        ],
+        'c2':[
+            [
+                T(1, 4), T(6, 9),
             ],
-        }
-        compute_overlap = ComputeOverlap(flat(category_times), debug=debug)
-
-        compute_overlap.compute()
-        got = compute_overlap.get_category_times()
-        expect = {
-            frozenset({'c1'}):sec(3),
-            # frozenset({'c1', 'c2'}):sec(2),
-            # frozenset({'c1', 'c3'}):sec(1),
-            # frozenset({'c1', 'c2', 'c3'}):sec(1),
-        }
-        # expect = {
-        #     frozenset({'c1'}):sec(2),
-        #     frozenset({'c1', 'c2'}):sec(2),
-        #     frozenset({'c1', 'c3'}):sec(1),
-        #     frozenset({'c1', 'c2', 'c3'}):sec(1),
-        # }
-        assert got == expect
-    test_03_error_partial_overlap()
-
-    def test_04_error_full_overlap():
-        category_times = {
-            'c1':[
-                [
-                    T(3, 6), T(4, 5),
-                ],
+        ],
+        'c3':[
+            [
+                T(2, 3), T(4, 5), T(7, 8),
             ],
-        }
-        compute_overlap = ComputeOverlap(flat(category_times), debug=debug)
-
-        compute_overlap.compute()
-        got = compute_overlap.get_category_times()
-        # expect = {
-        #     frozenset({'c1'}):sec(2),
-        #     frozenset({'c1', 'c2'}):sec(2),
-        #     frozenset({'c1', 'c3'}):sec(1),
-        #     frozenset({'c1', 'c2', 'c3'}):sec(1),
-        # }
-        # assert got == expect
-    test_04_error_full_overlap()
-
-    def test_05_error_duplicate_overlap():
-        category_times = {
-            'c1':[
-                [
-                    T(3, 6), T(3, 6),
-                ],
+            [
+                T(3, 4), T(11, 12),
             ],
-        }
-        compute_overlap = ComputeOverlap(flat(category_times), debug=debug)
+        ],
+    }
+    compute_overlap = ComputeOverlap(flat(category_times), overlaps_with=['c1'], debug=py_config.IML_DEBUG_UNIT_TESTS)
 
-        compute_overlap.compute()
-        got = compute_overlap.get_category_times()
-        # expect = {
-        #     frozenset({'c1'}):sec(2),
-        #     frozenset({'c1', 'c2'}):sec(2),
-        #     frozenset({'c1', 'c3'}):sec(1),
-        #     frozenset({'c1', 'c2', 'c3'}):sec(1),
-        # }
-        # assert got == expect
-    test_05_error_duplicate_overlap()
+    compute_overlap.compute()
+    got = compute_overlap.get_category_times()
+    expect = {
+        frozenset({'c1'}):sec(2),
+        frozenset({'c1', 'c2'}):sec(2),
+        frozenset({'c1', 'c3'}):sec(1),
+        frozenset({'c1', 'c2', 'c3'}):sec(1),
+    }
+    assert got == expect
 
-    def test_06_error_not_sorted_by_end_time():
-        category_times = {
-            'c1':[
-                [
-                    # T(3, 6), T(3, 5),
-                    # T(3, 5), T(3, 6),
-                    # T(2, 5), T(3, 6),
-                    T(3, 6), T(2, 5),
-                ],
+def test_03_error_partial_overlap():
+    from test.test_util import sec, T, flatten_category_times as flat
+    py_config.IS_UNIT_TEST = True
+    category_times = {
+        'c1':[
+            [
+                T(3, 5), T(4, 6),
             ],
-        }
-        compute_overlap = ComputeOverlap(flat(category_times), debug=debug)
+        ],
+    }
+    compute_overlap = ComputeOverlap(flat(category_times), debug=py_config.IML_DEBUG_UNIT_TESTS)
 
-        compute_overlap.compute()
-        got = compute_overlap.get_category_times()
-        # expect = {
-        #     frozenset({'c1'}):sec(2),
-        #     frozenset({'c1', 'c2'}):sec(2),
-        #     frozenset({'c1', 'c3'}):sec(1),
-        #     frozenset({'c1', 'c2', 'c3'}):sec(1),
-        # }
-        # assert got == expect
-    test_06_error_not_sorted_by_end_time()
+    compute_overlap.compute()
+    got = compute_overlap.get_category_times()
+    expect = {
+        frozenset({'c1'}):sec(3),
+        # frozenset({'c1', 'c2'}):sec(2),
+        # frozenset({'c1', 'c3'}):sec(1),
+        # frozenset({'c1', 'c2', 'c3'}):sec(1),
+    }
+    # expect = {
+    #     frozenset({'c1'}):sec(2),
+    #     frozenset({'c1', 'c2'}):sec(2),
+    #     frozenset({'c1', 'c3'}):sec(1),
+    #     frozenset({'c1', 'c2', 'c3'}):sec(1),
+    # }
+    assert got == expect
 
-    def test_07_overlapping_sorted_events():
-
-        category_times = {
-            'c1':[
-                [
-                    # [1..7]
-                    T(1, 6), T(2, 6), T(3, 7), T(4, 6)
-                ],
+def test_04_error_full_overlap():
+    from test.test_util import sec, T, flatten_category_times as flat
+    py_config.IS_UNIT_TEST = True
+    category_times = {
+        'c1':[
+            [
+                T(3, 6), T(4, 5),
             ],
-            'c2':[
-                [
-                    T(4, 5),
-                ],
-            ],
-        }
-        compute_overlap = ComputeOverlap(flat(category_times), debug=debug)
+        ],
+    }
+    compute_overlap = ComputeOverlap(flat(category_times), debug=py_config.IML_DEBUG_UNIT_TESTS)
 
-        compute_overlap.compute()
-        got = compute_overlap.get_category_times()
-        expect = {
-            frozenset({'c1'}):sec(5),
-            frozenset({'c1', 'c2'}):sec(1),
-        }
-        assert got == expect
-    test_07_overlapping_sorted_events()
+    compute_overlap.compute()
+    got = compute_overlap.get_category_times()
+    # expect = {
+    #     frozenset({'c1'}):sec(2),
+    #     frozenset({'c1', 'c2'}):sec(2),
+    #     frozenset({'c1', 'c3'}):sec(1),
+    #     frozenset({'c1', 'c2', 'c3'}):sec(1),
+    # }
+    # assert got == expect
 
-    def test_08_overlapping_sorted_events():
-        # Q: What if start times match but end times are unordered?
-        # Q: WHY would this EVER happen in our data though...?
-        #    It CAN if concurrent events get "shuffled" into the same category (for some reason).
-        #    Perhaps this could happen with CPU/GPU?
+def test_05_error_duplicate_overlap():
+    from test.test_util import sec, T, flatten_category_times as flat
+    py_config.IS_UNIT_TEST = True
+    category_times = {
+        'c1':[
+            [
+                T(3, 6), T(3, 6),
+            ],
+        ],
+    }
+    compute_overlap = ComputeOverlap(flat(category_times), debug=py_config.IML_DEBUG_UNIT_TESTS)
 
-        category_times = {
-            'c1':[
-                [
-                    # [1..7] 6
-                    T(1, 6), T(2, 6), T(3, 7), T(4, 6)
-                ],
-            ],
-            'c2':[
-                [
-                    # [4..9] 5
-                    T(4, 4.5), T(4.5, 5), T(5, 9), T(5, 8)
-                ],
-            ],
-            'c3':[
-                [
-                    # [5..9] 4
-                    T(5, 9),
-                ],
-            ],
-        }
-        compute_overlap = ComputeOverlap(flat(category_times), debug=debug)
+    compute_overlap.compute()
+    got = compute_overlap.get_category_times()
+    # expect = {
+    #     frozenset({'c1'}):sec(2),
+    #     frozenset({'c1', 'c2'}):sec(2),
+    #     frozenset({'c1', 'c3'}):sec(1),
+    #     frozenset({'c1', 'c2', 'c3'}):sec(1),
+    # }
+    # assert got == expect
 
-        compute_overlap.compute()
-        got = compute_overlap.get_category_times()
-        expect = {
-            # [1..4]
-            frozenset({'c1'}):sec(3),
-            # [4..5]
-            frozenset({'c1', 'c2'}):sec(1),
-            # [5..7]
-            frozenset({'c1', 'c2', 'c3'}):sec(2),
-            # [7..9]
-            frozenset({'c2', 'c3'}):sec(2),
-        }
-        assert got == expect
-    test_08_overlapping_sorted_events()
+def test_06_error_not_sorted_by_end_time():
+    from test.test_util import sec, T, flatten_category_times as flat
+    py_config.IS_UNIT_TEST = True
+    category_times = {
+        'c1':[
+            [
+                # T(3, 6), T(3, 5),
+                # T(3, 5), T(3, 6),
+                # T(2, 5), T(3, 6),
+                T(3, 6), T(2, 5),
+            ],
+        ],
+    }
+    compute_overlap = ComputeOverlap(flat(category_times), debug=py_config.IML_DEBUG_UNIT_TESTS)
+
+    compute_overlap.compute()
+    got = compute_overlap.get_category_times()
+    # expect = {
+    #     frozenset({'c1'}):sec(2),
+    #     frozenset({'c1', 'c2'}):sec(2),
+    #     frozenset({'c1', 'c3'}):sec(1),
+    #     frozenset({'c1', 'c2', 'c3'}):sec(1),
+    # }
+    # assert got == expect
+
+def test_07_overlapping_sorted_events():
+    from test.test_util import sec, T, flatten_category_times as flat
+    py_config.IS_UNIT_TEST = True
+
+    category_times = {
+        'c1':[
+            [
+                # [1..7]
+                T(1, 6), T(2, 6), T(3, 7), T(4, 6)
+            ],
+        ],
+        'c2':[
+            [
+                T(4, 5),
+            ],
+        ],
+    }
+    compute_overlap = ComputeOverlap(flat(category_times), debug=py_config.IML_DEBUG_UNIT_TESTS)
+
+    compute_overlap.compute()
+    got = compute_overlap.get_category_times()
+    expect = {
+        frozenset({'c1'}):sec(5),
+        frozenset({'c1', 'c2'}):sec(1),
+    }
+    assert got == expect
+
+def test_08_overlapping_sorted_events():
+    from test.test_util import sec, T, flatten_category_times as flat
+    py_config.IS_UNIT_TEST = True
+    # Q: What if start times match but end times are unordered?
+    # Q: WHY would this EVER happen in our data though...?
+    #    It CAN if concurrent events get "shuffled" into the same category (for some reason).
+    #    Perhaps this could happen with CPU/GPU?
+
+    category_times = {
+        'c1':[
+            [
+                # [1..7] 6
+                T(1, 6), T(2, 6), T(3, 7), T(4, 6)
+            ],
+        ],
+        'c2':[
+            [
+                # [4..9] 5
+                T(4, 4.5), T(4.5, 5), T(5, 9), T(5, 8)
+            ],
+        ],
+        'c3':[
+            [
+                # [5..9] 4
+                T(5, 9),
+            ],
+        ],
+    }
+    compute_overlap = ComputeOverlap(flat(category_times), debug=py_config.IML_DEBUG_UNIT_TESTS)
+
+    compute_overlap.compute()
+    got = compute_overlap.get_category_times()
+    expect = {
+        # [1..4]
+        frozenset({'c1'}):sec(3),
+        # [4..5]
+        frozenset({'c1', 'c2'}):sec(1),
+        # [5..7]
+        frozenset({'c1', 'c2', 'c3'}):sec(2),
+        # [7..9]
+        frozenset({'c2', 'c3'}):sec(2),
+    }
+    assert got == expect
 
 def test_split():
 

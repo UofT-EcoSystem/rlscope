@@ -26,6 +26,7 @@ from iml_profiler.protobuf.iml_prof_pb2 import CUDAAPIPhaseStatsProto, MachineDe
 from tqdm import tqdm as tqdm_progress
 
 from iml_profiler import py_config
+from iml_profiler.py_config import EnvVars
 
 USEC_IN_SEC = 1e6
 

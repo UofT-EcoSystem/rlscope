@@ -85,3 +85,84 @@ LIB_SAMPLE_CUDA_API = _j(ROOT, 'build', 'libsample_cuda_api.so')
 # Modifies C++ code to make tfprof add less overhead to the critical path.
 # CUSTOM_TF = True
 # CUSTOM_TF = False
+
+class _EnvVars:
+  """
+  Typed wrapper around os.environ
+
+  # E.g.
+  $ export DEBUG=yes
+  # OR
+  $ export DEBUG=true
+  ...
+  >>> EnvVars.get_bool('DEBUG')
+  True
+
+  # E.g.
+  $ export DEBUG=0
+  # OR
+  $ export DEBUG=false
+  ...
+  >>> EnvVars.get_bool('DEBUG')
+  False
+  """
+  def __init__(self, env=None):
+    if env is None:
+      env = os.environ
+    self.env = env
+
+  def _as_bool(self, string):
+    string = string.lower()
+    if string in {'0', 'no', 'false', 'None'}:
+      return False
+    return True
+
+  def _as_int(self, string):
+    return int(string)
+
+  def _as_float(self, string):
+    return float(string)
+
+  def _as_number(self, string):
+    try:
+      val = int(string)
+      return val
+    except ValueError:
+      pass
+
+    val = float(string)
+    return val
+
+  def _get_typed(self, var, converter, dflt):
+    if var not in self.env:
+      return dflt
+    string = self.env[var]
+    val = converter(string)
+    return val
+
+  def get_bool(self, var, dflt=False):
+    val = self._get_typed(var, self._as_bool, dflt)
+    return val
+
+  def get_int(self, var, dflt=0):
+    val = self._get_typed(var, self._as_int, dflt)
+    return val
+
+  def get_float(self, var, dflt=0.):
+    val = self._get_typed(var, self._as_float, dflt)
+    return val
+
+  def get_number(self, var, dflt=0.):
+    val = self._get_typed(var, self._as_number, dflt)
+    return val
+EnvVars = _EnvVars(env=ENV)
+
+NUMBA_DISABLE_JIT = EnvVars.get_bool('NUMBA_DISABLE_JIT', dflt=False)
+
+# Use numbafied implementation of event overlap computation.
+IML_USE_NUMBA = EnvVars.get_bool('IML_USE_NUMBA', dflt=False)
+# More verbose debugging information during unit-tests.
+IML_DEBUG_UNIT_TESTS = EnvVars.get_bool('IML_DEBUG_UNIT_TESTS', dflt=False)
+
+# NOTE: Don't touch this, it gets set manually by unit-tests.
+IS_UNIT_TEST = False

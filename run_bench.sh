@@ -316,6 +316,10 @@ run_all() {
     fig_all_algo_then_all_env --expr total_training_time --repetitions 3 "$@"
 }
 
+run_perf_debug() {
+    iml-analyze --iml-directory $IML_DIR/output/perf_debug "${CALIB_OPTS[@]}"
+}
+
 if [ $# -gt 0 ]; then
     echo "> CMD: $@"
     echo "  $ $@"
