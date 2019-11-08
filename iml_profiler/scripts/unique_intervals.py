@@ -299,6 +299,12 @@ def Timing(n=10**5, k=12, iterations=5, repeats=5):
         > with numba: 0.03406465379521251 seconds
         > without numba: 3.6920439190231265 seconds
         > Speedup: 108.38342703315574 ×
+        
+        > k=12 categories with n=100000 events in each list (iters=5, reps=5)
+        > Total time spent bechmarking = 952.9324278831482 seconds
+        > with numba: 0.34007849236950277 seconds
+        > without numba: 36.205823552422224 seconds
+        > Speedup: 106.46313826010437 ×
     """
 
     bench_start_t = time.time()
