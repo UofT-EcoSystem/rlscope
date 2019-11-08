@@ -1,4 +1,11 @@
 # -*- coding: utf-8 -*-
+"""
+Speedup event overlap computation using numba to JIT compile the algorithm using LLVM.
+
+This script is a simple example for experimenting, testing, and visualizing the core algorithm.
+"""
+import argparse
+import textwrap
 import numpy as np
 import matplotlib.pyplot as plt
 import numba
@@ -122,51 +129,94 @@ def PlotOutput(outputs, output_categories, categories):
         s = ''.join( letter for c, letter in zip(cats, categories) if c )
         y = -0.9 + (i % 3) * 0.25
         plt.text(x+0.1, y, s)
-    
-if __name__ == '__main__': 
-    
-    
-    def Experiment(categories, gen_func):
-        starts, ends = zip(*[ gen_func() for _ in categories ] )    
-        PlotCategories(categories, starts, ends)
-        times = [ Interleave(s, e) for s,e in zip(starts, ends) ]    
-        outputs, output_categories = UniqueSplits(categories, times)
-        PlotOutput(outputs, output_categories, categories)
 
-    def Timing(n=10**5, k=12, iterations=5, repeats=5):
-        import timeit
-        categories = [ 'C%d' for i in range(k) ]
-        times = [ Interleave(*GenerateIntervals(n)) for _ in range(k) ]
-        
-        variables = dict(globals(), **locals())
-    
-        # Precompile with numba and warm up the CPU and cache
-        UniqueSplits(categories, times)    
-        with_numba = timeit.repeat('UniqueSplits(categories, times)', 
-                                   repeat=repeats, number=iterations,
-                                   globals=variables)
-    
-    
-        # Warm up the CPU and cache
-        UniqueSplits(categories, times, use_numba=False)        
-        without = timeit.repeat('UniqueSplits(categories, times, use_numba=False)', 
-                                repeat=repeats, number=iterations,
-                                 globals=variables)
-    
-        print('%d categories with %d events in each list' % (k, n))
-        print('with numba:', min(with_numba)/iterations, 'seconds')
-        print('without it:  ', min(without)/iterations, 'seconds')
-        
-        
-    # "Unitest" experiments
-    #Experiment([ 'A', 'B', 'C' ], lambda: GenerateIntervals(5))
-    #Experiment([ 'X', 'Y', 'Z', 'W' ], lambda: GenerateIntervals(np.random.randint(8,12), mean_wait=5))   
-    
-    # Timing
-    Timing()
+def Experiment(figure_basename, categories, gen_func,
+               interactive=False):
+    starts, ends = zip(*[ gen_func() for _ in categories ] )
+    PlotCategories(categories, starts, ends)
+    times = [ Interleave(s, e) for s,e in zip(starts, ends) ]
+    outputs, output_categories = UniqueSplits(categories, times)
+    PlotOutput(outputs, output_categories, categories)
+    ShowOrSave(
+        figure_basename,
+        interactive=interactive,
+    )
 
-        
-        
-        
-        
+def ShowOrSave(base, interactive=False, ext='png'):
+    if args.interactive:
+        plt.show()
+    else:
+        path = '{base}.{ext}'.format(base=base, ext=ext)
+        print("> Save figure to {path}".format(path=path))
+        plt.savefig(path)
+
+def Timing(n=10**5, k=12, iterations=5, repeats=5):
+    import timeit
+    categories = [ 'C%d' for i in range(k) ]
+    times = [ Interleave(*GenerateIntervals(n)) for _ in range(k) ]
+
+    variables = dict(globals(), **locals())
+
+    # Precompile with numba and warm up the CPU and cache
+    UniqueSplits(categories, times)
+    with_numba = timeit.repeat('UniqueSplits(categories, times)',
+                               repeat=repeats, number=iterations,
+                               globals=variables)
+
+
+    # Warm up the CPU and cache
+    UniqueSplits(categories, times, use_numba=False)
+    without = timeit.repeat('UniqueSplits(categories, times, use_numba=False)',
+                            repeat=repeats, number=iterations,
+                            globals=variables)
+
+    print('%d categories with %d events in each list' % (k, n))
+    print('with numba:', min(with_numba)/iterations, 'seconds')
+    print('without it:  ', min(without)/iterations, 'seconds')
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--mode",
+        choices=[
+            'unit-test',
+            'perf',
+        ],
+        required=True,
+        help=textwrap.dedent("""
+    What should we run?
     
+    unit-test:
+        Randomly generate an event trace, and compute the overlap on it.
+    
+    perf:
+        Compare JIT-compiled runtime to pure python runtime.
+        NOTE: this can take ~ 10 minutes to run.
+    """))
+    parser.add_argument(
+        "--interactive",
+        action='store_true',
+        help=textwrap.dedent("""
+    Use plot.show() to show matplotlib interactive plot viewer
+    (default: saves to png files)
+    """))
+    args = parser.parse_args()
+
+    if args.mode == 'unit-test':
+        Experiment(
+            'A_B_C', [ 'A', 'B', 'C' ], lambda: GenerateIntervals(5),
+            interactive=args.interactive)
+        Experiment(
+            'X_Y_Z_W', [ 'X', 'Y', 'Z', 'W' ], lambda: GenerateIntervals(np.random.randint(8,12), mean_wait=5),
+            interactive=args.interactive)
+    elif args.mode == 'perf':
+        """
+        Example output:
+            12 categories with 100000 events in each list
+            with numba: 0.3409351079724729 seconds
+            without it:   37.32773629501462 seconds
+        """
+        Timing()
+    else:
+        raise NotImplementedError("Not sure how to run --mode={mode}".format(
+            mode=args.mode))
