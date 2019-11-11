@@ -35,6 +35,17 @@ from iml_profiler.parser.readers import TFProfCategoryTimesReader, \
 
 from iml_profiler import py_config
 
+from iml_profiler.scripts.unique_intervals import UniqueSplits, PlotOutput, ShowOrSave, \
+    bitset_add, \
+    bitset_contains, \
+    bitset_empty_set, \
+    bitset_full_set, \
+    bitset_indices, \
+    bitset_is_empty, \
+    bitset_remove, \
+    bitset_union, \
+    bitset_np_bool_vector
+
 class ComputeOverlap:
     # DEBUG = True
     DEBUG = False
@@ -465,10 +476,19 @@ class OverlapMetadata:
         assert category_key not in self.regions
         self.regions[category_key] = region_metadata
 
+    # @staticmethod
+    # def from_NumbaOverlapMetadata(numba_overlap_metadata, category_to_idx, idx_to_category):
+    #     overlap_metadata = OverlapMetadata()
+    #     for category_key_bitset, numba_region_metadata in numba_overlap_metadata.regions.items():
+    #         category_key = category_key_from_bitset(category_key_bitset, category_to_idx, idx_to_category)
+    #         region_metadata = RegionMetadata.from_NumbaRegionMetadata(numba_region_metadata, category_to_idx, idx_to_category)
+    #         overlap_metadata._add_region(category_key, region_metadata)
+    #     return overlap_metadata
+
     @staticmethod
     def from_NumbaOverlapMetadata(numba_overlap_metadata, category_to_idx, idx_to_category):
         overlap_metadata = OverlapMetadata()
-        for category_key_bitset, numba_region_metadata in numba_overlap_metadata.regions.items():
+        for category_key_bitset, numba_region_metadata in numba_overlap_metadata.items():
             category_key = category_key_from_bitset(category_key_bitset, category_to_idx, idx_to_category)
             region_metadata = RegionMetadata.from_NumbaRegionMetadata(numba_region_metadata, category_to_idx, idx_to_category)
             overlap_metadata._add_region(category_key, region_metadata)
@@ -511,174 +531,8 @@ def best_by_index_end(lle, cindices):
                 best = i
     return best, best_time
 
-"""
-Individual categories have one bit set:
-    Category[0] = 0b0001
-    Category[1] = 0b0010
-    Category[2] = 0b0100
-    Category[3] = 0b1000
-    ...
-
-Set Union:
-    { Category[0], Category[3] } = 0b1001
-
-Removing elements from the set:
-    Remove Category[0] from { Category[0], Category[3] } = 0b1000
-                                                                -
-                                                                flipped this bit to 0
-Adding elements to the set:
-    Add Category[1] from { Category[0], Category[3] } = 0b1011
-                                                            -
-                                                            flipped this bit to 1
-"""
-@njit
-def bitset_add(bitset, idx):
-    return bitset | (1 << idx)
-@njit
-def bitset_remove(bitset, idx):
-    return bitset & ~(1 << idx)
-@njit
-def bitset_contains(bitset, idx):
-    return bitset & (1 << idx)
-@njit
-def bitset_union(bitset1, bitset2):
-    return bitset1 | bitset2
-@njit
-def bitset_empty_set():
-    return 0
-@njit
-def bitset_full_set(N):
-    """
-    e.g. N = 4
-    0b1111
-        == 0b10000 - 1
-        == (1 << N) - 1
 
 
-    :param N:
-        Number of elements in the set.
-    :return:
-        A bitset containing all members {0, 1, 2, ..., N-1}
-    """
-    return (1 << N) - 1
-@njit
-def bitset_is_empty(bitset):
-    return bitset == 0
-@njit
-def bitset_indices(bitset):
-    bits_left = bitset
-    if py_config.NUMBA_DISABLE_JIT:
-        indices = []
-    else:
-        indices = numba.typed.List.empty_list(nb.int64)
-    idx = 0
-    while not bitset_is_empty(bits_left):
-        if bitset_contains(bitset, idx):
-            indices.append(idx)
-            bits_left = bitset_remove(bits_left, idx)
-        idx += 1
-    return indices
-
-# https://numba.pydata.org/numba-doc/dev/user/jitclass.html
-NumbaRegionMetadata_Fields = [
-    ('category_key', nb.int64),
-    ('start_time_usec', nb.int64),
-    ('end_time_usec', nb.int64),
-    ('num_events', nb.int64),
-]
-@jitclass(NumbaRegionMetadata_Fields)
-class NumbaRegionMetadata:
-    """
-    Numbified version of RegionMetadata class.
-    RegionMetadata is used to track the following statistics about each overlap region:
-
-        self.start_time_usec = None
-        self.end_time_usec = None
-        self.num_events = 0
-    - min(event.start_time)
-    - max(event.start_time)
-    - number of events in overlap region
-
-    NOTE: I'm not sure if these statistics are entirely necessary, but they're just nice-to-have for debugging.
-    """
-    def __init__(self, category_key=0):
-        self.category_key = category_key
-        self.start_time_usec = 0
-        self.end_time_usec = 0
-        self.num_events = 0
-
-    def add_event(self, event):
-        if self.start_time_usec == 0 or event.start_time_usec < self.start_time_usec:
-            self.start_time_usec = event.start_time_usec
-
-        if self.end_time_usec == 0 or event.end_time_usec > self.end_time_usec:
-            self.end_time_usec = event.end_time_usec
-
-        self.num_events += 1
-
-
-# Nested jitclass types.
-#
-# https://stackoverflow.com/questions/38682260/how-to-nest-numba-jitclass
-NumbaRegionMetadata_type = numba.deferred_type()
-# Fails with NUMBA_DISABLE_JIT=1
-if not py_config.NUMBA_DISABLE_JIT:
-    NumbaRegionMetadata_type.define(NumbaRegionMetadata.class_type.instance_type)
-
-NumbaOverlapMetadata_Fields = [
-    ('start_time_usec', nb.int64),
-    ('end_time_usec', nb.int64),
-    ('num_events', nb.int64),
-]
-@jitclass(NumbaOverlapMetadata_Fields)
-class NumbaOverlapMetadata:
-    """
-    Numbafied version of OverlapMetadata.
-    """
-    def __init__(self):
-        # CategoryKey -> RegionMetadata
-        if py_config.NUMBA_DISABLE_JIT:
-            self.regions = dict()
-        else:
-            self.regions = numba.typed.Dict.empty(
-                key_type=np.float64,
-                value_type=NumbaRegionMetadata_type,
-            )
-
-    def add_event(self, category_key, event):
-        if category_key not in self.regions:
-            self.regions[category_key] = NumbaRegionMetadata(category_key)
-
-        self.regions[category_key].add_event(event)
-NumbaOverlapMetadata_type = numba.deferred_type()
-if not py_config.NUMBA_DISABLE_JIT:
-    NumbaOverlapMetadata_type.define(NumbaOverlapMetadata.class_type.instance_type)
-
-NumbaOverlap_Fields = [
-    ('overlap_regions', numba.types.DictType(nb.int64, nb.int64)),
-]
-@jitclass(NumbaOverlap_Fields)
-class NumbaOverlap:
-    """
-    Numbafied version of OverlapMetadata.
-    """
-    def __init__(self):
-        # CategoryKey -> Int64
-        if py_config.NUMBA_DISABLE_JIT:
-            self.overlap_regions = dict()
-        else:
-            self.overlap_regions = numba.typed.Dict.empty(
-                key_type=nb.int64,
-                value_type=nb.int64,
-            )
-
-    def add_time(self, category_key, time_usec):
-        if category_key not in self.overlap_regions:
-            self.overlap_regions[category_key] = 0
-        self.overlap_regions[category_key] += time_usec
-NumbaOverlap_type = numba.deferred_type()
-if not py_config.NUMBA_DISABLE_JIT:
-    NumbaOverlap_type.define(NumbaOverlap.class_type.instance_type)
 
 def category_key_from_bitset(bitset, category_to_idx, idx_to_category, freeze=True):
     category_key = set()
@@ -699,29 +553,22 @@ class Overlap:
         # self.overlap_regions = dict()
         raise NotImplementedError()
 
+    # @staticmethod
+    # def from_NumbaOverlap(numba_overlap, category_to_idx, idx_to_category):
+    #     overlap = dict()
+    #     for category_key_bitset, time_usec in numba_overlap.overlap_regions.items():
+    #         category_key = category_key_from_bitset(category_key_bitset, category_to_idx, idx_to_category)
+    #         overlap[category_key] = time_usec
+    #     return overlap
+
     @staticmethod
-    def from_NumbaOverlap(numba_overlap, category_to_idx, idx_to_category):
+    def from_NumbaOverlap(numba_overlap_dict, category_to_idx, idx_to_category):
         overlap = dict()
-        for category_key_bitset, time_usec in numba_overlap.overlap_regions.items():
+        for category_key_bitset, time_usec in numba_overlap_dict.items():
             category_key = category_key_from_bitset(category_key_bitset, category_to_idx, idx_to_category)
             overlap[category_key] = time_usec
         return overlap
 
-NumbaEvent_Fields = [
-    ('start_time_usec', nb.int64),
-    ('end_time_usec', nb.int64),
-]
-@jitclass(NumbaEvent_Fields)
-class NumbaEvent:
-    """
-    Numbafied version of KernelTime.
-    """
-    def __init__(self, start_time_usec, end_time_usec):
-        self.start_time_usec = start_time_usec
-        self.end_time_usec = end_time_usec
-NumbaEvent_type = numba.deferred_type()
-if not py_config.NUMBA_DISABLE_JIT:
-    NumbaEvent_type.define(NumbaEvent.class_type.instance_type)
 
 @njit
 def numba_compute_overlap(
@@ -858,34 +705,35 @@ def numba_compute_overlap(
 
     return overlap, overlap_metadata
 
-def AsNumbaLLE(category_times, category_to_idx, idx_to_category):
+def AsNumbaEOTimes(category_times, category_to_idx, idx_to_category):
+    """
 
-    def AsNumbaLE(times):
-        if py_config.NUMBA_DISABLE_JIT:
-            le = []
-        else:
-            # le = numba.typed.List()
-            le = numba.typed.List.empty_list(NumbaRegionMetadata_type)
+    category_times = {
+        'A': [(t1, t2), (t3, t4), ...],
+        'B': [(t5, t6), (t7, t8), ...],
+        ...
+    }
 
-        for time in times:
-            start_time_usec = time.start_time_usec
-            end_time_usec = time.end_time_usec
-            event = NumbaEvent(start_time_usec, end_time_usec)
-            le.append(event)
-        return le
+    category_to_idx = {
+        'A': 0,
+        'B': 1,
+    }
 
-    if py_config.NUMBA_DISABLE_JIT:
-        by_start_lle = []
-        by_end_lle = []
-    else:
-        # by_start_lle = numba.typed.List()
-        # by_end_lle = numba.typed.List()
-        by_start_lle = numba.typed.List.empty_list(
-            numba.typed.List(lsttype=numba.types.ListType(NumbaEvent_type)),
-        )
-        by_end_lle = numba.typed.List.empty_list(
-            numba.typed.List(lsttype=numba.types.ListType(NumbaEvent_type)),
-        )
+    =>
+
+    eo_times = [
+        # 'A'
+        [t1, t2, t3, t4, ...],
+        # 'B'
+        [t5, t6, t7, t8, ...],
+        ...
+    ]
+
+    :param category_times:
+    :param category_to_idx:
+    :param idx_to_category:
+    :return:
+    """
 
     # if debug:
     #     logging.info("converting to NumbaEvent's: {msg}".format(
@@ -894,17 +742,14 @@ def AsNumbaLLE(category_times, category_to_idx, idx_to_category):
     #         }),
     #     ))
 
+    eo_times = []
     for category_key, times_by_start in category_times.items():
-        times_by_end = sorted(times_by_start, key=lambda ktime: ktime.end_time_usec)
-        # Events in category_times should be sorted by start_time_usec.
-        for i in range(1, len(times_by_start)):
-            assert times_by_start[i-1].start_time_usec <= times_by_start[i-1].start_time_usec
-        # No need to check, we just sorted them!
-        # for i in range(1, len(times_by_end)):
-        #     assert times_by_end[i-1].end_time_usec <= times_by_end[i-1].end_time_usec
-        by_start_lle.append(AsNumbaLE(times_by_start))
-        by_end_lle.append(AsNumbaLE(times_by_end))
-    return by_start_lle, by_end_lle
+        category_eo_times = np.empty(2*len(times_by_start), dtype=py_config.NUMPY_TIME_USEC_TYPE)
+        for i, ktime in enumerate(times_by_start):
+            category_eo_times[i*2] = ktime.start_time_usec
+            category_eo_times[i*2 + 1] = ktime.end_time_usec
+        eo_times.append(category_eo_times)
+    return eo_times
 
 def category_to_idx_maps(categories):
     categories_order = sorted(categories)
@@ -925,17 +770,23 @@ def compute_overlap_single_thread_numba(
     # Python -> Numba:
     #   Convert Python types to Numba types.
     category_to_idx, idx_to_category = category_to_idx_maps(category_times)
-    by_start, by_end = AsNumbaLLE(
+    eo_times = AsNumbaEOTimes(
         category_times, category_to_idx, idx_to_category,
         # debug=debug,
     )
 
-    assert len(by_start) == len(by_end)
     # Call into Numba
-    numba_overlap, numba_overlap_metadata = numba_compute_overlap(
-        by_start, by_end,
-        show_progress=show_progress,
-        debug=debug)
+    use_numba = not py_config.IML_DISABLE_JIT
+    # numba_overlap, numba_overlap_metadata = UniqueSplits(eo_times, use_numba=use_numba)
+    numba_overlap, numba_overlap_metadata, outputs, output_categories = UniqueSplits(eo_times, use_numba=use_numba)
+    if py_config.IML_DEBUG_UNIQUE_SPLITS_BASE:
+        cat_idx_pairs = sorted([(cat, idx) for (cat, idx) in category_to_idx.items()], key=lambda cat_idx: cat_idx[1])
+        categories = [cat for cat, idx in cat_idx_pairs]
+        PlotOutput(outputs, output_categories, categories)
+        ShowOrSave(
+            base=py_config.IML_DEBUG_UNIQUE_SPLITS_BASE,
+            interactive=False,
+        )
 
     # Numba -> Python:
     #   Convert Numba types back to Python types.

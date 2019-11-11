@@ -10,9 +10,44 @@ import textwrap
 import numpy as np
 import matplotlib.pyplot as plt
 import numba
+import numba as nb
 import pprint
 
+import logging
+
+from iml_profiler import py_config
+
 UNICODE_TIMES = u"\u00D7"
+BITS_PER_BYTE = 8
+
+"""
+Trying out different optimizations:
+
+    (1) Using bitsets instead of numpy true/false arrays:
+        RESULT: slowdown
+        
+        > k=12 categories with n=1000 events in each list (iters=5, reps=5)
+        > Total time spent benchmarking = 9.634756803512573 seconds
+        > with numba: 0.0035594630055129526 seconds
+        > without numba: 0.32853033738210796 seconds
+        > Speedup: 92.29772493021419 ×
+
+        > k=12 categories with n=10000 events in each list (iters=5, reps=5)
+        > Total time spent benchmarking = 85.38820958137512 seconds
+        > with numba: 0.032505753077566625 seconds
+        > without numba: 3.2078955063596366 seconds
+        > Speedup: 98.6870077645892 ×
+        
+Adding features:
+        (1) Add OverlapMetadata:
+
+        > k=12 categories with n=1000 events in each list (iters=5, reps=5)
+        > Total time spent benchmarking = 17.913370370864868 seconds
+        > with numba: 0.006963567808270454 seconds
+        > without numba: 0.5863135676831007 seconds
+        > Speedup: 84.19729423568631 ×
+
+"""
 
 def GenerateIntervals(n, max_length=10, mean_wait=15):
     """
@@ -80,10 +115,122 @@ def Deinterleave(c):
     a = c[0::2]
     b = c[1::2]
     return a,b
-    
+
+"""
+Individual categories have one bit set:
+    Category[0] = 0b0001
+    Category[1] = 0b0010
+    Category[2] = 0b0100
+    Category[3] = 0b1000
+    ...
+
+Set Union:
+    { Category[0], Category[3] } = 0b1001
+
+Removing elements from the set:
+    Remove Category[0] from { Category[0], Category[3] } = 0b1000
+                                                                -
+                                                                flipped this bit to 0
+Adding elements to the set:
+    Add Category[1] from { Category[0], Category[3] } = 0b1011
+                                                            -
+                                                            flipped this bit to 1
+"""
+@numba.njit
+def bitset_add(bitset, idx):
+    return bitset | (1 << idx)
+@numba.njit
+def bitset_remove(bitset, idx):
+    return bitset & ~(1 << idx)
+@numba.njit
+def bitset_contains(bitset, idx):
+    return bitset & (1 << idx)
+@numba.njit
+def bitset_union(bitset1, bitset2):
+    return bitset1 | bitset2
+@numba.njit
+def bitset_empty_set():
+    return 0
+@numba.njit
+def bitset_full_set(N):
+    """
+    e.g. N = 4
+    0b1111
+        == 0b10000 - 1
+        == (1 << N) - 1
+
+
+    :param N:
+        Number of elements in the set.
+    :return:
+        A bitset containing all members {0, 1, 2, ..., N-1}
+    """
+    return (1 << N) - 1
+@numba.njit
+def bitset_is_empty(bitset):
+    return bitset == 0
+@numba.njit
+def bitset_indices(bitset):
+    bits_left = bitset
+    # if py_config.NUMBA_DISABLE_JIT:
+    #     indices = []
+    # else:
+    #     indices = numba.typed.List.empty_list(nb.uint64)
+    indices = []
+    idx = 0
+    while not bitset_is_empty(bits_left):
+        if bitset_contains(bitset, idx):
+            indices.append(idx)
+            bits_left = bitset_remove(bits_left, idx)
+        idx += 1
+    return indices
+
+def bitset_np_bool_vector(bitset, N):
+    """
+    Convert bit-vector into numpy true/false bool vector.
+    e.g.
+    N = 6
+    bitset = 0b1101
+    [True, False, True, True, False, False]
+     -----------------------  ------------
+             0b1001              2 leading
+                                   zeros
+
+    NOTE: reversed order between bit-vector and numpy array.
+
+    :param bitset:
+    :param N:
+    :return:
+    """
+    return np.array([bitset_contains(bitset, i) for i in range(N)], dtype=bool)
+
+def num_bits_numpy_type(DType):
+    """
+    How many bits are in a numpy integer data-type (e.g. np.int64)?
+
+    >>> num_bits_numpy_type(np.int64)
+    64
+
+    :param dtype:
+    :return:
+    """
+    # Q: Should we use unsigned?  Does it matter?
+    # Yes probably; np.packedbits uses uint8.
+    assert issubclass(DType, np.signedinteger) or issubclass(DType, np.unsignedinteger)
+    # assert DType in [np.int64, np.int32, np.int16]
+    num_bytes = DType(0).nbytes
+    return num_bytes * BITS_PER_BYTE
 
 @numba.njit
-def implUniqueSplit(index, lengths, times, outputs, output_cats, cur_cat):
+def implUniqueSplit(index, lengths, times,
+
+                    outputs,
+                    output_cats,
+
+                    # cur_cat,
+                    out_numba_overlap,
+                    out_overlap_metadata,
+                    ):
     """
     Preconditions:
     - Events in each category have no self-intersection.
@@ -154,52 +301,111 @@ def implUniqueSplit(index, lengths, times, outputs, output_cats, cur_cat):
     # by subtracting the very first start-time from all start/end events.
     time_type = times[0].dtype
     cur_output = 0
-    last_time = np.iinfo(time_type).min
+    min_time_value = np.iinfo(time_type).min
     max_time_value = np.iinfo(time_type).max
+    last_time = min_time_value
+
+    # cur_cat = py_config.NUMBA_CATEGORY_KEY_TYPE(0)
+    cur_cat = 0
 
     while (index < lengths).any():
         min_cat = 0
+        # min_cat = py_config.NUMBA_CATEGORY_KEY_TYPE(0)
         min_time = max_time_value
         # Find the non-empty category with the next minimum start/end time.
         for i in range(len(index)):
+            # Check we haven't exhausted the intervals in the category.
             if index[i] < lengths[i]:
                 # Non-empty category.
                 if times[i][index[i]] <= min_time:
                     min_cat = i
                     min_time = times[i][index[i]]
+        # min_cat = the Category with the next smallest time (could be a start or end time)
+        # min_time = the next smallest time (NOT the index, it's the time itself)
 
         # (index[min_cat] % 2) == 0
         # This checks if it is a start_time (even index).
         
-        # Skip empty intervals
+        # Skip empty intervals.
+        #
+        # An empty interval has the start time equal to the end-time.
+        #
+        #   (index[min_cat] % 2) == 0
+        #   - This checks that we're currently looking at a start-time of an interval
+        #
+        #   min_time == times[min_cat][index[min_cat]+1]:
+        #   - times[min_cat][index[min_cat]+1] is the end-time of the interval we're look at,
+        #     and min_time is the start-time.
+        #   - this is just checking "if start_time == end_time"
         if (index[min_cat] % 2) == 0 and min_time == times[min_cat][index[min_cat]+1]:
             index[min_cat] += 2
             continue          
         
-        # Update current list of categories
-        is_start = index[min_cat] % 2 == 0
-        assert is_start != cur_cat[min_cat]
-        cur_cat[min_cat] = is_start        
-        
+        # Update current list of active categories.
+        #
+        is_start = (index[min_cat] % 2 == 0)
+        # assert is_start != cur_cat[min_cat]
+        # cur_cat[min_cat] = is_start
+        if is_start:
+            cur_cat = bitset_add(cur_cat, min_cat)
+        else:
+            start_time_usec = times[min_cat][index[min_cat]-1]
+            end_time_usec = min_time
+
+            # out_overlap_metadata.add_event(cur_cat, start_time_usec, end_time_usec)
+            if cur_cat not in out_overlap_metadata:
+                out_overlap_metadata[cur_cat] = NumbaRegionMetadata(cur_cat)
+            out_overlap_metadata[cur_cat].add_event(start_time_usec, end_time_usec)
+
+            overlap_region = out_overlap_metadata[cur_cat]
+
+            # if out_overlap_metadata[cur_cat].start_time_usec == 0 or start_time_usec < out_overlap_metadata[cur_cat].start_time_usec:
+            #     out_overlap_metadata[cur_cat].start_time_usec = start_time_usec
+            # if out_overlap_metadata[cur_cat].end_time_usec == 0 or end_time_usec > out_overlap_metadata[cur_cat].end_time_usec:
+            #     out_overlap_metadata[cur_cat].end_time_usec = end_time_usec
+
+            if overlap_region.start_time_usec == 0 or start_time_usec < overlap_region.start_time_usec:
+                overlap_region.start_time_usec = start_time_usec
+            if overlap_region.end_time_usec == 0 or end_time_usec > overlap_region.end_time_usec:
+                overlap_region.end_time_usec = end_time_usec
+
+
+        if last_time != min_time_value:
+            time_chunk = min_time - last_time
+            # Q: Does Dict have default values...?
+            if cur_cat not in out_numba_overlap:
+                out_numba_overlap[cur_cat] = 0
+            out_numba_overlap[cur_cat] += time_chunk
+
         # Can have multiple categories entering and leaving, so just make sure we keep things correct
         if last_time == min_time:
             # Start of new interval which is the same as the previous interval.
-            output_cats[cur_output-1, min_cat] = is_start
+            # output_cats[cur_output-1, min_cat] = is_start
+            output_cats[cur_output-1] = bitset_add(output_cats[cur_output-1], min_cat)
+            pass
         else:
             # Normal case:
             # Insert event if there is a change from last time
-            outputs[cur_output] = min_time                        
-            output_cats[cur_output, :] = cur_cat
+            outputs[cur_output] = min_time
+            # output_cats[cur_output, :] = cur_cat
+            output_cats[cur_output] = cur_cat
             cur_output += 1
-            last_time = min_time
-            
+            # last_time = min_time
+
+        last_time = min_time
         index[min_cat] += 1
         
     return cur_output
 
 
-def UniqueSplits(categories, times, use_numba=True):
-    k = len(categories)
+Category_Numpy_DType = py_config.NUMPY_CATEGORY_KEY_TYPE
+Category_Numba_Type = py_config.NUMBA_CATEGORY_KEY_TYPE
+Time_Numba_Type = py_config.NUMBA_TIME_USEC_TYPE
+
+def UniqueSplits(
+    times, use_numba=True):
+    k = len(times)
+
     time_type = times[0].dtype
     index = np.zeros(k, dtype=int)
     lengths = np.array([ len(t) for t in times ], dtype=int)
@@ -207,19 +413,144 @@ def UniqueSplits(categories, times, use_numba=True):
         times = tuple(times)
     
     outputs = np.zeros(lengths.sum(), dtype=time_type)
-    cur_cat = np.zeros(k, dtype=bool)
-    output_cats = np.zeros((len(outputs), k), dtype=bool)
-        
-    implementation = implUniqueSplit if use_numba else implUniqueSplit.py_func 
-    cur_output = implementation(index, lengths, times, outputs, output_cats, cur_cat)
-                
-    return outputs[:cur_output], output_cats[:cur_output]
+    # cur_cat = np.zeros(k, dtype=bool)
+    # output_cats = np.zeros((len(outputs), k), dtype=bool)
+    # We can represent a set of at most 64 elements using a 64-bit integer...
+    # Ideally we would instead use numpy's bit-vector representation.
+    # https://stackoverflow.com/questions/5602155/numpy-boolean-array-with-1-bit-entries
+    # (see np.packbits
+    assert num_bits_numpy_type(Category_Numpy_DType) >= k
+    output_cats = np.zeros(len(outputs), dtype=Category_Numpy_DType)
+
+    # numba_overlap_metadata = numba.typed.Dict.empty(
+    #     key_type=np.float64,
+    #     value_type=NumbaRegionMetadata_type,
+    # )
+
+    out_numba_overlap = numba.typed.Dict.empty(
+        key_type=Category_Numba_Type,
+        value_type=Time_Numba_Type,
+    )
+
+    # NOTE: This causes an assertion to go off inside numba!
+    # python: /root/miniconda2/conda-bld/llvmdev_1559156562364/work/lib/IR/DataLayout.cpp:680:
+    # unsigned int llvm::DataLayout::getAlignment(llvm::Type*, bool) const: Assertion `Ty->isSized() &&
+    # "Cannot getTypeInfo() on a type that is unsized!"' failed.
+
+    # NOTE: This is significantly slower ( Speedup: 84.19729423568631 × with --timing-num-intervals $((10**3)) )
+    # So, we "manually inline"  NumbaOverlapMetadata
+    # out_overlap_metadata = NumbaOverlapMetadata()
+    out_overlap_metadata = numba.typed.Dict.empty(
+        key_type=py_config.NUMBA_CATEGORY_KEY_TYPE,
+        value_type=NumbaRegionMetadata_type,
+    )
+
+    implementation = implUniqueSplit if use_numba else implUniqueSplit.py_func
+    # implementation(
+    cur_output = implementation(
+        index, lengths, times,
+
+        outputs,
+        output_cats,
+
+        # cur_cat,
+        out_numba_overlap,
+        out_overlap_metadata,
+    )
+
+    return out_numba_overlap, out_overlap_metadata, outputs[:cur_output], output_cats[:cur_output]
+    # return outputs[:cur_output]
+
+# NumbaOverlapMetadata_type = numba.deferred_type()
+# NumbaRegionMetadata_type = numba.deferred_type()
+
+# https://numba.pydata.org/numba-doc/dev/user/jitclass.html
+NumbaRegionMetadata_Fields = [
+    ('category_key', py_config.NUMBA_CATEGORY_KEY_TYPE),
+    ('start_time_usec', py_config.NUMBA_TIME_USEC_TYPE),
+    ('end_time_usec', py_config.NUMBA_TIME_USEC_TYPE),
+    ('num_events', nb.uint64),
+]
+@numba.jitclass(NumbaRegionMetadata_Fields)
+class NumbaRegionMetadata:
+    """
+    Numbified version of RegionMetadata class.
+    RegionMetadata is used to track the following statistics about each overlap region:
+
+        self.start_time_usec = None
+        self.end_time_usec = None
+        self.num_events = 0
+    - min(event.start_time)
+    - max(event.start_time)
+    - number of events in overlap region
+
+    NOTE: I'm not sure if these statistics are entirely necessary, but they're just nice-to-have for debugging.
+    """
+    def __init__(self, category_key):
+        self.category_key = category_key
+        self.start_time_usec = 0
+        self.end_time_usec = 0
+        self.num_events = 0
+
+    def add_event(self, start_time_usec, end_time_usec):
+        if self.start_time_usec == 0 or start_time_usec < self.start_time_usec:
+            self.start_time_usec = start_time_usec
+
+        if self.end_time_usec == 0 or end_time_usec > self.end_time_usec:
+            self.end_time_usec = end_time_usec
+
+        self.num_events += 1
+# if not py_config.NUMBA_DISABLE_JIT:
+#     NumbaRegionMetadata_type.define(NumbaRegionMetadata.class_type.instance_type)
+if not py_config.NUMBA_DISABLE_JIT:
+    NumbaRegionMetadata_type = NumbaRegionMetadata.class_type.instance_type
+else:
+    NumbaRegionMetadata_type = None
+
+
+# NumbaOverlapMetadata_Fields = [
+#     ('regions', numba.types.DictType(py_config.NUMBA_CATEGORY_KEY_TYPE, NumbaRegionMetadata_type)),
+# ]
+# @numba.jitclass(NumbaOverlapMetadata_Fields)
+# class NumbaOverlapMetadata:
+#     """
+#     Numbafied version of OverlapMetadata.
+#     """
+#     def __init__(self):
+#         # CategoryKey -> RegionMetadata
+#         # if py_config.NUMBA_DISABLE_JIT:
+#         #     self.regions = dict()
+#         # else:
+#         self.regions = numba.typed.Dict.empty(
+#             key_type=py_config.NUMBA_CATEGORY_KEY_TYPE,
+#             value_type=NumbaRegionMetadata_type,
+#         )
+#
+#     def add_event(self, category_key, start_time_usec, end_time_usec):
+#         if category_key not in self.regions:
+#             self.regions[category_key] = NumbaRegionMetadata(category_key)
+#
+#         self.regions[category_key].add_event(start_time_usec, end_time_usec)
+# if not py_config.NUMBA_DISABLE_JIT:
+#     NumbaOverlapMetadata_type = NumbaOverlapMetadata.class_type.instance_type
+# else:
+#     NumbaOverlapMetadata_type = None
 
 def PlotOutput(outputs, output_categories, categories):
     plt.ylim(ymin=-1)
     for i, (x, cats) in enumerate(zip(outputs, output_categories)):
         plt.axvline(x, color='k', lw=1, ls='dashed')
-        s = ''.join( letter for c, letter in zip(cats, categories) if c )
+        # cats = a numpy "bit-vector"
+        # s = ''.join( letter for c, letter in zip(cats, categories) if c )
+
+        # cats_bool_vector = cats
+        cats_bool_vector = bitset_np_bool_vector(cats, len(categories))
+
+        active_categories = list(np.array(categories)[cats_bool_vector])
+
+        # s = ''.join( letter for c, letter in zip(cats, categories) if c )
+
+        s = ''.join(active_categories)
         y = -0.9 + (i % 3) * 0.25
         plt.text(x+0.1, y, s)
 
@@ -229,7 +560,9 @@ def Experiment(figure_basename, categories, gen_func,
     starts, ends = zip(*[ gen_func() for _ in categories ] )
     PlotCategories(categories, starts, ends)
     times = [ Interleave(s, e) for s,e in zip(starts, ends) ]
-    outputs, output_categories = UniqueSplits(categories, times, use_numba=use_numba)
+    # UniqueSplits(times, use_numba=use_numba)
+    # outputs = UniqueSplits(times, use_numba=use_numba)
+    out_numba_overlap, out_overlap_metadata, outputs, output_categories = UniqueSplits(times, use_numba=use_numba)
     PlotOutput(outputs, output_categories, categories)
     ShowOrSave(
         figure_basename,
@@ -237,7 +570,7 @@ def Experiment(figure_basename, categories, gen_func,
     )
 
 def ShowOrSave(base, interactive=False, ext='png'):
-    if args.interactive:
+    if interactive:
         plt.show()
     else:
         path = '{base}.{ext}'.format(base=base, ext=ext)
@@ -290,6 +623,7 @@ def Timing(n=10**5, k=12, iterations=5, repeats=5):
         > Speedup: 57.75422600466007 ×
         
         > k=12 categories with n=1000 events in each list (iters=5, reps=5)
+        > Total time spent benchmarking = 10.256434202194214 seconds
         > with numba: 0.003667216468602419 seconds
         > without numba: 0.36136230640113354 seconds
         > Speedup: 98.53858082690417 ×
@@ -313,15 +647,15 @@ def Timing(n=10**5, k=12, iterations=5, repeats=5):
     # Each is the total time (seconds) it took to run iterations=5 in a loop.
 
     # Precompile with numba and warm up the CPU and cache
-    UniqueSplits(categories, times)
-    with_numba = timeit.repeat('UniqueSplits(categories, times)',
+    UniqueSplits(times)
+    with_numba = timeit.repeat('UniqueSplits(times)',
                                repeat=repeats, number=iterations,
                                globals=variables)
 
 
     # Warm up the CPU and cache
-    UniqueSplits(categories, times, use_numba=False)
-    without = timeit.repeat('UniqueSplits(categories, times, use_numba=False)',
+    UniqueSplits(times, use_numba=False)
+    without = timeit.repeat('UniqueSplits(times, use_numba=False)',
                             repeat=repeats, number=iterations,
                             globals=variables)
 
