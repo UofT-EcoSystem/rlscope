@@ -13,6 +13,8 @@ import numba
 import numba as nb
 import pprint
 
+from iml_profiler.parser.common import *
+
 import logging
 
 from iml_profiler import py_config
@@ -230,6 +232,8 @@ def implUniqueSplit(index, lengths, times,
                     # cur_cat,
                     out_numba_overlap,
                     out_overlap_metadata,
+
+                    # include_empty_time,
                     ):
     """
     Preconditions:
@@ -320,6 +324,24 @@ def implUniqueSplit(index, lengths, times,
                 if times[i][index[i]] <= min_time:
                     min_cat = i
                     min_time = times[i][index[i]]
+                    # logging.info(": {msg}".format(msg=pprint_msg({
+                    #     'cond': "({left}) times[i][index[i]] <= min_time ({right})".format(
+                    #         left=times[i][index[i]],
+                    #         right=min_time,
+                    #     ),
+                    #     'min_cat': min_cat,
+                    #     'min_time': min_time,
+                    # })))
+
+        # logging.info(": {msg}".format(msg=pprint_msg({
+        #     'min_cat': min_cat,
+        #     'min_time': min_time,
+        #     # 'index[min_cat]': index[min_cat],
+        #     # 'times[min_cat]': times[min_cat],
+        #     'cur_cat': "{cur_cat:b}".format(cur_cat=cur_cat),
+        #     'time_type': 'start' if (index[min_cat] % 2 == 0) else 'end',
+        # })))
+
         # min_cat = the Category with the next smallest time (could be a start or end time)
         # min_time = the next smallest time (NOT the index, it's the time itself)
 
@@ -339,8 +361,17 @@ def implUniqueSplit(index, lengths, times,
         #   - this is just checking "if start_time == end_time"
         if (index[min_cat] % 2) == 0 and min_time == times[min_cat][index[min_cat]+1]:
             index[min_cat] += 2
-            continue          
-        
+            continue
+
+        # if not include_empty_time and bitset_is_empty(cur_cat):
+
+        if last_time != min_time_value:
+            time_chunk = min_time - last_time
+            # Q: Does Dict have default values...?
+            if cur_cat not in out_numba_overlap:
+                out_numba_overlap[cur_cat] = 0
+            out_numba_overlap[cur_cat] += time_chunk
+
         # Update current list of active categories.
         #
         is_start = (index[min_cat] % 2 == 0)
@@ -369,13 +400,7 @@ def implUniqueSplit(index, lengths, times,
             if overlap_region.end_time_usec == 0 or end_time_usec > overlap_region.end_time_usec:
                 overlap_region.end_time_usec = end_time_usec
 
-
-        if last_time != min_time_value:
-            time_chunk = min_time - last_time
-            # Q: Does Dict have default values...?
-            if cur_cat not in out_numba_overlap:
-                out_numba_overlap[cur_cat] = 0
-            out_numba_overlap[cur_cat] += time_chunk
+            cur_cat = bitset_remove(cur_cat, min_cat)
 
         # Can have multiple categories entering and leaving, so just make sure we keep things correct
         if last_time == min_time:
@@ -684,6 +709,24 @@ def Timing(n=10**5, k=12, iterations=5, repeats=5):
     print("> Speedup: {speedup} {UNICODE_TIMES}".format(
         speedup=speedup,
         UNICODE_TIMES=UNICODE_TIMES))
+
+def test_bitset_01_empty_set():
+    empty_set = bitset_empty_set()
+    indices = bitset_indices(empty_set)
+    assert indices == []
+
+def test_bitset_02_one_elem_set():
+    empty_set = bitset_empty_set()
+    one_elem_set = bitset_add(empty_set, 0)
+    indices = bitset_indices(one_elem_set)
+    assert indices == [0]
+
+def test_bitset_03_two_elem_set():
+    empty_set = bitset_empty_set()
+    one_elem_set = bitset_add(empty_set, 0)
+    two_elem_set = bitset_add(one_elem_set, 2)
+    indices = bitset_indices(two_elem_set)
+    assert indices == [0, 2]
 
 if __name__ == '__main__':
     np.random.seed(475)

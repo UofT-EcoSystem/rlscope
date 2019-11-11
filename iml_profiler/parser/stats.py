@@ -88,6 +88,10 @@ class KernelTime:
         self.end_usec = end_usec
         self.time_usec = self.end_usec - self.start_usec
 
+    def set_end(self, end_usec):
+        self.end_usec = end_usec
+        self.time_usec = self.end_usec - self.start_usec
+
     @property
     def start_time_usec(self):
         assert self.start_usec is not None

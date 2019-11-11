@@ -3557,7 +3557,7 @@ def bin_category_times(
     pre_reduce=None,
     # categories=None,
     # operation_types=None,
-    category_times=None,
+    # category_times=None,
     debug=False):
     """
     Given a list of Event's, redistribute them into category_times[<cat>]
@@ -3582,11 +3582,12 @@ def bin_category_times(
     # if operation_types is None:
     #     operation_types = set()
 
-    if category_times is None:
-        category_times = dict()
-        use_insort = True
-    else:
-        use_insort = False
+    # if category_times is None:
+    #     category_times = dict()
+    #     use_insort = True
+    # else:
+    #     use_insort = False
+    category_times = dict()
 
     # proc_category = proc_as_category(process_name)
 
@@ -3636,10 +3637,25 @@ def bin_category_times(
         # we can use merge_sorted, which may be faster.
         #
         # However, merge_sorted approach will probably cause more allocations...
-        if use_insort:
-            insort(category_times[new_category], event, key=lambda event: event.start_time_usec)
-        else:
+        # if use_insort:
+        #     insort(category_times[new_category], event, key=lambda event: event.start_time_usec)
+        # else:
+        last_event = category_times[new_category]
+        if event.start_time_usec > last_event.end_time_usec:
+            # event does NOT overlap with last_event; append it:
+            #   [ last_event ]
+            #                   [   event   ]
+            # Modify last_event to include event:
+            #   [ last_event ]  [   event   ]
             category_times[new_category].append(event)
+        else:
+            # event overlaps with last_event:
+            #   [ last_event ]
+            #          [   event   ]
+            # Modify last_event to include event:
+            #   [ last_event       ]
+            new_end = max(event.end_time_usec, last_event.end_time_usec)
+            last_event.set_end(new_end)
 
     # return category_times, categories, operation_types
     return category_times
@@ -3682,8 +3698,17 @@ def bin_category_times_single_thread(
             visible_overhead=visible_overhead,
             pre_reduce=pre_reduce,
             # categories=categories, operation_types=operation_types, category_times=None,
-            category_times=None,
+            # category_times=None,
             debug=debug)
+        # NOTE: pair-wise merge is inefficient; it will create more intermediate lists than required.
+        # NOTE: this merging computation is only done to support re-running event overlap with CPU/GPU labels...
+        # - Alternative: run the event trace ONCE using fine-grained CPU labels,
+        #   and translate overlaps into coarse-grained "CPU" label
+        # - RESULT:
+        #   - all the different overlap computations can simply RE-USE the event overlap results
+        #     ( this is actually a HUGE deal and will speed things up a lot)
+        #   - no need to perform "merging" of times (pre_reduce eliminated);
+        #     if we still need a pre-reduce step, we should only need to do it once.
         merge_category_times(category_times, category_times_i, inplace=True)
 
     # return category_times, categories, operation_types
@@ -3711,9 +3736,9 @@ def bin_category_times_single_thread(
 #     return category_times, categories, operation_types
 
 # def BinCategoryTimesWorker(process_name, category, events, debug):
-def BinCategoryTimesWorker(args):
-    process_name, category, events, debug = args
-    return bin_category_times(process_name, category, events, debug=debug)
+# def BinCategoryTimesWorker(args):
+#     process_name, category, events, debug = args
+#     return bin_category_times(process_name, category, events, debug=debug)
 
 def split_category_times_by_category(process_name, proc_category_times, debug):
     for category, events in proc_category_times.items():
@@ -3725,31 +3750,31 @@ def split_category_times_by_category(process_name, proc_category_times, debug):
 #    Need to make a split_category_times(category_times, n) to do that
 # 3. make the Worker take proc_category_times instead of <category, events>
 
-def bin_category_times_parallel(
-    process_name,
-    proc_category_times,
-    categories=None,
-    category_times=None,
-    operation_types=None,
-    debug=False,
-    nprocs=None):
-    if categories is None:
-        categories = set()
-    if operation_types is None:
-        operation_types = set()
-    if category_times is None:
-        category_times = dict()
-
-    with multiprocessing.Pool(nprocs) as pool:
-        splits = list(split_category_times_by_category(process_name, proc_category_times, debug=False))
-        it = pool.imap_unordered(BinCategoryTimesWorker, splits)
-        progress_label = "bin_category_times_parallel: process={proc}".format(proc=process_name)
-        for i, (category_times_i, categories_i, operation_types_i) in enumerate(progress(it, desc=progress_label, total=len(splits), show_progress=debug)):
-            merge_category_times(category_times, category_times_i, inplace=True)
-            categories.update(categories_i)
-            operation_types.update(operation_types_i)
-
-    return category_times, categories, operation_types
+# def bin_category_times_parallel(
+#     process_name,
+#     proc_category_times,
+#     categories=None,
+#     category_times=None,
+#     operation_types=None,
+#     debug=False,
+#     nprocs=None):
+#     if categories is None:
+#         categories = set()
+#     if operation_types is None:
+#         operation_types = set()
+#     if category_times is None:
+#         category_times = dict()
+#
+#     with multiprocessing.Pool(nprocs) as pool:
+#         splits = list(split_category_times_by_category(process_name, proc_category_times, debug=False))
+#         it = pool.imap_unordered(BinCategoryTimesWorker, splits)
+#         progress_label = "bin_category_times_parallel: process={proc}".format(proc=process_name)
+#         for i, (category_times_i, categories_i, operation_types_i) in enumerate(progress(it, desc=progress_label, total=len(splits), show_progress=debug)):
+#             merge_category_times(category_times, category_times_i, inplace=True)
+#             categories.update(categories_i)
+#             operation_types.update(operation_types_i)
+#
+#     return category_times, categories, operation_types
 
 def merge_events(events1, events2):
     return merge_sorted(events1, events2, key=lambda event: event.start_time_usec)
