@@ -50,6 +50,10 @@ class KernelTime:
             self.time_usec = time_usec
             assert self.time_usec == self.end_usec - self.start_usec
 
+        # check_no_decimal(self.start_usec)
+        # check_no_decimal(self.end_usec)
+        # check_no_decimal(self.time_usec)
+
         if create_from is not None:
             self._get_attrs(create_from, overwrite_none=KERNEL_TIME_OVERWRITE_NONE)
 
@@ -87,10 +91,15 @@ class KernelTime:
         self.start_usec = start_usec
         self.end_usec = end_usec
         self.time_usec = self.end_usec - self.start_usec
+        # check_no_decimal(self.start_usec)
+        # check_no_decimal(self.end_usec)
+        # check_no_decimal(self.time_usec)
 
     def set_end(self, end_usec):
         self.end_usec = end_usec
         self.time_usec = self.end_usec - self.start_usec
+        # check_no_decimal(self.end_usec)
+        # check_no_decimal(self.time_usec)
 
     @property
     def start_time_usec(self):
@@ -910,4 +919,5 @@ class Stats:
             total_time += kt.sum()
         for kt in stats:
             kt.dump(writer, 'separate_calls', SEPARATE_CALLS_HEADER, total_time, profile_data_type)
+
 

@@ -29,6 +29,7 @@ from iml_profiler import py_config
 from iml_profiler.py_config import EnvVars
 
 USEC_IN_SEC = 1e6
+PSEC_IN_USEC = 1e3
 
 OPERATION_PYTHON_PROFILING_OVERHEAD = "Python profiling overhead"
 
@@ -2117,3 +2118,19 @@ class SimpleTimer:
 
     def __repr__(self):
         return str(self)
+
+
+def check_no_decimal(x):
+    decimal = float(x) - int(x)
+    assert decimal == 0
+
+
+def us_from_unit(x, time_unit):
+    if time_unit == 'us':
+        return x
+    elif time_unit == 'ps':
+        return x/PSEC_IN_USEC
+    elif time_unit == 'sec':
+        return x*USEC_IN_SEC
+    else:
+        raise NotImplementedError()

@@ -18,6 +18,7 @@ import seaborn as sns
 
 from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, basename as _b
 
+from iml_profiler import py_config
 from iml_profiler.parser.common import *
 from iml_profiler.parser.nvprof import CUDASQLiteParser
 from iml_profiler.parser.pyprof import PythonProfileParser
@@ -2269,8 +2270,9 @@ class UtilizationPlot:
                                            debug_ops=self.debug_ops)
 
         def compute_overlap():
-            memoize_path = _j(self.directory, "{klass}.{overlap_type}.compute_overlap.pickle".format(
+            memoize_path = _j(self.directory, "{klass}.{overlap_type}{numba_suffix}.compute_overlap.pickle".format(
                 klass=self.__class__.__name__,
+                numba_suffix='.numba' if py_config.IML_USE_NUMBA else '',
                 overlap_type=self.overlap_type,
             ))
 
@@ -2296,6 +2298,12 @@ class UtilizationPlot:
             return ret
 
         overlap, overlap_metadata = compute_overlap()
+        logging.info("Event overlap results: {msg}".format(msg=pprint_msg({
+            'overlap_type': self.overlap_type,
+            'IML_USE_NUMBA': py_config.IML_USE_NUMBA,
+            'overlap': overlap,
+            'overlap_metadata': overlap_metadata,
+        })))
 
         new_overlap = overlap
         # assert len(new_overlap) > 0

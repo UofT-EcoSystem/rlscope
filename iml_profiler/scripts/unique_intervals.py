@@ -365,8 +365,8 @@ def implUniqueSplit(index, lengths, times,
 
         # if not include_empty_time and bitset_is_empty(cur_cat):
 
-        if last_time != min_time_value:
-            time_chunk = min_time - last_time
+        time_chunk = min_time - last_time
+        if last_time != min_time_value and time_chunk > 0:
             # Q: Does Dict have default values...?
             if cur_cat not in out_numba_overlap:
                 out_numba_overlap[cur_cat] = 0

@@ -2933,8 +2933,8 @@ class SQLCategoryTimesReader:
         c = self.conn.cursor
         query = textwrap.dedent("""
         SELECT 
-            MIN(e1.start_time_us) as start_time_us,
-            MAX(e1.end_time_us) as end_time_us,
+            CAST(MIN(e1.start_time_us) - 1 AS BIGINT) as start_time_us,
+            CAST(MAX(e1.end_time_us) + 1 AS BIGINT) as end_time_us,
             COUNT(*) as total_events
         FROM 
             Category AS c1
@@ -2945,11 +2945,14 @@ class SQLCategoryTimesReader:
         WHERE 
             {process_clause} AND
             {phase_clause} AND
-            {machine_clause}
+            {machine_clause} AND
+            -- Skip "process operation" events.
+            NOT {process_op_clause}
         """).format(
             process_clause=sql_process_clause(process_name, 'p1', indents=1, allow_none=True),
             phase_clause=sql_phase_clause(phase_name, 'ph1', indents=1, allow_none=True),
             machine_clause=sql_machine_clause(machine_name, 'm', indents=1, allow_none=True),
+            process_op_clause=sql_process_op_clause('e1'),
             p=sql_placeholder(),
         )
         params = None
@@ -3001,13 +3004,16 @@ class SQLCategoryTimesReader:
             {phase_clause} AND
             {machine_clause} AND
             -- Keep events within a EventSplit(start, end) time range.
-            {event_split_range_clause}
+            {event_split_range_clause} AND
+            -- Skip "process operation" events.
+            NOT {process_op_clause}
         ORDER BY 
             p1.process_name, e1.start_time_us ASC 
         """).format(
             process_clause=sql_process_clause(process_name, 'p1', indents=1, allow_none=True),
             phase_clause=sql_phase_clause(phase_name, 'ph1', indents=1, allow_none=True),
             machine_clause=sql_machine_clause(machine_name, 'm', indents=1, allow_none=True),
+            process_op_clause=sql_process_op_clause('e1'),
             event_split_range_clause=sql_event_split_range_clause('e1', start_time_us, end_time_us, indents=1),
         )
 
@@ -3640,8 +3646,9 @@ def bin_category_times(
         # if use_insort:
         #     insort(category_times[new_category], event, key=lambda event: event.start_time_usec)
         # else:
-        last_event = category_times[new_category]
-        if event.start_time_usec > last_event.end_time_usec:
+        # last_event = category_times[new_category][-1]
+        event_list = category_times[new_category]
+        if len(event_list) == 0 or event.start_time_usec > event_list[-1].end_time_usec:
             # event does NOT overlap with last_event; append it:
             #   [ last_event ]
             #                   [   event   ]
@@ -3654,6 +3661,7 @@ def bin_category_times(
             #          [   event   ]
             # Modify last_event to include event:
             #   [ last_event       ]
+            last_event = event_list[-1]
             new_end = max(event.end_time_usec, last_event.end_time_usec)
             last_event.set_end(new_end)
 
@@ -4120,6 +4128,7 @@ def row_as_ktime(row, event_split=None):
     - duration_us
     - event_name
     """
+    TimeType = type(row['start_time_us'])
     if event_split is None:
         start_usec = row['start_time_us']
         end_usec = row['start_time_us'] + row['duration_us']
@@ -4135,10 +4144,10 @@ def row_as_ktime(row, event_split=None):
             end=min(event_split.end, e.end))
         """
         start_usec = max(
-            event_split.start_time_us,
+            TimeType(event_split.start_time_us),
             row['start_time_us'])
         end_usec = min(
-            event_split.end_time_us,
+            TimeType(event_split.end_time_us),
             row['start_time_us'] + row['duration_us'])
 
     ktime = KernelTime(
@@ -4965,6 +4974,22 @@ def _sql_eq_clause(value, alias, field, indents=None, allow_none=False):
             p=alias,
             field=field,
             value=_as_value(value))
+
+    txt = maybe_indent(txt, indents)
+    return txt
+
+def sql_process_op_clause(event_alias, indents=None):
+    """
+    For each process, we insert a "process operation" event:
+    Event(
+        event_name="[ppo2_PongNoFrameskip-v4]",
+        category_name="Operation",
+    )
+    We skip these during analysis.
+    """
+    txt = r"( {e}.event_name LIKE '\[%' )".format(
+        e=event_alias,
+    )
 
     txt = maybe_indent(txt, indents)
     return txt

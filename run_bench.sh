@@ -317,7 +317,11 @@ run_all() {
 }
 
 run_perf_debug() {
-    iml-analyze --iml-directory $IML_DIR/output/perf_debug "${CALIB_OPTS[@]}"
+    _do iml-analyze --iml-directory $IML_DIR/output/perf_debug "${CALIB_OPTS[@]}"
+}
+
+run_perf_debug_short() {
+    _do iml-analyze --iml-directory $IML_DIR/output/perf_debug_short "${CALIB_OPTS[@]}"
 }
 
 if [ $# -gt 0 ]; then

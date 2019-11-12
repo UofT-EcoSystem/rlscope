@@ -137,6 +137,18 @@ class ComputeOverlap:
         # It's already flattened
         self.category_times = category_times
         self.category_times = self._sort_category_times(self.category_times)
+        for category_key, events in self.category_times.items():
+            for e1, e2 in zip(events, events[1:]):
+                # [ e1 ]
+                #   [ e2 ]
+                if e2.start_time_usec < e1.end_time_usec:
+                    logging.info("Saw overlap within event list for same category_key: {msg}".format(msg=pprint_msg({
+                        'category_key': category_key,
+                        'e1': e1,
+                        'e2': e2,
+                        })))
+                    assert not( e2.start_time_usec < e1.end_time_usec )
+
 
     def compute(self):
         start_merge_t = time.time()
@@ -367,10 +379,10 @@ class CategoryTimesWrapper:
         return by_start.count_times_left() + by_end.count_times_left()
 
 class RegionMetadata:
-    def __init__(self, category_key=None, start_time_usec=None, end_time_usec=None, num_events=0):
+    def __init__(self, category_key=None, start_time_usec=None, end_time_usec=None, num_events=0, time_unit='us'):
         self.category_key = category_key
-        self.start_time_usec = start_time_usec
-        self.end_time_usec = end_time_usec
+        self.start_time_usec = us_from_unit(start_time_usec, time_unit=time_unit)
+        self.end_time_usec = us_from_unit(end_time_usec, time_unit=time_unit)
         self.num_events = num_events
 
     def add_event(self, event):
@@ -396,7 +408,7 @@ class RegionMetadata:
         return region1
 
     @staticmethod
-    def from_NumbaRegionMetadata(numba_region_metadata, category_to_idx, idx_to_category):
+    def from_NumbaRegionMetadata(numba_region_metadata, category_to_idx, idx_to_category, time_unit):
         category_key = category_key_from_bitset(
             numba_region_metadata.category_key,
             category_to_idx,
@@ -406,6 +418,7 @@ class RegionMetadata:
             start_time_usec=numba_region_metadata.start_time_usec,
             end_time_usec=numba_region_metadata.end_time_usec,
             num_events=numba_region_metadata.num_events,
+            time_unit=time_unit,
         )
         return region_metadata
 
@@ -499,11 +512,11 @@ class OverlapMetadata:
     #     return overlap_metadata
 
     @staticmethod
-    def from_NumbaOverlapMetadata(numba_overlap_metadata, category_to_idx, idx_to_category):
+    def from_NumbaOverlapMetadata(numba_overlap_metadata, category_to_idx, idx_to_category, time_unit):
         overlap_metadata = OverlapMetadata()
         for category_key_bitset, numba_region_metadata in numba_overlap_metadata.items():
             category_key = category_key_from_bitset(category_key_bitset, category_to_idx, idx_to_category)
-            region_metadata = RegionMetadata.from_NumbaRegionMetadata(numba_region_metadata, category_to_idx, idx_to_category)
+            region_metadata = RegionMetadata.from_NumbaRegionMetadata(numba_region_metadata, category_to_idx, idx_to_category, time_unit)
             overlap_metadata._add_region(category_key, region_metadata)
         return overlap_metadata
 
@@ -575,11 +588,11 @@ class Overlap:
     #     return overlap
 
     @staticmethod
-    def from_NumbaOverlap(numba_overlap_dict, category_to_idx, idx_to_category):
+    def from_NumbaOverlap(numba_overlap_dict, category_to_idx, idx_to_category, time_unit):
         overlap = dict()
         for category_key_bitset, time_usec in numba_overlap_dict.items():
             category_key = category_key_from_bitset(category_key_bitset, category_to_idx, idx_to_category)
-            overlap[category_key] = time_usec
+            overlap[category_key] = us_from_unit(time_usec, time_unit)
         return overlap
 
 
@@ -756,11 +769,22 @@ def AsNumbaEOTimes(category_times, category_to_idx, idx_to_category):
     #     ))
 
     eo_times = []
-    for category_key, times_by_start in category_times.items():
+    TimeType = None
+    psec_in_usec = None
+    for idx in sorted(idx_to_category.keys()):
+        category_key = idx_to_category[idx]
+        times_by_start = category_times[category_key]
         category_eo_times = np.empty(2*len(times_by_start), dtype=py_config.NUMPY_TIME_USEC_TYPE)
         for i, ktime in enumerate(times_by_start):
-            category_eo_times[i*2] = ktime.start_time_usec
-            category_eo_times[i*2 + 1] = ktime.end_time_usec
+            if psec_in_usec is None:
+                TimeType = type(ktime.start_time_usec)
+                psec_in_usec = TimeType(PSEC_IN_USEC)
+            # Convert Decimal(usec) to int64(picosecond);
+            # Should keep enough precision for accurate results, while still allow int64.
+            # Picosecond decimals come from:
+            # - Overhead events, whose duration is computed using an average.
+            category_eo_times[i*2] = int(ktime.start_time_usec * psec_in_usec)
+            category_eo_times[i*2 + 1] = int(ktime.end_time_usec * psec_in_usec)
         eo_times.append(category_eo_times)
     return eo_times
 
@@ -809,8 +833,8 @@ def compute_overlap_single_thread_numba(
 
     # Numba -> Python:
     #   Convert Numba types back to Python types.
-    overlap_metadata = OverlapMetadata.from_NumbaOverlapMetadata(numba_overlap_metadata, category_to_idx, idx_to_category)
-    overlap = Overlap.from_NumbaOverlap(numba_overlap, category_to_idx, idx_to_category)
+    overlap_metadata = OverlapMetadata.from_NumbaOverlapMetadata(numba_overlap_metadata, category_to_idx, idx_to_category, time_unit='ps')
+    overlap = Overlap.from_NumbaOverlap(numba_overlap, category_to_idx, idx_to_category, time_unit='ps')
 
     return overlap, overlap_metadata
 
@@ -1570,12 +1594,18 @@ class EventSplitter:
         # NumberType = type(duration_us)
         # n_splits = NumberType(n_splits)
 
-        duration_per_split_us = duration_us/n_splits
+        # Round up to nearest integer.
+        duration_per_split_us = int(1 + duration_us/n_splits)
         event_splits = [
             EventSplit(
                 period.start_time_us + i*duration_per_split_us,
-                period.start_time_us + (i + 1)*duration_per_split_us)
+                min(period.start_time_us + (i + 1)*duration_per_split_us,
+                    period.end_time_us),
+                )
             for i in range(n_splits)]
+        for split in event_splits:
+            check_no_decimal(split.start_time_us)
+            check_no_decimal(split.end_time_us)
         assert event_splits[0].start_time_us == period.start_time_us
         assert event_splits[-1].end_time_us == period.end_time_us
         return event_splits
@@ -2630,8 +2660,13 @@ class OverlapTypeInterface:
             assert len(new_key.non_ops) > 0
             assert len(new_key.procs) > 0
 
-            if len(new_key.ops) > 1:
+            if len(new_key.ops) > 1 and not( len(new_key.procs) > 1 ):
                 # Operations can only overlap cross-process, not within a single-process
+                logging.info("Saw > 1 ops within a single process: {msg}".format(msg=pprint_msg({
+                    'ops': new_key.ops,
+                    'procs': new_key.procs,
+                    'times': times,
+                })))
                 assert len(new_key.procs) > 1
 
             add_overlap_with_key(
