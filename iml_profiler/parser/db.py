@@ -2745,6 +2745,7 @@ class SQLCategoryTimesReader:
                        end_time_us=None,
                        visible_overhead=False,
                        pre_reduce=None,
+                       timer=None,
                        debug=DEFAULT_debug,
                        debug_memoize=False):
         """
@@ -2829,10 +2830,13 @@ class SQLCategoryTimesReader:
                 machine_name=machine_name,
                 start_time_us=start_time_us,
                 end_time_us=end_time_us,
+                timer=timer,
                 debug=debug,
                 debug_label=process_label,
                 fetchall=True,
             )
+            if timer is not None:
+                timer.end_operation('process_events_split(...)')
             # assert len(proc_events) > 0
             # assert len(proc_category_times) > 0
             # assert len(proc_category_times[CATEGORY_OPERATION]) > 0
@@ -2857,6 +2861,8 @@ class SQLCategoryTimesReader:
                         #     show_progress=debug,
                         #     debug_label=process_label)
                         assert len(process_category_times[machine_name][proc][CATEGORY_OPERATION]) > 0
+                if timer is not None:
+                    timer.end_operation('parse_timeline(...): flatten operations')
 
             # proc_category = proc_as_category(process_name)
             # proc_types.add(proc_category)
@@ -2879,16 +2885,22 @@ class SQLCategoryTimesReader:
                         visible_overhead=visible_overhead,
                         pre_reduce=pre_reduce,
                         # categories=categories, operation_types=operation_types,
-                        category_times=category_times, debug=debug)
+                        category_times=category_times,
+                        timer=timer,
+                        debug=debug)
                     # Doesn't speed anything up on "test_load"
                     # bin_category_times_parallel(
                     #     process_name, proc_category_times,
                     #     categories, category_times, operation_types, debug)
+            if timer is not None:
+                timer.end_operation('parse_timeline(...): pre_reduce category_times (e.g. into "CPU/GPU" categories)')
 
         # Sanity check: Events are all sorted.
         for category, events in category_times.items():
             for e1, e2 in zip(events, events[1:]):
                 assert e1.start_time_usec <= e2.start_time_usec
+        if timer is not None:
+            timer.end_operation('parse_timeline(...): sanity check')
 
         # assert len(operation_types) > 0
 
@@ -2975,6 +2987,7 @@ class SQLCategoryTimesReader:
                        machine_name=None,
                        start_time_us=None,
                        end_time_us=None,
+                       timer=None,
                        debug=False,
                        debug_label=None,
                        fetchall=True):
@@ -3021,6 +3034,8 @@ class SQLCategoryTimesReader:
         sql_exec_query(c, query, params, self.__class__, debug)
 
         rows = sql_fetch_rows(c, fetchall, debug=debug)
+        if timer is not None:
+            timer.end_operation('process_events_split(...): SQL query event rows')
 
         event_split = None
         if start_time_us is not None and end_time_us is not None:
@@ -3035,11 +3050,14 @@ class SQLCategoryTimesReader:
         process_category_times = self._rows_as_category_times(
             rows,
             event_split=event_split,
+            timer=timer,
             debug=debug,
             debug_label=debug_label)
+        if timer is not None:
+            timer.end_operation('process_events_split(...): convert event rows to category_times dict')
         return process_category_times
 
-    def _rows_as_category_times(self, rows, event_split=None, debug=False, debug_label=None):
+    def _rows_as_category_times(self, rows, event_split=None, timer=None, debug=False, debug_label=None):
         process_category_times = dict()
         def groupby_key(row):
             return (row['machine_name'], row['process_name'])
@@ -3051,6 +3069,7 @@ class SQLCategoryTimesReader:
             self._add_event_rows_to_category_times(
                 process_category_times[machine_name][process_name], process_rows,
                 event_split=event_split,
+                timer=timer,
                 debug=debug,
                 # show_progress=debug,
                 show_progress=False,
@@ -3172,6 +3191,7 @@ class SQLCategoryTimesReader:
     def _add_event_rows_to_category_times(self, category_times, rows,
                                           event_split=None,
                                           group_by_device=DEFAULT_group_by_device,
+                                          timer=None,
                                           debug=False,
                                           show_progress=False,
                                           debug_label=None):
@@ -3676,6 +3696,7 @@ def bin_category_times_single_thread(
     # categories=None,
     # operation_types=None,
     category_times=None,
+    timer=None,
     debug=False):
     """
     Given proc_category_times (category_times format for a specific process), redistribute the

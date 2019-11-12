@@ -118,8 +118,10 @@ class ComputeOverlap:
                  overlaps_with=None,
                  keep_empty_time=False,
                  check_key=None,
+                 timer=None,
                  debug=False,
                  show_progress=False):
+        self.timer = timer
         self.debug = ( ComputeOverlap.DEBUG or py_config.IML_DEBUG_UNIT_TESTS ) and debug
         self.check_key = check_key
         self.show_progress = show_progress
@@ -137,6 +139,9 @@ class ComputeOverlap:
         # It's already flattened
         self.category_times = category_times
         self.category_times = self._sort_category_times(self.category_times)
+        if self.timer is not None:
+            self.timer.end_operation('ComputerOverlap._sort_category_times()')
+        # Sanity check: no self-overlap
         for category_key, events in self.category_times.items():
             for e1, e2 in zip(events, events[1:]):
                 # [ e1 ]
@@ -148,11 +153,15 @@ class ComputeOverlap:
                         'e2': e2,
                         })))
                     assert not( e2.start_time_usec < e1.end_time_usec )
+        if self.timer is not None:
+            self.timer.end_operation('ComputerOverlap: sanity check - no self-overlap')
 
 
     def compute(self):
         start_merge_t = time.time()
         self.compute_merge()
+        if self.timer is not None:
+            self.timer.end_operation('ComputerOverlap.compute_merge()')
         end_merge_t = time.time()
         sec_merge = end_merge_t - start_merge_t
         if self.debug:
@@ -236,14 +245,18 @@ class ComputeOverlap:
                 self.overlaps_with,
                 self.check_key,
                 self.debug,
-                self.show_progress)
+                self.show_progress,
+                timer=self.timer,
+            )
         else:
             overlap, overlap_metadata = compute_overlap_single_thread(
                 category_times,
                 self.overlaps_with,
                 self.check_key,
                 self.debug,
-                self.show_progress)
+                self.show_progress,
+                timer=self.timer,
+            )
 
         if self.overlaps_with is not None:
             del_keys = []
@@ -264,6 +277,9 @@ class ComputeOverlap:
 
             for categories_key in del_keys:
                 del overlap[categories_key]
+
+        if self.timer is not None:
+            self.timer.end_operation('ComputerOverlap._compute_overlap(): fixup results')
 
         return overlap, overlap_metadata
 
@@ -802,7 +818,8 @@ def compute_overlap_single_thread_numba(
     overlaps_with=None,
     check_key=None,
     debug=False,
-    show_progress=False):
+    show_progress=False,
+    timer=None):
 
     # Python -> Numba:
     #   Convert Python types to Numba types.
@@ -811,6 +828,8 @@ def compute_overlap_single_thread_numba(
         category_times, category_to_idx, idx_to_category,
         # debug=debug,
     )
+    if timer is not None:
+        timer.end_operation('compute_overlap_single_thread_numba(...): Python -> Numba (eo_times)')
 
     # logging.info("{msg}".format(msg=pprint_msg({
     #     'idx_to_category': idx_to_category,
@@ -831,10 +850,16 @@ def compute_overlap_single_thread_numba(
             interactive=False,
         )
 
+    if timer is not None:
+        timer.end_operation('compute_overlap_single_thread_numba(...): Event overlap; UniqueSplits(eo_times)')
+
     # Numba -> Python:
     #   Convert Numba types back to Python types.
     overlap_metadata = OverlapMetadata.from_NumbaOverlapMetadata(numba_overlap_metadata, category_to_idx, idx_to_category, time_unit='ps')
     overlap = Overlap.from_NumbaOverlap(numba_overlap, category_to_idx, idx_to_category, time_unit='ps')
+
+    if timer is not None:
+        timer.end_operation('compute_overlap_single_thread_numba(...): Numba -> Python')
 
     return overlap, overlap_metadata
 
@@ -843,7 +868,8 @@ def compute_overlap_single_thread(
     overlaps_with=None,
     check_key=None,
     debug=False,
-    show_progress=False):
+    show_progress=False,
+    timer=None):
 
     overlap_metadata = OverlapMetadata()
 
@@ -853,7 +879,11 @@ def compute_overlap_single_thread(
     reversed_end_key = lambda ktime: - ktime.end_time_usec
 
     by_start = CategoryTimesWrapper(category_times, start_key, reversed_start_key, 'start')
+    if timer is not None:
+        timer.end_operation('compute_overlap_single_thread(...): sort by start-time')
     by_end = CategoryTimesWrapper(category_times, end_key, reversed_end_key, 'end')
+    if timer is not None:
+        timer.end_operation('compute_overlap_single_thread(...): sort by end-time')
 
     cur_categories = set()
     cur_events = dict()
@@ -976,6 +1006,9 @@ def compute_overlap_single_thread(
     bar.close()
 
     assert len(cur_categories) == 0
+
+    if timer is not None:
+        timer.end_operation('compute_overlap_single_thread(...): Event overlap')
 
     for categories_key in list(times.keys()):
         # We may get artificial overlaps even if two categories are synchronous,
@@ -1614,6 +1647,11 @@ def split_overlap_computation_Worker(kwargs):
     kwargs = dict(kwargs)
     self = kwargs['self']
     del kwargs['self']
+    if self.debug_perf:
+        timer = SimpleTimer("split_overlap_computation_Worker")
+        timer.reset_start_time()
+    else:
+        timer = None
     with GetConnectionPool(conn_kwargs=dict(
         db_path=self.db_path,
         host=self.host,
@@ -1623,7 +1661,12 @@ def split_overlap_computation_Worker(kwargs):
         maxconn=1,
         # forked child process worker for computing overlap split.
         new_process=True) as pool:
-        return self._split_overlap_computation(**kwargs)
+        ret = self._split_overlap_computation(timer=timer, **kwargs)
+    if self.debug_perf:
+        logging.info("[--debug-perf] Time breakdown of split_overlap_computation_Worker: {msg}".format(
+            msg=pprint_msg(timer),
+        ))
+    return ret
 
 class OverlapComputer:
     """
@@ -1640,8 +1683,10 @@ class OverlapComputer:
                  host=None,
                  user=None,
                  password=None,
+                 timer=None,
                  debug=False,
                  debug_single_thread=False,
+                 debug_perf=False,
                  debug_ops=False,
                  # Swallow any excess arguments
                  **kwargs):
@@ -1649,8 +1694,10 @@ class OverlapComputer:
         self.host = host
         self.user = user
         self.password = password
+        self.timer = timer
         self.debug = debug
         self.debug_single_thread = debug_single_thread
+        self.debug_perf = debug_perf
         self.debug_ops = debug_ops
 
     @property
@@ -2003,9 +2050,12 @@ class OverlapComputer:
                                    process_name=None,
                                    phase_name=None,
                                    debug_memoize=False,
+                                   timer=None,
                                    overlap_type=None):
 
         sql_reader = SQLCategoryTimesReader(self.db_path, host=self.host, user=self.user, password=self.password)
+        if timer is not None:
+            timer.end_operation('sql_reader = SQLCategoryTimesReader(...)')
 
         start_parse_timeline_t = time.time()
         category_times = sql_reader.parse_timeline(
@@ -2016,6 +2066,7 @@ class OverlapComputer:
             end_time_us=event_split.end_time_us,
             visible_overhead=visible_overhead,
             pre_reduce=pre_reduce,
+            timer=timer,
             debug=self.debug,
             debug_memoize=debug_memoize)
         sql_reader.close()
@@ -2074,6 +2125,7 @@ class OverlapComputer:
         # Q: ... is that true?
         compute_overlap = ComputeOverlap(category_times,
                                          check_key=check_key,
+                                         timer=timer,
                                          debug=self.debug,
                                          show_progress=self.debug)
         compute_overlap.compute()

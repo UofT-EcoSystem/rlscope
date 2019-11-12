@@ -2050,6 +2050,7 @@ class UtilizationPlot:
                  dynamic_size=False,
                  debug=False,
                  debug_single_thread=False,
+                 debug_perf=False,
                  debug_ops=False,
                  debug_memoize=False,
                  entire_trace=False,
@@ -2102,6 +2103,7 @@ class UtilizationPlot:
         self.sec_per_pixel = self.step_sec / float(self.pixels_per_square)
         self.debug = debug
         self.debug_single_thread = debug_single_thread
+        self.debug_perf = debug_perf
         self.visible_overhead = visible_overhead
         if self.debug_single_thread:
             self.n_workers = 1
@@ -2184,6 +2186,10 @@ class UtilizationPlot:
         return UtilizationPlot.get_plot_data_path(self.directory, bench_name, self.debug_ops)
 
     def run(self):
+
+        self.timer = SimpleTimer("EventOverlap")
+        self.timer.reset_start_time()
+
         self.sql_reader = SQLCategoryTimesReader(self.db_path, host=self.host, user=self.user, password=self.password, debug_ops=self.debug_ops)
 
         if self.entire_trace:
@@ -2265,8 +2271,10 @@ class UtilizationPlot:
 
         overlap_computer = OverlapComputer(self.db_path,
                                            host=self.host, user=self.user, password=self.password,
+                                           timer=self.timer,
                                            debug=self.debug,
                                            debug_single_thread=self.debug_single_thread,
+                                           debug_perf=self.debug_perf,
                                            debug_ops=self.debug_ops)
 
         def compute_overlap():

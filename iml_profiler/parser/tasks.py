@@ -83,6 +83,9 @@ param_debug = luigi.BoolParameter(description="debug")
 param_debug_single_thread = luigi.BoolParameter(description=textwrap.dedent("""
         Run any multiprocessing stuff using a single thread for debugging.
         """))
+param_debug_perf = luigi.BoolParameter(description=textwrap.dedent("""
+        Collect some coarse-grained timing info to help debug performance issues during trace analysis.
+        """))
 param_debug_memoize = luigi.BoolParameter(description=textwrap.dedent("""
         Memoize reading/generation of files to accelerate develop/test code iteration.
         """))
@@ -134,6 +137,7 @@ class IMLTask(luigi.Task):
     debug_memoize = luigi.BoolParameter(description="If true, memoize partial results for quicker runs", default=False, parsing=luigi.BoolParameter.EXPLICIT_PARSING)
     debug = param_debug
     debug_single_thread = param_debug_single_thread
+    debug_perf = param_debug_perf
 
     postgres_password = param_postgres_password
     postgres_user = param_postgres_user
@@ -385,6 +389,7 @@ class _UtilizationPlotTask(IMLTask):
             password=self.postgres_password,
             debug=self.debug,
             debug_single_thread=self.debug_single_thread,
+            debug_perf=self.debug_perf,
             debug_memoize=self.debug_memoize,
         )
         self.sql_parser.run()
@@ -463,6 +468,7 @@ class TraceEventsTask(luigi.Task):
     iml_directory = luigi.Parameter(description="Location of trace-files")
     debug = param_debug
     debug_single_thread = param_debug_single_thread
+    debug_perf = param_debug_perf
 
     postgres_password = param_postgres_password
     postgres_user = param_postgres_user
@@ -576,6 +582,7 @@ class UtilTask(luigi.Task):
     suffix = luigi.Parameter(description="Add suffix to output files: MachineGPUUtil.{suffix}.{ext}", default=None)
     debug = param_debug
     debug_single_thread = param_debug_single_thread
+    debug_perf = param_debug_perf
     algo_env_from_dir = luigi.BoolParameter(description="Add algo/env columns based on directory structure of --iml-directories <algo>/<env>/iml_dir", default=True, parsing=luigi.BoolParameter.EXPLICIT_PARSING)
 
     skip_output = False
@@ -605,6 +612,7 @@ class UtilPlotTask(luigi.Task):
 
     debug = param_debug
     debug_single_thread = param_debug_single_thread
+    debug_perf = param_debug_perf
     # algo_env_from_dir = luigi.BoolParameter(description="Add algo/env columns based on directory structure of --iml-directories <algo>/<env>/iml_dir", default=True, parsing=luigi.BoolParameter.EXPLICIT_PARSING)
 
     skip_output = False
@@ -626,6 +634,7 @@ class TrainingProgressTask(luigi.Task):
     # suffix = luigi.Parameter(description="Add suffix to output files: TrainingProgress.{suffix}.{ext}", default=None)
     debug = param_debug
     debug_single_thread = param_debug_single_thread
+    debug_perf = param_debug_perf
     algo_env_from_dir = luigi.BoolParameter(description="Add algo/env columns based on directory structure of --iml-directories <algo>/<env>/iml_dir", default=True, parsing=luigi.BoolParameter.EXPLICIT_PARSING)
     baseline_config = luigi.Parameter(description="The baseline configuration to compare all others against; default: config_uninstrumented", default=None)
     ignore_phase = luigi.BoolParameter(description="Bug workaround: for training progress files that didn't record phase, just ignore it.", default=False, parsing=luigi.BoolParameter.EXPLICIT_PARSING)
@@ -659,6 +668,7 @@ class ProfilingOverheadPlotTask(luigi.Task):
 
     debug = param_debug
     debug_single_thread = param_debug_single_thread
+    debug_perf = param_debug_perf
     # algo_env_from_dir = luigi.BoolParameter(description="Add algo/env columns based on directory structure of --iml-directories <algo>/<env>/iml_dir", default=True, parsing=luigi.BoolParameter.EXPLICIT_PARSING)
 
     skip_output = False
@@ -716,6 +726,7 @@ class GeneratePlotIndexTask(luigi.Task):
     # replace = luigi.BoolParameter(description="debug", parsing=luigi.BoolParameter.EXPLICIT_PARSING)
     debug = param_debug
     debug_single_thread = param_debug_single_thread
+    debug_perf = param_debug_perf
 
     postgres_password = param_postgres_password
     postgres_user = param_postgres_user
@@ -792,6 +803,7 @@ class OverlapStackedBarTask(luigi.Task):
     keep_zero = luigi.BoolParameter(description="If a stacked-bar element is zero in all the bar-charts, still show it in the legend.", default=True, parsing=luigi.BoolParameter.EXPLICIT_PARSING)
     debug = param_debug
     debug_single_thread = param_debug_single_thread
+    debug_perf = param_debug_perf
     suffix = luigi.Parameter(description="Add suffix to output files: OverlapStackedBarPlot.overlap_type_*.{suffix}.{ext}", default=None)
 
     # Needed by mk_SQL_tasks (for GeneratePlotIndexTask)
@@ -947,6 +959,7 @@ class CallInterceptionOverheadTask(luigi.Task):
 
     debug = param_debug
     debug_single_thread = param_debug_single_thread
+    debug_perf = param_debug_perf
     # algo_env_from_dir = luigi.BoolParameter(description="Add algo/env columns based on directory structure of --iml-directories <algo>/<env>/iml_dir", default=True, parsing=luigi.BoolParameter.EXPLICIT_PARSING)
 
     skip_output = False
@@ -974,6 +987,7 @@ class CUPTIOverheadTask(luigi.Task):
 
     debug = param_debug
     debug_single_thread = param_debug_single_thread
+    debug_perf = param_debug_perf
     # algo_env_from_dir = luigi.BoolParameter(description="Add algo/env columns based on directory structure of --iml-directories <algo>/<env>/iml_dir", default=True, parsing=luigi.BoolParameter.EXPLICIT_PARSING)
 
     skip_output = False
@@ -1003,6 +1017,7 @@ class CUPTIScalingOverheadTask(luigi.Task):
     debug = param_debug
     debug_memoize = param_debug_memoize
     debug_single_thread = param_debug_single_thread
+    debug_perf = param_debug_perf
     # algo_env_from_dir = luigi.BoolParameter(description="Add algo/env columns based on directory structure of --iml-directories <algo>/<env>/iml_dir", default=True, parsing=luigi.BoolParameter.EXPLICIT_PARSING)
 
     skip_output = False
@@ -1054,6 +1069,7 @@ class CorrectedTrainingTimeTask(luigi.Task):
     debug = param_debug
     debug_memoize = param_debug_memoize
     debug_single_thread = param_debug_single_thread
+    debug_perf = param_debug_perf
     # algo_env_from_dir = luigi.BoolParameter(description="Add algo/env columns based on directory structure of --iml-directories <algo>/<env>/iml_dir", default=True, parsing=luigi.BoolParameter.EXPLICIT_PARSING)
 
     skip_output = False
@@ -1082,6 +1098,7 @@ class PyprofOverheadTask(luigi.Task):
 
     debug = param_debug
     debug_single_thread = param_debug_single_thread
+    debug_perf = param_debug_perf
     # algo_env_from_dir = luigi.BoolParameter(description="Add algo/env columns based on directory structure of --iml-directories <algo>/<env>/iml_dir", default=True, parsing=luigi.BoolParameter.EXPLICIT_PARSING)
 
     skip_output = False
@@ -1108,6 +1125,7 @@ class TotalTrainingTimeTask(luigi.Task):
 
     debug = param_debug
     debug_single_thread = param_debug_single_thread
+    debug_perf = param_debug_perf
 
     skip_output = False
 

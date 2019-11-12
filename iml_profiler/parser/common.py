@@ -2098,6 +2098,9 @@ class SimpleTimer:
         self.name = name
         self.op_duration_sec = dict()
         self.last_time_sec = None
+        self.total_time_sec = 0.
+        self._next_idx = 0
+        self._idx_to_op = dict()
 
     def reset_start_time(self):
         now_sec = time.time()
@@ -2107,13 +2110,45 @@ class SimpleTimer:
         assert self.last_time_sec is not None
         now_sec = time.time()
         assert operation not in self.op_duration_sec
-        self.op_duration_sec[operation] = now_sec - self.last_time_sec
+        duration_sec = now_sec - self.last_time_sec
+        self.op_duration_sec[operation] = duration_sec
+        self.total_time_sec += duration_sec
         self.last_time_sec = now_sec
+        self._idx_to_op[self._next_idx] = operation
+        self._next_idx += 1
+
+    def ops(self):
+        ops = []
+        for idx, op in self._idx_to_op.items():
+            duration_sec = self.op_duration_sec[op]
+            ops.append((idx, op, duration_sec))
+        return ops
+
+    def ops_dataframe(self):
+        ops = self.ops()
+        df = pd.DataFrame.from_records(ops, columns=['op_idx', 'operation', 'time_sec'])
+        total_sec = df['time_sec'].sum()
+        df['percent'] = 100*df['time_sec']/total_sec
+        df = df.sort_values(['time_sec'], ascending=False)
+        df = pd.concat([
+            pd.DataFrame.from_records(
+                data=[(-1, 'TOTAL', total_sec, 100)],
+                columns=['op_idx', 'operation', 'time_sec', 'percent']),
+            df,
+        ])
+        return df
+
+    def _df_as_str(self, df):
+        with pd.option_context('display.max_rows', None, 'display.max_columns', None, 'display.max_colwidth', 90, 'display.width', 120):
+            # return "\n" + textwrap.indent(pprint.pformat(df), prefix='  ')
+            return "\n" + textwrap.indent(df.to_string(index=False), prefix='  ')
 
     def __str__(self):
         bldr = ToStringBuilder(obj=self)
         bldr.add_param('name', self.name)
-        bldr.add_param('op_duration_sec', pprint.pformat(self.op_duration_sec))
+        bldr.add_param('total_time_sec', self.total_time_sec)
+        df = self.ops_dataframe()
+        bldr.add_param('op_duration_sec', self._df_as_str(df))
         return bldr.to_string()
 
     def __repr__(self):
