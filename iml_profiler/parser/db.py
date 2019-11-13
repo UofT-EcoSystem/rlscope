@@ -2744,7 +2744,7 @@ class SQLCategoryTimesReader:
                        start_time_us=None,
                        end_time_us=None,
                        visible_overhead=False,
-                       pre_reduce=None,
+                       # pre_reduce=None,
                        timer=None,
                        debug=DEFAULT_debug,
                        debug_memoize=False):
@@ -2806,101 +2806,156 @@ class SQLCategoryTimesReader:
         # categories = set()
         # proc_types = set()
 
-        if process_name is None and ( start_time_us is not None or end_time_us is not None ):
-            # [None]
-            process_names = [process_name]
-        elif process_name is not None:
-            process_names = [process_name]
-        else:
-            process_names = self.process_names
+        # if process_name is None and ( start_time_us is not None or end_time_us is not None ):
+        #     # [None]
+        #     process_names = [process_name]
+        # elif process_name is not None:
+        #     process_names = [process_name]
+        # else:
+        #     process_names = self.process_names
+        #
+        # for process_name in process_names:
+        assert process_name is not None
+        assert machine_name is not None
+        assert phase_name is not None
 
-        for process_name in process_names:
+        process_label = "process={proc}".format(
+            proc=process_name)
+        """
+        {
+            <category_name>: <events belonging to process_name, sorted by start_sec>,
+            ...
+        }
+        """
+        op_category_times = self.process_events_split(
+            process_name=process_name,
+            phase_name=phase_name,
+            machine_name=machine_name,
+            category_name=CATEGORY_OPERATION,
+            start_time_us=start_time_us,
+            end_time_us=end_time_us,
+            timer=timer,
+            debug=debug,
+            debug_label=process_label,
+            fetchall=True,
+        )
+        # if timer is not None:
+        #     timer.end_operation('sql_reader = SQLCategoryTimesReader(...)')
 
-            process_label = "process={proc}".format(
-                proc=process_name)
-            """
-            {
-                <category_name>: <events belonging to process_name, sorted by start_sec>,
-                ...
-            }
-            """
-            process_category_times = self.process_events_split(
-                process_name=process_name,
-                phase_name=phase_name,
-                machine_name=machine_name,
-                start_time_us=start_time_us,
-                end_time_us=end_time_us,
-                timer=timer,
-                debug=debug,
-                debug_label=process_label,
-                fetchall=True,
-            )
-            if timer is not None:
-                timer.end_operation('process_events_split(...)')
-            # assert len(proc_events) > 0
-            # assert len(proc_category_times) > 0
-            # assert len(proc_category_times[CATEGORY_OPERATION]) > 0
+        process_eo_times_dict = self.process_events_split_eo_times(
+            process_name=process_name,
+            phase_name=phase_name,
+            machine_name=machine_name,
+            start_time_us=start_time_us,
+            end_time_us=end_time_us,
+            timer=timer,
+            debug=debug,
+            debug_label=process_label,
+        )
 
-            for machine_name in process_category_times.keys():
-                for proc in process_category_times[machine_name].keys():
+        # if timer is not None:
+        #     timer.end_operation('process_events_split(...)')
+        # assert len(proc_events) > 0
+        # assert len(proc_category_times) > 0
+        # assert len(proc_category_times[CATEGORY_OPERATION]) > 0
 
-                    # assert CATEGORY_OPERATION in proc_category_times
-                    if CATEGORY_OPERATION in process_category_times[machine_name][proc]:
-                        """
-                        Replace proc_category_times[CATEGORY_OPERATION], handle operation nesting.
-                        We are assuming a single process is single-threaded here, so any operation 
-                        nesting is form a single-threaded "call-stack".
-                        """
-                        process_category_times[machine_name][proc][CATEGORY_OPERATION] = process_op_nest_single_thread(
-                            process_category_times[machine_name][proc][CATEGORY_OPERATION],
-                            show_progress=debug,
-                            debug_label=process_label)
-                        # Doesn't speed anything up on "test_load"
-                        # proc_category_times[CATEGORY_OPERATION] = process_op_nest_parallel(
-                        #     proc_category_times[CATEGORY_OPERATION],
-                        #     show_progress=debug,
-                        #     debug_label=process_label)
-                        assert len(process_category_times[machine_name][proc][CATEGORY_OPERATION]) > 0
-                if timer is not None:
-                    timer.end_operation('parse_timeline(...): flatten operations')
+        for machine_name in op_category_times.keys():
+            for proc in op_category_times[machine_name].keys():
 
-            # proc_category = proc_as_category(process_name)
-            # proc_types.add(proc_category)
-
-            # Merge all the process-specific events into a single category_times dict.
-
-            # Q: How do we parallelize this part?
-            # A: All we are doing is iterating over every event, and replacing its category.
-            #    Then, we are sticking it back inside a single category_times dict.
-            #    Regardless of how we partition the work, merging results from multiple workers
-            #    involves writing a merge function for category_times.
-            #    i.e. merged_category_times = merge(ctimes_1[c], ctimes_2[c],
-            #                                       by=event.start_time_usec)
-            #    I'm not sure if we'll overcome the single-threaded merge time...
-            for machine_name in process_category_times.keys():
-                for proc in process_category_times[machine_name].keys():
-                    bin_category_times_single_thread(
-                        # process_name, proc_category_times,
-                        process_category_times[machine_name][proc],
-                        visible_overhead=visible_overhead,
-                        pre_reduce=pre_reduce,
-                        # categories=categories, operation_types=operation_types,
-                        category_times=category_times,
-                        timer=timer,
-                        debug=debug)
+                # assert CATEGORY_OPERATION in proc_category_times
+                if CATEGORY_OPERATION in op_category_times[machine_name][proc]:
+                    """
+                    Replace proc_category_times[CATEGORY_OPERATION], handle operation nesting.
+                    We are assuming a single process is single-threaded here, so any operation 
+                    nesting is form a single-threaded "call-stack".
+                    """
+                    op_category_times[machine_name][proc][CATEGORY_OPERATION] = process_op_nest_single_thread(
+                        op_category_times[machine_name][proc][CATEGORY_OPERATION],
+                        show_progress=debug,
+                        debug_label=process_label)
                     # Doesn't speed anything up on "test_load"
-                    # bin_category_times_parallel(
-                    #     process_name, proc_category_times,
-                    #     categories, category_times, operation_types, debug)
-            if timer is not None:
-                timer.end_operation('parse_timeline(...): pre_reduce category_times (e.g. into "CPU/GPU" categories)')
+                    # proc_category_times[CATEGORY_OPERATION] = process_op_nest_parallel(
+                    #     proc_category_times[CATEGORY_OPERATION],
+                    #     show_progress=debug,
+                    #     debug_label=process_label)
+                    assert len(op_category_times[machine_name][proc][CATEGORY_OPERATION]) > 0
+
+        if timer is not None:
+            timer.end_operation('parse_timeline(...): flatten operations')
+
+        binned_op_category_times = dict()
+        for machine_name in op_category_times.keys():
+            for proc in op_category_times[machine_name].keys():
+                bin_category_times_single_thread(
+                    # process_name, proc_category_times,
+                    op_category_times[machine_name][proc],
+                    visible_overhead=visible_overhead,
+                    pre_reduce=pre_reduce_op_event,
+                    # categories=categories, operation_types=operation_types,
+                    category_times=binned_op_category_times,
+                    timer=timer,
+                    debug=debug)
+                # Doesn't speed anything up on "test_load"
+                # bin_category_times_parallel(
+                #     process_name, proc_category_times,
+                #     categories, category_times, operation_types, debug)
+
+        if timer is not None:
+            timer.end_operation('parse_timeline(...): bin operations into separate categories')
+
+        for category_key in list(binned_op_category_times.keys()):
+            binned_op_category_times[category_key] = EventsAsEOTimes(binned_op_category_times[category_key])
+
+        if timer is not None:
+            timer.end_operation('parse_timeline(...): convert operation times to eo_times')
+
+        common_keys = set.intersection(set(binned_op_category_times.keys()), set(process_eo_times_dict.keys()))
+        assert len(common_keys) == 0
+        # Add operation eo_times.
+        process_eo_times_dict.update(binned_op_category_times)
+
+        if timer is not None:
+            total_num_events = sum(len(eo_times) for category_key, eo_times in process_eo_times_dict.items())
+            timer.record_throughput('events', total_num_events)
+
+        # proc_category = proc_as_category(process_name)
+        # proc_types.add(proc_category)
+
+        # Merge all the process-specific events into a single category_times dict.
+
+        # Q: How do we parallelize this part?
+        # A: All we are doing is iterating over every event, and replacing its category.
+        #    Then, we are sticking it back inside a single category_times dict.
+        #    Regardless of how we partition the work, merging results from multiple workers
+        #    involves writing a merge function for category_times.
+        #    i.e. merged_category_times = merge(ctimes_1[c], ctimes_2[c],
+        #                                       by=event.start_time_usec)
+        #    I'm not sure if we'll overcome the single-threaded merge time...
+        # for machine_name in op_category_times.keys():
+        #     for proc in op_category_times[machine_name].keys():
+        #         bin_category_times_single_thread(
+        #             # process_name, proc_category_times,
+        #             op_category_times[machine_name][proc],
+        #             visible_overhead=visible_overhead,
+        #             # pre_reduce=pre_reduce,
+        #             # categories=categories, operation_types=operation_types,
+        #             category_times=category_times,
+        #             timer=timer,
+        #             debug=debug)
+        #         # Doesn't speed anything up on "test_load"
+        #         # bin_category_times_parallel(
+        #         #     process_name, proc_category_times,
+        #         #     categories, category_times, operation_types, debug)
+
+        # if timer is not None:
+        #     timer.end_operation('parse_timeline(...): pre_reduce category_times (e.g. into "CPU/GPU" categories)')
 
         # Sanity check: Events are all sorted.
-        for category, events in category_times.items():
-            for e1, e2 in zip(events, events[1:]):
-                assert e1.start_time_usec <= e2.start_time_usec
-        if timer is not None:
-            timer.end_operation('parse_timeline(...): sanity check')
+        # for category, events in category_times.items():
+        #     for e1, e2 in zip(events, events[1:]):
+        #         assert e1.start_time_usec <= e2.start_time_usec
+        # if timer is not None:
+        #     timer.end_operation('parse_timeline(...): sanity check')
 
         # assert len(operation_types) > 0
 
@@ -2913,7 +2968,7 @@ class SQLCategoryTimesReader:
         #     }, indent=2)
 
         # ret = category_times, categories, operation_types, proc_types
-        ret = category_times
+        ret = process_eo_times_dict
         # maybe_memoize(debug_memoize, ret, self._parse_timeline_memo_path())
         return ret
 
@@ -2981,10 +3036,196 @@ class SQLCategoryTimesReader:
         trace_period = TracePeriod.from_row(row)
         return trace_period
 
+    def _sql_process_events_split(
+        self,
+        process_name=None,
+        phase_name=None,
+        machine_name=None,
+        category_name=None,
+        start_time_us=None,
+        end_time_us=None,
+        # timer=None,
+        # debug=False,
+        # debug_label=None,
+        # fetchall=True
+        ):
+        # """"
+        # SELECT d1.device_name, c1.category_name, e1.event_name, e1.start_time_us, e1.duration_us
+        #     , e1.event_id
+        #     , p1.process_name, ph1.phase_name, m.machine_name
+        #     , e1.pyprof_filename
+        #     , e1.pyprof_line_no
+        #     , e1.pyprof_function
+        #     , e1.pyprof_line_description
+        # FROM
+        #     Category AS c1
+        #     NATURAL JOIN Event as e1
+        #     NATURAL JOIN Process as p1
+        #     NATURAL JOIN Phase as ph1
+        #     NATURAL JOIN Machine as m
+        #     NATURAL LEFT JOIN Device as d1
+        # """
+        query = textwrap.dedent("""
+            SELECT d1.device_name, c1.category_name, e1.event_name, e1.start_time_us, e1.duration_us
+                , e1.event_id
+                , p1.process_name, ph1.phase_name, m.machine_name
+            FROM 
+                Category AS c1
+                NATURAL JOIN Event as e1
+                NATURAL JOIN Process as p1
+                NATURAL JOIN Phase as ph1
+                NATURAL JOIN Machine as m 
+                NATURAL LEFT JOIN Device as d1
+            WHERE 
+                {process_clause} AND
+                {phase_clause} AND
+                {machine_clause} AND
+                {category_clause} AND
+                -- Keep events within a EventSplit(start, end) time range.
+                {event_split_range_clause} AND
+                -- Skip "process operation" events.
+                NOT {process_op_clause}
+            ORDER BY 
+                m.machine_name, p1.process_name, c1.category_name, e1.start_time_us ASC 
+            """).format(
+            process_clause=sql_process_clause(process_name, 'p1', indents=1, allow_none=True),
+            phase_clause=sql_phase_clause(phase_name, 'ph1', indents=1, allow_none=True),
+            machine_clause=sql_machine_clause(machine_name, 'm', indents=1, allow_none=True),
+            category_clause=sql_category_clause(category_name, 'c1', indents=1, allow_none=True),
+            process_op_clause=sql_process_op_clause('e1'),
+            event_split_range_clause=sql_event_split_range_clause('e1', start_time_us, end_time_us, indents=1),
+        )
+        return query
+
+    def process_events_split_eo_times(self,
+                             process_name,
+                             phase_name=None,
+                             machine_name=None,
+                             start_time_us=None,
+                             end_time_us=None,
+                             timer=None,
+                             debug=False,
+                             debug_label=None):
+
+        assert ( start_time_us is None and end_time_us is None ) or \
+               ( start_time_us is not None and end_time_us is not None )
+
+        assert process_name is not None
+
+        c = self.conn.cursor
+
+        process_eo_times = dict()
+
+        # ##
+        # ## Do separate fetch queries for each category.
+        # ## TODO: ammenable to being parallelized
+        # ##
+        # category_names = self.categories
+        # for category_name in category_names:
+        #     if category_name in {CATEGORY_OPERATION}:
+        #         continue
+        #     # NOTE: we can do each of these in parallel.
+        #     # Q: Can we share np.array's efficiently between workers...? I don't think so.
+        #     category_cursor = c
+        #     # category_cursor = self.conn.get_cursor()
+        #     query = self._sql_process_events_split(
+        #         process_name=process_name,
+        #         phase_name=phase_name,
+        #         machine_name=machine_name,
+        #         category_name=category_name,
+        #         start_time_us=start_time_us,
+        #         end_time_us=end_time_us,
+        #     )
+        #     rows = RowIterator(query, category_cursor, fetchall=True)
+        #     # rows = RowIterator(query, category_cursor)
+        #     def count_timer(sql_op):
+        #         if timer is not None:
+        #             timer.end_operation("process_events_split_eo_times(...): convert SQL rows to numpy format; category={cat}: {sql_op}".format(
+        #                 sql_op=sql_op,
+        #                 cat=category_name,
+        #             ))
+        #     count = rows.count(timer=count_timer)
+        #     def select_timer(sql_op):
+        #         if timer is not None:
+        #             timer.end_operation("process_events_split_eo_times(...): convert SQL rows to numpy format; category={cat}, rows={n}: {sql_op}".format(
+        #                 sql_op=sql_op,
+        #                 cat=category_name,
+        #                 n=count,
+        #             ))
+        #     eo_times = RowsAsEOTimes(rows, timer=select_timer)
+        #     if timer is not None:
+        #         timer.end_operation("process_events_split_eo_times(...): convert SQL rows to numpy format; category={cat}, rows={n}: EO_TIMES READY".format(
+        #             cat=category_name,
+        #             n=count,
+        #         ))
+        #     category_key = CategoryKey(
+        #         ops=frozenset(),
+        #         non_ops=frozenset([category_name]),
+        #         procs=frozenset([process_name]))
+        #     assert category_key not in process_eo_times
+        #     process_eo_times[category_key] = eo_times
+        #
+        #     # self.conn.put_cursor(category_cursor)
+
+        ##
+        ## Do single SQL query to fetch all events
+        ## NOT ammenable to being parallelized.
+        ##
+        category_cursor = c
+        # category_cursor = self.conn.get_cursor()
+        query = self._sql_process_events_split(
+            process_name=process_name,
+            phase_name=phase_name,
+            machine_name=machine_name,
+            start_time_us=start_time_us,
+            end_time_us=end_time_us,
+        )
+        rows = RowIterator(query, category_cursor, fetchall=True,
+                           # debug=True,
+                           )
+        # rows = RowIterator(query, category_cursor)
+        def count_timer(sql_op):
+            if timer is not None:
+                timer.end_operation("process_events_split_eo_times(...): convert SQL rows to numpy format (ALL categories); {sql_op}".format(
+                    sql_op=sql_op,
+                ))
+        total_count = rows.count(timer=count_timer)
+        def select_timer(sql_op):
+            if timer is not None:
+                timer.end_operation("process_events_split_eo_times(...): convert SQL rows to numpy format (ALL categories); rows={n}: {sql_op}".format(
+                    sql_op=sql_op,
+                    n=total_count,
+                ))
+        def groupby_key(row):
+            return (row['category_name'],)
+        row_iter = rows.each_row(timer=select_timer)
+        for (category_name,), category_rows_iter in itertools.groupby(row_iter, key=groupby_key):
+            if category_name == CATEGORY_OPERATION:
+                continue
+            category_key = CategoryKey(
+                ops=frozenset(),
+                non_ops=frozenset([category_name]),
+                procs=frozenset([process_name]))
+            category_rows = list(category_rows_iter)
+            eo_times = RowsAsEOTimes(category_rows, timer=select_timer)
+            cat_count = len(category_rows)
+            if timer is not None:
+                timer.end_operation("process_events_split_eo_times(...): convert SQL rows to numpy format; category={cat}, rows={n}: EO_TIMES READY".format(
+                    cat=category_name,
+                    n=cat_count,
+                ))
+            assert category_key not in process_eo_times
+            process_eo_times[category_key] = eo_times
+
+            # self.conn.put_cursor(category_cursor)
+
+        return process_eo_times
+
     def process_events_split(self,
                        process_name=None,
                        phase_name=None,
                        machine_name=None,
+                       category_name=None,
                        start_time_us=None,
                        end_time_us=None,
                        timer=None,
@@ -2997,37 +3238,13 @@ class SQLCategoryTimesReader:
 
         c = self.conn.cursor
 
-        query = textwrap.dedent("""
-        SELECT d1.device_name, c1.category_name, e1.event_name, e1.start_time_us, e1.duration_us
-            , e1.event_id
-            , p1.process_name, ph1.phase_name, m.machine_name
-            , e1.pyprof_filename
-            , e1.pyprof_line_no
-            , e1.pyprof_function
-            , e1.pyprof_line_description
-        FROM 
-            Category AS c1
-            NATURAL JOIN Event as e1
-            NATURAL JOIN Process as p1
-            NATURAL JOIN Phase as ph1
-            NATURAL JOIN Machine as m 
-            NATURAL LEFT JOIN Device as d1
-        WHERE 
-            {process_clause} AND
-            {phase_clause} AND
-            {machine_clause} AND
-            -- Keep events within a EventSplit(start, end) time range.
-            {event_split_range_clause} AND
-            -- Skip "process operation" events.
-            NOT {process_op_clause}
-        ORDER BY 
-            p1.process_name, e1.start_time_us ASC 
-        """).format(
-            process_clause=sql_process_clause(process_name, 'p1', indents=1, allow_none=True),
-            phase_clause=sql_phase_clause(phase_name, 'ph1', indents=1, allow_none=True),
-            machine_clause=sql_machine_clause(machine_name, 'm', indents=1, allow_none=True),
-            process_op_clause=sql_process_op_clause('e1'),
-            event_split_range_clause=sql_event_split_range_clause('e1', start_time_us, end_time_us, indents=1),
+        query = self._sql_process_events_split(
+            process_name=process_name,
+            phase_name=phase_name,
+            machine_name=machine_name,
+            category_name=category_name,
+            start_time_us=start_time_us,
+            end_time_us=end_time_us,
         )
 
         params = None
@@ -3035,7 +3252,7 @@ class SQLCategoryTimesReader:
 
         rows = sql_fetch_rows(c, fetchall, debug=debug)
         if timer is not None:
-            timer.end_operation('process_events_split(...): SQL query event rows')
+            timer.end_operation('process_events_split(...): SQL query operation event rows')
 
         event_split = None
         if start_time_us is not None and end_time_us is not None:
@@ -3054,7 +3271,7 @@ class SQLCategoryTimesReader:
             debug=debug,
             debug_label=debug_label)
         if timer is not None:
-            timer.end_operation('process_events_split(...): convert event rows to category_times dict')
+            timer.end_operation('process_events_split(...): convert operation event rows to category_times dict')
         return process_category_times
 
     def _rows_as_category_times(self, rows, event_split=None, timer=None, debug=False, debug_label=None):
@@ -3562,17 +3779,25 @@ class EventCategoryMapper:
 #
 #         new_category = frozenset([cat, proc_category])
 
-def default_pre_reduce(category, event, process_name):
-    if category == CATEGORY_OPERATION:
-        new_category = CategoryKey(
-            ops=frozenset([event.name]),
-            non_ops=frozenset(),
-            procs=frozenset([process_name]))
-    else:
-        new_category = CategoryKey(
-            ops=frozenset(),
-            non_ops=frozenset([category]),
-            procs=frozenset([process_name]))
+# def default_pre_reduce(category, event, process_name):
+#     if category == CATEGORY_OPERATION:
+#         new_category = CategoryKey(
+#             ops=frozenset([event.name]),
+#             non_ops=frozenset(),
+#             procs=frozenset([process_name]))
+#     else:
+#         new_category = CategoryKey(
+#             ops=frozenset(),
+#             non_ops=frozenset([category]),
+#             procs=frozenset([process_name]))
+#     return new_category
+
+def pre_reduce_op_event(category, event, process_name):
+    assert category == CATEGORY_OPERATION
+    new_category = CategoryKey(
+        ops=frozenset([event.name]),
+        non_ops=frozenset(),
+        procs=frozenset([process_name]))
     return new_category
 
 def bin_category_times(
@@ -3600,8 +3825,8 @@ def bin_category_times(
     We are preparing events for CPU/GPU/operation overlap-processing.
     """
 
-    if pre_reduce is None:
-        pre_reduce = default_pre_reduce
+    # if pre_reduce is None:
+    #     pre_reduce = default_pre_reduce
 
     # if categories is None:
     #     categories = set()
@@ -3651,8 +3876,9 @@ def bin_category_times(
         #
         # new_category = frozenset([cat, proc_category])
 
-        # new_category = pre_reduce(category, event, process_name)
-        new_category = pre_reduce(category, event, visible_overhead)
+        if pre_reduce is not None:
+            new_category = pre_reduce(category, event, visible_overhead)
+
         if new_category is None:
             # SKIP this event entirely.
             continue
@@ -4578,7 +4804,7 @@ class OpStack:
     def __init__(self, kernel_time):
         self.sub_ops = []
         self.ktime = kernel_time
-        self.last_insert_start_time = None
+        # self.last_insert_start_time = None
         self.parent = None
 
     @property
@@ -4633,13 +4859,13 @@ class OpStack:
         return self.ktime.subsumes(op.ktime)
 
     def insert(self, ktime):
-        if self.last_insert_start_time is None:
-            self.last_insert_start_time = ktime.start_time_usec
-        else:
-            assert self.last_insert_start_time <= ktime.start_time_usec
+        # if self.last_insert_start_time is None:
+        #     self.last_insert_start_time = ktime.start_time_usec
+        # else:
+        #     assert self.last_insert_start_time <= ktime.start_time_usec
 
         op1 = OpStack(ktime)
-        assert self.subsumes(op1)
+        # assert self.subsumes(op1)
         self._insert(op1)
         return op1
 
@@ -4647,7 +4873,7 @@ class OpStack:
         return op.start_time_usec
 
     def _insert(self, op1):
-        assert self.subsumes(op1)
+        # assert self.subsumes(op1)
         idx = insort_right(self.sub_ops, op1, key=self._sub_ops_key, skip_insert=True)
         if idx == 0 or not self.sub_ops[idx - 1].subsumes(op1):
             op1.parent = self
@@ -4657,28 +4883,28 @@ class OpStack:
         else:
             self.sub_ops[idx - 1]._insert(op1)
 
-    def _insert_old(self, op1):
-        # PROBLEM: We are doing O(n^2) insertion here...
-        # Basically, for half of the events, everything is subsumed by a single event.
-        # I think it's the "training_loop" annotation.
-        #
-        # PSEUDOCODE for fix:
-        # # NOTE: we are inserting events in sorted order (ordered by event.start_time_usec)
-        # # Hence, the subsume-er event will exist before the subsume-ee
-        # idx = Do binary search on event.start_time_usec to find where we would insert the event.
-        # if idx == 0 or not event[idx-1].subsumes(op1):
-        #   sub_ops.insert(idx, op1)
-        # else:
-        #   sub_ops[idx-1]._insert(op1)
-        assert self.subsumes(op1)
-        for op2 in self.sub_ops:
-            if op2.subsumes(op1):
-                op2._insert(op1)
-                return
-        if len(self.sub_ops) > 0:
-            assert op1.ktime.is_after(self.sub_ops[-1].ktime)
-        op1.parent = self
-        self.sub_ops.append(op1)
+    # def _insert_old(self, op1):
+    #     # PROBLEM: We are doing O(n^2) insertion here...
+    #     # Basically, for half of the events, everything is subsumed by a single event.
+    #     # I think it's the "training_loop" annotation.
+    #     #
+    #     # PSEUDOCODE for fix:
+    #     # # NOTE: we are inserting events in sorted order (ordered by event.start_time_usec)
+    #     # # Hence, the subsume-er event will exist before the subsume-ee
+    #     # idx = Do binary search on event.start_time_usec to find where we would insert the event.
+    #     # if idx == 0 or not event[idx-1].subsumes(op1):
+    #     #   sub_ops.insert(idx, op1)
+    #     # else:
+    #     #   sub_ops[idx-1]._insert(op1)
+    #     assert self.subsumes(op1)
+    #     for op2 in self.sub_ops:
+    #         if op2.subsumes(op1):
+    #             op2._insert(op1)
+    #             return
+    #     if len(self.sub_ops) > 0:
+    #         assert op1.ktime.is_after(self.sub_ops[-1].ktime)
+    #     op1.parent = self
+    #     self.sub_ops.append(op1)
 
     @property
     def name(self):
@@ -4976,6 +5202,9 @@ def sql_phase_clause(phase_name, phase_alias, indents=None, allow_none=False):
 
 def sql_machine_clause(machine_name, machine_alias, indents=None, allow_none=False):
     return _sql_eq_clause(machine_name, machine_alias, 'machine_name', indents, allow_none)
+
+def sql_category_clause(category_name, category_alias, indents=None, allow_none=False):
+    return _sql_eq_clause(category_name, category_alias, 'category_name', indents, allow_none)
 
 def _sql_eq_clause(value, alias, field, indents=None, allow_none=False):
     def _as_value(value):
@@ -5376,6 +5605,241 @@ def sql_value_string(value):
     if type(value) == str:
         return "'{value}'".format(value=value)
     return str(value)
+
+
+def EventsAsEOTimes(events):
+    """
+    :param events:
+        KernelTime's sorted by ktime.start_time_usec
+    :return:
+    """
+    TimeType = None
+    psec_in_usec = None
+    category_eo_times = np.empty(2*len(events), dtype=py_config.NUMPY_TIME_USEC_TYPE)
+    for i, ktime in enumerate(events):
+        if psec_in_usec is None:
+            TimeType = type(ktime.start_time_usec)
+            psec_in_usec = TimeType(PSEC_IN_USEC)
+        # Convert Decimal(usec) to int64(picosecond);
+        # Should keep enough precision for accurate results, while still allow int64.
+        # Picosecond decimals come from:
+        # - Overhead events, whose duration is computed using an average.
+        category_eo_times[i*2] = int(ktime.start_time_usec * psec_in_usec)
+        category_eo_times[i*2 + 1] = int(ktime.end_time_usec * psec_in_usec)
+    return category_eo_times
+
+def RowsAsEOTimes(rows, timer):
+    """
+    :param events:
+        KernelTime's sorted by ktime.start_time_usec
+    :return:
+    """
+    TimeType = None
+    psec_in_usec = None
+    if isinstance(rows, RowIterator):
+        count = len(rows)
+        row_iter = rows.each_row(timer=timer)
+    else:
+        count = len(rows)
+        row_iter = rows
+    category_eo_times = np.empty(2*count, dtype=py_config.NUMPY_TIME_USEC_TYPE)
+    for i, row in enumerate(row_iter):
+        if psec_in_usec is None:
+            TimeType = type(row['start_time_us'])
+            psec_in_usec = TimeType(PSEC_IN_USEC)
+        # Convert Decimal(usec) to int64(picosecond);
+        # Should keep enough precision for accurate results, while still allow int64.
+        # Picosecond decimals come from:
+        # - Overhead events, whose duration is computed using an average.
+        category_eo_times[i*2] = int(row['start_time_us'] * psec_in_usec)
+        end_time_usec = row['start_time_us'] + row['duration_us']
+        category_eo_times[i*2 + 1] = int(end_time_usec * psec_in_usec)
+    return category_eo_times
+
+def AsNumbaEOTimes(
+    eo_times_dict,
+    # category_times,
+    category_to_idx, idx_to_category):
+    """
+
+    category_times = {
+        'A': [(t1, t2), (t3, t4), ...],
+        'B': [(t5, t6), (t7, t8), ...],
+        ...
+    }
+
+    category_to_idx = {
+        'A': 0,
+        'B': 1,
+    }
+
+    =>
+
+    eo_times = [
+        # 'A'
+        [t1, t2, t3, t4, ...],
+        # 'B'
+        [t5, t6, t7, t8, ...],
+        ...
+    ]
+
+    :param category_times:
+    :param category_to_idx:
+    :param idx_to_category:
+    :return:
+    """
+
+    # if debug:
+    #     logging.info("converting to NumbaEvent's: {msg}".format(
+    #         msg=pprint_msg({
+    #             'category_times': category_times,
+    #         }),
+    #     ))
+
+    eo_times = []
+    for idx in sorted(idx_to_category.keys()):
+        category_key = idx_to_category[idx]
+        category_eo_times = eo_times_dict[category_key]
+        # times_by_start = category_times[category_key]
+        # category_eo_times = EventsAsEOTimes(times_by_start)
+        eo_times.append(category_eo_times)
+    return eo_times
+
+def category_to_idx_maps(categories):
+    categories_order = sorted(categories)
+    category_to_idx = dict()
+    idx_to_category = dict()
+    for i, category in enumerate(categories_order):
+        category_to_idx[category] = i
+        idx_to_category[i] = category
+    return category_to_idx, idx_to_category
+
+class RowIterator:
+    def __init__(self, select_query, cursor, RowKlass=None, debug=False, fetchall=False):
+        """
+        :param select_query:
+        :param cursor:
+        :param RowKlass:
+        :param debug:
+        :param fetchall:
+            If true, fetch rows into memory all at once.
+            If false, stream rows using database cursor.
+        """
+        self.select_query = select_query
+        self.cursor = cursor
+        self.debug = debug
+        self.RowKlass = RowKlass
+        self.fetchall = fetchall
+        self._rows = None
+        self._count = None
+        self._iterating_rows = False
+
+    def _run_select(self, timer=None):
+        sql_exec_query(self.cursor, self.select_query, klass=self.__class__, debug=self.debug)
+        rows = sql_fetch_rows(self.cursor,
+                              fetchall=self.fetchall, debug=self.debug)
+        if timer is not None:
+            if callable(timer):
+                timer("SELECT")
+            else:
+                timer.end_operation("SELECT")
+
+        # Should be a cursor, not a list of rows.
+        if self.fetchall:
+            # Fetch rows into memory
+            assert type(rows) == list
+            # assert self._count is None or len(rows) == self._count
+        else:
+            # Iterate over cursor.
+            assert type(rows) != list
+            assert rows == self.cursor
+
+        return rows
+
+    def _each_row_fetchall(self, timer=None):
+        assert self.fetchall
+        assert not self._iterating_rows
+
+        if self._rows is not None:
+            return self._rows
+
+        # Make it so user can ask for length of query whenever (even inside loop)
+        # NOTE: hopefully this isn't expensive...
+        self._rows = self._run_select(timer=timer)
+        if self.debug:
+            import ipdb; ipdb.set_trace()
+        self._count = len(self._rows)
+
+        if self.RowKlass is None:
+            return self._rows
+        else:
+            return self._each_row_fetchall_generator()
+            # self._iterating_rows = True
+            # for row in self._rows:
+            #     obj = self.RowKlass.from_row(row)
+            #     yield obj
+            # self._iterating_rows = False
+
+    def _each_row_fetchall_generator(self):
+        self._iterating_rows = True
+        for row in self._rows:
+            obj = self.RowKlass.from_row(row)
+            yield obj
+        self._iterating_rows = False
+
+    def _each_row_stream(self, timer=None):
+        assert not self.fetchall
+        assert not self._iterating_rows
+
+        # Make it so user can ask for length of query whenever (even inside loop)
+        # NOTE: hopefully this isn't expensive...
+        self._maybe_fetch_count(timer=timer)
+
+        self._iterating_rows = True
+        rows = self._run_select(timer=timer)
+        for row in rows:
+            if self.RowKlass is not None:
+                obj = self.RowKlass.from_row(row)
+            else:
+                obj = row
+            yield obj
+        self._iterating_rows = False
+
+    def each_row(self, timer=None):
+        if self.fetchall:
+            return self._each_row_fetchall(timer=timer)
+        return self._each_row_stream(timer=timer)
+
+    def count(self, timer=None):
+        return self._maybe_fetch_count(timer=timer)
+
+    def _maybe_fetch_count(self, timer=None):
+        if self.fetchall:
+            return self._maybe_fetch_count_fetchall(timer=timer)
+        return self._maybe_fetch_count_stream(timer=timer)
+
+    def _maybe_fetch_count_fetchall(self, timer=None):
+        if self._rows is not None:
+            assert self._count is not None
+            return self._count
+
+        self._rows = self._run_select(timer=timer)
+        self._count = len(self._rows)
+        return self._count
+
+    def _maybe_fetch_count_stream(self, timer=None):
+        if self._count is not None:
+            return self._count
+        # We use the same cursor to iterate over rows as we do to get a count.
+        # Make sure we don't try to get a count while iterating over rows.
+        assert not self._iterating_rows
+        self._count = sql_count_from(self.cursor, self.select_query)
+        if timer is not None:
+            timer("COUNT")
+        return self._count
+
+    def __len__(self):
+        return self.count()
 
 def test_merge_sorted():
 

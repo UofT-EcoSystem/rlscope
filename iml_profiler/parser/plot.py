@@ -2043,6 +2043,7 @@ class UtilizationPlot:
                  user=None,
                  password=None,
                  visible_overhead=False,
+                 event_overlap_path=None,
                  n_workers=1,
                  events_per_split=10000,
                  step_sec=1.,
@@ -2090,6 +2091,7 @@ class UtilizationPlot:
         self.overlap_type = overlap_type
         self.machine_name = machine_name
         self.process_name = process_name
+        self.event_overlap_path = event_overlap_path
         self.phase_name = phase_name
         self.resource_type = resource_type
         self.operation_overlap_resource = frozenset(operation_overlap_resource)
@@ -2278,30 +2280,40 @@ class UtilizationPlot:
                                            debug_ops=self.debug_ops)
 
         def compute_overlap():
-            memoize_path = _j(self.directory, "{klass}.{overlap_type}{numba_suffix}.compute_overlap.pickle".format(
-                klass=self.__class__.__name__,
+            memoize = True
+            assert machine_name is not None
+            assert process_name is not None
+            assert phase_name is not None
+            memoize_path = _j(
+                self.directory,
+                "EventOverlap",
+                "machine", machine_name,
+                "process", process_name,
+                "phase", phase_name,
+                "EventOverlap.{numba_suffix}.compute_overlap.pickle".format(
+                # klass=self.__class__.__name__,
                 numba_suffix='.numba' if py_config.IML_USE_NUMBA else '',
-                overlap_type=self.overlap_type,
+                # overlap_type=self.overlap_type,
             ))
 
-            if should_load_memo(self.debug_memoize, memoize_path):
-                ret = load_memo(self.debug_memoize, memoize_path)
+            if should_load_memo(memoize, memoize_path):
+                ret = load_memo(memoize, memoize_path)
                 return ret
 
             overlap, overlap_metadata = overlap_computer.compute_process_timeline_overlap(
-                overlap_obj.pre_reduce,
+                # overlap_obj.pre_reduce,
                 visible_overhead=self.visible_overhead,
                 machine_name=machine_name,
                 process_name=process_name,
                 phase_name=phase_name,
                 n_workers=self.n_workers,
                 events_per_split=self.events_per_split,
-                debug_memoize=self.debug_memoize,
-                overlap_type=self.overlap_type)
+                debug_memoize=memoize,
+                # overlap_type=self.overlap_type,
+            )
 
             ret = (overlap, overlap_metadata)
-
-            maybe_memoize(self.debug_memoize, ret, memoize_path)
+            maybe_memoize(memoize, ret, memoize_path)
 
             return ret
 

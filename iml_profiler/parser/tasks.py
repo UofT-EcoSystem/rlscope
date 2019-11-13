@@ -167,13 +167,17 @@ class IMLTask(luigi.Task):
         return self.__class__.__name__
 
     def mark_done(self, start_t, end_t):
+        task_file = self.output()
+        return self._mark_done(task_file, start_t, end_t)
+
+    def _mark_done(self, task_file, start_t, end_t):
         # logging.info("MARK DONE @ {path}".format(path=self.output()))
         if self.skip_output:
             logging.info("> Skipping output={path} for task {name}".format(
                 path=self._done_file,
                 name=self._task_name))
             return
-        with self.output().open('w') as f:
+        with task_file.open('w') as f:
             print_cmd(cmd=sys.argv, files=[f])
             delta = end_t - start_t
             minutes, seconds = divmod(delta.total_seconds(), 60)
@@ -347,7 +351,28 @@ class _UtilizationPlotTask(IMLTask):
         
         Minimum: 1000
         """),
-        default=10000)
+
+        # metric                       per_sec           raw
+        # events  15816.74161747038 events/sec  17844 events")
+        # default=10000,
+
+        # NOTE: at events_per_split=50000, we still maximize events/sec.
+        # We want to choose the smallest events_per_split that still maximizes events/sec,
+        # since smaller events per split means a larger number of splits
+        # => greater opportunity for processing splits in parallel.
+
+        # metric                       per_sec           raw
+        # events  25679.08856381489 events/sec  94230 events")
+        default=50000,
+
+        # metric                        per_sec            raw
+        # events  28956.472301404858 events/sec  199384 events")
+        # default=100000,
+
+        # metric                       per_sec             raw
+        # events  28452.14408169205 events/sec  1246530 events")
+        # default=1000000,
+    )
 
     # Optional: if user provides overhead calibration files, we can "subtract" overheads.
     # cupti_overhead_json = param_cupti_overhead_json_optional
@@ -393,6 +418,82 @@ class _UtilizationPlotTask(IMLTask):
             debug_memoize=self.debug_memoize,
         )
         self.sql_parser.run()
+
+# class EventOverlapTask(IMLTask):
+#     visible_overhead = param_visible_overhead
+#     n_workers = luigi.IntParameter(
+#         description="How many threads to simultaneously run overlap-computation; if --debug-single-thread, uses 1",
+#         default=multiprocessing.cpu_count())
+#     events_per_split = luigi.IntParameter(
+#         description=textwrap.dedent("""
+#         Approximately how many events per split should there be?
+#         Assuming events_per_split is > 10x the number of events per iteration,
+#         events_per_split should roughly linearly correlate with memory usage and processing time of the split.
+#
+#         Minimum: 1000
+#         """),
+#         default=10000)
+#
+#     # NOT optional (to ensure we remember to do overhead correction).
+#     cupti_overhead_json = param_cupti_overhead_json
+#     LD_PRELOAD_overhead_json = param_LD_PRELOAD_overhead_json
+#     pyprof_overhead_json = param_pyprof_overhead_json
+#
+#     def output(self):
+#         return [
+#             luigi.LocalTarget(self._done_file),
+#             luigi.LocalTarget(self.event_overlap_path),
+#         ]
+#
+#     def mark_done(self, start_t, end_t):
+#         task_file = self.output()[0]
+#         return self._mark_done(task_file, start_t, end_t)
+#
+#     @property
+#     def event_overlap_path(self):
+#         """
+#         e.g.
+#
+#         <--iml-directory>/EventOverlap.pickle
+#         """
+#         return "{dir}/{name}.pickle".format(
+#             dir=self.iml_directory, name=self._task_name)
+#
+#     def requires(self):
+#         return [
+#             mk_SQL_tasks(self),
+#         ]
+#
+#     def iml_run(self):
+#         # If calibration files aren't provided, then overhead will be visible.
+#         # If calibration files are provided, we can subtract it:
+#         #   Use whatever they want based on --visible-overhead
+#         if not calibration_files_present(task=self):
+#             logging.warning(
+#                 ("Calibration files aren't all present; we cannot subtract overhead without "
+#                  "all of these options present: {msg}").format(
+#                     msg=pprint_msg(CALIBRATION_OPTS),
+#                 ))
+#             visible_overhead = True
+#         else:
+#             visible_overhead = self.visible_overhead
+#
+#         self.sql_parser = UtilizationPlot(
+#             overlap_type=self.overlap_type,
+#             directory=self.iml_directory,
+#             host=self.postgres_host,
+#             user=self.postgres_user,
+#             visible_overhead=visible_overhead,
+#             n_workers=self.n_workers,
+#             events_per_split=self.events_per_split,
+#             password=self.postgres_password,
+#             event_overlap_path=self.event_overlap_path,
+#             debug=self.debug,
+#             debug_single_thread=self.debug_single_thread,
+#             debug_perf=self.debug_perf,
+#             debug_memoize=self.debug_memoize,
+#         )
+#         self.sql_parser.run()
 
 class ResourceOverlapTask(_UtilizationPlotTask):
     overlap_type = 'ResourceOverlap'

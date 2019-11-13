@@ -1,5 +1,6 @@
 import logging
 import itertools
+from collections import namedtuple
 import functools
 from os.path import join as _j, dirname as _d
 import copy
@@ -26,7 +27,8 @@ from concurrent.futures import ProcessPoolExecutor
 
 from iml_profiler.parser.db import SQLCategoryTimesReader, sql_input_path, sql_get_source_files, \
     Machine, Process, Phase, EventSplit, \
-    GetConnectionPool
+    GetConnectionPool, \
+    EventsAsEOTimes, AsNumbaEOTimes, category_to_idx_maps
 
 from iml_profiler.parser.readers import TFProfCategoryTimesReader, \
    DEFAULT_group_by_device, \
@@ -114,7 +116,8 @@ class ComputeOverlap:
         that happened during an operation.
     """
     def __init__(self,
-                 category_times,
+                 # category_times,
+                 eo_times,
                  overlaps_with=None,
                  keep_empty_time=False,
                  check_key=None,
@@ -127,48 +130,47 @@ class ComputeOverlap:
         self.show_progress = show_progress
         self.overlaps_with = overlaps_with
         self.keep_empty_time = keep_empty_time
-        if self.overlaps_with is not None:
-            self.overlaps_with = set(self.overlaps_with)
-            for category in self.overlaps_with:
-                assert category in category_times.keys()
-        # TODO: Just remove this...?
-        # if len(category_times) > 0 and \
-        #         type(next(iter(category_times.values()))[0]) == list:
-        #     self.category_times = self._flatten_category_times(category_times)
-        # else:
-        # It's already flattened
-        self.category_times = category_times
-        self.category_times = self._sort_category_times(self.category_times)
-        if self.timer is not None:
-            self.timer.end_operation('ComputerOverlap._sort_category_times()')
+
+        self.eo_times = eo_times
+
+        # if self.overlaps_with is not None:
+        #     self.overlaps_with = set(self.overlaps_with)
+        #     for category in self.overlaps_with:
+        #         assert category in category_times.keys()
+        #
+        # self.category_times = category_times
+        # self.category_times = self._sort_category_times(self.category_times)
+        # if self.timer is not None:
+        #     self.timer.end_operation('ComputerOverlap._sort_category_times()')
+
         # Sanity check: no self-overlap
-        for category_key, events in self.category_times.items():
-            for e1, e2 in zip(events, events[1:]):
-                # [ e1 ]
-                #   [ e2 ]
-                if e2.start_time_usec < e1.end_time_usec:
-                    logging.info("Saw overlap within event list for same category_key: {msg}".format(msg=pprint_msg({
-                        'category_key': category_key,
-                        'e1': e1,
-                        'e2': e2,
-                        })))
-                    assert not( e2.start_time_usec < e1.end_time_usec )
-        if self.timer is not None:
-            self.timer.end_operation('ComputerOverlap: sanity check - no self-overlap')
+        # for category_key, events in self.category_times.items():
+        #     for e1, e2 in zip(events, events[1:]):
+        #         # [ e1 ]
+        #         #   [ e2 ]
+        #         if e2.start_time_usec < e1.end_time_usec:
+        #             logging.info("Saw overlap within event list for same category_key: {msg}".format(msg=pprint_msg({
+        #                 'category_key': category_key,
+        #                 'e1': e1,
+        #                 'e2': e2,
+        #                 })))
+        #             assert not( e2.start_time_usec < e1.end_time_usec )
+        # if self.timer is not None:
+        #     self.timer.end_operation('ComputerOverlap: sanity check - no self-overlap')
 
 
     def compute(self):
-        start_merge_t = time.time()
-        self.compute_merge()
-        if self.timer is not None:
-            self.timer.end_operation('ComputerOverlap.compute_merge()')
-        end_merge_t = time.time()
-        sec_merge = end_merge_t - start_merge_t
-        if self.debug:
-            logging.info("> {klass}.compute_merge took {sec} seconds".format(
-                klass=self.__class__.__name__,
-                sec=end_merge_t))
-        start_compute_t = end_merge_t
+        # start_merge_t = time.time()
+        # self.compute_merge()
+        # if self.timer is not None:
+        #     self.timer.end_operation('ComputerOverlap.compute_merge()')
+        # end_merge_t = time.time()
+        # sec_merge = end_merge_t - start_merge_t
+        # if self.debug:
+        #     logging.info("> {klass}.compute_merge took {sec} seconds".format(
+        #         klass=self.__class__.__name__,
+        #         sec=end_merge_t))
+        start_compute_t = time.time()
         self.compute_times()
         end_compute_t = time.time()
         sec_compute = end_compute_t - start_compute_t
@@ -177,12 +179,12 @@ class ComputeOverlap:
                 klass=self.__class__.__name__,
                 sec=sec_compute))
 
-    def compute_merge(self):
-        self.merged_category_times = self._merge_category_times(self.category_times)
+    # def compute_merge(self):
+    #     self.merged_category_times = self._merge_category_times(self.category_times)
 
     def compute_times(self):
         # set(c1, ..., cn) -> time in seconds
-        self.times, self.overlap_metadata = self._compute_overlap(self.merged_category_times)
+        self.times, self.overlap_metadata = self._compute_overlap(self.eo_times)
 
     def get_category_times(self):
         return self.times
@@ -238,25 +240,26 @@ class ComputeOverlap:
             i += 1
         return new_times
 
-    def _compute_overlap(self, category_times):
-        if py_config.IML_USE_NUMBA:
-            overlap, overlap_metadata = compute_overlap_single_thread_numba(
-                category_times,
-                self.overlaps_with,
-                self.check_key,
-                self.debug,
-                self.show_progress,
-                timer=self.timer,
-            )
-        else:
-            overlap, overlap_metadata = compute_overlap_single_thread(
-                category_times,
-                self.overlaps_with,
-                self.check_key,
-                self.debug,
-                self.show_progress,
-                timer=self.timer,
-            )
+    def _compute_overlap(self, eo_times_dict):
+        # if py_config.IML_USE_NUMBA:
+        overlap, overlap_metadata = compute_overlap_single_thread_numba(
+            # category_times,
+            eo_times_dict,
+            self.overlaps_with,
+            self.check_key,
+            self.debug,
+            self.show_progress,
+            timer=self.timer,
+        )
+        # else:
+        #     overlap, overlap_metadata = compute_overlap_single_thread(
+        #         category_times,
+        #         self.overlaps_with,
+        #         self.check_key,
+        #         self.debug,
+        #         self.show_progress,
+        #         timer=self.timer,
+        #     )
 
         if self.overlaps_with is not None:
             del_keys = []
@@ -747,74 +750,10 @@ def numba_compute_overlap(
 
     return overlap, overlap_metadata
 
-def AsNumbaEOTimes(category_times, category_to_idx, idx_to_category):
-    """
-
-    category_times = {
-        'A': [(t1, t2), (t3, t4), ...],
-        'B': [(t5, t6), (t7, t8), ...],
-        ...
-    }
-
-    category_to_idx = {
-        'A': 0,
-        'B': 1,
-    }
-
-    =>
-
-    eo_times = [
-        # 'A'
-        [t1, t2, t3, t4, ...],
-        # 'B'
-        [t5, t6, t7, t8, ...],
-        ...
-    ]
-
-    :param category_times:
-    :param category_to_idx:
-    :param idx_to_category:
-    :return:
-    """
-
-    # if debug:
-    #     logging.info("converting to NumbaEvent's: {msg}".format(
-    #         msg=pprint_msg({
-    #             'category_times': category_times,
-    #         }),
-    #     ))
-
-    eo_times = []
-    TimeType = None
-    psec_in_usec = None
-    for idx in sorted(idx_to_category.keys()):
-        category_key = idx_to_category[idx]
-        times_by_start = category_times[category_key]
-        category_eo_times = np.empty(2*len(times_by_start), dtype=py_config.NUMPY_TIME_USEC_TYPE)
-        for i, ktime in enumerate(times_by_start):
-            if psec_in_usec is None:
-                TimeType = type(ktime.start_time_usec)
-                psec_in_usec = TimeType(PSEC_IN_USEC)
-            # Convert Decimal(usec) to int64(picosecond);
-            # Should keep enough precision for accurate results, while still allow int64.
-            # Picosecond decimals come from:
-            # - Overhead events, whose duration is computed using an average.
-            category_eo_times[i*2] = int(ktime.start_time_usec * psec_in_usec)
-            category_eo_times[i*2 + 1] = int(ktime.end_time_usec * psec_in_usec)
-        eo_times.append(category_eo_times)
-    return eo_times
-
-def category_to_idx_maps(categories):
-    categories_order = sorted(categories)
-    category_to_idx = dict()
-    idx_to_category = dict()
-    for i, category in enumerate(categories_order):
-        category_to_idx[category] = i
-        idx_to_category[i] = category
-    return category_to_idx, idx_to_category
 
 def compute_overlap_single_thread_numba(
-    category_times,
+    # category_times,
+    eo_times_dict,
     overlaps_with=None,
     check_key=None,
     debug=False,
@@ -823,9 +762,11 @@ def compute_overlap_single_thread_numba(
 
     # Python -> Numba:
     #   Convert Python types to Numba types.
-    category_to_idx, idx_to_category = category_to_idx_maps(category_times)
+    category_to_idx, idx_to_category = category_to_idx_maps(eo_times_dict)
     eo_times = AsNumbaEOTimes(
-        category_times, category_to_idx, idx_to_category,
+        eo_times_dict,
+        # category_times,
+        category_to_idx, idx_to_category,
         # debug=debug,
     )
     if timer is not None:
@@ -1448,17 +1389,6 @@ class TraceEventsParser:
         if self.skip:
             return
 
-from collections import namedtuple
-
-class _CategoryKey(namedtuple('CategoryKey', 'ops non_ops procs')):
-    __slots__ = ()
-def CategoryKey(ops, non_ops, procs):
-    return _CategoryKey(
-        # Allow repeated ops:
-        # e.g. <q_forward, q_forward>
-        ops=tuple(sorted(ops)),
-        non_ops=frozenset(non_ops),
-        procs=frozenset(procs))
 
 class _CPUAndGPUCategories(namedtuple('CPUAndGPUCategories', 'cpus gpus')):
     __slots__ = ()
@@ -1967,7 +1897,7 @@ class OverlapComputer:
 
     OVERLAP_TYPES = ['OperationOverlap', 'ResourceOverlap', 'ResourceSubplot', 'CategoryOverlap', 'default']
     def compute_process_timeline_overlap(self,
-                                         pre_reduce,
+                                         # pre_reduce,
                                          visible_overhead=False,
                                          machine_name=None,
                                          process_name=None,
@@ -1975,7 +1905,8 @@ class OverlapComputer:
                                          n_workers=1,
                                          events_per_split=10000,
                                          debug_memoize=False,
-                                         overlap_type=None):
+                                         # overlap_type=None,
+                                         ):
         """
         Compute CPU/GPU overlap for a given process, and for a given phase.
 
@@ -1992,9 +1923,9 @@ class OverlapComputer:
         # TODO: run this function on EACH event-split for a particular (machine, process, phase).
         sql_reader = SQLCategoryTimesReader(self.db_path, host=self.host, user=self.user, password=self.password)
 
-        if overlap_type is None:
-            overlap_type = 'default'
-        assert overlap_type in OverlapComputer.OVERLAP_TYPES
+        # if overlap_type is None:
+        #     overlap_type = 'default'
+        # assert overlap_type in OverlapComputer.OVERLAP_TYPES
 
         event_splitter = EventSplitter(
             process_name=process_name,
@@ -2020,12 +1951,12 @@ class OverlapComputer:
                 self=self,
                 event_split=event_split,
                 visible_overhead=visible_overhead,
-                pre_reduce=pre_reduce,
+                # pre_reduce=pre_reduce,
                 machine_name=machine_name,
                 process_name=process_name,
                 phase_name=phase_name,
                 debug_memoize=debug_memoize,
-                overlap_type=overlap_type,
+                # overlap_type=overlap_type,
             )
         with ProcessPoolExecutor(n_workers) as pool:
             kwargs_list = [split_overlap_computation_Args(event_split) for event_split in event_splits]
@@ -2044,14 +1975,15 @@ class OverlapComputer:
 
 
     def _split_overlap_computation(self, event_split,
-                                   pre_reduce,
+                                   # pre_reduce,
                                    visible_overhead=False,
                                    machine_name=None,
                                    process_name=None,
                                    phase_name=None,
                                    debug_memoize=False,
                                    timer=None,
-                                   overlap_type=None):
+                                   # overlap_type=None,
+                                   ):
 
         sql_reader = SQLCategoryTimesReader(self.db_path, host=self.host, user=self.user, password=self.password)
         if timer is not None:
@@ -2065,7 +1997,7 @@ class OverlapComputer:
             start_time_us=event_split.start_time_us,
             end_time_us=event_split.end_time_us,
             visible_overhead=visible_overhead,
-            pre_reduce=pre_reduce,
+            # pre_reduce=pre_reduce,
             timer=timer,
             debug=self.debug,
             debug_memoize=debug_memoize)
@@ -2556,12 +2488,17 @@ class OverlapTypeInterface:
         })
         do_dump_json(js, path, cls=DecimalEncoder)
 
+    def post_reduce_category_key(self, overlap, overlap_metadata, visible_overhead):
+        # Implement custom overlap reduction logic.
+        # E.g. for ResourceOverlap, map the fine-grained CPU categories to just one "CPU" category.
+        raise NotImplementedError("You must override this.")
+
     def post_reduce(self, overlap, overlap_metadata, visible_overhead):
         category_key_overlap, category_key_overlap_metadata = self.reduce_to_category_key(overlap, overlap_metadata, visible_overhead)
         new_overlap, new_overlap_metadata = self.post_reduce_category_key(category_key_overlap, category_key_overlap_metadata, visible_overhead)
         return new_overlap, new_overlap_metadata
 
-    def pre_reduce_cpu_gpu(self, category, event, visible_overhead):
+    def reduce_category_key(self, category_key, visible_overhead, as_cpu_gpu):
         """
         Modular function to bin_events for "reducing" events to CPU/GPU BEFORE OverlapComputation.
         Also, allow ability to "filter-out" events (e.g. category=GPU; needed for CategoryOverlap).
@@ -2572,39 +2509,93 @@ class OverlapTypeInterface:
         # visible_overhead or invisible_overhead:
         #
         #     Whether to "subtract" overhead or not.
-        #     visible_overhead   = don't subtract; count overhead as extra CPU time.
-        #     invisible_overhead = subtract; remove CPU-time that us due to CPU overhead.
+        #     visible_overhead:
+        #       make profiling overhead visible during iml-drill.
+        #       Don't subtract; count overhead as extra CPU time.
+        #     invisible_overhead:
+        #       If false (and calibration files are given), then subtract overhead making it 'invisible' in iml-drill.
+        #       Subtract; remove CPU-time that is due to CPU overhead.
         #
         #     visible_overhead is determined by a iml-analyze flag.
         #     However, if the user DOESN'T provide calibration files, all we do is invisible_overhead.
         #     If calibration files are provided, then invisible_overhead ought to be the default.
         #
-        if category in CATEGORIES_CPU or ( visible_overhead and category in CATEGORIES_PROF ):
-            non_ops = frozenset([CATEGORY_CPU])
-            ops = frozenset()
-        elif ( not visible_overhead ) and category in CATEGORIES_PROF:
-            non_ops = frozenset([category])
-            ops = frozenset()
-        elif category == CATEGORY_GPU:
-            non_ops = frozenset([CATEGORY_GPU])
-            ops = frozenset()
-        elif category == CATEGORY_OPERATION:
-            non_ops = frozenset()
-            ops = frozenset([event.name])
-        else:
-            raise RuntimeError("Not sure how to categorize {cat} into CPU or GPU.".format(
-                cat=category))
-        new_key = CategoryKey(ops=ops,
-                              non_ops=non_ops,
-                              procs=frozenset([event.process_name]))
 
-        # pprint.pprint({
-        #     'name':'pre_reduce_cpu_gpu',
-        #     'event':event,
-        #     'category':category,
-        #     'new_key': new_key})
+        non_ops = set()
+        for category in category_key.non_ops:
+            if category in CATEGORIES_CPU or ( visible_overhead and category in CATEGORIES_PROF ):
+                if as_cpu_gpu:
+                    # NOTE: profiling types are treated as fine-grained CPU categories.
+                    non_ops.add(CATEGORY_CPU)
+                else:
+                    non_ops.add(category)
+            elif category in CATEGORIES_GPU:
+                if as_cpu_gpu:
+                    non_ops.add(CATEGORY_GPU)
+                else:
+                    non_ops.add(category)
+            elif ( not visible_overhead ) and category in CATEGORIES_PROF:
+                # Overhead will get removed during maybe_remove_overhead.
+                # Keep the overhead category so we can "see where it is".
+                non_ops.add(category)
+            else:
+                raise RuntimeError("Not sure how to categorize category_key: {msg}.".format(
+                    msg=pprint_msg({
+                        'non_ops.category': category,
+                        'category_key': category_key,
+                    })))
 
-        return new_key
+        new_category_key = CategoryKey(
+            ops=category_key.ops,
+            non_ops=non_ops,
+            procs=category_key.procs,
+        )
+        return new_category_key
+
+    # def pre_reduce_cpu_gpu(self, category, event, visible_overhead):
+    #     """
+    #     Modular function to bin_events for "reducing" events to CPU/GPU BEFORE OverlapComputation.
+    #     Also, allow ability to "filter-out" events (e.g. category=GPU; needed for CategoryOverlap).
+    #
+    #     [Events] ->
+    #     :return:
+    #     """
+    #     # visible_overhead or invisible_overhead:
+    #     #
+    #     #     Whether to "subtract" overhead or not.
+    #     #     visible_overhead   = don't subtract; count overhead as extra CPU time.
+    #     #     invisible_overhead = subtract; remove CPU-time that is due to CPU overhead.
+    #     #
+    #     #     visible_overhead is determined by a iml-analyze flag.
+    #     #     However, if the user DOESN'T provide calibration files, all we do is invisible_overhead.
+    #     #     If calibration files are provided, then invisible_overhead ought to be the default.
+    #     #
+    #     if category in CATEGORIES_CPU or ( visible_overhead and category in CATEGORIES_PROF ):
+    #         non_ops = frozenset([CATEGORY_CPU])
+    #         ops = frozenset()
+    #     elif ( not visible_overhead ) and category in CATEGORIES_PROF:
+    #         non_ops = frozenset([category])
+    #         ops = frozenset()
+    #     elif category == CATEGORY_GPU:
+    #         non_ops = frozenset([CATEGORY_GPU])
+    #         ops = frozenset()
+    #     elif category == CATEGORY_OPERATION:
+    #         non_ops = frozenset()
+    #         ops = frozenset([event.name])
+    #     else:
+    #         raise RuntimeError("Not sure how to categorize {cat} into CPU or GPU.".format(
+    #             cat=category))
+    #     new_key = CategoryKey(ops=ops,
+    #                           non_ops=non_ops,
+    #                           procs=frozenset([event.process_name]))
+    #
+    #     # pprint.pprint({
+    #     #     'name':'pre_reduce_cpu_gpu',
+    #     #     'event':event,
+    #     #     'category':category,
+    #     #     'new_key': new_key})
+    #
+    #     return new_key
 
     def reduce_to_category_key(self, overlap, overlap_metadata, visible_overhead):
         """
@@ -2741,8 +2732,10 @@ class OverlapTypeInterface:
         return new_overlap, new_overlap_metadata
 
     def reduce_overlap_resource_operation(
-            self, overlap, overlap_metadata, visible_overhead,
-            group_self_overlap=False):
+        self, overlap, overlap_metadata,
+        visible_overhead,
+        as_cpu_gpu,
+        group_self_overlap=False):
         """
         Reduce keys to pair of operation-types, or a single operation-type.
         (eliminate process, just keep operation-type and execution-type)
@@ -2800,6 +2793,10 @@ class OverlapTypeInterface:
                 new_key = CategoryKey(ops=ops,
                                       non_ops=overlap_key.non_ops,
                                       procs=frozenset())
+                new_key = self.reduce_category_key(
+                    new_key,
+                    visible_overhead=visible_overhead,
+                    as_cpu_gpu=as_cpu_gpu)
                 _add_key(new_overlap, new_key, times)
                 new_overlap_metadata.merge_region(new_key, overlap_metadata.get_region(overlap_key))
                 continue
@@ -2813,6 +2810,10 @@ class OverlapTypeInterface:
                 new_key = CategoryKey(ops=overlap_key.ops,
                                       non_ops=overlap_key.non_ops,
                                       procs=frozenset())
+                new_key = self.reduce_category_key(
+                    new_key,
+                    visible_overhead=visible_overhead,
+                    as_cpu_gpu=as_cpu_gpu)
                 _add_key(new_overlap, new_key, times)
                 new_overlap_metadata.merge_region(new_key, overlap_metadata.get_region(overlap_key))
                 continue
@@ -2910,8 +2911,8 @@ class DefaultOverlapType(OverlapTypeInterface):
         self.should_dump_as_is = True
         self.debug = debug or DEBUG_OVERLAP_TYPE
 
-    def pre_reduce(self, category, event, visible_overhead):
-        return self.pre_reduce_cpu_gpu(category, event, visible_overhead)
+    # def pre_reduce(self, category, event, visible_overhead):
+    #     return self.pre_reduce_cpu_gpu(category, event, visible_overhead)
 
     def as_js_dict(self, new_overlap):
         # def _group_by_ops_resource(self, new_overlap):
@@ -2930,6 +2931,7 @@ class DefaultOverlapType(OverlapTypeInterface):
     def post_reduce_category_key(self, overlap, overlap_metadata, visible_overhead):
         return self.reduce_overlap_resource_operation(
             overlap, overlap_metadata, visible_overhead,
+            as_cpu_gpu=False,
             group_self_overlap=False)
 
 class ResourceOverlapType(OverlapTypeInterface):
@@ -2938,20 +2940,20 @@ class ResourceOverlapType(OverlapTypeInterface):
         self.should_dump_as_is = False
         self.debug = debug or DEBUG_OVERLAP_TYPE
 
-    def pre_reduce(self, category, event, visible_overhead):
-        """
-        Re-map CPU-like categories to CATEGORY_CPU:
-            e.g.
-            CATEGORY_PYTHON -> CategoryKey(non_ops=[CATEGORY_CPU], procs=event.process_name)
-
-        Keep CATEGORY_OPERATION events.
-            CATEGORY_PYTHON -> CategoryKey(ops=[op], procs=event.process_name)
-
-        :param category:
-        :param event:
-        :return:
-        """
-        return self.pre_reduce_cpu_gpu(category, event, visible_overhead)
+    # def pre_reduce(self, category, event, visible_overhead):
+    #     """
+    #     Re-map CPU-like categories to CATEGORY_CPU:
+    #         e.g.
+    #         CATEGORY_PYTHON -> CategoryKey(non_ops=[CATEGORY_CPU], procs=event.process_name)
+    #
+    #     Keep CATEGORY_OPERATION events.
+    #         CATEGORY_PYTHON -> CategoryKey(ops=[op], procs=event.process_name)
+    #
+    #     :param category:
+    #     :param event:
+    #     :return:
+    #     """
+    #     return self.pre_reduce_cpu_gpu(category, event, visible_overhead)
 
     def post_reduce_category_key(self, overlap, overlap_metadata, visible_overhead):
         """
@@ -2978,6 +2980,10 @@ class ResourceOverlapType(OverlapTypeInterface):
             new_key = CategoryKey(ops=frozenset(),
                                   non_ops=overlap_key.non_ops,
                                   procs=frozenset())
+            new_key = self.reduce_category_key(
+                new_key,
+                visible_overhead=visible_overhead,
+                as_cpu_gpu=True)
             add_overlap_with_key(
                 new_overlap, new_overlap_metadata, new_key,
                 overlap_metadata, overlap_key,
@@ -3007,8 +3013,8 @@ class OperationOverlapType(OverlapTypeInterface):
         self.should_dump_as_is = False
         self.debug = debug or DEBUG_OVERLAP_TYPE
 
-    def pre_reduce(self, category, event, visible_overhead):
-        return self.pre_reduce_cpu_gpu(category, event, visible_overhead)
+    # def pre_reduce(self, category, event, visible_overhead):
+    #     return self.pre_reduce_cpu_gpu(category, event, visible_overhead)
 
     def post_reduce_category_key(self, overlap, overlap_metadata, visible_overhead):
         """
@@ -3022,6 +3028,7 @@ class OperationOverlapType(OverlapTypeInterface):
         """
         return self.reduce_overlap_resource_operation(
             overlap, overlap_metadata, visible_overhead,
+            as_cpu_gpu=True,
             group_self_overlap=True)
 
     def _operation_overlap_json(self, directory, machine_name, process_name, phase_name, resources):
@@ -3106,31 +3113,31 @@ class CategoryOverlapType(OverlapTypeInterface):
         self.should_dump_as_is = False
         self.debug = debug or DEBUG_OVERLAP_TYPE
 
-    def pre_reduce(self, category, event, visible_overhead):
-        """
-        Modular function to bin_events for "reducing" events to CPU/GPU BEFORE OverlapComputation.
-        Also, allow ability to "filter-out" events (e.g. category=GPU; needed for CategoryOverlap).
-
-        Pre-reduce: keep categories as-is; filter out GPU stuff.
-        """
-        if category == CATEGORY_OPERATION:
-            non_ops = frozenset()
-            ops = frozenset([event.name])
-        else:
-            non_ops = frozenset([category])
-            ops = frozenset()
-        new_key = CategoryKey(ops=ops,
-                              non_ops=non_ops,
-                              procs=frozenset([event.process_name]))
-
-        # if self.debug:
-        #     pprint.pprint({
-        #         'name':'{OverlapType}.pre_reduce'.format(OverlapType=self.overlap_type),
-        #         'event':event,
-        #         'category':category,
-        #         'new_key': new_key})
-
-        return new_key
+    # def pre_reduce(self, category, event, visible_overhead):
+    #     """
+    #     Modular function to bin_events for "reducing" events to CPU/GPU BEFORE OverlapComputation.
+    #     Also, allow ability to "filter-out" events (e.g. category=GPU; needed for CategoryOverlap).
+    #
+    #     Pre-reduce: keep categories as-is; filter out GPU stuff.
+    #     """
+    #     if category == CATEGORY_OPERATION:
+    #         non_ops = frozenset()
+    #         ops = frozenset([event.name])
+    #     else:
+    #         non_ops = frozenset([category])
+    #         ops = frozenset()
+    #     new_key = CategoryKey(ops=ops,
+    #                           non_ops=non_ops,
+    #                           procs=frozenset([event.process_name]))
+    #
+    #     # if self.debug:
+    #     #     pprint.pprint({
+    #     #         'name':'{OverlapType}.pre_reduce'.format(OverlapType=self.overlap_type),
+    #     #         'event':event,
+    #     #         'category':category,
+    #     #         'new_key': new_key})
+    #
+    #     return new_key
 
     def post_reduce_category_key(self, overlap, overlap_metadata, visible_overhead):
         """
@@ -3162,6 +3169,10 @@ class CategoryOverlapType(OverlapTypeInterface):
             new_key = CategoryKey(ops=overlap_key.ops,
                                   non_ops=overlap_key.non_ops,
                                   procs=frozenset())
+            new_key = self.reduce_category_key(
+                new_key,
+                visible_overhead=visible_overhead,
+                as_cpu_gpu=False)
             add_overlap_with_key(
                 new_overlap, new_overlap_metadata, new_key,
                 overlap_metadata, overlap_key,
@@ -3306,8 +3317,8 @@ class ResourceSubplotOverlapType(OverlapTypeInterface):
         self.should_dump_as_is = False
         self.debug = debug or DEBUG_OVERLAP_TYPE
 
-    def pre_reduce(self, category, event, visible_overhead):
-        return self.pre_reduce_cpu_gpu(category, event, visible_overhead)
+    # def pre_reduce(self, category, event, visible_overhead):
+    #     return self.pre_reduce_cpu_gpu(category, event, visible_overhead)
 
     def post_reduce_category_key(self, overlap, overlap_metadata, visible_overhead):
         """
@@ -3344,7 +3355,8 @@ class ResourceSubplotOverlapType(OverlapTypeInterface):
             _add_key(new_overlap, new_key, times)
             new_overlap_metadata.merge_region(new_key, overlap_metadata.get_region(overlap_key))
 
-            for resource_type in overlap_key.non_ops:
+            cpu_gpu_key = self.reduce_category_key(overlap_key, visible_overhead, as_cpu_gpu=True)
+            for resource_type in cpu_gpu_key.non_ops:
                 # NOTE: This is sort of hacky;
                 # we AREN'T outputting disjoint overlap regions here;
                 # instead we are outputting an entire "set" including its overlaps:

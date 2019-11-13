@@ -12,6 +12,7 @@ import pprint
 import re
 import textwrap
 import time
+import collections
 import traceback
 from io import StringIO
 from os.path import join as _j, dirname as _d, exists as _e, basename as _b
@@ -1760,6 +1761,7 @@ def load_memo(debug_memoize, path):
 
 def maybe_memoize(debug_memoize, ret, path):
     if debug_memoize:
+        os.makedirs(_d(path), exist_ok=True)
         logging.info("Write memoized file: {path}".format(path=path))
         with open(path, 'wb') as f:
             # -1 specifies highest binary protocol
@@ -2101,10 +2103,15 @@ class SimpleTimer:
         self.total_time_sec = 0.
         self._next_idx = 0
         self._idx_to_op = dict()
+        self._metrics = dict()
 
     def reset_start_time(self):
         now_sec = time.time()
         self.last_time_sec = now_sec
+
+    def record_throughput(self, metric_name, metric):
+        assert metric_name not in self._metrics
+        self._metrics[metric_name] = metric
 
     def end_operation(self, operation):
         assert self.last_time_sec is not None
@@ -2116,6 +2123,26 @@ class SimpleTimer:
         self.last_time_sec = now_sec
         self._idx_to_op[self._next_idx] = operation
         self._next_idx += 1
+
+    def metrics(self):
+        metrics = []
+        for metric_name, metric_value in self._metrics.items():
+            metric = metric_name
+            per_sec = "{per_sec} {name}/sec".format(
+                per_sec=metric_value/self.total_time_sec,
+                name=metric_name)
+            raw = "{raw} {name}".format(
+                name=metric_name,
+                raw=metric_value,
+            )
+            metrics.append((metric, per_sec, raw))
+        return metrics
+
+    def metric_dataframe(self):
+        ops = self.metrics()
+        df = pd.DataFrame.from_records(ops, columns=['metric', 'per_sec', 'raw'])
+        df = df.sort_values(['metric'])
+        return df
 
     def ops(self):
         ops = []
@@ -2139,16 +2166,22 @@ class SimpleTimer:
         return df
 
     def _df_as_str(self, df):
-        with pd.option_context('display.max_rows', None, 'display.max_columns', None, 'display.max_colwidth', 90, 'display.width', 120):
-            # return "\n" + textwrap.indent(pprint.pformat(df), prefix='  ')
+        # No limit of column/display width
+        with pd.option_context('display.max_rows', None,
+                               'display.max_columns', None,
+                               'display.max_colwidth', 0,
+                               'display.width', 0):
             return "\n" + textwrap.indent(df.to_string(index=False), prefix='  ')
 
     def __str__(self):
         bldr = ToStringBuilder(obj=self)
         bldr.add_param('name', self.name)
         bldr.add_param('total_time_sec', self.total_time_sec)
-        df = self.ops_dataframe()
-        bldr.add_param('op_duration_sec', self._df_as_str(df))
+        ops_df = self.ops_dataframe()
+        bldr.add_param('op_duration_sec', self._df_as_str(ops_df))
+        metric_df = self.metric_dataframe()
+        bldr.add_param('metrics', self._df_as_str(metric_df))
+
         return bldr.to_string()
 
     def __repr__(self):
@@ -2169,3 +2202,13 @@ def us_from_unit(x, time_unit):
         return x*USEC_IN_SEC
     else:
         raise NotImplementedError()
+
+class _CategoryKey(collections.namedtuple('CategoryKey', 'ops non_ops procs')):
+    __slots__ = ()
+def CategoryKey(ops, non_ops, procs):
+    return _CategoryKey(
+        # Allow repeated ops:
+        # e.g. <q_forward, q_forward>
+        ops=tuple(sorted(ops)),
+        non_ops=frozenset(non_ops),
+        procs=frozenset(procs))

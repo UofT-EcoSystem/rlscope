@@ -30,7 +30,8 @@ from iml_profiler.parser.db import SQLCategoryTimesReader, CSVInserter, \
     sql_fetch_rows, \
     sql_count_from, \
     ConnectionPoolManager, \
-    get_sql_connection
+    get_sql_connection, \
+    RowIterator
 
 from iml_profiler.parser.stats import KernelTime
 
@@ -3080,51 +3081,3 @@ class SQLOverheadEventsParser:
         )
         sql_exec_query(c, delete_query, klass=self.__class__, debug=self.debug)
 
-class RowIterator:
-    def __init__(self, select_query, cursor, RowKlass=None, debug=False):
-        self.select_query = select_query
-        self.cursor = cursor
-        self.debug = debug
-        self.RowKlass = RowKlass
-        self.count = None
-        self._iterating_rows = False
-
-    def _run_select(self):
-        sql_exec_query(self.cursor, self.select_query, klass=self.__class__, debug=self.debug)
-        rows = sql_fetch_rows(self.cursor,
-                              # Iterate over cursor.
-                              fetchall=False, debug=self.debug)
-
-        # Should be a cursor, not a list of rows.
-        assert type(rows) != list
-        assert rows == self.cursor
-
-        return rows
-
-    def each_row(self):
-        # Make it so user can ask for length of query whenever (even inside loop)
-        # NOTE: hopefully this isn't expensive...
-        self._maybe_fetch_count()
-        assert not self._iterating_rows
-        self._iterating_rows = True
-        rows = self._run_select()
-        for row in rows:
-            if self.RowKlass is not None:
-                obj = self.RowKlass.from_row(row)
-            else:
-                obj = row
-            yield obj
-        self._iterating_rows = False
-
-    def _maybe_fetch_count(self):
-        if self.count is not None:
-            return self.count
-        # We use the same cursor to iterate over rows as we do to get a count.
-        # Make sure we don't try to get a count while iterating over rows.
-        assert not self._iterating_rows
-        self.count = sql_count_from(self.cursor, self.select_query)
-        return self.count
-
-    def __len__(self):
-        self._maybe_fetch_count()
-        return self.count
