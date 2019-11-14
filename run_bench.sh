@@ -324,6 +324,70 @@ run_perf_debug_short() {
     _do iml-analyze --iml-directory $IML_DIR/output/perf_debug_short "${CALIB_OPTS[@]}"
 }
 
+_find_extension() {
+    local root_dir="$1"
+    local extension_regex="$2"
+    shift 2
+    local regex="/(.*\.(${extension_regex}))$"
+    find "$root_dir" -type f | grep --perl-regexp "$regex"
+}
+setup_cmakelists_windows() {
+
+    local src_ext_regex="cpp|cc|c|cu"
+    local hdr_ext_regex="h|hpp|cuh"
+    local all_ext_regex="${src_ext_regex}|${hdr_ext_regex}"
+
+    local include_dirs=( \
+        ./windows_includes \
+        ./windows_includes/CUPTI/include \
+        ./windows_includes/cuda/include \
+        ./build \
+        ./src \
+        ./tensorflow \
+    )
+
+    local src_dirs=( \
+        ./src \
+        ./tensorflow \
+    )
+
+    local path=CMakeLists.windows.txt
+
+    if [ -e "$path" ]; then
+        rm "$path"
+    fi
+
+# Header already included by main CMakeLists.txt file.
+#
+#    cat <<EOF >> "$path"
+#cmake_minimum_required(VERSION 3.8 FATAL_ERROR)
+#project(iml)
+##https://github.com/robertmaynard/code-samples/blob/master/posts/cmake/CMakeLists.txt
+#
+## We want to be able to do std::move() for lambda captures (c++11 doesn't have that).
+#set(CMAKE_CXX_STANDARD 14)
+#set(CMAKE_CXX_STANDARD_REQUIRED ON)
+#set(CMAKE_CXX_EXTENSIONS OFF)
+#
+#EOF
+
+    echo "include_directories(" >> "$path"
+    for direc in "${include_dirs[@]}"; do
+        echo "    $direc" >> "$path"
+    done
+    echo ") # include_directories" >> "$path"
+    echo "" >> "$path"
+
+    echo "add_executable(dummy_exe" >> "$path"
+    for src_dir in "${src_dirs[@]}"; do
+        _find_extension "$src_dir" "$src_ext_regex" | sed 's/^/  /' >> "$path"
+    done
+    echo ") # add_executable" >> "$path"
+    echo "" >> "$path"
+
+    echo "> Success: wrote $path"
+}
+
 if [ $# -gt 0 ]; then
     echo "> CMD: $@"
     echo "  $ $@"

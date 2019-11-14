@@ -47,14 +47,6 @@ void PrintCategoryTimes(const CategoryTimes& category_times, std::ostream& out, 
 }
 
 
-MyStatus CategoryEventsParser::CountCategoryTimes(const std::string& path, CategoryTimesCount* count) {
-  MyStatus status = MyStatus::OK();
-  iml::CategoryEventsProto proto;
-  status = _ReadProto(path, &proto);
-  IF_BAD_STATUS_RETURN(status);
-  return _CountCategoryTimes(path, count, proto);
-}
-
 MyStatus CategoryEventsParser::_CountCategoryTimes(const std::string& path, CategoryTimesCount* count, const iml::CategoryEventsProto& proto) {
   for (const auto& pair : proto.category_events()) {
     const auto& category = pair.first;
@@ -63,33 +55,6 @@ MyStatus CategoryEventsParser::_CountCategoryTimes(const std::string& path, Cate
   }
   return MyStatus::OK();
 }
-
-MyStatus CategoryEventsParser::ReadFile(const std::string& path, CategoryTimes* out_category_times) {
-  MyStatus status = MyStatus::OK();
-
-  iml::CategoryEventsProto proto;
-  status = _ReadProto(path, &proto);
-  IF_BAD_STATUS_RETURN(status);
-
-  CategoryTimesCount count;
-  status = _CountCategoryTimes(path, &count, proto);
-  IF_BAD_STATUS_RETURN(status);
-
-  *out_category_times = std::move(CategoryTimes(count));
-  status = _AppendCategoryTimes(path, out_category_times, proto);
-  IF_BAD_STATUS_RETURN(status);
-
-  return MyStatus::OK();
-}
-
-MyStatus CategoryEventsParser::AppendCategoryTimes(const std::string& path, CategoryTimes* out_category_times) {
-  MyStatus status = MyStatus::OK();
-  iml::CategoryEventsProto proto;
-  status = _ReadProto(path, &proto);
-  IF_BAD_STATUS_RETURN(status);
-  return _AppendCategoryTimes(path, out_category_times, proto);
-}
-
 MyStatus CategoryEventsParser::_AppendCategoryTimes(const std::string& path, CategoryTimes* out_category_times, const iml::CategoryEventsProto& proto) {
   MyStatus status = MyStatus::OK();
   for (const auto& pair : proto.category_events()) {
@@ -100,13 +65,6 @@ MyStatus CategoryEventsParser::_AppendCategoryTimes(const std::string& path, Cat
   }
   return MyStatus::OK();
 }
-
-MyStatus CategoryEventsParser::_ReadProto(const std::string& path, iml::CategoryEventsProto* proto) {
-  MyStatus status = ParseProto("category_events", path, proto);
-  IF_BAD_STATUS_RETURN(status);
-  return MyStatus::OK();
-}
-
 MyStatus CategoryEventsParser::_AppendCategory(const Category& category, const iml::CategoryEventsProto& proto, EOEvents* eo_events) {
   const auto& events = proto.category_events().at(category).events();
   size_t n_events = events.size();
@@ -118,24 +76,55 @@ MyStatus CategoryEventsParser::_AppendCategory(const Category& category, const i
   return MyStatus::OK();
 }
 
-MyStatus FindRLSFiles(const std::string& iml_directory, RLSFileType rls_file_type, std::list<std::string>* paths) {
-  return RecursiveFindFiles(paths, iml_directory, [rls_file_type] (const boost::filesystem::path& path) {
-    if (!boost::filesystem::is_regular_file(path)) {
+MyStatus CUDAAPIStatsParser::_CountCategoryTimes(const std::string& path, CategoryTimesCount* count, const ProtoKlass& proto) {
+  const std::string category = CATEGORY_CUDA_API_CPU;
+  size_t n_events = proto.events().size();
+  count->Add(category, n_events);
+  return MyStatus::OK();
+}
+MyStatus CUDAAPIStatsParser::_AppendCategoryTimes(const std::string& path, CategoryTimes* out_category_times, const ProtoKlass& proto) {
+  const std::string category = CATEGORY_CUDA_API_CPU;
+  EOEvents& eo_events = out_category_times->eo_times.at(category);
+  for (const auto& event : proto.events()) {
+    auto start_us = event.start_time_us();
+    auto end_us = event.start_time_us() + event.duration_us();
+    eo_events.AppendEvent(start_us, end_us);
+  }
+  return MyStatus::OK();
+}
+
+MyStatus CUDADeviceEventsParser::_CountCategoryTimes(const std::string& path, CategoryTimesCount* count, const CUDADeviceEventsParser::ProtoKlass& proto) {
+  const std::string category = CATEGORY_GPU;
+  for (const auto& dev_events_pair : proto.dev_events()) {
+    const auto& dev = dev_events_pair.first;
+    const auto& events = dev_events_pair.second.events();
+    size_t n_events = events.size();
+    count->Add(category, n_events);
+  }
+  return MyStatus::OK();
+}
+MyStatus CUDADeviceEventsParser::_AppendCategoryTimes(const std::string& path, CategoryTimes* out_category_times, const CUDADeviceEventsParser::ProtoKlass& proto) {
+  const std::string category = CATEGORY_GPU;
+  EOEvents& eo_events = out_category_times->eo_times.at(category);
+  for (const auto& dev_events_pair : proto.dev_events()) {
+    const auto& dev = dev_events_pair.first;
+    const auto& events = dev_events_pair.second.events();
+    for (const auto& event : events) {
+      auto start_us = event.start_time_us();
+      auto end_us = event.start_time_us() + event.duration_us();
+      eo_events.AppendEvent(start_us, end_us);
+    }
+  }
+  return MyStatus::OK();
+}
+
+MyStatus FindRLSFiles(const std::string& iml_directory, std::list<std::string>* paths) {
+  return RecursiveFindFiles(paths, iml_directory, [] (const boost::filesystem::path& bpath) {
+    if (!boost::filesystem::is_regular_file(bpath)) {
       return false;
     }
-    switch (rls_file_type) {
-      case RLSFileType::CUDA_API_STATS_FILE:
-        assert(false);
-        break;
-      case RLSFileType::CATEGORY_EVENTS_FILE:
-        return CategoryEventsParser::IsFile(path.string());
-        break;
-      case RLSFileType::CUDA_DEVICE_EVENTS_FILE:
-        assert(false);
-        break;
-      default:
-        assert(false);
-    }
+    auto file_type = GetRLSFileType(bpath.string());
+    return file_type != RLSFileType::UNKNOWN_FILE;
   });
 }
 
@@ -146,6 +135,81 @@ CategoryTimes::CategoryTimes(const CategoryTimesCount& count) {
     auto const n_events = pair.second;
     eo_times[category] = EOEvents(n_events);
   }
+}
+
+bool isRLSFile(RLSFileType file_type, const std::string& path) {
+  boost::filesystem::path bpath(path);
+
+  auto matches_regex = [&bpath] (const std::string& regex) {
+    std::regex file_regex(regex);
+    return std::regex_match(bpath.filename().string(), file_regex);
+  };
+
+  switch (file_type) {
+    case RLSFileType::CUDA_API_STATS_FILE:
+      return matches_regex(CUDA_API_STATS_REGEX);
+      break;
+    case RLSFileType::CATEGORY_EVENTS_FILE:
+      return matches_regex(CATEGORY_EVENTS_REGEX);
+      break;
+    case RLSFileType::CUDA_DEVICE_EVENTS_FILE:
+      return matches_regex(CUDA_DEVICE_EVENTS_REGEX);
+      break;
+    case RLSFileType::UNKNOWN_FILE:
+      return false;
+  }
+  // Not sure how to handle this file type.
+  assert(false);
+  return false;
+}
+
+RLSFileType GetRLSFileType(const std::string& path) {
+  boost::filesystem::path bpath(path);
+
+  auto matches_regex = [&bpath] (const std::string& regex) {
+    std::regex file_regex(regex);
+    return std::regex_match(bpath.filename().string(), file_regex);
+  };
+
+  if (matches_regex(CATEGORY_EVENTS_REGEX)) {
+    return RLSFileType::CATEGORY_EVENTS_FILE;
+  }
+  if (matches_regex(CUDA_API_STATS_REGEX)) {
+    return RLSFileType::CUDA_API_STATS_FILE;
+  }
+  if (matches_regex(CUDA_DEVICE_EVENTS_REGEX)) {
+    return RLSFileType::CUDA_DEVICE_EVENTS_FILE;
+  }
+
+  return RLSFileType::UNKNOWN_FILE;
+
+#undef IF_MATCH_RETURN_TYPE
+}
+
+MyStatus GetRLSEventParser(const std::string& path, std::unique_ptr<IEventFileParser>* parser) {
+  auto file_type = GetRLSFileType(path);
+  switch (file_type) {
+    case RLSFileType::CUDA_API_STATS_FILE:
+      parser->reset(new CUDAAPIStatsParser());
+      break;
+    case RLSFileType::CATEGORY_EVENTS_FILE:
+      parser->reset(new CategoryEventsParser());
+      break;
+    case RLSFileType::CUDA_DEVICE_EVENTS_FILE:
+      parser->reset(new CUDADeviceEventsParser());
+      break;
+    default:
+      assert(false);
+  }
+  return MyStatus::OK();
+}
+
+std::list<std::unique_ptr<IEventFileParser>> AllRLSParsers() {
+  std::list<std::unique_ptr<IEventFileParser>> parsers;
+  parsers.emplace_back(new CategoryEventsParser());
+  parsers.emplace_back(new CUDAAPIStatsParser());
+  parsers.emplace_back(new CUDADeviceEventsParser());
+  return parsers;
 }
 
 } // namespace tensorflow

@@ -39,13 +39,42 @@
 namespace tensorflow {
 
 enum RLSFileType {
-  CUDA_API_STATS_FILE = 0,
-  CATEGORY_EVENTS_FILE = 1,
-  CUDA_DEVICE_EVENTS_FILE = 2,
+  UNKNOWN_FILE = 0,
+  CUDA_API_STATS_FILE = 1,
+  CATEGORY_EVENTS_FILE = 2,
+  CUDA_DEVICE_EVENTS_FILE = 3,
 };
+
+
+// Copied from: iml_profiler/parser/common.py
+#define CATEGORY_TF_API "Framework API C"
+#define CATEGORY_PYTHON "Python"
+#define CATEGORY_PYTHON_PROFILER "Python profiler"
+#define CATEGORY_CUDA_API_CPU "CUDA API CPU"
+#define CATEGORY_UNKNOWN "Unknown"
+#define CATEGORY_GPU "GPU"
+#define CATEGORY_DUMMY_EVENT "Dummy event"
+#define CATEGORY_OPERATION "Operation"
+#define CATEGORY_SIMULATOR_CPP "Simulator C"
+
+
+//#define TRACE_SUFFIX_RE (R"((?:\.trace_(?P<trace_id>\d+))?)")
+#define TRACE_SUFFIX_RE R"((?:\.trace_(\d+))?)"
+
+//#define CUDA_API_STATS_REGEX (R"(^cuda_api_stats{trace}\.proto)")
+#define CUDA_API_STATS_REGEX (R"(^cuda_api_stats)" TRACE_SUFFIX_RE R"(\.proto)")
+
+//#define CATEGORY_EVENTS_REGEX (R"(category_events{trace}\.proto)")
+#define CATEGORY_EVENTS_REGEX (R"(category_events)" TRACE_SUFFIX_RE R"(\.proto)")
+
+//#define CUDA_DEVICE_EVENTS_REGEX (R"(cuda_device_events{trace}\.proto)")
+#define CUDA_DEVICE_EVENTS_REGEX (R"(cuda_device_events)" TRACE_SUFFIX_RE R"(\.proto)")
 
 using Category = std::string;
 //using CategoryTimes = std::map<Category, EOEvents>;
+
+bool isRLSFile(RLSFileType file_type, const std::string& path);
+RLSFileType GetRLSFileType(const std::string& path);
 
 template <typename KeepFunc>
 MyStatus RecursiveFindFiles(std::list<std::string>* paths, const std::string& root, KeepFunc func) {
@@ -68,7 +97,7 @@ MyStatus RecursiveFindFiles(std::list<std::string>* paths, const std::string& ro
   return MyStatus::OK();
 }
 
-MyStatus FindRLSFiles(const std::string& iml_directory, RLSFileType rls_file_type, std::list<std::string>* paths);
+MyStatus FindRLSFiles(const std::string& iml_directory, std::list<std::string>* paths);
 
 //enum RawTraceSplitLocationType {
 //  START = 0
@@ -233,46 +262,140 @@ public:
 
 };
 
-//#define TRACE_SUFFIX_RE (R"((?:\.trace_(?P<trace_id>\d+))?)")
-#define TRACE_SUFFIX_RE R"((?:\.trace_(\d+))?)"
-
-//#define CUDA_API_STATS_REGEX (R"(^cuda_api_stats{trace}\.proto)")
-#define CUDA_API_STATS_REGEX (R"(^cuda_api_stats)" TRACE_SUFFIX_RE R"(\.proto)")
-
-//#define CATEGORY_EVENTS_REGEX (R"(category_events{trace}\.proto)")
-#define CATEGORY_EVENTS_REGEX (R"(category_events)" TRACE_SUFFIX_RE R"(\.proto)")
-
-//#define CUDA_DEVICE_EVENTS_REGEX (R"(cuda_device_events{trace}\.proto)")
-#define CUDA_DEVICE_EVENTS_REGEX (R"(cuda_device_events)" TRACE_SUFFIX_RE R"(\.proto)")
-
-class CategoryEventsParser {
+class IEventFileParser {
 public:
 
-  static bool IsFile(const std::string& path) {
-    boost::filesystem::path bpath(path);
-    std::regex file_regex(CATEGORY_EVENTS_REGEX);
-    return std::regex_match(bpath.filename().string(), file_regex);
+  // Implemented in IEventFileProtoParser<ProtoKlass>
+  virtual bool IsFile(const std::string& path) const = 0;
+  virtual MyStatus ReadFile(const std::string& path, CategoryTimes* out_category_times) = 0;
+  virtual MyStatus CountCategoryTimes(const std::string& path, CategoryTimesCount* count) = 0;
+  virtual MyStatus AppendCategoryTimes(const std::string& path, CategoryTimes* out_category_times) = 0;
+
+};
+
+template <class ProtoKlass>
+class IEventFileProtoParser : public IEventFileParser {
+public:
+  RLSFileType _file_type;
+  std::string _proto_nickname;
+  IEventFileProtoParser(RLSFileType file_type, const std::string& proto_nickname) :
+      _file_type(file_type),
+      _proto_nickname(proto_nickname) {
   }
 
-  MyStatus ParseTimes(const std::string& path, CategoryTimes* out_category_times);
-  MyStatus CountCategoryTimes(const std::string& path, CategoryTimesCount* count);
-  MyStatus _CountCategoryTimes(const std::string& path, CategoryTimesCount* count, const iml::CategoryEventsProto& proto);
-  MyStatus ReadFile(const std::string& path, CategoryTimesCount* count);
+  virtual bool IsFile(const std::string& path) const {
+    return isRLSFile(_file_type, path);
+  }
 
-  MyStatus _ReadProto(const std::string& path, iml::CategoryEventsProto* proto);
+  virtual MyStatus _CountCategoryTimes(const std::string& path, CategoryTimesCount* count, const ProtoKlass& proto) = 0;
+  virtual MyStatus _AppendCategoryTimes(const std::string& path, CategoryTimes* out_category_times, const ProtoKlass& proto) = 0;
 
-  MyStatus ReadFile(const std::string& path, CategoryTimes* out_category_times);
+  MyStatus AppendCategoryTimes(const std::string& path, CategoryTimes* out_category_times) {
+    MyStatus status = MyStatus::OK();
+    ProtoKlass proto;
+    status = _ReadProto(path, &proto);
+    IF_BAD_STATUS_RETURN(status);
+    return _AppendCategoryTimes(path, out_category_times, proto);
+  }
 
-  MyStatus AppendCategoryTimes(const std::string& path, CategoryTimes* out_category_times);
-  MyStatus _AppendCategoryTimes(const std::string& path, CategoryTimes* out_category_times, const iml::CategoryEventsProto& proto);
+
+  MyStatus _ReadProto(const std::string& path, ProtoKlass* proto) {
+    MyStatus status = ParseProto(_proto_nickname, path, proto);
+    IF_BAD_STATUS_RETURN(status);
+    return MyStatus::OK();
+  }
+
+  virtual MyStatus CountCategoryTimes(const std::string& path, CategoryTimesCount* count) {
+    MyStatus status = MyStatus::OK();
+    ProtoKlass proto;
+    status = _ReadProto(path, &proto);
+    IF_BAD_STATUS_RETURN(status);
+    return _CountCategoryTimes(path, count, proto);
+  }
+
+
+  virtual MyStatus ReadFile(const std::string& path, CategoryTimes* out_category_times) {
+    MyStatus status = MyStatus::OK();
+
+    ProtoKlass proto;
+    status = this->_ReadProto(path, &proto);
+    IF_BAD_STATUS_RETURN(status);
+
+    CategoryTimesCount count;
+    status = this->_CountCategoryTimes(path, &count, proto);
+    IF_BAD_STATUS_RETURN(status);
+
+    *out_category_times = std::move(CategoryTimes(count));
+    status = this->_AppendCategoryTimes(path, out_category_times, proto);
+    IF_BAD_STATUS_RETURN(status);
+
+    return MyStatus::OK();
+  }
+};
+
+
+// GOAL:
+//
+// for each trace file:
+//   - take path, add to counts (don't care about underlying parser).
+//   AddEventFileCounts(path, &counts)
+//
+// CategoryTimes category_times(counts)
+//
+// for each trace file in trace_id order:
+//   - append events from trace file to eo_times
+//   AppendEventFile(path, &category_times)
+
+bool isRLSFile(RLSFileType file_type, const std::string& path);
+
+MyStatus GetRLSEventParser(const std::string& path, std::unique_ptr<IEventFileParser>* parser);
+
+class CategoryEventsParser : public IEventFileProtoParser<iml::CategoryEventsProto> {
+public:
+  CategoryEventsParser() :
+      IEventFileProtoParser<iml::CategoryEventsProto>(RLSFileType::CATEGORY_EVENTS_FILE, "category_events")
+  {
+  }
+
+
+  virtual MyStatus _CountCategoryTimes(const std::string& path, CategoryTimesCount* count, const iml::CategoryEventsProto& proto) override;
+  virtual MyStatus _AppendCategoryTimes(const std::string& path, CategoryTimes* out_category_times, const iml::CategoryEventsProto& proto) override;
+
   MyStatus _AppendCategory(const Category& category, const iml::CategoryEventsProto& proto, EOEvents* eo_events);
 
   // PROBLEM:
   // - we need to determine ahead of time how many events we need to read so we can preallocate an array.
   // - to do this, we need to load each protobuf file.
   // - our "ReadCategory" function should instead become "AppendCategory", and we should return an error or Assert if its too big.
-
 };
+
+class CUDAAPIStatsParser : public IEventFileProtoParser<iml::CUDAAPIPhaseStatsProto> {
+public:
+  using ProtoKlass = iml::CUDAAPIPhaseStatsProto;
+  CUDAAPIStatsParser() :
+      IEventFileProtoParser<ProtoKlass>(RLSFileType::CUDA_API_STATS_FILE, "cuda_api_stats")
+  {
+  }
+
+
+  virtual MyStatus _CountCategoryTimes(const std::string& path, CategoryTimesCount* count, const ProtoKlass& proto) override;
+  virtual MyStatus _AppendCategoryTimes(const std::string& path, CategoryTimes* out_category_times, const ProtoKlass& proto) override;
+};
+
+class CUDADeviceEventsParser : public IEventFileProtoParser<iml::MachineDevsEventsProto> {
+public:
+  using ProtoKlass = iml::MachineDevsEventsProto;
+  CUDADeviceEventsParser() :
+      IEventFileProtoParser<ProtoKlass>(RLSFileType::CUDA_DEVICE_EVENTS_FILE, "cuda_device_events")
+  {
+  }
+
+  virtual MyStatus _CountCategoryTimes(const std::string& path, CategoryTimesCount* count, const ProtoKlass& proto) override;
+  virtual MyStatus _AppendCategoryTimes(const std::string& path, CategoryTimes* out_category_times, const ProtoKlass& proto) override;
+};
+
+std::list<std::unique_ptr<IEventFileParser>> AllRLSParsers();
+
 
 }
 

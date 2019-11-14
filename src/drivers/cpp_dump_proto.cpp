@@ -7,6 +7,8 @@
 #include <boost/filesystem.hpp>
 #include <boost/any.hpp>
 
+#include <iostream>
+
 #include <assert.h>
 
 //#include "tensorflow/core/lib/core/status.h"
@@ -70,20 +72,18 @@ int main(int argc, char** argv) {
   }
 
   if (mode == Mode::MODE_DUMP_PROTO) {
-    if (CategoryEventsParser::IsFile(FLAGS_proto)) {
-      CategoryEventsParser parser;
-      CategoryTimes category_times;
-      status = parser.ReadFile(FLAGS_proto, &category_times);
-      IF_BAD_STATUS_EXIT("Failed to read --proto", status);
-      PrintCategoryTimes(category_times, std::cout, 0);
-      exit(EXIT_SUCCESS);
-    } else {
-      std::cout << "Not sure how to parse protobuf file @ --proto=" << FLAGS_proto;
-      exit(EXIT_FAILURE);
-    }
+    std::unique_ptr<IEventFileParser> parser;
+    status = GetRLSEventParser(FLAGS_proto, &parser);
+    IF_BAD_STATUS_EXIT("Not sure how to parse", status);
+    CategoryTimes category_times;
+    status = parser->ReadFile(FLAGS_proto, &category_times);
+    IF_BAD_STATUS_EXIT("Failed to read --proto", status);
+    PrintCategoryTimes(category_times, std::cout, 0);
+    std::cout << "\n";
+    exit(EXIT_SUCCESS);
   } else if (mode == Mode::MODE_LS_FILES) {
     std::list<std::string> paths;
-    status = FindRLSFiles(FLAGS_iml_directory, RLSFileType::CATEGORY_EVENTS_FILE, &paths);
+    status = FindRLSFiles(FLAGS_iml_directory, &paths);
     IF_BAD_STATUS_EXIT("Failed to ls trace-files in --iml_directory", status);
     for (const auto& path : paths) {
       std::cout << path << std::endl;
