@@ -287,6 +287,18 @@ setup_eigen_cpp_library() {
     )
 }
 
+cmake_build() {
+    local src_dir="$1"
+    shift 1
+
+    cd "$src_dir"
+    mkdir -p build
+    cd build
+    cmake .. -DCMAKE_INSTALL_PREFIX=$PWD/cmake_install
+    make -j$(nproc)
+    make install
+}
+
 #PROTOBUF_VERSION='3.6.1.2'
 
 #PROTOBUF_VERSION='3.6.1'
@@ -310,6 +322,21 @@ setup_protobuf_cpp_library() {
     ${PROTOBUF_CPP_LIB_DIR}/build/bin/protoc --version
     )
 }
+
+LIBPQXX_CPP_LIB_DIR="$ROOT/third_party/json"
+LIBPQXX_VERSION="6.4.5"
+setup_cpp_libpqxx() {
+    if [ "$FORCE" != 'yes' ] && [ -e $LIBPQXX_CPP_LIB_DIR ]; then
+        return
+    fi
+    local commit="$LIBPQXX_VERSION"
+    _clone "$LIBPQXX_CPP_LIB_DIR" \
+        jtv/libpqxx.git \
+        $commit
+#    cd $LIBPQXX_CPP_LIB_DIR
+#    _configure_make_install
+}
+
 
 _configure() {
     local install_dir="$1"
@@ -407,6 +434,7 @@ setup_apt_packages() {
     _apt_install \
         mercurial \
         git \
+        libgflags-dev libgflags2v5 \
 
 }
 
@@ -434,6 +462,7 @@ main() {
     _do setup_backward_cpp_library
     _do setup_eigen_cpp_library
     _do setup_protobuf_cpp_library
+    _do setup_boost_cpp_library
     # TODO: setup protobuf
 #    setup_cmake
     echo "> Success!"

@@ -4,7 +4,9 @@
 
 #include "cuda_api_profiler/cupti_logging.h"
 
-#include "tensorflow/core/platform/env.h"
+//#include "tensorflow/core/platform/env.h"
+#include "cuda_api_profiler/usec_timer.h"
+#include "cuda_api_profiler/generic_logging.h"
 
 #include <cupti.h>
 #include <cuda.h>
@@ -15,14 +17,6 @@
 #define STR(a) #a
 
 namespace tensorflow {
-
-std::ostream& PrintIndent(std::ostream& out, int indent) {
-  for (int i = 0; i < indent; i++) {
-    out << "  ";
-  }
-  return out;
-}
-
 
 const char* driver_cbid_to_string(CUpti_CallbackId cbid) {
 
@@ -1298,12 +1292,14 @@ SimpleTimer::SimpleTimer(const std::string& name) :
 }
 
 void SimpleTimer::ResetStartTime() {
-  auto now_us = Env::Default()->NowMicros();
+//  auto now_us = Env::Default()->NowMicros();
+  auto now_us = TimeNowMicros();
   _last_time_usec = now_us;
 }
 
 void SimpleTimer::EndOperation(const std::string& operation) {
-  auto now_us = Env::Default()->NowMicros();
+//  auto now_us = Env::Default()->NowMicros();
+  auto now_us = TimeNowMicros();
   DCHECK(_last_time_usec != 0);
   _op_duration_usec[operation] = now_us - _last_time_usec;
   _last_time_usec = now_us;

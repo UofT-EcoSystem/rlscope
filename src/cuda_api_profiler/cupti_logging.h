@@ -7,6 +7,8 @@
 
 #include "tensorflow/core/lib/core/status.h"
 
+#include "cuda_api_profiler/generic_logging.h"
+
 #include <cupti.h>
 #include <cuda.h>
 
@@ -42,8 +44,6 @@
   }
 
 namespace tensorflow {
-
-std::ostream& PrintIndent(std::ostream& out, int indent);
 
 const char* runtime_cbid_to_string(CUpti_CallbackId cbid);
 const char* driver_cbid_to_string(CUpti_CallbackId cbid);

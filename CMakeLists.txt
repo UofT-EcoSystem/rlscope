@@ -37,6 +37,12 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 # the current built (since it's persisted...i.e. the whole purpose of cache variables).
 #set(WITH_CUDA_LD_PRELOAD ON)
 set(WITH_CUDA_LD_PRELOAD OFF)
+# Implement database queries and construction of numpy data-formats in C++ instead of python
+# PRO: speedup data preparation
+# CON: extra dependency (libpqxx)
+#set(WITH_CXX_SQL OFF)
+# Implement reading raw trace-files into eo_times format using C++.
+set(WITH_CXX_ANALYSIS ON)
 #message("> WITH_CUDA_LD_PRELOAD = ${WITH_CUDA_LD_PRELOAD}")
 
 #FIND_PACKAGE(CUDA)
@@ -86,7 +92,8 @@ if (NOT IS_WINDOWS AND NOT (
         AND EXISTS ${PROJECT_SOURCE_DIR}/third_party/backward-cpp
         AND EXISTS ${PROJECT_SOURCE_DIR}/third_party/eigen
         AND EXISTS ${PROJECT_SOURCE_DIR}/third_party/protobuf-${PROTOBUF_VERSION}
-#        AND EXISTS ${PROJECT_SOURCE_DIR}/third_party/boost_${BOOST_VERSION_UNDERSCORES}/build
+#        AND EXISTS ${PROJECT_SOURCE_DIR}/third_party/libpqxx
+        AND EXISTS ${PROJECT_SOURCE_DIR}/third_party/boost_${BOOST_VERSION_UNDERSCORES}/build
         ) )
     message(FATAL_ERROR
             "You need to run setup.sh first:\n"
@@ -185,6 +192,10 @@ set(TF_SRC_DIRS
 
         )
 
+set(ANALYSIS_SRC_DIRS
+        ./src/analysis
+        )
+
 set(SRC_DIRS
         ./src
         # NOTE: don't include drivers.
@@ -225,6 +236,11 @@ macro(gather_sources srcs_var directories)
     endforeach()
 endmacro()
 
+gather_sources(ANALYSIS_SOURCES ANALYSIS_SRC_DIRS)
+set(ANALYSIS_SOURCES
+        ./src/cuda_api_profiler/generic_logging.cc
+        ./src/cuda_api_profiler/generic_logging.h
+        ${ANALYSIS_SOURCES})
 gather_sources(SOURCES SRC_DIRS)
 gather_sources(TEST_SOURCES TEST_DIRS)
 gather_sources(TF_SOURCES TF_SRC_DIRS)
@@ -323,8 +339,126 @@ protobuf_generate_cpp(PROTO_SRCS PROTO_HDRS
 #add_executable(bar bar.cc ${PROTO_SRCS} ${PROTO_HDRS})
 #target_link_libraries(bar ${Protobuf_LIBRARIES})
 
+#if (WITH_CXX_SQL)
+#    add_executable(run_query
+#            ./src/drivers/run_query.cpp
+#            ${ANALYSIS_SOURCES})
+#endif()
+
+add_library(nsync_includes INTERFACE)
+target_include_directories(nsync_includes INTERFACE third_party/nsync/public)
+
+function(AddFlags TARGET PROPERTY NEW_FLAGS)
+    #https://stackoverflow.com/questions/36662920/xcode-clang-link-build-dynamic-framework-or-dylib-not-embed-dependencies
+    #    set(TARGET "sample_cuda_api")
+    #    set(NEW_FLAGS "-Wl,-undefined,dynamic_lookup")
+    get_target_property(OLD_FLAGS ${TARGET} ${PROPERTY})
+    if(OLD_FLAGS STREQUAL "OLD_FLAGS-NOTFOUND")
+        SET(OLD_FLAGS "") # Set to empty string
+    else()
+        SET(OLD_FLAGS "${OLD_FLAGS} ") # A space to cleanly separate from existing content
+    endif()
+    # Append our values
+    SET(OLD_FLAGS "${OLD_FLAGS}${NEW_FLAGS}" )
+    set_target_properties(${TARGET} PROPERTIES ${PROPERTY} ${OLD_FLAGS} )
+endfunction()
+
+function(AddTensorflowDependencies TARGET INCLUDE_CUDA)
+    add_dependencies(${TARGET} double_conversion)
+    # This will add libraries, definitions and include directories needed by backward
+    # by setting each property on the target.
+    add_backward(${TARGET})
+
+    if (ENABLE_BACKTRACE)
+        set(BACKTRACE_SYMS_FLAGS "-g")
+        AddFlags(${TARGET} COMPILE_FLAGS ${BACKTRACE_SYMS_FLAGS})
+        AddFlags(${TARGET} LINK_FLAGS ${BACKTRACE_SYMS_FLAGS})
+    endif()
+
+    target_link_libraries(${TARGET} PRIVATE ${Protobuf_LIBRARIES})
+    #message("> PROTO_SRCS = ${PROTO_SRCS}")
+    #message("> PROTO_HDRS = ${PROTO_HDRS}")
+    #absl::synchronization
+    target_link_libraries(${TARGET} PRIVATE
+            absl::base
+            absl::strings
+            absl::memory)
+    target_link_libraries(${TARGET} PRIVATE nsync)
+
+    target_link_libraries(${TARGET} PRIVATE nsync_includes)
+
+    target_link_libraries(${TARGET} PRIVATE nsync_cpp)
+    target_link_libraries(${TARGET} PRIVATE pthread)
+    #target_include_directories(${TARGET} PRIVATE ${DOUBLE_CONVERSION_INCLUDE_DIRS})
+    target_include_directories(${TARGET} PRIVATE ${double_conversion_INCLUDE_DIR})
+    #target_link_libraries(${TARGET} ${DOUBLE_CONVERSION_LIBRARY})
+    #target_link_libraries(${TARGET} ${double_conversion_LIBRARIES})
+    #target_link_libraries(${TARGET} double_conversion)
+    target_link_libraries(${TARGET} PRIVATE ${double_conversion_LIBRARIES})
+    target_link_libraries(${TARGET} PRIVATE Eigen3::Eigen)
+    target_link_libraries(${TARGET} PRIVATE "-ldl")
+    if(NOT IS_WINDOWS AND INCLUDE_CUDA)
+        find_package(Libcupti REQUIRED)
+        target_link_libraries(${TARGET} PUBLIC ${Libcupti_LIBRARY})
+        # https://stackoverflow.com/questions/26243169/cmake-target-include-directories-meaning-of-scope
+        # NOTE: I still don't fully understand the PUBLIC/PRIVATE/INTERFACE scope here...
+        target_include_directories(${TARGET} PRIVATE ${Libcupti_INCLUDE_DIR})
+
+        if (NOT WITH_CUDA_LD_PRELOAD)
+            # CUDA_LIBRARIES = /usr/local/cuda/lib64/libcudart_static.a;-pthread;dl;/usr/lib/x86_64-linux-gnu/librt.so
+            message("> CUDA_LIBRARIES = ${CUDA_LIBRARIES}")
+            target_link_libraries(${TARGET} PUBLIC ${CUDA_LIBRARIES})
+        endif()
+
+#        if (WITH_CUDA_LD_PRELOAD)
+#            target_link_libraries(${TARGET} PUBLIC "-ldl")
+#        endif()
+
+        # Link driver API by adding -lcuda:
+        #   https://devtalk.nvidia.com/default/topic/774340/cmake-undefined-reference-cuctxdetach-cumemgetinfo_v2-cuctxcreate_v2-cuinit/
+        target_link_libraries(${TARGET} PUBLIC cuda)
+        # https://stackoverflow.com/questions/26243169/cmake-target-include-directories-meaning-of-scope
+        # NOTE: I still don't fully understand the PUBLIC/PRIVATE/INTERFACE scope here...
+        target_include_directories(${TARGET} PRIVATE ${CUDA_INCLUDE_DIRS})
+
+        #    add_subdirectory(third_party/boost_${BOOST_VERSION_UNDERSCORES})
+
+        #    set(BOOST_ROOT ${CMAKE_SOURCE_DIR}/third_party/boost_${BOOST_VERSION_UNDERSCORES}/build)
+        #    set(BOOST_INCLUDEDIR ${CMAKE_SOURCE_DIR}/third_party/boost_${BOOST_VERSION_UNDERSCORES}/build/include)
+        #    set(BOOST_LIBRARYDIR ${CMAKE_SOURCE_DIR}/third_party/boost_${BOOST_VERSION_UNDERSCORES}/build/lib)
+        #    set(Boost_NO_SYSTEM_PATHS ON)
+        #    find_package(Boost ${BOOST_VERSION} REQUIRED
+        ##            COMPONENTS stacktrace
+        #            COMPONENTS stacktrace_backtrace
+        ##            COMPONENTS stacktrace_addr2line
+        ##            HINTS ${CMAKE_SOURCE_DIR}/third_party/boost_${BOOST_VERSION_UNDERSCORES}/build
+        #            )
+        #
+        #    message("Boost_INCLUDE_DIR = ${Boost_INCLUDE_DIR}")
+        #    message("Boost_INCLUDE_DIRS = ${Boost_INCLUDE_DIRS}")
+        #
+        #    message("Boost_LIBRARY_DIRS = ${Boost_LIBRARY_DIRS}")
+        #    message("Boost_LIBRARY = ${Boost_LIBRARY}")
+        #    message("Boost_LIBRARIES = ${Boost_LIBRARIES}")
+        #
+        #    target_link_libraries(${TARGET} ${Boost_LIBRARIES})
+        #    target_link_directories(${TARGET} PRIVATE ${Boost_LIBRARY_DIRS})
+        #
+        #    target_include_directories(${TARGET} PRIVATE ${Boost_INCLUDE_DIRS})
+        ##    target_link_libraries(${TARGET} ${Boost_LIBRARIES})
+
+        find_package(Backtrace REQUIRED)
+        target_link_libraries(sample_cuda_api PRIVATE ${Backtrace_LIBRARY})
+        target_include_directories(sample_cuda_api PRIVATE ${Backtrace_INCLUDE_DIR})
+
+    endif()
+
+endfunction()
+
 # BLAZ
 if (ENABLE_DQN_CPP)
+
+
     add_executable(model
             ./src/drivers/run_model.cpp
             ${SOURCES})
@@ -362,6 +496,7 @@ endif()
 
 message("> CUDA_PROF_SRCS = ${CUDA_PROF_SRCS}")
 message("> TF_SOURCES = ${TF_SOURCES}")
+message("> ANALYSIS_SOURCES = ${ANALYSIS_SOURCES}")
 message("> PROTO_SRCS = ${PROTO_SRCS}")
 message("> PROTO_HDRS = ${PROTO_HDRS}")
 message("> BACKWARD_ENABLE = ${BACKWARD_ENABLE}")
@@ -469,21 +604,6 @@ if(NOT IS_WINDOWS)
 
 endif()
 
-function(AddFlags TARGET PROPERTY NEW_FLAGS)
-    #https://stackoverflow.com/questions/36662920/xcode-clang-link-build-dynamic-framework-or-dylib-not-embed-dependencies
-#    set(TARGET "sample_cuda_api")
-#    set(NEW_FLAGS "-Wl,-undefined,dynamic_lookup")
-    get_target_property(OLD_FLAGS ${TARGET} ${PROPERTY})
-    if(OLD_FLAGS STREQUAL "OLD_FLAGS-NOTFOUND")
-        SET(OLD_FLAGS "") # Set to empty string
-    else()
-        SET(OLD_FLAGS "${OLD_FLAGS} ") # A space to cleanly separate from existing content
-    endif()
-    # Append our values
-    SET(OLD_FLAGS "${OLD_FLAGS}${NEW_FLAGS}" )
-    set_target_properties(${TARGET} PROPERTIES ${PROPERTY} ${OLD_FLAGS} )
-endfunction()
-
 #set(LD_FLAGS_IGNORE_UNDEFINED "-Wl,-undefined,dynamic_lookup")
 #AddFlags(sample_cuda_api COMPILE_FLAGS ${LD_FLAGS_IGNORE_UNDEFINED})
 #AddFlags(sample_cuda_api LINK_FLAGS ${LD_FLAGS_IGNORE_UNDEFINED})
@@ -587,9 +707,63 @@ AddFlags(sample_cuda_api LINK_DEPENDS "${LD_VERSION_SCRIPT}")
 #message("> NSYNC_INCLUDES = ${NSYNC_INCLUDES}")
 #target_include_directories(sample_cuda_api ${NSYNC_INCLUDES})
 
-add_library(nsync_includes INTERFACE)
-target_include_directories(nsync_includes INTERFACE third_party/nsync/public)
 target_link_libraries(sample_cuda_api PRIVATE nsync_includes)
+
+if (WITH_CXX_ANALYSIS)
+    set(CPP_DUMP_PROTO_SRCS
+            ./src/drivers/cpp_dump_proto.cpp
+            ${ANALYSIS_SOURCES}
+#            ${TF_SOURCES}
+            ${BACKWARD_ENABLE}
+            ${PROTO_SRCS} ${PROTO_HDRS})
+    list(FILTER CPP_DUMP_PROTO_SRCS EXCLUDE REGEX "/c_test_util.cc")
+
+    message("> CPP_DUMP_PROTO_SRCS = ${CPP_DUMP_PROTO_SRCS}")
+    add_executable(cpp_dump_proto ${CPP_DUMP_PROTO_SRCS})
+    AddTensorflowDependencies(cpp_dump_proto FALSE)
+
+    find_library(GFLAGS_LIB gflags REQUIRED)
+    target_link_libraries(cpp_dump_proto PUBLIC ${GFLAGS_LIB})
+
+#    add_backward(cpp_dump_proto)
+#
+#    if (ENABLE_BACKTRACE)
+#        set(BACKTRACE_SYMS_FLAGS "-g")
+#        AddFlags(cpp_dump_proto COMPILE_FLAGS ${BACKTRACE_SYMS_FLAGS})
+#        AddFlags(cpp_dump_proto LINK_FLAGS ${BACKTRACE_SYMS_FLAGS})
+#    endif()
+
+
+    #    add_subdirectory(third_party/boost_${BOOST_VERSION_UNDERSCORES})
+    #    set(BOOST_ROOT ${CMAKE_SOURCE_DIR}/third_party/boost_${BOOST_VERSION_UNDERSCORES}/build)
+    #    set(BOOST_INCLUDEDIR ${CMAKE_SOURCE_DIR}/third_party/boost_${BOOST_VERSION_UNDERSCORES}/build/include)
+    #    set(BOOST_LIBRARYDIR ${CMAKE_SOURCE_DIR}/third_party/boost_${BOOST_VERSION_UNDERSCORES}/build/lib)
+    #    set(Boost_NO_SYSTEM_PATHS ON)
+    #    find_package(Boost ${BOOST_VERSION} REQUIRED
+    #            #            COMPONENTS stacktrace
+    #            COMPONENTS filesystem
+    #            #            COMPONENTS stacktrace_addr2line
+    #            #            HINTS ${CMAKE_SOURCE_DIR}/third_party/boost_${BOOST_VERSION_UNDERSCORES}/build
+    #            )
+    #
+    #    message("Boost_INCLUDE_DIR = ${Boost_INCLUDE_DIR}")
+    #    message("Boost_INCLUDE_DIRS = ${Boost_INCLUDE_DIRS}")
+    #
+    #    message("Boost_LIBRARY_DIRS = ${Boost_LIBRARY_DIRS}")
+    #    message("Boost_LIBRARY = ${Boost_LIBRARY}")
+    #    message("Boost_LIBRARIES = ${Boost_LIBRARIES}")
+    #
+    #    target_link_libraries(cpp_dump_proto ${Boost_LIBRARIES})
+    #    target_link_directories(cpp_dump_proto PRIVATE ${Boost_LIBRARY_DIRS})
+
+    set(BOOST_INCLUDEDIR ${CMAKE_SOURCE_DIR}/third_party/boost_${BOOST_VERSION_UNDERSCORES}/build/include)
+    target_include_directories(cpp_dump_proto PRIVATE ${BOOST_INCLUDEDIR})
+
+    set(BOOST_LIBRARYDIR ${CMAKE_SOURCE_DIR}/third_party/boost_${BOOST_VERSION_UNDERSCORES}/build/lib)
+    target_link_directories(cpp_dump_proto PRIVATE ${BOOST_LIBRARYDIR})
+    target_link_libraries(cpp_dump_proto PRIVATE boost_filesystem)
+
+endif()
 
 
 #./test/py_interface/py_interface_src.cpp
