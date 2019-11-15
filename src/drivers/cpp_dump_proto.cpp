@@ -4,8 +4,12 @@
 
 //#include "common/debug.h"
 
+#include <spdlog/spdlog.h>
+
 #include <boost/filesystem.hpp>
 #include <boost/any.hpp>
+
+#include <backward.hpp>
 
 #include <iostream>
 
@@ -25,6 +29,7 @@
 DEFINE_bool(debug, false, "Debug");
 DEFINE_string(proto, "", "Path to RLS trace-file protobuf file");
 DEFINE_string(iml_directory, "", "Path to --iml-directory used when collecting trace-files");
+DEFINE_string(mode, "", "One of: [stats, ls, proto]");
 
 using namespace tensorflow;
 
@@ -37,10 +42,46 @@ using namespace tensorflow;
 enum Mode {
   MODE_DUMP_PROTO = 0,
   MODE_LS_FILES = 1,
+  MODE_STATS = 2,
 };
 
+void Usage() {
+  std::cout << "Usage: " << std::endl;
+  std::cout << "  # Dump protobuf file" << std::endl;
+  std::cout << "  $ cpp_dump_proto [--mode proto] --proto path/to/trace_file.proto" << std::endl;
+  std::cout << std::endl;
+  std::cout << "  # ls trace-files" << std::endl;
+  std::cout << "  $ cpp_dump_proto --mode ls --iml_directory path/to/iml_directory" << std::endl;
+  std::cout << std::endl;
+  std::cout << "  # read eo_times for entire trace and dump statistics for each category" << std::endl;
+  std::cout << "  $ cpp_dump_proto --mode stats --iml_directory path/to/iml_directory" << std::endl;
+}
+void UsageAndExit(const std::string& msg) {
+  Usage();
+  std::cout << "ERROR: " << msg << std::endl;
+  exit(EXIT_FAILURE);
+}
+
 int main(int argc, char** argv) {
+  backward::SignalHandling sh;
   gflags::ParseCommandLineFlags(&argc, &argv, true);
+
+  // std::cout << "SPDLOG_ACTIVE_LEVEL = " << SPDLOG_ACTIVE_LEVEL << std::endl;
+
+  // NOTE: If you only define SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_DEBUG, this doesn't enable debug logging.
+  // It just ensures that the SPDLOG_DEBUG statements are **compiled in**!
+  // We still need to turn them on though!
+  spdlog::set_level(static_cast<spdlog::level::level_enum>(SPDLOG_ACTIVE_LEVEL));
+  // spdlog::set_level(spdlog::level::debug);
+
+  // WARNING: this log statements ALWAYS get compiled in REGARDLESS of SPDLOG_ACTIVE_LEVEL.
+  // (i.e. don't use them...)
+  // spdlog::info("Always compiled, enabled by default at runtime");
+
+//  SPDLOG_TRACE("Some trace message that will not be evaluated.{} ,{}", 1, 3.23);
+//  SPDLOG_DEBUG("Some Debug message that will be evaluated.. {} ,{}", 1, 3.23);
+//  SPDLOG_DEBUG("Some debug message to default logger that will be evaluated");
+//  SPDLOG_INFO("Compile time info message");
 
   MyStatus status = MyStatus::OK();
 
@@ -57,18 +98,38 @@ int main(int argc, char** argv) {
   }
 
   Mode mode;
-  if (FLAGS_iml_directory != "") {
-    mode = Mode::MODE_LS_FILES;
+  if (FLAGS_mode != "") {
+    if (FLAGS_mode == "ls") {
+      mode = Mode::MODE_LS_FILES;
+    } else if (FLAGS_mode == "stats") {
+      mode = Mode::MODE_STATS;
+    } else if (FLAGS_mode == "proto") {
+      mode = Mode::MODE_DUMP_PROTO;
+    } else {
+      UsageAndExit("--mode must be one of [stats, ls, proto]");
+    }
   } else if (FLAGS_proto != "") {
     mode = Mode::MODE_DUMP_PROTO;
   } else {
-    std::cout << "Usage: " << std::endl;
-    std::cout << "  # Dump protobuf file" << std::endl;
-    std::cout << "  $ cpp_dump_proto --proto path/to/trace_file.proto" << std::endl;
-    std::cout << std::endl;
-    std::cout << "  # ls trace-files" << std::endl;
-    std::cout << "  $ cpp_dump_proto --iml_directory path/to/iml_directory" << std::endl;
-    exit(EXIT_FAILURE);
+    UsageAndExit("not sure what --mode to run in");
+  }
+
+  if (mode == Mode::MODE_LS_FILES) {
+    if (FLAGS_iml_directory == "") {
+      UsageAndExit("--iml-directory is required for --mode=ls");
+    }
+  }
+
+  if (mode == Mode::MODE_STATS) {
+    if (FLAGS_iml_directory == "") {
+      UsageAndExit("--iml-directory is required for --mode=stats");
+    }
+  }
+
+  if (mode == Mode::MODE_DUMP_PROTO) {
+    if (FLAGS_proto == "") {
+      UsageAndExit("--proto is required for --mode=proto");
+    }
   }
 
   if (mode == Mode::MODE_DUMP_PROTO) {
@@ -76,22 +137,48 @@ int main(int argc, char** argv) {
     status = GetRLSEventParser(FLAGS_proto, &parser);
     IF_BAD_STATUS_EXIT("Not sure how to parse", status);
     CategoryTimes category_times;
-    status = parser->ReadFile(FLAGS_proto, &category_times);
+    status = parser->ReadFile(&category_times);
     IF_BAD_STATUS_EXIT("Failed to read --proto", status);
-    PrintCategoryTimes(category_times, std::cout, 0);
+    category_times.Print(std::cout, 0);
     std::cout << "\n";
     exit(EXIT_SUCCESS);
-  } else if (mode == Mode::MODE_LS_FILES) {
+  }
+
+  if (mode == Mode::MODE_LS_FILES) {
     std::list<std::string> paths;
     status = FindRLSFiles(FLAGS_iml_directory, &paths);
     IF_BAD_STATUS_EXIT("Failed to ls trace-files in --iml_directory", status);
     for (const auto& path : paths) {
       std::cout << path << std::endl;
     }
-  } else {
-    // Shouldn't reach here.
-    assert(false);
+    exit(EXIT_SUCCESS);
   }
+
+  if (mode == Mode::MODE_STATS) {
+    std::list<std::string> paths;
+    RawTraceParser parser(FLAGS_iml_directory);
+    status = parser.Init();
+    IF_BAD_STATUS_EXIT("Failed to collect stats for --iml_directory", status);
+    for (auto const& machine : parser.Machines()) {
+      for (auto const& process : parser.Processes(machine)) {
+        for (auto const &phase : parser.Phases(machine, process)) {
+          CategoryTimes category_times;
+          status = parser.ReadEntireTrace(machine, process, phase, &category_times);
+          IF_BAD_STATUS_EXIT("Failed read eo_times --iml_directory", status);
+          std::cout << "Machine=" << machine
+                    << ", " << "Process=" << process
+                    << ", " << "Phase=" << phase
+                    << std::endl;
+          category_times.PrintSummary(std::cout, 1);
+          std::cout << std::endl;
+        }
+      }
+    }
+    exit(EXIT_SUCCESS);
+  }
+
+  // Shouldn't reach here.
+  assert(false);
 
   return 0;
 }

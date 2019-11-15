@@ -104,6 +104,7 @@ if (NOT IS_WINDOWS AND NOT (
         AND EXISTS ${PROJECT_SOURCE_DIR}/third_party/protobuf-${PROTOBUF_VERSION}
 #        AND EXISTS ${PROJECT_SOURCE_DIR}/third_party/libpqxx
         AND EXISTS ${PROJECT_SOURCE_DIR}/third_party/boost_${BOOST_VERSION_UNDERSCORES}/build
+        AND EXISTS ${PROJECT_SOURCE_DIR}/third_party/spdlog
         ) )
     message(FATAL_ERROR
             "You need to run setup.sh first:\n"
@@ -370,7 +371,7 @@ function(AddFlags TARGET PROPERTY NEW_FLAGS)
     endif()
     # Append our values
     SET(OLD_FLAGS "${OLD_FLAGS}${NEW_FLAGS}" )
-    set_target_properties(${TARGET} PROPERTIES ${PROPERTY} ${OLD_FLAGS} )
+    set_target_properties(${TARGET} PROPERTIES ${PROPERTY} "${OLD_FLAGS}" )
 endfunction()
 
 function(AddTensorflowDependencies TARGET INCLUDE_CUDA)
@@ -395,7 +396,30 @@ function(AddTensorflowDependencies TARGET INCLUDE_CUDA)
             absl::memory)
     target_link_libraries(${TARGET} PRIVATE nsync)
 
+    IF(CMAKE_BUILD_TYPE STREQUAL "Debug")
+        message("> Enable spdlog logging for target=${TARGET}")
+
+        get_target_property(CUR_FLAG ${TARGET} COMPILE_DEFINITIONS)
+        message("> BEFORE CUR_FLAG = ${CUR_FLAG}")
+        set_target_properties(${TARGET} PROPERTIES COMPILE_DEFINITIONS "${CUR_FLAG};SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_DEBUG")
+        get_target_property(CUR_FLAG ${TARGET} COMPILE_DEFINITIONS)
+        message("> AFTER CUR_FLAG = ${CUR_FLAG}")
+    ELSE()
+        message("> SKIP: spdlog logging for target=${TARGET}")
+
+        get_target_property(CUR_FLAG ${TARGET} COMPILE_DEFINITIONS)
+        message("> BEFORE CUR_FLAG = ${CUR_FLAG}")
+        set_target_properties(${TARGET} PROPERTIES COMPILE_DEFINITIONS "${CUR_FLAG};SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_OFF")
+        get_target_property(CUR_FLAG ${TARGET} COMPILE_DEFINITIONS)
+        message("> AFTER CUR_FLAG = ${CUR_FLAG}")
+    ENDIF()
+
+
     target_link_libraries(${TARGET} PRIVATE nsync_includes)
+
+    find_package(spdlog REQUIRED
+            HINTS third_party/spdlog/build/cmake_install)
+    target_link_libraries(${TARGET} PRIVATE spdlog::spdlog)
 
     target_link_libraries(${TARGET} PRIVATE nsync_cpp)
     target_link_libraries(${TARGET} PRIVATE pthread)

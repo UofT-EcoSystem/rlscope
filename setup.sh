@@ -240,6 +240,17 @@ setup_backward_cpp_library() {
         $commit
 }
 
+SPDLOG_CPP_LIB_DIR="$ROOT/third_party/spdlog"
+setup_spdlog_cpp_library() {
+    if [ "$FORCE" != 'yes' ] && [ -e $SPDLOG_CPP_LIB_DIR/build ]; then
+        return
+    fi
+    local commit="v1.4.2"
+    _clone "$SPDLOG_CPP_LIB_DIR" \
+        gabime/spdlog.git \
+        $commit
+    cmake_build "$SPDLOG_CPP_LIB_DIR"
+}
 
 BOOST_CPP_LIB_VERSION="1.70.0"
 BOOST_CPP_LIB_VERSION_UNDERSCORES="$(perl -lape 's/\./_/g'<<<"$BOOST_CPP_LIB_VERSION")"
@@ -291,12 +302,14 @@ cmake_build() {
     local src_dir="$1"
     shift 1
 
+    (
     cd "$src_dir"
     mkdir -p build
     cd build
     cmake .. -DCMAKE_INSTALL_PREFIX=$PWD/cmake_install
     make -j$(nproc)
     make install
+    )
 }
 
 #PROTOBUF_VERSION='3.6.1.2'
@@ -431,10 +444,14 @@ _apt_install() {
 }
 
 setup_apt_packages() {
+    # binutils-dev
+    #   Needed for pretty stack-traces from backward-cpp library during segfaults:
+    #   https://github.com/bombela/backward-cpp#libraries-to-read-the-debug-info
     _apt_install \
         mercurial \
         git \
         libgflags-dev libgflags2v5 \
+        binutils-dev \
 
 }
 
@@ -463,6 +480,7 @@ main() {
     _do setup_eigen_cpp_library
     _do setup_protobuf_cpp_library
     _do setup_boost_cpp_library
+    _do setup_spdlog_cpp_library
     # TODO: setup protobuf
 #    setup_cmake
     echo "> Success!"
