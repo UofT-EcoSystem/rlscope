@@ -105,6 +105,7 @@ if (NOT IS_WINDOWS AND NOT (
 #        AND EXISTS ${PROJECT_SOURCE_DIR}/third_party/libpqxx
         AND EXISTS ${PROJECT_SOURCE_DIR}/third_party/boost_${BOOST_VERSION_UNDERSCORES}/build
         AND EXISTS ${PROJECT_SOURCE_DIR}/third_party/spdlog
+        AND EXISTS ${PROJECT_SOURCE_DIR}/third_party/googletest
         ) )
     message(FATAL_ERROR
             "You need to run setup.sh first:\n"
@@ -207,6 +208,10 @@ set(ANALYSIS_SRC_DIRS
         ./src/analysis
         )
 
+set(TEST_ANALYSIS_SRC_DIRS
+        ./test/analysis
+        )
+
 set(SRC_DIRS
         ./src
         # NOTE: don't include drivers.
@@ -248,6 +253,7 @@ macro(gather_sources srcs_var directories)
 endmacro()
 
 gather_sources(ANALYSIS_SOURCES ANALYSIS_SRC_DIRS)
+gather_sources(TEST_ANALYSIS_SOURCES TEST_ANALYSIS_SRC_DIRS)
 set(ANALYSIS_SOURCES
         ./src/cuda_api_profiler/generic_logging.cc
         ./src/cuda_api_profiler/generic_logging.h
@@ -374,6 +380,26 @@ function(AddFlags TARGET PROPERTY NEW_FLAGS)
     set_target_properties(${TARGET} PROPERTIES ${PROPERTY} "${OLD_FLAGS}" )
 endfunction()
 
+function(AddUnitTest TARGET)
+
+    # NOTE: this doesn't find gtest...
+#    enable_testing()
+#    find_package(GTest REQUIRED
+#            HINTS third_party/googletest/build/cmake_install
+#            )
+    set(GTEST_INCLUDE_DIR ${PROJECT_SOURCE_DIR}/third_party/googletest/build/cmake_install/include)
+    set(GTEST_LIBDIR ${PROJECT_SOURCE_DIR}/third_party/googletest/build/cmake_install/lib)
+    set(GTEST_LIBRARY
+            ${GTEST_LIBDIR}/libgtest_main.a
+            ${GTEST_LIBDIR}/libgtest.a)
+
+    message("> GTEST_INCLUDE_DIR = ${GTEST_INCLUDE_DIR}")
+    message("> GTEST_LIBRARY = ${GTEST_LIBRARY}")
+
+    target_include_directories(${TARGET} PRIVATE ${GTEST_INCLUDE_DIR})
+    target_link_libraries(${TARGET} PRIVATE ${GTEST_LIBRARY})
+endfunction()
+
 function(AddTensorflowDependencies TARGET INCLUDE_CUDA)
     add_dependencies(${TARGET} double_conversion)
     # This will add libraries, definitions and include directories needed by backward
@@ -414,6 +440,11 @@ function(AddTensorflowDependencies TARGET INCLUDE_CUDA)
         message("> AFTER CUR_FLAG = ${CUR_FLAG}")
     ENDIF()
 
+    set(BOOST_INCLUDEDIR ${CMAKE_SOURCE_DIR}/third_party/boost_${BOOST_VERSION_UNDERSCORES}/build/include)
+    target_include_directories(${TARGET} PRIVATE ${BOOST_INCLUDEDIR})
+    set(BOOST_LIBRARYDIR ${CMAKE_SOURCE_DIR}/third_party/boost_${BOOST_VERSION_UNDERSCORES}/build/lib)
+    target_link_directories(${TARGET} PRIVATE ${BOOST_LIBRARYDIR})
+    target_link_libraries(${TARGET} PRIVATE boost_filesystem)
 
     target_link_libraries(${TARGET} PRIVATE nsync_includes)
 
@@ -531,6 +562,7 @@ endif()
 message("> CUDA_PROF_SRCS = ${CUDA_PROF_SRCS}")
 message("> TF_SOURCES = ${TF_SOURCES}")
 message("> ANALYSIS_SOURCES = ${ANALYSIS_SOURCES}")
+message("> TEST_ANALYSIS_SOURCES = ${TEST_ANALYSIS_SOURCES}")
 message("> PROTO_SRCS = ${PROTO_SRCS}")
 message("> PROTO_HDRS = ${PROTO_HDRS}")
 message("> BACKWARD_ENABLE = ${BACKWARD_ENABLE}")
@@ -752,50 +784,22 @@ if (WITH_CXX_ANALYSIS)
             ${PROTO_SRCS} ${PROTO_HDRS})
     list(FILTER CPP_DUMP_PROTO_SRCS EXCLUDE REGEX "/c_test_util.cc")
 
+    set(TEST_ANALYSIS_SOURCES
+            ${TEST_ANALYSIS_SOURCES}
+            #            ${TF_SOURCES}
+            ${BACKWARD_ENABLE}
+            ${PROTO_SRCS} ${PROTO_HDRS})
+    list(FILTER TEST_ANALYSIS_SOURCES EXCLUDE REGEX "/c_test_util.cc")
+    add_executable(test_analysis ${TEST_ANALYSIS_SOURCES})
+    AddTensorflowDependencies(test_analysis FALSE)
+    AddUnitTest(test_analysis)
+
     message("> CPP_DUMP_PROTO_SRCS = ${CPP_DUMP_PROTO_SRCS}")
     add_executable(cpp_dump_proto ${CPP_DUMP_PROTO_SRCS})
     AddTensorflowDependencies(cpp_dump_proto FALSE)
 
     find_library(GFLAGS_LIB gflags REQUIRED)
     target_link_libraries(cpp_dump_proto PUBLIC ${GFLAGS_LIB})
-
-#    add_backward(cpp_dump_proto)
-#
-#    if (ENABLE_BACKTRACE)
-#        set(BACKTRACE_SYMS_FLAGS "-g")
-#        AddFlags(cpp_dump_proto COMPILE_FLAGS ${BACKTRACE_SYMS_FLAGS})
-#        AddFlags(cpp_dump_proto LINK_FLAGS ${BACKTRACE_SYMS_FLAGS})
-#    endif()
-
-
-    #    add_subdirectory(third_party/boost_${BOOST_VERSION_UNDERSCORES})
-    #    set(BOOST_ROOT ${CMAKE_SOURCE_DIR}/third_party/boost_${BOOST_VERSION_UNDERSCORES}/build)
-    #    set(BOOST_INCLUDEDIR ${CMAKE_SOURCE_DIR}/third_party/boost_${BOOST_VERSION_UNDERSCORES}/build/include)
-    #    set(BOOST_LIBRARYDIR ${CMAKE_SOURCE_DIR}/third_party/boost_${BOOST_VERSION_UNDERSCORES}/build/lib)
-    #    set(Boost_NO_SYSTEM_PATHS ON)
-    #    find_package(Boost ${BOOST_VERSION} REQUIRED
-    #            #            COMPONENTS stacktrace
-    #            COMPONENTS filesystem
-    #            #            COMPONENTS stacktrace_addr2line
-    #            #            HINTS ${CMAKE_SOURCE_DIR}/third_party/boost_${BOOST_VERSION_UNDERSCORES}/build
-    #            )
-    #
-    #    message("Boost_INCLUDE_DIR = ${Boost_INCLUDE_DIR}")
-    #    message("Boost_INCLUDE_DIRS = ${Boost_INCLUDE_DIRS}")
-    #
-    #    message("Boost_LIBRARY_DIRS = ${Boost_LIBRARY_DIRS}")
-    #    message("Boost_LIBRARY = ${Boost_LIBRARY}")
-    #    message("Boost_LIBRARIES = ${Boost_LIBRARIES}")
-    #
-    #    target_link_libraries(cpp_dump_proto ${Boost_LIBRARIES})
-    #    target_link_directories(cpp_dump_proto PRIVATE ${Boost_LIBRARY_DIRS})
-
-    set(BOOST_INCLUDEDIR ${CMAKE_SOURCE_DIR}/third_party/boost_${BOOST_VERSION_UNDERSCORES}/build/include)
-    target_include_directories(cpp_dump_proto PRIVATE ${BOOST_INCLUDEDIR})
-
-    set(BOOST_LIBRARYDIR ${CMAKE_SOURCE_DIR}/third_party/boost_${BOOST_VERSION_UNDERSCORES}/build/lib)
-    target_link_directories(cpp_dump_proto PRIVATE ${BOOST_LIBRARYDIR})
-    target_link_libraries(cpp_dump_proto PRIVATE boost_filesystem)
 
 endif()
 

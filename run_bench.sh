@@ -349,6 +349,7 @@ setup_cmakelists_windows() {
     local src_dirs=( \
         ./src \
         ./tensorflow \
+        ./test \
     )
 
     local path=CMakeLists.windows.txt

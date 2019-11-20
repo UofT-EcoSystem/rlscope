@@ -11,6 +11,7 @@
 #include <numeric>
 #include <iostream>
 #include <spdlog/spdlog.h>
+#include <limits>
 
 namespace tensorflow {
 
@@ -41,26 +42,173 @@ void EOEvents::PrintSummary(std::ostream& out, int indent) const {
 }
 
 MyStatus CategoryEventsParser::_CountCategoryTimes(CategoryTimesCount* count, const ProtoKlass& proto) {
+  MyStatus status = MyStatus::OK();
   for (const auto& pair : proto.category_events()) {
     const auto& category = pair.first;
-    size_t n_events = pair.second.events().size();
-    count->Add(category, n_events);
+    if (category == CATEGORY_OPERATION) {
+      status = _CountCategoryTimesOperation(count, proto);
+      IF_BAD_STATUS_RETURN(status);
+    } else {
+      auto category_key = CategoryKey::FromCategory(get_process(), category);
+      size_t n_events = pair.second.events().size();
+      count->Add(category_key, n_events);
+    }
   }
+  return MyStatus::OK();
+}
+
+// PSEUDOCODE:
+// # NOTE: to construct oe_times, we must run this twice; # once to determine the number of events,
+// # and another to fill in the events.
+// def each_op_event():
+// 	ops = []
+// 	last_time = None
+// 	while i < len(events) or len(ops) > 0:
+//    if len(ops) == 0:
+//      last_time = events[i].start
+//      ops.push(events[i])
+// 		  i += 1
+//      continue
+//
+// 		# Skip empty events
+// 		if i < len(events) and events[i].start == events[i].end:
+// 		  i += 1
+// 		  continue
+//
+// 		if i < len(events) and ops[-1].subsumes(events[i]):
+// 		  yield Op(
+// 		    op=ops[-1].name,
+// 		    start=last_time,
+// 		    end=events[i].start)
+// 		   last_time = events[i].start
+// 		  ops.push(events[i])
+// 		  i += 1
+// 		else:
+// 	  	# assert:
+// 	   	#   ops[-1] ends before events[i] begins
+// 		  yield Op(
+// 		    op=ops[-1].name,
+// 		    start=last_time,
+// 		    end=ops[-1].end_time)
+// 		  ops.pop()
+//      last_time = ops[-1].end_time
+template <typename EventProto, typename EventProtoList, typename Func>
+MyStatus EachOpEvent(const EventProtoList& event_protos, Func func) {
+  std::list<const EventProto*> ops;
+  TimeUsec last_time = std::numeric_limits<TimeUsec>::max();
+  auto max_time = std::numeric_limits<TimeUsec>::max();
+  size_t i = 0;
+  // For some reason, protobuf uses "int" for the size() of its repeated fields.
+  assert(event_protos.size() >= 0);
+  size_t events_size = static_cast<size_t>(event_protos.size());
+  auto get_end_time = [] (const EventProto* A) {
+    return A->start_time_us() + A->duration_us();
+  };
+  auto subsumes = [get_end_time] (const EventProto* A, const EventProto* B) {
+    //     [ B ]
+    // [     A     ]
+    // return A->start_time_us() <= B->start_time_us() <= B->end_time_us() <= A->end_time_us();
+    // ===
+    // return A->start_time_us() <= B->start_time_us() <= A->end_time_us();
+    return A->start_time_us() <= B->start_time_us() &&
+                                 B->start_time_us() <= get_end_time(A);
+  };
+  while (i < events_size || ops.size() > 0) {
+    if (ops.size() == 0) {
+      last_time = event_protos[i].start_time_us();
+      ops.push_back(&event_protos[i]);
+      i += 1;
+      continue;
+    }
+
+    // Skip empty events:
+    if (i < events_size && event_protos[i].start_time_us() == get_end_time(&event_protos[i])) {
+      i += 1;
+      continue;
+    }
+
+    if (i < events_size && subsumes(ops.back(), &event_protos[i])) {
+      auto op = ops.back();
+      auto start_time_us = last_time;
+      auto end_time_us = event_protos[i].start_time_us();
+      func(op->name(), start_time_us, end_time_us);
+      ops.push_back(&event_protos[i]);
+      last_time = end_time_us;
+      i += 1;
+    } else {
+      auto op = ops.back();
+      auto start_time_us = last_time;
+      auto end_time_us = get_end_time(op);
+      func(op->name(), start_time_us, end_time_us);
+      ops.pop_back();
+      last_time = end_time_us;
+    }
+  }
+  return MyStatus::OK();
+}
+
+MyStatus CategoryEventsParser::_CountCategoryTimesOperation(CategoryTimesCount* count, const ProtoKlass& proto) {
+  MyStatus status = MyStatus::OK();
+  auto const& process = get_process();
+  auto const& events = proto.category_events().at(CATEGORY_OPERATION).events();
+  EachOpEvent<iml::Event>(
+      events,
+      [&process, count] (const Operation& op, TimeUsec start_us, TimeUsec end_us) {
+        auto category_key = CategoryKey::FromOpEvent(process, op);
+        count->Add(category_key, 1);
+      });
   return MyStatus::OK();
 }
 MyStatus CategoryEventsParser::_AppendCategoryTimes(CategoryTimes* out_category_times, const ProtoKlass& proto) {
   MyStatus status = MyStatus::OK();
   for (const auto& pair : proto.category_events()) {
     const auto& category = pair.first;
-    EOEvents& eo_events = out_category_times->eo_times.at(category);
-    status = _AppendCategory(category, proto, &eo_events);
-    IF_BAD_STATUS_RETURN(status);
+    if (category == CATEGORY_OPERATION) {
+      status = _AppendCategoryOperation(category, proto, out_category_times);
+      IF_BAD_STATUS_RETURN(status);
+    } else {
+      CategoryKey category_key = CategoryKey::FromCategory(get_process(), category);
+      if (out_category_times->eo_times.find(category_key) == out_category_times->eo_times.end()) {
+        std::stringstream ss;
+        ss << "FAIL:\n";
+        out_category_times->PrintSummary(ss, 0);
+        ss << "\n";
+        category_key.Print(ss, 0);
+        ss << "\n";
+        SPDLOG_DEBUG(ss.str());
+
+        for (const auto& eo_times_pair : out_category_times->eo_times) {
+          if (out_category_times->eo_times.find(eo_times_pair.first) != out_category_times->eo_times.end()) {
+            assert(out_category_times->eo_times.find(eo_times_pair.first) != out_category_times->eo_times.end());
+          }
+        }
+
+        assert(false);
+      }
+      EOEvents& eo_events = out_category_times->eo_times.at(category_key);
+      status = _AppendCategory(category, proto, &eo_events);
+      IF_BAD_STATUS_RETURN(status);
+    }
   }
+  return MyStatus::OK();
+}
+MyStatus CategoryEventsParser::_AppendCategoryOperation(const Category& category, const ProtoKlass& proto, CategoryTimes* out_category_times) {
+  // for (start, end, op_name) in _EachEvent():
+  //   category_key = CategoryKey::FromOpEvent(process, op_name)
+  //   out_category_times->eo_times.at(category_key).AppendEvent(start, end)
+  auto const& process = get_process();
+  assert(category == CATEGORY_OPERATION);
+  auto const& events = proto.category_events().at(category).events();
+  EachOpEvent<iml::Event>(
+      events,
+      [&process, out_category_times] (const Operation& op, TimeUsec start_us, TimeUsec end_us) {
+        auto category_key = CategoryKey::FromOpEvent(process, op);
+        out_category_times->eo_times.at(category_key).AppendEvent(start_us, end_us);
+      });
   return MyStatus::OK();
 }
 MyStatus CategoryEventsParser::_AppendCategory(const Category& category, const ProtoKlass& proto, EOEvents* eo_events) {
   const auto& events = proto.category_events().at(category).events();
-  size_t n_events = events.size();
   for (const auto& event : proto.category_events().at(category).events()) {
     auto start_us = event.start_time_us();
     auto end_us = event.start_time_us() + event.duration_us();
@@ -72,12 +220,14 @@ MyStatus CategoryEventsParser::_AppendCategory(const Category& category, const P
 MyStatus CUDAAPIStatsParser::_CountCategoryTimes(CategoryTimesCount* count, const ProtoKlass& proto) {
   const std::string category = CATEGORY_CUDA_API_CPU;
   size_t n_events = proto.events().size();
-  count->Add(category, n_events);
+  auto category_key = CategoryKey::FromCategory(get_process(), category);
+  count->Add(category_key, n_events);
   return MyStatus::OK();
 }
 MyStatus CUDAAPIStatsParser::_AppendCategoryTimes(CategoryTimes* out_category_times, const ProtoKlass& proto) {
   const std::string category = CATEGORY_CUDA_API_CPU;
-  EOEvents& eo_events = out_category_times->eo_times.at(category);
+  auto category_key = CategoryKey::FromCategory(get_process(), category);
+  EOEvents& eo_events = out_category_times->eo_times.at(category_key);
   for (const auto& event : proto.events()) {
     auto start_us = event.start_time_us();
     auto end_us = event.start_time_us() + event.duration_us();
@@ -92,13 +242,15 @@ MyStatus CUDADeviceEventsParser::_CountCategoryTimes(CategoryTimesCount* count, 
     const auto& dev = dev_events_pair.first;
     const auto& events = dev_events_pair.second.events();
     size_t n_events = events.size();
-    count->Add(category, n_events);
+    auto category_key = CategoryKey::FromCategory(get_process(), category);
+    count->Add(category_key, n_events);
   }
   return MyStatus::OK();
 }
 MyStatus CUDADeviceEventsParser::_AppendCategoryTimes(CategoryTimes* out_category_times, const CUDADeviceEventsParser::ProtoKlass& proto) {
   const std::string category = CATEGORY_GPU;
-  EOEvents& eo_events = out_category_times->eo_times.at(category);
+  auto category_key = CategoryKey::FromCategory(get_process(), category);
+  EOEvents& eo_events = out_category_times->eo_times.at(category_key);
   for (const auto& dev_events_pair : proto.dev_events()) {
     const auto& dev = dev_events_pair.first;
     const auto& events = dev_events_pair.second.events();
@@ -121,12 +273,13 @@ MyStatus FindRLSFiles(const std::string& iml_directory, std::list<std::string>* 
   });
 }
 
-CategoryTimes::CategoryTimes(const CategoryTimesCount& count) {
+CategoryTimes::CategoryTimes(const Process& process_, const CategoryTimesCount& count) :
+    process(process_) {
   // Use count to preallocate space.
   for (const auto& pair : count.num_events) {
-    auto const& category = pair.first;
+    auto const& category_key = pair.first;
     auto const n_events = pair.second;
-    eo_times[category] = EOEvents(n_events);
+    eo_times[category_key] = EOEvents(n_events);
   }
 }
 void CategoryTimes::Print(std::ostream& out, int indent) const {
@@ -143,6 +296,22 @@ void CategoryTimes::Print(std::ostream& out, int indent) const {
 
     out << "\n";
     eo_times.Print(out, indent + 2);
+
+    category_idx += 1;
+  }
+}
+
+void CategoryTimesCount::Print(std::ostream& out, int indent) const {
+  PrintIndent(out, indent);
+  out << "CategoryTimesCount: size = " << this->num_events.size();
+  size_t category_idx = 0;
+  for (const auto& pair : this->num_events) {
+    const auto& category_key = pair.first;
+    const auto& count = pair.second;
+
+    out << "\n";
+    PrintIndent(out, indent + 1);
+    out << "Category[" << category_idx << "] = " << category_key << ", n_events = " << count;
 
     category_idx += 1;
   }
@@ -386,7 +555,7 @@ MyStatus RawTraceParser::ReadEntireTrace(
   }
 
   // Preallocate space for eo_times for this (machine, process, phase).
-  *category_times = std::move(CategoryTimes(count));
+  *category_times = std::move(CategoryTimes(process, count));
   for (auto const& meta : metas) {
     std::unique_ptr<IEventFileParser> parser;
     SPDLOG_DEBUG("read path = {}", meta.get_path());
@@ -436,6 +605,28 @@ MyStatus GetTraceID(const std::string& path, TraceID* trace_id) {
   auto parsed_trace_id =  StringToNumber<TraceID>(trace_str);
   *trace_id = parsed_trace_id;
   return MyStatus::OK();
+}
+
+void CategoryKey::Print(std::ostream& out, int indent) const {
+  PrintIndent(out, indent);
+  out << "CategoryKey(procs=";
+
+  PrintValue(out, this->procs);
+
+  out << ", ";
+  out << "ops=";
+  PrintValue(out, this->ops);
+
+  out << ", ";
+  out << "non_ops=";
+  PrintValue(out, this->non_ops);
+
+  out << ")";
+}
+
+std::ostream& operator<<(std::ostream& os, const CategoryKey& category_key) {
+  category_key.Print(os, 0);
+  return os;
 }
 
 } // namespace tensorflow

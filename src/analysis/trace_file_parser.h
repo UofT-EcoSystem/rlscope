@@ -10,6 +10,7 @@
 
 #include <assert.h>
 
+#include <spdlog/spdlog.h>
 #include <boost/filesystem.hpp>
 
 //#include "cuda_api_profiler/cupti_logging.h"
@@ -19,6 +20,7 @@
 #include <regex>
 #include <fstream>
 #include <list>
+#include <map>
 
 #include <sys/types.h>
 //#include <sys/stat.h>
@@ -27,6 +29,8 @@
 #include "error_codes.pb.h"
 //#include "tensorflow/core/lib/core/status.h"
 #include "analysis/my_status.h"
+
+#include <set>
 
 #define PSEC_IN_USEC (1000)
 #define USEC_IN_SEC (1000000)
@@ -90,8 +94,10 @@ enum RLSFileType {
 using Category = std::string;
 using Machine = std::string;
 using Process = std::string;
+using Operation = std::string;
 using Phase = std::string;
 using TraceID = uint64_t;
+using TimeUsec = int64_t;
 //using CategoryTimes = std::map<Category, EOEvents>;
 
 bool isRLSFileWithType(RLSFileType file_type, const std::string& path);
@@ -144,7 +150,7 @@ public:
   size_t _n_events;
   size_t _next_event_to_set;
   // [e1.start, e1.end, e2.start, e2.end, ...]
-  std::unique_ptr<int64_t[]> _events;
+  std::unique_ptr<TimeUsec[]> _events;
 
   EOEvents() :
       _n_events(0),
@@ -154,13 +160,13 @@ public:
       _n_events(n_events),
       _next_event_to_set(0),
       // 2*n_events: For each event, we need the (start, end) time.
-      _events(new int64_t[2*n_events]) {
+      _events(new TimeUsec[2*n_events]) {
   }
 
   void Print(std::ostream& out, int indent) const;
   void PrintSummary(std::ostream& out, int indent) const;
 
-  inline void SetEvent(size_t i, int64_t start_us, int64_t end_us) {
+  inline void SetEvent(size_t i, TimeUsec start_us, TimeUsec end_us) {
     assert(i < _n_events);
     assert(i == _next_event_to_set);
     assert(start_us <= end_us);
@@ -174,7 +180,7 @@ public:
     _next_event_to_set += 1;
   }
 
-  inline int64_t DurationUsec(size_t i) const {
+  inline TimeUsec DurationUsec(size_t i) const {
     assert(i < _n_events);
     auto start_idx = EVENT_START_IDX(i);
     auto end_idx = EVENT_END_IDX(i);
@@ -183,7 +189,7 @@ public:
     return end_us - start_us;
   }
 
-  inline void AppendEvent(int64_t start_us, int64_t end_us) {
+  inline void AppendEvent(TimeUsec start_us, TimeUsec end_us) {
     SetEvent(_next_event_to_set, start_us, end_us);
   }
 
@@ -219,28 +225,136 @@ MyStatus ParseProto(const std::string& file_type, const std::string& path, Proto
   return MyStatus::OK();
 }
 
+class CategoryKey {
+public:
+  std::set<Process> procs;
+  std::set<Operation> ops;
+  std::set<Category> non_ops;
+
+  static CategoryKey FromCategory(const Process& proc, const Category& category) {
+    CategoryKey category_key;
+    category_key.procs.insert(proc);
+    category_key.non_ops.insert(category);
+    return category_key;
+  }
+
+  static CategoryKey FromOpEvent(const Process& proc, const Operation& op) {
+    CategoryKey category_key;
+    category_key.procs.insert(proc);
+    category_key.ops.insert(op);
+    return category_key;
+  }
+
+  void Print(std::ostream& out, int indent) const;
+
+  bool operator<(const CategoryKey& rhs) const {
+    auto const& lhs = *this;
+    // https://en.cppreference.com/w/cpp/utility/tuple/operator_cmp
+    // Here's how you implement operator< for two tuples lhs and rhs.
+    //   (bool)(std::get<0>(lhs) < std::get<0>(rhs)) || (!(bool)(std::get<0>(rhs) < std::get<0>(lhs)) && lhstail < rhstail),
+    //
+    // Either, the left-most element of lhs is < the right-most element of rhs, OR
+    // its NOT the case that the left-most element of rhs is less than the left-most element of lhs (that would make rhs < lhs)
+    // AND the lhstail < rhstail (we evaluate the remaining elements if the first element of lhs and rhs are equal)
+    // return std::make_tuple(lhs.procs, lhs.ops, lhs.non_ops) <
+    //        std::make_tuple(rhs.procs, rhs.ops, rhs.non_ops);
+    return std::tie(lhs.procs, lhs.ops, lhs.non_ops) <
+           std::tie(rhs.procs, rhs.ops, rhs.non_ops);
+  }
+
+  bool operator==(const CategoryKey& rhs) const {
+    auto const& lhs = *this;
+    return (lhs.procs == rhs.procs)
+           && (lhs.ops == rhs.ops)
+           && (lhs.non_ops == rhs.non_ops);
+  }
+
+  friend std::ostream& operator<<(std::ostream& os, const CategoryKey& dt);
+};
+
 class CategoryTimesCount {
 public:
-  std::map<Category, size_t> num_events;
+  std::map<CategoryKey, size_t> num_events;
 
-  inline void Add(const Category& category, size_t n_events) {
-    // NOTE: if num_events[category] will default to zero if its not inside the map.
-    num_events[category] += n_events;
+  inline void Add(const CategoryKey& category_key, size_t n_events) {
+    // NOTE: if num_events[category_key] will default to zero if its not inside the map.
+    num_events[category_key] += n_events;
   }
 
   void _AddToCategoryTimes(const CategoryTimesCount& ctimes);
 
   friend CategoryTimesCount operator+(const CategoryTimesCount& left, const CategoryTimesCount& right);
   CategoryTimesCount& operator+=(const CategoryTimesCount& rhs);
+  void Print(std::ostream& out, int indent) const;
 
 };
 
+
+template <typename T>
+void PrintValue(std::ostream& os, const T& value) {
+  os << value;
+}
+
+//// NOTE: this result in a "multiple definition" compilation error; not sure why.
+//template <>
+//void PrintValue<std::string>(std::ostream& os, const std::string& value) {
+//  os << "\"" << value << "\"";
+//}
+
+template <typename T>
+void PrintValue(std::ostream& os, const std::set<T>& value) {
+  os << "{";
+  size_t i = 0;
+  for (auto const& val : value) {
+    if (i > 0) {
+      os << ", ";
+    }
+    PrintValue(os, val);
+    i += 1;
+  }
+  value.size();
+  os << "}";
+}
+
+template <typename T>
+void PrintValue(std::ostream& os, const std::list<T>& value) {
+  os << "[";
+  size_t i = 0;
+  for (auto const& val : value) {
+    if (i > 0) {
+      os << ", ";
+    }
+    PrintValue(os, val);
+    i += 1;
+  }
+  value.size();
+  os << "]";
+}
+
+template <typename K, typename V>
+void PrintValue(std::ostream& os, const std::map<K, V>& value) {
+  os << "{";
+  size_t i = 0;
+  for (auto const& pair : value) {
+    if (i > 0) {
+      os << ", ";
+    }
+    PrintValue(os, pair.first);
+    os << "=";
+    PrintValue(os, pair.second);
+    i += 1;
+  }
+  value.size();
+  os << "}";
+}
+
 class CategoryTimes {
 public:
-  std::map<Category, EOEvents> eo_times;
+  std::map<CategoryKey, EOEvents> eo_times;
+  Process process;
 
   CategoryTimes() = default;
-  CategoryTimes(const CategoryTimesCount& count);
+  CategoryTimes(const Process& process, const CategoryTimesCount& count);
   inline size_t size() const {
     return eo_times.size();
   }
@@ -248,8 +362,6 @@ public:
   void Print(std::ostream& out, int indent) const;
   void PrintSummary(std::ostream& out, int indent) const;
 };
-
-void PrintCategoryTimes(const CategoryTimes& category_times, std::ostream& out, int indent);
 
 //class EOTimes {
 //public:
@@ -524,7 +636,14 @@ public:
     status = this->_CountCategoryTimes(&count, proto);
     IF_BAD_STATUS_RETURN(status);
 
-    *out_category_times = std::move(CategoryTimes(count));
+    if (SPDLOG_ACTIVE_LEVEL <= SPDLOG_LEVEL_DEBUG) {
+      std::stringstream ss;
+      ss << "\n";
+      count.Print(ss, 1);
+      SPDLOG_DEBUG(ss.str());
+    }
+
+    *out_category_times = std::move(CategoryTimes(get_process(), count));
     status = this->_AppendCategoryTimes(out_category_times, proto);
     IF_BAD_STATUS_RETURN(status);
 
@@ -559,7 +678,9 @@ public:
 
 
   virtual MyStatus _CountCategoryTimes(CategoryTimesCount* count, const ProtoKlass& proto) override;
+  MyStatus _CountCategoryTimesOperation(CategoryTimesCount* count, const ProtoKlass& proto);
   virtual MyStatus _AppendCategoryTimes(CategoryTimes* out_category_times, const ProtoKlass& proto) override;
+  MyStatus _AppendCategoryOperation(const Category& category, const ProtoKlass& proto, CategoryTimes* out_category_times);
   virtual MyStatus _InitFromProto(const ProtoKlass& proto) override;
 
   MyStatus _AppendCategory(const Category& category, const ProtoKlass& proto, EOEvents* eo_events);
