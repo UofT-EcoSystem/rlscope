@@ -5,6 +5,8 @@
 #include "analysis/trace_file_parser.h"
 #include "cuda_api_profiler/generic_logging.h"
 
+#include <Eigen/Dense>
+
 #include <boost/compute/algorithm/reduce.hpp>
 
 #include <assert.h>
@@ -12,6 +14,8 @@
 #include <iostream>
 #include <spdlog/spdlog.h>
 #include <limits>
+
+using namespace Eigen;
 
 namespace tensorflow {
 
@@ -22,8 +26,8 @@ void EOEvents::Print(std::ostream& out, int indent) const {
   for (size_t i = 0; i < _n_events; i++) {
     auto start_idx = EVENT_START_IDX(i);
     auto end_idx = EVENT_END_IDX(i);
-    auto start_us = _events[start_idx] / PSEC_IN_USEC;
-    auto end_us = _events[end_idx] / PSEC_IN_USEC;
+    auto start_us = (*_events)[start_idx] / PSEC_IN_USEC;
+    auto end_us = (*_events)[end_idx] / PSEC_IN_USEC;
     auto dur_us = end_us - start_us;
 
     out << "\n";
@@ -282,11 +286,13 @@ CategoryTimes::CategoryTimes(const Process& process_, const CategoryTimesCount& 
     eo_times[category_key] = EOEvents(n_events);
   }
 }
-void CategoryTimes::Print(std::ostream& out, int indent) const {
+template <class CategoryTimesKlass, class Map>
+void CategoryTimesPrint(std::string name, const CategoryTimesKlass& self, const Map& eo_times, std::ostream& out, int indent) {
   PrintIndent(out, indent);
-  out << "CategoryTimes: size = " << this->size();
+  // e.g. name = CategoryTimes
+  out << name << ": size = " << self.size();
   size_t category_idx = 0;
-  for (const auto& pair : this->eo_times) {
+  for (const auto& pair : eo_times) {
     const auto& category = pair.first;
     const auto& eo_times = pair.second;
 
@@ -300,6 +306,37 @@ void CategoryTimes::Print(std::ostream& out, int indent) const {
     category_idx += 1;
   }
 }
+template <class CategoryTimesKlass, class Map>
+void CategoryTimesPrintSummary(std::string name, const CategoryTimesKlass& self, const Map& eo_times, std::ostream& out, int indent) {
+  PrintIndent(out, indent);
+  out << name << ": size = " << self.size();
+  size_t category_idx = 0;
+  for (const auto& pair : eo_times) {
+    const auto& category = pair.first;
+    const auto& eo_times = pair.second;
+
+    out << "\n";
+    PrintIndent(out, indent + 1);
+    out << "Category[" << category_idx << "] = " << category;
+
+    out << "\n";
+    eo_times.PrintSummary(out, indent + 2);
+
+    category_idx += 1;
+  }
+}
+void CategoryTimes::Print(std::ostream& out, int indent) const {
+  CategoryTimesPrint("CategoryTime", *this, this->eo_times, out, indent);
+}
+void CategoryTimes::PrintSummary(std::ostream& out, int indent) const {
+  CategoryTimesPrintSummary("CategoryTime", *this, this->eo_times, out, indent);
+}
+void CategoryTimesBitset::Print(std::ostream& out, int indent) const {
+  CategoryTimesPrint("CategoryTimeBitset", *this, this->eo_times, out, indent);
+}
+void CategoryTimesBitset::PrintSummary(std::ostream& out, int indent) const {
+  CategoryTimesPrintSummary("CategoryTimeBitset", *this, this->eo_times, out, indent);
+}
 
 void CategoryTimesCount::Print(std::ostream& out, int indent) const {
   PrintIndent(out, indent);
@@ -312,24 +349,6 @@ void CategoryTimesCount::Print(std::ostream& out, int indent) const {
     out << "\n";
     PrintIndent(out, indent + 1);
     out << "Category[" << category_idx << "] = " << category_key << ", n_events = " << count;
-
-    category_idx += 1;
-  }
-}
-void CategoryTimes::PrintSummary(std::ostream& out, int indent) const {
-  PrintIndent(out, indent);
-  out << "CategoryTimes: size = " << this->size();
-  size_t category_idx = 0;
-  for (const auto& pair : this->eo_times) {
-    const auto& category = pair.first;
-    const auto& eo_times = pair.second;
-
-    out << "\n";
-    PrintIndent(out, indent + 1);
-    out << "Category[" << category_idx << "] = " << category;
-
-    out << "\n";
-    eo_times.PrintSummary(out, indent + 2);
 
     category_idx += 1;
   }
@@ -543,7 +562,8 @@ MyStatus RawTraceParser::ReadEntireTrace(
     const Machine& machine,
     const Process& process,
     const Phase& phase,
-    CategoryTimes *category_times) {
+    CategoryTimes *category_times,
+    EntireTraceMeta* entire_meta) {
   MyStatus status = MyStatus::OK();
   std::list<TraceFileMeta> metas;
   status = _walker.TraceMetas(machine, process, phase, &metas);
@@ -565,6 +585,9 @@ MyStatus RawTraceParser::ReadEntireTrace(
     status = parser->AppendCategoryTimes(category_times);
     IF_BAD_STATUS_RETURN(status);
   }
+
+  *entire_meta = EntireTraceMeta(machine, process, phase);
+
   return MyStatus::OK();
 }
 
@@ -624,10 +647,246 @@ void CategoryKey::Print(std::ostream& out, int indent) const {
   out << ")";
 }
 
-std::ostream& operator<<(std::ostream& os, const CategoryKey& category_key) {
-  category_key.Print(os, 0);
-  return os;
+void CategoryKeyBitset::Print(std::ostream& out, int indent) const {
+ // auto keys = idx_map.KeySetFrom(bitset);
+  auto keys = idx_map->KeySetFrom(bitset);
+  PrintIndent(out, indent);
+
+  out << "CategoryKeyBitset: bits = " << bitset.to_string() << ", size = " << keys.size();
+  for (const auto& key : keys) {
+    out << "\n";
+    key.Print(out, indent + 1);
+  }
 }
+
+std::set<CategoryKey> CategoryKeyBitset::Keys() const {
+  auto keys = idx_map->KeySetFrom(bitset);
+  return keys;
+}
+
+std::set<size_t> CategoryKeyBitset::Indices() const {
+  auto indices = idx_map->IndexSetFrom(bitset);
+  return indices;
+}
+
+
+CategoryKeyBitset CategoryKeyBitset::EmptySet(std::shared_ptr<const CategoryIdxMap> idx_map) {
+  CategoryKeyBitset ctimes(idx_map);
+  return ctimes;
+}
+
+OverlapResult OverlapComputer::ComputeOverlap(bool keep_empty_time) const {
+  OverlapResult r;
+  r.idx_map = ctimes.idx_map;
+
+  // NOTE: eigen uses int for indexing rows/columns, not size_t...
+  // https://stackoverflow.com/questions/33993918/eigenmatrix-why-does-eigen-expect-an-int-and-not-size-t
+  // using IndexType = size_t;
+  using IndexType = int;
+
+  using IdxArray = Array<size_t, Dynamic, 1>;
+  size_t k = ctimes.size();
+  IdxArray index = IdxArray::Zero(k);
+
+  // std::vector<EOEvents> times;
+  std::vector<const TimeUsec*> times;
+  times.reserve(k);
+  for (const auto& pair : ctimes.eo_times) {
+    const auto& eo_events = pair.second;
+    times.push_back(eo_events.RawPtr());
+  }
+
+  IdxArray lengths = IdxArray(k);
+  {
+    IndexType i = 0;
+    for (const auto& pair : ctimes.eo_times) {
+      lengths(i) = 2 * pair.second.size();
+      i += 1;
+    }
+  }
+
+  TimeUsec min_time_value = std::numeric_limits<TimeUsec>::min();
+  TimeUsec last_time = min_time_value;
+  CategoryKeyBitset cur_cat = CategoryKeyBitset::EmptySet(ctimes.idx_map);
+
+  while ((index < lengths).any()) {
+    // Find the non-empty category with the next minimum start/end time.
+    IndexType min_cat = 0;
+    TimeUsec min_time = std::numeric_limits<TimeUsec>::max();
+    for (IndexType i = 0; i < index.size(); i++) {
+      // Check we haven't exhausted the intervals in the category.
+      if (index(i) < lengths(i)) {
+        // Non-empty category.
+        if (times[i][index(i)] < min_time) {
+          if (debug && SPDLOG_ACTIVE_LEVEL <= SPDLOG_LEVEL_DEBUG) {
+            std::stringstream ss;
+            auto left = times[i][index(i)];
+            auto right = min_time;
+            ss << "\n";
+            PrintIndent(ss, 1);
+            ss << "(" << left << ") times[i][index[i]] <= min_time (" << right  << ")" << "\n";
+            PrintIndent(ss, 2);
+            ss << "min_cat = " << i << "\n";
+            ss << "index = " << index << "\n";
+            ss << "lengths = " << lengths;
+            SPDLOG_DEBUG("{}", ss.str());
+          }
+          min_cat = i;
+          min_time = times[i][index(i)];
+        }
+      }
+    }
+
+//    // Verbose: print entire category key.
+//    if (debug && SPDLOG_ACTIVE_LEVEL <= SPDLOG_LEVEL_DEBUG) {
+//      std::stringstream ss;
+//
+//      CategoryKeyBitset min_cat_key(min_cat, ctimes.idx_map);
+//
+//      ss << "\n";
+//      ss << "min_cat:";
+//      ss << "\n";
+//      min_cat_key.Print(ss, 1);
+//
+//      ss << "\n";
+//      ss << "min_time = " << min_time;
+//
+//      ss << "\n";
+//      ss << "cur_cat:";
+//      ss << "\n";
+//      cur_cat.Print(ss, 1);
+//
+//      ss << "\n";
+//      if (index(min_cat) % 2 == 0) {
+//        ss << "time_type = start";
+//      } else {
+//        ss << "time_type = end";
+//      }
+//
+//      SPDLOG_DEBUG("{}", ss.str());
+//    }
+
+    // Less verbose: just print category index.
+    // start {i} @ {time} => {new_set}
+    if (debug && SPDLOG_ACTIVE_LEVEL <= SPDLOG_LEVEL_DEBUG) {
+      std::stringstream ss;
+      ss << "\n";
+      PrintIndent(ss, 1);
+      if (index(min_cat) % 2 == 0) {
+        ss << "start";
+      } else {
+        ss << "end  ";
+      }
+      ss << " " << min_cat << " @ " << min_time;
+
+      ss << " => ";
+      // CategoryKeyBitset min_cat_key(min_cat, ctimes.idx_map);
+      auto indices = cur_cat.Indices();
+      PrintValue(ss, indices);
+
+      SPDLOG_DEBUG("{}", ss.str());
+    }
+
+    if ((index(min_cat) % 2) == 0 and min_time == times[min_cat][index(min_cat)+1]) {
+      index(min_cat) += 2;
+      continue;
+    }
+
+    auto time_chunk = min_time - last_time;
+    if (last_time != min_time_value and time_chunk > 0) {
+      // NOTE: std::map<Key, Number> defaults to 0 if the key doesn't exist.
+      r.overlap[cur_cat] += time_chunk;
+    }
+
+    // Update current list of active categories.
+    bool is_start = (index(min_cat) % 2 == 0);
+    if (is_start) {
+      cur_cat.Add(min_cat);
+    } else {
+      TimeUsec start_time_usec = times[min_cat][index(min_cat)-1];
+      TimeUsec end_time_usec = min_time;
+      r.meta.AddEvent(cur_cat, start_time_usec, end_time_usec);
+      cur_cat.Remove(min_cat);
+    }
+
+    // Q: Can we use this information to merge overlap results from different machines...?
+//    // Can have multiple categories entering and leaving, so just make sure we keep things correct
+//    if (last_time == min_time) {
+//      // Start of new interval which is the same as the previous interval.
+//      // output_cats[cur_output-1, min_cat] = is_start;
+//      output_cats[cur_output-1] = bitset_add(output_cats[cur_output-1], min_cat);
+//    } else {
+//      // Normal case:
+//      // Insert event if there is a change from last time
+//      outputs[cur_output] = min_time;
+//      // output_cats[cur_output, :] = cur_cat;
+//      output_cats[cur_output] = cur_cat;
+//      cur_output += 1;
+//      // last_time = min_time;
+//    }
+
+    last_time = min_time;
+    index(min_cat) += 1;
+
+  }
+
+  if (!keep_empty_time) {
+    // Delete empty keys; these result from blank space between events. e.g.
+    //   frozenset(): 1000000
+    std::set<CategoryKeyBitset> del_keys;
+    for (const auto& pair : r.overlap) {
+      const auto& bitset = pair.first;
+      if (bitset.IsEmpty()) {
+        del_keys.insert(bitset);
+      }
+    }
+    for (const auto& bitset : del_keys) {
+      r.overlap.erase(bitset);
+    }
+  }
+
+  for (auto& pair : r.overlap) {
+    // Change overlap from psec to usec.
+    pair.second = pair.second / PSEC_IN_USEC;
+  }
+
+  return r;
+}
+
+void OverlapResult::Print(std::ostream& out, int indent) const {
+  PrintIndent(out, indent);
+  out << "OverlapResult: size = " << overlap.size();
+  size_t i = 0;
+  for (const auto& pair : overlap) {
+    auto const& bitset = pair.first;
+    auto time_us = pair.second;
+    double time_sec = ((double)time_us) / ((double)USEC_IN_SEC);
+
+    out << "\n";
+    PrintIndent(out, indent + 1);
+    out << "Overlap[" << i << "]: duration = " << time_sec << " sec";
+    out << "\n";
+    bitset.Print(out, indent + 2);
+
+    i += 1;
+  }
+}
+
+DEFINE_PRINT_OPERATOR(CategoryKey)
+DEFINE_PRINT_OPERATOR(CategoryKeyBitset)
+DEFINE_PRINT_OPERATOR(EOEvents)
+DEFINE_PRINT_OPERATOR(CategoryTimesCount)
+DEFINE_PRINT_OPERATOR(CategoryTimes)
+DEFINE_PRINT_OPERATOR(CategoryTimesBitset)
+DEFINE_PRINT_OPERATOR(OverlapResult)
+
+DEFINE_PRINT_DEBUG(CategoryKey)
+DEFINE_PRINT_DEBUG(CategoryKeyBitset)
+DEFINE_PRINT_DEBUG(EOEvents)
+DEFINE_PRINT_DEBUG(CategoryTimesCount)
+DEFINE_PRINT_DEBUG(CategoryTimes)
+DEFINE_PRINT_DEBUG(CategoryTimesBitset)
+DEFINE_PRINT_DEBUG(OverlapResult)
 
 } // namespace tensorflow
 

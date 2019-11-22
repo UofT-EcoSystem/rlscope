@@ -43,6 +43,7 @@ enum Mode {
   MODE_DUMP_PROTO = 0,
   MODE_LS_FILES = 1,
   MODE_STATS = 2,
+  MODE_OVERLAP = 3,
 };
 
 void Usage() {
@@ -103,6 +104,8 @@ int main(int argc, char** argv) {
       mode = Mode::MODE_LS_FILES;
     } else if (FLAGS_mode == "stats") {
       mode = Mode::MODE_STATS;
+    } else if (FLAGS_mode == "overlap") {
+      mode = Mode::MODE_OVERLAP;
     } else if (FLAGS_mode == "proto") {
       mode = Mode::MODE_DUMP_PROTO;
     } else {
@@ -123,6 +126,12 @@ int main(int argc, char** argv) {
   if (mode == Mode::MODE_STATS) {
     if (FLAGS_iml_directory == "") {
       UsageAndExit("--iml-directory is required for --mode=stats");
+    }
+  }
+
+  if (mode == Mode::MODE_OVERLAP) {
+    if (FLAGS_iml_directory == "") {
+      UsageAndExit("--iml-directory is required for --mode=overlap");
     }
   }
 
@@ -155,25 +164,37 @@ int main(int argc, char** argv) {
   }
 
   if (mode == Mode::MODE_STATS) {
-    std::list<std::string> paths;
     RawTraceParser parser(FLAGS_iml_directory);
     status = parser.Init();
     IF_BAD_STATUS_EXIT("Failed to collect stats for --iml_directory", status);
-    for (auto const& machine : parser.Machines()) {
-      for (auto const& process : parser.Processes(machine)) {
-        for (auto const &phase : parser.Phases(machine, process)) {
-          CategoryTimes category_times;
-          status = parser.ReadEntireTrace(machine, process, phase, &category_times);
-          IF_BAD_STATUS_EXIT("Failed read eo_times --iml_directory", status);
-          std::cout << "Machine=" << machine
-                    << ", " << "Process=" << process
-                    << ", " << "Phase=" << phase
-                    << std::endl;
-          category_times.PrintSummary(std::cout, 1);
-          std::cout << std::endl;
-        }
-      }
-    }
+    parser.EachEntireTrace([] (const CategoryTimes& category_times, const EntireTraceMeta& meta) {
+            std::cout << "Machine=" << meta.machine
+                      << ", " << "Process=" << meta.process
+                      << ", " << "Phase=" << meta.phase
+                      << std::endl;
+            category_times.PrintSummary(std::cout, 1);
+            std::cout << std::endl;
+            return MyStatus::OK();
+    });
+    exit(EXIT_SUCCESS);
+  }
+
+  if (mode == Mode::MODE_OVERLAP) {
+    RawTraceParser parser(FLAGS_iml_directory);
+    status = parser.Init();
+    IF_BAD_STATUS_EXIT("Failed to collect stats for --iml_directory", status);
+    parser.EachEntireTrace([] (const CategoryTimes& category_times, const EntireTraceMeta& meta) {
+      std::cout << "Machine=" << meta.machine
+                << ", " << "Process=" << meta.process
+                << ", " << "Phase=" << meta.phase
+                << std::endl;
+      category_times.PrintSummary(std::cout, 1);
+      OverlapComputer overlap_computer(category_times);
+      auto r = overlap_computer.ComputeOverlap();
+      r.Print(std::cout, 1);
+      std::cout << std::endl;
+      return MyStatus::OK();
+    });
     exit(EXIT_SUCCESS);
   }
 

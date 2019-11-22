@@ -390,7 +390,7 @@ function(AddUnitTest TARGET)
     set(GTEST_INCLUDE_DIR ${PROJECT_SOURCE_DIR}/third_party/googletest/build/cmake_install/include)
     set(GTEST_LIBDIR ${PROJECT_SOURCE_DIR}/third_party/googletest/build/cmake_install/lib)
     set(GTEST_LIBRARY
-            ${GTEST_LIBDIR}/libgtest_main.a
+            # ${GTEST_LIBDIR}/libgtest_main.a
             ${GTEST_LIBDIR}/libgtest.a)
 
     message("> GTEST_INCLUDE_DIR = ${GTEST_INCLUDE_DIR}")
@@ -562,7 +562,7 @@ endif()
 message("> CUDA_PROF_SRCS = ${CUDA_PROF_SRCS}")
 message("> TF_SOURCES = ${TF_SOURCES}")
 message("> ANALYSIS_SOURCES = ${ANALYSIS_SOURCES}")
-message("> TEST_ANALYSIS_SOURCES = ${TEST_ANALYSIS_SOURCES}")
+#message("> TEST_ANALYSIS_SOURCES = ${TEST_ANALYSIS_SOURCES}")
 message("> PROTO_SRCS = ${PROTO_SRCS}")
 message("> PROTO_HDRS = ${PROTO_HDRS}")
 message("> BACKWARD_ENABLE = ${BACKWARD_ENABLE}")
@@ -785,11 +785,13 @@ if (WITH_CXX_ANALYSIS)
     list(FILTER CPP_DUMP_PROTO_SRCS EXCLUDE REGEX "/c_test_util.cc")
 
     set(TEST_ANALYSIS_SOURCES
+            ${ANALYSIS_SOURCES}
             ${TEST_ANALYSIS_SOURCES}
             #            ${TF_SOURCES}
             ${BACKWARD_ENABLE}
             ${PROTO_SRCS} ${PROTO_HDRS})
     list(FILTER TEST_ANALYSIS_SOURCES EXCLUDE REGEX "/c_test_util.cc")
+    message("> TEST_ANALYSIS_SOURCES = ${TEST_ANALYSIS_SOURCES}")
     add_executable(test_analysis ${TEST_ANALYSIS_SOURCES})
     AddTensorflowDependencies(test_analysis FALSE)
     AddUnitTest(test_analysis)

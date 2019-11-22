@@ -8,10 +8,14 @@
 #include "iml_prof.pb.h"
 #include "pyprof.pb.h"
 
+#include "cuda_api_profiler/generic_logging.h"
+
 #include <assert.h>
 
 #include <spdlog/spdlog.h>
 #include <boost/filesystem.hpp>
+
+#include <iostream>
 
 //#include "cuda_api_profiler/cupti_logging.h"
 
@@ -40,6 +44,30 @@
         return status; \
       }
 
+#define DEFINE_PRINT_OPERATOR(Klass) \
+  std::ostream& operator<<(std::ostream& os, const Klass& obj) { \
+    obj.Print(os, 0); \
+    return os; \
+  }
+
+#define DECLARE_PRINT_OPERATOR(Klass) \
+  friend std::ostream& operator<<(std::ostream& os, const Klass& obj);
+
+
+#define DECLARE_PRINT_DEBUG \
+  void Pr() const;
+
+#define DEFINE_PRINT_DEBUG(Klass) \
+  void Klass::Pr() const { \
+    this->Print(std::cout, 0); \
+    std::cout.flush(); \
+  }
+
+#define DEFINE_PRINT_DEBUG_HEADER \
+  void Pr() const { \
+    this->Print(std::cout, 0); \
+    std::cout.flush(); \
+  }
 
 namespace tensorflow {
 
@@ -98,7 +126,231 @@ using Operation = std::string;
 using Phase = std::string;
 using TraceID = uint64_t;
 using TimeUsec = int64_t;
+#define MAX_CATEGORY_KEYS 64
 //using CategoryTimes = std::map<Category, EOEvents>;
+
+template <typename Number, typename K>
+struct IdxMaps {
+  std::map<K, Number> to_idx;
+  std::map<Number, K> from_idx;
+
+  bool debug{false};
+
+  void Print(std::ostream& out, int indent) const {
+    PrintIndent(out, indent);
+    out << "IdxMaps: size = " << to_idx.size();
+    for (const auto& pair : to_idx) {
+      auto const& key = pair.first;
+      auto const idx = pair.second;
+      auto time_us = pair.second;
+      double time_sec = ((double)time_us) / ((double)USEC_IN_SEC);
+
+      out << "\n";
+      PrintIndent(out, indent + 1);
+      out << "Idx: [" << idx << "] -> Key: [ " << key << " ]";
+    }
+  }
+  DEFINE_PRINT_DEBUG_HEADER
+
+  template <typename Num, typename Key>
+  friend std::ostream& operator<<(std::ostream& os, const IdxMaps<Num, Key>& obj);
+
+  inline Number Idx(const K& k) const {
+    if (to_idx.find(k) == to_idx.end()) {
+      std::stringstream ss;
+      ss << "\n";
+      this->Print(ss, 0);
+      ss << "\n";
+      k.Print(ss, 0);
+      SPDLOG_DEBUG(ss.str());
+      assert(false);
+    }
+    return to_idx.at(k);
+  }
+
+  inline K Key(Number idx) const {
+    return from_idx.at(idx);
+  }
+
+  template <std::size_t N>
+  std::set<K> KeySetFrom(const std::bitset<N>& bitset) const {
+    std::set<K> keys;
+
+    assert(N >= to_idx.size());
+    for (Number idx = 0; idx < to_idx.size(); idx++) {
+      if (debug) {
+        SPDLOG_DEBUG("Trying idx = {}", idx);
+      }
+      if (bitset[idx]) {
+        auto const& key = Key(idx);
+        if (debug) {
+          std::stringstream ss;
+          ss << key;
+          SPDLOG_DEBUG("Insert idx={}, key = {}", idx, ss.str());
+        }
+        keys.insert(Key(idx));
+      }
+    }
+
+    return keys;
+  }
+
+  template <std::size_t N>
+  std::set<Number> IndexSetFrom(const std::bitset<N>& bitset) const {
+    std::set<Number> indices;
+
+    assert(N >= to_idx.size());
+    for (Number idx = 0; idx < to_idx.size(); idx++) {
+      if (bitset[idx]) {
+        indices.insert(idx);
+      }
+    }
+
+    return indices;
+  }
+
+  template <typename Iterable>
+  static IdxMaps From(const Iterable& xs) {
+    IdxMaps m;
+    Number i = 0;
+    for (const auto& x : xs) {
+      m.to_idx[x] = i;
+      m.from_idx[i] = x;
+      i += 1;
+    }
+    return m;
+  }
+};
+
+template <typename Number, typename K>
+std::ostream& operator<<(std::ostream& os, const IdxMaps<Number, K>& obj) {
+  obj.Print(os, 0);
+  return os;
+}
+
+class CategoryKey {
+public:
+  std::set<Process> procs;
+  std::set<Operation> ops;
+  std::set<Category> non_ops;
+
+  static CategoryKey FromCategory(const Process& proc, const Category& category) {
+    CategoryKey category_key;
+    category_key.procs.insert(proc);
+    category_key.non_ops.insert(category);
+    return category_key;
+  }
+
+  static CategoryKey FromOpEvent(const Process& proc, const Operation& op) {
+    CategoryKey category_key;
+    category_key.procs.insert(proc);
+    category_key.ops.insert(op);
+    return category_key;
+  }
+
+  bool operator<(const CategoryKey& rhs) const {
+    auto const& lhs = *this;
+    // https://en.cppreference.com/w/cpp/utility/tuple/operator_cmp
+    // Here's how you implement operator< for two tuples lhs and rhs.
+    //   (bool)(std::get<0>(lhs) < std::get<0>(rhs)) || (!(bool)(std::get<0>(rhs) < std::get<0>(lhs)) && lhstail < rhstail),
+    //
+    // Either, the left-most element of lhs is < the right-most element of rhs, OR
+    // its NOT the case that the left-most element of rhs is less than the left-most element of lhs (that would make rhs < lhs)
+    // AND the lhstail < rhstail (we evaluate the remaining elements if the first element of lhs and rhs are equal)
+    // return std::make_tuple(lhs.procs, lhs.ops, lhs.non_ops) <
+    //        std::make_tuple(rhs.procs, rhs.ops, rhs.non_ops);
+    return std::tie(lhs.procs, lhs.ops, lhs.non_ops) <
+           std::tie(rhs.procs, rhs.ops, rhs.non_ops);
+  }
+
+  bool operator==(const CategoryKey& rhs) const {
+    auto const& lhs = *this;
+    return (lhs.procs == rhs.procs)
+           && (lhs.ops == rhs.ops)
+           && (lhs.non_ops == rhs.non_ops);
+  }
+
+  void Print(std::ostream& out, int indent) const;
+  DECLARE_PRINT_DEBUG
+  DECLARE_PRINT_OPERATOR(CategoryKey)
+};
+using CategoryIdxMap = IdxMaps<size_t, CategoryKey>;
+
+class CategoryKeyBitset {
+public:
+  bool debug{false};
+  std::bitset<MAX_CATEGORY_KEYS> bitset;
+  // Keep this for debugging purposes, so we can convert a bitset into a string.
+  std::shared_ptr<const CategoryIdxMap> idx_map;
+  CategoryKeyBitset() : idx_map(nullptr) {
+  }
+  CategoryKeyBitset(size_t category_idx, std::shared_ptr<const CategoryIdxMap> idx_map) :
+      bitset(1 << category_idx),
+      idx_map(idx_map) {
+    // Each CategoryKey is a unique bit in the bitset.
+    // This allows us to do set operations.
+    assert(category_idx < MAX_CATEGORY_KEYS);
+  }
+  CategoryKeyBitset(std::shared_ptr<const CategoryIdxMap> idx_map) :
+      idx_map(idx_map) {
+    // Empty set.
+  }
+
+  std::set<CategoryKey> Keys() const;
+  std::set<size_t> Indices() const;
+
+  inline void Add(size_t category_idx) {
+    assert(category_idx < MAX_CATEGORY_KEYS);
+    bitset[category_idx] = 1;
+  }
+
+  inline void Remove(size_t category_idx) {
+    assert(category_idx < MAX_CATEGORY_KEYS);
+    bitset[category_idx] = 0;
+  }
+
+  inline bool IsEmpty() const {
+    return bitset.count() == 0;
+    // return bitset.to_ullong() == 0;
+  }
+
+  static CategoryKeyBitset EmptySet(std::shared_ptr<const CategoryIdxMap> idx_map);
+
+  bool operator<(const CategoryKeyBitset& rhs) const {
+    auto const& lhs = *this;
+
+    static_assert(
+        MAX_CATEGORY_KEYS <= 8*sizeof(unsigned long long),
+        "We assume < 64 CategoryKey's, if you need more, then change CategoryKeyBitset::operator< to support arbitrary length bitsets (needed for std::map)");
+    return lhs.bitset.to_ullong() < rhs.bitset.to_ullong();
+
+    // Arbitrary length bitsets:
+    // return BitsetLessThan(lhs.bitset, rhs.bitset);
+
+  }
+
+  bool operator==(const CategoryKeyBitset& rhs) const {
+    auto const& lhs = *this;
+    return lhs.bitset == rhs.bitset;
+  }
+
+  void Print(std::ostream& out, int indent) const;
+  DECLARE_PRINT_DEBUG
+  DECLARE_PRINT_OPERATOR(CategoryKeyBitset)
+
+  // NOTE: Use this for operator< for arbitrary length bitsets.
+  // https://stackoverflow.com/questions/21245139/fastest-way-to-compare-bitsets-operator-on-bitsets
+  //
+  // template <std::size_t N>
+  // inline bool BitsetLessThan(const std::bitset<N>& x, const std::bitset<N>& y)
+  // {
+  //     for (int i = N-1; i >= 0; i--) {
+  //         if (x[i] ^ y[i]) return y[i];
+  //     }
+  //     return false;
+  // }
+};
+using Overlap = std::map<CategoryKeyBitset, TimeUsec>;
 
 bool isRLSFileWithType(RLSFileType file_type, const std::string& path);
 bool isRLSFile(const std::string& path);
@@ -150,20 +402,33 @@ public:
   size_t _n_events;
   size_t _next_event_to_set;
   // [e1.start, e1.end, e2.start, e2.end, ...]
-  std::unique_ptr<TimeUsec[]> _events;
+
+  // NOTE: operator[] isn't supported for shared_ptr<T[]>...
+  // TODO: if this slows stuff down, just make our own array template that avoids double dereference.
+  // https://stackoverflow.com/questions/8947579/why-isnt-there-a-stdshared-ptrt-specialisation
+  std::shared_ptr<std::vector<TimeUsec>> _events;
 
   EOEvents() :
       _n_events(0),
       _next_event_to_set(0) {
   }
   EOEvents(size_t n_events) :
-      _n_events(n_events),
-      _next_event_to_set(0),
+      _n_events(n_events)
+      , _next_event_to_set(0)
       // 2*n_events: For each event, we need the (start, end) time.
-      _events(new TimeUsec[2*n_events]) {
+      , _events(new std::vector<TimeUsec>(2*n_events))
+      {
+  }
+
+  // Return read-only raw pointer to array of times.
+  // NOTE: be careful, since the lifetime of this pointer is still managed by std::shared_ptr!
+  inline const TimeUsec* RawPtr() const {
+    return _events->data();
   }
 
   void Print(std::ostream& out, int indent) const;
+  DECLARE_PRINT_DEBUG
+  DECLARE_PRINT_OPERATOR(EOEvents)
   void PrintSummary(std::ostream& out, int indent) const;
 
   inline void SetEvent(size_t i, TimeUsec start_us, TimeUsec end_us) {
@@ -172,10 +437,10 @@ public:
     assert(start_us <= end_us);
     auto start_idx = EVENT_START_IDX(i);
     auto end_idx = EVENT_END_IDX(i);
-    _events[start_idx] = start_us * PSEC_IN_USEC;
-    _events[end_idx] = end_us * PSEC_IN_USEC;
+    (*_events)[start_idx] = start_us * PSEC_IN_USEC;
+    (*_events)[end_idx] = end_us * PSEC_IN_USEC;
     if (i > 0) {
-      assert(_events[EVENT_END_IDX(i - 1)] <= _events[EVENT_START_IDX(i)]);
+      assert((*_events)[EVENT_END_IDX(i - 1)] <= (*_events)[EVENT_START_IDX(i)]);
     }
     _next_event_to_set += 1;
   }
@@ -184,8 +449,8 @@ public:
     assert(i < _n_events);
     auto start_idx = EVENT_START_IDX(i);
     auto end_idx = EVENT_END_IDX(i);
-    auto start_us = _events[start_idx] / PSEC_IN_USEC;
-    auto end_us = _events[end_idx] / PSEC_IN_USEC;
+    auto start_us = (*_events)[start_idx] / PSEC_IN_USEC;
+    auto end_us = (*_events)[end_idx] / PSEC_IN_USEC;
     return end_us - start_us;
   }
 
@@ -225,52 +490,8 @@ MyStatus ParseProto(const std::string& file_type, const std::string& path, Proto
   return MyStatus::OK();
 }
 
-class CategoryKey {
-public:
-  std::set<Process> procs;
-  std::set<Operation> ops;
-  std::set<Category> non_ops;
 
-  static CategoryKey FromCategory(const Process& proc, const Category& category) {
-    CategoryKey category_key;
-    category_key.procs.insert(proc);
-    category_key.non_ops.insert(category);
-    return category_key;
-  }
 
-  static CategoryKey FromOpEvent(const Process& proc, const Operation& op) {
-    CategoryKey category_key;
-    category_key.procs.insert(proc);
-    category_key.ops.insert(op);
-    return category_key;
-  }
-
-  void Print(std::ostream& out, int indent) const;
-
-  bool operator<(const CategoryKey& rhs) const {
-    auto const& lhs = *this;
-    // https://en.cppreference.com/w/cpp/utility/tuple/operator_cmp
-    // Here's how you implement operator< for two tuples lhs and rhs.
-    //   (bool)(std::get<0>(lhs) < std::get<0>(rhs)) || (!(bool)(std::get<0>(rhs) < std::get<0>(lhs)) && lhstail < rhstail),
-    //
-    // Either, the left-most element of lhs is < the right-most element of rhs, OR
-    // its NOT the case that the left-most element of rhs is less than the left-most element of lhs (that would make rhs < lhs)
-    // AND the lhstail < rhstail (we evaluate the remaining elements if the first element of lhs and rhs are equal)
-    // return std::make_tuple(lhs.procs, lhs.ops, lhs.non_ops) <
-    //        std::make_tuple(rhs.procs, rhs.ops, rhs.non_ops);
-    return std::tie(lhs.procs, lhs.ops, lhs.non_ops) <
-           std::tie(rhs.procs, rhs.ops, rhs.non_ops);
-  }
-
-  bool operator==(const CategoryKey& rhs) const {
-    auto const& lhs = *this;
-    return (lhs.procs == rhs.procs)
-           && (lhs.ops == rhs.ops)
-           && (lhs.non_ops == rhs.non_ops);
-  }
-
-  friend std::ostream& operator<<(std::ostream& os, const CategoryKey& dt);
-};
 
 class CategoryTimesCount {
 public:
@@ -286,6 +507,8 @@ public:
   friend CategoryTimesCount operator+(const CategoryTimesCount& left, const CategoryTimesCount& right);
   CategoryTimesCount& operator+=(const CategoryTimesCount& rhs);
   void Print(std::ostream& out, int indent) const;
+  DECLARE_PRINT_DEBUG
+  DECLARE_PRINT_OPERATOR(CategoryTimesCount)
 
 };
 
@@ -330,6 +553,20 @@ void PrintValue(std::ostream& os, const std::list<T>& value) {
   value.size();
   os << "]";
 }
+template <typename T>
+void PrintValue(std::ostream& os, const std::vector<T>& value) {
+  os << "[";
+  size_t i = 0;
+  for (auto const& val : value) {
+    if (i > 0) {
+      os << ", ";
+    }
+    PrintValue(os, val);
+    i += 1;
+  }
+  value.size();
+  os << "]";
+}
 
 template <typename K, typename V>
 void PrintValue(std::ostream& os, const std::map<K, V>& value) {
@@ -360,6 +597,43 @@ public:
   }
 
   void Print(std::ostream& out, int indent) const;
+  DECLARE_PRINT_DEBUG
+  DECLARE_PRINT_OPERATOR(CategoryTimes)
+  void PrintSummary(std::ostream& out, int indent) const;
+};
+
+class CategoryTimesBitset {
+public:
+  std::map<CategoryKeyBitset, EOEvents> eo_times;
+  Process process;
+
+  std::shared_ptr<CategoryIdxMap> idx_map;
+
+  CategoryTimesBitset(const CategoryTimes& category_times) {
+    // Copy plain fields.
+    process = category_times.process;
+
+    // Copy eo_times (NOTE: float array is a shared_ptr).
+    std::vector<CategoryKey> keys;
+    for (auto const& pair : category_times.eo_times) {
+      keys.push_back(pair.first);
+    }
+    idx_map.reset(new CategoryIdxMap());
+    *idx_map = CategoryIdxMap::From(keys);
+    for (auto const& pair : category_times.eo_times) {
+      auto idx = idx_map->Idx(pair.first);
+      CategoryKeyBitset category(idx, idx_map);
+      eo_times[category] = category_times.eo_times.at(pair.first);
+    }
+  }
+  CategoryTimesBitset() = default;
+  inline size_t size() const {
+    return eo_times.size();
+  }
+
+  void Print(std::ostream& out, int indent) const;
+  DECLARE_PRINT_DEBUG
+  DECLARE_PRINT_OPERATOR(CategoryTimesBitset)
   void PrintSummary(std::ostream& out, int indent) const;
 };
 
@@ -370,6 +644,22 @@ public:
 
 // Navigate trace-files for a particular (machine, process, phase) in the --iml-directory in time-stamp order.
 // Used by RawTraceParser for reading events into eo_times in the correct order.
+struct EntireTraceMeta {
+  Machine machine;
+  Process process;
+  Phase phase;
+
+  EntireTraceMeta() = default;
+  EntireTraceMeta(
+      const Machine& machine_,
+      const Process& process_,
+      const Phase& phase_) :
+      machine(machine_)
+      , process(process_)
+      , phase(phase_)
+  {
+  }
+};
 struct TraceFileMeta {
   std::string path;
 
@@ -508,11 +798,31 @@ public:
     return _walker.Phases(machine, process);
   }
 
+  template <typename Func>
+  MyStatus EachEntireTrace(Func func) {
+    MyStatus status = MyStatus::OK();
+    for (auto const& machine : this->Machines()) {
+      for (auto const& process : this->Processes(machine)) {
+        for (auto const &phase : this->Phases(machine, process)) {
+          CategoryTimes category_times;
+          EntireTraceMeta meta;
+          status = this->ReadEntireTrace(machine, process, phase,
+                                          &category_times, &meta);
+          IF_BAD_STATUS_RETURN(status);
+          status = func(category_times, meta);
+          IF_BAD_STATUS_RETURN(status);
+        }
+      }
+    }
+    return MyStatus::OK();
+  }
+
   MyStatus ReadEntireTrace(
       const Machine& machine,
       const Process& process,
       const Phase& phase,
-      CategoryTimes *category_times);
+      CategoryTimes* category_times,
+      EntireTraceMeta* entire_meta);
 
 //  CategoryTimes RawTraceParser::ReadEntireTrace(const std::string& iml_directory) {
 //  }
@@ -720,6 +1030,65 @@ public:
 
 MyStatus GetTraceID(const std::string& path, TraceID* trace_id);
 
+struct RegionMetadata {
+  CategoryKeyBitset category_key;
+  TimeUsec start_time_usec;
+  TimeUsec end_time_usec;
+  size_t num_events;
+  RegionMetadata() = default;
+  RegionMetadata(const CategoryKeyBitset& category_key) :
+      category_key(category_key),
+      start_time_usec(0),
+      end_time_usec(0),
+      num_events(0) {
+  }
+
+  inline void AddEvent(TimeUsec start_us, TimeUsec end_us) {
+    if (this->start_time_usec == 0 || start_us < this->start_time_usec) {
+      this->start_time_usec = start_us;
+    }
+
+    if (this->end_time_usec == 0 || end_us > this->end_time_usec) {
+      this->end_time_usec = end_us;
+    }
+
+    this->num_events += 1;
+  }
+
+
+};
+struct OverlapMetadata {
+  std::map<CategoryKeyBitset, RegionMetadata> regions;
+
+  void AddEvent(const CategoryKeyBitset& category_key, TimeUsec start_us, TimeUsec end_us) {
+    if (regions.find(category_key) == regions.end()) {
+      regions[category_key] = RegionMetadata(category_key);
+    }
+    regions[category_key].AddEvent(start_us, end_us);
+  }
+};
+struct OverlapResult {
+  Overlap overlap;
+  OverlapMetadata meta;
+  std::shared_ptr<CategoryIdxMap> idx_map;
+
+  void Print(std::ostream& out, int indent) const;
+  DECLARE_PRINT_DEBUG
+  DECLARE_PRINT_OPERATOR(OverlapResult)
+};
+class OverlapComputer {
+public:
+  bool debug{false};
+  const CategoryTimes& category_times;
+  CategoryTimesBitset ctimes;
+  void _CategoryToIdxMaps();
+  OverlapComputer(const CategoryTimes& category_times_) :
+      category_times(category_times_),
+      ctimes(category_times)
+  {
+  }
+  OverlapResult ComputeOverlap(bool keep_empty_time = false) const;
+};
 
 }
 
