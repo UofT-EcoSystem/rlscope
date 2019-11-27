@@ -94,7 +94,7 @@ CategoryTimes CategoryTimesFrom(const EventData& event_data) {
     for (const auto& event : pair.second) {
       auto start_us = event.start_us;
       auto end_us = event.end_us;
-      eo_events.AppendEvent(start_us, end_us);
+      eo_events.AppendEvent(boost::none, start_us, end_us);
     }
   }
 
@@ -244,6 +244,44 @@ TEST(TestComputeOverlap, Test_01_Complete) {
 //  }
   EXPECT_TRUE(overlap_eq);
 
+}
+
+TEST(TestEachMerged, Test_01_Merge) {
+  // ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z"]
+  std::vector<std::vector<std::string>> vec_of_xs{
+      {     "b", "c",                          "i"},
+      {"a", "b",                               "i"},
+      {"a", "b",      "d", "e", "f", "g", "h", "i"},
+  };
+
+
+  std::vector<std::string> expect{
+    "a",
+    "a",
+    "b",
+    "b",
+    "b",
+    "c",
+    "d",
+    "e",
+    "f",
+    "g",
+    "h",
+    "i",
+    "i",
+    "i",
+  };
+  std::vector<std::string> merged;
+  auto func = [&merged] (const std::vector<std::string>& letters, size_t i) {
+    EXPECT_LT(i, letters.size());
+    merged.push_back(letters[i]);
+  };
+  auto key_func = [] (const std::vector<std::string>& letters, size_t i) {
+    EXPECT_LT(i, letters.size());
+    return letters[i];
+  };
+  EachMerged<std::vector<std::string>, std::string>(vec_of_xs, func, key_func);
+  EXPECT_EQ(merged, expect);
 }
 
 }

@@ -17,7 +17,8 @@ project(iml)
 #https://github.com/robertmaynard/code-samples/blob/master/posts/cmake/CMakeLists.txt
 
 # We want to be able to do std::move() for lambda captures (c++11 doesn't have that).
-set(CMAKE_CXX_STANDARD 14)
+#set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
@@ -427,7 +428,7 @@ function(AddTensorflowDependencies TARGET INCLUDE_CUDA)
 
         get_target_property(CUR_FLAG ${TARGET} COMPILE_DEFINITIONS)
         message("> BEFORE CUR_FLAG = ${CUR_FLAG}")
-        set_target_properties(${TARGET} PROPERTIES COMPILE_DEFINITIONS "${CUR_FLAG};SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_DEBUG")
+        set_target_properties(${TARGET} PROPERTIES COMPILE_DEFINITIONS "${CUR_FLAG};SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_DEBUG;SPDLOG_TRACE=ON")
         get_target_property(CUR_FLAG ${TARGET} COMPILE_DEFINITIONS)
         message("> AFTER CUR_FLAG = ${CUR_FLAG}")
     ELSE()
@@ -439,6 +440,8 @@ function(AddTensorflowDependencies TARGET INCLUDE_CUDA)
         get_target_property(CUR_FLAG ${TARGET} COMPILE_DEFINITIONS)
         message("> AFTER CUR_FLAG = ${CUR_FLAG}")
     ENDIF()
+
+    target_link_libraries(${TARGET} PRIVATE nlohmann_json::nlohmann_json)
 
     set(BOOST_INCLUDEDIR ${CMAKE_SOURCE_DIR}/third_party/boost_${BOOST_VERSION_UNDERSCORES}/build/include)
     target_include_directories(${TARGET} PRIVATE ${BOOST_INCLUDEDIR})

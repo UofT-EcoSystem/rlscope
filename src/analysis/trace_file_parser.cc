@@ -4,10 +4,21 @@
 
 #include "analysis/trace_file_parser.h"
 #include "cuda_api_profiler/generic_logging.h"
+#include "cuda_api_profiler/debug_flags.h"
 
 #include <Eigen/Dense>
 
 #include <boost/compute/algorithm/reduce.hpp>
+
+// NOTE: not until gcc 7.1 (7.4.0 in Ubuntu 18.04); use boost::optional instead.
+// #include <optional>
+#include <boost/optional.hpp>
+#include <boost/utility/string_view.hpp>
+
+//#include <string_view>
+
+#include <nlohmann/json.hpp>
+using json = nlohmann::json;
 
 #include <assert.h>
 #include <numeric>
@@ -19,11 +30,50 @@ using namespace Eigen;
 
 namespace tensorflow {
 
+const std::set<Category> CATEGORIES_C_EVENTS = std::set<Category>{
+    CATEGORY_TF_API,
+    CATEGORY_SIMULATOR_CPP,
+};
+
+template <typename Func, class EventListIter>
+MyStatus EachEvent(const EventListIter& events, Func func) {
+  MyStatus status = MyStatus::OK();
+  for (const auto& event : events) {
+    auto start_us = event.start_time_us();
+    auto end_us = event.start_time_us() + event.duration_us();
+    auto const& name = event.name();
+    status = func(name, start_us, end_us);
+    IF_BAD_STATUS_RETURN(status);
+  }
+  return MyStatus::OK();
+}
+
+MyStatus ReadJson(std::string path, json* j) {
+  boost::filesystem::path file(path);
+
+  if(!boost::filesystem::exists(file)) {
+    std::stringstream ss;
+    ss << "Couldn't find json file @ path=" << path;
+    return MyStatus(error::INVALID_ARGUMENT, ss.str());
+  }
+  // read a JSON file
+  std::ifstream inp(path);
+  try {
+    inp >> *j;
+  } catch (nlohmann::detail::parse_error e) {
+    std::stringstream ss;
+    ss << "Failed to parse json file @ path=" << path << ":\n";
+    ss << e.what();
+    return MyStatus(error::INVALID_ARGUMENT, ss.str());
+  }
+
+  return MyStatus::OK();
+}
 
 void EOEvents::Print(std::ostream& out, int indent) const {
   PrintIndent(out, indent);
-  out << "EOEvents: size = " << _n_events;
-  for (size_t i = 0; i < _n_events; i++) {
+  out << "EOEvents: size = " << this->size() << ", capacity = " << this->capacity();
+  for (size_t i = 0; i < this->size(); i++) {
     auto start_idx = EVENT_START_IDX(i);
     auto end_idx = EVENT_END_IDX(i);
     auto start_us = (*_events)[start_idx] / PSEC_IN_USEC;
@@ -38,17 +88,19 @@ void EOEvents::Print(std::ostream& out, int indent) const {
 }
 void EOEvents::PrintSummary(std::ostream& out, int indent) const {
   double total_sec = 0;
-  for (size_t i = 0; i < _n_events; i++) {
+  for (size_t i = 0; i < this->size(); i++) {
     total_sec += ((double)this->DurationUsec(i)) / ((double)USEC_IN_SEC);
   }
   PrintIndent(out, indent);
-  out << "EOEvents: size = " << _n_events << ", duration = " << total_sec << " sec";
+  out << "EOEvents: size = " << this->size() << ", capacity = " << this->capacity() << ", duration = " << total_sec << " sec";
 }
 
 MyStatus CategoryEventsParser::_CountCategoryTimes(CategoryTimesCount* count, const ProtoKlass& proto) {
   MyStatus status = MyStatus::OK();
   for (const auto& pair : proto.category_events()) {
+    size_t number_of_events = pair.second.events().size();
     const auto& category = pair.first;
+//    DBG_LOG("CategoryEventsParser::_CountCategoryTimes category={}, n_events={}", category, number_of_events);
     if (category == CATEGORY_OPERATION) {
       status = _CountCategoryTimesOperation(count, proto);
       IF_BAD_STATUS_RETURN(status);
@@ -155,6 +207,9 @@ MyStatus CategoryEventsParser::_CountCategoryTimesOperation(CategoryTimesCount* 
   MyStatus status = MyStatus::OK();
   auto const& process = get_process();
   auto const& events = proto.category_events().at(CATEGORY_OPERATION).events();
+//  DBG_LOG("CategoryEventsParser::ParserMeta.num_CATEGORY_OPERATION = {}", events.size());
+  count->AddExtra(CategoryKey::FromCategory(process, CATEGORY_EXTRA_OPERATION), events.size());
+
   EachOpEvent<iml::Event>(
       events,
       [&process, count] (const Operation& op, TimeUsec start_us, TimeUsec end_us) {
@@ -172,23 +227,23 @@ MyStatus CategoryEventsParser::_AppendCategoryTimes(CategoryTimes* out_category_
       IF_BAD_STATUS_RETURN(status);
     } else {
       CategoryKey category_key = CategoryKey::FromCategory(get_process(), category);
-      if (out_category_times->eo_times.find(category_key) == out_category_times->eo_times.end()) {
-        std::stringstream ss;
-        ss << "FAIL:\n";
-        out_category_times->PrintSummary(ss, 0);
-        ss << "\n";
-        category_key.Print(ss, 0);
-        ss << "\n";
-        SPDLOG_DEBUG(ss.str());
-
-        for (const auto& eo_times_pair : out_category_times->eo_times) {
-          if (out_category_times->eo_times.find(eo_times_pair.first) != out_category_times->eo_times.end()) {
-            assert(out_category_times->eo_times.find(eo_times_pair.first) != out_category_times->eo_times.end());
-          }
-        }
-
-        assert(false);
-      }
+//      if (out_category_times->eo_times.find(category_key) == out_category_times->eo_times.end()) {
+//        std::stringstream ss;
+//        ss << "FAIL:\n";
+//        out_category_times->PrintSummary(ss, 0);
+//        ss << "\n";
+//        category_key.Print(ss, 0);
+//        ss << "\n";
+//        SPDLOG_DEBUG(ss.str());
+//
+//        for (const auto& eo_times_pair : out_category_times->eo_times) {
+//          if (out_category_times->eo_times.find(eo_times_pair.first) != out_category_times->eo_times.end()) {
+//            assert(out_category_times->eo_times.find(eo_times_pair.first) != out_category_times->eo_times.end());
+//          }
+//        }
+//
+//        assert(false);
+//      }
       EOEvents& eo_events = out_category_times->eo_times.at(category_key);
       status = _AppendCategory(category, proto, &eo_events);
       IF_BAD_STATUS_RETURN(status);
@@ -196,28 +251,44 @@ MyStatus CategoryEventsParser::_AppendCategoryTimes(CategoryTimes* out_category_
   }
   return MyStatus::OK();
 }
+
 MyStatus CategoryEventsParser::_AppendCategoryOperation(const Category& category, const ProtoKlass& proto, CategoryTimes* out_category_times) {
   // for (start, end, op_name) in _EachEvent():
   //   category_key = CategoryKey::FromOpEvent(process, op_name)
   //   out_category_times->eo_times.at(category_key).AppendEvent(start, end)
+  MyStatus status = MyStatus::OK();
   auto const& process = get_process();
   assert(category == CATEGORY_OPERATION);
   auto const& events = proto.category_events().at(category).events();
+//  auto* parser_meta = GetParserMetaDerived();
+//  parser_meta->eo_CATEGORY_OPERATION = std::move(EOEvents(parser_meta->num_CATEGORY_OPERATION, true));
+  auto extra_op_category_key = CategoryKey::FromCategory(process, CATEGORY_EXTRA_OPERATION);
+  auto& extra_op_events = out_category_times->extra_eo_times.at(extra_op_category_key);
+  status = EachEvent(events, [&extra_op_events] (const EventName& name, TimeUsec start_us, TimeUsec end_us) {
+    extra_op_events.AppendEvent(name, start_us, end_us);
+    return MyStatus::OK();
+  });
+  IF_BAD_STATUS_RETURN(status);
+  // Watch out for accidental copy-construction.
+  assert(out_category_times->extra_eo_times.at(extra_op_category_key).size() > 0);
+
   EachOpEvent<iml::Event>(
       events,
       [&process, out_category_times] (const Operation& op, TimeUsec start_us, TimeUsec end_us) {
         auto category_key = CategoryKey::FromOpEvent(process, op);
-        out_category_times->eo_times.at(category_key).AppendEvent(start_us, end_us);
+        out_category_times->eo_times.at(category_key).AppendEvent(op, start_us, end_us);
       });
   return MyStatus::OK();
 }
+
 MyStatus CategoryEventsParser::_AppendCategory(const Category& category, const ProtoKlass& proto, EOEvents* eo_events) {
+  MyStatus status = MyStatus::OK();
   const auto& events = proto.category_events().at(category).events();
-  for (const auto& event : proto.category_events().at(category).events()) {
-    auto start_us = event.start_time_us();
-    auto end_us = event.start_time_us() + event.duration_us();
-    eo_events->AppendEvent(start_us, end_us);
-  }
+  status = EachEvent(events, [eo_events] (const EventName& name, TimeUsec start_us, TimeUsec end_us) {
+    eo_events->AppendEvent(name, start_us, end_us);
+    return MyStatus::OK();
+  });
+  IF_BAD_STATUS_RETURN(status);
   return MyStatus::OK();
 }
 
@@ -229,13 +300,17 @@ MyStatus CUDAAPIStatsParser::_CountCategoryTimes(CategoryTimesCount* count, cons
   return MyStatus::OK();
 }
 MyStatus CUDAAPIStatsParser::_AppendCategoryTimes(CategoryTimes* out_category_times, const ProtoKlass& proto) {
+  MyStatus status = MyStatus::OK();
   const std::string category = CATEGORY_CUDA_API_CPU;
   auto category_key = CategoryKey::FromCategory(get_process(), category);
   EOEvents& eo_events = out_category_times->eo_times.at(category_key);
-  for (const auto& event : proto.events()) {
+  const auto& events = proto.events();
+
+  for (const auto& event : events) {
     auto start_us = event.start_time_us();
     auto end_us = event.start_time_us() + event.duration_us();
-    eo_events.AppendEvent(start_us, end_us);
+    auto const &name = event.api_name();
+    eo_events.AppendEvent(name, start_us, end_us);
   }
   return MyStatus::OK();
 }
@@ -261,7 +336,7 @@ MyStatus CUDADeviceEventsParser::_AppendCategoryTimes(CategoryTimes* out_categor
     for (const auto& event : events) {
       auto start_us = event.start_time_us();
       auto end_us = event.start_time_us() + event.duration_us();
-      eo_events.AppendEvent(start_us, end_us);
+      eo_events.AppendEvent(event.name(), start_us, end_us);
     }
   }
   return MyStatus::OK();
@@ -277,20 +352,66 @@ MyStatus FindRLSFiles(const std::string& iml_directory, std::list<std::string>* 
   });
 }
 
+bool CategoryShouldKeepNames(const CategoryKey& key) {
+  return key.non_ops.find(CATEGORY_CUDA_API_CPU) != key.non_ops.end();
+}
+
+size_t CategoryTimes::TotalEvents() const {
+  size_t n_events = 0;
+  for (const auto& pair : eo_times) {
+    auto const& category_key = pair.first;
+    auto const& eo_events = pair.second;
+    n_events += eo_events.size();
+  }
+  return n_events;
+}
+
+void CategoryTimes::_Preallocate(EOTimes* eo_times, const CategoryKey& category_key, size_t n_events) {
+  bool keep_names = CategoryShouldKeepNames(category_key);
+  (*eo_times)[category_key] = EOEvents(n_events, keep_names);
+}
+void CategoryTimes::Preallocate(const CategoryKey& category_key, size_t n_events) {
+  _Preallocate(&eo_times, category_key, n_events);
+}
+void CategoryTimes::PreallocateExtra(const CategoryKey& category_key, size_t n_events) {
+  _Preallocate(&extra_eo_times, category_key, n_events);
+}
+
+size_t CategoryTimes::_Count(const EOTimes& eo_times, const CategoryKey& category_key) const {
+  return eo_times.at(category_key).size();
+}
+size_t CategoryTimes::Count(const CategoryKey& category_key) const {
+  return _Count(eo_times, category_key);
+}
+size_t CategoryTimes::CountExtra(const CategoryKey& category_key) const {
+  return _Count(extra_eo_times, category_key);
+}
+
 CategoryTimes::CategoryTimes(const Process& process_, const CategoryTimesCount& count) :
     process(process_) {
   // Use count to preallocate space.
-  for (const auto& pair : count.num_events) {
-    auto const& category_key = pair.first;
-    auto const n_events = pair.second;
-    eo_times[category_key] = EOEvents(n_events);
-  }
+  auto preallocate = [] (EOTimes* eo_times, const CategoryTimesCount::CountMap& cmap) {
+    for (const auto& pair : cmap) {
+      auto const& category_key = pair.first;
+      auto const n_events = pair.second;
+      bool keep_names = CategoryShouldKeepNames(category_key);
+      (*eo_times)[category_key] = EOEvents(n_events, keep_names);
+    }
+  };
+  preallocate(&eo_times, count.num_events);
+  preallocate(&extra_eo_times, count.extra_num_events);
+//  for (const auto& pair : count.num_events) {
+//    auto const& category_key = pair.first;
+//    auto const n_events = pair.second;
+//    bool keep_names = CategoryShouldKeepNames(category_key);
+//    eo_times[category_key] = EOEvents(n_events, keep_names);
+//  }
 }
-template <class CategoryTimesKlass, class Map>
-void CategoryTimesPrint(std::string name, const CategoryTimesKlass& self, const Map& eo_times, std::ostream& out, int indent) {
+template <class Map>
+void CategoryTimesPrint(std::string name, const Map& eo_times, std::ostream& out, int indent) {
   PrintIndent(out, indent);
   // e.g. name = CategoryTimes
-  out << name << ": size = " << self.size();
+  out << name << ": size = " << eo_times.size();
   size_t category_idx = 0;
   for (const auto& pair : eo_times) {
     const auto& category = pair.first;
@@ -306,10 +427,10 @@ void CategoryTimesPrint(std::string name, const CategoryTimesKlass& self, const 
     category_idx += 1;
   }
 }
-template <class CategoryTimesKlass, class Map>
-void CategoryTimesPrintSummary(std::string name, const CategoryTimesKlass& self, const Map& eo_times, std::ostream& out, int indent) {
+template <class Map>
+void CategoryTimesPrintSummary(std::string name, const Map& eo_times, std::ostream& out, int indent) {
   PrintIndent(out, indent);
-  out << name << ": size = " << self.size();
+  out << name << ": size = " << eo_times.size();
   size_t category_idx = 0;
   for (const auto& pair : eo_times) {
     const auto& category = pair.first;
@@ -326,23 +447,39 @@ void CategoryTimesPrintSummary(std::string name, const CategoryTimesKlass& self,
   }
 }
 void CategoryTimes::Print(std::ostream& out, int indent) const {
-  CategoryTimesPrint("CategoryTime", *this, this->eo_times, out, indent);
+  CategoryTimesPrint("CategoryTime", this->eo_times, out, indent);
+  if (this->extra_eo_times.size() > 0) {
+    out << "\n";
+    CategoryTimesPrint("CategoryTimeExtra", this->extra_eo_times, out, indent);
+  }
 }
 void CategoryTimes::PrintSummary(std::ostream& out, int indent) const {
-  CategoryTimesPrintSummary("CategoryTime", *this, this->eo_times, out, indent);
+  CategoryTimesPrintSummary("CategoryTime", this->eo_times, out, indent);
+  if (this->extra_eo_times.size() > 0) {
+    out << "\n";
+    CategoryTimesPrintSummary("CategoryTimeExtra", this->extra_eo_times, out, indent);
+  }
 }
 void CategoryTimesBitset::Print(std::ostream& out, int indent) const {
-  CategoryTimesPrint("CategoryTimeBitset", *this, this->eo_times, out, indent);
+  CategoryTimesPrint("CategoryTimeBitset", this->eo_times, out, indent);
 }
 void CategoryTimesBitset::PrintSummary(std::ostream& out, int indent) const {
-  CategoryTimesPrintSummary("CategoryTimeBitset", *this, this->eo_times, out, indent);
+  CategoryTimesPrintSummary("CategoryTimeBitset", this->eo_times, out, indent);
 }
 
 void CategoryTimesCount::Print(std::ostream& out, int indent) const {
+  _Print(this->num_events, "CategoryTimesCount", out, indent);
+  if (this->extra_num_events.size() > 0) {
+    out << "\n";
+    _Print(this->extra_num_events, "CategoryTimesCountExtra", out, indent);
+  }
+}
+void CategoryTimesCount::_Print(const CountMap& cmap, const std::string& name, std::ostream& out, int indent) const {
   PrintIndent(out, indent);
-  out << "CategoryTimesCount: size = " << this->num_events.size();
+  // e.g. CategoryTimesCount
+  out << name << ": size = " << cmap.size();
   size_t category_idx = 0;
-  for (const auto& pair : this->num_events) {
+  for (const auto& pair : cmap) {
     const auto& category_key = pair.first;
     const auto& count = pair.second;
 
@@ -406,8 +543,31 @@ RLSFileType GetRLSFileType(const std::string& path) {
 
   return RLSFileType::UNKNOWN_FILE;
 
-#undef IF_MATCH_RETURN_TYPE
 }
+
+//template <class ParserKlass>
+//typename ParserKlass::ParserMeta* GenericGetParserMetaDerived(const ParserKlass& self) {
+//  assert(self._file_type == ParserKlass::FILE_TYPE);
+//  assert(self._parser_meta->file_type == ParserKlass::FILE_TYPE);
+//  typename ParserKlass::ParserMeta* parser_meta = reinterpret_cast<typename ParserKlass::ParserMeta*>(self._parser_meta.get());
+//  return parser_meta;
+//}
+
+//template <class ParserKlass>
+//typename ParserKlass::ParserMeta* AsDerivedParserMeta(const std::shared_ptr<IParserMeta>& parser_meta) {
+//  assert(parser_meta->file_type == ParserKlass::FILE_TYPE);
+//  typename ParserKlass::ParserMeta* pm = reinterpret_cast<typename ParserKlass::ParserMeta*>(parser_meta.get());
+//  return pm;
+//}
+
+#define DEFINE_GET_PARSER_META(ParserKlass) \
+  ParserKlass::ParserMeta* ParserKlass::GetParserMetaDerived() const { \
+    return GenericGetParserMetaDerived<ParserKlass>(*this); \
+  }
+
+//DEFINE_GET_PARSER_META(CUDAAPIStatsParser)
+//DEFINE_GET_PARSER_META(CUDADeviceEventsParser)
+//DEFINE_GET_PARSER_META(CategoryEventsParser)
 
 MyStatus GetRLSEventParser(const std::string& path, std::unique_ptr<IEventFileParser>* parser) {
   auto file_type = GetRLSFileType(path);
@@ -428,11 +588,15 @@ MyStatus GetRLSEventParser(const std::string& path, std::unique_ptr<IEventFilePa
 }
 
 void CategoryTimesCount::_AddToCategoryTimes(const CategoryTimesCount& ctimes) {
-  for (auto const& pair : ctimes.num_events) {
-    auto const& category = pair.first;
-    auto n_events = pair.second;
-    this->num_events[category] += n_events;
-  }
+  auto add_to = [] (const CountMap& from_map, CountMap* to_map) {
+    for (auto const& pair : from_map) {
+      auto const& category = pair.first;
+      auto n_events = pair.second;
+      (*to_map)[category] += n_events;
+    }
+  };
+  add_to(ctimes.num_events, &this->num_events);
+  add_to(ctimes.extra_num_events, &this->extra_num_events);
 }
 CategoryTimesCount operator+(const CategoryTimesCount& left, const CategoryTimesCount& right) {
   CategoryTimesCount added;
@@ -465,6 +629,14 @@ MyStatus TraceFileMeta::Init() {
 
   status = parser->CountCategoryTimes(&count);
   IF_BAD_STATUS_RETURN(status);
+
+  // this->parser_meta = parser._parser_meta;
+//  this->parser_meta = parser->GetParserMeta();
+//  DBG_LOG("TraceFileMeta::Init() : file_type = {}, parser_meta = {}, Parser::this = {}"
+//  , file_type
+//  , reinterpret_cast<void*>(this->parser_meta.get())
+//  , reinterpret_cast<void*>(this)
+//  );
 
   parser->Init();
   machine = parser->get_machine();
@@ -542,7 +714,9 @@ MyStatus TraceFileWalker::Init() {
   status = FindRLSFiles(_iml_directory, &paths);
   IF_BAD_STATUS_RETURN(status);
   for (auto const& path : paths) {
-    SPDLOG_DEBUG("TraceFileWalker saw path={}", path);
+    if (SHOULD_DEBUG(FEATURE_LOAD_DATA)) {
+      DBG_LOG("TraceFileWalker saw path={}", path);
+    }
     TraceFileMeta meta;
     // Cache meta-data for trace-file.
     status = ReadMeta(path, &meta);
@@ -553,8 +727,25 @@ MyStatus TraceFileWalker::Init() {
 
 MyStatus RawTraceParser::Init() {
   MyStatus status = MyStatus::OK();
+
+  _has_calibration_files = (
+      _cupti_overhead_json_path != "" &&
+      _LD_PRELOAD_overhead_json_path != "" &&
+      _pyprof_overhead_json_path != ""
+  );
+
+  if (_has_calibration_files) {
+    status = ReadJson(_cupti_overhead_json_path, &_cupti_overhead_json);
+    IF_BAD_STATUS_RETURN(status);
+    status = ReadJson(_LD_PRELOAD_overhead_json_path, &_LD_PRELOAD_overhead_json);
+    IF_BAD_STATUS_RETURN(status);
+    status = ReadJson(_pyprof_overhead_json_path, &_pyprof_overhead_json);
+    IF_BAD_STATUS_RETURN(status);
+  }
+
   status = _walker.Init();
   IF_BAD_STATUS_RETURN(status);
+
   return MyStatus::OK();
 }
 
@@ -565,31 +756,287 @@ MyStatus RawTraceParser::ReadEntireTrace(
     CategoryTimes *category_times,
     EntireTraceMeta* entire_meta) {
   MyStatus status = MyStatus::OK();
+
+  *entire_meta = EntireTraceMeta(machine, process, phase);
+
   std::list<TraceFileMeta> metas;
   status = _walker.TraceMetas(machine, process, phase, &metas);
   IF_BAD_STATUS_RETURN(status);
 
   CategoryTimesCount count;
-  for (auto const& meta : metas) {
+  for (auto const &meta : metas) {
     count += meta.get_count();
+  }
+
+  if (SHOULD_DEBUG(FEATURE_LOAD_DATA)) {
+    std::stringstream ss;
+    ss << "\n";
+    count.Print(ss, 1);
+    DBG_LOG("Total count: {}", ss.str());
   }
 
   // Preallocate space for eo_times for this (machine, process, phase).
   *category_times = std::move(CategoryTimes(process, count));
-  for (auto const& meta : metas) {
+
+//  if (SHOULD_DEBUG(FEATURE_LOAD_DATA)) {
+//    std::stringstream ss;
+//    ss << "\n";
+//    category_times->PrintSummary(ss, 1);
+//    DBG_LOG("Preallocated: {}", ss.str());
+//  }
+
+  for (auto const &meta : metas) {
     std::unique_ptr<IEventFileParser> parser;
-    SPDLOG_DEBUG("read path = {}", meta.get_path());
+    if (SHOULD_DEBUG(FEATURE_LOAD_DATA)) {
+      DBG_LOG("read path = {}", meta.get_path());
+    }
     status = GetRLSEventParser(meta.get_path(), &parser);
     IF_BAD_STATUS_RETURN(status);
     // TODO: cache read proto-files to avoid re-reading 20MB files...maybe.
     status = parser->AppendCategoryTimes(category_times);
     IF_BAD_STATUS_RETURN(status);
+
+//    if (SHOULD_DEBUG(FEATURE_LOAD_DATA)) {
+//      DBG_LOG("After {}", meta.path);
+//      category_times->PrintSummary(std::cout, 1);
+//      std::cout << "\n";
+//    }
+
   }
 
-  *entire_meta = EntireTraceMeta(machine, process, phase);
+  if (_has_calibration_files) {
+    // Use calibration files to subtract overhead by "injecting" overhead events.
+    status = _AppendOverheadEvents(
+        machine,
+        process,
+        phase,
+        category_times);
+    IF_BAD_STATUS_RETURN(status);
+  }
 
   return MyStatus::OK();
 }
+
+MyStatus RawTraceParser::_AppendOverheadEvents(
+    const Machine& machine,
+    const Process& process,
+    const Phase& phase,
+    CategoryTimes *category_times) {
+  MyStatus status = MyStatus::OK();
+  status = _AppendOverhead_CUPTI_and_LD_PRELOAD(
+      machine,
+      process,
+      phase,
+      category_times);
+  IF_BAD_STATUS_RETURN(status);
+  status = _AppendOverhead_PYTHON_INTERCEPTION(
+      machine,
+      process,
+      phase,
+      category_times);
+  IF_BAD_STATUS_RETURN(status);
+  status = _AppendOverhead_PYTHON_ANNOTATION(
+      machine,
+      process,
+      phase,
+      category_times);
+  IF_BAD_STATUS_RETURN(status);
+  return MyStatus::OK();
+}
+MyStatus RawTraceParser::_AppendOverhead_CUPTI_and_LD_PRELOAD(
+    const Machine& machine,
+    const Process& process,
+    const Phase& phase,
+    CategoryTimes *category_times) {
+  double per_LD_PRELOAD_interception_us = _LD_PRELOAD_overhead_json["mean_interception_overhead_per_call_us"];
+  auto LD_PRELOAD_category_key = CategoryKey::FromCategory(process, CATEGORY_PROF_LD_PRELOAD);
+  auto CUPTI_category_key = CategoryKey::FromCategory(process, CATEGORY_PROF_CUPTI);
+  auto CUDA_API_category_key = CategoryKey::FromCategory(process, CATEGORY_CUDA_API_CPU);
+  auto n_cuda_api_events = category_times->Count(CUDA_API_category_key);
+  category_times->Preallocate(LD_PRELOAD_category_key, n_cuda_api_events);
+  category_times->Preallocate(CUPTI_category_key, n_cuda_api_events);
+  auto& CUDA_API_events = category_times->eo_times.at(CUDA_API_category_key);
+  auto& LD_PRELOAD_events = category_times->eo_times.at(LD_PRELOAD_category_key);
+  auto& CUPTI_events = category_times->eo_times.at(CUPTI_category_key);
+
+  // cuda_api_id => mean_time_us
+  std::map<EventNameID, double> cupti_overhead_ps;
+  std::map<EventNameID, size_t> missing_cupti_overhead_cuda_api_calls;
+  for (auto const& pair : _cupti_overhead_json.items()) {
+    auto const& cuda_api_name = pair.key();
+    // NOTE: all the CUDA API calls we see in the json file SHOULD exist in the trace-file...
+    // If they don't, add them as a key, or just skip them.
+    if (!CUDA_API_events.HasEventID(cuda_api_name)) {
+      continue;
+    }
+    auto cuda_api_id = CUDA_API_events.AsEventID(cuda_api_name);
+    auto const& js = pair.value();
+    double mean_cupti_overhead_per_call_us = js["mean_cupti_overhead_per_call_us"];
+    cupti_overhead_ps[cuda_api_id] = mean_cupti_overhead_per_call_us * PSEC_IN_USEC;
+  }
+
+  for (size_t i = 0; i < CUDA_API_events.size(); i++) {
+    // CATEGORY_PROF_CUPTI
+    {
+      auto id = CUDA_API_events.GetEventNameID(i);
+      auto it = cupti_overhead_ps.find(id);
+      if (it == cupti_overhead_ps.end()) {
+        missing_cupti_overhead_cuda_api_calls[id] += 1;
+      } else {
+        auto mean_cupti_overhead_ps = it->second;
+        TimePsec start_ps = CUDA_API_events.StartPsec(i);
+        TimePsec end_ps = start_ps + mean_cupti_overhead_ps;
+        OptionalString name;
+        if (CUPTI_events.KeepNames()) {
+          name = CUDA_API_events.GetEventName(i);
+        }
+        CUPTI_events.AppendEventPsec(name, start_ps, end_ps);
+      }
+    }
+    // CATEGORY_PROF_LD_PRELOAD
+    {
+//      TimePsec cuda_api_duration_us = CUDA_API_events.DurationUsec(i);
+//      if (cuda_api_duration_us <= per_LD_PRELOAD_interception_us) {
+//        SPDLOG_WARN("CUDA_API_events[{}, {}]:  cuda_api_duration_us ({} us) > ({} us) per_LD_PRELOAD_interception_us",
+//            i, CUDA_API_events.GetEventName(i),
+//            cuda_api_duration_us,
+//            per_LD_PRELOAD_interception_us);
+//      }
+      TimePsec start_ps = CUDA_API_events.EndPsec(i);
+      TimePsec end_ps = start_ps + (per_LD_PRELOAD_interception_us * PSEC_IN_USEC);
+      OptionalString name;
+      if (LD_PRELOAD_events.KeepNames()) {
+        name = CUDA_API_events.GetEventName(i);
+      }
+      LD_PRELOAD_events.AppendEventPsec(name, start_ps, end_ps);
+    }
+  }
+
+  if (missing_cupti_overhead_cuda_api_calls.size() > 0) {
+    std::stringstream ss;
+//    ss << "Saw CUDA API calls that we didn't have calibrated CUPTI overheads for overheads for in " << meta.path << ":\n";
+    ss << "WARNING: Saw CUDA API calls that we didn't have calibrated CUPTI overheads for overheads for:\n";
+    PrintIndent(ss, 1);
+    for (auto const& pair : missing_cupti_overhead_cuda_api_calls) {
+      auto id = pair.first;
+      auto n_events = pair.second;
+      auto cuda_api_name = CUDA_API_events.AsEventName(id);
+      ss << "  cuda_api=" << cuda_api_name << ": " << n_events << " events\n";
+    }
+    ss << "\n";
+    std::cout << ss.str();
+  }
+  return MyStatus::OK();
+}
+
+MyStatus RawTraceParser::_AppendOverhead_PYTHON_INTERCEPTION(
+    const Machine& machine,
+    const Process& process,
+    const Phase& phase,
+    CategoryTimes *category_times) {
+//      auto* parser_meta = AsDerivedParserMeta<CUDAAPIStatsParser>(parser->GetParserMeta());
+  double per_pyprof_interception_us = _pyprof_overhead_json["mean_pyprof_interception_overhead_per_call_us"];
+  auto category_key = CategoryKey::FromCategory(process, CATEGORY_PROF_PYTHON_INTERCEPTION);
+  size_t n_events = 0;
+  for (auto const& category : CATEGORIES_C_EVENTS) {
+    n_events += category_times->Count(CategoryKey::FromCategory(process, category));
+  }
+  // DBG_LOG("_AppendOverhead_PYTHON_INTERCEPTION: n_events = {}", n_events);
+  category_times->Preallocate(category_key, n_events);
+  auto& prof_events = category_times->eo_times.at(category_key);
+  std::vector<EOEvents> clib_eo_events;
+  for (auto const& category : CATEGORIES_C_EVENTS) {
+    clib_eo_events.push_back(category_times->eo_times[CategoryKey::FromCategory(process, category)]);
+  }
+  auto func = [per_pyprof_interception_us, &prof_events] (const EOEvents& events, size_t i) {
+    TimePsec start_ps = events.EndPsec(i) + (per_pyprof_interception_us * PSEC_IN_USEC);
+    TimePsec end_ps = start_ps + (per_pyprof_interception_us * PSEC_IN_USEC);
+    OptionalString name;
+    if (prof_events.KeepNames()) {
+      name = events.GetEventName(i);
+    }
+    prof_events.AppendEventPsec(name, start_ps, end_ps);
+  };
+  auto key_func = [] (const EOEvents& events, size_t i) -> TimeUsec {
+    return events.StartUsec(i);
+  };
+  EachMerged<EOEvents, TimeUsec>(clib_eo_events, func, key_func);
+  return MyStatus::OK();
+}
+
+MyStatus RawTraceParser::_AppendOverhead_PYTHON_ANNOTATION(
+    const Machine& machine,
+    const Process& process,
+    const Phase& phase,
+    CategoryTimes *category_times) {
+  double per_pyprof_annotation_overhead_us = _pyprof_overhead_json["mean_pyprof_annotation_overhead_per_call_us"];
+  auto category_key = CategoryKey::FromCategory(process, CATEGORY_PROF_PYTHON_ANNOTATION);
+  auto ops_key = CategoryKey::FromCategory(process, CATEGORY_EXTRA_OPERATION);
+  auto const& ops_events = category_times->extra_eo_times.at(ops_key);
+  assert(ops_events.size() > 0);
+  category_times->Preallocate(category_key, ops_events.size());
+  auto& prof_events = category_times->eo_times.at(category_key);
+  for (size_t i = 0; i < ops_events.size(); i++) {
+    TimePsec start_ps = ops_events.StartPsec(i);
+    TimePsec end_ps = start_ps + (per_pyprof_annotation_overhead_us * PSEC_IN_USEC);
+    OptionalString name;
+    if (prof_events.KeepNames()) {
+      name = ops_events.GetEventName(i);
+    }
+    // PROBLEM: we only want to keep names of events if we HAVE to.
+    // Solution: optionally provide name.  If
+    prof_events.AppendEventPsec(name, start_ps, end_ps);
+  }
+  return MyStatus::OK();
+}
+
+//MyStatus ReadEntireOverhead_CATEGORY_PROF_PYTHON_ANNOTATION(
+//    const Machine& machine,
+//    const Process& process,
+//    const Phase& phase,
+//    CategoryTimes* category_times,
+//    CategoryTimesCount* count,
+//    EntireTraceMeta* entire_meta) {
+//  *entire_meta = EntireTraceMeta(machine, process, phase);
+//  assert(!count->Contains(CATEGORY_PROF_PYTHON_ANNOTATION));
+//  // TODO: we want to count the number of operation events BEFORE op-stack processing...
+//  // Q: Is it equivalent to use the post-processed one?
+//  // NO; this INCREASES the number of "operation end times" in the trace.
+//  // maybe it's easier to just "walk through" the files again...?
+//  auto n_events = count->Count(CATEGORY_OPERATION);
+//  count->Add(CATEGORY_PROF_PYTHON_ANNOTATION, n_events);
+//
+//  return MyStatus::OK();
+//}
+//
+//MyStatus RawTraceParser::ReadEntireOverhead_CATEGORY_PROF_PYTHON_ANNOTATION(
+//    const Machine& machine,
+//    const Process& process,
+//    const Phase& phase,
+//    CategoryTimes* category_times,
+//    CategoryTimesCount* count,
+//    EntireTraceMeta* entire_meta) {
+//  CategoryTimesCount count;
+//  if (_cupti_overhead_json != "") {
+//    CategoryTimesCount count;
+//    // Preallocate
+//    // Insert: Python annotations
+//    // PSEUDOCODE:
+//    //     op_events = SQL:
+//    //         select all from Event where e.category == CATEGORY_OPERATION
+//    //     for op in op_events:
+//    //         insert Event(
+//    //             start=op.end,
+//    //             duration=mean_pyprof_annotation_overhead_us,
+//    //             category=CATEGORY_PROF_PYTHON_ANNOTATION)
+//
+//    // Preallocate: count[CATEGORY_PROF_PYTHON_ANNOTATION] = count[CATEGORY_PROF_PYTHON_ANNOTATION]
+//    // Preallocate: count[CATEGORY_PROF_PYTHON_INTERCEPTION] = count[CATEGORIES_C_EVENTS]
+//    // Preallocate: count[CATEGORY_PROF_CUPTI] = count[CATEGORY_CUDA_API_CPU] (upper bound)
+//    // Preallocate: count[CATEGORY_PROF_LD_PRELOAD] = count[CATEGORY_CUDA_API_CPU]
+//
+//  }
+//}
 
 template <class ParserKlass, class ProtoKlass>
 MyStatus GenericInitFromProto(ParserKlass& self, const ProtoKlass& proto) {
@@ -600,6 +1047,9 @@ MyStatus GenericInitFromProto(ParserKlass& self, const ProtoKlass& proto) {
 }
 
 MyStatus CategoryEventsParser::_InitFromProto(const ProtoKlass& proto) {
+  // TODO:
+  // - count number of operation events.
+  // - record their end times (convience: record both start/end times in EOEvents)
   return GenericInitFromProto(*this, proto);
 }
 MyStatus CUDAAPIStatsParser::_InitFromProto(const ProtoKlass& proto) {
@@ -718,7 +1168,7 @@ OverlapResult OverlapComputer::ComputeOverlap(bool keep_empty_time) const {
       if (index(i) < lengths(i)) {
         // Non-empty category.
         if (times[i][index(i)] < min_time) {
-          if (debug && SPDLOG_ACTIVE_LEVEL <= SPDLOG_LEVEL_DEBUG) {
+          if (debug && SHOULD_DEBUG(FEATURE_OVERLAP)) {
             std::stringstream ss;
             auto left = times[i][index(i)];
             auto right = min_time;
@@ -729,7 +1179,7 @@ OverlapResult OverlapComputer::ComputeOverlap(bool keep_empty_time) const {
             ss << "min_cat = " << i << "\n";
             ss << "index = " << index << "\n";
             ss << "lengths = " << lengths;
-            SPDLOG_DEBUG("{}", ss.str());
+            DBG_LOG("{}", ss.str());
           }
           min_cat = i;
           min_time = times[i][index(i)];
@@ -738,7 +1188,7 @@ OverlapResult OverlapComputer::ComputeOverlap(bool keep_empty_time) const {
     }
 
 //    // Verbose: print entire category key.
-//    if (debug && SPDLOG_ACTIVE_LEVEL <= SPDLOG_LEVEL_DEBUG) {
+//    if (debug && SHOULD_DEBUG(FEATURE_OVERLAP)) {
 //      std::stringstream ss;
 //
 //      CategoryKeyBitset min_cat_key(min_cat, ctimes.idx_map);
@@ -763,12 +1213,12 @@ OverlapResult OverlapComputer::ComputeOverlap(bool keep_empty_time) const {
 //        ss << "time_type = end";
 //      }
 //
-//      SPDLOG_DEBUG("{}", ss.str());
+//      DBG_LOG("{}", ss.str());
 //    }
 
     // Less verbose: just print category index.
     // start {i} @ {time} => {new_set}
-    if (debug && SPDLOG_ACTIVE_LEVEL <= SPDLOG_LEVEL_DEBUG) {
+    if (debug && SHOULD_DEBUG(FEATURE_OVERLAP)) {
       std::stringstream ss;
       ss << "\n";
       PrintIndent(ss, 1);
@@ -784,7 +1234,7 @@ OverlapResult OverlapComputer::ComputeOverlap(bool keep_empty_time) const {
       auto indices = cur_cat.Indices();
       PrintValue(ss, indices);
 
-      SPDLOG_DEBUG("{}", ss.str());
+      DBG_LOG("{}", ss.str());
     }
 
     if ((index(min_cat) % 2) == 0 and min_time == times[min_cat][index(min_cat)+1]) {

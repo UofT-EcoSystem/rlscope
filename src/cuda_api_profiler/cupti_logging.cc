@@ -1286,38 +1286,5 @@ const char *getActivityOverheadKindString(CUpti_ActivityOverheadKind kind) {
   return "<unknown>";
 }
 
-SimpleTimer::SimpleTimer(const std::string& name) :
-    _name(name),
-    _last_time_usec(0) {
-}
-
-void SimpleTimer::ResetStartTime() {
-//  auto now_us = Env::Default()->NowMicros();
-  auto now_us = TimeNowMicros();
-  _last_time_usec = now_us;
-}
-
-void SimpleTimer::EndOperation(const std::string& operation) {
-//  auto now_us = Env::Default()->NowMicros();
-  auto now_us = TimeNowMicros();
-  DCHECK(_last_time_usec != 0);
-  _op_duration_usec[operation] = now_us - _last_time_usec;
-  _last_time_usec = now_us;
-}
-
-void SimpleTimer::Print(std::ostream& out, int indent) {
-  PrintIndent(out, indent);
-  out << "SimpleTimer: name = " << _name;
-  for (auto const& pair : _op_duration_usec) {
-    const auto& op = pair.first;
-    auto duration_usec = pair.second;
-    double duration_sec = duration_usec / ((double) 1e6);
-
-    out << "\n";
-    PrintIndent(out, indent + 1);
-    out << "name=\"" << pair.first << "\"" << " = " << duration_sec << " sec";
-
-  }
-}
 
 }

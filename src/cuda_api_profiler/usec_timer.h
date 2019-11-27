@@ -24,18 +24,18 @@
 
 namespace tensorflow {
 
-uint64_t TimeNowNanos() {
+static uint64_t TimeNowNanos() {
   struct timespec ts;
   clock_gettime(CLOCK_REALTIME, &ts);
   return (static_cast<uint64_t>(ts.tv_sec) * MY_kSecondsToNanos +
           static_cast<uint64_t>(ts.tv_nsec));
 }
 
-uint64_t TimeNowMicros() {
+static uint64_t TimeNowMicros() {
   return TimeNowNanos() / MY_kMicrosToNanos;
 }
 
-uint64_t TimeNowSeconds() {
+static uint64_t TimeNowSeconds() {
   return TimeNowNanos() / MY_kSecondsToNanos;
 }
 

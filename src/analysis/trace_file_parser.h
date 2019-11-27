@@ -8,14 +8,26 @@
 #include "iml_prof.pb.h"
 #include "pyprof.pb.h"
 
+#include <Eigen/Dense>
+
 #include "cuda_api_profiler/generic_logging.h"
+#include "cuda_api_profiler/defines.h"
 
 #include <assert.h>
 
 #include <spdlog/spdlog.h>
 #include <boost/filesystem.hpp>
 
+// NOTE: not until gcc 7.1 (7.4.0 in Ubuntu 18.04); use boost::optional instead.
+// #include <optional>
+#include <boost/optional.hpp>
+#include <boost/utility/string_view.hpp>
+
+#include <nlohmann/json.hpp>
+// using json = nlohmann::json;
+
 #include <iostream>
+//#include <string_view>
 
 //#include "cuda_api_profiler/cupti_logging.h"
 
@@ -35,9 +47,10 @@
 #include "analysis/my_status.h"
 
 #include <set>
+#include <cuda_api_profiler/debug_flags.h>
 
-#define PSEC_IN_USEC (1000)
-#define USEC_IN_SEC (1000000)
+//#define PSEC_IN_USEC (1000)
+//#define USEC_IN_SEC (1000000)
 
 #define IF_BAD_STATUS_RETURN(status)  \
       if (status.code() != MyStatus::OK().code()) { \
@@ -68,6 +81,10 @@
     this->Print(std::cout, 0); \
     std::cout.flush(); \
   }
+
+
+#define DECLARE_GET_PARSER_META \
+  ParserMeta* GetParserMetaDerived() const;
 
 namespace tensorflow {
 
@@ -106,6 +123,19 @@ enum RLSFileType {
 #define CATEGORY_OPERATION "Operation"
 #define CATEGORY_SIMULATOR_CPP "Simulator C"
 
+#define CATEGORY_EXTRA_OPERATION "Operation: original"
+
+#define CATEGORY_PROF_CUPTI "Profiling: CUPTI"
+#define CATEGORY_PROF_LD_PRELOAD "Profiling: LD_PRELOAD"
+#define CATEGORY_PROF_PYTHON_ANNOTATION "Profiling: Python annotation"
+#define CATEGORY_PROF_PYTHON_INTERCEPTION "Profiling: Python interception"
+//CATEGORIES_PROF = {
+//    CATEGORY_PROF_CUPTI,
+//    CATEGORY_PROF_LD_PRELOAD,
+//    CATEGORY_PROF_PYTHON_ANNOTATION,
+//    CATEGORY_PROF_PYTHON_INTERCEPTION,
+//}
+
 
 //#define TRACE_SUFFIX_RE (R"((?:\.trace_(?P<trace_id>\d+))?)")
 #define TRACE_SUFFIX_RE R"((?:\.trace_(\d+))?)"
@@ -119,15 +149,28 @@ enum RLSFileType {
 //#define CUDA_DEVICE_EVENTS_REGEX (R"(cuda_device_events{trace}\.proto)")
 #define CUDA_DEVICE_EVENTS_REGEX (R"(cuda_device_events)" TRACE_SUFFIX_RE R"(\.proto)")
 
+// NOT supported until C++17 Ubuntu 18.04
+//using OptionalString = boost::optional<std::string_view>;
+// Doesn't allow automatic conversion of std::string arguments.
+// using OptionalString = boost::optional<boost::string_view>;
+// Works?
+using OptionalString = boost::optional<const std::string&>;
+// Doesn't allow automatic conversion of std::string arguments.
+// using OptionalString = boost::optional<const std::string*>;
 using Category = std::string;
+using EventNameID = uint32_t;
 using Machine = std::string;
 using Process = std::string;
 using Operation = std::string;
+using EventName = std::string;
 using Phase = std::string;
 using TraceID = uint64_t;
 using TimeUsec = int64_t;
+using TimePsec = int64_t;
 #define MAX_CATEGORY_KEYS 64
 //using CategoryTimes = std::map<Category, EOEvents>;
+
+extern const std::set<Category> CATEGORIES_C_EVENTS;
 
 template <typename Number, typename K>
 struct IdxMaps {
@@ -162,7 +205,7 @@ struct IdxMaps {
       this->Print(ss, 0);
       ss << "\n";
       k.Print(ss, 0);
-      SPDLOG_DEBUG(ss.str());
+      DBG_LOG("{}", ss.str());
       assert(false);
     }
     return to_idx.at(k);
@@ -178,15 +221,15 @@ struct IdxMaps {
 
     assert(N >= to_idx.size());
     for (Number idx = 0; idx < to_idx.size(); idx++) {
-      if (debug) {
-        SPDLOG_DEBUG("Trying idx = {}", idx);
+      if (debug && SHOULD_DEBUG(FEATURE_OVERLAP)) {
+        DBG_LOG("Trying idx = {}", idx);
       }
       if (bitset[idx]) {
         auto const& key = Key(idx);
-        if (debug) {
+        if (debug && SHOULD_DEBUG(FEATURE_OVERLAP)) {
           std::stringstream ss;
           ss << key;
-          SPDLOG_DEBUG("Insert idx={}, key = {}", idx, ss.str());
+          DBG_LOG("Insert idx={}, key = {}", idx, ss.str());
         }
         keys.insert(Key(idx));
       }
@@ -227,6 +270,93 @@ std::ostream& operator<<(std::ostream& os, const IdxMaps<Number, K>& obj) {
   obj.Print(os, 0);
   return os;
 }
+
+template <typename Number, class Key>
+class KeyVector {
+  public:
+  std::vector<Number> ids;
+  Number next_id;
+  using IdToKey = std::map<Number, Key>;
+  IdToKey id_to_key;
+  using KeyToId = std::map<Key, Number>;
+  KeyToId key_to_id;
+  std::set<Key> keys;
+
+  KeyVector() :
+      next_id(0)
+  {
+  }
+
+  inline void reserve(size_t n) {
+    ids.reserve(n);
+  }
+
+  inline size_t size() const {
+    return ids.size();
+  }
+
+  inline void push_back(const Key& key) {
+
+    // https://stackoverflow.com/questions/97050/stdmap-insert-or-stdmap-find
+    Number id;
+    auto lb = key_to_id.lower_bound(key);
+    if (lb != key_to_id.end() && !(key_to_id.key_comp()(key, lb->first))) {
+        // key already exists
+        // update lb->second if you care to
+        id = lb->second;
+    } else {
+        // The key does not exist in the map; add it to the map
+        id = next_id;
+        next_id += 1;
+        // Use lb as a hint to insert, so it can avoid another lookup.
+        key_to_id.insert(lb, typename KeyToId::value_type(key, id));
+        id_to_key[id] = key;
+        keys.insert(key);
+        assert(keys.size() < std::numeric_limits<Number>::max());
+    }
+    ids.push_back(id);
+
+  }
+
+  inline const Key& operator[](int index) const {
+    assert(static_cast<size_t>(index) < ids.size());
+    auto id = ids[index];
+    auto const& key = id_to_key.at(id);
+    return key;
+  }
+
+  inline Number ID(int index) const {
+    assert(static_cast<size_t>(index) < ids.size());
+    auto id = ids[index];
+    return id;
+  }
+
+  inline Number AsID(const Key& key) const {
+    auto id = key_to_id.at(key);
+    return id;
+  }
+
+  inline const Key& AsKey(Number id) const {
+    return id_to_key.at(id);
+  }
+
+  inline Number HasID(const Key& key) const {
+    return key_to_id.find(key) != key_to_id.end();
+  }
+
+//  inline const Key& Key(size_t i) {
+//    assert(i < ids.size());
+//    auto number = ids[i];
+//    auto it = id_to_key.find(number);
+//    assert(it != id_to_key.end());
+//    return it->second;
+//  }
+
+  inline const std::set<Key>& Keys() {
+    return keys;
+  }
+
+};
 
 class CategoryKey {
 public:
@@ -399,7 +529,8 @@ MyStatus FindRLSFiles(const std::string& iml_directory, std::list<std::string>* 
 class EOEvents {
 public:
   // Number of events
-  size_t _n_events;
+  size_t _max_events;
+  // size_t _n_events;
   size_t _next_event_to_set;
   // [e1.start, e1.end, e2.start, e2.end, ...]
 
@@ -408,16 +539,30 @@ public:
   // https://stackoverflow.com/questions/8947579/why-isnt-there-a-stdshared-ptrt-specialisation
   std::shared_ptr<std::vector<TimeUsec>> _events;
 
+  // Assumption:
+  // The number of unique event-names belonging to a single category is < 2^32.
+  // NOTE: It's not clear to me what a reasonable value to use here really is...
+  KeyVector<EventNameID, std::string> _names;
+  bool _keep_names;
+
   EOEvents() :
-      _n_events(0),
-      _next_event_to_set(0) {
+      _max_events(0),
+      _next_event_to_set(0),
+      _keep_names(false) {
   }
-  EOEvents(size_t n_events) :
-      _n_events(n_events)
+  EOEvents(size_t n_events, bool keep_names) :
+      _max_events(n_events)
       , _next_event_to_set(0)
       // 2*n_events: For each event, we need the (start, end) time.
-      , _events(new std::vector<TimeUsec>(2*n_events))
-      {
+      // , _events(new std::vector<TimeUsec>(2*n_events))
+      , _events(new std::vector<TimeUsec>())
+      , _keep_names(keep_names)
+  {
+    _events->reserve(2*n_events);
+  }
+
+  inline bool KeepNames() const {
+    return _keep_names;
   }
 
   // Return read-only raw pointer to array of times.
@@ -431,14 +576,22 @@ public:
   DECLARE_PRINT_OPERATOR(EOEvents)
   void PrintSummary(std::ostream& out, int indent) const;
 
-  inline void SetEvent(size_t i, TimeUsec start_us, TimeUsec end_us) {
-    assert(i < _n_events);
+  inline void SetEvent(OptionalString name, size_t i, TimeUsec start_us, TimeUsec end_us) {
+    SetEventPsec(name, i, start_us*PSEC_IN_USEC, end_us*PSEC_IN_USEC);
+  }
+
+  inline void SetEventPsec(OptionalString name, size_t i, TimePsec start_ps, TimePsec end_ps) {
+    assert(i < _max_events);
     assert(i == _next_event_to_set);
-    assert(start_us <= end_us);
+    assert(start_ps <= end_ps);
     auto start_idx = EVENT_START_IDX(i);
     auto end_idx = EVENT_END_IDX(i);
-    (*_events)[start_idx] = start_us * PSEC_IN_USEC;
-    (*_events)[end_idx] = end_us * PSEC_IN_USEC;
+    if (_keep_names) {
+      assert(name.has_value());
+      _names.push_back(name.value());
+    }
+    (*_events)[start_idx] = start_ps;
+    (*_events)[end_idx] = end_ps;
     if (i > 0) {
       assert((*_events)[EVENT_END_IDX(i - 1)] <= (*_events)[EVENT_START_IDX(i)]);
     }
@@ -446,7 +599,7 @@ public:
   }
 
   inline TimeUsec DurationUsec(size_t i) const {
-    assert(i < _n_events);
+    assert(i < _max_events);
     auto start_idx = EVENT_START_IDX(i);
     auto end_idx = EVENT_END_IDX(i);
     auto start_us = (*_events)[start_idx] / PSEC_IN_USEC;
@@ -454,12 +607,61 @@ public:
     return end_us - start_us;
   }
 
-  inline void AppendEvent(TimeUsec start_us, TimeUsec end_us) {
-    SetEvent(_next_event_to_set, start_us, end_us);
+  inline TimeUsec StartUsec(size_t i) const {
+    return StartPsec(i)/PSEC_IN_USEC;
+  }
+
+  inline TimePsec StartPsec(size_t i) const {
+    assert(i < _max_events);
+    auto start_idx = EVENT_START_IDX(i);
+    auto start_ps = (*_events)[start_idx];
+    return start_ps;
+  }
+
+  inline TimePsec EndPsec(size_t i) const {
+    assert(i < _max_events);
+    auto end_idx = EVENT_END_IDX(i);
+    auto end_ps = (*_events)[end_idx];
+    return end_ps;
+  }
+
+  inline const std::string& GetEventName(size_t i) const {
+    assert(i < _max_events);
+    assert(_keep_names);
+    return _names[i];
+  }
+
+  inline EventNameID GetEventNameID(size_t i) const {
+    assert(i < _max_events);
+    return _names.ID(i);
+  }
+
+  inline EventNameID AsEventID(const std::string& name) const {
+    return _names.AsID(name);
+  }
+
+  inline const EventName& AsEventName(EventNameID id) const {
+    return _names.AsKey(id);
+  }
+
+  inline bool HasEventID(const std::string& name) const {
+    return _names.HasID(name);
+  }
+
+  inline void AppendEvent(OptionalString name, TimeUsec start_us, TimeUsec end_us) {
+    SetEvent(name, _next_event_to_set, start_us, end_us);
+  }
+
+  inline void AppendEventPsec(OptionalString name, TimePsec start_ps, TimePsec end_ps) {
+    SetEventPsec(name, _next_event_to_set, start_ps, end_ps);
   }
 
   inline size_t size() const {
-    return _n_events;
+    return _next_event_to_set;
+  }
+
+  inline size_t capacity() const {
+    return _max_events;
   }
 
 };
@@ -491,21 +693,65 @@ MyStatus ParseProto(const std::string& file_type, const std::string& path, Proto
 }
 
 
+//class OverheadCounter {
+//  public:
+//    // 1) Read JSON.
+//    // 2) Generate overhead events.
+//    //   a) Simple event types: only need EOTimes to insert, don't need event_name
+//    //      (i.e. DON'T need to re-read raw files)
+//    //      - CATEGORY_PROF_PYTHON_ANNOTATION: Python annotations
+//    //      - CATEGORY_PROF_PYTHON_INTERCEPTION: Python -> C-library interception
+//    //      - CATEGORY_PROF_LD_PRELOAD: LD_PRELOAD
+//    //   b) Complex event types: need event_name, so we need to re-read raw files,
+//    //      OR provide an option to record operation event-names;
+//    //      we can encode unique operation names as integer id's (bitset if we want to be hardcore).
+//    //      This will make storing way more efficient.
+//    //      - CATEGORY_PROF_CUPTI: CUPTI
+//};
 
 
 class CategoryTimesCount {
 public:
-  std::map<CategoryKey, size_t> num_events;
+  using CountMap = std::map<CategoryKey, size_t>;
+  CountMap num_events;
+  CountMap extra_num_events;
 
-  inline void Add(const CategoryKey& category_key, size_t n_events) {
+  inline void _Add(CountMap* cmap, const CategoryKey& category_key, size_t n_events) {
     // NOTE: if num_events[category_key] will default to zero if its not inside the map.
-    num_events[category_key] += n_events;
+    (*cmap)[category_key] += n_events;
+  }
+  inline void Add(const CategoryKey& category_key, size_t n_events) {
+    _Add(&num_events, category_key, n_events);
+  }
+  inline void AddExtra(const CategoryKey& category_key, size_t n_events) {
+    _Add(&extra_num_events, category_key, n_events);
+  }
+
+  inline size_t _Count(const CountMap& cmap, const CategoryKey& category_key) const {
+    return cmap.at(category_key);
+  }
+  inline size_t Count(const CategoryKey& category_key) const {
+    return _Count(num_events, category_key);
+  }
+  inline size_t CountExtra(const CategoryKey& category_key) const {
+    return _Count(extra_num_events, category_key);
+  }
+
+  inline bool _Contains(const CountMap& cmap, const CategoryKey& category_key) const {
+    return cmap.count(category_key) == 0;
+  }
+  inline bool Contains(const CategoryKey& category_key) const {
+    return _Contains(num_events, category_key);
+  }
+  inline bool ContainsExtra(const CategoryKey& category_key) const {
+    return _Contains(extra_num_events, category_key);
   }
 
   void _AddToCategoryTimes(const CategoryTimesCount& ctimes);
 
   friend CategoryTimesCount operator+(const CategoryTimesCount& left, const CategoryTimesCount& right);
   CategoryTimesCount& operator+=(const CategoryTimesCount& rhs);
+  void _Print(const CountMap& cmap, const std::string& name, std::ostream& out, int indent) const;
   void Print(std::ostream& out, int indent) const;
   DECLARE_PRINT_DEBUG
   DECLARE_PRINT_OPERATOR(CategoryTimesCount)
@@ -585,9 +831,64 @@ void PrintValue(std::ostream& os, const std::map<K, V>& value) {
   os << "}";
 }
 
+template <typename Iterable,
+//    typename Func, typename KeyFunc,
+    typename Key>
+void EachMerged(const std::vector<Iterable>& vec_of_xs
+    // Func func,
+
+    , std::function<void(const Iterable&, size_t)> func
+    , std::function<Key(const Iterable&, size_t)> key_func
+
+//    , Func func
+//    , KeyFunc key_func
+
+    ) {
+  using namespace Eigen;
+
+  using IdxArray = Array<size_t, Dynamic, 1>;
+  size_t k = vec_of_xs.size();
+  IdxArray index = IdxArray::Zero(k);
+
+  IdxArray lengths = IdxArray(k);
+  {
+    int i = 0;
+    for (const auto& xs : vec_of_xs) {
+      lengths(i) = xs.size();
+      i += 1;
+    }
+  }
+
+  while ((index < lengths).any()) {
+    // Find the non-empty category with the next minimum start/end time.
+    int min_i = -1;
+    Key min_key;
+    for (int i = 0; i < index.size(); i++) {
+      // Check we haven't exhausted the intervals in the category.
+      if (index(i) < lengths(i)) {
+        // Non-empty category.
+        // auto x = get_func(vec_of_xs[i], index(i));
+        Key key = key_func(vec_of_xs[i], index(i));
+        if (min_i == -1 || key < min_key) {
+          min_i = i;
+          min_key = key;
+        }
+      }
+    }
+
+    assert(min_i != -1);
+    func(vec_of_xs[min_i], index(min_i));
+    index(min_i) += 1;
+  }
+}
+
 class CategoryTimes {
 public:
-  std::map<CategoryKey, EOEvents> eo_times;
+  using EOTimes = std::map<CategoryKey, EOEvents>;
+  EOTimes eo_times;
+  // Extra EOEvents data that WON'T be used during overlap computation.
+  // Useful for storing additional data needed for inserting overhead events.
+  EOTimes extra_eo_times;
   Process process;
 
   CategoryTimes() = default;
@@ -595,6 +896,15 @@ public:
   inline size_t size() const {
     return eo_times.size();
   }
+  size_t TotalEvents() const;
+
+  void Preallocate(const CategoryKey& category_key, size_t n_events);
+  void PreallocateExtra(const CategoryKey& category_key, size_t n_events);
+  void _Preallocate(EOTimes* eo_times, const CategoryKey& category_key, size_t n_events);
+
+  size_t _Count(const EOTimes& eo_times, const CategoryKey& category_key) const;
+  size_t Count(const CategoryKey& category_key) const;
+  size_t CountExtra(const CategoryKey& category_key) const;
 
   void Print(std::ostream& out, int indent) const;
   DECLARE_PRINT_DEBUG
@@ -660,6 +970,15 @@ struct EntireTraceMeta {
   {
   }
 };
+
+//struct IParserMeta {
+//  RLSFileType file_type;
+//  IParserMeta() : file_type(UNKNOWN_FILE) {
+//  }
+//  IParserMeta(RLSFileType file_type_) : file_type(file_type_) {
+//  }
+//};
+
 struct TraceFileMeta {
   std::string path;
 
@@ -669,6 +988,8 @@ struct TraceFileMeta {
   Phase phase;
   TraceID trace_id;
   RLSFileType file_type;
+
+//  std::shared_ptr<IParserMeta> parser_meta;
 
   bool initialized;
 
@@ -744,13 +1065,32 @@ public:
 
 class RawTraceParser {
 public:
+  std::shared_ptr<SimpleTimer> timer;
   std::string _iml_directory;
   TraceFileWalker _walker;
 
-  RawTraceParser(const std::string& iml_directory) :
+  std::string _cupti_overhead_json_path;
+  std::string _LD_PRELOAD_overhead_json_path;
+  std::string _pyprof_overhead_json_path;
+
+  nlohmann::json _cupti_overhead_json;
+  nlohmann::json _LD_PRELOAD_overhead_json;
+  nlohmann::json _pyprof_overhead_json;
+
+  bool _has_calibration_files;
+
+  RawTraceParser(const std::string& iml_directory,
+      const std::string& cupti_overhead_json,
+      const std::string& LD_PRELOAD_overhead_json,
+      const std::string& pyprof_overhead_json) :
       _iml_directory(iml_directory),
-      _walker(_iml_directory)
+      _walker(_iml_directory),
+      _cupti_overhead_json_path(cupti_overhead_json),
+      _LD_PRELOAD_overhead_json_path(LD_PRELOAD_overhead_json),
+      _pyprof_overhead_json_path(pyprof_overhead_json),
+      _has_calibration_files(false)
   {
+
   }
   // ASSUMPTION: all events i have category.events[i].start_us <= category.events[i+1].start_us
   // Q: What do we do if this assumption FAILS?
@@ -808,6 +1148,11 @@ public:
           EntireTraceMeta meta;
           status = this->ReadEntireTrace(machine, process, phase,
                                           &category_times, &meta);
+          if (timer) {
+            std::stringstream ss;
+            ss << "ReadEntireTrace(machine=" << meta.machine << ", process=" << meta.process << ", phase=" << meta.phase << ")";
+            timer->EndOperation(ss.str());
+          }
           IF_BAD_STATUS_RETURN(status);
           status = func(category_times, meta);
           IF_BAD_STATUS_RETURN(status);
@@ -823,6 +1168,27 @@ public:
       const Phase& phase,
       CategoryTimes* category_times,
       EntireTraceMeta* entire_meta);
+
+  MyStatus _AppendOverheadEvents(
+      const Machine& machine,
+      const Process& process,
+      const Phase& phase,
+      CategoryTimes *category_times);
+  MyStatus _AppendOverhead_CUPTI_and_LD_PRELOAD(
+      const Machine& machine,
+      const Process& process,
+      const Phase& phase,
+      CategoryTimes *category_times);
+  MyStatus _AppendOverhead_PYTHON_INTERCEPTION(
+      const Machine& machine,
+      const Process& process,
+      const Phase& phase,
+      CategoryTimes *category_times);
+  MyStatus _AppendOverhead_PYTHON_ANNOTATION(
+      const Machine& machine,
+      const Process& process,
+      const Phase& phase,
+      CategoryTimes *category_times);
 
 //  CategoryTimes RawTraceParser::ReadEntireTrace(const std::string& iml_directory) {
 //  }
@@ -842,6 +1208,7 @@ public:
   virtual MyStatus CountCategoryTimes(CategoryTimesCount* count) = 0;
   virtual MyStatus AppendCategoryTimes(CategoryTimes* out_category_times) = 0;
   virtual MyStatus Init() = 0;
+//  virtual std::shared_ptr<IParserMeta> GetParserMeta() = 0;
 
   virtual const Machine& get_machine() const = 0;
   virtual const Process& get_process() const = 0;
@@ -862,6 +1229,8 @@ public:
   Phase _phase;
 
   bool _initialized;
+
+//  std::shared_ptr<IParserMeta> _parser_meta;
 
   IEventFileProtoParser(const std::string& path, RLSFileType file_type, const std::string& proto_nickname) :
       _path(path),
@@ -906,6 +1275,10 @@ public:
     return MyStatus::OK();
   }
 
+//  virtual std::shared_ptr<IParserMeta> GetParserMeta() override {
+//    return _parser_meta;
+//  }
+
   MyStatus AppendCategoryTimes(CategoryTimes* out_category_times) {
     MyStatus status = MyStatus::OK();
     ProtoKlass proto;
@@ -918,7 +1291,6 @@ public:
     MyStatus status = ParseProto(_proto_nickname, path, proto);
     IF_BAD_STATUS_RETURN(status);
     if (!_initialized) {
-      _initialized;
       status = _InitFromProto(*proto);
       IF_BAD_STATUS_RETURN(status);
       _initialized = true;
@@ -946,11 +1318,11 @@ public:
     status = this->_CountCategoryTimes(&count, proto);
     IF_BAD_STATUS_RETURN(status);
 
-    if (SPDLOG_ACTIVE_LEVEL <= SPDLOG_LEVEL_DEBUG) {
+    if (SHOULD_DEBUG(FEATURE_LOAD_DATA)) {
       std::stringstream ss;
       ss << "\n";
       count.Print(ss, 1);
-      SPDLOG_DEBUG(ss.str());
+      DBG_LOG("{}", ss.str());
     }
 
     *out_category_times = std::move(CategoryTimes(get_process(), count));
@@ -980,12 +1352,26 @@ MyStatus GetRLSEventParser(const std::string& path, std::unique_ptr<IEventFilePa
 
 class CategoryEventsParser : public IEventFileProtoParser<iml::CategoryEventsProto> {
 public:
+  static const RLSFileType FILE_TYPE = RLSFileType::CATEGORY_EVENTS_FILE;
   using ProtoKlass = iml::CategoryEventsProto;
+
+//  struct ParserMeta : IParserMeta {
+//    // How many operation events are there BEFORE we apply EachOpEvent.
+//    size_t num_CATEGORY_OPERATION;
+//    // eo_events for CATEGORY_OPERATION BEFORE we apply EachOpEvent.
+//    EOEvents eo_CATEGORY_OPERATION;
+//    ParserMeta() :
+//        IParserMeta(FILE_TYPE),
+//        num_CATEGORY_OPERATION(0)
+//    {
+//    }
+//  };
+
+
   CategoryEventsParser(const std::string& path) :
       IEventFileProtoParser<iml::CategoryEventsProto>(path, RLSFileType::CATEGORY_EVENTS_FILE, "category_events")
   {
   }
-
 
   virtual MyStatus _CountCategoryTimes(CategoryTimesCount* count, const ProtoKlass& proto) override;
   MyStatus _CountCategoryTimesOperation(CategoryTimesCount* count, const ProtoKlass& proto);
@@ -995,6 +1381,8 @@ public:
 
   MyStatus _AppendCategory(const Category& category, const ProtoKlass& proto, EOEvents* eo_events);
 
+//  DECLARE_GET_PARSER_META
+
   // PROBLEM:
   // - we need to determine ahead of time how many events we need to read so we can preallocate an array.
   // - to do this, we need to load each protobuf file.
@@ -1003,6 +1391,14 @@ public:
 
 class CUDAAPIStatsParser : public IEventFileProtoParser<iml::CUDAAPIPhaseStatsProto> {
 public:
+  static const RLSFileType FILE_TYPE = RLSFileType::CUDA_API_STATS_FILE;
+//  struct ParserMeta : IParserMeta {
+//    ParserMeta() :
+//        IParserMeta(FILE_TYPE)
+//    {
+//    }
+//  };
+
   using ProtoKlass = iml::CUDAAPIPhaseStatsProto;
   CUDAAPIStatsParser(const std::string& path) :
       IEventFileProtoParser<ProtoKlass>(path, RLSFileType::CUDA_API_STATS_FILE, "cuda_api_stats")
@@ -1013,10 +1409,19 @@ public:
   virtual MyStatus _CountCategoryTimes(CategoryTimesCount* count, const ProtoKlass& proto) override;
   virtual MyStatus _AppendCategoryTimes(CategoryTimes* out_category_times, const ProtoKlass& proto) override;
   virtual MyStatus _InitFromProto(const ProtoKlass& proto) override;
+
+//  DECLARE_GET_PARSER_META
+
 };
 
 class CUDADeviceEventsParser : public IEventFileProtoParser<iml::MachineDevsEventsProto> {
 public:
+  static const RLSFileType FILE_TYPE = RLSFileType::CUDA_DEVICE_EVENTS_FILE;
+//  struct ParserMeta : IParserMeta {
+//    ParserMeta() :
+//        IParserMeta(FILE_TYPE) {
+//    }
+//  };
   using ProtoKlass = iml::MachineDevsEventsProto;
   CUDADeviceEventsParser(const std::string& path) :
       IEventFileProtoParser<ProtoKlass>(path, RLSFileType::CUDA_DEVICE_EVENTS_FILE, "cuda_device_events")
@@ -1026,6 +1431,9 @@ public:
   virtual MyStatus _CountCategoryTimes(CategoryTimesCount* count, const ProtoKlass& proto) override;
   virtual MyStatus _AppendCategoryTimes(CategoryTimes* out_category_times, const ProtoKlass& proto) override;
   virtual MyStatus _InitFromProto(const ProtoKlass& proto) override;
+
+//  DECLARE_GET_PARSER_META
+
 };
 
 MyStatus GetTraceID(const std::string& path, TraceID* trace_id);
@@ -1089,6 +1497,8 @@ public:
   }
   OverlapResult ComputeOverlap(bool keep_empty_time = false) const;
 };
+
+MyStatus ReadJson(std::string path, nlohmann::json* j);
 
 }
 

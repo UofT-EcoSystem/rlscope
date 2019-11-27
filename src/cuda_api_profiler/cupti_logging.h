@@ -56,19 +56,6 @@ void printActivity(const CUpti_Activity *record);
 //  }
 //}
 
-class SimpleTimer {
-public:
-  using TimeUsec = int64;
-  std::string _name;
-  std::map<std::string, TimeUsec> _op_duration_usec;
-  TimeUsec _last_time_usec;
-  SimpleTimer(const std::string& name);
-
-  void ResetStartTime();
-  void EndOperation(const std::string& operation);
-  void Print(std::ostream& out, int indent);
-
-};
 
 }
 
