@@ -10,6 +10,9 @@
 
 #include <ostream>
 #include <map>
+#include <set>
+#include <vector>
+#include <list>
 
 namespace tensorflow {
 
@@ -41,6 +44,10 @@ public:
     return true;
   }
   int &operator[] (int);
+
+  ID LastID() const {
+    return _next_id - 1;
+  }
 
 //  V& operator[](const K& index) // for non-const objects: can be used for assignment
 //  {
@@ -86,6 +93,7 @@ public:
   using MetricValue = float;
   using TimeUsec = int64_t;
   std::string _name;
+  std::ostream* _out;
 
   OrderedMap<std::string, TimeUsec> _op_duration_usec;
   OrderedMap<std::string, MetricValue> _metrics;
@@ -97,6 +105,8 @@ public:
   TimeUsec _start_time_usec;
   SimpleTimer(const std::string& name);
 
+  void MakeVerbose(std::ostream* out);
+
   void ResetStartTime();
   double TotalTimeSec() const;
   void EndOperation(const std::string& operation);
@@ -105,7 +115,97 @@ public:
 
 };
 
-std::ostream& PrintIndent(std::ostream& out, int indent);
+
+//std::ostream& PrintIndent(std::ostream& out, int indent);
+template <typename OStream>
+OStream& PrintIndent(OStream& out, int indent) {
+  for (int i = 0; i < indent; i++) {
+    out << "  ";
+  }
+  return out;
+}
+
+//// NOTE: this result in a "multiple definition" compilation error; not sure why.
+//template <>
+//void PrintValue<std::string>(std::ostream& os, const std::string& value) {
+//  os << "\"" << value << "\"";
+//}
+
+template <typename OStream, typename T>
+void PrintValue(OStream& os, const T& value) {
+//template <typename T>
+//void PrintValue(std::ostream& os, const T& value) {
+  os << value;
+}
+
+//template <typename T>
+//void PrintValue(std::ostream& os, const std::set<T>& value) {
+template <typename OStream, typename T>
+void PrintValue(OStream& os, const std::set<T>& value) {
+  os << "{";
+  size_t i = 0;
+  for (auto const& val : value) {
+    if (i > 0) {
+      os << ", ";
+    }
+    PrintValue(os, val);
+    i += 1;
+  }
+  value.size();
+  os << "}";
+}
+
+// template <typename T>
+// void PrintValue(std::ostream& os, const std::list<T>& value) {
+template <typename OStream, typename T>
+void PrintValue(OStream& os, const std::list<T>& value) {
+  os << "[";
+  size_t i = 0;
+  for (auto const& val : value) {
+    if (i > 0) {
+      os << ", ";
+    }
+    PrintValue(os, val);
+    i += 1;
+  }
+  value.size();
+  os << "]";
+}
+// template <typename T>
+// void PrintValue(std::ostream& os, const std::vector<T>& value) {
+template <typename OStream, typename T>
+void PrintValue(OStream& os, const std::vector<T>& value) {
+  os << "[";
+  size_t i = 0;
+  for (auto const& val : value) {
+    if (i > 0) {
+      os << ", ";
+    }
+    PrintValue(os, val);
+    i += 1;
+  }
+  value.size();
+  os << "]";
+}
+
+// template <typename K, typename V>
+// void PrintValue(std::ostream& os, const std::map<K, V>& value) {
+template <typename OStream, typename K, typename V>
+void PrintValue(OStream& os, const std::map<K, V>& value) {
+  os << "{";
+  size_t i = 0;
+  for (auto const& pair : value) {
+    if (i > 0) {
+      os << ", ";
+    }
+    PrintValue(os, pair.first);
+    os << "=";
+    PrintValue(os, pair.second);
+    i += 1;
+  }
+  value.size();
+  os << "}";
+}
 
 }
 

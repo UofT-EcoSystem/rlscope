@@ -16,6 +16,7 @@
 #include <assert.h>
 
 #include <spdlog/spdlog.h>
+#include <spdlog/fmt/ostr.h>
 #include <boost/filesystem.hpp>
 
 // NOTE: not until gcc 7.1 (7.4.0 in Ubuntu 18.04); use boost::optional instead.
@@ -400,9 +401,35 @@ public:
            && (lhs.non_ops == rhs.non_ops);
   }
 
-  void Print(std::ostream& out, int indent) const;
   DECLARE_PRINT_DEBUG
-  DECLARE_PRINT_OPERATOR(CategoryKey)
+  // DECLARE_PRINT_OPERATOR(CategoryKey)
+
+  template <typename OStream>
+  void Print(OStream& out, int indent) const {
+    PrintIndent(out, indent);
+    out << "CategoryKey(procs=";
+
+    PrintValue(out, this->procs);
+
+    out << ", ";
+    out << "ops=";
+    PrintValue(out, this->ops);
+
+    out << ", ";
+    out << "non_ops=";
+    PrintValue(out, this->non_ops);
+
+    out << ")";
+  }
+
+
+  template <typename OStream>
+  friend OStream &operator<<(OStream &os, const CategoryKey &obj)
+  {
+    obj.Print(os, 0);
+    return os;
+  }
+
 };
 using CategoryIdxMap = IdxMaps<size_t, CategoryKey>;
 
@@ -548,7 +575,9 @@ public:
   EOEvents() :
       _max_events(0),
       _next_event_to_set(0),
-      _keep_names(false) {
+      _events(new std::vector<TimeUsec>()),
+      _keep_names(false)
+  {
   }
   EOEvents(size_t n_events, bool keep_names) :
       _max_events(n_events)
@@ -568,6 +597,9 @@ public:
   // Return read-only raw pointer to array of times.
   // NOTE: be careful, since the lifetime of this pointer is still managed by std::shared_ptr!
   inline const TimeUsec* RawPtr() const {
+    // NOTE: if you get a segfault here, it's because you've default-constructed EOEvents() instead of calling
+    // EOEvents(size_t n_events).
+    // Perhaps you accidentally inserted a map key when calling eo_times[key]?
     return _events->data();
   }
 
@@ -759,78 +791,6 @@ public:
 };
 
 
-template <typename T>
-void PrintValue(std::ostream& os, const T& value) {
-  os << value;
-}
-
-//// NOTE: this result in a "multiple definition" compilation error; not sure why.
-//template <>
-//void PrintValue<std::string>(std::ostream& os, const std::string& value) {
-//  os << "\"" << value << "\"";
-//}
-
-template <typename T>
-void PrintValue(std::ostream& os, const std::set<T>& value) {
-  os << "{";
-  size_t i = 0;
-  for (auto const& val : value) {
-    if (i > 0) {
-      os << ", ";
-    }
-    PrintValue(os, val);
-    i += 1;
-  }
-  value.size();
-  os << "}";
-}
-
-template <typename T>
-void PrintValue(std::ostream& os, const std::list<T>& value) {
-  os << "[";
-  size_t i = 0;
-  for (auto const& val : value) {
-    if (i > 0) {
-      os << ", ";
-    }
-    PrintValue(os, val);
-    i += 1;
-  }
-  value.size();
-  os << "]";
-}
-template <typename T>
-void PrintValue(std::ostream& os, const std::vector<T>& value) {
-  os << "[";
-  size_t i = 0;
-  for (auto const& val : value) {
-    if (i > 0) {
-      os << ", ";
-    }
-    PrintValue(os, val);
-    i += 1;
-  }
-  value.size();
-  os << "]";
-}
-
-template <typename K, typename V>
-void PrintValue(std::ostream& os, const std::map<K, V>& value) {
-  os << "{";
-  size_t i = 0;
-  for (auto const& pair : value) {
-    if (i > 0) {
-      os << ", ";
-    }
-    PrintValue(os, pair.first);
-    os << "=";
-    PrintValue(os, pair.second);
-    i += 1;
-  }
-  value.size();
-  os << "}";
-}
-
 template <typename Iterable,
 //    typename Func, typename KeyFunc,
     typename Key>
@@ -902,6 +862,29 @@ public:
   void PreallocateExtra(const CategoryKey& category_key, size_t n_events);
   void _Preallocate(EOTimes* eo_times, const CategoryKey& category_key, size_t n_events);
 
+  // // Writable events, create if it doesn't exist.
+  // EOEvents& eo_events = category_times->MutableEvents(key);
+  // // Read-only events, create if it doesn't exist.
+  // const EOEvents& eo_events = category_times->Events(key);
+  //
+  // // Same as above, but don't assume it exists, and don't create it if it doesn't.
+  // boost::optional<EOEvents&> eo_events = category_times->MaybeMutableEvents(key);
+  // boost::optional<const EOEvents&> eo_events = category_times->MaybeEvents(key);
+  const EOEvents& Events(const CategoryKey& category_key);
+  EOEvents& MutableEvents(const CategoryKey& category_key);
+  boost::optional<const EOEvents&> MaybeEvents(const CategoryKey& category_key) const;
+  boost::optional<EOEvents&> MaybeMutableEvents(const CategoryKey& category_key);
+
+  const EOEvents& EventsExtra(const CategoryKey& category_key);
+  EOEvents& MutableEventsExtra(const CategoryKey& category_key);
+  boost::optional<const EOEvents&> MaybeEventsExtra(const CategoryKey& category_key) const;
+  boost::optional<EOEvents&> MaybeMutableEventsExtra(const CategoryKey& category_key);
+
+  const EOEvents& _Events(EOTimes* eo_times, const CategoryKey& category_key);
+  EOEvents& _MutableEvents(EOTimes* eo_times, const CategoryKey& category_key);
+  boost::optional<const EOEvents&> _MaybeEvents(const EOTimes& eo_times, const CategoryKey& category_key) const;
+  boost::optional<EOEvents&> _MaybeMutableEvents(EOTimes* eo_times, const CategoryKey& category_key);
+
   size_t _Count(const EOTimes& eo_times, const CategoryKey& category_key) const;
   size_t Count(const CategoryKey& category_key) const;
   size_t CountExtra(const CategoryKey& category_key) const;
@@ -933,7 +916,7 @@ public:
     for (auto const& pair : category_times.eo_times) {
       auto idx = idx_map->Idx(pair.first);
       CategoryKeyBitset category(idx, idx_map);
-      eo_times[category] = category_times.eo_times.at(pair.first);
+      eo_times[category] = pair.second;
     }
   }
   CategoryTimesBitset() = default;
@@ -1148,11 +1131,6 @@ public:
           EntireTraceMeta meta;
           status = this->ReadEntireTrace(machine, process, phase,
                                           &category_times, &meta);
-          if (timer) {
-            std::stringstream ss;
-            ss << "ReadEntireTrace(machine=" << meta.machine << ", process=" << meta.process << ", phase=" << meta.phase << ")";
-            timer->EndOperation(ss.str());
-          }
           IF_BAD_STATUS_RETURN(status);
           status = func(category_times, meta);
           IF_BAD_STATUS_RETURN(status);

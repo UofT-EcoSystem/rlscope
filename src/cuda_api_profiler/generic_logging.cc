@@ -9,14 +9,20 @@
 
 #include <assert.h>
 #include <ostream>
+#include <iostream>
 
 namespace tensorflow {
 
 SimpleTimer::SimpleTimer(const std::string& name) :
     _name(name),
+    _out(nullptr),
     _last_time_usec(0),
     _start_time_usec(0)
 {
+}
+
+void SimpleTimer::MakeVerbose(std::ostream* out) {
+  _out = out;
 }
 
 void SimpleTimer::ResetStartTime() {
@@ -39,7 +45,12 @@ void SimpleTimer::EndOperation(const std::string& operation) {
   auto now_us = TimeNowMicros();
   assert(_last_time_usec != 0);
   // _op_duration_usec[operation] = now_us - _last_time_usec;
-  _op_duration_usec.Set(operation, now_us - _last_time_usec);
+  auto duration_us = now_us - _last_time_usec;
+  _op_duration_usec.Set(operation, duration_us);
+  if (_out) {
+    MetricValue duration_sec = static_cast<MetricValue>(duration_us) / static_cast<MetricValue>(USEC_IN_SEC);
+    (*_out) << "[" << _op_duration_usec.LastID() << "] name=\"" << operation << "\"" << " = " << duration_sec << " sec" << std::endl;
+  }
   _last_time_usec = now_us;
 }
 
@@ -91,13 +102,6 @@ void SimpleTimer::Print(std::ostream& out, int indent) {
 void SimpleTimer::RecordThroughput(const std::string& metric_name, MetricValue metric) {
   // _metrics[metric_name] = metric;
   _metrics.Set(metric_name, metric);
-}
-
-std::ostream &PrintIndent(std::ostream &out, int indent) {
-  for (int i = 0; i < indent; i++) {
-    out << "  ";
-  }
-  return out;
 }
 
 }

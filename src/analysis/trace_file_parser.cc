@@ -100,13 +100,17 @@ MyStatus CategoryEventsParser::_CountCategoryTimes(CategoryTimesCount* count, co
   for (const auto& pair : proto.category_events()) {
     size_t number_of_events = pair.second.events().size();
     const auto& category = pair.first;
-//    DBG_LOG("CategoryEventsParser::_CountCategoryTimes category={}, n_events={}", category, number_of_events);
+    if (SHOULD_DEBUG(FEATURE_LOAD_DATA)) {
+      DBG_LOG("Count category={}, n_events={}", category, number_of_events);
+    }
     if (category == CATEGORY_OPERATION) {
       status = _CountCategoryTimesOperation(count, proto);
       IF_BAD_STATUS_RETURN(status);
     } else {
       auto category_key = CategoryKey::FromCategory(get_process(), category);
       size_t n_events = pair.second.events().size();
+      // Q: is this a requirement...?
+      assert(n_events > 0);
       count->Add(category_key, n_events);
     }
   }
@@ -244,7 +248,7 @@ MyStatus CategoryEventsParser::_AppendCategoryTimes(CategoryTimes* out_category_
 //
 //        assert(false);
 //      }
-      EOEvents& eo_events = out_category_times->eo_times.at(category_key);
+      EOEvents& eo_events = out_category_times->MutableEvents(category_key);
       status = _AppendCategory(category, proto, &eo_events);
       IF_BAD_STATUS_RETURN(status);
     }
@@ -263,7 +267,7 @@ MyStatus CategoryEventsParser::_AppendCategoryOperation(const Category& category
 //  auto* parser_meta = GetParserMetaDerived();
 //  parser_meta->eo_CATEGORY_OPERATION = std::move(EOEvents(parser_meta->num_CATEGORY_OPERATION, true));
   auto extra_op_category_key = CategoryKey::FromCategory(process, CATEGORY_EXTRA_OPERATION);
-  auto& extra_op_events = out_category_times->extra_eo_times.at(extra_op_category_key);
+  auto& extra_op_events = out_category_times->MutableEventsExtra(extra_op_category_key);
   status = EachEvent(events, [&extra_op_events] (const EventName& name, TimeUsec start_us, TimeUsec end_us) {
     extra_op_events.AppendEvent(name, start_us, end_us);
     return MyStatus::OK();
@@ -276,7 +280,8 @@ MyStatus CategoryEventsParser::_AppendCategoryOperation(const Category& category
       events,
       [&process, out_category_times] (const Operation& op, TimeUsec start_us, TimeUsec end_us) {
         auto category_key = CategoryKey::FromOpEvent(process, op);
-        out_category_times->eo_times.at(category_key).AppendEvent(op, start_us, end_us);
+        auto& eo_events = out_category_times->MutableEvents(category_key);
+        eo_events.AppendEvent(op, start_us, end_us);
       });
   return MyStatus::OK();
 }
@@ -303,7 +308,7 @@ MyStatus CUDAAPIStatsParser::_AppendCategoryTimes(CategoryTimes* out_category_ti
   MyStatus status = MyStatus::OK();
   const std::string category = CATEGORY_CUDA_API_CPU;
   auto category_key = CategoryKey::FromCategory(get_process(), category);
-  EOEvents& eo_events = out_category_times->eo_times.at(category_key);
+  EOEvents& eo_events = out_category_times->MutableEvents(category_key);
   const auto& events = proto.events();
 
   for (const auto& event : events) {
@@ -329,7 +334,7 @@ MyStatus CUDADeviceEventsParser::_CountCategoryTimes(CategoryTimesCount* count, 
 MyStatus CUDADeviceEventsParser::_AppendCategoryTimes(CategoryTimes* out_category_times, const CUDADeviceEventsParser::ProtoKlass& proto) {
   const std::string category = CATEGORY_GPU;
   auto category_key = CategoryKey::FromCategory(get_process(), category);
-  EOEvents& eo_events = out_category_times->eo_times.at(category_key);
+  EOEvents& eo_events = out_category_times->MutableEvents(category_key);
   for (const auto& dev_events_pair : proto.dev_events()) {
     const auto& dev = dev_events_pair.first;
     const auto& events = dev_events_pair.second.events();
@@ -377,8 +382,64 @@ void CategoryTimes::PreallocateExtra(const CategoryKey& category_key, size_t n_e
   _Preallocate(&extra_eo_times, category_key, n_events);
 }
 
+const EOEvents& CategoryTimes::Events(const CategoryKey& category_key) {
+  return _Events(&eo_times, category_key);
+}
+EOEvents& CategoryTimes::MutableEvents(const CategoryKey& category_key) {
+  return _MutableEvents(&eo_times, category_key);
+}
+boost::optional<const EOEvents&> CategoryTimes::MaybeEvents(const CategoryKey& category_key) const {
+  return _MaybeEvents(eo_times, category_key);
+}
+boost::optional<EOEvents&> CategoryTimes::MaybeMutableEvents(const CategoryKey& category_key) {
+  return _MaybeMutableEvents(&eo_times, category_key);
+}
+
+
+const EOEvents& CategoryTimes::EventsExtra(const CategoryKey& category_key) {
+  return _Events(&extra_eo_times, category_key);
+}
+EOEvents& CategoryTimes::MutableEventsExtra(const CategoryKey& category_key) {
+  return _MutableEvents(&extra_eo_times, category_key);
+}
+boost::optional<const EOEvents&> CategoryTimes::MaybeEventsExtra(const CategoryKey& category_key) const {
+  return _MaybeEvents(extra_eo_times, category_key);
+}
+boost::optional<EOEvents&> CategoryTimes::MaybeMutableEventsExtra(const CategoryKey& category_key) {
+  return _MaybeMutableEvents(&extra_eo_times, category_key);
+}
+
+const EOEvents& CategoryTimes::_Events(EOTimes* eo_times, const CategoryKey& category_key) {
+  return (*eo_times)[category_key];
+}
+EOEvents& CategoryTimes::_MutableEvents(EOTimes* eo_times, const CategoryKey& category_key) {
+  return (*eo_times)[category_key];
+}
+boost::optional<const EOEvents&> CategoryTimes::_MaybeEvents(const EOTimes& eo_times, const CategoryKey& category_key) const {
+  auto it = eo_times.find(category_key);
+  boost::optional<const EOEvents&> events;
+  if (it != eo_times.end()) {
+    events = it->second;
+  }
+  return events;
+}
+boost::optional<EOEvents&> CategoryTimes::_MaybeMutableEvents(EOTimes* eo_times, const CategoryKey& category_key) {
+  auto it = eo_times->find(category_key);
+  boost::optional<EOEvents&> events;
+  if (it != eo_times->end()) {
+    events = it->second;
+  }
+  return events;
+}
+
+
+
 size_t CategoryTimes::_Count(const EOTimes& eo_times, const CategoryKey& category_key) const {
-  return eo_times.at(category_key).size();
+  auto it = eo_times.find(category_key);
+  if (it == eo_times.end()) {
+    return 0;
+  }
+  return it->second.size();
 }
 size_t CategoryTimes::Count(const CategoryKey& category_key) const {
   return _Count(eo_times, category_key);
@@ -390,16 +451,22 @@ size_t CategoryTimes::CountExtra(const CategoryKey& category_key) const {
 CategoryTimes::CategoryTimes(const Process& process_, const CategoryTimesCount& count) :
     process(process_) {
   // Use count to preallocate space.
-  auto preallocate = [] (EOTimes* eo_times, const CategoryTimesCount::CountMap& cmap) {
+  auto preallocate = [] (const std::string& name, EOTimes* eo_times, const CategoryTimesCount::CountMap& cmap) {
     for (const auto& pair : cmap) {
       auto const& category_key = pair.first;
       auto const n_events = pair.second;
       bool keep_names = CategoryShouldKeepNames(category_key);
+      if (SHOULD_DEBUG(FEATURE_LOAD_DATA)) {
+        DBG_LOG("Preallocate({}) category={}, n_events={}",
+            name,
+            category_key,
+            n_events);
+      }
       (*eo_times)[category_key] = EOEvents(n_events, keep_names);
     }
   };
-  preallocate(&eo_times, count.num_events);
-  preallocate(&extra_eo_times, count.extra_num_events);
+  preallocate("eo_times", &eo_times, count.num_events);
+  preallocate("extra_eo_times", &extra_eo_times, count.extra_num_events);
 //  for (const auto& pair : count.num_events) {
 //    auto const& category_key = pair.first;
 //    auto const n_events = pair.second;
@@ -778,12 +845,12 @@ MyStatus RawTraceParser::ReadEntireTrace(
   // Preallocate space for eo_times for this (machine, process, phase).
   *category_times = std::move(CategoryTimes(process, count));
 
-//  if (SHOULD_DEBUG(FEATURE_LOAD_DATA)) {
-//    std::stringstream ss;
-//    ss << "\n";
-//    category_times->PrintSummary(ss, 1);
-//    DBG_LOG("Preallocated: {}", ss.str());
-//  }
+  if (SHOULD_DEBUG(FEATURE_LOAD_DATA)) {
+    std::stringstream ss;
+    ss << "\n";
+    category_times->PrintSummary(ss, 1);
+    DBG_LOG("Preallocated: {}", ss.str());
+  }
 
   for (auto const &meta : metas) {
     std::unique_ptr<IEventFileParser> parser;
@@ -804,6 +871,19 @@ MyStatus RawTraceParser::ReadEntireTrace(
 
   }
 
+  if (SHOULD_DEBUG(FEATURE_LOAD_DATA)) {
+    std::stringstream ss;
+    ss << "\n";
+    category_times->PrintSummary(ss, 1);
+    DBG_LOG("After adding events: {}", ss.str());
+  }
+
+  if (timer) {
+    std::stringstream ss;
+    ss << "ReadEntireTrace(machine=" << machine << ", process=" << process << ", phase=" << phase << ")";
+    timer->EndOperation(ss.str());
+  }
+
   if (_has_calibration_files) {
     // Use calibration files to subtract overhead by "injecting" overhead events.
     status = _AppendOverheadEvents(
@@ -812,6 +892,18 @@ MyStatus RawTraceParser::ReadEntireTrace(
         phase,
         category_times);
     IF_BAD_STATUS_RETURN(status);
+    if (timer) {
+      std::stringstream ss;
+      ss << "AppendOverheadEvents(machine=" << machine << ", process=" << process << ", phase=" << phase << ")";
+      timer->EndOperation(ss.str());
+    }
+  }
+
+  if (SHOULD_DEBUG(FEATURE_LOAD_DATA)) {
+    std::stringstream ss;
+    ss << "\n";
+    category_times->PrintSummary(ss, 1);
+    DBG_LOG("After adding overhead events: {}", ss.str());
   }
 
   return MyStatus::OK();
@@ -855,9 +947,9 @@ MyStatus RawTraceParser::_AppendOverhead_CUPTI_and_LD_PRELOAD(
   auto n_cuda_api_events = category_times->Count(CUDA_API_category_key);
   category_times->Preallocate(LD_PRELOAD_category_key, n_cuda_api_events);
   category_times->Preallocate(CUPTI_category_key, n_cuda_api_events);
-  auto& CUDA_API_events = category_times->eo_times.at(CUDA_API_category_key);
-  auto& LD_PRELOAD_events = category_times->eo_times.at(LD_PRELOAD_category_key);
-  auto& CUPTI_events = category_times->eo_times.at(CUPTI_category_key);
+  auto& CUDA_API_events = category_times->MutableEvents(CUDA_API_category_key);
+  auto& LD_PRELOAD_events = category_times->MutableEvents(LD_PRELOAD_category_key);
+  auto& CUPTI_events = category_times->MutableEvents(CUPTI_category_key);
 
   // cuda_api_id => mean_time_us
   std::map<EventNameID, double> cupti_overhead_ps;
@@ -946,7 +1038,10 @@ MyStatus RawTraceParser::_AppendOverhead_PYTHON_INTERCEPTION(
   auto& prof_events = category_times->eo_times.at(category_key);
   std::vector<EOEvents> clib_eo_events;
   for (auto const& category : CATEGORIES_C_EVENTS) {
-    clib_eo_events.push_back(category_times->eo_times[CategoryKey::FromCategory(process, category)]);
+    auto it = category_times->eo_times.find(CategoryKey::FromCategory(process, category));
+    if (it != category_times->eo_times.end()) {
+      clib_eo_events.push_back(it->second);
+    }
   }
   auto func = [per_pyprof_interception_us, &prof_events] (const EOEvents& events, size_t i) {
     TimePsec start_ps = events.EndPsec(i) + (per_pyprof_interception_us * PSEC_IN_USEC);
@@ -972,10 +1067,10 @@ MyStatus RawTraceParser::_AppendOverhead_PYTHON_ANNOTATION(
   double per_pyprof_annotation_overhead_us = _pyprof_overhead_json["mean_pyprof_annotation_overhead_per_call_us"];
   auto category_key = CategoryKey::FromCategory(process, CATEGORY_PROF_PYTHON_ANNOTATION);
   auto ops_key = CategoryKey::FromCategory(process, CATEGORY_EXTRA_OPERATION);
-  auto const& ops_events = category_times->extra_eo_times.at(ops_key);
+  auto const& ops_events = category_times->MutableEventsExtra(ops_key);
   assert(ops_events.size() > 0);
   category_times->Preallocate(category_key, ops_events.size());
-  auto& prof_events = category_times->eo_times.at(category_key);
+  auto& prof_events = category_times->MutableEvents(category_key);
   for (size_t i = 0; i < ops_events.size(); i++) {
     TimePsec start_ps = ops_events.StartPsec(i);
     TimePsec end_ps = start_ps + (per_pyprof_annotation_overhead_us * PSEC_IN_USEC);
@@ -1078,23 +1173,6 @@ MyStatus GetTraceID(const std::string& path, TraceID* trace_id) {
   auto parsed_trace_id =  StringToNumber<TraceID>(trace_str);
   *trace_id = parsed_trace_id;
   return MyStatus::OK();
-}
-
-void CategoryKey::Print(std::ostream& out, int indent) const {
-  PrintIndent(out, indent);
-  out << "CategoryKey(procs=";
-
-  PrintValue(out, this->procs);
-
-  out << ", ";
-  out << "ops=";
-  PrintValue(out, this->ops);
-
-  out << ", ";
-  out << "non_ops=";
-  PrintValue(out, this->non_ops);
-
-  out << ")";
 }
 
 void CategoryKeyBitset::Print(std::ostream& out, int indent) const {
@@ -1322,7 +1400,7 @@ void OverlapResult::Print(std::ostream& out, int indent) const {
   }
 }
 
-DEFINE_PRINT_OPERATOR(CategoryKey)
+//DEFINE_PRINT_OPERATOR(CategoryKey)
 DEFINE_PRINT_OPERATOR(CategoryKeyBitset)
 DEFINE_PRINT_OPERATOR(EOEvents)
 DEFINE_PRINT_OPERATOR(CategoryTimesCount)

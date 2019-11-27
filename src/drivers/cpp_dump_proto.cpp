@@ -220,6 +220,7 @@ int main(int argc, char** argv) {
     auto parser = mk_parser();
     std::shared_ptr<SimpleTimer> timer(new SimpleTimer("mode_overlap"));
     timer->ResetStartTime();
+    timer->MakeVerbose(&std::cout);
     parser.timer = timer;
     size_t n_total_events = 0;
     parser.EachEntireTrace([timer, &n_total_events] (const CategoryTimes& category_times, const EntireTraceMeta& meta) {
