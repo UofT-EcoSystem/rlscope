@@ -1188,8 +1188,12 @@ class CorrectedTrainingTimeTask(luigi.Task):
 
 class PyprofOverheadTask(luigi.Task):
     uninstrumented_directory = luigi.ListParameter(description="IML directory that ran with 'iml-prof --config uninstrumented train.py --iml-disable --iml-training-progress'")
-    pyprof_annotations_directory = luigi.ListParameter(description="IML directory that ran with 'iml-prof --config uninstrumented train.py --iml-disable-tfprof --iml-disable-pyprof-interceptions --iml-training-progress'")
-    pyprof_interceptions_directory = luigi.ListParameter(description="IML directory that ran with 'iml-prof --config uninstrumented train.py --iml-disable-tfprof --iml-disable-pyprof-annotations --iml-training-progress'")
+    # pyprof_annotations_directory = luigi.ListParameter(description="IML directory that ran with 'iml-prof --config uninstrumented train.py --iml-disable-tfprof --iml-disable-pyprof-interceptions --iml-training-progress'")
+    # pyprof_interceptions_directory = luigi.ListParameter(description="IML directory that ran with 'iml-prof --config uninstrumented train.py --iml-disable-tfprof --iml-disable-pyprof-annotations --iml-training-progress'")
+
+    pyprof_annotations_directory = luigi.ListParameter(description="IML directory that ran with 'iml-prof --config uninstrumented train.py --iml-disable-tfprof --iml-disable-pyprof-interceptions --iml-training-progress'", default=None)
+    pyprof_interceptions_directory = luigi.ListParameter(description="IML directory that ran with 'iml-prof --config uninstrumented train.py --iml-disable-tfprof --iml-disable-pyprof-annotations --iml-training-progress'", default=None)
+
     directory = luigi.Parameter(description="Output directory", default=".")
 
     # Plot attrs

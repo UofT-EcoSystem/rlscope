@@ -228,17 +228,63 @@ run_calibration_all() {
     run_subtraction_validation "$@"
 }
 
+NUM_REPS=5
 run_subtraction_validation() {
+    if [ $# -lt 2 ]; then
+        echo "ERROR: Saw $# arguments, but expect:"
+        echo "  run_subtraction_validation <algo> <environ>"
+        return 1
+    fi
+    # Default in the past: (HalfCheetahBulletEnv-v0, ppo2)
+    local algo="$1"
+    local environ="$2"
+    shift 2
     _cmd() {
-        _do iml-quick-expr "${RUN_DEBUG_ARGS[@]}" --expr subtraction_validation --calibration-mode validation --repetitions 3 --only-runs 2 --env HalfCheetahBulletEnv-v0 --algo ppo2 "$@"
+        _do iml-quick-expr "${RUN_DEBUG_ARGS[@]}" --expr subtraction_validation --calibration-mode validation --repetitions $NUM_REPS --only-runs 2 --env "$environ" --algo "$algo" "$@"
     }
     _cmd "$@"
     _cmd "$@" --plot
 }
 
+run_pyprof_calibration_fig_algorithm_choice_1a_med_complexity() {
+    iml-quick-expr --expr microbenchmark --algo-env-group algorithm_choice_1a_med_complexity "$@"
+}
+
+run_pyprof_calibration_fig_environment_choice() {
+    iml-quick-expr --expr microbenchmark --algo-env-group environment_choice "$@"
+}
+
+run_pyprof_calibration_iterations_20000() {
+    iml-quick-expr --expr microbenchmark --env HalfCheetahBulletEnv-v0 --algo ppo2 --iterations $((2*10**4)) "$@"
+}
+
+run_pyprof_calibration_all() {
+    run_pyprof_calibration_fig_environment_choice "$@"
+    run_pyprof_calibration_fig_algorithm_choice_1a_med_complexity "$@"
+    run_pyprof_calibration_iterations_20000 "$@"
+}
+
 run_subtraction_calibration() {
+#    if [ $# -lt 2 ]; then
+#        echo "ERROR: Saw $# arguments, but expect:"
+#        echo "  run_subtraction_calibration <algo> <environ>"
+#        return 1
+#    fi
+#    # Default in the past: (HalfCheetahBulletEnv-v0, ppo2)
+#    local algo="$1"
+#    local environ="$2"
+#    shift 2
+
+    if [ $# -eq 0 ]; then
+        echo "ERROR: Saw $# arguments, but expected arguments that select specific (algo, env) combinations like:"
+        echo "  run_subtraction_calibration --algo ppo2 --env HalfCheetahBulletEnv-v0"
+        echo "  run_subtraction_calibration --algo ppo2 --env Walker2DBulletEnv-v0"
+        echo "  run_subtraction_calibration --algo-env-group environment_choice"
+        return 1
+    fi
+
     _cmd() {
-        _do iml-quick-expr "${RUN_DEBUG_ARGS[@]}" --expr subtraction_validation --calibration-mode calibration --repetitions 3 --only-runs 2 --env HalfCheetahBulletEnv-v0 --algo ppo2 "$@"
+        _do iml-quick-expr "${RUN_DEBUG_ARGS[@]}" --expr subtraction_validation --calibration-mode calibration --repetitions $NUM_REPS --only-runs 2 "$@"
     }
     _cmd "$@"
     _cmd "$@" --plot
@@ -246,7 +292,7 @@ run_subtraction_calibration() {
 
 run_subtraction_validation_long() {
     _cmd() {
-        _do iml-quick-expr "${RUN_DEBUG_ARGS[@]}" --expr subtraction_validation --calibration-mode validation --repetitions 3 --env HalfCheetahBulletEnv-v0 --algo ppo2 "$@"
+        _do iml-quick-expr "${RUN_DEBUG_ARGS[@]}" --expr subtraction_validation --calibration-mode validation --repetitions $NUM_REPS --env HalfCheetahBulletEnv-v0 --algo ppo2 "$@"
     }
     # - Run using long iterations (most important...)
     # - Re-plot stuff.

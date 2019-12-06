@@ -246,13 +246,9 @@ def main():
         e.g. for --repetition 1, --config instrumented
         $IML_DIR/output/iml_bench/all/config_instrumented_repetition_01
         """.rstrip()))
+
     parser.add_argument('--algo-env-group',
-                        choices=['on_vs_off_policy',
-                                 'environment_choice',
-                                 'algorithm_choice_1a_med_complexity',
-                                 'algorithm_choice_1b_low_complexity',
-                                 'all_rl_workloads',
-                                 'debug_expr'],
+                        choices=expr_config.ALGO_ENV_GROUP_CHOICES,
                         help=textwrap.dedent("""
         Only run a specific "experiment".
         i.e. only run (algo, env) combinations needed for a specific graph.

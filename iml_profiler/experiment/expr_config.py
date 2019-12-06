@@ -5,6 +5,15 @@ import gym
 import re
 import logging
 
+ALGO_ENV_GROUP_CHOICES = [
+    'on_vs_off_policy',
+    'environment_choice',
+    'algorithm_choice_1a_med_complexity',
+    'algorithm_choice_1b_low_complexity',
+    'all_rl_workloads',
+    'debug_expr',
+]
+
 STABLE_BASELINES_ANNOTATED_ALGOS = [
     'ppo2',
     'dqn',

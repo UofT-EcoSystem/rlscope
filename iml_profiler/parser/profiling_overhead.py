@@ -1,5 +1,6 @@
 import logging
 import copy
+import numpy as np
 import itertools
 import argparse
 from decimal import Decimal
@@ -902,9 +903,81 @@ class CallInterceptionOverheadParser:
 
 
 class PyprofOverheadCalculation:
-    def __init__(self, df, json):
+    def __init__(self, df, json, num_field):
         self.df = df
         self.json = json
+        self.num_field = num_field
+
+    def num_calls(self):
+        return self.df[self.num_field]
+
+class MicrobenchmarkOverheadJSON:
+    def __init__(self, path):
+        self.path = path
+        self._load_json()
+
+    def _load_json(self):
+        js = load_json(self.path)
+        for k in list(js.keys()):
+            if type(js[k]) == list:
+                js[k] = np.array(js[k])
+        self.js = js
+
+    def dump(self):
+        js = dict()
+        for key, value in self.js.items():
+            if isinstance(value, np.ndarray) or isinstance(value, pd.Series):
+                js[key] = list(value)
+            else:
+                js[key] = value
+
+        do_dump_json(js, self.path)
+
+    def __getitem__(self, item):
+        return self.js[item]
+
+    def __setitem__(self, key, value):
+        self.js[key] = value
+
+    def __contains__(self, item):
+        return item in self.js
+
+    def __len__(self, item):
+        return len(self.js)
+
+def parse_microbench_overhead_js(field_name, uninstrumented_json_path, instrumented_json_path):
+    """
+    Summarized format:
+    {
+        "mean_pyprof_annotation_overhead_per_call_us": 23.5408,
+        "num_pyprof_annotation_overhead_per_call_us": 5,
+        "std_pyprof_annotation_overhead_per_call_us": 0.5474806261412359
+    }
+    Raw iteration format:
+    {
+        "pyprof_annotation_overhead_per_call_us": [23, 21, 22, ...],
+        "num_pyprof_annotation_overhead_per_call_us": 5,
+    }
+    """
+    # mean_overhead_us = ins['time_sec_per_iteration']*USEC_IN_SEC - unins['time_sec_per_iteration']*USEC_IN_SEC
+    uninstrumented_json = MicrobenchmarkOverheadJSON(uninstrumented_json_path)
+    instrumented_json = MicrobenchmarkOverheadJSON(instrumented_json_path)
+
+    # instrumented_json['overhead_per_call_us'] -
+    # uninstrumented_json['overhead_per_call_us']
+    overhead_per_call_us = \
+        ( instrumented_json['iterations_total_sec'] - uninstrumented_json['iterations_total_sec'] )*USEC_IN_SEC / \
+        instrumented_json['iterations_total_num_calls']
+    num_field = "num_{field}".format(field=field_name)
+    mean_field = "mean_{field}".format(field=field_name)
+    std_field = "std_{field}".format(field=field_name)
+    js = {
+        field_name: list(overhead_per_call_us),
+        num_field: len(overhead_per_call_us),
+        mean_field: np.mean(overhead_per_call_us),
+        std_field: np.std(overhead_per_call_us),
+    }
+    return js
 
 class PyprofOverheadParser:
     """
@@ -929,9 +1002,9 @@ class PyprofOverheadParser:
     """
     def __init__(self,
                  uninstrumented_directory,
-                 pyprof_annotations_directory,
-                 pyprof_interceptions_directory,
-                 directory,
+                 pyprof_annotations_directory=None,
+                 pyprof_interceptions_directory=None,
+                 directory=None,
                  width=None,
                  height=None,
                  debug=False,
@@ -945,12 +1018,16 @@ class PyprofOverheadParser:
         self.uninstrumented_directory = uninstrumented_directory
         self.pyprof_annotations_directory = pyprof_annotations_directory
         self.pyprof_interceptions_directory = pyprof_interceptions_directory
+        assert directory is not None
         self.directory = directory
         self.width = width
         self.height = height
         self.debug = debug
         self.debug_single_thread = debug_single_thread
         self.filename_prefix = 'category_events'
+
+        self._training_duration_colnames = ['training_duration_us', 'training_duration_us_unins']
+
 
     @staticmethod
     def get_total_intercepted_calls(reader):
@@ -964,9 +1041,15 @@ class PyprofOverheadParser:
     def get_overhead_field(reader):
         return reader.total_op_events()
 
-    def compute_overhead(self, config, instrumented_directory,
+    @staticmethod
+    def compute_overhead(config,
+                         uninstrumented_directory,
+                         instrumented_directory,
                          name, get_num_field,
-                         mapper_cb=None):
+                         mapper_cb=None,
+                         debug=False,
+                         debug_single_thread=False,
+                         ):
         """
         Given an instrumented_directory and uninstrumented_directory, join row-by-row,
         and compute the delta in training_duration_us to get "total profiling overhead".
@@ -975,7 +1058,7 @@ class PyprofOverheadParser:
 
         # assert name in ['op', 'event']
 
-        unins_df = pd.concat(get_training_durations_df(self.uninstrumented_directory, debug=self.debug, debug_single_thread=self.debug_single_thread))
+        unins_df = pd.concat(get_training_durations_df(uninstrumented_directory, debug=debug, debug_single_thread=debug_single_thread))
         unins_df['config'] = 'uninstrumented'
 
         # e.g. num_<pyprof_interception>s
@@ -985,9 +1068,9 @@ class PyprofOverheadParser:
 
         ins_dfs = []
         for directory in instrumented_directory:
-            training_duration_us = get_training_durations(directory, debug=self.debug, debug_single_thread=self.debug_single_thread)
+            training_duration_us = get_training_durations(directory, debug=debug, debug_single_thread=debug_single_thread)
 
-            pyprof_mapper = DataframeMapper(PyprofDataframeReader, directories=[directory], debug=self.debug)
+            pyprof_mapper = DataframeMapper(PyprofDataframeReader, directories=[directory], debug=debug)
             if mapper_cb:
                 mapper_cb(pyprof_mapper)
 
@@ -1031,8 +1114,98 @@ class PyprofOverheadParser:
         # mean_pyprof_interception_overhead_per_call_us
         # mean_pyprof_annotation_overhead_per_call_us
 
-        calc = PyprofOverheadCalculation(df, json)
+        calc = PyprofOverheadCalculation(df, json, num_field=num_field)
         return calc
+
+    @staticmethod
+    def check_no_interceptions(pyprof_mapper):
+        total_intercepted_calls = pyprof_mapper.map_one(PyprofOverheadParser.get_total_intercepted_calls)
+        assert total_intercepted_calls == 0
+
+    @staticmethod
+    def check_no_annotations(pyprof_mapper):
+        total_annotations = pyprof_mapper.map_one(PyprofOverheadParser.get_total_annotations)
+        assert total_annotations == 0
+
+    @staticmethod
+    def compute_interception_overhead(
+        uninstrumented_directory,
+        instrumented_directory,
+        debug=False,
+        debug_single_thread=False):
+        pyprof_interceptions_calc = PyprofOverheadParser.compute_overhead(
+            'pyprof_interceptions',
+            uninstrumented_directory,
+            instrumented_directory,
+            'pyprof_interception',
+            PyprofOverheadParser.get_total_intercepted_calls,
+            mapper_cb=PyprofOverheadParser.check_no_annotations,
+            debug=debug,
+            debug_single_thread=debug_single_thread,
+        )
+        return pyprof_interceptions_calc
+
+    def run_interceptions(self):
+        sns_kwargs = get_sns_kwargs()
+        plt_kwargs = get_plt_kwargs()
+
+        pyprof_interceptions_calc = PyprofOverheadParser.compute_interception_overhead(
+            self.uninstrumented_directory,
+            self.pyprof_interceptions_directory,
+            debug=self.debug,
+            debug_single_thread=self.debug_single_thread,
+        )
+
+        pyprof_interceptions_df = dataframe_replace_us_with_sec(pyprof_interceptions_calc.df, colnames=self._training_duration_colnames)
+        output_csv(pyprof_interceptions_df, self._pyprof_interception_csv_path, sort_by=['pyprof_interception_overhead_us'])
+
+        fig, ax = self._plot(x='x_field', y=overhead_per_call_colname('pyprof_interception'), data=pyprof_interceptions_df, sns_kwargs=sns_kwargs)
+        ax.set_title(r'Python $\rightarrow$ C-library interception overhead')
+        ax.set_ylabel('Time per interception (us)')
+        ax.set_xlabel('(algo, env)')
+        save_plot(fig, ax, png_path=self._pyprof_interception_png_path)
+
+        return pyprof_interceptions_calc
+
+    @staticmethod
+    def compute_annotation_overhead(
+        uninstrumented_directory,
+        instrumented_directory,
+        debug=False,
+        debug_single_thread=False):
+        pyprof_annotations_calc = PyprofOverheadParser.compute_overhead(
+            'pyprof_annotations',
+            uninstrumented_directory,
+            instrumented_directory,
+            'pyprof_annotation',
+            PyprofOverheadParser.get_total_annotations,
+            mapper_cb=PyprofOverheadParser.check_no_interceptions,
+            debug=debug,
+            debug_single_thread=debug_single_thread,
+        )
+        return pyprof_annotations_calc
+
+    def run_annotations(self):
+        sns_kwargs = get_sns_kwargs()
+        plt_kwargs = get_plt_kwargs()
+
+        pyprof_annotations_calc = PyprofOverheadParser.compute_annotation_overhead(
+            self.uninstrumented_directory,
+            self.pyprof_annotations_directory,
+            debug=self.debug,
+            debug_single_thread=self.debug_single_thread,
+        )
+
+        pyprof_annotations_df = dataframe_replace_us_with_sec(pyprof_annotations_calc.df, colnames=self._training_duration_colnames)
+        output_csv(pyprof_annotations_df, self._pyprof_annotation_csv_path, sort_by=['pyprof_annotation_overhead_us'])
+
+        fig, ax = self._plot(x='x_field', y=overhead_per_call_colname('pyprof_annotation'), data=pyprof_annotations_df, sns_kwargs=sns_kwargs)
+        ax.set_title(r'Python annotation overhead')
+        ax.set_ylabel('Time per annotation (us)')
+        ax.set_xlabel('(algo, env)')
+        save_plot(fig, ax, png_path=self._pyprof_annotation_png_path)
+
+        return pyprof_annotations_calc
 
     def run(self):
         """
@@ -1087,62 +1260,50 @@ class PyprofOverheadParser:
         }
         """
 
-        sns_kwargs = get_sns_kwargs()
-        plt_kwargs = get_plt_kwargs()
+        pyprof_annotations_calc = None
+        pyprof_interceptions_calc = None
 
-        def check_no_interceptions(pyprof_mapper):
-            total_intercepted_calls = pyprof_mapper.map_one(PyprofOverheadParser.get_total_intercepted_calls)
-            assert total_intercepted_calls == 0
-        pyprof_annotations_calc = self.compute_overhead(
-            'pyprof_annotations', self.pyprof_annotations_directory, 'pyprof_annotation', PyprofOverheadParser.get_total_annotations,
-            mapper_cb=check_no_interceptions)
-        def check_no_annotations(pyprof_mapper):
-            total_annotations = pyprof_mapper.map_one(PyprofOverheadParser.get_total_annotations)
-            assert total_annotations == 0
-        pyprof_interceptions_calc = self.compute_overhead(
-            'pyprof_interceptions', self.pyprof_interceptions_directory, 'pyprof_interception', PyprofOverheadParser.get_total_intercepted_calls,
-            mapper_cb=check_no_annotations)
+        def has_files(opt):
+            return opt is not None
 
-        json = merge_jsons([pyprof_annotations_calc.json, pyprof_interceptions_calc.json])
-        logging.info("Output json @ {path}".format(path=self._json_path))
-        do_dump_json(json, self._json_path)
+        jsons = []
+        if has_files(self.pyprof_annotations_directory):
+            pyprof_annotations_calc = self.run_annotations()
+            jsons.append(pyprof_annotations_calc.json)
 
-        training_duration_colnames = ['training_duration_us', 'training_duration_us_unins']
+            path = self._python_annotation_json_path
+            logging.info("Output json @ {path}".format(path=path))
+            do_dump_json(pyprof_annotations_calc.json, path)
 
-        pyprof_annotations_df = dataframe_replace_us_with_sec(pyprof_annotations_calc.df, colnames=training_duration_colnames)
-        output_csv(pyprof_annotations_df, self._pyprof_annotation_csv_path, sort_by=['pyprof_annotation_overhead_us'])
+        if has_files(self.pyprof_interceptions_directory):
+            pyprof_interceptions_calc = self.run_interceptions()
+            jsons.append(pyprof_interceptions_calc.json)
 
-        pyprof_interceptions_df = dataframe_replace_us_with_sec(pyprof_interceptions_calc.df, colnames=training_duration_colnames)
-        output_csv(pyprof_interceptions_df, self._pyprof_interception_csv_path, sort_by=['pyprof_interception_overhead_us'])
+            path = self._clib_interception_json_path
+            logging.info("Output json @ {path}".format(path=path))
+            do_dump_json(pyprof_interceptions_calc.json, path)
 
-        def _plot(x='x_field', y=None, data=None):
-            assert y is not None
-            assert data is not None
-            if self.width is not None and self.height is not None:
-                figsize = (self.width, self.height)
-                logging.info("Setting figsize = {fig}".format(fig=figsize))
-            else:
-                figsize = None
-            # This is causing XIO error....
-            fig = plt.figure(figsize=figsize)
+        if pyprof_interceptions_calc is not None and pyprof_interceptions_calc is not None:
+            json = merge_jsons(jsons)
+            logging.info("Output json @ {path}".format(path=self._json_path))
+            do_dump_json(json, self._json_path)
 
-            ax = fig.add_subplot(111)
-            sns.barplot(x=x, y=y, data=data, ax=ax,
-                        **sns_kwargs)
-            ax.legend().set_title(None)
-            return fig, ax
+    def _plot(self, x='x_field', y=None, data=None, sns_kwargs=dict()):
+        assert y is not None
+        assert data is not None
+        if self.width is not None and self.height is not None:
+            figsize = (self.width, self.height)
+            logging.info("Setting figsize = {fig}".format(fig=figsize))
+        else:
+            figsize = None
+        # This is causing XIO error....
+        fig = plt.figure(figsize=figsize)
 
-        fig, ax = _plot(x='x_field', y=overhead_per_call_colname('pyprof_interception'), data=pyprof_interceptions_df)
-        ax.set_title(r'Python $\rightarrow$ C-library interception overhead')
-        ax.set_ylabel('Time per interception (us)')
-        ax.set_xlabel('(algo, env)')
-        save_plot(fig, ax, png_path=self._pyprof_interception_png_path)
-
-        fig, ax = _plot(x='x_field', y=overhead_per_call_colname('pyprof_annotation'), data=pyprof_annotations_df)
-        ax.set_title(r'Python annotation overhead')
-        ax.set_ylabel('Time per annotation (us)')
-        ax.set_xlabel('(algo, env)')
-        save_plot(fig, ax, png_path=self._pyprof_annotation_png_path)
+        ax = fig.add_subplot(111)
+        sns.barplot(x=x, y=y, data=data, ax=ax,
+                    **sns_kwargs)
+        ax.legend().set_title(None)
+        return fig, ax
 
     @property
     def _pyprof_annotation_csv_path(self):
@@ -1167,6 +1328,16 @@ class PyprofOverheadParser:
     @property
     def _json_path(self):
         return _j(self.directory, "{prefix}.json".format(
+            prefix=self.filename_prefix))
+
+    @property
+    def _clib_interception_json_path(self):
+        return _j(self.directory, "{prefix}.python_clib_interception.json".format(
+            prefix=self.filename_prefix))
+
+    @property
+    def _python_annotation_json_path(self):
+        return _j(self.directory, "{prefix}.python_annotation.json".format(
             prefix=self.filename_prefix))
 
 class TotalTrainingTimeParser:
@@ -1288,7 +1459,7 @@ class TotalTrainingTimeParser:
         # mean_pyprof_interception_overhead_per_call_us
         # mean_pyprof_annotation_overhead_per_call_us
 
-        calc = PyprofOverheadCalculation(df, json)
+        calc = PyprofOverheadCalculation(df, json, num_field=num_field)
         return calc
 
     def run(self):

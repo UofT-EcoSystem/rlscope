@@ -4,6 +4,9 @@ import pprint
 from glob import glob
 import textwrap
 import os
+import sys
+import numpy as np
+import pandas as pd
 from os import environ as ENV
 import json
 import functools
@@ -16,6 +19,13 @@ from iml_profiler.profiler.concurrent import ForkedProcessPool
 from iml_profiler.scripts import bench
 from iml_profiler.experiment import expr_config
 from iml_profiler.parser.dataframe import IMLConfig
+from iml_profiler.parser.profiling_overhead import \
+    parse_microbench_overhead_js, \
+    DataframeMapper, \
+    PyprofDataframeReader, \
+    PyprofOverheadParser, \
+    MicrobenchmarkOverheadJSON
+
 
 # ( set -e; set -x; iml-quick-expr --expr total_training_time --repetitions 3 --bullet; )
 # ( set -e; set -x; iml-quick-expr --expr total_training_time --repetitions 3 --bullet --plot; )
@@ -85,6 +95,10 @@ class QuickExpr:
         expr_total_training_time = ExprTotalTrainingTime(quick_expr=self, argv=extra_argv)
         expr_total_training_time.run()
 
+    def expr_microbenchmark(self, extra_argv):
+        expr_microbenchmark = ExprMicrobenchmark(quick_expr=self, argv=extra_argv)
+        expr_microbenchmark.run()
+
     def run(self):
         expr_func_name = "expr_{expr}".format(expr=self.args.expr)
         if not hasattr(self, expr_func_name):
@@ -118,6 +132,7 @@ def main():
             'subtraction_validation',
             'total_training_time',
             'plot_fig',
+            'microbenchmark',
         ],
         required=True,
         help=textwrap.dedent("""
@@ -134,9 +149,9 @@ def main():
     # to be fully functional.
     # Even if we could...you probably don't want to log your pdb session
     # and all its color-codes anyway.
-    # parser.add_argument(
-    #     '--pdb',
-    #     action='store_true')
+    parser.add_argument(
+        '--pdb',
+        action='store_true')
     parser.add_argument('--debug-single-thread',
                         action='store_true',
                         help=textwrap.dedent("""
@@ -183,9 +198,22 @@ def main():
         """))
 
     args, extra_argv = parser.parse_known_args()
-    quick_expr = QuickExpr(args, extra_argv)
-    quick_expr.run()
+    if args.pdb:
+        args.debug_single_thread = True
 
+    quick_expr = QuickExpr(args, extra_argv)
+
+    try:
+        quick_expr.run()
+    except Exception as e:
+        if not args.pdb:
+            raise
+        print("> IML: Detected exception:")
+        print(e)
+        print("> Entering pdb:")
+        import ipdb
+        ipdb.post_mortem()
+        raise
 
 class ExprSubtractionValidationConfig:
     def __init__(self, expr, algo, env, iml_prof_config, config_suffix, script_args=[], long_run=False):
@@ -214,13 +242,24 @@ class ExprSubtractionValidationConfig:
             ))
 
     def to_string(self):
-        return ("ExprSubtractionValidationConfig("
+        return ("{klass}("
                 "iml_prof_config='{iml_prof_config}'"
-                ", config_suffix='{config_suffix}'"
+                "config_suffix='{config_suffix}'"
+                ", algo='{algo}'"
+                ", env='{env}'"
                 ")").format(
+            klass=self.__class__.__name__,
             iml_prof_config=self.iml_prof_config,
             config_suffix=self.config_suffix,
+            algo=self.algo,
+            env=self.env,
         )
+
+    def __str__(self):
+        return self.to_string()
+
+    def __repr__(self):
+        return self.to_string()
 
     def logfile(self, rep, iters):
         logfile = _j(self.out_dir(rep, iters), "logfile.out")
@@ -379,6 +418,785 @@ class ExprTotalTrainingTimeConfig:
             iml_directory = self.out_dir(rep)
             iml_directories.append(iml_directory)
         return iml_directories
+
+class ExprMicrobenchmarkConfig:
+    def __init__(self, expr, algo, env, mode, config, iml_prof_config='uninstrumented', config_suffix=None, script_args=[]):
+        self.mode = mode
+        self.expr = expr
+        self.config = config
+        self.quick_expr = self.expr.quick_expr
+        # $ iml-prof --config ${iml_prof_config}
+        # NOTE: we want to run with IML disabled; we just want to know the total training time WITHOUT IML.
+        self.iml_prof_config = iml_prof_config
+        assert config_suffix is not None
+        self.config_suffix = config_suffix
+        # $ python train.py --iml-directory config_${config_suffix}
+        # self.config_suffix = self.iml_prof_config
+        self.script_args = script_args
+        self.algo = algo
+        self.env = env
+
+    def out_dir(self):
+        return _j(
+            self.expr.out_dir,
+            self.algo,
+            self.env,
+            self.config_suffix,
+            "iterations_{i}".format(i=self.expr.args.iterations),
+        )
+
+    def to_string(self):
+        return ("{klass}("
+                "config_suffix='{config_suffix}'"
+                ", algo='{algo}'"
+                ", env='{env}'"
+                ", mode='{mode}'"
+                ")").format(
+            klass=self.__class__.__name__,
+            config_suffix=self.config_suffix,
+            algo=self.algo,
+            env=self.env,
+            mode=self.mode,
+        )
+
+    def __str__(self):
+        return self.to_string()
+
+    def __repr__(self):
+        return self.to_string()
+
+    def logfile(self, rep):
+        logfile = _j(self.out_dir(), self.mode, "logfile.repetition_{r:02}.out".format(
+            r=rep))
+        return logfile
+
+    def _get_cmd(self, rep, extra_argv=[]):
+        cmd = ['iml-prof',
+               '--config', self.iml_prof_config,
+               'python', 'enjoy.py',
+
+               # IMPORTANT: When we run with "--config uninstrumented" during calibrations runs, we STILL want to
+               # keep "python interceptions" and "python annotations" enabled, so we can measure their overhead in
+               # in isolation!
+               '--iml-calibration',
+               # '--iml-directory', _a(self.out_dir(rep)),
+               '--iml-directory', _a(self.out_dir()),
+               # '--iml-max-timesteps', iters,
+               '--iml-training-progress',
+               '--iml-delay',
+
+               '--mode', self.mode,
+
+               '--repetition', rep,
+               '--iterations', self.expr.args.iterations,
+
+               '--algo', self.algo,
+               '--env', self.env,
+
+               # '--log-folder', _j(ENV['RL_BASELINES_ZOO_DIR'], 'output'),
+               # '--log-interval', '1',
+               # '--iml-delay',
+               ]
+        # if self.config == 'uninstrumented':
+        #     cmd.extend([
+        #         # NOTE: we want to run with IML disabled; we just want to know the total training time WITHOUT IML.
+        #         '--iml-disable',
+        #     ])
+        cmd.extend(self.script_args)
+        cmd.extend(extra_argv)
+        return cmd
+
+    def run(self, rep, extra_argv=[]):
+        # TODO: this is OpenAI specific; make it work for minigo.
+
+        cmd = self._get_cmd(rep, extra_argv)
+
+        logfile = self.logfile(rep)
+        # logging.info("Logging to file {path}".format(
+        #     path=logfile))
+        expr_run_cmd(
+            cmd=cmd,
+            to_file=logfile,
+            cwd=ENV['RL_BASELINES_ZOO_DIR'],
+            replace=self.quick_expr.args.replace,
+            dry_run=self.quick_expr.args.dry_run,
+            skip_error=self.quick_expr.args.skip_error,
+            debug=self.quick_expr.args.debug)
+
+    def already_ran(self, rep):
+        logfile = self.logfile(rep)
+        return expr_already_ran(logfile, debug=self.quick_expr.args.debug)
+
+    def repetition_out_dir(self, rep):
+        # output/
+        # expr_microbenchmark/
+        # ppo2/
+        # HalfCheetahBulletEnv-v0/
+        # config_mode_microbench_iml_clib_interception_simulator.config_just_pyprof_interceptions/
+        # microbench_iml_clib_interception_simulator/
+        # repetition_01
+
+        # self.quick_expr.out_dir,
+        # self.algo,
+        # self.env,
+        # self.config_suffix,
+        return _j(
+            self.out_dir(),
+            # Specific to directory structure of enjoy.py...
+            self.mode,
+            "repetition_{r:02}".format(r=rep),
+        )
+
+    def microbench_json_path(self):
+        # output/
+        # expr_microbenchmark/
+        # ppo2/
+        # HalfCheetahBulletEnv-v0/
+        # mode_microbench_iml_python_annotation.uninstrumented/
+        # microbench_iml_python_annotation/
+        # microbench_iml_python_annotation.json
+
+        # self.quick_expr.out_dir,
+        # self.algo,
+        # self.env,
+        # self.config_suffix,
+        return _j(
+            self.out_dir(),
+            self.mode,
+            "{mode}.json".format(mode=self.mode),
+        )
+
+    def iml_directories(self):
+        """
+        Return all --iml-directories whose runs are completed.
+        """
+        iml_directories = []
+        for rep in range(1, self.expr.args.repetitions+1):
+            if not self.already_ran(rep):
+                continue
+            iml_directory = self.repetition_out_dir(rep)
+            iml_directories.append(iml_directory)
+        return iml_directories
+
+class ExprMicrobenchmark:
+    def __init__(self, quick_expr, argv):
+        self.quick_expr = quick_expr
+        self.argv = argv
+        self._pool = ForkedProcessPool(name='{klass}.pool'.format(
+            klass=self.__class__.__name__))
+
+    @property
+    def out_dir(self):
+        return _j(self.quick_expr.out_dir)
+
+    @property
+    def plot_dir(self):
+        return _j(
+            self.out_dir,
+            "plot")
+
+    @property
+    def plot_logfile(self):
+        logfile = _j(self.plot_dir, "logfile.out")
+        return logfile
+
+    def run(self):
+        parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+        # parser.add_argument(
+        #     '--bullet',
+        #     action='store_true',
+        #     help='Limit environments to physics-based Bullet environments')
+        # parser.add_argument(
+        #     '--atari',
+        #     action='store_true',
+        #     help='Limit environments to Atari Pong environment')
+        # parser.add_argument(
+        #     '--lunar',
+        #     action='store_true',
+        #     help='Limit environments to LunarLander environments (i.e. LunarLanderContinuous-v2, LunarLander-v2)')
+
+        # parser.add_argument('--mode', help='mode of execution for rl-baselines-zoo enjoy.py microbenchmark mode',
+        #                     choices=[
+        #                         # 'default',
+        #                         'microbench_iml_python_annotation',
+        #                         'microbench_iml_clib_interception_simulator',
+        #                         'microbench_iml_clib_interception_tensorflow',
+        #                     ])
+        parser.add_argument(
+            '--repetitions',
+            type=int,
+            default=5)
+        parser.add_argument(
+            '--iterations',
+            type=int,
+            # (HalfCheetah, ppo2):
+            # - iterations=10**4:        Python->TensorFlow: 27 +/- 1.5
+            # - iterations=$((2*10**4)):
+            default=10**4)
+        parser.add_argument(
+            '--env',
+            # required=True,
+        )
+        parser.add_argument(
+            '--algo',
+            # required=True,
+        )
+        parser.add_argument('--algo-env-group',
+                            choices=expr_config.ALGO_ENV_GROUP_CHOICES,
+                            help=textwrap.dedent("""
+            Only run a specific "experiment".
+            i.e. only run (algo, env) combinations needed for a specific graph.
+            
+            Default: run all (algo, env) combinations for all experiments.
+            """))
+
+        # parser.add_argument(
+        #     '--compute-microbench',
+        #     action='store_true',
+        # )
+
+        # parser.add_argument(
+        #     '--plot',
+        #     action='store_true')
+        # parser.add_argument(
+        #     '--instrumented',
+        #     help="Run in fully instrumented mode (needed for creating \"Overhead correction\" figure)",
+        #     action='store_true')
+
+        self.args, self.extra_argv = parser.parse_known_args(self.argv)
+
+        self.init_configs()
+
+        # if self.args.plot:
+        #     self.do_plot()
+        # else:
+        self.do_run()
+
+    def do_plot(self):
+        """
+        Create bar graph of total training time for each experiment we run:
+        iml_dirs = find_iml_dirs(self.root_dir)
+        $ iml-analyze --task TotalTrainingTimePlot --iml-directories iml-dirs
+        Read data-frame like:
+          algo, env,         x_field, total_training_time_sec
+          ppo2, HalfCheetah, ...,     ...
+          ppo2, HalfCheetah, ...,     ...
+        """
+
+        # TODO:
+        #
+        # PyprofOverheadTask:
+        # - just_pyprof_annotations
+        # - just_pyprof_interceptions
+        # - uninstrumented
+
+        task = 'TotalTrainingTimeTask'
+
+        iml_directories = []
+        for config in self.configs:
+            config_dirs = config.iml_directories()
+            iml_directories.extend(config_dirs)
+
+        if len(iml_directories) == 0:
+            log_missing_files(self, task, files={
+                'iml_directories': iml_directories,
+            })
+            return
+
+        plot_dir = self.plot_dir
+        if not self.quick_expr.args.dry_run:
+            os.makedirs(plot_dir, exist_ok=True)
+        cmd = ['iml-analyze',
+               '--directory', plot_dir,
+               '--task', task,
+               '--uninstrumented-directory', json.dumps(iml_directories),
+               ]
+        add_iml_analyze_flags(cmd, self.quick_expr.args)
+        cmd.extend(self.extra_argv)
+
+        logfile = self.plot_logfile
+        expr_run_cmd(
+            cmd=cmd,
+            to_file=logfile,
+            # Always re-run plotting script?
+            # replace=True,
+            dry_run=self.quick_expr.args.dry_run,
+            skip_error=self.quick_expr.args.skip_error,
+            debug=self.quick_expr.args.debug)
+
+    def conf(self, algo, env, mode, config):
+        config_suffix = self.get_config_suffix(mode, config)
+        return self.config_suffix_to_obj[algo][env][mode][config_suffix]
+        # return self.config_suffix_to_obj[algo][env][mode][config]
+
+    def pyprof_overhead_dir(self, algo, env, mode):
+        return _j(
+            self.out_dir,
+            algo,
+            env,
+            mode,
+            "iterations_{i}".format(i=self.args.iterations),
+            "pyprof_overhead")
+
+    def pyprof_overhead_logfile(self, algo, env, mode):
+        task = "PyprofOverheadTask"
+        logfile = _j(
+            self.pyprof_overhead_dir(algo, env, mode),
+            self._logfile_basename(task),
+        )
+        return logfile
+
+    def _logfile_basename(self, task):
+        return "{task}.logfile.out".format(task=task)
+
+    def is_interception_config(self, config):
+        return re.search('interception', config)
+
+    def is_annotation_config(self, config):
+        return re.search('annotation', config)
+
+    def microbench_add_per_call_us(self, algo, env, mode, config):
+        assert config != 'uninstrumented'
+
+        # Python annotations: read the total number of operations
+        # Python->CLIB: read the total number of Python->C interceptions.
+
+        """
+        PSEUDOCODE:
+        if 'pyprof_annotation_overhead_per_call_us' in js:
+            return
+        js['pyprof_annotation_overhead_per_call_us'] = js['iterations_total_sec'] / ins_df['total_num_calls'}
+        """
+
+        if self.quick_expr.args.dry_run:
+            return
+
+        instrumented_json_path = self.conf(algo, env, mode, config).microbench_json_path()
+        js = MicrobenchmarkOverheadJSON(instrumented_json_path)
+        if 'iterations_total_num_calls' in js:
+            return False
+
+        # uninstrumented_json_path = self.conf(algo, env, mode, 'uninstrumented').microbench_json_path()
+
+        instrumented_iml_dirs = self.conf(algo, env, mode, config).iml_directories()
+        uninstrumented_iml_dirs = self.conf(algo, env, mode, 'uninstrumented').iml_directories()
+
+        if self.is_interception_config(config):
+            compute_overhead_func = PyprofOverheadParser.compute_interception_overhead
+        elif self.is_annotation_config(config):
+            compute_overhead_func = PyprofOverheadParser.compute_annotation_overhead
+        else:
+            raise NotImplementedError()
+        pyprof_overhead_calc = compute_overhead_func(
+            uninstrumented_iml_dirs,
+            instrumented_iml_dirs,
+            debug=self.quick_expr.args.debug,
+            debug_single_thread=self.quick_expr.args.debug_single_thread,
+        )
+
+        js['iterations_total_num_calls'] = pyprof_overhead_calc.num_calls()
+        js['overhead_per_call_us'] = (js['iterations_total_sec']*USEC_IN_SEC)/js['iterations_total_num_calls']
+        js.dump()
+        return True
+
+    def compute_microbench_pyprof_overhead(self, algo, env, mode, config):
+        assert config != 'uninstrumented'
+
+        if self.quick_expr.args.dry_run:
+            return
+
+        self.microbench_add_per_call_us(algo, env, mode, config)
+
+        uninstrumented_json_path = self.conf(algo, env, mode, 'uninstrumented').microbench_json_path()
+        instrumented_json_path = self.conf(algo, env, mode, config).microbench_json_path()
+
+        if self.quick_expr.args.debug:
+            logging.info("log = {msg}".format(
+                msg=pprint_msg({
+                    'uninstrumented_json_path': uninstrumented_json_path,
+                    'instrumented_json_path': instrumented_json_path,
+                })))
+
+        if not _e(uninstrumented_json_path) or \
+           not _e(instrumented_json_path):
+            logging.info(textwrap.dedent("""
+                    {klass}: SKIP compute_microbench_pyprof_overhead;
+                    Files present so far:
+                    {files}
+                    """).format(
+                klass=self.__class__.__name__,
+                files=textwrap.indent(pprint.pformat({
+                    'uninstrumented_json_path': uninstrumented_json_path,
+                    'instrumented_json_path': instrumented_json_path,
+                }), prefix='  '),
+            ))
+            return
+
+        directory = _d(instrumented_json_path)
+        base = self.config_to_overhead_basename[config]
+        json_path = _j(directory, base)
+        field_name = self.config_to_overhead_field_name[config]
+        js = parse_microbench_overhead_js(
+            field_name=field_name,
+            uninstrumented_json_path=uninstrumented_json_path,
+            instrumented_json_path=instrumented_json_path)
+        logging.info("Output json @ {path}".format(path=json_path))
+        do_dump_json(js, json_path)
+
+    def compute_pyprof_overhead(self, algo, env, mode, config):
+        task = "PyprofOverheadTask"
+
+        # if self.quick_expr.args.debug:
+        #     logging.info("log = {msg}".format(
+        #         msg=pprint_msg({
+        #             'iterations': self.iterations,
+        #         })))
+
+        # for iters in self.iterations:
+        # uninstrumented_directories = self.conf(algo, env, mode, 'uninstrumented_calibration').iml_directories()
+        # pyprof_annotations_directories = self.conf(algo, env, mode, 'just_pyprof_annotations_calibration').iml_directories()
+        # pyprof_interceptions_directories = self.conf(algo, env, mode, 'just_pyprof_interceptions_calibration').iml_directories()
+        uninstrumented_directories = self.conf(algo, env, mode, 'uninstrumented').iml_directories()
+        # pyprof_annotations_directories = self.conf(algo, env, mode, 'just_pyprof_annotations').iml_directories()
+        # FAIL: cannot find key:
+        # 'mode_microbench_iml_python_annotation.config_just_pyprof_interceptions'
+        # NOTE: we need to make PyprofOverheadTask JUST output annotation overhead WITHOUT requiring interceptions runs for the same config.
+        # Q: any reason to output them at the same time...?
+        # pyprof_interceptions_directories = self.conf(algo, env, mode, 'just_pyprof_interceptions').iml_directories()
+
+        pyprof_overhead_directories = self.conf(algo, env, mode, config).iml_directories()
+        if self.quick_expr.args.debug:
+            logging.info("log = {msg}".format(
+                msg=pprint_msg({
+                    'uninstrumented_directories': uninstrumented_directories,
+                    'pyprof_overhead_directories': pyprof_overhead_directories,
+                    # 'pyprof_annotations_directories': pyprof_annotations_directories,
+                    # 'pyprof_interceptions_directories': pyprof_interceptions_directories,
+                })))
+
+        if len({
+            len(uninstrumented_directories),
+            len(pyprof_overhead_directories),
+            # len(pyprof_interceptions_directories),
+        }) != 1:
+            log_missing_files(self, task=task, files={
+                'uninstrumented_directories': uninstrumented_directories,
+                'pyprof_overhead_directories': pyprof_overhead_directories,
+                # 'pyprof_annotations_directories': pyprof_annotations_directories,
+                # 'pyprof_interceptions_directories': pyprof_interceptions_directories,
+            })
+            return
+
+        directory = self.pyprof_overhead_dir(algo, env, mode)
+        if not self.quick_expr.args.dry_run:
+            os.makedirs(directory, exist_ok=True)
+        cmd = ['iml-analyze',
+               '--directory', directory,
+               '--task', task,
+               '--uninstrumented-directory', json.dumps(uninstrumented_directories),
+               # '--pyprof-annotations-directory', json.dumps(pyprof_annotations_directories),
+               # '--pyprof-interceptions-directory', json.dumps(pyprof_interceptions_directories),
+               ]
+        if self.is_annotation_config(config):
+            cmd.extend([
+                '--pyprof-annotations-directory', json.dumps(pyprof_overhead_directories),
+            ])
+        elif self.is_interception_config(config):
+            cmd.extend([
+                '--pyprof-interceptions-directory', json.dumps(pyprof_overhead_directories),
+            ])
+        else:
+            raise NotImplementedError()
+        add_iml_analyze_flags(cmd, self.quick_expr.args)
+        cmd.extend(self.extra_argv)
+
+        logfile = self.pyprof_overhead_logfile(algo, env, mode)
+        expr_run_cmd(
+            cmd=cmd,
+            to_file=logfile,
+            # Always re-run plotting script?
+            # replace=True,
+            dry_run=self.quick_expr.args.dry_run,
+            skip_error=self.quick_expr.args.skip_error,
+            debug=self.quick_expr.args.debug)
+
+    def get_config_suffix(self, mode, config):
+        config_suffix = "mode_{mode}.{config}".format(
+            mode=mode,
+            config=config,
+        )
+        return config_suffix
+
+    def init_configs(self):
+        self.configs = []
+        self.config_suffix_to_obj = dict()
+        self.stable_baselines_algo_env = expr_config.stable_baselines_gather_algo_env_pairs(
+            algo=self.args.algo,
+            env_id=self.args.env,
+            # bullet=self.args.bullet,
+            # atari=self.args.atari,
+            # lunar=self.args.lunar,
+            algo_env_group=self.args.algo_env_group,
+            debug=self.quick_expr.args.debug,
+        )
+
+        # MODES = [
+        #     'default',
+        #     'microbench_iml_python_annotation',
+        #     'microbench_iml_clib_interception_simulator',
+        #     'microbench_iml_clib_interception_tensorflow',
+        # ]
+
+        # algo_env_configs = []
+        # def add_calibration_config(**common_kwargs):
+        #     # config_kwargs = dict(common_kwargs)
+        #     # config_kwargs['long_run'] = True
+        #     # config = ExprMicrobenchmarkConfig(**config_kwargs)
+        #     # assert not config.is_calibration
+        #     # if self.args.calibration_mode == 'validation':
+        #     #     # *_calibration folders are used for computing average overhead.
+        #     #     # Folders without the *_calibration are the runs we subtract the averages from.
+        #     #     algo_env_configs.append(config)
+        #
+        #     config_suffix = "{suffix}_calibration".format(
+        #         suffix=common_kwargs['config_suffix'],
+        #     )
+        #     calibration_config_kwargs = dict(common_kwargs)
+        #     calibration_config_kwargs.update(dict(
+        #         # Disable tfprof: CUPTI and LD_PRELOAD.
+        #         config_suffix=config_suffix,
+        #         # long_run=False,
+        #     ))
+        #     calibration_config = ExprMicrobenchmarkConfig(**calibration_config_kwargs)
+        #     # assert calibration_config.is_calibration
+        #     algo_env_configs.append(calibration_config)
+
+        self.config_to_overhead_field_name = {
+            'just_pyprof_annotations': 'pyprof_annotation_overhead_per_call_us',
+            'just_pyprof_interceptions': 'pyprof_interception_overhead_per_call_us',
+            # ... : 'cupti_overhead_per_call_us',
+            # ... : 'interception_overhead_per_call_us',
+        }
+
+        self.config_to_overhead_basename = {
+
+            # category_events.json
+            # cupti_overhead.json
+            # LD_PRELOAD_overhead.json
+
+            # category_events.json
+            # category_events.python_annotation.json
+            # category_events.python_clib_interception.json
+
+            # microbench_iml_clib_interception_simulator.json
+            # microbench_iml_clib_interception_tensorflow.json
+            # microbench_iml_python_annotation.json
+
+            'just_pyprof_annotations': 'category_events.python_annotation.json',
+            'just_pyprof_interceptions': 'category_events.python_clib_interception.json',
+
+        }
+
+        def mk_config_uninstrumented(algo, env, mode):
+            config = 'uninstrumented'
+            return ExprMicrobenchmarkConfig(
+                expr=self,
+                algo=algo,
+                env=env,
+                mode=mode,
+                config=config,
+                iml_prof_config='uninstrumented',
+                config_suffix=self.get_config_suffix(mode=mode, config=config),
+                # Disable ALL pyprof/tfprof stuff.
+                script_args=['--iml-disable'],
+            )
+        def mk_config_just_pyprof_annotations(algo, env, mode):
+
+            # PyprofOverheadTask: Python->C-lib event tracing, and operation annotation overhead correction.
+            config = 'just_pyprof_annotations'
+            return ExprMicrobenchmarkConfig(
+                expr=self,
+                algo=algo,
+                env=env,
+                mode=mode,
+                config=config,
+                iml_prof_config='uninstrumented',
+                config_suffix=self.get_config_suffix(mode=mode, config=config),
+                # Only enable GPU/C-lib event collection, not operation annotations.
+                script_args=['--iml-disable-tfprof', '--iml-disable-pyprof-interceptions'],
+            )
+        def mk_config_just_pyprof_interceptions(algo, env, mode):
+            config = 'just_pyprof_interceptions'
+            return ExprMicrobenchmarkConfig(
+                expr=self,
+                algo=algo,
+                env=env,
+                mode=mode,
+                config=config,
+                iml_prof_config='uninstrumented',
+                config_suffix=self.get_config_suffix(mode=mode, config=config),
+                # Only enable operation annotations, not GPU/C-lib event collection.
+                script_args=['--iml-disable-tfprof', '--iml-disable-pyprof-annotations'],
+            )
+        # add_calibration_config(
+        #     expr=self,
+        #     algo=algo,
+        #     env=env,
+        #     iml_prof_config='uninstrumented',
+        #     # Disable tfprof: CUPTI and LD_PRELOAD.
+        #     config_suffix='just_pyprof_annotations',
+        #     # Only enable GPU/C-lib event collection, not operation annotations.
+        #     script_args=['--iml-disable-tfprof', '--iml-disable-pyprof-interceptions'],
+        # )
+        # add_calibration_config(
+        #     expr=self,
+        #     algo=algo,
+        #     env=env,
+        #     iml_prof_config='uninstrumented',
+        #     # Disable tfprof: CUPTI and LD_PRELOAD.
+        #     config_suffix='just_pyprof_interceptions',
+        #     # Only enable operation annotations, not GPU/C-lib event collection.
+        #     script_args=['--iml-disable-tfprof', '--iml-disable-pyprof-annotations'],
+        # )
+        # # Entirely uninstrumented configuration; we use this in many of the overhead calculations to determine
+        # # how much training time is attributable to the enabled "feature" (e.g. CUPTI activities).
+        # add_calibration_config(
+        #     expr=self,
+        #     algo=algo,
+        #     env=env,
+        #     iml_prof_config='uninstrumented',
+        #     config_suffix='uninstrumented',
+        #     # Disable ALL pyprof/tfprof stuff.
+        #     script_args=['--iml-disable'],
+        # )
+
+        config_suffix_to_mk_config = {
+            'just_pyprof_interceptions': mk_config_just_pyprof_interceptions,
+            'just_pyprof_annotations': mk_config_just_pyprof_annotations,
+            'uninstrumented': mk_config_uninstrumented,
+        }
+        mode_to_config_suffix = {
+            'microbench_iml_python_annotation': [
+                'just_pyprof_annotations',
+                'uninstrumented',
+            ],
+            'microbench_iml_clib_interception_simulator': [
+                'just_pyprof_interceptions',
+                'uninstrumented',
+            ],
+            'microbench_iml_clib_interception_tensorflow': [
+                'just_pyprof_interceptions',
+                'uninstrumented',
+            ],
+        }
+        for algo, env in self.stable_baselines_algo_env:
+            for mode in mode_to_config_suffix.keys():
+                for config_suffix in mode_to_config_suffix[mode]:
+                    mk_config = config_suffix_to_mk_config[config_suffix]
+                    config = mk_config(algo, env, mode)
+                    self.configs.append(config)
+
+        for config in self.configs:
+            mk_dict_tree(self.config_suffix_to_obj, [config.algo, config.env, config.mode])
+            assert config.config_suffix not in self.config_suffix_to_obj[config.algo][config.env][config.mode]
+            self.config_suffix_to_obj[config.algo][config.env][config.mode][config.config_suffix] = config
+
+            # if algo not in self.config_suffix_to_obj:
+            #     self.config_suffix_to_obj[algo] = dict()
+            # if env not in self.config_suffix_to_obj[algo]:
+            #     self.config_suffix_to_obj[algo][env] = dict()
+            # if mode not in self.config_suffix_to_obj[algo][env]:
+            #     self.config_suffix_to_obj[algo][env][mode] = dict()
+            # assert config.config_suffix not in self.config_suffix_to_obj[algo][env][mode]
+            # self.config_suffix_to_obj[algo][env][mode][config.config_suffix] = config
+
+        # for mode in MODES:
+        #     for algo, env in self.stable_baselines_algo_env:
+        #         iml_prof_config = 'full'
+        #         # if self.args.instrumented:
+        #         #     iml_prof_config = 'full'
+        #         # else:
+        #         #     iml_prof_config = 'uninstrumented'
+        #         config = ExprMicrobenchmarkConfig(
+        #             expr=self,
+        #             algo=algo,
+        #             env=env,
+        #             mode=mode,
+        #             iml_prof_config=iml_prof_config,
+        #         )
+        #         self.configs.append(config)
+
+        logging.info("configs: " + pprint_msg(self.configs))
+        logging.info("config_suffix_to_obj: " + pprint_msg(self.config_suffix_to_obj))
+        # TODO: add config for minigo
+        # Q: should we subclass ExprTotalTrainingTimeConfig to specialize running minigo experiment?
+
+    def do_run(self):
+        # Run the repetition 01 of every environment,
+        # Run the repetition 02 of every environment,
+        # ...
+        # (allows us to incrementally plot stuff more easily)
+        for rep in range(1, self.args.repetitions+1):
+            for config in self.configs:
+                # For debugging, allow overwriting --n-timesteps in train.py with whatever we want.
+                config.run(rep, extra_argv=self.extra_argv)
+
+        # for algo, env in self.stable_baselines_algo_env:
+            # self.compute_cupti_scaling_overhead(algo, env)
+            # self.compute_cupti_overhead(algo, env)
+            # self.compute_LD_PRELOAD_overhead(algo, env)
+            # self.compute_pyprof_overhead(algo, env)
+            # self._pool.submit(
+            #     get_func_name(self, 'compute_cupti_scaling_overhead'),
+            #     self.compute_cupti_scaling_overhead,
+            #     algo, env,
+            #     sync=self.quick_expr.args.debug_single_thread,
+            # )
+            # self._pool.submit(
+            #     get_func_name(self, 'compute_cupti_overhead'),
+            #     self.compute_cupti_overhead,
+            #     algo, env,
+            #     sync=self.quick_expr.args.debug_single_thread,
+            # )
+            # self._pool.submit(
+            #     get_func_name(self, 'compute_LD_PRELOAD_overhead'),
+            #     self.compute_LD_PRELOAD_overhead,
+            #     algo, env,
+            #     sync=self.quick_expr.args.debug_single_thread,
+            # )
+        for config in self.configs:
+
+            if config.config == 'uninstrumented':
+                continue
+
+            self._pool.submit(
+                get_func_name(self, 'compute_pyprof_overhead'),
+                self.compute_pyprof_overhead,
+                config.algo, config.env, config.mode, config.config,
+                sync=self.quick_expr.args.debug_single_thread,
+            )
+
+            # if self.args.compute_microbench:
+            # Q: Is this function making microbench json empty...?
+            self._pool.submit(
+                get_func_name(self, 'compute_microbench_pyprof_overhead'),
+                self.compute_microbench_pyprof_overhead,
+                config.algo, config.env, config.mode, config.config,
+                sync=self.quick_expr.args.debug_single_thread,
+            )
+
+        self._pool.shutdown()
+
+        # Need to wait for all the compute_microbench_pyprof_overhead calls to finish before calling
+        # microbench_add_per_call_us.
+
+        # self._pool.submit(
+        #     get_func_name(self, 'microbench_add_per_call_us'),
+        #     self.microbench_add_per_call_us,
+        #     config.algo, config.env, config.mode, config.config,
+        #     sync=self.quick_expr.args.debug_single_thread,
+        # )
+
 
 class ExprTotalTrainingTime:
     def __init__(self, quick_expr, argv):
@@ -1044,10 +1862,18 @@ class ExprSubtractionValidation:
             bullet=self.args.bullet,
             atari=self.args.atari,
             lunar=self.args.lunar,
+            algo_env_group=self.args.algo_env_group,
             debug=self.quick_expr.args.debug,
         )
         for algo, env in self.stable_baselines_algo_env:
             self._add_configs(algo, env)
+
+
+        logging.info("Run configuration: {msg}".format(msg=pprint_msg({
+            '(algo, env)': self.stable_baselines_algo_env,
+            'configs': self.configs,
+        })))
+
 
     def _add_configs(self, algo, env):
 
@@ -1196,11 +2022,16 @@ class ExprSubtractionValidation:
             script_args=['--iml-disable-tfprof', '--iml-disable-pyprof-annotations'],
         )
 
-        for config in algo_env_configs:
-            if algo not in self.config_suffix_to_obj:
-                self.config_suffix_to_obj[algo] = dict()
-            if env not in self.config_suffix_to_obj[algo]:
-                self.config_suffix_to_obj[algo][env] = dict()
+        # for config in algo_env_configs:
+        #     if algo not in self.config_suffix_to_obj:
+        #         self.config_suffix_to_obj[algo] = dict()
+        #     if env not in self.config_suffix_to_obj[algo]:
+        #         self.config_suffix_to_obj[algo][env] = dict()
+        #     assert config.config_suffix not in self.config_suffix_to_obj[algo][env]
+        #     self.config_suffix_to_obj[algo][env][config.config_suffix] = config
+
+        for config in self.configs:
+            mk_dict_tree(self.config_suffix_to_obj, [algo, env])
             assert config.config_suffix not in self.config_suffix_to_obj[algo][env]
             self.config_suffix_to_obj[algo][env][config.config_suffix] = config
 
@@ -1296,6 +2127,14 @@ class ExprSubtractionValidation:
         parser.add_argument(
             '--algo',
         )
+        parser.add_argument('--algo-env-group',
+                            choices=expr_config.ALGO_ENV_GROUP_CHOICES,
+                            help=textwrap.dedent("""
+            Only run a specific "experiment".
+            i.e. only run (algo, env) combinations needed for a specific graph.
+            
+            Default: run all (algo, env) combinations for all experiments.
+            """))
         parser.add_argument(
             '--plot',
             action='store_true')
@@ -1698,6 +2537,14 @@ def _check_has_config_dir(path):
         raise RuntimeError("Saw no config_* component in {path}".format(
             path=path,
         ))
+
+def mk_dict_tree(dic, keys):
+    d = dic
+    for key in keys:
+        if key not in d:
+            d[key] = dict()
+        d = d[key]
+
 
 if __name__ == '__main__':
     main()

@@ -739,7 +739,7 @@ class Profiler:
                 # In order for calibration to work properly, we need to be able to enable each book-keeping feature in isolation!
                 # Q: What code depends on "--config uninstrumented" (without --iml-calibration) implying --iml-disable?
                 # A: minigo code.
-                logging.warning("DISABLE IML for --config={config} run".format(
+                logging.warning("DISABLE ALL IML FEATURES for --config={config} run".format(
                     config=self.iml_config))
                 self.disable = True
         self.disable_pyprof_annotations = get_argval('disable_pyprof_annotations', disable_pyprof_annotations, False)

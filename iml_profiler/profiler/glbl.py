@@ -95,10 +95,15 @@ def handle_iml_args(parser, args, directory=None, reports_progress=False):
         If the user doesn't provide --iml-directory (i.e. a separate directory for storing profiling data),
         we fall back on this.
     """
-    if args.iml_directory is not None:
-        iml_directory = args.iml_directory
-    else:
+    # if args.iml_directory is not None:
+    #     iml_directory = args.iml_directory
+    # else:
+    #     iml_directory = directory
+
+    if directory is not None:
         iml_directory = directory
+    else:
+        iml_directory = args.iml_directory
 
     # TODO: train.py apparently like to launch separate process all willy-nilly.
     # I'm not sure what it's doing this for, but it's certainly true that python-side IML stuff will do it too.

@@ -1147,6 +1147,8 @@ class DecimalEncoder(json.JSONEncoder):
             # str will retain precision... but makes it annoying "reading it back in"...
             return float(o)
             # return str(o)
+        if isinstance(o, (np.int32, np.int64)):
+            return int(o)
         return super(DecimalEncoder, self).default(o)
 
 def do_dump_json(data, path, cls=DecimalEncoder):
