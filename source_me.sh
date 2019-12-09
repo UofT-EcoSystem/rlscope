@@ -17,6 +17,7 @@ _maybe_add_path() {
 
 PROTOBUF_INSTALL_DIR="$(ls -d $ROOT/third_party/protobuf-*/build/bin)"
 _maybe_add_path "$PROTOBUF_INSTALL_DIR"
+_maybe_add_path "$ROOT/local/bin"
 unset PROTOBUF_INSTALL_DIR
 
 unset _maybe_add_path

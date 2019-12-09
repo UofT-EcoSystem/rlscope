@@ -21,6 +21,7 @@ project(iml)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 set(ENABLE_BACKTRACE ON CACHE BOOL "Enable pretty-printed stacktrace during LOG(FATAL) or DCHECK failures; requires adding -g debug symbols")
 
@@ -68,7 +69,7 @@ else()
     set(IS_WINDOWS OFF)
 endif()
 
-if(IS_WINDOWS)
+if(IS_WINDOWS OR CLION)
     if(NOT EXISTS "${PROJECT_SOURCE_DIR}/CMakeLists.windows.txt")
         message(FATAL_ERROR "ERROR: expected to find CMakeLists.windows.txt containing files we should index in CLion")
     endif()

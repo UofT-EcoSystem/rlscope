@@ -450,8 +450,10 @@ setup_apt_packages() {
     _apt_install \
         mercurial \
         git \
-        libgflags-dev libgflags2v5 \
+        'libgflags*' \
         binutils-dev \
+
+        # libgflags-dev libgflags2v5
 
 }
 
@@ -482,7 +484,7 @@ main() {
     _do setup_boost_cpp_library
     _do setup_spdlog_cpp_library
     # TODO: setup protobuf
-#    setup_cmake
+   _do setup_cmake
     echo "> Success!"
 }
 

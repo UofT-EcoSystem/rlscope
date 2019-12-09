@@ -123,6 +123,8 @@ REQUIRED_PACKAGES = [
     'ipdb >= 0.12',
     # Debugger used for pytest
     'pdbpp >= 0.10.0',
+
+    'numba==0.46.0',
 ]
 
 # NOTE: dependencies for building docker images are defined in dockerfiles/requirements.txt
