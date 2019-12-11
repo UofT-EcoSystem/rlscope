@@ -24,7 +24,8 @@ from iml_profiler.parser.profiling_overhead import \
     DataframeMapper, \
     PyprofDataframeReader, \
     PyprofOverheadParser, \
-    MicrobenchmarkOverheadJSON
+    MicrobenchmarkOverheadJSON, \
+    CalibrationJSONs
 
 
 # ( set -e; set -x; iml-quick-expr --expr total_training_time --repetitions 3 --bullet; )
@@ -1685,6 +1686,8 @@ class ExprSubtractionValidation:
         # Use the pyprof/CUPTI/LD_PRELOAD overhead we calibrated using one_minute_iterations iterations.
         #
 
+        raise NotImplementedError("Use cpp code, not old python implementation... (not maintained anymore)")
+
         pyprof_overhead_jsons = self._glob_json_files(self.pyprof_overhead_dir(algo, env, iters))
         assert len(pyprof_overhead_jsons) <= 1
 
@@ -1744,6 +1747,13 @@ class ExprSubtractionValidation:
             plot_dir = self.plot_dir(config, iters)
             if not self.quick_expr.args.dry_run:
                 os.makedirs(plot_dir, exist_ok=True)
+            # calibration_jsons = CalibrationJSONs(
+            #     cupti_overhead_json=cupti_overhead_jsons[0],
+            #     LD_PRELOAD_overhead_json=LD_PRELOAD_overhead_jsons[0],
+            #     # python_annotation_json=None,
+            #     # python_clib_interception_tensorflow_json=None,
+            #     # python_clib_interception_simulator_json=None,
+            # )
             cmd = ['iml-analyze',
                    '--directory', plot_dir,
                    '--task', task,
@@ -1757,6 +1767,7 @@ class ExprSubtractionValidation:
 
                    '--iml-prof-config', config.iml_prof_config,
                    ]
+            # cmd.extend(calibration_jsons.argv())
             add_iml_analyze_flags(cmd, self.quick_expr.args)
             cmd.extend(self.extra_argv)
 
@@ -2419,21 +2430,7 @@ class ExprPlotFig:
             required=True,
         )
 
-        parser.add_argument(
-            '--cupti-overhead-json',
-            help="Calibration: mean per-CUDA API CUPTI overhead when GPU activities are recorded (see: CUPTIOverheadTask)",
-            required=True,
-        )
-        parser.add_argument(
-            '--LD-PRELOAD-overhead-json',
-            help="Calibration: mean overhead for intercepting CUDA API calls with LD_PRELOAD  (see: CallInterceptionOverheadTask)",
-            required=True,
-        )
-        parser.add_argument(
-            '--pyprof-overhead-json',
-            help="Calibration: means for (1) Python->C++ interception overhead, (2) operation annotation overhead (see: PyprofOverheadTask)",
-            required=True,
-        )
+        CalibrationJSONs.add_argparse(parser, required=True)
 
         self.args, self.extra_argv = parser.parse_known_args(self.argv)
 
@@ -2448,14 +2445,17 @@ class ExprPlotFig:
 
     def iml_analyze_cmdline(self, task, argv):
         plot_dir = self.plot_dir(self.args.fig)
+        calibration_jsons = CalibrationJSONs.from_obj(self.args)
         cmd = ['iml-analyze',
                '--directory', plot_dir,
                '--task', task,
 
-               '--pyprof-overhead-json', self.args.pyprof_overhead_json,
-               '--cupti-overhead-json', self.args.cupti_overhead_json,
-               '--LD-PRELOAD-overhead-json', self.args.LD_PRELOAD_overhead_json,
+               # '--pyprof-overhead-json', self.args.pyprof_overhead_json,
+               # '--cupti-overhead-json', self.args.cupti_overhead_json,
+               # '--LD-PRELOAD-overhead-json', self.args.LD_PRELOAD_overhead_json,
+
                ]
+        cmd.extend(calibration_jsons.argv())
         cmd.extend(argv)
         add_iml_analyze_flags(cmd, self.quick_expr.args)
         cmd.extend(self.extra_argv)

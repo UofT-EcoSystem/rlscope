@@ -404,7 +404,6 @@ class SplitMapMerge_CUDAAPIStatsDataframeReader__per_api_stats:
     def merge_fn(self, a, b):
         return self.obj.merge_from_map(self.map_fn, a, b)
 
-
 class SplitMapMerge_PyprofDataframeReader__total_intercepted_calls:
     def __init__(self, obj):
         self.obj = obj
@@ -426,6 +425,38 @@ class SplitMapMerge_PyprofDataframeReader__total_intercepted_calls:
         # We should check for that somehow...
         # return category not in {CATEGORY_OPERATION, CATEGORY_PYTHON}
         return category in CATEGORIES_C_EVENTS
+
+class SplitMapMerge_PyprofDataframeReader__total_intercepted_tensorflow_calls:
+    def __init__(self, obj):
+        self.obj = obj
+
+    def map_fn(self, df):
+        was_intercepted_call_event = df['category'].apply(self.is_intercepted_tensorflow_call_event)
+        intercepted_call_event_df = df[was_intercepted_call_event]
+        total_intercepted_tensorflow_calls = len(intercepted_call_event_df)
+        return total_intercepted_tensorflow_calls
+
+    def merge_fn(self, a, b):
+        return a + b
+
+    def is_intercepted_tensorflow_call_event(self, category):
+        return category == CATEGORY_TF_API
+
+class SplitMapMerge_PyprofDataframeReader__total_intercepted_simulator_calls:
+    def __init__(self, obj):
+        self.obj = obj
+
+    def map_fn(self, df):
+        was_intercepted_call_event = df['category'].apply(self.is_intercepted_simulator_call_event)
+        intercepted_call_event_df = df[was_intercepted_call_event]
+        total_intercepted_simulator_calls = len(intercepted_call_event_df)
+        return total_intercepted_simulator_calls
+
+    def merge_fn(self, a, b):
+        return a + b
+
+    def is_intercepted_simulator_call_event(self, category):
+        return category == CATEGORY_SIMULATOR_CPP
 
 class SplitMapMerge_PyprofDataframeReader__total_op_events:
     def __init__(self, obj):
@@ -738,6 +769,21 @@ class PyprofDataframeReader(BaseDataframeReader):
             #     bar.finish()
 
     def total_intercepted_calls(self):
+        return self._total_intercepted_calls(
+            'total_intercepted_calls',
+            SplitMapMerge_PyprofDataframeReader__total_intercepted_calls)
+
+    def total_intercepted_tensorflow_calls(self):
+        return self._total_intercepted_calls(
+            'total_intercepted_tensorflow_calls',
+            SplitMapMerge_PyprofDataframeReader__total_intercepted_tensorflow_calls)
+
+    def total_intercepted_simulator_calls(self):
+        return self._total_intercepted_calls(
+            'total_intercepted_simulator_calls',
+            SplitMapMerge_PyprofDataframeReader__total_intercepted_simulator_calls)
+
+    def _total_intercepted_calls(self, name, SplitMapMergeKlass):
         """
         How many times did we perform interception:
         CATEGORY_PYTHON: Python -> C++
@@ -751,26 +797,11 @@ class PyprofDataframeReader(BaseDataframeReader):
 
         :return:
         """
-
-        # df = self.read()
-        # def is_intercepted_call_event(category):
-        #     # PROBLEM: If we add new categories of events, this will break.
-        #     # We already DID add new event categories: CATEGORY_PROF_...
-        #     # All we can really do keep track of a set of "CATEGORIES_C_EVENTS" that represent "Python -> C" interceptions.
-        #     # However, if we ever add 'custom categories' in the future, that approach will break.
-        #     # We should check for that somehow...
-        #     # return category not in {CATEGORY_OPERATION, CATEGORY_PYTHON}
-        #     return category in CATEGORIES_C_EVENTS
-        # was_intercepted_call_event = df['category'].apply(is_intercepted_call_event)
-        # intercepted_call_event_df = df[was_intercepted_call_event]
-        # total_intercepted_calls = len(intercepted_call_event_df)
-        # return total_intercepted_calls
-
         if len(self.proto_paths) == 0:
             return 0
-        split_map_merge = SplitMapMerge_PyprofDataframeReader__total_intercepted_calls(obj=self)
+        split_map_merge = SplitMapMergeKlass(obj=self)
         total_intercepted_calls = self.split_map_merge(
-            'total_intercepted_calls', split_map_merge.map_fn, split_map_merge.merge_fn,
+            name, split_map_merge.map_fn, split_map_merge.merge_fn,
             debug=self.debug,
             debug_single_thread=self.debug_single_thread)
         return total_intercepted_calls
@@ -886,19 +917,21 @@ class PyprofDataframeReader(BaseDataframeReader):
         return len_df
 
     def check_events(self):
-        # df = self.read()
-
+        """
+        Total category_events recorded:
+        - Each CATEGORY_PYTHON event should have a corresponding C++ event.
+        - Then we have op-events
+        - Plus, we may have some "extra" events like the
+          process event Event(category=CATEGORY_OPERATION, name="[<PROC>ppo2_HalfCheetah]")
+        """
         len_df = self.len_df()
 
-        total_intercepted_calls = self.total_intercepted_calls()
+        total_intercepted_tensorflow_calls = self.total_intercepted_tensorflow_calls()
+        total_intercepted_simulator_calls = self.total_intercepted_simulator_calls()
+        total_intercepted_calls = total_intercepted_tensorflow_calls + total_intercepted_simulator_calls
         total_op_events = self.total_op_events()
         total_op_proc_events = self.total_op_process_events()
 
-        # Total category_events recorded:
-        # - Each CATEGORY_PYTHON event should have a corresponding C++ event.
-        # - Then we have op-events
-        # - Plus, we may have some "extra" events like the
-        #   process event Event(category=CATEGORY_OPERATION, name="[<PROC>ppo2_HalfCheetah]")
         assert 2*total_intercepted_calls + total_op_events + total_op_proc_events == len_df
 
     def total_pyprof_overhead_us(self):

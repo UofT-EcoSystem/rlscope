@@ -28,6 +28,7 @@
 // using json = nlohmann::json;
 
 #include <iostream>
+#include <algorithm>
 //#include <string_view>
 
 //#include "cuda_api_profiler/cupti_logging.h"
@@ -89,13 +90,6 @@
 
 namespace tensorflow {
 
-template <typename T>
-T StringToNumber(const std::string& s) {
-  std::stringstream ss(s);
-  T x = 0;
-  ss >> x;
-  return x;
-}
 
 enum RLSFileType {
   UNKNOWN_FILE = 0,
@@ -125,6 +119,10 @@ enum RLSFileType {
 #define CATEGORY_SIMULATOR_CPP "Simulator C"
 
 #define CATEGORY_EXTRA_OPERATION "Operation: original"
+#define CATEGORY_TOTAL "Total"
+// Not a category used during tracing;
+// represents a group of categories.
+#define CATEGORY_CPU "CPU"
 
 #define CATEGORY_PROF_CUPTI "Profiling: CUPTI"
 #define CATEGORY_PROF_LD_PRELOAD "Profiling: LD_PRELOAD"
@@ -159,6 +157,7 @@ using OptionalString = boost::optional<const std::string&>;
 // Doesn't allow automatic conversion of std::string arguments.
 // using OptionalString = boost::optional<const std::string*>;
 using Category = std::string;
+using OverlapType = std::string;
 using EventNameID = uint32_t;
 using Machine = std::string;
 using Process = std::string;
@@ -170,8 +169,73 @@ using TimeUsec = int64_t;
 using TimePsec = int64_t;
 #define MAX_CATEGORY_KEYS 64
 //using CategoryTimes = std::map<Category, EOEvents>;
+using OverlapMap = std::map<std::set<std::string>, TimeUsec>;
+using Metadata = nlohmann::json;
 
 extern const std::set<Category> CATEGORIES_C_EVENTS;
+extern const std::set<Category> CATEGORIES_PROF;
+extern const std::set<Category> CATEGORIES_CPU;
+extern const std::set<Category> CATEGORIES_GPU;
+
+extern const std::set<OverlapType> OVERLAP_TYPES;
+
+template <typename OStream>
+void _AddSuffix(OStream& ss, std::string name, std::string key, const Metadata& md) {
+  if (md.find(key) != md.end()) {
+    std::string value = md[key];
+    ss << "." << name << "_" << value;
+  }
+}
+
+template <typename OStream>
+void _AddSuffixList(OStream& ss, std::string name, std::string key, const Metadata& md) {
+  if (md.find(key) != md.end()) {
+    ss << "." << name;
+    for (auto const& js_value : md[key]) {
+      std::string value = js_value;
+      ss << "_" << value;
+    }
+  }
+}
+
+template <typename OStream>
+void AddPhaseSuffix(OStream& ss, const Metadata& md) {
+  _AddSuffix(ss, "phase", "phase", md);
+}
+
+template <typename OStream>
+void AddMachineSuffix(OStream& ss, const Metadata& md) {
+  _AddSuffix(ss, "machine", "machine", md);
+}
+
+template <typename OStream>
+void AddOverlapTitle(OStream& ss, const Metadata& md) {
+  std::string overlap_type = md["overlap_type"];
+  ss << overlap_type;
+}
+
+template <typename OStream>
+void AddProcessSuffix(OStream& ss, const Metadata& md) {
+  _AddSuffix(ss, "process", "process", md);
+}
+
+template <typename OStream>
+void AddResourcesSuffix(OStream& ss, const Metadata& md) {
+  _AddSuffixList(ss, "resources", "resource_overlap", md);
+}
+
+template <typename OStream>
+void AddOpsSuffix(OStream& ss, const Metadata& md) {
+  _AddSuffixList(ss, "ops", "operation", md);
+}
+
+template <typename T>
+T StringToNumber(const std::string& s) {
+  std::stringstream ss(s);
+  T x = 1;
+  ss >> x;
+  return x;
+}
 
 template <typename Number, typename K>
 struct IdxMaps {
@@ -364,6 +428,18 @@ public:
   std::set<Process> procs;
   std::set<Operation> ops;
   std::set<Category> non_ops;
+
+  CategoryKey() = default;
+
+  CategoryKey(
+      std::set<Process> procs_,
+      std::set<Operation> ops_,
+      std::set<Category> non_ops_) :
+      procs(std::move(procs_)),
+      ops(std::move(ops_)),
+      non_ops(std::move(non_ops_)) {
+  }
+
 
   static CategoryKey FromCategory(const Process& proc, const Category& category) {
     CategoryKey category_key;
@@ -1416,6 +1492,80 @@ public:
 
 MyStatus GetTraceID(const std::string& path, TraceID* trace_id);
 
+template <typename Elem, typename Iterable, typename BoolUnaryOp, typename BoolBinaryOp>
+Elem KeepExtreme(
+    const Iterable& xs,
+    Elem dflt,
+    BoolBinaryOp should_keep,
+    BoolUnaryOp should_skip) {
+  Elem value = dflt;
+  bool is_dflt = true;
+  for (auto const& x: xs) {
+    if (should_skip(x)) {
+      continue;
+    }
+
+    if (is_dflt) {
+      value = x;
+      is_dflt = false;
+    } else if (should_keep(x, value)) {
+      value = x;
+    }
+  }
+  return value;
+}
+
+struct RegionMetadataReducer {
+  CategoryKey category_key;
+  TimeUsec start_time_usec;
+  TimeUsec end_time_usec;
+  size_t num_events;
+  RegionMetadataReducer() = default;
+  RegionMetadataReducer(const CategoryKey& category_key) :
+      category_key(category_key),
+      start_time_usec(0),
+      end_time_usec(0),
+      num_events(0) {
+  }
+
+  RegionMetadataReducer(
+      const CategoryKey& category_key_,
+      TimeUsec start_time_usec_,
+      TimeUsec end_time_usec_,
+      size_t num_events_) :
+      category_key(category_key_),
+      start_time_usec(start_time_usec_),
+      end_time_usec(end_time_usec_),
+      num_events(num_events_) {
+  }
+
+  void MergeInplace(const RegionMetadataReducer& region2) {
+    RegionMetadataReducer& region1 = *this;
+
+    region1.start_time_usec = KeepExtreme(
+        std::vector<TimeUsec>{region1.start_time_usec, region2.start_time_usec},
+        0,
+        /*should_keep=*/[] (TimeUsec x, TimeUsec min_x) {
+          return x < min_x;
+        },
+        /*should_skip=*/[] (TimeUsec x) {
+          return x == 0;
+        });
+
+    region1.end_time_usec = KeepExtreme(
+        std::vector<TimeUsec>{region1.end_time_usec, region2.end_time_usec},
+        0,
+        /*should_keep=*/[] (TimeUsec x, TimeUsec min_x) {
+          return x > min_x;
+        },
+        /*should_skip=*/[] (TimeUsec x) {
+          return x == 0;
+        });
+
+    region1.num_events = region1.num_events + region2.num_events;
+  }
+
+};
 struct RegionMetadata {
   CategoryKeyBitset category_key;
   TimeUsec start_time_usec;
@@ -1453,14 +1603,206 @@ struct OverlapMetadata {
     regions[category_key].AddEvent(start_us, end_us);
   }
 };
+struct OverlapMetadataReducer {
+  std::map<CategoryKey, RegionMetadataReducer> regions;
+
+  inline OverlapMetadataReducer OnlyKey(const CategoryKey& category_key) const {
+    OverlapMetadataReducer r;
+    r.regions[category_key] = this->regions.at(category_key);
+    return r;
+  }
+
+  void MergeRegion(const CategoryKey& category_key, const RegionMetadataReducer& region) {
+    if (regions.find(category_key) == regions.end()) {
+      regions[category_key] = RegionMetadataReducer(category_key);
+    }
+    regions[category_key].MergeInplace(region);
+  }
+
+  void AddRegion(const CategoryKey& category_key, const RegionMetadata& region_metadata) {
+    assert(regions.find(category_key) == regions.end());
+    regions[category_key] = RegionMetadataReducer(
+        category_key,
+        region_metadata.start_time_usec,
+        region_metadata.end_time_usec,
+        region_metadata.num_events);
+  }
+
+};
 struct OverlapResult {
   Overlap overlap;
   OverlapMetadata meta;
   std::shared_ptr<CategoryIdxMap> idx_map;
 
+  inline const RegionMetadata& GetMeta(const CategoryKeyBitset& bitset) const {
+    return meta.regions.at(bitset);
+  }
+
+  void DumpVennJS(
+      const std::string& directory,
+      const Machine& machine,
+      const Process& process,
+      const Phase& phase) const;
+
   void Print(std::ostream& out, int indent) const;
   DECLARE_PRINT_DEBUG
   DECLARE_PRINT_OPERATOR(OverlapResult)
+};
+class OverlapResultReducer {
+public:
+  std::map<CategoryKey, TimeUsec> overlap;
+  OverlapMetadataReducer regions;
+  bool debug{false};
+
+  OverlapResultReducer() = default;
+
+  inline const RegionMetadataReducer& GetMeta(const CategoryKey& category_key) const {
+    return regions.regions.at(category_key);
+  }
+
+  inline OverlapResultReducer OnlyKey(const CategoryKey& category_key) const {
+    OverlapResultReducer r;
+    r.overlap[category_key] = this->overlap.at(category_key);
+    r.regions = this->regions.OnlyKey(category_key);
+    return r;
+  }
+
+  inline const TimeUsec& GetTimeUsec(const CategoryKey& category_key) const {
+    return overlap.at(category_key);
+  }
+
+  static OverlapResultReducer ReduceToCategoryKey(const OverlapResult& result) {
+    OverlapResultReducer ov;
+    for (auto const& pair : result.overlap) {
+
+      const auto& bitset = pair.first;
+      auto category_keys = bitset.Keys();
+      auto time_usec = pair.second;
+
+      CategoryKey new_key(
+          /*procs=*/{},
+          /*ops=*/{},
+          /*non_ops=*/{});
+      for (const auto& category_key : category_keys) {
+        assert(category_key.procs.size() == 1);
+        new_key.ops.insert(category_key.ops.begin(), category_key.ops.end());
+        new_key.non_ops.insert(category_key.non_ops.begin(), category_key.non_ops.end());
+        new_key.procs.insert(category_key.procs.begin(), category_key.procs.end());
+      }
+
+      // We don't yet support overlap across processes.
+      assert(new_key.procs.size() == 1);
+
+      // If involves BOTH execution: {CPU, GPU, CPU/GPU},
+      //    AND an operation: {q_forward, q_backward, ...}
+      //   Keep.
+      if (new_key.ops.size() == 0 || new_key.non_ops.size() == 0) {
+        continue;
+      }
+
+      assert(ov.overlap.find(new_key) == ov.overlap.end());
+      ov.overlap[new_key] = time_usec;
+      ov.regions.AddRegion(new_key, result.GetMeta(bitset));
+    }
+    return ov;
+  }
+
+  static bool IsEmptyKey(const CategoryKey& category_key) {
+    return category_key.ops.size() == 0 ||
+           category_key.non_ops.size() == 0;
+  }
+
+  static CategoryKey NoOverheadKey(const CategoryKey& key) {
+    // maybe_remove_overhead
+    CategoryKey new_key;
+    new_key.ops = key.ops;
+    new_key.procs = key.procs;
+    new_key.non_ops = key.non_ops;
+
+    std::set<Category> prof_categories;
+    std::set_intersection(
+        key.non_ops.begin(), key.non_ops.end(),
+        CATEGORIES_PROF.begin(), CATEGORIES_PROF.end(),
+        std::inserter(prof_categories, prof_categories.begin()));
+    if (prof_categories.size() > 0) {
+        // Discard CPU-time that is due to profiling overhead.
+        // NOTE: CATEGORY_GPU won't get discarded.
+        new_key.non_ops.erase(CATEGORIES_CPU.begin(), CATEGORIES_CPU.end());
+        // Q: Should we remove the profiling category as well...? I think so yes.
+        new_key.non_ops.erase(CATEGORIES_PROF.begin(), CATEGORIES_PROF.end());
+    }
+    return new_key;
+  }
+  static CategoryKey ReduceCategoryKey(const CategoryKey& key, bool as_cpu_gpu) {
+    // Modular function to bin_events for "reducing" events to CPU/GPU BEFORE OverlapComputation.
+    // Also, allow ability to "filter-out" events (e.g. category=GPU; needed for CategoryOverlap).
+    CategoryKey new_key(
+        /*procs=*/key.procs,
+        /*ops=*/key.ops,
+        /*non_ops=*/{});
+    for (auto const& category : key.non_ops) {
+
+      if (CATEGORIES_CPU.count(category) != 0) {
+        if (as_cpu_gpu) {
+          // NOTE: profiling types are treated as fine-grained CPU categories.
+          new_key.non_ops.insert(CATEGORY_CPU);
+        } else {
+          new_key.non_ops.insert(category);
+        }
+      } else if (CATEGORIES_GPU.count(category) != 0) {
+        if (as_cpu_gpu) {
+          new_key.non_ops.insert(CATEGORY_GPU);
+        } else {
+          new_key.non_ops.insert(category);
+        }
+      } else if (CATEGORIES_PROF.count(category) != 0) {
+        new_key.non_ops.insert(category);
+      } else {
+        // Not sure how to categorize key.
+        assert(false);
+      }
+
+    }
+    return new_key;
+
+  }
+
+  void AddOverlapWithKey(
+      const CategoryKey& old_key,
+      const CategoryKey& new_key,
+      const OverlapResultReducer& old_reducer) {
+
+
+    const auto& no_overhead_key = OverlapResultReducer::NoOverheadKey(new_key);
+
+    if (debug) {
+      std::stringstream ss;
+      ss << "AddOverlapWithKey:";
+
+      ss << "\n";
+      ss << "old_key = ";
+      old_key.Print(ss, 1);
+
+      ss << "\n";
+      ss << "new_key = ";
+      new_key.Print(ss, 1);
+
+      ss << "\n";
+      ss << "no_overhead_key = ";
+      no_overhead_key.Print(ss, 1);
+
+      DBG_LOG("{}", ss.str());
+    }
+
+
+    if (OverlapResultReducer::IsEmptyKey(no_overhead_key)) {
+      return;
+    }
+    auto time_usec = old_reducer.GetTimeUsec(old_key);
+    overlap[no_overhead_key] += time_usec;
+    regions.MergeRegion(no_overhead_key, old_reducer.GetMeta(old_key));
+  }
+
 };
 class OverlapComputer {
 public:
@@ -1477,6 +1819,612 @@ public:
 };
 
 MyStatus ReadJson(std::string path, nlohmann::json* j);
+MyStatus WriteJson(std::string path, const nlohmann::json& j);
+
+
+#define DECLARE_DumpOverlapJS \
+  virtual void DumpOverlapJS( \
+        const std::string& directory, \
+        const Machine& machine, \
+        const Process& process, \
+        const Phase& phase, \
+        const OverlapResultReducer& reducer) = 0;
+
+#define DEFINE_DumpOverlapJS(OverlapTypeClass) \
+  virtual void DumpOverlapJS( \
+      const std::string& directory, \
+      const Machine& machine, \
+      const Process& process, \
+      const Phase& phase, \
+      const OverlapResultReducer& reducer) { \
+    _GenericDumpOverlapJS<OverlapTypeClass>( \
+        directory, \
+        machine, \
+        process, \
+        phase, \
+        reducer); \
+  }
+
+class OverlapTypeReducerInterface {
+public:
+  virtual OverlapType GetOverlapType() const = 0;
+  virtual OverlapResultReducer PostReduceCategoryKey(const OverlapResultReducer& old_reducer) const = 0;
+
+  DECLARE_DumpOverlapJS
+
+  template <class OverlapTypeClass>
+  void _GenericDumpOverlapJS(
+      const std::string& directory,
+      const Machine& machine,
+      const Process& process,
+      const Phase& phase,
+      const OverlapResultReducer& reducer) const {
+    typename OverlapTypeClass::OverlapJSDumper js_dumper(
+        GetOverlapType(),
+        directory,
+        machine,
+        process,
+        phase,
+        reducer);
+    js_dumper.DumpJSONs();
+  }
+
+};
+
+class OverlapMapToVennJSConverter {
+public:
+  std::map<std::string, TimeUsec> _ComputeSetSizes(const OverlapMap& overlap_map) const {
+    std::map<std::string, TimeUsec> set_to_size;
+    for (const auto& pair :overlap_map) {
+      const auto& overlap_region = pair.first;
+      auto time_usec = pair.second;
+      for (const auto& set_region : overlap_region) {
+        set_to_size[set_region] += time_usec;
+      }
+    }
+    return set_to_size;
+  }
+  nlohmann::json convert(const OverlapMap& overlap_map) const {
+    nlohmann::json venn_js;
+    auto const& set_to_size = _ComputeSetSizes(overlap_map);
+
+    std::map<std::string, size_t> label_to_id;
+    std::set<std::string> labels;
+    for (const auto& pair : overlap_map) {
+      auto const& overlap = pair.first;
+      labels.insert(overlap.begin(), overlap.end());
+    }
+    size_t i = 0;
+    for (const auto& label : labels) {
+      label_to_id[label] = 0;
+    }
+
+    auto as_sets = [&label_to_id] (const std::set<std::string>& overlap) {
+      std::set<size_t> set_ids;
+      for (auto const& category : overlap) {
+        auto ident = label_to_id[category];
+        set_ids.insert(ident);
+      }
+      return set_ids;
+    };
+
+    for (const auto& pair : set_to_size) {
+      const auto& label = pair.first;
+      const auto size = pair.second;
+      nlohmann::json venn_set = {
+          {"sets", as_sets({label})},
+          {"size", size},
+          {"label", label},
+      };
+      venn_js.push_back(venn_set);
+    }
+
+    for (const auto& pair : overlap_map) {
+      const auto& overlap = pair.first;
+      auto size = pair.second;
+      if (overlap.size() == 1) {
+        // Single "set region" doesn't include overlap with other sets.
+        // "Set region" is handled in for-loop above this one.
+        continue;
+      }
+      nlohmann::json venn_set = {
+          {"sets", as_sets(overlap)},
+          {"size", size},
+      };
+      venn_js.push_back(venn_set);
+    }
+
+    // venn_js.sort(key=lambda venn_set: (len(venn_set['sets']), venn_set['sets']))
+
+    // Make the shorter (in particular, single-element) venn_sets appear first.
+    // venn_sets within the same length are ordered based on lexicographic order.
+#define SORT_KEY(venn_set) std::make_tuple(venn_set["sets"].size(), venn_set["sets"])
+    std::sort(
+        venn_js.begin(), venn_js.end(),
+        [] (const nlohmann::json& lhs, const nlohmann::json& rhs) {
+      return SORT_KEY(lhs) < SORT_KEY(rhs);
+    });
+#undef SORT_KEY
+
+    return venn_js;
+  }
+};
+
+class BaseOverlapJSDumper {
+public:
+
+  OverlapType overlap_type;
+  std::string directory;
+  Machine machine;
+  Process process;
+  Phase phase;
+
+  std::map<std::set<Operation>,
+      std::map<std::set<Category>,
+          OverlapResultReducer>> reducer_map;
+
+  BaseOverlapJSDumper(
+      const OverlapType& overlap_type_,
+      const std::string& directory_,
+      const Machine& machine_,
+      const Process& process_,
+      const Phase& phase_,
+      const OverlapResultReducer& reducer) :
+      overlap_type(overlap_type_),
+      directory(directory_),
+      machine(machine_),
+      process(process_),
+      phase(phase_)
+  {
+    for (auto const& pair : reducer.overlap) {
+      const auto& category_key = pair.first;
+      assert(
+          ( reducer_map.find(category_key.ops) == reducer_map.end() ) ||
+          ( reducer_map[category_key.ops].find(category_key.non_ops) == reducer_map[category_key.ops].end() ));
+      reducer_map[category_key.ops][category_key.non_ops] = reducer.OnlyKey(category_key);
+    }
+  }
+
+  void DumpJSONs() const {
+    for (auto const& ops_pair : reducer_map) {
+      const auto& ops = ops_pair.first;
+      for (auto const& non_ops_pair : ops_pair.second) {
+        const auto& non_ops = non_ops_pair.first;
+        const auto& reducer = non_ops_pair.second;
+
+        OverlapMap overlap_map;
+        for (auto const& category_key_pair : reducer.overlap) {
+          auto const& category_key = category_key_pair.first;
+          auto time_usec = category_key_pair.second;
+
+          auto const& strings = CategoryKeyToStrings(category_key);
+          overlap_map[strings] = time_usec;
+
+          nlohmann::json js;
+
+          Metadata md;
+          md["machine"] = machine;
+          md["process"] = process;
+          md["phase"] = phase;
+          md["overlap_type"] = overlap_type;
+
+          auto const& meta = reducer.GetMeta(category_key);
+          md["start_time_usec"] = meta.start_time_usec;
+          md["end_time_usec"] = meta.end_time_usec;
+          md["num_events"] = meta.num_events;
+
+          AddMetadataFields(&md, category_key);
+          js["metadata"] = md;
+
+          OverlapMapToVennJSConverter converter;
+          auto const& venn_js = converter.convert(overlap_map);
+
+          js["venn"] = venn_js;
+          const auto& venn_js_path = VennJSPath(md);
+          if (SHOULD_DEBUG(FEATURE_SAVE_JS)) {
+            DBG_LOG("Write json to path = {}", venn_js_path);
+          }
+
+          boost::filesystem::path parent = boost::filesystem::path(venn_js_path).parent_path();
+          boost::filesystem::create_directories(parent.string());
+
+          MyStatus status = MyStatus::OK();
+          status = WriteJson(venn_js_path, js);
+          assert(status.code() == MyStatus::OK().code());
+        }
+      }
+    }
+  }
+
+  std::string VennJSPath(const Metadata& md) const {
+    boost::filesystem::path direc(directory);
+    boost::filesystem::path base = VennJSBasename(md);
+    return (direc / base).string();
+  }
+
+  virtual std::set<std::string> CategoryKeyToStrings(const CategoryKey& category_key) const = 0;
+  virtual std::string VennJSBasename(const Metadata& md) const = 0;
+  virtual void AddMetadataFields(Metadata* md, const CategoryKey& category_key) const = 0;
+
+};
+
+class ResourceJSDumper : public BaseOverlapJSDumper {
+public:
+
+  ResourceJSDumper(
+      const OverlapType& overlap_type,
+      const std::string& directory,
+      const Machine& machine,
+      const Process& process,
+      const Phase& phase,
+      const OverlapResultReducer& reducer) :
+      BaseOverlapJSDumper(
+          overlap_type,
+          directory,
+          machine,
+          process,
+          phase,
+          reducer)
+  { }
+
+  virtual std::set<std::string> CategoryKeyToStrings(const CategoryKey& category_key) const {
+    // set(non-operation categories) -> [ CPU, GPU, CPU/GPU ] time
+    //   <CPU>, <GPU>, <CPU, GPU>             0.001 sec
+    assert(category_key.ops.size() == 0);
+    assert(category_key.non_ops.size() > 0);
+    assert(category_key.procs.size() == 0 || category_key.procs.size() == 1);
+    return category_key.non_ops;
+  }
+
+  virtual std::string VennJSBasename(const Metadata& md) const {
+    std::stringstream ss;
+    AddOverlapTitle(ss, md);
+    AddMachineSuffix(ss, md);
+    AddProcessSuffix(ss, md);
+    AddPhaseSuffix(ss, md);
+    ss << ".venn_js.json";
+    return ss.str();
+  }
+
+  virtual void AddMetadataFields(Metadata* md, const CategoryKey& category_key) const {
+    // pass
+  }
+
+};
+class ResourceOverlapType : public OverlapTypeReducerInterface {
+public:
+  using OverlapJSDumper = ResourceJSDumper;
+  DEFINE_DumpOverlapJS(ResourceOverlapType)
+
+  virtual OverlapType GetOverlapType() const {
+    return "ResourceOverlap";
+  }
+  virtual OverlapResultReducer PostReduceCategoryKey(const OverlapResultReducer& old_reducer) const {
+    OverlapResultReducer r;
+//    r.debug = true;
+    for (auto const& pair : old_reducer.overlap) {
+      auto const& old_key = pair.first;
+      if (old_key.ops.size() > 1) {
+        // Operations can only overlap cross-process, not within a single-process
+        assert(old_key.procs.size() > 1);
+      }
+      CategoryKey new_key(
+          /*procs=*/{},
+          /*ops=*/{},
+          /*non_ops=*/old_key.non_ops);
+      auto cpu_gpu_key = OverlapResultReducer::ReduceCategoryKey(new_key, /*as_cpu_gpu=*/true);
+      r.AddOverlapWithKey(old_key, cpu_gpu_key, old_reducer);
+    }
+    return r;
+  }
+
+};
+
+class ResourceSubplotJSDumper : public BaseOverlapJSDumper {
+public:
+
+  ResourceSubplotJSDumper(
+      const OverlapType& overlap_type,
+      const std::string& directory,
+      const Machine& machine,
+      const Process& process,
+      const Phase& phase,
+      const OverlapResultReducer& reducer) :
+      BaseOverlapJSDumper(
+          overlap_type,
+          directory,
+          machine,
+          process,
+          phase,
+          reducer)
+  { }
+
+  virtual std::set<std::string> CategoryKeyToStrings(const CategoryKey& category_key) const {
+    // set(non-operation categories) -> [ CPU, GPU, CPU/GPU ] time
+    //   <CPU>, <GPU>, <CPU, GPU>             0.001 sec
+    assert(category_key.ops.size() == 0);
+    assert(category_key.non_ops.size() > 0);
+    assert(category_key.procs.size() == 0 || category_key.procs.size() == 1);
+    return category_key.non_ops;
+  }
+
+  virtual std::string VennJSBasename(const Metadata& md) const {
+    std::stringstream ss;
+    AddOverlapTitle(ss, md);
+    AddMachineSuffix(ss, md);
+    AddProcessSuffix(ss, md);
+    AddPhaseSuffix(ss, md);
+    ss << ".venn_js.json";
+    return ss.str();
+  }
+
+  virtual void AddMetadataFields(Metadata* md, const CategoryKey& category_key) const {
+    // pass
+  }
+
+};
+class ResourceSubplotOverlapType : public OverlapTypeReducerInterface {
+public:
+  using OverlapJSDumper = ResourceSubplotJSDumper;
+  DEFINE_DumpOverlapJS(ResourceSubplotOverlapType)
+
+  virtual OverlapType GetOverlapType() const {
+    return "ResourceSubplot";
+  }
+  virtual OverlapResultReducer PostReduceCategoryKey(const OverlapResultReducer& old_reducer) const {
+    OverlapResultReducer r;
+    for (auto const& pair : old_reducer.overlap) {
+      auto const& old_key = pair.first;
+
+      if (old_key.ops.size() > 1) {
+        // Operations can only overlap cross-process, not within a single-process
+        assert(old_key.procs.size() > 1);
+      }
+      assert(old_key.non_ops.size() > 0);
+
+      // Just {CPU}
+      // Add time to CPU, add time to Total.
+      //
+      // Just {GPU}
+      // Add time to GPU, add time to Total.
+      //
+      // Just {CPU, GPU}
+      // Add time to CPU, add time to GPU, add time to Total.
+
+      CategoryKey new_key(
+          /*procs=*/{},
+          /*ops=*/{},
+          /*non_ops=*/{CATEGORY_TOTAL});
+      r.AddOverlapWithKey(old_key, new_key, old_reducer);
+
+      auto cpu_gpu_key = OverlapResultReducer::ReduceCategoryKey(old_key, /*as_cpu_gpu=*/true);
+      for (auto const& resource_type : cpu_gpu_key.non_ops) {
+        // NOTE: This is sort of hacky;
+        // we AREN'T outputting disjoint overlap regions here;
+        // instead we are outputting an entire "set" including its overlaps:
+        // i.e.
+        // CPU   = [CPU only time] + [CPU overlapped with GPU time]
+        // GPU   = [GPU only time] + [GPU overlapped with GPU time]
+        // Total = [CPU only time] + [GPU only time] + [CPU overlapped with GPU time]
+        CategoryKey add_key(
+            /*procs=*/{},
+            /*ops=*/{},
+            /*non_ops=*/{resource_type});
+        r.AddOverlapWithKey(old_key, add_key, old_reducer);
+      }
+
+    }
+    return r;
+  }
+
+};
+
+
+class OperationJSDumper : public BaseOverlapJSDumper {
+public:
+
+  OperationJSDumper(
+      const OverlapType& overlap_type,
+      const std::string& directory,
+      const Machine& machine,
+      const Process& process,
+      const Phase& phase,
+      const OverlapResultReducer& reducer) :
+      BaseOverlapJSDumper(
+          overlap_type,
+          directory,
+          machine,
+          process,
+          phase,
+          reducer)
+  { }
+
+  virtual std::set<std::string> CategoryKeyToStrings(const CategoryKey& category_key) const {
+    // set(non-operation categories) -> set(operation categories) -> [ CPU, GPU, CPU/GPU ] time
+    //    <CPU>, <GPU>, <CPU, GPU>       <q_forward, q_backward>           0.001 sec
+    assert(category_key.ops.size() > 0);
+    assert(category_key.non_ops.size() > 0);
+    assert(category_key.procs.size() == 0 || category_key.procs.size() == 1);
+    return category_key.ops;
+  }
+
+  virtual std::string VennJSBasename(const Metadata& md) const {
+    std::stringstream ss;
+    AddOverlapTitle(ss, md);
+    AddMachineSuffix(ss, md);
+    AddProcessSuffix(ss, md);
+    AddPhaseSuffix(ss, md);
+    AddResourcesSuffix(ss, md);
+    ss << ".venn_js.json";
+    return ss.str();
+  }
+
+  virtual void AddMetadataFields(Metadata* md, const CategoryKey& category_key) const {
+    (*md)["resource_overlap"] = category_key.non_ops;
+  }
+
+};
+class OperationOverlapType : public OverlapTypeReducerInterface {
+public:
+  using OverlapJSDumper = OperationJSDumper;
+  DEFINE_DumpOverlapJS(OperationOverlapType)
+
+  virtual OverlapType GetOverlapType() const {
+    return "OperationOverlap";
+  }
+  virtual OverlapResultReducer PostReduceCategoryKey(const OverlapResultReducer& old_reducer) const {
+    // reduce_overlap_resource_operation
+
+    OverlapResultReducer r;
+    r.debug = true;
+
+    if (r.debug) {
+      DBG_LOG("{}", "OperationOverlapType.PostReduceCategoryKey");
+    }
+
+    for (auto const& pair : old_reducer.overlap) {
+      auto const& old_key = pair.first;
+
+      if (old_key.ops.size() > 1) {
+        // Operations can only overlap cross-process, not within a single-process
+        assert(old_key.procs.size() > 1);
+      }
+      assert(old_key.non_ops.size() > 0);
+
+      CategoryKey new_key(
+          /*procs=*/{},
+          /*ops=*/old_key.ops,
+          /*non_ops=*/old_key.non_ops);
+      new_key = OverlapResultReducer::ReduceCategoryKey(
+          new_key,
+          /*as_cpu_gpu=*/true);
+      r.AddOverlapWithKey(old_key, new_key, old_reducer);
+
+    }
+
+    return r;
+  }
+
+};
+
+class CategoryJSDumper : public BaseOverlapJSDumper {
+public:
+
+  CategoryJSDumper(
+      const OverlapType& overlap_type,
+      const std::string& directory,
+      const Machine& machine,
+      const Process& process,
+      const Phase& phase,
+      const OverlapResultReducer& reducer) :
+      BaseOverlapJSDumper(
+          overlap_type,
+          directory,
+          machine,
+          process,
+          phase,
+          reducer)
+  { }
+
+  virtual std::set<std::string> CategoryKeyToStrings(const CategoryKey& category_key) const {
+    // set(non-operation categories) -> set(operation categories) -> [ CPU, GPU, CPU/GPU ] time
+    //    <CPU>, <GPU>, <CPU, GPU>       <q_forward, q_backward>           0.001 sec
+    assert(category_key.ops.size() > 0);
+    assert(category_key.non_ops.size() > 0);
+    assert(category_key.procs.size() == 0 || category_key.procs.size() == 1);
+    return category_key.non_ops;
+  }
+
+  virtual std::string VennJSBasename(const Metadata& md) const {
+    std::stringstream ss;
+    AddOverlapTitle(ss, md);
+    AddMachineSuffix(ss, md);
+    AddProcessSuffix(ss, md);
+    AddPhaseSuffix(ss, md);
+    AddOpsSuffix(ss, md);
+    AddResourcesSuffix(ss, md);
+    ss << ".venn_js.json";
+    return ss.str();
+  }
+
+  struct CPUAndGPUCategories {
+    std::set<Category> cpus;
+    std::set<Category> gpus;
+  };
+  CPUAndGPUCategories SplitCpuGpuCategories(const CategoryKey& category_key) const {
+    CPUAndGPUCategories cats;
+    for (auto const& category : category_key.non_ops) {
+      if (CATEGORIES_CPU.count(category) > 0) {
+        cats.cpus.insert(category);
+      } else if (CATEGORIES_GPU.count(category) > 0) {
+        cats.gpus.insert(category);
+      } else {
+        // "Not sure how to categorize category={cat} as CPU vs GPU"
+        assert(false);
+      }
+    }
+    return cats;
+  }
+
+  virtual void AddMetadataFields(Metadata* md, const CategoryKey& category_key) const {
+
+    // add md["operation"]
+    assert(category_key.ops.size() == 1);
+    (*md)["operation"] = category_key.ops;
+
+    // add md["resource_overlap"]
+    auto const& cpus_gpus = SplitCpuGpuCategories(category_key);
+    std::set<Category> resource_key;
+    if (cpus_gpus.cpus.size() > 0) {
+      resource_key.insert(CATEGORY_CPU);
+    } else if (cpus_gpus.gpus.size() > 0) {
+      resource_key.insert(CATEGORY_GPU);
+    }
+    (*md)["resource_overlap"] = resource_key;
+
+  }
+
+};
+class CategoryOverlapType : public OverlapTypeReducerInterface {
+public:
+  using OverlapJSDumper = CategoryJSDumper;
+  DEFINE_DumpOverlapJS(CategoryOverlapType)
+
+  virtual OverlapType GetOverlapType() const {
+    return "CategoryOverlap";
+  }
+  virtual OverlapResultReducer PostReduceCategoryKey(const OverlapResultReducer& old_reducer) const {
+    // reduce_overlap_resource_operation
+
+    OverlapResultReducer r;
+
+    for (auto const& pair : old_reducer.overlap) {
+      auto const& old_key = pair.first;
+
+      if (old_key.ops.size() > 1) {
+        // Operations can only overlap cross-process, not within a single-process
+        assert(old_key.procs.size() > 1);
+      }
+      assert(old_key.procs.size() == 1);
+      assert(old_key.ops.size() == 1);
+      assert(old_key.non_ops.size() >= 1);
+
+      CategoryKey new_key(
+          /*procs=*/{},
+          /*ops=*/old_key.ops,
+          /*non_ops=*/old_key.non_ops);
+      new_key = OverlapResultReducer::ReduceCategoryKey(
+          new_key,
+          /*as_cpu_gpu=*/false);
+      r.AddOverlapWithKey(old_key, new_key, old_reducer);
+
+    }
+
+    return r;
+  }
+
+};
+
 
 }
 

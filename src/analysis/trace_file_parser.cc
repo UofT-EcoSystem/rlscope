@@ -8,7 +8,7 @@
 
 #include <Eigen/Dense>
 
-#include <boost/compute/algorithm/reduce.hpp>
+//#include <boost/compute/algorithm/reduce.hpp>
 
 // NOTE: not until gcc 7.1 (7.4.0 in Ubuntu 18.04); use boost::optional instead.
 // #include <optional>
@@ -16,6 +16,7 @@
 #include <boost/utility/string_view.hpp>
 
 //#include <string_view>
+#include <iomanip>
 
 #include <nlohmann/json.hpp>
 using json = nlohmann::json;
@@ -33,6 +34,32 @@ namespace tensorflow {
 const std::set<Category> CATEGORIES_C_EVENTS = std::set<Category>{
     CATEGORY_TF_API,
     CATEGORY_SIMULATOR_CPP,
+};
+
+const std::set<Category> CATEGORIES_PROF = std::set<Category>{
+    CATEGORY_PROF_CUPTI,
+    CATEGORY_PROF_LD_PRELOAD,
+    CATEGORY_PROF_PYTHON_ANNOTATION,
+    CATEGORY_PROF_PYTHON_INTERCEPTION,
+};
+
+const std::set<Category> CATEGORIES_CPU = std::set<Category>{
+    CATEGORY_TF_API,
+    CATEGORY_PYTHON,
+    CATEGORY_CUDA_API_CPU,
+    CATEGORY_SIMULATOR_CPP,
+    CATEGORY_PYTHON_PROFILER,
+};
+
+const std::set<Category> CATEGORIES_GPU = std::set<Category>{
+    CATEGORY_GPU,
+};
+
+const std::set<OverlapType> OVERLAP_TYPES = std::set<OverlapType>{
+    "ResourceOverlap",
+    "CategoryOverlap",
+    "OperationOverlap",
+    "ResourceSubplot",
 };
 
 template <typename Func, class EventListIter>
@@ -63,6 +90,29 @@ MyStatus ReadJson(std::string path, json* j) {
   } catch (nlohmann::detail::parse_error e) {
     std::stringstream ss;
     ss << "Failed to parse json file @ path=" << path << ":\n";
+    ss << e.what();
+    return MyStatus(error::INVALID_ARGUMENT, ss.str());
+  }
+
+  return MyStatus::OK();
+}
+
+MyStatus WriteJson(std::string path, const nlohmann::json& j) {
+  boost::filesystem::path file(path);
+  auto parent = file.parent_path();
+  if(!boost::filesystem::exists(parent)) {
+    std::stringstream ss;
+    ss << "Couldn't find directory of json file @ directory=" << parent;
+    return MyStatus(error::INVALID_ARGUMENT, ss.str());
+  }
+  // read a JSON file
+  std::ofstream out(path);
+  try {
+    // j.dump()
+    out << std::setw(4) << j;
+  } catch (nlohmann::detail::parse_error e) {
+    std::stringstream ss;
+    ss << "Failed to write json file @ path=" << path << ":\n";
     ss << e.what();
     return MyStatus(error::INVALID_ARGUMENT, ss.str());
   }
@@ -1379,6 +1429,42 @@ OverlapResult OverlapComputer::ComputeOverlap(bool keep_empty_time) const {
   }
 
   return r;
+}
+
+std::unique_ptr<OverlapTypeReducerInterface> GetJSDumper(const OverlapType& overlap_type) {
+  if (overlap_type == "ResourceOverlap") {
+    return std::make_unique<ResourceOverlapType>();
+  } else if (overlap_type == "CategoryOverlap") {
+    return std::make_unique<CategoryOverlapType>();
+  } else if (overlap_type == "OperationOverlap") {
+    return std::make_unique<OperationOverlapType>();
+  } else if (overlap_type == "ResourceSubplot") {
+    return std::make_unique<ResourceSubplotOverlapType>();
+  }
+  // Not sure what overlap_type is.
+  assert(false);
+  std::stringstream ss;
+  ss << "Not sure how to handle overlap_type = " << overlap_type;
+  RAISE_NOT_IMPLEMENTED(ss.str());
+  return std::make_unique<ResourceOverlapType>();
+}
+
+
+void OverlapResult::DumpVennJS(const std::string& directory,
+                               const Machine& machine,
+                               const Process& process,
+                               const Phase& phase) const {
+  for (auto const& overlap_type : OVERLAP_TYPES) {
+    auto const& overlap_reducer = OverlapResultReducer::ReduceToCategoryKey(*this);
+    auto js_dumper = GetJSDumper(overlap_type);
+    auto const& reduced_overlap = js_dumper->PostReduceCategoryKey(overlap_reducer);
+    js_dumper->DumpOverlapJS(
+        directory,
+        machine,
+        process,
+        phase,
+        reduced_overlap);
+  }
 }
 
 void OverlapResult::Print(std::ostream& out, int indent) const {

@@ -239,6 +239,15 @@ int main(int argc, char** argv) {
         ss << "ComputeOverlap(machine=" << meta.machine << ", process=" << meta.process << ", phase=" << meta.phase << ")";
         timer->EndOperation(ss.str());
       }
+      r.DumpVennJS(
+          FLAGS_iml_directory,
+          meta.machine, meta.process, meta.phase);
+      if (timer) {
+        std::stringstream ss;
+        ss << "DumpVennJS(machine=" << meta.machine << ", process=" << meta.process << ", phase=" << meta.phase << ")";
+        timer->EndOperation(ss.str());
+      }
+
       std::cout << std::endl;
       r.Print(std::cout, 1);
       std::cout << std::endl;

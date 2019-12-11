@@ -38,6 +38,100 @@ from iml_profiler.parser.stats import KernelTime
 
 from iml_profiler.profiler import iml_logging
 
+class CalibrationJSON:
+    def __init__(self, path, as_df=None):
+        self.path = path
+        self.as_df = as_df
+
+        if self.path is not None:
+            self.js = load_json(path)
+
+            if self.as_df is not None:
+                self.df = self.as_df(self.js)
+
+    def is_given(self):
+        return self.path is not None
+
+    def __getitem__(self, item):
+        return self.js[item]
+
+class CalibrationJSONs:
+    def __init__(self,
+                 cupti_overhead_json=None,
+                 LD_PRELOAD_overhead_json=None,
+                 python_annotation_json=None,
+                 python_clib_interception_tensorflow_json=None,
+                 python_clib_interception_simulator_json=None,
+                 # Swallow extra kwargs
+                 **kwargs):
+
+        self.cupti_overhead_json = CalibrationJSON(cupti_overhead_json, as_df=self._cupti_as_df)
+        self.LD_PRELOAD_overhead_json = CalibrationJSON(LD_PRELOAD_overhead_json)
+        self.python_annotation_json = CalibrationJSON(python_annotation_json)
+        self.python_clib_interception_tensorflow_json = CalibrationJSON(python_clib_interception_tensorflow_json)
+        self.python_clib_interception_simulator_json = CalibrationJSON(python_clib_interception_simulator_json)
+
+    @staticmethod
+    def add_argparse(parser, required=False):
+        parser.add_argument(
+            '--cupti-overhead-json',
+            help="Calibration: mean per-CUDA API CUPTI overhead when GPU activities are recorded (see: CUPTIOverheadTask)",
+            required=required,
+        )
+        parser.add_argument(
+            '--LD-PRELOAD-overhead-json',
+            help="Calibration: mean overhead for intercepting CUDA API calls with LD_PRELOAD  (see: CallInterceptionOverheadTask)",
+            required=required,
+        )
+        parser.add_argument(
+            '--python-clib-interception-tensorflow-json',
+            help="Calibration: means for TensorFlow Python->C++ interception overhead (see: PyprofOverheadTask)",
+            required=required,
+        )
+        parser.add_argument(
+            '--python-clib-interception-simulator-json',
+            help="Calibration: means for Simulator Python->C++ interception overhead (see: PyprofOverheadTask)",
+            required=required,
+        )
+        parser.add_argument(
+            '--python-annotation-json',
+            help="Calibration: means for operation annotation overhead (see: PyprofOverheadTask)",
+            required=required,
+        )
+
+    @staticmethod
+    def from_obj(obj):
+        calibration_jsons = CalibrationJSONs(**vars(obj))
+        return calibration_jsons
+
+    def _cupti_as_df(self, js):
+        cupti_overhead_cols = dict()
+        for api_name, cupti_data in js.items():
+            add_col(cupti_overhead_cols, 'api_name', api_name)
+            for field, value in cupti_data.items():
+                add_col(cupti_overhead_cols, field, value)
+        df = pd.DataFrame(cupti_overhead_cols)
+        return df
+
+    def _as_df(self, js):
+        cols = dict()
+        for field, value in js.items():
+            add_col(cols, field, value)
+        df = pd.DataFrame(cols)
+        return df
+
+    def argv(self):
+        argv = []
+        def _add(opt, json):
+            if json.is_given():
+                argv.extend([opt, json.path])
+        _add('--python-clib-interception-tensorflow-json', self.python_clib_interception_tensorflow_json)
+        _add('--python-clib-interception-simulator-json', self.python_clib_interception_tensorflow_json)
+        _add('--python-annotation-json', self.python_annotation_json)
+        _add('--cupti-overhead-json', self.cupti_overhead_json)
+        _add('--LD-PRELOAD-overhead-json', self.LD_PRELOAD_overhead_json)
+        return argv
+
 class CorrectedTrainingTimeParser:
     """
     Compute total training time, after "subtracting" various sources of profiling overhead.
@@ -45,7 +139,9 @@ class CorrectedTrainingTimeParser:
     def __init__(self,
                  cupti_overhead_json,
                  LD_PRELOAD_overhead_json,
-                 pyprof_overhead_json,
+                 python_annotation_json,
+                 python_clib_interception_tensorflow_json,
+                 python_clib_interception_simulator_json,
                  iml_directories,
                  uninstrumented_directories,
                  directory,
@@ -61,16 +157,14 @@ class CorrectedTrainingTimeParser:
         :param directories:
         :param debug:
         """
-        self.cupti_overhead_json_path = cupti_overhead_json
-        self.cupti_overhead_json = load_json(self.cupti_overhead_json_path)
-        self._init_cupti_overhead_df()
 
-        self.LD_PRELOAD_overhead_json_path = LD_PRELOAD_overhead_json
-        self.LD_PRELOAD_overhead_json = load_json(self.LD_PRELOAD_overhead_json_path)
-
-        self.pyprof_overhead_json_path = pyprof_overhead_json
-        self.pyprof_overhead_json = load_json(self.pyprof_overhead_json_path)
-        self._init_pyprof_overhead_df()
+        self.calibration_jsons = CalibrationJSONs(
+            cupti_overhead_json=cupti_overhead_json,
+            LD_PRELOAD_overhead_json=LD_PRELOAD_overhead_json,
+            python_annotation_json=python_annotation_json,
+            python_clib_interception_tensorflow_json=python_clib_interception_tensorflow_json,
+            python_clib_interception_simulator_json=python_clib_interception_simulator_json,
+        )
 
         # NOTE: we don't need "should_subtract_pyprof"
 
@@ -144,19 +238,35 @@ class CorrectedTrainingTimeParser:
         # NOTE: for pyprof overhead we SHOULD just be able to subtract regardless...
         # if there's no pyprof activity, then there should be no events present.
 
-    def _init_cupti_overhead_df(self):
-        cupti_overhead_cols = dict()
-        for api_name, cupti_data in self.cupti_overhead_json.items():
-            add_col(cupti_overhead_cols, 'api_name', api_name)
-            for field, value in cupti_data.items():
-                add_col(cupti_overhead_cols, field, value)
-        self.cupti_overhead_df = pd.DataFrame(cupti_overhead_cols)
+    # def _init_cupti_overhead_df(self):
+    #     cupti_overhead_cols = dict()
+    #     for api_name, cupti_data in self.cupti_overhead_json.items():
+    #         add_col(cupti_overhead_cols, 'api_name', api_name)
+    #         for field, value in cupti_data.items():
+    #             add_col(cupti_overhead_cols, field, value)
+    #     self.cupti_overhead_df = pd.DataFrame(cupti_overhead_cols)
+    #
+    # def _init_pyprof_overhead_df(self):
+    #     pyprof_overhead_cols = dict()
+    #     for field, value in self.pyprof_overhead_json.items():
+    #         add_col(pyprof_overhead_cols, field, value)
+    #     self.pyprof_overhead_df = pd.DataFrame(pyprof_overhead_cols)
 
-    def _init_pyprof_overhead_df(self):
-        pyprof_overhead_cols = dict()
-        for field, value in self.pyprof_overhead_json.items():
-            add_col(pyprof_overhead_cols, field, value)
-        self.pyprof_overhead_df = pd.DataFrame(pyprof_overhead_cols)
+    @property
+    def cupti_overhead_json(self):
+        return self.calibration_jsons.cupti_overhead_json
+    @property
+    def LD_PRELOAD_overhead_json(self):
+        return self.calibration_jsons.LD_PRELOAD_overhead_json
+    @property
+    def python_annotation_json(self):
+        return self.calibration_jsons.python_annotation_json
+    @property
+    def python_clib_interception_tensorflow_json(self):
+        return self.calibration_jsons.python_clib_interception_tensorflow_json
+    @property
+    def python_clib_interception_simulator_json(self):
+        return self.calibration_jsons.python_clib_interception_simulator_json
 
     def run(self):
         """
@@ -295,7 +405,7 @@ class CorrectedTrainingTimeParser:
                 # - join on api_name, make column 'mean_cupti_overhead_per_call_us'
                 # - multiply mean by num_calls
 
-                per_api_df = per_api_df.merge(self.cupti_overhead_df, on=['api_name'])
+                per_api_df = per_api_df.merge(self.cupti_overhead_json.df, on=['api_name'])
                 if self.should_subtract_cupti:
                     per_api_df['total_cupti_overhead_us'] = per_api_df['num_calls'] * per_api_df['mean_cupti_overhead_per_call_us']
                 else:
@@ -318,16 +428,22 @@ class CorrectedTrainingTimeParser:
                 pyprof_mapper = DataframeMapper(PyprofDataframeReader, directories=[directory], debug=self.debug)
 
                 if self.should_subtract_pyprof_interception:
-                    total_intercepted_calls = pyprof_mapper.map_one(lambda reader: reader.total_intercepted_calls())
-                    total_pyprof_interception_overhead_us = total_intercepted_calls * self.pyprof_overhead_json['mean_pyprof_interception_overhead_per_call_us']
+                    total_tensorflow_intercepted_calls = pyprof_mapper.map_one(lambda reader: reader.total_intercepted_tensorflow_calls())
+                    total_python_tensorflow_interception_overhead_us = total_tensorflow_intercepted_calls * self.python_clib_interception_tensorflow_json['mean_pyprof_interception_overhead_per_call_us']
                 else:
-                    total_pyprof_interception_overhead_us = 0
+                    total_python_tensorflow_interception_overhead_us = 0
+
+                if self.should_subtract_pyprof_interception:
+                    total_simulator_intercepted_calls = pyprof_mapper.map_one(lambda reader: reader.total_intercepted_simulator_calls())
+                    total_python_simulator_interception_overhead_us = total_simulator_intercepted_calls * self.python_clib_interception_simulator_json['mean_pyprof_interception_overhead_per_call_us']
+                else:
+                    total_python_simulator_interception_overhead_us = 0
 
                 if self.should_subtract_pyprof_annotation:
-                    total_pyprof_annotations = pyprof_mapper.map_one(lambda reader: reader.total_annotations())
-                    total_pyprof_annotation_overhead_us = total_pyprof_annotations * self.pyprof_overhead_json['mean_pyprof_annotation_overhead_per_call_us']
+                    total_python_annotations = pyprof_mapper.map_one(lambda reader: reader.total_annotations())
+                    total_python_annotation_overhead_us = total_python_annotations * self.python_annotation_json['mean_pyprof_annotation_overhead_per_call_us']
                 else:
-                    total_pyprof_annotation_overhead_us = 0
+                    total_python_annotation_overhead_us = 0
 
                 """
                 - Interception overhead = sum(total_n_calls * api.mean_interception_per_call_overhead_us)
@@ -343,14 +459,21 @@ class CorrectedTrainingTimeParser:
 
                 # total_training_duration_us = get_training_durations(directory, debug=self.debug, debug_single_thread=self.debug_single_thread)
 
-                total_df = pd.DataFrame({
+                total_overhead_data = {
                     'total_cupti_overhead_us': [total_cupti_overhead_us],
                     'total_interception_overhead_us': [total_interception_overhead_us],
-                    'total_pyprof_interception_overhead_us': [total_pyprof_interception_overhead_us],
-                    'total_pyprof_annotation_overhead_us': [total_pyprof_annotation_overhead_us],
+
+                    'total_python_tensorflow_interception_overhead_us': [total_python_tensorflow_interception_overhead_us],
+                    'total_python_simulator_interception_overhead_us': [total_python_simulator_interception_overhead_us],
+
+                    'total_python_annotation_overhead_us': [total_python_annotation_overhead_us],
 
                     'total_training_duration_us': [total_training_duration_us],
-                })
+                }
+                for col in total_overhead_data.keys():
+                    # NOTE: make sure each column name matches is_total_overhead_column(col)
+                    assert is_total_overhead_column(col)
+                total_df = pd.DataFrame(total_overhead_data)
                 add_fields(total_df, iml_config)
 
                 # WARNING: protect against bug where we create more than one row unintentionally.
@@ -1380,9 +1503,9 @@ class TotalTrainingTimeParser:
         self.debug_single_thread = debug_single_thread
         self.filename_prefix = 'total_training_time'
 
-    @staticmethod
-    def get_total_intercepted_calls(reader):
-        return reader.total_intercepted_calls()
+    # @staticmethod
+    # def get_total_intercepted_calls(reader):
+    #     return reader.total_intercepted_calls()
 
     @staticmethod
     def get_total_annotations(reader):
@@ -2628,92 +2751,92 @@ class OverheadEventCountParser:
         return _j(self.directory, "{prefix}.json".format(
             prefix=self.filename_prefix))
 
-class CorrectedVennParser:
-    """
-    Correct the time reported in venn.js files by subtracting overheads from various categories.
-    """
-    def __init__(self,
-                 overhead_event_count_json,
-                 venn_js_paths,
-                 width=None,
-                 height=None,
-                 debug=False,
-                 # Swallow any excess arguments
-                 **kwargs):
-        """
-        :param directories:
-        :param debug:
-        """
-        self.overhead_event_count_json_path = overhead_event_count_json
-        self.overhead_event_count_json = load_json(self.overhead_event_count_json_path)
-
-        self.venn_js_paths = venn_js_paths
-
-        self.width = width
-        self.height = height
-        self.debug = debug
-        # self.filename_prefix = 'overhead_event_count'
-
-    def directory(self, venn_js):
-        return _d(venn_js)
-
-    def run(self):
-        sns_kwargs = get_sns_kwargs()
-        plt_kwargs = get_plt_kwargs()
-
-        for venn_js_path in self.venn_js_paths:
-            corrected_venn_js_path = as_corrected_venn_js_file(venn_js_path)
-            vd = VennData(venn_js_path)
-            # Q: what do we want to do?
-            """
-            e.g. for CUPTI:
-            CUPTI overhead:
-                Subtract from:
-                [CPU, q_forward, CUDA API]
-                Need to know: which operation is active at top-of-stack.
-            overhead_event_count_json[overhead_type]
-            """
-
-            vd.subtract_overheard(
-                self.overhead_event_count_json,
-                self.cupti_overhead_json,
-                self.LD_PRELOAD_overhead_json,
-                self.pyprof_overhead_json,
-            )
-
-        json = dict()
-
-        cuda_api_call_count = dict()
-        cuda_api_stats_files = [path for path in each_file_recursive(self.directory) if is_cuda_api_stats_file(path)]
-        def add_call_counts(cuda_api_stats_file):
-            cuda_api_event_reader = CUDAAPIStatsReader(cuda_api_stats_file)
-            phase = cuda_api_event_reader.phase
-            for event in cuda_api_event_reader.cuda_api_call_events():
-                cuda_api_call_count[phase][event.active_operation][event.api_name] += 1
-        for cuda_api_stats_file in cuda_api_stats_files:
-            add_call_counts(cuda_api_stats_file)
-        json['cuda_api_call'] = cuda_api_call_count
-
-        op_stack_files = [path for path in each_file_recursive(self.directory) if is_op_stack_file(path)]
-        def add_op_stack_counts(op_stack_file):
-            op_stack_reader = OpStackReader(op_stack_file)
-            for overhead_type, phase, operation_name, num_overhead_events in op_stack_reader.all_events():
-                if overhead_type not in json:
-                    json[overhead_type] = dict()
-                if phase not in json[overhead_type]:
-                    json[overhead_type][phase] = dict()
-                assert operation_name not in json[overhead_type][phase]
-                json[overhead_type][phase][operation_name] = json[overhead_type][phase].get(operation_name, 0) + num_overhead_events
-        for op_stack_file in op_stack_files:
-            add_op_stack_counts(op_stack_file)
-
-        logging.info("Output json @ {path}".format(path=self._json_path))
-        do_dump_json(json, self._json_path)
-
-    @property
-    def _json_path(self):
-        return _j(self.directory, "{prefix}.json".format(
-            prefix=self.filename_prefix))
+# class CorrectedVennParser:
+#     """
+#     Correct the time reported in venn.js files by subtracting overheads from various categories.
+#     """
+#     def __init__(self,
+#                  overhead_event_count_json,
+#                  venn_js_paths,
+#                  width=None,
+#                  height=None,
+#                  debug=False,
+#                  # Swallow any excess arguments
+#                  **kwargs):
+#         """
+#         :param directories:
+#         :param debug:
+#         """
+#         self.overhead_event_count_json_path = overhead_event_count_json
+#         self.overhead_event_count_json = load_json(self.overhead_event_count_json_path)
+#
+#         self.venn_js_paths = venn_js_paths
+#
+#         self.width = width
+#         self.height = height
+#         self.debug = debug
+#         # self.filename_prefix = 'overhead_event_count'
+#
+#     def directory(self, venn_js):
+#         return _d(venn_js)
+#
+#     def run(self):
+#         sns_kwargs = get_sns_kwargs()
+#         plt_kwargs = get_plt_kwargs()
+#
+#         for venn_js_path in self.venn_js_paths:
+#             corrected_venn_js_path = as_corrected_venn_js_file(venn_js_path)
+#             vd = VennData(venn_js_path)
+#             # Q: what do we want to do?
+#             """
+#             e.g. for CUPTI:
+#             CUPTI overhead:
+#                 Subtract from:
+#                 [CPU, q_forward, CUDA API]
+#                 Need to know: which operation is active at top-of-stack.
+#             overhead_event_count_json[overhead_type]
+#             """
+#
+#             vd.subtract_overhead(
+#                 self.overhead_event_count_json,
+#                 self.cupti_overhead_json,
+#                 self.LD_PRELOAD_overhead_json,
+#                 self.pyprof_overhead_json,
+#             )
+#
+#         json = dict()
+#
+#         cuda_api_call_count = dict()
+#         cuda_api_stats_files = [path for path in each_file_recursive(self.directory) if is_cuda_api_stats_file(path)]
+#         def add_call_counts(cuda_api_stats_file):
+#             cuda_api_event_reader = CUDAAPIStatsReader(cuda_api_stats_file)
+#             phase = cuda_api_event_reader.phase
+#             for event in cuda_api_event_reader.cuda_api_call_events():
+#                 cuda_api_call_count[phase][event.active_operation][event.api_name] += 1
+#         for cuda_api_stats_file in cuda_api_stats_files:
+#             add_call_counts(cuda_api_stats_file)
+#         json['cuda_api_call'] = cuda_api_call_count
+#
+#         op_stack_files = [path for path in each_file_recursive(self.directory) if is_op_stack_file(path)]
+#         def add_op_stack_counts(op_stack_file):
+#             op_stack_reader = OpStackReader(op_stack_file)
+#             for overhead_type, phase, operation_name, num_overhead_events in op_stack_reader.all_events():
+#                 if overhead_type not in json:
+#                     json[overhead_type] = dict()
+#                 if phase not in json[overhead_type]:
+#                     json[overhead_type][phase] = dict()
+#                 assert operation_name not in json[overhead_type][phase]
+#                 json[overhead_type][phase][operation_name] = json[overhead_type][phase].get(operation_name, 0) + num_overhead_events
+#         for op_stack_file in op_stack_files:
+#             add_op_stack_counts(op_stack_file)
+#
+#         logging.info("Output json @ {path}".format(path=self._json_path))
+#         do_dump_json(json, self._json_path)
+#
+#     @property
+#     def _json_path(self):
+#         return _j(self.directory, "{prefix}.json".format(
+#             prefix=self.filename_prefix))
 
 class SQLOverheadEventsParser:
     """
@@ -2901,6 +3024,8 @@ class SQLOverheadEventsParser:
         # self.cupti_overhead_json = cupti_overhead_json
         # self.LD_PRELOAD_overhead_json = LD_PRELOAD_overhead_json
         # self.pyprof_overhead_json = pyprof_overhead_json
+
+        raise NotImplementedError("Use cpp code, not old python implementation... (not maintained anymore)")
 
 
         self.cupti_overhead_json_path = cupti_overhead_json

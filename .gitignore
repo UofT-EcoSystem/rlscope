@@ -10,3 +10,5 @@ CTestTestfile.cmake
 id_rsa*
 ssh_config*
 /third_party/
+/Debug
+/Release

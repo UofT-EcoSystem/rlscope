@@ -106,7 +106,9 @@ def _get_param(desc, default=no_value):
 CALIBRATION_OPTS = [
     'cupti_overhead_json',
     'LD_PRELOAD_overhead_json',
-    'pyprof_overhead_json',
+    'python_annotation_json',
+    'python_clib_interception_tensorflow_json',
+    'python_clib_interception_simulator_json',
 ]
 
 def get_param_cupti_overhead_json(default=no_value):
@@ -115,8 +117,13 @@ def get_param_cupti_overhead_json(default=no_value):
 def get_param_LD_PRELOAD_overhead_json(default=no_value):
     desc = "Calibration: mean overhead for intercepting CUDA API calls with LD_PRELOAD  (see: CallInterceptionOverheadTask)"
     return _get_param(desc=desc, default=default)
-def get_param_pyprof_overhead_json(default=no_value):
-    desc = "Calibration: means for (1) Python->C++ interception overhead, (2) operation annotation overhead (see: PyprofOverheadTask)"
+def get_param_python_clib_interception_overhead_json(clib, default=no_value):
+    desc = "Calibration: mean for {clib} Python->C++ interception overhead (see: PyprofOverheadTask)".format(
+        clib=clib)
+    return _get_param(desc=desc, default=default)
+
+def get_param_python_annotation_overhead_json(default=no_value):
+    desc = "Calibration: means for operation annotation overhead (see: PyprofOverheadTask)"
     return _get_param(desc=desc, default=default)
 
 def calibration_files_present(task):
@@ -125,12 +132,10 @@ def calibration_files_present(task):
 # NOTE: this params REQUIRE a value (since no default is present)
 param_cupti_overhead_json = get_param_cupti_overhead_json()
 param_LD_PRELOAD_overhead_json = get_param_LD_PRELOAD_overhead_json()
-param_pyprof_overhead_json = get_param_pyprof_overhead_json()
 
-# These have optional values.
-param_cupti_overhead_json_optional = get_param_cupti_overhead_json(default=None)
-param_LD_PRELOAD_overhead_json_optional = get_param_LD_PRELOAD_overhead_json(default=None)
-param_pyprof_overhead_json_optional = get_param_pyprof_overhead_json(default=None)
+param_python_annotation_json = get_param_python_annotation_overhead_json()
+param_python_clib_interception_tensorflow_json = get_param_python_clib_interception_overhead_json(clib='TensorFlow')
+param_python_clib_interception_simulator_json = get_param_python_clib_interception_overhead_json(clib='Simulator')
 
 class IMLTask(luigi.Task):
     iml_directory = luigi.Parameter(description="Location of trace-files")
@@ -296,7 +301,9 @@ class SQLOverheadEventsTask(IMLTask):
     # TODO: we still need to investigate whether calibration using a separate workload generalizes properly.
     cupti_overhead_json = param_cupti_overhead_json
     LD_PRELOAD_overhead_json = param_LD_PRELOAD_overhead_json
-    pyprof_overhead_json = param_pyprof_overhead_json
+    python_annotation_json = param_python_annotation_json
+    python_clib_interception_tensorflow_json = param_python_clib_interception_tensorflow_json
+    python_clib_interception_simulator_json = param_python_clib_interception_simulator_json
 
     def requires(self):
         return [
@@ -305,11 +312,12 @@ class SQLOverheadEventsTask(IMLTask):
 
     def iml_run(self):
         # TODO: implement SQLOverheadEventsParser to insert overhead events.
+        raise NotImplementedError("Use cpp code, not old python implementation... (not maintained anymore)")
         self.sql_overhead_events_parser = SQLOverheadEventsParser(
             directory=self.iml_directory,
             cupti_overhead_json=self.cupti_overhead_json,
             LD_PRELOAD_overhead_json=self.LD_PRELOAD_overhead_json,
-            pyprof_overhead_json=self.pyprof_overhead_json,
+            # pyprof_overhead_json=self.pyprof_overhead_json,
 
             host=self.postgres_host,
             user=self.postgres_user,
@@ -374,15 +382,12 @@ class _UtilizationPlotTask(IMLTask):
         # default=1000000,
     )
 
-    # Optional: if user provides overhead calibration files, we can "subtract" overheads.
-    # cupti_overhead_json = param_cupti_overhead_json_optional
-    # LD_PRELOAD_overhead_json = param_LD_PRELOAD_overhead_json_optional
-    # pyprof_overhead_json = param_pyprof_overhead_json_optional
-
     # NOT optional (to ensure we remember to do overhead correction).
     cupti_overhead_json = param_cupti_overhead_json
     LD_PRELOAD_overhead_json = param_LD_PRELOAD_overhead_json
-    pyprof_overhead_json = param_pyprof_overhead_json
+    python_annotation_json = param_python_annotation_json
+    python_clib_interception_tensorflow_json = param_python_clib_interception_tensorflow_json
+    python_clib_interception_simulator_json = param_python_clib_interception_simulator_json
 
     def requires(self):
         return [
@@ -419,82 +424,6 @@ class _UtilizationPlotTask(IMLTask):
         )
         self.sql_parser.run()
 
-# class EventOverlapTask(IMLTask):
-#     visible_overhead = param_visible_overhead
-#     n_workers = luigi.IntParameter(
-#         description="How many threads to simultaneously run overlap-computation; if --debug-single-thread, uses 1",
-#         default=multiprocessing.cpu_count())
-#     events_per_split = luigi.IntParameter(
-#         description=textwrap.dedent("""
-#         Approximately how many events per split should there be?
-#         Assuming events_per_split is > 10x the number of events per iteration,
-#         events_per_split should roughly linearly correlate with memory usage and processing time of the split.
-#
-#         Minimum: 1000
-#         """),
-#         default=10000)
-#
-#     # NOT optional (to ensure we remember to do overhead correction).
-#     cupti_overhead_json = param_cupti_overhead_json
-#     LD_PRELOAD_overhead_json = param_LD_PRELOAD_overhead_json
-#     pyprof_overhead_json = param_pyprof_overhead_json
-#
-#     def output(self):
-#         return [
-#             luigi.LocalTarget(self._done_file),
-#             luigi.LocalTarget(self.event_overlap_path),
-#         ]
-#
-#     def mark_done(self, start_t, end_t):
-#         task_file = self.output()[0]
-#         return self._mark_done(task_file, start_t, end_t)
-#
-#     @property
-#     def event_overlap_path(self):
-#         """
-#         e.g.
-#
-#         <--iml-directory>/EventOverlap.pickle
-#         """
-#         return "{dir}/{name}.pickle".format(
-#             dir=self.iml_directory, name=self._task_name)
-#
-#     def requires(self):
-#         return [
-#             mk_SQL_tasks(self),
-#         ]
-#
-#     def iml_run(self):
-#         # If calibration files aren't provided, then overhead will be visible.
-#         # If calibration files are provided, we can subtract it:
-#         #   Use whatever they want based on --visible-overhead
-#         if not calibration_files_present(task=self):
-#             logging.warning(
-#                 ("Calibration files aren't all present; we cannot subtract overhead without "
-#                  "all of these options present: {msg}").format(
-#                     msg=pprint_msg(CALIBRATION_OPTS),
-#                 ))
-#             visible_overhead = True
-#         else:
-#             visible_overhead = self.visible_overhead
-#
-#         self.sql_parser = UtilizationPlot(
-#             overlap_type=self.overlap_type,
-#             directory=self.iml_directory,
-#             host=self.postgres_host,
-#             user=self.postgres_user,
-#             visible_overhead=visible_overhead,
-#             n_workers=self.n_workers,
-#             events_per_split=self.events_per_split,
-#             password=self.postgres_password,
-#             event_overlap_path=self.event_overlap_path,
-#             debug=self.debug,
-#             debug_single_thread=self.debug_single_thread,
-#             debug_perf=self.debug_perf,
-#             debug_memoize=self.debug_memoize,
-#         )
-#         self.sql_parser.run()
-
 class ResourceOverlapTask(_UtilizationPlotTask):
     overlap_type = 'ResourceOverlap'
 
@@ -512,15 +441,12 @@ class All(IMLTask):
     # ResourceOverlapTask.task is deleted, we will still re-run it.
     skip_output = True
 
-    # Optional: if user provides overhead calibration files, we can "subtract" overheads.
-    # cupti_overhead_json = param_cupti_overhead_json_optional
-    # LD_PRELOAD_overhead_json = param_LD_PRELOAD_overhead_json_optional
-    # pyprof_overhead_json = param_pyprof_overhead_json_optional
-
     # NOT optional (to ensure we remember to do overhead correction).
     cupti_overhead_json = param_cupti_overhead_json
     LD_PRELOAD_overhead_json = param_LD_PRELOAD_overhead_json
-    pyprof_overhead_json = param_pyprof_overhead_json
+    python_annotation_json = param_python_annotation_json
+    python_clib_interception_tensorflow_json = param_python_clib_interception_tensorflow_json
+    python_clib_interception_simulator_json = param_python_clib_interception_simulator_json
 
     visible_overhead = param_visible_overhead
 
@@ -586,7 +512,9 @@ class TraceEventsTask(luigi.Task):
     # Needed by mk_SQL_tasks
     cupti_overhead_json = param_cupti_overhead_json
     LD_PRELOAD_overhead_json = param_LD_PRELOAD_overhead_json
-    pyprof_overhead_json = param_pyprof_overhead_json
+    python_annotation_json = param_python_annotation_json
+    python_clib_interception_tensorflow_json = param_python_clib_interception_tensorflow_json
+    python_clib_interception_simulator_json = param_python_clib_interception_simulator_json
 
     skip_output = False
 
@@ -805,7 +733,9 @@ class ExtrapolatedTrainingTimeTask(IMLTask):
     # Needed by mk_SQL_tasks
     cupti_overhead_json = param_cupti_overhead_json
     LD_PRELOAD_overhead_json = param_LD_PRELOAD_overhead_json
-    pyprof_overhead_json = param_pyprof_overhead_json
+    python_annotation_json = param_python_annotation_json
+    python_clib_interception_tensorflow_json = param_python_clib_interception_tensorflow_json
+    python_clib_interception_simulator_json = param_python_clib_interception_simulator_json
 
     def requires(self):
         return [
@@ -836,7 +766,9 @@ class GeneratePlotIndexTask(luigi.Task):
     # Needed by mk_SQL_tasks
     cupti_overhead_json = param_cupti_overhead_json
     LD_PRELOAD_overhead_json = param_LD_PRELOAD_overhead_json
-    pyprof_overhead_json = param_pyprof_overhead_json
+    python_annotation_json = param_python_annotation_json
+    python_clib_interception_tensorflow_json = param_python_clib_interception_tensorflow_json
+    python_clib_interception_simulator_json = param_python_clib_interception_simulator_json
 
     skip_output = False
 
@@ -910,7 +842,9 @@ class OverlapStackedBarTask(luigi.Task):
     # Needed by mk_SQL_tasks (for GeneratePlotIndexTask)
     cupti_overhead_json = param_cupti_overhead_json
     LD_PRELOAD_overhead_json = param_LD_PRELOAD_overhead_json
-    pyprof_overhead_json = param_pyprof_overhead_json
+    python_annotation_json = param_python_annotation_json
+    python_clib_interception_tensorflow_json = param_python_clib_interception_tensorflow_json
+    python_clib_interception_simulator_json = param_python_clib_interception_simulator_json
 
     skip_output = False
 
@@ -1137,7 +1071,9 @@ class CUPTIScalingOverheadTask(luigi.Task):
 class CorrectedTrainingTimeTask(luigi.Task):
     cupti_overhead_json = param_cupti_overhead_json
     LD_PRELOAD_overhead_json = param_LD_PRELOAD_overhead_json
-    pyprof_overhead_json = param_pyprof_overhead_json
+    python_annotation_json = param_python_annotation_json
+    python_clib_interception_tensorflow_json = param_python_clib_interception_tensorflow_json
+    python_clib_interception_simulator_json = param_python_clib_interception_simulator_json
     iml_directories = luigi.ListParameter(description="IML directory that ran with full tracing enabled")
     uninstrumented_directories = luigi.ListParameter(description="IML directories for uninstrumented runs (iml-prof --config uninstrumented)")
     directory = luigi.Parameter(description="Output directory", default=".")

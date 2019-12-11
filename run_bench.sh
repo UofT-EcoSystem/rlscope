@@ -31,11 +31,14 @@ _do() {
     "$@"
 }
 
-CALIB_DIR=$IML_DIR/calibration/redo_02
+CALIB_DIR=$IML_DIR/calibration/microbench
 CALIB_OPTS=( \
     --cupti-overhead-json $CALIB_DIR/cupti_overhead.json \
-    --pyprof-overhead-json $CALIB_DIR/category_events.json \
-    --LD-PRELOAD-overhead-json $CALIB_DIR/LD_PRELOAD_overhead.json)
+    --LD-PRELOAD-overhead-json $CALIB_DIR/LD_PRELOAD_overhead.json \
+    --python-clib-interception-tensorflow-json $CALIB_DIR/category_events.python_clib_interception.tensorflow.json \
+    --python-clib-interception-simulator-json $CALIB_DIR/category_events.python_clib_interception.simulator.json \
+    --python-annotation-json $CALIB_DIR/category_events.python_annotation.json \
+    )
 
 _run_bench() {
     local all_dir=$IML_DIR/output/iml_bench/all

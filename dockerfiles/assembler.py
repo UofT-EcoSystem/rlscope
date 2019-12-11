@@ -659,6 +659,14 @@ def main():
         """).rstrip())
 
     parser.add_argument(
+        '--publish',
+        action='append',
+        help=textwrap.dedent("""\
+        Translates into docker --publish option; e.g.
+        --publish <HOST_PORT>:<CONTAINER_PORT> 
+        """).rstrip())
+
+    parser.add_argument(
         '--env',
         '-e',
         action='append',
@@ -1186,6 +1194,7 @@ class Assembler:
 
         docker_run_env = get_docker_run_env(tag_def, args.env)
         iml_volumes = get_iml_volumes(docker_run_env, args.volume)
+        iml_ports = get_iml_ports(docker_run_env, args.publish)
 
         if not args.pull:
             if args.release not in RELEASE_TO_LOCAL_IMG_TAG:
@@ -1201,6 +1210,7 @@ class Assembler:
             assembler_cmd=self.argv,
             env=docker_run_env,
             volumes=iml_volumes,
+            ports=iml_ports,
             iml_drill_port=args.deploy_iml_drill_port,
             postgres_pgdata_dir=args.deploy_postgres_pgdata_dir,
             postgres_port=args.deploy_postgres_port,
@@ -1492,6 +1502,9 @@ def get_iml_volumes(run_args, extra_volumes):
         volumes[direc] = direc
     return volumes
 
+def get_iml_ports(run_args, extra_ports):
+    return extra_ports
+
 class DockerError(Exception):
     """
     :param path
@@ -1756,6 +1769,7 @@ class StackYMLGenerator:
                 ports:
                     # Expose port that the iml-drill web server runs on.
                     - {iml_drill_port}:{DEFAULT_IML_DRILL_PORT}
+                    {port_list}
                 
                 volumes:
                 {volume_list}
@@ -1799,7 +1813,7 @@ class StackYMLGenerator:
         """).rstrip()
 
     def generate(self,
-                 assembler_cmd, env, volumes,
+                 assembler_cmd, env, volumes, ports,
                  iml_drill_port=DEFAULT_IML_DRILL_PORT,
                  postgres_port=DEFAULT_POSTGRES_PORT,
                  postgres_pgdata_dir=DEFAULT_POSTGRES_PGDATA_DIR,
@@ -1817,6 +1831,7 @@ class StackYMLGenerator:
         return self.template.format(
             env_list=self.env_list(env, indent=bash_indent),
             volume_list=self.volume_list(volumes, indent=bash_indent),
+            port_list=self.port_list(ports, indent=bash_indent + 1),
             DEFAULT_POSTGRES_PORT=DEFAULT_POSTGRES_PORT,
             postgres_port=postgres_port,
             postgres_pgdata_dir=postgres_pgdata_dir,
@@ -1830,6 +1845,8 @@ class StackYMLGenerator:
 
     def _yml_list(self, values, indent):
         yml_lines = []
+        if values is None:
+            values = []
         for value in values:
             yml_lines.append("- {value}".format(
                 value=value))
@@ -1842,6 +1859,9 @@ class StackYMLGenerator:
 
     def volume_list(self, volumes : dict, indent):
         return self._yml_dict_as_list(volumes, sep=':', indent=indent)
+
+    def port_list(self, ports : list, indent):
+        return self._yml_list(ports, indent=indent)
 
     def env_list(self, envs : dict, indent):
         return self._yml_dict_as_list(envs, sep='=', indent=indent)

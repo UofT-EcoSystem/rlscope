@@ -1820,201 +1820,201 @@ class VdTree(_DataIndex):
                         operation_name = operation.operation_name
                         yield machine_name, process_name, phase_name, operation_name
 
-    def subtract_overhead(self,
-                          overhead_event_count_json,
-                          cupti_overhead_json,
-                          LD_PRELOAD_overhead_json,
-                          pyprof_overhead_json):
-        """
-        - CUDA API interception:
-          Subtract from:
-          [CPU, q_forward, TensorFlow C++]
-
-        - CUPTI overhead:
-          Subtract from:
-          [CPU, q_forward, CUDA API]
-
-        - Python -> C-library interception:
-          Subtract from:
-          [CPU, q_forward, Python]
-
-        - Python annotations:
-          Subtract from:
-          [CPU, q_forward, Python]
-        """
-
-        # 'machine', 'process', 'phase', 'resource_overlap', 'operation'
-
-        # e.g. subtracting Python annotation time.
-        # The approach will be similar for other overhead types.
-
-        for machine_name, process_name, phase_name, operation_name in self._each_operation():
-
-            # Python annotations:
-            total_pyprof_annotation = overhead_event_count_json['pyprof_annotation'][machine_name][process_name][phase_name][operation_name]
-            per_pyprof_annotation_sec = pyprof_overhead_json['mean_pyprof_annotation_per_call_us']/USEC_IN_SEC
-            pyprof_annotation_sec = per_pyprof_annotation_sec * total_pyprof_annotation
-            self.subtract_from_resource(
-                resource='CPU',
-                selector=dict(
-                    machine=machine_name,
-                    process=process_name,
-                    phase=phase_name,
-                    operation=operation_name,
-                    category=CATEGORY_PYTHON,
-                ),
-                subtract_sec=pyprof_annotation_sec)
-
-            # Python -> C-library interception:
-            total_pyprof_interception = overhead_event_count_json['pyprof_interception'][machine_name][process_name][phase_name][operation_name]
-            per_pyprof_interception_sec = pyprof_overhead_json['mean_pyprof_interception_overhead_per_call_us']/USEC_IN_SEC
-            pyprof_interception_sec = per_pyprof_interception_sec * total_pyprof_interception
-            self.subtract_from_resource(
-                resource='CPU',
-                selector=dict(
-                    machine=machine_name,
-                    process=process_name,
-                    phase=phase_name,
-                    operation=operation_name,
-                    category=CATEGORY_PYTHON,
-                ),
-                subtract_sec=pyprof_interception_sec)
-
-
-            missing_cupti_overhead_cuda_api_calls = dict()
-            # CUPTI overhead:
-            for cuda_api_name, num_api_calls in overhead_event_count_json['cuda_api_call'][machine_name][process_name][phase_name][operation_name].items():
-                if cuda_api_name not in cupti_overhead_json:
-                    missing_cupti_overhead_cuda_api_calls[cuda_api_name] = missing_cupti_overhead_cuda_api_calls.get(cuda_api_name, 0) + 1
-                else:
-                    per_cuda_api_sec = cupti_overhead_json[cuda_api_name]['mean_cupti_overhead_per_call_us']/USEC_IN_SEC
-                    cupti_overhead_sec = per_cuda_api_sec * num_api_calls
-                    self.subtract_from_resource(
-                        resource='CPU',
-                        selector=dict(
-                            machine=machine_name,
-                            process=process_name,
-                            phase=phase_name,
-                            operation=operation_name,
-                            category=CATEGORY_CUDA_API_CPU,
-                        ),
-                        subtract_sec=cupti_overhead_sec)
-            if len(missing_cupti_overhead_cuda_api_calls) > 0:
-                logging.warning("Saw CUDA API calls that we didn't have calibrated CUPTI overheads for overheads for {path}: {msg}".format(
-                    path=self.db_path,
-                    msg=pprint_msg(missing_cupti_overhead_cuda_api_calls),
-                ))
-
-            # CUDA API interception:
-            total_cuda_api_calls = np.sum([num_api_calls for cuda_api_name, num_api_calls in
-                                           overhead_event_count_json['cuda_api_call'][machine_name][process_name][phase_name][operation_name].items()])
-            per_LD_PRELOAD_sec = pyprof_overhead_json['mean_interception_overhead_per_call_us']/USEC_IN_SEC
-            LD_PRELOAD_sec = per_LD_PRELOAD_sec * total_cuda_api_calls
-            self.subtract_from_resource(
-                resource='CPU',
-                selector=dict(
-                    machine=machine_name,
-                    process=process_name,
-                    phase=phase_name,
-                    operation=operation_name,
-                    # ASSUMPTION: GPU calls are being made from inside the Tensorflow C++ API...
-                    # this might not hold once we start measuring other libraries the use the GPU...
-                    # NOTE: this overhead does NOT come from the CUDA API call itself; the overhead is
-                    # "around" the CUDA API call.
-                    category=CATEGORY_TF_API,
-                ),
-                subtract_sec=LD_PRELOAD_sec)
-
-    def subtract_from_resource(self, resource, selector, subtract_sec):
-        """
-        To handle the fact that we cannot precisely attribute profiling-overhead CPU-time to [CPU], or [CPU, GPU],
-        we decide to perform this heuristic:
-        - Subtract from [CPU] or [CPU, GPU], in the order of whichever is largest FIRST
-        - If we end up subtracting all of the first resource-group,
-          then subtract what remains from the next resource-group.
-
-        NOTE: if we subtract CPU-time from [CPU, GPU] the new time that remains is GPU-only time...
-
-        :param resource:
-        :param selector:
-        :param subtract_sec:
-        :return:
-        """
-        resource_selector = dict(selector)
-        resource_selector['plot_type'] = 'ResourceOverlap'
-        resource_selector = only_selector_fields(resource_selector)
-        resource_vd = self.get_file(resource_selector)
-        # e.g.
-        # resource = 'CPU'
-        # resource_types = [['CPU'], ['CPU', 'GPU']]
-        keys = resource_vd.keys()
-        resource_types = [resource_type for resource_type in keys if resource in resource_type]
-        def sort_by_time(key):
-            return -1 * resource_vd.get_size(key)
-        # by = {by total time spent in resource in descending order}
-        resource_types.sort(key=sort_by_time)
-        subtract_left_sec = subtract_sec
-        for resource_type in resource_types:
-            if subtract_left_sec == 0:
-                break
-            # vd_leaf = vd_tree.lookup(machine, process, phase, operation, category)
-            # vd_selector = copy.copy(selector)
-            # vd_selector['resource_overlap'] = resource_type
-            # Q: are we selecting for ResourceOverlap or ResourceSubplot?
-            # vd_leaf = self.get_file(selector)
-
-            # to_subtract = min(
-            #     subtract_left_sec,
-            #     vd.time_sec(resource_type, process, phase, operation, category))
-            # key_type = plot_index.KEY_TYPE[plot_type]
-            # key = selector[key_type]
-            to_subtract = min(
-                subtract_left_sec,
-                # vd_leaf.get_size(key),
-                resource_vd.get_size(resource_type),
-            )
-
-            # We need to "propagate up" the subtraction;
-            # vd_tree.subtract handles this.
-            # i.e. If we are subtracting from:
-            #   [CPU, q_forward, Python]
-            # Then, we need to subtract from:
-            #   [CPU, q_forward, Python]
-            #     CategoryOverlap.machine_{...}.process_{...}.phase_{...}.ops_{...}.resources_{...}.venn_js.json
-            #   [CPU, q_forward]
-            #     OperationOverlap.machine_{...}.process_{...}.phase_{...}.resources_{...}.venn_js.json
-            #   [CPU]
-            #     ResourceOverlap.machine_{...}.process_{...}.phase_{...}.venn_js.json
-            #     SKIP: ResourceSubplot.machine_{...}.process_{...}.phase_{...}.venn_js.json
-            # vd_tree.subtract(machine, process, phase, resource_type, operation, category, to_subtract)
-            self.subtract(resource_selector, to_subtract)
-            subtract_left_sec -= to_subtract
-
-    def subtract(self, selector, subtract_sec):
-        # selector = {
-        #     'machine': machine
-        #     'process': process
-        #     'phase': phase
-        #     'resource_type': resource_type,
-        #     'operation': operation
-        #     'category': category
-        # }
-        for plot_type in plot_index.OVERLAP_PLOT_TYPES:
-            # e.g. ResourceOverlap: [machine, process, phase]
-            # selector[just keep plot_type.attributes]
-            plot_type_selector = dict((k, v) for k, v in selector.items()
-                                      if k in plot_index.SEL_ORDER[plot_type])
-            plot_type_selector['plot_type'] = plot_type
-            vd = self.get_file(plot_type_selector)
-
-            # def vd.key_field():
-            #  ResourceSubplot -> ListOf[resource_type]
-            #  OperationOverlap -> operation
-            #  CategoryOverlap -> category
-            #  ResourceSubplot -> resource_type
-            key_field = plot_index.KEY_TYPE[plot_type]
-            key = selector[key_field]
-            vd.subtract(key, subtract_sec, inplace=True)
+    # def subtract_overhead(self,
+    #                       overhead_event_count_json,
+    #                       cupti_overhead_json,
+    #                       LD_PRELOAD_overhead_json,
+    #                       pyprof_overhead_json):
+    #     """
+    #     - CUDA API interception:
+    #       Subtract from:
+    #       [CPU, q_forward, TensorFlow C++]
+    #
+    #     - CUPTI overhead:
+    #       Subtract from:
+    #       [CPU, q_forward, CUDA API]
+    #
+    #     - Python -> C-library interception:
+    #       Subtract from:
+    #       [CPU, q_forward, Python]
+    #
+    #     - Python annotations:
+    #       Subtract from:
+    #       [CPU, q_forward, Python]
+    #     """
+    #
+    #     # 'machine', 'process', 'phase', 'resource_overlap', 'operation'
+    #
+    #     # e.g. subtracting Python annotation time.
+    #     # The approach will be similar for other overhead types.
+    #
+    #     for machine_name, process_name, phase_name, operation_name in self._each_operation():
+    #
+    #         # Python annotations:
+    #         total_pyprof_annotation = overhead_event_count_json['pyprof_annotation'][machine_name][process_name][phase_name][operation_name]
+    #         per_pyprof_annotation_sec = pyprof_overhead_json['mean_pyprof_annotation_per_call_us']/USEC_IN_SEC
+    #         pyprof_annotation_sec = per_pyprof_annotation_sec * total_pyprof_annotation
+    #         self.subtract_from_resource(
+    #             resource='CPU',
+    #             selector=dict(
+    #                 machine=machine_name,
+    #                 process=process_name,
+    #                 phase=phase_name,
+    #                 operation=operation_name,
+    #                 category=CATEGORY_PYTHON,
+    #             ),
+    #             subtract_sec=pyprof_annotation_sec)
+    #
+    #         # Python -> C-library interception:
+    #         total_pyprof_interception = overhead_event_count_json['pyprof_interception'][machine_name][process_name][phase_name][operation_name]
+    #         per_pyprof_interception_sec = pyprof_overhead_json['mean_pyprof_interception_overhead_per_call_us']/USEC_IN_SEC
+    #         pyprof_interception_sec = per_pyprof_interception_sec * total_pyprof_interception
+    #         self.subtract_from_resource(
+    #             resource='CPU',
+    #             selector=dict(
+    #                 machine=machine_name,
+    #                 process=process_name,
+    #                 phase=phase_name,
+    #                 operation=operation_name,
+    #                 category=CATEGORY_PYTHON,
+    #             ),
+    #             subtract_sec=pyprof_interception_sec)
+    #
+    #
+    #         missing_cupti_overhead_cuda_api_calls = dict()
+    #         # CUPTI overhead:
+    #         for cuda_api_name, num_api_calls in overhead_event_count_json['cuda_api_call'][machine_name][process_name][phase_name][operation_name].items():
+    #             if cuda_api_name not in cupti_overhead_json:
+    #                 missing_cupti_overhead_cuda_api_calls[cuda_api_name] = missing_cupti_overhead_cuda_api_calls.get(cuda_api_name, 0) + 1
+    #             else:
+    #                 per_cuda_api_sec = cupti_overhead_json[cuda_api_name]['mean_cupti_overhead_per_call_us']/USEC_IN_SEC
+    #                 cupti_overhead_sec = per_cuda_api_sec * num_api_calls
+    #                 self.subtract_from_resource(
+    #                     resource='CPU',
+    #                     selector=dict(
+    #                         machine=machine_name,
+    #                         process=process_name,
+    #                         phase=phase_name,
+    #                         operation=operation_name,
+    #                         category=CATEGORY_CUDA_API_CPU,
+    #                     ),
+    #                     subtract_sec=cupti_overhead_sec)
+    #         if len(missing_cupti_overhead_cuda_api_calls) > 0:
+    #             logging.warning("Saw CUDA API calls that we didn't have calibrated CUPTI overheads for overheads for {path}: {msg}".format(
+    #                 path=self.db_path,
+    #                 msg=pprint_msg(missing_cupti_overhead_cuda_api_calls),
+    #             ))
+    #
+    #         # CUDA API interception:
+    #         total_cuda_api_calls = np.sum([num_api_calls for cuda_api_name, num_api_calls in
+    #                                        overhead_event_count_json['cuda_api_call'][machine_name][process_name][phase_name][operation_name].items()])
+    #         per_LD_PRELOAD_sec = pyprof_overhead_json['mean_interception_overhead_per_call_us']/USEC_IN_SEC
+    #         LD_PRELOAD_sec = per_LD_PRELOAD_sec * total_cuda_api_calls
+    #         self.subtract_from_resource(
+    #             resource='CPU',
+    #             selector=dict(
+    #                 machine=machine_name,
+    #                 process=process_name,
+    #                 phase=phase_name,
+    #                 operation=operation_name,
+    #                 # ASSUMPTION: GPU calls are being made from inside the Tensorflow C++ API...
+    #                 # this might not hold once we start measuring other libraries the use the GPU...
+    #                 # NOTE: this overhead does NOT come from the CUDA API call itself; the overhead is
+    #                 # "around" the CUDA API call.
+    #                 category=CATEGORY_TF_API,
+    #             ),
+    #             subtract_sec=LD_PRELOAD_sec)
+    #
+    # def subtract_from_resource(self, resource, selector, subtract_sec):
+    #     """
+    #     To handle the fact that we cannot precisely attribute profiling-overhead CPU-time to [CPU], or [CPU, GPU],
+    #     we decide to perform this heuristic:
+    #     - Subtract from [CPU] or [CPU, GPU], in the order of whichever is largest FIRST
+    #     - If we end up subtracting all of the first resource-group,
+    #       then subtract what remains from the next resource-group.
+    #
+    #     NOTE: if we subtract CPU-time from [CPU, GPU] the new time that remains is GPU-only time...
+    #
+    #     :param resource:
+    #     :param selector:
+    #     :param subtract_sec:
+    #     :return:
+    #     """
+    #     resource_selector = dict(selector)
+    #     resource_selector['plot_type'] = 'ResourceOverlap'
+    #     resource_selector = only_selector_fields(resource_selector)
+    #     resource_vd = self.get_file(resource_selector)
+    #     # e.g.
+    #     # resource = 'CPU'
+    #     # resource_types = [['CPU'], ['CPU', 'GPU']]
+    #     keys = resource_vd.keys()
+    #     resource_types = [resource_type for resource_type in keys if resource in resource_type]
+    #     def sort_by_time(key):
+    #         return -1 * resource_vd.get_size(key)
+    #     # by = {by total time spent in resource in descending order}
+    #     resource_types.sort(key=sort_by_time)
+    #     subtract_left_sec = subtract_sec
+    #     for resource_type in resource_types:
+    #         if subtract_left_sec == 0:
+    #             break
+    #         # vd_leaf = vd_tree.lookup(machine, process, phase, operation, category)
+    #         # vd_selector = copy.copy(selector)
+    #         # vd_selector['resource_overlap'] = resource_type
+    #         # Q: are we selecting for ResourceOverlap or ResourceSubplot?
+    #         # vd_leaf = self.get_file(selector)
+    #
+    #         # to_subtract = min(
+    #         #     subtract_left_sec,
+    #         #     vd.time_sec(resource_type, process, phase, operation, category))
+    #         # key_type = plot_index.KEY_TYPE[plot_type]
+    #         # key = selector[key_type]
+    #         to_subtract = min(
+    #             subtract_left_sec,
+    #             # vd_leaf.get_size(key),
+    #             resource_vd.get_size(resource_type),
+    #         )
+    #
+    #         # We need to "propagate up" the subtraction;
+    #         # vd_tree.subtract handles this.
+    #         # i.e. If we are subtracting from:
+    #         #   [CPU, q_forward, Python]
+    #         # Then, we need to subtract from:
+    #         #   [CPU, q_forward, Python]
+    #         #     CategoryOverlap.machine_{...}.process_{...}.phase_{...}.ops_{...}.resources_{...}.venn_js.json
+    #         #   [CPU, q_forward]
+    #         #     OperationOverlap.machine_{...}.process_{...}.phase_{...}.resources_{...}.venn_js.json
+    #         #   [CPU]
+    #         #     ResourceOverlap.machine_{...}.process_{...}.phase_{...}.venn_js.json
+    #         #     SKIP: ResourceSubplot.machine_{...}.process_{...}.phase_{...}.venn_js.json
+    #         # vd_tree.subtract(machine, process, phase, resource_type, operation, category, to_subtract)
+    #         self.subtract(resource_selector, to_subtract)
+    #         subtract_left_sec -= to_subtract
+    #
+    # def subtract(self, selector, subtract_sec):
+    #     # selector = {
+    #     #     'machine': machine
+    #     #     'process': process
+    #     #     'phase': phase
+    #     #     'resource_type': resource_type,
+    #     #     'operation': operation
+    #     #     'category': category
+    #     # }
+    #     for plot_type in plot_index.OVERLAP_PLOT_TYPES:
+    #         # e.g. ResourceOverlap: [machine, process, phase]
+    #         # selector[just keep plot_type.attributes]
+    #         plot_type_selector = dict((k, v) for k, v in selector.items()
+    #                                   if k in plot_index.SEL_ORDER[plot_type])
+    #         plot_type_selector['plot_type'] = plot_type
+    #         vd = self.get_file(plot_type_selector)
+    #
+    #         # def vd.key_field():
+    #         #  ResourceSubplot -> ListOf[resource_type]
+    #         #  OperationOverlap -> operation
+    #         #  CategoryOverlap -> category
+    #         #  ResourceSubplot -> resource_type
+    #         key_field = plot_index.KEY_TYPE[plot_type]
+    #         key = selector[key_field]
+    #         vd.subtract(key, subtract_sec, inplace=True)
 
 def get_x_env(env, long_env=False):
     short_env = env
