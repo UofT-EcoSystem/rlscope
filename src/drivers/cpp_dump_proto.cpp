@@ -231,9 +231,52 @@ int main(int argc, char** argv) {
       category_times.PrintSummary(std::cout, 1);
       std::cout << std::endl;
 
+      if (SHOULD_DEBUG(FEATURE_LOAD_DATA)) {
+        std::stringstream ss;
+        ss << "CategoryTimes details:";
+
+        std::set<Operation> ops;
+        for (const auto& pair : category_times.eo_times) {
+          auto const &category_key = pair.first;
+          ops.insert(category_key.ops.begin(), category_key.ops.end());
+        }
+        ss << "\n";
+        PrintIndent(ss, 1);
+        // op_names = {sample_action, step}
+        ss << "op_names = ";
+        PrintValue(ss, ops);
+
+        for (const auto& pair : category_times.eo_times) {
+          auto const& category_key = pair.first;
+          auto const& eo_events = pair.second;
+
+          if (eo_events.KeepNames()) {
+            ss << "\n";
+            category_key.Print(ss, 1);
+            auto const& names = eo_events.UniqueNames();
+            ss << "\n";
+            PrintIndent(ss, 2);
+            ss << "names = ";
+            PrintValue(ss, names);
+          }
+        }
+
+        DBG_LOG("{}", ss.str());
+      }
+
       n_total_events += category_times.TotalEvents();
       OverlapComputer overlap_computer(category_times);
+      if (SHOULD_DEBUG(FEATURE_OVERLAP)) {
+        overlap_computer.debug = true;
+      }
       auto r = overlap_computer.ComputeOverlap();
+
+//      if (SHOULD_DEBUG(FEATURE_PREPROCESS_DATA)) {
+      std::cout << std::endl;
+      r.Print(std::cout, 1);
+      std::cout << std::endl;
+//      }
+
       if (timer) {
         std::stringstream ss;
         ss << "ComputeOverlap(machine=" << meta.machine << ", process=" << meta.process << ", phase=" << meta.phase << ")";
@@ -248,9 +291,6 @@ int main(int argc, char** argv) {
         timer->EndOperation(ss.str());
       }
 
-      std::cout << std::endl;
-      r.Print(std::cout, 1);
-      std::cout << std::endl;
       return MyStatus::OK();
     });
     if (timer) {

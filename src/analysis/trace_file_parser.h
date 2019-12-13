@@ -137,7 +137,8 @@ enum RLSFileType {
 
 
 //#define TRACE_SUFFIX_RE (R"((?:\.trace_(?P<trace_id>\d+))?)")
-#define TRACE_SUFFIX_RE R"((?:\.trace_(\d+))?)"
+// WARNING: using non-capturing groups (?:) causes match strings to become empty.
+#define TRACE_SUFFIX_RE R"(\.trace_(\d+)?)"
 
 //#define CUDA_API_STATS_REGEX (R"(^cuda_api_stats{trace}\.proto)")
 #define CUDA_API_STATS_REGEX (R"(^cuda_api_stats)" TRACE_SUFFIX_RE R"(\.proto)")
@@ -417,7 +418,7 @@ class KeyVector {
 //    return it->second;
 //  }
 
-  inline const std::set<Key>& Keys() {
+  inline const std::set<Key>& Keys() const {
     return keys;
   }
 
@@ -542,6 +543,33 @@ public:
     bitset[category_idx] = 0;
   }
 
+  inline size_t size() const {
+    return bitset.count();
+  }
+
+  inline CategoryKeyBitset Intersection(const CategoryKeyBitset& rhs) const {
+    const auto& lhs = *this;
+    CategoryKeyBitset intersect;
+    intersect.bitset = lhs.bitset & rhs.bitset;
+    intersect.idx_map = lhs.idx_map;
+    intersect.debug = lhs.debug;
+    return intersect;
+  }
+
+  static CategoryKeyBitset Ops(const CategoryKeyBitset& category_set) {
+    CategoryKeyBitset ops;
+    ops.idx_map = category_set.idx_map;
+    ops.debug = category_set.debug;
+    for (const auto& pair : category_set.idx_map->to_idx) {
+      auto const& category_key = pair.first;
+      auto ident = pair.second;
+      if (category_key.ops.size() > 0) {
+        ops.Add(ident);
+      }
+    }
+    return ops;
+  }
+
   inline bool IsEmpty() const {
     return bitset.count() == 0;
     // return bitset.to_ullong() == 0;
@@ -588,6 +616,7 @@ using Overlap = std::map<CategoryKeyBitset, TimeUsec>;
 bool isRLSFileWithType(RLSFileType file_type, const std::string& path);
 bool isRLSFile(const std::string& path);
 RLSFileType GetRLSFileType(const std::string& path);
+const char* RLSFileTypeString(RLSFileType file_type);
 
 template <typename KeepFunc>
 MyStatus RecursiveFindFiles(std::list<std::string>* paths, const std::string& root, KeepFunc func) {
@@ -670,6 +699,10 @@ public:
     return _keep_names;
   }
 
+  inline const std::set<std::string>& UniqueNames() const {
+    return _names.Keys();
+  }
+
   // Return read-only raw pointer to array of times.
   // NOTE: be careful, since the lifetime of this pointer is still managed by std::shared_ptr!
   inline const TimeUsec* RawPtr() const {
@@ -683,12 +716,21 @@ public:
   DECLARE_PRINT_DEBUG
   DECLARE_PRINT_OPERATOR(EOEvents)
   void PrintSummary(std::ostream& out, int indent) const;
+  void CheckIntegrity(std::ostream& out, int indent) const;
 
   inline void SetEvent(OptionalString name, size_t i, TimeUsec start_us, TimeUsec end_us) {
     SetEventPsec(name, i, start_us*PSEC_IN_USEC, end_us*PSEC_IN_USEC);
   }
 
   inline void SetEventPsec(OptionalString name, size_t i, TimePsec start_ps, TimePsec end_ps) {
+
+    if (start_ps == 1571629741190258000 && end_ps == 1571629774546157000) {
+      DBG_BREAKPOINT("A");
+    }
+    if (start_ps == 1571629741190322000 && end_ps == 1571629741195270000) {
+      DBG_BREAKPOINT("B");
+    }
+
     assert(i < _max_events);
     assert(i == _next_event_to_set);
     assert(start_ps <= end_ps);
@@ -969,6 +1011,8 @@ public:
   DECLARE_PRINT_DEBUG
   DECLARE_PRINT_OPERATOR(CategoryTimes)
   void PrintSummary(std::ostream& out, int indent) const;
+
+  void CheckIntegrity(std::ostream& out, int indent) const;
 };
 
 class CategoryTimesBitset {
@@ -1067,6 +1111,26 @@ struct TraceFileMeta {
     assert(isRLSFile(path));
   }
 
+  template <typename OStream, typename Value>
+  void _PrintField(OStream& out, int indent, const std::string& name, const Value& value) const {
+    out << "\n";
+    PrintIndent(out, indent);
+    out << name << " = " << value;
+  }
+  template <typename OStream>
+  void Print(OStream& out, int indent) const {
+    PrintIndent(out, indent);
+
+    out << "TraceFileMeta:";
+    _PrintField(out, indent + 1, "path", path);
+    _PrintField(out, indent + 1, "file_type", RLSFileTypeString(file_type));
+    _PrintField(out, indent + 1, "machine", machine);
+    _PrintField(out, indent + 1, "process", process);
+    _PrintField(out, indent + 1, "phase", phase);
+    _PrintField(out, indent + 1, "trace_id", trace_id);
+
+  }
+
   inline const std::string& get_path() const {
     return path;
   }
@@ -1118,6 +1182,23 @@ public:
   std::list<Machine> Machines() const;
   std::list<Process> Processes(const Machine& machine) const;
   std::list<Phase> Phases(const Machine& machine, const Process& process) const;
+
+  template <typename OStream>
+  void Print(OStream& out, int indent) const {
+    PrintIndent(out, indent);
+    out << "TraceFileWalker: size = " << _path_to_meta.size();
+    size_t i = 0;
+    for (const auto& pair : _path_to_meta) {
+      auto const& path = pair.first;
+      auto const& meta = pair.second;
+      out << "\n";
+      PrintIndent(out, indent + 1);
+      out << "path[" << i << "] = " << path;
+      out << "\n";
+      meta.Print(out, indent + 2);
+      i += 1;
+    }
+  }
 
   MyStatus Init();
 };
@@ -2424,6 +2505,180 @@ public:
   }
 
 };
+
+// PSEUDOCODE:
+// # NOTE: to construct oe_times, we must run this twice; # once to determine the number of events,
+// # and another to fill in the events.
+// def each_op_event():
+// 	ops = []
+// 	last_time = None
+// 	while i < len(events) or len(ops) > 0:
+//    if len(ops) == 0:
+//      last_time = events[i].start
+//      ops.push(events[i])
+// 		  i += 1
+//      continue
+//
+// 		# Skip empty events
+// 		if i < len(events) and events[i].start == events[i].end:
+// 		  i += 1
+// 		  continue
+//
+// 		if i < len(events) and ops[-1].subsumes(events[i]):
+// 		  yield Op(
+// 		    op=ops[-1].name,
+// 		    start=last_time,
+// 		    end=events[i].start)
+// 		   last_time = events[i].start
+// 		  ops.push(events[i])
+// 		  i += 1
+// 		else:
+// 	  	# assert:
+// 	   	#   ops[-1] ends before events[i] begins
+// 		  yield Op(
+// 		    op=ops[-1].name,
+// 		    start=last_time,
+// 		    end=ops[-1].end_time)
+// 		  ops.pop()
+//      last_time = ops[-1].end_time
+template <typename EventProto, typename EventProtoList, typename Func>
+MyStatus EachOpEvent(const EventProtoList& event_protos, Func func) {
+  struct EventCompare {
+    bool operator() (const EventProto* lhs, const EventProto* rhs) const {
+    // NOTE: really subtle ordering constraint here needed for correctness.
+    //
+    //   A: [   ]
+    //   B: [            ]
+    //      0   1    2   3
+    //      [ A ][   B   ]
+    //
+    //    1. EITHER
+    //      - (START_EMPTY) A @ 0
+    //      - (START) B @ 0
+    //    2. (END) A @ 1
+    //    3. (END) B @ 3
+    //    To ensure (2, 3), we need to order by [event->start_time_us()] second.
+    //
+    //
+    //   A:          [   ]
+    //   B: [            ]
+    //      0   1    2   3
+    //      [   B   ][ A ]
+    //
+    //    1. (START_EMPTY) B @ 0
+    //    2. (START) A @ 2
+    //    3. (END) A @ 3
+    //    4. (END) B @ 3
+    //    To ensure (3, 4), we need to order by [-1 * event->start_time_us()] second.
+    //
+#define EVENT_KEY(event) \
+  std::make_tuple(event->start_time_us() + event->duration_us(), -1 * event->start_time_us())
+      return EVENT_KEY(lhs) < EVENT_KEY(rhs);
+#undef EVENT_KEY
+    }
+  };
+  using OpStack = std::set<const EventProto*, EventCompare>;
+  OpStack ops;
+  TimeUsec last_time = std::numeric_limits<TimeUsec>::max();
+  auto max_time = std::numeric_limits<TimeUsec>::max();
+  size_t i = 0;
+  // For some reason, protobuf uses "int" for the size() of its repeated fields.
+  assert(event_protos.size() >= 0);
+  size_t events_size = static_cast<size_t>(event_protos.size());
+  auto get_end_time = [] (const EventProto* A) {
+    return A->start_time_us() + A->duration_us();
+  };
+  auto pop_next_event = [] (OpStack* ops) {
+    auto it = ops->begin();
+    auto min_event = *it;
+    ops->erase(it);
+    return min_event;
+  };
+  auto peek_next_event = [] (const OpStack& ops) {
+    auto it = ops.begin();
+    auto min_event = *it;
+    return min_event;
+  };
+//  if (SHOULD_DEBUG(FEATURE_PREPROCESS_DATA)) {
+//    DBG_LOG();
+//  }
+//  auto subsumes = [get_end_time] (const EventProto* A, const EventProto* B) {
+//    //     [ B ]
+//    // [     A     ]
+//    // return A->start_time_us() <= B->start_time_us() <= B->end_time_us() <= A->end_time_us();
+//    // ===
+//    // return A->start_time_us() <= B->start_time_us() <= A->end_time_us();
+//    return A->start_time_us() <= B->start_time_us() &&
+//           B->start_time_us() <= get_end_time(A);
+//  };
+  while (i < events_size || ops.size() > 0) {
+    if (ops.size() == 0) {
+      last_time = event_protos[i].start_time_us();
+      if (SHOULD_DEBUG(FEATURE_PREPROCESS_DATA)) {
+        DBG_LOG("(EMPTY_START) last_time = Event(name={}) @ {} us", event_protos[i].name(), last_time);
+      }
+      ops.insert(&event_protos[i]);
+      i += 1;
+      continue;
+    }
+
+    // Skip empty events:
+    if (i < events_size && event_protos[i].start_time_us() == get_end_time(&event_protos[i])) {
+      if (SHOULD_DEBUG(FEATURE_PREPROCESS_DATA)) {
+        DBG_LOG("(SKIP) Event(name={}) @ {} us", event_protos[i].name(), event_protos[i].start_time_us());
+      }
+      i += 1;
+      continue;
+    }
+
+    if (i < events_size && event_protos[i].start_time_us() < get_end_time(peek_next_event(ops))) {
+      auto op = peek_next_event(ops);
+      auto start_time_us = last_time;
+      auto end_time_us = event_protos[i].start_time_us();
+      if (start_time_us < end_time_us) {
+        // Add operation event only if duration is non-zero.
+        func(op->name(), start_time_us, end_time_us);
+      }
+      ops.insert(&event_protos[i]);
+      last_time = end_time_us;
+      if (SHOULD_DEBUG(FEATURE_PREPROCESS_DATA)) {
+        DBG_LOG("(START) last_time = Event(name={}) @ {} us", event_protos[i].name(), last_time);
+      }
+      i += 1;
+    } else {
+      auto op = pop_next_event(&ops);
+      auto start_time_us = last_time;
+      auto end_time_us = get_end_time(op);
+      if (start_time_us < end_time_us) {
+        // Add operation event only if duration is non-zero.
+        func(op->name(), start_time_us, end_time_us);
+      }
+      last_time = end_time_us;
+//      if (SHOULD_DEBUG(FEATURE_PREPROCESS_DATA)) {
+//        std::stringstream ss;
+//        ss << "(END) last_time = Event(name=" << op->name() << ") @ " << last_time << " us";
+//
+//        ss << "\n";
+//        PrintIndent(ss, 1);
+//        ss << "min_event.name = " << op->name();
+//
+//        ss << "\n";
+//        PrintIndent(ss, 1);
+//        ss << "min_event.start = " << op->start_time_us();
+//
+//        ss << "\n";
+//        PrintIndent(ss, 1);
+//        ss << "min_event.end = " << get_end_time(op);
+//
+//        DBG_LOG("{}", ss.str());
+//      }
+      if (SHOULD_DEBUG(FEATURE_PREPROCESS_DATA)) {
+        DBG_LOG("(END) last_time = Event(name={}) @ {} us", op->name(), last_time);
+      }
+    }
+  }
+  return MyStatus::OK();
+}
 
 
 }

@@ -10,6 +10,9 @@
 #include <stdexcept>
 #include <string>
 #include <sstream>
+#include <iostream>
+
+#include <backward.hpp>
 
 #include <spdlog/spdlog.h>
 //#include <sys/types.h>
@@ -31,10 +34,16 @@ namespace tensorflow {
 // $ strings a.out | grep BANANAS
 // <OUPTPUT>
 //
-constexpr bool FEATURE_OVERLAP = 0;
-constexpr bool FEATURE_LOAD_DATA = 0;
+constexpr bool FEATURE_OVERLAP = 1;
+constexpr bool FEATURE_LOAD_DATA = 1;
 constexpr bool FEATURE_SAVE_JS = 1;
+constexpr bool FEATURE_PREPROCESS_DATA = 0;
 #define SHOULD_DEBUG(feature) ((SPDLOG_ACTIVE_LEVEL <= SPDLOG_LEVEL_DEBUG) && feature)
+
+constexpr bool FEATURE_BREAKPOINT_DUMP_STACK = 0;
+
+// Just do overlap computation on CATEGORY_OPERATION's.
+constexpr bool FEATURE_JUST_OPERATIONS = 1;
 
 #define RAISE_NOT_IMPLEMENTED(msg) \
   throw NotImplementedException(msg, __FILE__, __LINE__)
@@ -53,6 +62,40 @@ public:
     return message.c_str();
   }
 };
+
+static inline void DumpStacktrace(size_t skip_frames, bool snippet) {
+  backward::StackTrace st;
+  const size_t MAX_STACKFRAMES = 32;
+  // Skip stackframes added by this callframe.
+  skip_frames += 3;
+  st.load_here(MAX_STACKFRAMES);
+// Last 4 frames are always related to backward.hpp or logging.cc.
+// Skip those frames; make the latest frame the LOG(FAIL) or DCHECK failure.
+  size_t idx;
+  if (st.size() < skip_frames) {
+// Print the whole thing.
+    idx = 0;
+  } else {
+// Skip the last 4 frames.
+    idx = skip_frames;
+  }
+  st.load_from(st[idx].addr, MAX_STACKFRAMES);
+  backward::Printer p;
+  p.snippet = snippet;
+  p.print(st);
+}
+
+static void __attribute_noinline__ dbg_breakpoint(const std::string& name, const char* file, int lineno) {
+  std::cout << "";
+}
+static void __attribute_noinline__ _dbg_breakpoint(const std::string& name, const char* file, int lineno) {
+  if (FEATURE_BREAKPOINT_DUMP_STACK) {
+    DumpStacktrace(1, true);
+  }
+  std::cout << "[ HIT BREAKPOINT \"" << name << "\" @ " << file << ":" << lineno << " ]" << std::endl;
+  dbg_breakpoint(name, file, lineno);
+}
+#define DBG_BREAKPOINT(name) _dbg_breakpoint(name, __FILE__, __LINE__)
 
 };
 
