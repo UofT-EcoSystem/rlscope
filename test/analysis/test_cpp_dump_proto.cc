@@ -177,7 +177,7 @@ std::vector<MyEvent> InterleaveEvents(const std::map<Operation, std::vector<MyEv
 
 std::list<MyEvent> SplitEvents(const std::vector<MyEvent>& op_events) {
   std::list<MyEvent> got_events;
-  EachOpEvent<MyEvent>(
+  EventFlattener<MyEvent>::EachOpEvent(
       op_events,
       [&got_events] (const Operation& op, TimeUsec start_us, TimeUsec end_us) {
         EXPECT_LE(start_us, end_us);

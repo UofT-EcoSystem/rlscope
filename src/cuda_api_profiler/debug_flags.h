@@ -43,7 +43,7 @@ constexpr bool FEATURE_PREPROCESS_DATA = 0;
 constexpr bool FEATURE_BREAKPOINT_DUMP_STACK = 0;
 
 // Just do overlap computation on CATEGORY_OPERATION's.
-constexpr bool FEATURE_JUST_OPERATIONS = 1;
+constexpr bool FEATURE_JUST_OPERATIONS = 0;
 
 #define RAISE_NOT_IMPLEMENTED(msg) \
   throw NotImplementedException(msg, __FILE__, __LINE__)

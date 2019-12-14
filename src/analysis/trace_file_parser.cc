@@ -183,7 +183,7 @@ MyStatus CategoryEventsParser::_CountCategoryTimesOperation(CategoryTimesCount* 
 //  DBG_LOG("CategoryEventsParser::ParserMeta.num_CATEGORY_OPERATION = {}", events.size());
   count->AddExtra(CategoryKey::FromCategory(process, CATEGORY_EXTRA_OPERATION), events.size());
 
-  EachOpEvent<iml::Event>(
+  EventFlattener<iml::Event>::EachOpEvent(
       events,
       [&process, count] (const Operation& op, TimeUsec start_us, TimeUsec end_us) {
         auto category_key = CategoryKey::FromOpEvent(process, op);
@@ -245,7 +245,7 @@ MyStatus CategoryEventsParser::_AppendCategoryOperation(const Category& category
   // Watch out for accidental copy-construction.
   assert(out_category_times->extra_eo_times.at(extra_op_category_key).size() > 0);
 
-  EachOpEvent<iml::Event>(
+  EventFlattener<iml::Event>::EachOpEvent(
       events,
       [this, &process, out_category_times] (const Operation& op, TimeUsec start_us, TimeUsec end_us) {
 //        if (SHOULD_DEBUG(FEATURE_LOAD_DATA)) {
