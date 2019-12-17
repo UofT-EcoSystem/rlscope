@@ -97,6 +97,10 @@ enum RLSFileType {
   CATEGORY_EVENTS_FILE = 2,
   CUDA_DEVICE_EVENTS_FILE = 3,
 };
+
+extern const std::regex PROCESS_OPERATION_REGEX;
+
+extern const std::vector<RLSFileType> RLS_FILE_TYPES;
 //const std::vector<RLSFileType>& AllRLSFileTypes() {
 //  static const std::vector<RLSFileType> RLSFileTypeVector = std::vector<RLSFileType>{
 //      CUDA_API_STATS_FILE ,
@@ -179,6 +183,34 @@ extern const std::set<Category> CATEGORIES_CPU;
 extern const std::set<Category> CATEGORIES_GPU;
 
 extern const std::set<OverlapType> OVERLAP_TYPES;
+
+template <typename EventList>
+void SortEvents(EventList* events) {
+  std::sort(
+      events->begin(),
+      events->end(),
+      // [] (const EventKlass* lhs, const EventKlass* rhs) {
+      [] (const auto& lhs, const auto& rhs) {
+        return lhs.start_time_us() < rhs.start_time_us();
+      });
+}
+
+template <typename Events>
+void CheckEventsSorted(const Category& category, const Events& events) {
+  size_t failed = 0;
+  for (int i = 0; i < events.size(); i++) {
+    if (i > 0) {
+      if (!(events[i-1].start_time_us() <= events[i].start_time_us())) {
+        failed += 1;
+      }
+      // assert(events[i-1].start_time_us() <= events[i].start_time_us());
+    }
+  }
+  if (failed > 0) {
+    DBG_LOG("WARNING: saw {} unordered events for category = \"{}\"", failed, category);
+  }
+}
+
 
 template <typename OStream>
 void _AddSuffix(OStream& ss, std::string name, std::string key, const Metadata& md) {
@@ -451,6 +483,9 @@ public:
 
   static CategoryKey FromOpEvent(const Process& proc, const Operation& op) {
     CategoryKey category_key;
+    if (op == "[ppo2_Walker2DBulletEnv-v0]") {
+      DBG_BREAKPOINT("[ppo2_Walker2DBulletEnv-v0]");
+    }
     category_key.procs.insert(proc);
     category_key.ops.insert(op);
     return category_key;
@@ -724,12 +759,12 @@ public:
 
   inline void SetEventPsec(OptionalString name, size_t i, TimePsec start_ps, TimePsec end_ps) {
 
-    if (start_ps == 1571629741190258000 && end_ps == 1571629774546157000) {
-      DBG_BREAKPOINT("A");
-    }
-    if (start_ps == 1571629741190322000 && end_ps == 1571629741195270000) {
-      DBG_BREAKPOINT("B");
-    }
+//    if (start_ps == 1571629741190258000 && end_ps == 1571629774546157000) {
+//      DBG_BREAKPOINT("A");
+//    }
+//    if (start_ps == 1571629741190322000 && end_ps == 1571629741195270000) {
+//      DBG_BREAKPOINT("B");
+//    }
 
     assert(i < _max_events);
     assert(i == _next_event_to_set);
@@ -1094,6 +1129,8 @@ struct TraceFileMeta {
 
 //  std::shared_ptr<IParserMeta> parser_meta;
 
+  nlohmann::json parser_meta;
+
   bool initialized;
 
   TraceFileMeta() :
@@ -1168,7 +1205,12 @@ public:
   // RLSFilePath -> TraceFileMeta
   std::map<std::string, TraceFileMeta> _path_to_meta;
   // [machine_name][process_name][phase_name][trace_id] -> TraceFileMeta
-  std::map<Machine, std::map<Process, std::map<Phase, std::map<RLSFileType, std::map<TraceID, TraceFileMeta>>>>> _meta;
+  std::map<Machine,
+  std::map<Process,
+  std::map<Phase,
+  std::map<RLSFileType,
+  std::map<TraceID, TraceFileMeta>>>>> _meta;
+
   std::string _iml_directory;
 
   TraceFileWalker(const std::string& iml_directory) :
@@ -1177,8 +1219,9 @@ public:
   }
 
   MyStatus ReadMeta(const std::string& path, TraceFileMeta* meta);
-  MyStatus TraceMetas(const Machine& machine, const Process& process, const Phase& phase, std::list<TraceFileMeta>* metas);
+  MyStatus TraceMetas(RLSFileType file_type, const Machine& machine, const Process& process, const Phase& phase, std::vector<TraceFileMeta>* metas);
 
+  std::set<RLSFileType> FileTypes() const;
   std::list<Machine> Machines() const;
   std::list<Process> Processes(const Machine& machine) const;
   std::list<Phase> Phases(const Machine& machine, const Process& process) const;
@@ -1334,27 +1377,161 @@ public:
 
 };
 
-class IEventFileParser {
+struct TraceParserMeta {
+
+  Machine machine;
+  Process process;
+  Phase phase;
+
+  TraceParserMeta(
+      const Machine& machine,
+      const Process& process,
+      const Phase& phase) :
+      machine(machine),
+      process(process),
+      phase(phase) {
+  }
+};
+
+class ITraceProtoReader {
 public:
 
   // Implemented in IEventFileProtoParser<ProtoKlass>
-  virtual bool IsFile(const std::string& path) const = 0;
-  virtual MyStatus ReadFile(CategoryTimes* out_category_times) = 0;
-  virtual MyStatus CountCategoryTimes(CategoryTimesCount* count) = 0;
-  virtual MyStatus AppendCategoryTimes(CategoryTimes* out_category_times) = 0;
+//  virtual bool IsFile(const std::string& path) const = 0;
+//  virtual MyStatus ReadFile(CategoryTimes* out_category_times) = 0;
   virtual MyStatus Init() = 0;
-//  virtual std::shared_ptr<IParserMeta> GetParserMeta() = 0;
+  virtual void Clear() = 0;
+  virtual MyStatus ReadMeta(nlohmann::json* meta) = 0;
 
   virtual const Machine& get_machine() const = 0;
   virtual const Process& get_process() const = 0;
   virtual const Phase& get_phase() const = 0;
 
+};
+
+class IEventFileParser {
+public:
+  CategoryTimesCount _count;
+  TraceParserMeta _meta;
+
+  // IEventFileParser() = default;
+  IEventFileParser(TraceParserMeta meta) :
+      _meta(std::move(meta))
+  {
+  }
+
+//  virtual MyStatus CountCategoryTimes(const std::string& path) = 0;
+//  virtual MyStatus AppendCategoryTimes(const std::string& path, CategoryTimes* out_category_times) = 0;
+
+  virtual MyStatus CountCategoryTimes(const std::vector<TraceFileMeta>& metas) = 0;
+  virtual MyStatus AppendCategoryTimes(const std::vector<TraceFileMeta>& metas, CategoryTimes* out_category_times) = 0;
+
+  virtual const CategoryTimesCount& GetCount() const {
+    return _count;
+  }
+  virtual CategoryTimesCount* MutableGetCount() {
+    return &_count;
+  }
+
+  virtual MyStatus Init() = 0;
+//  virtual std::shared_ptr<IParserMeta> GetParserMeta() = 0;
+
+  virtual const Machine& get_machine() const {
+    return _meta.machine;
+  }
+  virtual const Process& get_process() const {
+    return _meta.process;
+  }
+  virtual const Phase& get_phase() const {
+    return _meta.phase;
+  }
+
 
 };
 
-template <class ProtoKlass>
+
+template <class ProtoKlass, class ProtoReader>
 class IEventFileProtoParser : public IEventFileParser {
 public:
+  RLSFileType _file_type;
+  std::string _proto_nickname;
+
+  IEventFileProtoParser(TraceParserMeta meta, RLSFileType file_type, const std::string& proto_nickname) :
+      IEventFileParser(meta),
+      _file_type(file_type),
+      _proto_nickname(proto_nickname)
+  {
+  }
+
+  virtual bool IsFile(const std::string& path) const {
+    return isRLSFileWithType(_file_type, path);
+  }
+
+  virtual MyStatus Init() override {
+    return MyStatus::OK();
+  }
+
+};
+template <class ProtoKlass, class ProtoReader>
+class ISimpleProtoParser : public IEventFileProtoParser<ProtoKlass, ProtoReader> {
+public:
+
+  ISimpleProtoParser(TraceParserMeta meta, RLSFileType file_type, const std::string& proto_nickname) :
+      IEventFileProtoParser<ProtoKlass, ProtoReader>(std::move(meta), file_type, proto_nickname) {
+  }
+
+  virtual MyStatus _CountCategoryTimes(CategoryTimesCount* count, ProtoKlass* proto) = 0;
+  virtual MyStatus _AppendCategoryTimes(CategoryTimes* out_category_times, ProtoKlass* proto) = 0;
+
+  virtual MyStatus AppendCategoryTimes(const std::vector<TraceFileMeta>& metas, CategoryTimes* out_category_times) override {
+    MyStatus status = MyStatus::OK();
+
+    for (const auto& meta : metas) {
+      ProtoReader reader(meta.get_path());
+      status = reader.Init();
+      IF_BAD_STATUS_RETURN(status);
+
+      reader.MutableEachCategory([] (const auto& category, auto* events) {
+        SortEvents(events);
+      });
+
+//      reader.EachCategory([] (const auto& category, const auto& events) {
+//        CheckEventsSorted(category, events);
+//      });
+
+      status = _AppendCategoryTimes(out_category_times, reader.MutableProto());
+      IF_BAD_STATUS_RETURN(status);
+    }
+
+    return status;
+  }
+
+  virtual MyStatus CountCategoryTimes(const std::vector<TraceFileMeta>& metas) override {
+    MyStatus status = MyStatus::OK();
+
+    for (const auto& meta : metas) {
+      ProtoReader reader(meta.get_path());
+      status = reader.Init();
+      IF_BAD_STATUS_RETURN(status);
+
+      reader.MutableEachCategory([] (const auto& category, auto* events) {
+        SortEvents(events);
+      });
+
+      status = _CountCategoryTimes(&this->_count, reader.MutableProto());
+      IF_BAD_STATUS_RETURN(status);
+    }
+
+    return status;
+  }
+};
+
+
+template <class ProtoKlass>
+class ITraceFileProtoReader : public ITraceProtoReader {
+public:
+  ProtoKlass _proto;
+
   std::string _path;
   RLSFileType _file_type;
   std::string _proto_nickname;
@@ -1367,7 +1544,7 @@ public:
 
 //  std::shared_ptr<IParserMeta> _parser_meta;
 
-  IEventFileProtoParser(const std::string& path, RLSFileType file_type, const std::string& proto_nickname) :
+  ITraceFileProtoReader(const std::string& path, RLSFileType file_type, const std::string& proto_nickname) :
       _path(path),
       _file_type(file_type),
       _proto_nickname(proto_nickname),
@@ -1392,10 +1569,25 @@ public:
     return isRLSFileWithType(_file_type, path);
   }
 
-  virtual MyStatus _CountCategoryTimes(CategoryTimesCount* count, const ProtoKlass& proto) = 0;
-  virtual MyStatus _AppendCategoryTimes(CategoryTimes* out_category_times, const ProtoKlass& proto) = 0;
+  virtual MyStatus _InitFromProto(const ProtoKlass& proto) {
+    // Default: no extra initialization.
+    return MyStatus::OK();
+  }
 
-  virtual MyStatus _InitFromProto(const ProtoKlass& proto) = 0;
+  virtual MyStatus _ReadMetaFromProto(nlohmann::json* meta, const ProtoKlass& proto) {
+    // Default: no extra initialization.
+    return MyStatus::OK();
+  }
+
+  virtual const ProtoKlass& Proto() const {
+    assert(_initialized);
+    return _proto;
+  }
+
+  virtual ProtoKlass* MutableProto() {
+    assert(_initialized);
+    return &_proto;
+  }
 
   virtual MyStatus Init() {
     if (_initialized) {
@@ -1403,23 +1595,19 @@ public:
     }
     // Initialization happens in _ReadProto.
     MyStatus status = MyStatus::OK();
-    ProtoKlass proto;
-    status = _ReadProto(_path, &proto);
+    status = _ReadProto(_path, &_proto);
     IF_BAD_STATUS_RETURN(status);
     assert(_initialized);
     return MyStatus::OK();
   }
 
-//  virtual std::shared_ptr<IParserMeta> GetParserMeta() override {
-//    return _parser_meta;
-//  }
-
-  MyStatus AppendCategoryTimes(CategoryTimes* out_category_times) {
+  virtual MyStatus ReadMeta(nlohmann::json* meta) override {
     MyStatus status = MyStatus::OK();
-    ProtoKlass proto;
-    status = _ReadProto(_path, &proto);
+    status = Init();
     IF_BAD_STATUS_RETURN(status);
-    return _AppendCategoryTimes(out_category_times, proto);
+    status = _ReadMetaFromProto(meta, _proto);
+    IF_BAD_STATUS_RETURN(status);
+    return MyStatus::OK();
   }
 
   MyStatus _ReadProto(const std::string& path, ProtoKlass* proto) {
@@ -1433,39 +1621,20 @@ public:
     return MyStatus::OK();
   }
 
-  virtual MyStatus CountCategoryTimes(CategoryTimesCount* count) {
-    MyStatus status = MyStatus::OK();
-    ProtoKlass proto;
-    status = _ReadProto(_path, &proto);
-    IF_BAD_STATUS_RETURN(status);
-    return _CountCategoryTimes(count, proto);
+//  virtual MyStatus ReadFile(CategoryTimes* out_category_times) override {
+//    MyStatus status = MyStatus::OK();
+//
+//    _proto.Clear();
+//    status = this->_ReadProto(_path, &_proto);
+//    IF_BAD_STATUS_RETURN(status);
+//
+//    return MyStatus::OK();
+//  }
+
+  virtual void Clear() override {
+    _proto.Clear();
   }
 
-
-  virtual MyStatus ReadFile(CategoryTimes* out_category_times) {
-    MyStatus status = MyStatus::OK();
-
-    ProtoKlass proto;
-    status = this->_ReadProto(_path, &proto);
-    IF_BAD_STATUS_RETURN(status);
-
-    CategoryTimesCount count;
-    status = this->_CountCategoryTimes(&count, proto);
-    IF_BAD_STATUS_RETURN(status);
-
-    if (SHOULD_DEBUG(FEATURE_LOAD_DATA)) {
-      std::stringstream ss;
-      ss << "\n";
-      count.Print(ss, 1);
-      DBG_LOG("{}", ss.str());
-    }
-
-    *out_category_times = std::move(CategoryTimes(get_process(), count));
-    status = this->_AppendCategoryTimes(out_category_times, proto);
-    IF_BAD_STATUS_RETURN(status);
-
-    return MyStatus::OK();
-  }
 };
 
 
@@ -1483,38 +1652,445 @@ public:
 
 bool isRLSFileWithType(RLSFileType file_type, const std::string& path);
 
-MyStatus GetRLSEventParser(const std::string& path, std::unique_ptr<IEventFileParser>* parser);
+MyStatus GetRLSEventParser(const std::string& path, TraceParserMeta parser_meta, std::unique_ptr<IEventFileParser>* parser);
+MyStatus GetRLSEventParserFromType(RLSFileType file_type, TraceParserMeta parser_meta, std::unique_ptr<IEventFileParser>* parser);
 
-class CategoryEventsParser : public IEventFileProtoParser<iml::CategoryEventsProto> {
+
+template <typename EventProto>
+class EventFlattener {
+public:
+  struct EventCompare {
+    bool operator() (const EventProto* lhs, const EventProto* rhs) const {
+      // NOTE: really subtle ordering constraint here needed for correctness.
+      //
+      //   A: [   ]
+      //   B: [            ]
+      //      0   1    2   3
+      //      [ A ][   B   ]
+      //
+      //    1. EITHER
+      //      - (START_EMPTY) A @ 0
+      //      - (START) B @ 0
+      //    2. (END) A @ 1
+      //    3. (END) B @ 3
+      //    To ensure (2, 3), we need to order by [event->start_time_us()] second.
+      //
+      //
+      //   A:          [   ]
+      //   B: [            ]
+      //      0   1    2   3
+      //      [   B   ][ A ]
+      //
+      //    1. (START_EMPTY) B @ 0
+      //    2. (START) A @ 2
+      //    3. (END) A @ 3
+      //    4. (END) B @ 3
+      //    To ensure (3, 4), we need to order by [-1 * event->start_time_us()] second.
+      //
+#define EVENT_KEY(event) \
+  std::make_tuple(event->start_time_us() + event->duration_us(), -1 * event->start_time_us())
+      return EVENT_KEY(lhs) < EVENT_KEY(rhs);
+#undef EVENT_KEY
+    }
+  };
+
+  template <typename EventProtoList, typename Func>
+  static void EachOpEvent(const EventProtoList& events, Func func) {
+    EventFlattener<EventProto> flattener;
+    flattener.ProcessUntilFinish(events, func);
+  }
+
+  struct OpStack {
+    using OpSet = std::set<const EventProto*, EventCompare>;
+    OpSet op_set;
+    TimeUsec start_us;
+    TimeUsec end_us;
+
+    std::map<TimeUsec, int> start_times;
+    std::map<TimeUsec, int> end_times;
+
+    OpStack() :
+        start_us(std::numeric_limits<TimeUsec>::max()),
+        end_us(std::numeric_limits<TimeUsec>::min())
+    {
+    }
+
+    template <class Map, typename Key>
+    static void _DecRef(Map* map, Key key) {
+      auto it = map->find(key);
+      assert(it != map->end());
+      assert(it->second > 0);
+      it->second -= 1;
+      if (it->second == 0) {
+        map->erase(it);
+      }
+    }
+
+    template <class Map, typename Key>
+    static void _IncRef(Map* map, Key key) {
+      (*map)[key] += 1;
+    }
+
+    inline void insert(const EventProto* event) {
+      _IncRef(&start_times, event->start_time_us());
+      _IncRef(&end_times, GetEndTime(event));
+      assert((start_times.size() == 0 && start_times.size() == 0) ||
+             (start_times.size() > 0 && start_times.size() > 0));
+      start_us = std::min(start_us, event->start_time_us());
+      end_us = std::max(end_us, GetEndTime(event));
+
+      op_set.insert(event);
+    }
+
+    inline const EventProto* PopNextEvent() {
+      auto it = op_set.begin();
+      auto min_event = *it;
+      op_set.erase(it);
+
+      _DecRef(&start_times, min_event->start_time_us());
+      _DecRef(&end_times, GetEndTime(min_event));
+      assert((start_times.size() == 0 && start_times.size() == 0) ||
+             (start_times.size() > 0 && start_times.size() > 0));
+      if (start_times.size() > 0) {
+        start_us = start_times.begin()->first;
+        end_us = end_times.rbegin()->first;
+      } else {
+        start_us = std::numeric_limits<TimeUsec>::max();
+        end_us = std::numeric_limits<TimeUsec>::min();
+      }
+
+      return min_event;
+    }
+
+    inline const EventProto* PeekNextEvent() const {
+      auto it = op_set.begin();
+      auto min_event = *it;
+      return min_event;
+    }
+
+    inline size_t size() const {
+      return op_set.size();
+    }
+
+  };
+
+  OpStack _ops;
+  size_t _event_idx;
+  TimeUsec _last_time;
+
+  EventFlattener() :
+      _event_idx(0),
+      _last_time(std::numeric_limits<TimeUsec>::max()){
+  }
+
+  static inline bool Subsumes(const EventProto* A, const EventProto* B) {
+    //     [ B ]
+    // [     A     ]
+    // return A->start_time_us() <= B->start_time_us() <= B->end_time_us() <= A->end_time_us();
+    // ===
+    // return A->start_time_us() <= B->start_time_us() <= A->end_time_us();
+    return A->start_time_us() <= B->start_time_us() &&
+           B->start_time_us() <= GetEndTime(A);
+  }
+  static inline bool Subsumes(const EventProto* A, TimeUsec time_us) {
+    //     [ B ]
+    // [     A     ]
+    return A->start_time_us() <= time_us &&
+           time_us <= GetEndTime(A);
+  }
+  static inline bool Subsumes(TimeUsec A_start, TimeUsec A_end, TimeUsec time_us) {
+    //     [ B ]
+    // [     A     ]
+    return A_start <= time_us &&
+           time_us <= A_end;
+  }
+
+  static inline TimeUsec GetEndTime(const EventProto* A) {
+    return A->start_time_us() + A->duration_us();
+  }
+
+  template <typename EventProtoList, typename Func, typename SkipFunc>
+  void ProcessUntilFinish(const EventProtoList& event_protos, Func func, SkipFunc skip_func) {
+    auto max_time = std::numeric_limits<TimeUsec>::max();
+    ProcessUntil(event_protos, max_time, func, skip_func);
+  }
+  template <typename EventProtoList, typename Func>
+  void ProcessUntilFinish(const EventProtoList& event_protos, Func func) {
+    ProcessUntilFinish(
+        event_protos, func,
+        [] (const auto& event) {
+          return false;
+        });
+  }
+
+  template <typename EventProtoList, typename Func, typename SkipFunc>
+  void ProcessUntil(const EventProtoList& event_protos, TimeUsec before, Func func, SkipFunc skip_func) {
+
+    size_t i = 0;
+    // For some reason, protobuf uses "int" for the size() of its repeated fields.
+    assert(event_protos.size() >= 0);
+    const auto events_size = static_cast<size_t>(event_protos.size());
+
+    auto can_end_events = [this, before] () -> bool {
+      return _ops.size() > 0 && !Subsumes(_ops.start_us, _ops.end_us, before);
+    };
+
+    auto append_event = [this] (const EventProto* event) {
+      _ops.insert(event);
+    };
+
+    while (i < events_size || can_end_events()) {
+      if (i < events_size && skip_func(event_protos[i])) {
+//        if (SHOULD_DEBUG(FEATURE_PREPROCESS_DATA)) {
+        DBG_LOG("(SKIP_FUNC) Event(name={}) @ {} us", event_protos[i].name(), event_protos[i].start_time_us());
+//        }
+        i += 1;
+        continue;
+      }
+
+      // Skip empty events:
+      if (i < events_size && event_protos[i].start_time_us() == GetEndTime(&event_protos[i])) {
+        if (SHOULD_DEBUG(FEATURE_PREPROCESS_DATA)) {
+          DBG_LOG("(SKIP) Event(name={}) @ {} us", event_protos[i].name(), event_protos[i].start_time_us());
+        }
+        i += 1;
+        continue;
+      }
+
+      if (_ops.size() == 0) {
+        assert(i < events_size);
+        append_event(&event_protos[i]);
+        _last_time = event_protos[i].start_time_us();
+        if (SHOULD_DEBUG(FEATURE_PREPROCESS_DATA)) {
+          DBG_LOG("(EMPTY_START) last_time = Event(name={}) @ {} us", event_protos[i].name(), _last_time);
+        }
+        i += 1;
+        continue;
+      }
+
+      if (i < events_size && event_protos[i].start_time_us() < GetEndTime(_ops.PeekNextEvent())) {
+        auto op = _ops.PeekNextEvent();
+        auto start_time_us = _last_time;
+        auto end_time_us = event_protos[i].start_time_us();
+        if (start_time_us < end_time_us) {
+          // Add operation event only if duration is non-zero.
+          func(op->name(), start_time_us, end_time_us);
+        }
+        append_event(&event_protos[i]);
+        _last_time = end_time_us;
+        if (SHOULD_DEBUG(FEATURE_PREPROCESS_DATA)) {
+          DBG_LOG("(START) last_time = Event(name={}) @ {} us", event_protos[i].name(), _last_time);
+        }
+        i += 1;
+      } else if (can_end_events()) {
+        auto op = _ops.PopNextEvent();
+        auto start_time_us = _last_time;
+        auto end_time_us = GetEndTime(op);
+        if (start_time_us < end_time_us) {
+          // Add operation event only if duration is non-zero.
+          func(op->name(), start_time_us, end_time_us);
+        }
+        _last_time = end_time_us;
+        if (SHOULD_DEBUG(FEATURE_PREPROCESS_DATA)) {
+          DBG_LOG("(END) last_time = Event(name={}) @ {} us", op->name(), _last_time);
+        }
+      }
+    }
+
+    if (_ops.size() > 0) {
+      if (SHOULD_DEBUG(FEATURE_OVERLAP)) {
+        DBG_LOG("Ran until before={} us, still have {} ops remaining", before, _ops.size());
+      }
+    }
+
+  }
+  template <typename EventProtoList, typename Func>
+  void ProcessUntil(const EventProtoList& event_protos, TimeUsec before, Func func) {
+    ProcessUntil(
+        event_protos, before, func,
+        [] (const auto& event) {
+          return false;
+        });
+  }
+
+};
+
+
+class CategoryEventsProtoReader : public ITraceFileProtoReader<iml::CategoryEventsProto> {
 public:
   static const RLSFileType FILE_TYPE = RLSFileType::CATEGORY_EVENTS_FILE;
+
   using ProtoKlass = iml::CategoryEventsProto;
+  using EventKlass = iml::Event;
 
-//  struct ParserMeta : IParserMeta {
-//    // How many operation events are there BEFORE we apply EachOpEvent.
-//    size_t num_CATEGORY_OPERATION;
-//    // eo_events for CATEGORY_OPERATION BEFORE we apply EachOpEvent.
-//    EOEvents eo_CATEGORY_OPERATION;
-//    ParserMeta() :
-//        IParserMeta(FILE_TYPE),
-//        num_CATEGORY_OPERATION(0)
-//    {
-//    }
-//  };
+  // Need to know:
+  // - The START time of the first "Operation" event.
+  // - The START time of the first "Operation" event.
+  //TimeUsec _start_operation_usec;
 
-
-  CategoryEventsParser(const std::string& path) :
-      IEventFileProtoParser<iml::CategoryEventsProto>(path, RLSFileType::CATEGORY_EVENTS_FILE, "category_events")
+  CategoryEventsProtoReader(const std::string& path) :
+      ITraceFileProtoReader<ProtoKlass>(path, RLSFileType::CATEGORY_EVENTS_FILE, "category_events")
   {
   }
 
-  virtual MyStatus _CountCategoryTimes(CategoryTimesCount* count, const ProtoKlass& proto) override;
-  MyStatus _CountCategoryTimesOperation(CategoryTimesCount* count, const ProtoKlass& proto);
-  virtual MyStatus _AppendCategoryTimes(CategoryTimes* out_category_times, const ProtoKlass& proto) override;
-  MyStatus _AppendCategoryOperation(const Category& category, const ProtoKlass& proto, CategoryTimes* out_category_times);
-  virtual MyStatus _InitFromProto(const ProtoKlass& proto) override;
+  template <typename Func>
+  void EachCategory(Func func) {
+    auto const& proto = Proto();
+    for (const auto& pair : proto.category_events()) {
+      const auto& category = pair.first;
+      const auto& events = pair.second.events();
+      func(category, events);
+    }
+  }
 
-  MyStatus _AppendCategory(const Category& category, const ProtoKlass& proto, EOEvents* eo_events);
+  template <typename Func>
+  void MutableEachCategory(Func func) {
+    auto* proto = MutableProto();
+    for (auto& pair : *(proto->mutable_category_events())) {
+      const auto& category = pair.first;
+      auto* events = pair.second.mutable_events();
+      func(category, events);
+    }
+  }
+
+  static inline bool SkipOperationEvent(const Operation& name) {
+    return std::regex_match(name, PROCESS_OPERATION_REGEX);
+  }
+
+  virtual MyStatus _ReadMetaFromProto(nlohmann::json* meta, const ProtoKlass& proto) override {
+
+//    TimeUsec start_operation_usec = std::numeric_limits<TimeUsec>::max();
+//    auto it = proto.category_events().find(CATEGORY_OPERATION);
+//    if (it != proto.category_events().end()) {
+//      const auto& events =  it->second.events();
+//      for (const auto& event : events) {
+//        start_operation_usec = std::min(start_operation_usec, event.start_time_us());
+//      }
+//    }
+//    (*meta)["start_operation_usec"] = start_operation_usec;
+
+    for (const auto& pair : proto.category_events()) {
+      auto const& category = pair.first;
+      const auto& events =  pair.second.events();
+      auto start_operation_usec = std::numeric_limits<TimeUsec>::max();
+      const std::string* start_usec_name = nullptr;
+      bool is_category_operation = (category == CATEGORY_OPERATION);
+      for (const auto& event : events) {
+        if (is_category_operation && SkipOperationEvent(event.name())) {
+          // Skip
+          continue;
+        }
+        if (event.start_time_us() < start_operation_usec) {
+          start_operation_usec = event.start_time_us();
+          start_usec_name = &event.name();
+        }
+        // start_operation_usec = std::min(start_operation_usec, event.start_time_us());
+      }
+      (*meta)["start_usec"][category] = start_operation_usec;
+      if (start_usec_name) {
+        (*meta)["start_usec_name"][category] = *start_usec_name;
+      } else {
+        (*meta)["start_usec_name"][category] = "";
+      }
+    }
+
+//    TimeUsec start_operation_usec = std::numeric_limits<TimeUsec>::max();
+//    auto it = proto.category_events().find(CATEGORY_OPERATION);
+//    if (it != proto.category_events().end()) {
+//      const auto& events =  it->second.events();
+//      for (const auto& event : events) {
+//        start_operation_usec = std::min(start_operation_usec, event.start_time_us());
+//      }
+//    }
+//    (*meta)["start_operation_usec"] = start_operation_usec;
+
+    return MyStatus::OK();
+  }
+
+};
+class CategoryEventsParser : public IEventFileProtoParser<iml::CategoryEventsProto, CategoryEventsProtoReader> {
+public:
+  static const RLSFileType FILE_TYPE = RLSFileType::CATEGORY_EVENTS_FILE;
+
+  using ProtoKlass = iml::CategoryEventsProto;
+  using ProtoReader = CategoryEventsProtoReader;
+
+  EventFlattener<iml::Event> _event_flattener;
+
+  CategoryEventsParser(TraceParserMeta meta) :
+      IEventFileProtoParser<ProtoKlass, ProtoReader>(std::move(meta), RLSFileType::CATEGORY_EVENTS_FILE, "category_events")
+  {
+  }
+
+  virtual MyStatus _CountCategoryTimes(CategoryTimesCount* count, ProtoKlass* proto, boost::optional<const TraceFileMeta&> next_meta);
+  MyStatus _CountCategoryTimesOperation(CategoryTimesCount* count, ProtoKlass* proto, boost::optional<const TraceFileMeta&> next_meta);
+  virtual MyStatus _AppendCategoryTimes(CategoryTimes* out_category_times, ProtoKlass* proto, boost::optional<const TraceFileMeta&> next_meta);
+  MyStatus _AppendCategoryOperation(const Category& category, ProtoKlass* proto, CategoryTimes* out_category_times, boost::optional<const TraceFileMeta&> next_meta);
+
+  MyStatus _AppendCategory(const Category& category, ProtoKlass* proto, EOEvents* eo_events);
+
+  virtual MyStatus AppendCategoryTimes(const std::vector<TraceFileMeta>& metas, CategoryTimes* out_category_times) override {
+    MyStatus status = MyStatus::OK();
+
+    for (auto it = metas.begin(); it != metas.end(); it++) {
+      const auto& meta = *it;
+
+      boost::optional<const TraceFileMeta&> next_meta;
+      auto next_it = it;
+      next_it++;
+      if (next_it != metas.end()) {
+        next_meta = *next_it;
+      }
+
+
+      ProtoReader reader(meta.get_path());
+      status = reader.Init();
+      IF_BAD_STATUS_RETURN(status);
+
+      reader.MutableEachCategory([] (const auto& category, auto* events) {
+        SortEvents(events);
+      });
+
+//      reader.EachCategory([] (const auto& category, const auto& events) {
+//        CheckEventsSorted(category, events);
+//      });
+
+      status = _AppendCategoryTimes(out_category_times, reader.MutableProto(), next_meta);
+      IF_BAD_STATUS_RETURN(status);
+    }
+
+    return status;
+  }
+
+  virtual MyStatus CountCategoryTimes(const std::vector<TraceFileMeta>& metas) override {
+    MyStatus status = MyStatus::OK();
+
+    for (auto it = metas.begin(); it != metas.end(); it++) {
+      const auto& meta = *it;
+
+      boost::optional<const TraceFileMeta&> next_meta;
+      auto next_it = it;
+      next_it++;
+      if (next_it != metas.end()) {
+        assert(next_it->get_trace_id() == it->get_trace_id() + 1);
+        next_meta = *next_it;
+      }
+
+      ProtoReader reader(meta.get_path());
+      status = reader.Init();
+      IF_BAD_STATUS_RETURN(status);
+
+      reader.MutableEachCategory([] (const auto& category, auto* events) {
+        SortEvents(events);
+      });
+
+      status = _CountCategoryTimes(&_count, reader.MutableProto(), next_meta);
+      IF_BAD_STATUS_RETURN(status);
+    }
+
+    return status;
+  }
+
 
 //  DECLARE_GET_PARSER_META
 
@@ -1524,48 +2100,105 @@ public:
   // - our "ReadCategory" function should instead become "AppendCategory", and we should return an error or Assert if its too big.
 };
 
-class CUDAAPIStatsParser : public IEventFileProtoParser<iml::CUDAAPIPhaseStatsProto> {
+class CUDAAPIStatsProtoReader : public ITraceFileProtoReader<iml::CUDAAPIPhaseStatsProto> {
 public:
   static const RLSFileType FILE_TYPE = RLSFileType::CUDA_API_STATS_FILE;
-//  struct ParserMeta : IParserMeta {
-//    ParserMeta() :
-//        IParserMeta(FILE_TYPE)
-//    {
-//    }
-//  };
 
   using ProtoKlass = iml::CUDAAPIPhaseStatsProto;
-  CUDAAPIStatsParser(const std::string& path) :
-      IEventFileProtoParser<ProtoKlass>(path, RLSFileType::CUDA_API_STATS_FILE, "cuda_api_stats")
+  using EventKlass = iml::CUDAAPIEvent;
+
+  CUDAAPIStatsProtoReader(const std::string& path) :
+      ITraceFileProtoReader<ProtoKlass>(path, RLSFileType::CUDA_API_STATS_FILE, "cuda_api_stats")
   {
   }
 
+  template <typename Func>
+  void EachCategory(Func func) {
+    auto const& proto = Proto();
+    const std::string category = CATEGORY_CUDA_API_CPU;
+    const auto& events = proto.events();
+    func(category, events);
+  }
 
-  virtual MyStatus _CountCategoryTimes(CategoryTimesCount* count, const ProtoKlass& proto) override;
-  virtual MyStatus _AppendCategoryTimes(CategoryTimes* out_category_times, const ProtoKlass& proto) override;
-  virtual MyStatus _InitFromProto(const ProtoKlass& proto) override;
+  template <typename Func>
+  void MutableEachCategory(Func func) {
+    auto* proto = MutableProto();
+    const std::string category = CATEGORY_CUDA_API_CPU;
+    auto* events = proto->mutable_events();
+    func(category, events);
+  }
+
+};
+class CUDAAPIStatsParser : public ISimpleProtoParser<iml::CUDAAPIPhaseStatsProto, CUDAAPIStatsProtoReader> {
+public:
+  static const RLSFileType FILE_TYPE = RLSFileType::CUDA_API_STATS_FILE;
+
+  using ProtoKlass = iml::CUDAAPIPhaseStatsProto;
+  using ProtoReader = CUDAAPIStatsProtoReader;
+
+  CUDAAPIStatsParser(TraceParserMeta meta) :
+      ISimpleProtoParser<ProtoKlass, ProtoReader>(std::move(meta), RLSFileType::CUDA_API_STATS_FILE, "cuda_api_stats")
+  {
+  }
+
+  virtual MyStatus _CountCategoryTimes(CategoryTimesCount* count, ProtoKlass* proto) override;
+  virtual MyStatus _AppendCategoryTimes(CategoryTimes* out_category_times, ProtoKlass* proto) override;
 
 //  DECLARE_GET_PARSER_META
 
 };
 
-class CUDADeviceEventsParser : public IEventFileProtoParser<iml::MachineDevsEventsProto> {
+
+
+class CUDADeviceEventsProtoReader : public ITraceFileProtoReader<iml::MachineDevsEventsProto> {
 public:
   static const RLSFileType FILE_TYPE = RLSFileType::CUDA_DEVICE_EVENTS_FILE;
-//  struct ParserMeta : IParserMeta {
-//    ParserMeta() :
-//        IParserMeta(FILE_TYPE) {
-//    }
-//  };
+
   using ProtoKlass = iml::MachineDevsEventsProto;
-  CUDADeviceEventsParser(const std::string& path) :
-      IEventFileProtoParser<ProtoKlass>(path, RLSFileType::CUDA_DEVICE_EVENTS_FILE, "cuda_device_events")
+  using EventKlass = iml::CUDAEventProto;
+
+  CUDADeviceEventsProtoReader(const std::string& path) :
+      ITraceFileProtoReader<ProtoKlass>(path, RLSFileType::CUDA_DEVICE_EVENTS_FILE, "cuda_device_events")
   {
   }
 
-  virtual MyStatus _CountCategoryTimes(CategoryTimesCount* count, const ProtoKlass& proto) override;
-  virtual MyStatus _AppendCategoryTimes(CategoryTimes* out_category_times, const ProtoKlass& proto) override;
-  virtual MyStatus _InitFromProto(const ProtoKlass& proto) override;
+  template <typename Func>
+  void EachCategory(Func func) {
+    auto const& proto = Proto();
+    const std::string category = CATEGORY_GPU;
+    for (const auto& dev_events_pair : proto.dev_events()) {
+      const auto& dev = dev_events_pair.first;
+      const auto& events = dev_events_pair.second.events();
+      func(category, events);
+    }
+  }
+
+  template <typename Func>
+  void MutableEachCategory(Func func) {
+    auto* proto = MutableProto();
+    const std::string category = CATEGORY_GPU;
+    for (auto& dev_events_pair : *(proto->mutable_dev_events())) {
+      const auto& dev = dev_events_pair.first;
+      auto* events = dev_events_pair.second.mutable_events();
+      func(category, events);
+    }
+  }
+
+};
+class CUDADeviceEventsParser : public ISimpleProtoParser<iml::MachineDevsEventsProto, CUDADeviceEventsProtoReader> {
+public:
+  static const RLSFileType FILE_TYPE = RLSFileType::CUDA_DEVICE_EVENTS_FILE;
+
+  using ProtoKlass = iml::MachineDevsEventsProto;
+  using ProtoReader = CUDADeviceEventsProtoReader;
+
+  CUDADeviceEventsParser(TraceParserMeta meta) :
+      ISimpleProtoParser<ProtoKlass, ProtoReader>(std::move(meta), RLSFileType::CUDA_DEVICE_EVENTS_FILE, "cuda_device_events")
+  {
+  }
+
+  virtual MyStatus _CountCategoryTimes(CategoryTimesCount* count, ProtoKlass* proto) override;
+  virtual MyStatus _AppendCategoryTimes(CategoryTimes* out_category_times, ProtoKlass* proto) override;
 
 //  DECLARE_GET_PARSER_META
 
@@ -2502,234 +3135,6 @@ public:
     }
 
     return r;
-  }
-
-};
-
-template <typename EventProto>
-class EventFlattener {
-public:
-  struct EventCompare {
-    bool operator() (const EventProto* lhs, const EventProto* rhs) const {
-      // NOTE: really subtle ordering constraint here needed for correctness.
-      //
-      //   A: [   ]
-      //   B: [            ]
-      //      0   1    2   3
-      //      [ A ][   B   ]
-      //
-      //    1. EITHER
-      //      - (START_EMPTY) A @ 0
-      //      - (START) B @ 0
-      //    2. (END) A @ 1
-      //    3. (END) B @ 3
-      //    To ensure (2, 3), we need to order by [event->start_time_us()] second.
-      //
-      //
-      //   A:          [   ]
-      //   B: [            ]
-      //      0   1    2   3
-      //      [   B   ][ A ]
-      //
-      //    1. (START_EMPTY) B @ 0
-      //    2. (START) A @ 2
-      //    3. (END) A @ 3
-      //    4. (END) B @ 3
-      //    To ensure (3, 4), we need to order by [-1 * event->start_time_us()] second.
-      //
-#define EVENT_KEY(event) \
-  std::make_tuple(event->start_time_us() + event->duration_us(), -1 * event->start_time_us())
-      return EVENT_KEY(lhs) < EVENT_KEY(rhs);
-#undef EVENT_KEY
-    }
-  };
-
-  template <typename EventProtoList, typename Func>
-  static void EachOpEvent(const EventProtoList& events, Func func) {
-    EventFlattener<EventProto> flattener;
-    flattener.ProcessUntilFinish(events, func);
-  }
-
-  struct OpStack {
-    using OpSet = std::set<const EventProto*, EventCompare>;
-    OpSet op_set;
-    TimeUsec start_us;
-    TimeUsec end_us;
-
-    std::map<TimeUsec, int> start_times;
-    std::map<TimeUsec, int> end_times;
-
-    OpStack() :
-        start_us(std::numeric_limits<TimeUsec>::max()),
-        end_us(std::numeric_limits<TimeUsec>::min())
-    {
-    }
-
-    template <class Map, typename Key>
-    static void _DecRef(Map* map, Key key) {
-      auto it = map->find(key);
-      assert(it != map->end());
-      assert(it->second > 0);
-      it->second -= 1;
-      if (it->second == 0) {
-        map->erase(it);
-      }
-    }
-
-    template <class Map, typename Key>
-    static void _IncRef(Map* map, Key key) {
-      (*map)[key] += 1;
-    }
-
-    inline void insert(const EventProto* event) {
-      _IncRef(&start_times, event->start_time_us());
-      _IncRef(&end_times, GetEndTime(event));
-      assert((start_times.size() == 0 && start_times.size() == 0) ||
-             (start_times.size() > 0 && start_times.size() > 0));
-      start_us = std::min(start_us, event->start_time_us());
-      end_us = std::max(end_us, GetEndTime(event));
-
-      op_set.insert(event);
-    }
-
-    inline const EventProto* PopNextEvent() {
-      auto it = op_set.begin();
-      auto min_event = *it;
-      op_set.erase(it);
-
-      _DecRef(&start_times, min_event->start_time_us());
-      _DecRef(&end_times, GetEndTime(min_event));
-      assert((start_times.size() == 0 && start_times.size() == 0) ||
-             (start_times.size() > 0 && start_times.size() > 0));
-      if (start_times.size() > 0) {
-        start_us = start_times.begin()->first;
-        end_us = end_times.rbegin()->first;
-      } else {
-        start_us = std::numeric_limits<TimeUsec>::max();
-        end_us = std::numeric_limits<TimeUsec>::min();
-      }
-
-      return min_event;
-    }
-
-    inline const EventProto* PeekNextEvent() const {
-      auto it = op_set.begin();
-      auto min_event = *it;
-      return min_event;
-    }
-
-    inline size_t size() const {
-      return op_set.size();
-    }
-
-  };
-
-  OpStack _ops;
-  size_t _event_idx;
-  TimeUsec _last_time;
-
-  EventFlattener() :
-      _event_idx(0),
-      _last_time(std::numeric_limits<TimeUsec>::max()){
-  }
-
-  static inline bool Subsumes(const EventProto* A, const EventProto* B) {
-    //     [ B ]
-    // [     A     ]
-    // return A->start_time_us() <= B->start_time_us() <= B->end_time_us() <= A->end_time_us();
-    // ===
-    // return A->start_time_us() <= B->start_time_us() <= A->end_time_us();
-    return A->start_time_us() <= B->start_time_us() &&
-                                 B->start_time_us() <= GetEndTime(A);
-  }
-  static inline bool Subsumes(const EventProto* A, TimeUsec time_us) {
-    //     [ B ]
-    // [     A     ]
-    return A->start_time_us() <= time_us &&
-                                 time_us <= GetEndTime(A);
-  }
-  static inline bool Subsumes(TimeUsec A_start, TimeUsec A_end, TimeUsec time_us) {
-    //     [ B ]
-    // [     A     ]
-    return A_start <= time_us &&
-                      time_us <= A_end;
-  }
-
-  static inline TimeUsec GetEndTime(const EventProto* A) {
-    return A->start_time_us() + A->duration_us();
-  }
-
-  template <typename EventProtoList, typename Func>
-  void ProcessUntilFinish(const EventProtoList& event_protos, Func func) {
-    auto max_time = std::numeric_limits<TimeUsec>::max();
-    ProcessUntil(event_protos, max_time, func);
-  }
-
-  template <typename EventProtoList, typename Func>
-  void ProcessUntil(const EventProtoList& event_protos, TimeUsec before, Func func) {
-
-    size_t i = 0;
-    // For some reason, protobuf uses "int" for the size() of its repeated fields.
-    assert(event_protos.size() >= 0);
-    const auto events_size = static_cast<size_t>(event_protos.size());
-
-    auto can_end_events = [this, before] () -> bool {
-      return _ops.size() > 0 && !Subsumes(_ops.start_us, _ops.end_us, before);
-    };
-
-    auto append_event = [this] (const EventProto* event) {
-      _ops.insert(event);
-    };
-
-    while (i < events_size || can_end_events()) {
-      if (_ops.size() == 0) {
-        assert(i < events_size);
-        append_event(&event_protos[i]);
-        _last_time = event_protos[i].start_time_us();
-        if (SHOULD_DEBUG(FEATURE_PREPROCESS_DATA)) {
-          DBG_LOG("(EMPTY_START) last_time = Event(name={}) @ {} us", event_protos[i].name(), _last_time);
-        }
-        i += 1;
-        continue;
-      }
-
-      // Skip empty events:
-      if (i < events_size && event_protos[i].start_time_us() == GetEndTime(&event_protos[i])) {
-        if (SHOULD_DEBUG(FEATURE_PREPROCESS_DATA)) {
-          DBG_LOG("(SKIP) Event(name={}) @ {} us", event_protos[i].name(), event_protos[i].start_time_us());
-        }
-        i += 1;
-        continue;
-      }
-
-      if (i < events_size && event_protos[i].start_time_us() < GetEndTime(_ops.PeekNextEvent())) {
-        auto op = _ops.PeekNextEvent();
-        auto start_time_us = _last_time;
-        auto end_time_us = event_protos[i].start_time_us();
-        if (start_time_us < end_time_us) {
-          // Add operation event only if duration is non-zero.
-          func(op->name(), start_time_us, end_time_us);
-        }
-        append_event(&event_protos[i]);
-        _last_time = end_time_us;
-        if (SHOULD_DEBUG(FEATURE_PREPROCESS_DATA)) {
-          DBG_LOG("(START) last_time = Event(name={}) @ {} us", event_protos[i].name(), _last_time);
-        }
-        i += 1;
-      } else if (can_end_events()) {
-        auto op = _ops.PopNextEvent();
-        auto start_time_us = _last_time;
-        auto end_time_us = GetEndTime(op);
-        if (start_time_us < end_time_us) {
-          // Add operation event only if duration is non-zero.
-          func(op->name(), start_time_us, end_time_us);
-        }
-        _last_time = end_time_us;
-        if (SHOULD_DEBUG(FEATURE_PREPROCESS_DATA)) {
-          DBG_LOG("(END) last_time = Event(name={}) @ {} us", op->name(), _last_time);
-        }
-      }
-    }
   }
 
 };

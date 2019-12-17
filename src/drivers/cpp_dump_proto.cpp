@@ -169,17 +169,18 @@ int main(int argc, char** argv) {
     }
   }
 
-  if (mode == Mode::MODE_DUMP_PROTO) {
-    std::unique_ptr<IEventFileParser> parser;
-    status = GetRLSEventParser(FLAGS_proto, &parser);
-    IF_BAD_STATUS_EXIT("Not sure how to parse", status);
-    CategoryTimes category_times;
-    status = parser->ReadFile(&category_times);
-    IF_BAD_STATUS_EXIT("Failed to read --proto", status);
-    category_times.Print(std::cout, 0);
-    std::cout << "\n";
-    exit(EXIT_SUCCESS);
-  }
+//  if (mode == Mode::MODE_DUMP_PROTO) {
+//    std::unique_ptr<IEventFileParser> parser;
+//    TraceParserMeta parser_meta("", "", "");
+//    status = GetRLSEventParser(FLAGS_proto, parser_meta, &parser);
+//    IF_BAD_STATUS_EXIT("Not sure how to parse", status);
+//    CategoryTimes category_times;
+//    status = parser->ReadFile(&category_times);
+//    IF_BAD_STATUS_EXIT("Failed to read --proto", status);
+//    category_times.Print(std::cout, 0);
+//    std::cout << "\n";
+//    exit(EXIT_SUCCESS);
+//  }
 
   if (mode == Mode::MODE_LS_FILES) {
     std::list<std::string> paths;

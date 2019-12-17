@@ -85,11 +85,17 @@ public:
   template <typename OStream>
   void Print(OStream& os, int indent) const {
     PrintIndent(os, indent);
-    os << "MyEvent(name=" << this->_name;
-    os << ", start=" << this->_start_time_us << " us";
-    os << ", dur=" << this->_duration_us << " us";
+
+    os << this->_name << "(";
+    os << this->_start_time_us;
+    os << ", " << (this->_start_time_us +  this->_duration_us);
     os << ")";
-    return os;
+
+//    os << "MyEvent(name=" << this->_name;
+//    os << ", start=" << this->_start_time_us << " us";
+//    os << ", dur=" << this->_duration_us << " us";
+//    os << ")";
+
   }
 
 };
@@ -104,10 +110,7 @@ public:
 //}
 
 std::ostream& operator<<(std::ostream& os, const MyEvent& obj) {
-  os << "MyEvent(name=" << obj._name;
-  os << ", start=" << obj._start_time_us << " us";
-  os << ", dur=" << obj._duration_us << " us";
-  os << ")";
+  obj.Print(os, 0);
   return os;
 }
 
@@ -173,6 +176,14 @@ std::vector<MyEvent> InterleaveEvents(const std::map<Operation, std::vector<MyEv
     return lhs.start_time_us() < rhs.start_time_us();
   });
   return all_events;
+}
+
+TimeUsec EventStartTimeUsec(const std::vector<MyEvent>& events) {
+  auto start_time = std::numeric_limits<TimeUsec>::max();
+  for (auto const& event : events) {
+    start_time = std::min(start_time, event.start_time_us());
+  }
+  return start_time;
 }
 
 std::list<MyEvent> SplitEvents(const std::vector<MyEvent>& op_events) {
@@ -302,6 +313,124 @@ TEST(TestProcessing, TestEachOpEvent_05) {
   };
 
   EXPECT_EQ(got_events, expect_events);
+}
+
+TEST(TestProcessing, TestEventFlattener_01) {
+  // A:     [   ]   (   )
+  // B: [                   ]
+  //    0   1   2   3   4   5
+  //
+  // File 01: [ ]
+  // File 02: ( )
+  std::map<Operation, std::vector<MyEvent>> event_map_01{
+      {"A", {
+                {1, 2},
+            }},
+      {"B", {
+                {0, 5},
+            }},
+  };
+  auto const& op_events_file_01 = InterleaveEvents(event_map_01);
+
+  std::map<Operation, std::vector<MyEvent>> event_map_02{
+      {"A", {
+                {3, 4},
+            }},
+  };
+  auto const& op_events_file_02 = InterleaveEvents(event_map_02);
+
+
+  std::list<MyEvent> got_events;
+  auto append_event = [&got_events] (const Operation& op, TimeUsec start_us, TimeUsec end_us) {
+    EXPECT_LE(start_us, end_us);
+    got_events.emplace_back(op, start_us, end_us);
+  };
+
+  EventFlattener<MyEvent> event_flattener;
+  TimeUsec expect_file_02_operation_start = 3;
+  auto file_02_operation_start = EventStartTimeUsec(op_events_file_02);
+  EXPECT_EQ(file_02_operation_start, expect_file_02_operation_start);
+
+  size_t got_total_events = 0;
+  size_t expect_total_events = 5;
+
+  event_flattener.ProcessUntil(op_events_file_01, file_02_operation_start, append_event);
+  std::list<MyEvent> expect_events_01 = {
+      {"B", 0, 1},
+  };
+  EXPECT_EQ(got_events, expect_events_01);
+  got_total_events += got_events.size();
+  got_events.clear();
+
+  event_flattener.ProcessUntilFinish(op_events_file_02, append_event);
+  std::list<MyEvent> expect_events_02 = {
+      {"A", 1, 2},
+      {"B", 2, 3},
+      {"A", 3, 4},
+      {"B", 4, 5},
+  };
+  EXPECT_EQ(got_events, expect_events_02);
+  got_total_events += got_events.size();
+  got_events.clear();
+
+  EXPECT_EQ(got_total_events, expect_total_events);
+
+}
+
+TEST(TestProcessing, TestEventFlattener_02) {
+  // A:     [   ]
+  // B: (           )
+  //    0   1   2   3
+  //
+  // File 01: [ ]
+  // File 02: ( )
+  std::map<Operation, std::vector<MyEvent>> event_map_01{
+      {"A", {
+                {1, 2},
+            }},
+  };
+  auto const& op_events_file_01 = InterleaveEvents(event_map_01);
+
+  std::map<Operation, std::vector<MyEvent>> event_map_02{
+      {"B", {
+                {0, 3},
+            }},
+  };
+  auto const& op_events_file_02 = InterleaveEvents(event_map_02);
+
+
+  std::list<MyEvent> got_events;
+  auto append_event = [&got_events] (const Operation& op, TimeUsec start_us, TimeUsec end_us) {
+    EXPECT_LE(start_us, end_us);
+    got_events.emplace_back(op, start_us, end_us);
+  };
+
+  auto file_02_operation_start = EventStartTimeUsec(op_events_file_02);
+  EXPECT_EQ(file_02_operation_start, 0);
+
+  size_t got_total_events = 0;
+  size_t expect_total_events = 3;
+
+  EventFlattener<MyEvent> event_flattener;
+  event_flattener.ProcessUntil(op_events_file_01, file_02_operation_start, append_event);
+  std::list<MyEvent> expect_events_01 = {
+  };
+  EXPECT_EQ(got_events, expect_events_01);
+  got_total_events += got_events.size();
+  got_events.clear();
+
+  event_flattener.ProcessUntilFinish(op_events_file_02, append_event);
+  std::list<MyEvent> expect_events_02 = {
+      {"B", 0, 1},
+      {"A", 1, 2},
+      {"B", 2, 3},
+  };
+  EXPECT_EQ(got_events, expect_events_02);
+  got_total_events += got_events.size();
+  got_events.clear();
+
+  EXPECT_EQ(got_total_events, expect_total_events);
+
 }
 
 TEST(TestEigen, ArrayModifyOne) {
