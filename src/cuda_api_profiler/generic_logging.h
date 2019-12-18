@@ -151,7 +151,6 @@ void PrintValue(OStream& os, const std::set<T>& value) {
     PrintValue(os, val);
     i += 1;
   }
-  value.size();
   os << "}";
 }
 
@@ -168,7 +167,6 @@ void PrintValue(OStream& os, const std::list<T>& value) {
     PrintValue(os, val);
     i += 1;
   }
-  value.size();
   os << "]";
 }
 // template <typename T>
@@ -184,7 +182,6 @@ void PrintValue(OStream& os, const std::vector<T>& value) {
     PrintValue(os, val);
     i += 1;
   }
-  value.size();
   os << "]";
 }
 
@@ -203,7 +200,6 @@ void PrintValue(OStream& os, const std::map<K, V>& value) {
     PrintValue(os, pair.second);
     i += 1;
   }
-  value.size();
   os << "}";
 }
 

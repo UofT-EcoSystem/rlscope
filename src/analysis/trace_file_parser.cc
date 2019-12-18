@@ -58,6 +58,8 @@ const std::set<Category> CATEGORIES_CPU = std::set<Category>{
     CATEGORY_CUDA_API_CPU,
     CATEGORY_SIMULATOR_CPP,
     CATEGORY_PYTHON_PROFILER,
+    // NOTE: need to have this here to handle overhead subtraction correctly.
+    CATEGORY_CPU,
 };
 
 const std::set<Category> CATEGORIES_GPU = std::set<Category>{
@@ -162,134 +164,134 @@ void EOEvents::CheckIntegrity(std::ostream& out, int indent) const {
   }
 }
 
-MyStatus CategoryEventsParser::_CountCategoryTimes(
-    CategoryTimesCount* count,
-    ProtoKlass* proto,
-    boost::optional<const TraceFileMeta&> next_meta) {
-  MyStatus status = MyStatus::OK();
-  for (const auto& pair : proto->category_events()) {
-    size_t number_of_events = pair.second.events().size();
-    const auto& category = pair.first;
-    if (SHOULD_DEBUG(FEATURE_LOAD_DATA)) {
-      DBG_LOG("Count category={}, n_events={}", category, number_of_events);
-    }
-    if (category == CATEGORY_OPERATION) {
-      status = _CountCategoryTimesOperation(count, proto, next_meta);
-      IF_BAD_STATUS_RETURN(status);
-    } else if (!FEATURE_JUST_OPERATIONS) {
-      auto category_key = CategoryKey::FromCategory(get_process(), category);
-      size_t n_events = pair.second.events().size();
-      // Q: is this a requirement...?
-      assert(n_events > 0);
-      count->Add(category_key, n_events);
-    }
-  }
-  return MyStatus::OK();
-}
+//MyStatus CategoryEventsParser::_CountCategoryTimes(
+//    CategoryTimesCount* count,
+//    ProtoKlass* proto,
+//    boost::optional<const TraceFileMeta&> next_meta) {
+//  MyStatus status = MyStatus::OK();
+//  for (const auto& pair : proto->category_events()) {
+//    size_t number_of_events = pair.second.events().size();
+//    const auto& category = pair.first;
+//    if (SHOULD_DEBUG(FEATURE_LOAD_DATA)) {
+//      DBG_LOG("Count category={}, n_events={}", category, number_of_events);
+//    }
+//    if (category == CATEGORY_OPERATION) {
+//      status = _CountCategoryTimesOperation(count, proto, next_meta);
+//      IF_BAD_STATUS_RETURN(status);
+//    } else if (!FEATURE_JUST_OPERATIONS) {
+//      auto category_key = CategoryKey::FromCategory(get_process(), category);
+//      size_t n_events = pair.second.events().size();
+//      // Q: is this a requirement...?
+//      assert(n_events > 0);
+//      count->Add(category_key, n_events);
+//    }
+//  }
+//  return MyStatus::OK();
+//}
 
 TimeUsec StartOperationTimeUsec(const TraceFileMeta& meta) {
 //  return meta.parser_meta["start_operation_usec"];
   return meta.parser_meta["start_usec"][CATEGORY_OPERATION];
 }
 
-MyStatus CategoryEventsParser::_CountCategoryTimesOperation(
-    CategoryTimesCount* count,
-    ProtoKlass* proto,
-    boost::optional<const TraceFileMeta&> next_meta) {
-  MyStatus status = MyStatus::OK();
-  auto const& process = get_process();
-  auto const& events = proto->category_events().at(CATEGORY_OPERATION).events();
-//  DBG_LOG("CategoryEventsParser::ParserMeta.num_CATEGORY_OPERATION = {}", events.size());
-  count->AddExtra(CategoryKey::FromCategory(process, CATEGORY_EXTRA_OPERATION), events.size());
-
-  auto add_op = [&process, count] (const Operation& op, TimeUsec start_us, TimeUsec end_us) {
-    auto category_key = CategoryKey::FromOpEvent(process, op);
-    count->Add(category_key, 1);
-  };
-  auto skip_func = [] (const auto& event) -> bool {
-    return CategoryEventsProtoReader::SkipOperationEvent(event.name());
-  };
-
-  if (next_meta) {
-    _event_flattener.ProcessUntil(events, StartOperationTimeUsec(next_meta.get()), add_op, skip_func);
-  } else {
-    _event_flattener.ProcessUntilFinish(events, add_op, skip_func);
-  }
-
-//  EventFlattener<iml::Event>::EachOpEvent(
-//      events,
-//      [&process, count] (const Operation& op, TimeUsec start_us, TimeUsec end_us) {
-//        auto category_key = CategoryKey::FromOpEvent(process, op);
-//        count->Add(category_key, 1);
-//      });
-
-  return MyStatus::OK();
-}
-MyStatus CategoryEventsParser::_AppendCategoryTimes(
-    CategoryTimes* out_category_times,
-    ProtoKlass* proto,
-    boost::optional<const TraceFileMeta&> next_meta) {
-  MyStatus status = MyStatus::OK();
-  for (const auto& pair : proto->category_events()) {
-    const auto& category = pair.first;
-    if (category == CATEGORY_OPERATION) {
-      status = _AppendCategoryOperation(category, proto, out_category_times, next_meta);
-      IF_BAD_STATUS_RETURN(status);
-    } else if (!FEATURE_JUST_OPERATIONS) {
-      CategoryKey category_key = CategoryKey::FromCategory(get_process(), category);
-//      if (out_category_times->eo_times.find(category_key) == out_category_times->eo_times.end()) {
-//        std::stringstream ss;
-//        ss << "FAIL:\n";
-//        out_category_times->PrintSummary(ss, 0);
-//        ss << "\n";
-//        category_key.Print(ss, 0);
-//        ss << "\n";
-//        SPDLOG_DEBUG(ss.str());
+//MyStatus CategoryEventsParser::_CountCategoryTimesOperation(
+//    CategoryTimesCount* count,
+//    ProtoKlass* proto,
+//    boost::optional<const TraceFileMeta&> next_meta) {
+//  MyStatus status = MyStatus::OK();
+//  auto const& process = get_process();
+//  auto const& events = proto->category_events().at(CATEGORY_OPERATION).events();
+////  DBG_LOG("CategoryEventsParser::ParserMeta.num_CATEGORY_OPERATION = {}", events.size());
+//  count->AddExtra(CategoryKey::FromCategory(process, CATEGORY_EXTRA_OPERATION), events.size());
 //
-//        for (const auto& eo_times_pair : out_category_times->eo_times) {
-//          if (out_category_times->eo_times.find(eo_times_pair.first) != out_category_times->eo_times.end()) {
-//            assert(out_category_times->eo_times.find(eo_times_pair.first) != out_category_times->eo_times.end());
-//          }
-//        }
+//  auto add_op = [&process, count] (const Operation& op, TimeUsec start_us, TimeUsec end_us) {
+//    auto category_key = CategoryKey::FromOpEvent(process, op);
+//    count->Add(category_key, 1);
+//  };
+//  auto skip_func = [] (const auto& event) -> bool {
+//    return CategoryEventsProtoReader::SkipOperationEvent(event.name());
+//  };
 //
-//        assert(false);
-//      }
-      EOEvents& eo_events = out_category_times->MutableEvents(category_key);
-      status = _AppendCategory(category, proto, &eo_events);
-      IF_BAD_STATUS_RETURN(status);
-    }
+//  if (next_meta) {
+//    _event_flattener.ProcessUntil(events, StartOperationTimeUsec(next_meta.get()), add_op, skip_func);
+//  } else {
+//    _event_flattener.ProcessUntilFinish(events, add_op, skip_func);
+//  }
+//
+////  EventFlattener<iml::Event>::EachOpEvent(
+////      events,
+////      [&process, count] (const Operation& op, TimeUsec start_us, TimeUsec end_us) {
+////        auto category_key = CategoryKey::FromOpEvent(process, op);
+////        count->Add(category_key, 1);
+////      });
+//
+//  return MyStatus::OK();
+//}
+
+//MyStatus CategoryEventsParser::AppendAllCategory(CategoryTimes* out_category_times, const Category& category, const EventList& events) {
+//  MyStatus status = MyStatus::OK();
+//  CategoryKey category_key = CategoryKey::FromCategory(get_process(), category);
+//  EOEvents& eo_events = out_category_times->MutableEvents(category_key);
+//  status = EachEvent(events, [&eo_events] (const EventName& name, TimeUsec start_us, TimeUsec end_us) {
+//    eo_events.AppendEvent(name, start_us, end_us);
+//    return MyStatus::OK();
+//  });
+//  IF_BAD_STATUS_RETURN(status);
+//}
+//MyStatus CategoryEventsParser::_AppendCategoryTimes(
+//    CategoryTimes* out_category_times,
+//    ProtoKlass* proto,
+//    boost::optional<const TraceFileMeta&> next_meta) {
+//  MyStatus status = MyStatus::OK();
+//  for (const auto& pair : proto->category_events()) {
+//    const auto& category = pair.first;
+//    if (category == CATEGORY_OPERATION) {
+//      status = _AppendCategoryOperation(category, proto, out_category_times, next_meta);
+//      IF_BAD_STATUS_RETURN(status);
+//    } else if (!FEATURE_JUST_OPERATIONS) {
+//      CategoryKey category_key = CategoryKey::FromCategory(get_process(), category);
+//      EOEvents& eo_events = out_category_times->MutableEvents(category_key);
+//      status = _AppendCategory(category, proto, &eo_events);
+//      IF_BAD_STATUS_RETURN(status);
+//    }
+//  }
+//  return MyStatus::OK();
+//}
+
+MyStatus CategoryEventsParser::AppendAllCategory(
+    const EntireTraceMeta& entire_meta,
+    const Category& category,
+    const std::vector<typename ProtoReader::EventKlass>& events,
+    CategoryTimes* out_category_times) {
+  auto status = MyStatus::OK();
+  if (category == CATEGORY_OPERATION) {
+    status = _AppendCategoryOperation(
+        entire_meta,
+        category,
+        events,
+        out_category_times);
+    IF_BAD_STATUS_RETURN(status);
+  } else if (!FEATURE_JUST_OPERATIONS) {
+    status = DefaultAppendAllCategory(
+        entire_meta,
+        category,
+        events,
+        out_category_times);
+    IF_BAD_STATUS_RETURN(status);
   }
   return MyStatus::OK();
 }
 
 MyStatus CategoryEventsParser::_AppendCategoryOperation(
+    const EntireTraceMeta& entire_meta,
     const Category& category,
-    ProtoKlass* proto,
-    CategoryTimes* out_category_times,
-    boost::optional<const TraceFileMeta&> next_meta) {
-  // for (start, end, op_name) in _EachEvent():
-  //   category_key = CategoryKey::FromOpEvent(process, op_name)
-  //   out_category_times->eo_times.at(category_key).AppendEvent(start, end)
+    const std::vector<typename ProtoReader::EventKlass>& events,
+    CategoryTimes* out_category_times) {
   MyStatus status = MyStatus::OK();
   auto const& process = get_process();
   assert(category == CATEGORY_OPERATION);
-  auto const& events = proto->category_events().at(category).events();
-//  auto* parser_meta = GetParserMetaDerived();
-//  parser_meta->eo_CATEGORY_OPERATION = std::move(EOEvents(parser_meta->num_CATEGORY_OPERATION, true));
-  auto extra_op_category_key = CategoryKey::FromCategory(process, CATEGORY_EXTRA_OPERATION);
-  auto& extra_op_events = out_category_times->MutableEventsExtra(extra_op_category_key);
-  status = EachEvent(events, [&extra_op_events] (const EventName& name, TimeUsec start_us, TimeUsec end_us) {
-    extra_op_events.AppendEvent(name, start_us, end_us);
-    return MyStatus::OK();
-  });
-  IF_BAD_STATUS_RETURN(status);
-  // Watch out for accidental copy-construction.
-  assert(out_category_times->extra_eo_times.at(extra_op_category_key).size() > 0);
 
   auto append_event = [this, &process, out_category_times] (const Operation& op, TimeUsec start_us, TimeUsec end_us) {
-//        if (SHOULD_DEBUG(FEATURE_LOAD_DATA)) {
-//          DBG_LOG("op_name = {}, path = {}", op, _path);
-//        }
     auto category_key = CategoryKey::FromOpEvent(process, op);
     auto& eo_events = out_category_times->MutableEvents(category_key);
     eo_events.AppendEvent(op, start_us, end_us);
@@ -297,37 +299,45 @@ MyStatus CategoryEventsParser::_AppendCategoryOperation(
   auto skip_func = [] (const auto& event) -> bool {
     return CategoryEventsProtoReader::SkipOperationEvent(event.name());
   };
+  CategoryTimesCount count;
+  auto add_op = [&process, &count] (const Operation& op, TimeUsec start_us, TimeUsec end_us) {
+    auto category_key = CategoryKey::FromOpEvent(process, op);
+    count.Add(category_key, 1);
+  };
 
-  if (next_meta) {
-    _event_flattener.ProcessUntil(events, StartOperationTimeUsec(next_meta.get()), append_event, skip_func);
-  } else {
-    _event_flattener.ProcessUntilFinish(events, append_event, skip_func);
-  }
-
-//  EventFlattener<iml::Event>::EachOpEvent(
-//      events,
-//      [this, &process, out_category_times] (const Operation& op, TimeUsec start_us, TimeUsec end_us) {
-////        if (SHOULD_DEBUG(FEATURE_LOAD_DATA)) {
-////          DBG_LOG("op_name = {}, path = {}", op, _path);
-////        }
-//        auto category_key = CategoryKey::FromOpEvent(process, op);
-//        auto& eo_events = out_category_times->MutableEvents(category_key);
-//        eo_events.AppendEvent(op, start_us, end_us);
-//      });
-
-  return MyStatus::OK();
-}
-
-MyStatus CategoryEventsParser::_AppendCategory(const Category& category, ProtoKlass* proto, EOEvents* eo_events) {
-  MyStatus status = MyStatus::OK();
-  const auto& events = proto->category_events().at(category).events();
-  status = EachEvent(events, [eo_events] (const EventName& name, TimeUsec start_us, TimeUsec end_us) {
-    eo_events->AppendEvent(name, start_us, end_us);
-    return MyStatus::OK();
-  });
+  status = DefaultAppendAllCategoryExtra(entire_meta, CATEGORY_EXTRA_OPERATION, events, out_category_times);
   IF_BAD_STATUS_RETURN(status);
+
+//  // auto const& events = proto->category_events().at(category).events();
+//  auto extra_op_category_key = CategoryKey::FromCategory(process, CATEGORY_EXTRA_OPERATION);
+//  out_category_times->PreallocateExtra(extra_op_category_key, events.size());
+//  auto& extra_op_events = out_category_times->MutableEventsExtra(extra_op_category_key);
+//  status = EachEvent(events, [&extra_op_events] (const EventName& name, TimeUsec start_us, TimeUsec end_us) {
+//    extra_op_events.AppendEvent(name, start_us, end_us);
+//    return MyStatus::OK();
+//  });
+//  IF_BAD_STATUS_RETURN(status);
+//  // Watch out for accidental copy-construction.
+//  assert(out_category_times->extra_eo_times.at(extra_op_category_key).size() > 0);
+
+  _event_flattener.ProcessUntilFinish(events, add_op, skip_func);
+  out_category_times->Preallocate(count);
+
+  _event_flattener.ProcessUntilFinish(events, append_event, skip_func);
+
   return MyStatus::OK();
 }
+
+//MyStatus CategoryEventsParser::_AppendCategory(const Category& category, ProtoKlass* proto, EOEvents* eo_events) {
+//  MyStatus status = MyStatus::OK();
+//  const auto& events = proto->category_events().at(category).events();
+//  status = EachEvent(events, [eo_events] (const EventName& name, TimeUsec start_us, TimeUsec end_us) {
+//    eo_events->AppendEvent(name, start_us, end_us);
+//    return MyStatus::OK();
+//  });
+//  IF_BAD_STATUS_RETURN(status);
+//  return MyStatus::OK();
+//}
 
 MyStatus CUDAAPIStatsParser::_CountCategoryTimes(CategoryTimesCount* count, ProtoKlass* proto) {
   if (FEATURE_JUST_OPERATIONS) {
@@ -420,6 +430,13 @@ size_t CategoryTimes::TotalEvents() const {
 void CategoryTimes::_Preallocate(EOTimes* eo_times, const CategoryKey& category_key, size_t n_events) {
   bool keep_names = CategoryShouldKeepNames(category_key);
   (*eo_times)[category_key] = EOEvents(n_events, keep_names);
+}
+void CategoryTimes::Preallocate(const CategoryTimesCount& count) {
+  for (const auto& pair : count.num_events) {
+    const auto& category_key = pair.first;
+    auto n_events = pair.second;
+    Preallocate(category_key, n_events);
+  }
 }
 void CategoryTimes::Preallocate(const CategoryKey& category_key, size_t n_events) {
   _Preallocate(&eo_times, category_key, n_events);
@@ -786,6 +803,8 @@ MyStatus TraceFileMeta::Init() {
   IF_BAD_STATUS_RETURN(status);
   status = reader->ReadMeta(&parser_meta);
   IF_BAD_STATUS_RETURN(status);
+  status = reader->ReadTraceFileMeta(this);
+  IF_BAD_STATUS_RETURN(status);
 
   // this->parser_meta = parser._parser_meta;
 //  this->parser_meta = parser->GetParserMeta();
@@ -894,6 +913,15 @@ MyStatus TraceFileWalker::Init() {
     status = ReadMeta(path, &meta);
     IF_BAD_STATUS_RETURN(status);
   }
+
+  if (timer) {
+    std::stringstream ss;
+    ss << "TraceFileWalker.Init()";
+    timer->EndOperation(ss.str());
+  } else {
+    assert(false);
+  }
+
   return MyStatus::OK();
 }
 
@@ -928,6 +956,117 @@ MyStatus RawTraceParser::Init() {
   return MyStatus::OK();
 }
 
+//MyStatus RawTraceParser::_ReadOneFileSequential(
+//    const Machine& machine,
+//    const Process& process,
+//    const Phase& phase,
+//    CategoryTimes *category_times,
+//    EntireTraceMeta* entire_meta,
+//    const std::map<RLSFileType, std::vector<TraceFileMeta>>& meta_map,
+//    const std::map<RLSFileType, std::unique_ptr<IEventFileParser>>& parser_map) {
+//  MyStatus status = MyStatus::OK();
+//
+//  for (auto rls_file_type : RLS_FILE_TYPES) {
+//    auto const &metas = meta_map.at(rls_file_type);
+//    for (size_t i = 1; i < metas.size(); i++) {
+//      auto const &last_meta = metas[i - 1];
+//      auto const &meta = metas[i];
+//      if (
+//          meta.parser_meta.find("start_usec") != meta.parser_meta.end()
+//          && last_meta.parser_meta.find("start_usec") != last_meta.parser_meta.end()
+//          ) {
+//        std::set<Category> categories;
+//        for (const auto &pair : meta.parser_meta["start_usec"].items()) {
+//          categories.insert(pair.key());
+//        }
+//        for (const auto &pair : last_meta.parser_meta["start_usec"].items()) {
+//          categories.insert(pair.key());
+//        }
+//        for (const auto &category : categories) {
+//          TimeUsec last_start_us = last_meta.parser_meta["start_usec"][category];
+//          const std::string &last_start_us_name = last_meta.parser_meta["start_usec_name"][category];
+//          TimeUsec start_us = meta.parser_meta["start_usec"][category];
+//          const std::string &start_us_name = meta.parser_meta["start_usec_name"][category];
+//          if (!(last_start_us <= start_us)) {
+//            std::stringstream ss;
+//            ss << "Saw start_us of category=\"" << category << "\" unordered between consecutive trace-id files:\n";
+//            ss << "  file 1 @ " << last_meta.get_path() << "\n";
+//            ss << "    start_us = " << last_start_us << " us\n";
+//            ss << "    name = " << last_start_us_name << " us\n";
+//            ss << "  file 2 @ " << meta.get_path() << "\n";
+//            ss << "    start_us = " << start_us << " us\n";
+//            ss << "    name = " << start_us_name << " us\n";
+//            DBG_LOG("{}", ss.str());
+//            assert(last_start_us <= start_us);
+//          }
+//        }
+//      }
+//    }
+//  }
+//
+//  for (auto rls_file_type : RLS_FILE_TYPES) {
+//    const auto &parser = parser_map.at(rls_file_type);
+//    status = parser->CountCategoryTimes(meta_map.at(rls_file_type));
+//    IF_BAD_STATUS_RETURN(status);
+//  }
+//
+//  CategoryTimesCount count;
+//  for (auto const &pair : parser_map) {
+//    auto const &parser = pair.second;
+//    count += parser->GetCount();
+//  }
+//
+//
+//  if (SHOULD_DEBUG(FEATURE_LOAD_DATA)) {
+//    std::stringstream ss;
+//    ss << "\n";
+//    count.Print(ss, 1);
+//    DBG_LOG("Total count: {}", ss.str());
+//  }
+//
+//  // Preallocate space for eo_times for this (machine, process, phase).
+//  *category_times = std::move(CategoryTimes(process, count));
+//
+//  if (SHOULD_DEBUG(FEATURE_LOAD_DATA)) {
+//    std::stringstream ss;
+//    ss << "\n";
+//    category_times->PrintSummary(ss, 1);
+//    DBG_LOG("Preallocated: {}", ss.str());
+//  }
+//
+//  for (auto rls_file_type : RLS_FILE_TYPES) {
+//    const auto &parser = parser_map.at(rls_file_type);
+//    status = parser->AppendCategoryTimes(meta_map.at(rls_file_type), category_times);
+//    IF_BAD_STATUS_RETURN(status);
+//  }
+//
+//  return MyStatus::OK();
+//}
+
+MyStatus RawTraceParser::_ReadMergeSorted(
+    const Machine& machine,
+    const Process& process,
+    const Phase& phase,
+    CategoryTimes *category_times,
+    EntireTraceMeta* entire_meta,
+    const std::map<RLSFileType, std::vector<TraceFileMeta>>& meta_map,
+    const std::map<RLSFileType, std::unique_ptr<IEventFileParser>>& parser_map) {
+  MyStatus status = MyStatus::OK();
+
+  for (auto rls_file_type : RLS_FILE_TYPES) {
+    const auto &parser = parser_map.at(rls_file_type);
+    status = parser->AppendAllCategoryTimes(*entire_meta, meta_map.at(rls_file_type), category_times);
+    if (timer) {
+      std::stringstream ss;
+      ss << "_ReadMergeSorted(machine=" << machine << ", process=" << process << ", phase=" << phase << ", file_type=" << RLSFileTypeString(rls_file_type) << ")";
+      timer->EndOperation(ss.str());
+    }
+    IF_BAD_STATUS_RETURN(status);
+  }
+
+  return MyStatus::OK();
+}
+
 MyStatus RawTraceParser::ReadEntireTrace(
     const Machine& machine,
     const Process& process,
@@ -946,44 +1085,6 @@ MyStatus RawTraceParser::ReadEntireTrace(
     IF_BAD_STATUS_RETURN(status);
   }
 
-  for (auto rls_file_type : RLS_FILE_TYPES) {
-    auto const& metas = meta_map[rls_file_type];
-    for (size_t i = 1; i < metas.size(); i++) {
-      auto const& last_meta = metas[i-1];
-      auto const& meta = metas[i];
-      if (
-          meta.parser_meta.find("start_usec") != meta.parser_meta.end()
-          && last_meta.parser_meta.find("start_usec") != last_meta.parser_meta.end()
-          ) {
-        std::set<Category> categories;
-        for (const auto& pair : meta.parser_meta["start_usec"].items()) {
-          categories.insert(pair.key());
-        }
-        for (const auto& pair : last_meta.parser_meta["start_usec"].items()) {
-          categories.insert(pair.key());
-        }
-        for (const auto& category : categories) {
-          TimeUsec last_start_us = last_meta.parser_meta["start_usec"][category];
-          const std::string& last_start_us_name = last_meta.parser_meta["start_usec_name"][category];
-          TimeUsec start_us = meta.parser_meta["start_usec"][category];
-          const std::string& start_us_name = meta.parser_meta["start_usec_name"][category];
-          if (!(last_start_us <= start_us)) {
-            std::stringstream ss;
-            ss << "Saw start_us of category=\"" << category << "\" unordered between consecutive trace-id files:\n";
-            ss << "  file 1 @ " << last_meta.get_path() << "\n";
-            ss << "    start_us = " << last_start_us << " us\n";
-            ss << "    name = " << last_start_us_name << " us\n";
-            ss << "  file 2 @ " << meta.get_path() << "\n";
-            ss << "    start_us = " << start_us << " us\n";
-            ss << "    name = " << start_us_name << " us\n";
-            DBG_LOG("{}", ss.str());
-            assert(last_start_us <= start_us);
-          }
-        }
-      }
-    }
-  }
-
   std::map<RLSFileType, std::unique_ptr<IEventFileParser>> parser_map;
   for (auto rls_file_type : RLS_FILE_TYPES) {
     TraceParserMeta parser_meta(machine, process, phase);
@@ -991,61 +1092,17 @@ MyStatus RawTraceParser::ReadEntireTrace(
     IF_BAD_STATUS_RETURN(status);
   }
 
-  for (auto rls_file_type : RLS_FILE_TYPES) {
-    auto& parser = parser_map[rls_file_type];
-    status = parser->CountCategoryTimes(meta_map.at(rls_file_type));
-    IF_BAD_STATUS_RETURN(status);
-  }
+//  status = _ReadOneFileSequential(
+//      machine, process, phase, category_times, entire_meta,
+//      meta_map, parser_map);
+//  IF_BAD_STATUS_RETURN(status);
 
-  CategoryTimesCount count;
-  for (auto const &pair : parser_map) {
-    auto const& parser = pair.second;
-    count += parser->GetCount();
-  }
+  status = _ReadMergeSorted(
+      machine, process, phase, category_times, entire_meta,
+      meta_map, parser_map);
+  IF_BAD_STATUS_RETURN(status);
 
 
-  if (SHOULD_DEBUG(FEATURE_LOAD_DATA)) {
-    std::stringstream ss;
-    ss << "\n";
-    count.Print(ss, 1);
-    DBG_LOG("Total count: {}", ss.str());
-  }
-
-  // Preallocate space for eo_times for this (machine, process, phase).
-  *category_times = std::move(CategoryTimes(process, count));
-
-  if (SHOULD_DEBUG(FEATURE_LOAD_DATA)) {
-    std::stringstream ss;
-    ss << "\n";
-    category_times->PrintSummary(ss, 1);
-    DBG_LOG("Preallocated: {}", ss.str());
-  }
-
-  for (auto rls_file_type : RLS_FILE_TYPES) {
-    auto& parser = parser_map[rls_file_type];
-    status = parser->AppendCategoryTimes(meta_map.at(rls_file_type), category_times);
-    IF_BAD_STATUS_RETURN(status);
-  }
-
-
-//  for (auto const &meta : metas) {
-//    std::unique_ptr<IEventFileParser> parser;
-//    if (SHOULD_DEBUG(FEATURE_LOAD_DATA)) {
-//      DBG_LOG("read path = {}", meta.get_path());
-//    }
-//    status = GetRLSEventParser(meta.get_path(), &parser);
-//    IF_BAD_STATUS_RETURN(status);
-//    // TODO: cache read proto-files to avoid re-reading 20MB files...maybe.
-//    status = parser->AppendCategoryTimes(category_times);
-//    IF_BAD_STATUS_RETURN(status);
-//
-////    if (SHOULD_DEBUG(FEATURE_LOAD_DATA)) {
-////      DBG_LOG("After {}", meta.path);
-////      category_times->PrintSummary(std::cout, 1);
-////      std::cout << "\n";
-////    }
-//
-//  }
 
   if (SHOULD_DEBUG(FEATURE_LOAD_DATA)) {
     std::stringstream ss;
@@ -1360,13 +1417,22 @@ MyStatus GetTraceID(const std::string& path, TraceID* trace_id) {
 void CategoryKeyBitset::Print(std::ostream& out, int indent) const {
  // auto keys = idx_map.KeySetFrom(bitset);
   auto keys = idx_map->KeySetFrom(bitset);
-  PrintIndent(out, indent);
 
-  out << "CategoryKeyBitset: bits = " << bitset.to_string() << ", size = " << keys.size();
+  // Print a single CategoryKey all merged together.
+  CategoryKey merged_key;
   for (const auto& key : keys) {
-    out << "\n";
-    key.Print(out, indent + 1);
+    merged_key.MergeInplace(key);
   }
+  merged_key.Print(out, indent);
+
+  // Print each CategoryKey individually.
+//  PrintIndent(out, indent);
+//  out << "CategoryKeyBitset: bits = " << bitset.to_string() << ", size = " << keys.size();
+//  for (const auto& key : keys) {
+//    out << "\n";
+//    key.Print(out, indent + 1);
+//  }
+
 }
 
 std::set<CategoryKey> CategoryKeyBitset::Keys() const {
@@ -1585,10 +1651,7 @@ OverlapResult OverlapComputer::ComputeOverlap(bool keep_empty_time) const {
     }
   }
 
-  for (auto& pair : r.overlap) {
-    // Change overlap from psec to usec.
-    pair.second = pair.second / PSEC_IN_USEC;
-  }
+  r.ConvertPsecToUsec();
 
   return r;
 }
@@ -1596,21 +1659,23 @@ OverlapResult OverlapComputer::ComputeOverlap(bool keep_empty_time) const {
 #undef IS_END_IDX
 
 std::unique_ptr<OverlapTypeReducerInterface> GetJSDumper(const OverlapType& overlap_type) {
+  std::unique_ptr<OverlapTypeReducerInterface> ret;
   if (overlap_type == "ResourceOverlap") {
-    return std::make_unique<ResourceOverlapType>();
+    ret = std::make_unique<ResourceOverlapType>();
   } else if (overlap_type == "CategoryOverlap") {
-    return std::make_unique<CategoryOverlapType>();
+    ret = std::make_unique<CategoryOverlapType>();
   } else if (overlap_type == "OperationOverlap") {
-    return std::make_unique<OperationOverlapType>();
+    ret = std::make_unique<OperationOverlapType>();
   } else if (overlap_type == "ResourceSubplot") {
-    return std::make_unique<ResourceSubplotOverlapType>();
+    ret = std::make_unique<ResourceSubplotOverlapType>();
+  } else {
+    // Not sure what overlap_type is.
+    assert(false);
+    std::stringstream ss;
+    ss << "Not sure how to handle overlap_type = " << overlap_type;
+    RAISE_NOT_IMPLEMENTED(ss.str());
   }
-  // Not sure what overlap_type is.
-  assert(false);
-  std::stringstream ss;
-  ss << "Not sure how to handle overlap_type = " << overlap_type;
-  RAISE_NOT_IMPLEMENTED(ss.str());
-  return std::make_unique<ResourceOverlapType>();
+  return ret;
 }
 
 
@@ -1620,6 +1685,13 @@ void OverlapResult::DumpVennJS(const std::string& directory,
                                const Phase& phase) const {
   for (auto const& overlap_type : OVERLAP_TYPES) {
     auto const& overlap_reducer = OverlapResultReducer::ReduceToCategoryKey(*this);
+    if (SHOULD_DEBUG(FEATURE_SAVE_JS)) {
+      std::stringstream ss;
+      ss << "DumpVennJS: overlap_type = " << overlap_type;
+      ss << "\n";
+      overlap_reducer.Print(ss, 1);
+      DBG_LOG("{}", ss.str());
+    }
     auto js_dumper = GetJSDumper(overlap_type);
     auto const& reduced_overlap = js_dumper->PostReduceCategoryKey(overlap_reducer);
     js_dumper->DumpOverlapJS(
@@ -1633,7 +1705,11 @@ void OverlapResult::DumpVennJS(const std::string& directory,
 
 void OverlapResult::Print(std::ostream& out, int indent) const {
   PrintIndent(out, indent);
-  out << "OverlapResult: size = " << overlap.size();
+  out << "OverlapResult:";
+
+  out << "\n";
+  PrintIndent(out, indent + 1);
+  out << "Overlap: size = " << overlap.size();
   size_t i = 0;
   for (const auto& pair : overlap) {
     auto const& bitset = pair.first;
@@ -1641,13 +1717,16 @@ void OverlapResult::Print(std::ostream& out, int indent) const {
     double time_sec = ((double)time_us) / ((double)USEC_IN_SEC);
 
     out << "\n";
-    PrintIndent(out, indent + 1);
+    PrintIndent(out, indent + 2);
     out << "Overlap[" << i << "]: duration = " << time_sec << " sec";
     out << "\n";
-    bitset.Print(out, indent + 2);
-
+    bitset.Print(out, indent + 3);
     i += 1;
   }
+
+  out << "\n";
+  meta.Print(out, indent + 1);
+
 }
 
 //DEFINE_PRINT_OPERATOR(CategoryKey)

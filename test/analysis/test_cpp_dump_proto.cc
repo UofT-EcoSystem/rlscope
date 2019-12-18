@@ -433,6 +433,51 @@ TEST(TestProcessing, TestEventFlattener_02) {
 
 }
 
+TEST(TestUtil, TestKeepExtreme_01) {
+  auto got = KeepExtreme(
+      std::vector<TimeUsec>{0, 5, 3, 4},
+      0,
+      /*should_keep=*/[] (TimeUsec x, TimeUsec min_x) {
+        return x < min_x;
+      },
+      /*should_skip=*/[] (TimeUsec x) {
+        return x == 0;
+      });
+  auto expect = 3;
+  EXPECT_EQ(got, expect);
+}
+
+TEST(TestUtil, TestKeepExtreme_02) {
+  //[2019-12-18 19:37:25.488] [debug] [trace_file_parser.h:2590] pid=21880 @ MergeInplace: region1 before: RegionMetadataReducer(start=0 us, end=0 us, num_events=0)
+  //[2019-12-18 19:37:25.488] [debug] [trace_file_parser.h:2591] pid=21880 @ MergeInplace: region2 before: RegionMetadataReducer(start=1571625977177087000 us, end=1571625998937912000 us, num_events=140)
+  //[2019-12-18 19:37:25.488] [debug] [trace_file_parser.h:2615] pid=21880 @ MergeInplace: region1 after: RegionMetadataReducer(start=-647324648 us, end=-361336128 us, num_events=140)
+
+  TimeUsec got_start = KeepExtreme<TimeUsec>(
+      std::vector<TimeUsec>{0, 1571625977177087000},
+      0,
+      /*should_keep=*/[] (TimeUsec x, TimeUsec min_x) {
+        return x < min_x;
+      },
+      /*should_skip=*/[] (TimeUsec x) {
+        return x == 0;
+      });
+  auto expect_start = 1571625977177087000;
+  EXPECT_EQ(got_start, expect_start);
+
+  TimeUsec got_end = KeepExtreme<TimeUsec>(
+      std::vector<TimeUsec>{0, 1571625998937912000},
+      0,
+      /*should_keep=*/[] (TimeUsec x, TimeUsec min_x) {
+        return x < min_x;
+      },
+      /*should_skip=*/[] (TimeUsec x) {
+        return x == 0;
+      });
+  auto expect_end = 1571625998937912000;
+  EXPECT_EQ(got_end, expect_end);
+
+}
+
 TEST(TestEigen, ArrayModifyOne) {
 //  using IdxArray = Array<size_t, Dynamic, 1>;
 //  size_t k = 3;

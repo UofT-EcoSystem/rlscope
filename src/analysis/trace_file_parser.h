@@ -90,6 +90,8 @@
 
 namespace tensorflow {
 
+// forward decls
+class IEventFileParser;
 
 enum RLSFileType {
   UNKNOWN_FILE = 0,
@@ -473,6 +475,11 @@ public:
       non_ops(std::move(non_ops_)) {
   }
 
+  void MergeInplace(const CategoryKey& category_key) {
+    procs.insert(category_key.procs.begin(), category_key.procs.end());
+    ops.insert(category_key.ops.begin(), category_key.ops.end());
+    non_ops.insert(category_key.non_ops.begin(), category_key.non_ops.end());
+  }
 
   static CategoryKey FromCategory(const Process& proc, const Category& category) {
     CategoryKey category_key;
@@ -483,9 +490,6 @@ public:
 
   static CategoryKey FromOpEvent(const Process& proc, const Operation& op) {
     CategoryKey category_key;
-    if (op == "[ppo2_Walker2DBulletEnv-v0]") {
-      DBG_BREAKPOINT("[ppo2_Walker2DBulletEnv-v0]");
-    }
     category_key.procs.insert(proc);
     category_key.ops.insert(op);
     return category_key;
@@ -1011,6 +1015,7 @@ public:
   }
   size_t TotalEvents() const;
 
+  void Preallocate(const CategoryTimesCount& count);
   void Preallocate(const CategoryKey& category_key, size_t n_events);
   void PreallocateExtra(const CategoryKey& category_key, size_t n_events);
   void _Preallocate(EOTimes* eo_times, const CategoryKey& category_key, size_t n_events);
@@ -1127,6 +1132,9 @@ struct TraceFileMeta {
   TraceID trace_id;
   RLSFileType file_type;
 
+  std::map<Category, size_t> n_events;
+  std::set<Category> categories;
+
 //  std::shared_ptr<IParserMeta> parser_meta;
 
   nlohmann::json parser_meta;
@@ -1202,6 +1210,7 @@ struct TraceFileMeta {
 };
 class TraceFileWalker {
 public:
+  std::shared_ptr<SimpleTimer> timer;
   // RLSFilePath -> TraceFileMeta
   std::map<std::string, TraceFileMeta> _path_to_meta;
   // [machine_name][process_name][phase_name][trace_id] -> TraceFileMeta
@@ -1216,6 +1225,10 @@ public:
   TraceFileWalker(const std::string& iml_directory) :
       _iml_directory(iml_directory)
   {
+  }
+
+  void SetTimer(std::shared_ptr<SimpleTimer> timer) {
+    this->timer = timer;
   }
 
   MyStatus ReadMeta(const std::string& path, TraceFileMeta* meta);
@@ -1309,6 +1322,11 @@ public:
   //
   //
 
+  void SetTimer(std::shared_ptr<SimpleTimer> timer) {
+    this->timer = timer;
+    _walker.SetTimer(timer);
+  }
+
   MyStatus Init();
 
   inline std::list<Machine> Machines() const {
@@ -1324,9 +1342,12 @@ public:
   template <typename Func>
   MyStatus EachEntireTrace(Func func) {
     MyStatus status = MyStatus::OK();
-    for (auto const& machine : this->Machines()) {
-      for (auto const& process : this->Processes(machine)) {
-        for (auto const &phase : this->Phases(machine, process)) {
+    auto const& machines = this->Machines();
+    for (auto const& machine : machines) {
+      auto const& processes = this->Processes(machine);
+      for (auto const& process : processes) {
+        auto const& phases = this->Phases(machine, process);
+        for (auto const &phase : phases) {
           CategoryTimes category_times;
           EntireTraceMeta meta;
           status = this->ReadEntireTrace(machine, process, phase,
@@ -1346,6 +1367,24 @@ public:
       const Phase& phase,
       CategoryTimes* category_times,
       EntireTraceMeta* entire_meta);
+
+//  MyStatus _ReadOneFileSequential(
+//      const Machine& machine,
+//      const Process& process,
+//      const Phase& phase,
+//      CategoryTimes *category_times,
+//      EntireTraceMeta* entire_meta,
+//      const std::map<RLSFileType, std::vector<TraceFileMeta>>& meta_map,
+//      const std::map<RLSFileType, std::unique_ptr<IEventFileParser>>& parser_map);
+
+  MyStatus _ReadMergeSorted(
+      const Machine& machine,
+      const Process& process,
+      const Phase& phase,
+      CategoryTimes *category_times,
+      EntireTraceMeta* entire_meta,
+      const std::map<RLSFileType, std::vector<TraceFileMeta>>& meta_map,
+      const std::map<RLSFileType, std::unique_ptr<IEventFileParser>>& parser_map);
 
   MyStatus _AppendOverheadEvents(
       const Machine& machine,
@@ -1402,6 +1441,7 @@ public:
   virtual MyStatus Init() = 0;
   virtual void Clear() = 0;
   virtual MyStatus ReadMeta(nlohmann::json* meta) = 0;
+  virtual MyStatus ReadTraceFileMeta(TraceFileMeta* meta) = 0;
 
   virtual const Machine& get_machine() const = 0;
   virtual const Process& get_process() const = 0;
@@ -1423,8 +1463,10 @@ public:
 //  virtual MyStatus CountCategoryTimes(const std::string& path) = 0;
 //  virtual MyStatus AppendCategoryTimes(const std::string& path, CategoryTimes* out_category_times) = 0;
 
-  virtual MyStatus CountCategoryTimes(const std::vector<TraceFileMeta>& metas) = 0;
-  virtual MyStatus AppendCategoryTimes(const std::vector<TraceFileMeta>& metas, CategoryTimes* out_category_times) = 0;
+//  virtual MyStatus CountCategoryTimes(const std::vector<TraceFileMeta>& metas) = 0;
+//  virtual MyStatus AppendCategoryTimes(const std::vector<TraceFileMeta>& metas, CategoryTimes* out_category_times) = 0;
+
+  virtual MyStatus AppendAllCategoryTimes(const EntireTraceMeta& entire_meta, const std::vector<TraceFileMeta>& metas, CategoryTimes* out_category_times) = 0;
 
   virtual const CategoryTimesCount& GetCount() const {
     return _count;
@@ -1446,6 +1488,62 @@ public:
     return _meta.phase;
   }
 
+
+};
+
+struct TraceFileLocation {
+  std::map<Category, size_t> event_idx;
+  std::map<Category, TimeUsec> start_ps;
+};
+
+class SimpleEventReader {
+public:
+  std::vector<TraceFileMeta> metas;
+
+  SimpleEventReader(std::vector<TraceFileMeta> metas)
+      : metas(std::move(metas))
+  {
+  }
+
+  template <class ProtoReader, class EventKlass>
+  MyStatus ReadCategoryEvents(const Category& category, std::vector<EventKlass>* events) const {
+    size_t n_events = 0;
+    for (const auto& meta : metas) {
+      auto const& it = meta.n_events.find(category);
+      if (it != meta.n_events.end()) {
+        n_events += it->second;
+      }
+    }
+
+    events->reserve(n_events);
+    for (const auto& meta : metas) {
+      if (meta.categories.find(category) == meta.categories.end()) {
+        continue;
+      }
+      ProtoReader reader(meta.get_path());
+      auto status = reader.Init();
+      IF_BAD_STATUS_RETURN(status);
+
+      reader.MutableEachCategory([n_events, &events, category] (const auto& cat, auto* cat_events) {
+        if (category != cat) {
+          return;
+        }
+        SortEvents(cat_events);
+        auto n_events_so_far = events->size();
+        assert(events->size() + cat_events->size() <= n_events);
+        std::copy(cat_events->begin(), cat_events->end(), std::back_inserter(*events));
+        std::inplace_merge(
+            events->begin(),
+            events->begin() + n_events_so_far,
+            events->end(),
+            [] (const EventKlass& lhs, const EventKlass& rhs) {
+              return ProtoReader::EventStartUsec(lhs) < ProtoReader::EventStartUsec(rhs);
+            });
+      });
+    }
+    assert(events->size() == n_events);
+    return MyStatus::OK();
+  }
 
 };
 
@@ -1471,6 +1569,79 @@ public:
     return MyStatus::OK();
   }
 
+  virtual MyStatus AppendAllCategory(
+      const EntireTraceMeta& entire_meta,
+      const Category& category,
+      const std::vector<typename ProtoReader::EventKlass>& events,
+      CategoryTimes* out_category_times) {
+    return DefaultAppendAllCategory(
+        entire_meta,
+        category,
+        events,
+        out_category_times);
+  }
+
+  virtual MyStatus DefaultAppendAllCategory(
+      const EntireTraceMeta& entire_meta,
+      const Category& category,
+      const std::vector<typename ProtoReader::EventKlass>& events,
+      CategoryTimes* out_category_times) {
+    auto category_key = CategoryKey::FromCategory(entire_meta.process, category);
+    out_category_times->Preallocate(category_key, events.size());
+    auto& eo_events = out_category_times->MutableEvents(category_key);
+    for (size_t i = 0; i < events.size(); i++) {
+      auto start_us = ProtoReader::EventStartUsec(events[i]);
+      auto end_us = ProtoReader::EventEndUsec(events[i]);
+      OptionalString name;
+      if (eo_events.KeepNames()) {
+        name = ProtoReader::EventName(events[i]);
+      }
+      eo_events.AppendEvent(name, start_us, end_us);
+    }
+    return MyStatus::OK();
+  }
+
+  virtual MyStatus DefaultAppendAllCategoryExtra(
+      const EntireTraceMeta& entire_meta,
+      const Category& category,
+      const std::vector<typename ProtoReader::EventKlass>& events,
+      CategoryTimes* out_category_times) {
+    auto category_key = CategoryKey::FromCategory(entire_meta.process, category);
+    out_category_times->PreallocateExtra(category_key, events.size());
+    auto& eo_events = out_category_times->MutableEventsExtra(category_key);
+    for (size_t i = 0; i < events.size(); i++) {
+      auto start_us = ProtoReader::EventStartUsec(events[i]);
+      auto end_us = ProtoReader::EventEndUsec(events[i]);
+      OptionalString name;
+      if (eo_events.KeepNames()) {
+        name = ProtoReader::EventName(events[i]);
+      }
+      eo_events.AppendEvent(name, start_us, end_us);
+    }
+    return MyStatus::OK();
+  }
+
+  virtual MyStatus AppendAllCategoryTimes(const EntireTraceMeta& entire_meta, const std::vector<TraceFileMeta>& metas, CategoryTimes* out_category_times) override {
+    auto status = MyStatus::OK();
+    SimpleEventReader simple_reader(metas);
+    std::set<Category> categories;
+    std::set<Process> processes;
+    for (const auto& meta : metas) {
+      categories.insert(meta.categories.begin(), meta.categories.end());
+    }
+    for (const auto& category : categories) {
+      std::vector<typename ProtoReader::EventKlass> events;
+      status = simple_reader.ReadCategoryEvents<ProtoReader>(category, &events);
+      IF_BAD_STATUS_RETURN(status);
+
+      status = this->AppendAllCategory(entire_meta, category, events, out_category_times);
+      IF_BAD_STATUS_RETURN(status);
+
+    }
+    return MyStatus::OK();
+  }
+
+
 };
 template <class ProtoKlass, class ProtoReader>
 class ISimpleProtoParser : public IEventFileProtoParser<ProtoKlass, ProtoReader> {
@@ -1483,51 +1654,48 @@ public:
   virtual MyStatus _CountCategoryTimes(CategoryTimesCount* count, ProtoKlass* proto) = 0;
   virtual MyStatus _AppendCategoryTimes(CategoryTimes* out_category_times, ProtoKlass* proto) = 0;
 
-  virtual MyStatus AppendCategoryTimes(const std::vector<TraceFileMeta>& metas, CategoryTimes* out_category_times) override {
-    MyStatus status = MyStatus::OK();
-
-    for (const auto& meta : metas) {
-      ProtoReader reader(meta.get_path());
-      status = reader.Init();
-      IF_BAD_STATUS_RETURN(status);
-
-      reader.MutableEachCategory([] (const auto& category, auto* events) {
-        SortEvents(events);
-      });
-
-//      reader.EachCategory([] (const auto& category, const auto& events) {
-//        CheckEventsSorted(category, events);
+//  virtual MyStatus AppendCategoryTimes(const std::vector<TraceFileMeta>& metas, CategoryTimes* out_category_times) override {
+//    MyStatus status = MyStatus::OK();
+//
+//    for (const auto& meta : metas) {
+//      ProtoReader reader(meta.get_path());
+//      status = reader.Init();
+//      IF_BAD_STATUS_RETURN(status);
+//
+//      reader.MutableEachCategory([] (const auto& category, auto* events) {
+//        SortEvents(events);
 //      });
+//
+//      status = _AppendCategoryTimes(out_category_times, reader.MutableProto());
+//      IF_BAD_STATUS_RETURN(status);
+//    }
+//
+//    return status;
+//  }
+//
+//  virtual MyStatus CountCategoryTimes(const std::vector<TraceFileMeta>& metas) override {
+//    MyStatus status = MyStatus::OK();
+//
+//    for (const auto& meta : metas) {
+//      ProtoReader reader(meta.get_path());
+//      status = reader.Init();
+//      IF_BAD_STATUS_RETURN(status);
+//
+//      reader.MutableEachCategory([] (const auto& category, auto* events) {
+//        SortEvents(events);
+//      });
+//
+//      status = _CountCategoryTimes(&this->_count, reader.MutableProto());
+//      IF_BAD_STATUS_RETURN(status);
+//    }
+//
+//    return status;
+//  }
 
-      status = _AppendCategoryTimes(out_category_times, reader.MutableProto());
-      IF_BAD_STATUS_RETURN(status);
-    }
-
-    return status;
-  }
-
-  virtual MyStatus CountCategoryTimes(const std::vector<TraceFileMeta>& metas) override {
-    MyStatus status = MyStatus::OK();
-
-    for (const auto& meta : metas) {
-      ProtoReader reader(meta.get_path());
-      status = reader.Init();
-      IF_BAD_STATUS_RETURN(status);
-
-      reader.MutableEachCategory([] (const auto& category, auto* events) {
-        SortEvents(events);
-      });
-
-      status = _CountCategoryTimes(&this->_count, reader.MutableProto());
-      IF_BAD_STATUS_RETURN(status);
-    }
-
-    return status;
-  }
 };
 
 
-template <class ProtoKlass>
+template <class ProtoKlass, class ProtoReader>
 class ITraceFileProtoReader : public ITraceProtoReader {
 public:
   ProtoKlass _proto;
@@ -1589,13 +1757,18 @@ public:
     return &_proto;
   }
 
-  virtual MyStatus Init() {
+  virtual MyStatus Init() override {
     if (_initialized) {
       return MyStatus::OK();
     }
     // Initialization happens in _ReadProto.
     MyStatus status = MyStatus::OK();
     status = _ReadProto(_path, &_proto);
+
+    _machine = ProtoReader::ProtoMachine(_proto);
+    _process = ProtoReader::ProtoProcess(_proto);
+    _phase = ProtoReader::ProtoPhase(_proto);
+
     IF_BAD_STATUS_RETURN(status);
     assert(_initialized);
     return MyStatus::OK();
@@ -1841,9 +2014,9 @@ public:
 
     while (i < events_size || can_end_events()) {
       if (i < events_size && skip_func(event_protos[i])) {
-//        if (SHOULD_DEBUG(FEATURE_PREPROCESS_DATA)) {
-        DBG_LOG("(SKIP_FUNC) Event(name={}) @ {} us", event_protos[i].name(), event_protos[i].start_time_us());
-//        }
+        if (SHOULD_DEBUG(FEATURE_PREPROCESS_DATA)) {
+          DBG_LOG("(SKIP_FUNC) Event(name={}) @ {} us", event_protos[i].name(), event_protos[i].start_time_us());
+        }
         i += 1;
         continue;
       }
@@ -1916,12 +2089,28 @@ public:
 };
 
 
-class CategoryEventsProtoReader : public ITraceFileProtoReader<iml::CategoryEventsProto> {
+template <class ProtoReader>
+MyStatus GenericReadTraceFileMeta(ProtoReader* reader, TraceFileMeta* meta) {
+  auto status = reader->Init();
+  IF_BAD_STATUS_RETURN(status);
+  reader->EachCategory([meta] (const auto& category, auto& events) {
+    meta->n_events[category] += events.size();
+    meta->categories.insert(category);
+  });
+  return MyStatus::OK();
+}
+#define DEFINE_READ_TRACE_FILE_META \
+  virtual MyStatus ReadTraceFileMeta(TraceFileMeta* meta) override { \
+    return GenericReadTraceFileMeta(this, meta); \
+  }
+
+class CategoryEventsProtoReader : public ITraceFileProtoReader<iml::CategoryEventsProto, CategoryEventsProtoReader> {
 public:
   static const RLSFileType FILE_TYPE = RLSFileType::CATEGORY_EVENTS_FILE;
 
   using ProtoKlass = iml::CategoryEventsProto;
   using EventKlass = iml::Event;
+  using ProtoReader = CategoryEventsProtoReader;
 
   // Need to know:
   // - The START time of the first "Operation" event.
@@ -1929,9 +2118,35 @@ public:
   //TimeUsec _start_operation_usec;
 
   CategoryEventsProtoReader(const std::string& path) :
-      ITraceFileProtoReader<ProtoKlass>(path, RLSFileType::CATEGORY_EVENTS_FILE, "category_events")
+      ITraceFileProtoReader<ProtoKlass, ProtoReader>(path, RLSFileType::CATEGORY_EVENTS_FILE, "category_events")
   {
   }
+
+  static const std::string& EventName(const EventKlass& event) {
+    return event.name();
+  }
+  static TimeUsec EventStartUsec(const EventKlass& event) {
+    return event.start_time_us();
+  }
+  static TimeUsec EventEndUsec(const EventKlass& event) {
+    return event.start_time_us() + event.duration_us();
+  }
+
+  static const std::string& ProtoMachine(const ProtoKlass& proto) {
+    return proto.machine_name();
+  }
+  static const std::string& ProtoProcess(const ProtoKlass& proto) {
+    return proto.process_name();
+  }
+  static const std::string& ProtoPhase(const ProtoKlass& proto) {
+    return proto.phase();
+  }
+
+  DEFINE_READ_TRACE_FILE_META
+
+//  virtual MyStatus ReadTraceFileMeta(TraceFileMeta* meta) override {
+//    return GenericReadTraceFileMeta(this, meta);
+//  }
 
   template <typename Func>
   void EachCategory(Func func) {
@@ -2022,74 +2237,82 @@ public:
   {
   }
 
-  virtual MyStatus _CountCategoryTimes(CategoryTimesCount* count, ProtoKlass* proto, boost::optional<const TraceFileMeta&> next_meta);
-  MyStatus _CountCategoryTimesOperation(CategoryTimesCount* count, ProtoKlass* proto, boost::optional<const TraceFileMeta&> next_meta);
-  virtual MyStatus _AppendCategoryTimes(CategoryTimes* out_category_times, ProtoKlass* proto, boost::optional<const TraceFileMeta&> next_meta);
-  MyStatus _AppendCategoryOperation(const Category& category, ProtoKlass* proto, CategoryTimes* out_category_times, boost::optional<const TraceFileMeta&> next_meta);
+//  virtual MyStatus _CountCategoryTimes(CategoryTimesCount* count, ProtoKlass* proto, boost::optional<const TraceFileMeta&> next_meta);
+//  MyStatus _CountCategoryTimesOperation(CategoryTimesCount* count, ProtoKlass* proto, boost::optional<const TraceFileMeta&> next_meta);
+//  virtual MyStatus _AppendCategoryTimes(CategoryTimes* out_category_times, ProtoKlass* proto, boost::optional<const TraceFileMeta&> next_meta);
 
-  MyStatus _AppendCategory(const Category& category, ProtoKlass* proto, EOEvents* eo_events);
+  virtual MyStatus AppendAllCategory(
+      const EntireTraceMeta& entire_meta,
+      const Category& category,
+      const std::vector<typename ProtoReader::EventKlass>& events,
+      CategoryTimes* out_category_times) override;
+  virtual MyStatus _AppendCategoryOperation(
+      const EntireTraceMeta& entire_meta,
+      const Category& category,
+      const std::vector<typename ProtoReader::EventKlass>& events,
+      CategoryTimes* out_category_times);
 
-  virtual MyStatus AppendCategoryTimes(const std::vector<TraceFileMeta>& metas, CategoryTimes* out_category_times) override {
-    MyStatus status = MyStatus::OK();
-
-    for (auto it = metas.begin(); it != metas.end(); it++) {
-      const auto& meta = *it;
-
-      boost::optional<const TraceFileMeta&> next_meta;
-      auto next_it = it;
-      next_it++;
-      if (next_it != metas.end()) {
-        next_meta = *next_it;
-      }
-
-
-      ProtoReader reader(meta.get_path());
-      status = reader.Init();
-      IF_BAD_STATUS_RETURN(status);
-
-      reader.MutableEachCategory([] (const auto& category, auto* events) {
-        SortEvents(events);
-      });
-
-//      reader.EachCategory([] (const auto& category, const auto& events) {
-//        CheckEventsSorted(category, events);
+//  virtual MyStatus AppendCategoryTimes(const std::vector<TraceFileMeta>& metas, CategoryTimes* out_category_times) override {
+//    MyStatus status = MyStatus::OK();
+//
+//    for (auto it = metas.begin(); it != metas.end(); it++) {
+//      const auto& meta = *it;
+//
+//      boost::optional<const TraceFileMeta&> next_meta;
+//      auto next_it = it;
+//      next_it++;
+//      if (next_it != metas.end()) {
+//        next_meta = *next_it;
+//      }
+//
+//
+//      ProtoReader reader(meta.get_path());
+//      status = reader.Init();
+//      IF_BAD_STATUS_RETURN(status);
+//
+//      reader.MutableEachCategory([] (const auto& category, auto* events) {
+//        SortEvents(events);
 //      });
+//
+////      reader.EachCategory([] (const auto& category, const auto& events) {
+////        CheckEventsSorted(category, events);
+////      });
+//
+//      status = _AppendCategoryTimes(out_category_times, reader.MutableProto(), next_meta);
+//      IF_BAD_STATUS_RETURN(status);
+//    }
+//
+//    return status;
+//  }
 
-      status = _AppendCategoryTimes(out_category_times, reader.MutableProto(), next_meta);
-      IF_BAD_STATUS_RETURN(status);
-    }
-
-    return status;
-  }
-
-  virtual MyStatus CountCategoryTimes(const std::vector<TraceFileMeta>& metas) override {
-    MyStatus status = MyStatus::OK();
-
-    for (auto it = metas.begin(); it != metas.end(); it++) {
-      const auto& meta = *it;
-
-      boost::optional<const TraceFileMeta&> next_meta;
-      auto next_it = it;
-      next_it++;
-      if (next_it != metas.end()) {
-        assert(next_it->get_trace_id() == it->get_trace_id() + 1);
-        next_meta = *next_it;
-      }
-
-      ProtoReader reader(meta.get_path());
-      status = reader.Init();
-      IF_BAD_STATUS_RETURN(status);
-
-      reader.MutableEachCategory([] (const auto& category, auto* events) {
-        SortEvents(events);
-      });
-
-      status = _CountCategoryTimes(&_count, reader.MutableProto(), next_meta);
-      IF_BAD_STATUS_RETURN(status);
-    }
-
-    return status;
-  }
+//  virtual MyStatus CountCategoryTimes(const std::vector<TraceFileMeta>& metas) override {
+//    MyStatus status = MyStatus::OK();
+//
+//    for (auto it = metas.begin(); it != metas.end(); it++) {
+//      const auto& meta = *it;
+//
+//      boost::optional<const TraceFileMeta&> next_meta;
+//      auto next_it = it;
+//      next_it++;
+//      if (next_it != metas.end()) {
+//        assert(next_it->get_trace_id() == it->get_trace_id() + 1);
+//        next_meta = *next_it;
+//      }
+//
+//      ProtoReader reader(meta.get_path());
+//      status = reader.Init();
+//      IF_BAD_STATUS_RETURN(status);
+//
+//      reader.MutableEachCategory([] (const auto& category, auto* events) {
+//        SortEvents(events);
+//      });
+//
+//      status = _CountCategoryTimes(&_count, reader.MutableProto(), next_meta);
+//      IF_BAD_STATUS_RETURN(status);
+//    }
+//
+//    return status;
+//  }
 
 
 //  DECLARE_GET_PARSER_META
@@ -2100,17 +2323,40 @@ public:
   // - our "ReadCategory" function should instead become "AppendCategory", and we should return an error or Assert if its too big.
 };
 
-class CUDAAPIStatsProtoReader : public ITraceFileProtoReader<iml::CUDAAPIPhaseStatsProto> {
+class CUDAAPIStatsProtoReader : public ITraceFileProtoReader<iml::CUDAAPIPhaseStatsProto, CUDAAPIStatsProtoReader> {
 public:
   static const RLSFileType FILE_TYPE = RLSFileType::CUDA_API_STATS_FILE;
 
   using ProtoKlass = iml::CUDAAPIPhaseStatsProto;
   using EventKlass = iml::CUDAAPIEvent;
+  using ProtoReader = CUDAAPIStatsProtoReader;
 
   CUDAAPIStatsProtoReader(const std::string& path) :
-      ITraceFileProtoReader<ProtoKlass>(path, RLSFileType::CUDA_API_STATS_FILE, "cuda_api_stats")
+      ITraceFileProtoReader<ProtoKlass, ProtoReader>(path, RLSFileType::CUDA_API_STATS_FILE, "cuda_api_stats")
   {
   }
+
+  static const std::string& EventName(const EventKlass& event) {
+    return event.api_name();
+  }
+  static TimeUsec EventStartUsec(const EventKlass& event) {
+    return event.start_time_us();
+  }
+  static TimeUsec EventEndUsec(const EventKlass& event) {
+    return event.start_time_us() + event.duration_us();
+  }
+
+  static const std::string& ProtoMachine(const ProtoKlass& proto) {
+    return proto.machine_name();
+  }
+  static const std::string& ProtoProcess(const ProtoKlass& proto) {
+    return proto.process_name();
+  }
+  static const std::string& ProtoPhase(const ProtoKlass& proto) {
+    return proto.phase();
+  }
+
+  DEFINE_READ_TRACE_FILE_META
 
   template <typename Func>
   void EachCategory(Func func) {
@@ -2150,17 +2396,40 @@ public:
 
 
 
-class CUDADeviceEventsProtoReader : public ITraceFileProtoReader<iml::MachineDevsEventsProto> {
+class CUDADeviceEventsProtoReader : public ITraceFileProtoReader<iml::MachineDevsEventsProto, CUDADeviceEventsProtoReader> {
 public:
   static const RLSFileType FILE_TYPE = RLSFileType::CUDA_DEVICE_EVENTS_FILE;
 
   using ProtoKlass = iml::MachineDevsEventsProto;
   using EventKlass = iml::CUDAEventProto;
+  using ProtoReader = CUDADeviceEventsProtoReader;
 
   CUDADeviceEventsProtoReader(const std::string& path) :
-      ITraceFileProtoReader<ProtoKlass>(path, RLSFileType::CUDA_DEVICE_EVENTS_FILE, "cuda_device_events")
+      ITraceFileProtoReader<ProtoKlass, ProtoReader>(path, RLSFileType::CUDA_DEVICE_EVENTS_FILE, "cuda_device_events")
   {
   }
+
+  static const std::string& EventName(const EventKlass& event) {
+    return event.name();
+  }
+  static TimeUsec EventStartUsec(const EventKlass& event) {
+    return event.start_time_us();
+  }
+  static TimeUsec EventEndUsec(const EventKlass& event) {
+    return event.start_time_us() + event.duration_us();
+  }
+
+  static const std::string& ProtoMachine(const ProtoKlass& proto) {
+    return proto.machine_name();
+  }
+  static const std::string& ProtoProcess(const ProtoKlass& proto) {
+    return proto.process_name();
+  }
+  static const std::string& ProtoPhase(const ProtoKlass& proto) {
+    return proto.phase();
+  }
+
+  DEFINE_READ_TRACE_FILE_META
 
   template <typename Func>
   void EachCategory(Func func) {
@@ -2234,7 +2503,14 @@ struct RegionMetadataReducer {
   TimeUsec start_time_usec;
   TimeUsec end_time_usec;
   size_t num_events;
-  RegionMetadataReducer() = default;
+
+  RegionMetadataReducer() :
+      start_time_usec(0),
+      end_time_usec(0),
+      num_events(0)
+  {
+  }
+
   RegionMetadataReducer(const CategoryKey& category_key) :
       category_key(category_key),
       start_time_usec(0),
@@ -2251,12 +2527,70 @@ struct RegionMetadataReducer {
       start_time_usec(start_time_usec_),
       end_time_usec(end_time_usec_),
       num_events(num_events_) {
+    assert(start_time_usec >= 0);
+    assert(end_time_usec >= 0);
+    assert(num_events >= 0);
+  }
+
+  void CheckIntegrity() const {
+    assert(start_time_usec >= 0);
+    assert(end_time_usec >= 0);
+    assert(num_events >= 0);
+  }
+
+  template <typename OStream>
+  void Print(OStream& out, int indent) const {
+
+    PrintIndent(out, indent);
+    out << "RegionMetadataReducer:";
+
+    out << "\n";
+    category_key.Print(out, indent + 1);
+
+    out << "\n";
+    PrintIndent(out, indent + 1);
+    out << "start_us = " << start_time_usec << " us";
+
+    out << "\n";
+    PrintIndent(out, indent + 1);
+    out << "end_us   = " << end_time_usec << " us";
+
+    double dur_sec = (((double)end_time_usec) - ((double)start_time_usec))/((double)USEC_IN_SEC);
+    out << "\n";
+    PrintIndent(out, indent + 1);
+    out << "dur_sec  = " << dur_sec << " sec";
+
+    out << "\n";
+    PrintIndent(out, indent + 1);
+    out << "num_events = " << num_events;
+
+  }
+
+  template <typename OStream>
+  friend OStream& operator<<(OStream& os, const RegionMetadataReducer& obj) {
+    os << "RegionMetadataReducer("
+       << "start=" << obj.start_time_usec << " us"
+       << ", end=" << obj.end_time_usec << " us"
+       << ", num_events=" << obj.num_events
+       << ")";
+    return os;
   }
 
   void MergeInplace(const RegionMetadataReducer& region2) {
     RegionMetadataReducer& region1 = *this;
 
-    region1.start_time_usec = KeepExtreme(
+    assert(region1.start_time_usec >= 0);
+    assert(region1.end_time_usec >= 0);
+    assert(region1.num_events >= 0);
+
+    assert(region2.start_time_usec >= 0);
+    assert(region2.end_time_usec >= 0);
+    assert(region2.num_events >= 0);
+
+//    DBG_LOG("region1 before: {}", region1);
+//    DBG_LOG("region2 before: {}", region2);
+
+    region1.start_time_usec = KeepExtreme<TimeUsec>(
         std::vector<TimeUsec>{region1.start_time_usec, region2.start_time_usec},
         0,
         /*should_keep=*/[] (TimeUsec x, TimeUsec min_x) {
@@ -2266,7 +2600,7 @@ struct RegionMetadataReducer {
           return x == 0;
         });
 
-    region1.end_time_usec = KeepExtreme(
+    region1.end_time_usec = KeepExtreme<TimeUsec>(
         std::vector<TimeUsec>{region1.end_time_usec, region2.end_time_usec},
         0,
         /*should_keep=*/[] (TimeUsec x, TimeUsec min_x) {
@@ -2277,6 +2611,13 @@ struct RegionMetadataReducer {
         });
 
     region1.num_events = region1.num_events + region2.num_events;
+
+//    DBG_LOG("region1 after: {}", region1);
+
+    assert(this->start_time_usec >= 0);
+    assert(this->end_time_usec >= 0);
+    assert(this->num_events >= 0);
+
   }
 
 };
@@ -2285,12 +2626,25 @@ struct RegionMetadata {
   TimeUsec start_time_usec;
   TimeUsec end_time_usec;
   size_t num_events;
-  RegionMetadata() = default;
+
+  RegionMetadata() :
+      start_time_usec(0),
+      end_time_usec(0),
+      num_events(0)
+  {
+  }
+
+
   RegionMetadata(const CategoryKeyBitset& category_key) :
       category_key(category_key),
       start_time_usec(0),
       end_time_usec(0),
       num_events(0) {
+  }
+
+  void ConvertPsecToUsec() {
+    start_time_usec = start_time_usec / PSEC_IN_USEC;
+    end_time_usec = end_time_usec / PSEC_IN_USEC;
   }
 
   inline void AddEvent(TimeUsec start_us, TimeUsec end_us) {
@@ -2305,24 +2659,96 @@ struct RegionMetadata {
     this->num_events += 1;
   }
 
+  void Print(std::ostream& out, int indent) const {
+
+    PrintIndent(out, indent);
+    out << "RegionMetadata:";
+
+    out << "\n";
+    category_key.Print(out, indent + 1);
+
+    out << "\n";
+    PrintIndent(out, indent + 1);
+    out << "start_us = " << start_time_usec << " us";
+
+    out << "\n";
+    PrintIndent(out, indent + 1);
+    out << "end_us   = " << end_time_usec << " us";
+
+    double dur_sec = (((double)end_time_usec) - ((double)start_time_usec))/((double)USEC_IN_SEC);
+    out << "\n";
+    PrintIndent(out, indent + 1);
+    out << "dur_sec  = " << dur_sec << " sec";
+
+    out << "\n";
+    PrintIndent(out, indent + 1);
+    out << "num_events = " << num_events;
+
+  }
+
 
 };
 struct OverlapMetadata {
   std::map<CategoryKeyBitset, RegionMetadata> regions;
 
+  void ConvertPsecToUsec() {
+    for (auto& pair : regions) {
+      // Change overlap from psec to usec.
+      auto& region_meta = pair.second;
+      region_meta.ConvertPsecToUsec();
+    }
+  }
+
+  void Print(std::ostream& out, int indent) const {
+    PrintIndent(out, indent);
+    out << "OverlapMetadata: size = " << regions.size();
+    for (const auto& pair : regions) {
+      auto const& bitset = pair.first;
+      auto const& region_meta = pair.second;
+
+      out << "\n";
+      region_meta.Print(out, indent + 1);
+    }
+  }
+
   void AddEvent(const CategoryKeyBitset& category_key, TimeUsec start_us, TimeUsec end_us) {
     if (regions.find(category_key) == regions.end()) {
       regions[category_key] = RegionMetadata(category_key);
     }
-    regions[category_key].AddEvent(start_us, end_us);
+    regions.at(category_key).AddEvent(start_us, end_us);
   }
 };
 struct OverlapMetadataReducer {
   std::map<CategoryKey, RegionMetadataReducer> regions;
 
-  inline OverlapMetadataReducer OnlyKey(const CategoryKey& category_key) const {
+  void Print(std::ostream& out, int indent) const {
+    PrintIndent(out, indent);
+    out << "OverlapMetadataReducer: size = " << regions.size();
+    for (const auto& pair : regions) {
+      auto const& category_key = pair.first;
+      auto const& region_meta = pair.second;
+
+      out << "\n";
+      region_meta.Print(out, indent + 1);
+    }
+  }
+
+  inline OverlapMetadataReducer OnlyKeys(const std::set<CategoryKey>& category_keys) const {
     OverlapMetadataReducer r;
-    r.regions[category_key] = this->regions.at(category_key);
+    for (const auto& category_key : category_keys) {
+      this->regions.at(category_key).CheckIntegrity();
+      r.regions[category_key] = this->regions.at(category_key);
+      r.regions[category_key].CheckIntegrity();
+    }
+    return r;
+  }
+
+  RegionMetadataReducer GetMetaForAll() const {
+    RegionMetadataReducer r;
+    for (const auto& pair : regions) {
+      auto const& meta = pair.second;
+      r.MergeInplace(meta);
+    }
     return r;
   }
 
@@ -2330,7 +2756,7 @@ struct OverlapMetadataReducer {
     if (regions.find(category_key) == regions.end()) {
       regions[category_key] = RegionMetadataReducer(category_key);
     }
-    regions[category_key].MergeInplace(region);
+    regions.at(category_key).MergeInplace(region);
   }
 
   void AddRegion(const CategoryKey& category_key, const RegionMetadata& region_metadata) {
@@ -2347,6 +2773,15 @@ struct OverlapResult {
   Overlap overlap;
   OverlapMetadata meta;
   std::shared_ptr<CategoryIdxMap> idx_map;
+
+
+  void ConvertPsecToUsec() {
+    for (auto& pair : overlap) {
+      // Change overlap from psec to usec.
+      pair.second = pair.second / PSEC_IN_USEC;
+    }
+    meta.ConvertPsecToUsec();
+  }
 
   inline const RegionMetadata& GetMeta(const CategoryKeyBitset& bitset) const {
     return meta.regions.at(bitset);
@@ -2370,14 +2805,40 @@ public:
 
   OverlapResultReducer() = default;
 
+  void Print(std::ostream& out, int indent) const {
+
+    PrintIndent(out, indent);
+    out << "OverlapResultReducer: size = " << overlap.size();
+    size_t i = 0;
+    for (auto const& pair : overlap) {
+      auto const& category_key = pair.first;
+      auto time_usec = pair.second;
+      auto time_sec = ((double)time_usec)/((double)USEC_IN_SEC);
+      out << "\n";
+      PrintIndent(out, indent + 1);
+      out << "[" << i << "] " << category_key << " = " << time_sec << " sec";
+      i += 1;
+    }
+
+    out << "\n";
+    regions.Print(out, indent + 1);
+
+  }
+
   inline const RegionMetadataReducer& GetMeta(const CategoryKey& category_key) const {
     return regions.regions.at(category_key);
   }
 
-  inline OverlapResultReducer OnlyKey(const CategoryKey& category_key) const {
+  inline RegionMetadataReducer GetMetaForAll() const {
+    return regions.GetMetaForAll();
+  }
+
+  inline OverlapResultReducer OnlyKeys(const std::set<CategoryKey>& category_keys) const {
     OverlapResultReducer r;
-    r.overlap[category_key] = this->overlap.at(category_key);
-    r.regions = this->regions.OnlyKey(category_key);
+    for (const auto& category_key : category_keys) {
+      r.overlap[category_key] = this->overlap.at(category_key);
+    }
+    r.regions = this->regions.OnlyKeys(category_keys);
     return r;
   }
 
@@ -2421,9 +2882,15 @@ public:
     return ov;
   }
 
-  static bool IsEmptyKey(const CategoryKey& category_key) {
-    return category_key.ops.size() == 0 ||
-           category_key.non_ops.size() == 0;
+  static bool IsEmptyKey(const OverlapType& overlap_type, const CategoryKey& category_key) {
+    if (overlap_type == "ResourceOverlap" || overlap_type == "ResourceSubplot") {
+      return category_key.non_ops.size() == 0;
+    } else if (overlap_type == "OperationOverlap" || overlap_type == "CategoryOverlap") {
+      return category_key.ops.size() == 0 ||
+             category_key.non_ops.size() == 0;
+    }
+    assert(false);
+    return false;
   }
 
   static CategoryKey NoOverheadKey(const CategoryKey& key) {
@@ -2482,6 +2949,7 @@ public:
   }
 
   void AddOverlapWithKey(
+      const OverlapType& overlap_type,
       const CategoryKey& old_key,
       const CategoryKey& new_key,
       const OverlapResultReducer& old_reducer) {
@@ -2494,22 +2962,22 @@ public:
       ss << "AddOverlapWithKey:";
 
       ss << "\n";
-      ss << "old_key = ";
-      old_key.Print(ss, 1);
+      PrintIndent(ss, 1);
+      ss << "old_key = " << old_key;
 
       ss << "\n";
-      ss << "new_key = ";
-      new_key.Print(ss, 1);
+      PrintIndent(ss, 1);
+      ss << "new_key = " << new_key;
 
       ss << "\n";
-      ss << "no_overhead_key = ";
-      no_overhead_key.Print(ss, 1);
+      PrintIndent(ss, 1);
+      ss << "no_overhead_key = " << no_overhead_key;
 
       DBG_LOG("{}", ss.str());
     }
 
 
-    if (OverlapResultReducer::IsEmptyKey(no_overhead_key)) {
+    if (OverlapResultReducer::IsEmptyKey(overlap_type, no_overhead_key)) {
       return;
     }
     auto time_usec = old_reducer.GetTimeUsec(old_key);
@@ -2580,6 +3048,7 @@ public:
         process,
         phase,
         reducer);
+    js_dumper.Init();
     js_dumper.DumpJSONs();
   }
 
@@ -2602,6 +3071,13 @@ public:
     nlohmann::json venn_js;
     auto const& set_to_size = _ComputeSetSizes(overlap_map);
 
+    if (SHOULD_DEBUG(FEATURE_SAVE_JS)) {
+      std::stringstream ss;
+      ss << "OverlapMapToVennJSConverter.convert; overlap_map = \n  ";
+      PrintValue(ss, overlap_map);
+      DBG_LOG("{}", ss.str());
+    }
+
     std::map<std::string, size_t> label_to_id;
     std::set<std::string> labels;
     for (const auto& pair : overlap_map) {
@@ -2610,7 +3086,8 @@ public:
     }
     size_t i = 0;
     for (const auto& label : labels) {
-      label_to_id[label] = 0;
+      label_to_id[label] = i;
+      i += 1;
     }
 
     auto as_sets = [&label_to_id] (const std::set<std::string>& overlap) {
@@ -2672,10 +3149,9 @@ public:
   Machine machine;
   Process process;
   Phase phase;
+  const OverlapResultReducer& reducer;
 
-  std::map<std::set<Operation>,
-      std::map<std::set<Category>,
-          OverlapResultReducer>> reducer_map;
+  std::map<CategoryKey, OverlapResultReducer> reducer_map;
 
   BaseOverlapJSDumper(
       const OverlapType& overlap_type_,
@@ -2683,70 +3159,123 @@ public:
       const Machine& machine_,
       const Process& process_,
       const Phase& phase_,
-      const OverlapResultReducer& reducer) :
+      const OverlapResultReducer& reducer_) :
       overlap_type(overlap_type_),
       directory(directory_),
       machine(machine_),
       process(process_),
-      phase(phase_)
+      phase(phase_),
+      reducer(reducer_)
   {
-    for (auto const& pair : reducer.overlap) {
-      const auto& category_key = pair.first;
-      assert(
-          ( reducer_map.find(category_key.ops) == reducer_map.end() ) ||
-          ( reducer_map[category_key.ops].find(category_key.non_ops) == reducer_map[category_key.ops].end() ));
-      reducer_map[category_key.ops][category_key.non_ops] = reducer.OnlyKey(category_key);
+    if (SHOULD_DEBUG(FEATURE_SAVE_JS)) {
+      std::stringstream ss;
+      ss << "overlap_type = " << overlap_type;
+      ss << "\n";
+      reducer.Print(ss, 1);
+      DBG_LOG("{}", ss.str());
     }
   }
 
+  void Init() {
+    // NOTE: We cannot do this within the constructor, since we need to call
+    // the virtual function GroupCategoryKey, and C++ doesn't allow that.
+    _BuildReducerMap();
+  }
+
+  void _BuildReducerMap() {
+    // When we dump *Overlap, we want all these CategoryKey's:
+    //
+    // ResourceOverlap / ResourceSubplot:
+    //   CategoryKey(non_ops)
+    //     where non_ops.intersect({CPU, GPU, Total}).size() > 0
+    //   We expect only one file:
+    //     ops.size() = 0
+    //
+    // OperationOverlap:
+    //   CategoryKey(ops)
+    //     where ops.size() > 0
+    //   We expect a file for every resource-type:
+    //     non_ops.size() > 0 && non_ops.intersect({CPU, GPU, Total}) > 0
+    //
+    // CategoryOverlap:
+    //   CategoryKey(ops, non_ops)
+    //     where ops.size() > 0, non_ops.size() > 0
+    //   We expect a file for every [resource-type, operation]:
+    //     ops.size() > 0 && non_ops.intersect((CPU_CATEGORIES - CPU) U GPU_CATEGORIES) > 0
+
+    // group_map =
+    //   GroupKey -> { CategoryKey's that map to GroupKey }
+    // reducer_map =
+    //   GroupKey -> OverlapResultReducer containing CategoryKey's that map to GroupKey
+
+    std::map<CategoryKey, std::set<CategoryKey>> group_map;
+    for (auto const& pair : reducer.overlap) {
+      const auto& category_key = pair.first;
+      const auto& group_key = GroupCategoryKey(category_key);
+      group_map[group_key].insert(category_key);
+    }
+
+    for (auto const& pair : group_map) {
+      const auto& group_key = pair.first;
+      const auto& category_keys = pair.second;
+      reducer_map[group_key] = reducer.OnlyKeys(category_keys);
+    }
+  }
+
+  OverlapMap AsOverlapMap(const OverlapResultReducer& reducer_) const {
+    OverlapMap overlap_map;
+    for (auto const& category_key_pair : reducer_.overlap) {
+      auto const& category_key = category_key_pair.first;
+      auto time_usec = category_key_pair.second;
+
+      auto const& strings = CategoryKeyToStrings(category_key);
+      overlap_map[strings] = time_usec;
+    }
+    return overlap_map;
+  }
+
   void DumpJSONs() const {
-    for (auto const& ops_pair : reducer_map) {
-      const auto& ops = ops_pair.first;
-      for (auto const& non_ops_pair : ops_pair.second) {
-        const auto& non_ops = non_ops_pair.first;
-        const auto& reducer = non_ops_pair.second;
+    size_t i = 0;
+    for (auto const& pair : reducer_map) {
+      const auto& group_key = pair.first;
+      const auto& reducer_ = pair.second;
 
-        OverlapMap overlap_map;
-        for (auto const& category_key_pair : reducer.overlap) {
-          auto const& category_key = category_key_pair.first;
-          auto time_usec = category_key_pair.second;
+      auto overlap_map = AsOverlapMap(reducer_);
+      i += 1;
 
-          auto const& strings = CategoryKeyToStrings(category_key);
-          overlap_map[strings] = time_usec;
+      nlohmann::json js;
 
-          nlohmann::json js;
+      Metadata md;
+      md["machine"] = machine;
+      md["process"] = process;
+      md["phase"] = phase;
+      md["overlap_type"] = overlap_type;
 
-          Metadata md;
-          md["machine"] = machine;
-          md["process"] = process;
-          md["phase"] = phase;
-          md["overlap_type"] = overlap_type;
+      auto const& meta = reducer.GetMetaForAll();
+      md["start_time_usec"] = meta.start_time_usec;
+      md["end_time_usec"] = meta.end_time_usec;
+      md["num_events"] = meta.num_events;
 
-          auto const& meta = reducer.GetMeta(category_key);
-          md["start_time_usec"] = meta.start_time_usec;
-          md["end_time_usec"] = meta.end_time_usec;
-          md["num_events"] = meta.num_events;
+      AddMetadataFields(&md, group_key);
+      js["metadata"] = md;
 
-          AddMetadataFields(&md, category_key);
-          js["metadata"] = md;
+      OverlapMapToVennJSConverter converter;
+      auto const& venn_js = converter.convert(overlap_map);
 
-          OverlapMapToVennJSConverter converter;
-          auto const& venn_js = converter.convert(overlap_map);
-
-          js["venn"] = venn_js;
-          const auto& venn_js_path = VennJSPath(md);
-          if (SHOULD_DEBUG(FEATURE_SAVE_JS)) {
-            DBG_LOG("Write json to path = {}", venn_js_path);
-          }
-
-          boost::filesystem::path parent = boost::filesystem::path(venn_js_path).parent_path();
-          boost::filesystem::create_directories(parent.string());
-
-          MyStatus status = MyStatus::OK();
-          status = WriteJson(venn_js_path, js);
-          assert(status.code() == MyStatus::OK().code());
-        }
+      js["venn"] = venn_js;
+      const auto& venn_js_path = VennJSPath(md);
+      if (SHOULD_DEBUG(FEATURE_SAVE_JS)) {
+        std::stringstream ss;
+        ss << "Write json to path = " << venn_js_path;
+        DBG_LOG("{}", ss.str());
       }
+
+      boost::filesystem::path parent = boost::filesystem::path(venn_js_path).parent_path();
+      boost::filesystem::create_directories(parent.string());
+
+      MyStatus status = MyStatus::OK();
+      status = WriteJson(venn_js_path, js);
+      assert(status.code() == MyStatus::OK().code());
     }
   }
 
@@ -2758,7 +3287,40 @@ public:
 
   virtual std::set<std::string> CategoryKeyToStrings(const CategoryKey& category_key) const = 0;
   virtual std::string VennJSBasename(const Metadata& md) const = 0;
+  virtual CategoryKey GroupCategoryKey(const CategoryKey& category_key) const = 0;
   virtual void AddMetadataFields(Metadata* md, const CategoryKey& category_key) const = 0;
+
+  struct CPUAndGPUCategories {
+    std::set<Category> cpus;
+    std::set<Category> gpus;
+  };
+  static CPUAndGPUCategories SplitCpuGpuCategories(const std::set<Category>& non_ops) {
+    CPUAndGPUCategories cats;
+    for (auto const& category : non_ops) {
+      if (CATEGORIES_CPU.count(category) > 0) {
+        cats.cpus.insert(category);
+      } else if (CATEGORIES_GPU.count(category) > 0) {
+        cats.gpus.insert(category);
+      } else {
+        // "Not sure how to categorize category={cat} as CPU vs GPU"
+        assert(false);
+      }
+    }
+    return cats;
+  }
+
+  static std::set<Category> AsCPUAndGPU(const std::set<Category>& non_ops) {
+    auto const& cpus_gpus = SplitCpuGpuCategories(non_ops);
+    std::set<Category> cpu_and_gpu;
+    if (cpus_gpus.cpus.size() > 0) {
+      cpu_and_gpu.insert(CATEGORY_CPU);
+    }
+    if (cpus_gpus.gpus.size() > 0) {
+      cpu_and_gpu.insert(CATEGORY_GPU);
+    }
+    return cpu_and_gpu;
+  }
+
 
 };
 
@@ -2781,7 +3343,7 @@ public:
           reducer)
   { }
 
-  virtual std::set<std::string> CategoryKeyToStrings(const CategoryKey& category_key) const {
+  virtual std::set<std::string> CategoryKeyToStrings(const CategoryKey& category_key) const override {
     // set(non-operation categories) -> [ CPU, GPU, CPU/GPU ] time
     //   <CPU>, <GPU>, <CPU, GPU>             0.001 sec
     assert(category_key.ops.size() == 0);
@@ -2790,7 +3352,7 @@ public:
     return category_key.non_ops;
   }
 
-  virtual std::string VennJSBasename(const Metadata& md) const {
+  virtual std::string VennJSBasename(const Metadata& md) const override {
     std::stringstream ss;
     AddOverlapTitle(ss, md);
     AddMachineSuffix(ss, md);
@@ -2800,7 +3362,19 @@ public:
     return ss.str();
   }
 
-  virtual void AddMetadataFields(Metadata* md, const CategoryKey& category_key) const {
+  virtual CategoryKey GroupCategoryKey(const CategoryKey& category_key) const override {
+    // ResourceOverlap / ResourceSubplot:
+    // - ALL the CategoryKey's are output to the same file.
+    // - In: CategoryKey(ops={}, non_ops={CPU, GPU})
+    // - Out: CategoryKey(ops={}, non_ops={})
+    CategoryKey group_key(
+        /*procs=*/category_key.procs,
+        /*ops=*/{},
+        /*non_ops=*/{});
+    return group_key;
+  }
+
+  virtual void AddMetadataFields(Metadata* md, const CategoryKey& category_key) const override {
     // pass
   }
 
@@ -2815,9 +3389,11 @@ public:
   }
   virtual OverlapResultReducer PostReduceCategoryKey(const OverlapResultReducer& old_reducer) const {
     OverlapResultReducer r;
-//    r.debug = true;
     for (auto const& pair : old_reducer.overlap) {
       auto const& old_key = pair.first;
+      if (OverlapResultReducer::IsEmptyKey(GetOverlapType(), old_key)) {
+        continue;
+      }
       if (old_key.ops.size() > 1) {
         // Operations can only overlap cross-process, not within a single-process
         assert(old_key.procs.size() > 1);
@@ -2827,7 +3403,7 @@ public:
           /*ops=*/{},
           /*non_ops=*/old_key.non_ops);
       auto cpu_gpu_key = OverlapResultReducer::ReduceCategoryKey(new_key, /*as_cpu_gpu=*/true);
-      r.AddOverlapWithKey(old_key, cpu_gpu_key, old_reducer);
+      r.AddOverlapWithKey(GetOverlapType(), old_key, cpu_gpu_key, old_reducer);
     }
     return r;
   }
@@ -2853,7 +3429,7 @@ public:
           reducer)
   { }
 
-  virtual std::set<std::string> CategoryKeyToStrings(const CategoryKey& category_key) const {
+  virtual std::set<std::string> CategoryKeyToStrings(const CategoryKey& category_key) const override {
     // set(non-operation categories) -> [ CPU, GPU, CPU/GPU ] time
     //   <CPU>, <GPU>, <CPU, GPU>             0.001 sec
     assert(category_key.ops.size() == 0);
@@ -2862,7 +3438,7 @@ public:
     return category_key.non_ops;
   }
 
-  virtual std::string VennJSBasename(const Metadata& md) const {
+  virtual std::string VennJSBasename(const Metadata& md) const override {
     std::stringstream ss;
     AddOverlapTitle(ss, md);
     AddMachineSuffix(ss, md);
@@ -2872,7 +3448,19 @@ public:
     return ss.str();
   }
 
-  virtual void AddMetadataFields(Metadata* md, const CategoryKey& category_key) const {
+  virtual CategoryKey GroupCategoryKey(const CategoryKey& category_key) const override {
+    // ResourceOverlap / ResourceSubplot:
+    // - ALL the CategoryKey's are output to the same file.
+    // - In: CategoryKey(ops={}, non_ops={CPU, GPU})
+    // - Out: CategoryKey(ops={}, non_ops={})
+    CategoryKey group_key(
+        /*procs=*/category_key.procs,
+        /*ops=*/{},
+        /*non_ops=*/{});
+    return group_key;
+  }
+
+  virtual void AddMetadataFields(Metadata* md, const CategoryKey& category_key) const override {
     // pass
   }
 
@@ -2889,6 +3477,9 @@ public:
     OverlapResultReducer r;
     for (auto const& pair : old_reducer.overlap) {
       auto const& old_key = pair.first;
+      if (OverlapResultReducer::IsEmptyKey(GetOverlapType(), old_key)) {
+        continue;
+      }
 
       if (old_key.ops.size() > 1) {
         // Operations can only overlap cross-process, not within a single-process
@@ -2909,7 +3500,7 @@ public:
           /*procs=*/{},
           /*ops=*/{},
           /*non_ops=*/{CATEGORY_TOTAL});
-      r.AddOverlapWithKey(old_key, new_key, old_reducer);
+      r.AddOverlapWithKey(GetOverlapType(), old_key, new_key, old_reducer);
 
       auto cpu_gpu_key = OverlapResultReducer::ReduceCategoryKey(old_key, /*as_cpu_gpu=*/true);
       for (auto const& resource_type : cpu_gpu_key.non_ops) {
@@ -2924,7 +3515,7 @@ public:
             /*procs=*/{},
             /*ops=*/{},
             /*non_ops=*/{resource_type});
-        r.AddOverlapWithKey(old_key, add_key, old_reducer);
+        r.AddOverlapWithKey(GetOverlapType(), old_key, add_key, old_reducer);
       }
 
     }
@@ -2953,7 +3544,7 @@ public:
           reducer)
   { }
 
-  virtual std::set<std::string> CategoryKeyToStrings(const CategoryKey& category_key) const {
+  virtual std::set<std::string> CategoryKeyToStrings(const CategoryKey& category_key) const override {
     // set(non-operation categories) -> set(operation categories) -> [ CPU, GPU, CPU/GPU ] time
     //    <CPU>, <GPU>, <CPU, GPU>       <q_forward, q_backward>           0.001 sec
     assert(category_key.ops.size() > 0);
@@ -2962,7 +3553,7 @@ public:
     return category_key.ops;
   }
 
-  virtual std::string VennJSBasename(const Metadata& md) const {
+  virtual std::string VennJSBasename(const Metadata& md) const override {
     std::stringstream ss;
     AddOverlapTitle(ss, md);
     AddMachineSuffix(ss, md);
@@ -2973,7 +3564,19 @@ public:
     return ss.str();
   }
 
-  virtual void AddMetadataFields(Metadata* md, const CategoryKey& category_key) const {
+  virtual CategoryKey GroupCategoryKey(const CategoryKey& category_key) const override {
+    // OperationOverlap:
+    // - Same resource-type goes to the same file.
+    // - In: CategoryKey(ops={compute_advantage_estimates}, non_ops={CPU, GPU})
+    // - Out: CategoryKey(ops={}, non_ops={CPU, CPU})
+    CategoryKey group_key(
+        /*procs=*/category_key.procs,
+        /*ops=*/{},
+        /*non_ops=*/category_key.non_ops);
+    return group_key;
+  }
+
+  virtual void AddMetadataFields(Metadata* md, const CategoryKey& category_key) const override {
     (*md)["resource_overlap"] = category_key.non_ops;
   }
 
@@ -2990,7 +3593,6 @@ public:
     // reduce_overlap_resource_operation
 
     OverlapResultReducer r;
-    r.debug = true;
 
     if (r.debug) {
       DBG_LOG("{}", "OperationOverlapType.PostReduceCategoryKey");
@@ -2998,6 +3600,9 @@ public:
 
     for (auto const& pair : old_reducer.overlap) {
       auto const& old_key = pair.first;
+      if (OverlapResultReducer::IsEmptyKey(GetOverlapType(), old_key)) {
+        continue;
+      }
 
       if (old_key.ops.size() > 1) {
         // Operations can only overlap cross-process, not within a single-process
@@ -3012,7 +3617,7 @@ public:
       new_key = OverlapResultReducer::ReduceCategoryKey(
           new_key,
           /*as_cpu_gpu=*/true);
-      r.AddOverlapWithKey(old_key, new_key, old_reducer);
+      r.AddOverlapWithKey(GetOverlapType(), old_key, new_key, old_reducer);
 
     }
 
@@ -3040,7 +3645,7 @@ public:
           reducer)
   { }
 
-  virtual std::set<std::string> CategoryKeyToStrings(const CategoryKey& category_key) const {
+  virtual std::set<std::string> CategoryKeyToStrings(const CategoryKey& category_key) const override {
     // set(non-operation categories) -> set(operation categories) -> [ CPU, GPU, CPU/GPU ] time
     //    <CPU>, <GPU>, <CPU, GPU>       <q_forward, q_backward>           0.001 sec
     assert(category_key.ops.size() > 0);
@@ -3049,7 +3654,7 @@ public:
     return category_key.non_ops;
   }
 
-  virtual std::string VennJSBasename(const Metadata& md) const {
+  virtual std::string VennJSBasename(const Metadata& md) const override {
     std::stringstream ss;
     AddOverlapTitle(ss, md);
     AddMachineSuffix(ss, md);
@@ -3061,37 +3666,31 @@ public:
     return ss.str();
   }
 
-  struct CPUAndGPUCategories {
-    std::set<Category> cpus;
-    std::set<Category> gpus;
-  };
-  CPUAndGPUCategories SplitCpuGpuCategories(const CategoryKey& category_key) const {
-    CPUAndGPUCategories cats;
-    for (auto const& category : category_key.non_ops) {
-      if (CATEGORIES_CPU.count(category) > 0) {
-        cats.cpus.insert(category);
-      } else if (CATEGORIES_GPU.count(category) > 0) {
-        cats.gpus.insert(category);
-      } else {
-        // "Not sure how to categorize category={cat} as CPU vs GPU"
-        assert(false);
-      }
-    }
-    return cats;
+  virtual CategoryKey GroupCategoryKey(const CategoryKey& category_key) const override {
+    // CategoryOverlap:
+    // - Same ops and resource-type goes to the same file.
+    // - In: CategoryKey(ops={compute_advantage_estimates}, non_ops={CUDA API CPU, Framework API C})
+    // - Out: CategoryKey(ops={compute_advantage_estimates}, non_ops={CPU})
+    CategoryKey group_key(
+        /*procs=*/category_key.procs,
+        /*ops=*/category_key.ops,
+        /*non_ops=*/AsCPUAndGPU(category_key.non_ops));
+    return group_key;
   }
 
-  virtual void AddMetadataFields(Metadata* md, const CategoryKey& category_key) const {
+  virtual void AddMetadataFields(Metadata* md, const CategoryKey& category_key) const override {
 
     // add md["operation"]
     assert(category_key.ops.size() == 1);
     (*md)["operation"] = category_key.ops;
 
     // add md["resource_overlap"]
-    auto const& cpus_gpus = SplitCpuGpuCategories(category_key);
+    auto const& cpus_gpus = SplitCpuGpuCategories(category_key.non_ops);
     std::set<Category> resource_key;
     if (cpus_gpus.cpus.size() > 0) {
       resource_key.insert(CATEGORY_CPU);
-    } else if (cpus_gpus.gpus.size() > 0) {
+    }
+    if (cpus_gpus.gpus.size() > 0) {
       resource_key.insert(CATEGORY_GPU);
     }
     (*md)["resource_overlap"] = resource_key;
@@ -3114,6 +3713,9 @@ public:
 
     for (auto const& pair : old_reducer.overlap) {
       auto const& old_key = pair.first;
+      if (OverlapResultReducer::IsEmptyKey(GetOverlapType(), old_key)) {
+        continue;
+      }
 
       if (old_key.ops.size() > 1) {
         // Operations can only overlap cross-process, not within a single-process
@@ -3130,7 +3732,7 @@ public:
       new_key = OverlapResultReducer::ReduceCategoryKey(
           new_key,
           /*as_cpu_gpu=*/false);
-      r.AddOverlapWithKey(old_key, new_key, old_reducer);
+      r.AddOverlapWithKey(GetOverlapType(), old_key, new_key, old_reducer);
 
     }
 

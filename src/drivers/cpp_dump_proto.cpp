@@ -39,7 +39,7 @@ using json = nlohmann::json;
 
 #include "analysis/trace_file_parser.h"
 
-DEFINE_bool(debug, false, "Debug");
+DEFINE_bool(debug, false, "Debug: give additional verbose output");
 DEFINE_string(proto, "", "Path to RLS trace-file protobuf file");
 DEFINE_string(iml_directory, "", "Path to --iml-directory used when collecting trace-files");
 DEFINE_string(mode, "", "One of: [stats, ls, proto]");
@@ -192,12 +192,18 @@ int main(int argc, char** argv) {
     exit(EXIT_SUCCESS);
   }
 
-  auto mk_parser = [] {
+  auto mk_parser = [] () {
     MyStatus status = MyStatus::OK();
     RawTraceParser parser(FLAGS_iml_directory,
                           FLAGS_cupti_overhead_json,
                           FLAGS_LD_PRELOAD_overhead_json,
                           FLAGS_pyprof_overhead_json);
+
+    std::shared_ptr<SimpleTimer> timer(new SimpleTimer("timer"));
+    timer->ResetStartTime();
+    timer->MakeVerbose(&std::cout);
+    parser.SetTimer(timer);
+
     status = parser.Init();
     IF_BAD_STATUS_EXIT("Failed to collect stats for --iml_directory", status);
     return parser;
@@ -219,18 +225,17 @@ int main(int argc, char** argv) {
 
   if (mode == Mode::MODE_OVERLAP) {
     auto parser = mk_parser();
-    std::shared_ptr<SimpleTimer> timer(new SimpleTimer("mode_overlap"));
-    timer->ResetStartTime();
-    timer->MakeVerbose(&std::cout);
-    parser.timer = timer;
+    auto timer = parser.timer;
     size_t n_total_events = 0;
     parser.EachEntireTrace([timer, &n_total_events] (const CategoryTimes& category_times, const EntireTraceMeta& meta) {
-      std::cout << "Machine=" << meta.machine
-                << ", " << "Process=" << meta.process
-                << ", " << "Phase=" << meta.phase
-                << std::endl;
-      category_times.PrintSummary(std::cout, 1);
-      std::cout << std::endl;
+      if (FLAGS_debug) {
+        std::cout << "Machine=" << meta.machine
+                  << ", " << "Process=" << meta.process
+                  << ", " << "Phase=" << meta.phase
+                  << std::endl;
+        category_times.PrintSummary(std::cout, 1);
+        std::cout << std::endl;
+      }
 
       if (SHOULD_DEBUG(FEATURE_LOAD_DATA)) {
         std::stringstream ss;
@@ -272,11 +277,11 @@ int main(int argc, char** argv) {
       }
       auto r = overlap_computer.ComputeOverlap();
 
-//      if (SHOULD_DEBUG(FEATURE_PREPROCESS_DATA)) {
-      std::cout << std::endl;
-      r.Print(std::cout, 1);
-      std::cout << std::endl;
-//      }
+      if (FLAGS_debug) {
+        std::cout << std::endl;
+        r.Print(std::cout, 1);
+        std::cout << std::endl;
+      }
 
       if (timer) {
         std::stringstream ss;
