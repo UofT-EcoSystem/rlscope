@@ -2511,40 +2511,36 @@ struct RegionMetadataReducer {
   CategoryKey category_key;
   TimeUsec start_time_usec;
   TimeUsec end_time_usec;
-  size_t num_events;
 
   RegionMetadataReducer() :
       start_time_usec(0),
-      end_time_usec(0),
-      num_events(0)
+      end_time_usec(0)
   {
   }
 
   RegionMetadataReducer(const CategoryKey& category_key) :
       category_key(category_key),
       start_time_usec(0),
-      end_time_usec(0),
-      num_events(0) {
+      end_time_usec(0)
+      {
   }
 
   RegionMetadataReducer(
       const CategoryKey& category_key_,
       TimeUsec start_time_usec_,
-      TimeUsec end_time_usec_,
-      size_t num_events_) :
+      TimeUsec end_time_usec_
+      ) :
       category_key(category_key_),
       start_time_usec(start_time_usec_),
-      end_time_usec(end_time_usec_),
-      num_events(num_events_) {
+      end_time_usec(end_time_usec_)
+      {
     assert(start_time_usec >= 0);
     assert(end_time_usec >= 0);
-    assert(num_events >= 0);
   }
 
   void CheckIntegrity() const {
     assert(start_time_usec >= 0);
     assert(end_time_usec >= 0);
-    assert(num_events >= 0);
   }
 
   template <typename OStream>
@@ -2569,10 +2565,6 @@ struct RegionMetadataReducer {
     PrintIndent(out, indent + 1);
     out << "dur_sec  = " << dur_sec << " sec";
 
-    out << "\n";
-    PrintIndent(out, indent + 1);
-    out << "num_events = " << num_events;
-
   }
 
   template <typename OStream>
@@ -2580,7 +2572,6 @@ struct RegionMetadataReducer {
     os << "RegionMetadataReducer("
        << "start=" << obj.start_time_usec << " us"
        << ", end=" << obj.end_time_usec << " us"
-       << ", num_events=" << obj.num_events
        << ")";
     return os;
   }
@@ -2590,11 +2581,9 @@ struct RegionMetadataReducer {
 
     assert(region1.start_time_usec >= 0);
     assert(region1.end_time_usec >= 0);
-    assert(region1.num_events >= 0);
 
     assert(region2.start_time_usec >= 0);
     assert(region2.end_time_usec >= 0);
-    assert(region2.num_events >= 0);
 
 //    DBG_LOG("region1 before: {}", region1);
 //    DBG_LOG("region2 before: {}", region2);
@@ -2619,13 +2608,11 @@ struct RegionMetadataReducer {
           return x == 0;
         });
 
-    region1.num_events = region1.num_events + region2.num_events;
 
 //    DBG_LOG("region1 after: {}", region1);
 
     assert(this->start_time_usec >= 0);
     assert(this->end_time_usec >= 0);
-    assert(this->num_events >= 0);
 
   }
 
@@ -2634,12 +2621,20 @@ struct RegionMetadata {
   CategoryKeyBitset category_key;
   TimeUsec start_time_usec;
   TimeUsec end_time_usec;
-  size_t num_events;
 
   RegionMetadata() :
       start_time_usec(0),
-      end_time_usec(0),
-      num_events(0)
+      end_time_usec(0)
+  {
+  }
+
+  RegionMetadata(
+      const CategoryKeyBitset& category_key,
+      TimeUsec start_time_usec,
+      TimeUsec end_time_usec) :
+      category_key(category_key),
+      start_time_usec(start_time_usec),
+      end_time_usec(end_time_usec)
   {
   }
 
@@ -2647,8 +2642,14 @@ struct RegionMetadata {
   RegionMetadata(const CategoryKeyBitset& category_key) :
       category_key(category_key),
       start_time_usec(0),
-      end_time_usec(0),
-      num_events(0) {
+      end_time_usec(0)
+  {
+  }
+
+  bool operator==(const RegionMetadata& rhs) const {
+    auto& lhs = *this;
+    return lhs.start_time_usec == rhs.start_time_usec
+           && lhs.end_time_usec == rhs.end_time_usec;
   }
 
   void ConvertPsecToUsec() {
@@ -2665,7 +2666,6 @@ struct RegionMetadata {
       this->end_time_usec = end_us;
     }
 
-    this->num_events += 1;
   }
 
   void Print(std::ostream& out, int indent) const {
@@ -2689,16 +2689,21 @@ struct RegionMetadata {
     PrintIndent(out, indent + 1);
     out << "dur_sec  = " << dur_sec << " sec";
 
-    out << "\n";
-    PrintIndent(out, indent + 1);
-    out << "num_events = " << num_events;
-
   }
 
 
 };
 struct OverlapMetadata {
   std::map<CategoryKeyBitset, RegionMetadata> regions;
+
+  bool operator==(const OverlapMetadata& rhs) const {
+    auto& lhs = *this;
+    return lhs.regions == rhs.regions;
+  }
+
+  size_t size() const {
+    return regions.size();
+  }
 
   void ConvertPsecToUsec() {
     for (auto& pair : regions) {
@@ -2773,8 +2778,8 @@ struct OverlapMetadataReducer {
     regions[category_key] = RegionMetadataReducer(
         category_key,
         region_metadata.start_time_usec,
-        region_metadata.end_time_usec,
-        region_metadata.num_events);
+        region_metadata.end_time_usec
+        );
   }
 
 };
@@ -2915,11 +2920,15 @@ public:
         CATEGORIES_PROF.begin(), CATEGORIES_PROF.end(),
         std::inserter(prof_categories, prof_categories.begin()));
     if (prof_categories.size() > 0) {
-        // Discard CPU-time that is due to profiling overhead.
-        // NOTE: CATEGORY_GPU won't get discarded.
-        new_key.non_ops.erase(CATEGORIES_CPU.begin(), CATEGORIES_CPU.end());
-        // Q: Should we remove the profiling category as well...? I think so yes.
-        new_key.non_ops.erase(CATEGORIES_PROF.begin(), CATEGORIES_PROF.end());
+      // Discard CPU-time that is due to profiling overhead.
+      // NOTE: CATEGORY_GPU won't get discarded.
+      for (auto const& category : CATEGORIES_CPU) {
+        new_key.non_ops.erase(category);
+      }
+      // Q: Should we remove the profiling category as well...? I think so yes.
+      for (auto const& category : CATEGORIES_PROF) {
+        new_key.non_ops.erase(category);
+      }
     }
     return new_key;
   }
@@ -3263,7 +3272,6 @@ public:
       auto const& meta = reducer.GetMetaForAll();
       md["start_time_usec"] = meta.start_time_usec;
       md["end_time_usec"] = meta.end_time_usec;
-      md["num_events"] = meta.num_events;
 
       AddMetadataFields(&md, group_key);
       js["metadata"] = md;

@@ -53,6 +53,7 @@ struct Event {
 };
 using EventData = std::map<std::string, std::vector<Event>>;
 using OverlapData = std::map<std::set<std::string>, TimeUsec>;
+using RegionData = std::map<std::set<std::string>, Event>;
 //using T = Event;
 
 Event T(int64_t start_sec, int64_t end_sec) {
@@ -103,51 +104,42 @@ CategoryTimes CategoryTimesFrom(const EventData& event_data) {
 
 
 OverlapResult OverlapFrom(const OverlapComputer& overlap_computer, const OverlapData& overlap_data,
+    const RegionData& region_data = {},
     bool debug=false) {
   OverlapResult r;
   r.idx_map = overlap_computer.ctimes.idx_map;
 
-  for (const auto& pair : overlap_data) {
+  auto as_bitset = [debug, &r] (const std::set<std::string>& ops) -> CategoryKeyBitset {
     CategoryKeyBitset bitset = CategoryKeyBitset::EmptySet(r.idx_map);
+    assert(bitset.idx_map != nullptr);
     bitset.debug = debug;
     std::set<size_t> indices;
     std::vector<CategoryKey> category_keys;
-    for (auto const& key : pair.first) {
+    for (auto const& key : ops) {
       const auto category_key = AsCategoryKey(key);
       category_keys.push_back(category_key);
       auto category_idx = r.idx_map->Idx(category_key);
       indices.insert(category_idx);
       bitset.Add(category_idx);
     }
+    return bitset;
+  };
 
-    if (debug) {
-      std::stringstream ss;
-      ss << "\n";
-
-      ss << "set = ";
-      PrintValue(ss, pair.first);
-      ss << "\n";
-
-      ss << "indices = ";
-      PrintValue(ss, indices);
-      ss << "\n";
-
-      ss << "category_keys = ";
-      PrintValue(ss, category_keys);
-      ss << "\n";
-
-      bitset.Print(ss, 1);
-      ss << "\n";
-
-      PrintIndent(ss, 1);
-      ss << "TimeUs = " << pair.second << "\n";
-
-      SPDLOG_DEBUG("{}", ss.str());
-    }
-
+  for (const auto& pair : overlap_data) {
+    auto bitset = as_bitset(pair.first);
     r.overlap[bitset] = pair.second;
   }
 
+  for (const auto& pair : region_data) {
+    const auto& bitset = as_bitset(pair.first);
+    const auto& event = pair.second;
+    const auto& region_meta = RegionMetadata(bitset, event.start_us, event.end_us);
+    r.meta.regions[bitset] = region_meta;
+  }
+  for (const auto& pair : r.meta.regions) {
+    const auto& bitset = pair.first;
+    assert(bitset.idx_map != nullptr);
+  }
   return r;
 }
 
@@ -206,22 +198,104 @@ TEST(TestIdxMap, Test_01) {
 
 TEST(TestComputeOverlap, Test_01_Complete) {
   EventData event_data = {
-      {"c1", {T(3, 7), T(8, 10)}},
-      {"c2", {T(1, 4), T(6, 9)}},
-      {"c3", {T(2, 5), T(7, 8), T(11, 12)}},
+      {"A", {T(3, 7), T(8, 10)}},
+      {"B", {T(1, 4), T(6, 9)}},
+      {"C", {T(2, 5), T(7, 8), T(11, 12)}},
   };
+  //       1   2   3   4   5   6   7   8   9   10  11  12  13
+  // 0: A:         [               ]   [       ]
+  // 1: B: [           ]       [           ]
+  // 2: C:     [           ]       [   ]           [   ]
+  //       |   |   |   |   |   |   |   |   |   |   |   |
+  //       B   BC  ABC AC  A   AB  BC  AB  A   0   C   0
+  //
+  // 7 events.
+  //
+  // Expect FEATURE_OVERLAP_META:
+  //   NOTE: AB = {0, 1}
+  //     {1} 1..2
+  //     {1, 2} 2..3
+  //     {0, 1, 2} 3..4
+  //     {0, 2} 4..5
+  //     {0} 5..6
+  //     {0, 1} 6..7
+  //     {1, 2} 7..8
+  //     {0, 1} 8..9
+  //     {0} 9..10
+  //     {2} 11..12
+  //
+  //     Tally:
+  //       {0} 5..6
+  //       {0} 9..10
+  //       --------------
+  //       {0} 5..10
+  //
+  //       {0, 1} 6..7
+  //       {0, 1} 8..9
+  //       --------------
+  //       {0, 1} 6..9
+  //
+  //       {0, 1, 2} 3..4
+  //       --------------
+  //       {0, 1, 2} 3..4
+  //
+  //       {0, 2} 4..5
+  //       --------------
+  //       {0, 2} 4..5
+  //
+  //       {1} 1..2
+  //       --------------
+  //       {1} 1..2
+  //
+  //       {1, 2} 2..3
+  //       {1, 2} 7..8
+  //       --------------
+  //       {1, 2} 2..8
+  //
+  //       {2} 11..12
+  //       --------------
+  //       {2} 11..12
+  //
+  // NOTE: our way of counting num_events is totally WRONG...
+  // it will double-count events:
+  //   A:     [   ]
+  //   B: [           ]
+  //      |   |   |   |
+  //      B   AB  B   0
+  //
+  //   AB, 2, 3, 1
+  //   ------------
+  //   AB, 2, 3, 1
+  //
+  //   B, 1, 2, 1
+  //   B, 3, 4, 1
+  //   ------------
+  //   B, 1, 4, 2
+  //
+  //   GOT: 3 num_events, ACTUAL = 2
+  //
+  //   num_events represents the "number of overlap regions" that make up an overlap.
   OverlapData overlap_data = {
 
-      {{"c1"}, sec(2)},
-      {{"c2"}, sec(1)},
-      {{"c3"}, sec(1)},
+      {{"A"}, sec(2)},
+      {{"B"}, sec(1)},
+      {{"C"}, sec(1)},
 
-      {{"c1", "c2"}, sec(2)},
-      {{"c1", "c3"}, sec(1)},
-      {{"c2", "c3"}, sec(2)},
+      {{"A", "B"}, sec(2)},
+      {{"A", "C"}, sec(1)},
+      {{"B", "C"}, sec(2)},
 
-      {{"c1", "c2", "c3"}, sec(1)},
+      {{"A", "B", "C"}, sec(1)},
 
+  };
+  RegionData region_data = {
+      {{"A"}, T(5, 10)},
+      {{"A", "B"}, T(6, 9)},
+      {{"A", "B", "C"}, T(3, 4)},
+      {{"A", "C"}, T(4, 5)},
+      {{"B"}, T(1, 2)},
+      {{"B", "C"}, T(2, 8)},
+      {{"C"}, T(11, 12)},
   };
   auto category_times = CategoryTimesFrom(event_data);
 
@@ -230,19 +304,19 @@ TEST(TestComputeOverlap, Test_01_Complete) {
 //  std::cout << "\n";
 
   OverlapComputer overlap_computer(category_times);
-  // overlap_computer.debug = true;
+  overlap_computer.debug = true;
 
-  auto expect_r = OverlapFrom(overlap_computer, overlap_data);
+  auto expect_r = OverlapFrom(overlap_computer, overlap_data, region_data);
   auto got_r = overlap_computer.ComputeOverlap();
   // TODO: lookup how to use custom printers with gtest for got/expect when test fails.
 
   bool overlap_eq = (got_r.overlap == expect_r.overlap);
   PrintIfFail(overlap_eq, got_r, expect_r);
-//  if (overlap_eq) {
-//    PrintGot(got_r);
-//    PrintExpect(expect_r);
-//  }
   EXPECT_TRUE(overlap_eq);
+
+  bool meta_eq = (got_r.meta == expect_r.meta);
+  PrintIfFail(meta_eq, got_r.meta, expect_r.meta);
+  EXPECT_TRUE(meta_eq);
 
 }
 

@@ -1592,7 +1592,8 @@ OverlapResult OverlapComputer::ComputeOverlap(bool keep_empty_time) const {
     }
 
     auto time_chunk = min_time - last_time;
-    if (last_time != min_time_value and time_chunk > 0) {
+    bool non_zero_time = time_chunk > 0;
+    if (non_zero_time) {
       // NOTE: std::map<Key, Number> defaults to 0 if the key doesn't exist.
       r.overlap[cur_cat] += time_chunk;
     }
@@ -1600,11 +1601,40 @@ OverlapResult OverlapComputer::ComputeOverlap(bool keep_empty_time) const {
     // Update current list of active categories.
     bool is_start = (index(min_cat) % 2 == 0);
     if (is_start) {
+      if (non_zero_time) {
+        TimeUsec start_time_usec = last_time;
+        TimeUsec end_time_usec = min_time;
+        r.meta.AddEvent(cur_cat, start_time_usec, end_time_usec);
+      }
       cur_cat.Add(min_cat);
     } else {
-      TimeUsec start_time_usec = times[min_cat][index(min_cat)-1];
-      TimeUsec end_time_usec = min_time;
-      r.meta.AddEvent(cur_cat, start_time_usec, end_time_usec);
+      if (non_zero_time) {
+        TimeUsec start_time_usec = last_time;
+        TimeUsec end_time_usec = min_time;
+        if (debug && SHOULD_DEBUG(FEATURE_OVERLAP_META)) {
+          std::stringstream ss;
+
+          ss << "meta.AddRegion";
+
+          const auto& indices = cur_cat.Indices();
+          ss << "\n";
+          PrintIndent(ss, 2);
+          ss << "cat = ";
+          PrintValue(ss, indices);
+
+          ss << "\n";
+          PrintIndent(ss, 2);
+          ss << "start_us = " << start_time_usec << " us";
+
+          ss << "\n";
+          PrintIndent(ss, 2);
+          ss << "end_us = " << end_time_usec << " us";
+
+          DBG_LOG("{}", ss.str());
+        }
+        r.meta.AddEvent(cur_cat, start_time_usec, end_time_usec);
+      }
+
       cur_cat.Remove(min_cat);
     }
 
@@ -1644,6 +1674,7 @@ OverlapResult OverlapComputer::ComputeOverlap(bool keep_empty_time) const {
   if (!keep_empty_time) {
     // Delete empty keys; these result from blank space between events. e.g.
     //   frozenset(): 1000000
+    assert(r.overlap.size() == r.meta.size());
     std::set<CategoryKeyBitset> del_keys;
     for (const auto& pair : r.overlap) {
       const auto& bitset = pair.first;
@@ -1653,6 +1684,9 @@ OverlapResult OverlapComputer::ComputeOverlap(bool keep_empty_time) const {
     }
     for (const auto& bitset : del_keys) {
       r.overlap.erase(bitset);
+    }
+    for (const auto& bitset : del_keys) {
+      r.meta.regions.erase(bitset);
     }
   }
 

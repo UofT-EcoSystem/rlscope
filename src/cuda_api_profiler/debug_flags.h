@@ -35,14 +35,18 @@ namespace tensorflow {
 // <OUPTPUT>
 //
 constexpr bool FEATURE_OVERLAP = 0;
+constexpr bool FEATURE_OVERLAP_META = 0;
 constexpr bool FEATURE_LOAD_DATA = 0;
 constexpr bool FEATURE_SAVE_JS = 0;
 constexpr bool FEATURE_PREPROCESS_DATA = 0;
+constexpr bool FEATURE_OVERHEAD_CORRECTION = 0;
 constexpr bool FEATURE_ANY =
     FEATURE_OVERLAP
+    || FEATURE_OVERLAP_META
     || FEATURE_LOAD_DATA
     || FEATURE_SAVE_JS
-    || FEATURE_PREPROCESS_DATA;
+    || FEATURE_PREPROCESS_DATA
+    || FEATURE_OVERHEAD_CORRECTION;
 #define SHOULD_DEBUG(feature) ((SPDLOG_ACTIVE_LEVEL <= SPDLOG_LEVEL_DEBUG) && feature)
 
 constexpr bool FEATURE_BREAKPOINT_DUMP_STACK = 0;
