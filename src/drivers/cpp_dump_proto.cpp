@@ -277,7 +277,7 @@ int main(int argc, char** argv) {
       }
       auto r = overlap_computer.ComputeOverlap();
 
-      if (FLAGS_debug) {
+      if (SHOULD_DEBUG(FEATURE_ANY) || FLAGS_debug) {
         std::cout << std::endl;
         r.Print(std::cout, 1);
         std::cout << std::endl;

@@ -323,6 +323,14 @@ MyStatus CategoryEventsParser::_AppendCategoryOperation(
   _event_flattener.ProcessUntilFinish(events, add_op, skip_func);
   out_category_times->Preallocate(count);
 
+//  if (SHOULD_DEBUG(FEATURE_LOAD_DATA)) {
+//    std::stringstream ss;
+//    ss << "Count of events for adding flattened CATEGORY_OPERATION's:";
+//    ss << "\n";
+//    count.Print(ss, 1);
+//    DBG_LOG("{}", ss.str());
+//  }
+
   _event_flattener.ProcessUntilFinish(events, append_event, skip_func);
 
   return MyStatus::OK();
@@ -1419,10 +1427,7 @@ void CategoryKeyBitset::Print(std::ostream& out, int indent) const {
   auto keys = idx_map->KeySetFrom(bitset);
 
   // Print a single CategoryKey all merged together.
-  CategoryKey merged_key;
-  for (const auto& key : keys) {
-    merged_key.MergeInplace(key);
-  }
+  auto merged_key = AsCategoryKey();
   merged_key.Print(out, indent);
 
   // Print each CategoryKey individually.
@@ -1684,22 +1689,33 @@ void OverlapResult::DumpVennJS(const std::string& directory,
                                const Process& process,
                                const Phase& phase) const {
   for (auto const& overlap_type : OVERLAP_TYPES) {
+
     auto const& overlap_reducer = OverlapResultReducer::ReduceToCategoryKey(*this);
     if (SHOULD_DEBUG(FEATURE_SAVE_JS)) {
       std::stringstream ss;
-      ss << "DumpVennJS: overlap_type = " << overlap_type;
+      ss << "ReduceToCategoryKey overlap_reducer: overlap_type = " << overlap_type;
       ss << "\n";
       overlap_reducer.Print(ss, 1);
       DBG_LOG("{}", ss.str());
     }
+
     auto js_dumper = GetJSDumper(overlap_type);
     auto const& reduced_overlap = js_dumper->PostReduceCategoryKey(overlap_reducer);
+    if (SHOULD_DEBUG(FEATURE_SAVE_JS)) {
+      std::stringstream ss;
+      ss << "PostReduceCategoryKey reduced_overlap: overlap_type = " << overlap_type;
+      ss << "\n";
+      reduced_overlap.Print(ss, 1);
+      DBG_LOG("{}", ss.str());
+    }
+
     js_dumper->DumpOverlapJS(
         directory,
         machine,
         process,
         phase,
         reduced_overlap);
+
   }
 }
 

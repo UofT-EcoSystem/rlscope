@@ -569,6 +569,15 @@ public:
     // Empty set.
   }
 
+  CategoryKey AsCategoryKey() const {
+    auto keys = Keys();
+    CategoryKey merged_key;
+    for (const auto& key : keys) {
+      merged_key.MergeInplace(key);
+    }
+    return merged_key;
+  }
+
   std::set<CategoryKey> Keys() const;
   std::set<size_t> Indices() const;
 
@@ -927,7 +936,7 @@ public:
   }
 
   inline bool _Contains(const CountMap& cmap, const CategoryKey& category_key) const {
-    return cmap.count(category_key) == 0;
+    return cmap.count(category_key) > 0;
   }
   inline bool Contains(const CategoryKey& category_key) const {
     return _Contains(num_events, category_key);
