@@ -59,6 +59,8 @@
         return status; \
       }
 
+#define IS_BAD_STATUS(status) (status.code() != MyStatus::OK().code())
+
 #define DEFINE_PRINT_OPERATOR(Klass) \
   std::ostream& operator<<(std::ostream& os, const Klass& obj) { \
     obj.Print(os, 0); \
@@ -1444,6 +1446,8 @@ struct TraceParserMeta {
 class ITraceProtoReader {
 public:
 
+  virtual ~ITraceProtoReader() = default;
+
   // Implemented in IEventFileProtoParser<ProtoKlass>
 //  virtual bool IsFile(const std::string& path) const = 0;
 //  virtual MyStatus ReadFile(CategoryTimes* out_category_times) = 0;
@@ -1462,6 +1466,8 @@ class IEventFileParser {
 public:
   CategoryTimesCount _count;
   TraceParserMeta _meta;
+
+  virtual ~IEventFileParser() = default;
 
   // IEventFileParser() = default;
   IEventFileParser(TraceParserMeta meta) :
@@ -1563,6 +1569,8 @@ public:
   RLSFileType _file_type;
   std::string _proto_nickname;
 
+  virtual ~IEventFileProtoParser() = default;
+
   IEventFileProtoParser(TraceParserMeta meta, RLSFileType file_type, const std::string& proto_nickname) :
       IEventFileParser(meta),
       _file_type(file_type),
@@ -1656,6 +1664,8 @@ template <class ProtoKlass, class ProtoReader>
 class ISimpleProtoParser : public IEventFileProtoParser<ProtoKlass, ProtoReader> {
 public:
 
+  virtual ~ISimpleProtoParser() = default;
+
   ISimpleProtoParser(TraceParserMeta meta, RLSFileType file_type, const std::string& proto_nickname) :
       IEventFileProtoParser<ProtoKlass, ProtoReader>(std::move(meta), file_type, proto_nickname) {
   }
@@ -1718,6 +1728,8 @@ public:
   Phase _phase;
 
   bool _initialized;
+
+  virtual ~ITraceFileProtoReader() = default;
 
 //  std::shared_ptr<IParserMeta> _parser_meta;
 
@@ -1836,6 +1848,7 @@ bool isRLSFileWithType(RLSFileType file_type, const std::string& path);
 
 MyStatus GetRLSEventParser(const std::string& path, TraceParserMeta parser_meta, std::unique_ptr<IEventFileParser>* parser);
 MyStatus GetRLSEventParserFromType(RLSFileType file_type, TraceParserMeta parser_meta, std::unique_ptr<IEventFileParser>* parser);
+MyStatus GetTraceProtoReader(const std::string& path, std::unique_ptr<ITraceProtoReader>* reader);
 
 
 template <typename EventProto>
@@ -2126,6 +2139,8 @@ public:
   // - The START time of the first "Operation" event.
   //TimeUsec _start_operation_usec;
 
+  virtual ~CategoryEventsProtoReader() = default;
+
   CategoryEventsProtoReader(const std::string& path) :
       ITraceFileProtoReader<ProtoKlass, ProtoReader>(path, RLSFileType::CATEGORY_EVENTS_FILE, "category_events")
   {
@@ -2241,6 +2256,8 @@ public:
 
   EventFlattener<iml::Event> _event_flattener;
 
+  virtual ~CategoryEventsParser() = default;
+
   CategoryEventsParser(TraceParserMeta meta) :
       IEventFileProtoParser<ProtoKlass, ProtoReader>(std::move(meta), RLSFileType::CATEGORY_EVENTS_FILE, "category_events")
   {
@@ -2340,6 +2357,8 @@ public:
   using EventKlass = iml::CUDAAPIEvent;
   using ProtoReader = CUDAAPIStatsProtoReader;
 
+  virtual ~CUDAAPIStatsProtoReader() = default;
+
   CUDAAPIStatsProtoReader(const std::string& path) :
       ITraceFileProtoReader<ProtoKlass, ProtoReader>(path, RLSFileType::CUDA_API_STATS_FILE, "cuda_api_stats")
   {
@@ -2391,6 +2410,8 @@ public:
   using ProtoKlass = iml::CUDAAPIPhaseStatsProto;
   using ProtoReader = CUDAAPIStatsProtoReader;
 
+  virtual ~CUDAAPIStatsParser() = default;
+
   CUDAAPIStatsParser(TraceParserMeta meta) :
       ISimpleProtoParser<ProtoKlass, ProtoReader>(std::move(meta), RLSFileType::CUDA_API_STATS_FILE, "cuda_api_stats")
   {
@@ -2412,6 +2433,8 @@ public:
   using ProtoKlass = iml::MachineDevsEventsProto;
   using EventKlass = iml::CUDAEventProto;
   using ProtoReader = CUDADeviceEventsProtoReader;
+
+  virtual ~CUDADeviceEventsProtoReader() = default;
 
   CUDADeviceEventsProtoReader(const std::string& path) :
       ITraceFileProtoReader<ProtoKlass, ProtoReader>(path, RLSFileType::CUDA_DEVICE_EVENTS_FILE, "cuda_device_events")
@@ -2469,6 +2492,8 @@ public:
 
   using ProtoKlass = iml::MachineDevsEventsProto;
   using ProtoReader = CUDADeviceEventsProtoReader;
+
+  virtual ~CUDADeviceEventsParser() = default;
 
   CUDADeviceEventsParser(TraceParserMeta meta) :
       ISimpleProtoParser<ProtoKlass, ProtoReader>(std::move(meta), RLSFileType::CUDA_DEVICE_EVENTS_FILE, "cuda_device_events")
@@ -3047,6 +3072,8 @@ MyStatus WriteJson(std::string path, const nlohmann::json& j);
 
 class OverlapTypeReducerInterface {
 public:
+  virtual ~OverlapTypeReducerInterface() = default;
+
   virtual OverlapType GetOverlapType() const = 0;
   virtual OverlapResultReducer PostReduceCategoryKey(const OverlapResultReducer& old_reducer) const = 0;
 
@@ -3170,6 +3197,8 @@ public:
   const OverlapResultReducer& reducer;
 
   std::map<CategoryKey, OverlapResultReducer> reducer_map;
+
+  virtual ~BaseOverlapJSDumper() = default;
 
   BaseOverlapJSDumper(
       const OverlapType& overlap_type_,
@@ -3343,6 +3372,7 @@ public:
 
 class ResourceJSDumper : public BaseOverlapJSDumper {
 public:
+  virtual ~ResourceJSDumper() = default;
 
   ResourceJSDumper(
       const OverlapType& overlap_type,
@@ -3401,6 +3431,8 @@ public:
   using OverlapJSDumper = ResourceJSDumper;
   DEFINE_DumpOverlapJS(ResourceOverlapType)
 
+  virtual ~ResourceOverlapType() = default;
+
   virtual OverlapType GetOverlapType() const {
     return "ResourceOverlap";
   }
@@ -3429,6 +3461,8 @@ public:
 
 class ResourceSubplotJSDumper : public BaseOverlapJSDumper {
 public:
+
+  virtual ~ResourceSubplotJSDumper() = default;
 
   ResourceSubplotJSDumper(
       const OverlapType& overlap_type,
@@ -3487,6 +3521,8 @@ public:
   using OverlapJSDumper = ResourceSubplotJSDumper;
   DEFINE_DumpOverlapJS(ResourceSubplotOverlapType)
 
+  virtual ~ResourceSubplotOverlapType() = default;
+
   virtual OverlapType GetOverlapType() const {
     return "ResourceSubplot";
   }
@@ -3544,6 +3580,7 @@ public:
 
 class OperationJSDumper : public BaseOverlapJSDumper {
 public:
+  virtual ~OperationJSDumper() = default;
 
   OperationJSDumper(
       const OverlapType& overlap_type,
@@ -3603,6 +3640,8 @@ public:
   using OverlapJSDumper = OperationJSDumper;
   DEFINE_DumpOverlapJS(OperationOverlapType)
 
+  virtual ~OperationOverlapType() = default;
+
   virtual OverlapType GetOverlapType() const {
     return "OperationOverlap";
   }
@@ -3645,6 +3684,8 @@ public:
 
 class CategoryJSDumper : public BaseOverlapJSDumper {
 public:
+
+  virtual ~CategoryJSDumper() = default;
 
   CategoryJSDumper(
       const OverlapType& overlap_type,
@@ -3719,6 +3760,8 @@ class CategoryOverlapType : public OverlapTypeReducerInterface {
 public:
   using OverlapJSDumper = CategoryJSDumper;
   DEFINE_DumpOverlapJS(CategoryOverlapType)
+
+  virtual ~CategoryOverlapType() = default;
 
   virtual OverlapType GetOverlapType() const {
     return "CategoryOverlap";

@@ -7,12 +7,16 @@
 
 #include <assert.h>
 #include "cuda_api_profiler/generic_logging.h"
+#include "cuda_api_profiler/defines.h"
 
 #include <ostream>
 #include <map>
 #include <set>
 #include <vector>
 #include <list>
+
+#include <sys/time.h>
+#include <sys/resource.h>
 
 namespace tensorflow {
 
@@ -88,6 +92,52 @@ public:
 
 };
 
+static inline size_t ResidentMemBytes() {
+  int who = RUSAGE_SELF;
+  struct rusage usage;
+  int ret;
+  ret = getrusage(who,&usage);
+  assert(ret != -1);
+  return usage.ru_maxrss * 1024;
+}
+
+// Prints to the provided buffer a nice number of bytes (KB, MB, GB, etc)
+template <typename OStream>
+void PrintBytes(OStream& out, uint64_t bytes) {
+  std::vector<std::string> suffixes {
+      "B",
+      "KB",
+      "MB",
+      "GB",
+      "TB",
+      "PB",
+      "EB",
+  };
+  size_t s = 0; // which suffix to use
+  double count = bytes;
+  while (count >= 1024 && s < suffixes.size()) {
+    s++;
+    count /= 1024;
+  }
+
+//  if (count - floor(count) == 0.0) {
+//    // sprintf(buf, "%d %s", (int)count, suffixes[s]);
+//    out << static_cast<int>(count) << " " << suffixes[s];
+//  } else {
+//    // sprintf(buf, "%.1f %s", count, suffixes[s]);
+//    auto old_precision = out.precision(1);
+//    out << count << " " << suffixes[s];
+//    out.precision(old_precision);
+//  }
+
+  // sprintf(buf, "%.1f %s", count, suffixes[s]);
+  auto old_precision = out.precision(1);
+
+  out << std::fixed << count << " " << suffixes[s];
+  out.precision(old_precision);
+  out.unsetf(std::ios_base::floatfield);
+}
+
 class SimpleTimer {
 public:
   using MetricValue = float;
@@ -95,20 +145,50 @@ public:
   std::string _name;
   std::ostream* _out;
 
-  OrderedMap<std::string, TimeUsec> _op_duration_usec;
+  struct OpStats {
+    TimeUsec duration_us;
+    size_t mem_bytes;
+    OpStats() :
+        duration_us(0),
+        mem_bytes(0) {
+    }
+    OpStats(
+        TimeUsec duration_us,
+        size_t mem_bytes) :
+        duration_us(duration_us),
+        mem_bytes(mem_bytes) {
+    }
+  };
+
+  OrderedMap<std::string, OpStats> _op_stats;
+//  OrderedMap<std::string, TimeUsec> _op_duration_usec;
+//  OrderedMap<std::string, size_t> _op_mem_bytes;
   OrderedMap<std::string, MetricValue> _metrics;
 
-//  std::map<std::string, TimeUsec> _op_duration_usec;
-//  std::map<std::string, MetricValue> _metrics;
-
   TimeUsec _last_time_usec;
+  size_t _last_mem_bytes;
   TimeUsec _start_time_usec;
+  size_t _start_mem_bytes;
   SimpleTimer(const std::string& name);
 
   void MakeVerbose(std::ostream* out);
 
+  template <typename OStream>
+  void _PrintLine(OStream& out,
+                  int i, const std::string& operation, TimeUsec duration_us, size_t mem_bytes) {
+    // e.g.
+    // [23] name="ReadProto(category_events.trace_4.proto)" = 0.469798 sec, mem=1MB
+    MetricValue duration_sec = static_cast<MetricValue>(duration_us) / static_cast<MetricValue>(USEC_IN_SEC);
+    out << "[" << i << "] "
+        << "name=\"" << operation << "\"" << " = " << duration_sec << " sec"
+        << ", mem=";
+    PrintBytes(out, mem_bytes);
+  }
+
+
   void ResetStartTime();
   double TotalTimeSec() const;
+  size_t TotalMemBytes() const;
   void EndOperation(const std::string& operation);
   void Print(std::ostream& out, int indent);
   void RecordThroughput(const std::string& metric_name, MetricValue metric);

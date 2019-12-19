@@ -12,3 +12,12 @@ ssh_config*
 /third_party/
 /Debug
 /Release
+/dockerfiles/dockerfiles/cpu-jupyter.Dockerfile
+/dockerfiles/dockerfiles/cpu.Dockerfile
+/dockerfiles/dockerfiles/devel-cpu-jupyter.Dockerfile
+/dockerfiles/dockerfiles/devel-cpu.Dockerfile
+/dockerfiles/dockerfiles/devel-gpu-jupyter.Dockerfile
+/dockerfiles/dockerfiles/devel-gpu.Dockerfile
+/dockerfiles/dockerfiles/gpu-jupyter.Dockerfile
+/dockerfiles/dockerfiles/gpu.Dockerfile
+/dockerfiles/requirements.txt

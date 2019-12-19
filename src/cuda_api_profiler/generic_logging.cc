@@ -17,7 +17,9 @@ SimpleTimer::SimpleTimer(const std::string& name) :
     _name(name),
     _out(nullptr),
     _last_time_usec(0),
-    _start_time_usec(0)
+    _last_mem_bytes(0),
+    _start_time_usec(0),
+    _start_mem_bytes(0)
 {
 }
 
@@ -28,31 +30,43 @@ void SimpleTimer::MakeVerbose(std::ostream* out) {
 void SimpleTimer::ResetStartTime() {
 //  auto now_us = Env::Default()->NowMicros();
   auto now_us = TimeNowMicros();
+  auto now_bytes = ResidentMemBytes();
   _last_time_usec = now_us;
+  _last_mem_bytes = now_bytes;
   _start_time_usec = now_us;
+  _start_mem_bytes = now_bytes;
 }
 
 double SimpleTimer::TotalTimeSec() const {
-  // auto now_us = TimeNowMicros();
-  // auto time_us = now_us - _start_time_usec;
   auto time_us = _last_time_usec - _start_time_usec;
-  // return ((double)time_us) / ((double)USEC_IN_SEC);
   return static_cast<double>(time_us) / static_cast<double>(USEC_IN_SEC);
 }
+
+size_t SimpleTimer::TotalMemBytes() const {
+  auto mem_bytes = _last_mem_bytes - _start_mem_bytes;
+  return mem_bytes;
+}
+
 
 void SimpleTimer::EndOperation(const std::string& operation) {
 //  auto now_us = Env::Default()->NowMicros();
   auto now_us = TimeNowMicros();
+  auto now_bytes = ResidentMemBytes();
   assert(_last_time_usec != 0);
-  // _op_duration_usec[operation] = now_us - _last_time_usec;
+  assert(_last_mem_bytes != 0);
   auto duration_us = now_us - _last_time_usec;
-  _op_duration_usec.Set(operation, duration_us);
+  auto mem_bytes = now_bytes - _last_mem_bytes;
+//  _op_duration_usec.Set(operation, duration_us);
+//  _op_mem_bytes.Set(operation, mem_bytes);
+  _op_stats.Set(operation, OpStats(duration_us, mem_bytes));
   if (_out) {
-    MetricValue duration_sec = static_cast<MetricValue>(duration_us) / static_cast<MetricValue>(USEC_IN_SEC);
-    (*_out) << "[" << _op_duration_usec.LastID() << "] name=\"" << operation << "\"" << " = " << duration_sec << " sec" << std::endl;
+    this->_PrintLine(*_out, _op_stats.LastID(), operation, duration_us, mem_bytes);
+    (*_out) << std::endl;
   }
   _last_time_usec = now_us;
+  _last_mem_bytes = now_bytes;
 }
+
 
 void SimpleTimer::Print(std::ostream& out, int indent) {
   PrintIndent(out, indent);
@@ -61,13 +75,12 @@ void SimpleTimer::Print(std::ostream& out, int indent) {
   {
     out << "\n";
     PrintIndent(out, indent + 1);
-    out << "Operations: size = " << _op_duration_usec.size();
+    out << "Operations: size = " << _op_stats.size();
     size_t i = 0;
-    _op_duration_usec.EachPair([&i, &out, indent] (const auto& op, const auto& duration_usec) {
-      double duration_sec = duration_usec / ((double) 1e6);
+    _op_stats.EachPair([this, &i, &out, indent] (const auto& operation, const auto& op_stats) {
       out << "\n";
       PrintIndent(out, indent + 2);
-      out << "[" << i << "] name=\"" << op << "\"" << " = " << duration_sec << " sec";
+      this->_PrintLine(out, i, operation, op_stats.duration_us, op_stats.mem_bytes);
       i++;
       return true;
     });
@@ -87,20 +100,9 @@ void SimpleTimer::Print(std::ostream& out, int indent) {
     });
   }
 
-//  for (auto const& pair : _op_duration_usec) {
-//    const auto& op = pair.first;
-//    auto duration_usec = pair.second;
-//    double duration_sec = duration_usec / ((double) 1e6);
-//
-//    out << "\n";
-//    PrintIndent(out, indent + 1);
-//    out << "name=\"" << pair.first << "\"" << " = " << duration_sec << " sec";
-//
-//  }
 }
 
 void SimpleTimer::RecordThroughput(const std::string& metric_name, MetricValue metric) {
-  // _metrics[metric_name] = metric;
   _metrics.Set(metric_name, metric);
 }
 

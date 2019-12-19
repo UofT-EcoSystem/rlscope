@@ -61,6 +61,7 @@ enum Mode {
   MODE_LS_FILES = 1,
   MODE_STATS = 2,
   MODE_OVERLAP = 3,
+  MODE_READ_FILES = 4,
 };
 
 void Usage() {
@@ -132,6 +133,8 @@ int main(int argc, char** argv) {
       mode = Mode::MODE_LS_FILES;
     } else if (FLAGS_mode == "stats") {
       mode = Mode::MODE_STATS;
+    } else if (FLAGS_mode == "read") {
+      mode = Mode::MODE_READ_FILES;
     } else if (FLAGS_mode == "overlap") {
       mode = Mode::MODE_OVERLAP;
     } else if (FLAGS_mode == "proto") {
@@ -154,6 +157,12 @@ int main(int argc, char** argv) {
   if (mode == Mode::MODE_STATS) {
     if (FLAGS_iml_directory == "") {
       UsageAndExit("--iml-directory is required for --mode=stats");
+    }
+  }
+
+  if (mode == Mode::MODE_READ_FILES) {
+    if (FLAGS_iml_directory == "") {
+      UsageAndExit("--iml-directory is required for --mode=read");
     }
   }
 
@@ -192,16 +201,21 @@ int main(int argc, char** argv) {
     exit(EXIT_SUCCESS);
   }
 
-  auto mk_parser = [] () {
+  auto mk_timer = [] () {
+    std::shared_ptr<SimpleTimer> timer(new SimpleTimer("timer"));
+    timer->ResetStartTime();
+    timer->MakeVerbose(&std::cout);
+    return timer;
+  };
+
+  auto mk_parser = [mk_timer] () {
     MyStatus status = MyStatus::OK();
     RawTraceParser parser(FLAGS_iml_directory,
                           FLAGS_cupti_overhead_json,
                           FLAGS_LD_PRELOAD_overhead_json,
                           FLAGS_pyprof_overhead_json);
 
-    std::shared_ptr<SimpleTimer> timer(new SimpleTimer("timer"));
-    timer->ResetStartTime();
-    timer->MakeVerbose(&std::cout);
+    auto timer = mk_timer();
     parser.SetTimer(timer);
 
     status = parser.Init();
@@ -220,6 +234,45 @@ int main(int argc, char** argv) {
             std::cout << std::endl;
             return MyStatus::OK();
     });
+    exit(EXIT_SUCCESS);
+  }
+
+  if (mode == Mode::MODE_READ_FILES) {
+    auto timer = mk_timer();
+    std::list<std::string> paths;
+    status = FindRLSFiles(FLAGS_iml_directory, &paths);
+    IF_BAD_STATUS_EXIT("Failed to ls trace-files in --iml_directory", status);
+    for (const auto& path : paths) {
+      std::cout << path << std::endl;
+      {
+        std::unique_ptr<ITraceProtoReader> reader;
+        status = GetTraceProtoReader(path, &reader);
+        if (IS_BAD_STATUS(status)) {
+          std::stringstream ss;
+          ss << "Not sure how to read files like " << path;
+          IF_BAD_STATUS_EXIT(ss.str(), status);
+        }
+        status = reader->Init();
+        if (IS_BAD_STATUS(status)) {
+          std::stringstream ss;
+          ss << "Failed to read trace-file = " << path;
+          IF_BAD_STATUS_EXIT(ss.str(), status);
+        }
+      }
+
+      if (timer) {
+        std::stringstream ss;
+        boost::filesystem::path bpath(path);
+        ss << "ReadProto(" << bpath.filename().string() << ")";
+        timer->EndOperation(ss.str());
+      }
+
+    }
+    if (timer) {
+      std::cout << std::endl;
+      timer->Print(std::cout, 0);
+      std::cout << std::endl;
+    }
     exit(EXIT_SUCCESS);
   }
 
