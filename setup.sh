@@ -252,6 +252,17 @@ setup_spdlog_cpp_library() {
     cmake_build "$SPDLOG_CPP_LIB_DIR"
 }
 
+CTPL_CPP_LIB_DIR="$ROOT/third_party/CTPL"
+setup_ctpl_cpp_library() {
+    if [ "$FORCE" != 'yes' ] && [ -e $CTPL_CPP_LIB_DIR ]; then
+        return
+    fi
+    local commit="v.0.0.2"
+    _clone "$CTPL_CPP_LIB_DIR" \
+        vit-vit/CTPL.git \
+        $commit
+}
+
 BOOST_CPP_LIB_VERSION="1.70.0"
 BOOST_CPP_LIB_VERSION_UNDERSCORES="$(perl -lape 's/\./_/g'<<<"$BOOST_CPP_LIB_VERSION")"
 BOOST_CPP_LIB_DIR="$ROOT/third_party/boost_${BOOST_CPP_LIB_VERSION_UNDERSCORES}"
@@ -483,6 +494,7 @@ main() {
     _do setup_protobuf_cpp_library
     _do setup_boost_cpp_library
     _do setup_spdlog_cpp_library
+    _do setup_ctpl_cpp_library
     # TODO: setup protobuf
    _do setup_cmake
     echo "> Success!"

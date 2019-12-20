@@ -107,6 +107,7 @@ if (NOT IS_WINDOWS AND NOT (
 #        AND EXISTS ${PROJECT_SOURCE_DIR}/third_party/libpqxx
         AND EXISTS ${PROJECT_SOURCE_DIR}/third_party/boost_${BOOST_VERSION_UNDERSCORES}/build
         AND EXISTS ${PROJECT_SOURCE_DIR}/third_party/spdlog
+        AND EXISTS ${PROJECT_SOURCE_DIR}/third_party/CTPL
         AND EXISTS ${PROJECT_SOURCE_DIR}/third_party/googletest
         ) )
     message(FATAL_ERROR
@@ -443,6 +444,10 @@ function(AddTensorflowDependencies TARGET INCLUDE_CUDA)
     ENDIF()
 
     target_link_libraries(${TARGET} PRIVATE nlohmann_json::nlohmann_json)
+
+    # Simple header-only thread pool library.
+    set(CTPL_INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/third_party/CTPL)
+    target_include_directories(${TARGET} PRIVATE ${CTPL_INCLUDE_DIRS})
 
     set(BOOST_INCLUDEDIR ${CMAKE_SOURCE_DIR}/third_party/boost_${BOOST_VERSION_UNDERSCORES}/build/include)
     target_include_directories(${TARGET} PRIVATE ${BOOST_INCLUDEDIR})

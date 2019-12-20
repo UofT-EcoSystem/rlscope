@@ -8,6 +8,9 @@
 #include "iml_prof.pb.h"
 #include "pyprof.pb.h"
 
+#include <future>
+
+#include <ctpl.h>
 #include <Eigen/Dense>
 
 #include "cuda_api_profiler/generic_logging.h"
@@ -1511,6 +1514,34 @@ struct TraceFileLocation {
   std::map<Category, TimeUsec> start_ps;
 };
 
+struct SimpleEvent {
+  std::string _name;
+  TimeUsec _start_time_us;
+  TimeUsec _end_time_us;;
+
+  // STL.
+  SimpleEvent() = default;
+
+  SimpleEvent(const std::string& name, TimeUsec start_time_us, TimeUsec end_time_us) :
+      _name(name),
+      _start_time_us(start_time_us),
+      _end_time_us(end_time_us)
+  {
+  }
+
+  TimeUsec start_time_us() const {
+    return _start_time_us;
+  }
+
+  TimeUsec end_time_us() const {
+    return _end_time_us;
+  }
+
+  const std::string& name() const {
+    return _name;
+  }
+};
+
 class SimpleEventReader {
 public:
   std::vector<TraceFileMeta> metas;
@@ -1557,6 +1588,226 @@ public:
       });
     }
     assert(events->size() == n_events);
+    return MyStatus::OK();
+  }
+
+  // NOTE: This doesn't work yet... still debugging.
+  template <class ProtoReader, class EventKlass>
+  MyStatus ReadCategoryEventsParallel(const Category& category, std::vector<SimpleEvent>* events) const {
+
+    auto cmp_events = [] (const SimpleEvent& lhs, const SimpleEvent& rhs) -> bool {
+      return lhs.start_time_us() < rhs.start_time_us();
+    };
+
+  // - Stage 1: Read into vector (parallel for each trace-file)
+  //   - Read ALL proto files into single std::vector
+  //   - Limit number of threads that can read in parallel to prevent a large memory footprint.
+  //     (just use number of cores)
+  // - Stage 2: Sort within each vector (parallel for each trace-file)
+  //   - Q: Is there an algorithm we should use for sorting a mostly sorted list? Insertion/bubble sort… screw it.
+  // - Stage 3: Merge
+  //   - Tree-reduce style merge_inplace
+  //   - How to implement this...?
+  //   - Threadpool with index pairs:
+  //     - (start, middle, end)
+  //    - We know events are mostly sorted, so I would expect when we do merge(list1, list2),
+  //      list1 AND list2 would be left mostly intact, with some events from list2 making there way into list1.
+
+
+    size_t n_events = 0;
+    for (const auto& meta : metas) {
+      auto const& it = meta.n_events.find(category);
+      if (it != meta.n_events.end()) {
+        n_events += it->second;
+      }
+    }
+
+    auto num_threads = std::thread::hardware_concurrency();
+
+    // - Stage 1: Read into vector (parallel for each trace-file)
+    //   - Read ALL proto files into single std::vector
+    //   - Limit number of threads that can read in parallel to prevent a large memory footprint.
+    //     (just use number of cores)
+    // - Stage 2: Sort within each vector (parallel for each trace-file)
+    //   - Q: Is there an algorithm we should use for sorting a mostly sorted list? Insertion/bubble sort… screw it.
+    // events->reserve(n_events);
+
+    // Otherwise events.size() returns 0 after parallel insertion via assigment...
+    events->resize(n_events);
+
+    std::vector<bool> has_category(metas.size());
+    std::vector<size_t> events_start_idx(metas.size());
+    std::vector<size_t> events_end_idx(metas.size());
+    std::vector<size_t> cat_size(metas.size());
+    size_t category_events_so_far = 0;
+    for (size_t i = 0; i < metas.size(); i++) {
+      const auto& meta = metas[i];
+      if (meta.categories.find(category) == meta.categories.end()) {
+        events_start_idx[i] = category_events_so_far;
+        events_end_idx[i] = category_events_so_far;
+        has_category[i] = false;
+        cat_size[i] = 0;
+        continue;
+      }
+      const auto n_cat_events = meta.n_events.at(category);
+      events_start_idx[i] = category_events_so_far;
+      events_end_idx[i] = category_events_so_far + n_cat_events;
+      has_category[i] = true;
+      cat_size[i] = n_cat_events;
+      category_events_so_far += n_cat_events;
+    }
+
+    {
+      ctpl::thread_pool pool(num_threads);
+      std::vector<std::future<void>> results;
+      for (size_t i = 0; i < metas.size(); i++) {
+        const auto& meta = metas[i];
+        if (meta.categories.find(category) == meta.categories.end()) {
+          continue;
+        }
+        size_t start_idx = events_start_idx[i];
+        DBG_LOG("DO: parallel.read path = {}, start={}, end={}",
+                meta.get_path(),
+                start_idx,
+                start_idx + cat_size[i]);
+        results.push_back(pool.push([start_idx, &meta, n_events, &events, category] (int) {
+          // DBG_LOG("parallel.read path = {}", meta.get_path());
+          ProtoReader reader(meta.get_path());
+          auto status = reader.Init();
+          assert(status.code() == MyStatus::OK().code());
+          // IF_BAD_STATUS_RETURN(status);
+          reader.EachCategory([start_idx, &meta, n_events, &events, category] (const auto& cat, const auto& cat_events) {
+            if (category != cat) {
+              return;
+            }
+//            SortEvents(cat_events);
+            assert(start_idx + cat_events.size() <= n_events);
+            DBG_LOG("parallel.read path = {}, start={}, end={}",
+                meta.get_path(),
+                start_idx,
+                start_idx + cat_events.size());
+
+            auto events_it = events->begin() + start_idx;
+            for (auto it = cat_events.cbegin(); it != cat_events.cend(); it++, events_it++) {
+              *events_it = SimpleEvent(
+                  ProtoReader::EventName(*it),
+                  ProtoReader::EventStartUsec(*it),
+                  ProtoReader::EventEndUsec(*it));
+            }
+            std::sort(
+                events->begin() + start_idx,
+                events->begin() + start_idx + cat_events.size(),
+                // [] (const EventKlass* lhs, const EventKlass* rhs) {
+                [] (const auto& lhs, const auto& rhs) {
+                  return lhs.start_time_us() < rhs.start_time_us();
+                });
+
+            // WARNING: this causes a SEGFAULT because internally protobuf appears to be doing
+            // non-thread-safe shared-memory crap when events get swapped!
+            // SOLUTION: don't use protobuf's for anything here or afterwards.
+//            auto events_it = events->begin();
+//            std::advance(events_it, start_idx);
+//            std::copy(cat_events->begin(), cat_events->end(),
+//                      std::inserter(
+//                          *events,
+//                          // events->begin() + start_idx
+//                          events_it
+//                          ));
+
+          });
+        }));
+      }
+      for (auto& result : results) {
+        result.get();
+      }
+    }
+    assert(events->size() == n_events);
+
+//    {
+//      // Simple sequential merge.
+//      if (metas.size() > 0) {
+//        size_t events_so_far = 0;
+//        size_t middle = cat_size[0];
+//        size_t end = cat_size[0];
+//        for (size_t i = 1; i < metas.size() - 1; i++) {
+//          const auto& meta = metas[i];
+//          if (meta.categories.find(category) == meta.categories.end()) {
+//            continue;
+//          }
+//          end += cat_size[i];
+//          assert(has_category[i]);
+//          std::inplace_merge(
+//              events->begin(),
+//              events->begin() + middle,
+//              events->begin() + end,
+//              cmp_events);
+//          middle += cat_size[i];
+//        }
+//      }
+//    }
+
+    {
+      // - Stage 3: Tree-reduce style merge_inplace
+      //   - How to implement this...?
+      //   - Threadpool with index pairs:
+      //     - (start, middle, end)
+      //    - We know events are mostly sorted, so I would expect when we do merge(list1, list2),
+      //      list1 AND list2 would be left mostly intact, with some events from list2 making there way into list1.
+
+      struct EventRegion {
+        size_t start;
+        size_t end;
+        EventRegion(size_t start, size_t end) :
+            start(start),
+            end(end) {
+        }
+      };
+
+
+      std::vector<EventRegion> event_regions;
+      event_regions.reserve(metas.size());
+      for (size_t i = 0; i < metas.size(); i++) {
+        const auto &meta = metas[i];
+        if (meta.categories.find(category) == meta.categories.end()) {
+          continue;
+        }
+        event_regions.push_back(EventRegion(
+            events_start_idx[i],
+            events_end_idx[i]));
+      }
+
+      ctpl::thread_pool pool(num_threads);
+      while (event_regions.size() > 1) {
+        std::vector<std::future<EventRegion>> new_regions_fut;
+        new_regions_fut.reserve(event_regions.size());
+        // For each consecutive pair of event regions, merge them.
+        for (size_t i = 0; i < event_regions.size() - 1; i += 2) {
+          const auto& e0 = event_regions[i];
+          const auto& e1 = event_regions[i+1];
+          assert(e0.end == e1.start);
+          size_t start = e0.start;
+          size_t middle = e0.end;
+          size_t end = e1.end;
+          assert(end <= n_events);
+          new_regions_fut.push_back(pool.push([start, middle, end, &events, cmp_events] (int) {
+            std::inplace_merge(
+                events->begin() + start,
+                events->begin() + middle,
+                events->begin() + end,
+                cmp_events);
+            return EventRegion(start, end);
+          }));
+        }
+        std::vector<EventRegion> new_regions;
+        new_regions.reserve(new_regions_fut.size());
+        for (auto& region : new_regions_fut) {
+          new_regions.push_back(region.get());
+        }
+        event_regions = std::move(new_regions);
+      }
+
+    }
+
     return MyStatus::OK();
   }
 
@@ -1650,6 +1901,19 @@ public:
       std::vector<typename ProtoReader::EventKlass> events;
       status = simple_reader.ReadCategoryEvents<ProtoReader>(category, &events);
       IF_BAD_STATUS_RETURN(status);
+
+      // Lazy quick testing: compare serial against parallel result.
+      // NOTE: this still doesn't work yet, still debugging...
+//      std::vector<SimpleEvent> parallel_events;
+//      status = simple_reader.ReadCategoryEventsParallel<ProtoReader, typename ProtoReader::EventKlass>(category, &parallel_events);
+//      IF_BAD_STATUS_RETURN(status);
+//
+//      assert(events.size() == parallel_events.size());
+//      for (size_t i = 0; i < events.size(); i++) {
+//        assert(ProtoReader::EventStartUsec(events[i]) == parallel_events[i].start_time_us());
+//        assert(ProtoReader::EventEndUsec(events[i]) == parallel_events[i].end_time_us());
+//        assert(ProtoReader::EventName(events[i]) == parallel_events[i].name());
+//      }
 
       status = this->AppendAllCategory(entire_meta, category, events, out_category_times);
       IF_BAD_STATUS_RETURN(status);
