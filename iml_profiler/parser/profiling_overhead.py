@@ -470,9 +470,6 @@ class CorrectedTrainingTimeParser:
 
                     'total_training_duration_us': [total_training_duration_us],
                 }
-                for col in total_overhead_data.keys():
-                    # NOTE: make sure each column name matches is_total_overhead_column(col)
-                    assert is_total_overhead_column(col)
                 total_df = pd.DataFrame(total_overhead_data)
                 add_fields(total_df, iml_config)
 

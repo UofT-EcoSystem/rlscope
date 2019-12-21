@@ -138,14 +138,8 @@ extern const std::vector<RLSFileType> RLS_FILE_TYPES;
 #define CATEGORY_PROF_CUPTI "Profiling: CUPTI"
 #define CATEGORY_PROF_LD_PRELOAD "Profiling: LD_PRELOAD"
 #define CATEGORY_PROF_PYTHON_ANNOTATION "Profiling: Python annotation"
-#define CATEGORY_PROF_PYTHON_INTERCEPTION "Profiling: Python interception"
-//CATEGORIES_PROF = {
-//    CATEGORY_PROF_CUPTI,
-//    CATEGORY_PROF_LD_PRELOAD,
-//    CATEGORY_PROF_PYTHON_ANNOTATION,
-//    CATEGORY_PROF_PYTHON_INTERCEPTION,
-//}
-
+#define CATEGORY_PROF_PYTHON_CLIB_INTERCEPTION_TENSORFLOW "Profiling: Python->C interception TensorFlow"
+#define CATEGORY_PROF_PYTHON_CLIB_INTERCEPTION_SIMULATOR "Profiling: Python->C interception Simulator"
 
 //#define TRACE_SUFFIX_RE (R"((?:\.trace_(?P<trace_id>\d+))?)")
 // WARNING: using non-capturing groups (?:) causes match strings to become empty.
@@ -896,23 +890,6 @@ MyStatus ParseProto(const std::string& file_type, const std::string& path, Proto
 }
 
 
-//class OverheadCounter {
-//  public:
-//    // 1) Read JSON.
-//    // 2) Generate overhead events.
-//    //   a) Simple event types: only need EOTimes to insert, don't need event_name
-//    //      (i.e. DON'T need to re-read raw files)
-//    //      - CATEGORY_PROF_PYTHON_ANNOTATION: Python annotations
-//    //      - CATEGORY_PROF_PYTHON_INTERCEPTION: Python -> C-library interception
-//    //      - CATEGORY_PROF_LD_PRELOAD: LD_PRELOAD
-//    //   b) Complex event types: need event_name, so we need to re-read raw files,
-//    //      OR provide an option to record operation event-names;
-//    //      we can encode unique operation names as integer id's (bitset if we want to be hardcore).
-//    //      This will make storing way more efficient.
-//    //      - CATEGORY_PROF_CUPTI: CUPTI
-//};
-
-
 class CategoryTimesCount {
 public:
   using CountMap = std::map<CategoryKey, size_t>;
@@ -1281,23 +1258,31 @@ public:
 
   std::string _cupti_overhead_json_path;
   std::string _LD_PRELOAD_overhead_json_path;
-  std::string _pyprof_overhead_json_path;
+  std::string _python_annotation_json_path;
+  std::string _python_clib_interception_tensorflow_json_path;
+  std::string _python_clib_interception_simulator_json_path;
 
   nlohmann::json _cupti_overhead_json;
   nlohmann::json _LD_PRELOAD_overhead_json;
-  nlohmann::json _pyprof_overhead_json;
+  nlohmann::json _python_annotation_json;
+  nlohmann::json _python_clib_interception_tensorflow_json;
+  nlohmann::json _python_clib_interception_simulator_json;
 
   bool _has_calibration_files;
 
   RawTraceParser(const std::string& iml_directory,
-      const std::string& cupti_overhead_json,
-      const std::string& LD_PRELOAD_overhead_json,
-      const std::string& pyprof_overhead_json) :
+                 const std::string& cupti_overhead_json,
+                 const std::string& LD_PRELOAD_overhead_json,
+                 const std::string& python_annotation_json,
+                 const std::string& python_clib_interception_tensorflow_json,
+                 const std::string& python_clib_interception_simulator_json) :
       _iml_directory(iml_directory),
       _walker(_iml_directory),
       _cupti_overhead_json_path(cupti_overhead_json),
       _LD_PRELOAD_overhead_json_path(LD_PRELOAD_overhead_json),
-      _pyprof_overhead_json_path(pyprof_overhead_json),
+      _python_annotation_json_path(python_annotation_json),
+      _python_clib_interception_tensorflow_json_path(python_clib_interception_tensorflow_json),
+      _python_clib_interception_simulator_json_path(python_clib_interception_simulator_json),
       _has_calibration_files(false)
   {
 
@@ -1414,7 +1399,10 @@ public:
       const Machine& machine,
       const Process& process,
       const Phase& phase,
-      CategoryTimes *category_times);
+      CategoryTimes *category_times,
+      const Category& category_prof,
+      const std::set<Category>& c_events_categories,
+      double per_python_clib_interception_us);
   MyStatus _AppendOverhead_PYTHON_ANNOTATION(
       const Machine& machine,
       const Process& process,
@@ -3196,6 +3184,36 @@ public:
     return false;
   }
 
+  static bool IsCPUCategory(const Category& category) {
+    return CATEGORIES_CPU.count(category) > 0;
+  }
+
+  static bool IsGPUCategory(const Category& category) {
+    return CATEGORIES_GPU.count(category) > 0;
+  }
+
+  static bool IsProfOverheadCategory(const Category& category) {
+    return CATEGORIES_PROF.count(category) > 0;
+  }
+
+  static bool HasCPUOverhead(const CategoryKey& category_key) {
+    for (const auto& category : category_key.non_ops) {
+      if (IsProfOverheadCategory(category)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  static bool IsCPUOnlyKey(const CategoryKey& category_key) {
+    for (auto const& category : category_key.non_ops) {
+      if (!IsProfOverheadCategory(category) && !IsCPUCategory(category)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
   static CategoryKey NoOverheadKey(const CategoryKey& key) {
     // maybe_remove_overhead
     CategoryKey new_key;
@@ -3813,12 +3831,19 @@ public:
       // Just {CPU, GPU}
       // Add time to CPU, add time to GPU, add time to Total.
 
-      CategoryKey new_key(
-          /*procs=*/{},
-          /*ops=*/{},
-          /*non_ops=*/{CATEGORY_TOTAL});
-      r.AddOverlapWithKey(GetOverlapType(), old_key, new_key, old_reducer);
+      if (!(OverlapResultReducer::IsCPUOnlyKey(old_key) && OverlapResultReducer::HasCPUOverhead(old_key))) {
+        CategoryKey new_key(
+            /*procs=*/{},
+            /*ops=*/{},
+            /*non_ops=*/{CATEGORY_TOTAL});
+        r.AddOverlapWithKey(GetOverlapType(), old_key, new_key, old_reducer);
+      }
 
+      std::set<Category> prof_categories;
+      std::set_intersection(
+          old_key.non_ops.begin(), old_key.non_ops.end(),
+          CATEGORIES_PROF.begin(), CATEGORIES_PROF.end(),
+          std::inserter(prof_categories, prof_categories.begin()));
       auto cpu_gpu_key = OverlapResultReducer::ReduceCategoryKey(old_key, /*as_cpu_gpu=*/true);
       for (auto const& resource_type : cpu_gpu_key.non_ops) {
         // NOTE: This is sort of hacky;
@@ -3826,12 +3851,17 @@ public:
         // instead we are outputting an entire "set" including its overlaps:
         // i.e.
         // CPU   = [CPU only time] + [CPU overlapped with GPU time]
-        // GPU   = [GPU only time] + [GPU overlapped with GPU time]
+        // GPU   = [GPU only time] + [CPU overlapped with GPU time]
         // Total = [CPU only time] + [GPU only time] + [CPU overlapped with GPU time]
         CategoryKey add_key(
             /*procs=*/{},
             /*ops=*/{},
-            /*non_ops=*/{resource_type});
+            /*non_ops=*/{});
+        add_key.non_ops.insert(resource_type);
+        // Add any profiling categories (if any) so CPU time gets subtracted properly by AddOverlapWithKey.
+        for (const auto& category : prof_categories) {
+          add_key.non_ops.insert(category);
+        }
         r.AddOverlapWithKey(GetOverlapType(), old_key, add_key, old_reducer);
       }
 

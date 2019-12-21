@@ -46,7 +46,9 @@ DEFINE_string(mode, "", "One of: [stats, ls, proto]");
 
 DEFINE_string(cupti_overhead_json, "", "Path to calibration file: mean per-CUDA API CUPTI overhead when GPU activities are recorded (see: CUPTIOverheadTask) ");
 DEFINE_string(LD_PRELOAD_overhead_json, "", "Path to calibration file: mean overhead for intercepting CUDA API calls with LD_PRELOAD  (see: CallInterceptionOverheadTask)");
-DEFINE_string(pyprof_overhead_json, "", "Path to calibration file: means for (1) Python->C++ interception overhead, (2) operation annotation overhead (see: PyprofOverheadTask)");
+DEFINE_string(python_annotation_json, "", "Path to calibration file: means for operation annotation overhead (see: PyprofOverheadTask)");
+DEFINE_string(python_clib_interception_tensorflow_json, "", "Path to calibration file: means for TensorFlow Python->C++ interception overhead (see: PyprofOverheadTask)");
+DEFINE_string(python_clib_interception_simulator_json, "", "Path to calibration file: means for Simulator Python->C++ interception overhead (see: PyprofOverheadTask)");
 
 using namespace tensorflow;
 
@@ -213,7 +215,9 @@ int main(int argc, char** argv) {
     RawTraceParser parser(FLAGS_iml_directory,
                           FLAGS_cupti_overhead_json,
                           FLAGS_LD_PRELOAD_overhead_json,
-                          FLAGS_pyprof_overhead_json);
+                          FLAGS_python_annotation_json,
+                          FLAGS_python_clib_interception_tensorflow_json,
+                          FLAGS_python_clib_interception_simulator_json);
 
     auto timer = mk_timer();
     parser.SetTimer(timer);

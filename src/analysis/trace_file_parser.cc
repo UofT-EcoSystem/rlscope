@@ -49,7 +49,8 @@ const std::set<Category> CATEGORIES_PROF = std::set<Category>{
     CATEGORY_PROF_CUPTI,
     CATEGORY_PROF_LD_PRELOAD,
     CATEGORY_PROF_PYTHON_ANNOTATION,
-    CATEGORY_PROF_PYTHON_INTERCEPTION,
+    CATEGORY_PROF_PYTHON_CLIB_INTERCEPTION_TENSORFLOW,
+    CATEGORY_PROF_PYTHON_CLIB_INTERCEPTION_SIMULATOR,
 };
 
 const std::set<Category> CATEGORIES_CPU = std::set<Category>{
@@ -937,9 +938,10 @@ MyStatus RawTraceParser::Init() {
   MyStatus status = MyStatus::OK();
 
   _has_calibration_files = (
-      _cupti_overhead_json_path != "" &&
-      _LD_PRELOAD_overhead_json_path != "" &&
-      _pyprof_overhead_json_path != ""
+      _cupti_overhead_json_path != ""
+      && _LD_PRELOAD_overhead_json_path != ""
+      && _python_clib_interception_tensorflow_json != ""
+      && _python_clib_interception_simulator_json != ""
   );
 
   if (_has_calibration_files) {
@@ -947,7 +949,11 @@ MyStatus RawTraceParser::Init() {
     IF_BAD_STATUS_RETURN(status);
     status = ReadJson(_LD_PRELOAD_overhead_json_path, &_LD_PRELOAD_overhead_json);
     IF_BAD_STATUS_RETURN(status);
-    status = ReadJson(_pyprof_overhead_json_path, &_pyprof_overhead_json);
+    status = ReadJson(_python_annotation_json_path, &_python_annotation_json);
+    IF_BAD_STATUS_RETURN(status);
+    status = ReadJson(_python_clib_interception_tensorflow_json_path, &_python_clib_interception_tensorflow_json);
+    IF_BAD_STATUS_RETURN(status);
+    status = ReadJson(_python_clib_interception_simulator_json_path, &_python_clib_interception_simulator_json);
     IF_BAD_STATUS_RETURN(status);
   }
 
@@ -1171,12 +1177,26 @@ MyStatus RawTraceParser::_AppendOverheadEvents(
       phase,
       category_times);
   IF_BAD_STATUS_RETURN(status);
+
   status = _AppendOverhead_PYTHON_INTERCEPTION(
       machine,
       process,
       phase,
-      category_times);
+      category_times,
+      CATEGORY_PROF_PYTHON_CLIB_INTERCEPTION_TENSORFLOW,
+      {CATEGORY_TF_API},
+      _python_clib_interception_tensorflow_json["mean_pyprof_interception_overhead_per_call_us"]);
   IF_BAD_STATUS_RETURN(status);
+  status = _AppendOverhead_PYTHON_INTERCEPTION(
+      machine,
+      process,
+      phase,
+      category_times,
+      CATEGORY_PROF_PYTHON_CLIB_INTERCEPTION_SIMULATOR,
+      {CATEGORY_SIMULATOR_CPP},
+      _python_clib_interception_simulator_json["mean_pyprof_interception_overhead_per_call_us"]);
+  IF_BAD_STATUS_RETURN(status);
+
   status = _AppendOverhead_PYTHON_ANNOTATION(
       machine,
       process,
@@ -1275,27 +1295,28 @@ MyStatus RawTraceParser::_AppendOverhead_PYTHON_INTERCEPTION(
     const Machine& machine,
     const Process& process,
     const Phase& phase,
-    CategoryTimes *category_times) {
-//      auto* parser_meta = AsDerivedParserMeta<CUDAAPIStatsParser>(parser->GetParserMeta());
-  double per_pyprof_interception_us = _pyprof_overhead_json["mean_pyprof_interception_overhead_per_call_us"];
-  auto category_key = CategoryKey::FromCategory(process, CATEGORY_PROF_PYTHON_INTERCEPTION);
+    CategoryTimes *category_times,
+    const Category& category_prof,
+    const std::set<Category>& c_events_categories,
+    double per_python_clib_interception_us) {
+  auto category_key = CategoryKey::FromCategory(process, category_prof);
   size_t n_events = 0;
-  for (auto const& category : CATEGORIES_C_EVENTS) {
+  for (auto const& category : c_events_categories) {
     n_events += category_times->Count(CategoryKey::FromCategory(process, category));
   }
   // DBG_LOG("_AppendOverhead_PYTHON_INTERCEPTION: n_events = {}", n_events);
   category_times->Preallocate(category_key, n_events);
   auto& prof_events = category_times->eo_times.at(category_key);
   std::vector<EOEvents> clib_eo_events;
-  for (auto const& category : CATEGORIES_C_EVENTS) {
+  for (auto const& category : c_events_categories) {
     auto it = category_times->eo_times.find(CategoryKey::FromCategory(process, category));
     if (it != category_times->eo_times.end()) {
       clib_eo_events.push_back(it->second);
     }
   }
-  auto func = [per_pyprof_interception_us, &prof_events] (const EOEvents& events, size_t i) {
-    TimePsec start_ps = events.EndPsec(i) + (per_pyprof_interception_us * PSEC_IN_USEC);
-    TimePsec end_ps = start_ps + (per_pyprof_interception_us * PSEC_IN_USEC);
+  auto func = [per_python_clib_interception_us, &prof_events] (const EOEvents& events, size_t i) {
+    TimePsec start_ps = events.EndPsec(i) + (per_python_clib_interception_us * PSEC_IN_USEC);
+    TimePsec end_ps = start_ps + (per_python_clib_interception_us * PSEC_IN_USEC);
     OptionalString name;
     if (prof_events.KeepNames()) {
       name = events.GetEventName(i);
@@ -1314,7 +1335,7 @@ MyStatus RawTraceParser::_AppendOverhead_PYTHON_ANNOTATION(
     const Process& process,
     const Phase& phase,
     CategoryTimes *category_times) {
-  double per_pyprof_annotation_overhead_us = _pyprof_overhead_json["mean_pyprof_annotation_overhead_per_call_us"];
+  double per_pyprof_annotation_overhead_us = _python_annotation_json["mean_pyprof_annotation_overhead_per_call_us"];
   auto category_key = CategoryKey::FromCategory(process, CATEGORY_PROF_PYTHON_ANNOTATION);
   auto ops_key = CategoryKey::FromCategory(process, CATEGORY_EXTRA_OPERATION);
   auto const& ops_events = category_times->MutableEventsExtra(ops_key);
@@ -1334,72 +1355,6 @@ MyStatus RawTraceParser::_AppendOverhead_PYTHON_ANNOTATION(
   }
   return MyStatus::OK();
 }
-
-//MyStatus ReadEntireOverhead_CATEGORY_PROF_PYTHON_ANNOTATION(
-//    const Machine& machine,
-//    const Process& process,
-//    const Phase& phase,
-//    CategoryTimes* category_times,
-//    CategoryTimesCount* count,
-//    EntireTraceMeta* entire_meta) {
-//  *entire_meta = EntireTraceMeta(machine, process, phase);
-//  assert(!count->Contains(CATEGORY_PROF_PYTHON_ANNOTATION));
-//  // TODO: we want to count the number of operation events BEFORE op-stack processing...
-//  // Q: Is it equivalent to use the post-processed one?
-//  // NO; this INCREASES the number of "operation end times" in the trace.
-//  // maybe it's easier to just "walk through" the files again...?
-//  auto n_events = count->Count(CATEGORY_OPERATION);
-//  count->Add(CATEGORY_PROF_PYTHON_ANNOTATION, n_events);
-//
-//  return MyStatus::OK();
-//}
-//
-//MyStatus RawTraceParser::ReadEntireOverhead_CATEGORY_PROF_PYTHON_ANNOTATION(
-//    const Machine& machine,
-//    const Process& process,
-//    const Phase& phase,
-//    CategoryTimes* category_times,
-//    CategoryTimesCount* count,
-//    EntireTraceMeta* entire_meta) {
-//  CategoryTimesCount count;
-//  if (_cupti_overhead_json != "") {
-//    CategoryTimesCount count;
-//    // Preallocate
-//    // Insert: Python annotations
-//    // PSEUDOCODE:
-//    //     op_events = SQL:
-//    //         select all from Event where e.category == CATEGORY_OPERATION
-//    //     for op in op_events:
-//    //         insert Event(
-//    //             start=op.end,
-//    //             duration=mean_pyprof_annotation_overhead_us,
-//    //             category=CATEGORY_PROF_PYTHON_ANNOTATION)
-//
-//    // Preallocate: count[CATEGORY_PROF_PYTHON_ANNOTATION] = count[CATEGORY_PROF_PYTHON_ANNOTATION]
-//    // Preallocate: count[CATEGORY_PROF_PYTHON_INTERCEPTION] = count[CATEGORIES_C_EVENTS]
-//    // Preallocate: count[CATEGORY_PROF_CUPTI] = count[CATEGORY_CUDA_API_CPU] (upper bound)
-//    // Preallocate: count[CATEGORY_PROF_LD_PRELOAD] = count[CATEGORY_CUDA_API_CPU]
-//
-//  }
-//}
-
-//template <class ReaderKlass, class ProtoKlass>
-//MyStatus GenericInitFromProto(ReaderKlass& self, const ProtoKlass& proto) {
-//  self._machine = proto.machine_name();
-//  self._process = proto.process_name();
-//  self._phase = proto.phase();
-//  return MyStatus::OK();
-//}
-//
-//MyStatus CategoryEventsProtoReader::_InitFromProto(const ProtoKlass& proto) {
-//  return GenericInitFromProto(*this, proto);
-//}
-//MyStatus CUDAAPIStatsProtoReader::_InitFromProto(const ProtoKlass& proto) {
-//  return GenericInitFromProto(*this, proto);
-//}
-//MyStatus CUDADeviceEventsProtoReader::_InitFromProto(const ProtoKlass& proto) {
-//  return GenericInitFromProto(*this, proto);
-//}
 
 MyStatus GetTraceID(const std::string& path, TraceID* trace_id) {
   RLSFileType file_type = GetRLSFileType(path);
