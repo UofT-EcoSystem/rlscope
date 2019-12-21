@@ -131,6 +131,7 @@ extern const std::vector<RLSFileType> RLS_FILE_TYPES;
 
 #define CATEGORY_EXTRA_OPERATION "Operation: original"
 #define CATEGORY_TOTAL "Total"
+#define CATEGORY_CORRECTED_TRAINING_TIME "Corrected training time"
 // Not a category used during tracing;
 // represents a group of categories.
 #define CATEGORY_CPU "CPU"
@@ -3174,7 +3175,7 @@ public:
   }
 
   static bool IsEmptyKey(const OverlapType& overlap_type, const CategoryKey& category_key) {
-    if (overlap_type == "ResourceOverlap" || overlap_type == "ResourceSubplot") {
+    if (overlap_type == "ResourceOverlap" || overlap_type == "ResourceSubplot" || overlap_type == "ProfilingOverhead") {
       return category_key.non_ops.size() == 0;
     } else if (overlap_type == "OperationOverlap" || overlap_type == "CategoryOverlap") {
       return category_key.ops.size() == 0 ||
@@ -3196,9 +3197,31 @@ public:
     return CATEGORIES_PROF.count(category) > 0;
   }
 
+//  static bool IsProfOverheadKey(const CategoryKey& category_key) {
+//    return IsProfOverheadCategory(category_key.non_ops);
+//  }
+
+  static std::set<Category> ProfCategories(const std::set<Category>& categories) {
+    std::set<Category> prof_categories;
+    std::set_intersection(
+        categories.begin(), categories.end(),
+        CATEGORIES_PROF.begin(), CATEGORIES_PROF.end(),
+        std::inserter(prof_categories, prof_categories.begin()));
+    return prof_categories;
+  }
+
   static bool HasCPUOverhead(const CategoryKey& category_key) {
     for (const auto& category : category_key.non_ops) {
       if (IsProfOverheadCategory(category)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  static bool HasGPU(const CategoryKey& category_key) {
+    for (const auto& category : category_key.non_ops) {
+      if (IsGPUCategory(category)) {
         return true;
       }
     }
@@ -3273,41 +3296,72 @@ public:
 
   }
 
+  void AddOverlapWithKeyAllowOverhead(
+      const OverlapType& overlap_type,
+      const CategoryKey& old_key,
+      const CategoryKey& new_key,
+      const OverlapResultReducer& old_reducer) {
+    _AddOverlapWithKey(
+        overlap_type,
+        old_key,
+        new_key,
+        old_reducer,
+        true);
+  }
+
   void AddOverlapWithKey(
       const OverlapType& overlap_type,
       const CategoryKey& old_key,
       const CategoryKey& new_key,
       const OverlapResultReducer& old_reducer) {
+    _AddOverlapWithKey(
+        overlap_type,
+        old_key,
+        new_key,
+        old_reducer,
+        false);
+  }
 
 
-    const auto& no_overhead_key = OverlapResultReducer::NoOverheadKey(new_key);
+  void _AddOverlapWithKey(
+      const OverlapType& overlap_type,
+      const CategoryKey& old_key,
+      const CategoryKey& new_key,
+      const OverlapResultReducer& old_reducer,
+      bool allow_overhead) {
 
-    if (debug) {
-      std::stringstream ss;
-      ss << "AddOverlapWithKey:";
+    CategoryKey insert_key;
+    if (allow_overhead) {
+      insert_key = new_key;
+    } else {
+      insert_key = OverlapResultReducer::NoOverheadKey(new_key);
 
-      ss << "\n";
-      PrintIndent(ss, 1);
-      ss << "old_key = " << old_key;
+      if (debug) {
+        std::stringstream ss;
+        ss << "AddOverlapWithKey:";
 
-      ss << "\n";
-      PrintIndent(ss, 1);
-      ss << "new_key = " << new_key;
+        ss << "\n";
+        PrintIndent(ss, 1);
+        ss << "old_key = " << old_key;
 
-      ss << "\n";
-      PrintIndent(ss, 1);
-      ss << "no_overhead_key = " << no_overhead_key;
+        ss << "\n";
+        PrintIndent(ss, 1);
+        ss << "new_key = " << new_key;
 
-      DBG_LOG("{}", ss.str());
+        ss << "\n";
+        PrintIndent(ss, 1);
+        ss << "no_overhead_key = " << insert_key;
+
+        DBG_LOG("{}", ss.str());
+      }
     }
 
-
-    if (OverlapResultReducer::IsEmptyKey(overlap_type, no_overhead_key)) {
+    if (OverlapResultReducer::IsEmptyKey(overlap_type, insert_key)) {
       return;
     }
     auto time_usec = old_reducer.GetTimeUsec(old_key);
-    overlap[no_overhead_key] += time_usec;
-    regions.MergeRegion(no_overhead_key, old_reducer.GetMeta(old_key));
+    overlap[insert_key] += time_usec;
+    regions.MergeRegion(insert_key, old_reducer.GetMeta(old_key));
   }
 
 };
@@ -4090,6 +4144,137 @@ public:
 
     }
 
+    return r;
+  }
+
+};
+
+class ProfilingOverheadJSDumper : public BaseOverlapJSDumper {
+public:
+
+  virtual ~ProfilingOverheadJSDumper() = default;
+
+  ProfilingOverheadJSDumper(
+      const OverlapType& overlap_type,
+      const std::string& directory,
+      const Machine& machine,
+      const Process& process,
+      const Phase& phase,
+      const OverlapResultReducer& reducer) :
+      BaseOverlapJSDumper(
+          overlap_type,
+          directory,
+          machine,
+          process,
+          phase,
+          reducer)
+  { }
+
+  virtual std::set<std::string> CategoryKeyToStrings(const CategoryKey& category_key) const override {
+    // set(non-operation categories) -> [ CPU, GPU, CPU/GPU ] time
+    //   <CPU>, <GPU>, <CPU, GPU>             0.001 sec
+    assert(category_key.ops.size() == 0);
+    assert(category_key.non_ops.size() > 0);
+    assert(category_key.procs.size() == 0 || category_key.procs.size() == 1);
+    return category_key.non_ops;
+  }
+
+  virtual std::string VennJSBasename(const Metadata& md) const override {
+    std::stringstream ss;
+    AddOverlapTitle(ss, md);
+    AddMachineSuffix(ss, md);
+    AddProcessSuffix(ss, md);
+    AddPhaseSuffix(ss, md);
+    // PROBLEM: what if phases overlap like in minigo...?  How to handle this?  Show each phase separately?
+    ss << ".venn_js.json";
+    return ss.str();
+  }
+
+  virtual CategoryKey GroupCategoryKey(const CategoryKey& category_key) const override {
+    // ResourceOverlap / ProfilingOverhead:
+    // - ALL the CategoryKey's are output to the same file.
+    // - In: CategoryKey(ops={}, non_ops={CPU, GPU})
+    // - Out: CategoryKey(ops={}, non_ops={})
+    CategoryKey group_key(
+        /*procs=*/category_key.procs,
+        /*ops=*/{},
+        /*non_ops=*/{});
+    return group_key;
+  }
+
+  virtual void AddMetadataFields(Metadata* md, const CategoryKey& category_key) const override {
+    // pass
+  }
+
+};
+class ProfilingOverheadOverlapType : public OverlapTypeReducerInterface {
+public:
+  using OverlapJSDumper = ProfilingOverheadJSDumper;
+  DEFINE_DumpOverlapJS(ProfilingOverheadOverlapType)
+
+  virtual ~ProfilingOverheadOverlapType() = default;
+
+  virtual OverlapType GetOverlapType() const {
+    return "ProfilingOverhead";
+  }
+  virtual OverlapResultReducer PostReduceCategoryKey(const OverlapResultReducer& old_reducer) const {
+
+    // We want to bin "Corrected training time" for any:
+    // - GPU only time (may have CPU overhead)
+    // - CPU/GPU only time (may have CPU overhead)
+    // - CPU only time that does NOT have CPU overhead in it
+
+    // If the key contains any CATEGORIES_PROF, and it is a CPU-only key (NO GPU categories):
+    // - Record CategoryKey(
+    //     procs=procs,
+    //     ops=ops,
+    //     non_ops=non_ops.intersect(CATEGORIES_PROF)
+    //   )
+    //   i.e. We just want to keep CATEGORIES_PROF if it ONLY intersects CPU time (NOT GPU time).
+
+    OverlapResultReducer r;
+    for (auto const& pair : old_reducer.overlap) {
+      auto const& old_key = pair.first;
+      if (OverlapResultReducer::IsEmptyKey(GetOverlapType(), old_key)) {
+        continue;
+      }
+      if (old_key.ops.size() > 1) {
+        // Operations can only overlap cross-process, not within a single-process
+        assert(old_key.procs.size() > 1);
+      }
+      assert(old_key.non_ops.size() > 0);
+
+      // Just {CPU}
+      // Add time to CPU, add time to Total.
+      //
+      // Just {GPU}
+      // Add time to GPU, add time to Total.
+      //
+      // Just {CPU, GPU}
+      // Add time to CPU, add time to GPU, add time to Total.
+
+      auto cpu_gpu_key = OverlapResultReducer::ReduceCategoryKey(old_key, /*as_cpu_gpu=*/true);
+      if (
+          (OverlapResultReducer::IsCPUOnlyKey(cpu_gpu_key) && !OverlapResultReducer::HasCPUOverhead(cpu_gpu_key))
+          || (OverlapResultReducer::HasGPU(cpu_gpu_key))) {
+        CategoryKey new_key(
+            /*procs=*/cpu_gpu_key.procs,
+            /*ops=*/{},
+            /*non_ops=*/{CATEGORY_CORRECTED_TRAINING_TIME});
+        r.AddOverlapWithKeyAllowOverhead(GetOverlapType(), old_key, new_key, old_reducer);
+      }
+
+      if (
+          OverlapResultReducer::HasCPUOverhead(cpu_gpu_key) &&
+          OverlapResultReducer::IsCPUOnlyKey(cpu_gpu_key)) {
+        CategoryKey new_key(
+            /*procs=*/cpu_gpu_key.procs,
+            /*ops=*/{},
+            /*non_ops=*/OverlapResultReducer::ProfCategories(cpu_gpu_key.non_ops));
+        r.AddOverlapWithKeyAllowOverhead(GetOverlapType(), old_key, new_key, old_reducer);
+      }
+
+    }
     return r;
   }
 

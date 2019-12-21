@@ -72,6 +72,7 @@ const std::set<OverlapType> OVERLAP_TYPES = std::set<OverlapType>{
     "CategoryOverlap",
     "OperationOverlap",
     "ResourceSubplot",
+    "ProfilingOverhead",
 };
 
 template <typename Func, class EventListIter>
@@ -1662,6 +1663,8 @@ std::unique_ptr<OverlapTypeReducerInterface> GetJSDumper(const OverlapType& over
     ret = std::make_unique<OperationOverlapType>();
   } else if (overlap_type == "ResourceSubplot") {
     ret = std::make_unique<ResourceSubplotOverlapType>();
+  } else if (overlap_type == "ProfilingOverhead") {
+    ret = std::make_unique<ProfilingOverheadOverlapType>();
   } else {
     // Not sure what overlap_type is.
     assert(false);
