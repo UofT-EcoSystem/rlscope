@@ -617,11 +617,14 @@ class CorrectedTrainingTimeParser:
             # plot_data['field'] = "Per-API-call interception overhead"
             ax = fig.add_subplot(111)
             # sns.barplot(x='x_field', y='training_duration_sec', hue='pretty_config', data=training_duration_plot_data, ax=ax)
-            add_stacked_bars(x='x_field', y='total_overhead_sec',
-                             hue='overhead_type_order',
-                             label='pretty_overhead_type',
-                             data=total_plot_data, ax=ax,
-                             **plt_kwargs)
+            add_stacked_bars(
+                x='x_field',
+                y='total_overhead_sec',
+                hue='overhead_type_order',
+                label='pretty_overhead_type',
+                data=total_plot_data, ax=ax,
+                debug=self.debug,
+                **plt_kwargs)
             # ax.legend().set_title(None)
             ax.set_ylabel('Total training time (sec)')
             ax.set_xlabel('(algo, env)')
@@ -662,6 +665,8 @@ class CorrectedTrainingTimeParser:
         })
         corrected_df['config'] = 'corrected'
 
+        XGROUP_OVERHEAD = 0
+        XGROUP_UNINS = 1
         def get_low_bias_overhead_correction_plot_data(total_plot_data, unins_df):
             """
             Get data in csv format needed for "Figure 8: Low-bias overhead correction".
@@ -707,14 +712,44 @@ class CorrectedTrainingTimeParser:
                 else:
                     raise NotImplementedError()
 
+            def as_x_group(duration_name):
+                if duration_name in {
+                    'corrected_total_training_duration_us',
+                    'total_python_annotation_overhead_us',
+                    'total_python_simulator_interception_overhead_us',
+                    'total_python_tensorflow_interception_overhead_us',
+                    'total_interception_overhead_us',
+                    'total_cupti_overhead_us',
+                }:
+                    return XGROUP_OVERHEAD
+
+                if duration_name in {
+                    'uninstrumented_total_training_duration_us',
+                }:
+                    return XGROUP_UNINS
+
+                raise NotImplementedError("Not sure what x_group duration_name={name} belongs to".format(
+                    name=duration_name))
+
+            def as_plot_group(algo, env):
+                if expr_config.is_fig_algo_comparison_med_complexity(algo, env):
+                    return "Algorithm choice"
+                elif expr_config.is_fig_env_comparison(algo, env):
+                    return "Environment choice"
+                else:
+                    return "Misc"
+
             # Transform unins_df
+            # max_duration_name_order = np.max(total_plot_data['overhead_type_order'])
+            min_duration_name_order = np.min(total_plot_data['overhead_type_order'])
             unins_df['duration_us'] = unins_df['training_duration_us']
             add_x_field(unins_df)
             unins_df['duration_name'] = 'uninstrumented_total_training_duration_us'
             unins_df['config_pretty_name'] = unins_df['config'].apply(as_config_pretty_name)
             unins_df['duration_pretty_name'] = unins_df['duration_name'].apply(
                 lambda overhead_type: pretty_overhead_type(overhead_type, 'us'))
-            unins_df['duration_name_order'] = 0
+            # unins_df['duration_name_order'] = max_duration_name_order + 1
+            unins_df['duration_name_order'] = min_duration_name_order - 1
             # , colnames=['duration_us']
             unins_df = dataframe_replace_us_with_sec(unins_df)
             unins_df = unins_df[keep_cols]
@@ -729,6 +764,9 @@ class CorrectedTrainingTimeParser:
             total_plot_data = total_plot_data[keep_cols]
 
             low_bias_df = pd.concat([unins_df, total_plot_data])
+
+            low_bias_df['x_group'] = low_bias_df['duration_name'].apply(as_x_group)
+            low_bias_df['plot_group'] = np.vectorize(as_plot_group, otypes=[str])(low_bias_df['algo'], low_bias_df['env'])
 
             # Calculate bar-label: 100*(corrected - unins)/unins
             low_bias_df['bar_label'] = ''
@@ -760,12 +798,60 @@ class CorrectedTrainingTimeParser:
             is_in_paper = np.vectorize(expr_config.is_paper_env, otypes=[np.bool])(low_bias_df['algo'], low_bias_df['env'])
             low_bias_df = low_bias_df[is_in_paper]
 
-            low_bias_df = low_bias_df.sort_values(['algo', 'env', 'config', 'duration_name_order'])
+            # low_bias_df = low_bias_df.sort_values(['algo', 'env', 'config', 'duration_name_order'])
+            low_bias_df = low_bias_df.sort_values(['algo', 'env', 'duration_name_order'])
 
             return low_bias_df
 
         low_bias_df = get_low_bias_overhead_correction_plot_data(total_plot_data, unins_df)
         output_csv(low_bias_df, self._overhead_correction_csv_path)
+        if len(low_bias_df) > 0:
+            for low_bias_group, low_bias_group_df in low_bias_df.groupby(['plot_group']):
+                fig = plt.figure(figsize=figsize)
+                # plot_data['field'] = "Per-API-call interception overhead"
+                ax = fig.add_subplot(111)
+                # sns.barplot(x='x_field', y='training_duration_sec', hue='pretty_config', data=training_duration_plot_data, ax=ax)
+                # ['algo',
+                #  'env',
+                #  'x_field',
+                #  'duration_name',
+                #  'duration_pretty_name',
+                #  'duration_name_order',
+                #  'config',
+                #  'config_pretty_name',
+                #  'duration_sec',
+                #  'x_group',
+                #  'bar_label',
+                #  'percent_wrong']
+                xgroup_barplot = add_grouped_stacked_bars(
+                    x='x_field',
+                    x_group='x_group',
+                    y='duration_sec',
+                    hue='duration_name_order',
+                    label='duration_pretty_name',
+                    label_order='duration_name_order',
+                    bar_label='bar_label',
+                    bar_label_x_offset=3,
+                    bar_label_kwargs=dict(
+                        fontsize=9
+                    ),
+                    data=low_bias_group_df,
+                    ax=ax,
+                    rotation=10,
+                    # rotation=None,
+                    debug=self.debug,
+                    **plt_kwargs)
+                # for xgroup, barplot in xgroup_barplot.items():
+                #     if xgroup == XGROUP_UNINS:
+                #         add_ax_bar_labels(ax, barplot)
+                # ax.legend().set_title(None)
+                ax.set_ylabel('Total training time (sec)')
+                ax.set_xlabel('(RL algorithm, Simulator)')
+                # ax.set_title("Breakdown of profiling overhead")
+                logging.info("Output plot @ {path}".format(path=self._overhead_correction_png_path(low_bias_group)))
+                fig.tight_layout()
+                fig.savefig(self._overhead_correction_png_path(low_bias_group))
+                plt.close(fig)
 
         # unins_training_duration_us = get_training_durations(self.uninstrumented_directories, debug=self.debug)
         # unins_df = pd.DataFrame({
@@ -849,15 +935,15 @@ class CorrectedTrainingTimeParser:
 
     @property
     def _total_png_path(self):
-        return _j(self.directory, "corrected_training_time.total.png")
+        return _j(self.directory, "corrected_training_time.total.pdf")
 
     @property
     def _per_api_png_path(self):
-        return _j(self.directory, "corrected_training_time.per_api.png")
+        return _j(self.directory, "corrected_training_time.per_api.pdf")
 
     @property
     def _training_time_png_path(self):
-        return _j(self.directory, "corrected_training_time.training_time.png")
+        return _j(self.directory, "corrected_training_time.training_time.pdf")
 
     @property
     def _training_time_csv_path(self):
@@ -866,6 +952,13 @@ class CorrectedTrainingTimeParser:
     @property
     def _overhead_correction_csv_path(self):
         return _j(self.directory, "corrected_training_time.overhead_correction.csv")
+
+    def _overhead_correction_png_path(self, plot_group):
+        suffix = plot_group.lower()
+        suffix = re.sub(r'\s+', '_', suffix)
+        return _j(self.directory, "corrected_training_time.overhead_correction.{suffix}.pdf".format(
+            suffix=suffix,
+        ))
 
 class CallInterceptionOverheadParser:
     """
@@ -2270,10 +2363,14 @@ def pretty_overhead_type(overhead_type, unit='us'):
         return "{col}_{us}".format(
             col=col, us=unit)
 
-    if overhead_type == with_unit('total_pyprof_annotation_overhead'):
-        return "Python annotations"
+    if overhead_type in {with_unit('total_pyprof_annotation_overhead'), with_unit('total_python_annotation_overhead')}:
+        return "Python annotation"
     elif overhead_type == with_unit('total_pyprof_interception_overhead'):
-        return r"Python $\leftrightarrow$ C interception"
+        return r"Python$\leftrightarrow$C"
+    elif overhead_type == with_unit('total_python_simulator_interception_overhead'):
+        return r"Python$\leftrightarrow$Simulator"
+    elif overhead_type == with_unit('total_python_tensorflow_interception_overhead'):
+        return r"Python$\leftrightarrow$TensorFlow"
     elif overhead_type == with_unit('corrected_total_training_duration'):
         return "Corrected training time"
     elif overhead_type == with_unit('total_cupti_overhead'):
@@ -2282,13 +2379,13 @@ def pretty_overhead_type(overhead_type, unit='us'):
     elif overhead_type == with_unit('total_interception_overhead'):
         # return 'CUPTI GPU activities disabled'
         return 'CUDA API interception'
-    elif overhead_type == with_unit('uninstrumented_total_training_duration_us'):
+    elif overhead_type == with_unit('uninstrumented_total_training_duration'):
         return 'Uninstrumented training time'
     else:
         return overhead_type
 
 
-def add_stacked_bars(x, y, hue, label=None, data=None, ax=None, **kwargs):
+def add_stacked_bars(x, y, hue, label=None, data=None, ax=None, debug=False, **kwargs):
     # sns.barplot(x=.., y=.., hue=..)
 
     # Q: Does order of "data" affect groups returned by groupby?
@@ -2305,8 +2402,14 @@ def add_stacked_bars(x, y, hue, label=None, data=None, ax=None, **kwargs):
         means[group] = group_df.groupby([x]).mean().reset_index()
         stds[group] = group_df.groupby([x]).std().reset_index()
     bottom = None
+
+    xtick_labels = means[groups[0]][x]
+    xticks = np.arange(len(xtick_labels))
+    ax.set_xticks(xticks)
+    ax.set_xticklabels(xtick_labels)
     for group in groups:
         xs = means[group][x]
+        assert (xs == xtick_labels).all()
         ys = means[group][y]
         std = stds[group][y]
         # plt.bar(x=xs, height=ys, yerr=std, bottom=bottom, ax=ax)
@@ -2318,7 +2421,15 @@ def add_stacked_bars(x, y, hue, label=None, data=None, ax=None, **kwargs):
         else:
             # group = hue
             label_str = group
-        barplot = ax.bar(x=xs, height=ys, yerr=std, label=label_str, bottom=bottom, **kwargs)
+        if debug:
+            logging.info("add_stacked_bars:\n{msg}".format(
+                msg=pprint_msg({
+                    'xs':xs,
+                    'xticks':xticks,
+                    'ys':ys,
+                })))
+        # barplot = ax.bar(x=xs, height=ys, yerr=std, label=label_str, bottom=bottom, **kwargs)
+        barplot = ax.bar(x=xticks, height=ys, yerr=std, label=label_str, bottom=bottom, **kwargs)
 
         if bottom is None:
             bottom = ys
@@ -2329,6 +2440,167 @@ def add_stacked_bars(x, y, hue, label=None, data=None, ax=None, **kwargs):
     handles, labels = ax.get_legend_handles_labels()
     # ax.legend(handles[::-1], labels[::-1], title=None, loc='upper left')
     ax.legend(handles[::-1], labels[::-1])
+
+def add_ax_bar_labels(ax, rects, labels, x_offset=0, y_offset=0, **kwargs):
+    """Attach a text label above each bar in *rects*, displaying its height."""
+    # https://matplotlib.org/3.1.1/gallery/lines_bars_and_markers/barchart.html
+    # 3 points vertical offset
+    xy_offset = (x_offset, y_offset + 3)
+    for rect, label in zip(rects, labels):
+        if label is not None and label != "":
+            height = rect.get_height()
+            # label = '{}'.format(height)
+            ax.annotate(label,
+                        xy=(rect.get_x() + rect.get_width() / 2, height),
+                        xytext=xy_offset,
+                        textcoords="offset points",
+                        ha='center', va='bottom',
+                        **kwargs)
+
+
+def add_grouped_stacked_bars(
+    x, x_group, y, hue,
+    bar_label=None,
+    bar_label_x_offset=0,
+    bar_label_kwargs=dict(),
+    label=None,
+    label_order=None,
+    data=None,
+    ax=None,
+    rotation=None,
+    debug=False,
+    **kwargs):
+    # sns.barplot(x=.., y=.., hue=..)
+
+    # add_stacked_bars(
+    #     x='x_field',
+    #     y='total_overhead_sec',
+    #     hue='overhead_type_order',
+    #     label='pretty_overhead_type',
+    #     data=total_plot_data, ax=ax,
+    #     debug=self.debug,
+    #     **plt_kwargs)
+
+    def _calc_bar_xloc(n, w):
+        """
+        n = total number of bars
+        w = width per bar
+
+        :param n:
+        :return:
+        """
+        i = np.arange(n) - (n // 2)
+        if n % 2 == 0:
+            # even:
+            # n = 4
+            # i = [0, 1, 2, 3]
+            ws = i*w + w/2
+        else:
+            # odd:
+            # n = 5
+            # i = [0, 1, 2, 3, 4]
+            ws = i*w
+        return ws
+
+    x_groups = data[x_group].unique()
+    total_bar_width = 2/3
+    # width per bar:
+    # bar_width = 0.33
+    bar_width = total_bar_width/len(x_groups)
+    bar_xloc = _calc_bar_xloc(len(x_groups), bar_width)
+
+    def _add_stacked_bars(xgroup_idx, data=None):
+        # sns.barplot(x=.., y=.., hue=..)
+
+        # Q: Does order of "data" affect groups returned by groupby?
+        if label is not None:
+            groupby_cols = [hue, label]
+        else:
+            groupby_cols = [hue]
+        data_groupby = data.groupby(groupby_cols)
+        groups = [pair[0] for pair in list(data_groupby)]
+        logging.info("groups: " + pprint_msg(groups))
+        means = dict()
+        stds = dict()
+        for group, group_df in data_groupby:
+            means[group] = group_df.groupby([x]).mean().reset_index()
+            stds[group] = group_df.groupby([x]).std().reset_index()
+        bottom = None
+
+        xtick_labels = means[groups[0]][x]
+        xticks = np.arange(len(xtick_labels))
+        ax.set_xticks(xticks)
+        ax.set_xticklabels(xtick_labels, rotation=rotation)
+        for group in groups:
+            xs = means[group][x]
+            assert (xs == xtick_labels).all()
+            ys = means[group][y]
+            std = stds[group][y]
+            # plt.bar(x=xs, height=ys, yerr=std, bottom=bottom, ax=ax)
+
+            # Order in which we call this determines order in which stacks appear.
+            if label is not None:
+                # group = [hue, label]
+                label_str = group[1]
+            else:
+                # group = hue
+                label_str = group
+            if debug:
+                logging.info("add_stacked_bars:\n{msg}".format(
+                    msg=pprint_msg({
+                        'xs':xs,
+                        'xticks':xticks,
+                        'ys':ys,
+                    })))
+            # barplot = ax.bar(x=xs, height=ys, yerr=std, label=label_str, bottom=bottom, **kwargs)
+            # [width/n]
+            # bar_x = []
+            # -1 1
+            # -2 -1 1 2
+            ## for
+            barplot = ax.bar(x=xticks + bar_xloc[xgroup_idx], height=ys, width=bar_width, yerr=std, label=label_str, bottom=bottom, **kwargs)
+            # # TODO: add rect labels... how?
+            # if xgroup_idx == 1:
+            #     import ipdb; ipdb.set_trace()
+            if bar_label is not None:
+                bar_labels = data['bar_label']
+                add_ax_bar_labels(ax, barplot, bar_labels, x_offset=bar_label_x_offset, **bar_label_kwargs)
+
+            if bottom is None:
+                bottom = ys
+            else:
+                bottom += ys
+        return barplot
+
+    xgroup_groupby = data.groupby([x_group])
+    xgroup_barplot = dict()
+    for xgroup_idx, (xgroup, xgroup_df) in enumerate(xgroup_groupby):
+        logging.info("xgroup = {xgroup}".format(xgroup=xgroup))
+        # Q: Does order of "data" affect groups returned by groupby?
+        barplot = _add_stacked_bars(xgroup_idx, data=xgroup_df)
+        xgroup_barplot[xgroup] = barplot
+
+    handles, labels = ax.get_legend_handles_labels()
+    if label_order and label:
+        lb_to_order = dict()
+        for order, lb in [g for (g, d) in data.groupby([label_order, label])]:
+            lb_to_order[lb] = order
+        new_labels = reversed(sorted(labels, key=lambda lb: lb_to_order[lb]))
+        label_handle_pairs = reversed(sorted(((lb_to_order[lb], h) for lb, h in zip(labels, handles))))
+        new_handles = [pair[1] for pair in label_handle_pairs]
+        # ax.legend(new_handles, new_labels)
+    else:
+        # Reverse legend label order (when making stacked bar its in reverse order)
+        # ax.legend(handles[::-1], labels[::-1], title=None, loc='upper left')
+        new_handles = handles[::-1]
+        new_labels = labels[::-1]
+        # ax.legend(new_handles, new_labels)
+    ax.legend(new_handles, new_labels,
+              fancybox=True, framealpha=0.5)
+
+
+
+    return xgroup_barplot
 
 def add_bar_labels(y, hue, ax=None, get_bar_labels=None, y_add_factor=0.025):
     """

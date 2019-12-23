@@ -57,7 +57,7 @@ iml_analyze() {
 }
 
 run_total_training_time_plot() {
-    iml-quick-expr --expr plot_fig --fig fig_13_overhead_correction \
+    _do iml-quick-expr --expr plot_fig --fig fig_13_overhead_correction \
         "${CALIB_OPTS[@]}" \
         --root-dir $IML_DATA_DIR/iml/output/expr_total_training_time \
         --debug-memoize "$@"
