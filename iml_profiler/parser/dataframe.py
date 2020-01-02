@@ -56,7 +56,8 @@ class BaseDataframeReader:
         self.added_fields = set()
         self.debug = debug
         self.debug_single_thread = debug_single_thread
-        self.iml_config = read_iml_config(self.directory)
+        # self.iml_config = read_iml_config(self.directory, allow_union=True)
+        self.iml_metadata = read_iml_config_metadata(self.directory)
         self.iml_columns = self._get_iml_columns()
         self.colnames = self._get_colnames()
 
@@ -132,16 +133,19 @@ class BaseDataframeReader:
         assert data is not None
         # if data is None:
         #     data = self.data
-        if 'metadata' not in self.iml_config:
+        if not self._has_iml_columns():
             return
         def _get(col):
-            self._add_col(col, self.iml_config['metadata'].get(col, ''), data=data)
+            self._add_col(col, self.iml_metadata.get(col, ''), data=data)
         # Q: should we just set ALL the metadata?
         _get('algo')
         _get('env')
 
+    def _has_iml_columns(self):
+        return 'algo' in self.iml_metadata and 'env' in self.iml_metadata
+
     def _get_iml_columns(self):
-        if 'metadata' not in self.iml_config:
+        if not self._has_iml_columns():
             return []
         return ['algo', 'env']
 
@@ -279,6 +283,60 @@ class BaseDataframeReader:
         if self.df is None:
             self._read_df()
         return self.df
+
+class OverlapDataframeReader(BaseDataframeReader):
+
+    def __init__(self, directory, add_fields=None, debug=False, debug_single_thread=False):
+
+        colnames = [
+            'machine_name',
+            'phase_name',
+            'process_name',
+            'start_time_usec',
+            'end_time_usec',
+            'overlap_type',
+            'overlap_label',
+            'overlap_usec',
+        ]
+
+        super().__init__(directory, add_fields=add_fields, colnames=colnames, debug=debug, debug_single_thread=debug_single_thread)
+
+    def is_proto_file(self, path):
+        return is_venn_js_file(path)
+
+    def _label_string(self, tpl):
+        # if len(tpl) == 1:
+        #     return tpl[0]
+        return ', '.join([str(x) for x in tpl])
+
+    def add_proto_cols(self, path, data=None):
+        if self.debug:
+            logging.info("Read OverlapDataframeReader from {path}".format(path=path))
+
+        venn_js = VennData(path)
+
+        def add_key(col_key, venn_js_key=None):
+            if venn_js_key is None:
+                venn_js_key = col_key
+            self._add_col(col_key, venn_js.md[venn_js_key], data=data)
+
+
+        overlap_dict = venn_js.as_dict()
+        for overlap_label, overlap_usec in overlap_dict.items():
+            add_key('machine_name', 'machine')
+            add_key('process_name', 'process')
+            add_key('phase_name', 'phase')
+
+            add_key('start_time_usec')
+            add_key('end_time_usec')
+            add_key('overlap_type')
+
+            label_str = self._label_string(overlap_label)
+            self._add_col('overlap_label', label_str, data=data)
+            self._add_col('overlap_usec', overlap_usec, data=data)
+
+            self._maybe_add_fields(path, data=data)
+
 
 class UtilDataframeReader(BaseDataframeReader):
 
@@ -1019,7 +1077,7 @@ class DataframeMapper:
         reader = self.readers[0]
         return func(reader)
 
-def get_iml_config_path(directory):
+def get_iml_config_path(directory, allow_many=False):
     """
     Add (algo, env) from iml_config.json, if they were set by the training script using iml.prof.set_metadata(...).
 
@@ -1030,12 +1088,16 @@ def get_iml_config_path(directory):
         if is_iml_config_file(path) and _b(_d(path)) != DEFAULT_PHASE]
     # There should be exactly one iml_config.json file.
     # Q: Couldn't there be multiple for multi-process scripts like minigo?
-    if len(iml_config_paths) != 1:
+    if len(iml_config_paths) != 1 and not allow_many:
         logging.info("Expected 1 iml_config.json but saw {len} within iml_directory={dir}: {msg}".format(
             dir=directory,
             len=len(iml_config_paths),
             msg=pprint_msg(iml_config_paths)))
         assert len(iml_config_paths) == 1
+
+    if allow_many:
+        return iml_config_paths
+
     iml_config_path = iml_config_paths[0]
     return iml_config_path
 
@@ -1043,6 +1105,15 @@ def read_iml_config(directory):
     iml_config_path = get_iml_config_path(directory)
     iml_config = load_json(iml_config_path)
     return iml_config
+
+def read_iml_config_metadata(directory):
+    iml_metadata = dict()
+    iml_config_paths = get_iml_config_path(directory, allow_many=True)
+    for iml_config_path in iml_config_paths:
+        iml_config = load_json(iml_config_path)
+        if 'metadata' in iml_config:
+            iml_metadata.update(iml_config['metadata'])
+    return iml_metadata
 
 class IMLConfig:
     def __init__(self, directory=None, iml_config_path=None):
@@ -1184,3 +1255,235 @@ class LinearRegressionReader:
     def feature_df(self):
         pass
 
+
+class VennData:
+    """
+    Regarding venn_js format.
+
+    The "size" of each "circle" in the venn diagram is specified in a list of regions:
+    # ppo2/HumanoidBulletEnv-v0/ResourceOverlap.process_ppo2_HumanoidBulletEnv-v0.phase_ppo2_HumanoidBulletEnv-v0.venn_js.json
+    self.venn['venn'] = {
+        {
+            "label": "CPU",
+            "sets": [
+                0
+            ],
+            # This the size of the blue "CPU" circle.
+            "size": 117913583.0
+        },
+        {
+            "label": "GPU",
+            "sets": [
+                1
+            ],
+            # This the size of the orange "GPU" circle.
+            "size": 1096253.0
+        },
+        {
+            "sets": [
+                0,
+                1
+            ],
+            # This the size of the region of intersection between the "CPU" and "GPU" circles.
+            # Since CPU time SUBSUMES GPU time, this is the same as the GPU time.
+            "size": 1096253.0
+        }
+    }
+
+    NOTE:
+    - In our current diagram, CPU-time SUBSUMES GPU-time.
+    - [CPU, GPU] time is time where both the CPU AND the GPU are being used.
+    - If you just want to know CPU ONLY time (i.e. no GPU in-use), you must compute:
+      [CPU only] = [CPU] - [CPU, GPU]
+    - Since stacked-bar charts cannot show overlap between adjacent squares, we need to
+      create a separate stacked-bar "label" for each combination of resource overlaps.
+    - In order to obtain this stack-bar data, we want to compute:
+      - 'CPU' = [CPU only]
+      - 'GPU' = [GPU only]
+      - 'CPU + GPU' = [CPU-GPU only]
+    - In our example, we have:
+      - 'CPU' = 117913583.0 - (any group that has 'CPU' in it)
+              = 117913583.0 - 1096253.0
+      - 'GPU' = 1096253.0 - 1096253.0
+              = 0
+      - 'CPU + GPU' = 1096253.0 - (any group that has BOTH 'CPU' and 'GPU' in it, but NOT 'CPU'/'GPU' only)
+    """
+    def __init__(self, path):
+        self.path = path
+        with open(path) as f:
+            self.venn = json.load(f)
+        self._metadata = self.venn['metadata']
+        self._build_idx_to_label()
+        self.data = None
+        self.data = self.as_dict()
+
+    def metadata(self):
+        return copy.copy(self._metadata)
+
+    @property
+    def md(self):
+        return self._metadata
+
+    def subtract(self, subtract_sec, inplace=True):
+        """
+        Return a new instance of VennData, but with overhead counts subtracted.
+
+        PSEUDOCODE:
+        # subtract pyprof_annotation:
+        def vd_tree.subtract(machine, process, phase, resource_type, operation, category, subtract_sec):
+            selector = {
+                'machine': machine
+                'process': process
+                'phase': phase
+                'resource_type': resource_type,
+                'operation': operation
+                'category': category
+            }
+            for plot_type in plot_types:
+
+                # e.g. ResourceOverlap: [machine, process, phase]
+                plot_type_selector = selector[just keep plot_type.attributes]
+                plot_type_selector['plot_type'] = plot_type
+                vd = vd_tree.lookup(selector)
+
+                # def vd.key_field():
+                #  ResourceSubplot -> ListOf[resource_type]
+                #  OperationOverlap -> operation
+                #  CategoryOverlap -> category
+                #  ResourceSubplot -> resource_type
+                key = selector[vd.key_field()]
+
+                vd.subtract(key, subtract_sec, inplace=True)
+
+        def subtract_from_resource(resource, machine, process, phase, operation, category, subtract_sec):
+            # e.g.
+            # resource = 'CPU'
+            # resource_types = [['CPU'], ['CPU', 'GPU']]
+            resource_types = [resource_type for resource_type in vd.resource_types if resource in resource_type]
+            resource_types.sort(key={by total time spent in resource})
+            subtract_left_sec = subtract_sec
+            for resource_type in resource_types:
+                vd_leaf = vd_tree.lookup(machine, process, phase, operation, category)
+                to_subtract = min(
+                  subtract_left_sec,
+                  vd.time_sec(resource_type, process, phase, operation, category))
+                  # We need to "propagate up" the subtraction;
+                  # vd_tree.subtract handles this.
+                  # i.e. If we are subtracting from:
+                  #   [CPU, q_forward, Python]
+                  # Then, we need to subtract from:
+                  #   [CPU, q_forward, Python]
+                  #     CategoryOverlap.machine_{...}.process_{...}.phase_{...}.ops_{...}.resources_{...}.venn_js.json
+                  #   [CPU, q_forward]
+                  #     OperationOverlap.machine_{...}.process_{...}.phase_{...}.resources_{...}.venn_js.json
+                  #   [CPU]
+                  #     ResourceOverlap.machine_{...}.process_{...}.phase_{...}.venn_js.json
+                  #     ResourceSubplot.machine_{...}.process_{...}.phase_{...}.venn_js.json
+                vd_tree.subtract(machine, process, phase, resource_type, operation, category, to_subtract)
+                subtract_left_sec -= to_subtract
+
+        # Q: What's a good way to sanity check venn_js consistency?
+        # Make sure the child venn_js number "add up" to those found in the parent venn_js.
+        # e.g. child=OperationOverlap, parent=ResourceOverlap
+        # for resource_type in [['CPU'], ['CPU', 'GPU'], ['GPU']]:
+        #   assert sum[OperationOverlap[op, resource_type] for each op] == ResourceOverlap[resource_type]
+
+        # e.g. subtracting Python annotation time.
+        # The approach will be similar for other overhead types.
+        for machine in machines(directory):
+            for process in processes(machine, directory):
+                for phase in phases(machine, process, directory):
+                    for operation in operations(machine, process, phase, directory):
+                        subtract_sec = (pyprof_overhead_json['mean_pyprof_annotation_per_call_us']/USEC_IN_SEC) *
+                                       overhead_event_count_json[pyprof_annotation][process][phase][operation]
+                        vd_tree.subtract_from_resource(resource='CPU', machine, process, phase, operation, category='Python',
+                            subtract_sec)
+
+        :param overhead_event_count_json:
+        :param cupti_overhead_json:
+        :param LD_PRELOAD_overhead_json:
+        :param pyprof_overhead_json:
+        :return:
+        """
+        pass
+
+    def stacked_bar_dict(self):
+        """
+        In order to obtain stack-bar data, we must compute:
+        - 'CPU' = [CPU only]
+        - 'GPU' = [GPU only]
+        - 'CPU + GPU' = [CPU-GPU only]
+
+        See VennData NOTE above for details.
+        """
+        venn_dict = self.data
+        stacked_dict = dict()
+        # e.g. group = ['CPU']
+        for group in venn_dict.keys():
+            # Currently, stacked_dic['CPU'] includes overlap time from ['CPU', 'GPU']
+            stacked_dict[group] = venn_dict[group]
+            # e.g. member = ['CPU']
+            for other_group in venn_dict.keys():
+                # e.g. ['CPU'] subset-of ['CPU', 'GPU']
+                if group != other_group and set(group).issubset(set(other_group)):
+                    stacked_dict[group] = stacked_dict[group] - venn_dict[other_group]
+        return stacked_dict
+
+    def total_size(self):
+        total_size = 0.
+        # [ size of all regions ] - [ size of overlap regions ]
+        for labels, size in self.data.items():
+            if len(labels) > 1:
+                # Overlap region is JUST the size of the overlap.
+                total_size -= size
+            else:
+                # Single 'set' is the size of the WHOLE region (INCLUDING overlaps)
+                assert len(labels) == 1
+                total_size += size
+        return total_size
+
+    def get_size(self, key):
+        return self.data[key]
+
+    def keys(self):
+        return self.data.keys()
+
+    def _build_idx_to_label(self):
+        self.idx_to_label = dict()
+        self.label_to_idx = dict()
+        for venn_data in self.venn['venn']:
+            if len(venn_data['sets']) == 1:
+                assert 'label' in venn_data
+                idx = venn_data['sets'][0]
+                self.idx_to_label[idx] = venn_data['label']
+                self.idx_to_label[venn_data['label']] = idx
+
+    def _indices_to_labels(self, indices):
+        return tuple(sorted(self.idx_to_label[i] for i in indices))
+
+    def _labels_to_indices(self, labels):
+        return tuple(sorted(self.label_to_idx[label] for label in labels))
+
+    def labels(self):
+        return self.data.keys()
+
+    def get_label(self, label):
+        idx = self._label_to_idx(label)
+
+    def as_dict(self):
+        """
+        {
+            ('CPU',): 135241018.0,
+            ('GPU',): 3230025.0,
+            ('CPU', 'GPU'): 3230025.0,
+        }
+        """
+        if self.data is not None:
+            return dict(self.data)
+        d = dict()
+        for venn_data in self.venn['venn']:
+            labels = self._indices_to_labels(venn_data['sets'])
+            size_us = venn_data['size']
+            assert labels not in d
+            d[labels] = size_us
+        return d

@@ -21,21 +21,30 @@ _check_iml
 
 #py_maybe_install 'baselines' install_baselines.sh
 
+if [ "$DEBUG" == 'yes' ]; then
+    export GOPARAMS=$MLPERF_DIR/reinforcement/tensorflow/minigo/params/multiple_workers.json
+else
+    export GOPARAMS=$MLPERF_DIR/reinforcement/tensorflow/minigo/params/final_debug.json
+fi
+echo "> Using GOPARAMS=$GOPARAMS"
+GOPARAMS_BASE="$(basename "$GOPARAMS")"
 if [ "$OUTPUT_DIR" == '' ]; then
-    OUTPUT_DIR="$MLPERF_DIR/output/minigo/docker/train_minigo"
+    OUTPUT_DIR="$MLPERF_DIR/output/docker/minigo/${GOPARAMS_BASE}"
     echo "> env.OUTPUT_DIR not set; defaulting to:"
     echo "  OUTPUT_DIR=$OUTPUT_DIR"
 fi
-mkdir -p $OUTPUT_DIR
+#mkdir -p $OUTPUT_DIR
 
 # K4000
 #export CUDA_VISIBLE_DEVICES="1"
 
 SEED=1
-export BASE_DIR=$OUTPUT_DIR
-export GOPARAMS=$MLPERF_DIR/reinforcement/tensorflow/minigo/params/multiple_workers.json
 
-mkdir -p $BASE_DIR
+#export BASE_DIR=$OUTPUT_DIR
+#mkdir -p $BASE_DIR
+
+export IML_DIRECTORY=$OUTPUT_DIR
+mkdir -p $IML_DIRECTORY
 
 cd $MLPERF_DIR/reinforcement/tensorflow
 _do ./run_and_time.sh $SEED --iml-keep-traces

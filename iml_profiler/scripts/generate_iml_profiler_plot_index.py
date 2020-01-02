@@ -69,8 +69,21 @@ class GeneratePlotIndex:
     def lookup_entry(self, md, path=None):
 
         def map_resource_overlap(field, value):
+
+            # if self.debug:
+            #     logging.info("field={field}, value={value}".format(
+            #         field=field,
+            #         value=value,
+            #     ))
+
             if field == 'resource_overlap':
                 return tuple(value)
+
+            if field == 'operation' and type(value) == list:
+                assert len(value) == 1
+                # Q: just use single item..?
+                return tuple(value)
+
             return value
 
         def mk_keys(md, plot_type_field, value_map=None):
@@ -150,7 +163,13 @@ class GeneratePlotIndex:
         #     else:
 
     def run(self):
+        i = 0
         for path in self.each_file():
+
+            if self.debug:
+                logging.info("path[{i}] = {path}".format(
+                    i=i,
+                    path=path))
 
             md = self.read_metadata(path)
             if md is None:
@@ -268,20 +287,36 @@ def main():
                         help=textwrap.dedent("""
     Replace if exists.
     """))
+    parser.add_argument('--pdb',
+                        action='store_true',
+                        help=textwrap.dedent("""
+    Python debugger on unhandled exception.
+    """))
     args = parser.parse_args()
 
     if args.out_dir is None:
         args.out_dir = args.iml_directory
 
-    obj = GeneratePlotIndex(
-        directory=args.iml_directory,
-        out_dir=args.out_dir,
-        basename=args.basename,
-        debug=args.debug,
-        replace=args.replace,
-        dry_run=args.dry_run,
-    )
-    obj.run()
+
+    try:
+        obj = GeneratePlotIndex(
+            directory=args.iml_directory,
+            out_dir=args.out_dir,
+            basename=args.basename,
+            debug=args.debug,
+            replace=args.replace,
+            dry_run=args.dry_run,
+        )
+        obj.run()
+    except Exception as e:
+        if not args.pdb:
+            raise
+        print("> IML: Detected exception:")
+        print(e)
+        print("> Entering pdb:")
+        import ipdb
+        ipdb.post_mortem()
+        raise
 
 if __name__ == '__main__':
     main()

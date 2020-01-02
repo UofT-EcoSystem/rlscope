@@ -1115,6 +1115,12 @@ def step_suffix(step, allow_none=False):
         return ""
     return ".step_{id}".format(id=step)
 
+def device_suffix(device_name, allow_none=False):
+    assert allow_none or device_name is not None
+    if device_name is None:
+        return ""
+    return ".device_{dev}".format(dev=device_name)
+
 def device_id_suffix(device_id, device_name=None, allow_none=False):
     if device_id is None and not allow_none:
         raise RuntimeError("device_id must be >= 0, got None")
