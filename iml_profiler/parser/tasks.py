@@ -54,7 +54,7 @@ PARSER_NAME_TO_KLASS = dict((ParserKlass.__name__, ParserKlass) \
 # IML_TASKS = ...
 # NOT_RUNNABLE_TASKS = ...
 def get_NOT_RUNNABLE_TASKS():
-    return [IMLTask, _UtilizationPlotTask]
+    return [IMLTask, IMLTaskDB, _UtilizationPlotTask]
 
 def get_IML_TASKS():
     global NOT_RUNNABLE_TASKS
@@ -144,18 +144,10 @@ class IMLTask(luigi.Task):
     debug_single_thread = param_debug_single_thread
     debug_perf = param_debug_perf
 
-    postgres_password = param_postgres_password
-    postgres_user = param_postgres_user
-    postgres_host = param_postgres_host
-
     skip_output = False
 
     def output(self):
         return luigi.LocalTarget(self._done_file)
-
-    @property
-    def db_path(self):
-        return sql_input_path(self.iml_directory)
 
     @property
     def _done_file(self):
@@ -197,6 +189,29 @@ class IMLTask(luigi.Task):
                 sec=seconds,
             )), file=f)
 
+    def iml_run(self):
+        raise NotImplementedError("{klass} must override iml_run()".format(
+            klass=self.__class__.__name__))
+
+    def _run_with_timer(self):
+        start_t = datetime.datetime.now()
+        self.iml_run()
+        end_t = datetime.datetime.now()
+
+        self.mark_done(start_t, end_t)
+
+    def run(self):
+        self._run_with_timer()
+
+
+class IMLTaskDB(IMLTask):
+    postgres_password = param_postgres_password
+    postgres_user = param_postgres_user
+    postgres_host = param_postgres_host
+
+    @property
+    def db_path(self):
+        return sql_input_path(self.iml_directory)
 
     @property
     def maxconn(self):
@@ -208,10 +223,6 @@ class IMLTask(luigi.Task):
         """
         return 1
 
-    def iml_run(self):
-        raise NotImplementedError("{klass} must override iml_run()".format(
-            klass=self.__class__.__name__))
-
     def run(self):
         if self.maxconn > 0 and db.USE_CONNECTION_POOLING:
             # Create a postgres connection pool that allows at most maxconn connections
@@ -222,20 +233,13 @@ class IMLTask(luigi.Task):
                 user=self.postgres_user,
                 password=self.postgres_password,
             ), maxconn=self.maxconn, new_process=True) as pool:
-                self._run_with_pool()
+                self._run_with_timer()
         else:
             # DON'T create a postgres connection pool.
-            self._run_with_pool()
+            self._run_with_timer()
 
 
-    def _run_with_pool(self):
-        start_t = datetime.datetime.now()
-        self.iml_run()
-        end_t = datetime.datetime.now()
-
-        self.mark_done(start_t, end_t)
-
-class SQLParserTask(IMLTask):
+class SQLParserTask(IMLTaskDB):
     def requires(self):
         return []
 
@@ -250,7 +254,7 @@ class SQLParserTask(IMLTask):
         )
         self.sql_parser.run()
 
-class SQLOverheadEventsTask(IMLTask):
+class SQLOverheadEventsTask(IMLTaskDB):
     """
     How IML handles subtracting CPU-overhead:
 
@@ -328,7 +332,7 @@ class SQLOverheadEventsTask(IMLTask):
         )
         self.sql_overhead_events_parser.run()
 
-class _UtilizationPlotTask(IMLTask):
+class _UtilizationPlotTask(IMLTaskDB):
     visible_overhead = param_visible_overhead
     # Q: Is there a good way to choose this automatically...?
     # PROBLEM: n_workers should be the size of the pool...but how should we choose the number of splits to make...?
@@ -436,7 +440,7 @@ class ResourceSubplotTask(_UtilizationPlotTask):
 class OperationOverlapTask(_UtilizationPlotTask):
     overlap_type = 'OperationOverlap'
 
-class All(IMLTask):
+class All(IMLTaskDB):
     # Don't output All.task, so that if (for example)
     # ResourceOverlapTask.task is deleted, we will still re-run it.
     skip_output = True
@@ -475,18 +479,18 @@ class HeatScaleTask(IMLTask):
     # step_sec=1.,
     # pixels_per_square=10,
     # decay=0.99,
-    def requires(self):
-        return [
-            # NOTE: we DON'T need overhead events.
-            mk_SQLParserTask(self),
-        ]
+    # def requires(self):
+    #     return [
+    #         # NOTE: we DON'T need overhead events.
+    #         mk_SQLParserTask(self),
+    #     ]
 
     def iml_run(self):
         self.heat_scale = HeatScalePlot(
             directory=self.iml_directory,
-            host=self.postgres_host,
-            user=self.postgres_user,
-            password=self.postgres_password,
+            # host=self.postgres_host,
+            # user=self.postgres_user,
+            # password=self.postgres_password,
             debug=self.debug,
         )
         self.heat_scale.run()
@@ -713,7 +717,7 @@ class ProfilingOverheadPlotTask(luigi.Task):
         self.dumper = ProfilingOverheadPlot(**kwargs)
         self.dumper.run()
 
-class ExtrapolatedTrainingTimeTask(IMLTask):
+class ExtrapolatedTrainingTimeTask(IMLTaskDB):
     dependency = luigi.Parameter(description="JSON file containing Hard-coded computational dependencies A.phase -> B.phase", default=None)
     algo_env_from_dir = luigi.BoolParameter(description="Add algo/env columns based on directory structure of --iml-directories <algo>/<env>/iml_dir", default=True, parsing=luigi.BoolParameter.EXPLICIT_PARSING)
 

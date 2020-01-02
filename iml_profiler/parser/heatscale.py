@@ -340,6 +340,11 @@ def exponential_moving_average(time_secs, utils, start_time_sec, step_sec, decay
     step_sec = NumberType(step_sec)
 
     i = 0
+
+    while i < len(time_secs) and time_secs[i] < start_time_sec:
+        # SKIP: utilization samples that happen BEFORE the trace starts.
+        i += 1
+
     while i < len(time_secs):
         time_sec = time_secs[i]
         assert time_sec >= start_time_sec
