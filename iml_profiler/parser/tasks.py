@@ -21,7 +21,7 @@ from os.path import join as _j, abspath as _a, exists as _e, dirname as _d, base
 
 from iml_profiler.parser.tfprof import TotalTimeParser, TraceEventsParser
 from iml_profiler.parser.pyprof import PythonProfileParser, PythonFlameGraphParser, PythonProfileTotalParser
-from iml_profiler.parser.plot import TimeBreakdownPlot, PlotSummary, CombinedProfileParser, CategoryOverlapPlot, UtilizationPlot, HeatScalePlot
+from iml_profiler.parser.plot import TimeBreakdownPlot, PlotSummary, CombinedProfileParser, CategoryOverlapPlot, UtilizationPlot, HeatScalePlot, ConvertResourceOverlapToResourceSubplot
 from iml_profiler.parser.db import SQLParser, sql_input_path, GetConnectionPool
 from iml_profiler.parser import db
 from iml_profiler.parser.stacked_bar_plots import OverlapStackedBarPlot
@@ -541,6 +541,37 @@ class HeatScaleTask(IMLTask):
             debug=self.debug,
         )
         self.heat_scale.run()
+
+class ConvertResourceOverlapToResourceSubplotTask(IMLTask):
+    # step_sec=1.,
+    # pixels_per_square=10,
+    # decay=0.99,
+    # def requires(self):
+    #     return [
+    #         # NOTE: we DON'T need overhead events.
+    #         mk_SQLParserTask(self),
+    #     ]
+
+    # NOT optional (to ensure we remember to do overhead correction).
+    # cupti_overhead_json = param_cupti_overhead_json
+    # LD_PRELOAD_overhead_json = param_LD_PRELOAD_overhead_json
+    # python_annotation_json = param_python_annotation_json
+    # python_clib_interception_tensorflow_json = param_python_clib_interception_tensorflow_json
+    # python_clib_interception_simulator_json = param_python_clib_interception_simulator_json
+
+    # def requires(self):
+    #     kwargs = self.param_kwargs
+    #
+    #     return [
+    #         _mk(kwargs, CppAnalyze),
+    #     ]
+
+    def iml_run(self):
+        self.converter = ConvertResourceOverlapToResourceSubplot(
+            directory=self.iml_directory,
+            debug=self.debug,
+        )
+        self.converter.run()
 
 class TraceEventsTask(luigi.Task):
     iml_directory = luigi.Parameter(description="Location of trace-files")
@@ -1247,6 +1278,7 @@ IML_TASKS.add(CorrectedTrainingTimeTask)
 IML_TASKS.add(PyprofOverheadTask)
 IML_TASKS.add(CUPTIScalingOverheadTask)
 IML_TASKS.add(TotalTrainingTimeTask)
+IML_TASKS.add(ConvertResourceOverlapToResourceSubplotTask)
 
 if __name__ == "__main__":
     main()

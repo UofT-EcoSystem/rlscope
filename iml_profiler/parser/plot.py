@@ -22,10 +22,10 @@ from iml_profiler import py_config
 from iml_profiler.parser.common import *
 from iml_profiler.parser.nvprof import CUDASQLiteParser
 from iml_profiler.parser.pyprof import PythonProfileParser
-from iml_profiler.parser.tfprof import OverlapComputer, overlap_type_to_instance
+from iml_profiler.parser.tfprof import OverlapComputer, overlap_type_to_instance, OverlapJSONToVennConverter
 from iml_profiler.parser.heatscale import HeatScale, exponential_moving_average
 from iml_profiler.parser.db import SQLCategoryTimesReader, sql_get_source_files, sql_input_path
-from iml_profiler.parser.dataframe import UtilDataframeReader, OverlapDataframeReader
+from iml_profiler.parser.dataframe import UtilDataframeReader, OverlapDataframeReader, VennData
 
 # figsize (W x H) in inches
 aspect_ratio = 16./9.
@@ -2509,6 +2509,146 @@ class IDSet:
         return len(self.item_to_id)
 
 # def device_name_to_
+
+class ConvertResourceOverlapToResourceSubplot:
+    def __init__(self, directory,
+                 debug=False,
+                 # Swallow any excess arguments
+                 **kwargs):
+        self.directory = directory
+        self.debug = debug
+
+    def _plot_data_path(self, device_id, device_name):
+        return _j(self.directory, "util_scale.plot_data{dev}.txt".format(
+            dev=device_id_suffix(device_id, device_name),
+        ))
+
+    def _json_path(self, device_id, device_name):
+        return _j(self.directory, "util_scale{dev}.js_path.json".format(
+            dev=device_id_suffix(device_id, device_name),
+        ))
+
+    def convert_ResourceOverlap_to_ResourceSubplot(self, venn_path):
+        """
+        E.g. Input - ResourceOverlap:
+        {
+            "metadata": {
+                "end_time_usec": 1572305950361810,
+                "machine": "eco-15",
+                "overlap_type": "ResourceOverlap",
+                "phase": "selfplay_worker_9_generation_1",
+                "process": "selfplay_worker_9_generation_1",
+                "start_time_usec": 1572300331843396
+            },
+            "venn": [
+                {
+                    "label": "CPU",
+                    "sets": [
+                        0
+                    ],
+                    "size": 4951987256
+                },
+                {
+                    "label": "GPU",
+                    "sets": [
+                        1
+                    ],
+                    "size": 22915662
+                },
+                {
+                    "sets": [
+                        0,
+                        1
+                    ],
+                    "size": 19313474
+                }
+            ]
+        }
+        E.g. Output - ResourceSubplot:
+        {
+            "metadata": {
+                "end_time_usec": 1572305950361810,
+                "machine": "eco-15",
+                "overlap_type": "ResourceSubplot",
+                "phase": "selfplay_worker_9_generation_1",
+                "process": "selfplay_worker_9_generation_1",
+                "start_time_usec": 1572300331843396
+            },
+            "venn": [
+                {
+                    "label": "CPU",
+                    "sets": [
+                        0
+                    ],
+                    "size": 4951987256
+                },
+                {
+                    "label": "GPU",
+                    "sets": [
+                        1
+                    ],
+                    "size": 22915662
+                },
+                {
+                    "label": "Total",
+                    "sets": [
+                        2
+                    ],
+                    # "size": [CPU] + [GPU] - [CPU, GPU]
+                    "size": 4951987256 + 22915662 - 19313474
+                },
+            ]
+        }
+
+        :return:
+        """
+        total_region = ('Total',)
+        resource_overlap_venn_js = VennData(venn_path)
+        resource_overlap = resource_overlap_venn_js.as_dict()
+        resource_subplot = dict()
+        resource_subplot[total_region] = 0
+        for region, region_size in resource_overlap.items():
+            assert type(region) in {tuple}
+            if len(region) == 1:
+                resource_subplot[region] = region_size
+                resource_subplot[total_region] += region_size
+            else:
+                # Subtract overlap to remove double counting
+                # from adding up the individual regions.
+                resource_subplot[total_region] -= region_size
+        md = resource_overlap_venn_js.metadata()
+        md['overlap_type'] = 'ResourceSubplot'
+        converter = OverlapJSONToVennConverter(
+            overlap=resource_subplot,
+            metadata=md)
+        direc = _d(venn_path)
+        base = _b(venn_path)
+        new_base = re.sub(r'ResourceOverlap', 'ResourceSubplot', base)
+        resource_subplot_path = _j(direc, new_base)
+        assert resource_subplot_path != venn_path
+        logging.info(textwrap.dedent("""\
+        Convert:
+          From: {src}
+          To:   {dst}
+        """).format(
+            src=venn_path,
+            dst=resource_subplot_path,
+        ))
+        converter.dump(resource_subplot_path)
+
+    def run(self):
+        venn_paths = []
+        resource_overlap_paths = []
+        for path in each_file_recursive(self.directory):
+            if not is_venn_js_file(path):
+                continue
+            venn_paths.append(path)
+            venn_js = VennData(path)
+            if venn_js.md['overlap_type'] == 'ResourceOverlap':
+                resource_overlap_paths.append(path)
+
+        for venn_path in resource_overlap_paths:
+            self.convert_ResourceOverlap_to_ResourceSubplot(venn_path)
 
 class HeatScalePlot:
     """

@@ -3408,18 +3408,27 @@ class OverlapJSONDumper:
         return js
 
 class OverlapJSONToVennConverter:
-    def __init__(self, js=None, path=None):
+    def __init__(self, js=None, path=None, overlap=None, metadata=None):
         # "overlap region"     "size of overlap"
         # set([CPU, GPU])  ->  Number
-        assert js is not None or path is not None
-        if path is not None:
-            with open(path, 'r') as f:
-                js = json.load(f)
+        assert js is not None or path is not None or ( overlap is not None and metadata is not None )
 
-        self.js = js
-        self.path = path
-        self.overlap = self._reconstruct_overlap()
-        self.metadata = self.js['metadata']
+        self.js = None
+        self.path = None
+        self.overlap = None
+        self.metadata = None
+
+        if js is not None or path is not None:
+            if path is not None:
+                with open(path, 'r') as f:
+                    js = json.load(f)
+            self.js = js
+            self.path = path
+            self.overlap = self._reconstruct_overlap()
+            self.metadata = self.js['metadata']
+        else:
+            self.overlap = overlap
+            self.metadata = metadata
 
     def _reconstruct_overlap(self):
         overlap = dict()
@@ -3429,6 +3438,7 @@ class OverlapJSONToVennConverter:
         return overlap
 
     def _compute_set_sizes(self):
+        # Convert self.overlap into venn_js sizes.
         set_to_size = dict()
         for overlap_region, size in self.overlap.items():
             for set_region in overlap_region:
