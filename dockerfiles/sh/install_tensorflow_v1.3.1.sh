@@ -12,7 +12,8 @@ source $SH_DIR/make_utils.sh
 
 _check_env
 
+_do pip install tensorflow-gpu==1.13.1
 
-# pip install tensorflow-gpu==1.13.1
 # The Dockerfile downloaded a tensorflow .whl package in advance.
-_do pip install $HOME/pip_whl/tensorflow_gpu*.whl
+# NOTE: Only works for Ubuntu 16.04 with python3.5
+#_do pip install $HOME/pip_whl/tensorflow_gpu*.whl

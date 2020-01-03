@@ -2680,6 +2680,10 @@ class HeatScalePlot:
                 samples['start_time_sec'], samples['util'],
                 start_time_sec, self.step_sec, self.decay)
             centered_time_secs = (np.array(norm_time_secs) - start_time_sec).tolist()
+            unnorm_samples = {
+                'util': list(samples['util']),
+                'start_time_sec': list(samples['start_time_sec']),
+            }
             norm_samples = {
                 'util':norm_utils,
                 'start_time_sec':centered_time_secs,
@@ -2692,14 +2696,14 @@ class HeatScalePlot:
 
             plot_df = pd.DataFrame(norm_samples).astype(float)
             self.dump_plot_data(plot_df, device)
-            self.dump_js_data(norm_samples, device, start_time_sec)
+            self.dump_js_data(norm_samples, unnorm_samples, device, start_time_sec)
             # plotter.add_data(norm_samples)
             # print("> HeatScalePlot @ {path}".format(path=png))
             # plotter.plot()
 
         # self.sql_reader.close()
 
-    def dump_js_data(self, norm_samples, device, start_time_sec):
+    def dump_js_data(self, norm_samples, unnorm_samples, device, start_time_sec):
 
         def add_device_metadata(md, device):
             md['device_name'] = device.device_name
@@ -2724,7 +2728,28 @@ class HeatScalePlot:
                 'util': norm_samples['util'],
                 'start_time_sec': norm_samples['start_time_sec'],
             },
+            'unnorm_data': {
+                'util': unnorm_samples['util'],
+                'start_time_sec': unnorm_samples['start_time_sec'],
+            },
         }
+        def add_stats(js_key, data_key):
+            if 'stats' not in js['metadata']:
+                js['metadata']['stats'] = dict()
+            if js_key not in js['metadata']['stats']:
+                js['metadata']['stats'][js_key] = dict()
+            if data_key not in js['metadata']['stats'][js_key]:
+                js['metadata']['stats'][js_key][data_key] = dict()
+            agg_df = pd.DataFrame(js[js_key][data_key]).agg(['min', 'max', 'mean'])
+            agg_keys = list(iter(agg_df.index))
+            for agg_key in agg_keys:
+                value = agg_df.loc[agg_key].values[0]
+                js['metadata']['stats'][js_key][data_key][agg_key] = value
+
+        add_stats('data', 'util')
+        add_stats('unnorm_data', 'util')
+        # add_stats('start_time_sec')
+
         path = self._json_path(device.device_id, device.device_name)
         print("> HeatScalePlot @ plot data @ {path}".format(path=path))
         do_dump_json(js, path)

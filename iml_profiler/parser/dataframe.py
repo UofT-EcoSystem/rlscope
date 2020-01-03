@@ -363,15 +363,38 @@ class UtilDataframeReader(BaseDataframeReader):
         if self.debug:
             logging.info("Read MachineUtilization from {path}".format(path=path))
         for device_name, device_utilization in machine_util.device_util.items():
+            last_start_time_us = None
+            device_id = 0
+            # TODO: once we verify this works, limit output devices to CUDA_VISIBLE_DEVICES
             for sample in device_utilization.samples:
+                # HACK: iml-sample-util will record 1 sample at the same timestamp for each GPU, regardless
+                # of CUDA_VISIBLE_DEVICES.
+                # Often a machine has multiple GPUs with the same device_name.
+                # To ensure we don't incorrectly group multiple samples into the same device,
+                # add a device_id suffix to the device_name.
+                # We can dissambiguate the samples since we assume:
+                # - Devices are samples in the same order each time
+                # - Consecutive device samples appear next to each other in the proto file
+                if last_start_time_us is not None:
+                    if last_start_time_us == sample.start_time_us:
+                        # Sample taken at same time as last sample.
+                        # This sample is for another GPU.
+                        # Increment device_id.
+                        device_id += 1
+                    else:
+                        # New sample (not taken at same time).
+                        # Reset device_id.
+                        device_id = 0
                 self._add_col('machine_name', machine_util.machine_name, data=data)
-                self._add_col('device_name', device_name, data=data)
+                dev = "{name}.{id:02}".format(name=device_name, id=device_id)
+                self._add_col('device_name', dev, data=data)
 
                 self._add_col('util', sample.util, data=data)
                 self._add_col('start_time_us', sample.start_time_us, data=data)
                 self._add_col('total_resident_memory_bytes', sample.total_resident_memory_bytes, data=data)
 
                 self._maybe_add_fields(path, data=data)
+                last_start_time_us = sample.start_time_us
 
 class TrainingProgressDataframeReader(BaseDataframeReader):
 
@@ -1113,6 +1136,16 @@ def read_iml_config_metadata(directory):
         iml_config = load_json(iml_config_path)
         if 'metadata' in iml_config:
             iml_metadata.update(iml_config['metadata'])
+
+        if 'env' in iml_config and 'CUDA_VISIBLE_DEVICES' in iml_config['env']:
+            if 'env' not in iml_metadata:
+                iml_metadata['env'] = dict()
+
+            if 'CUDA_VISIBLE_DEVICES' in iml_metadata['env']:
+                assert iml_metadata['env']['CUDA_VISIBLE_DEVICES'] == iml_config['env']['CUDA_VISIBLE_DEVICES']
+            else:
+                iml_metadata['env']['CUDA_VISIBLE_DEVICES'] = iml_config['env']['CUDA_VISIBLE_DEVICES']
+
     return iml_metadata
 
 class IMLConfig:

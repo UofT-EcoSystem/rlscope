@@ -15,6 +15,7 @@ SEL_ORDER = {
     'ResourceSubplot': ['machine', 'process', 'phase'],
     'OperationOverlap': ['machine', 'process', 'phase', 'resource_overlap'],
     'HeatScale': ['machine_name', 'device_name'],
+    'ProfilingOverhead': ['machine', 'process', 'phase'],
 }
 KEY_TYPE = {
     'CategoryOverlap': ['category'],

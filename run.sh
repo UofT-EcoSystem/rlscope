@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 read -r -d '' BASH_SCRIPT << EOM
 cd \$IML_DIR;
+source source_me.sh;
 $@;
 EOM
 

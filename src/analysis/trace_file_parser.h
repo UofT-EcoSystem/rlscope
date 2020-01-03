@@ -1853,6 +1853,13 @@ public:
       if (eo_events.KeepNames()) {
         name = ProtoReader::EventName(events[i]);
       }
+      if (end_us < start_us) {
+        DBG_LOG("BUG: skip negative duration Event(name=\"{}\", start_us={}, duration_us={} us)",
+                ProtoReader::EventName(events[i]), start_us, end_us - start_us);
+        // Just insert a zero-length event since we've already preallocated space for it
+        // (they're effectively be ignored during overlap).
+        end_us = start_us;
+      }
       eo_events.AppendEvent(name, start_us, end_us);
     }
     return MyStatus::OK();

@@ -440,7 +440,49 @@ class ResourceSubplotTask(_UtilizationPlotTask):
 class OperationOverlapTask(_UtilizationPlotTask):
     overlap_type = 'OperationOverlap'
 
-class All(IMLTaskDB):
+def _mk(kwargs, TaskKlass):
+    task_kwargs = keep_task_kwargs(kwargs, TaskKlass)
+    if kwargs.get('debug', False):
+        logging.info("{klass} kwargs: {msg}".format(
+            klass=TaskKlass.__name__,
+            msg=pprint_msg(task_kwargs)))
+    return TaskKlass(**task_kwargs)
+
+# ASSUME: cpp_dump_proto is on $PATH;
+# i.e. they have run:
+# $ cd $IML_DIR
+# $ source source_me.sh
+CPP_ANALYZE_BIN = 'cpp_dump_proto'
+class CppAnalyze(IMLTask):
+
+    # NOT optional (to ensure we remember to do overhead correction).
+    cupti_overhead_json = param_cupti_overhead_json
+    LD_PRELOAD_overhead_json = param_LD_PRELOAD_overhead_json
+    python_annotation_json = param_python_annotation_json
+    python_clib_interception_tensorflow_json = param_python_clib_interception_tensorflow_json
+    python_clib_interception_simulator_json = param_python_clib_interception_simulator_json
+
+    # visible_overhead = param_visible_overhead
+
+    def iml_run(self):
+        cmd = [CPP_ANALYZE_BIN]
+        cmd.extend([
+            '--iml_directory', self.iml_directory,
+            '--mode', 'overlap',
+
+            '--cupti_overhead_json', self.cupti_overhead_json,
+            '--LD_PRELOAD_overhead_json', self.LD_PRELOAD_overhead_json,
+            '--python_annotation_json', self.python_annotation_json,
+            '--python_clib_interception_tensorflow_json', self.python_clib_interception_tensorflow_json,
+            '--python_clib_interception_simulator_json', self.python_clib_interception_simulator_json,
+        ])
+        if self.debug:
+            cmd.extend(['--debug'])
+        print_cmd(cmd)
+        subprocess.check_call(cmd)
+
+# class All(IMLTaskDB):
+class All(IMLTask):
     # Don't output All.task, so that if (for example)
     # ResourceOverlapTask.task is deleted, we will still re-run it.
     skip_output = True
@@ -456,24 +498,15 @@ class All(IMLTaskDB):
 
     def requires(self):
         kwargs = self.param_kwargs
-        def _mk(TaskKlass):
-            task_kwargs = keep_task_kwargs(kwargs, TaskKlass)
-            if kwargs.get('debug', False):
-                logging.info("{klass} kwargs: {msg}".format(
-                    klass=TaskKlass.__name__,
-                    msg=pprint_msg(task_kwargs)))
-            return TaskKlass(**task_kwargs)
 
         return [
-            _mk(ResourceOverlapTask),
-            _mk(CategoryOverlapTask),
-            _mk(ResourceSubplotTask),
-            _mk(OperationOverlapTask),
-            _mk(HeatScaleTask),
+            _mk(kwargs, HeatScaleTask),
+            _mk(kwargs, CppAnalyze),
         ]
 
     def iml_run(self):
         pass
+
 
 class HeatScaleTask(IMLTask):
     # step_sec=1.,
@@ -484,6 +517,20 @@ class HeatScaleTask(IMLTask):
     #         # NOTE: we DON'T need overhead events.
     #         mk_SQLParserTask(self),
     #     ]
+
+    # NOT optional (to ensure we remember to do overhead correction).
+    cupti_overhead_json = param_cupti_overhead_json
+    LD_PRELOAD_overhead_json = param_LD_PRELOAD_overhead_json
+    python_annotation_json = param_python_annotation_json
+    python_clib_interception_tensorflow_json = param_python_clib_interception_tensorflow_json
+    python_clib_interception_simulator_json = param_python_clib_interception_simulator_json
+
+    def requires(self):
+        kwargs = self.param_kwargs
+
+        return [
+            _mk(kwargs, CppAnalyze),
+        ]
 
     def iml_run(self):
         self.heat_scale = HeatScalePlot(

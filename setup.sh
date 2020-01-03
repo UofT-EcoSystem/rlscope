@@ -463,6 +463,8 @@ setup_apt_packages() {
         git \
         'libgflags*' \
         binutils-dev \
+        gdb \
+        gdbserver \
 
         # libgflags-dev libgflags2v5
 

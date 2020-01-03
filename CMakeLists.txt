@@ -12,6 +12,7 @@
 
 # Need cmake >= 3.8 so that we can do:
 #   set(LANGUAGES CXX CUDA)
+set(CMAKE_LEGACY_CYGWIN_WIN32 0)
 cmake_minimum_required(VERSION 3.8 FATAL_ERROR)
 project(iml)
 #https://github.com/robertmaynard/code-samples/blob/master/posts/cmake/CMakeLists.txt
@@ -894,3 +895,11 @@ endif(MSVC)
 
 set(COMPILE_FLAGS_HIDDEN_VISIBILITY "-fvisibility=hidden")
 AddFlags(sample_cuda_api COMPILE_FLAGS ${COMPILE_FLAGS_HIDDEN_VISIBILITY})
+
+set(ALL_TARGETS cpp_dump_proto test_analysis)
+install(TARGETS ${ALL_TARGETS}
+        CONFIGURATIONS Debug
+        RUNTIME DESTINATION Debug/bin)
+install(TARGETS ${ALL_TARGETS}
+        CONFIGURATIONS Release
+        RUNTIME DESTINATION Release/bin)
