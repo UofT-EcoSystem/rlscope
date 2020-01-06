@@ -216,9 +216,9 @@ class OverlapStackedBarPlot:
     @property
     def plot_x_axis_label(self):
         if self.x_type == 'rl-comparison':
-            return "(RL algorithm, Environment)"
+            return "(RL algorithm, Simulator)"
         elif self.x_type == 'env-comparison':
-            return "Environment"
+            return "Simulator"
         elif self.x_type == 'algo-comparison':
             return "RL algorithm"
         raise NotImplementedError
@@ -235,7 +235,7 @@ class OverlapStackedBarPlot:
     @property
     def plot_y2_axis_label(self):
         if self.y2_logscale:
-            return "Total training time (log2-scale)"
+            return "Total training time (log2 sec)"
         else:
             return "Total training time (sec)"
 
@@ -1124,6 +1124,8 @@ class StackedBarPlot:
         #         item.set_fontsize(self.fontsize)
 
         ax.grid(zorder=grid_zorder)
+        # Turn off x-axis grid-lines (just want y-axis grid-lines)
+        ax.grid(b=False, axis='x')
         if self.y2_field is not None:
             # ax2.grid(True)
 

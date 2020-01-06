@@ -603,7 +603,7 @@ class ExperimentGroup(Experiment):
                 '--y-type', 'percent',
                 '--x-type', 'env-comparison',
                 '--training-time',
-                '--y2-logscale',
+                # '--y2-logscale',
             ], suffix=plot_log(expr, overlap_type), algo_env_pairs=algo_env_pairs)
 
         # (3) Algorithm choice:
