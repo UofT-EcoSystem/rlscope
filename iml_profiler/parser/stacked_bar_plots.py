@@ -24,6 +24,7 @@ from os.path import join as _j, abspath as _a, exists as _e, dirname as _d, base
 from iml_profiler.parser.db import SQLCategoryTimesReader, sql_get_source_files, sql_input_path
 from iml_profiler.parser.plot_index import _DataIndex
 from iml_profiler.parser import plot_index
+from iml_profiler.parser.dataframe import VennData
 
 from iml_profiler.parser.common import *
 
@@ -167,7 +168,7 @@ class OverlapStackedBarPlot:
 
     @property
     def _plot_path(self):
-        return self._get_plot_path(ext='png')
+        return self._get_plot_path(ext='pdf')
 
     # def _json_path(self, device_id, device_name):
     #     return _j(self.directory, "util_scale{dev}.js_path.json".format(
@@ -903,17 +904,30 @@ class StackedBarPlot:
         return (self.data[group] == 0.).all()
 
     def _add_legend(self, fig, loc, bbox_to_anchor):
-        legend_rects = []
+        legend_handles, legend_labels = self._legend_handles_labels()
+        leg = fig.legend(legend_handles, legend_labels,
+                         bbox_to_anchor=bbox_to_anchor, loc=loc, borderaxespad=0.)
+        leg.draw_frame(False)
+
+    def _legend_handles_labels(self):
+        legend_handles = []
+        def mk_rect(color):
+            legend_rect = plt.Rectangle((0, 0), 1, 1, fc=color, edgecolor='none')
+            return legend_rect
         for i, group in enumerate(self.groups):
             if not self.keep_zero and self._all_zero(group):
                 # If a stacked-bar element is zero in all the bar-charts, don't show it in the legend (--keep-zero false).
                 continue
-            legend_rect = plt.Rectangle((0, 0), 1, 1, fc=self.colors[i], edgecolor='none')
-            legend_rects.append(legend_rect)
+            legend_rect = mk_rect(self.colors[i])
+            legend_handles.append(legend_rect)
         legend_labels = [self._group_to_label(group) for group in self.groups]
-        leg = fig.legend(legend_rects, legend_labels,
-                         bbox_to_anchor=bbox_to_anchor, loc=loc, borderaxespad=0.)
-        leg.draw_frame(False)
+        if self.y2_field is not None and self.y2_axis_label is not None:
+            # Last color is for y2-field bar.
+            assert len(self.colors) == len(self.groups) + 1
+            legend_rect = mk_rect(self.colors[-1])
+            legend_handles.append(legend_rect)
+            legend_labels.append(self.y2_axis_label)
+        return legend_handles, legend_labels
 
     def plot(self):
 
@@ -1043,7 +1057,9 @@ class StackedBarPlot:
             # from matplotlib.ticker import FormatStrFormatter
 
             # ax2.yaxis.set_major_formatter(mpl_ticker.FormatStrFormatter('%.d'))
-            ax2.yaxis.set_major_formatter(DaysHoursMinutesSecondsFormatter())
+
+            # Use (days, hours, minutes, seconds)
+            # ax2.yaxis.set_major_formatter(DaysHoursMinutesSecondsFormatter())
 
         # #Plot 1 - background - "total" (top) series
         # sns.barplot(x = self.data.Group, y = self.data.total, color = "red")
@@ -1060,12 +1076,22 @@ class StackedBarPlot:
             bbox_to_anchor=None,
         )
 
-        if self.show_legend:
-            self._add_legend(
-                fig,
-                loc='upper left',
-                bbox_to_anchor=(1.05, 1),
-            )
+        # https://stackoverflow.com/questions/4700614/how-to-put-the-legend-out-of-the-plot/43439132#43439132
+        legend_handles, legend_labels = self._legend_handles_labels()
+        logging.info({
+            # 'handles': handles,
+            # 'labels': labels,
+            'legend_handles': legend_handles,
+            'legend_labels': legend_labels,
+        })
+        ax.legend(legend_handles, legend_labels,
+                  bbox_to_anchor=(0, 1.02, 1, 0.2),
+                  loc='lower left',
+                  mode='expand',
+                  # ncol=len(legend_labels) - 1,
+                  ncol=2,
+                  # nrow=2,
+                  fancybox=True, framealpha=0.5)
 
         # , prop={'size': self.fontsize}
 

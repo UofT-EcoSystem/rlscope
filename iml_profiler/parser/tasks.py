@@ -911,7 +911,7 @@ class OverlapStackedBarTask(luigi.Task):
     # postgres_host = param_postgres_host
     # postgres_user = param_postgres_user
     # postgres_password = param_postgres_password
-    show_title = luigi.BoolParameter(description="Whether to add a title to the plot", default=True, parsing=luigi.BoolParameter.EXPLICIT_PARSING)
+    show_title = luigi.BoolParameter(description="Whether to add a title to the plot", default=False, parsing=luigi.BoolParameter.EXPLICIT_PARSING)
     show_legend = luigi.BoolParameter(description="Whether show the legend", default=True, parsing=luigi.BoolParameter.EXPLICIT_PARSING)
     width = luigi.FloatParameter(description="Width of plot in inches", default=None)
     height = luigi.FloatParameter(description="Height of plot in inches", default=None)
