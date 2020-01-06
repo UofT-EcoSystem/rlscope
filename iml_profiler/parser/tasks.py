@@ -21,7 +21,7 @@ from os.path import join as _j, abspath as _a, exists as _e, dirname as _d, base
 
 from iml_profiler.parser.tfprof import TotalTimeParser, TraceEventsParser
 from iml_profiler.parser.pyprof import PythonProfileParser, PythonFlameGraphParser, PythonProfileTotalParser
-from iml_profiler.parser.plot import TimeBreakdownPlot, PlotSummary, CombinedProfileParser, CategoryOverlapPlot, UtilizationPlot, HeatScalePlot, ConvertResourceOverlapToResourceSubplot
+from iml_profiler.parser.plot import TimeBreakdownPlot, PlotSummary, CombinedProfileParser, CategoryOverlapPlot, UtilizationPlot, HeatScalePlot, ConvertResourceOverlapToResourceSubplot, VennJsPlotter
 from iml_profiler.parser.db import SQLParser, sql_input_path, GetConnectionPool
 from iml_profiler.parser import db
 from iml_profiler.parser.stacked_bar_plots import OverlapStackedBarPlot
@@ -500,8 +500,9 @@ class All(IMLTask):
         kwargs = self.param_kwargs
 
         return [
-            _mk(kwargs, HeatScaleTask),
             _mk(kwargs, CppAnalyze),
+            _mk(kwargs, HeatScaleTask),
+            _mk(kwargs, VennJsPlotTask),
         ]
 
     def iml_run(self):
@@ -1263,6 +1264,85 @@ class TotalTrainingTimeTask(luigi.Task):
         self.dumper = TotalTrainingTimeParser(**kwargs)
         self.dumper.run()
 
+class VennJsPlotTask(IMLTask):
+
+    # NOT optional (to ensure we remember to do overhead correction).
+    cupti_overhead_json = param_cupti_overhead_json
+    LD_PRELOAD_overhead_json = param_LD_PRELOAD_overhead_json
+    python_annotation_json = param_python_annotation_json
+    python_clib_interception_tensorflow_json = param_python_clib_interception_tensorflow_json
+    python_clib_interception_simulator_json = param_python_clib_interception_simulator_json
+
+    # venn_js = luigi.ListParameter(description="venn_js.json path")
+    # directory = luigi.Parameter(description="Output directory", default=".")
+
+    # Plot attrs
+    # rotation = luigi.FloatParameter(description="x-axis title rotation", default=45.)
+    width = luigi.FloatParameter(description="Width of plot in inches", default=None)
+    height = luigi.FloatParameter(description="Height of plot in inches", default=None)
+
+    algo = luigi.Parameter(description="RL algorithm", default=None)
+    env = luigi.Parameter(description="Simulator", default=None)
+
+    debug = param_debug
+    debug_single_thread = param_debug_single_thread
+    debug_perf = param_debug_perf
+
+    skip_output = False
+
+    def requires(self):
+        kwargs = self.param_kwargs
+
+        return [
+            _mk(kwargs, CppAnalyze),
+        ]
+
+    # def output(self):
+    #     return []
+
+    def iml_run(self):
+        venn_js_paths = []
+        for path in each_file_recursive(self.iml_directory):
+            if not is_venn_js_file(path):
+                continue
+            venn_js_paths.append(path)
+        logging.info("Plot venn_js files:\n{msg}".format(
+            msg=pprint_msg(venn_js_paths),
+        ))
+        for venn_js in venn_js_paths:
+            kwargs = kwargs_from_task(self)
+            plotter = VennJsPlotter(venn_js=venn_js, **kwargs)
+            plotter.run()
+
+class VennJsPlotOneTask(luigi.Task):
+    venn_js = luigi.Parameter(description="venn_js path")
+
+    # Plot attrs
+    # rotation = luigi.FloatParameter(description="x-axis title rotation", default=45.)
+    width = luigi.FloatParameter(description="Width of plot in inches", default=None)
+    height = luigi.FloatParameter(description="Height of plot in inches", default=None)
+
+    algo = luigi.Parameter(description="RL algorithm", default=None)
+    env = luigi.Parameter(description="Simulator", default=None)
+
+    debug = param_debug
+    debug_single_thread = param_debug_single_thread
+    debug_perf = param_debug_perf
+
+    skip_output = False
+
+    def requires(self):
+        return []
+
+    def output(self):
+        return []
+
+    def run(self):
+        logging.info("HELLO")
+        kwargs = kwargs_from_task(self)
+        plotter = VennJsPlotter(**kwargs)
+        plotter.run()
+
 NOT_RUNNABLE_TASKS = get_NOT_RUNNABLE_TASKS()
 IML_TASKS = get_IML_TASKS()
 IML_TASKS.add(TraceEventsTask)
@@ -1279,6 +1359,8 @@ IML_TASKS.add(PyprofOverheadTask)
 IML_TASKS.add(CUPTIScalingOverheadTask)
 IML_TASKS.add(TotalTrainingTimeTask)
 IML_TASKS.add(ConvertResourceOverlapToResourceSubplotTask)
+IML_TASKS.add(VennJsPlotTask)
+IML_TASKS.add(VennJsPlotOneTask)
 
 if __name__ == "__main__":
     main()

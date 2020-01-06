@@ -25,7 +25,7 @@ from iml_profiler.parser.pyprof import PythonProfileParser
 from iml_profiler.parser.tfprof import OverlapComputer, overlap_type_to_instance, OverlapJSONToVennConverter
 from iml_profiler.parser.heatscale import HeatScale, exponential_moving_average
 from iml_profiler.parser.db import SQLCategoryTimesReader, sql_get_source_files, sql_input_path
-from iml_profiler.parser.dataframe import UtilDataframeReader, OverlapDataframeReader, VennData
+from iml_profiler.parser.dataframe import UtilDataframeReader, OverlapDataframeReader, VennData, read_iml_config_metadata
 
 # figsize (W x H) in inches
 aspect_ratio = 16./9.
@@ -2650,6 +2650,190 @@ class ConvertResourceOverlapToResourceSubplot:
         for venn_path in resource_overlap_paths:
             self.convert_ResourceOverlap_to_ResourceSubplot(venn_path)
 
+class VennJsPlotter:
+    def __init__(self,
+                 # directory,
+                 venn_js,
+                 algo=None,
+                 env=None,
+                 width=None,
+                 height=None,
+                 debug=False,
+                 # Swallow any excess arguments
+                 **kwargs):
+        # TODO: make it so we can plot multiple venn_js paths.
+        # self.directory = directory
+        self.venn_js = venn_js
+        self.algo = algo
+        self.env = env
+        self.width = width
+        self.height = height
+        self.debug = debug
+
+    @staticmethod
+    def _plot_path(venn_js_path, file_ext):
+        plot_path = venn_js_path
+        plot_path = re.sub(r'\.venn_js\.json$', file_ext, plot_path)
+        assert plot_path != venn_js_path
+        return plot_path
+
+    @staticmethod
+    def plot_paths(venn_js_path):
+        file_exts = ['.pdf', '.svg']
+        return [VennJsPlotter._plot_path(venn_js_path, file_ext)
+                for file_ext in file_exts]
+
+    def plot_venn_js(self, venn_path):
+        """
+        E.g. input
+        {
+            "metadata": {
+                "end_time_usec": 1572305950361810,
+                "machine": "eco-15",
+                "overlap_type": "ResourceOverlap",
+                "phase": "selfplay_worker_9_generation_1",
+                "process": "selfplay_worker_9_generation_1",
+                "start_time_usec": 1572300331843396
+            },
+            "venn": [
+                {
+                    "label": "CPU",
+                    "sets": [
+                        0
+                    ],
+                    "size": 4951987256
+                },
+                {
+                    "label": "GPU",
+                    "sets": [
+                        1
+                    ],
+                    "size": 22915662
+                },
+                {
+                    "sets": [
+                        0,
+                        1
+                    ],
+                    "size": 19313474
+                }
+            ]
+        }
+        """
+        iml_dir = _d(venn_path)
+        iml_metadata = read_iml_config_metadata(iml_dir)
+        venn_data = VennData(venn_path)
+        overlap = venn_data.as_dict()
+        overlap.keys()
+        def region_tuple_as_label(region_tuple):
+            return ' + '.join(sorted(region_tuple))
+        col_data = {
+           'time_us': [],
+           'region_tuple': [],
+            'label': [],
+            'x_group': [],
+            'algo': [],
+            'env': [],
+            'x_field': [],
+        }
+        X_GROUP_ALL = 0
+
+        def get_algo_env(opt):
+            if getattr(self, opt) is not None:
+                value = getattr(self, opt)
+            elif opt in iml_metadata:
+                value = iml_metadata[opt]
+            else:
+                value = ''
+            return value
+
+        for region_tuple, time_us in overlap.items():
+            col_data['time_us'].append(time_us)
+            col_data['region_tuple'].append(region_tuple)
+            col_data['label'].append(region_tuple_as_label(region_tuple))
+            col_data['x_group'].append(X_GROUP_ALL)
+            algo = get_algo_env('algo')
+            col_data['algo'].append(algo)
+
+            env = get_algo_env('env')
+            col_data['env'].append(env)
+
+            x_field = "({algo}, {env})".format(
+                algo=algo,
+                env=env)
+            col_data['x_field'].append(x_field)
+
+        df = pd.DataFrame(col_data)
+        df['time_sec'] = df['time_us'] / MICROSECONDS_IN_SECOND
+
+        # Total up the time of each region
+        total_time_sec = df['time_sec'].sum()
+        df['percent'] = df['time_sec']/total_time_sec
+
+        if self.width is not None and self.height is not None:
+            figsize = (self.width, self.height)
+            logging.info("Setting figsize = {fig}".format(fig=figsize))
+            # sns.set_context({"figure.figsize": figsize})
+        else:
+            figsize = None
+
+        sns_kwargs = get_sns_kwargs()
+        plt_kwargs = get_plt_kwargs()
+
+        fig = plt.figure(figsize=figsize)
+        # plot_data['field'] = "Per-API-call interception overhead"
+        ax = fig.add_subplot(111)
+        # sns.barplot(x='x_field', y='training_duration_sec', hue='pretty_config', data=training_duration_plot_data, ax=ax)
+        # ['algo',
+        #  'env',
+        #  'x_field',
+        #  'duration_name',
+        #  'duration_pretty_name',
+        #  'duration_name_order',
+        #  'config',
+        #  'config_pretty_name',
+        #  'duration_sec',
+        #  'x_group',
+        #  'bar_label',
+        #  'percent_wrong']
+        xgroup_barplot = add_grouped_stacked_bars(
+            x='x_field',
+            x_group='x_group',
+            y='time_sec',
+            hue='label',
+            label='label',
+            label_order='label',
+            # bar_label='bar_label',
+            # bar_label_x_offset=3,
+            # bar_label_kwargs=dict(
+            #     fontsize=9
+            # ),
+            data=df,
+            ax=ax,
+            # rotation=10,
+            # rotation=None,
+            debug=self.debug,
+            **plt_kwargs)
+        # for xgroup, barplot in xgroup_barplot.items():
+        #     if xgroup == XGROUP_UNINS:
+        #         add_ax_bar_labels(ax, barplot)
+        # ax.legend().set_title(None)
+        ax.set_ylabel('Total training time (sec)')
+        ax.set_xlabel('(RL algorithm, Simulator)')
+        # ax.set_title("Breakdown of profiling overhead")
+        fig.tight_layout()
+
+        for plot_path in self.plot_paths(venn_path):
+            # plot_path = self.plot_path(venn_path)
+            logging.info("Plot venn_js @ {path}".format(
+                path=plot_path,
+            ))
+            fig.savefig(plot_path)
+        plt.close(fig)
+
+    def run(self):
+        self.plot_venn_js(self.venn_js)
+
 class HeatScalePlot:
     """
     HeatScale/colormap of overall device (CPU/GPU) utilization.
@@ -3104,6 +3288,219 @@ def disable_test_just_legend():
     figlegend.savefig(
         'test_just_legend.png',
         bbox_inches="tight")
+
+def get_sns_kwargs():
+    sns_kwargs = dict()
+    sns_kwargs['capsize'] = 0.04
+    sns_kwargs['errwidth'] = 1.25
+    return sns_kwargs
+
+def get_plt_kwargs():
+    plt_kwargs = dict()
+    plt_kwargs['capsize'] = 5
+    return plt_kwargs
+
+def add_grouped_stacked_bars(
+    x, x_group, y, hue,
+    bar_label=None,
+    bar_label_x_offset=0,
+    bar_label_kwargs=dict(),
+    label=None,
+    label_order=None,
+    data=None,
+    ax=None,
+    rotation=None,
+    debug=False,
+    **kwargs):
+    # sns.barplot(x=.., y=.., hue=..)
+
+    # add_stacked_bars(
+    #     x='x_field',
+    #     y='total_overhead_sec',
+    #     hue='overhead_type_order',
+    #     label='pretty_overhead_type',
+    #     data=total_plot_data, ax=ax,
+    #     debug=self.debug,
+    #     **plt_kwargs)
+
+    def _calc_bar_xloc(n, w):
+        """
+        n = total number of bars
+        w = width per bar
+
+        :param n:
+        :return:
+        """
+        i = np.arange(n) - (n // 2)
+        if n % 2 == 0:
+            # even:
+            # n = 4
+            # i = [0, 1, 2, 3]
+            ws = i*w + w/2
+        else:
+            # odd:
+            # n = 5
+            # i = [0, 1, 2, 3, 4]
+            ws = i*w
+        return ws
+
+    x_groups = data[x_group].unique()
+    total_bar_width = 2/3
+    # width per bar:
+    # bar_width = 0.33
+    bar_width = total_bar_width/len(x_groups)
+    bar_xloc = _calc_bar_xloc(len(x_groups), bar_width)
+
+    def _add_stacked_bars(xgroup_idx, data=None):
+        # sns.barplot(x=.., y=.., hue=..)
+
+        # Q: Does order of "data" affect groups returned by groupby?
+        if label is not None:
+            groupby_cols = [hue, label]
+        else:
+            groupby_cols = [hue]
+        data_groupby = data.groupby(groupby_cols)
+        groups = [pair[0] for pair in list(data_groupby)]
+        logging.info("groups: " + pprint_msg(groups))
+        means = dict()
+        stds = dict()
+        for group, group_df in data_groupby:
+            means[group] = group_df.groupby([x]).mean().reset_index()
+            stds[group] = group_df.groupby([x]).std().reset_index()
+        bottom = None
+
+        xtick_labels = means[groups[0]][x]
+        xticks = np.arange(len(xtick_labels))
+        ax.set_xticks(xticks)
+        ax.set_xticklabels(xtick_labels, rotation=rotation)
+        for group in groups:
+            xs = means[group][x]
+            assert (xs == xtick_labels).all()
+            ys = means[group][y]
+            std = stds[group][y]
+            # plt.bar(x=xs, height=ys, yerr=std, bottom=bottom, ax=ax)
+
+            # Order in which we call this determines order in which stacks appear.
+            if label is not None:
+                # group = [hue, label]
+                label_str = group[1]
+            else:
+                # group = hue
+                label_str = group
+            if debug:
+                logging.info("add_stacked_bars:\n{msg}".format(
+                    msg=pprint_msg({
+                        'xs':xs,
+                        'xticks':xticks,
+                        'ys':ys,
+                    })))
+            # barplot = ax.bar(x=xs, height=ys, yerr=std, label=label_str, bottom=bottom, **kwargs)
+            # [width/n]
+            # bar_x = []
+            # -1 1
+            # -2 -1 1 2
+            ## for
+            barplot = ax.bar(x=xticks + bar_xloc[xgroup_idx], height=ys, width=bar_width, yerr=std, label=label_str, bottom=bottom, **kwargs)
+            # # TODO: add rect labels... how?
+            # if xgroup_idx == 1:
+            #     import ipdb; ipdb.set_trace()
+            if bar_label is not None:
+                bar_labels = data['bar_label']
+                add_ax_bar_labels(ax, barplot, bar_labels, x_offset=bar_label_x_offset, **bar_label_kwargs)
+
+            if bottom is None:
+                bottom = ys
+            else:
+                bottom += ys
+        return barplot
+
+    xgroup_groupby = data.groupby([x_group])
+    xgroup_barplot = dict()
+    for xgroup_idx, (xgroup, xgroup_df) in enumerate(xgroup_groupby):
+        logging.info("xgroup = {xgroup}".format(xgroup=xgroup))
+        # Q: Does order of "data" affect groups returned by groupby?
+        barplot = _add_stacked_bars(xgroup_idx, data=xgroup_df)
+        xgroup_barplot[xgroup] = barplot
+
+    handles, labels = ax.get_legend_handles_labels()
+    if label_order and label:
+        lb_to_order = dict()
+        for order, lb in [g for (g, d) in data.groupby([label_order, label])]:
+            lb_to_order[lb] = order
+        new_labels = reversed(sorted(labels, key=lambda lb: lb_to_order[lb]))
+        label_handle_pairs = reversed(sorted(((lb_to_order[lb], h) for lb, h in zip(labels, handles))))
+        new_handles = [pair[1] for pair in label_handle_pairs]
+        # ax.legend(new_handles, new_labels)
+    else:
+        # Reverse legend label order (when making stacked bar its in reverse order)
+        # ax.legend(handles[::-1], labels[::-1], title=None, loc='upper left')
+        new_handles = handles[::-1]
+        new_labels = labels[::-1]
+        # ax.legend(new_handles, new_labels)
+    ax.legend(new_handles, new_labels,
+              fancybox=True, framealpha=0.5)
+
+
+
+    return xgroup_barplot
+
+def add_bar_labels(y, hue, ax=None, get_bar_labels=None, y_add_factor=0.025):
+    """
+    :param y:
+    :param hue:
+    :param ax:
+    :param get_bar_labels:
+    :param y_add_factor:
+        Multiply y-axis by y_add_factor and add it to label position;
+        useful for preventing overlap with error bars.
+    :return:
+    """
+    # Iterate through the list of axes' patches
+    # Q: In what order do we iterate the patches?
+
+    if get_bar_labels is not None:
+        # Q: I have NO idea what this would do if there were multiple x_fields... oh well.
+        _, labels = ax.get_legend_handles_labels()
+        ys = [p.get_height() for p in ax.patches]
+        df = pd.DataFrame({
+            hue: labels,
+            y: ys,
+            # Not sure how to get x_field...only xpos.
+            # x: ,
+        })
+        # df['bar_label'] = get_bar_labels(df)
+        bar_labels = get_bar_labels(df)
+
+    for i, (p, label) in enumerate(zip(ax.patches, labels)):
+        xpos = p.get_x() + p.get_width()/2.
+        y_bottom, y_top = ax.get_ylim()
+        add_ypos = y_add_factor*(y_top - y_bottom)
+        ypos = p.get_height() + add_ypos
+        if get_bar_labels is None:
+            bar_label = '%d' % int(p.get_height())
+        else:
+            bar_label = bar_labels[i]
+
+        ax.text(xpos, ypos, bar_label,
+                ha='center', va='bottom')
+
+def add_ax_bar_labels(ax, rects, labels, x_offset=0, y_offset=0, **kwargs):
+    """Attach a text label above each bar in *rects*, displaying its height."""
+    # https://matplotlib.org/3.1.1/gallery/lines_bars_and_markers/barchart.html
+    # 3 points vertical offset
+    xy_offset = (x_offset, y_offset + 3)
+    for rect, label in zip(rects, labels):
+        if label is not None and label != "":
+            height = rect.get_height()
+            # label = '{}'.format(height)
+            ax.annotate(label,
+                        xy=(rect.get_x() + rect.get_width() / 2, height),
+                        xytext=xy_offset,
+                        textcoords="offset points",
+                        ha='center', va='bottom',
+                        **kwargs)
+
+
 
 from iml_profiler.profiler import iml_logging
 def main():

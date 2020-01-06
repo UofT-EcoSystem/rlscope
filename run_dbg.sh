@@ -10,6 +10,6 @@ if [ "$DEBUG" = 'yes' ]; then
     set -x
 fi
 cd $(dirname $0)
-./run.sh "cd Debug && make -j$(nproc)" 
-./run.sh "$@"
+python ./run.py bash -c "cd Debug && make -j$(nproc)"
+python ./run.py "$@"
 # Debug/cpp_dump_proto --mode overlap --iml_directory output/perf_debug
