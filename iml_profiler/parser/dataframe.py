@@ -136,13 +136,13 @@ class BaseDataframeReader:
         if not self._has_iml_columns():
             return
         def _get(col):
-            self._add_col(col, self.iml_metadata.get(col, ''), data=data)
+            self._add_col(col, self.iml_metadata['metadata'].get(col, ''), data=data)
         # Q: should we just set ALL the metadata?
         _get('algo')
         _get('env')
 
     def _has_iml_columns(self):
-        return 'algo' in self.iml_metadata and 'env' in self.iml_metadata
+        return 'algo' in self.iml_metadata['metadata'] and 'env' in self.iml_metadata['metadata']
 
     def _get_iml_columns(self):
         if not self._has_iml_columns():
@@ -1130,12 +1130,14 @@ def read_iml_config(directory):
     return iml_config
 
 def read_iml_config_metadata(directory):
-    iml_metadata = dict()
+    iml_metadata = {
+        'metadata': dict()
+    }
     iml_config_paths = get_iml_config_path(directory, allow_many=True)
     for iml_config_path in iml_config_paths:
         iml_config = load_json(iml_config_path)
         if 'metadata' in iml_config:
-            iml_metadata.update(iml_config['metadata'])
+            iml_metadata['metadata'].update(iml_config['metadata'])
 
         if 'env' in iml_config and 'CUDA_VISIBLE_DEVICES' in iml_config['env']:
             if 'env' not in iml_metadata:
@@ -1505,6 +1507,10 @@ class VennData:
 
     def as_dict(self):
         """
+        NOTE: This returns venn_js sizes.
+        i.e.
+        ('CPU',) contains the size of the CPU region, INCLUDING possible overlap with GPU.
+        ('CPU', 'GPU',) contains only the overlap across CPU and GPU.
         {
             ('CPU',): 135241018.0,
             ('GPU',): 3230025.0,
@@ -1520,3 +1526,94 @@ class VennData:
             assert labels not in d
             d[labels] = size_us
         return d
+
+    def as_overlap_dict(self):
+        """
+        NOTE: This returns "overlap" sizes.
+        i.e.
+        ('CPU',) contains the exclusive size of the CPU region, NOT INCLUDING possible overlap with GPU.
+        ('CPU', 'GPU',) contains only the overlap across CPU and GPU.
+
+        {
+            ('CPU',): 132010993,
+            ('GPU',): 0,
+            ('CPU', 'GPU'): 3230025.0,
+        }
+
+
+        PSEUDOCODE:
+        overlap = dict()
+        for region, size_us in venn_sizes.keys():
+            if len(region) == 1:
+                overlap[region] += size_us
+            else:
+                overlap[region] = size_us
+                for r in region:
+                    overlap[(r,)] -= size_us
+        """
+        venn_sizes = self.as_dict()
+        overlap = dict()
+        def mk_region(region):
+            if region not in overlap:
+                overlap[region] = 0.
+        for region, size_us in venn_sizes.items():
+            if len(region) == 1:
+                mk_region(region)
+                overlap[region] += size_us
+            else:
+                mk_region(region)
+                overlap[region] = size_us
+                for r in region:
+                    mk_region((r,))
+                    overlap[(r,)] -= size_us
+
+        for region, size_us in overlap.items():
+            assert size_us >= 0
+
+        # NOTE: if a region only exists in overlap with another region
+        # (e.g. CUDA API CPU + Framework API C),
+        # we DON'T want to have a legend-label for it.
+        del_regions = set()
+        for region, size_us in overlap.items():
+            if size_us == 0:
+                del_regions.add(region)
+        for region in del_regions:
+            del overlap[region]
+
+        return overlap
+
+
+def get_training_durations_df(directories,
+                              debug=False,
+                              debug_single_thread=False):
+    def get_value(df_reader):
+        return df_reader.training_duration_df()
+    return map_readers(TrainingProgressDataframeReader, directories, get_value,
+                       debug=debug,
+                       debug_single_thread=debug_single_thread)
+
+
+def map_readers(DataframeReaderKlass, directories, func,
+                debug=False,
+                debug_single_thread=False):
+    xs = []
+
+    if type(directories) == str:
+        dirs = [directories]
+    else:
+        dirs = list(directories)
+
+    for directory in dirs:
+        df_reader = DataframeReaderKlass(
+            directory,
+            # add_fields=self.maybe_add_algo_env,
+            debug=debug,
+            debug_single_thread=debug_single_thread)
+        x = func(df_reader)
+        xs.append(x)
+
+    if type(directories) == str:
+        assert len(xs) == 1
+        return xs[0]
+    return xs
+

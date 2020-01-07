@@ -240,6 +240,12 @@ def main():
           plots
         """.rstrip()))
     parser.add_argument(
+        '--unins-dir',
+        default='./output/expr_total_training_time',
+        help=textwrap.dedent("""\
+        Root directory containing full uninstrumented training runs 
+        """.rstrip()))
+    parser.add_argument(
         '--repetition',
         type=int,
         help=textwrap.dedent("""\
@@ -872,6 +878,16 @@ class ExperimentGroup(Experiment):
         iml_directory = get_iml_directory(args.config, args.dir, algo, env_id, args.repetition)
         return iml_directory
 
+    def unins_iml_directory(self, algo, env_id):
+        args = self.args
+        config = 'uninstrumented'
+        repetition = 1
+        iml_directory = _j(args.unins_dir, algo, env_id, 'config_{config}_repetition_{r:02}'.format(
+            config=config,
+            r=repetition,
+        ))
+        return iml_directory
+
     def algo_env_pairs(self):
         gather = GatherAlgoEnv(self.args)
         return gather.algo_env_pairs()
@@ -922,8 +938,22 @@ class ExperimentGroup(Experiment):
         algo_env_pairs = list(set(algo_env_pairs))
         algo_env_pairs.sort(key=sort_key)
         iml_dirs = [self.iml_directory(algo, env_id) for algo, env_id in algo_env_pairs]
+        unins_iml_dirs = []
+        for algo, env_id in algo_env_pairs:
+            unins_iml_dir = self.unins_iml_directory(algo, env_id)
+            if _d(unins_iml_dir):
+                unins_iml_dirs.append(unins_iml_dir)
+            else:
+                logging.info("OverlapStackedBarTask.SKIP unins_iml_dir = {path}".format(
+                    path=unins_iml_dir))
+        logging.info("OverlapStackedBarTask.args =\n{msg}".format(
+            msg=pprint_msg({
+                'algo_env_pairs': algo_env_pairs,
+                'unins_iml_dirs': unins_iml_dirs,
+            })))
         cmd.extend([
             '--iml-directories', json.dumps(iml_dirs),
+            '--unins-iml-directories', json.dumps(unins_iml_dirs),
         ])
 
         cmd.extend([

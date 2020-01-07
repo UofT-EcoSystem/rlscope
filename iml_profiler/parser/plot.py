@@ -2723,8 +2723,7 @@ class VennJsPlotter:
         iml_dir = _d(venn_path)
         iml_metadata = read_iml_config_metadata(iml_dir)
         venn_data = VennData(venn_path)
-        overlap = venn_data.as_dict()
-        overlap.keys()
+        overlap = venn_data.as_overlap_dict()
         def region_tuple_as_label(region_tuple):
             return ' + '.join(sorted(region_tuple))
         col_data = {
@@ -2741,8 +2740,8 @@ class VennJsPlotter:
         def get_algo_env(opt):
             if getattr(self, opt) is not None:
                 value = getattr(self, opt)
-            elif opt in iml_metadata:
-                value = iml_metadata[opt]
+            elif opt in iml_metadata['metadata']:
+                value = iml_metadata['metadata'][opt]
             else:
                 value = ''
             return value
@@ -3348,7 +3347,11 @@ def add_grouped_stacked_bars(
     total_bar_width = 2/3
     # width per bar:
     # bar_width = 0.33
-    bar_width = total_bar_width/len(x_groups)
+    if len(x_groups) > 0:
+        bar_width = total_bar_width/len(x_groups)
+    else:
+        # Prevent division by zero for empty dataframes.
+        bar_width = 0.33
     bar_xloc = _calc_bar_xloc(len(x_groups), bar_width)
 
     def _add_stacked_bars(xgroup_idx, data=None):

@@ -878,6 +878,7 @@ class GeneratePlotIndexTask(luigi.Task):
 
 class OverlapStackedBarTask(luigi.Task):
     iml_directories = luigi.ListParameter(description="Multiple --iml-directory entries for finding overlap_type files: *.venn_js.js")
+    unins_iml_directories = luigi.ListParameter(description="Multiple --iml-directory entries for finding total uninstrumented training time (NOTE: every iml_directory should have an unins_iml_directory)")
     directory = luigi.Parameter(description="Output directory", default=".")
     title = luigi.Parameter(description="Plot title", default=None)
     rotation = luigi.FloatParameter(description="x-axis title rotation", default=45.)

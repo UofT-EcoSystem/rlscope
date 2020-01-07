@@ -14,7 +14,7 @@ import seaborn as sns
 
 from matplotlib import pyplot as plt
 
-from iml_profiler.parser.dataframe import TrainingProgressDataframeReader, CUDAAPIStatsDataframeReader, PyprofDataframeReader, read_iml_config, DataframeMapper, IMLConfig, VennData
+from iml_profiler.parser.dataframe import TrainingProgressDataframeReader, CUDAAPIStatsDataframeReader, PyprofDataframeReader, read_iml_config, DataframeMapper, IMLConfig, VennData, map_readers, get_training_durations_df
 from iml_profiler.parser.readers import OpStackReader, CUDAAPIStatsReader
 from iml_profiler.parser.stacked_bar_plots import StackedBarPlot
 from iml_profiler.parser import stacked_bar_plots
@@ -633,6 +633,7 @@ class CorrectedTrainingTimeParser:
             fig.savefig(self._total_png_path)
             plt.close(fig)
 
+        # JAMES: uninstrumented training time
         def load_unins_training_durations_df():
             memoize_path = _j(self.directory, "{klass}.load_unins_training_durations_df.pickle".format(
                 klass=self.__class__.__name__))
@@ -2274,44 +2275,11 @@ class CUPTIOverheadParser:
     def _png_path(self):
         return _j(self.directory, "cupti_overhead.png")
 
-def map_readers(DataframeReaderKlass, directories, func,
-                debug=False,
-                debug_single_thread=False):
-    xs = []
-
-    if type(directories) == str:
-        dirs = [directories]
-    else:
-        dirs = list(directories)
-
-    for directory in dirs:
-        df_reader = DataframeReaderKlass(
-            directory,
-            # add_fields=self.maybe_add_algo_env,
-            debug=debug,
-            debug_single_thread=debug_single_thread)
-        x = func(df_reader)
-        xs.append(x)
-
-    if type(directories) == str:
-        assert len(xs) == 1
-        return xs[0]
-    return xs
-
 def get_training_durations(directories,
                            debug=False,
                            debug_single_thread=False):
     def get_value(df_reader):
         return df_reader.training_duration_us()
-    return map_readers(TrainingProgressDataframeReader, directories, get_value,
-                       debug=debug,
-                       debug_single_thread=debug_single_thread)
-
-def get_training_durations_df(directories,
-                              debug=False,
-                              debug_single_thread=False):
-    def get_value(df_reader):
-        return df_reader.training_duration_df()
     return map_readers(TrainingProgressDataframeReader, directories, get_value,
                        debug=debug,
                        debug_single_thread=debug_single_thread)

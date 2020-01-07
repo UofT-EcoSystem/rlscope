@@ -24,7 +24,7 @@ from os.path import join as _j, abspath as _a, exists as _e, dirname as _d, base
 from iml_profiler.parser.db import SQLCategoryTimesReader, sql_get_source_files, sql_input_path
 from iml_profiler.parser.plot_index import _DataIndex
 from iml_profiler.parser import plot_index
-from iml_profiler.parser.dataframe import VennData
+from iml_profiler.parser.dataframe import VennData, get_training_durations_df
 
 from iml_profiler.parser.common import *
 
@@ -68,6 +68,7 @@ class OverlapStackedBarPlot:
 
     def __init__(self,
                  iml_directories,
+                 unins_iml_directories,
                  directory,
                  overlap_type,
                  resource_overlap=None,
@@ -92,6 +93,7 @@ class OverlapStackedBarPlot:
                  user=None,
                  password=None,
                  debug=False,
+                 debug_single_thread=False,
                  # Swallow any excess arguments
                  **kwargs):
         """
@@ -118,6 +120,13 @@ class OverlapStackedBarPlot:
         if len(iml_directories) == 0:
             raise ValueError("OverlapStackedBarPlot expects at least 1 trace-file directory for iml_directories")
         self.iml_directories = iml_directories
+        self.unins_iml_directories = unins_iml_directories
+        logging.info("{klass}:\n{msg}".format(
+            klass=self.__class__.__name__,
+            msg=pprint_msg({
+                'iml_directories': self.iml_directories,
+                'unins_iml_directories': self.unins_iml_directories,
+            })))
         self.training_time = training_time
         self.should_add_training_time = training_time
         self.directory = directory
@@ -146,6 +155,7 @@ class OverlapStackedBarPlot:
         self.user = user
         self.password = password
         self.debug = debug
+        self.debug_single_thread = debug_single_thread
 
     def _get_plot_path(self, ext):
         if self.suffix is not None:
@@ -260,16 +270,16 @@ class OverlapStackedBarPlot:
 
         return title
 
-    def _get_algo_env_id(self, iml_dir):
-        sql_reader = self.sql_readers[iml_dir]
-        procs = sql_reader.process_names()
-        assert len(procs) == 1
-        proc = procs[0]
-        m = re.search(r'(?P<algo>[^_]+)_(?P<env_id>.+)', proc)
-        algo = m.group('algo')
-        env_id = m.group('env_id')
-        env_id = self._reduce_env(env_id)
-        return (algo, env_id)
+    # def _get_algo_env_id(self, iml_dir):
+    #     sql_reader = self.sql_readers[iml_dir]
+    #     procs = sql_reader.process_names()
+    #     assert len(procs) == 1
+    #     proc = procs[0]
+    #     m = re.search(r'(?P<algo>[^_]+)_(?P<env_id>.+)', proc)
+    #     algo = m.group('algo')
+    #     env_id = m.group('env_id')
+    #     env_id = self._reduce_env(env_id)
+    #     return (algo, env_id)
 
     def _get_algo_env_from_dir(self, iml_dir):
         # .../<algo>/<env_id>
@@ -332,6 +342,29 @@ class OverlapStackedBarPlot:
         my_index = _DataIndex(index.index, iml_dir)
         return my_index
 
+    def read_unins_df(self):
+        # def load_unins_training_durations_df():
+        #     memoize_path = _j(self.directory, "{klass}.load_unins_training_durations_df.pickle".format(
+        #         klass=self.__class__.__name__))
+        #
+        #     if should_load_memo(self.debug_memoize, memoize_path):
+        #         ret = load_memo(self.debug_memoize, memoize_path)
+        #         return ret
+        #
+        #     ret = pd.concat(get_training_durations_df(self.uninstrumented_directories, debug=self.debug, debug_single_thread=self.debug_single_thread))
+        #
+        #     maybe_memoize(self.debug_memoize, ret, memoize_path)
+        #
+        #     return ret
+
+        unins_df = pd.concat(get_training_durations_df(
+            self.unins_iml_directories,
+            debug=self.debug,
+            debug_single_thread=self.debug_single_thread))
+        unins_df['unins_total_training_time_us'] = unins_df['training_duration_us']
+        return unins_df
+
+
     def _init_directories(self):
         """
         Initialize SQL / DataIndex needed for reading plot-data from iml-analyze'd --iml-directory's.
@@ -339,10 +372,10 @@ class OverlapStackedBarPlot:
         :return:
         """
         self.data_index = dict()
-        self.sql_readers = dict()
+        # self.sql_readers = dict()
 
         for iml_dir in self.iml_directories:
-            self.sql_readers[iml_dir] = SQLCategoryTimesReader(self.db_path(iml_dir), host=self.host, user=self.user, password=self.password)
+            # self.sql_readers[iml_dir] = SQLCategoryTimesReader(self.db_path(iml_dir), host=self.host, user=self.user, password=self.password)
             index = self.get_index(iml_dir)
             self.data_index[iml_dir] = index
 
@@ -430,7 +463,7 @@ class OverlapStackedBarPlot:
                 # Extrapolate the total training time using percent_complete
                 assert 'percent_complete' in md
                 total_training_time = extrap_total_training_time(total_size, md['percent_complete'])
-                new_stacked_dict['total_training_time'] = total_training_time
+                new_stacked_dict['extrap_total_training_time'] = total_training_time
             new_stacked_dict = dict((k, as_list(v)) for k, v in new_stacked_dict.items())
             df = pd.DataFrame(new_stacked_dict)
 
@@ -551,7 +584,43 @@ class OverlapStackedBarPlot:
 
         return new_df
 
+
     def _read_df(self):
+        # TODO: merge these on (algo, env)
+        # Only keep rows that have both.
+        # (Would be nice to warn which rows are missing what)
+        self.unins_df = self.read_unins_df()
+        self.ins_df = self.read_ins_df()
+
+        self.df = self.ins_df.merge(self.unins_df, on=['algo', 'env'])
+        self.df['total_training_time'] = self.df['unins_total_training_time_us']
+
+        # # Keep (algo, env) even if we don't have total uninstrumented training time for it.
+        # # Use extrapolated time instead.
+        # self.df = self.ins_df.merge(self.unins_df, on=['algo', 'env'], how='left')
+        # def get_total_training_time(row):
+        #     # Prefer actual uninstrumented training time over extrapolated training time.
+        #     # Q: isn't extrapolated time including overheads...?
+        #     if np.isnan(row['unins_total_training_time_us']):
+        #         return row['extrap_total_training_time']
+        #     return row['unins_total_training_time_us']
+        # self.df['total_training_time'] = self.df.apply(get_total_training_time, axis=1)
+
+        buf = StringIO()
+        DataFrame.print_df(self.unins_df, file=buf)
+        logging.info("unins_df:\n{msg}".format(
+            msg=textwrap.indent(buf.getvalue(), prefix='  '),
+            # pprint_msg(self.unins_df),
+        ))
+
+        buf = StringIO()
+        DataFrame.print_df(self.df, file=buf)
+        logging.info("ins_df:\n{msg}".format(
+            msg=textwrap.indent(buf.getvalue(), prefix='  '),
+            # msg=pprint_msg(self.df),
+        ))
+
+    def read_ins_df(self):
         """
         Read venn_js data of several --iml-directory's into a single data-frame.
 
@@ -600,7 +669,8 @@ class OverlapStackedBarPlot:
 
             dfs.append(df)
 
-        self.df = pd.concat(dfs)
+        ins_df = pd.concat(dfs)
+        return ins_df
 
     def _HACK_remove_process_operation_df(self, df):
         """
@@ -626,9 +696,9 @@ class OverlapStackedBarPlot:
             if self._is_region(colname):
                 op_name = colname[0]
                 if is_op_process_event(op_name, CATEGORY_OPERATION):
-                    logging.info("HACK: remove process_name={proc} from operation dataframe".format(
-                        proc=op_name,
-                    ))
+                    # logging.info("HACK: remove process_name={proc} from operation dataframe".format(
+                    #     proc=op_name,
+                    # ))
                     remove_cols.add(colname)
         for colname in remove_cols:
             del df[colname]
