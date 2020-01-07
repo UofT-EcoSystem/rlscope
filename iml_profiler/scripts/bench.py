@@ -941,7 +941,7 @@ class ExperimentGroup(Experiment):
         unins_iml_dirs = []
         for algo, env_id in algo_env_pairs:
             unins_iml_dir = self.unins_iml_directory(algo, env_id)
-            if _d(unins_iml_dir):
+            if os.path.isdir(unins_iml_dir):
                 unins_iml_dirs.append(unins_iml_dir)
             else:
                 logging.info("OverlapStackedBarTask.SKIP unins_iml_dir = {path}".format(
