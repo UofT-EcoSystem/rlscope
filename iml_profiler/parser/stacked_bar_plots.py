@@ -646,16 +646,16 @@ class OverlapStackedBarPlot:
         # Only keep rows that have both.
         # (Would be nice to warn which rows are missing what)
 
-        if not self.detailed:
-            self.unins_df = self.read_unins_df()
-            self.ins_df = self.read_ins_df()
+        self.unins_df = self.read_unins_df()
+        buf = StringIO()
+        DataFrame.print_df(self.unins_df, file=buf)
+        logging.info("unins_df:\n{msg}".format(
+            msg=textwrap.indent(buf.getvalue(), prefix='  '),
+            # pprint_msg(self.unins_df),
+        ))
 
-            buf = StringIO()
-            DataFrame.print_df(self.unins_df, file=buf)
-            logging.info("unins_df:\n{msg}".format(
-                msg=textwrap.indent(buf.getvalue(), prefix='  '),
-                # pprint_msg(self.unins_df),
-            ))
+        if not self.detailed:
+            self.ins_df = self.read_ins_df()
 
             buf = StringIO()
             DataFrame.print_df(self.df, file=buf)
@@ -667,7 +667,9 @@ class OverlapStackedBarPlot:
             self.df = self.ins_df.merge(self.unins_df, on=['algo', 'env'])
             self.df['total_training_time'] = self.df['unins_total_training_time_us']
         else:
-            self.df = self.read_ins_df()
+            self.ins_df = self.read_ins_df()
+            self.df = self.ins_df.merge(self.unins_df, on=['algo', 'env'])
+            self.df['total_training_time'] = self.df['unins_total_training_time_us'] * self.df['percent']
 
             # buf = StringIO()
             # DataFrame.print_df(self.df, file=buf)
@@ -750,6 +752,9 @@ class OverlapStackedBarPlot:
         non_numeric_cols = all_cols.difference(numeric_cols)
         # ins_df.groupby(['machine', 'operation', 'phase', 'process', 'region', 'resource_overlap', 'category', 'algo', 'env', 'x_field']).sum().reset_index()
         ins_df = ins_df.groupby(list(non_numeric_cols)).sum().reset_index()
+
+        total_size = ins_df['size'].sum()
+        ins_df['percent'] = ins_df['size']/total_size
 
         return ins_df
 
@@ -846,10 +851,10 @@ class OverlapStackedBarPlot:
 
             return ret
 
-        if not self.detailed:
+        if 'total_training_time' in self.df:
+            self.df['total_training_time'] = transform_usec_to_sec(self.df, 'total_training_time')
 
-            if 'total_training_time' in self.df:
-                self.df['total_training_time'] = transform_usec_to_sec(self.df, 'total_training_time')
+        if not self.detailed:
 
             if self.y_type == 'seconds':
                 for group in self.regions:
@@ -913,7 +918,8 @@ class OverlapStackedBarPlot:
             data=self.df,
             path=self._plot_path('plot_category'),
             x_field='x_field',
-            y_field='time_sec',
+            # y_field='time_sec',
+            y_field='total_training_time',
             hatch='operation',
             hue='category',
             xlabel='(RL algorithm, Simulator)',
@@ -939,7 +945,8 @@ class OverlapStackedBarPlot:
             data=resource_df,
             path=self._plot_path('plot_resource'),
             x_field='x_field',
-            y_field='time_sec',
+            # y_field='time_sec',
+            y_field='total_training_time',
             hatch='operation',
             hue='resource_overlap',
             xlabel='(RL algorithm, Simulator)',
