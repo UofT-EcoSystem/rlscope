@@ -6,6 +6,7 @@ import importlib
 import sys
 import textwrap
 import copy
+import itertools
 
 from matplotlib import ticker as mpl_ticker
 import matplotlib
@@ -25,6 +26,7 @@ from iml_profiler.parser.db import SQLCategoryTimesReader, sql_get_source_files,
 from iml_profiler.parser.plot_index import _DataIndex
 from iml_profiler.parser import plot_index
 from iml_profiler.parser.dataframe import VennData, get_training_durations_df
+from iml_profiler.parser.plot import LegendMaker, HATCH_STYLES
 
 from iml_profiler.parser.common import *
 
@@ -74,6 +76,7 @@ class OverlapStackedBarPlot:
                  resource_overlap=None,
                  operation=None,
                  training_time=False,
+                 detailed=False,
                  remap_df=None,
                  y2_logscale=False,
                  ignore_inconsistent_overlap_regions=False,
@@ -128,6 +131,7 @@ class OverlapStackedBarPlot:
                 'unins_iml_directories': self.unins_iml_directories,
             })))
         self.training_time = training_time
+        self.detailed = detailed
         self.should_add_training_time = training_time
         self.directory = directory
         self.overlap_type = overlap_type
@@ -157,28 +161,32 @@ class OverlapStackedBarPlot:
         self.debug = debug
         self.debug_single_thread = debug_single_thread
 
-    def _get_plot_path(self, ext):
+    def _get_plot_path(self, ext, extra_suffix):
         if self.suffix is not None:
             suffix_str = '.{suffix}'.format(suffix=self.suffix)
         else:
             suffix_str = ''
-        return _j(self.directory, "OverlapStackedBarPlot.overlap_type_{ov}{suffix}.{ext}".format(
+
+        if extra_suffix is not None:
+            extra_suffix_str = '.{extra_suffix}'.format(extra_suffix=extra_suffix)
+        else:
+            extra_suffix_str = ''
+
+        return _j(self.directory, "OverlapStackedBarPlot.overlap_type_{ov}{extra_suffix}{suffix}.{ext}".format(
             ov=self.overlap_type,
             suffix=suffix_str,
+            extra_suffix=extra_suffix_str,
             ext=ext,
         ))
 
-    @property
-    def _plot_data_path(self):
-        return self._get_plot_path(ext='txt')
+    def _plot_data_path(self, extra_suffix=None):
+        return self._get_plot_path(ext='txt', extra_suffix=extra_suffix)
 
-    @property
-    def _plot_csv_path(self):
-        return self._get_plot_path(ext='csv')
+    def _plot_csv_path(self, extra_suffix=None):
+        return self._get_plot_path(ext='csv', extra_suffix=extra_suffix)
 
-    @property
-    def _plot_path(self):
-        return self._get_plot_path(ext='pdf')
+    def _plot_path(self, extra_suffix=None):
+        return self._get_plot_path(ext='pdf', extra_suffix=extra_suffix)
 
     # def _json_path(self, device_id, device_name):
     #     return _j(self.directory, "util_scale{dev}.js_path.json".format(
@@ -343,20 +351,6 @@ class OverlapStackedBarPlot:
         return my_index
 
     def read_unins_df(self):
-        # def load_unins_training_durations_df():
-        #     memoize_path = _j(self.directory, "{klass}.load_unins_training_durations_df.pickle".format(
-        #         klass=self.__class__.__name__))
-        #
-        #     if should_load_memo(self.debug_memoize, memoize_path):
-        #         ret = load_memo(self.debug_memoize, memoize_path)
-        #         return ret
-        #
-        #     ret = pd.concat(get_training_durations_df(self.uninstrumented_directories, debug=self.debug, debug_single_thread=self.debug_single_thread))
-        #
-        #     maybe_memoize(self.debug_memoize, ret, memoize_path)
-        #
-        #     return ret
-
         unins_df = pd.concat(get_training_durations_df(
             self.unins_iml_directories,
             debug=self.debug,
@@ -379,7 +373,7 @@ class OverlapStackedBarPlot:
             index = self.get_index(iml_dir)
             self.data_index[iml_dir] = index
 
-    def _add_or_suggest_selector_field(self, idx, selector, field_name, can_ignore=False):
+    def _add_or_suggest_selector_field(self, idx, selector, field_name, can_ignore=False, allow_many=False):
         """
         For e.g. field_name = 'resource_overlap' (['CPU'], or ['CPU', 'GPU']).
 
@@ -405,7 +399,7 @@ class OverlapStackedBarPlot:
             selector[field_name] = value
         else:
             choices = idx.available_values(selector, field_name, can_ignore=can_ignore, skip_missing_fields=True)
-            if len(choices) > 1:
+            if len(choices) > 1 and not allow_many:
                 raise RuntimeError("Please provide {opt}: choices = {choices}".format(
                     opt=optname(field_name),
                     choices=choices,
@@ -435,12 +429,17 @@ class OverlapStackedBarPlot:
             # TODO: support multi-process stuff.
             # NOTE: we should really add more fields here for multi-process support (e.g. 'process' and 'phase');
             # For now this just support single-process results.
-            self._add_or_suggest_selector_field(idx, selector, 'resource_overlap', can_ignore=True)
-            self._add_or_suggest_selector_field(idx, selector, 'operation', can_ignore=self.overlap_type not in ['CategoryOverlap'])
+            if not self.detailed:
+                self._add_or_suggest_selector_field(idx, selector, 'resource_overlap', can_ignore=True)
+            # self._add_or_suggest_selector_field(idx, selector, 'operation', can_ignore=self.overlap_type not in ['CategoryOverlap'])
 
-            md, entry, ident = idx.get_file(selector=selector, skip_missing_fields=True)
-            vd = VennData(entry['venn_js_path'])
-            yield (algo, env), vd
+            for md, entry, ident in idx.get_files(selector=selector, skip_missing_fields=True):
+                vd = VennData(entry['venn_js_path'])
+                yield (algo, env), vd
+
+            # md, entry, ident = idx.get_file(selector=selector, skip_missing_fields=True)
+            # vd = VennData(entry['venn_js_path'])
+            # yield (algo, env), vd
 
     def each_df(self):
         for (algo, env), vd in self.each_vd():
@@ -469,6 +468,24 @@ class OverlapStackedBarPlot:
 
             df = self._HACK_remove_process_operation_df(df)
             df = self._remap_df(df, algo, env)
+
+            yield (algo, env), self._regions(df), path, df
+
+    def new_each_df(self):
+        for (algo, env), vd in self.each_vd():
+            df = vd.as_df(keep_metadata_fields=['machine', 'process', 'phase', 'operation', 'resource_overlap'])
+            df['operation'] = df['operation'].apply(join_plus)
+            df['resource_overlap'] = df['resource_overlap'].apply(join_plus)
+            df['category'] = df['region'].apply(join_plus)
+            df['time_sec'] = df['size'] / MICROSECONDS_IN_SECOND
+            # stacked_dict = vd.stacked_bar_dict()
+            # md = vd.metadata()
+            path = vd.path
+            df['algo'] = algo
+            df['env'] = env
+
+            df = self._new_HACK_remove_process_operation_df(df)
+            df = self._new_remap_df(df, algo, env)
 
             yield (algo, env), self._regions(df), path, df
 
@@ -584,16 +601,80 @@ class OverlapStackedBarPlot:
 
         return new_df
 
+    def _new_remap_df(self, orig_df, algo, env):
+        if self.remap_df is None:
+            return orig_df
+
+        # not_regions = [key for key in orig_df.keys() if not self._is_region(key)]
+
+        # eval context:
+        # TODO: limit locals/globals to these? Don't want to limit numpy/pandas access though.
+        df = copy.copy(orig_df)
+        # regions = self._regions(df)
+        # new_df = df[not_regions]
+        new_df = copy.copy(df)
+        # algo
+        # env
+
+        for df_transformation in self.remap_df:
+            # e.g.
+            # new_df[('other',)] = df[('compute_advantage_estimates',)] +
+            #                      df[('optimize_surrogate',)]
+            if self.debug:
+                logging.info("--remap-df:\n{trans}".format(trans=textwrap.indent(df_transformation, prefix='  ')))
+            exec(df_transformation)
+
+        # Make sure they didn't modify df; they SHOULD be modifying new_df
+        # (i.e. adding regions to a "fresh" slate)
+        assert np.all(df == orig_df)
+
+        if self.debug:
+            # logging.info("--remap-df complete")
+
+            buf = StringIO()
+            DataFrame.print_df(orig_df, file=buf)
+            logging.info("Old dataframe:\n{msg}".format(msg=textwrap.indent(buf.getvalue(), prefix='  ')))
+
+            buf = StringIO()
+            DataFrame.print_df(new_df, file=buf)
+            logging.info("New dataframe after --remap-df:\n{msg}".format(msg=textwrap.indent(buf.getvalue(), prefix='  ')))
+
+        return new_df
 
     def _read_df(self):
         # TODO: merge these on (algo, env)
         # Only keep rows that have both.
         # (Would be nice to warn which rows are missing what)
-        self.unins_df = self.read_unins_df()
-        self.ins_df = self.read_ins_df()
 
-        self.df = self.ins_df.merge(self.unins_df, on=['algo', 'env'])
-        self.df['total_training_time'] = self.df['unins_total_training_time_us']
+        if not self.detailed:
+            self.unins_df = self.read_unins_df()
+            self.ins_df = self.read_ins_df()
+
+            buf = StringIO()
+            DataFrame.print_df(self.unins_df, file=buf)
+            logging.info("unins_df:\n{msg}".format(
+                msg=textwrap.indent(buf.getvalue(), prefix='  '),
+                # pprint_msg(self.unins_df),
+            ))
+
+            buf = StringIO()
+            DataFrame.print_df(self.df, file=buf)
+            logging.info("ins_df:\n{msg}".format(
+                msg=textwrap.indent(buf.getvalue(), prefix='  '),
+                # msg=pprint_msg(self.df),
+            ))
+
+            self.df = self.ins_df.merge(self.unins_df, on=['algo', 'env'])
+            self.df['total_training_time'] = self.df['unins_total_training_time_us']
+        else:
+            self.df = self.read_ins_df()
+
+            # buf = StringIO()
+            # DataFrame.print_df(self.df, file=buf)
+            # logging.info("ins_df:\n{msg}".format(
+            #     msg=textwrap.indent(buf.getvalue(), prefix='  '),
+            #     # msg=pprint_msg(self.df),
+            # ))
 
         # # Keep (algo, env) even if we don't have total uninstrumented training time for it.
         # # Use extrapolated time instead.
@@ -606,19 +687,6 @@ class OverlapStackedBarPlot:
         #     return row['unins_total_training_time_us']
         # self.df['total_training_time'] = self.df.apply(get_total_training_time, axis=1)
 
-        buf = StringIO()
-        DataFrame.print_df(self.unins_df, file=buf)
-        logging.info("unins_df:\n{msg}".format(
-            msg=textwrap.indent(buf.getvalue(), prefix='  '),
-            # pprint_msg(self.unins_df),
-        ))
-
-        buf = StringIO()
-        DataFrame.print_df(self.df, file=buf)
-        logging.info("ins_df:\n{msg}".format(
-            msg=textwrap.indent(buf.getvalue(), prefix='  '),
-            # msg=pprint_msg(self.df),
-        ))
 
     def read_ins_df(self):
         """
@@ -635,18 +703,24 @@ class OverlapStackedBarPlot:
         # Process each df separately, since they have DIFFERENT keys.
         # Then, check that the groups for the df match.
 
-        use_regions = self._check_overlap_json_files()
+        if not self.detailed:
+            use_regions = self._check_overlap_json_files()
 
         dfs = []
-        for (algo, env), regions, path, df in self.each_df():
-
-            logging.info("({algo}, {env}): {msg}".format(
+        if self.detailed:
+            df_iter = self.new_each_df()
+        else:
+            df_iter = self.each_df()
+        for (algo, env), regions, path, df in df_iter:
+            buf = StringIO()
+            DataFrame.print_df(df)
+            logging.info("({algo}, {env}):\n{msg}".format(
                 algo=algo,
                 env=env,
-                msg=pprint_msg(df),
+                msg=textwrap.indent(buf.getvalue(), prefix='  '),
             ))
 
-            if regions != use_regions:
+            if not self.detailed and regions != use_regions:
                 logging.info(
                     textwrap.dedent("""\
                     Skipping {path} (--ignore-inconsistent-overlap-regions)
@@ -662,14 +736,21 @@ class OverlapStackedBarPlot:
             if self.regions is None:
                 self.regions = set(regions)
 
-            if self.debug:
-                logging.info(pprint_msg({
-                    'path': path,
-                    'df': df}))
+            # if self.debug:
+            #     logging.info(pprint_msg({
+            #         'path': path,
+            #         'df': df}))
 
             dfs.append(df)
 
         ins_df = pd.concat(dfs)
+
+        all_cols = set(ins_df.keys())
+        numeric_cols = set([colname for colname in ins_df.keys() if np.issubdtype(ins_df[colname].dtype, np.number)])
+        non_numeric_cols = all_cols.difference(numeric_cols)
+        # ins_df.groupby(['machine', 'operation', 'phase', 'process', 'region', 'resource_overlap', 'category', 'algo', 'env', 'x_field']).sum().reset_index()
+        ins_df = ins_df.groupby(list(non_numeric_cols)).sum().reset_index()
+
         return ins_df
 
     def _HACK_remove_process_operation_df(self, df):
@@ -703,6 +784,32 @@ class OverlapStackedBarPlot:
         for colname in remove_cols:
             del df[colname]
         return df
+
+    def _new_HACK_remove_process_operation_df(self, df):
+        """
+        HACK: BUG: not sure why, but operation overlap contains an operation that looks like the process_name:
+        e.g.
+        {
+            "label": "[ppo2_Walker2DBulletEnv-v0]",
+            "sets": [
+                0
+            ],
+            "size": 45344.0
+        },
+        Likely reason: we used to have code that checked if a Event.event_name looked like a "process_name"...
+        for some reason that code check has been disabled during analysis.
+        Fix: the time is REALLY small compared to everything else, so we can either:
+        1. add it to the largest time (e.g. step)
+        2. ignore it (should be safe if its an absolute time...not safe if its a percent already)
+
+        :return:
+        """
+        def is_process_event(op_name):
+            return bool(is_op_process_event(op_name, CATEGORY_OPERATION))
+        new_df = df[~df['operation'].apply(is_process_event)]
+        return new_df
+
+        return new_df
 
     def _normalize_df(self):
         """
@@ -739,18 +846,20 @@ class OverlapStackedBarPlot:
 
             return ret
 
-        if 'total_training_time' in self.df:
-            self.df['total_training_time'] = transform_usec_to_sec(self.df, 'total_training_time')
+        if not self.detailed:
 
-        if self.y_type == 'seconds':
-            for group in self.regions:
-                self.df[group] = transform_usec_to_sec(self.df, group)
-        elif self.y_type == 'percent':
-            ret = transform_usec_to_percent(self.df)
-            for group in ret.keys():
-                self.df[group] = ret[group]
-        else:
-            raise NotImplementedError
+            if 'total_training_time' in self.df:
+                self.df['total_training_time'] = transform_usec_to_sec(self.df, 'total_training_time')
+
+            if self.y_type == 'seconds':
+                for group in self.regions:
+                    self.df[group] = transform_usec_to_sec(self.df, group)
+            elif self.y_type == 'percent':
+                ret = transform_usec_to_percent(self.df)
+                for group in ret.keys():
+                    self.df[group] = ret[group]
+            else:
+                raise NotImplementedError
 
     def get_x_env(self, env):
         return get_x_env(env, long_env=self.long_env)
@@ -768,7 +877,7 @@ class OverlapStackedBarPlot:
 
         stacked_bar_plot = StackedBarPlot(
             data=self.df,
-            path=self._plot_path,
+            path=self._plot_path(),
             groups=sorted(self.regions),
             x_field='x_field',
             y2_field=y2_field,
@@ -784,6 +893,59 @@ class OverlapStackedBarPlot:
             rotation=self.rotation,
             # groups: the "keys" into the data dictionary, which are the "stacks" found in each bar.
             group_to_label=self.group_to_label,
+        )
+        stacked_bar_plot.plot()
+
+    def _detailed_plot_df(self):
+        buf = StringIO()
+        DataFrame.print_df(self.df)
+        logging.info("Dataframe:\n{df}".format(
+            df=textwrap.indent(buf.getvalue(), prefix='  ')))
+
+        # if self.training_time:
+        #     y2_field = 'total_training_time'
+        # else:
+        #     y2_field = None
+
+
+
+        stacked_bar_plot = DetailedStackedBarPlot(
+            data=self.df,
+            path=self._plot_path('plot_category'),
+            x_field='x_field',
+            y_field='time_sec',
+            hatch='operation',
+            hue='category',
+            xlabel='(RL algorithm, Simulator)',
+            ylabel='Total training time (seconds)',
+            title=self.plot_title,
+            debug=self.debug,
+        )
+        stacked_bar_plot.plot()
+
+        ignore_cols = ['category', 'region']
+        all_cols = set(self.df.keys())
+        numeric_cols = set([
+            colname for colname in self.df.keys()
+            if np.issubdtype(self.df[colname].dtype, np.number)])
+        non_numeric_cols = all_cols.difference(numeric_cols)
+
+        groupby_cols = non_numeric_cols.difference(ignore_cols)
+        keep_cols = all_cols.difference(ignore_cols)
+        groupby = self.df[list(keep_cols)].groupby(by=list(groupby_cols))
+        resource_df = groupby.sum().reset_index()
+
+        stacked_bar_plot = DetailedStackedBarPlot(
+            data=resource_df,
+            path=self._plot_path('plot_resource'),
+            x_field='x_field',
+            y_field='time_sec',
+            hatch='operation',
+            hue='resource_overlap',
+            xlabel='(RL algorithm, Simulator)',
+            ylabel='Total training time (seconds)',
+            title=self.plot_title,
+            debug=self.debug,
         )
         stacked_bar_plot.plot()
 
@@ -825,7 +987,10 @@ class OverlapStackedBarPlot:
         if self.skip_plot:
             logging.info("Skipping plotting {path} (--skip-plot)".format(path=self._plot_path))
         else:
-            self._plot_df()
+            if self.detailed:
+                self._detailed_plot_df()
+            else:
+                self._plot_df()
 
         # self.dump_js_data(norm_samples, device, start_time_sec)
         # plotter.add_data(norm_samples)
@@ -866,15 +1031,15 @@ class OverlapStackedBarPlot:
 
         logging.info("> {name} @ human readable plot data @ {path}".format(
             name=self.__class__.__name__,
-            path=self._plot_data_path))
-        with open(self._plot_data_path, 'w') as f:
+            path=self._plot_data_path()))
+        with open(self._plot_data_path(), 'w') as f:
             DataFrame.print_df(human_df, file=f)
 
         logging.info("> {name} @ csv plot data @ {path}".format(
             name=self.__class__.__name__,
-            path=self._plot_csv_path))
+            path=self._plot_csv_path()))
 
-        human_df.to_csv(self._plot_csv_path, index=False)
+        human_df.to_csv(self._plot_csv_path(), index=False)
 
         # Print human readable plot data to stdout
         logging.info(pprint_msg(human_df))
@@ -1232,6 +1397,435 @@ class StackedBarPlot:
     @property
     def legend_path(self):
         return re.sub(r'(\.[^.]+)$', r'.legend\1', self.path)
+
+
+class DetailedStackedBarPlot:
+    def __init__(self,
+                 data, path,
+                 x_field,
+                 y_field,
+                 # operation
+                 hatch,
+                 # category
+                 hue,
+                 xlabel=None,
+                 ylabel=None,
+                 title=None,
+                 debug=False,
+                 ):
+
+        self.data = data
+        self.path = path
+
+        self.x_field = x_field
+        self.y_field = y_field
+        self.hatch = hatch
+        self.hue = hue
+
+        self.debug = debug
+
+        self.xlabel = xlabel
+        self.ylabel = ylabel
+        self.title = title
+
+        self.hatch_map = self.as_hatch_map(self.hatches)
+        self.hue_map = self.as_color_map(self.hues(self.data))
+
+
+    @property
+    def hatches(self):
+        hatches = sorted(self.data[self.hatch].unique())
+        return hatches
+
+    def hues(self, data):
+        hues = sorted(data[self.hue].unique())
+        return hues
+
+    def as_hatch_map(self, xs):
+        # Need enough distinct hash-styles to fit categories.
+        # assert len(xs) <= len(HATCH_STYLES)
+        if len(xs) > len(HATCH_STYLES):
+            logging.info("> WARNING: We only have {h} HATCH_STYLES, but there are {x} category-overlap labels".format(
+                h=len(HATCH_STYLES),
+                x=len(xs),
+            ))
+        hatch_map = dict()
+        for x, hatch_style in zip(xs, itertools.cycle(HATCH_STYLES)):
+            hatch_map[x] = hatch_style
+        return hatch_map
+
+    def get_color_map(self):
+        cmap = plt.get_cmap('Pastel1')
+        return cmap
+
+    def as_color_map(self, xs):
+        # https://matplotlib.org/examples/color/colormaps_reference.html
+        # https://matplotlib.org/tutorials/colors/colormaps.html
+        color_map = dict()
+        cmap = self.get_color_map()
+        # np.arange(0,1,(1 - 0)/5)
+        for i, x in enumerate(xs):
+            color = cmap(i % cmap.N)
+            color_map[x] = color
+        return color_map
+
+    def plot(self):
+
+        # PSEUDOCODE:
+        # bottom = zeroes(len(ys))
+        # data.sort_values(by=[self.hatch, self.hue]
+        # for hatch, hatch_df in data.groupby(by=[self.hatch]):
+        #   for hue, hue_df in hatch_df.groupby(by=[self.hue])
+        #     xs = hue_df[self.x]
+        #     ys = hue_df[self.y]
+        #     ax.bar(xs=xs, ys=ys, bottom=bottom,
+        #       color=self.color_map[hue],
+        #       hatch=self.hatch_map[hatch)
+        #     bottom += ys
+
+        fig = plt.figure()
+        # Q: What's this affect?
+        # ax = plt.add_subplot(111)
+        ax = fig.add_subplot(111)
+
+        all_xs = []
+        all_ys = []
+        bottom = None
+        data = self.data.sort_values(by=[self.hatch, self.hue, self.x_field])
+        hatches = self.hatches
+        bar_kwargs = []
+        for hatch in hatches:
+            hatch_df = data[data[self.hatch] == hatch]
+            hues = self.hues(hatch_df)
+            for hue in hues:
+                hue_df = hatch_df[hatch_df[self.hue] == hue]
+                xs = hue_df[self.x_field].values
+                ys = hue_df[self.y_field].values
+                all_xs.append(xs)
+                all_ys.append(ys)
+                plot_kwargs = dict(
+                    x=xs, height=ys, bottom=bottom,
+                    # Color of hatch pattern.
+                    edgecolor='black',
+                    color=self.hue_map[hue],
+                    hatch=self.hatch_map[hatch]
+                )
+                ax.bar(**plot_kwargs)
+                kw = dict(plot_kwargs)
+                kw.update({
+                    'hue_field': hue,
+                    'hatch_field': hatch,
+                })
+                bar_kwargs.append(kw)
+                if bottom is None:
+                    bottom = np.zeros(len(ys))
+                assert not np.isnan(bottom).any()
+                assert not np.isnan(ys).any()
+                assert not np.isnan(bottom + ys).any()
+                bottom = bottom + ys
+                assert not np.isnan(bottom).any()
+        logging.info("Plot debug:\n{msg}".format(
+            msg=pprint_msg({
+                'bar_kwargs': bar_kwargs,
+            }),
+        ))
+
+        if self.ylabel is not None:
+            ax.set_ylabel(self.ylabel)
+        if self.xlabel is not None:
+            ax.set_xlabel(self.xlabel)
+        if self.title is not None:
+            ax.set_title(self.title)
+
+        self._add_legend(ax)
+
+        logging.info("Output csv @ {path}".format(path=self._csv_path))
+        data.to_csv(self._csv_path, index=False)
+
+        logging.info("Output dataframe @ {path}".format(path=self._df_path))
+        with open(self._df_path, 'w') as f:
+            DataFrame.print_df(data, file=f)
+        DataFrame.print_df(data, file=sys.stdout)
+
+        logging.info("Output plot @ {path}".format(path=self.path))
+        fig.savefig(self.path, bbox_inches="tight")
+        plt.close(fig)
+
+        # self._add_lines(operation)
+        # self._add_legend(operation)
+        # self._add_axis_labels(operation)
+        # self._show(fig, operation)
+
+    def _as_path(self, file_ext):
+        path = self.path
+        path = re.sub(r'\.[^.]+$', file_ext, path)
+        assert path != self.path
+        return path
+
+    @property
+    def _csv_path(self):
+        return self._as_path('.csv')
+
+    @property
+    def _df_path(self):
+        return self._as_path('.dataframe.txt')
+
+    def get_plot_operations(self):
+        if self.get_png is not None:
+            all_benches = [NO_BENCH_NAME] + unique(self.mean_df['operation'])
+            return all_benches
+
+        return [NO_BENCH_NAME]
+
+    def get_png_path(self, operation):
+        if self.get_png is not None:
+            return self.get_png(operation)
+
+        return self.png
+
+    def get_png_legend_path(self, operation):
+        png_path = self.get_png_path(operation)
+        legend_png_path = re.sub(r'\.png$', '.legend.png', png_path)
+        return legend_png_path
+
+        # if self.get_png_legend is not None:
+        #     return self.get_png_legend(operation)
+        #
+        # return self.png_legend
+
+    def get_plot_data_pt(self, operation):
+        if self.get_plot_data_path is not None:
+            return self.get_plot_data_path(operation)
+
+        return self.plot_data_path
+
+    def _show(self, fig, operation=None):
+        if self.show:
+            plt.show()
+        else:
+            print("> Save figure to {path}".format(path=self.get_png_path(operation)))
+            print("> Save plot data to {path}".format(path=self.get_plot_data_pt(operation)))
+            fig.savefig(self.get_png_path(operation), bbox_inches="tight")
+            plt.close()
+
+    def _add_lines(self, operation=None):
+
+        self._bottom = None
+        def _add_line(impl_name, operation):
+            for category in self.category_order:
+                rows = self.df[
+                    (self.df['operation'] == operation)
+                    & (self.df['category'] == category)
+                    ]
+                if len(rows) == 0:
+                    continue
+                xvalues = self._get_xvalues(rows['impl_name'], rows['device'])
+                yvalues = rows['mean'].values
+                yerr = rows['std'].values
+
+                color = self.category_color_map[category]
+                hatch = self.operation_hatch_map[operation]
+
+                if self._bottom is None:
+                    self._bottom = np.zeros_like(yvalues)
+
+                # PROBLEM: if data is missing for step
+                assert self._bottom.shape == yvalues.shape
+
+                plot = plt.bar(xvalues, yvalues, color=color, width=self.bar_width, edgecolor='white', label=operation,
+                               bottom=self._bottom,
+                               hatch=hatch,
+                               yerr=yerr)
+
+                self._bottom += yvalues
+
+        for impl_name in self.impl_name_order:
+            if operation == NO_BENCH_NAME:
+                for operation in self.operation_order:
+                    _add_line(impl_name, operation)
+            else:
+                _add_line(impl_name, operation)
+
+    def _add_legend(self, axis):
+        self.legend_makers = []
+
+        reversed_labels = False
+
+        # Sometimes they are so many legend labels that the two separate legend boxes will overlap,
+        # and it's hard to position the legend boxes "on top of each other".
+        # So, we're better off making a single legend box.
+        single_legend = True
+
+        common_legend_kwargs = {
+            'fancybox':True,
+            # 'shadow':True,
+            'labelspacing': 1.2,
+            'handlelength': 3,
+            'handleheight': 2,
+        }
+
+        # We need two groups of lines:
+        #
+        # 1) Hatch-type:
+        #    - Should have the same color
+        #    - # of hash-types = len(category_order = ['GPUTimeSec', 'CppTimeSec', 'PythonTimeSec'])
+        #                      = 3
+        #
+        # 2) Color-type:
+        #    - Should have the same hatch.
+        #    - # of color-types = len(operation_order = ['q_forward', 'q_backward', 'step'])
+        #                       = 3
+
+        # https://stackoverflow.com/questions/4700614/how-to-put-the-legend-out-of-the-plot
+        if not single_legend:
+            legend_kwargs = []
+
+        hatch_legend = LegendMaker(attr_name='hatch',
+                                   field_to_attr_map=self.hatch_map,
+                                   field_order=self.hatches,
+                                   # labels=self.hatches,
+                                   legend_kwargs={
+                                       # 'labelspacing': 1.2,
+                                       # 'handlelength': 3,
+                                       # 'handleheight': 2,
+                                   },
+                                   reversed=reversed_labels)
+        self.legend_makers.append(hatch_legend)
+        if not single_legend:
+            kwargs = dict(common_legend_kwargs)
+            kwargs.update({
+                    # NOTE:
+                    # - Internally LegendMaker uses the figure coordinate system.
+                    # - So, (1, 1) is the (right, top) of the whole figure,
+                    #   so 1.04 makes it just a bit to the right of the whole figure
+                    'bbox_to_anchor': (1.04, 1),
+            })
+            legend_kwargs.append(kwargs)
+
+        color_legend = LegendMaker(attr_name='facecolor',
+                                   field_to_attr_map=self.hue_map,
+                                   field_order=self.hues(self.data),
+                                   # labels=self.hues(self.data),
+                                   edgecolor='white',
+                                   legend_kwargs={
+                                       # 'handlelength': 3,
+                                       # 'handleheight': 2,
+                                   },
+                                   reversed=reversed_labels)
+        self.legend_makers.append(color_legend)
+        if not single_legend:
+            kwargs = dict(common_legend_kwargs)
+            kwargs.update({
+                # 'loc':'lower left',
+                # 'loc':'left',
+                # 'bbox_to_anchor': (0, -1),
+
+                # Place legend beneath plot so it has room to grow when there are lots of labels,
+                # without overlapping the other legend.
+                # Sadly, I still don't understand how this thing works.
+                # (e.g. I'm not sure how to left-align the legend beneath the plot... OH WELL).
+                #
+                # https://stackoverflow.com/questions/4700614/how-to-put-the-legend-out-of-the-plot
+                # 'loc':'upper center',
+                # 'bbox_to_anchor':(0.5, -0.05),
+
+                'loc':'lower left',
+                'bbox_to_anchor':(1.04, 0.0),
+
+            })
+            legend_kwargs.append(kwargs)
+
+        if not single_legend:
+            LegendMaker.add_legends_multiple(
+                self.legend_makers,
+                axis=axis,
+                legend_kwargs=legend_kwargs)
+
+        if single_legend:
+            kwargs = dict(common_legend_kwargs)
+            kwargs.update({
+                'loc':'top left',
+                'bbox_to_anchor':(1.04, 1.0),
+            })
+            LegendMaker.add_legends_single(
+                self.legend_makers,
+                axis=axis,
+                legend_kwargs=kwargs)
+
+        # LegendMaker.add_legends_vertically(self.legend_makers,
+        #                         legend_kwargs=legend_kwargs)
+
+
+    # def _get_categories(self, json_data):
+    #     return list(k for k in json_data.keys() if k in self.category_order)
+
+    @property
+    def dataframe(self):
+        if self.df is None:
+            self._as_dataframe()
+        return self.df
+
+    def _as_dataframe(self):
+        self._build_operation_order()
+
+        # devices = list(data.keys())
+        self.orig_df = pd.DataFrame(self.df_data)
+
+        self.df = DataFrame.get_mean_std(self.orig_df, self.value_field)
+        logging.info("> DATAFRAME BEFORE SORT:")
+        logging.info(self.df)
+        self.df = self.df.sort_values(by=['impl_name_order', 'operation_order', 'category_order'])
+        # self.df = self.df.sort_values(by=['impl_name_order', 'operation_order', 'category_order'], ascending=False)
+        # self.df = self.df.sort_values(by=['operation_order'])
+        logging.info("> DATAFRAME AFTER SORT:")
+        logging.info(self.df)
+        # groupby_cols = DataFrame.get_groupby_cols(self.orig_df, value_field)
+        self.df['std_div_mean_percent'] = 100 * self.df['std']/self.df['mean']
+
+        self.mean_df = self.df
+
+    def _add_axis_labels(self, operation=None):
+        if self.title is not None:
+            plt.title(self.title)
+
+        if self.xlabel is not None:
+            # , fontweight='bold'
+            if operation == NO_BENCH_NAME:
+                plt.xlabel(self.xlabel)
+            else:
+                plt.xlabel(get_pretty_bench(operation))
+
+        if self.ylabel is not None:
+            plt.ylabel(self.ylabel)
+
+
+        n_bars = len(self.data[self.x_field].unique())
+        xtick_xvalues = self._xtick_xvalues(self.impl_name_order, self.impl_name_order_map, n_bars)
+        plt.xticks(xtick_xvalues, self.impl_name_order)
+
+
+    def _get_xvalue(self, impl_name, device):
+        bench_order = self.impl_name_order_map[impl_name]
+        graphics_order = self.device_order_map[device]
+        return bench_order + graphics_order*self.bar_width
+
+    def _get_xvalues(self, impl_names, devices):
+        return np.array([self._get_xvalue(impl_name, device) \
+                         for impl_name, device in zip(impl_names, devices)])
+
+    # Add xticks on the middle of the group bars
+    def _xtick_xvalues(self, xvalues, order_map, n_bars):
+        idxes = [order_map[xvalue] for xvalue in xvalues]
+        all_bars_width = n_bars * self.bar_width
+        # This may be wrong.
+        center_width = ((n_bars - 1)*self.bar_width)/2
+        return [i*all_bars_width + center_width \
+                for i in idxes]
+
+    def _check_has_keys(self, xs, xs_map):
+        for x in xs:
+            assert x in xs_map
+
 
 # Unused class; just some documentation
 class RegionDataFrame:
@@ -1899,16 +2493,16 @@ def get_x_env(env, long_env=False):
 def get_x_field(algo, env, x_type, human_readable=False):
     short_env = get_x_env(env)
     if x_type == 'rl-comparison':
-        if human_readable:
-            x_field = "({algo}, {env})".format(
-                algo=algo,
-                env=short_env,
-            )
-        else:
-            x_field = "{algo}\n{env}".format(
-                algo=algo,
-                env=short_env,
-            )
+        # if human_readable:
+        x_field = "({algo}, {env})".format(
+            algo=algo,
+            env=short_env,
+        )
+        # else:
+        #     x_field = "{algo}\n{env}".format(
+        #         algo=algo,
+        #         env=short_env,
+        #     )
     elif x_type == 'env-comparison':
         x_field = short_env
     elif x_type == 'algo-comparison':
@@ -1965,6 +2559,9 @@ def only_selector_fields(selector):
     assert 'plot_type' in selector
     new_selector = dict((k, v) for k, v in selector.items())
     return new_selector
+
+def join_plus(xs):
+    return ' + '.join(sorted(xs))
 
 if __name__ == '__main__':
     main()

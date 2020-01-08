@@ -1184,7 +1184,7 @@ class StackedBarPlotter:
         })
         self.legend_makers.append(color_legend)
 
-        LegendMaker.add_legends(
+        LegendMaker.add_legends_multiple(
             self.legend_makers,
             axis=axis,
             legend_kwargs=legend_kwargs)
@@ -1559,7 +1559,7 @@ class LegendMaker:
     :param reversed
         If true, label-order is reversed from order of bar-stacks in plot.
     """
-    def __init__(self, attr_name, field_to_attr_map, field_order, labels,
+    def __init__(self, attr_name, field_to_attr_map, field_order, labels=None,
                  edgecolor="black",
                  facecolor="white",
                  legend_kwargs=None,
@@ -1592,37 +1592,56 @@ class LegendMaker:
             patch = mpatches.Patch(**patch_kwargs)
             self.patches.append(patch)
 
-    def get_legend(self, axis=None, **kwargs):
-        if self.legend is not None:
-            return self.legend
-        legend_labels = [self.labels.get(field, field) for field in self.field_order]
+    def get_legend_handles_labels_kwargs(self, **kwargs):
+        if self.labels is not None:
+            legend_labels = [self.labels.get(field, field) for field in self.field_order]
+        else:
+            legend_labels = [field for field in self.field_order]
+
         if self.legend_kwargs is not None:
             legend_kwargs = dict(self.legend_kwargs)
         else:
             legend_kwargs = dict()
         legend_kwargs.update(kwargs)
-        if axis is None:
-            axis = plt
+
         if not self.reversed:
-            self.legend = axis.legend(handles=list(reversed(self.patches)), labels=list(reversed(legend_labels)), **legend_kwargs)
-            # self.legend = plt.legend(handles=list(reversed(self.patches)), labels=legend_labels, **legend_kwargs)
-        else:
-            # Default stacked-bar behaviour shows labels in reverse order from the stacked bars.
-            # That's just silly.
-            #
-            # NOTE: "reversed=True" implies this case (the backwards default behaviour)
-            self.legend = axis.legend(handles=self.patches, labels=legend_labels, **legend_kwargs)
+            handles = list(reversed(self.patches))
+            labels = list(reversed(legend_labels))
+            return handles, labels, legend_kwargs
 
-        # if self.attr_name == 'hatch':
-        #     leg = self.legend
-        #     ax = leg.axes # Q: Can we obtain the width/height?
-        #     pprint.pprint(({'dir(ax)': dir(ax)}))
-        #     import ipdb; ipdb.set_trace()
+        # Default stacked-bar behaviour shows labels in reverse order from the stacked bars.
+        # That's just silly.
+        #
+        # NOTE: "reversed=True" implies this case (the backwards default behaviour)
+        handles = list(self.patches)
+        labels = legend_labels
+        return handles, labels, legend_kwargs
 
+    def get_legend(self, axis=None, **kwargs):
+        handles, labels, legend_kwargs = self.get_legend_handles_labels_kwargs(**kwargs)
+        self.legend = axis.legend(handles=handles, labels=labels, **legend_kwargs)
         return self.legend
 
     @staticmethod
-    def add_legends(legend_makers, axis=None, legend_kwargs=[]):
+    def add_legends_single(legend_makers, axis=None, legend_kwargs=dict()):
+        legends = []
+        all_handles = []
+        all_labels = []
+        for i, legend_maker in enumerate(legend_makers):
+            handles, labels, _ = legend_maker.get_legend_handles_labels_kwargs(**legend_kwargs)
+            all_handles.extend(handles)
+            all_labels.extend(labels)
+
+        if axis is None:
+            axis = plt.gca()
+
+        legend = axis.legend(handles=all_handles, labels=all_labels, **legend_kwargs)
+        axis.add_artist(legend)
+
+        return legends
+
+    @staticmethod
+    def add_legends_multiple(legend_makers, axis=None, legend_kwargs=[]):
         legends = []
         for i, legend_maker in enumerate(legend_makers):
             if i < len(legend_kwargs):

@@ -116,6 +116,10 @@ run_fig_algorithm_choice_1a_med_complexity_plot_01() {
     # logan
     sb_one_rep_plot --repetition 1 "$@" --algo-env-group algorithm_choice_1a_med_complexity "$@"
 }
+run_fig_dqn_detailed_plot_01() {
+    # eco-13
+    sb_one_rep_plot --repetition 1 --algo-env-group dqn_detailed "$@"
+}
 
 run_fig_environment_choice() {
     # eco-13

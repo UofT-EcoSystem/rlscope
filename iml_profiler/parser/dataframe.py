@@ -1582,6 +1582,27 @@ class VennData:
 
         return overlap
 
+    def as_df(self, keep_metadata_fields):
+        overlap = self.as_overlap_dict()
+        data = dict()
+
+        def mk_col(col):
+            if col not in data:
+                data[col] = []
+
+        def append_col(col, value):
+            mk_col(col)
+            data[col].append(value)
+
+        for region, size in overlap.items():
+            append_col('region', region)
+            append_col('size', size)
+            for field in keep_metadata_fields:
+                append_col(field, self._metadata[field])
+
+        df = pd.DataFrame(data)
+        return df
+
 
 def get_training_durations_df(directories,
                               debug=False,

@@ -859,7 +859,7 @@ class GeneratePlotIndexTask(luigi.Task):
         # Requires that traces files have been collected...
         # So, lets just depend on the SQL parser to have loaded everything.
         return [
-            mk_SQL_tasks(self),
+            # mk_SQL_tasks(self),
         ]
 
     def output(self):
@@ -886,6 +886,7 @@ class OverlapStackedBarTask(luigi.Task):
     resource_overlap = luigi.ListParameter(description="What resources are we looking at for things like --overlap-type=OperationOverlap? e.g. ['CPU'], ['CPU', 'GPU']", default=None)
     operation = luigi.Parameter(description="What operation are we looking at for things like --overlap-type=CategoryOverlap? e.g. ['step'], ['sample_action']", default=None)
     training_time = luigi.BoolParameter(description="Plot a second y-axis with total training time", parsing=luigi.BoolParameter.EXPLICIT_PARSING)
+    detailed = luigi.BoolParameter(description="Provide detailed operation/category breakdown in a single view", parsing=luigi.BoolParameter.EXPLICIT_PARSING)
     remap_df = luigi.ListParameter(description="Transform df pandas.DataFrame object; useful for remapping regions to new ones", default=None)
     y2_logscale = luigi.BoolParameter(description="Show training time y-axis in logscale", parsing=luigi.BoolParameter.EXPLICIT_PARSING)
     # For some reason, (ppo2, MinitaurBulletEnv-v0) only has:

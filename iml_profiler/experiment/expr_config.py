@@ -8,6 +8,7 @@ import logging
 ALGO_ENV_GROUP_CHOICES = [
     'on_vs_off_policy',
     'environment_choice',
+    'dqn_detailed',
     'algorithm_choice_1a_med_complexity',
     'algorithm_choice_1b_low_complexity',
     'all_rl_workloads',
@@ -199,6 +200,9 @@ def is_fig_algo_comparison_med_complexity(algo, env_id):
 def is_fig_env_comparison(algo, env_id):
     return algo == 'ppo2' and is_paper_env(algo, env_id)
 
+def is_fig_dqn_detailed(algo, env_id):
+    return algo == 'dqn' and re.search(r'PongNoFrameskip', env_id)
+
 def is_paper_env(algo, env_id):
     return is_low_complexity_env(algo, env_id) or \
            is_med_complexity_env(algo, env_id) or \
@@ -246,6 +250,7 @@ def is_algo_env_group_combo(algo_env_group, algo, env):
         'algorithm_choice_1a_med_complexity',
         'algorithm_choice_1b_low_complexity',
         'environment_choice',
+        'dqn_detailed',
         'all_rl_workloads',
     }
 
@@ -263,6 +268,9 @@ def is_algo_env_group_combo(algo_env_group, algo, env):
         ) or (
             algo_env_group == 'environment_choice' and
             is_fig_env_comparison(algo, env)
+        ) or (
+            algo_env_group == 'dqn_detailed' and
+            is_fig_dqn_detailed(algo, env)
         ) or (
             algo_env_group == 'all_rl_workloads' and
             is_paper_env(algo, env)

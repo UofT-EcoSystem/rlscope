@@ -625,6 +625,41 @@ class ExperimentGroup(Experiment):
         #     step = step
         #     other = sum(r for r in regions if r != step)
 
+        # (4) DQN detailed category/operation breakdown plot:
+        expr = 'dqn_detailed'
+        # algo_env_pairs = [('dqn', 'PongNoFrameskip-v4')]
+        algo_env_pairs = gather.pairs_by_algo_env_group(expr)
+        # NOTE: --algo-env-group is forwarded automatically since it's an option that belongs to the "main" parser, not the subparser
+        opts = []
+
+        if self.should_run_algo_env_group(expr):
+            logging.info(rl_workloads_msg(expr, algo_env_pairs))
+            self.iml_bench(parser, subparser, 'train_stable_baselines.sh', opts, suffix=bench_log(expr))
+            overlap_type = 'CategoryOverlap'
+            self.stacked_plot([
+                '--detailed',
+                '--overlap-type', overlap_type,
+                '--remap-df', json.dumps([textwrap.dedent("""\
+                    # Replace operations with simple (Inference, Simulation, Backpropagation) labels
+                    # established in Background discussion of typical RL workloads.
+                    def dqn_pretty_operation(op_name):
+                        if op_name in {'q_backward', 'q_update_target_network', 'training_loop'}:
+                            return "Backpropagation"
+                        elif op_name == 'q_forward':
+                            return "Inference"
+                        elif op_name == 'step':
+                            return "Simulation"
+                        else:
+                            raise NotImplementedError("Not sure what pretty-name to use for op_name={op_name}".format(
+                                op_name=op_name))
+                    new_df['operation'] = new_df['operation'].apply(dqn_pretty_operation)
+                        """)]),
+                # '--y-type', 'percent',
+                # '--x-type', 'rl-comparison',
+                # '--training-time',
+                # '--y2-logscale',
+            ], suffix=plot_log(expr, overlap_type), algo_env_pairs=algo_env_pairs)
+
         def plot_expr_algorithm_choice(expr, algo_env_pairs):
             """
             Map all algorithm operations to uniform, simplified labels:
