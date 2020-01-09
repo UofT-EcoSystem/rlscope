@@ -1,4 +1,5 @@
 import pandas as pd
+import decimal
 import copy
 import os
 import pprint
@@ -296,7 +297,7 @@ class OverlapDataframeReader(BaseDataframeReader):
             'end_time_usec',
             'overlap_type',
             'overlap_label',
-            'overlap_usec',
+            # 'overlap_usec',
         ]
 
         super().__init__(directory, add_fields=add_fields, colnames=colnames, debug=debug, debug_single_thread=debug_single_thread)
@@ -321,6 +322,7 @@ class OverlapDataframeReader(BaseDataframeReader):
             self._add_col(col_key, venn_js.md[venn_js_key], data=data)
 
 
+        # WARNING: this returns venn_sizes which we probably DON'T want to work with...
         overlap_dict = venn_js.as_dict()
         for overlap_label, overlap_usec in overlap_dict.items():
             add_key('machine_name', 'machine')
@@ -333,7 +335,7 @@ class OverlapDataframeReader(BaseDataframeReader):
 
             label_str = self._label_string(overlap_label)
             self._add_col('overlap_label', label_str, data=data)
-            self._add_col('overlap_usec', overlap_usec, data=data)
+            # self._add_col('overlap_usec', overlap_usec, data=data)
 
             self._maybe_add_fields(path, data=data)
 
@@ -462,6 +464,20 @@ class TrainingProgressDataframeReader(BaseDataframeReader):
         assert len(training_iterations) == 1
         training_iterations = training_iterations.values[0]
         return training_iterations
+
+    def total_timesteps(self):
+        df = self.last_progress()
+        total_timesteps = df['total_timesteps']
+        assert len(total_timesteps) == 1
+        total_timesteps = total_timesteps.values[0]
+        return total_timesteps
+
+    def end_num_timesteps(self):
+        df = self.last_progress()
+        end_num_timesteps = df['end_num_timesteps']
+        assert len(end_num_timesteps) == 1
+        end_num_timesteps = end_num_timesteps.values[0]
+        return end_num_timesteps
 
     def training_duration_df(self):
         df = copy.copy(self.last_progress())
@@ -1466,16 +1482,23 @@ class VennData:
 
     def total_size(self):
         total_size = 0.
-        # [ size of all regions ] - [ size of overlap regions ]
-        for labels, size in self.data.items():
-            if len(labels) > 1:
-                # Overlap region is JUST the size of the overlap.
-                total_size -= size
-            else:
-                # Single 'set' is the size of the WHOLE region (INCLUDING overlaps)
-                assert len(labels) == 1
-                total_size += size
+        overlap = self.as_overlap_dict()
+        for labels, size in overlap.items():
+            total_size += size
         return total_size
+        # NOTE: this may have been correct with our broken venn_js format...
+        # but it's no longer correct.
+        # total_size = 0.
+        # # [ size of all regions ] - [ size of overlap regions ]
+        # for labels, size in self.data.items():
+        #     if len(labels) > 1:
+        #         # Overlap region is JUST the size of the overlap.
+        #         total_size -= size
+        #     else:
+        #         # Single 'set' is the size of the WHOLE region (INCLUDING overlaps)
+        #         assert len(labels) == 1
+        #         total_size += size
+        # return total_size
 
     def get_size(self, key):
         return self.data[key]
@@ -1527,60 +1550,104 @@ class VennData:
             d[labels] = size_us
         return d
 
+    # # def as_overlap_dict(self):
+    # def old_as_overlap_dict(self):
+    #     """
+    #     NOTE: This returns "overlap" sizes.
+    #     i.e.
+    #     ('CPU',) contains the exclusive size of the CPU region, NOT INCLUDING possible overlap with GPU.
+    #     ('CPU', 'GPU',) contains only the overlap across CPU and GPU.
+    #
+    #     {
+    #         ('CPU',): 132010993,
+    #         ('GPU',): 0,
+    #         ('CPU', 'GPU'): 3230025.0,
+    #     }
+    #
+    #
+    #     PSEUDOCODE:
+    #     overlap = dict()
+    #     for region, size_us in venn_sizes.keys():
+    #         if len(region) == 1:
+    #             overlap[region] += size_us
+    #         else:
+    #             overlap[region] = size_us
+    #             for r in region:
+    #                 overlap[(r,)] -= size_us
+    #     """
+    #     venn_sizes = self.as_dict()
+    #     overlap = dict()
+    #     def mk_region(region):
+    #         if region not in overlap:
+    #             overlap[region] = 0.
+    #     for region, size_us in venn_sizes.items():
+    #         if len(region) == 1:
+    #             mk_region(region)
+    #             overlap[region] += size_us
+    #         else:
+    #             mk_region(region)
+    #             overlap[region] = size_us
+    #             for r in region:
+    #                 mk_region((r,))
+    #                 overlap[(r,)] -= size_us
+    #
+    #     for region, size_us in overlap.items():
+    #         assert size_us >= 0
+    #
+    #     # NOTE: if a region only exists in overlap with another region
+    #     # (e.g. CUDA API CPU + Framework API C),
+    #     # we DON'T want to have a legend-label for it.
+    #     del_regions = set()
+    #     for region, size_us in overlap.items():
+    #         if size_us == 0:
+    #             del_regions.add(region)
+    #     for region in del_regions:
+    #         del overlap[region]
+    #
+    #     return overlap
+
+    # def new_as_overlap_dict(self):
     def as_overlap_dict(self):
         """
-        NOTE: This returns "overlap" sizes.
-        i.e.
-        ('CPU',) contains the exclusive size of the CPU region, NOT INCLUDING possible overlap with GPU.
-        ('CPU', 'GPU',) contains only the overlap across CPU and GPU.
+        ##
+        ## To calcuate V[…] from O[…]:
+        ##
+        # Add anything from O which is subset-eq of [0,1,2]
+        V[0,1,2] = O[0,1,2]
+        # Add anything from O which is subset-eq of [0,2]
+        V[0,2] = O[0,2] + O[0,1,2]
+        V[1,2] = O[1,2] + O[0,1,2]
+        V[0,1] = O[0,1] + O[0,1,2]
+        # Add anything from O which is subset-eq of [0]
+        V[0] = O[0] + O[0,1] + O[0,2] + O[0,1,2]
+        V[1] = O[1] + O[0,1] + O[1,2] + O[0,1,2]
+        V[2] = O[2] + O[0,2] + O[1,2] + O[0,1,2]
 
-        {
-            ('CPU',): 132010993,
-            ('GPU',): 0,
-            ('CPU', 'GPU'): 3230025.0,
-        }
-
+        ##
+        ## To calcuate O[…] from V[…]:
+        ##
+        O[0,1,2] = V[0,1,2]
+        O[0,2] = V[0,1] - O[0,1,2]
+        O[1,2] = V[1,2] - O[0,1,2]
+        O[0,1] = V[0,1] - O[0,1,2]
+        O[0] = V[0] - O[0,1] - O[0,2] - O[0,1,2]
+        O[1] = V[1] - O[0,1] - O[1,2] - O[0,1,2]
+        O[2] = V[2] - O[0,2] - O[1,2] - O[0,1,2]
 
         PSEUDOCODE:
-        overlap = dict()
-        for region, size_us in venn_sizes.keys():
-            if len(region) == 1:
-                overlap[region] += size_us
-            else:
-                overlap[region] = size_us
-                for r in region:
-                    overlap[(r,)] -= size_us
+        INPUT: V[region] -> size
+        OUTPUT: O[region] -> size
+
+        For region in sorted(V.keys(), key=lambda region: len( region)):
+            O[region] = V[region]
+            # Subtract all keys we've added so far to O that are a subset of region.
+            Sub_regions = set([k for k in O.keys() if k != region and k.issubset(region)])
+            For k in sub_regions:
+                O[region] -= O[k]
         """
-        venn_sizes = self.as_dict()
-        overlap = dict()
-        def mk_region(region):
-            if region not in overlap:
-                overlap[region] = 0.
-        for region, size_us in venn_sizes.items():
-            if len(region) == 1:
-                mk_region(region)
-                overlap[region] += size_us
-            else:
-                mk_region(region)
-                overlap[region] = size_us
-                for r in region:
-                    mk_region((r,))
-                    overlap[(r,)] -= size_us
-
-        for region, size_us in overlap.items():
-            assert size_us >= 0
-
-        # NOTE: if a region only exists in overlap with another region
-        # (e.g. CUDA API CPU + Framework API C),
-        # we DON'T want to have a legend-label for it.
-        del_regions = set()
-        for region, size_us in overlap.items():
-            if size_us == 0:
-                del_regions.add(region)
-        for region in del_regions:
-            del overlap[region]
-
-        return overlap
+        V = self.as_dict()
+        O = venn_as_overlap_dict(V)
+        return O
 
     def as_df(self, keep_metadata_fields):
         overlap = self.as_overlap_dict()
@@ -1613,6 +1680,24 @@ def get_training_durations_df(directories,
                        debug=debug,
                        debug_single_thread=debug_single_thread)
 
+def get_total_timesteps(directories,
+                        debug=False,
+                        debug_single_thread=False):
+    def get_value(df_reader):
+        return df_reader.total_timesteps()
+    return map_readers(TrainingProgressDataframeReader, directories, get_value,
+                       debug=debug,
+                       debug_single_thread=debug_single_thread)
+
+def get_end_num_timesteps(directories,
+                          debug=False,
+                          debug_single_thread=False):
+    def get_value(df_reader):
+        return df_reader.end_num_timesteps()
+    return map_readers(TrainingProgressDataframeReader, directories, get_value,
+                       debug=debug,
+                       debug_single_thread=debug_single_thread)
+
 
 def map_readers(DataframeReaderKlass, directories, func,
                 debug=False,
@@ -1638,3 +1723,297 @@ def map_readers(DataframeReaderKlass, directories, func,
         return xs[0]
     return xs
 
+def overlap_as_venn_dict(O):
+    """
+    ##
+    ## To calcuate V[…] from O[…]:
+    ##
+    # Add anything from O which is subset-eq of [0,1,2]
+    V[0,1,2] = O[0,1,2]
+    # Add anything from O which is subset-eq of [0,2]
+    V[0,2] = O[0,2] + O[0,1,2]
+    V[1,2] = O[1,2] + O[0,1,2]
+    V[0,1] = O[0,1] + O[0,1,2]
+    # Add anything from O which is subset-eq of [0]
+    V[0] = O[0] + O[0,1] + O[0,2] + O[0,1,2]
+    V[1] = O[1] + O[0,1] + O[1,2] + O[0,1,2]
+    V[2] = O[2] + O[0,2] + O[1,2] + O[0,1,2]
+
+    PSEUDOCODE:
+    INPUT: O[region] -> size
+    OUTPOUT: V[region] -> size
+
+    For region in O.keys():
+        V[region] = 0
+        add_keys = set([k for k in O.keys() if region.issubset(k)])
+        For k in add_keys:
+            V[region] += O[k]
+
+    # Add any "single regions" that are missing.
+    labels = set()
+    For region in O.keys():
+        for label in region:
+            labels.insert(label)
+    single_regions = set({l} for l in labels)
+    for region in single_regions:
+        if region not in V:
+            V[region] = 0
+            for k in O.keys():
+                if region.issubset(k):
+                    V[region] += O[k]
+
+
+    :param O:
+        overlap dict
+    :return:
+    """
+    V = dict()
+    for region in O.keys():
+        V[region] = 0
+        add_keys = set([k for k in O.keys() if set(region).issubset(set(k))])
+        for k in add_keys:
+            V[region] += O[k]
+
+    # Add any "single regions" that are missing.
+    labels = set()
+    for region in O.keys():
+        for label in region:
+            labels.add(label)
+    single_regions = set((l,) for l in labels)
+    for region in single_regions:
+        if region in V:
+            continue
+        V[region] = 0
+        for k in O.keys():
+            if set(region).issubset(set(k)):
+                V[region] += O[k]
+
+    return V
+
+def venn_as_overlap_dict(V):
+    """
+    ##
+    ## To calcuate O[…] from V[…]:
+    ##
+    O[0,1,2] = V[0,1,2]
+    O[0,2] = V[0,1] - O[0,1,2]
+    O[1,2] = V[1,2] - O[0,1,2]
+    O[0,1] = V[0,1] - O[0,1,2]
+    O[0] = V[0] - O[0,1] - O[0,2] - O[0,1,2]
+    O[1] = V[1] - O[0,1] - O[1,2] - O[0,1,2]
+    O[2] = V[2] - O[0,2] - O[1,2] - O[0,1,2]
+
+    PSEUDOCODE:
+    INPUT: V[region] -> size
+    OUTPUT: O[region] -> size
+
+    For region in sorted(V.keys(), key=lambda region: len( region)):
+        O[region] = V[region]
+        # Subtract all keys we've added so far to O that are a subset of region.
+        Sub_regions = set([k for k in O.keys() if k != region and k.issubset(region)])
+        For k in sub_regions:
+            O[region] -= O[k]
+
+    :param V:
+        venn_js dict
+    :return:
+    """
+    O = dict()
+    for region in reversed(sorted(V.keys(), key=lambda region: len(region))):
+        O[region] = V[region]
+        # Subtract all keys we've added so far to O that are a subset of region.
+        sub_regions = set([k for k in O.keys() if k != region and set(region).issubset(set(k))])
+        for k in sub_regions:
+            O[region] -= O[k]
+
+    del_regions = set()
+    for region, size in O.items():
+        if size == 0:
+            del_regions.add(region)
+    for region in del_regions:
+        del O[region]
+
+    return O
+
+def test_venn_as_overlap_dict():
+    def check_eq(name, got, expect):
+        result = (got == expect)
+        if not result:
+            logging.info(pprint_msg({
+                'name': name,
+                'got': got,
+                'expect': expect,
+            }))
+        assert got == expect
+
+    def check_from_venn(name, V, expect_O):
+        got_O = venn_as_overlap_dict(V)
+        check_eq("{name}.venn_as_overlap_dict".format(name=name), got_O, expect_O)
+        got_V = overlap_as_venn_dict(expect_O)
+        expect_V = V
+        check_eq("{name}.overlap_as_venn_dict".format(name=name), got_V, expect_V)
+
+    def check_from_overlap(name, O, expect_V):
+        got_V = overlap_as_venn_dict(O)
+        check_eq("{name}.overlap_as_venn_dict".format(name=name), got_V, expect_V)
+
+        V = expect_V
+        expect_O = O
+        got_O = venn_as_overlap_dict(V)
+        check_eq("{name}.test_venn_as_overlap_dict_06.overlap_as_venn_dict".format(name=name), got_O, expect_O)
+
+
+    def test_venn_as_overlap_dict_01():
+        V = {
+            (0,): 6,
+            (1,): 6,
+            (2,): 6,
+            (0,1): 2,
+            (0,2): 2,
+            (1,2): 2,
+            (0,1,2): 1,
+        }
+        expect_O = {
+            (0,): 3,
+            (1,): 3,
+            (2,): 3,
+            (0,1): 1,
+            (0,2): 1,
+            (1,2): 1,
+            (0,1,2): 1,
+        }
+        check_from_venn("test_venn_as_overlap_dict_01", V, expect_O)
+    test_venn_as_overlap_dict_01()
+
+    def test_venn_as_overlap_dict_02():
+        V = {
+            (0,): 5,
+            (1,): 5,
+            (0,1): 2,
+        }
+        expect_O = {
+            (0,): 3,
+            (1,): 3,
+            (0,1): 2,
+        }
+        check_from_venn("test_venn_as_overlap_dict_02", V, expect_O)
+    test_venn_as_overlap_dict_02()
+
+    def test_venn_as_overlap_dict_03():
+        V = {
+            (0,): 3,
+            (1,): 3,
+            (2,): 3,
+            (0,1): 1,
+            (0,2): 1,
+        }
+        expect_O = {
+            (0,): 1,
+            (1,): 2,
+            (2,): 2,
+            (0,1): 1,
+            (0,2): 1,
+        }
+        check_from_venn("test_venn_as_overlap_dict_03", V, expect_O)
+    test_venn_as_overlap_dict_03()
+
+    # def test_venn_as_overlap_dict_04():
+    #     # FROM : /mnt/data/james/clone/iml/output/iml_bench/all/config_instrumented_repetition_01/ppo2/Walker2DBulletEnv-v0/CategoryOverlap.machine_2420f5fc91b8.process_ppo2_Walker2DBulletEnv-v0.phase_ppo2_Walker2DBulletEnv-v0.ops_sample_action.resources_CPU_GPU.venn_js.json
+    #     # Generated using old SQL code.
+    #     # "venn": [
+    #     #     {
+    #     #         "label": "CUDA API CPU",
+    #     #         "sets": [
+    #     #             0
+    #     #         ],
+    #     #         "size": 1157825.0156115906
+    #     #     },
+    #     #     {
+    #     #         "label": "Framework API C",
+    #     #         "sets": [
+    #     #             1
+    #     #         ],
+    #     #         "size": 1242334.3759821171
+    #     #     },
+    #     #     {
+    #     #         "label": "GPU",
+    #     #         "sets": [
+    #     #             2
+    #     #         ],
+    #     #         "size": 1242334.3759821171
+    #     #     },
+    #     #     {
+    #     #         "sets": [
+    #     #             1,
+    #     #             2
+    #     #         ],
+    #     #         "size": 84509.36037052666
+    #     #     },
+    #     #     {
+    #     #         "sets": [
+    #     #             0,
+    #     #             1,
+    #     #             2
+    #     #         ],
+    #     #         "size": 1157825.0156115906
+    #     #     }
+    #     # ]
+    #     V = {
+    #         # Fails due to floating point weirdness.
+    #         # (0,): decimal.Decimal(1157825.0156115906),
+    #         # (1,): decimal.Decimal(1242334.3759821171),
+    #         # (2,): decimal.Decimal(1242334.3759821171),
+    #         # (1,2): decimal.Decimal(84509.36037052666),
+    #         # # Q: Why isn't there a (0,2) / (0,1)?
+    #         # (0,1,2): decimal.Decimal(1157825.0156115906),
+    #         (0,): 1157825,
+    #         (1,): 1242334,
+    #         (2,): 1242334,
+    #         (1,2): 84509,
+    #         # Q: Why isn't there a (0,2) / (0,1)?
+    #         (0,1,2): 1157825,
+    #     }
+    #     expect_O = {
+    #         (0,): V[(0,)] - (V[(0,1,2)]),
+    #         (1,): V[(1,)] - (V[(1,2)] - V[(0,1,2)]) - (V[(0,1,2)]),
+    #         (2,): V[(2,)] - (V[(1,2)] - V[(0,1,2)]) - (V[(0,1,2)]),
+    #         (1,2): V[(1,2)] - V[(0,1,2)],
+    #         # Q: Why isn't there a (0,2) / (0,1)?
+    #         (0,1,2): V[(0,1,2)],
+    #     }
+    #     check_from_venn("test_venn_as_overlap_dict_04", V, expect_O)
+    # test_venn_as_overlap_dict_04()
+
+    def test_venn_as_overlap_dict_05():
+        O = {
+            (0,): 5,
+            (0,1): 5,
+        }
+        expect_V = {
+            (0,): 10,
+            (1,): 5,
+            (0,1): 5,
+        }
+        got_V = overlap_as_venn_dict(O)
+        check_eq("test_venn_as_overlap_dict_05.overlap_as_venn_dict", got_V, expect_V)
+    test_venn_as_overlap_dict_05()
+
+    def test_venn_as_overlap_dict_06():
+        O = {
+            (0,1): 5,
+        }
+        expect_V = {
+            (0,): 5,
+            (1,): 5,
+            (0,1): 5,
+        }
+        check_from_overlap("test_venn_as_overlap_dict_06", O, expect_V)
+
+        # got_V = overlap_as_venn_dict(O)
+        # check_eq("test_venn_as_overlap_dict_06.overlap_as_venn_dict", got_V, expect_V)
+        #
+        # V = expect_V
+        # expect_O = O
+        # got_O = venn_as_overlap_dict(V)
+        # check_eq("test_venn_as_overlap_dict_06.overlap_as_venn_dict", got_O, expect_O)
+    test_venn_as_overlap_dict_06()

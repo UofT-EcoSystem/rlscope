@@ -186,6 +186,18 @@ extern const std::set<Category> CATEGORIES_GPU;
 
 extern const std::set<OverlapType> OVERLAP_TYPES;
 
+template <class Elem>
+bool IsSubset(const std::set<Elem>& A, const std::set<Elem>& B) {
+  // Return true iff A issubset-of B.
+  // i.e. for all elements a in A, a is in B
+  for (auto const& a : A) {
+    if (B.find(a) == B.end()) {
+      return false;
+    }
+  }
+  return true;
+}
+
 template <typename EventList>
 void SortEvents(EventList* events) {
   std::sort(
@@ -3444,20 +3456,114 @@ public:
 
 class OverlapMapToVennJSConverter {
 public:
-  std::map<std::string, TimeUsec> _ComputeSetSizes(const OverlapMap& overlap_map) const {
-    std::map<std::string, TimeUsec> set_to_size;
-    for (const auto& pair :overlap_map) {
-      const auto& overlap_region = pair.first;
-      auto time_usec = pair.second;
-      for (const auto& set_region : overlap_region) {
-        set_to_size[set_region] += time_usec;
+
+//  std::map<std::string, TimeUsec> _ComputeSetSizes(const OverlapMap& overlap_map) const {
+//#if 0
+//    V = dict()
+//    for region in O.keys():
+//        V[region] = 0
+//        add_keys = set([k for k in O.keys() if set(region).issubset(set(k))])
+//        for k in add_keys:
+//            V[region] += O[k]
+//    return V
+//#endif
+//    std::map<std::string, TimeUsec> set_to_size;
+//    for (const auto& pair :overlap_map) {
+//      const auto& overlap_region = pair.first;
+//      auto time_usec = pair.second;
+//      for (const auto& set_region : overlap_region) {
+//        set_to_size[set_region] += time_usec;
+//      }
+//    }
+//    return set_to_size;
+//  }
+
+  static std::map<std::set<std::string>, TimeUsec> OverlapAsVennDict(const OverlapMap& overlap_map) {
+#if 0
+    ##
+    ## To calcuate V[...] from O[...]:
+    ##
+    # Add anything from O which is subset-eq of [0,1,2]
+    V[0,1,2] = O[0,1,2]
+    # Add anything from O which is subset-eq of [0,2]
+    V[0,2] = O[0,2] + O[0,1,2]
+    V[1,2] = O[1,2] + O[0,1,2]
+    V[0,1] = O[0,1] + O[0,1,2]
+    # Add anything from O which is subset-eq of [0]
+    V[0] = O[0] + O[0,1] + O[0,2] + O[0,1,2]
+    V[1] = O[1] + O[0,1] + O[1,2] + O[0,1,2]
+    V[2] = O[2] + O[0,2] + O[1,2] + O[0,1,2]
+
+    V = dict()
+    for region in O.keys():
+        V[region] = 0
+        add_keys = set([k for k in O.keys() if set(region).issubset(set(k))])
+        for k in add_keys:
+            V[region] += O[k]
+
+    # Add any "single regions" that are missing.
+    labels = set()
+    For region in O.keys():
+        for label in region:
+            labels.insert(label)
+    single_regions = set({l} for l in labels)
+    for region in single_regions:
+        if region not in V:
+            V[region] = 0
+            for k in O.keys():
+                if region.issubset(k):
+                    V[region] += O[k]
+
+    return V
+#endif
+    std::map<std::set<std::string>, TimeUsec> V;
+    for (const auto & pair : overlap_map) {
+      auto const& region = pair.first;
+      V[region] = 0;
+      std::set<std::set<std::string>> add_keys;
+      for (const auto& O_pair : overlap_map) {
+        const auto& k = O_pair.first;
+        if (IsSubset(region, k)) {
+          add_keys.insert(k);
+        }
+      }
+      for (const auto& k : add_keys) {
+        V[region] += overlap_map.at(k);
       }
     }
-    return set_to_size;
+
+    // Add any "single regions" that are missing.
+    std::set<std::string> labels;
+    for (const auto & pair : overlap_map) {
+      auto const &region = pair.first;
+      for (const auto& label : region) {
+        labels.insert(label);
+      }
+    }
+    std::set<std::set<std::string>> single_regions;
+    for (const auto& label : labels) {
+      single_regions.insert({label});
+    }
+    for (const auto & region : single_regions) {
+      if (V.find(region) != V.end()) {
+        continue;
+      }
+      V[region] = 0;
+      for (const auto & pair : overlap_map) {
+        const auto& k = pair.first;
+        if (IsSubset(region, k)) {
+          V[region] += pair.second;
+        }
+      }
+    }
+
+    return V;
   }
+
   nlohmann::json convert(const OverlapMap& overlap_map) const {
     nlohmann::json venn_js;
-    auto const& set_to_size = _ComputeSetSizes(overlap_map);
+//    auto const& set_to_size = _ComputeSetSizes(overlap_map);
+    auto const& venn_sizes = OverlapAsVennDict(overlap_map);
 
     if (SHOULD_DEBUG(FEATURE_SAVE_JS)) {
       std::stringstream ss;
@@ -3487,33 +3593,58 @@ public:
       return set_ids;
     };
 
-    for (const auto& pair : set_to_size) {
-      const auto& label = pair.first;
-      const auto size = pair.second;
-      nlohmann::json venn_set = {
-          {"sets", as_sets({label})},
-          {"size", size},
-          {"label", label},
-      };
-      venn_js.push_back(venn_set);
-    }
-
-    for (const auto& pair : overlap_map) {
+    for (const auto& pair : venn_sizes) {
       const auto& overlap = pair.first;
-      auto size = pair.second;
+      const auto size = pair.second;
       if (overlap.size() == 1) {
-        // Single "set region" doesn't include overlap with other sets.
-        // "Set region" is handled in for-loop above this one.
-        continue;
+        const auto& label = *overlap.cbegin();
+        nlohmann::json venn_set = {
+            {"sets", as_sets(overlap)},
+            {"size", size},
+            {"label", label},
+        };
+        venn_js.push_back(venn_set);
       }
-      nlohmann::json venn_set = {
-          {"sets", as_sets(overlap)},
-          {"size", size},
-      };
-      venn_js.push_back(venn_set);
     }
 
-    // venn_js.sort(key=lambda venn_set: (len(venn_set['sets']), venn_set['sets']))
+    for (const auto& pair : venn_sizes) {
+      const auto& overlap = pair.first;
+      const auto size = pair.second;
+      if (overlap.size() > 1) {
+        nlohmann::json venn_set = {
+            {"sets", as_sets(overlap)},
+            {"size", size},
+        };
+        venn_js.push_back(venn_set);
+      }
+    }
+
+
+//    for (const auto& pair : set_to_size) {
+//      const auto& label = pair.first;
+//      const auto size = pair.second;
+//      nlohmann::json venn_set = {
+//          {"sets", as_sets({label})},
+//          {"size", size},
+//          {"label", label},
+//      };
+//      venn_js.push_back(venn_set);
+//    }
+//
+//    for (const auto& pair : overlap_map) {
+//      const auto& overlap = pair.first;
+//      auto size = pair.second;
+//      if (overlap.size() == 1) {
+//        // Single "set region" doesn't include overlap with other sets.
+//        // "Set region" is handled in for-loop above this one.
+//        continue;
+//      }
+//      nlohmann::json venn_set = {
+//          {"sets", as_sets(overlap)},
+//          {"size", size},
+//      };
+//      venn_js.push_back(venn_set);
+//    }
 
     // Make the shorter (in particular, single-element) venn_sets appear first.
     // venn_sets within the same length are ordered based on lexicographic order.

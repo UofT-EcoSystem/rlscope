@@ -112,6 +112,10 @@ run_fig_algorithm_choice_1a_med_complexity() {
     # logan
     sb_reps_last --algo-env-group algorithm_choice_1a_med_complexity "$@"
 }
+run_fig_all_rl_workloads_plot_01() {
+    # logan
+    sb_one_rep_plot --repetition 1 "$@" --algo-env-group all_rl_workloads "$@"
+}
 run_fig_algorithm_choice_1a_med_complexity_plot_01() {
     # logan
     sb_one_rep_plot --repetition 1 "$@" --algo-env-group algorithm_choice_1a_med_complexity "$@"

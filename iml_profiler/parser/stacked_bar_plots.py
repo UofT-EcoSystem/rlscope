@@ -25,7 +25,7 @@ from os.path import join as _j, abspath as _a, exists as _e, dirname as _d, base
 from iml_profiler.parser.db import SQLCategoryTimesReader, sql_get_source_files, sql_input_path
 from iml_profiler.parser.plot_index import _DataIndex
 from iml_profiler.parser import plot_index
-from iml_profiler.parser.dataframe import VennData, get_training_durations_df
+from iml_profiler.parser.dataframe import VennData, get_training_durations_df, read_iml_config_metadata, get_total_timesteps, get_end_num_timesteps
 from iml_profiler.parser.plot import LegendMaker, HATCH_STYLES
 
 from iml_profiler.parser.common import *
@@ -76,6 +76,7 @@ class OverlapStackedBarPlot:
                  resource_overlap=None,
                  operation=None,
                  training_time=False,
+                 extrapolated_training_time=False,
                  detailed=False,
                  remap_df=None,
                  y2_logscale=False,
@@ -131,8 +132,9 @@ class OverlapStackedBarPlot:
                 'unins_iml_directories': self.unins_iml_directories,
             })))
         self.training_time = training_time
+        self.extrapolated_training_time = extrapolated_training_time
         self.detailed = detailed
-        self.should_add_training_time = training_time
+        # self.should_add_training_time = training_time
         self.directory = directory
         self.overlap_type = overlap_type
         self.resource_overlap = resource_overlap
@@ -446,6 +448,9 @@ class OverlapStackedBarPlot:
             stacked_dict = vd.stacked_bar_dict()
             md = vd.metadata()
             path = vd.path
+            iml_dir = _d(path)
+
+            iml_metadata = read_iml_config_metadata(_d(path))
 
             def as_list(v):
                 if type(v) == list:
@@ -454,15 +459,53 @@ class OverlapStackedBarPlot:
             new_stacked_dict = dict(stacked_dict)
             new_stacked_dict['algo'] = algo
             new_stacked_dict['env'] = env
-            if self.should_add_training_time:
-                # Q: Will this handle scaling phases?  I think so... basically, each phase-file will just have a
-                # different 'percent_complete'. However, I think we need to make OverlapStackedBarPlot have a phase argument,
-                # or run for each phase.
+
+            # if self.training_time or 'HACK_total_timesteps' in iml_metadata['metadata']:
+            #     if 'percent_complete' in md:
+            #         # Q: Will this handle scaling phases?  I think so... basically, each phase-file will just have a
+            #         # different 'percent_complete'. However, I think we need to make OverlapStackedBarPlot have a phase argument,
+            #         # or run for each phase.
+            #         total_size = vd.total_size()
+            #         # Extrapolate the total training time using percent_complete
+            #         total_training_time = extrap_total_training_time(total_size, md['percent_complete'])
+            #         new_stacked_dict['extrap_total_training_time'] = total_training_time
+            #     else:
+            #         new_stacked_dict['extrap_total_training_time'] = np.NAN
+
+            extrap_dict = dict()
+            extrap_dict['algo'] = algo
+            extrap_dict['env'] = env
+            extrap_dict['path'] = path
+
+            # if env == 'AirLearningEnv':
+            #     import ipdb; ipdb.set_trace()
+
+            if ( self.extrapolated_training_time or 'HACK_total_timesteps' in iml_metadata['metadata'] ) and 'percent_complete' in md:
                 total_size = vd.total_size()
                 # Extrapolate the total training time using percent_complete
-                assert 'percent_complete' in md
-                total_training_time = extrap_total_training_time(total_size, md['percent_complete'])
+                if 'HACK_total_timesteps' in iml_metadata['metadata']:
+                    logging.info("HACK: ({algo}, {env}) @ {path} -- Override total number of training timesteps to be {t}".format(
+                        algo=algo,
+                        env=env,
+                        path=path,
+                        t=iml_metadata['metadata']['HACK_total_timesteps'],
+                    ))
+                    end_time_timesteps = get_end_num_timesteps(iml_dir)
+                    percent_complete = end_time_timesteps / iml_metadata['metadata']['HACK_total_timesteps']
+                    extrap_dict['end_time_timesteps'] = end_time_timesteps
+                    extrap_dict['HACK_total_timesteps'] = iml_metadata['metadata']['HACK_total_timesteps']
+                else:
+                    percent_complete = md['percent_complete']
+                total_training_time = extrap_total_training_time(total_size, percent_complete)
                 new_stacked_dict['extrap_total_training_time'] = total_training_time
+                extrap_dict['percent_complete'] = percent_complete
+                extrap_dict['total_training_time'] = total_training_time
+                extrap_dict['total_size'] = total_size
+            else:
+                new_stacked_dict['extrap_total_training_time'] = np.NAN
+                extrap_dict['isnan'] = True
+            logging.info("debug extrap:\n{msg}".format(msg=pprint_msg(extrap_dict)))
+
             new_stacked_dict = dict((k, as_list(v)) for k, v in new_stacked_dict.items())
             df = pd.DataFrame(new_stacked_dict)
 
@@ -473,8 +516,13 @@ class OverlapStackedBarPlot:
 
     def new_each_df(self):
         for (algo, env), vd in self.each_vd():
+            path = vd.path
+            md = vd.metadata()
+            iml_dir = _d(path)
+            iml_metadata = read_iml_config_metadata(iml_dir)
             df = vd.as_df(keep_metadata_fields=['machine', 'process', 'phase', 'operation', 'resource_overlap'])
-            df['operation'] = df['operation'].apply(join_plus)
+            if len(df['operation']) > 0 and type(df['operation'][0]) != str:
+                df['operation'] = df['operation'].apply(join_plus)
             df['resource_overlap'] = df['resource_overlap'].apply(join_plus)
             df['category'] = df['region'].apply(join_plus)
             df['time_sec'] = df['size'] / MICROSECONDS_IN_SECOND
@@ -483,6 +531,25 @@ class OverlapStackedBarPlot:
             path = vd.path
             df['algo'] = algo
             df['env'] = env
+            # if 'percent_complete' in md:
+            if ( self.extrapolated_training_time or 'HACK_total_timesteps' in iml_metadata['metadata'] ) and 'percent_complete' in md:
+                total_size = vd.total_size()
+                # Extrapolate the total training time using percent_complete
+                if 'HACK_total_timesteps' in iml_metadata['metadata']:
+                    logging.info("HACK: ({algo}, {env}) @ {path} -- Override total number of training timesteps to be {t}".format(
+                        algo=algo,
+                        env=env,
+                        path=path,
+                        t=iml_metadata['HACK_total_timesteps'],
+                    ))
+                    end_time_timesteps = get_end_num_timesteps(iml_dir)
+                    percent_complete = end_time_timesteps / iml_metadata['HACK_total_timesteps']
+                else:
+                    percent_complete = md['percent_complete']
+                total_training_time = extrap_total_training_time(total_size, percent_complete)
+                df['extrap_total_training_time'] = total_training_time
+            else:
+                df['extrap_total_training_time'] = np.NAN
 
             df = self._new_HACK_remove_process_operation_df(df)
             df = self._new_remap_df(df, algo, env)
@@ -490,7 +557,7 @@ class OverlapStackedBarPlot:
             yield (algo, env), self._regions(df), path, df
 
     def _check_can_add_training_time(self):
-        if not self.training_time:
+        if not self.extrapolated_training_time:
             return
         for (algo, env), vd in self.each_vd():
             if 'percent_complete' not in vd.md:
@@ -589,15 +656,32 @@ class OverlapStackedBarPlot:
             exec(df_transformation)
         # Make sure they didn't modify df; they SHOULD be modifying new_df
         # (i.e. adding regions to a "fresh" slate)
-        assert np.all(df == orig_df)
+        # assert np.all(df == orig_df)
+        # Assume NaN's in the same place => equality.
+        assert df.equals(orig_df)
+
+        # if self.debug:
+        #     logging.info("--remap-df complete")
+        #     logging.info("Old dataframe; regions={regions}".format(regions=self._regions(orig_df)))
+        #     logging.info(pprint_msg(orig_df))
+        #
+        #     logging.info("New dataframe after --remap-df; regions={regions}".format(regions=self._regions(new_df)))
+        #     logging.info(pprint_msg(new_df))
 
         if self.debug:
-            logging.info("--remap-df complete")
-            logging.info("Old dataframe; regions={regions}".format(regions=self._regions(orig_df)))
-            logging.info(pprint_msg(orig_df))
+            buf = StringIO()
+            DataFrame.print_df(orig_df, file=buf)
+            logging.info("Old dataframe; regions={regions}:\n{msg}".format(
+                msg=textwrap.indent(buf.getvalue(), prefix='  '),
+                regions=self._regions(orig_df),
+            ))
 
-            logging.info("New dataframe after --remap-df; regions={regions}".format(regions=self._regions(new_df)))
-            logging.info(pprint_msg(new_df))
+            buf = StringIO()
+            DataFrame.print_df(new_df, file=buf)
+            logging.info("New dataframe after --remap-df; regions={regions}:\n{msg}".format(
+                msg=textwrap.indent(buf.getvalue(), prefix='  '),
+                regions=self._regions(orig_df),
+            ))
 
         return new_df
 
@@ -629,8 +713,6 @@ class OverlapStackedBarPlot:
         assert np.all(df == orig_df)
 
         if self.debug:
-            # logging.info("--remap-df complete")
-
             buf = StringIO()
             DataFrame.print_df(orig_df, file=buf)
             logging.info("Old dataframe:\n{msg}".format(msg=textwrap.indent(buf.getvalue(), prefix='  ')))
@@ -640,6 +722,9 @@ class OverlapStackedBarPlot:
             logging.info("New dataframe after --remap-df:\n{msg}".format(msg=textwrap.indent(buf.getvalue(), prefix='  ')))
 
         return new_df
+
+    def _num_algo_env_combos(self):
+        return len(self.df[['algo', 'env']].unique())
 
     def _read_df(self):
         # TODO: merge these on (algo, env)
@@ -651,25 +736,44 @@ class OverlapStackedBarPlot:
         DataFrame.print_df(self.unins_df, file=buf)
         logging.info("unins_df:\n{msg}".format(
             msg=textwrap.indent(buf.getvalue(), prefix='  '),
-            # pprint_msg(self.unins_df),
         ))
 
+        self.ins_df = self.read_ins_df()
+        buf = StringIO()
+        DataFrame.print_df(self.ins_df, file=buf)
+        logging.info("ins_df:\n{msg}".format(
+            msg=textwrap.indent(buf.getvalue(), prefix='  '),
+        ))
+
+        # self.df = self.ins_df.merge(self.unins_df, on=['algo', 'env'])
+        # if not self.detailed:
+        #     self.df['total_training_time'] = self.df['unins_total_training_time_us']
+        # else:
+        #     self.df['total_training_time'] = self.df['unins_total_training_time_us'] * self.df['percent']
+
+        # Keep (algo, env) even if we don't have total uninstrumented training time for it.
+        # Use extrapolated time instead.
+        self.df = self.ins_df.merge(self.unins_df, on=['algo', 'env'], how='left')
+        def get_total_training_time(row):
+            # Prefer actual uninstrumented training time over extrapolated training time.
+            # Q: isn't extrapolated time including overheads...?
+            if np.isnan(row['unins_total_training_time_us']):
+                return row['extrap_total_training_time']
+            return row['unins_total_training_time_us']
+        self.df['full_unins_training_time'] = self.df.apply(get_total_training_time, axis=1)
+        self.df = self.df[~np.isnan(self.df['full_unins_training_time'])]
         if not self.detailed:
-            self.ins_df = self.read_ins_df()
-
-            buf = StringIO()
-            DataFrame.print_df(self.df, file=buf)
-            logging.info("ins_df:\n{msg}".format(
-                msg=textwrap.indent(buf.getvalue(), prefix='  '),
-                # msg=pprint_msg(self.df),
-            ))
-
-            self.df = self.ins_df.merge(self.unins_df, on=['algo', 'env'])
-            self.df['total_training_time'] = self.df['unins_total_training_time_us']
+            self.df['total_training_time'] = self.df['full_unins_training_time']
         else:
-            self.ins_df = self.read_ins_df()
-            self.df = self.ins_df.merge(self.unins_df, on=['algo', 'env'])
-            self.df['total_training_time'] = self.df['unins_total_training_time_us'] * self.df['percent']
+            self.df['total_training_time'] = self.df['full_unins_training_time'] * self.df['percent']
+            # Number of (algo, env) combinations is just 1;
+            # Show single training time bar, where total training time is broken down into percent's
+
+            # Number of (algo, env) combinations is more than one;
+            # Show two bars per (algo, env):
+            # - Left bar: percent breakdown with high-level resource (CPU/GPU) (hue) and high-level operation (hatches).
+            # - Right bar: Total training time
+
 
             # buf = StringIO()
             # DataFrame.print_df(self.df, file=buf)
@@ -678,16 +782,12 @@ class OverlapStackedBarPlot:
             #     # msg=pprint_msg(self.df),
             # ))
 
-        # # Keep (algo, env) even if we don't have total uninstrumented training time for it.
-        # # Use extrapolated time instead.
-        # self.df = self.ins_df.merge(self.unins_df, on=['algo', 'env'], how='left')
-        # def get_total_training_time(row):
-        #     # Prefer actual uninstrumented training time over extrapolated training time.
-        #     # Q: isn't extrapolated time including overheads...?
-        #     if np.isnan(row['unins_total_training_time_us']):
-        #         return row['extrap_total_training_time']
-        #     return row['unins_total_training_time_us']
-        # self.df['total_training_time'] = self.df.apply(get_total_training_time, axis=1)
+        buf = StringIO()
+        DataFrame.print_df(self.df, file=buf)
+        logging.info("df:\n{msg}".format(
+            msg=textwrap.indent(buf.getvalue(), prefix='  '),
+        ))
+
 
 
     def read_ins_df(self):
@@ -716,9 +816,10 @@ class OverlapStackedBarPlot:
         for (algo, env), regions, path, df in df_iter:
             buf = StringIO()
             DataFrame.print_df(df)
-            logging.info("({algo}, {env}):\n{msg}".format(
+            logging.info("({algo}, {env}) @ path={path}:\n{msg}".format(
                 algo=algo,
                 env=env,
+                path=path,
                 msg=textwrap.indent(buf.getvalue(), prefix='  '),
             ))
 
@@ -745,16 +846,31 @@ class OverlapStackedBarPlot:
 
             dfs.append(df)
 
+        # if self.debug:
+        #     logging.info("ins_df before concat:\n{msg}".format(msg=pprint_msg(dfs)))
         ins_df = pd.concat(dfs)
+        # if self.debug:
+        #     logging.info("ins_df after concat:\n{msg}".format(msg=pprint_msg(ins_df)))
 
-        all_cols = set(ins_df.keys())
-        numeric_cols = set([colname for colname in ins_df.keys() if np.issubdtype(ins_df[colname].dtype, np.number)])
+        old_ins_df = ins_df
+        all_cols = set(old_ins_df.keys())
+        numeric_cols = set([colname for colname in old_ins_df.keys() if np.issubdtype(old_ins_df[colname].dtype, np.number)])
         non_numeric_cols = all_cols.difference(numeric_cols)
-        # ins_df.groupby(['machine', 'operation', 'phase', 'process', 'region', 'resource_overlap', 'category', 'algo', 'env', 'x_field']).sum().reset_index()
-        ins_df = ins_df.groupby(list(non_numeric_cols)).sum().reset_index()
+        # old_ins_df.groupby(['machine', 'operation', 'phase', 'process', 'region', 'resource_overlap', 'category', 'algo', 'env', 'x_field']).sum().reset_index()
+        # WARNING:  df.groupby(...).sum(skipna=False)
+        #   This IGNORES NaN's in aggregated columns resulting in NaN's not being forwarded (e.g. zero columns appear instead of NaN's)
+        # SOLUTION: df.groupby(...).agg(pd.DataFrame.sum, skipna=False)
+        # SEE: https://github.com/pandas-dev/pandas/issues/28787
+        # ins_df = old_ins_df.groupby(list(non_numeric_cols)).sum().reset_index()
+        ins_df = old_ins_df.groupby(list(non_numeric_cols)).agg(pd.DataFrame.sum, skipna=False).reset_index()
 
-        total_size = ins_df['size'].sum()
-        ins_df['percent'] = ins_df['size']/total_size
+        # if self.debug:
+        #     logging.info("ins_df after groupby.sum():\n{msg}".format(msg=pprint_msg(ins_df)))
+        #     import ipdb; ipdb.set_trace()
+
+        if self.detailed:
+            total_size = ins_df['size'].sum()
+            ins_df['percent'] = ins_df['size']/total_size
 
         return ins_df
 
@@ -986,7 +1102,7 @@ class OverlapStackedBarPlot:
                     'algo_env_pairs': algo_env_pairs,
                 })))
         self._init_directories()
-        self._check_can_add_training_time()
+        # self._check_can_add_training_time()
         self._read_df()
         self._normalize_df()
         self._add_df_fields(self.df)

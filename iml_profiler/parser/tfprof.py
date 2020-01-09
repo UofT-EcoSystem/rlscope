@@ -21,6 +21,8 @@ from iml_profiler.parser.stats import KernelTime
 from iml_profiler.parser.trace_events import TraceEventsDumper, dump_category_times
 from iml_profiler.profiler.concurrent import ForkedProcessPool, FailedProcessException
 
+from iml_profiler.parser.dataframe import venn_as_overlap_dict, overlap_as_venn_dict
+
 from iml_profiler.profiler import concurrent
 
 from concurrent.futures import ProcessPoolExecutor
@@ -3439,14 +3441,16 @@ class OverlapJSONToVennConverter:
 
     def _compute_set_sizes(self):
         # Convert self.overlap into venn_js sizes.
-        set_to_size = dict()
-        for overlap_region, size in self.overlap.items():
-            for set_region in overlap_region:
-                assert type(set_region) == str
-                if set_region not in set_to_size:
-                    set_to_size[set_region] = as_type(0., type(size))
-                set_to_size[set_region] += size
-        return set_to_size
+        V = overlap_as_venn_dict(self.overlap)
+        return V
+        # set_to_size = dict()
+        # for overlap_region, size in self.overlap.items():
+        #     for set_region in overlap_region:
+        #         assert type(set_region) == str
+        #         if set_region not in set_to_size:
+        #             set_to_size[set_region] = as_type(0., type(size))
+        #         set_to_size[set_region] += size
+        # return set_to_size
 
     def convert(self):
         """
