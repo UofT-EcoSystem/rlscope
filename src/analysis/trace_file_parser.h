@@ -57,6 +57,8 @@
 //#define PSEC_IN_USEC (1000)
 //#define USEC_IN_SEC (1000000)
 
+#define IML_VERSION 1
+
 #define IF_BAD_STATUS_RETURN(status)  \
       if (status.code() != MyStatus::OK().code()) { \
         return status; \
@@ -3771,6 +3773,9 @@ public:
       md["process"] = process;
       md["phase"] = phase;
       md["overlap_type"] = overlap_type;
+
+      // Control for bugs in old data-formats.
+      md["version"] = IML_VERSION;
 
       auto const& meta = reducer.GetMetaForAll();
       md["start_time_usec"] = meta.start_time_usec;

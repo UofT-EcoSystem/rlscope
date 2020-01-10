@@ -8,6 +8,9 @@ import textwrap
 import copy
 import itertools
 
+
+import matplotlib.patches as mpatches
+import matplotlib.patches as mpl_patches
 from matplotlib import ticker as mpl_ticker
 import matplotlib
 # NOTE: If we don't do this, then with ForwardX11 enabled in ~/.ssh/config we get an error on python script exit:
@@ -519,6 +522,7 @@ class OverlapStackedBarPlot:
             path = vd.path
             md = vd.metadata()
             iml_dir = _d(path)
+
             iml_metadata = read_iml_config_metadata(iml_dir)
             df = vd.as_df(keep_metadata_fields=['machine', 'process', 'phase', 'operation', 'resource_overlap'])
             if len(df['operation']) > 0 and type(df['operation'][0]) != str:
@@ -540,10 +544,10 @@ class OverlapStackedBarPlot:
                         algo=algo,
                         env=env,
                         path=path,
-                        t=iml_metadata['HACK_total_timesteps'],
+                        t=iml_metadata['metadata']['HACK_total_timesteps'],
                     ))
                     end_time_timesteps = get_end_num_timesteps(iml_dir)
-                    percent_complete = end_time_timesteps / iml_metadata['HACK_total_timesteps']
+                    percent_complete = end_time_timesteps / iml_metadata['metadata']['HACK_total_timesteps']
                 else:
                     percent_complete = md['percent_complete']
                 total_training_time = extrap_total_training_time(total_size, percent_complete)
@@ -710,7 +714,9 @@ class OverlapStackedBarPlot:
 
         # Make sure they didn't modify df; they SHOULD be modifying new_df
         # (i.e. adding regions to a "fresh" slate)
-        assert np.all(df == orig_df)
+        # assert np.all(df == orig_df)
+        # Assume NaN's in the same place => equality.
+        assert df.equals(orig_df)
 
         if self.debug:
             buf = StringIO()
@@ -869,8 +875,14 @@ class OverlapStackedBarPlot:
         #     import ipdb; ipdb.set_trace()
 
         if self.detailed:
-            total_size = ins_df['size'].sum()
-            ins_df['percent'] = ins_df['size']/total_size
+            # NOTE: must calculate percent within an (algo, env)
+            group_dfs = []
+            for group, group_df in ins_df.groupby(['algo', 'env']):
+                total_size = group_df['size'].sum()
+                # Q: does this update ins_df...?
+                group_df['percent'] = group_df['size']/total_size
+                group_dfs.append(group_df)
+            ins_df = pd.concat(group_dfs)
 
         return ins_df
 
@@ -1028,49 +1040,70 @@ class OverlapStackedBarPlot:
         # else:
         #     y2_field = None
 
-
-
         stacked_bar_plot = DetailedStackedBarPlot(
             data=self.df,
-            path=self._plot_path('plot_category'),
+            path=self._plot_path('plot_fancy'),
             x_field='x_field',
-            # y_field='time_sec',
-            y_field='total_training_time',
-            hatch='operation',
-            hue='category',
-            xlabel='(RL algorithm, Simulator)',
-            ylabel='Total training time (seconds)',
-            title=self.plot_title,
-            debug=self.debug,
-        )
-        stacked_bar_plot.plot()
+            y_field='percent',
+            x_group='operation',
+            # y2_field='total_training_time',
 
-        ignore_cols = ['category', 'region']
-        all_cols = set(self.df.keys())
-        numeric_cols = set([
-            colname for colname in self.df.keys()
-            if np.issubdtype(self.df[colname].dtype, np.number)])
-        non_numeric_cols = all_cols.difference(numeric_cols)
-
-        groupby_cols = non_numeric_cols.difference(ignore_cols)
-        keep_cols = all_cols.difference(ignore_cols)
-        groupby = self.df[list(keep_cols)].groupby(by=list(groupby_cols))
-        resource_df = groupby.sum().reset_index()
-
-        stacked_bar_plot = DetailedStackedBarPlot(
-            data=resource_df,
-            path=self._plot_path('plot_resource'),
-            x_field='x_field',
-            # y_field='time_sec',
-            y_field='total_training_time',
-            hatch='operation',
+            hues_together=True,
+            hatch='category',
             hue='resource_overlap',
+
+            # hatches_together=True,
+            # hatch='resource_overlap',
+            # hue='category',
+
             xlabel='(RL algorithm, Simulator)',
-            ylabel='Total training time (seconds)',
+            ylabel='Percent',
             title=self.plot_title,
             debug=self.debug,
         )
         stacked_bar_plot.plot()
+
+        # stacked_bar_plot = DetailedStackedBarPlot(
+        #     data=self.df,
+        #     path=self._plot_path('plot_category'),
+        #     x_field='x_field',
+        #     # y_field='time_sec',
+        #     y_field='total_training_time',
+        #     hatch='operation',
+        #     hue='category',
+        #     xlabel='(RL algorithm, Simulator)',
+        #     ylabel='Total training time (seconds)',
+        #     title=self.plot_title,
+        #     debug=self.debug,
+        # )
+        # stacked_bar_plot.plot()
+        #
+        # ignore_cols = ['category', 'region']
+        # all_cols = set(self.df.keys())
+        # numeric_cols = set([
+        #     colname for colname in self.df.keys()
+        #     if np.issubdtype(self.df[colname].dtype, np.number)])
+        # non_numeric_cols = all_cols.difference(numeric_cols)
+        #
+        # groupby_cols = non_numeric_cols.difference(ignore_cols)
+        # keep_cols = all_cols.difference(ignore_cols)
+        # groupby = self.df[list(keep_cols)].groupby(by=list(groupby_cols))
+        # resource_df = groupby.sum().reset_index()
+        #
+        # stacked_bar_plot = DetailedStackedBarPlot(
+        #     data=resource_df,
+        #     path=self._plot_path('plot_resource'),
+        #     x_field='x_field',
+        #     # y_field='time_sec',
+        #     y_field='total_training_time',
+        #     hatch='operation',
+        #     hue='resource_overlap',
+        #     xlabel='(RL algorithm, Simulator)',
+        #     ylabel='Total training time (seconds)',
+        #     title=self.plot_title,
+        #     debug=self.debug,
+        # )
+        # stacked_bar_plot.plot()
 
     def _add_df_fields(self, df, human_readable=False):
         """
@@ -1527,23 +1560,38 @@ class DetailedStackedBarPlot:
                  data, path,
                  x_field,
                  y_field,
+                 x_group,
                  # operation
                  hatch,
                  # category
                  hue,
+                 hues_together=False,
+                 hatches_together=False,
                  xlabel=None,
                  ylabel=None,
                  title=None,
+                 bar_width=0.33,
                  debug=False,
                  ):
+
 
         self.data = data
         self.path = path
 
         self.x_field = x_field
         self.y_field = y_field
+        self.x_group = x_group
+
         self.hatch = hatch
         self.hue = hue
+        # Must provide at least one of these as true.
+        assert ( hues_together or hatches_together )
+        # Must provide EXACTLY ON of these as true.
+        assert not( hues_together and hatches_together )
+        self.hues_together = hues_together
+        self.hatches_together = hatches_together
+
+        self.bar_width = bar_width
 
         self.debug = debug
 
@@ -1551,13 +1599,69 @@ class DetailedStackedBarPlot:
         self.ylabel = ylabel
         self.title = title
 
-        self.hatch_map = self.as_hatch_map(self.hatches)
+        self._init_x_offsets()
+
+        self.hatch_map = self.as_hatch_map(self.hatches(self.data))
         self.hue_map = self.as_color_map(self.hues(self.data))
 
+    def _init_x_offsets(self):
+        x_groups = self.x_groups()
 
-    @property
-    def hatches(self):
-        hatches = sorted(self.data[self.hatch].unique())
+        total_bar_width = 2/3
+        # width per bar:
+        # bar_width = 0.33
+        if len(x_groups) > 0:
+            self.bar_width = total_bar_width/len(x_groups)
+        else:
+            # Prevent division by zero for empty dataframes.
+            self.bar_width = 0.33
+
+        bar_xloc = self._calc_bar_xloc(len(x_groups), self.bar_width)
+        x_group_offset = dict()
+        for x_group, offset in zip(x_groups, bar_xloc):
+            x_group_offset[x_group] = offset
+        self.x_group_offset = x_group_offset
+
+        x_field_offset = dict()
+        for offset, x_field in enumerate(self.x_fields()):
+            x_field_offset[x_field] = offset
+        self.x_field_offset = x_field_offset
+
+    def _xtick(self, x_field, x_group):
+        return self.x_field_offset[x_field] + self.x_group_offset[x_group]
+
+    @staticmethod
+    def _calc_bar_xloc(n, w):
+        """
+        n = total number of bars
+        w = width per bar
+
+        :param n:
+        :return:
+        """
+        i = np.arange(n) - (n // 2)
+        if n % 2 == 0:
+            # even:
+            # n = 4
+            # i = [0, 1, 2, 3]
+            ws = i*w + w/2
+        else:
+            # odd:
+            # n = 5
+            # i = [0, 1, 2, 3, 4]
+            ws = i*w
+        return ws
+
+    def x_fields(self):
+        x_fields = sorted(self.data[self.x_field].unique())
+        return x_fields
+
+    def x_groups(self):
+        x_groups = sorted(self.data[self.x_group].unique())
+        return x_groups
+
+    def hatches(self, data):
+        hatches = sorted(data[self.hatch].unique())
         return hatches
 
     def hues(self, data):
@@ -1593,6 +1697,12 @@ class DetailedStackedBarPlot:
         return color_map
 
     def plot(self):
+        fig = plt.figure()
+        # Q: What's this affect?
+        # ax = plt.add_subplot(111)
+        ax = fig.add_subplot(111)
+
+        data = self.data.sort_values(by=[self.hatch, self.hue, self.x_field])
 
         # PSEUDOCODE:
         # bottom = zeroes(len(ys))
@@ -1606,52 +1716,11 @@ class DetailedStackedBarPlot:
         #       hatch=self.hatch_map[hatch)
         #     bottom += ys
 
-        fig = plt.figure()
-        # Q: What's this affect?
-        # ax = plt.add_subplot(111)
-        ax = fig.add_subplot(111)
-
-        all_xs = []
-        all_ys = []
-        bottom = None
-        data = self.data.sort_values(by=[self.hatch, self.hue, self.x_field])
-        hatches = self.hatches
-        bar_kwargs = []
-        for hatch in hatches:
-            hatch_df = data[data[self.hatch] == hatch]
-            hues = self.hues(hatch_df)
-            for hue in hues:
-                hue_df = hatch_df[hatch_df[self.hue] == hue]
-                xs = hue_df[self.x_field].values
-                ys = hue_df[self.y_field].values
-                all_xs.append(xs)
-                all_ys.append(ys)
-                plot_kwargs = dict(
-                    x=xs, height=ys, bottom=bottom,
-                    # Color of hatch pattern.
-                    edgecolor='black',
-                    color=self.hue_map[hue],
-                    hatch=self.hatch_map[hatch]
-                )
-                ax.bar(**plot_kwargs)
-                kw = dict(plot_kwargs)
-                kw.update({
-                    'hue_field': hue,
-                    'hatch_field': hatch,
-                })
-                bar_kwargs.append(kw)
-                if bottom is None:
-                    bottom = np.zeros(len(ys))
-                assert not np.isnan(bottom).any()
-                assert not np.isnan(ys).any()
-                assert not np.isnan(bottom + ys).any()
-                bottom = bottom + ys
-                assert not np.isnan(bottom).any()
-        logging.info("Plot debug:\n{msg}".format(
-            msg=pprint_msg({
-                'bar_kwargs': bar_kwargs,
-            }),
-        ))
+        if self.hues_together:
+            self._plot_hues_together(data, fig, ax)
+        else:
+            assert self.hatches_together
+            self._plot_hatches_together(data, fig, ax)
 
         if self.ylabel is not None:
             ax.set_ylabel(self.ylabel)
@@ -1661,6 +1730,7 @@ class DetailedStackedBarPlot:
             ax.set_title(self.title)
 
         self._add_legend(ax)
+        self._add_xgroup_legend(ax)
 
         logging.info("Output csv @ {path}".format(path=self._csv_path))
         data.to_csv(self._csv_path, index=False)
@@ -1678,6 +1748,155 @@ class DetailedStackedBarPlot:
         # self._add_legend(operation)
         # self._add_axis_labels(operation)
         # self._show(fig, operation)
+
+    def _plot_hatches_together(self, data, fig, ax):
+        # fig = plt.figure()
+        # # Q: What's this affect?
+        # # ax = plt.add_subplot(111)
+        # ax = fig.add_subplot(111)
+
+        all_xs = []
+        all_ys = []
+        bar_kwargs = []
+        # TODO: inter-change hue/hatch loops..?
+        last_iter = None
+        # NOTE: we need to use DIFFERNT bottom's for each x_group!
+        # ... so iterate over x_group FIRST.
+        # Q: Different x-fields may not have a particular x-group...?
+        # We are ASSUMING that EVERY (algo,env) has (BP,Sim,Inf)
+        x_groups = self.x_groups()
+
+        all_x_fields = self.x_fields()
+        ax.set_xticks(np.arange(len(all_x_fields)))
+        ax.set_xticklabels(all_x_fields
+                           # , rotation=rotation
+                           )
+
+        for x_group in x_groups:
+            bottom = None
+            xgroup_df = data[data[self.x_group] == x_group]
+            hatches = self.hatches(xgroup_df)
+            for hatch in hatches:
+                hatch_df = xgroup_df[xgroup_df[self.hatch] == hatch]
+                hues = self.hues(hatch_df)
+                for hue in hues:
+                    hue_df = hatch_df[hatch_df[self.hue] == hue]
+                    x_fields = hue_df[self.x_field]
+                    x_groups = hue_df[self.x_group]
+                    xs = np.vectorize(self._xtick, otypes=[np.float])(hue_df[self.x_field], hue_df[self.x_group])
+                    ys = hue_df[self.y_field].values
+                    all_xs.append(xs)
+                    all_ys.append(ys)
+                    plot_kwargs = dict(
+                        x=xs, height=ys, bottom=bottom,
+                        width=self.bar_width,
+                        # Color of hatch pattern.
+                        edgecolor='black',
+                        color=self.hue_map[hue],
+                        hatch=self.hatch_map[hatch]
+                    )
+                    ax.bar(**plot_kwargs)
+                    kw = dict(plot_kwargs)
+                    kw.update({
+                        'hue_field': hue,
+                        'hatch_field': hatch,
+                    })
+                    bar_kwargs.append(kw)
+                    if bottom is None:
+                        bottom = np.zeros(len(ys))
+                    assert not np.isnan(bottom).any()
+                    assert not np.isnan(ys).any()
+                    assert not np.isnan(bottom + ys).any()
+                    bottom = bottom + ys
+                    assert not np.isnan(bottom).any()
+
+                    last_iter = dict(
+                        x_fields=x_fields,
+                        x_groups=x_groups,
+                        xs=xs,
+                        ys=ys,
+                        bottom=bottom,
+                    )
+
+        logging.info("Plot debug:\n{msg}".format(
+            msg=pprint_msg({
+                'bar_kwargs': bar_kwargs,
+            }),
+        ))
+
+
+    def _plot_hues_together(self, data, fig, ax):
+
+        all_xs = []
+        all_ys = []
+        bar_kwargs = []
+        # TODO: inter-change hue/hatch loops..?
+        last_iter = None
+        # NOTE: we need to use DIFFERNT bottom's for each x_group!
+        # ... so iterate over x_group FIRST.
+        # Q: Different x-fields may not have a particular x-group...?
+        # We are ASSUMING that EVERY (algo,env) has (BP,Sim,Inf)
+        x_groups = self.x_groups()
+
+        all_x_fields = self.x_fields()
+        ax.set_xticks(np.arange(len(all_x_fields)))
+        ax.set_xticklabels(all_x_fields
+                           # , rotation=rotation
+                           )
+
+        for x_group in x_groups:
+            bottom = None
+            xgroup_df = data[data[self.x_group] == x_group]
+            hues = self.hues(xgroup_df)
+            for hue in hues:
+                hue_df = xgroup_df[xgroup_df[self.hue] == hue]
+                hatches = self.hatches(hue_df)
+                for hatch in hatches:
+                    hatch_df = hue_df[hue_df[self.hatch] == hatch]
+                    # xs = hatch_df[self.x_field].values
+                    x_fields = hatch_df[self.x_field]
+                    x_groups = hatch_df[self.x_group]
+                    xs = np.vectorize(self._xtick, otypes=[np.float])(hatch_df[self.x_field], hatch_df[self.x_group])
+                    ys = hatch_df[self.y_field].values
+                    all_xs.append(xs)
+                    all_ys.append(ys)
+                    plot_kwargs = dict(
+                        x=xs, height=ys, bottom=bottom,
+                        width=self.bar_width,
+                        # Color of hatch pattern.
+                        edgecolor='black',
+                        color=self.hue_map[hue],
+                        hatch=self.hatch_map[hatch]
+                    )
+                    ax.bar(**plot_kwargs)
+                    kw = dict(plot_kwargs)
+                    kw.update({
+                        'hue_field': hue,
+                        'hatch_field': hatch,
+                    })
+                    bar_kwargs.append(kw)
+                    if bottom is None:
+                        bottom = np.zeros(len(ys))
+                    assert not np.isnan(bottom).any()
+                    assert not np.isnan(ys).any()
+                    assert not np.isnan(bottom + ys).any()
+                    bottom = bottom + ys
+                    assert not np.isnan(bottom).any()
+
+                    last_iter = dict(
+                        x_fields=x_fields,
+                        x_groups=x_groups,
+                        xs=xs,
+                        ys=ys,
+                        bottom=bottom,
+                    )
+
+        logging.info("Plot debug:\n{msg}".format(
+            msg=pprint_msg({
+                'bar_kwargs': bar_kwargs,
+            }),
+        ))
+
 
     def _as_path(self, file_ext):
         path = self.path
@@ -1769,6 +1988,140 @@ class DetailedStackedBarPlot:
             else:
                 _add_line(impl_name, operation)
 
+    def _add_xgroup_legend(self, ax, x_offset=0, y_offset=0):
+
+        # legbox_spacer = 0.04
+        legbox_spacer = 0
+        # Place legend at top-left of plot-area.
+        legend_kwargs = dict(
+            loc='upper left',
+            bbox_to_anchor=(0 + legbox_spacer, 1 - legbox_spacer),
+            ncol=1,
+            handlelength=0,
+            handletextpad=0,
+        )
+
+        annotate_kwargs = dict(
+            color='black',
+            weight='bold',
+        )
+
+        patch_kwargs = dict(
+            edgecolor='black',
+            # facecolor='white',
+        )
+
+        def get_bar_label(i, x_group):
+            # label = "({i})".format(i=i + 1)
+            # label = "{i}".format(i=i + 1)
+            label = "$({i})$".format(i=i + 1)
+            return label
+
+        def _add_xgroup_bar_labels():
+            x_groups = self.x_groups()
+            x_fields = self.x_fields()
+            # Just label the first x-field with (1), (2), (3)
+            # OR: BP, Inf, Sim
+            x_field = x_fields[0]
+
+            df = self.data
+            xy_offset = (x_offset, y_offset)
+            for i, x_group in enumerate(x_groups):
+                x = self._xtick(x_field, x_group)
+                sub_df = df[
+                    (df[self.x_field] == x_field) &
+                    (df[self.x_group] == x_group)]
+                height = sub_df[self.y_field].sum()
+                logging.info("Add bar-label:\n{msg}".format(msg=pprint_msg({
+                    'x_field': x_field,
+                    'x_group': x_group,
+                    'height': height,
+                    'x': x,
+                })))
+                label = get_bar_label(i, x_group)
+                ax.annotate(
+                    label,
+                    # xy=(rect.get_x() + rect.get_width() / 2, height),
+                    xy=(x, height),
+                    xytext=xy_offset,
+                    textcoords="offset points",
+                    ha='center',
+                    va='bottom',
+                    **annotate_kwargs)
+
+        def _add_xgroup_legbox():
+            x_groups = self.x_groups()
+            patches = []
+            for i, x_group in enumerate(x_groups):
+                patch = mpatches.Patch(edgecolor='white', color='white')
+                # patch = mpl_patches.Rectangle((0, 0), 0, 0, fc="white", ec="white",
+                #                       lw=0, alpha=0)
+
+                # patch = mpatches.Patch(**patch_kwargs)
+                # patch = mpatches.Rectangle(**patch_kwargs)
+
+                # label = get_bar_label(i, x_group)
+                # # patch = ax.annotate(label, (0, 0),
+                # #             ha='center',
+                # #             va='center',
+                # #             # edgecolor='black',
+                # #             # xycoords='offset points'
+                # #             **annotate_kwargs)
+                # patch = ax.text(0, 0, label,
+                #                 ha='center',
+                #                 va='center',
+                #                 # edgecolor='black',
+                #                 # xycoords='offset points'
+                #                 **annotate_kwargs)
+
+                patches.append(patch)
+
+            # labels = x_groups
+
+            def _get_label(i, x_group):
+                bar_label = get_bar_label(i, x_group)
+                # txt = r"\textbf{{{bar_label}}} = {x_group}".format(
+                #     bar_label=bar_label,
+                #     x_group=x_group)
+                txt = "{bar_label} {x_group}".format(
+                    bar_label=bar_label,
+                    x_group=x_group)
+                # import ipdb; ipdb.set_trace()
+                return txt
+            labels = [_get_label(i, x_group) for i, x_group in enumerate(x_groups)]
+
+            legend = ax.legend(handles=patches, labels=labels, **legend_kwargs)
+            ax.add_artist(legend)
+
+            # for i, (x_group, patch) in enumerate(zip(x_groups, patches)):
+            #     bar_label = get_bar_label(i, x_group)
+            #
+            #     rx, ry = patch.get_xy()
+            #     cx = rx + patch.get_width()/2.0
+            #     cy = ry + patch.get_height()/2.0
+            #
+            #     # ax.annotate(bar_label, (cx, cy),
+            #     #             ha='center',
+            #     #             va='center',
+            #     #             **annotate_kwargs)
+            #
+            #     txt = r"$\textbf{bar_label}$ = {x_group}".format(
+            #         bar_label=bar_label,
+            #         x_group=x_group)
+            #     ax.annotate(
+            #         txt, (cx, cy),
+            #         ha='center',
+            #         va='center',
+            #         **annotate_kwargs)
+
+            return legend
+
+        _add_xgroup_bar_labels()
+        _add_xgroup_legbox()
+
+
+
+
     def _add_legend(self, axis):
         self.legend_makers = []
 
@@ -1786,6 +2139,9 @@ class DetailedStackedBarPlot:
             'handlelength': 3,
             'handleheight': 2,
         }
+
+        # legend_spacer = 0.04
+        legend_spacer = 0
 
         # We need two groups of lines:
         #
@@ -1805,7 +2161,7 @@ class DetailedStackedBarPlot:
 
         hatch_legend = LegendMaker(attr_name='hatch',
                                    field_to_attr_map=self.hatch_map,
-                                   field_order=self.hatches,
+                                   field_order=self.hatches(self.data),
                                    # labels=self.hatches,
                                    legend_kwargs={
                                        # 'labelspacing': 1.2,
@@ -1821,7 +2177,7 @@ class DetailedStackedBarPlot:
                     # - Internally LegendMaker uses the figure coordinate system.
                     # - So, (1, 1) is the (right, top) of the whole figure,
                     #   so 1.04 makes it just a bit to the right of the whole figure
-                    'bbox_to_anchor': (1.04, 1),
+                    'bbox_to_anchor': (1 + legend_spacer, 1),
             })
             legend_kwargs.append(kwargs)
 
@@ -1853,7 +2209,7 @@ class DetailedStackedBarPlot:
                 # 'bbox_to_anchor':(0.5, -0.05),
 
                 'loc':'lower left',
-                'bbox_to_anchor':(1.04, 0.0),
+                'bbox_to_anchor':(1 + legend_spacer, 0.0),
 
             })
             legend_kwargs.append(kwargs)
@@ -1868,7 +2224,7 @@ class DetailedStackedBarPlot:
             kwargs = dict(common_legend_kwargs)
             kwargs.update({
                 'loc':'top left',
-                'bbox_to_anchor':(1.04, 1.0),
+                'bbox_to_anchor':(1 + legend_spacer, 1.0),
             })
             LegendMaker.add_legends_single(
                 self.legend_makers,

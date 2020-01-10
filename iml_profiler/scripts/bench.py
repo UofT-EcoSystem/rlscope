@@ -584,49 +584,48 @@ class ExperimentGroup(Experiment):
         if self.should_run_algo_env_group(expr):
             logging.info(rl_workloads_msg(expr, algo_env_pairs))
             self.iml_bench(parser, subparser, 'train_stable_baselines.sh', opts, suffix=bench_log(expr))
-            overlap_type = 'OperationOverlap'
-            # overlap_type = 'CategoryOverlap'
+            # overlap_type = 'OperationOverlap'
+            overlap_type = 'CategoryOverlap'
             # NOTE: gather across ALL ppo directories, including environment we cannot run like AirLearning.
             algo_env_pairs = gather.pairs_by_algo('ppo2')
             self.stacked_plot([
                 '--overlap-type', overlap_type,
 
-                '--resource-overlap', json.dumps(['CPU']),
-                '--remap-df', json.dumps([textwrap.dedent("""
-                        # Replace ppo2 operations with simple (Inference, Simulation, Backpropagation) labels
-                        # established in Background discussion of typical RL workloads.
-
-                        # Sanity check to make sure we don't forget any operations.
-                        assert regions.issubset({
-                            ('step',),
-                            ('sample_action',),
-                            ('compute_advantage_estimates',),
-                            ('optimize_surrogate',),
-                            ('training_loop',),
-                        })
-                        new_df[('Simulation',)] = df[('step',)]
-                        new_df[('Inference',)] = df[('sample_action',)]
-                        new_df[('Backpropagation',)] = df[('compute_advantage_estimates',)] + df[('optimize_surrogate',)] + df[('training_loop',)]
-                        """)]),
-                '--training-time',
-                # '--extrapolated-training-time',
-
-                # '--detailed',
+                # '--resource-overlap', json.dumps(['CPU']),
                 # '--remap-df', json.dumps([textwrap.dedent("""
                 #         # Replace ppo2 operations with simple (Inference, Simulation, Backpropagation) labels
                 #         # established in Background discussion of typical RL workloads.
-                #         def ppo_pretty_operation(op_name):
-                #             if op_name in {'compute_advantage_estimates', 'optimize_surrogate', 'training_loop'}:
-                #                 return "Backpropagation"
-                #             elif op_name == 'sample_action':
-                #                 return "Inference"
-                #             elif op_name == 'step':
-                #                 return "Simulation"
-                #             else:
-                #                 raise NotImplementedError("Not sure what pretty-name to use for op_name={op_name}".format(
-                #                     op_name=op_name))
-                #         new_df['operation'] = new_df['operation'].apply(ppo_pretty_operation)
+                #         # Sanity check to make sure we don't forget any operations.
+                #         assert regions.issubset({
+                #             ('step',),
+                #             ('sample_action',),
+                #             ('compute_advantage_estimates',),
+                #             ('optimize_surrogate',),
+                #             ('training_loop',),
+                #         })
+                #         new_df[('Simulation',)] = df[('step',)]
+                #         new_df[('Inference',)] = df[('sample_action',)]
+                #         new_df[('Backpropagation',)] = df[('compute_advantage_estimates',)] + df[('optimize_surrogate',)] + df[('training_loop',)]
                 #         """)]),
+                # '--training-time',
+                # # '--extrapolated-training-time',
+
+                '--detailed',
+                '--remap-df', json.dumps([textwrap.dedent("""
+                        # Replace ppo2 operations with simple (Inference, Simulation, Backpropagation) labels
+                        # established in Background discussion of typical RL workloads.
+                        def ppo_pretty_operation(op_name):
+                            if op_name in {'compute_advantage_estimates', 'optimize_surrogate', 'training_loop'}:
+                                return "Backpropagation"
+                            elif op_name == 'sample_action':
+                                return "Inference"
+                            elif op_name == 'step':
+                                return "Simulation"
+                            else:
+                                raise NotImplementedError("Not sure what pretty-name to use for op_name={op_name}".format(
+                                    op_name=op_name))
+                        new_df['operation'] = new_df['operation'].apply(ppo_pretty_operation)
+                        """)]),
 
                 '--y-type', 'percent',
                 '--x-type', 'env-comparison',

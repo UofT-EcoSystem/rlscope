@@ -1481,24 +1481,34 @@ class VennData:
         return stacked_dict
 
     def total_size(self):
+        if self._is_vennbug_version():
+            return self._old_vennbug_total_size()
+        return self._new_total_size()
+
+    def _is_vennbug_version(self):
+        return 'version' not in self._metadata
+
+    def _new_total_size(self):
         total_size = 0.
         overlap = self.as_overlap_dict()
         for labels, size in overlap.items():
             total_size += size
         return total_size
+
+    def _old_vennbug_total_size(self):
         # NOTE: this may have been correct with our broken venn_js format...
         # but it's no longer correct.
-        # total_size = 0.
-        # # [ size of all regions ] - [ size of overlap regions ]
-        # for labels, size in self.data.items():
-        #     if len(labels) > 1:
-        #         # Overlap region is JUST the size of the overlap.
-        #         total_size -= size
-        #     else:
-        #         # Single 'set' is the size of the WHOLE region (INCLUDING overlaps)
-        #         assert len(labels) == 1
-        #         total_size += size
-        # return total_size
+        total_size = 0.
+        # [ size of all regions ] - [ size of overlap regions ]
+        for labels, size in self.data.items():
+            if len(labels) > 1:
+                # Overlap region is JUST the size of the overlap.
+                total_size -= size
+            else:
+                # Single 'set' is the size of the WHOLE region (INCLUDING overlaps)
+                assert len(labels) == 1
+                total_size += size
+        return total_size
 
     def get_size(self, key):
         return self.data[key]
@@ -1606,8 +1616,14 @@ class VennData:
     #
     #     return overlap
 
-    # def new_as_overlap_dict(self):
     def as_overlap_dict(self):
+        if self._is_vennbug_version():
+            return self._old_vennbug_as_overlap_dict()
+        return self._new_as_overlap_dict()
+
+
+    # def new_as_overlap_dict(self):
+    def _new_as_overlap_dict(self):
         """
         ##
         ## To calcuate V[…] from O[…]:
@@ -1648,6 +1664,64 @@ class VennData:
         V = self.as_dict()
         O = venn_as_overlap_dict(V)
         return O
+
+    def _old_vennbug_as_overlap_dict(self):
+        """
+        NOTE: This returns "overlap" sizes.
+        i.e.
+        ('CPU',) contains the exclusive size of the CPU region, NOT INCLUDING possible overlap with GPU.
+        ('CPU', 'GPU',) contains only the overlap across CPU and GPU.
+        {
+            ('CPU',): 132010993,
+            ('GPU',): 0,
+            ('CPU', 'GPU'): 3230025.0,
+        }
+        PSEUDOCODE:
+        overlap = dict()
+        for region, size_us in venn_sizes.keys():
+            if len(region) == 1:
+                overlap[region] += size_us
+            else:
+                overlap[region] = size_us
+                for r in region:
+                    overlap[(r,)] -= size_us
+        """
+        venn_sizes = self.as_dict()
+        overlap = dict()
+        def mk_region(region):
+            if region not in overlap:
+                overlap[region] = 0.
+        for region, size_us in venn_sizes.items():
+            if len(region) == 1:
+                mk_region(region)
+                overlap[region] += size_us
+            else:
+                mk_region(region)
+                overlap[region] = size_us
+                for r in region:
+                    mk_region((r,))
+                    overlap[(r,)] -= size_us
+
+        for region in overlap.keys():
+            # Convert things like this to zero to prevent negatives causing false assertions.
+            # ('GPU',): -2.9103830456733704e-11,
+            if np.isclose(overlap[region], 0):
+                overlap[region] = 0
+
+        for region, size_us in overlap.items():
+            assert size_us >= 0
+
+        # NOTE: if a region only exists in overlap with another region
+        # (e.g. CUDA API CPU + Framework API C),
+        # we DON'T want to have a legend-label for it.
+        del_regions = set()
+        for region, size_us in overlap.items():
+            if size_us == 0:
+                del_regions.add(region)
+        for region in del_regions:
+            del overlap[region]
+
+        return overlap
 
     def as_df(self, keep_metadata_fields):
         overlap = self.as_overlap_dict()
