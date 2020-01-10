@@ -85,6 +85,7 @@ Parameters
 ----------
 hatch : {'/', '\\', '|', '-', '+', 'x', 'o', 'O', '.', '*'}
 """
+HATCH_STYLE_EMPTY = ""
 HATCH_STYLES = [
     # 7
     '/', '\\', '|', 'x', 'o', '.', '*',

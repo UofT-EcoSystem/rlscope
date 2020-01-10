@@ -674,8 +674,8 @@ class ExperimentGroup(Experiment):
                                 op_name=op_name))
                     new_df['operation'] = new_df['operation'].apply(dqn_pretty_operation)
                         """)]),
-                # '--y-type', 'percent',
-                # '--x-type', 'rl-comparison',
+                '--y-type', 'percent',
+                '--x-type', 'rl-comparison',
                 # '--training-time',
                 # '--y2-logscale',
             ], suffix=plot_log(expr, overlap_type), algo_env_pairs=algo_env_pairs)
@@ -710,81 +710,120 @@ class ExperimentGroup(Experiment):
                 Backpropgation = training_loop + update_actor_and_critic + update_target_network
             """
             if self.should_run_algo_env_group(expr):
-                overlap_type = 'OperationOverlap'
+                # overlap_type = 'OperationOverlap'
+                overlap_type = 'CategoryOverlap'
                 self.stacked_plot([
                     '--overlap-type', overlap_type,
-                    '--resource-overlap', json.dumps(['CPU']),
-                    '--training-time',
+
+                    '--detailed',
                     '--remap-df', json.dumps([textwrap.dedent("""
-                        # Categorize ALL RL algorithms into simplified categories:
-                        #   Inference, Simulation, Backpropgation
-                        import pprint
-                        pprint.pprint({
-                            'algorithm_choice.remap_df.original_df': df,
-                            'regions': regions,
-                            '(algo, env)': "({algo}, {env})".format(algo=algo, env=env),
-                        })
-                        
-                        # Keep 'step' region
+                    def pretty_operation(algo, op_name):
                         if algo == 'ppo2':
-                            # Inference = sample_action
-                            # Simulation = step
-                            # Backpropagation = compute_advantage_estimates + optimize_surrogate + training_loop
-                            assert regions.issubset({
-                                ('step',),
-                                ('sample_action',),
-                                ('compute_advantage_estimates',), 
-                                ('optimize_surrogate',),
-                                ('training_loop',),
-                            })
-                            new_df[('Simulation',)] = df[('step',)]
-                            new_df[('Inference',)] = df[('sample_action',)]
-                            new_df[('Backpropagation',)] = df[('compute_advantage_estimates',)] + df[('optimize_surrogate',)] + df[('training_loop',)]
+                            if op_name in {'compute_advantage_estimates', 'optimize_surrogate', 'training_loop'}:
+                                return "Backpropagation"
+                            elif op_name == 'sample_action':
+                                return "Inference"
+                            elif op_name == 'step':
+                                return "Simulation"
                         elif algo == 'ddpg':
-                            # Inference = sample_action
-                            # Simulation = step
-                            # Backpropagation = evaluate + train_step + training_loop + update_target_network
-                            assert regions.issubset({
-                                ('step',),
-                                ('sample_action',),
-                                ('evaluate',), 
-                                ('train_step',), 
-                                ('training_loop',),
-                                ('update_target_network',),
-                            })
-                            new_df[('Simulation',)] = df[('step',)]
-                            new_df[('Inference',)] = df[('sample_action',)]
-                            new_df[('Backpropagation',)] = df[('evaluate',)] + df[('train_step',)] + df[('training_loop',)] + df[('update_target_network',)]
+                            if op_name in {'evaluate', 'train_step', 'training_loop', 'update_target_network'}:
+                                return "Backpropagation"
+                            elif op_name == 'sample_action':
+                                return "Inference"
+                            elif op_name == 'step':
+                                return "Simulation"
                         elif algo == 'a2c':
-                            # Inference = sample_action
-                            # Simulation = step
-                            # Backpropagation = train_step + training_loop
-                            assert regions.issubset({
-                                ('step',),
-                                ('sample_action',),
-                                ('train_step',), 
-                                ('training_loop',),
-                            })
-                            new_df[('Simulation',)] = df[('step',)]
-                            new_df[('Inference',)] = df[('sample_action',)]
-                            new_df[('Backpropagation',)] = df[('train_step',)] + df[('training_loop',)]
+                            if op_name in {'train_step', 'training_loop'}:
+                                return "Backpropagation"
+                            elif op_name == 'sample_action':
+                                return "Inference"
+                            elif op_name == 'step':
+                                return "Simulation"
                         elif algo == 'sac':
-                            # Inference = sample_action
-                            # Simulation = step
-                            # Backpropgation = training_loop + update_actor_and_critic + update_target_network
-                            assert regions.issubset({
-                                ('step',),
-                                ('sample_action',),
-                                ('update_actor_and_critic',), 
-                                ('update_target_network',), 
-                                ('training_loop',),
-                            })
-                            new_df[('Simulation',)] = df[('step',)]
-                            new_df[('Inference',)] = df[('sample_action',)]
-                            new_df[('Backpropagation',)] = df[('training_loop',)] + df[('update_actor_and_critic',)] + df[('update_target_network',)]
-                        else:
-                            raise NotImplementedError("Not sure how to remap operation labels {labels} into simplified labels=[Inference, Simulation, Backpropgation] for algo={algo}".format(labels=regions, algo=algo))
+                            if op_name in {'training_loop', 'update_actor_and_critic', 'update_target_network'}:
+                                return "Backpropagation"
+                            elif op_name == 'sample_action':
+                                return "Inference"
+                            elif op_name == 'step':
+                                return "Simulation"
+                        raise NotImplementedError("Not sure what pretty-name to use for algo={algo}, op_name={op_name}".format(
+                            algo=algo,
+                            op_name=op_name))
+                    new_df['operation'] = np.vectorize(pretty_operation, otypes=[str])(new_df['algo'], new_df['operation'])
                         """)]),
+
+                    # '--resource-overlap', json.dumps(['CPU']),
+                    # '--training-time',
+                    # '--remap-df', json.dumps([textwrap.dedent("""
+                    #     # Categorize ALL RL algorithms into simplified categories:
+                    #     #   Inference, Simulation, Backpropgation
+                    #     import pprint
+                    #     pprint.pprint({
+                    #         'algorithm_choice.remap_df.original_df': df,
+                    #         'regions': regions,
+                    #         '(algo, env)': "({algo}, {env})".format(algo=algo, env=env),
+                    #     })
+                    #     # Keep 'step' region
+                    #     if algo == 'ppo2':
+                    #         # Inference = sample_action
+                    #         # Simulation = step
+                    #         # Backpropagation = compute_advantage_estimates + optimize_surrogate + training_loop
+                    #         assert regions.issubset({
+                    #             ('step',),
+                    #             ('sample_action',),
+                    #             ('compute_advantage_estimates',),
+                    #             ('optimize_surrogate',),
+                    #             ('training_loop',),
+                    #         })
+                    #         new_df[('Simulation',)] = df[('step',)]
+                    #         new_df[('Inference',)] = df[('sample_action',)]
+                    #         new_df[('Backpropagation',)] = df[('compute_advantage_estimates',)] + df[('optimize_surrogate',)] + df[('training_loop',)]
+                    #     elif algo == 'ddpg':
+                    #         # Inference = sample_action
+                    #         # Simulation = step
+                    #         # Backpropagation = evaluate + train_step + training_loop + update_target_network
+                    #         assert regions.issubset({
+                    #             ('step',),
+                    #             ('sample_action',),
+                    #             ('evaluate',),
+                    #             ('train_step',),
+                    #             ('training_loop',),
+                    #             ('update_target_network',),
+                    #         })
+                    #         new_df[('Simulation',)] = df[('step',)]
+                    #         new_df[('Inference',)] = df[('sample_action',)]
+                    #         new_df[('Backpropagation',)] = df[('evaluate',)] + df[('train_step',)] + df[('training_loop',)] + df[('update_target_network',)]
+                    #     elif algo == 'a2c':
+                    #         # Inference = sample_action
+                    #         # Simulation = step
+                    #         # Backpropagation = train_step + training_loop
+                    #         assert regions.issubset({
+                    #             ('step',),
+                    #             ('sample_action',),
+                    #             ('train_step',),
+                    #             ('training_loop',),
+                    #         })
+                    #         new_df[('Simulation',)] = df[('step',)]
+                    #         new_df[('Inference',)] = df[('sample_action',)]
+                    #         new_df[('Backpropagation',)] = df[('train_step',)] + df[('training_loop',)]
+                    #     elif algo == 'sac':
+                    #         # Inference = sample_action
+                    #         # Simulation = step
+                    #         # Backpropgation = training_loop + update_actor_and_critic + update_target_network
+                    #         assert regions.issubset({
+                    #             ('step',),
+                    #             ('sample_action',),
+                    #             ('update_actor_and_critic',),
+                    #             ('update_target_network',),
+                    #             ('training_loop',),
+                    #         })
+                    #         new_df[('Simulation',)] = df[('step',)]
+                    #         new_df[('Inference',)] = df[('sample_action',)]
+                    #         new_df[('Backpropagation',)] = df[('training_loop',)] + df[('update_actor_and_critic',)] + df[('update_target_network',)]
+                    #     else:
+                    #         raise NotImplementedError("Not sure how to remap operation labels {labels} into simplified labels=[Inference, Simulation, Backpropgation] for algo={algo}".format(labels=regions, algo=algo))
+                    #     """)]),
+
                     '--y-type', 'percent',
                     '--x-type', 'algo-comparison',
                 ], suffix=plot_log(expr, overlap_type), algo_env_pairs=algo_env_pairs)
