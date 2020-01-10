@@ -22,6 +22,7 @@ import matplotlib as mpl
 import seaborn as sns
 import pandas as pd
 import matplotlib.pyplot as plt
+import matplotlib.gridspec
 
 from os.path import join as _j, abspath as _a, exists as _e, dirname as _d, basename as _b
 
@@ -1040,13 +1041,25 @@ class OverlapStackedBarPlot:
         # else:
         #     y2_field = None
 
+
+        df_training_time = self.df[['x_field', 'algo', 'env', 'total_training_time']]
+        cols = group_numeric_cols(df_training_time)
+        df_training_time = df_training_time.groupby(cols.non_numeric_cols).agg(pd.DataFrame.sum, skipna=False).reset_index()
+
+        def ax_func(stacked_bar_plot):
+            stacked_bar_plot.ax2.grid(b=True, axis='y')
         stacked_bar_plot = DetailedStackedBarPlot(
             data=self.df,
             path=self._plot_path('plot_fancy'),
             x_field='x_field',
             y_field='percent',
             x_group='operation',
-            # y2_field='total_training_time',
+
+            y2_field='total_training_time',
+            # y2label='Total training time (sec)',
+            y2label='Training time (sec)',
+            data2=df_training_time,
+            n_y2_ticks=4,
 
             hues_together=True,
             hatch='category',
@@ -1059,6 +1072,7 @@ class OverlapStackedBarPlot:
             xlabel='(RL algorithm, Simulator)',
             ylabel='Percent',
             title=self.plot_title,
+            func=ax_func,
             debug=self.debug,
         )
         stacked_bar_plot.plot()
@@ -1567,10 +1581,15 @@ class DetailedStackedBarPlot:
                  hue,
                  hues_together=False,
                  hatches_together=False,
+                 y2_field=None,
+                 n_y2_ticks=None,
+                 data2=None,
                  xlabel=None,
                  ylabel=None,
+                 y2label=None,
                  title=None,
                  bar_width=0.33,
+                 func=None,
                  debug=False,
                  ):
 
@@ -1593,10 +1612,22 @@ class DetailedStackedBarPlot:
 
         self.bar_width = bar_width
 
+        self.func = func
         self.debug = debug
+
+        # Either provide both or neither.
+        assert ( y2_field is None and data2 is None ) or \
+               ( y2_field is not None and data2 is not None )
+        # BOTH data and data2 should contain x_field since they will share an x-axis.
+        assert x_field in data2
+        assert x_field in data
+        self.y2_field = y2_field
+        self.n_y2_ticks = n_y2_ticks
+        self.data2 = data2
 
         self.xlabel = xlabel
         self.ylabel = ylabel
+        self.y2label = y2label
         self.title = title
 
         self._init_x_offsets()
@@ -1700,7 +1731,39 @@ class DetailedStackedBarPlot:
         fig = plt.figure()
         # Q: What's this affect?
         # ax = plt.add_subplot(111)
-        ax = fig.add_subplot(111)
+
+        ax2 = None
+        if self.y2_field is None:
+            ax = fig.add_subplot(1, 1, 1)
+            self.ax = ax
+        else:
+
+            # # bottom (bigger)
+            # ax = fig.add_subplot(2, 1, 2)
+            # # top (smaller)
+            # ax2 = fig.add_subplot(2, 1, 1, sharex=ax)
+
+            # gs = matplotlib.gridspec.GridSpec(2, 1, height_ratios=[1, 3])
+            gs = matplotlib.gridspec.GridSpec(2, 1, height_ratios=[1, 2.5])
+            # top
+            ax_0 = plt.subplot(gs[0])
+            # bottom
+            ax_1 = plt.subplot(gs[1], sharex=ax_0)
+
+            # top
+            ax2 = ax_0
+            # bottom
+            ax = ax_1
+
+            plt.setp(ax2.get_xticklabels(), visible=False)
+            fig.subplots_adjust(hspace=0.1)
+
+            if self.n_y2_ticks is not None:
+                ax2.yaxis.set_major_locator(plt.MaxNLocator(self.n_y2_ticks))
+
+            # ax2.grid(b=False, axis='x')
+            self.ax = ax
+            self.ax2 = ax2
 
         data = self.data.sort_values(by=[self.hatch, self.hue, self.x_field])
 
@@ -1729,8 +1792,30 @@ class DetailedStackedBarPlot:
         if self.title is not None:
             ax.set_title(self.title)
 
-        self._add_legend(ax)
+        if self.y2_field is not None:
+            self._add_legend(ax2)
+        else:
+            self._add_legend(ax)
         self._add_xgroup_legend(ax)
+
+        if self.y2_field is not None:
+            all_x_fields = np.array(self.x_fields())
+            xs = np.arange(len(all_x_fields))
+            ys = self.data2[self.data2[self.x_field] == all_x_fields][self.y2_field].values
+            plot_kwargs = dict(
+                x=xs, height=ys,
+                width=self.bar_width,
+                # Color of hatch pattern.
+                edgecolor='black',
+                color='black',
+                # hatch=self.hatch_map[hatch]
+            )
+            if self.y2label is not None:
+                ax2.set_ylabel(self.y2label)
+            ax2.bar(**plot_kwargs)
+
+        if self.func is not None:
+            self.func(self)
 
         logging.info("Output csv @ {path}".format(path=self._csv_path))
         data.to_csv(self._csv_path, index=False)
@@ -3041,6 +3126,24 @@ def only_selector_fields(selector):
 
 def join_plus(xs):
     return ' + '.join(sorted(xs))
+
+class ColumnGrouping:
+    def __init__(self, all_cols, numeric_cols, non_numeric_cols):
+        self.all_cols = all_cols
+        self.numeric_cols = numeric_cols
+        self.non_numeric_cols = non_numeric_cols
+
+def group_numeric_cols(df):
+    all_cols = set(df.keys())
+    numeric_cols = set([colname for colname in df.keys() if np.issubdtype(df[colname].dtype, np.number)])
+    non_numeric_cols = all_cols.difference(numeric_cols)
+    cols = ColumnGrouping(
+        all_cols=list(all_cols),
+        numeric_cols=list(numeric_cols),
+        non_numeric_cols=list(non_numeric_cols),
+    )
+    return cols
+
 
 if __name__ == '__main__':
     main()
