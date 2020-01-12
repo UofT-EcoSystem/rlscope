@@ -1133,9 +1133,43 @@ class OverlapStackedBarPlot:
         cols = group_numeric_cols(df_training_time)
         df_training_time = df_training_time.groupby(cols.non_numeric_cols).agg(pd.DataFrame.sum, skipna=False).reset_index()
 
+        # def bar_label_func(i, x_group):
+        #     if x_group == 'Backpropagation':
+        #         return "BP"
+        #     elif x_group == 'Inference':
+        #         return "Inf"
+        #     elif x_group == 'Simulation':
+        #         return "Sim"
+        #     raise NotImplementedError("Not sure what bar-label to use for x_group=\"{x_group}\"".format(
+        #         x_group=x_group))
         def ax_func(stacked_bar_plot):
             stacked_bar_plot.ax2.grid(b=True, axis='y')
             stacked_bar_plot.ax2.set_axisbelow(True)
+
+            # import ipdb; ipdb.set_trace()
+            #
+            # import matplotlib.pyplot as plt
+            #
+            # SMALL_SIZE = 8
+            # MEDIUM_SIZE = 10
+            # BIGGER_SIZE = 12
+            #
+            # # plt.rc('font', size=SMALL_SIZE)          # controls default text sizes
+            # # plt.rc('axes', titlesize=SMALL_SIZE)     # fontsize of the axes title
+            # # plt.rc('axes', labelsize=MEDIUM_SIZE)    # fontsize of the x and y labels
+            # # plt.rc('xtick', labelsize=SMALL_SIZE)    # fontsize of the tick labels
+            # # plt.rc('ytick', labelsize=SMALL_SIZE)    # fontsize of the tick labels
+            # # plt.rc('legend', fontsize=SMALL_SIZE)    # legend fontsize
+            # # plt.rc('figure', titlesize=BIGGER_SIZE)  # fontsize of the figure title
+            #
+            # plt.rc('font', size=BIGGER_SIZE)          # controls default text sizes
+            # plt.rc('axes', titlesize=BIGGER_SIZE)     # fontsize of the axes title
+            # plt.rc('axes', labelsize=BIGGER_SIZE)    # fontsize of the x and y labels
+            # plt.rc('xtick', labelsize=BIGGER_SIZE)    # fontsize of the tick labels
+            # plt.rc('ytick', labelsize=BIGGER_SIZE)    # fontsize of the tick labels
+            # plt.rc('legend', fontsize=BIGGER_SIZE)    # legend fontsize
+            # plt.rc('figure', titlesize=BIGGER_SIZE)  # fontsize of the figure title
+
         stacked_bar_plot = DetailedStackedBarPlot(
             data=self.df,
             path=self._plot_path('plot_fancy'),
@@ -1152,6 +1186,7 @@ class OverlapStackedBarPlot:
             hues_together=True,
             hatch='category',
             empty_hatch_value="",
+            # bar_label_func=bar_label_func,
             hue='resource_overlap',
 
             # hatches_together=True,
@@ -1676,6 +1711,7 @@ class DetailedStackedBarPlot:
                  n_y2_ticks=None,
                  data2=None,
                  empty_hatch_value=None,
+                 bar_label_func=None,
                  xlabel=None,
                  ylabel=None,
                  y2label=None,
@@ -1718,6 +1754,7 @@ class DetailedStackedBarPlot:
         self.data2 = data2
 
         self.empty_hatch_value = empty_hatch_value
+        self.bar_label_func = bar_label_func
         self.xlabel = xlabel
         self.ylabel = ylabel
         self.y2label = y2label
@@ -1852,6 +1889,7 @@ class DetailedStackedBarPlot:
 
     def plot(self):
         fig = plt.figure()
+        self.fig = fig
         # Q: What's this affect?
         # ax = plt.add_subplot(111)
 
@@ -2332,10 +2370,11 @@ class DetailedStackedBarPlot:
         )
 
         def get_bar_label(i, x_group):
-            # label = "({i})".format(i=i + 1)
-            # label = "{i}".format(i=i + 1)
-            label = "$({i})$".format(i=i + 1)
-            return label
+            if self.bar_label_func is not None:
+                bar_label = self.bar_label_func(i, x_group)
+            else:
+                bar_label = "$({i})$".format(i=i + 1)
+            return bar_label
 
         def _add_xgroup_bar_labels():
             x_groups = self.x_groups(self.data)
@@ -3382,7 +3421,8 @@ def only_selector_fields(selector):
     return new_selector
 
 def join_plus(xs):
-    return ' + '.join(sorted(xs))
+    # return ' + '.join(sorted(xs))
+    return ' +\n'.join(sorted(xs))
 
 class ColumnGrouping:
     def __init__(self, all_cols, numeric_cols, non_numeric_cols):
