@@ -866,6 +866,7 @@ class OverlapStackedBarPlot:
                     return "Simulator"
                 elif category == CATEGORY_TF_API:
                     return "TensorFlow"
+                    # return "TF"
                 elif category == CATEGORY_CUDA_API_CPU:
                     return "CUDA"
                 return category
@@ -1146,29 +1147,20 @@ class OverlapStackedBarPlot:
             stacked_bar_plot.ax2.grid(b=True, axis='y')
             stacked_bar_plot.ax2.set_axisbelow(True)
 
-            # import ipdb; ipdb.set_trace()
-            #
-            # import matplotlib.pyplot as plt
-            #
-            # SMALL_SIZE = 8
-            # MEDIUM_SIZE = 10
-            # BIGGER_SIZE = 12
-            #
-            # # plt.rc('font', size=SMALL_SIZE)          # controls default text sizes
-            # # plt.rc('axes', titlesize=SMALL_SIZE)     # fontsize of the axes title
-            # # plt.rc('axes', labelsize=MEDIUM_SIZE)    # fontsize of the x and y labels
-            # # plt.rc('xtick', labelsize=SMALL_SIZE)    # fontsize of the tick labels
-            # # plt.rc('ytick', labelsize=SMALL_SIZE)    # fontsize of the tick labels
-            # # plt.rc('legend', fontsize=SMALL_SIZE)    # legend fontsize
-            # # plt.rc('figure', titlesize=BIGGER_SIZE)  # fontsize of the figure title
-            #
-            # plt.rc('font', size=BIGGER_SIZE)          # controls default text sizes
-            # plt.rc('axes', titlesize=BIGGER_SIZE)     # fontsize of the axes title
-            # plt.rc('axes', labelsize=BIGGER_SIZE)    # fontsize of the x and y labels
-            # plt.rc('xtick', labelsize=BIGGER_SIZE)    # fontsize of the tick labels
-            # plt.rc('ytick', labelsize=BIGGER_SIZE)    # fontsize of the tick labels
-            # plt.rc('legend', fontsize=BIGGER_SIZE)    # legend fontsize
-            # plt.rc('figure', titlesize=BIGGER_SIZE)  # fontsize of the figure title
+        SMALL_SIZE = 8
+        # Default font size for matplotlib (too small for paper).
+        MEDIUM_SIZE = 10
+        BIGGER_SIZE = 12
+
+        FONT_SIZE = BIGGER_SIZE
+
+        plt.rc('font', size=FONT_SIZE)          # controls default text sizes
+        plt.rc('axes', titlesize=FONT_SIZE)     # fontsize of the axes title
+        plt.rc('axes', labelsize=FONT_SIZE)    # fontsize of the x and y labels
+        plt.rc('xtick', labelsize=FONT_SIZE)    # fontsize of the tick labels
+        plt.rc('ytick', labelsize=FONT_SIZE)    # fontsize of the tick labels
+        plt.rc('legend', fontsize=FONT_SIZE)    # legend fontsize
+        plt.rc('figure', titlesize=FONT_SIZE)  # fontsize of the figure title
 
         stacked_bar_plot = DetailedStackedBarPlot(
             data=self.df,
@@ -1180,6 +1172,10 @@ class OverlapStackedBarPlot:
             y2_field='total_training_time',
             # y2label='Total training time (sec)',
             y2label='Training time (sec)',
+
+            # HACK: adjust y-position of y-label by adding empty-whitespace at the end.
+            # NOTE: DOESN'T work... autocrop fails to remove text area it occupies.
+            # y2label='Training time (sec)        ',
             data2=df_training_time,
             n_y2_ticks=4,
 
@@ -1836,7 +1832,7 @@ class DetailedStackedBarPlot:
             # 7
             # '//', r'\\', '||', 'xx', 'o', '..', '*',
             # '////', r"\\\\", '|||', 'xxx', 'oo', '..', '**',
-            '////', r"\\\\", '|||', 'oo', '..', '**', 'xxx',
+            '////', r"\\\\", '|||', '...', '**', 'oo', 'xxx',
 
             # 6
             '/.', '\\.', '|.', 'x.', 'o.', '*.',
@@ -1988,7 +1984,7 @@ class DetailedStackedBarPlot:
         DataFrame.print_df(data, file=sys.stdout)
 
         logging.info("Output plot @ {path}".format(path=self.path))
-        fig.savefig(self.path, bbox_inches="tight")
+        fig.savefig(self.path, bbox_inches="tight", pad_inches=0)
         plt.close(fig)
 
         # self._add_lines(operation)
@@ -2505,6 +2501,9 @@ class DetailedStackedBarPlot:
             'labelspacing': 1.2,
             'handlelength': 3,
             'handleheight': 2,
+            # 'borderpad': 0.0,
+            'handletextpad': 0.4,
+            'labelspacing': 0.35,
         }
 
         # legend_spacer = 0.04
@@ -3422,7 +3421,8 @@ def only_selector_fields(selector):
 
 def join_plus(xs):
     # return ' + '.join(sorted(xs))
-    return ' +\n'.join(sorted(xs))
+    # PROBLEM: this messes up the DQN plot for some reason...
+    return " +\n".join(sorted(xs))
 
 class ColumnGrouping:
     def __init__(self, all_cols, numeric_cols, non_numeric_cols):
