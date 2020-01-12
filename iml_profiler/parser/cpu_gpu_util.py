@@ -252,6 +252,14 @@ class UtilParser:
         logging.info("Output min/max/std aggregated machine utilization data @ {path}".format(path=self._agg_csv_path))
         flat_df_agg.to_csv(self._agg_csv_path, index=False)
 
+        util_plot = UtilPlot(
+            csv=self._raw_csv_path,
+            directory=self.directory,
+            x_type='rl-comparison',
+            debug=self.debug,
+        )
+        util_plot.run()
+
 class UtilPlot:
     def __init__(self,
                  csv,
@@ -390,10 +398,10 @@ class UtilPlot:
         if self.y_title is not None:
             ax.set_ylabel(self.y_title)
 
-        png_path = self._get_plot_path('png')
+        png_path = self._get_plot_path('pdf')
         logging.info('Save figure to {path}'.format(path=png_path))
         fig.tight_layout()
-        fig.savefig(png_path)
+        fig.savefig(png_path, bbox_inches="tight", pad_inches=0)
         plt.close(fig)
 
         # figlegend.tight_layout()

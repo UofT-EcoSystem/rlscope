@@ -895,44 +895,44 @@ class ExperimentGroup(Experiment):
             #   - remove DQN for now.
             #   - fix janky plot x-axis alignment
             # TODO: keep dqn and use --selectors to select different files and remap-df to remap dqn[q_forward] to dqn[sample_action]
-            algo_env_pairs = [(algo, env) for algo, env in algo_env_pairs if not re.search(r'dqn', algo)]
 
-            gpu_operations = ['sample_action']
-            for gpu_operation in gpu_operations:
-                self.stacked_plot([
-                    '--overlap-type', overlap_type,
-                    '--resource-overlap', json.dumps(['CPU']),
-                    '--operation', gpu_operation,
-                    # '--selectors', gpu_operation,
-                    '--training-time',
-                    '--remap-df', json.dumps([textwrap.dedent("""
-                        keep_regions = [
-                            ('Python',),
-                            ('Framework API C',),
-                        ]
-                        for r in keep_regions:
-                            new_df[r] = df[r]
-                        new_df[('CUDA API CPU',)] = df[('CUDA API CPU', 'Framework API C',)]
-                    """)]),
-
-
-                    # '--remap-df', json.dumps([textwrap.dedent("""
-                    # # Inference:
-                    # #   - operations we would use when deploying the trained model in production
-                    # # TODO:
-                    # # Backward-pass:
-                    # #   - additional operations required when training, but NOT from a fully trained model.
-                    # # Weight-update:
-                    # #   - after gradients are computed, update the weights
-                    # inference_ops = set([('step',), ('sample_action',)])
-                    # other_ops = set([op for op in regions if op not in inference_ops])
-                    # import ipdb; ipdb.set_trace()
-                    # new_df[('inference',)] = np.sum(df[inference_ops])
-                    # new_df[('other',)] = np.sum(df[other_ops])
-                    # """)]),
-
-                    '--y-type', 'percent',
-                ] + rl_workload_dims + common_dims, suffix=plot_log(expr, overlap_type, gpu_operation), algo_env_pairs=algo_env_pairs)
+            # algo_env_pairs = [(algo, env) for algo, env in algo_env_pairs if not re.search(r'dqn', algo)]
+            # gpu_operations = ['sample_action']
+            # for gpu_operation in gpu_operations:
+            #     self.stacked_plot([
+            #         '--overlap-type', overlap_type,
+            #         '--resource-overlap', json.dumps(['CPU']),
+            #         '--operation', gpu_operation,
+            #         # '--selectors', gpu_operation,
+            #         '--training-time',
+            #         '--remap-df', json.dumps([textwrap.dedent("""
+            #             keep_regions = [
+            #                 ('Python',),
+            #                 ('Framework API C',),
+            #             ]
+            #             for r in keep_regions:
+            #                 new_df[r] = df[r]
+            #             new_df[('CUDA API CPU',)] = df[('CUDA API CPU', 'Framework API C',)]
+            #         """)]),
+            #
+            #
+            #         # '--remap-df', json.dumps([textwrap.dedent("""
+            #         # # Inference:
+            #         # #   - operations we would use when deploying the trained model in production
+            #         # # TODO:
+            #         # # Backward-pass:
+            #         # #   - additional operations required when training, but NOT from a fully trained model.
+            #         # # Weight-update:
+            #         # #   - after gradients are computed, update the weights
+            #         # inference_ops = set([('step',), ('sample_action',)])
+            #         # other_ops = set([op for op in regions if op not in inference_ops])
+            #         # import ipdb; ipdb.set_trace()
+            #         # new_df[('inference',)] = np.sum(df[inference_ops])
+            #         # new_df[('other',)] = np.sum(df[other_ops])
+            #         # """)]),
+            #
+            #         '--y-type', 'percent',
+            #     ] + rl_workload_dims + common_dims, suffix=plot_log(expr, overlap_type, gpu_operation), algo_env_pairs=algo_env_pairs)
 
         # - Statement: GPU operations are dominated by CPU time. In particular, CUDA API C
         #   time is a dominant contributor.

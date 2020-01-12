@@ -131,11 +131,16 @@ def calibration_files_present(task):
 
 # NOTE: this params REQUIRE a value (since no default is present)
 param_cupti_overhead_json = get_param_cupti_overhead_json()
+param_cupti_overhead_json_optional = get_param_cupti_overhead_json(default=None)
 param_LD_PRELOAD_overhead_json = get_param_LD_PRELOAD_overhead_json()
+param_LD_PRELOAD_overhead_json_optional = get_param_LD_PRELOAD_overhead_json(default=None)
 
 param_python_annotation_json = get_param_python_annotation_overhead_json()
+param_python_annotation_json_optional = get_param_python_annotation_overhead_json(default=None)
 param_python_clib_interception_tensorflow_json = get_param_python_clib_interception_overhead_json(clib='TensorFlow')
+param_python_clib_interception_tensorflow_json_optional = get_param_python_clib_interception_overhead_json(clib='TensorFlow', default=None)
 param_python_clib_interception_simulator_json = get_param_python_clib_interception_overhead_json(clib='Simulator')
+param_python_clib_interception_simulator_json_optional = get_param_python_clib_interception_overhead_json(clib='Simulator', default=None)
 
 class IMLTask(luigi.Task):
     iml_directory = luigi.Parameter(description="Location of trace-files")
@@ -696,6 +701,13 @@ class UtilTask(luigi.Task):
     debug_single_thread = param_debug_single_thread
     debug_perf = param_debug_perf
     algo_env_from_dir = luigi.BoolParameter(description="Add algo/env columns based on directory structure of --iml-directories <algo>/<env>/iml_dir", default=True, parsing=luigi.BoolParameter.EXPLICIT_PARSING)
+
+    # optional.
+    cupti_overhead_json = param_cupti_overhead_json_optional
+    LD_PRELOAD_overhead_json = param_LD_PRELOAD_overhead_json_optional
+    python_annotation_json = param_python_annotation_json_optional
+    python_clib_interception_tensorflow_json = param_python_clib_interception_tensorflow_json_optional
+    python_clib_interception_simulator_json = param_python_clib_interception_simulator_json_optional
 
     skip_output = False
 

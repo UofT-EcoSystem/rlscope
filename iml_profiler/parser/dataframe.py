@@ -226,8 +226,10 @@ class BaseDataframeReader:
                 self.added_fields.update(extra_fields.keys())
                 for key, value in extra_fields.items():
                     self._add_col_to_data(key, value, data=data)
+            self._check_cols(data=data)
 
         self._add_iml_config_columns(data=data)
+        self._check_cols(data=data)
 
     @property
     def proto_paths(self):
@@ -252,6 +254,8 @@ class BaseDataframeReader:
         proto_paths = self.proto_paths
         for proto_path in progress(proto_paths, desc="{klass}.read dataframe".format(
             klass=self.__class__.__name__), show_progress=True):
+            if self.debug:
+                logging.info("Read proto_path={path}".format(path=proto_path))
             self.add_proto_cols(proto_path, data=data)
             self._check_cols(data=data)
         if len(proto_paths) == 0:
@@ -394,8 +398,10 @@ class UtilDataframeReader(BaseDataframeReader):
                 self._add_col('util', sample.util, data=data)
                 self._add_col('start_time_us', sample.start_time_us, data=data)
                 self._add_col('total_resident_memory_bytes', sample.total_resident_memory_bytes, data=data)
+                # self._check_cols(data=data)
 
                 self._maybe_add_fields(path, data=data)
+                self._check_cols(data=data)
                 last_start_time_us = sample.start_time_us
 
 class TrainingProgressDataframeReader(BaseDataframeReader):
