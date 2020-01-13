@@ -90,6 +90,7 @@ class OverlapStackedBarPlot:
                  rotation=None,
                  x_type='rl-comparison',
                  y_type='percent',
+                 y_lim_scale_factor=None,
                  show_title=True,
                  show_legend=True,
                  width=None,
@@ -154,6 +155,7 @@ class OverlapStackedBarPlot:
         self.rotation = rotation
         self.x_type = x_type
         self.y_type = y_type
+        self.y_lim_scale_factor = y_lim_scale_factor
         self.show_title = show_title
         self.show_legend = show_legend
         self.width = width
@@ -357,6 +359,13 @@ class OverlapStackedBarPlot:
         return my_index
 
     def read_unins_df(self):
+        if len(self.unins_iml_directories) == 0:
+            return pd.DataFrame({
+                'unins_total_training_time_us': [],
+                'training_duration_us': [],
+                'algo': [],
+                'env': [],
+            })
         unins_df = pd.concat(get_training_durations_df(
             self.unins_iml_directories,
             debug=self.debug,
@@ -486,8 +495,46 @@ class OverlapStackedBarPlot:
 
             if ( self.extrapolated_training_time or 'HACK_total_timesteps' in iml_metadata['metadata'] ) and 'percent_complete' in md:
                 total_size = vd.total_size()
-                # Extrapolate the total training time using percent_complete
-                if 'HACK_total_timesteps' in iml_metadata['metadata']:
+                if all(col in iml_metadata['metadata'] for col in {'HACK_unins_end_training_time_us',
+                                                                   'HACK_unins_start_training_time_us',
+                                                                   'HACK_unins_end_num_timesteps',
+                                                                   'HACK_unins_start_num_timesteps',
+                                                                   'HACK_total_timesteps'}):
+                    # Extrapolate the total training time using uninstrumented run
+                    logging.info("HACK: ({algo}, {env}) @ {path} -- Extrapolate the total training time using uninstrumented run".format(
+                        algo=algo,
+                        env=env,
+                        path=path,
+                    ))
+
+                    """
+                    PID=24865/MainProcess @ dump_proto_txt, dump_proto.py:19 :: 2020-01-12 19:55:38,607 INFO: > DUMP: IncrementalTrainingProgress @ training_progress.trace_61.proto
+                    content_code: TP_HAS_PROGRESS
+                    process_name: "airlearning-iml"
+                    phase: "airlearning-iml"
+                    machine_name: "eco-15"
+                    total_timesteps: 3000
+                    start_trace_time_us: 1578618824694440
+                    start_percent_complete: 0.3336666524410248
+                    start_num_timesteps: 1001
+                    start_training_time_us: 1578618824694492
+                    end_percent_complete: 0.9990000128746033
+                    end_training_time_us: 1578619511199796
+                    end_num_timesteps: 2997
+                    """
+
+                    unins_train_time_us = iml_metadata['metadata']['HACK_unins_end_training_time_us'] - iml_metadata['metadata']['HACK_unins_start_training_time_us']
+                    unins_timesteps = iml_metadata['metadata']['HACK_unins_end_num_timesteps'] - iml_metadata['metadata']['HACK_unins_start_num_timesteps']
+                    total_timesteps = iml_metadata['metadata']['HACK_total_timesteps']
+                    total_training_time = (unins_train_time_us / unins_timesteps) * total_timesteps
+                    new_stacked_dict['extrap_total_training_time'] = total_training_time
+
+                    extrap_dict['unins_train_time_us'] = unins_train_time_us
+                    extrap_dict['unins_timesteps'] = unins_timesteps
+                    extrap_dict['total_timesteps'] = total_timesteps
+                    extrap_dict['total_training_time'] = total_training_time
+                elif 'HACK_total_timesteps' in iml_metadata['metadata']:
+                    # Extrapolate the total training time using percent_complete
                     logging.info("HACK: ({algo}, {env}) @ {path} -- Override total number of training timesteps to be {t}".format(
                         algo=algo,
                         env=env,
@@ -496,15 +543,17 @@ class OverlapStackedBarPlot:
                     ))
                     end_time_timesteps = get_end_num_timesteps(iml_dir)
                     percent_complete = end_time_timesteps / iml_metadata['metadata']['HACK_total_timesteps']
+                    total_training_time = extrap_total_training_time(total_size, percent_complete)
+                    new_stacked_dict['extrap_total_training_time'] = total_training_time
                     extrap_dict['end_time_timesteps'] = end_time_timesteps
                     extrap_dict['HACK_total_timesteps'] = iml_metadata['metadata']['HACK_total_timesteps']
                 else:
                     percent_complete = md['percent_complete']
-                total_training_time = extrap_total_training_time(total_size, percent_complete)
-                new_stacked_dict['extrap_total_training_time'] = total_training_time
-                extrap_dict['percent_complete'] = percent_complete
-                extrap_dict['total_training_time'] = total_training_time
-                extrap_dict['total_size'] = total_size
+                    total_training_time = extrap_total_training_time(total_size, percent_complete)
+                    new_stacked_dict['extrap_total_training_time'] = total_training_time
+                # extrap_dict['percent_complete'] = percent_complete
+                # extrap_dict['total_training_time'] = total_training_time
+                # extrap_dict['total_size'] = total_size
             else:
                 new_stacked_dict['extrap_total_training_time'] = np.NAN
                 extrap_dict['isnan'] = True
@@ -544,7 +593,47 @@ class OverlapStackedBarPlot:
             df['algo'] = algo
             df['env'] = env
             # if 'percent_complete' in md:
-            if ( self.extrapolated_training_time or 'HACK_total_timesteps' in iml_metadata['metadata'] ) and 'percent_complete' in md:
+            if all(col in iml_metadata['metadata'] for col in {'HACK_unins_end_training_time_us',
+                                                               'HACK_unins_start_training_time_us',
+                                                               'HACK_unins_end_num_timesteps',
+                                                               'HACK_unins_start_num_timesteps',
+                                                               'HACK_total_timesteps'}):
+                # Extrapolate the total training time using uninstrumented run
+                logging.info("HACK: ({algo}, {env}) @ {path} -- Extrapolate the total training time using uninstrumented run".format(
+                    algo=algo,
+                    env=env,
+                    path=path,
+                ))
+
+                """
+                PID=24865/MainProcess @ dump_proto_txt, dump_proto.py:19 :: 2020-01-12 19:55:38,607 INFO: > DUMP: IncrementalTrainingProgress @ training_progress.trace_61.proto
+                content_code: TP_HAS_PROGRESS
+                process_name: "airlearning-iml"
+                phase: "airlearning-iml"
+                machine_name: "eco-15"
+                total_timesteps: 3000
+                start_trace_time_us: 1578618824694440
+                start_percent_complete: 0.3336666524410248
+                start_num_timesteps: 1001
+                start_training_time_us: 1578618824694492
+                end_percent_complete: 0.9990000128746033
+                end_training_time_us: 1578619511199796
+                end_num_timesteps: 2997
+                """
+
+                unins_train_time_us = iml_metadata['metadata']['HACK_unins_end_training_time_us'] - iml_metadata['metadata']['HACK_unins_start_training_time_us']
+                unins_timesteps = iml_metadata['metadata']['HACK_unins_end_num_timesteps'] - iml_metadata['metadata']['HACK_unins_start_num_timesteps']
+                total_timesteps = iml_metadata['metadata']['HACK_total_timesteps']
+                total_training_time = (unins_train_time_us / unins_timesteps) * total_timesteps
+                # new_stacked_dict['extrap_total_training_time'] = total_training_time
+                df['extrap_total_training_time'] = total_training_time
+                assert not np.isnan(total_training_time)
+
+                # extrap_dict['unins_train_time_us'] = unins_train_time_us
+                # extrap_dict['unins_timesteps'] = unins_timesteps
+                # extrap_dict['total_timesteps'] = total_timesteps
+                # extrap_dict['total_training_time'] = total_training_time
+            elif ( self.extrapolated_training_time or 'HACK_total_timesteps' in iml_metadata['metadata'] ) and 'percent_complete' in md:
                 total_size = vd.total_size()
                 # Extrapolate the total training time using percent_complete
                 if 'HACK_total_timesteps' in iml_metadata['metadata']:
@@ -562,6 +651,9 @@ class OverlapStackedBarPlot:
                 df['extrap_total_training_time'] = total_training_time
             else:
                 df['extrap_total_training_time'] = np.NAN
+
+            # if np.isnan(df['extrap_total_training_time'].values[0]):
+            #     import ipdb; ipdb.set_trace()
 
             df = self._new_HACK_remove_process_operation_df(df)
             df = self._new_remap_df(df, algo, env)
@@ -941,11 +1033,11 @@ class OverlapStackedBarPlot:
 
             dfs.append(df)
 
-        # if self.debug:
-        #     logging.info("ins_df before concat:\n{msg}".format(msg=pprint_msg(dfs)))
+        if self.debug:
+            logging.info("ins_df before concat:\n{msg}".format(msg=pprint_msg(dfs)))
         ins_df = pd.concat(dfs)
-        # if self.debug:
-        #     logging.info("ins_df after concat:\n{msg}".format(msg=pprint_msg(ins_df)))
+        if self.debug:
+            logging.info("ins_df after concat:\n{msg}".format(msg=pprint_msg(ins_df)))
 
         old_ins_df = ins_df
         all_cols = set(old_ins_df.keys())
@@ -959,9 +1051,9 @@ class OverlapStackedBarPlot:
         # ins_df = old_ins_df.groupby(list(non_numeric_cols)).sum().reset_index()
         ins_df = old_ins_df.groupby(list(non_numeric_cols)).agg(pd.DataFrame.sum, skipna=False).reset_index()
 
-        # if self.debug:
-        #     logging.info("ins_df after groupby.sum():\n{msg}".format(msg=pprint_msg(ins_df)))
-        #     import ipdb; ipdb.set_trace()
+        if self.debug:
+            logging.info("ins_df after groupby.sum():\n{msg}".format(msg=pprint_msg(ins_df)))
+            # import ipdb; ipdb.set_trace()
 
         if self.detailed:
             # NOTE: must calculate percent within an (algo, env)
@@ -1143,9 +1235,21 @@ class OverlapStackedBarPlot:
         #         return "Sim"
         #     raise NotImplementedError("Not sure what bar-label to use for x_group=\"{x_group}\"".format(
         #         x_group=x_group))
+
+
+        log_y_scale = True
+
         def ax_func(stacked_bar_plot):
             stacked_bar_plot.ax2.grid(b=True, axis='y')
             stacked_bar_plot.ax2.set_axisbelow(True)
+
+            if log_y_scale:
+                stacked_bar_plot.ax2.set_yscale('log', basey=2)
+
+            if self.rotation is not None:
+                stacked_bar_plot.ax.set_xticklabels(
+                    stacked_bar_plot.ax.get_xticklabels(),
+                    rotation=self.rotation)
 
         SMALL_SIZE = 8
         # Default font size for matplotlib (too small for paper).
@@ -1154,7 +1258,8 @@ class OverlapStackedBarPlot:
 
         FONT_SIZE = BIGGER_SIZE
 
-        plt.rc('font', size=FONT_SIZE)          # controls default text sizes
+        # plt.rc('font', size=FONT_SIZE)          # controls default text sizes
+        plt.rc('font', size=MEDIUM_SIZE)          # controls default text sizes
         plt.rc('axes', titlesize=FONT_SIZE)     # fontsize of the axes title
         plt.rc('axes', labelsize=FONT_SIZE)    # fontsize of the x and y labels
         plt.rc('xtick', labelsize=FONT_SIZE)    # fontsize of the tick labels
@@ -1178,6 +1283,8 @@ class OverlapStackedBarPlot:
             # y2label='Training time (sec)        ',
             data2=df_training_time,
             n_y2_ticks=4,
+
+            y_lim_scale_factor=self.y_lim_scale_factor,
 
             hues_together=True,
             hatch='category',
@@ -1708,6 +1815,7 @@ class DetailedStackedBarPlot:
                  data2=None,
                  empty_hatch_value=None,
                  bar_label_func=None,
+                 y_lim_scale_factor=None,
                  xlabel=None,
                  ylabel=None,
                  y2label=None,
@@ -1751,6 +1859,7 @@ class DetailedStackedBarPlot:
 
         self.empty_hatch_value = empty_hatch_value
         self.bar_label_func = bar_label_func
+        self.y_lim_scale_factor = y_lim_scale_factor
         self.xlabel = xlabel
         self.ylabel = ylabel
         self.y2label = y2label
@@ -2379,13 +2488,18 @@ class DetailedStackedBarPlot:
             # OR: BP, Inf, Sim
             x_field = x_fields[0]
 
-            if len(x_fields) == 1:
+            if len(x_fields) == 1 or self.y_lim_scale_factor is not None:
                 # HACK: provide enough space for the bar-labels on the first x_field.
                 # When the number of x_fields is 1, it always overlap with the top plot area bounding box.
                 # So, add an extra 5% of head-room
-                head_room_percent = 5
-                y_min, y_max = ax.get_ylim()
-                ax.set_ylim([y_min, y_max*(1 + head_room_percent/100)])
+
+                if self.y_lim_scale_factor is not None:
+                    y_min, y_max = ax.get_ylim()
+                    ax.set_ylim([y_min, y_max*self.y_lim_scale_factor])
+                else:
+                    head_room_percent = 5
+                    y_min, y_max = ax.get_ylim()
+                    ax.set_ylim([y_min, y_max*(1 + head_room_percent/100)])
 
             df = self.data
             xy_offset = (x_offset, y_offset)

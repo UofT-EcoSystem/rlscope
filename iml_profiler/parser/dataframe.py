@@ -167,8 +167,10 @@ class BaseDataframeReader:
         assert data is not None
         # if data is None:
         #     data = self.data
-        if self.colnames is not None:
-            assert colname in self.colnames
+
+        # if self.colnames is not None:
+        #     assert colname in self.colnames
+
         if colname not in data:
             data[colname] = []
         data[colname].append(value)
@@ -318,6 +320,7 @@ class OverlapDataframeReader(BaseDataframeReader):
             'overlap_type',
             'overlap_label',
             # 'overlap_usec',
+            'CUDA_VISIBLE_DEVICES',
         ]
 
         super().__init__(directory, add_fields=add_fields, colnames=colnames, debug=debug, debug_single_thread=debug_single_thread)
@@ -440,6 +443,7 @@ class TrainingProgressDataframeReader(BaseDataframeReader):
             'end_percent_complete',
             'end_training_time_us',
             'end_num_timesteps',
+            # 'CUDA_VISIBLE_DEVICES',
         ]
 
         super().__init__(directory, add_fields=add_fields, colnames=colnames, debug=debug, debug_single_thread=debug_single_thread)
@@ -685,6 +689,7 @@ class CUDAAPIStatsDataframeReader(BaseDataframeReader):
             'api_name',
             'total_time_us',
             'num_calls',
+            'CUDA_VISIBLE_DEVICES',
         ]
 
         super().__init__(directory, add_fields=add_fields, colnames=colnames, debug=debug, debug_single_thread=debug_single_thread)
@@ -833,6 +838,7 @@ class PyprofDataframeReader(BaseDataframeReader):
             'start_time_us',
             'duration_us',
             'name',
+            'CUDA_VISIBLE_DEVICES',
         ]
 
         super().__init__(directory, add_fields=add_fields, colnames=colnames, debug=debug, debug_single_thread=debug_single_thread)

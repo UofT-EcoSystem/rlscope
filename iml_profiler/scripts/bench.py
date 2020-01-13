@@ -588,6 +588,7 @@ class ExperimentGroup(Experiment):
             overlap_type = 'CategoryOverlap'
             # NOTE: gather across ALL ppo directories, including environment we cannot run like AirLearning.
             algo_env_pairs = gather.pairs_by_algo('ppo2')
+            # algo_env_pairs = [(algo, env) for algo, env in algo_env_pairs if re.search('AirLearning', env)]
             self.stacked_plot([
                 '--overlap-type', overlap_type,
 
@@ -610,7 +611,9 @@ class ExperimentGroup(Experiment):
                 # '--training-time',
                 # # '--extrapolated-training-time',
 
+                '--y-lim-scale-factor', 1.10,
                 '--detailed',
+                '--rotation', 15,
                 '--remap-df', json.dumps([textwrap.dedent("""
                         # Replace ppo2 operations with simple (Inference, Simulation, Backpropagation) labels
                         # established in Background discussion of typical RL workloads.

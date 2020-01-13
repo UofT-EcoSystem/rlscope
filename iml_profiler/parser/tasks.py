@@ -939,6 +939,7 @@ class OverlapStackedBarTask(luigi.Task):
     height = luigi.FloatParameter(description="Height of plot in inches", default=None)
     long_env = luigi.BoolParameter(description="full environment name: Humanoid -> HumanoidBulletEnv-v0", default=None)
     keep_zero = luigi.BoolParameter(description="If a stacked-bar element is zero in all the bar-charts, still show it in the legend.", default=True, parsing=luigi.BoolParameter.EXPLICIT_PARSING)
+    y_lim_scale_factor = luigi.FloatParameter(description="scale ylim.max by scale-factor (hack to make room for bar-labels)", default=None)
     debug = param_debug
     debug_single_thread = param_debug_single_thread
     debug_perf = param_debug_perf
