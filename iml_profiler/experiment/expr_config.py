@@ -189,6 +189,10 @@ def is_med_complexity_env(algo, env_id):
 def is_high_complexity_env(algo, env_id):
     return re.search(r'airlearning', env_id.lower())
 
+def is_mcts_go(algo, env_id):
+    return re.search(r'mcts', algo.lower()) and \
+           re.search(r'go', env_id.lower())
+
 def is_walker_env(algo, env_id):
     return re.search(r'Walker2D', env_id)
 
@@ -206,7 +210,8 @@ def is_fig_dqn_detailed(algo, env_id):
 def is_paper_env(algo, env_id):
     return is_low_complexity_env(algo, env_id) or \
            is_med_complexity_env(algo, env_id) or \
-           is_high_complexity_env(algo, env_id)
+           is_high_complexity_env(algo, env_id) or \
+           is_mcts_go(algo, env_id)
 
 def is_bullet_env(env_id):
     return re.search(r'BulletEnv', env_id)

@@ -734,6 +734,13 @@ class UtilPlotTask(luigi.Task):
     width = luigi.FloatParameter(description="Width of plot in inches", default=None)
     height = luigi.FloatParameter(description="Height of plot in inches", default=None)
 
+    # optional.
+    cupti_overhead_json = param_cupti_overhead_json_optional
+    LD_PRELOAD_overhead_json = param_LD_PRELOAD_overhead_json_optional
+    python_annotation_json = param_python_annotation_json_optional
+    python_clib_interception_tensorflow_json = param_python_clib_interception_tensorflow_json_optional
+    python_clib_interception_simulator_json = param_python_clib_interception_simulator_json_optional
+
     debug = param_debug
     debug_single_thread = param_debug_single_thread
     debug_perf = param_debug_perf

@@ -866,7 +866,7 @@ class ExperimentGroup(Experiment):
             # # - 1st plot shows GPU time spent is tiny
             # #   TODO: we want categories to be 'CPU', 'CPU + GPU', 'GPU' (ResourceOverlap)
             # overlap_type = 'ResourceOverlap'
-            algo_env_pairs = self.algo_env_pairs()
+            algo_env_pairs = self.algo_env_pairs(include_minigo=True, debug=True)
             # self.stacked_plot([
             #     '--overlap-type', overlap_type,
             #     '--y-type', 'percent',
@@ -982,9 +982,9 @@ class ExperimentGroup(Experiment):
         ))
         return iml_directory
 
-    def algo_env_pairs(self):
-        gather = GatherAlgoEnv(self.args)
-        return gather.algo_env_pairs()
+    def algo_env_pairs(self, include_minigo=False, debug=False):
+        gather = GatherAlgoEnv(self.args, include_minigo=include_minigo)
+        return gather.algo_env_pairs(debug=debug)
 
     def _is_air_learning_env(self, env):
         return re.search(r'AirLearning', env)
@@ -1424,8 +1424,9 @@ def get_iml_directory(config, direc, algo, env_id, repetition):
     return iml_directory
 
 class GatherAlgoEnv:
-    def __init__(self, args):
+    def __init__(self, args, include_minigo=False):
         self.args = args
+        self.include_minigo = include_minigo
 
     def should_skip_env(self, env):
         # For some reason, the simulation time for Humanoid is huge when trained with sac.
@@ -1448,10 +1449,13 @@ class GatherAlgoEnv:
     def _is_algo_dir(self, path):
         return os.path.isdir(path)
 
-    def algo_env_pairs(self, has_machine_util=False):
+    def algo_env_pairs(self, has_machine_util=False, debug=False):
         args = self.args
         algo_env_pairs = []
-        for algo_path in glob(_j(self.root_iml_directory, '*')):
+        # if debug:
+        #     import ipdb; ipdb.set_trace()
+        algo_paths = glob(_j(self.root_iml_directory, '*'))
+        for algo_path in algo_paths:
             if is_config_dir(algo_path):
                 continue
             if not self._is_algo_dir(algo_path):
@@ -1461,7 +1465,8 @@ class GatherAlgoEnv:
             algo = _b(algo_path)
             if self.should_skip_algo(algo):
                 continue
-            for env_path in glob(_j(algo_path, '*')):
+            env_paths = glob(_j(algo_path, '*'))
+            for env_path in env_paths:
                 if not self._is_env_dir(env_path):
                     if args.debug:
                         logging.info("Skip env_path={dir}".format(dir=env_path))

@@ -13,10 +13,13 @@ import seaborn as sns
 from iml_profiler.parser.dataframe import UtilDataframeReader
 
 from matplotlib import pyplot as plt
+import matplotlib.gridspec
 
 from iml_profiler.parser import stacked_bar_plots
 
 from iml_profiler.profiler import iml_logging
+
+from iml_profiler.experiment import expr_config
 
 def protobuf_to_dict(pb):
     return dict((field.name, value) for field, value in pb.ListFields())
@@ -111,6 +114,16 @@ class UtilParser:
 
         self.added_fields = set()
 
+    @staticmethod
+    def is_cpu(device_name):
+        if re.search(r'\b(Intel|Xeon|CPU|AMD)\b', device_name):
+            return True
+        return False
+
+    @staticmethod
+    def is_gpu(device_name):
+        return not UtilParser.is_cpu(device_name)
+
     @property
     def _raw_csv_path(self):
         return _j(self.directory, "overall_machine_util.raw.csv")
@@ -167,6 +180,7 @@ class UtilParser:
         fields = {
             'algo': algo,
             'env_id': env_id,
+            'env': env_id,
         }
         return fields
 
@@ -240,6 +254,22 @@ class UtilParser:
 
 
         new_df = pd.concat(dfs)
+        def cpu_or_gpu(device_name):
+            if UtilParser.is_cpu(device_name):
+                return 'CPU'
+            return 'GPU'
+        new_df['device_type'] = new_df['device_name'].apply(cpu_or_gpu)
+        def used_by_tensorflow(CUDA_VISIBLE_DEVICES, device_id, device_type):
+            if device_type == 'CPU':
+                return True
+            if device_type == 'GPU':
+                return device_id in CUDA_VISIBLE_DEVICES
+            # Not handled.
+            raise NotImplementedError()
+        new_df['used_by_tensorflow'] = np.vectorize(used_by_tensorflow, otypes=[np.bool])(
+            new_df['CUDA_VISIBLE_DEVICES'],
+            new_df['device_id'],
+            new_df['device_type'])
 
         # OUTPUT raw thing here.
         logging.info("Output raw un-aggregated machine utilization data @ {path}".format(path=self._raw_csv_path))
@@ -251,6 +281,8 @@ class UtilParser:
         # import ipdb; ipdb.set_trace()
         logging.info("Output min/max/std aggregated machine utilization data @ {path}".format(path=self._agg_csv_path))
         flat_df_agg.to_csv(self._agg_csv_path, index=False)
+
+        # Q: Which (algo, env) have at least one utilization readings > 0 a GPU whose device_id > 0?
 
         util_plot = UtilPlot(
             csv=self._raw_csv_path,
@@ -286,19 +318,35 @@ class UtilPlot:
     def _read_df(self):
         self.df = pd.read_csv(self.csv)
 
-        x_fields = []
-        for index, row in self.df.iterrows():
-            if 'env' in row:
-                env = row['env']
-            else:
-                env = row['env_id']
-            x_field = stacked_bar_plots.get_x_field(row['algo'], env, self.x_type)
-            x_fields.append(x_field)
-        self.df['x_field'] = x_fields
+        def _x_field(algo, env):
+            return stacked_bar_plots.get_x_field(algo, env, self.x_type)
+        self.df['x_field'] = np.vectorize(_x_field, otypes=[str])(
+            self.df['algo'],
+            self.df['env'])
+
+        self.all_df = copy.copy(self.df)
+
+        self.df = self.df[
+            (self.df['used_by_tensorflow']) &
+            (self.df['device_type'] == 'GPU')]
+
+        keep_cols = ['machine_name', 'algo', 'env', 'device_name']
+        # df_count = self.df[keep_cols].groupby(keep_cols).reset_index()
+        df_count = self.df[keep_cols].groupby(keep_cols).size().reset_index(name="counts")[keep_cols]
+        groupby_cols = ['machine_name', 'algo', 'env']
+        df_count = df_count[keep_cols].groupby(groupby_cols).size().reset_index(name='counts')
+        df_count_more_than_1_gpu = df_count[df_count['counts'] > 1]
+        if len(df_count_more_than_1_gpu) > 0:
+            buf = StringIO()
+            DataFrame.print_df(df_count_more_than_1_gpu, file=buf)
+            logging.info("Saw > 1 GPU being using for at least one (algo, env) experiment; not sure which GPU to show:\n{msg}".format(
+                msg=textwrap.indent(buf.getvalue(), prefix='  '),
+            ))
+            assert len(df_count_more_than_1_gpu) == 0
 
     def run(self):
         self._read_df()
-        self.plot()
+        self._plot()
 
     def _get_plot_path(self, ext):
         if self.suffix is not None:
@@ -313,11 +361,205 @@ class UtilPlot:
     def legend_path(self, ext):
         return re.sub(r'(?P<ext>\.[^.]+)$', r'.legend\g<ext>', self._get_plot_path(ext))
 
-    def plot(self):
+    def _plot(self):
+        if self.width is not None and self.height is not None:
+            figsize = (self.width, self.height)
+            logging.info("Setting figsize = {fig}".format(fig=figsize))
+            # sns.set_context({"figure.figsize": figsize})
+        else:
+            figsize = None
 
-        # figlegend.tight_layout()
-        # figlegend.savefig(self.legend_path, bbox_inches='tight', pad_inches=0)
-        # plt.close(figlegend)
+        # a4_width_px = 983
+        # textwidth_px = 812
+        # a4_width_inches = 8.27
+        # plot_percent = 5/6
+        # plot_width_inches = (a4_width_inches * (textwidth_px / a4_width_px) * plot_percent)
+        # plot_height_inches = 3
+        # figsize = (plot_width_inches, plot_height_inches)
+
+        figsize = (10, 2.5)
+
+        logging.info("Plot dimensions (inches) = {figsize}".format(
+            figsize=figsize))
+
+        # This is causing XIO error....
+        fig = plt.figure(figsize=figsize)
+
+        SMALL_SIZE = 8
+        # Default font size for matplotlib (too small for paper).
+        MEDIUM_SIZE = 10
+        BIGGER_SIZE = 12
+
+        FONT_SIZE = MEDIUM_SIZE
+
+        plt.rc('font', size=FONT_SIZE)          # controls default text sizes
+        plt.rc('axes', titlesize=FONT_SIZE)     # fontsize of the axes title
+        plt.rc('axes', labelsize=FONT_SIZE)    # fontsize of the x and y labels
+        plt.rc('xtick', labelsize=FONT_SIZE)    # fontsize of the tick labels
+        plt.rc('ytick', labelsize=FONT_SIZE)    # fontsize of the tick labels
+        plt.rc('legend', fontsize=FONT_SIZE)    # legend fontsize
+        plt.rc('figure', titlesize=FONT_SIZE)  # fontsize of the figure title
+
+        # gs = matplotlib.gridspec.GridSpec(2, 1, height_ratios=[1, 3])
+        gs = matplotlib.gridspec.GridSpec(1, 3, width_ratios=[5, 4, 1])
+        ax_0 = plt.subplot(gs[0])
+        ax_1 = plt.subplot(gs[1])
+        ax_2 = plt.subplot(gs[2])
+        axes = [ax_0, ax_1, ax_2]
+
+        # plt.setp(ax2.get_xticklabels(), visible=False)
+        fig.subplots_adjust(wspace=0.4)
+
+        self.df_gpu = self.df
+
+        logging.info(pprint_msg(self.df_gpu))
+        # ax = sns.boxplot(x=self.df_gpu['x_field'], y=100*self.df_gpu['util'],
+        #                  showfliers=False,
+        #                  )
+
+        # algo_env_group_title = {
+        #     'environment_choice': "Simulator choice\n(RL algorithm = PPO)",
+        #     'algorithm_choice_1a_med_complexity': "Algorithm choice\n(Simulator = Walker2D)",
+        #     'scaleup_rl': 'Scale-up RL workload',
+        # }
+        UNKNOWN_ALGO_ENV = "UNKNOWN_ALGO_ENV"
+        # def is_scaleup_rl(algo, env):
+        #     return (algo == 'MCTS' and env == 'GoEnv')
+        def as_algo_env_group(algo, env):
+            if expr_config.is_fig_algo_comparison_med_complexity(algo, env):
+                return 'algorithm_choice_1a_med_complexity'
+            elif expr_config.is_fig_env_comparison(algo, env):
+                # HACK: Match (algo, env) used in the "Simulator choice" figure in paper.
+                if not re.search(r'Ant|HalfCheetah|Hopper|Pong|Walker2D|AirLearning', env):
+                    return UNKNOWN_ALGO_ENV
+                return 'environment_choice'
+            elif expr_config.is_mcts_go(algo, env):
+                # is_scaleup_rl(algo, env)
+                return 'scaleup_rl'
+
+            return UNKNOWN_ALGO_ENV
+
+        def get_plot_x_axis_label(algo_env_group):
+            if algo_env_group == 'scaleup_rl':
+                return "(RL algorithm, Simulator)"
+            elif algo_env_group == 'environment_choice':
+                return "Simulator"
+            elif algo_env_group == 'algorithm_choice_1a_med_complexity':
+                return "RL algorithm"
+            raise NotImplementedError()
+
+        def get_plot_title(algo_env_group):
+            if algo_env_group == 'scaleup_rl':
+                return "Scale-up RL workload"
+            elif algo_env_group == 'environment_choice':
+                return "Simulator choice\n(RL algorithm = PPO)"
+            elif algo_env_group == 'algorithm_choice_1a_med_complexity':
+                return "Algorithm choice\n(Simulator = Walker2D)"
+            raise NotImplementedError()
+
+        def as_x_type(algo_env_group):
+            if algo_env_group == 'scaleup_rl':
+                return 'rl-comparison'
+            if algo_env_group == 'environment_choice':
+                return 'env-comparison'
+            if algo_env_group == 'algorithm_choice_1a_med_complexity':
+                return 'algo-comparison'
+            raise NotImplementedError()
+
+        def _mk_boxplot(i, ax, algo_env_group, df_gpu):
+            # xs = df_gpu['x_field']
+            def _x_field(algo, env):
+                x_type = as_x_type(algo_env_group)
+                return stacked_bar_plots.get_x_field(algo, env, x_type)
+            xs = np.vectorize(_x_field, otypes=[str])(
+                df_gpu['algo'],
+                df_gpu['env'])
+            ys = 100*df_gpu['util']
+            logging.info("Plot algo_env_group:\n{msg}".format(
+                msg=pprint_msg({
+                    'i': i,
+                    'algo_env_group': algo_env_group,
+                    'df_gpu': df_gpu,
+                    'xs': xs,
+                    'ys': ys,
+                }),
+            ))
+            # https://python-graph-gallery.com/33-control-colors-of-boxplot-seaborn/
+            # https://matplotlib.org/examples/color/named_colors.html
+            boxplot_color = 'tan'
+            sns.boxplot(
+                xs, ys,
+                color=boxplot_color,
+                ax=ax,
+                showfliers=False,
+                medianprops={'color': 'black'},
+            )
+            x_label = get_plot_x_axis_label(algo_env_group)
+            ax.set_xlabel(x_label)
+            if i == 0:
+                ax.set_ylabel('GPU Utilization (%)')
+            else:
+                # i > 0
+                ax.set_ylabel(None)
+            title = get_plot_title(algo_env_group)
+            ax.set_title(title)
+
+            ymin, ymax = ax.get_ylim()
+            ax.set_ylim(0., ymax)
+
+            if self.rotation is not None:
+                # ax = bottom_plot.axes
+                ax.set_xticklabels(ax.get_xticklabels(), rotation=self.rotation)
+
+        self.df_gpu['algo_env_group'] = np.vectorize(as_algo_env_group, otypes=[np.str])(
+            self.df_gpu['algo'],
+            self.df_gpu['env'],
+        )
+        self.df_gpu = self.df_gpu[self.df_gpu['algo_env_group'] != UNKNOWN_ALGO_ENV]
+        algo_env_groups = [
+            'environment_choice',
+            'algorithm_choice_1a_med_complexity',
+            'scaleup_rl',
+        ]
+        for i, algo_env_group in enumerate(algo_env_groups):
+            df_group = self.df_gpu[self.df_gpu['algo_env_group'] == algo_env_group]
+            if len(df_group) == 0:
+                logging.warning("Found no GPU utilization data for algo_env_group={group}, SKIP plot".format(
+                    group=algo_env_group))
+                continue
+            ax = axes[i]
+            _mk_boxplot(i, ax, algo_env_group, df_group)
+
+        # groupby_cols = ['algo', 'env_id']
+        # # label_df = self.df_gpu[list(set(groupby_cols + ['x_field', 'util']))]
+        # label_df = self.df_gpu.groupby(groupby_cols).mean()
+        # add_hierarchical_labels(fig, ax, self.df_gpu, label_df, groupby_cols)
+
+        # if self.rotation is not None:
+        #     # ax = bottom_plot.axes
+        #     ax.set_xticklabels(ax.get_xticklabels(), rotation=self.rotation)
+        #
+        # # Default ylim for violinplot is slightly passed bottom/top of data:
+        # #   ipdb> ax.get_ylim()
+        # #   (-2.3149999976158147, 48.614999949932105)
+        # #   ipdb> np.min(100*self.df['util'])
+        # #   0.0
+        # #   ipdb> np.max(100*self.df['util'])
+        # #   46.29999995231629
+        # ymin, ymax = ax.get_ylim()
+        # ax.set_ylim(0., ymax)
+        #
+        # ax.set_xlabel(self.x_axis_label)
+        # if self.y_title is not None:
+        #     ax.set_ylabel(self.y_title)
+
+        png_path = self._get_plot_path('pdf')
+        logging.info('Save figure to {path}'.format(path=png_path))
+        # fig.tight_layout()
+        fig.savefig(png_path, bbox_inches="tight", pad_inches=0)
+        plt.close(fig)
+
+    def _plot_all(self):
 
         if self.width is not None and self.height is not None:
             figsize = (self.width, self.height)
@@ -329,41 +571,9 @@ class UtilPlot:
         fig = plt.figure(figsize=figsize)
 
 
-        # ax = fig.add_subplot(111)
-        # ax2 = None
-        # if self.y2_field is not None:
-        #     ax2 = ax.twinx()
-        #     # Need to do this, otherwise, training time bar is ABOVE gridlines from ax.
-        #     ax.set_zorder(ax2.get_zorder()+1)
-        #     # Need to do this, otherwise training time bar is invisible.
-        #     ax.patch.set_visible(False)
-
-        def is_cpu(device_name):
-            if re.search(r'Intel|Xeon|CPU', device_name):
-                return True
-            return False
-
-        def is_gpu(device_name):
-            return not is_cpu(device_name)
-
-        def should_keep(row):
-            if row['machine_name'] == 'reddirtx-ubuntu':
-                # Ignore 'Tesla K40c' (unused, 0 util)
-                return row['device_name'] == 'GeForce RTX 2080 Ti'
-            return True
-
         self.df_gpu = self.df
 
-        self.df_gpu = self.df_gpu[self.df_gpu['device_name'].apply(is_gpu)]
-
-        self.df_gpu = self.df_gpu[self.df_gpu.apply(should_keep, axis=1)]
-
         logging.info(pprint_msg(self.df_gpu))
-
-        # ax = sns.violinplot(x=self.df_gpu['x_field'], y=100*self.df_gpu['util'],
-        #                     inner="box",
-        #                     # cut=0.,
-        #                     )
 
         ax = sns.boxplot(x=self.df_gpu['x_field'], y=100*self.df_gpu['util'],
                          showfliers=False,
@@ -373,12 +583,6 @@ class UtilPlot:
         # # label_df = self.df_gpu[list(set(groupby_cols + ['x_field', 'util']))]
         # label_df = self.df_gpu.groupby(groupby_cols).mean()
         # add_hierarchical_labels(fig, ax, self.df_gpu, label_df, groupby_cols)
-
-        # df = self.df
-        # ax = sns.violinplot(x=df['x_field'], y=100*df['util'],
-        #                     # hue=df['algo'],
-        #                     # hue=df['env_id'],
-        #                     inner="box", cut=0.)
 
         if self.rotation is not None:
             # ax = bottom_plot.axes
@@ -404,198 +608,6 @@ class UtilPlot:
         fig.savefig(png_path, bbox_inches="tight", pad_inches=0)
         plt.close(fig)
 
-        # figlegend.tight_layout()
-        # figlegend.savefig(self.legend_path, bbox_inches='tight', pad_inches=0)
-        # plt.close(figlegend)
-
-        return
-
-        #Set general plot properties
-
-        sns.set_style("white")
-
-        # ax = plt.subplot()
-        # ax_list = fig.axes
-        # plt.subplot()
-        # fig, ax = plt.subplots()
-        # ax.set_xs
-        # sns.set_context({"figure.figsize": (24, 10)})
-
-        if self.fontsize is not None:
-            sns.set_style('font', {
-                'size': self.fontsize,
-            })
-
-        # plt.rc('xtick', rotation=40)
-        # sns.set_style('xtick', {
-        #     'rotation': 40,
-        # })
-
-        # TODO:
-        # - Make it so plot legends appear to right of the plot
-        # - Make it so we can choose NOT to show plot legend (ideally just make it invisible...)
-        # - All fonts should be same size
-
-        if self.y2_field is not None:
-            # Total training time bar gets its own color.
-            num_colors = len(self.groups) + 1
-        else:
-            num_colors = len(self.groups)
-        self.colors = sns.color_palette("hls", num_colors)
-
-        if self.y2_field is not None:
-            bar_width = 0.25
-        else:
-            bar_width = 0.5
-
-        ind = np.arange(len(self.data[self.x_field]))
-        ax.set_xticks(ind + bar_width/2)
-        ax.set_xticklabels(self.data[self.x_field])
-
-        n_bars = len(self.data[self.groups[0]])
-        accum_ys = np.zeros(n_bars)
-        barplot_kwargs = []
-        bar_zorder = 0
-        # bar_zorder = -1
-        grid_zorder = 1
-        for i, group in enumerate(self.groups):
-            accum_ys += self.data[group]
-            ys = copy.copy(accum_ys)
-            if self.y2_field is not None:
-                xs = ind
-            else:
-                xs = ind + bar_width/2
-            bar_kwargs = {
-                'x': xs,
-                # 'y': ys,
-                'height': ys,
-                'color': self.colors[i],
-                # 'ax': ax,
-                # 'position': 0,
-                'zorder': bar_zorder,
-            }
-            if bar_width is not None:
-                bar_kwargs['width'] = bar_width
-            barplot_kwargs.append(bar_kwargs)
-
-        if self.y2_field is not None:
-            # TODO: we need to group rows and sum them based on matching df[group]...?
-            # import ipdb; ipdb.set_trace()
-            # for i, group in enumerate(self.groups):
-            y_color = self.colors[-1]
-            bar_kwargs = {
-                # 'x': self.data[self.x_field],
-                'x': ind + bar_width,
-                'height': self.data[self.y2_field],
-                # 'y': self.data[self.y2_field],
-                'color': y_color,
-                # 'ax': ax2,
-                # 'position': 1,
-                'zorder': bar_zorder,
-            }
-            if bar_width is not None:
-                bar_kwargs['width'] = bar_width
-            # sns.barplot(**bar_kwargs)
-            # plt.bar(**bar_kwargs)
-            ax2.bar(**bar_kwargs)
-
-        barplots = []
-        for kwargs in reversed(barplot_kwargs):
-            # TODO: color?
-            # barplot = sns.barplot(**kwargs)
-            # barplot = plt.bar(**kwargs)
-            barplot = ax.bar(**kwargs)
-            barplots.append(barplot)
-        barplots.reverse()
-
-        if self.y2_field is not None and self.y2_logscale:
-            # ax2.set_yscale('log')
-            ax2.set_yscale('log', basey=2)
-
-            # ax2.set_yscale('log')
-            # ax2.set_yticks([1,10,100] + [max(y)])
-            # from matplotlib.ticker import FormatStrFormatter
-
-            # ax2.yaxis.set_major_formatter(mpl_ticker.FormatStrFormatter('%.d'))
-            ax2.yaxis.set_major_formatter(DaysHoursMinutesSecondsFormatter())
-
-        # #Plot 1 - background - "total" (top) series
-        # sns.barplot(x = self.data.Group, y = self.data.total, color = "red")
-        #
-        # #Plot 2 - overlay - "bottom" series
-        # bottom_plot = sns.barplot(x = self.data.Group, y = self.data.Series1, color = "#0000A3")
-
-        bottom_plot = barplots[-1]
-
-        figlegend = plt.figure()
-        self._add_legend(
-            figlegend,
-            loc='center',
-            bbox_to_anchor=None,
-        )
-
-        if self.show_legend:
-            self._add_legend(
-                fig,
-                loc='upper left',
-                bbox_to_anchor=(1.05, 1),
-            )
-
-        # , prop={'size': self.fontsize}
-
-        # topbar = plt.Rectangle((0,0),1,1,fc="red", edgecolor = 'none')
-        # bottombar = plt.Rectangle((0,0),1,1,fc='#0000A3',  edgecolor = 'none')
-        # l = plt.legend([bottombar, topbar], ['Bottom Bar', 'Top Bar'], loc=1, ncol = 2, prop={'size':16})
-
-        #Optional code - Make plot look nicer
-        sns.despine(fig=fig, left=True)
-        # bottom_plot.set_ylabel(self.y_axis_label)
-        # bottom_plot.set_xlabel(self.x_axis_label)
-        ax.set_ylabel(self.y_axis_label)
-        if self.title is not None:
-            # bottom_plot.set_title(self.title)
-            ax.set_title(self.title)
-
-        # Suggestions about how to prevent x-label overlap with matplotlib:
-        #
-        # https://stackoverflow.com/questions/42528921/how-to-prevent-overlapping-x-axis-labels-in-sns-countplot
-
-        # #Set fonts to consistent 16pt size
-        # for item in ([bottom_plot.xaxis.label, bottom_plot.yaxis.label] +
-        #              bottom_plot.get_xticklabels() + bottom_plot.get_yticklabels()):
-        #     if self.fontsize is not None:
-        #         item.set_fontsize(self.fontsize)
-
-        ax.grid(zorder=grid_zorder)
-        if self.y2_field is not None:
-            # ax2.grid(True)
-
-            if self.y2_axis_label is not None:
-                ax2.set_ylabel(self.y2_axis_label)
-
-            # Align training time against percent.
-            # (weird training time labels).
-            #
-            # l = ax.get_ylim()
-            # l2 = ax2.get_ylim()
-            # f = lambda x : l2[0]+(x-l[0])/(l[1]-l[0])*(l2[1]-l2[0])
-            # ticks = f(ax.get_yticks())
-            # ax2.yaxis.set_major_locator(matplotlib.ticker.FixedLocator(ticks))
-
-            # Align percent against training time.
-            # (weird percent labels).
-            #
-            # l = ax2.get_ylim()
-            # l2 = ax.get_ylim()
-            # f = lambda x : l2[0]+(x-l[0])/(l[1]-l[0])*(l2[1]-l2[0])
-            # ticks = f(ax2.get_yticks())
-            # ax.yaxis.set_major_locator(matplotlib.ticker.FixedLocator(ticks))
-
-        logging.info('Save figure to {path}'.format(path=self.path))
-        fig.tight_layout()
-        fig.savefig(self.path)
-        plt.close(fig)
-
     @property
     def x_axis_label(self):
         if self.x_type == 'rl-comparison':
@@ -604,7 +616,7 @@ class UtilPlot:
             return "Environment"
         elif self.x_type == 'algo-comparison':
             return "RL algorithm"
-        raise NotImplementedError
+        raise NotImplementedError()
 
 # https://stackoverflow.com/questions/19184484/how-to-add-group-labels-for-bar-charts-in-matplotlib
 

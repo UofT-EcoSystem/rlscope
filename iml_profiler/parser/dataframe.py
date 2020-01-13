@@ -130,17 +130,30 @@ class BaseDataframeReader:
     def _get_colnames(self):
         return self._colnames.union(set(self.iml_columns))
 
-    def _add_iml_config_columns(self, data=None):
+    def _add_iml_config_columns(self, data=None, skip_fields=None):
         assert data is not None
-        # if data is None:
-        #     data = self.data
-        if not self._has_iml_columns():
-            return
-        def _get(col):
-            self._add_col(col, self.iml_metadata['metadata'].get(col, ''), data=data)
+        def _get_meta(col):
+            if col not in self.iml_metadata['metadata'] or \
+                (skip_fields is not None and col in skip_fields):
+                return
+            self._add_col(col, self.iml_metadata['metadata'][col], data=data)
         # Q: should we just set ALL the metadata?
-        _get('algo')
-        _get('env')
+        _get_meta('algo')
+        _get_meta('env')
+        if 'env' in self.iml_metadata and 'CUDA_VISIBLE_DEVICES' in self.iml_metadata['env']:
+            devs = self.iml_metadata['env']['CUDA_VISIBLE_DEVICES']
+            if type(devs) == int:
+                dev_ids = frozenset([devs])
+            elif type(devs) == str:
+                dev_ids = frozenset([int(d) for d in re.split(r',\s*', devs)])
+            else:
+                raise NotImplementedError(
+                    ("Not sure how to parse "
+                     "iml_config['env']['CUDA_VISIBLE_DEVICES'] = {obj}, "
+                     "type={type}").format(
+                        obj=devs,
+                        type=type(devs)))
+            self._add_col('CUDA_VISIBLE_DEVICES', dev_ids, data=data)
 
     def _has_iml_columns(self):
         return 'algo' in self.iml_metadata['metadata'] and 'env' in self.iml_metadata['metadata']
@@ -220,15 +233,18 @@ class BaseDataframeReader:
         raise NotImplementedError()
 
     def _maybe_add_fields(self, path, data=None):
+        skip_fields = set()
         if self.add_fields is not None:
             extra_fields = self.add_fields(path)
             if extra_fields is not None:
                 self.added_fields.update(extra_fields.keys())
                 for key, value in extra_fields.items():
                     self._add_col_to_data(key, value, data=data)
-            self._check_cols(data=data)
+            # self._check_cols(data=data)
+            # Avoid adding same columns twice.
+            skip_fields.update(extra_fields.keys())
 
-        self._add_iml_config_columns(data=data)
+        self._add_iml_config_columns(data=data, skip_fields=skip_fields)
         self._check_cols(data=data)
 
     @property
@@ -353,10 +369,12 @@ class UtilDataframeReader(BaseDataframeReader):
             'machine_name',
             # DeviceUtilization from pyprof.proto
             'device_name',
+            'device_id',
             # UtilizationSample from pyprof.proto
             'util',
             'start_time_us',
             'total_resident_memory_bytes',
+            'CUDA_VISIBLE_DEVICES',
         ]
 
         super().__init__(directory, add_fields=add_fields, colnames=colnames, debug=debug, debug_single_thread=debug_single_thread)
@@ -394,6 +412,7 @@ class UtilDataframeReader(BaseDataframeReader):
                 self._add_col('machine_name', machine_util.machine_name, data=data)
                 dev = "{name}.{id:02}".format(name=device_name, id=device_id)
                 self._add_col('device_name', dev, data=data)
+                self._add_col('device_id', device_id, data=data)
 
                 self._add_col('util', sample.util, data=data)
                 self._add_col('start_time_us', sample.start_time_us, data=data)
