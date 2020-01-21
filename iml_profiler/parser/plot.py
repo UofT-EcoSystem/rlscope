@@ -3328,6 +3328,7 @@ def add_grouped_stacked_bars(
     label_order=None,
     data=None,
     ax=None,
+    xfield_label_func=None,
     rotation=None,
     debug=False,
     **kwargs):
@@ -3392,15 +3393,28 @@ def add_grouped_stacked_bars(
             stds[group] = group_df.groupby([x]).std().reset_index()
         bottom = None
 
-        xtick_labels = means[groups[0]][x]
+        def _xfield_label(xg):
+            if xfield_label_func is not None:
+                return xfield_label_func(xg)
+            return xg
+
+        # xtick_labels = means[groups[0]][x]
+        all_xs  = means[groups[0]][x]
+        xtick_labels = [_xfield_label(xfield) for xfield in means[groups[0]][x]]
         xticks = np.arange(len(xtick_labels))
         ax.set_xticks(xticks)
         ax.set_xticklabels(xtick_labels, rotation=rotation)
+
+        x_to_xtick = dict()
+        for xfield, xtick in zip(all_xs, xticks):
+            x_to_xtick[xfield] = xtick
+
         for group in groups:
             xs = means[group][x]
-            assert (xs == xtick_labels).all()
+            assert (xs == all_xs).all()
             ys = means[group][y]
             std = stds[group][y]
+            # import ipdb; ipdb.set_trace()
             # plt.bar(x=xs, height=ys, yerr=std, bottom=bottom, ax=ax)
 
             # Order in which we call this determines order in which stacks appear.
@@ -3424,12 +3438,21 @@ def add_grouped_stacked_bars(
             # -2 -1 1 2
             ## for
             barplot = ax.bar(x=xticks + bar_xloc[xgroup_idx], height=ys, width=bar_width, yerr=std, label=label_str, bottom=bottom, **kwargs)
+            xtick_to_barplot = dict()
+            for xtick, b in zip(xticks, barplot):
+                xtick_to_barplot[xtick] = b
             # # TODO: add rect labels... how?
             # if xgroup_idx == 1:
             #     import ipdb; ipdb.set_trace()
             if bar_label is not None:
+                bs = []
+                for xfield in data[x]:
+                    xtick = x_to_xtick[xfield]
+                    bs.append(xtick_to_barplot[xtick])
+
                 bar_labels = data['bar_label']
-                add_ax_bar_labels(ax, barplot, bar_labels, x_offset=bar_label_x_offset, **bar_label_kwargs)
+                # add_ax_bar_labels(ax, barplot, bar_labels, x_offset=bar_label_x_offset, **bar_label_kwargs)
+                add_ax_bar_labels(ax, bs, bar_labels, x_offset=bar_label_x_offset, **bar_label_kwargs)
 
             if bottom is None:
                 bottom = ys

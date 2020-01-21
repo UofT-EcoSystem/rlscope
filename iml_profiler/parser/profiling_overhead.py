@@ -323,9 +323,39 @@ class CorrectedTrainingTimeParser:
         sns_kwargs = get_sns_kwargs()
         plt_kwargs = get_plt_kwargs()
 
+        PLOT_GROUP_ALGO_CHOICE = "Algorithm choice"
+        PLOT_GROUP_ENV_CHOICE = "Environment choice"
+        PLOT_GROUP_RL_WORKLOAD = "Misc"
+        def as_plot_group(algo, env):
+            if expr_config.is_fig_algo_comparison_med_complexity(algo, env):
+                return PLOT_GROUP_ALGO_CHOICE
+            elif expr_config.is_fig_env_comparison(algo, env):
+                return PLOT_GROUP_ENV_CHOICE
+            else:
+                return PLOT_GROUP_RL_WORKLOAD
+
+
+        def add_x_field(df):
+            # df = copy.copy(df)
+            def _x_type(plot_group):
+                if plot_group == PLOT_GROUP_ENV_CHOICE:
+                    return 'env-comparison'
+                elif plot_group == PLOT_GROUP_ALGO_CHOICE:
+                    return 'algo-comparison'
+                return 'rl-comparison'
+
+            def _x_field(plot_group, algo, env):
+                x_type = _x_type(plot_group)
+                return stacked_bar_plots.get_x_field(
+                    algo, env,
+                    x_type=x_type,
+                    human_readable=True)
+            df['plot_group'] = np.vectorize(as_plot_group, otypes=[str])(df['algo'], df['env'])
+            df['x_field'] = np.vectorize(_x_field, otypes=[str])(df['plot_group'], df['algo'], df['env'])
+            # return df
+
         def add_fields(df, iml_config):
             add_iml_config(df, iml_config)
-            add_x_field(df)
 
         def load_dfs():
             memoize_path = _j(self.directory, "{klass}.load_dfs.pickle".format(
@@ -495,6 +525,8 @@ class CorrectedTrainingTimeParser:
             return ret
 
         total_df, per_api_df = load_dfs()
+        add_x_field(total_df)
+        add_x_field(per_api_df)
 
         # PROBLEM: we need to plot the uninstrumented runtime as well to verify the "corrected" time is correct.
         # TODO: output format that ProfilingOverheadPlot can read, reuse that plotting code.
@@ -541,16 +573,33 @@ class CorrectedTrainingTimeParser:
             del per_api_plot_data['total_overhead_us']
             return per_api_plot_data
 
-        if self.width is not None and self.height is not None:
-            figsize = (self.width, self.height)
-            logging.info("Setting figsize = {fig}".format(fig=figsize))
-            # sns.set_context({"figure.figsize": figsize})
-        else:
-            figsize = None
+        # if self.width is not None and self.height is not None:
+        #     figsize = (self.width, self.height)
+        #     logging.info("Setting figsize = {fig}".format(fig=figsize))
+        #     # sns.set_context({"figure.figsize": figsize})
+        # else:
+        #     figsize = None
+
+
+        # figsize = (7, 5)
+        # figsize = (7, 8)
+        # if self.plot_group == 'environment_choice':
+        #     figsize = (9, 7)
+        # elif self.plot_group == 'algorithm_choice':
+        #     figsize = (7, 6)
+        # else:
+        figsize = None
+
+        logging.info("Plot dimensions (inches) = {figsize}".format(
+            figsize=figsize))
+
+
 
         per_api_plot_data = get_per_api_plot_data(per_api_df)
         output_csv(per_api_plot_data, self._per_api_csv_path, sort_by=['total_overhead_sec'])
         if len(per_api_plot_data) > 0:
+
+
             fig = plt.figure(figsize=figsize)
             ax = fig.add_subplot(111)
             sns.barplot(
@@ -561,7 +610,7 @@ class CorrectedTrainingTimeParser:
             ax.set_xlabel('CUDA API call')
             ax.set_title("Breakdown of profiling overhead by CUDA API call")
             logging.info("Output plot @ {path}".format(path=self._per_api_png_path))
-            fig.savefig(self._per_api_png_path)
+            fig.savefig(self._per_api_png_path, bbox_inches="tight", pad_inches=0)
             plt.close(fig)
 
         def get_total_plot_data(total_df):
@@ -630,7 +679,7 @@ class CorrectedTrainingTimeParser:
             ax.set_xlabel('(algo, env)')
             ax.set_title("Breakdown of profiling overhead")
             logging.info("Output plot @ {path}".format(path=self._total_png_path))
-            fig.savefig(self._total_png_path)
+            fig.savefig(self._total_png_path, bbox_inches="tight", pad_inches=0)
             plt.close(fig)
 
         # JAMES: uninstrumented training time
@@ -665,6 +714,51 @@ class CorrectedTrainingTimeParser:
             'env': total_df['env'],
         })
         corrected_df['config'] = 'corrected'
+
+        def get_figsize(plot_group):
+
+            SMALL_SIZE = 8
+            # Default font size for matplotlib (too small for paper).
+            MEDIUM_SIZE = 10
+            BIGGER_SIZE = 12
+
+            FONT_SIZE = None
+
+            # if plot_group == PLOT_GROUP_ALGO_CHOICE:
+            #     figsize = (10, 6.5)
+            #     FONT_SIZE = BIGGER_SIZE + 4
+            # elif plot_group == PLOT_GROUP_ENV_CHOICE:
+            #     figsize = (7, 5.5)
+            #     FONT_SIZE = BIGGER_SIZE + 2
+            # else:
+            #     # PLOT_GROUP_RL_WORKLOAD
+            #     figsize = None
+
+            if plot_group in {PLOT_GROUP_ALGO_CHOICE, PLOT_GROUP_ENV_CHOICE}:
+                figsize = (10, 9.5)
+                FONT_SIZE = BIGGER_SIZE + 8
+            else:
+                # PLOT_GROUP_RL_WORKLOAD
+                figsize = None
+
+            if FONT_SIZE is not None:
+                plt.rc('font', size=FONT_SIZE)          # controls default text sizes
+                plt.rc('axes', titlesize=FONT_SIZE)     # fontsize of the axes title
+                plt.rc('axes', labelsize=FONT_SIZE)    # fontsize of the x and y labels
+                plt.rc('xtick', labelsize=FONT_SIZE)    # fontsize of the tick labels
+                plt.rc('ytick', labelsize=FONT_SIZE)    # fontsize of the tick labels
+                plt.rc('legend', fontsize=FONT_SIZE)    # legend fontsize
+                plt.rc('figure', titlesize=FONT_SIZE)  # fontsize of the figure title
+
+            return figsize
+
+        def get_xlabel(plot_group):
+            if plot_group == PLOT_GROUP_ALGO_CHOICE:
+                return "RL algorithm"
+            elif plot_group == PLOT_GROUP_ENV_CHOICE:
+                return "Simulator"
+            else:
+                return "(RL algorithm, Simulator)"
 
         XGROUP_OVERHEAD = 0
         XGROUP_UNINS = 1
@@ -731,14 +825,6 @@ class CorrectedTrainingTimeParser:
 
                 raise NotImplementedError("Not sure what x_group duration_name={name} belongs to".format(
                     name=duration_name))
-
-            def as_plot_group(algo, env):
-                if expr_config.is_fig_algo_comparison_med_complexity(algo, env):
-                    return "Algorithm choice"
-                elif expr_config.is_fig_env_comparison(algo, env):
-                    return "Environment choice"
-                else:
-                    return "Misc"
 
             # Transform unins_df
             # max_duration_name_order = np.max(total_plot_data['overhead_type_order'])
@@ -807,8 +893,19 @@ class CorrectedTrainingTimeParser:
         low_bias_df = get_low_bias_overhead_correction_plot_data(total_plot_data, unins_df)
         output_csv(low_bias_df, self._overhead_correction_csv_path)
         if len(low_bias_df) > 0:
-            for low_bias_group, low_bias_group_df in low_bias_df.groupby(['plot_group']):
+            def get_xfield_order_map(plot_group, df):
+                df = df[df['x_group'] == XGROUP_OVERHEAD]
+                df = df[['x_field', 'duration_sec']].groupby(['x_field']).sum().reset_index()
+                # x_fields = sorted(set(low_bias_group_df.sort_values(['duration_sec'])['x_field'].values))
+                x_fields = df.sort_values(['duration_sec'])['x_field'].unique()
+                xfield_to_idx = as_order_map(x_fields)
+                idx_to_xfield = reverse_dict(xfield_to_idx)
+                # import ipdb; ipdb.set_trace()
+                return xfield_to_idx, idx_to_xfield
+            for plot_group, low_bias_group_df in low_bias_df.groupby(['plot_group']):
+                figsize = get_figsize(plot_group)
                 fig = plt.figure(figsize=figsize)
+                xfield_to_idx, idx_to_xfield = get_xfield_order_map(plot_group, low_bias_group_df)
                 # plot_data['field'] = "Per-API-call interception overhead"
                 ax = fig.add_subplot(111)
                 # sns.barplot(x='x_field', y='training_duration_sec', hue='pretty_config', data=training_duration_plot_data, ax=ax)
@@ -824,34 +921,47 @@ class CorrectedTrainingTimeParser:
                 #  'x_group',
                 #  'bar_label',
                 #  'percent_wrong']
+                def xfield_label_func(idx):
+                    xfield = idx_to_xfield[idx]
+                    return xfield
+                low_bias_group_df = copy.copy(low_bias_group_df)
+                low_bias_group_df['x_field_idx'] = low_bias_group_df['x_field'].apply(lambda x_field: xfield_to_idx[x_field])
                 xgroup_barplot = add_grouped_stacked_bars(
-                    x='x_field',
+                    # x='x_field',
+                    x='x_field_idx',
                     x_group='x_group',
+                    # x_group='x_group_idx',
                     y='duration_sec',
                     hue='duration_name_order',
                     label='duration_pretty_name',
                     label_order='duration_name_order',
                     bar_label='bar_label',
-                    bar_label_x_offset=3,
-                    bar_label_kwargs=dict(
-                        fontsize=9
-                    ),
+                    bar_label_x_offset=14,
+                    # bar_label_kwargs=dict(
+                    #     fontsize=9
+                    # ),
                     data=low_bias_group_df,
                     ax=ax,
+                    xfield_label_func=xfield_label_func,
                     rotation=10,
                     # rotation=None,
                     debug=self.debug,
                     **plt_kwargs)
+                # HACK: make it so percent labels will fit in plot area.
+                x_min, x_max = ax.get_xlim()
+                ax.set_xlim([x_min, x_max*1.02])
+
                 # for xgroup, barplot in xgroup_barplot.items():
                 #     if xgroup == XGROUP_UNINS:
                 #         add_ax_bar_labels(ax, barplot)
                 # ax.legend().set_title(None)
                 ax.set_ylabel('Total training time (sec)')
-                ax.set_xlabel('(RL algorithm, Simulator)')
+                xlabel = get_xlabel(plot_group)
+                ax.set_xlabel(xlabel)
                 # ax.set_title("Breakdown of profiling overhead")
-                logging.info("Output plot @ {path}".format(path=self._overhead_correction_png_path(low_bias_group)))
-                fig.tight_layout()
-                fig.savefig(self._overhead_correction_png_path(low_bias_group))
+                logging.info("Output plot @ {path}".format(path=self._overhead_correction_png_path(plot_group)))
+                # fig.tight_layout()
+                fig.savefig(self._overhead_correction_png_path(plot_group), bbox_inches="tight", pad_inches=0)
                 plt.close(fig)
 
         # unins_training_duration_us = get_training_durations(self.uninstrumented_directories, debug=self.debug)
