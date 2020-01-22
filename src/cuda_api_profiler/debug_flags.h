@@ -36,7 +36,7 @@ namespace tensorflow {
 //
 constexpr bool FEATURE_OVERLAP = 0;
 constexpr bool FEATURE_OVERLAP_META = 0;
-constexpr bool FEATURE_LOAD_DATA = 0;
+constexpr bool FEATURE_LOAD_DATA = 1;
 constexpr bool FEATURE_SAVE_JS = 0;
 constexpr bool FEATURE_PREPROCESS_DATA = 0;
 constexpr bool FEATURE_OVERHEAD_CORRECTION = 0;

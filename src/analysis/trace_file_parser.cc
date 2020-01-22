@@ -34,7 +34,7 @@ namespace tensorflow {
 
 const std::regex PROCESS_OPERATION_REGEX = std::regex(R"(\[.*\])");
 
-const std::vector<RLSFileType> RLS_FILE_TYPES = {
+const std::set<RLSFileType> RLS_FILE_TYPES = {
     CUDA_API_STATS_FILE,
     CATEGORY_EVENTS_FILE,
     CUDA_DEVICE_EVENTS_FILE,
@@ -131,6 +131,23 @@ MyStatus WriteJson(std::string path, const nlohmann::json& j) {
   }
 
   return MyStatus::OK();
+}
+
+
+const std::string& EOEvent::name() const {
+  return _eo_events->GetEventName(_i);
+}
+
+TimeUsec EOEvent::start_time_us() const {
+  return _eo_events->StartUsec(_i);
+}
+
+TimeUsec EOEvent::end_time_us() const {
+  return _eo_events->EndUsec(_i);
+}
+
+TimeUsec EOEvent::duration_us() const {
+  return _eo_events->DurationUsec(_i);
 }
 
 void EOEvents::Print(std::ostream& out, int indent) const {
@@ -1062,13 +1079,14 @@ MyStatus RawTraceParser::_ReadMergeSorted(
     const Machine& machine,
     const Process& process,
     const Phase& phase,
+    const std::set<RLSFileType>& file_types,
     CategoryTimes *category_times,
     EntireTraceMeta* entire_meta,
     const std::map<RLSFileType, std::vector<TraceFileMeta>>& meta_map,
     const std::map<RLSFileType, std::unique_ptr<IEventFileParser>>& parser_map) {
   MyStatus status = MyStatus::OK();
 
-  for (auto rls_file_type : RLS_FILE_TYPES) {
+  for (auto rls_file_type : file_types) {
     const auto &parser = parser_map.at(rls_file_type);
     status = parser->AppendAllCategoryTimes(*entire_meta, meta_map.at(rls_file_type), category_times);
     if (timer) {
@@ -1086,6 +1104,7 @@ MyStatus RawTraceParser::ReadEntireTrace(
     const Machine& machine,
     const Process& process,
     const Phase& phase,
+    const std::set<RLSFileType>& file_types,
     CategoryTimes *category_times,
     EntireTraceMeta* entire_meta) {
   MyStatus status = MyStatus::OK();
@@ -1094,14 +1113,14 @@ MyStatus RawTraceParser::ReadEntireTrace(
 
   std::map<RLSFileType, std::vector<TraceFileMeta>> meta_map;
 
-  for (auto rls_file_type : RLS_FILE_TYPES) {
+  for (auto rls_file_type : file_types) {
     meta_map[rls_file_type] = {};
     status = _walker.TraceMetas(rls_file_type, machine, process, phase, &meta_map[rls_file_type]);
     IF_BAD_STATUS_RETURN(status);
   }
 
   std::map<RLSFileType, std::unique_ptr<IEventFileParser>> parser_map;
-  for (auto rls_file_type : RLS_FILE_TYPES) {
+  for (auto rls_file_type : file_types) {
     TraceParserMeta parser_meta(machine, process, phase);
     status = GetRLSEventParserFromType(rls_file_type, parser_meta, &parser_map[rls_file_type]);
     IF_BAD_STATUS_RETURN(status);
@@ -1113,7 +1132,9 @@ MyStatus RawTraceParser::ReadEntireTrace(
 //  IF_BAD_STATUS_RETURN(status);
 
   status = _ReadMergeSorted(
-      machine, process, phase, category_times, entire_meta,
+      machine, process, phase,
+      file_types,
+      category_times, entire_meta,
       meta_map, parser_map);
   IF_BAD_STATUS_RETURN(status);
 

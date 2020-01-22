@@ -30,6 +30,7 @@ using json = nlohmann::json;
 
 //#include "tensorflow/core/lib/core/status.h"
 #include "analysis/my_status.h"
+#include "analysis/sample_periods.h"
 
 #include <list>
 #include <initializer_list>
@@ -42,13 +43,20 @@ using json = nlohmann::json;
 DEFINE_bool(debug, false, "Debug: give additional verbose output");
 DEFINE_string(proto, "", "Path to RLS trace-file protobuf file");
 DEFINE_string(iml_directory, "", "Path to --iml-directory used when collecting trace-files");
-DEFINE_string(mode, "", "One of: [stats, ls, proto]");
+DEFINE_string(mode, "", "One of: [stats, ls, proto, sample_periods]");
 
 DEFINE_string(cupti_overhead_json, "", "Path to calibration file: mean per-CUDA API CUPTI overhead when GPU activities are recorded (see: CUPTIOverheadTask) ");
 DEFINE_string(LD_PRELOAD_overhead_json, "", "Path to calibration file: mean overhead for intercepting CUDA API calls with LD_PRELOAD  (see: CallInterceptionOverheadTask)");
 DEFINE_string(python_annotation_json, "", "Path to calibration file: means for operation annotation overhead (see: PyprofOverheadTask)");
 DEFINE_string(python_clib_interception_tensorflow_json, "", "Path to calibration file: means for TensorFlow Python->C++ interception overhead (see: PyprofOverheadTask)");
 DEFINE_string(python_clib_interception_simulator_json, "", "Path to calibration file: means for Simulator Python->C++ interception overhead (see: PyprofOverheadTask)");
+
+
+// Window size (a.k.a. sample period [NVIDIA documentation]): the number of "bins" we look at when calculating the GPU kernel time.
+//   NOTE: if window size is in milliseconds, then it should be evenly divisible by the polling interval.
+// Polling interval: the size of each "bin" where we check whether or not a GPU kernel ran, and assign 0/1 to it.
+DEFINE_int64(polling_interval_us, 0, "nvidia-smi sampling period in microseconds (http://developer.download.nvidia.com/compute/DCGM/docs/nvidia-smi-367.38.pdf): Percent of time over the past sample period during which one or more kernels was executing on the GPU. The sample period may be between 1 second and 1/6 second depending on the product");
+//DEFINE_int64(window_size_us, 0, "nvidia-smi sampling period in microseconds (http://developer.download.nvidia.com/compute/DCGM/docs/nvidia-smi-367.38.pdf): Percent of time over the past sample period during which one or more kernels was executing on the GPU. The sample period may be between 1 second and 1/6 second depending on the product");
 
 using namespace tensorflow;
 
@@ -64,6 +72,7 @@ enum Mode {
   MODE_STATS = 2,
   MODE_OVERLAP = 3,
   MODE_READ_FILES = 4,
+  MODE_SAMPLE_PERIODS = 5,
 };
 
 void Usage() {
@@ -141,6 +150,8 @@ int main(int argc, char** argv) {
       mode = Mode::MODE_OVERLAP;
     } else if (FLAGS_mode == "proto") {
       mode = Mode::MODE_DUMP_PROTO;
+    } else if (FLAGS_mode == "sample_periods") {
+      mode = Mode::MODE_SAMPLE_PERIODS;
     } else {
       UsageAndExit("--mode must be one of [stats, ls, proto]");
     }
@@ -171,6 +182,24 @@ int main(int argc, char** argv) {
   if (mode == Mode::MODE_OVERLAP) {
     if (FLAGS_iml_directory == "") {
       UsageAndExit("--iml-directory is required for --mode=overlap");
+    }
+  }
+
+  if (mode == Mode::MODE_SAMPLE_PERIODS) {
+    if (FLAGS_iml_directory == "") {
+      UsageAndExit("--iml-directory is required for --mode=sample_periods");
+    }
+
+    if (FLAGS_polling_interval_us == 0) {
+      UsageAndExit("--polling_interval_us is required for --mode=sample_periods");
+    }
+
+    if (FLAGS_cupti_overhead_json != ""
+        || FLAGS_LD_PRELOAD_overhead_json != ""
+        || FLAGS_python_clib_interception_tensorflow_json != ""
+        || FLAGS_python_clib_interception_simulator_json != "")
+    {
+      UsageAndExit("Calibration files (e.g., --cupti-overhead-json-path) should NOT be provided for mode=sample_periods");
     }
   }
 
@@ -229,12 +258,12 @@ int main(int argc, char** argv) {
 
   if (mode == Mode::MODE_STATS) {
     auto parser = mk_parser();
-    parser.EachEntireTrace([] (const CategoryTimes& category_times, const EntireTraceMeta& meta) {
+    parser.EachEntireTrace([] (std::unique_ptr<CategoryTimes> category_times, const EntireTraceMeta& meta) {
             std::cout << "Machine=" << meta.machine
                       << ", " << "Process=" << meta.process
                       << ", " << "Phase=" << meta.phase
                       << std::endl;
-            category_times.PrintSummary(std::cout, 1);
+            category_times->PrintSummary(std::cout, 1);
             std::cout << std::endl;
             return MyStatus::OK();
     });
@@ -284,13 +313,13 @@ int main(int argc, char** argv) {
     auto parser = mk_parser();
     auto timer = parser.timer;
     size_t n_total_events = 0;
-    parser.EachEntireTrace([timer, &n_total_events] (const CategoryTimes& category_times, const EntireTraceMeta& meta) {
+    parser.EachEntireTrace([timer, &n_total_events] (std::unique_ptr<CategoryTimes> category_times, const EntireTraceMeta& meta) {
       if (FLAGS_debug) {
         std::cout << "Machine=" << meta.machine
                   << ", " << "Process=" << meta.process
                   << ", " << "Phase=" << meta.phase
                   << std::endl;
-        category_times.PrintSummary(std::cout, 1);
+        category_times->PrintSummary(std::cout, 1);
         std::cout << std::endl;
       }
 
@@ -299,7 +328,7 @@ int main(int argc, char** argv) {
         ss << "CategoryTimes details:";
 
         std::set<Operation> ops;
-        for (const auto& pair : category_times.eo_times) {
+        for (const auto& pair : category_times->eo_times) {
           auto const &category_key = pair.first;
           ops.insert(category_key.ops.begin(), category_key.ops.end());
         }
@@ -309,7 +338,7 @@ int main(int argc, char** argv) {
         ss << "op_names = ";
         PrintValue(ss, ops);
 
-        for (const auto& pair : category_times.eo_times) {
+        for (const auto& pair : category_times->eo_times) {
           auto const& category_key = pair.first;
           auto const& eo_events = pair.second;
 
@@ -327,8 +356,8 @@ int main(int argc, char** argv) {
         DBG_LOG("{}", ss.str());
       }
 
-      n_total_events += category_times.TotalEvents();
-      OverlapComputer overlap_computer(category_times);
+      n_total_events += category_times->TotalEvents();
+      OverlapComputer overlap_computer(*category_times);
       if (SHOULD_DEBUG(FEATURE_OVERLAP)) {
         overlap_computer.debug = true;
       }
@@ -365,6 +394,127 @@ int main(int argc, char** argv) {
           static_cast<SimpleTimer::MetricValue>(total_time_sec);
       timer->RecordThroughput("overlap events/sec", events_per_sec);
 
+      std::cout << std::endl;
+      timer->Print(std::cout, 0);
+      std::cout << std::endl;
+    }
+    exit(EXIT_SUCCESS);
+  }
+
+  if (mode == Mode::MODE_SAMPLE_PERIODS) {
+    auto parser = mk_parser();
+    auto timer = parser.timer;
+    size_t n_total_events = 0;
+    // Q: how can we instruct this thing ONLY to read GPU kernels times and to skip reading other trace-files...?
+    // A: just limit the RLS file types.
+    // Q: How can we merge GPU kernels time ACROSS phases?
+    // A: Options
+    // - merge EOEvents
+    //   - PRO: simpler to split
+    //   - CON: doubles memory usage in worst-case naive implementation... we can probably keep memory the same if we are smart.
+    // - iterable structure
+    //   - PRO: no space increase
+    //   - CON: much harder to split since splits could be across several files (really complicated to do this).
+    std::set<RLSFileType> file_types = {CUDA_DEVICE_EVENTS_FILE};
+    std::list<std::tuple<std::unique_ptr<CategoryTimes>, EntireTraceMeta>> all_category_times;
+    parser.EachEntireTraceWithFileType([timer, &n_total_events, &all_category_times] (std::unique_ptr<CategoryTimes> category_times, const EntireTraceMeta& meta) {
+      if (FLAGS_debug) {
+        std::cout << "Machine=" << meta.machine
+                  << ", " << "Process=" << meta.process
+                  << ", " << "Phase=" << meta.phase
+                  << std::endl;
+        category_times->PrintSummary(std::cout, 1);
+        std::cout << std::endl;
+      }
+
+      // Get rid of procs since we just want to know if a GPU is running (don't care which process it belongs to)...
+      //   CategoryKey(procs={selfplay_worker_0_generation_0}, ops={}, non_ops={GPU})
+      //   =>
+      //   CategoryKey(procs={}, ops={}, non_ops={GPU})
+      category_times->RemapKeysInplace([] (const CategoryKey& old_key) {
+        CategoryKey new_key = old_key;
+        new_key.procs.clear();
+        return new_key;
+      });
+
+      if (SHOULD_DEBUG(FEATURE_LOAD_DATA)) {
+        std::stringstream ss;
+        ss << "CategoryTimes details:";
+
+        std::set<Operation> ops;
+        for (const auto& pair : category_times->eo_times) {
+          auto const &category_key = pair.first;
+          ops.insert(category_key.ops.begin(), category_key.ops.end());
+        }
+        ss << "\n";
+        PrintIndent(ss, 1);
+        // op_names = {sample_action, step}
+        ss << "op_names = ";
+        PrintValue(ss, ops);
+
+        for (const auto& pair : category_times->eo_times) {
+          auto const& category_key = pair.first;
+          auto const& eo_events = pair.second;
+
+          if (eo_events.KeepNames()) {
+            ss << "\n";
+            category_key.Print(ss, 1);
+            auto const& names = eo_events.UniqueNames();
+            ss << "\n";
+            PrintIndent(ss, 2);
+            ss << "names = ";
+            PrintValue(ss, names);
+          }
+        }
+
+        DBG_LOG("{}", ss.str());
+      }
+
+      n_total_events += category_times->TotalEvents();
+      all_category_times.emplace_back(std::move(category_times), meta);
+
+      return MyStatus::OK();
+    },
+    file_types);
+    if (timer) {
+      auto total_time_sec = timer->TotalTimeSec();
+      timer->RecordThroughput("overlap events", n_total_events);
+      timer->RecordThroughput("total_sec", total_time_sec);
+//      SimpleTimer::MetricValue events_per_sec =
+//          static_cast<SimpleTimer::MetricValue>(n_total_events) /
+//          static_cast<SimpleTimer::MetricValue>(total_time_sec);
+//      timer->RecordThroughput("overlap events/sec", events_per_sec);
+
+    }
+    std::list<const CategoryTimes*> all_ctimes;
+    for (const auto& tupl : all_category_times) {
+      all_ctimes.push_back(std::get<0>(tupl).get());
+    }
+    CategoryTimes merged = CategoryTimes::MergeAll(all_ctimes);
+    if (timer) {
+      timer->EndOperation("CategoryTimes::MergeAll()");
+    }
+    if (FLAGS_debug) {
+      std::cout << "Merged CategoryTimes summary:" << std::endl;
+      merged.PrintSummary(std::cout, 1);
+      std::cout << std::endl;
+    }
+
+    SamplePeriods sample_periods(merged, FLAGS_polling_interval_us, FLAGS_iml_directory);
+    auto sample_periods_js = sample_periods.Compute();
+    auto sample_periods_js_path = sample_periods.JSPath();
+    status = WriteJson(sample_periods_js_path, sample_periods_js);
+    if (timer) {
+      timer->EndOperation("SamplePeriods.Compute()");
+    }
+
+    if (status.code() != MyStatus::OK().code()) {
+      std::stringstream ss;
+      ss << "Failed to write json @ path=" <<  sample_periods_js_path << " for --mode=" << FLAGS_mode;
+      IF_BAD_STATUS_EXIT(ss.str(), status);
+    }
+
+    if (timer) {
       std::cout << std::endl;
       timer->Print(std::cout, 0);
       std::cout << std::endl;

@@ -109,9 +109,9 @@ enum RLSFileType {
 
 extern const std::regex PROCESS_OPERATION_REGEX;
 
-extern const std::vector<RLSFileType> RLS_FILE_TYPES;
-//const std::vector<RLSFileType>& AllRLSFileTypes() {
-//  static const std::vector<RLSFileType> RLSFileTypeVector = std::vector<RLSFileType>{
+extern const std::set<RLSFileType> RLS_FILE_TYPES;
+//const std::set<RLSFileType>& AllRLSFileTypes() {
+//  static const std::set<RLSFileType> RLSFileTypeVector = std::set<RLSFileType>{
 //      CUDA_API_STATS_FILE ,
 //      CATEGORY_EVENTS_FILE ,
 //      CUDA_DEVICE_EVENTS_FILE ,
@@ -718,6 +718,24 @@ MyStatus FindRLSFiles(const std::string& iml_directory, std::list<std::string>* 
 //  RawTraceSplitLocation end_location;
 //};
 
+class EOEvents;
+
+class EOEvent {
+public:
+  const EOEvents* _eo_events;
+  size_t _i;
+
+  EOEvent(const EOEvents* eo_events, size_t i) :
+      _eo_events(eo_events),
+      _i(i) {
+  }
+
+  const std::string& name() const;
+  TimeUsec start_time_us() const;
+  TimeUsec end_time_us() const;
+  TimeUsec duration_us() const;
+};
+
 #define EVENT_START_IDX(i) (2*i)
 #define EVENT_END_IDX(i) (2*i + 1)
 class EOEvents {
@@ -738,6 +756,122 @@ public:
   // NOTE: It's not clear to me what a reasonable value to use here really is...
   KeyVector<EventNameID, std::string> _names;
   bool _keep_names;
+
+//  typedef A allocator_type;
+  typedef EOEvent value_type;
+  typedef EOEvent& reference;
+//  typedef typename A::const_reference const_reference;
+  typedef size_t difference_type;
+  typedef size_t size_type;
+  typedef size_t pointer;
+
+  class iterator {
+  public:
+    typedef iterator self_type;
+    typedef EOEvents::value_type value_type;
+    typedef EOEvents::value_type& reference;
+    typedef EOEvents::pointer pointer;
+    typedef std::forward_iterator_tag iterator_category;
+    typedef EOEvents::difference_type difference_type;
+    iterator(const EOEvents* eo_events, size_type i) :
+        eo_events_(eo_events),
+        i_(i) {
+    }
+    // PREFIX
+    self_type operator++() {
+      i_++;
+      return *this;
+    }
+    // POSTFIX
+    self_type operator++(int junk) {
+      self_type old_self = *this;
+      i_++;
+      return old_self;
+    }
+    value_type operator*() {
+      return EOEvent(eo_events_, i_);
+    }
+    pointer operator->() { return i_; }
+    bool operator==(const self_type& rhs) {
+      auto const& lhs = *this;
+      return lhs.eo_events_ == rhs.eo_events_ &&
+             lhs.i_ == rhs.i_;
+    }
+    bool operator!=(const self_type& rhs) {
+      auto const& lhs = *this;
+      return lhs.eo_events_ != rhs.eo_events_ ||
+             lhs.i_ != rhs.i_;
+    }
+  private:
+    const EOEvents* eo_events_;
+    size_type i_;
+  };
+
+  iterator begin() const
+  {
+    return iterator(this, 0);
+  }
+
+  iterator end() const
+  {
+    return iterator(this, this->size());
+  }
+
+//  class const_iterator {
+//  public:
+//    typedef const_iterator self_type;
+//    typedef T value_type;
+//    typedef T& reference;
+//    typedef T* pointer;
+//    typedef int difference_type;
+//    typedef std::forward_iterator_tag iterator_category;
+//    const_iterator(pointer ptr) : ptr_(ptr) { }
+//    self_type operator++() { self_type i = *this; ptr_++; return i; }
+//    self_type operator++(int junk) { ptr_++; return *this; }
+//    const reference operator*() { return *ptr_; }
+//    const pointer operator->() { return ptr_; }
+//    bool operator==(const self_type& rhs) { return ptr_ == rhs.ptr_; }
+//    bool operator!=(const self_type& rhs) { return ptr_ != rhs.ptr_; }
+//  private:
+//    pointer ptr_;
+//  };
+
+  static EOEvents Merge(const EOEvents& lhs, const EOEvents& rhs) {
+    if (lhs._keep_names) {
+      assert(rhs._keep_names);
+    }
+    EOEvents merged(
+        lhs._max_events + rhs._max_events,
+        lhs._keep_names);
+
+    bool keep_names = merged.KeepNames();
+    auto append_event = [&merged, keep_names] (const EOEvents& eo_events, size_t* i) {
+      OptionalString name;
+      if (keep_names) {
+        name = eo_events.GetEventName(*i);
+      }
+      merged.AppendEvent(name, eo_events.StartUsec(*i), eo_events.EndUsec(*i));
+      *i += 1;
+    };
+
+    size_t lhs_i = 0;
+    size_t rhs_i = 0;
+    while (lhs_i < lhs.size() && rhs_i < rhs.size()) {
+      if (lhs.StartUsec(lhs_i) <= rhs.StartUsec(rhs_i)) {
+        append_event(lhs, &lhs_i);
+      } else {
+        append_event(rhs, &rhs_i);
+      }
+    }
+    while (lhs_i < lhs.size()) {
+      append_event(lhs, &lhs_i);
+    }
+    while (rhs_i < rhs.size()) {
+      append_event(rhs, &rhs_i);
+    }
+
+    return merged;
+  }
 
   EOEvents() :
       _max_events(0),
@@ -821,6 +955,10 @@ public:
 
   inline TimeUsec StartUsec(size_t i) const {
     return StartPsec(i)/PSEC_IN_USEC;
+  }
+
+  inline TimeUsec EndUsec(size_t i) const {
+    return EndPsec(i)/PSEC_IN_USEC;
   }
 
   inline TimePsec StartPsec(size_t i) const {
@@ -1021,6 +1159,23 @@ public:
   }
   size_t TotalEvents() const;
 
+  template <typename Func>
+  void RemapKeysInplace(Func remap_key_func) {
+    auto remap_eo_times = [remap_key_func] (const EOTimes& times) -> EOTimes {
+      EOTimes remapped_eo_times;
+      for (auto const& pair : times) {
+        const auto& old_key = pair.first;
+        auto new_key = remap_key_func(old_key);
+        remapped_eo_times[new_key] = pair.second;
+      }
+      return remapped_eo_times;
+    };
+    auto remapped_eo_times = remap_eo_times(this->eo_times);
+    auto remapped_extra_eo_times = remap_eo_times(this->extra_eo_times);
+    eo_times = remapped_eo_times;
+    extra_eo_times = remapped_extra_eo_times;
+  }
+
   void Preallocate(const CategoryTimesCount& count);
   void Preallocate(const CategoryKey& category_key, size_t n_events);
   void PreallocateExtra(const CategoryKey& category_key, size_t n_events);
@@ -1059,6 +1214,42 @@ public:
   void PrintSummary(std::ostream& out, int indent) const;
 
   void CheckIntegrity(std::ostream& out, int indent) const;
+
+  static EOTimes _EOTimesMergeAll(std::list<const EOTimes*> all_eo_times) {
+    EOTimes merged;
+    for (const auto& eo_times : all_eo_times) {
+      for (const auto& pair : *eo_times) {
+        auto it = merged.find(pair.first);
+        if (it != merged.end()) {
+          merged[pair.first] = EOEvents::Merge(it->second, pair.second);
+        } else {
+          merged[pair.first] = pair.second;
+        }
+      }
+    }
+    return merged;
+  }
+
+  static CategoryTimes MergeAll(std::list<const CategoryTimes*> all_category_times) {
+    CategoryTimes merged;
+    if (all_category_times.size() == 0) {
+      return merged;
+    }
+    std::list<const EOTimes*> all_eo_times;
+    std::list<const EOTimes*> all_extra_eo_times;
+    for (auto const& category_times : all_category_times) {
+      all_eo_times.push_back(&category_times->eo_times);
+      all_extra_eo_times.push_back(&category_times->extra_eo_times);
+    }
+    merged.eo_times = _EOTimesMergeAll(all_eo_times);
+    merged.extra_eo_times = _EOTimesMergeAll(all_extra_eo_times);
+    // Should we make it "", since it contais multiple processes?
+    // Or, make a member "processes" that contains all of them as a set?
+    merged.process = (*all_category_times.begin())->process;
+
+    return merged;
+  }
+
 };
 
 class CategoryTimesBitset {
@@ -1355,6 +1546,11 @@ public:
 
   template <typename Func>
   MyStatus EachEntireTrace(Func func) {
+    return EachEntireTraceWithFileType(func, RLS_FILE_TYPES);
+  }
+
+  template <typename Func>
+  MyStatus EachEntireTraceWithFileType(Func func, const std::set<RLSFileType>& file_types) {
     MyStatus status = MyStatus::OK();
     auto const& machines = this->Machines();
     for (auto const& machine : machines) {
@@ -1362,12 +1558,14 @@ public:
       for (auto const& process : processes) {
         auto const& phases = this->Phases(machine, process);
         for (auto const &phase : phases) {
-          CategoryTimes category_times;
+          std::unique_ptr<CategoryTimes> category_times(new CategoryTimes());
           EntireTraceMeta meta;
-          status = this->ReadEntireTrace(machine, process, phase,
-                                          &category_times, &meta);
+          status = this->ReadEntireTrace(
+              machine, process, phase,
+              file_types,
+              category_times.get(), &meta);
           IF_BAD_STATUS_RETURN(status);
-          status = func(category_times, meta);
+          status = func(std::move(category_times), meta);
           IF_BAD_STATUS_RETURN(status);
         }
       }
@@ -1379,6 +1577,7 @@ public:
       const Machine& machine,
       const Process& process,
       const Phase& phase,
+      const std::set<RLSFileType>& file_types,
       CategoryTimes* category_times,
       EntireTraceMeta* entire_meta);
 
@@ -1395,6 +1594,7 @@ public:
       const Machine& machine,
       const Process& process,
       const Phase& phase,
+      const std::set<RLSFileType>& file_types,
       CategoryTimes *category_times,
       EntireTraceMeta* entire_meta,
       const std::map<RLSFileType, std::vector<TraceFileMeta>>& meta_map,

@@ -791,7 +791,7 @@ if (WITH_CXX_ANALYSIS)
             ${ANALYSIS_SOURCES}
 #            ${TF_SOURCES}
             ${BACKWARD_ENABLE}
-            ${PROTO_SRCS} ${PROTO_HDRS} src/analysis/lru_cache.cc)
+            ${PROTO_SRCS} ${PROTO_HDRS} src/analysis/lru_cache.cc src/analysis/sample_periods.cc src/analysis/sample_periods.h)
     list(FILTER CPP_DUMP_PROTO_SRCS EXCLUDE REGEX "/c_test_util.cc")
 
     set(TEST_ANALYSIS_SOURCES
