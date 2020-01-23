@@ -41,9 +41,10 @@ using json = nlohmann::json;
 #include "analysis/trace_file_parser.h"
 
 DEFINE_bool(debug, false, "Debug: give additional verbose output");
+DEFINE_bool(ignore_memcpy, false, "Ignore CUDA memcpy events when reading cuda_device_events*.proto");
 DEFINE_string(proto, "", "Path to RLS trace-file protobuf file");
 DEFINE_string(iml_directory, "", "Path to --iml-directory used when collecting trace-files");
-DEFINE_string(mode, "", "One of: [stats, ls, proto, sample_periods]");
+DEFINE_string(mode, "", "One of: [stats, ls, proto, polling_util]");
 
 DEFINE_string(cupti_overhead_json, "", "Path to calibration file: mean per-CUDA API CUPTI overhead when GPU activities are recorded (see: CUPTIOverheadTask) ");
 DEFINE_string(LD_PRELOAD_overhead_json, "", "Path to calibration file: mean overhead for intercepting CUDA API calls with LD_PRELOAD  (see: CallInterceptionOverheadTask)");
@@ -72,7 +73,7 @@ enum Mode {
   MODE_STATS = 2,
   MODE_OVERLAP = 3,
   MODE_READ_FILES = 4,
-  MODE_SAMPLE_PERIODS = 5,
+  MODE_POLLING_UTIL = 5,
 };
 
 void Usage() {
@@ -150,8 +151,8 @@ int main(int argc, char** argv) {
       mode = Mode::MODE_OVERLAP;
     } else if (FLAGS_mode == "proto") {
       mode = Mode::MODE_DUMP_PROTO;
-    } else if (FLAGS_mode == "sample_periods") {
-      mode = Mode::MODE_SAMPLE_PERIODS;
+    } else if (FLAGS_mode == "polling_util") {
+      mode = Mode::MODE_POLLING_UTIL;
     } else {
       UsageAndExit("--mode must be one of [stats, ls, proto]");
     }
@@ -185,13 +186,13 @@ int main(int argc, char** argv) {
     }
   }
 
-  if (mode == Mode::MODE_SAMPLE_PERIODS) {
+  if (mode == Mode::MODE_POLLING_UTIL) {
     if (FLAGS_iml_directory == "") {
-      UsageAndExit("--iml-directory is required for --mode=sample_periods");
+      UsageAndExit("--iml-directory is required for --mode=polling_util");
     }
 
     if (FLAGS_polling_interval_us == 0) {
-      UsageAndExit("--polling_interval_us is required for --mode=sample_periods");
+      UsageAndExit("--polling_interval_us is required for --mode=polling_util");
     }
 
     if (FLAGS_cupti_overhead_json != ""
@@ -199,7 +200,7 @@ int main(int argc, char** argv) {
         || FLAGS_python_clib_interception_tensorflow_json != ""
         || FLAGS_python_clib_interception_simulator_json != "")
     {
-      UsageAndExit("Calibration files (e.g., --cupti-overhead-json-path) should NOT be provided for mode=sample_periods");
+      UsageAndExit("Calibration files (e.g., --cupti-overhead-json-path) should NOT be provided for mode=polling_util");
     }
   }
 
@@ -207,6 +208,17 @@ int main(int argc, char** argv) {
     if (FLAGS_proto == "") {
       UsageAndExit("--proto is required for --mode=proto");
     }
+  }
+
+  EntireTraceSelector selector;
+  if (FLAGS_ignore_memcpy) {
+    selector.ignore_memcpy = true;
+  }
+  {
+    std::stringstream ss;
+    ss << "How to parse trace-files:\n";
+    selector.Print(ss, 1);
+    DBG_LOG("{}", ss.str());
   }
 
 //  if (mode == Mode::MODE_DUMP_PROTO) {
@@ -266,7 +278,7 @@ int main(int argc, char** argv) {
             category_times->PrintSummary(std::cout, 1);
             std::cout << std::endl;
             return MyStatus::OK();
-    });
+    }, selector);
     exit(EXIT_SUCCESS);
   }
 
@@ -384,7 +396,7 @@ int main(int argc, char** argv) {
       }
 
       return MyStatus::OK();
-    });
+    }, selector);
     if (timer) {
       auto total_time_sec = timer->TotalTimeSec();
       timer->RecordThroughput("overlap events", n_total_events);
@@ -401,7 +413,7 @@ int main(int argc, char** argv) {
     exit(EXIT_SUCCESS);
   }
 
-  if (mode == Mode::MODE_SAMPLE_PERIODS) {
+  if (mode == Mode::MODE_POLLING_UTIL) {
     auto parser = mk_parser();
     auto timer = parser.timer;
     size_t n_total_events = 0;
@@ -475,7 +487,7 @@ int main(int argc, char** argv) {
 
       return MyStatus::OK();
     },
-    file_types);
+    file_types, selector);
     if (timer) {
       auto total_time_sec = timer->TotalTimeSec();
       timer->RecordThroughput("overlap events", n_total_events);
@@ -500,17 +512,17 @@ int main(int argc, char** argv) {
       std::cout << std::endl;
     }
 
-    SamplePeriods sample_periods(merged, FLAGS_polling_interval_us, FLAGS_iml_directory);
-    auto sample_periods_js = sample_periods.Compute();
-    auto sample_periods_js_path = sample_periods.JSPath();
-    status = WriteJson(sample_periods_js_path, sample_periods_js);
+    PollingUtil polling_util(merged, FLAGS_polling_interval_us, FLAGS_iml_directory);
+    auto polling_util_js = polling_util.Compute();
+    auto polling_util_js_path = polling_util.JSPath();
+    status = WriteJson(polling_util_js_path, polling_util_js);
     if (timer) {
-      timer->EndOperation("SamplePeriods.Compute()");
+      timer->EndOperation("PollingUtil.Compute()");
     }
 
     if (status.code() != MyStatus::OK().code()) {
       std::stringstream ss;
-      ss << "Failed to write json @ path=" <<  sample_periods_js_path << " for --mode=" << FLAGS_mode;
+      ss << "Failed to write json @ path=" <<  polling_util_js_path << " for --mode=" << FLAGS_mode;
       IF_BAD_STATUS_EXIT(ss.str(), status);
     }
 

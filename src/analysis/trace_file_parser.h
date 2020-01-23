@@ -1311,6 +1311,31 @@ struct EntireTraceMeta {
   }
 };
 
+// Parameters that determine how to parse proto files.
+struct EntireTraceSelector {
+  bool ignore_memcpy;
+  EntireTraceSelector() :
+      ignore_memcpy(false) {
+  }
+
+  template <typename OStream, typename Value>
+  void _PrintField(OStream& out, int indent, const std::string& name, const Value& value) const {
+    out << "\n";
+    PrintIndent(out, indent);
+    out << name << " = " << value;
+  }
+  template <typename OStream>
+  void Print(OStream& out, int indent) const {
+    PrintIndent(out, indent);
+
+    out << "EntireTraceSelector:";
+    _PrintField(out, indent + 1, "ignore_memcpy", ignore_memcpy);
+
+  }
+
+
+};
+
 //struct IParserMeta {
 //  RLSFileType file_type;
 //  IParserMeta() : file_type(UNKNOWN_FILE) {
@@ -1545,12 +1570,12 @@ public:
   }
 
   template <typename Func>
-  MyStatus EachEntireTrace(Func func) {
-    return EachEntireTraceWithFileType(func, RLS_FILE_TYPES);
+  MyStatus EachEntireTrace(Func func, const EntireTraceSelector& selector) {
+    return EachEntireTraceWithFileType(func, RLS_FILE_TYPES, selector);
   }
 
   template <typename Func>
-  MyStatus EachEntireTraceWithFileType(Func func, const std::set<RLSFileType>& file_types) {
+  MyStatus EachEntireTraceWithFileType(Func func, const std::set<RLSFileType>& file_types, const EntireTraceSelector& selector) {
     MyStatus status = MyStatus::OK();
     auto const& machines = this->Machines();
     for (auto const& machine : machines) {
@@ -1563,7 +1588,7 @@ public:
           status = this->ReadEntireTrace(
               machine, process, phase,
               file_types,
-              category_times.get(), &meta);
+              category_times.get(), &meta, selector);
           IF_BAD_STATUS_RETURN(status);
           status = func(std::move(category_times), meta);
           IF_BAD_STATUS_RETURN(status);
@@ -1579,7 +1604,8 @@ public:
       const Phase& phase,
       const std::set<RLSFileType>& file_types,
       CategoryTimes* category_times,
-      EntireTraceMeta* entire_meta);
+      EntireTraceMeta* entire_meta,
+      const EntireTraceSelector& selector);
 
 //  MyStatus _ReadOneFileSequential(
 //      const Machine& machine,
@@ -2320,8 +2346,8 @@ public:
 
 bool isRLSFileWithType(RLSFileType file_type, const std::string& path);
 
-MyStatus GetRLSEventParser(const std::string& path, TraceParserMeta parser_meta, std::unique_ptr<IEventFileParser>* parser);
-MyStatus GetRLSEventParserFromType(RLSFileType file_type, TraceParserMeta parser_meta, std::unique_ptr<IEventFileParser>* parser);
+MyStatus GetRLSEventParser(const std::string& path, TraceParserMeta parser_meta, std::unique_ptr<IEventFileParser>* parser, const EntireTraceSelector& selector);
+MyStatus GetRLSEventParserFromType(RLSFileType file_type, TraceParserMeta parser_meta, std::unique_ptr<IEventFileParser>* parser, const EntireTraceSelector& selector);
 MyStatus GetTraceProtoReader(const std::string& path, std::unique_ptr<ITraceProtoReader>* reader);
 
 
@@ -2967,10 +2993,13 @@ public:
   using ProtoKlass = iml::MachineDevsEventsProto;
   using ProtoReader = CUDADeviceEventsProtoReader;
 
+  EntireTraceSelector _selector;
+
   virtual ~CUDADeviceEventsParser() = default;
 
-  CUDADeviceEventsParser(TraceParserMeta meta) :
-      ISimpleProtoParser<ProtoKlass, ProtoReader>(std::move(meta), RLSFileType::CUDA_DEVICE_EVENTS_FILE, "cuda_device_events")
+  CUDADeviceEventsParser(TraceParserMeta meta, const EntireTraceSelector& selector) :
+      ISimpleProtoParser<ProtoKlass, ProtoReader>(std::move(meta), RLSFileType::CUDA_DEVICE_EVENTS_FILE, "cuda_device_events"),
+      _selector(selector)
   {
   }
 

@@ -21,7 +21,7 @@ from os.path import join as _j, abspath as _a, exists as _e, dirname as _d, base
 
 from iml_profiler.parser.tfprof import TotalTimeParser, TraceEventsParser
 from iml_profiler.parser.pyprof import PythonProfileParser, PythonFlameGraphParser, PythonProfileTotalParser
-from iml_profiler.parser.plot import TimeBreakdownPlot, PlotSummary, CombinedProfileParser, CategoryOverlapPlot, UtilizationPlot, HeatScalePlot, ConvertResourceOverlapToResourceSubplot, VennJsPlotter
+from iml_profiler.parser.plot import TimeBreakdownPlot, PlotSummary, CombinedProfileParser, CategoryOverlapPlot, UtilizationPlot, HeatScalePlot, ConvertResourceOverlapToResourceSubplot, VennJsPlotter, SlidingWindowUtilizationPlot
 from iml_profiler.parser.db import SQLParser, sql_input_path, GetConnectionPool
 from iml_profiler.parser import db
 from iml_profiler.parser.stacked_bar_plots import OverlapStackedBarPlot
@@ -1366,6 +1366,33 @@ class VennJsPlotOneTask(luigi.Task):
         plotter = VennJsPlotter(**kwargs)
         plotter.run()
 
+
+class SlidingWindowUtilizationPlotTask(IMLTask):
+    polling_util_json = luigi.Parameter(description="Output from: cpp_dump_proto --mode=polling_util")
+    window_size_us = luigi.FloatParameter(description=textwrap.dedent("""\
+    The sampling period (in nvidia-smi documentation lingo); nvidia-smi's GPU utilization metric looks 
+    at a sliding window of time to determine the (%) of bins that had a kernel executing in them.  
+    --window_size_us must be evenly divisible by the polling interval used in --sample_periods_json.
+    """))
+
+    debug = param_debug
+    debug_single_thread = param_debug_single_thread
+    debug_perf = param_debug_perf
+
+    skip_output = False
+
+    # TODO: require running "cpp_dump_proto --mode=polling_util", and lookup polling_util_json from that task.
+    def requires(self):
+        return []
+
+    def iml_run(self):
+        kwargs = kwargs_from_task(self)
+        assert 'directory' not in kwargs
+        kwargs['directory'] = kwargs['iml_directory']
+        del kwargs['iml_directory']
+        plotter = SlidingWindowUtilizationPlot(**kwargs)
+        plotter.run()
+
 NOT_RUNNABLE_TASKS = get_NOT_RUNNABLE_TASKS()
 IML_TASKS = get_IML_TASKS()
 IML_TASKS.add(TraceEventsTask)
@@ -1384,6 +1411,7 @@ IML_TASKS.add(TotalTrainingTimeTask)
 IML_TASKS.add(ConvertResourceOverlapToResourceSubplotTask)
 IML_TASKS.add(VennJsPlotTask)
 IML_TASKS.add(VennJsPlotOneTask)
+IML_TASKS.add(SlidingWindowUtilizationPlotTask)
 
 if __name__ == "__main__":
     main()

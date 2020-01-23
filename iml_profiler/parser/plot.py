@@ -1,5 +1,6 @@
 import logging
 import argparse
+import copy
 import re
 import sys
 import itertools
@@ -7,6 +8,7 @@ import os
 import csv
 import textwrap
 import pprint
+import math
 from io import StringIO
 import json
 import codecs
@@ -2050,6 +2052,344 @@ class ResourceOverlapPlotData:
 
     def _stats(self):
         return UtilizationPlot.get_stats(self.directory)
+
+class PollingUtilParser:
+    def __init__(self,
+                 polling_util_json=None,
+                 bins=None, start_time_us=None, end_time_us=None, polling_interval_us=None):
+
+        def is_from_json():
+            return polling_util_json is not None
+
+        def is_from_bins():
+            return bins is not None and \
+                   start_time_us is not None and \
+                   end_time_us is not None and \
+                   polling_interval_us is not None
+
+        configs = [is_from_json(), is_from_bins()]
+        assert any(configs) and not all(configs)
+
+        if is_from_bins():
+            self._from_bins(bins, start_time_us, end_time_us, polling_interval_us)
+        elif is_from_json():
+            self._from_json(polling_util_json)
+        else:
+            raise NotImplementedError()
+
+    def _from_json(self, polling_util_json):
+        self.polling_util_json_path = polling_util_json
+        self.polling_util_json = load_json(self.polling_util_json_path)
+        self.bins = np.array(self.polling_util_json['bins'], dtype=np.bool)
+        self.start_time_us = self.polling_util_json['metadata']['start_time_us']
+        self.end_time_us = self.polling_util_json['metadata']['end_time_us']
+        self.polling_interval_us = self.polling_util_json['metadata']['polling_interval_us']
+        # assert len(self.bins) == math.ceil((self.end_time_us - self.start_time_us)/self.polling_interval_us)
+        assert len(self.bins) == self._get_num_bins(self.start_time_us, self.end_time_us)
+        return self
+
+    def _from_bins(self, bins, start_time_us, end_time_us, polling_interval_us):
+        self.bins = np.array(bins, dtype=np.bool)
+        self.start_time_us = start_time_us
+        self.end_time_us = end_time_us
+        self.polling_interval_us = polling_interval_us
+        # assert len(self.bins) == math.ceil((self.end_time_us - self.start_time_us)/self.polling_interval_us)
+        assert len(self.bins) == self._get_num_bins(self.start_time_us, self.end_time_us)
+        # math.floor(self.end_time_us/self.polling_interval_us) - math.floor(self.start_time_us/self.polling_interval_us) + 1
+        return self
+
+    def _get_num_bins(self, start_us, end_us):
+        # wrong = math.ceil((end_us - start_us)/self.polling_interval_us)
+        right = math.floor(end_us/self.polling_interval_us) - math.floor(start_us/self.polling_interval_us) + 1
+        # assert right == wrong
+        return right
+
+    def extend(self, start_time_us, end_time_us):
+        # NOTE: need to extend "bins" with "false" to cover GPU polling intervals that we don't have readings for...
+        # this should be a SMALL number of intervals since sampler should run for entirety of the run.
+        #
+        # [ train.start ][ sample.start ][ sample.end ][ train.end ]
+        # A             B                C            D            E
+        #
+        # train.start.i = math.floor(train.start/poll)*poll
+        # sample.start.i = math.floor(sample.start/poll)*poll
+        # sample.end.i = math.ceil(sample.end/poll)*poll
+        # train.end.i = math.ceil(train.end/poll)*poll
+        #
+        # assert len(self.bins) == (sample.end.i - sample.start.i)
+        # add_bins_before = sample.start.i - train.start.i
+        # add_bins_after = train.end.i - start.end.i
+
+        poll = self.polling_interval_us
+        train_start = start_time_us
+        train_end = end_time_us
+        sample_start = self.start_time_us
+        sample_end = self.end_time_us
+
+        assert train_start <= sample_start <= sample_end <= train_end
+
+        train_start_i = math.floor(train_start/poll)
+        sample_start_i = math.floor(sample_start/poll)
+        # sample_end_i = math.ceil(sample_end/poll)
+        # train_end_i = math.ceil(train_end/poll)
+        sample_end_i = math.floor(sample_end/poll)
+        train_end_i = math.floor(train_end/poll)
+
+        # assert (sample_start_i - train_start_i) == get_num_bins(train_start, sample_start)
+        # assert (train_end_i - sample_end_i) == get_num_bins(sample_end, train_end)
+        # assert (sample_end_i - sample_start_i) == get_num_bins(sample_start, sample_end)
+
+        # [                                    ]   [                          ]   [                                ]
+        # train_start_i ... (sample_start_i - 1)   sample_start_i  sample_end_i   (sample_end_i + 1) ... train_end_i
+        # add_bins_before = (sample_start_i - 1) - train_start_i + 1
+        # add_bins_after = train_end_i - (sample_end_i + 1) + 1
+        # in_between = sample_start_i - sample_end_i + 1
+
+        add_bins_before = (sample_start_i - 1) - train_start_i + 1
+        add_bins_after = train_end_i - (sample_end_i + 1) + 1
+        assert (sample_end_i - sample_start_i + 1) == len(self.bins)
+        assert add_bins_before + add_bins_after + len(self.bins) == self._get_num_bins(train_start, train_end)
+
+        assert add_bins_before >= 0
+        assert add_bins_after >= 0
+
+        bins = [False]*add_bins_before + list(self.bins) + [False]*add_bins_after
+
+        extend = PollingUtilParser(
+            bins=bins,
+            start_time_us=min(self.start_time_us, start_time_us),
+            end_time_us=max(end_time_us, self.end_time_us),
+            polling_interval_us=self.polling_interval_us)
+
+        return extend
+
+    def get_util(self, time_us, window_size_us):
+        i = (time_us - self.start_time_us) // self.polling_interval_us
+        assert i >= 0
+        assert i < len(self.bins)
+        assert window_size_us % self.polling_interval_us == 0
+        n_bins = int(window_size_us // self.polling_interval_us)
+        start_i = max(0, i - n_bins)
+        end_i = i
+        assert start_i <= end_i
+        # Q: Should we include the CURRENT bin...or just previous bins...?
+        # Well, we haven't seen the current bin finish yet... so probably PREVIOUS bins.
+        bin_samples = self.bins[start_i:end_i]
+        if len(bin_samples) == 0:
+            util = 0.
+        else:
+            util = np.mean(bin_samples)
+        return util
+
+class SlidingWindowUtilizationPlot:
+    """
+    PSEUDOCODE:
+
+    class PollingUtilParser:
+        def extend(self, polling_util, training.start_time_us, training.end_time_us):
+            # NOTE: need to extend "bins" with "false" to cover GPU polling intervals that we don't have readings for...
+            # this should be a SMALL number of intervals since sampler should run for entirety of the run.
+            # [ train.start ][ sample.start ][ sample.end ][ train.end ]
+            add_bins_before = max(
+                0,
+                (polling_util.start_time_us - training.start_time_us) // polling_interval_us
+            )
+            add_bins_after = max(
+                0,
+                (training.end_time_us - polling_util.end_time_us) // polling_interval_us,
+            )
+            bins = [False]*add_bins_before + polling_util.bins + [False]*add_bins_after
+
+            extend = PollingUtilParser.from_bins(
+                bins=bins,
+                start_time_us=min(polling_util.start_time_us, training.start_time_us),
+                end_time_us=max(training.end_time_us, polling_util.end_time_us))
+
+            return extend
+
+        def get_util(self, time_us):
+            i = (time_us - self.start_time_usec) // polling_interval_us
+            start_i = max(0, i)
+            end_i = min(i, len(bins))
+            util = np.mean(bins[start_i:end_i])
+            return util
+
+    def read_dataframe(self):
+        # NOTE: optionally skip this step is a csv file is provided via cmdline (makes debugging plot faster)
+
+        gpu_util_df = read machine_util*.proto files, keeping only CUDA_VISIBLE_DEVICES utilization readings
+        orig_polling_util = read json file into PollingUtilParser
+        training.start_time_us = min(gpu_util_df['time_us'])
+        training.end_time_us = max(gpu_util_df['time_us'])
+        polling_util = orig_polling_util.extend(training.start_time_us, training.end_time_us)
+        # Match the same number of samples as collected using nvidia-smi
+        sliding_window_util = np.array(len(gpu_util_df))
+        assert sliding_window_us % polling_interval_us == 0
+        n_bins = sliding_window_us / polling_interval_us
+
+        sliding_window_utils = np.array(polling_util.get_util(time_us) \
+          for time_us, smi_util in gpu_util_df)
+
+        # convert sliding_window_utils into gpu_util_df dataframe format.
+        #   algo, env, line_label, device_name, util, time_us, time_sec
+        # line_label is one of:
+        #   - nvidia-smi
+        #   - Sliding window (polling interval = 1ms, window size = 1000ms)
+        # NOTE: make time_sec 0-based from the beginning of training;
+        # start of training is min(time_us) before training starts.
+        df = ...
+
+        Output csv @ "SlidingWindowUtilization.csv"
+        return df
+
+    def plot(self, df):
+        # Create line-plot for each gpu utilization
+        ...
+    """
+    def __init__(self, directory, polling_util_json, window_size_us, debug=False, **kwargs):
+        self.directory = directory
+        self.polling_util_json_path = polling_util_json
+        self.window_size_us = window_size_us
+        self.debug = debug
+
+    # def maybe_add_algo_env(self, machine_util_path):
+    #     assert is_machine_util_file(machine_util_path)
+    #
+    #     iml_directory = _d(machine_util_path)
+    #
+    #     if self.algo_env_from_dir:
+    #         return self.add_algo_env_from_dir(machine_util_path)
+    #     if not _e(experiment.experiment_config_path(iml_directory)):
+    #         return self.add_experiment_config(machine_util_path)
+    #
+    #     # Not sure what (algo, env) is; don't add those columns.
+    #     return None
+
+    def read_nvidia_smi(self):
+        gpu_util_df_reader = UtilDataframeReader(
+            self.directory,
+            # Q: use --algo and --env?  Or just don't add them at all since its a per iml-directory plot anyways.
+            # add_fields=self.maybe_add_algo_env,
+            debug=self.debug)
+        gpu_util_df = gpu_util_df_reader.read()
+
+        gpu_util_df = gpu_util_df[
+            (gpu_util_df['used_by_tensorflow']) &
+            (gpu_util_df['device_type'] == 'GPU')]
+
+        return gpu_util_df
+
+    def read_dataframe(self):
+        gpu_util_df = self.read_nvidia_smi()
+        assert len(gpu_util_df['device_id'].unique()) == 1
+        assert len(gpu_util_df['device_name'].unique()) == 1
+        device_name = list(gpu_util_df['device_name'].unique())[0]
+        device_id = list(gpu_util_df['device_id'].unique())[0]
+        start_time_us = min(gpu_util_df['start_time_us'])
+        end_time_us = max(gpu_util_df['start_time_us'])
+
+        orig_polling_util = PollingUtilParser(self.polling_util_json_path)
+        polling_util = orig_polling_util.extend(start_time_us, end_time_us)
+        n_smi_samples = len(gpu_util_df['start_time_us'])
+        # assert len(polling_util.bins) == n_smi_samples
+        sld_start_time_us = gpu_util_df['start_time_us']
+        sld_util = np.zeros(n_smi_samples, dtype=np.float64)
+        for i, time_us in enumerate(gpu_util_df['start_time_us']):
+            sld_util[i] = polling_util.get_util(time_us, self.window_size_us)
+
+        sld_df = pd.DataFrame(data={
+            'util': sld_util,
+            'start_time_us': sld_start_time_us,
+        })
+
+        # convert sliding_window_utils into gpu_util_df dataframe format.
+        #   line_label, device_name, util, time_us, time_sec
+        # line_label is one of:
+        #   - nvidia-smi
+        #   - Sliding window (polling interval = 1ms, window size = 1000ms)
+        # NOTE: make time_sec 0-based from the beginning of training;
+        # start of training is min(time_us) before training starts.
+        sld_df['line_label'] = "Sliding window (poll interval = {poll_ms} ms, window size = {window_ms} ms)".format(
+            poll_ms=polling_util.polling_interval_us / MICROSECONDS_IN_MS,
+            window_ms=self.window_size_us / MICROSECONDS_IN_MS,
+        )
+        sld_df['device_name'] = device_name
+        sld_df['device_id'] = device_id
+
+        smi_df = copy.copy(gpu_util_df[['util', 'start_time_us', 'device_id', 'device_name']])
+        smi_df['line_label'] = 'nvidia-smi'
+
+        df = pd.concat([smi_df, sld_df], sort=True)
+        # Nice to have utilization readings next to each other when manually inspecting csv file.
+        df = df.sort_values(by=['start_time_us', 'line_label'])
+
+        df['time_sec'] = ( df['start_time_us'] - start_time_us ) / MICROSECONDS_IN_SECOND
+
+        return df, polling_util.polling_interval_us
+
+    def plot(self, df):
+        df = copy.copy(df)
+        # figsize = None
+        # fig = plt.figure(figsize=figsize)
+        fig, ax = plt.subplots()
+
+        df['util_percent'] = df['util'] * 100.
+        sns.lineplot(
+            x="time_sec", y="util_percent", hue="line_label",
+            data=df,
+            ax=ax)
+
+        def fix_seaborn_legend():
+            leg = ax.get_legend()
+            handles = leg.legendHandles
+            labels = [txt.get_text() for txt in leg.texts]
+            # First handle/label is the legend "title"... ignore it.
+            handles = handles[1:]
+            labels = labels[1:]
+            # Remove seaborn created legend that has a legend title.
+            ax.get_legend().remove()
+            # Create our own legend, without a title.
+            ax.legend(
+                handles=handles,
+                labels=labels,
+
+                # Position legend in center, above plotting area.
+                # bbox position is relative to the bottom-centre of the legend.
+                loc='lower center',
+                bbox_to_anchor=(
+                    0.5,
+                    1,
+                ),
+
+            )
+        fix_seaborn_legend()
+
+        ax.set_ylabel(r"GPU utilization (%)")
+        ax.set_xlabel(r"Training time (sec)")
+        fig.savefig(self._plot_path, bbox_inches="tight", pad_inches=0)
+        logging.info('Save figure to {path}'.format(path=self._plot_path))
+        plt.close(fig)
+
+    def _path_with_ext(self, ext):
+        return _j(self.directory, "SlidingWindowUtilizationPlot.polling_interval_us_{poll}_us.window_size_us_{wind}_us.{ext}".format(
+            poll=self.polling_interval_us,
+            wind=self.window_size_us,
+            ext=ext,
+        ))
+
+    @property
+    def _csv_path(self):
+        return self._path_with_ext('csv')
+
+    @property
+    def _plot_path(self):
+        return self._path_with_ext('pdf')
+
+    def run(self):
+        self.df, self.polling_interval_us = self.read_dataframe()
+        self.df.to_csv(self._csv_path, index=False)
+        logging.info("Output SlidingWindowUtilizationPlot data @ {path}".format(path=self._csv_path))
+        self.plot(self.df)
 
 
 class UtilizationPlot:

@@ -13,7 +13,12 @@
 
 namespace tensorflow {
 
-nlohmann::json SamplePeriods::Compute() const {
+template <typename IntType>
+IntType ceiling_div(IntType numerator, IntType denominator) {
+  return (numerator + (denominator - 1)) / denominator;
+}
+
+nlohmann::json PollingUtil::Compute() const {
   // PSEUDOCODE:
   //
   // For process, phase, trace_file in trace_files:
@@ -100,38 +105,49 @@ nlohmann::json SamplePeriods::Compute() const {
   TimeUsec first_start_us = (*gpu_times.begin()).start_time_us();
 
   assert(first_start_us <= last_end_us);
-  size_t n_bins = (last_end_us - first_start_us)/_polling_interval_us;
+//  size_t n_bins = (last_end_us - first_start_us)/_polling_interval_us;
+  size_t n_bins = ceiling_div(last_end_us - first_start_us, _polling_interval_us);
 
   std::vector<bool> bins;
   bins.resize(n_bins);
 
-  auto mark_bin = [this, last_end_us, &bins] (TimeUsec time_us) {
-    size_t i = (last_end_us - time_us)/_polling_interval_us;
-    bins[i] = true;
+  auto bin_idx = [this, first_start_us, &bins] (TimeUsec time_us) -> size_t {
+    assert(time_us >= first_start_us);
+    size_t i = (time_us - first_start_us)/_polling_interval_us;
+    return i;
   };
 
+  size_t num_multi_bin_events = 0;
   for (const auto& event : gpu_times) {
-    mark_bin(event.start_time_us());
-    mark_bin(event.end_time_us());
+    auto start_i = bin_idx(event.start_time_us());
+    auto end_i = bin_idx(event.end_time_us());
+    if (end_i != start_i) {
+      num_multi_bin_events += 1;
+    }
+    for (size_t i = start_i; i <= end_i; i++) {
+      assert(i < bins.size());
+      bins[i] = true;
+    }
   }
 
   js["metadata"]["start_time_us"] = first_start_us;
   js["metadata"]["end_time_us"] = last_end_us;
   js["metadata"]["polling_interval_us"] = _polling_interval_us;
+  js["metadata"]["num_multi_bin_events"] = num_multi_bin_events;
   js["bins"] = bins;
 
   return js;
 }
 
-std::string SamplePeriods::JSPath() const {
+std::string PollingUtil::JSPath() const {
   boost::filesystem::path direc(_iml_directory);
   boost::filesystem::path base = JSBasename();
   return (direc / base).string();
 }
 
-std::string SamplePeriods::JSBasename() const {
+std::string PollingUtil::JSBasename() const {
   std::stringstream ss;
-  ss << "sample_periods";
+  ss << "polling_util";
   ss << ".polling_interval_us_" << _polling_interval_us << "_us";
   ss << ".json";
   return ss.str();

@@ -285,6 +285,8 @@ class BaseDataframeReader:
         else:
             self.df = pd.DataFrame(data)
 
+        self.df = self.add_to_dataframe(self.df)
+
     def read_each(self):
         proto_paths = self.proto_paths
         for proto_path in progress(proto_paths, desc="{klass}.read dataframe".format(
@@ -306,6 +308,10 @@ class BaseDataframeReader:
         if self.df is None:
             self._read_df()
         return self.df
+
+    def add_to_dataframe(self, df):
+        return df
+
 
 class OverlapDataframeReader(BaseDataframeReader):
 
@@ -384,6 +390,38 @@ class UtilDataframeReader(BaseDataframeReader):
 
     def is_proto_file(self, path):
         return is_machine_util_file(path)
+
+    @staticmethod
+    def is_cpu(device_name):
+        if re.search(r'\b(Intel|Xeon|CPU|AMD)\b', device_name):
+            return True
+        return False
+
+    @staticmethod
+    def cpu_or_gpu(device_name):
+        if UtilDataframeReader.is_cpu(device_name):
+            return 'CPU'
+        return 'GPU'
+
+    @staticmethod
+    def used_by_tensorflow(CUDA_VISIBLE_DEVICES, device_id, device_type):
+        if device_type == 'CPU':
+            return True
+        if device_type == 'GPU':
+            return device_id in CUDA_VISIBLE_DEVICES
+        # Not handled.
+        raise NotImplementedError()
+
+    # override
+    def add_to_dataframe(self, df):
+        # new_df = pd.concat(dfs)
+        df['device_type'] = df['device_name'].apply(self.cpu_or_gpu)
+        if 'CUDA_VISIBLE_DEVICES' in df:
+            df['used_by_tensorflow'] = np.vectorize(self.used_by_tensorflow, otypes=[np.bool])(
+                df['CUDA_VISIBLE_DEVICES'],
+                df['device_id'],
+                df['device_type'])
+        return df
 
     def add_proto_cols(self, path, data=None):
         machine_util = read_machine_util_file(path)

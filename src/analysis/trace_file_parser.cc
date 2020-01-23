@@ -405,7 +405,17 @@ MyStatus CUDADeviceEventsParser::_CountCategoryTimes(CategoryTimesCount* count, 
   for (const auto& dev_events_pair : proto->dev_events()) {
     const auto& dev = dev_events_pair.first;
     const auto& events = dev_events_pair.second.events();
-    size_t n_events = events.size();
+    size_t n_events = 0;
+    if (_selector.ignore_memcpy) {
+      for (const auto& event : events) {
+        if (event.cuda_event_type() == iml::CudaEventType::MEMCPY) {
+          continue;
+        }
+        n_events += 1;
+      }
+    } else {
+      n_events = events.size();
+    }
     auto category_key = CategoryKey::FromCategory(get_process(), category);
     count->Add(category_key, n_events);
   }
@@ -424,6 +434,9 @@ MyStatus CUDADeviceEventsParser::_AppendCategoryTimes(CategoryTimes* out_categor
     for (const auto& event : events) {
       auto start_us = event.start_time_us();
       auto end_us = event.start_time_us() + event.duration_us();
+      if (_selector.ignore_memcpy && event.cuda_event_type() == iml::CudaEventType::MEMCPY) {
+        continue;
+      }
       eo_events.AppendEvent(event.name(), start_us, end_us);
     }
   }
@@ -747,13 +760,13 @@ const char* RLSFileTypeString(RLSFileType file_type) {
 //DEFINE_GET_PARSER_META(CUDADeviceEventsParser)
 //DEFINE_GET_PARSER_META(CategoryEventsParser)
 
-MyStatus GetRLSEventParser(const std::string& path, TraceParserMeta parser_meta, std::unique_ptr<IEventFileParser>* parser) {
+MyStatus GetRLSEventParser(const std::string& path, TraceParserMeta parser_meta, std::unique_ptr<IEventFileParser>* parser, const EntireTraceSelector& selector) {
   auto file_type = GetRLSFileType(path);
-  auto status = GetRLSEventParserFromType(file_type, parser_meta, parser);
+  auto status = GetRLSEventParserFromType(file_type, parser_meta, parser, selector);
   return status;
 }
 
-MyStatus GetRLSEventParserFromType(RLSFileType file_type, TraceParserMeta parser_meta, std::unique_ptr<IEventFileParser>* parser) {
+MyStatus GetRLSEventParserFromType(RLSFileType file_type, TraceParserMeta parser_meta, std::unique_ptr<IEventFileParser>* parser, const EntireTraceSelector& selector) {
   switch (file_type) {
     case RLSFileType::CUDA_API_STATS_FILE:
       parser->reset(new CUDAAPIStatsParser(std::move(parser_meta)));
@@ -762,7 +775,9 @@ MyStatus GetRLSEventParserFromType(RLSFileType file_type, TraceParserMeta parser
       parser->reset(new CategoryEventsParser(std::move(parser_meta)));
       break;
     case RLSFileType::CUDA_DEVICE_EVENTS_FILE:
-      parser->reset(new CUDADeviceEventsParser(std::move(parser_meta)));
+      parser->reset(new CUDADeviceEventsParser(
+          std::move(parser_meta),
+          selector));
       break;
     default:
       assert(false);
@@ -1106,7 +1121,8 @@ MyStatus RawTraceParser::ReadEntireTrace(
     const Phase& phase,
     const std::set<RLSFileType>& file_types,
     CategoryTimes *category_times,
-    EntireTraceMeta* entire_meta) {
+    EntireTraceMeta* entire_meta,
+    const EntireTraceSelector& selector) {
   MyStatus status = MyStatus::OK();
 
   *entire_meta = EntireTraceMeta(machine, process, phase);
@@ -1122,7 +1138,7 @@ MyStatus RawTraceParser::ReadEntireTrace(
   std::map<RLSFileType, std::unique_ptr<IEventFileParser>> parser_map;
   for (auto rls_file_type : file_types) {
     TraceParserMeta parser_meta(machine, process, phase);
-    status = GetRLSEventParserFromType(rls_file_type, parser_meta, &parser_map[rls_file_type]);
+    status = GetRLSEventParserFromType(rls_file_type, parser_meta, &parser_map[rls_file_type], selector);
     IF_BAD_STATUS_RETURN(status);
   }
 
