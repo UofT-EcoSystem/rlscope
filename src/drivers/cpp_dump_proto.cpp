@@ -74,6 +74,7 @@ enum Mode {
   MODE_OVERLAP = 3,
   MODE_READ_FILES = 4,
   MODE_POLLING_UTIL = 5,
+  MODE_GPU_KERNELS = 6,
 };
 
 void Usage() {
@@ -153,6 +154,8 @@ int main(int argc, char** argv) {
       mode = Mode::MODE_DUMP_PROTO;
     } else if (FLAGS_mode == "polling_util") {
       mode = Mode::MODE_POLLING_UTIL;
+    } else if (FLAGS_mode == "gpu_kernels") {
+      mode = Mode::MODE_GPU_KERNELS;
     } else {
       UsageAndExit("--mode must be one of [stats, ls, proto]");
     }
@@ -207,6 +210,12 @@ int main(int argc, char** argv) {
   if (mode == Mode::MODE_DUMP_PROTO) {
     if (FLAGS_proto == "") {
       UsageAndExit("--proto is required for --mode=proto");
+    }
+  }
+
+  if (mode == Mode::MODE_GPU_KERNELS) {
+    if (FLAGS_iml_directory == "") {
+      UsageAndExit("--iml-directory is required for --mode=gpu_kernels");
     }
   }
 

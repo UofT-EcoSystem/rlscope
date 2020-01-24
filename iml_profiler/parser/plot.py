@@ -27,7 +27,7 @@ from iml_profiler.parser.pyprof import PythonProfileParser
 from iml_profiler.parser.tfprof import OverlapComputer, overlap_type_to_instance, OverlapJSONToVennConverter
 from iml_profiler.parser.heatscale import HeatScale, exponential_moving_average
 from iml_profiler.parser.db import SQLCategoryTimesReader, sql_get_source_files, sql_input_path
-from iml_profiler.parser.dataframe import UtilDataframeReader, OverlapDataframeReader, VennData, read_iml_config_metadata
+from iml_profiler.parser.dataframe import UtilDataframeReader, OverlapDataframeReader, VennData, read_iml_config_metadata, CUDADeviceEventsReader
 
 # figsize (W x H) in inches
 aspect_ratio = 16./9.
@@ -3886,6 +3886,34 @@ def add_ax_bar_labels(ax, rects, labels, x_offset=0, y_offset=0, **kwargs):
                         ha='center', va='bottom',
                         **kwargs)
 
+
+class CUDAEventCSVReader:
+    def __init__(self, directory, debug=False, **kwargs):
+        self.directory = directory
+        self.debug = debug
+
+    def run(self):
+        logging.info("Read cuda device events dataframe @ {path}".format(path=self.directory))
+        reader = CUDADeviceEventsReader(self.directory)
+        df = reader.read()
+        logging.info("Output csv @ {path}".format(path=self._csv_path))
+        # colnames = [
+        #     'machine_name',
+        #     'process_name',
+        #     'phase_name',
+        #     'device_name',
+        #     'event_name',
+        #     'cuda_event_type',
+        #     'start_time_us',
+        #     'duration_us',
+        #     'CUDA_VISIBLE_DEVICES',
+        # ]
+        df.sort_values(by=['start_time_us'], inplace=True)
+        df.to_csv(self._csv_path, index=False)
+
+    @property
+    def _csv_path(self):
+        return _j(self.directory, "cuda_device_events.csv")
 
 
 from iml_profiler.profiler import iml_logging

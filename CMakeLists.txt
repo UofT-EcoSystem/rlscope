@@ -47,6 +47,7 @@ set(WITH_CUDA_LD_PRELOAD OFF)
 # Implement reading raw trace-files into eo_times format using C++.
 set(WITH_CXX_ANALYSIS ON)
 #message("> WITH_CUDA_LD_PRELOAD = ${WITH_CUDA_LD_PRELOAD}")
+set(WITH_CXX_EXPERIMENTS ON)
 
 #FIND_PACKAGE(CUDA)
 
@@ -212,6 +213,10 @@ set(ANALYSIS_SRC_DIRS
         ./src/analysis
         )
 
+set(EXPERIMENT_SRC_DIRS
+        ./src/experiment
+        )
+
 set(TEST_ANALYSIS_SRC_DIRS
         ./test/analysis
         )
@@ -257,6 +262,7 @@ macro(gather_sources srcs_var directories)
 endmacro()
 
 gather_sources(ANALYSIS_SOURCES ANALYSIS_SRC_DIRS)
+gather_sources(EXPERIMENT_SOURCES EXPERIMENT_SRC_DIRS)
 gather_sources(TEST_ANALYSIS_SOURCES TEST_ANALYSIS_SRC_DIRS)
 set(ANALYSIS_SOURCES
         ./src/cuda_api_profiler/generic_logging.cc
@@ -812,7 +818,36 @@ if (WITH_CXX_ANALYSIS)
 
     find_library(GFLAGS_LIB gflags REQUIRED)
     target_link_libraries(cpp_dump_proto PUBLIC ${GFLAGS_LIB})
+endif()
 
+if (WITH_CXX_EXPERIMENTS)
+    set(GPU_UTIL_EXPERIMENT_SRCS
+            ./src/drivers/gpu_util_experiment.cc
+            ${EXPERIMENT_SOURCES}
+            #            ${TF_SOURCES}
+            ${BACKWARD_ENABLE}
+            ${PROTO_SRCS} ${PROTO_HDRS})
+    list(FILTER GPU_UTIL_EXPERIMENT_SRCS EXCLUDE REGEX "/c_test_util.cc")
+
+#    set(TEST_ANALYSIS_SOURCES
+#            ${ANALYSIS_SOURCES}
+#            ${TEST_ANALYSIS_SOURCES}
+#            #            ${TF_SOURCES}
+#            ${BACKWARD_ENABLE}
+#            ${PROTO_SRCS} ${PROTO_HDRS})
+#    list(FILTER TEST_ANALYSIS_SOURCES EXCLUDE REGEX "/c_test_util.cc")
+
+#    message("> TEST_ANALYSIS_SOURCES = ${TEST_ANALYSIS_SOURCES}")
+#    add_executable(test_analysis ${TEST_ANALYSIS_SOURCES})
+#    AddTensorflowDependencies(test_analysis FALSE)
+#    AddUnitTest(test_analysis)
+
+    message("> GPU_UTIL_EXPERIMENT_SRCS = ${GPU_UTIL_EXPERIMENT_SRCS}")
+    add_executable(gpu_util_experiment ${GPU_UTIL_EXPERIMENT_SRCS})
+    AddTensorflowDependencies(gpu_util_experiment FALSE)
+
+    find_library(GFLAGS_LIB gflags REQUIRED)
+    target_link_libraries(gpu_util_experiment PUBLIC ${GFLAGS_LIB})
 endif()
 
 
@@ -896,7 +931,7 @@ endif(MSVC)
 set(COMPILE_FLAGS_HIDDEN_VISIBILITY "-fvisibility=hidden")
 AddFlags(sample_cuda_api COMPILE_FLAGS ${COMPILE_FLAGS_HIDDEN_VISIBILITY})
 
-set(ALL_TARGETS cpp_dump_proto test_analysis)
+set(ALL_TARGETS cpp_dump_proto test_analysis gpu_util_experiment)
 install(TARGETS ${ALL_TARGETS}
         CONFIGURATIONS Debug
         RUNTIME DESTINATION Debug/bin)

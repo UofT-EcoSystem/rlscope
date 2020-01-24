@@ -59,11 +59,6 @@
 
 #define IML_VERSION 1
 
-#define IF_BAD_STATUS_RETURN(status)  \
-      if (status.code() != MyStatus::OK().code()) { \
-        return status; \
-      }
-
 #define IS_BAD_STATUS(status) (status.code() != MyStatus::OK().code())
 
 #define DEFINE_PRINT_OPERATOR(Klass) \
@@ -3628,10 +3623,6 @@ public:
   }
   OverlapResult ComputeOverlap(bool keep_empty_time = false) const;
 };
-
-MyStatus ReadJson(std::string path, nlohmann::json* j);
-MyStatus WriteJson(std::string path, const nlohmann::json& j);
-
 
 #define DECLARE_DumpOverlapJS \
   virtual void DumpOverlapJS( \

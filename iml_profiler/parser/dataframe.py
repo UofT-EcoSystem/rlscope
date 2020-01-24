@@ -15,6 +15,7 @@ from iml_profiler.profiler import concurrent
 from os.path import join as _j, abspath as _a, exists as _e, dirname as _d, basename as _b
 
 from iml_profiler.parser.common import *
+from iml_profiler.protobuf import iml_prof_pb2
 
 def Worker_split_map_merge(kwargs):
     kwargs = dict(kwargs)
@@ -367,6 +368,85 @@ class OverlapDataframeReader(BaseDataframeReader):
             # self._add_col('overlap_usec', overlap_usec, data=data)
 
             self._maybe_add_fields(path, data=data)
+
+class CUDADeviceEventsReader(BaseDataframeReader):
+
+    def __init__(self, directory, add_fields=None, debug=False, debug_single_thread=False):
+
+        colnames = [
+            'machine_name',
+            'process_name',
+            'phase_name',
+            'device_name',
+            'event_name',
+            'cuda_event_type',
+            'start_time_us',
+            'duration_us',
+            'CUDA_VISIBLE_DEVICES',
+        ]
+
+        super().__init__(directory, add_fields=add_fields, colnames=colnames, debug=debug, debug_single_thread=debug_single_thread)
+
+    def is_proto_file(self, path):
+        return is_cuda_device_events_file(path)
+
+    # # override
+    # def add_to_dataframe(self, df):
+    #     # new_df = pd.concat(dfs)
+    #     df['device_type'] = df['device_name'].apply(self.cpu_or_gpu)
+    #     if 'CUDA_VISIBLE_DEVICES' in df:
+    #         df['used_by_tensorflow'] = np.vectorize(self.used_by_tensorflow, otypes=[np.bool])(
+    #             df['CUDA_VISIBLE_DEVICES'],
+    #             df['device_id'],
+    #             df['device_type'])
+    #     return df
+
+    def get_event_name(self, event):
+        if event.name != "" and event.name is not None:
+            return event.name
+
+    def get_event_type(self, event):
+        if event.cuda_event_type == iml_prof_pb2.UNKNOWN:
+            return "UNKNOWN"
+        elif event.cuda_event_type == iml_prof_pb2.KERNEL:
+            return "KERNEL"
+        elif event.cuda_event_type == iml_prof_pb2.MEMCPY:
+            return "MEMCPY"
+        elif event.cuda_event_type == iml_prof_pb2.MEMSET:
+            return "MEMSET"
+        else:
+            raise NotImplementedError("Not sure what Event.name to use for event.cuda_event_type == {code}".format(
+                code=event.cuda_event_type,
+            ))
+
+    def add_proto_cols(self, path, data=None):
+        if self.debug:
+            logging.info("Read CUDADeviceEventsReader from {path}".format(path=path))
+
+        proto = read_cuda_device_events_file(path)
+        category = CATEGORY_GPU
+        for device_name, dev_events_proto in proto.dev_events.items():
+            for event in dev_events_proto.events:
+                event_name = self.get_event_name(event)
+                event_type = self.get_event_type(event)
+
+                # string name = 1;
+                # CudaEventType cuda_event_type = 2;
+                # int64 start_time_us = 3;
+                # int64 duration_us = 4;
+
+                self._add_col('machine_name', proto.machine_name, data=data)
+                self._add_col('process_name', proto.process_name, data=data)
+                self._add_col('phase_name', proto.phase, data=data)
+                self._add_col('device_name', device_name, data=data)
+                self._add_col('event_name', event_name, data=data)
+                self._add_col('cuda_event_type', event_type, data=data)
+                self._add_col('start_time_us', event.start_time_us, data=data)
+                self._add_col('duration_us', event.duration_us, data=data)
+                # self._check_cols(data=data)
+
+                self._maybe_add_fields(path, data=data)
+                self._check_cols(data=data)
 
 
 class UtilDataframeReader(BaseDataframeReader):
