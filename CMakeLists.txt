@@ -86,7 +86,7 @@ endif()
 #    include_directories(SYSTEM /usr/local/cuda/extras/CUPTI/include)
 #endif()
 
-set(LANGUAGES CXX)
+set(LANGUAGES CXX CUDA)
 #if(IS_WINDOWS)
 #    set(LANGUAGES CXX)
 #else()
@@ -578,6 +578,7 @@ endif()
 message("> CUDA_PROF_SRCS = ${CUDA_PROF_SRCS}")
 message("> TF_SOURCES = ${TF_SOURCES}")
 message("> ANALYSIS_SOURCES = ${ANALYSIS_SOURCES}")
+message("> EXPERIMENT_SOURCES = ${EXPERIMENT_SOURCES}")
 #message("> TEST_ANALYSIS_SOURCES = ${TEST_ANALYSIS_SOURCES}")
 message("> PROTO_SRCS = ${PROTO_SRCS}")
 message("> PROTO_HDRS = ${PROTO_HDRS}")
@@ -824,6 +825,7 @@ if (WITH_CXX_EXPERIMENTS)
     set(GPU_UTIL_EXPERIMENT_SRCS
             ./src/drivers/gpu_util_experiment.cc
             ${EXPERIMENT_SOURCES}
+            ${ANALYSIS_SOURCES}
             #            ${TF_SOURCES}
             ${BACKWARD_ENABLE}
             ${PROTO_SRCS} ${PROTO_HDRS})

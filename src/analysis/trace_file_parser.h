@@ -50,6 +50,7 @@
 #include "error_codes.pb.h"
 //#include "tensorflow/core/lib/core/status.h"
 #include "analysis/my_status.h"
+#include "analysis/json.h"
 
 #include <set>
 #include <cuda_api_profiler/debug_flags.h>

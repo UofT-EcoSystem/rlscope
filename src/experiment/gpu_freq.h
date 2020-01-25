@@ -10,6 +10,8 @@
 #include <vector>
 #include <string>
 
+#include "analysis/my_status.h"
+
 //#define GPU_CLOCK_MIN_SAMPLE_TIME_SEC (10)
 #define GPU_CLOCK_MIN_SAMPLE_TIME_SEC (5)
 #define GPU_CLOCK_REPETITIONS (3)
@@ -86,8 +88,10 @@ public:
   static double gpu_sleep(clock_value_t sleep_cycles);
   void run();
 
-  void dump_json() const;
+  MyStatus dump_json() const;
+  MyStatus load_json(const std::string &path);
   std::string json_path() const;
+  std::string json_basename() const;
 };
 
 } // namespace tensorflow

@@ -45,6 +45,7 @@ using json = nlohmann::json;
 DEFINE_bool(debug, false, "Debug: give additional verbose output");
 DEFINE_string(iml_directory, "", "Path to --iml-directory used when collecting trace-files");
 DEFINE_string(gpu_clock_freq_json, "", "--mode=run_kernels: Path to JSON file containing GPU clock frequency measurements (from --mode=gpu_clock_freq)");
+DEFINE_string(mode, "", "One of: [gpu_clock_freq, run_kernels]");
 
 DEFINE_int64(kernel_delay_us, 0, "Time between kernel launches in microseconds");
 DEFINE_int64(kernel_duration_us, 0, "Duration of kernel in microseconds");
@@ -118,23 +119,6 @@ int main(int argc, char** argv) {
     exit(EXIT_FAILURE);
   }
 
-  if (mode == Mode::MODE_GPU_CLOCK_FREQ) {
-    if (FLAGS_iml_directory == "") {
-      std::stringstream ss;
-      ss << "--iml-directory is required for --mode=" << FLAGS_mode;
-      UsageAndExit(ss.str());
-    }
-  }
-
-//  if (FLAGS_cupti_overhead_json != "") {
-//    json j;
-//    status = ReadJson(FLAGS_cupti_overhead_json, &j);
-//    IF_BAD_STATUS_EXIT("Failed to read json from --cupti_overhead_json", status);
-//    DBG_LOG("Read json from: {}", FLAGS_cupti_overhead_json);
-//    std::cout << j << std::endl;
-//    exit(EXIT_SUCCESS);
-//  }
-
   Mode mode = StringToMode(FLAGS_mode);
   if (mode == MODE_UNKNOWN) {
     std::set<std::string> mode_strings;
@@ -147,11 +131,19 @@ int main(int argc, char** argv) {
     UsageAndExit(ss.str());
   }
 
+  if (mode == Mode::MODE_GPU_CLOCK_FREQ) {
+    if (FLAGS_iml_directory == "") {
+      std::stringstream ss;
+      ss << "--iml-directory is required for --mode=" << FLAGS_mode;
+      UsageAndExit(ss.str());
+    }
+  }
 
   if (mode == Mode::MODE_GPU_CLOCK_FREQ) {
     GPUClockFreq gpu_clock_freq(FLAGS_repetitions, FLAGS_iml_directory);
     gpu_clock_freq.run();
-    gpu_clock_freq.dump_json();
+    status = gpu_clock_freq.dump_json();
+    IF_BAD_STATUS_EXIT("Failed to dump json for --mode=gpu_clock_freq", status);
     DBG_LOG("Dumped gpu_clock_freq json @ {}", gpu_clock_freq.json_path());
     exit(EXIT_SUCCESS);
   }
@@ -161,62 +153,4 @@ int main(int argc, char** argv) {
 
   return 0;
 }
-
-//class LibHandle {
-//public:
-//  GPUClockResult _clock_result;
-//  bool _has_clock_result;
-//  LibHandle() : _has_clock_result(false) {
-//  }
-//  void call_c();
-//  double guess_gpu_freq_mhz();
-//  double gpu_sleep(double seconds);
-//  double run_cpp(double seconds);
-//  void set_gpu_freq_mhz(double mhz);
-//};
-
-//void LibHandle::call_c() {
-//  std::cout << "Hello world from C++ (called from python)" << std::endl;
-//}
-//
-//double LibHandle::guess_gpu_freq_mhz() {
-//  std::cout << "Guessing GPU clock frequency." << std::endl;
-//  int repetitions = FLAGS_repetitions;
-//  GPUClockFreq clock_freq(repetitions);
-//  GPUClockResult result = clock_freq.run();
-//  _clock_result = result;
-//  _has_clock_result = true;
-//  return result.avg_mhz;
-//}
-
-//double LibHandle::gpu_sleep(double seconds) {
-//  assert(_has_clock_result);
-//  // cycles = cycles/sec * seconds
-//  GPUClockFreq::clock_value_t cycles = ceil(_clock_result.avg_mhz * seconds);
-////  std::cout << "> Sleeping on GPU for " << seconds << " seconds (" << cycles << " cycles @ " << _clock_result.avg_mhz << " MHz)." << std::endl;
-////  auto start_t = GPUClockFreq::now();
-//  auto time_sec = GPUClockFreq::gpu_sleep(cycles);
-////  auto end_t = GPUClockFreq::now();
-////  auto time_sec = GPUClockFreq::elapsed_sec(start_t, end_t);
-////  std::cout << "> Slept on GPU for " << time_sec << " seconds." << std::endl;
-//  return time_sec;
-//}
-
-//double LibHandle::run_cpp(double seconds) {
-//  std::cout << "> Running inside C++ for " << seconds << " seconds" << std::endl;
-//  auto start_t = GPUClockFreq::now();
-//  double time_sec = 0;
-//  while (true) {
-//    auto end_t = GPUClockFreq::now();
-//    time_sec = GPUClockFreq::elapsed_sec(start_t, end_t);
-//    if (time_sec >= seconds) {
-//      break;
-//    }
-//  }
-//  return time_sec;
-//}
-//void LibHandle::set_gpu_freq_mhz(double mhz) {
-//  _has_clock_result = true;
-//  _clock_result = GPUClockResult{.avg_mhz=mhz, .std_mhz=0};
-//}
 
