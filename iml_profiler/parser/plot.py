@@ -2339,30 +2339,15 @@ class SlidingWindowUtilizationPlot:
             data=df,
             ax=ax)
 
-        def fix_seaborn_legend():
-            leg = ax.get_legend()
-            handles = leg.legendHandles
-            labels = [txt.get_text() for txt in leg.texts]
-            # First handle/label is the legend "title"... ignore it.
-            handles = handles[1:]
-            labels = labels[1:]
-            # Remove seaborn created legend that has a legend title.
-            ax.get_legend().remove()
-            # Create our own legend, without a title.
-            ax.legend(
-                handles=handles,
-                labels=labels,
-
-                # Position legend in center, above plotting area.
-                # bbox position is relative to the bottom-centre of the legend.
-                loc='lower center',
-                bbox_to_anchor=(
-                    0.5,
-                    1,
-                ),
-
-            )
-        fix_seaborn_legend()
+        fix_seaborn_legend(ax, legend_kwargs=dict(
+            # Position legend in center, above plotting area.
+            # bbox position is relative to the bottom-centre of the legend.
+            loc='lower center',
+            bbox_to_anchor=(
+                0.5,
+                1,
+            ),
+        ))
 
         ax.set_ylabel(r"GPU utilization (%)")
         ax.set_xlabel(r"Training time (sec)")
@@ -3892,11 +3877,13 @@ class CUDAEventCSVReader:
         self.directory = directory
         self.debug = debug
 
-    def run(self):
-        logging.info("Read cuda device events dataframe @ {path}".format(path=self.directory))
+    def read_df(self, verbose=False):
+        if verbose:
+            logging.info("Read cuda device events dataframe @ {path}".format(path=self.directory))
         reader = CUDADeviceEventsReader(self.directory)
         df = reader.read()
-        logging.info("Output csv @ {path}".format(path=self._csv_path))
+        if verbose:
+            logging.info("Output csv @ {path}".format(path=self._csv_path))
         # colnames = [
         #     'machine_name',
         #     'process_name',
@@ -3909,12 +3896,32 @@ class CUDAEventCSVReader:
         #     'CUDA_VISIBLE_DEVICES',
         # ]
         df.sort_values(by=['start_time_us'], inplace=True)
+        return df
+
+    def run(self):
+        df = self.read_df(verbose=True)
         df.to_csv(self._csv_path, index=False)
 
     @property
     def _csv_path(self):
         return _j(self.directory, "cuda_device_events.csv")
 
+
+def fix_seaborn_legend(ax, legend_kwargs=dict()):
+    leg = ax.get_legend()
+    handles = leg.legendHandles
+    labels = [txt.get_text() for txt in leg.texts]
+    # First handle/label is the legend "title"... ignore it.
+    handles = handles[1:]
+    labels = labels[1:]
+    # Remove seaborn created legend that has a legend title.
+    ax.get_legend().remove()
+    # Create our own legend, without a title.
+    ax.legend(
+        handles=handles,
+        labels=labels,
+        **legend_kwargs,
+    )
 
 from iml_profiler.profiler import iml_logging
 def main():

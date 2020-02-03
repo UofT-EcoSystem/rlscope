@@ -26,7 +26,7 @@ from iml_profiler.parser.db import SQLParser, sql_input_path, GetConnectionPool
 from iml_profiler.parser import db
 from iml_profiler.parser.stacked_bar_plots import OverlapStackedBarPlot
 from iml_profiler.parser.common import print_cmd
-from iml_profiler.parser.cpu_gpu_util import UtilParser, UtilPlot
+from iml_profiler.parser.cpu_gpu_util import UtilParser, UtilPlot, GPUUtilOverTimePlot
 from iml_profiler.parser.training_progress import TrainingProgressParser, ProfilingOverheadPlot
 from iml_profiler.parser.extrapolated_training_time import ExtrapolatedTrainingTimeParser
 from iml_profiler.parser.profiling_overhead import CallInterceptionOverheadParser, CUPTIOverheadParser, CUPTIScalingOverheadParser, CorrectedTrainingTimeParser, PyprofOverheadParser, TotalTrainingTimeParser, SQLOverheadEventsParser
@@ -1413,6 +1413,33 @@ class CUDAEventCSVTask(IMLTask):
         dumper = CUDAEventCSVReader(**kwargs)
         dumper.run()
 
+class GPUUtilOverTimePlotTask(IMLTask):
+    """
+    Compare GPU utilization over time using a synthetic experiment that varies two parameters:
+    - kernel_delay_us: time between launching consecutive kernels.
+    - kernel_duration_us: time that kernels run for.
+    """
+
+    debug = param_debug
+    debug_single_thread = param_debug_single_thread
+    debug_perf = param_debug_perf
+
+    iml_directories = luigi.ListParameter(description="Multiple --iml-directory entries for finding overlap_type files: *.venn_js.js")
+    show_std = luigi.BoolParameter(description="If true, show stdev for kernel delay and duration", default=False, parsing=luigi.BoolParameter.EXPLICIT_PARSING)
+
+    skip_output = False
+
+    def requires(self):
+        return []
+
+    def iml_run(self):
+        kwargs = kwargs_from_task(self)
+        assert 'directory' not in kwargs
+        kwargs['directory'] = kwargs['iml_directory']
+        del kwargs['iml_directory']
+        dumper = GPUUtilOverTimePlot(**kwargs)
+        dumper.run()
+
 NOT_RUNNABLE_TASKS = get_NOT_RUNNABLE_TASKS()
 IML_TASKS = get_IML_TASKS()
 IML_TASKS.add(TraceEventsTask)
@@ -1433,7 +1460,7 @@ IML_TASKS.add(VennJsPlotTask)
 IML_TASKS.add(VennJsPlotOneTask)
 IML_TASKS.add(SlidingWindowUtilizationPlotTask)
 IML_TASKS.add(CUDAEventCSVTask)
-
+IML_TASKS.add(GPUUtilOverTimePlotTask)
 
 if __name__ == "__main__":
     main()

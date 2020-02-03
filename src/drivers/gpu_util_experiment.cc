@@ -31,7 +31,7 @@ using json = nlohmann::json;
 #include <assert.h>
 
 //#include "tensorflow/core/lib/core/status.h"
-#include "analysis/my_status.h"
+#include "common/my_status.h"
 #include "analysis/sample_periods.h"
 
 #include <list>
@@ -49,6 +49,7 @@ DEFINE_string(mode, "", "One of: [gpu_clock_freq, run_kernels]");
 
 DEFINE_int64(kernel_delay_us, 0, "Time between kernel launches in microseconds");
 DEFINE_int64(kernel_duration_us, 0, "Duration of kernel in microseconds");
+DEFINE_double(run_sec, 0, "How to long to run for (in seconds)");
 DEFINE_int64(repetitions, 5, "Repetitions when guessing GPU clock frequency");
 
 using namespace tensorflow;
@@ -131,10 +132,30 @@ int main(int argc, char** argv) {
     UsageAndExit(ss.str());
   }
 
-  if (mode == Mode::MODE_GPU_CLOCK_FREQ) {
+  if (mode == Mode::MODE_GPU_CLOCK_FREQ || mode == Mode::MODE_RUN_KERNELS) {
     if (FLAGS_iml_directory == "") {
       std::stringstream ss;
       ss << "--iml-directory is required for --mode=" << FLAGS_mode;
+      UsageAndExit(ss.str());
+    }
+  }
+
+  if (mode == Mode::MODE_RUN_KERNELS) {
+    if (FLAGS_kernel_delay_us <= 0) {
+      std::stringstream ss;
+      ss << "--kernel_delay_us > 0 is required for --mode=" << FLAGS_mode;
+      UsageAndExit(ss.str());
+    }
+
+    if (FLAGS_kernel_duration_us <= 0) {
+      std::stringstream ss;
+      ss << "--kernel_duration_us > 0 is required for --mode=" << FLAGS_mode;
+      UsageAndExit(ss.str());
+    }
+
+    if (FLAGS_run_sec <= 0) {
+      std::stringstream ss;
+      ss << "--run_sec > 0 is required for --mode=" << FLAGS_mode;
       UsageAndExit(ss.str());
     }
   }
@@ -145,6 +166,21 @@ int main(int argc, char** argv) {
     status = gpu_clock_freq.dump_json();
     IF_BAD_STATUS_EXIT("Failed to dump json for --mode=gpu_clock_freq", status);
     DBG_LOG("Dumped gpu_clock_freq json @ {}", gpu_clock_freq.json_path());
+    exit(EXIT_SUCCESS);
+  }
+
+  if (mode == Mode::MODE_RUN_KERNELS) {
+    GPUClockFreq gpu_clock_freq(FLAGS_repetitions, FLAGS_iml_directory);
+    status = gpu_clock_freq.load_json(FLAGS_gpu_clock_freq_json);
+    IF_BAD_STATUS_EXIT("Failed to load json for --mode=gpu_clock_freq", status);
+    GPUKernelRunner gpu_kernel_runner(
+        gpu_clock_freq,
+        FLAGS_kernel_delay_us,
+        FLAGS_kernel_duration_us,
+        FLAGS_run_sec,
+        FLAGS_iml_directory,
+        FLAGS_debug);
+    gpu_kernel_runner.run();
     exit(EXIT_SUCCESS);
   }
 

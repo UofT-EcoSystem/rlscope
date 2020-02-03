@@ -14,7 +14,7 @@ limitations under the License.
 ==============================================================================*/
 
 //#include "tensorflow/core/lib/core/status.h"
-#include "analysis/my_status.h"
+#include "common/my_status.h"
 #include <stdio.h>
 
 namespace tensorflow {

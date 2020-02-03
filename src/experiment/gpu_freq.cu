@@ -14,20 +14,12 @@
 
 #include "experiment/gpu_freq.h"
 
-//#include "analysis/json.h"
+//#include "common/json.h"
 
 //#include <nlohmann/json.hpp>
 //using json = nlohmann::json;
 
-#include "analysis/my_status.h"
-
-#define CHECK_CUDA(err) ({ \
-  if (err != cudaSuccess) { \
-    auto err_str = cudaGetErrorString(err); \
-    std::cout << __FILE__ << ":" << __LINE__ << " @ " << __func__ << ": CUDA Failed with (err=" << err << "): " << err_str << std::endl; \
-    assert(err == cudaSuccess); \
-  } \
-})
+#include "common/my_status.h"
 
 namespace tensorflow {
 
@@ -44,27 +36,52 @@ __global__ void _gpu_sleep(clock_value_t sleep_cycles, int64_t *output) {
   } while (cycles_elapsed < sleep_cycles);
 }
 
-double GPUClockFreq::gpu_sleep(clock_value_t sleep_cycles) {
-//  int64_t output = 0;
-  int64_t *output = nullptr;
+void GPUSleeper::gpu_sleep_cycles(CudaStream stream, clock_value_t sleep_cycles) {
+
+//  int64_t *output = nullptr;
+//  cudaError_t err;
+//  err = cudaMallocHost((void **) &output, sizeof(int64_t));
+//  CHECK_CUDA(err);
+//  *output = 0;
+
+//  auto start_t = time_now();
+  _gpu_sleep<<<1, 1, 0, stream.get()>>>(sleep_cycles, _output.get()); // This line alone is 0.208557334
+
+//  err = cudaDeviceSynchronize();
+//  CHECK_CUDA(err);
+
+//  auto end_t = time_now(); // This whole block is 5.316381218, but we measure it using nvprof as 5.113029
+
+//  err = cudaFreeHost(output);
+//  CHECK_CUDA(err);
+
+//  auto time_sec = elapsed_sec(start_t, end_t);
+//  return time_sec;
+}
+
+void GPUSleeper::gpu_sleep_cycles_sync(CudaStream stream, clock_value_t sleep_cycles) {
   cudaError_t err;
-  err = cudaMallocHost((void **) &output, sizeof(int64_t));
+  gpu_sleep_cycles(stream, sleep_cycles);
+//  err = cudaDeviceSynchronize();
+  err = cudaStreamSynchronize(stream.get());
   CHECK_CUDA(err);
-  *output = 0;
+}
 
-  auto start_t = GPUClockFreq::now();
-  _gpu_sleep << < 1, 1 >> > (sleep_cycles, output); // This line alone is 0.208557334
-  err = cudaDeviceSynchronize();
-  CHECK_CUDA(err);
-  auto end_t = GPUClockFreq::now(); // This whole block is 5.316381218, but we measure it using nvprof as 5.113029
+void GPUClockFreq::gpu_sleep_sec(CudaStream stream, double seconds) {
+// cycles = cycles/sec * seconds
+  clock_value_t cycles = ceil(_avg_mhz * seconds);
+//  std::cout << "> Sleeping on GPU for " << seconds << " seconds (" << cycles << " cycles @ " << _clock_result.avg_mhz << " MHz)." << std::endl;
+//  auto start_t = GPUClockFreq::now();
+  _gpu_sleeper.gpu_sleep_cycles(stream, cycles);
+}
 
-//  std::cout << "> gpu_sleep.output=" << *output << ", sleep_cycles=" << sleep_cycles << std::endl;
-
-  err = cudaFreeHost(output);
-  CHECK_CUDA(err);
-
-  auto time_sec = GPUClockFreq::elapsed_sec(start_t, end_t);
-  return time_sec;
+void GPUClockFreq::gpu_sleep_us(CudaStream stream, int64_t usec) {
+// cycles = cycles/sec * seconds
+// cycles/usec
+  clock_value_t cycles = ceil((_avg_mhz / ((double)MICROSECONDS_IN_SECOND)) * usec);
+//  std::cout << "> Sleeping on GPU for " << seconds << " seconds (" << cycles << " cycles @ " << _clock_result.avg_mhz << " MHz)." << std::endl;
+//  auto start_t = GPUClockFreq::now();
+  _gpu_sleeper.gpu_sleep_cycles(stream, cycles);
 }
 
 } // namespace tensorflow

@@ -76,6 +76,7 @@ public:
   Status EnableTrace(CUPTIClient *client);
   Status _EnablePCSampling();
   Status _DisablePCSampling();
+  Status Flush();
 
   // Disable tracing.  No further events will be delivered to 'client'.
   Status DisableTrace();

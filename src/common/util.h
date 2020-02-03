@@ -17,6 +17,9 @@
 #include <string>
 #include <cstdlib>
 
+#include <sys/stat.h>
+#include <sys/types.h>
+
 template <typename T>
 class CircularBuffer {
 public:
@@ -112,6 +115,21 @@ type_name()
     else if (std::is_rvalue_reference<T>::value)
         r += "&&";
     return r;
+}
+
+namespace tensorflow {
+
+void mkdir_p(const std::string& dir,
+             bool exist_ok = true);
+void mkdir_p_with_mode(const std::string& dir,
+                       bool exist_ok = true,
+    // Read/write/search permissions for owner and group,
+    // and with read/search permissions for others.
+                       mode_t mode = S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
+
+std::string os_dirname(const std::string& path);
+std::string os_basename(const std::string& path);
+
 }
 
 #endif //DNN_TENSORFLOW_CPP_UTIL_H

@@ -6,7 +6,7 @@
 #include "cuda_api_profiler/get_env_var.h"
 //#include "iml_profiler/protobuf/iml_prof.pb.h"
 #include "iml_prof.pb.h"
-#include "cuda_api_profiler/util.h"
+#include "common/util.h"
 #include "cuda_api_profiler/cupti_logging.h"
 
 #include "tensorflow/core/platform/env.h"
@@ -180,6 +180,8 @@ void CUDAActivityProfiler::Print(std::ostream& out, int indent) {
 }
 
 void CUDAActivityProfiler::AsyncDump() {
+//  _cupti_api->ActivityFlushAll(0);
+  cupti_manager_->Flush();
   mutex_lock lock(_mu);
   {
     mutex_lock lock(_trace_mu);
@@ -206,6 +208,14 @@ void CUDAActivityProfiler::_AsyncDump() {
     CUDAActivityProfilerState dump_state;
     dump_state = _state.DumpState();
     _AsyncDumpWithState(std::move(dump_state));
+  } else {
+    VLOG(1) << "CUDAActivityProfiler: Cannot dump device_events: "
+                << "\n    " << "_process_name=" << _state._process_name
+                << "\n    " << "_machine_name=" << _state._machine_name
+                << "\n    " << "_phase_name=" << _state._phase_name
+                << "\n    " << "_directory=" << _state._directory
+                << "\n    " << "kernel_records_.size()=" << _state.kernel_records_.size()
+                << "\n    " << "memcpy_records_.size()=" << _state.memcpy_records_.size();
   }
 }
 

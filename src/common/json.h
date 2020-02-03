@@ -5,7 +5,7 @@
 #ifndef IML_JSON_H
 #define IML_JSON_H
 
-#include "analysis/my_status.h"
+#include "common/my_status.h"
 
 #include <string>
 #include <nlohmann/json.hpp>

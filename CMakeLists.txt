@@ -213,6 +213,10 @@ set(ANALYSIS_SRC_DIRS
         ./src/analysis
         )
 
+set(COMMON_SRC_DIRS
+        ./src/common
+        )
+
 set(EXPERIMENT_SRC_DIRS
         ./src/experiment
         )
@@ -262,6 +266,7 @@ macro(gather_sources srcs_var directories)
 endmacro()
 
 gather_sources(ANALYSIS_SOURCES ANALYSIS_SRC_DIRS)
+gather_sources(COMMON_SOURCES COMMON_SRC_DIRS)
 gather_sources(EXPERIMENT_SOURCES EXPERIMENT_SRC_DIRS)
 gather_sources(TEST_ANALYSIS_SOURCES TEST_ANALYSIS_SRC_DIRS)
 set(ANALYSIS_SOURCES
@@ -578,6 +583,7 @@ endif()
 message("> CUDA_PROF_SRCS = ${CUDA_PROF_SRCS}")
 message("> TF_SOURCES = ${TF_SOURCES}")
 message("> ANALYSIS_SOURCES = ${ANALYSIS_SOURCES}")
+message("> COMMON_SOURCES = ${COMMON_SOURCES}")
 message("> EXPERIMENT_SOURCES = ${EXPERIMENT_SOURCES}")
 #message("> TEST_ANALYSIS_SOURCES = ${TEST_ANALYSIS_SOURCES}")
 message("> PROTO_SRCS = ${PROTO_SRCS}")
@@ -591,6 +597,9 @@ set(SAMPLE_CUDA_API_SOURCES
         # I think that's because the program being executed overrides the SIGSEGV handler
         # (which is FINE, as long as backward-cpp doesn't override the application handler).
         ${BACKWARD_ENABLE}
+        # NOTE: we should probably put "common" stuff between 'analysis' and libsample in the common directory,
+        # instead of pulling in all of the analysis sources.
+        ${COMMON_SOURCES}
         ${PROTO_SRCS} ${PROTO_HDRS}
         ${CUDA_PROF_SRCS}
         )
@@ -612,6 +621,14 @@ add_dependencies(sample_cuda_api double_conversion)
 # This will add libraries, definitions and include directories needed by backward
 # by setting each property on the target.
 add_backward(sample_cuda_api)
+
+set(BOOST_INCLUDEDIR ${CMAKE_SOURCE_DIR}/third_party/boost_${BOOST_VERSION_UNDERSCORES}/build/include)
+target_include_directories(sample_cuda_api PRIVATE ${BOOST_INCLUDEDIR})
+set(BOOST_LIBRARYDIR ${CMAKE_SOURCE_DIR}/third_party/boost_${BOOST_VERSION_UNDERSCORES}/build/lib)
+target_link_directories(sample_cuda_api PRIVATE ${BOOST_LIBRARYDIR})
+target_link_libraries(sample_cuda_api PRIVATE boost_filesystem)
+
+target_link_libraries(sample_cuda_api PRIVATE nlohmann_json::nlohmann_json)
 
 target_link_libraries(sample_cuda_api PRIVATE ${Protobuf_LIBRARIES})
 #message("> PROTO_SRCS = ${PROTO_SRCS}")
@@ -796,12 +813,14 @@ if (WITH_CXX_ANALYSIS)
     set(CPP_DUMP_PROTO_SRCS
             ./src/drivers/cpp_dump_proto.cpp
             ${ANALYSIS_SOURCES}
+            ${COMMON_SOURCES}
 #            ${TF_SOURCES}
             ${BACKWARD_ENABLE}
             ${PROTO_SRCS} ${PROTO_HDRS} src/analysis/lru_cache.cc src/analysis/sample_periods.cc src/analysis/sample_periods.h)
     list(FILTER CPP_DUMP_PROTO_SRCS EXCLUDE REGEX "/c_test_util.cc")
 
     set(TEST_ANALYSIS_SOURCES
+            ${COMMON_SOURCES}
             ${ANALYSIS_SOURCES}
             ${TEST_ANALYSIS_SOURCES}
             #            ${TF_SOURCES}
@@ -825,24 +844,12 @@ if (WITH_CXX_EXPERIMENTS)
     set(GPU_UTIL_EXPERIMENT_SRCS
             ./src/drivers/gpu_util_experiment.cc
             ${EXPERIMENT_SOURCES}
+            ${COMMON_SOURCES}
             ${ANALYSIS_SOURCES}
             #            ${TF_SOURCES}
             ${BACKWARD_ENABLE}
             ${PROTO_SRCS} ${PROTO_HDRS})
     list(FILTER GPU_UTIL_EXPERIMENT_SRCS EXCLUDE REGEX "/c_test_util.cc")
-
-#    set(TEST_ANALYSIS_SOURCES
-#            ${ANALYSIS_SOURCES}
-#            ${TEST_ANALYSIS_SOURCES}
-#            #            ${TF_SOURCES}
-#            ${BACKWARD_ENABLE}
-#            ${PROTO_SRCS} ${PROTO_HDRS})
-#    list(FILTER TEST_ANALYSIS_SOURCES EXCLUDE REGEX "/c_test_util.cc")
-
-#    message("> TEST_ANALYSIS_SOURCES = ${TEST_ANALYSIS_SOURCES}")
-#    add_executable(test_analysis ${TEST_ANALYSIS_SOURCES})
-#    AddTensorflowDependencies(test_analysis FALSE)
-#    AddUnitTest(test_analysis)
 
     message("> GPU_UTIL_EXPERIMENT_SRCS = ${GPU_UTIL_EXPERIMENT_SRCS}")
     add_executable(gpu_util_experiment ${GPU_UTIL_EXPERIMENT_SRCS})

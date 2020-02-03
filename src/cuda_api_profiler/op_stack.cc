@@ -25,7 +25,7 @@
 #include "cuda_api_profiler/get_env_var.h"
 #include "cuda_api_profiler/defines.h"
 #include "cuda_api_profiler/cupti_logging.h"
-#include "cuda_api_profiler/util.h"
+#include "common/util.h"
 
 namespace tensorflow {
 

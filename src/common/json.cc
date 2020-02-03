@@ -2,7 +2,7 @@
 // Created by jgleeson on 2020-01-23.
 //
 
-#include "analysis/my_status.h"
+#include "common/my_status.h"
 
 #include <string>
 #include <sstream>

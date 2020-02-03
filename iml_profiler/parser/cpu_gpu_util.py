@@ -20,6 +20,7 @@ from iml_profiler.parser import stacked_bar_plots
 from iml_profiler.profiler import iml_logging
 
 from iml_profiler.experiment import expr_config
+from iml_profiler.parser.plot import CUDAEventCSVReader, fix_seaborn_legend
 
 def protobuf_to_dict(pb):
     return dict((field.name, value) for field, value in pb.ListFields())
@@ -291,6 +292,139 @@ class UtilParser:
             debug=self.debug,
         )
         util_plot.run()
+
+class GPUUtilOverTimePlot:
+    """
+    Legend label:
+        "Kernels (delay=mean +/- std us, duration=mean +/- std us)"
+
+    xs:
+      Time (in seconds) since first GPU sample (for the same run)
+    ys:
+      GPU utilization in (%).
+    """
+    def __init__(self,
+                 directory,
+                 iml_directories,
+                 show_std=False,
+                 debug=False,
+                 # Swallow any excess arguments
+                 **kwargs):
+        self.directory = directory
+        self.iml_directories = iml_directories
+        self.show_std = show_std
+        self.debug = debug
+
+    def _human_time(self, usec):
+        units = ['us', 'ms', 'sec']
+        # conversion_factor[i+1] = value you must divide by to convert units[i] to units[i+1]
+        # conversion_factor[0] = value you must divide by to convert us to us
+        conversion_factor = [1, 1000, 1000]
+
+        value = usec
+        unit = 'us'
+        for i in range(len(units)):
+            if (value / conversion_factor[i]) >= 1:
+                value = (value / conversion_factor[i])
+                unit = units[i]
+            else:
+                break
+        return value, unit
+
+    def _human_time_str(self, usec):
+        value, unit = self._human_time(usec)
+        return "{value:.1f} {unit}".format(
+            value=value,
+            unit=unit,
+        )
+
+    def read_data(self, iml_directory):
+        df_reader = UtilDataframeReader(
+            iml_directory,
+            # add_fields=self.maybe_add_algo_env,
+            debug=self.debug)
+        df = df_reader.read()
+        df = df[
+            df['used_by_tensorflow'] &
+            (df['device_type'] == 'GPU')]
+        df['time_sec'] = (df['start_time_us'] - df['start_time_us'].min())/MICROSECONDS_IN_SECOND
+        df['util_percent'] = df['util'] * 100
+        df.sort_values(by=['start_time_us'], inplace=True)
+
+        event_reader = CUDAEventCSVReader(iml_directory, debug=self.debug)
+        event_df = event_reader.read_df()
+        delay_us = event_df['start_time_us'].diff()[1:]
+        mean_delay_us =  delay_us.mean()
+        std_delay_us = delay_us.std()
+        mean_duration_us = event_df['duration_us'].mean()
+        std_duration_us = event_df['duration_us'].std()
+
+        data = {
+            # 'util_df': util_df,
+            # 'df': df,
+            'mean_delay_us': mean_delay_us,
+            'std_delay_us': std_delay_us,
+            'mean_duration_us': mean_duration_us,
+            'std_duration_us': std_duration_us,
+        }
+
+        df['label'] = self.legend_label(data)
+        data['df'] = df
+
+        return data
+
+    def legend_label(self, data):
+        def _mean_std(mean, std):
+            if self.show_std:
+                return "{mean} +/- {std}".format(
+                    mean=self._human_time_str(usec=mean),
+                    std=self._human_time_str(usec=std),
+                )
+            else:
+                return "{mean}".format(
+                    mean=self._human_time_str(usec=mean),
+                )
+        unit = 'us'
+        # return "Kernels (delay={delay}, duration={duration}".format(
+        return "delay={delay}, duration={duration}".format(
+            delay=_mean_std(data['mean_delay_us'], data['std_delay_us']),
+            duration=_mean_std(data['mean_duration_us'], data['std_duration_us']),
+        )
+
+    def run(self):
+        dir_to_data = dict()
+        for iml_directory in self.iml_directories:
+            dir_to_data[iml_directory] = self.read_data(iml_directory)
+
+        df = pd.concat([
+            dir_to_data[iml_directory]['df']
+            for iml_directory in self.iml_directories], sort=True)
+
+        fig, ax = plt.subplots()
+        # df = pd.DataFrame({'A':26, 'B':20}, index=['N'])
+        # df.plot(kind='bar', ax=ax)
+        # ax.legend(["AAA", "BBB"]);
+        # df.plot(kind='scatter', x='time_sec', y='gpu_util_percent', ax=ax)
+        # sns.scatterplot(x='time_sec', y='util_percent', hue='label', data=df, ax=ax)
+        sns.lineplot(x='time_sec', y='util_percent', hue='label', data=df, ax=ax)
+        fix_seaborn_legend(ax)
+        ax.set_ylabel("GPU utilization (%)")
+        ax.set_xlabel("Total runtime (seconds)")
+        plot_path = self._get_path('pdf')
+        csv_path = self._get_path('csv')
+
+        df.to_csv(csv_path, index=False)
+        logging.info('Save figure to {path}'.format(path=plot_path))
+        fig.tight_layout()
+        fig.savefig(plot_path, bbox_inches="tight", pad_inches=0)
+        plt.close(fig)
+
+
+    def _get_path(self, ext):
+        return _j(
+            self.directory,
+            "GPUUtilOverTimePlot.{ext}".format(ext=ext),
+        )
 
 class UtilPlot:
     def __init__(self,

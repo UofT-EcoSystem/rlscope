@@ -29,7 +29,7 @@ using json = nlohmann::json;
 #include <assert.h>
 
 //#include "tensorflow/core/lib/core/status.h"
-#include "analysis/my_status.h"
+#include "common/my_status.h"
 #include "analysis/sample_periods.h"
 
 #include <list>

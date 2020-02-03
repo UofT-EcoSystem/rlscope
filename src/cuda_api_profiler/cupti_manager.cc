@@ -176,6 +176,12 @@ Status CUPTIManager::_DisablePCSampling() {
   return Status::OK();
 }
 
+Status CUPTIManager::Flush() {
+  VLOG(1) << "CUPTIManager." << __func__ << ": flush cupti activities";
+  CUPTI_CALL(cuptiActivityFlushAll(0));
+  return Status::OK();
+}
+
 Status CUPTIManager::EnableTrace(CUPTIClient *client) {
   mutex_lock l(mu_);
   VLOG(0) << __func__;

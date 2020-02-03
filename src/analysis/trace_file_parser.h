@@ -49,8 +49,8 @@
 //#include "tensorflow/core/lib/core/error_codes.pb.h"
 #include "error_codes.pb.h"
 //#include "tensorflow/core/lib/core/status.h"
-#include "analysis/my_status.h"
-#include "analysis/json.h"
+#include "common/my_status.h"
+#include "common/json.h"
 
 #include <set>
 #include <cuda_api_profiler/debug_flags.h>
