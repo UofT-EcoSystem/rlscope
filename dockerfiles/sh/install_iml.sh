@@ -13,6 +13,7 @@ cd "$SH_DIR"
 source $SH_DIR/make_utils.sh
 
 _check_env
+_upgrade_pip
 
 if [ "${IML_DIR}" = "" ]; then
     # Install directly from git repo.

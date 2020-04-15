@@ -11,6 +11,7 @@ cd "$SH_DIR"
 source $SH_DIR/make_utils.sh
 
 _check_env
+_upgrade_pip
 
 # Equivalent to: --compilation_mode=opt
 # See: https://docs.bazel.build/versions/master/user-manual.html

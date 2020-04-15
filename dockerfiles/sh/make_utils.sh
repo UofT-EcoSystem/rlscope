@@ -149,6 +149,11 @@ _check_tensorflow() {
     fi
 }
 
+_upgrade_pip() {
+    # I've seen pip commands fail when pip isn't up-to-date.
+    pip install --upgrade pip
+}
+
 _check_iml() {
     if ! py_module_installed "iml_profiler"; then
         install_iml.sh

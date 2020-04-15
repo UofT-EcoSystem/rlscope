@@ -3895,6 +3895,7 @@ class CUDAEventCSVReader:
         #     'duration_us',
         #     'CUDA_VISIBLE_DEVICES',
         # ]
+
         df.sort_values(by=['start_time_us'], inplace=True)
         return df
 

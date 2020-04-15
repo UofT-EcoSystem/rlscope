@@ -11,6 +11,7 @@ cd "$SH_DIR"
 source $SH_DIR/make_utils.sh
 
 _check_env
+_upgrade_pip
 
 _do pip install tensorflow-gpu==1.13.1
 

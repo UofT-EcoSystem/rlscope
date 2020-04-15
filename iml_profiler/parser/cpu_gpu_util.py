@@ -22,6 +22,10 @@ from iml_profiler.profiler import iml_logging
 from iml_profiler.experiment import expr_config
 from iml_profiler.parser.plot import CUDAEventCSVReader, fix_seaborn_legend
 
+import multiprocessing
+from iml_profiler.profiler.concurrent import map_pool
+from concurrent.futures import ProcessPoolExecutor
+
 def protobuf_to_dict(pb):
     return dict((field.name, value) for field, value in pb.ListFields())
 
@@ -308,12 +312,14 @@ class GPUUtilOverTimePlot:
                  iml_directories,
                  show_std=False,
                  debug=False,
+                 debug_single_thread=False,
                  # Swallow any excess arguments
                  **kwargs):
         self.directory = directory
         self.iml_directories = iml_directories
         self.show_std = show_std
         self.debug = debug
+        self.debug_single_thread = debug_single_thread
 
     def _human_time(self, usec):
         units = ['us', 'ms', 'sec']
@@ -353,15 +359,63 @@ class GPUUtilOverTimePlot:
 
         event_reader = CUDAEventCSVReader(iml_directory, debug=self.debug)
         event_df = event_reader.read_df()
-        delay_us = event_df['start_time_us'].diff()[1:]
-        mean_delay_us =  delay_us.mean()
-        std_delay_us = delay_us.std()
+        # WANT:
+        #   k[1].delay = k[1].start - k[0].end
+        #   k[2].delay = k[2].start - k[1].end
+        #   k[3].delay = k[3].start - k[2].end
+        #   ...
+        #   k[n].delay = k[n].start - k[n-1].end
+        #                ----------   ----------
+        #                k[1:].start  k[:n-1].end
+        #
+        # Q: Should we keep NEGATIVE delay?
+        # A: depends what we want to know... I think NO... we want to know
+        # "When there are gaps where no kernel is running, how large are they?"
+        # Negative delay is nice to have a yes/no verdict of whether kernels overlap in time.
+        #
+        # NOTE: this is the difference between the START of consecutive kernel launches...
+        # [    K1    ]      [      K2      ]
+        # |                 |
+        # K1.start          K2.start
+        #
+        # delay = K2.start - K1.start
+        # This explains why delay is 10sec for 10-sec duration kernels...
+        #
+        # I think we would actually want:
+        #   delay = max(0, K2.start - K1.end)
+
+        # delay_us = event_df['start_time_us'].diff()[1:]
+        # report_delay_us = delay_us
+
+        event_df['end_time_us'] = event_df['start_time_us'] + event_df['duration_us']
+        event_df.sort_values(['start_time_us', 'end_time_us'], inplace=True)
+        delay_us = event_df['start_time_us'][1:].values - event_df['end_time_us'][:len(event_df)-1].values
+        delay_non_neg_us = delay_us[delay_us >= 0]
+        report_delay_us = delay_non_neg_us
+        # Q: What does this mean...?  The number of consecutive kernels that overlap.
+        delay_neg_us = delay_us[delay_us < 0]
+        num_overlapped = len(delay_neg_us)
+        mean_delay_neg_us =  delay_neg_us.mean()
+        std_delay_neg_us = delay_neg_us.std()
+
+        mean_delay_us =  report_delay_us.mean()
+        std_delay_us = report_delay_us.std()
+        num_delay_us = len(report_delay_us)
         mean_duration_us = event_df['duration_us'].mean()
         std_duration_us = event_df['duration_us'].std()
+
+        # if np.isnan(mean_delay_us):
+        #     import ipdb; ipdb.set_trace()
 
         data = {
             # 'util_df': util_df,
             # 'df': df,
+            'mean_delay_neg_us': mean_delay_neg_us,
+            'std_delay_neg_us': std_delay_neg_us,
+            'num_overlapped': num_overlapped,
+
+            'directory': iml_directory,
+            'num_delay_us': num_delay_us,
             'mean_delay_us': mean_delay_us,
             'std_delay_us': std_delay_us,
             'mean_duration_us': mean_duration_us,
@@ -386,15 +440,49 @@ class GPUUtilOverTimePlot:
                 )
         unit = 'us'
         # return "Kernels (delay={delay}, duration={duration}".format(
-        return "delay={delay}, duration={duration}".format(
+        base = _b(data['directory'])
+        base = re.sub(r'^gpu_util_experiment\.', '', base)
+        return "{base}: delay={delay}, duration={duration}".format(
+            base=base,
             delay=_mean_std(data['mean_delay_us'], data['std_delay_us']),
             duration=_mean_std(data['mean_duration_us'], data['std_duration_us']),
         )
 
+    @staticmethod
+    def Worker_GPUUtilOverTimePlot_read_data(kwargs):
+        # for var, value in kwargs.items():
+        #     locals()[var] = value
+        self = kwargs['self']
+        iml_directory = kwargs['iml_directory']
+        data = self.read_data(iml_directory)
+        return iml_directory, data
+
     def run(self):
         dir_to_data = dict()
-        for iml_directory in self.iml_directories:
-            dir_to_data[iml_directory] = self.read_data(iml_directory)
+
+        # for iml_directory in self.iml_directories:
+        #     dir_to_data[iml_directory] = self.read_data(iml_directory)
+
+        if self.debug_single_thread:
+            n_workers = 1
+        else:
+            n_workers = multiprocessing.cpu_count()
+        def Args_GPUUtilOverTimePlot_read_data(iml_directory):
+            return dict(
+                self=self,
+                iml_directory=iml_directory,
+            )
+
+        with ProcessPoolExecutor(n_workers) as pool:
+            # splits = split_list(proto_paths, n_workers)
+            kwargs_list = [Args_GPUUtilOverTimePlot_read_data(iml_directory) for iml_directory in self.iml_directories]
+            data_list = map_pool(
+                pool, GPUUtilOverTimePlot.Worker_GPUUtilOverTimePlot_read_data, kwargs_list,
+                desc="GPUUtilOverTimePlot.read_data",
+                show_progress=True,
+                sync=self.debug_single_thread)
+            for iml_directory, data in data_list:
+                dir_to_data[iml_directory] = data
 
         df = pd.concat([
             dir_to_data[iml_directory]['df']
@@ -410,8 +498,20 @@ class GPUUtilOverTimePlot:
         fix_seaborn_legend(ax)
         ax.set_ylabel("GPU utilization (%)")
         ax.set_xlabel("Total runtime (seconds)")
+
+        os.makedirs(self.directory, exist_ok=True)
         plot_path = self._get_path('pdf')
         csv_path = self._get_path('csv')
+        json_path = self._get_path('json')
+
+        metadata_js = dict()
+        for iml_directory in self.iml_directories:
+            metadata_js[iml_directory] = dict()
+            for k, v in dir_to_data[iml_directory].items():
+                if k != 'df':
+                    metadata_js[iml_directory][k] = v
+        # logging.info('Dump metadata js to {path}'.format(path=json_path))
+        do_dump_json(metadata_js, json_path)
 
         df.to_csv(csv_path, index=False)
         logging.info('Save figure to {path}'.format(path=plot_path))

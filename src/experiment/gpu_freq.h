@@ -9,11 +9,19 @@
 #include <cuda_runtime.h>
 
 #include <cmath>
+#include <thread>
 #include <chrono>
 #include <vector>
 #include <string>
 
+#include <boost/process.hpp>
+
 #include "common/my_status.h"
+
+#include "cuda_api_profiler/generic_logging.h"
+#include "cuda_api_profiler/defines.h"
+
+//#include "tensorflow/core/platform/notification.h"
 
 //#define GPU_CLOCK_MIN_SAMPLE_TIME_SEC (10)
 #define GPU_CLOCK_MIN_SAMPLE_TIME_SEC (5)
@@ -60,6 +68,141 @@ double Std(Container& buffer) {
   return sqrt(summation / ((double) n));
 }
 
+class TimeHistogram {
+public:
+  using nano_t = uint64_t;
+
+  std::string _name;
+  // nanoseconds -> count
+  std::map<nano_t, uint64_t> _hist;
+  TimeHistogram(const std::string& name) :
+  _name(name)
+  {
+  }
+
+  template <typename T>
+  T _RoundUp(T x, T multiple) const {
+
+    return ((x + multiple - 1)/multiple)*multiple;
+  }
+  template <typename T>
+  T _RoundDown(T x, T multiple) const {
+    return (x/multiple)*multiple;
+  }
+  // Round to to closest multiple:
+  //   remainder = x % multiple
+  //   if remainder > multiple/2:
+  //     _RoundUp(x, multiple)
+  //   else:
+  //     _RoundDown(x, multiple)
+  template <typename T>
+  T _RoundClosest(T x, T multiple) const {
+    auto remainder = x % multiple;
+    if (2*remainder > multiple) {
+      return _RoundUp(x, multiple);
+    }
+    return _RoundDown(x, multiple);
+  }
+
+  void CountNanoseconds(nano_t nanosec) {
+    // If nanosec >= 1 second:
+    //   round to closest second
+    // elif nanosec >= 1 ms:
+    //   round to closest ms
+    // else nanosec >= 1 us:
+    //   round to closest us
+#define NANO_IN_SEC static_cast<nano_t>(1*1000*1000*1000)
+#define NANO_IN_MS static_cast<nano_t>(1*1000*1000)
+#define NANO_IN_US static_cast<nano_t>(1*1000)
+
+
+    nano_t record_nano;
+    if (nanosec >= NANO_IN_SEC) {
+      record_nano = _RoundClosest(nanosec, NANO_IN_SEC);
+    } else if (nanosec >= NANO_IN_MS) {
+      record_nano = _RoundClosest(nanosec, NANO_IN_MS);
+//    } else if (nanosec >= NANO_IN_US) {
+    } else {
+      record_nano = _RoundClosest(nanosec, NANO_IN_US);
+    }
+    _hist[record_nano] += 1;
+  }
+
+  template <typename OStream, typename NanoType>
+  void _PrintHumanTime(OStream& out, NanoType nanosec, int indent) const {
+    PrintIndent(out, indent);
+    if (nanosec >= NANO_IN_SEC) {
+      double sec = static_cast<double>(nanosec)/static_cast<double>(NANO_IN_SEC);
+      out << sec << " sec";
+    } else if (nanosec >= NANO_IN_MS) {
+      double ms = static_cast<double>(nanosec)/static_cast<double>(NANO_IN_MS);
+      out << ms << " ms";
+    } else {
+      double us = static_cast<double>(nanosec)/static_cast<double>(NANO_IN_US);
+      out << us << " us";
+    }
+  }
+
+  template <typename OStream>
+  void Print(OStream& out, int indent) const {
+    PrintIndent(out, indent);
+    out << "TimeHistogram: name = " << _name << ", size = " << _hist.size();
+
+    std::vector<nano_t> times_nano;
+    times_nano.reserve(_hist.size());
+    for (const auto& pair : _hist) {
+      auto const& nanosec = pair.first;
+      auto const count = pair.second;
+      for (uint64_t i = 0; i < count; i++) {
+        times_nano.push_back(nanosec);
+      }
+    }
+    auto avg_nano_dbl = Average(times_nano);
+    auto std_nano_dbl = Std(times_nano);
+
+    out << "\n";
+    PrintIndent(out, indent + 1);
+    out << "Average time = ";
+    _PrintHumanTime(out, avg_nano_dbl, indent);
+
+    out << "\n";
+    PrintIndent(out, indent + 1);
+    out << "Stdev time = ";
+    _PrintHumanTime(out, std_nano_dbl, indent);
+
+    if (_hist.size() > 0) {
+      out << "\n";
+      PrintIndent(out, indent + 1);
+      out << "Histogram:";
+    }
+
+    uint64_t total_count = 0;
+    for (const auto& pair : _hist) {
+      auto const count = pair.second;
+      total_count += count;
+    }
+    for (const auto& pair : _hist) {
+      auto const& nanosec = pair.first;
+      auto const count = pair.second;
+      double percent = 100*static_cast<double>(count)/static_cast<double>(total_count);
+
+      out << "\n";
+      PrintIndent(out, indent + 2);
+      out << "Time = [";
+      _PrintHumanTime(out, nanosec, indent);
+      out << "]: " << percent << "% (" << count << "/" << total_count << ")";
+    }
+  }
+
+  template <typename OStream>
+  friend OStream &operator<<(OStream &os, const TimeHistogram &obj)
+  {
+    obj.Print(os, 0);
+    return os;
+  }
+
+};
+
 using clock_value_t = long long;
 // https://www.softwariness.com/articles/monotonic-clocks-windows-and-posix/
 //  using std::chrono::steady_clock;
@@ -71,6 +214,7 @@ time_type time_now();
 
 struct CudaStreamWrapper {
   cudaStream_t _handle;
+  void synchronize();
   CudaStreamWrapper();
   ~CudaStreamWrapper();
 };
@@ -83,6 +227,7 @@ public:
 //  cudaStream_t _stream;
   CudaStream();
   cudaStream_t get() const;
+  void synchronize();
 };
 
 template <typename T>
@@ -146,7 +291,7 @@ public:
       _output(1) {
   }
 
-  void gpu_sleep_cycles(CudaStream stream, clock_value_t sleep_cycles);
+  void gpu_sleep_cycles(CudaStream stream, clock_value_t sleep_cycles, bool sync);
   void gpu_sleep_cycles_sync(CudaStream stream, clock_value_t sleep_cycles);
 
 };
@@ -182,7 +327,9 @@ public:
   double freq_mhz(double time_sec);
 
   void gpu_sleep_sec(CudaStream stream, double seconds);
+  void _gpu_sleep_us(CudaStream stream, int64_t usec, bool sync);
   void gpu_sleep_us(CudaStream stream, int64_t usec);
+  void gpu_sleep_us_sync(CudaStream stream, int64_t usec);
   void run();
 
   MyStatus dump_json() const;
@@ -194,28 +341,42 @@ public:
 class GPUKernelRunner {
 public:
   CudaStream _stream;
+  std::unique_ptr<std::thread> _async_thread;
+  std::unique_ptr<boost::process::child> _async_process;
 
+  // "Number of kernels to launch per-thread."
+  int64_t _n_launches;
   // "Time between kernel launches in microseconds"
   int64_t _kernel_delay_us;
   // "Duration of kernel in microseconds"
   int64_t _kernel_duration_us;
   // "How to long to run for (in seconds)"
   double _run_sec;
+  // After launching a kernel, wait for it to finish.
+  // Useful for running really long kernels (e.g., 10 sec)
+  // without creating a giant queue of kernel launches (e.g., delay=1us)
+  bool _sync;
 
   GPUClockFreq _freq;
   std::string _directory;
   bool _debug;
 
+//  std::unique_ptr<Notification> _async_thread_done;
+
   GPUKernelRunner(
       GPUClockFreq freq,
+      int64_t n_launches,
       int64_t kernel_delay_us,
       int64_t kernel_duration_us,
       double run_sec,
+      bool sync,
       const std::string& directory,
       bool debug) :
+      _n_launches(n_launches),
       _kernel_delay_us(kernel_delay_us),
       _kernel_duration_us(kernel_duration_us),
       _run_sec(run_sec),
+      _sync(sync),
       _freq(std::move(freq)),
       _directory(directory),
       _debug(debug)
@@ -223,6 +384,64 @@ public:
   }
 
   void DelayUs(int64_t usec);
+
+  void run();
+  void synchronize();
+
+  void run_async_thread();
+  void wait_thread();
+
+  void run_async_process(int thread_id);
+  void wait_process(int thread_id);
+
+};
+
+class ThreadedGPUKernelRunner {
+public:
+  CudaStream _stream;
+
+  // "Number of kernels to launch per-thread."
+  int64_t _n_launches;
+  // "Time between kernel launches in microseconds"
+  int64_t _kernel_delay_us;
+  // "Duration of kernel in microseconds"
+  int64_t _kernel_duration_us;
+  // "How to long to run for (in seconds)"
+  double _run_sec;
+  size_t _num_threads;
+  bool _processes;
+  // After launching a kernel, wait for it to finish.
+  // Useful for running really long kernels (e.g., 10 sec)
+  // without creating a giant queue of kernel launches (e.g., delay=1us)
+  bool _sync;
+
+  GPUClockFreq _freq;
+  std::string _directory;
+  bool _debug;
+
+  ThreadedGPUKernelRunner(
+      GPUClockFreq freq,
+      int64_t n_launches,
+      int64_t kernel_delay_us,
+      int64_t kernel_duration_us,
+      double run_sec,
+      size_t num_threads,
+      bool processes,
+      bool sync,
+      const std::string& directory,
+      bool debug) :
+      _n_launches(n_launches),
+      _kernel_delay_us(kernel_delay_us),
+      _kernel_duration_us(kernel_duration_us),
+      _run_sec(run_sec),
+      _num_threads(num_threads),
+      _processes(processes),
+      _sync(sync),
+      _freq(std::move(freq)),
+      _directory(directory),
+      _debug(debug)
+  {
+  }
 
   void run();
 

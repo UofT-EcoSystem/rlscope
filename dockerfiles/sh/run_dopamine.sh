@@ -13,6 +13,7 @@ cd "$SH_DIR"
 source $SH_DIR/make_utils.sh
 
 _check_env
+_upgrade_pip
 
 _check_DOPAMINE_DIR
 

@@ -16,6 +16,7 @@ cd "$SH_DIR"
 source $SH_DIR/make_utils.sh
 
 _check_env
+_upgrade_pip
 
 _check_STABLE_BASELINES_DIR
 _check_RL_BASELINES_ZOO_DIR

@@ -5,6 +5,7 @@
 #include <chrono>
 #include <iostream>
 #include <cmath>
+#include <thread>
 
 #include <cuda_runtime.h>
 #include <cassert>
@@ -25,6 +26,12 @@ using json = nlohmann::json;
 #include "cuda_api_profiler/generic_logging.h"
 #include "cuda_api_profiler/debug_flags.h"
 
+#include <sys/syscall.h>
+#include "drivers/gpu_util_experiment.h"
+
+static pid_t my_gettid() {
+  return syscall(SYS_gettid);
+}
 
 namespace tensorflow {
 
@@ -78,6 +85,10 @@ double elapsed_sec(time_type start, time_type stop) {
   double sec = ((stop - start).count()) * steady_clock::period::num / static_cast<double>(steady_clock::period::den);
   return sec;
 }
+
+//std::chrono::nanoseconds elapsed_nano(time_type start, time_type stop) {
+//  return std::chrono::duration_cast<std::chrono::nanoseconds>(stop - start).count();
+//}
 
 void GPUClockFreq::iter(CudaStream stream, time_type *start_t, time_type *end_t) {
   *start_t = time_now();
@@ -172,6 +183,109 @@ void GPUKernelRunner::DelayUs(int64_t usec) {
   }
 }
 
+void ThreadedGPUKernelRunner::run() {
+  if (_num_threads == 1) {
+    // Just one thread launches kernels (default).
+    // Run in same thread.
+    GPUKernelRunner gpu_kernel_runner(
+        _freq,
+        _n_launches,
+        _kernel_delay_us,
+        _kernel_duration_us,
+        _run_sec,
+        _sync,
+        _directory,
+        _debug);
+    gpu_kernel_runner.run();
+    return;
+  }
+
+  if (SHOULD_DEBUG(FEATURE_GPU_CLOCK_FREQ)) {
+    DBG_LOG("ThreadedGPUKernelRunner launching kernels from {} threads", _num_threads);
+  }
+
+  // >= 2 threads.
+  // Launch kernels from multiple threads
+  // Q: Separate stream?  Same stream?
+  // A: In minigo, there are separate processes...so to be accurate we should fork().
+  //    From Serina's experiments with GPU scheduling, the GPU will NOT allow separate kernels to overlap and will
+  //    instead serialize their execution.  But separate streams from the same process, I expect there to be overlap.
+  //    We should try both, and measure BOTH utilization AND overlap.
+  std::vector<GPUKernelRunner> gpu_kernel_runners;
+  gpu_kernel_runners.reserve(_num_threads);
+  for (int i = 0; i < static_cast<int>(_num_threads); i++) {
+    gpu_kernel_runners.emplace_back(
+        _freq,
+        _n_launches,
+        _kernel_delay_us,
+        _kernel_duration_us,
+        _run_sec,
+        _sync,
+        _directory,
+        _debug);
+  }
+  int i;
+
+  i = 0;
+  for (auto& gpu_kernel_runner : gpu_kernel_runners) {
+    if (!_processes) {
+      gpu_kernel_runner.run_async_thread();
+    } else {
+      gpu_kernel_runner.run_async_process(i);
+    }
+    i++;
+  }
+
+  i = 0;
+  for (auto& gpu_kernel_runner : gpu_kernel_runners) {
+    if (!_processes) {
+      gpu_kernel_runner.wait_thread();
+    } else {
+      gpu_kernel_runner.wait_process(i);
+    }
+    i++;
+  }
+
+}
+
+void GPUKernelRunner::run_async_thread() {
+  assert(_async_thread == nullptr);
+  _async_thread.reset(new std::thread([this] {
+    this->run();
+  }));
+}
+void GPUKernelRunner::wait_thread() {
+  assert(_async_thread != nullptr);
+  _async_thread->join();
+  _async_thread.reset(nullptr);
+}
+
+void GPUKernelRunner::run_async_process(int thread_id) {
+  assert(_async_process == nullptr);
+  _async_process.reset(new boost::process::child);
+  GPUUtilExperimentArgs args;
+  args.FLAGS_num_threads = 1;
+
+  //get a handle to the current environment
+  auto env = boost::this_process::environment();
+  std::stringstream process_name_ss;
+  boost::process::environment child_env = env;
+  process_name_ss << env["IML_PROCESS_NAME"].to_string() << ".thread_" << thread_id;
+  child_env["IML_PROCESS_NAME"] = process_name_ss.str();
+
+  *_async_process = ReinvokeProcess(args, child_env);
+}
+void GPUKernelRunner::wait_process(int thread_id) {
+  assert(_async_process);
+  // Q: How are non-zero exit codes handled?
+  _async_process->wait();
+  _async_process.reset(nullptr);
+}
+
+void GPUKernelRunner::synchronize() {
+
+}
+
 void GPUKernelRunner::run() {
   // Launch a kernel that runs for --kernel_duration_us microseconds.
   // Launch the kernel every --kernel_delay_us microseconds.
@@ -185,10 +299,18 @@ void GPUKernelRunner::run() {
   };
   std::list<GPUKernelRun> kernel_runs;
 
+  TimeHistogram hist("cudaLaunchKernel");
+
+  int64_t launches = 0;
   while (true) {
     time_type now_t = time_now();
     auto time_sec = elapsed_sec(start_t, now_t);
-    if (time_sec >= _run_sec) {
+    if (
+//        time_sec >= _run_sec ||
+        launches >= _n_launches) {
+      // Q: Should we wait for the stream to finish here?
+      // Otherwise, cudaStreamDestroy will free the stream in ~CudaStreamWrapper without waiting for the stream to finish;
+      // I suspect that could result in traces NOT being collected for remaining kernels (unsure...)
       break;
     }
     GPUKernelRun kernel_run;
@@ -198,8 +320,15 @@ void GPUKernelRunner::run() {
     // - Q: Do we want to launch another kernel BEFORE the last one finishes...?
     //   ... if waiting for it to finish takes a long time (> 5 us)... then yes?
     auto before_sleep_t = time_now();
-    _freq.gpu_sleep_us(_stream, _kernel_duration_us);
+    if (_sync) {
+      _freq.gpu_sleep_us_sync(_stream, _kernel_duration_us);
+    } else {
+      _freq.gpu_sleep_us(_stream, _kernel_duration_us);
+    }
+    launches += 1;
     auto after_sleep_t = time_now();
+    auto nanosec = std::chrono::duration_cast<std::chrono::nanoseconds>(after_sleep_t - before_sleep_t).count();
+    hist.CountNanoseconds(nanosec);
     auto time_sleeping_sec = elapsed_sec(before_sleep_t, after_sleep_t);
 
     int64_t time_sleeping_us = time_sleeping_sec * MICROSECONDS_IN_SECOND;
@@ -248,6 +377,12 @@ void GPUKernelRunner::run() {
     DBG_LOG("{}", ss.str());
   }
 
+  {
+    std::stringstream ss;
+    ss << hist;
+    DBG_LOG("{}", ss.str());
+  }
+
 }
 
 CudaStream::CudaStream() : _stream(new CudaStreamWrapper()) {
@@ -255,18 +390,30 @@ CudaStream::CudaStream() : _stream(new CudaStreamWrapper()) {
 cudaStream_t CudaStream::get() const {
   return _stream->_handle;
 }
+void CudaStream::synchronize() {
+  return _stream->synchronize();
+}
 
+void CudaStreamWrapper::synchronize() {
+  cudaError_t ret;
+  ret = cudaStreamSynchronize(_handle);
+  CHECK_CUDA(ret);
+}
 CudaStreamWrapper::CudaStreamWrapper() :
     _handle(nullptr)
 {
   cudaError_t ret;
-  ret = cudaStreamCreate(&_handle);
+  ret = cudaStreamCreateWithFlags(&_handle, cudaStreamNonBlocking);
+//  ret = cudaStreamCreate(&_handle);
   CHECK_CUDA(ret);
+  DBG_LOG("Create CUDA stream = {}", reinterpret_cast<void*>(_handle));
   assert(_handle != nullptr);
 }
 CudaStreamWrapper::~CudaStreamWrapper() {
   cudaError_t ret;
   if (_handle) {
+    // Wait for remaining kernels on stream to complete.
+    this->synchronize();
     ret = cudaStreamDestroy(_handle);
     CHECK_CUDA(ret);
     _handle = nullptr;

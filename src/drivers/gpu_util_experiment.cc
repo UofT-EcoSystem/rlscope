@@ -11,7 +11,9 @@
 #include <spdlog/spdlog.h>
 
 #include <boost/filesystem.hpp>
+#include <boost/process.hpp>
 #include <boost/any.hpp>
+#include <boost/optional.hpp>
 
 #include "cuda_api_profiler/generic_logging.h"
 #include "cuda_api_profiler/debug_flags.h"
@@ -41,18 +43,120 @@ using json = nlohmann::json;
 #include <memory>
 
 #include "analysis/trace_file_parser.h"
+#include "gpu_util_experiment.h"
 
 DEFINE_bool(debug, false, "Debug: give additional verbose output");
 DEFINE_string(iml_directory, "", "Path to --iml-directory used when collecting trace-files");
 DEFINE_string(gpu_clock_freq_json, "", "--mode=run_kernels: Path to JSON file containing GPU clock frequency measurements (from --mode=gpu_clock_freq)");
 DEFINE_string(mode, "", "One of: [gpu_clock_freq, run_kernels]");
 
+DEFINE_int64(n_launches, 0, "Number of kernels to launch per-thread.");
 DEFINE_int64(kernel_delay_us, 0, "Time between kernel launches in microseconds");
 DEFINE_int64(kernel_duration_us, 0, "Duration of kernel in microseconds");
 DEFINE_double(run_sec, 0, "How to long to run for (in seconds)");
+DEFINE_int64(num_threads, 1, "How many threads/processes to launch CUDA kernels from?");
+// NOTE: launching in the same process will allow kernel overlap, whereas separate process will not (similar to minigo).
+DEFINE_bool(processes, false, "When --num_threads > 1, use separate processes to launch CUDA kernels.  Default behaviour is to use separate threads.");
+DEFINE_bool(sync, false, "Wait for kernel to finish after each launch. Useful for running really long kernels (e.g., 10 sec) to avoid creating long queues of kernels accidentally.");
 DEFINE_int64(repetitions, 5, "Repetitions when guessing GPU clock frequency");
 
-using namespace tensorflow;
+//using namespace tensorflow;
+namespace tensorflow {
+
+// FlagType = int64_t, double
+template <typename FlagType>
+void AppendCmdArg(std::list<std::string>* cmdline, const std::string& flag_opt, FlagType FLAGS_value, boost::optional<FlagType> overwrite_value)
+{
+  FlagType value;
+  if (overwrite_value.has_value()) {
+    value = overwrite_value.value();
+  } else {
+    value = FLAGS_value;
+  }
+
+  std::stringstream flag_opt_ss;
+  flag_opt_ss << "--" << flag_opt;
+  cmdline->push_back(flag_opt_ss.str());
+  std::stringstream value_ss;
+  value_ss << value;
+  cmdline->push_back(value_ss.str());
+}
+
+template <>
+void AppendCmdArg(std::list<std::string>* cmdline, const std::string& flag_opt, bool FLAGS_value, boost::optional<bool> overwrite_value) {
+  bool value;
+  if (overwrite_value.has_value()) {
+    value = overwrite_value.value();
+  } else {
+    value = FLAGS_value;
+  }
+
+  if (value) {
+    std::stringstream flag_opt_ss;
+    flag_opt_ss << "--" << flag_opt;
+    cmdline->push_back(flag_opt_ss.str());
+  }
+}
+
+template <>
+void AppendCmdArg(std::list<std::string>* cmdline, const std::string& flag_opt, std::string FLAGS_value, boost::optional<std::string> overwrite_value) {
+  std::string value;
+  if (overwrite_value.has_value()) {
+    value = overwrite_value.value();
+  } else {
+    value = FLAGS_value;
+  }
+
+  std::stringstream flag_opt_ss;
+  flag_opt_ss << "--" << flag_opt;
+  cmdline->push_back(flag_opt_ss.str());
+  cmdline->push_back(value);
+}
+
+static std::string BINARY_PATH;
+
+boost::process::child ReinvokeProcess(const GPUUtilExperimentArgs& overwrite_args, boost::process::environment env) {
+//  using bp = boost::process;
+//  bp::child c(bp::search_path("g++"), "main.cpp");
+//  std::stringstream ss;
+//  auto cmdline = ss.str();
+  std::list<std::string> cmdline;
+  cmdline.push_back(BINARY_PATH);
+
+#define APPEND_CMD_ARG(flag_opt, FLAGS_var) \
+  AppendCmdArg(&cmdline, flag_opt, FLAGS_var, overwrite_args.FLAGS_var);
+
+  APPEND_CMD_ARG("debug", FLAGS_debug);
+  APPEND_CMD_ARG("iml_directory", FLAGS_iml_directory);
+  APPEND_CMD_ARG("gpu_clock_freq_json", FLAGS_gpu_clock_freq_json);
+  APPEND_CMD_ARG("mode", FLAGS_mode);
+  APPEND_CMD_ARG("n_launches", FLAGS_n_launches);
+  APPEND_CMD_ARG("kernel_delay_us", FLAGS_kernel_delay_us);
+  APPEND_CMD_ARG("kernel_duration_us", FLAGS_kernel_duration_us);
+  APPEND_CMD_ARG("run_sec", FLAGS_run_sec);
+  APPEND_CMD_ARG("num_threads", FLAGS_num_threads);
+  APPEND_CMD_ARG("processes", FLAGS_processes);
+  APPEND_CMD_ARG("sync", FLAGS_sync);
+  APPEND_CMD_ARG("repetitions", FLAGS_repetitions);
+#undef APPEND_CMD_ARG
+
+  std::stringstream cmdline_ss;
+  int i = 0;
+  for (const auto& arg : cmdline) {
+    if (i > 0) {
+      cmdline_ss << " ";
+    }
+    cmdline_ss << arg;
+    i += 1;
+  }
+  auto cmdline_str = cmdline_ss.str();
+  DBG_LOG("Reinvoke gpu_util_experiment:\n  $ {}", cmdline_str);
+
+  boost::process::child child(cmdline_str, env);
+
+  return child;
+}
+
 
 #define IF_BAD_STATUS_EXIT(msg, status)  \
       if (status.code() != MyStatus::OK().code()) { \
@@ -103,7 +207,11 @@ void UsageAndExit(const std::string& msg) {
   exit(EXIT_FAILURE);
 }
 
+} // tensorflow
+using namespace tensorflow;
+
 int main(int argc, char** argv) {
+  BINARY_PATH = argv[0];
   backward::SignalHandling sh;
   gflags::ParseCommandLineFlags(&argc, &argv, true);
 
@@ -116,8 +224,13 @@ int main(int argc, char** argv) {
 
   boost::filesystem::path iml_path(FLAGS_iml_directory);
   if (FLAGS_iml_directory != "" && !boost::filesystem::is_directory(iml_path)) {
-    std::cout << "ERROR: --iml_directory must be a path to a root --iml-directory given when collecting traces" << std::endl;
-    exit(EXIT_FAILURE);
+    bool success = boost::filesystem::create_directories(iml_path);
+    if (!success) {
+      std::cout << "ERROR: failed to create --iml_directory = " << iml_path << std::endl;
+      exit(EXIT_FAILURE);
+    }
+//    std::cout << "ERROR: --iml_directory must be a path to a root --iml-directory given when collecting traces" << std::endl;
+//    exit(EXIT_FAILURE);
   }
 
   Mode mode = StringToMode(FLAGS_mode);
@@ -147,17 +260,24 @@ int main(int argc, char** argv) {
       UsageAndExit(ss.str());
     }
 
+    if (FLAGS_n_launches < 0) {
+      std::stringstream ss;
+      ss << "--n_launches >= 0 is required for --mode=" << FLAGS_mode;
+      UsageAndExit(ss.str());
+    }
+
     if (FLAGS_kernel_duration_us <= 0) {
       std::stringstream ss;
       ss << "--kernel_duration_us > 0 is required for --mode=" << FLAGS_mode;
       UsageAndExit(ss.str());
     }
 
-    if (FLAGS_run_sec <= 0) {
-      std::stringstream ss;
-      ss << "--run_sec > 0 is required for --mode=" << FLAGS_mode;
-      UsageAndExit(ss.str());
-    }
+//    if (FLAGS_run_sec <= 0) {
+//      std::stringstream ss;
+//      ss << "--run_sec > 0 is required for --mode=" << FLAGS_mode;
+//      UsageAndExit(ss.str());
+//    }
+
   }
 
   if (mode == Mode::MODE_GPU_CLOCK_FREQ) {
@@ -173,11 +293,15 @@ int main(int argc, char** argv) {
     GPUClockFreq gpu_clock_freq(FLAGS_repetitions, FLAGS_iml_directory);
     status = gpu_clock_freq.load_json(FLAGS_gpu_clock_freq_json);
     IF_BAD_STATUS_EXIT("Failed to load json for --mode=gpu_clock_freq", status);
-    GPUKernelRunner gpu_kernel_runner(
+    ThreadedGPUKernelRunner gpu_kernel_runner(
         gpu_clock_freq,
+        FLAGS_n_launches,
         FLAGS_kernel_delay_us,
         FLAGS_kernel_duration_us,
         FLAGS_run_sec,
+        FLAGS_num_threads,
+        FLAGS_processes,
+        FLAGS_sync,
         FLAGS_iml_directory,
         FLAGS_debug);
     gpu_kernel_runner.run();
