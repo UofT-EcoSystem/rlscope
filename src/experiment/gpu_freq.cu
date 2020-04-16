@@ -36,6 +36,12 @@ __global__ void _gpu_sleep(clock_value_t sleep_cycles, int64_t *output) {
   } while (cycles_elapsed < sleep_cycles);
 }
 
+__global__ void _compute_kernel(size_t iterations, int64_t *output) {
+  for (size_t i = 0; i < iterations; i++) {
+    *output = *output + 1;
+  }
+}
+
 void GPUSleeper::gpu_sleep_cycles(CudaStream stream, clock_value_t sleep_cycles, bool sync) {
   cudaError_t err;
   _gpu_sleep<<<1, 1, 0, stream.get()>>>(sleep_cycles, _output.get()); // This line alone is 0.208557334

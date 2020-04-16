@@ -22,6 +22,7 @@
 #include <string>
 
 #include <boost/process.hpp>
+#include "drivers/gpu_util_experiment.h"
 
 #include "common/my_status.h"
 
@@ -332,6 +333,8 @@ class GPUClockFreq {
 public:
   GPUSleeper _gpu_sleeper;
 
+  GPUUtilExperimentArgs args;
+
   std::vector<double> _time_secs;
   std::vector<double> _freq_mhz;
   double _avg_mhz;
@@ -339,16 +342,19 @@ public:
 //  std::vector<clock_value_t> time_cycles;
   // Number of cycles to sleep for on the GPU.
   clock_value_t _sleep_cycles;
-  int _repetitions;
+//  int _repetitions;
 //  GPUClockResult _result;
-  std::string _directory;
+//  std::string _directory;
 
-  GPUClockFreq(int repetitions, const std::string& directory) :
-      _avg_mhz(0.)
+  GPUClockFreq(GPUUtilExperimentArgs args
+//      int repetitions, const std::string& directory
+      ) :
+      args(args)
+      , _avg_mhz(0.)
       , _std_mhz(0.)
       , _sleep_cycles(GPU_CLOCK_INIT_GPU_SLEEP_CYCLES)
-      , _repetitions(repetitions)
-      , _directory(directory)
+//      , _repetitions(repetitions)
+//      , _directory(directory)
   {
   }
 
@@ -399,53 +405,58 @@ public:
   std::unique_ptr<std::thread> _async_thread;
   std::unique_ptr<boost::process::child> _async_process;
 
+  GPUUtilExperimentArgs args;
+
 //  std::unique_ptr<CudaContext> _context;
 //  CudaStream _stream;
 //  std::unique_ptr<std::thread> _async_thread;
 //  std::unique_ptr<boost::process::child> _async_process;
 
-  // "Number of kernels to launch per-thread."
-  int64_t _n_launches;
-  // "Time between kernel launches in microseconds"
-  int64_t _kernel_delay_us;
-  // "Duration of kernel in microseconds"
-  int64_t _kernel_duration_us;
-  // "How to long to run for (in seconds)"
-  double _run_sec;
-  // After launching a kernel, wait for it to finish.
-  // Useful for running really long kernels (e.g., 10 sec)
-  // without creating a giant queue of kernel launches (e.g., delay=1us)
-  bool _sync;
-  bool _cuda_context;
-  bool _internal_is_child;
-
+//  // "Number of kernels to launch per-thread."
+//  int64_t _n_launches;
+//  // "Time between kernel launches in microseconds"
+//  int64_t _kernel_delay_us;
+//  // "Duration of kernel in microseconds"
+//  int64_t _kernel_duration_us;
+//  // "How to long to run for (in seconds)"
+//  double _run_sec;
+//  // After launching a kernel, wait for it to finish.
+//  // Useful for running really long kernels (e.g., 10 sec)
+//  // without creating a giant queue of kernel launches (e.g., delay=1us)
+//  bool _sync;
+//  bool _cuda_context;
+//  bool _internal_is_child;
+//
   GPUClockFreq _freq;
-  std::string _directory;
-  bool _debug;
+//  std::string _directory;
+//  bool _debug;
 
 //  std::unique_ptr<Notification> _async_thread_done;
 
   GPUKernelRunner(
       GPUClockFreq freq,
-      int64_t n_launches,
-      int64_t kernel_delay_us,
-      int64_t kernel_duration_us,
-      double run_sec,
-      bool sync,
-      bool cuda_context,
-      bool internal_is_child,
-      const std::string& directory,
-      bool debug) :
-      _n_launches(n_launches),
-      _kernel_delay_us(kernel_delay_us),
-      _kernel_duration_us(kernel_duration_us),
-      _run_sec(run_sec),
-      _sync(sync),
-      _cuda_context(cuda_context),
-      _internal_is_child(internal_is_child),
-      _freq(std::move(freq)),
-      _directory(directory),
-      _debug(debug)
+      GPUUtilExperimentArgs args
+//      int64_t n_launches,
+//      int64_t kernel_delay_us,
+//      int64_t kernel_duration_us,
+//      double run_sec,
+//      bool sync,
+//      bool cuda_context,
+//      bool internal_is_child,
+//      const std::string& directory,
+//      bool debug
+      ) :
+      args(args),
+//      _n_launches(n_launches),
+//      _kernel_delay_us(kernel_delay_us),
+//      _kernel_duration_us(kernel_duration_us),
+//      _run_sec(run_sec),
+//      _sync(sync),
+//      _cuda_context(cuda_context),
+//      _internal_is_child(internal_is_child),
+      _freq(std::move(freq))
+//      _directory(directory),
+//      _debug(debug)
   {
   }
 
@@ -607,53 +618,60 @@ class ThreadedGPUKernelRunner {
 public:
   SharedMem _shared_mem;
   SyncBlock* _sync_block;
-  // "Number of kernels to launch per-thread."
-  int64_t _n_launches;
-  // "Time between kernel launches in microseconds"
-  int64_t _kernel_delay_us;
-  // "Duration of kernel in microseconds"
-  int64_t _kernel_duration_us;
-  // "How to long to run for (in seconds)"
-  double _run_sec;
-  size_t _num_threads;
-  bool _processes;
-  // After launching a kernel, wait for it to finish.
-  // Useful for running really long kernels (e.g., 10 sec)
-  // without creating a giant queue of kernel launches (e.g., delay=1us)
-  bool _sync;
-  bool _cuda_context;
-  bool _internal_is_child;
+
+//  // "Number of kernels to launch per-thread."
+//  int64_t _n_launches;
+//  // "Time between kernel launches in microseconds"
+//  int64_t _kernel_delay_us;
+//  // "Duration of kernel in microseconds"
+//  int64_t _kernel_duration_us;
+//  // "How to long to run for (in seconds)"
+//  double _run_sec;
+//  size_t _num_threads;
+//  bool _processes;
+//  // After launching a kernel, wait for it to finish.
+//  // Useful for running really long kernels (e.g., 10 sec)
+//  // without creating a giant queue of kernel launches (e.g., delay=1us)
+//  bool _sync;
+//  bool _cuda_context;
+//  bool _internal_is_child;
+
+  GPUUtilExperimentArgs args;
 
   GPUClockFreq _freq;
-  std::string _directory;
-  bool _debug;
+//  std::string _directory;
+//  bool _debug;
 
   ThreadedGPUKernelRunner(
       GPUClockFreq freq,
-      int64_t n_launches,
-      int64_t kernel_delay_us,
-      int64_t kernel_duration_us,
-      double run_sec,
-      size_t num_threads,
-      bool processes,
-      bool sync,
-      bool cuda_context,
-      bool internal_is_child,
-      const std::string& directory,
-      bool debug) :
+      GPUUtilExperimentArgs args
+
+//      int64_t n_launches,
+//      int64_t kernel_delay_us,
+//      int64_t kernel_duration_us,
+//      double run_sec,
+//      size_t num_threads,
+//      bool processes,
+//      bool sync,
+//      bool cuda_context,
+//      bool internal_is_child,
+//      const std::string& directory,
+//      bool debug
+      ) :
       _sync_block(nullptr),
-      _n_launches(n_launches),
-      _kernel_delay_us(kernel_delay_us),
-      _kernel_duration_us(kernel_duration_us),
-      _run_sec(run_sec),
-      _num_threads(num_threads),
-      _processes(processes),
-      _sync(sync),
-      _cuda_context(cuda_context),
-      _internal_is_child(internal_is_child),
-      _freq(std::move(freq)),
-      _directory(directory),
-      _debug(debug)
+      args(std::move(args)),
+//      _n_launches(n_launches),
+//      _kernel_delay_us(kernel_delay_us),
+//      _kernel_duration_us(kernel_duration_us),
+//      _run_sec(run_sec),
+//      _num_threads(num_threads),
+//      _processes(processes),
+//      _sync(sync),
+//      _cuda_context(cuda_context),
+//      _internal_is_child(internal_is_child),
+      _freq(std::move(freq))
+//      _directory(directory),
+//      _debug(debug)
   {
   }
 

@@ -27,8 +27,12 @@ struct GPUUtilExperimentArgs {
   boost::optional<int64_t> FLAGS_num_threads;
   boost::optional<bool> FLAGS_processes;
   boost::optional<bool> FLAGS_sync;
+  boost::optional<bool> FLAGS_cuda_context;
   boost::optional<int64_t> FLAGS_repetitions;
   boost::optional<bool> FLAGS_internal_is_child;
+  boost::optional<int64_t> FLAGS_kern_arg_iterations;
+
+  static GPUUtilExperimentArgs FromFlags();
 };
 
 

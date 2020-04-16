@@ -150,7 +150,7 @@ std::string GPUClockFreq::json_basename() const {
 }
 
 std::string GPUClockFreq::json_path() const {
-  boost::filesystem::path direc(_directory);
+  boost::filesystem::path direc(args.FLAGS_iml_directory.get());
   boost::filesystem::path base = json_basename();
   return (direc / base).string();
 }
@@ -159,7 +159,7 @@ void GPUClockFreq::run() {
   CudaStream stream;
   guess_cycles(stream);
   time_type start_t, end_t;
-  for (int r = 0; r < _repetitions; ++r) {
+  for (int r = 0; r < args.FLAGS_repetitions.get(); ++r) {
     iter(stream, &start_t, &end_t);
     auto total_sec = elapsed_sec(start_t, end_t);
     _time_secs.push_back(total_sec);
@@ -192,40 +192,32 @@ void GPUKernelRunner::DelayUs(int64_t usec) {
 
 void ThreadedGPUKernelRunner::run() {
 
-  if (!_internal_is_child) {
+  if (!args.FLAGS_internal_is_child.get()) {
     // Create shared memory segment.
     _shared_mem = SharedMem(SharedMem::Parent(SHARED_MEM_NAME, SHARED_MEM_SIZE_BYTES));
     // num_threads + 1 since barrier is across all children AND parent.
     // (parent uses barrier to time just kernel execution portion, excluding setup/teardown).
-    _sync_block = SyncBlock::Parent(&_shared_mem, SYNC_BLOCK_NAME, _num_threads + 1);
-    if (SHOULD_DEBUG(FEATURE_GPU_UTIL_SYNCH)) {
+    _sync_block = SyncBlock::Parent(&_shared_mem, SYNC_BLOCK_NAME, args.FLAGS_num_threads.get() + 1);
+    if (SHOULD_DEBUG(FEATURE_GPU_UTIL_SYNC)) {
       DBG_LOG("Parent saw {} @ {}", *_sync_block, reinterpret_cast<void *>(_sync_block));
     }
   }
 
-  if (_num_threads == 1) {
+  if (args.FLAGS_num_threads.get() == 1) {
     // Just one thread launches kernels (default).
     // Run in same thread.
     GPUKernelRunner gpu_kernel_runner(
         _freq,
-        _n_launches,
-        _kernel_delay_us,
-        _kernel_duration_us,
-        _run_sec,
-        _sync,
-        _cuda_context,
-        _internal_is_child,
-        _directory,
-        _debug);
+        args);
     gpu_kernel_runner.run();
     return;
   }
 
-  if (SHOULD_DEBUG(FEATURE_GPU_UTIL_SYNCH)) {
-    DBG_LOG("ThreadedGPUKernelRunner launching kernels from {} threads", _num_threads);
+  if (SHOULD_DEBUG(FEATURE_GPU_UTIL_SYNC)) {
+    DBG_LOG("ThreadedGPUKernelRunner launching kernels from {} threads", args.FLAGS_num_threads.get());
   }
 
-  assert(!_internal_is_child);
+  assert(!args.FLAGS_internal_is_child.get());
 
   // >= 2 threads.
   // Launch kernels from multiple threads
@@ -235,26 +227,20 @@ void ThreadedGPUKernelRunner::run() {
   //    instead serialize their execution.  But separate streams from the same process, I expect there to be overlap.
   //    We should try both, and measure BOTH utilization AND overlap.
   std::vector<GPUKernelRunner> gpu_kernel_runners;
-  gpu_kernel_runners.reserve(_num_threads);
-  for (int i = 0; i < static_cast<int>(_num_threads); i++) {
-    bool internal_is_child = true;
+  gpu_kernel_runners.reserve(args.FLAGS_num_threads.get());
+
+  GPUUtilExperimentArgs child_args = args;
+  child_args.FLAGS_internal_is_child = true;
+  for (int i = 0; i < static_cast<int>(args.FLAGS_num_threads.get()); i++) {
     gpu_kernel_runners.emplace_back(
         _freq,
-        _n_launches,
-        _kernel_delay_us,
-        _kernel_duration_us,
-        _run_sec,
-        _sync,
-        _cuda_context,
-        internal_is_child,
-        _directory,
-        _debug);
+        child_args);
   }
   int i;
 
   i = 0;
   for (auto& gpu_kernel_runner : gpu_kernel_runners) {
-    if (!_processes) {
+    if (!args.FLAGS_processes.get()) {
       gpu_kernel_runner.run_async_thread();
     } else {
       gpu_kernel_runner.run_async_process(i);
@@ -272,7 +258,7 @@ void ThreadedGPUKernelRunner::run() {
 
   i = 0;
   for (auto& gpu_kernel_runner : gpu_kernel_runners) {
-    if (!_processes) {
+    if (!args.FLAGS_processes.get()) {
       gpu_kernel_runner.wait_thread();
     } else {
       gpu_kernel_runner.wait_process(i);
@@ -283,7 +269,7 @@ void ThreadedGPUKernelRunner::run() {
   double seconds = std::chrono::duration_cast<std::chrono::microseconds>(done_kernels_t - start_kernels_t).count() / static_cast<double>(MICROSECONDS_IN_SECOND);
   DBG_LOG("Running kernels took {} seconds", seconds);
 
-  if (SHOULD_DEBUG(FEATURE_GPU_UTIL_SYNCH)) {
+  if (SHOULD_DEBUG(FEATURE_GPU_UTIL_SYNC)) {
     DBG_LOG("After children done, Parent sees: {}", *_sync_block);
   }
 
@@ -308,9 +294,9 @@ void GPUKernelRunner::wait_thread() {
 void GPUKernelRunner::run_async_process(int thread_id) {
   assert(_async_process == nullptr);
   _async_process.reset(new boost::process::child);
-  GPUUtilExperimentArgs args;
-  args.FLAGS_num_threads = 1;
-  args.FLAGS_internal_is_child = true;
+  GPUUtilExperimentArgs child_args = args;
+  child_args.FLAGS_num_threads = 1;
+  child_args.FLAGS_internal_is_child = true;
 
   //get a handle to the current environment
   auto env = boost::this_process::environment();
@@ -319,7 +305,7 @@ void GPUKernelRunner::run_async_process(int thread_id) {
   process_name_ss << env["IML_PROCESS_NAME"].to_string() << ".thread_" << thread_id;
   child_env["IML_PROCESS_NAME"] = process_name_ss.str();
 
-  *_async_process = ReinvokeProcess(args, child_env);
+  *_async_process = ReinvokeProcess(child_args, child_env);
 }
 void GPUKernelRunner::wait_process(int thread_id) {
   assert(_async_process);
@@ -336,17 +322,18 @@ void GPUKernelRunner::run() {
 
   SharedMem shared_mem;
   SyncBlock* sync_block = nullptr;
-  if (_internal_is_child) {
+  DBG_LOG("args.FLAGS_internal_is_child = {}", args.FLAGS_internal_is_child.get());
+  if (args.FLAGS_internal_is_child.get()) {
     shared_mem = SharedMem::Child(SHARED_MEM_NAME);
     sync_block = SyncBlock::Child(&shared_mem, SYNC_BLOCK_NAME);
-    if (SHOULD_DEBUG(FEATURE_GPU_UTIL_SYNCH)) {
+    if (SHOULD_DEBUG(FEATURE_GPU_UTIL_SYNC)) {
       DBG_LOG("Child saw {} @ {}", *sync_block, reinterpret_cast<void*>(sync_block));
     }
   }
 
-  _run_ctx.reset(new RunContext(_cuda_context));
+  _run_ctx.reset(new RunContext(args.FLAGS_cuda_context.get()));
 
-  if (_internal_is_child) {
+  if (args.FLAGS_internal_is_child.get()) {
     // Barrier synchronization to wait for ALL threads to finish creating CUDA context.
     //
     // This is to ensure a fair comparison of "how long" it takes multi-process/multi-thread/multi-context
@@ -358,7 +345,7 @@ void GPUKernelRunner::run() {
   // Launch the kernel every --kernel_delay_us microseconds.
   time_type start_t = time_now();
 
-//  assert(_kernel_duration_us % MICROSECONDS_IN_SECOND == 0);
+//  assert(args.FLAGS_kernel_duration_us.get() % MICROSECONDS_IN_SECOND == 0);
 
   struct GPUKernelRun {
     int64_t time_sleeping_us;
@@ -373,8 +360,8 @@ void GPUKernelRunner::run() {
     time_type now_t = time_now();
     auto time_sec = elapsed_sec(start_t, now_t);
     if (
-//        time_sec >= _run_sec ||
-        launches >= _n_launches) {
+//        time_sec >= args.FLAGS_run_sec.get() ||
+        launches >= args.FLAGS_n_launches.get()) {
       // Q: Should we wait for the stream to finish here?
       // Otherwise, cudaStreamDestroy will free the stream in ~CudaStreamWrapper without waiting for the stream to finish;
       // I suspect that could result in traces NOT being collected for remaining kernels (unsure...)
@@ -387,10 +374,10 @@ void GPUKernelRunner::run() {
     // - Q: Do we want to launch another kernel BEFORE the last one finishes...?
     //   ... if waiting for it to finish takes a long time (> 5 us)... then yes?
     auto before_sleep_t = time_now();
-    if (_sync) {
-      _freq.gpu_sleep_us_sync(*_run_ctx->_stream, _kernel_duration_us);
+    if (args.FLAGS_sync.get()) {
+      _freq.gpu_sleep_us_sync(*_run_ctx->_stream, args.FLAGS_kernel_duration_us.get());
     } else {
-      _freq.gpu_sleep_us(*_run_ctx->_stream, _kernel_duration_us);
+      _freq.gpu_sleep_us(*_run_ctx->_stream, args.FLAGS_kernel_duration_us.get());
     }
     launches += 1;
     auto after_sleep_t = time_now();
@@ -401,27 +388,27 @@ void GPUKernelRunner::run() {
     int64_t time_sleeping_us = time_sleeping_sec * MICROSECONDS_IN_SECOND;
     kernel_run.time_sleeping_us = time_sleeping_us;
 //    if (SHOULD_DEBUG(FEATURE_GPU_CLOCK_FREQ)) {
-//      auto off_by = _kernel_duration_us - time_sleeping_us;
+//      auto off_by = args.FLAGS_kernel_duration_us.get() - time_sleeping_us;
 //      DBG_LOG("GPU.sleep for {} us (off by {} us)", time_sleeping_us, off_by);
 //    }
     auto before_delay_t = time_now();
-    DelayUs(_kernel_delay_us);
-//    int ret = usleep(_kernel_delay_us);
+    DelayUs(args.FLAGS_kernel_delay_us.get());
+//    int ret = usleep(args.FLAGS_kernel_delay_us.get());
 //    assert(ret == 0);
     auto after_delay_t = time_now();
     auto after_delay_sec = elapsed_sec(before_delay_t, after_delay_t);
     int64_t after_delay_us = after_delay_sec * MICROSECONDS_IN_SECOND;
     kernel_run.after_delay_us = after_delay_us;
 //    if (SHOULD_DEBUG(FEATURE_GPU_CLOCK_FREQ)) {
-//      auto off_by = _kernel_delay_us - after_delay_us;
+//      auto off_by = args.FLAGS_kernel_delay_us.get() - after_delay_us;
 //      DBG_LOG("CPU.delay for {} us (off by {} us)", after_delay_us, off_by);
 //    }
-    if (_debug) {
+    if (args.FLAGS_debug.get()) {
       kernel_runs.push_back(std::move(kernel_run));
     }
   }
 
-  if (_internal_is_child) {
+  if (args.FLAGS_internal_is_child.get()) {
     // Barrier synchronization to wait for ALL GPU kernels to finish executing across all threads.
     //
     // This is to ensure a fair comparison of "how long" it takes multi-process/multi-thread/multi-context
@@ -429,7 +416,7 @@ void GPUKernelRunner::run() {
     sync_block->barrier.arrive_and_wait();
   }
 
-  if (_debug) {
+  if (args.FLAGS_debug.get()) {
     std::stringstream ss;
     size_t i = 0;
     int indent = 0;
@@ -440,11 +427,11 @@ void GPUKernelRunner::run() {
       ss << "[" << i << "]\n";
 
       PrintIndent(ss, indent + 2);
-      int64_t off_by_time_sleeping_us = _kernel_duration_us - kernel_run.time_sleeping_us;
+      int64_t off_by_time_sleeping_us = args.FLAGS_kernel_duration_us.get() - kernel_run.time_sleeping_us;
       ss << "GPU.sleep for " << kernel_run.time_sleeping_us << " us (off by " << off_by_time_sleeping_us << " us)\n";
 
       PrintIndent(ss, indent + 2);
-      int64_t off_by_after_delay_us = _kernel_delay_us - kernel_run.after_delay_us;
+      int64_t off_by_after_delay_us = args.FLAGS_kernel_delay_us.get() - kernel_run.after_delay_us;
       ss << "CPU.delay for " << kernel_run.after_delay_us << " us (off by " << off_by_after_delay_us << " us)\n";
 
       i += 1;

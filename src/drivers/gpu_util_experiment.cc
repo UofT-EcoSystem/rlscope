@@ -63,19 +63,20 @@ DEFINE_int64(repetitions, 5, "Repetitions when guessing GPU clock frequency");
 
 DEFINE_bool(internal_is_child, false, "(Internal) this process is a child of some parent instance of gpu_util_experiment => open existing shared memory (don't create)");
 
+DEFINE_int64(kern_arg_iterations, 1000*1000*1000, "(Kernel arg) compute_kernel: how many loop iterations to perform (increase compute)");
+// TODO: add grid size and thread block size args.
+
 //using namespace tensorflow;
 namespace tensorflow {
 
 // FlagType = int64_t, double
 template <typename FlagType>
-void AppendCmdArg(std::list<std::string>* cmdline, const std::string& flag_opt, FlagType FLAGS_value, boost::optional<FlagType> overwrite_value)
+void AppendCmdArg(std::list<std::string>* cmdline, const std::string& flag_opt, boost::optional<FlagType> arg)
 {
-  FlagType value;
-  if (overwrite_value.has_value()) {
-    value = overwrite_value.value();
-  } else {
-    value = FLAGS_value;
+  if (!arg.has_value()) {
+    return;
   }
+  FlagType value = arg.value();
 
   std::stringstream flag_opt_ss;
   flag_opt_ss << "--" << flag_opt;
@@ -86,13 +87,11 @@ void AppendCmdArg(std::list<std::string>* cmdline, const std::string& flag_opt, 
 }
 
 template <>
-void AppendCmdArg(std::list<std::string>* cmdline, const std::string& flag_opt, bool FLAGS_value, boost::optional<bool> overwrite_value) {
-  bool value;
-  if (overwrite_value.has_value()) {
-    value = overwrite_value.value();
-  } else {
-    value = FLAGS_value;
+void AppendCmdArg(std::list<std::string>* cmdline, const std::string& flag_opt, boost::optional<bool> arg) {
+  if (!arg.has_value()) {
+    return;
   }
+  bool value = arg.value();
 
   if (value) {
     std::stringstream flag_opt_ss;
@@ -102,13 +101,11 @@ void AppendCmdArg(std::list<std::string>* cmdline, const std::string& flag_opt, 
 }
 
 template <>
-void AppendCmdArg(std::list<std::string>* cmdline, const std::string& flag_opt, std::string FLAGS_value, boost::optional<std::string> overwrite_value) {
-  std::string value;
-  if (overwrite_value.has_value()) {
-    value = overwrite_value.value();
-  } else {
-    value = FLAGS_value;
+void AppendCmdArg(std::list<std::string>* cmdline, const std::string& flag_opt, boost::optional<std::string> arg) {
+  if (!arg.has_value()) {
+    return;
   }
+  std::string value = arg.value();
 
   std::stringstream flag_opt_ss;
   flag_opt_ss << "--" << flag_opt;
@@ -117,6 +114,45 @@ void AppendCmdArg(std::list<std::string>* cmdline, const std::string& flag_opt, 
 }
 
 static std::string BINARY_PATH;
+
+/* static */ GPUUtilExperimentArgs GPUUtilExperimentArgs::FromFlags() {
+  GPUUtilExperimentArgs args;
+#define SET_FLAG(FLAGS_var) \
+  args.FLAGS_var = ::FLAGS_var;
+
+  auto env = boost::this_process::environment();
+#define SET_ENV(env_var) \
+  if (env.find(#env_var) != env.end()) { \
+    args.env_var = env[#env_var].to_string(); \
+  }
+
+//  if (env.find("IML_PROCESS_NAME") != env.end()) {
+//    args.IML_PROCESS_NAME = env["IML_PROCESS_NAME"].to_string();
+//  }
+
+  SET_ENV(IML_PROCESS_NAME);
+
+//  args.FLAGS_debug = ::FLAGS_debug;
+
+  SET_FLAG(FLAGS_debug);
+  SET_FLAG(FLAGS_iml_directory);
+  SET_FLAG(FLAGS_gpu_clock_freq_json);
+  SET_FLAG(FLAGS_mode);
+  SET_FLAG(FLAGS_n_launches);
+  SET_FLAG(FLAGS_kernel_delay_us);
+  SET_FLAG(FLAGS_kernel_duration_us);
+  SET_FLAG(FLAGS_run_sec);
+  SET_FLAG(FLAGS_num_threads);
+  SET_FLAG(FLAGS_processes);
+  SET_FLAG(FLAGS_sync);
+  SET_FLAG(FLAGS_cuda_context);
+  SET_FLAG(FLAGS_repetitions);
+  SET_FLAG(FLAGS_internal_is_child);
+  SET_FLAG(FLAGS_kern_arg_iterations);
+#undef SET_FLAG
+
+  return args;
+}
 
 boost::process::child ReinvokeProcess(const GPUUtilExperimentArgs& overwrite_args, boost::process::environment env) {
 //  using bp = boost::process;
@@ -127,7 +163,7 @@ boost::process::child ReinvokeProcess(const GPUUtilExperimentArgs& overwrite_arg
   cmdline.push_back(BINARY_PATH);
 
 #define APPEND_CMD_ARG(flag_opt, FLAGS_var) \
-  AppendCmdArg(&cmdline, flag_opt, FLAGS_var, overwrite_args.FLAGS_var);
+  AppendCmdArg(&cmdline, flag_opt, overwrite_args.FLAGS_var);
 
   APPEND_CMD_ARG("debug", FLAGS_debug);
   APPEND_CMD_ARG("iml_directory", FLAGS_iml_directory);
@@ -140,8 +176,10 @@ boost::process::child ReinvokeProcess(const GPUUtilExperimentArgs& overwrite_arg
   APPEND_CMD_ARG("num_threads", FLAGS_num_threads);
   APPEND_CMD_ARG("processes", FLAGS_processes);
   APPEND_CMD_ARG("sync", FLAGS_sync);
+  APPEND_CMD_ARG("cuda_context", FLAGS_cuda_context);
   APPEND_CMD_ARG("repetitions", FLAGS_repetitions);
   APPEND_CMD_ARG("internal_is_child", FLAGS_internal_is_child);
+  APPEND_CMD_ARG("kern_arg_iterations", FLAGS_kern_arg_iterations);
 #undef APPEND_CMD_ARG
 
   std::stringstream cmdline_ss;
@@ -284,8 +322,10 @@ int main(int argc, char** argv) {
 
   }
 
+  auto args = GPUUtilExperimentArgs::FromFlags();
+
   if (mode == Mode::MODE_GPU_CLOCK_FREQ) {
-    GPUClockFreq gpu_clock_freq(FLAGS_repetitions, FLAGS_iml_directory);
+    GPUClockFreq gpu_clock_freq(args);
     gpu_clock_freq.run();
     status = gpu_clock_freq.dump_json();
     IF_BAD_STATUS_EXIT("Failed to dump json for --mode=gpu_clock_freq", status);
@@ -294,22 +334,12 @@ int main(int argc, char** argv) {
   }
 
   if (mode == Mode::MODE_RUN_KERNELS) {
-    GPUClockFreq gpu_clock_freq(FLAGS_repetitions, FLAGS_iml_directory);
+    GPUClockFreq gpu_clock_freq(args);
     status = gpu_clock_freq.load_json(FLAGS_gpu_clock_freq_json);
     IF_BAD_STATUS_EXIT("Failed to load json for --mode=gpu_clock_freq", status);
     ThreadedGPUKernelRunner gpu_kernel_runner(
         gpu_clock_freq,
-        FLAGS_n_launches,
-        FLAGS_kernel_delay_us,
-        FLAGS_kernel_duration_us,
-        FLAGS_run_sec,
-        FLAGS_num_threads,
-        FLAGS_processes,
-        FLAGS_sync,
-        FLAGS_cuda_context,
-        FLAGS_internal_is_child,
-        FLAGS_iml_directory,
-        FLAGS_debug);
+        args);
     gpu_kernel_runner.run();
     exit(EXIT_SUCCESS);
   }
