@@ -58,6 +58,7 @@ DEFINE_int64(num_threads, 1, "How many threads/processes to launch CUDA kernels 
 // NOTE: launching in the same process will allow kernel overlap, whereas separate process will not (similar to minigo).
 DEFINE_bool(processes, false, "When --num_threads > 1, use separate processes to launch CUDA kernels.  Default behaviour is to use separate threads.");
 DEFINE_bool(sync, false, "Wait for kernel to finish after each launch. Useful for running really long kernels (e.g., 10 sec) to avoid creating long queues of kernels accidentally.");
+DEFINE_bool(cuda_context, false, "Create new CUDA context for each thread.");
 DEFINE_int64(repetitions, 5, "Repetitions when guessing GPU clock frequency");
 
 //using namespace tensorflow;
@@ -302,6 +303,7 @@ int main(int argc, char** argv) {
         FLAGS_num_threads,
         FLAGS_processes,
         FLAGS_sync,
+        FLAGS_cuda_context,
         FLAGS_iml_directory,
         FLAGS_debug);
     gpu_kernel_runner.run();

@@ -932,6 +932,9 @@ endif()
 #    endforeach()
 #endif()
 
+# Link to CUDA driver API.
+target_link_libraries(gpu_util_experiment PRIVATE cuda)
+
 configure_file(normalized_car_features.csv ${CMAKE_CURRENT_BINARY_DIR}/normalized_car_features.csv COPYONLY)
 if(MSVC)
     target_compile_definitions(main PRIVATE COMPILER_MSVC)

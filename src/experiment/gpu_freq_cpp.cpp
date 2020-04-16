@@ -2,6 +2,9 @@
 // Created by jgleeson on 2020-01-23.
 //
 
+#include <cuda.h>
+#include <cuda_runtime.h>
+
 #include <chrono>
 #include <iostream>
 #include <cmath>
@@ -20,6 +23,10 @@
 
 #include <nlohmann/json.hpp>
 using json = nlohmann::json;
+
+#include <pthread.h>
+
+#include <backward.hpp>
 
 #include "common/my_status.h"
 
@@ -194,6 +201,7 @@ void ThreadedGPUKernelRunner::run() {
         _kernel_duration_us,
         _run_sec,
         _sync,
+        _cuda_context,
         _directory,
         _debug);
     gpu_kernel_runner.run();
@@ -221,6 +229,7 @@ void ThreadedGPUKernelRunner::run() {
         _kernel_duration_us,
         _run_sec,
         _sync,
+        _cuda_context,
         _directory,
         _debug);
   }
@@ -282,11 +291,10 @@ void GPUKernelRunner::wait_process(int thread_id) {
   _async_process.reset(nullptr);
 }
 
-void GPUKernelRunner::synchronize() {
-
-}
-
 void GPUKernelRunner::run() {
+
+  _run_ctx.reset(new RunContext(_cuda_context));
+
   // Launch a kernel that runs for --kernel_duration_us microseconds.
   // Launch the kernel every --kernel_delay_us microseconds.
   time_type start_t = time_now();
@@ -321,9 +329,9 @@ void GPUKernelRunner::run() {
     //   ... if waiting for it to finish takes a long time (> 5 us)... then yes?
     auto before_sleep_t = time_now();
     if (_sync) {
-      _freq.gpu_sleep_us_sync(_stream, _kernel_duration_us);
+      _freq.gpu_sleep_us_sync(*_run_ctx->_stream, _kernel_duration_us);
     } else {
-      _freq.gpu_sleep_us(_stream, _kernel_duration_us);
+      _freq.gpu_sleep_us(*_run_ctx->_stream, _kernel_duration_us);
     }
     launches += 1;
     auto after_sleep_t = time_now();
@@ -383,6 +391,44 @@ void GPUKernelRunner::run() {
     DBG_LOG("{}", ss.str());
   }
 
+}
+
+CudaContext::CudaContext() : _context(new CudaContextWrapper()) {
+}
+CUcontext CudaContext::get() const {
+  return _context->_handle;
+}
+
+CudaContextWrapper::CudaContextWrapper() :
+    _handle(nullptr),
+    _flags(0),
+    _dev(0)
+{
+  CUresult result;
+  result = cuCtxCreate(&_handle, _flags, _dev);
+  CHECK_CUDA_DRIVER(result);
+  std::stringstream ss;
+//  DBG_LOG("Create CUDA context = {}", reinterpret_cast<void*>(_handle));
+  backward::StackTrace st;
+  st.load_here(32);
+  backward::Printer p;
+  ss << "Create CUDA context = " << reinterpret_cast<void*>(_handle) << "\n";
+  p.print(st, ss);
+  DBG_LOG("{}", ss.str());
+  assert(_handle != nullptr);
+}
+CudaContextWrapper::~CudaContextWrapper() {
+  if (_handle) {
+    // Wait for remaining kernels on all streams for the context to complete.
+    // (driver API assumes you have done this before destroying context.)
+    cudaError_t ret;
+    CUresult result;
+    ret = cudaDeviceSynchronize();
+    CHECK_CUDA(ret);
+    result = cuCtxDestroy(_handle);
+    CHECK_CUDA_DRIVER(result);
+    _handle = nullptr;
+  }
 }
 
 CudaStream::CudaStream() : _stream(new CudaStreamWrapper()) {

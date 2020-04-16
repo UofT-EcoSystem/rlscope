@@ -5,6 +5,8 @@
 #ifndef IML_GPU_FREQ_H
 #define IML_GPU_FREQ_H
 
+#include <pthread.h>
+
 #include <cuda.h>
 #include <cuda_runtime.h>
 
@@ -31,7 +33,7 @@
 
 #define MICROSECONDS_IN_SECOND (1000000)
 
-//std::stringstream _ss;
+//std::stringstream _ss
 //_ss << __FILE__ << ":" << __LINE__ << " @ " << __func__ << ": CUDA Failed with (err=" << err << "): " << err_str;
 //DBG_LOG("{}", _ss.str());
 
@@ -40,6 +42,16 @@
     auto err_str = cudaGetErrorString(err); \
     std::cout << __FILE__ << ":" << __LINE__ << " @ " << __func__ << ": CUDA Failed with (err=" << err << "): " << err_str << std::endl; \
     assert(err == cudaSuccess); \
+  } \
+})
+
+#define CHECK_CUDA_DRIVER(err) ({ \
+  if (err != CUDA_SUCCESS) { \
+    const char* err_str; \
+    auto __str_err = cuGetErrorString(err, &err_str); \
+    assert(__str_err == CUDA_SUCCESS); \
+    std::cout << __FILE__ << ":" << __LINE__ << " @ " << __func__ << ": CUDA driver API Failed with (err=" << err << "): " << err_str << std::endl; \
+    assert(err == CUDA_SUCCESS); \
   } \
 })
 
@@ -218,7 +230,6 @@ struct CudaStreamWrapper {
   CudaStreamWrapper();
   ~CudaStreamWrapper();
 };
-
 class CudaStream {
 public:
   // We want to inherit shared_ptr copy/move constructor functionality, but we need new/delete
@@ -228,6 +239,20 @@ public:
   CudaStream();
   cudaStream_t get() const;
   void synchronize();
+};
+
+struct CudaContextWrapper {
+  CUcontext _handle;
+  unsigned int _flags;
+  CUdevice _dev = 0;
+  CudaContextWrapper();
+  ~CudaContextWrapper();
+};
+class CudaContext {
+public:
+  std::shared_ptr<CudaContextWrapper> _context;
+  CudaContext();
+  CUcontext get() const;
 };
 
 template <typename T>
@@ -340,9 +365,30 @@ public:
 
 class GPUKernelRunner {
 public:
-  CudaStream _stream;
+  struct RunContext {
+    // NOTE: We DON'T make these member variables, since we need to create it AFTER separate threads have started running
+    // (the context is BOUND to the current thread once created with cuCtxCreate).
+    std::unique_ptr<CudaContext> _context;
+    std::unique_ptr<CudaStream> _stream;
+
+    RunContext(bool cuda_context) {
+      if (cuda_context) {
+        // Create a per-thread CUDA context.
+        // NEED to create CUcontext before anything else (e.g., streams).
+        _context.reset(new CudaContext());
+      }
+      _stream.reset(new CudaStream());
+    }
+  };
+  // Run context is not created until run() starts (i.e. AFTER thread is created).
+  std::unique_ptr<RunContext> _run_ctx;
   std::unique_ptr<std::thread> _async_thread;
   std::unique_ptr<boost::process::child> _async_process;
+
+//  std::unique_ptr<CudaContext> _context;
+//  CudaStream _stream;
+//  std::unique_ptr<std::thread> _async_thread;
+//  std::unique_ptr<boost::process::child> _async_process;
 
   // "Number of kernels to launch per-thread."
   int64_t _n_launches;
@@ -356,6 +402,7 @@ public:
   // Useful for running really long kernels (e.g., 10 sec)
   // without creating a giant queue of kernel launches (e.g., delay=1us)
   bool _sync;
+  bool _cuda_context;
 
   GPUClockFreq _freq;
   std::string _directory;
@@ -370,6 +417,7 @@ public:
       int64_t kernel_duration_us,
       double run_sec,
       bool sync,
+      bool cuda_context,
       const std::string& directory,
       bool debug) :
       _n_launches(n_launches),
@@ -377,6 +425,7 @@ public:
       _kernel_duration_us(kernel_duration_us),
       _run_sec(run_sec),
       _sync(sync),
+      _cuda_context(cuda_context),
       _freq(std::move(freq)),
       _directory(directory),
       _debug(debug)
@@ -386,7 +435,6 @@ public:
   void DelayUs(int64_t usec);
 
   void run();
-  void synchronize();
 
   void run_async_thread();
   void wait_thread();
@@ -414,6 +462,7 @@ public:
   // Useful for running really long kernels (e.g., 10 sec)
   // without creating a giant queue of kernel launches (e.g., delay=1us)
   bool _sync;
+  bool _cuda_context;
 
   GPUClockFreq _freq;
   std::string _directory;
@@ -428,6 +477,7 @@ public:
       size_t num_threads,
       bool processes,
       bool sync,
+      bool cuda_context,
       const std::string& directory,
       bool debug) :
       _n_launches(n_launches),
@@ -437,6 +487,7 @@ public:
       _num_threads(num_threads),
       _processes(processes),
       _sync(sync),
+      _cuda_context(cuda_context),
       _freq(std::move(freq)),
       _directory(directory),
       _debug(debug)
