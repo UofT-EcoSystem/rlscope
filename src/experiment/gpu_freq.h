@@ -10,6 +10,10 @@
 #include <cuda.h>
 #include <cuda_runtime.h>
 
+#include <boost/interprocess/sync/interprocess_mutex.hpp>
+#include <boost/interprocess/shared_memory_object.hpp>
+#include <boost/interprocess/managed_shared_memory.hpp>
+
 #include <cmath>
 #include <thread>
 #include <chrono>
@@ -403,6 +407,7 @@ public:
   // without creating a giant queue of kernel launches (e.g., delay=1us)
   bool _sync;
   bool _cuda_context;
+  bool _internal_is_child;
 
   GPUClockFreq _freq;
   std::string _directory;
@@ -418,6 +423,7 @@ public:
       double run_sec,
       bool sync,
       bool cuda_context,
+      bool internal_is_child,
       const std::string& directory,
       bool debug) :
       _n_launches(n_launches),
@@ -426,6 +432,7 @@ public:
       _run_sec(run_sec),
       _sync(sync),
       _cuda_context(cuda_context),
+      _internal_is_child(internal_is_child),
       _freq(std::move(freq)),
       _directory(directory),
       _debug(debug)
@@ -444,10 +451,123 @@ public:
 
 };
 
+struct SharedMem {
+public:
+  std::string _name;
+  size_t _size_bytes;
+  boost::interprocess::managed_shared_memory _segment;
+  SharedMem() : _size_bytes(0) {
+
+  }
+private:
+  SharedMem(const std::string& name, size_t size_bytes) :
+      _name(name),
+      _size_bytes(size_bytes)
+  {
+  }
+
+  SharedMem(const std::string& name) :
+      _name(name),
+      _size_bytes(0)
+  {
+  }
+
+public:
+  static SharedMem Child(const std::string& name) {
+    SharedMem shared_mem(name);
+    shared_mem._segment = boost::interprocess::managed_shared_memory(boost::interprocess::open_only, name.c_str());
+    shared_mem._size_bytes = shared_mem._segment.get_size();
+    return shared_mem;
+  }
+
+  static SharedMem Parent(const std::string& name, size_t size_bytes) {
+    SharedMem shared_mem(name, size_bytes);
+    // FUN C++ FACT: destructors WON'T be called during SIGINT (ctrl-c).
+    // So, we CANNOT depend on a named shared memory region being cleaned up.
+    // HACK: remove it if it exists.
+    boost::interprocess::shared_memory_object::remove(name.c_str());
+    shared_mem._segment = boost::interprocess::managed_shared_memory(boost::interprocess::create_only, name.c_str(), size_bytes);
+    return shared_mem;
+  }
+
+  template <typename OStream>
+  void Print(OStream& out, int indent) const {
+    PrintIndent(out, indent);
+    out << "SharedMem(name=" << _name << ", size_bytes=" << _size_bytes << ")";
+  }
+
+  template <typename OStream>
+  friend OStream &operator<<(OStream &os, const SharedMem &obj)
+  {
+    obj.Print(os, 0);
+    return os;
+  }
+
+};
+
+struct SyncBlock {
+  boost::interprocess::interprocess_mutex mutex;
+  size_t counter;
+
+  SyncBlock(size_t counter) : counter(counter) {
+  }
+  ~SyncBlock();
+
+  static SyncBlock* Child(SharedMem* shared_mem, const std::string& name) {
+    std::pair<SyncBlock*, boost::interprocess::managed_shared_memory::size_type> res;
+    res = shared_mem->_segment.find<SyncBlock> (name.c_str());
+    //Length should be 1
+    assert(res.second == 1);
+    return res.first;
+  }
+
+  template <typename ...Args>
+  static SyncBlock* Parent(SharedMem* shared_mem, const std::string& name, Args && ...args) {
+    return shared_mem->_segment.construct<SyncBlock>
+        (name.c_str())  //name of the object
+        (std::forward<Args>(args)...);            //ctor first argument
+  }
+
+
+  template <typename OStream>
+  void Print(OStream& out, int indent) const {
+    PrintIndent(out, indent);
+    out << "SyncBlock(counter=" << counter << ")";
+  }
+
+  template <typename OStream>
+  friend OStream &operator<<(OStream &os, const SyncBlock &obj)
+  {
+    obj.Print(os, 0);
+    return os;
+  }
+
+  void IncrementCounter() {
+    const size_t num_increments = 1*1000*1000*1000;
+    for (size_t i = 0; i < num_increments; i++) {
+      counter += 1;
+    }
+  }
+
+  void IncrementCounterLocked() {
+    boost::interprocess::scoped_lock<boost::interprocess::interprocess_mutex> lock(mutex);
+    const size_t num_increments = 1*1000*1000;
+    for (size_t i = 0; i < num_increments; i++) {
+      counter += 1;
+    }
+  }
+
+};
+
+#define SYNC_BLOCK_NAME "SyncBlock"
+#define SYNC_BLOCK_INIT_COUNTER 1337
+#define SHARED_MEM_NAME "SharedMem"
+#define SHARED_MEM_SIZE_BYTES (1*1024*1024)
+
 class ThreadedGPUKernelRunner {
 public:
-  CudaStream _stream;
-
+  SharedMem _shared_mem;
+  SyncBlock* _sync_block;
   // "Number of kernels to launch per-thread."
   int64_t _n_launches;
   // "Time between kernel launches in microseconds"
@@ -463,6 +583,7 @@ public:
   // without creating a giant queue of kernel launches (e.g., delay=1us)
   bool _sync;
   bool _cuda_context;
+  bool _internal_is_child;
 
   GPUClockFreq _freq;
   std::string _directory;
@@ -478,8 +599,10 @@ public:
       bool processes,
       bool sync,
       bool cuda_context,
+      bool internal_is_child,
       const std::string& directory,
       bool debug) :
+      _sync_block(nullptr),
       _n_launches(n_launches),
       _kernel_delay_us(kernel_delay_us),
       _kernel_duration_us(kernel_duration_us),
@@ -488,6 +611,7 @@ public:
       _processes(processes),
       _sync(sync),
       _cuda_context(cuda_context),
+      _internal_is_child(internal_is_child),
       _freq(std::move(freq)),
       _directory(directory),
       _debug(debug)
@@ -496,23 +620,6 @@ public:
 
   void run();
 
-//  void guess_cycles();
-//
-//  static time_type now();
-//
-//  static double elapsed_sec(time_type start, time_type stop);
-//
-//  void iter(time_type *start_t, time_type *end_t);
-//
-//  double freq_mhz(double time_sec);
-//
-//  static double gpu_sleep(clock_value_t sleep_cycles);
-//  void run();
-
-//  MyStatus dump_json() const;
-//  MyStatus load_json(const std::string &path);
-//  std::string json_path() const;
-//  std::string json_basename() const;
 };
 
 

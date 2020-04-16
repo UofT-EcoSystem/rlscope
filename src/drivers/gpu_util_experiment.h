@@ -28,6 +28,7 @@ struct GPUUtilExperimentArgs {
   boost::optional<bool> FLAGS_processes;
   boost::optional<bool> FLAGS_sync;
   boost::optional<int64_t> FLAGS_repetitions;
+  boost::optional<bool> FLAGS_internal_is_child;
 };
 
 

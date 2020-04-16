@@ -61,6 +61,8 @@ DEFINE_bool(sync, false, "Wait for kernel to finish after each launch. Useful fo
 DEFINE_bool(cuda_context, false, "Create new CUDA context for each thread.");
 DEFINE_int64(repetitions, 5, "Repetitions when guessing GPU clock frequency");
 
+DEFINE_bool(internal_is_child, false, "(Internal) this process is a child of some parent instance of gpu_util_experiment => open existing shared memory (don't create)");
+
 //using namespace tensorflow;
 namespace tensorflow {
 
@@ -139,6 +141,7 @@ boost::process::child ReinvokeProcess(const GPUUtilExperimentArgs& overwrite_arg
   APPEND_CMD_ARG("processes", FLAGS_processes);
   APPEND_CMD_ARG("sync", FLAGS_sync);
   APPEND_CMD_ARG("repetitions", FLAGS_repetitions);
+  APPEND_CMD_ARG("internal_is_child", FLAGS_internal_is_child);
 #undef APPEND_CMD_ARG
 
   std::stringstream cmdline_ss;
@@ -304,6 +307,7 @@ int main(int argc, char** argv) {
         FLAGS_processes,
         FLAGS_sync,
         FLAGS_cuda_context,
+        FLAGS_internal_is_child,
         FLAGS_iml_directory,
         FLAGS_debug);
     gpu_kernel_runner.run();

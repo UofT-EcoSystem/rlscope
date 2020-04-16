@@ -191,6 +191,14 @@ void GPUKernelRunner::DelayUs(int64_t usec) {
 }
 
 void ThreadedGPUKernelRunner::run() {
+
+  if (!_internal_is_child) {
+    // Create shared memory segment.
+    _shared_mem = SharedMem(SharedMem::Parent(SHARED_MEM_NAME, SHARED_MEM_SIZE_BYTES));
+    _sync_block = SyncBlock::Parent(&_shared_mem, SYNC_BLOCK_NAME, SYNC_BLOCK_INIT_COUNTER);
+    DBG_LOG("Parent saw {} @ {}", *_sync_block, reinterpret_cast<void*>(_sync_block));
+  }
+
   if (_num_threads == 1) {
     // Just one thread launches kernels (default).
     // Run in same thread.
@@ -202,6 +210,7 @@ void ThreadedGPUKernelRunner::run() {
         _run_sec,
         _sync,
         _cuda_context,
+        _internal_is_child,
         _directory,
         _debug);
     gpu_kernel_runner.run();
@@ -222,6 +231,7 @@ void ThreadedGPUKernelRunner::run() {
   std::vector<GPUKernelRunner> gpu_kernel_runners;
   gpu_kernel_runners.reserve(_num_threads);
   for (int i = 0; i < static_cast<int>(_num_threads); i++) {
+    bool internal_is_child = true;
     gpu_kernel_runners.emplace_back(
         _freq,
         _n_launches,
@@ -230,6 +240,7 @@ void ThreadedGPUKernelRunner::run() {
         _run_sec,
         _sync,
         _cuda_context,
+        internal_is_child,
         _directory,
         _debug);
   }
@@ -255,6 +266,12 @@ void ThreadedGPUKernelRunner::run() {
     i++;
   }
 
+  DBG_LOG("After children done, Parent sees: {}", *_sync_block);
+
+}
+
+SyncBlock::~SyncBlock() {
+  DBG_LOG("Destructor for {}", *this);
 }
 
 void GPUKernelRunner::run_async_thread() {
@@ -274,6 +291,7 @@ void GPUKernelRunner::run_async_process(int thread_id) {
   _async_process.reset(new boost::process::child);
   GPUUtilExperimentArgs args;
   args.FLAGS_num_threads = 1;
+  args.FLAGS_internal_is_child = true;
 
   //get a handle to the current environment
   auto env = boost::this_process::environment();
@@ -292,6 +310,19 @@ void GPUKernelRunner::wait_process(int thread_id) {
 }
 
 void GPUKernelRunner::run() {
+
+  SharedMem shared_mem;
+  SyncBlock* sync_block = nullptr;
+  if (_internal_is_child) {
+    shared_mem = SharedMem::Child(SHARED_MEM_NAME);
+    sync_block = SyncBlock::Child(&shared_mem, SYNC_BLOCK_NAME);
+    DBG_LOG("Child saw {} @ {}", *sync_block, reinterpret_cast<void*>(sync_block));
+  }
+
+//  if (_internal_is_child) {
+//    sync_block->IncrementCounterLocked();
+////    sync_block->IncrementCounter();
+//  }
 
   _run_ctx.reset(new RunContext(_cuda_context));
 
