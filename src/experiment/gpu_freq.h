@@ -11,6 +11,7 @@
 #include <cuda_runtime.h>
 
 #include <boost/interprocess/sync/interprocess_mutex.hpp>
+#include <boost/interprocess/sync/interprocess_condition.hpp>
 #include <boost/interprocess/shared_memory_object.hpp>
 #include <boost/interprocess/managed_shared_memory.hpp>
 
@@ -251,12 +252,14 @@ struct CudaContextWrapper {
   CUdevice _dev = 0;
   CudaContextWrapper();
   ~CudaContextWrapper();
+  void synchronize();
 };
 class CudaContext {
 public:
   std::shared_ptr<CudaContextWrapper> _context;
   CudaContext();
   CUcontext get() const;
+  void synchronize();
 };
 
 template <typename T>
@@ -383,9 +386,16 @@ public:
       }
       _stream.reset(new CudaStream());
     }
+
+    void synchronize() {
+      _stream->synchronize();
+      if (_context) {
+        _context->synchronize();
+      }
+    }
   };
   // Run context is not created until run() starts (i.e. AFTER thread is created).
-  std::unique_ptr<RunContext> _run_ctx;
+  // std::unique_ptr<RunContext> _run_ctx;
   std::unique_ptr<std::thread> _async_thread;
   std::unique_ptr<boost::process::child> _async_process;
 
@@ -505,11 +515,55 @@ public:
 
 };
 
-struct SyncBlock {
+struct InterProcessBarrier {
   boost::interprocess::interprocess_mutex mutex;
-  size_t counter;
+  boost::interprocess::interprocess_condition barrier_limit_break;
 
-  SyncBlock(size_t counter) : counter(counter) {
+  size_t num_threads;
+  size_t n_waiting_threads;
+
+  InterProcessBarrier(size_t num_threads) :
+      num_threads(num_threads),
+      n_waiting_threads(0) {
+  }
+
+  void arrive_and_wait() {
+    boost::interprocess::scoped_lock<boost::interprocess::interprocess_mutex> lock(mutex);
+    n_waiting_threads += 1;
+    assert(n_waiting_threads <= num_threads);
+    if (n_waiting_threads < num_threads) {
+      barrier_limit_break.wait(lock);
+    } else {
+      barrier_limit_break.notify_all();
+    }
+    assert(n_waiting_threads >= 1);
+    n_waiting_threads -= 1;
+  }
+
+  template <typename OStream>
+  void Print(OStream& out, int indent) const {
+    PrintIndent(out, indent);
+    out << "InterProcessBarrier(n_waiting_threads=" << n_waiting_threads << ")";
+  }
+
+  template <typename OStream>
+  friend OStream &operator<<(OStream &os, const InterProcessBarrier &obj)
+  {
+    obj.Print(os, 0);
+    return os;
+  }
+
+};
+
+struct SyncBlock {
+  size_t n_threads;
+
+  InterProcessBarrier barrier;
+
+  SyncBlock(size_t n_threads) :
+      n_threads(n_threads),
+      barrier(n_threads)
+  {
   }
   ~SyncBlock();
 
@@ -532,7 +586,7 @@ struct SyncBlock {
   template <typename OStream>
   void Print(OStream& out, int indent) const {
     PrintIndent(out, indent);
-    out << "SyncBlock(counter=" << counter << ")";
+    out << "SyncBlock(barrier=" << barrier << ")";
   }
 
   template <typename OStream>
@@ -542,25 +596,10 @@ struct SyncBlock {
     return os;
   }
 
-  void IncrementCounter() {
-    const size_t num_increments = 1*1000*1000*1000;
-    for (size_t i = 0; i < num_increments; i++) {
-      counter += 1;
-    }
-  }
-
-  void IncrementCounterLocked() {
-    boost::interprocess::scoped_lock<boost::interprocess::interprocess_mutex> lock(mutex);
-    const size_t num_increments = 1*1000*1000;
-    for (size_t i = 0; i < num_increments; i++) {
-      counter += 1;
-    }
-  }
-
 };
 
 #define SYNC_BLOCK_NAME "SyncBlock"
-#define SYNC_BLOCK_INIT_COUNTER 1337
+//#define SYNC_BLOCK_INIT_COUNTER 1337
 #define SHARED_MEM_NAME "SharedMem"
 #define SHARED_MEM_SIZE_BYTES (1*1024*1024)
 

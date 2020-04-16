@@ -195,8 +195,12 @@ void ThreadedGPUKernelRunner::run() {
   if (!_internal_is_child) {
     // Create shared memory segment.
     _shared_mem = SharedMem(SharedMem::Parent(SHARED_MEM_NAME, SHARED_MEM_SIZE_BYTES));
-    _sync_block = SyncBlock::Parent(&_shared_mem, SYNC_BLOCK_NAME, SYNC_BLOCK_INIT_COUNTER);
-    DBG_LOG("Parent saw {} @ {}", *_sync_block, reinterpret_cast<void*>(_sync_block));
+    // num_threads + 1 since barrier is across all children AND parent.
+    // (parent uses barrier to time just kernel execution portion, excluding setup/teardown).
+    _sync_block = SyncBlock::Parent(&_shared_mem, SYNC_BLOCK_NAME, _num_threads + 1);
+    if (SHOULD_DEBUG(FEATURE_GPU_UTIL_SYNCH)) {
+      DBG_LOG("Parent saw {} @ {}", *_sync_block, reinterpret_cast<void *>(_sync_block));
+    }
   }
 
   if (_num_threads == 1) {
@@ -217,9 +221,11 @@ void ThreadedGPUKernelRunner::run() {
     return;
   }
 
-  if (SHOULD_DEBUG(FEATURE_GPU_CLOCK_FREQ)) {
+  if (SHOULD_DEBUG(FEATURE_GPU_UTIL_SYNCH)) {
     DBG_LOG("ThreadedGPUKernelRunner launching kernels from {} threads", _num_threads);
   }
+
+  assert(!_internal_is_child);
 
   // >= 2 threads.
   // Launch kernels from multiple threads
@@ -256,6 +262,14 @@ void ThreadedGPUKernelRunner::run() {
     i++;
   }
 
+  // Wait for threads to setup CUDA context.
+  _sync_block->barrier.arrive_and_wait();
+  auto start_kernels_t = time_now();
+
+  // Wait for threads finish executing GPU kernels.to setup CUDA context.
+  _sync_block->barrier.arrive_and_wait();
+  auto done_kernels_t = time_now();
+
   i = 0;
   for (auto& gpu_kernel_runner : gpu_kernel_runners) {
     if (!_processes) {
@@ -266,7 +280,12 @@ void ThreadedGPUKernelRunner::run() {
     i++;
   }
 
-  DBG_LOG("After children done, Parent sees: {}", *_sync_block);
+  double seconds = std::chrono::duration_cast<std::chrono::microseconds>(done_kernels_t - start_kernels_t).count() / static_cast<double>(MICROSECONDS_IN_SECOND);
+  DBG_LOG("Running kernels took {} seconds", seconds);
+
+  if (SHOULD_DEBUG(FEATURE_GPU_UTIL_SYNCH)) {
+    DBG_LOG("After children done, Parent sees: {}", *_sync_block);
+  }
 
 }
 
@@ -311,20 +330,29 @@ void GPUKernelRunner::wait_process(int thread_id) {
 
 void GPUKernelRunner::run() {
 
+  // NOTE: this is NOT a member variable, since we want it to be destructed within the child thread, NOT the parent.
+  // That's because the CUDA context is bound to this thread.
+  std::unique_ptr<RunContext> _run_ctx;
+
   SharedMem shared_mem;
   SyncBlock* sync_block = nullptr;
   if (_internal_is_child) {
     shared_mem = SharedMem::Child(SHARED_MEM_NAME);
     sync_block = SyncBlock::Child(&shared_mem, SYNC_BLOCK_NAME);
-    DBG_LOG("Child saw {} @ {}", *sync_block, reinterpret_cast<void*>(sync_block));
+    if (SHOULD_DEBUG(FEATURE_GPU_UTIL_SYNCH)) {
+      DBG_LOG("Child saw {} @ {}", *sync_block, reinterpret_cast<void*>(sync_block));
+    }
   }
 
-//  if (_internal_is_child) {
-//    sync_block->IncrementCounterLocked();
-////    sync_block->IncrementCounter();
-//  }
-
   _run_ctx.reset(new RunContext(_cuda_context));
+
+  if (_internal_is_child) {
+    // Barrier synchronization to wait for ALL threads to finish creating CUDA context.
+    //
+    // This is to ensure a fair comparison of "how long" it takes multi-process/multi-thread/multi-context
+    // to launch --n_launches kernels, WITHOUT considering setup cost.
+    sync_block->barrier.arrive_and_wait();
+  }
 
   // Launch a kernel that runs for --kernel_duration_us microseconds.
   // Launch the kernel every --kernel_delay_us microseconds.
@@ -393,6 +421,14 @@ void GPUKernelRunner::run() {
     }
   }
 
+  if (_internal_is_child) {
+    // Barrier synchronization to wait for ALL GPU kernels to finish executing across all threads.
+    //
+    // This is to ensure a fair comparison of "how long" it takes multi-process/multi-thread/multi-context
+    // to launch --n_launches kernels, WITHOUT considering setup cost.
+    sync_block->barrier.arrive_and_wait();
+  }
+
   if (_debug) {
     std::stringstream ss;
     size_t i = 0;
@@ -429,7 +465,15 @@ CudaContext::CudaContext() : _context(new CudaContextWrapper()) {
 CUcontext CudaContext::get() const {
   return _context->_handle;
 }
+void CudaContext::synchronize() {
+  return _context->synchronize();
+}
 
+void CudaContextWrapper::synchronize() {
+  cudaError_t ret;
+  ret = cudaDeviceSynchronize();
+  CHECK_CUDA(ret);
+}
 CudaContextWrapper::CudaContextWrapper() :
     _handle(nullptr),
     _flags(0),
@@ -438,24 +482,28 @@ CudaContextWrapper::CudaContextWrapper() :
   CUresult result;
   result = cuCtxCreate(&_handle, _flags, _dev);
   CHECK_CUDA_DRIVER(result);
-  std::stringstream ss;
+  if (SHOULD_DEBUG(FEATURE_GPU_UTIL_CUDA_CONTEXT)) {
+    std::stringstream ss;
 //  DBG_LOG("Create CUDA context = {}", reinterpret_cast<void*>(_handle));
-  backward::StackTrace st;
-  st.load_here(32);
-  backward::Printer p;
-  ss << "Create CUDA context = " << reinterpret_cast<void*>(_handle) << "\n";
-  p.print(st, ss);
-  DBG_LOG("{}", ss.str());
+    backward::StackTrace st;
+    st.load_here(32);
+    backward::Printer p;
+    ss << "Create CUDA context = " << reinterpret_cast<void*>(_handle) << "\n";
+    p.print(st, ss);
+    DBG_LOG("{}", ss.str());
+  }
   assert(_handle != nullptr);
 }
 CudaContextWrapper::~CudaContextWrapper() {
   if (_handle) {
     // Wait for remaining kernels on all streams for the context to complete.
     // (driver API assumes you have done this before destroying context.)
-    cudaError_t ret;
     CUresult result;
-    ret = cudaDeviceSynchronize();
-    CHECK_CUDA(ret);
+    this->synchronize();
+    // NOTE: I've seen this segfault _sometimes_ for multi-context runs... not sure why.
+    if (SHOULD_DEBUG(FEATURE_GPU_UTIL_CUDA_CONTEXT)) {
+      DBG_LOG("Destroy cuda context @ handle={}", reinterpret_cast<void*>(_handle));
+    }
     result = cuCtxDestroy(_handle);
     CHECK_CUDA_DRIVER(result);
     _handle = nullptr;
@@ -483,7 +531,9 @@ CudaStreamWrapper::CudaStreamWrapper() :
   ret = cudaStreamCreateWithFlags(&_handle, cudaStreamNonBlocking);
 //  ret = cudaStreamCreate(&_handle);
   CHECK_CUDA(ret);
-  DBG_LOG("Create CUDA stream = {}", reinterpret_cast<void*>(_handle));
+  if (SHOULD_DEBUG(FEATURE_GPU_UTIL_CUDA_CONTEXT)) {
+    DBG_LOG("Create CUDA stream = {}", reinterpret_cast<void *>(_handle));
+  }
   assert(_handle != nullptr);
 }
 CudaStreamWrapper::~CudaStreamWrapper() {
