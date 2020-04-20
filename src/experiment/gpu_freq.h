@@ -252,6 +252,8 @@ struct CudaContextWrapper {
   unsigned int _flags;
   CUdevice _dev = 0;
   CudaContextWrapper();
+  CudaContextWrapper(unsigned int flags);
+  void _Init();
   ~CudaContextWrapper();
   void synchronize();
 };
@@ -259,6 +261,7 @@ class CudaContext {
 public:
   std::shared_ptr<CudaContextWrapper> _context;
   CudaContext();
+  CudaContext(unsigned int flags);
   CUcontext get() const;
   void synchronize();
 };
@@ -304,6 +307,9 @@ public:
   T* get() const {
     return _buffer->_handle;
   }
+  size_t num_elems() const {
+    return _n_elems;
+  }
 
 };
 
@@ -329,11 +335,48 @@ public:
 
 };
 
-class GPUClockFreq {
+class GPUKernel {
+public:
+  GPUUtilExperimentArgs args;
+  GPUKernel() = default;
+  GPUKernel(GPUUtilExperimentArgs args) :
+      args(std::move(args))
+  {
+  }
+  // TODO: this needs to be called AFTER CUDA context has been allocated...
+  virtual MyStatus Init() = 0;
+  virtual std::unique_ptr<GPUKernel> clone() const = 0;
+  virtual void RunSync(CudaStream stream) = 0;
+  virtual void RunAsync(CudaStream stream) = 0;
+};
+
+class GPUComputeKernel : public GPUKernel {
+public:
+  struct RunCtx {
+    CudaHostBuffer<int64_t> output;
+    RunCtx(size_t n_elems) :
+        output(n_elems) {
+    }
+  };
+  std::unique_ptr<RunCtx> run_ctx;
+
+  GPUComputeKernel(GPUUtilExperimentArgs args
+  ) : GPUKernel(args)
+  {
+  }
+
+  void _gpu_compute_kernel(CudaStream stream, bool sync);
+
+  virtual MyStatus Init() override;
+  virtual std::unique_ptr<GPUKernel> clone() const override;
+  virtual void RunSync(CudaStream stream) override;
+  virtual void RunAsync(CudaStream stream) override;
+
+};
+
+class GPUClockFreq : public GPUKernel {
 public:
   GPUSleeper _gpu_sleeper;
-
-  GPUUtilExperimentArgs args;
 
   std::vector<double> _time_secs;
   std::vector<double> _freq_mhz;
@@ -347,16 +390,18 @@ public:
 //  std::string _directory;
 
   GPUClockFreq(GPUUtilExperimentArgs args
-//      int repetitions, const std::string& directory
       ) :
-      args(args)
+      GPUKernel(args)
       , _avg_mhz(0.)
       , _std_mhz(0.)
       , _sleep_cycles(GPU_CLOCK_INIT_GPU_SLEEP_CYCLES)
-//      , _repetitions(repetitions)
-//      , _directory(directory)
   {
   }
+
+  virtual MyStatus Init() override;
+  virtual std::unique_ptr<GPUKernel> clone() const override;
+  virtual void RunSync(CudaStream stream) override;
+  virtual void RunAsync(CudaStream stream) override;
 
   void guess_cycles(CudaStream stream);
 
@@ -376,6 +421,9 @@ public:
   std::string json_basename() const;
 };
 
+
+MyStatus GetGPUKernel(GPUUtilExperimentArgs args, std::unique_ptr<GPUKernel>* gpu_kernel);
+
 class GPUKernelRunner {
 public:
   struct RunContext {
@@ -384,11 +432,11 @@ public:
     std::unique_ptr<CudaContext> _context;
     std::unique_ptr<CudaStream> _stream;
 
-    RunContext(bool cuda_context) {
+    RunContext(bool cuda_context, unsigned int cuda_context_flags) {
       if (cuda_context) {
         // Create a per-thread CUDA context.
         // NEED to create CUcontext before anything else (e.g., streams).
-        _context.reset(new CudaContext());
+        _context.reset(new CudaContext(cuda_context_flags));
       }
       _stream.reset(new CudaStream());
     }
@@ -427,14 +475,14 @@ public:
 //  bool _cuda_context;
 //  bool _internal_is_child;
 //
-  GPUClockFreq _freq;
+  std::unique_ptr<GPUKernel> _gpu_kernel;
 //  std::string _directory;
 //  bool _debug;
 
 //  std::unique_ptr<Notification> _async_thread_done;
 
   GPUKernelRunner(
-      GPUClockFreq freq,
+      std::unique_ptr<GPUKernel> gpu_kernel,
       GPUUtilExperimentArgs args
 //      int64_t n_launches,
 //      int64_t kernel_delay_us,
@@ -454,7 +502,7 @@ public:
 //      _sync(sync),
 //      _cuda_context(cuda_context),
 //      _internal_is_child(internal_is_child),
-      _freq(std::move(freq))
+      _gpu_kernel(std::move(gpu_kernel))
 //      _directory(directory),
 //      _debug(debug)
   {
@@ -638,12 +686,12 @@ public:
 
   GPUUtilExperimentArgs args;
 
-  GPUClockFreq _freq;
+  std::unique_ptr<GPUKernel> _gpu_kernel;
 //  std::string _directory;
 //  bool _debug;
 
   ThreadedGPUKernelRunner(
-      GPUClockFreq freq,
+      std::unique_ptr<GPUKernel> gpu_kernel,
       GPUUtilExperimentArgs args
 
 //      int64_t n_launches,
@@ -669,7 +717,7 @@ public:
 //      _sync(sync),
 //      _cuda_context(cuda_context),
 //      _internal_is_child(internal_is_child),
-      _freq(std::move(freq))
+      _gpu_kernel(std::move(gpu_kernel))
 //      _directory(directory),
 //      _debug(debug)
   {

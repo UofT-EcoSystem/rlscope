@@ -265,6 +265,20 @@ void PrintValue(OStream& os, const std::vector<T>& value) {
   os << "]";
 }
 
+template <typename OStream, typename T>
+void PrintValue(OStream& os, const std::initializer_list<T>& value) {
+  os << "[";
+  size_t i = 0;
+  for (auto const& val : value) {
+    if (i > 0) {
+      os << ", ";
+    }
+    PrintValue(os, val);
+    i += 1;
+  }
+  os << "]";
+}
+
 // template <typename K, typename V>
 // void PrintValue(std::ostream& os, const std::map<K, V>& value) {
 template <typename OStream, typename K, typename V>

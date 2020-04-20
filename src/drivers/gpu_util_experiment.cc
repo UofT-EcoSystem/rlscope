@@ -63,11 +63,35 @@ DEFINE_int64(repetitions, 5, "Repetitions when guessing GPU clock frequency");
 
 DEFINE_bool(internal_is_child, false, "(Internal) this process is a child of some parent instance of gpu_util_experiment => open existing shared memory (don't create)");
 
+DEFINE_string(kernel, "compute_kernel", "What GPU kernel should we run?");
+// URL: https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__CTX.html#group__CUDA__CTX_1g65dc0012348bc84810e2103a40d8e2cf
+DEFINE_string(gpu_sched_policy, "default", "What GPU scheduling policy to use for the CUDA context (see: CUDA Driver API documentation for cuCtxCreate for details)?");
 DEFINE_int64(kern_arg_iterations, 1000*1000*1000, "(Kernel arg) compute_kernel: how many loop iterations to perform (increase compute)");
 // TODO: add grid size and thread block size args.
 
 //using namespace tensorflow;
 namespace tensorflow {
+
+static MyStatus GetCudaContextFlags(unsigned int* flags) {
+  *flags = 0;
+  MyStatus status;
+  if (FLAGS_gpu_sched_policy == "default") {
+    *flags |= CU_CTX_SCHED_AUTO;
+  } else if (FLAGS_gpu_sched_policy == "spin") {
+    *flags |= CU_CTX_SCHED_SPIN;
+  } else if (FLAGS_gpu_sched_policy == "block") {
+    *flags |= CU_CTX_SCHED_BLOCKING_SYNC;
+  } else if (FLAGS_gpu_sched_policy == "yield") {
+    *flags |= CU_CTX_SCHED_YIELD;
+  } else {
+    std::stringstream ss;
+    ss << "Not sure what GPU scheduling policy to use for --gpu_sched_policy=" << FLAGS_gpu_sched_policy
+       << "; choices are: ";
+    PrintValue(ss, {"default", "spin", "block", "yield"});
+    return MyStatus(error::INVALID_ARGUMENT, ss.str());
+  }
+  return MyStatus::OK();
+}
 
 // FlagType = int64_t, double
 template <typename FlagType>
@@ -149,6 +173,8 @@ static std::string BINARY_PATH;
   SET_FLAG(FLAGS_repetitions);
   SET_FLAG(FLAGS_internal_is_child);
   SET_FLAG(FLAGS_kern_arg_iterations);
+  SET_FLAG(FLAGS_kernel);
+  SET_FLAG(FLAGS_gpu_sched_policy);
 #undef SET_FLAG
 
   return args;
@@ -180,6 +206,8 @@ boost::process::child ReinvokeProcess(const GPUUtilExperimentArgs& overwrite_arg
   APPEND_CMD_ARG("repetitions", FLAGS_repetitions);
   APPEND_CMD_ARG("internal_is_child", FLAGS_internal_is_child);
   APPEND_CMD_ARG("kern_arg_iterations", FLAGS_kern_arg_iterations);
+  APPEND_CMD_ARG("kernel", FLAGS_kernel);
+  APPEND_CMD_ARG("gpu_sched_policy", FLAGS_gpu_sched_policy);
 #undef APPEND_CMD_ARG
 
   std::stringstream cmdline_ss;
@@ -323,6 +351,17 @@ int main(int argc, char** argv) {
   }
 
   auto args = GPUUtilExperimentArgs::FromFlags();
+  if (SHOULD_DEBUG(FEATURE_GPU_CLOCK_FREQ)
+      || SHOULD_DEBUG(FEATURE_GPU_UTIL_CUDA_CONTEXT)
+      || SHOULD_DEBUG(FEATURE_GPU_UTIL_SYNC)
+      || FLAGS_debug) {
+    DBG_LOG("{}", args);
+  }
+
+  unsigned int cuda_context_flags;
+  status = GetCudaContextFlags(&cuda_context_flags);
+  IF_BAD_STATUS_EXIT("Failed to parse cmdline args", status);
+  args.FLAGS_cuda_context_flags = cuda_context_flags;
 
   if (mode == Mode::MODE_GPU_CLOCK_FREQ) {
     GPUClockFreq gpu_clock_freq(args);
@@ -334,11 +373,15 @@ int main(int argc, char** argv) {
   }
 
   if (mode == Mode::MODE_RUN_KERNELS) {
-    GPUClockFreq gpu_clock_freq(args);
-    status = gpu_clock_freq.load_json(FLAGS_gpu_clock_freq_json);
-    IF_BAD_STATUS_EXIT("Failed to load json for --mode=gpu_clock_freq", status);
+    std::unique_ptr<GPUKernel> gpu_kernel;
+    status = GetGPUKernel(args, &gpu_kernel);
+    IF_BAD_STATUS_EXIT("Failed to setup --kernel", status);
+
+//    GPUClockFreq gpu_clock_freq(args);
+//    status = gpu_clock_freq.load_json(FLAGS_gpu_clock_freq_json);
+//    IF_BAD_STATUS_EXIT("Failed to load json for --mode=gpu_clock_freq", status);
     ThreadedGPUKernelRunner gpu_kernel_runner(
-        gpu_clock_freq,
+        std::move(gpu_kernel),
         args);
     gpu_kernel_runner.run();
     exit(EXIT_SUCCESS);

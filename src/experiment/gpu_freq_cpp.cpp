@@ -9,6 +9,7 @@
 #include <iostream>
 #include <cmath>
 #include <thread>
+#include <memory>
 
 #include <cuda_runtime.h>
 #include <cassert>
@@ -45,6 +46,56 @@ namespace tensorflow {
 using clock_value_t = long long;
 
 using steady_clock = std::chrono::steady_clock;
+
+MyStatus GPUComputeKernel::Init() {
+  // MyStatus status;
+  this->run_ctx.reset(new RunCtx(1));
+  return MyStatus::OK();
+}
+std::unique_ptr<GPUKernel> GPUComputeKernel::clone() const {
+  std::unique_ptr<GPUComputeKernel> obj(new GPUComputeKernel(this->args));
+  if (this->run_ctx) {
+    obj->run_ctx.reset(new RunCtx(this->run_ctx->output.num_elems()));
+  }
+  return obj;
+  // std::unique_ptr<RunCtx> doesn't allow copy constructor...
+//  return std::make_unique<GPUComputeKernel>(*this);  // requires C++ 14
+}
+void GPUComputeKernel::RunSync(CudaStream stream) {
+  _gpu_compute_kernel(stream, /*sync=*/true);
+}
+void GPUComputeKernel::RunAsync(CudaStream stream) {
+  _gpu_compute_kernel(stream, /*sync=*/false);
+}
+
+MyStatus GPUClockFreq::Init() {
+  return this->load_json(args.FLAGS_gpu_clock_freq_json.get());
+}
+std::unique_ptr<GPUKernel> GPUClockFreq::clone() const {
+  return std::make_unique<GPUClockFreq>(*this);  // requires C++ 14
+}
+void GPUClockFreq::RunSync(CudaStream stream) {
+  gpu_sleep_us_sync(stream, args.FLAGS_kernel_duration_us.get());
+}
+void GPUClockFreq::RunAsync(CudaStream stream) {
+  gpu_sleep_us(stream, args.FLAGS_kernel_duration_us.get());
+}
+
+MyStatus GetGPUKernel(GPUUtilExperimentArgs args, std::unique_ptr<GPUKernel>* gpu_kernel) {
+  if (args.FLAGS_kernel.get() == "gpu_sleep") {
+    (*gpu_kernel).reset(new GPUClockFreq(args));
+  } else if (args.FLAGS_kernel.get() == "compute_kernel") {
+    (*gpu_kernel).reset(new GPUComputeKernel(args));
+  } else {
+    (*gpu_kernel).reset(nullptr);
+    std::stringstream ss;
+    ss << "Not sure what kernel to run for --kernel=" << args.FLAGS_kernel.get() << "; choices are:\n";
+    PrintValue(ss, {"gpu_sleep", "compute_kernel"});
+    return MyStatus(error::INVALID_ARGUMENT, ss.str());
+
+  }
+  return (*gpu_kernel)->Init();
+}
 
 void GPUClockFreq::guess_cycles(CudaStream stream) {
   std::cout << "> Using initial sleep_cycles=" << _sleep_cycles << std::endl;
@@ -203,11 +254,13 @@ void ThreadedGPUKernelRunner::run() {
     }
   }
 
-  if (args.FLAGS_num_threads.get() == 1) {
+//  if (args.FLAGS_num_threads.get() == 1) {
+  if (args.FLAGS_internal_is_child.get()) {
     // Just one thread launches kernels (default).
     // Run in same thread.
+    std::unique_ptr<GPUKernel> gpu_kernel = _gpu_kernel->clone();
     GPUKernelRunner gpu_kernel_runner(
-        _freq,
+        std::move(gpu_kernel),
         args);
     gpu_kernel_runner.run();
     return;
@@ -232,8 +285,9 @@ void ThreadedGPUKernelRunner::run() {
   GPUUtilExperimentArgs child_args = args;
   child_args.FLAGS_internal_is_child = true;
   for (int i = 0; i < static_cast<int>(args.FLAGS_num_threads.get()); i++) {
+    std::unique_ptr<GPUKernel> gpu_kernel = _gpu_kernel->clone();
     gpu_kernel_runners.emplace_back(
-        _freq,
+        std::move(gpu_kernel),
         child_args);
   }
   int i;
@@ -331,7 +385,9 @@ void GPUKernelRunner::run() {
     }
   }
 
-  _run_ctx.reset(new RunContext(args.FLAGS_cuda_context.get()));
+  _run_ctx.reset(new RunContext(
+      args.FLAGS_cuda_context.get(),
+      args.FLAGS_cuda_context_flags.get()));
 
   if (args.FLAGS_internal_is_child.get()) {
     // Barrier synchronization to wait for ALL threads to finish creating CUDA context.
@@ -368,17 +424,29 @@ void GPUKernelRunner::run() {
       break;
     }
     GPUKernelRun kernel_run;
+    auto before_sleep_t = time_now();
+
+
+    // THIS part is specific to the kernel implementation.
+    // GPU clock freq is an argument that is specific to the GPU sleep kernel.
+    // Kernel interface:
+    // Kernel(GPUUtilExperimentArgs args)
+    // Kernel.RunSync()
+    // Kernel.RunAsync()
+
     // NOTE: this WILL wait for the kernel to finish first using cudaDeviceSynchronize()....
     // Alternatives:
     // - wait for just the launched kernel to finish using cudaEvent => multi-threaded friendly
     // - Q: Do we want to launch another kernel BEFORE the last one finishes...?
     //   ... if waiting for it to finish takes a long time (> 5 us)... then yes?
-    auto before_sleep_t = time_now();
     if (args.FLAGS_sync.get()) {
-      _freq.gpu_sleep_us_sync(*_run_ctx->_stream, args.FLAGS_kernel_duration_us.get());
+      _gpu_kernel->RunSync(*_run_ctx->_stream);
+//      _freq.gpu_sleep_us_sync(*_run_ctx->_stream, args.FLAGS_kernel_duration_us.get());
     } else {
-      _freq.gpu_sleep_us(*_run_ctx->_stream, args.FLAGS_kernel_duration_us.get());
+      _gpu_kernel->RunAsync(*_run_ctx->_stream);
+//      _freq.gpu_sleep_us(*_run_ctx->_stream, args.FLAGS_kernel_duration_us.get());
     }
+
     launches += 1;
     auto after_sleep_t = time_now();
     auto nanosec = std::chrono::duration_cast<std::chrono::nanoseconds>(after_sleep_t - before_sleep_t).count();
@@ -408,6 +476,7 @@ void GPUKernelRunner::run() {
     }
   }
 
+  _run_ctx->synchronize();
   if (args.FLAGS_internal_is_child.get()) {
     // Barrier synchronization to wait for ALL GPU kernels to finish executing across all threads.
     //
@@ -447,7 +516,11 @@ void GPUKernelRunner::run() {
 
 }
 
-CudaContext::CudaContext() : _context(new CudaContextWrapper()) {
+CudaContext::CudaContext() :
+    _context(new CudaContextWrapper()) {
+}
+CudaContext::CudaContext(unsigned int flags) :
+    _context(new CudaContextWrapper(flags)) {
 }
 CUcontext CudaContext::get() const {
   return _context->_handle;
@@ -461,11 +534,7 @@ void CudaContextWrapper::synchronize() {
   ret = cudaDeviceSynchronize();
   CHECK_CUDA(ret);
 }
-CudaContextWrapper::CudaContextWrapper() :
-    _handle(nullptr),
-    _flags(0),
-    _dev(0)
-{
+void CudaContextWrapper::_Init() {
   CUresult result;
   result = cuCtxCreate(&_handle, _flags, _dev);
   CHECK_CUDA_DRIVER(result);
@@ -480,6 +549,32 @@ CudaContextWrapper::CudaContextWrapper() :
     DBG_LOG("{}", ss.str());
   }
   assert(_handle != nullptr);
+}
+CudaContextWrapper::CudaContextWrapper(unsigned int flags) :
+    _handle(nullptr),
+    _flags(flags),
+    // When running really long kernels, CUDA's default scheduling policy
+    // (CU_CTX_SCHED_AUTO -> CU_CTX_SCHED_SPIN) still polls waiting for GPU kernels to finish.
+    // This leads to high CPU utilization.  This can be eliminated by changing the scheduling
+    // policy associated with the CUDA context to CU_CTX_SCHED_BLOCKING_SYNC.
+    // This drops CPU utilization down to zero.
+//    _flags(CU_CTX_SCHED_BLOCKING_SYNC),
+    _dev(0)
+{
+  _Init();
+}
+CudaContextWrapper::CudaContextWrapper() :
+    _handle(nullptr),
+    _flags(0),
+    // When running really long kernels, CUDA's default scheduling policy
+    // (CU_CTX_SCHED_AUTO -> CU_CTX_SCHED_SPIN) still polls waiting for GPU kernels to finish.
+    // This leads to high CPU utilization.  This can be eliminated by changing the scheduling
+    // policy associated with the CUDA context to CU_CTX_SCHED_BLOCKING_SYNC.
+    // This drops CPU utilization down to zero.
+//    _flags(CU_CTX_SCHED_BLOCKING_SYNC),
+    _dev(0)
+{
+  _Init();
 }
 CudaContextWrapper::~CudaContextWrapper() {
   if (_handle) {

@@ -79,4 +79,13 @@ void GPUClockFreq::gpu_sleep_us_sync(CudaStream stream, int64_t usec) {
   _gpu_sleep_us(stream, usec, /*sync=*/true);
 }
 
+void GPUComputeKernel::_gpu_compute_kernel(CudaStream stream, bool sync) {
+  cudaError_t err;
+  _compute_kernel<<<1, 1, 0, stream.get()>>>(args.FLAGS_kern_arg_iterations.get(), run_ctx->output.get()); // This line alone is 0.208557334
+  if (sync) {
+    err = cudaStreamSynchronize(stream.get());
+    CHECK_CUDA(err);
+  }
+}
+
 } // namespace tensorflow
