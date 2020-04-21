@@ -22,10 +22,12 @@ _check_iml
 
 #py_maybe_install 'baselines' install_baselines.sh
 
-if [ "$DEBUG" == 'yes' ]; then
-    export GOPARAMS=$MLPERF_DIR/reinforcement/tensorflow/minigo/params/multiple_workers.json
-else
-    export GOPARAMS=$MLPERF_DIR/reinforcement/tensorflow/minigo/params/final_debug.json
+if [ "$GOPARAMS" == '' ]; then
+    if [ "$DEBUG" == 'yes' ]; then
+        export GOPARAMS=$MLPERF_DIR/reinforcement/tensorflow/minigo/params/multiple_workers.json
+    else
+        export GOPARAMS=$MLPERF_DIR/reinforcement/tensorflow/minigo/params/final_debug.json
+    fi
 fi
 echo "> Using GOPARAMS=$GOPARAMS"
 GOPARAMS_BASE="$(basename "$GOPARAMS")"

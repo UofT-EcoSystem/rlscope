@@ -2888,11 +2888,16 @@ def iml_argv_and_env(prof : Profiler, keep_executable=False, keep_non_iml_args=F
 def _iml_env(prof : Profiler, keep_executable=False, keep_non_iml_args=False, env=None):
     if env is None:
         env = dict(os.environ)
-    ld_preloads = []
-    if 'LD_PRELOAD' in env:
-        ld_preloads.append(env['LD_PRELOAD'])
-    ld_preloads.append(py_config.LIB_SAMPLE_CUDA_API)
-    env['LD_PRELOAD'] = ':'.join(ld_preloads)
+
+    # Only modify LD_PRELOAD to load.
+    # Rationale: want to be able to easily run nvprof on RLScope-instrumented scripts
+    if not prof.disable:
+        ld_preloads = []
+        if 'LD_PRELOAD' in env:
+            ld_preloads.append(env['LD_PRELOAD'])
+        ld_preloads.append(py_config.LIB_SAMPLE_CUDA_API)
+        env['LD_PRELOAD'] = ':'.join(ld_preloads)
+
     return env
 
 def _iml_argv(prof : Profiler, keep_executable=False, keep_non_iml_args=False):
