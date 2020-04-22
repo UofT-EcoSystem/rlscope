@@ -1,7 +1,9 @@
 import logging
 import copy
 import itertools
+import subprocess
 import argparse
+import csv
 
 from iml_profiler.protobuf.pyprof_pb2 import CategoryEventsProto, MachineUtilization, DeviceUtilization, UtilizationSample
 from iml_profiler.parser.common import *
@@ -296,6 +298,397 @@ class UtilParser:
             debug=self.debug,
         )
         util_plot.run()
+
+class NvprofKernelHistogram:
+
+    FLOAT_RE = r'(?:[-+]?[0-9]*\.?[0-9]+(?:[eE][-+]?[0-9]+)?)'
+
+    UNIT_RE = r'ns|ms|sec|s'
+
+    def __init__(self,
+                 nvprof_file,
+                 debug=False,
+                 debug_single_thread=False,
+                 # Swallow any excess arguments
+                 **kwargs):
+        self.nvprof_file = nvprof_file
+        self.debug = debug
+        self.debug_single_thread = debug_single_thread
+
+    def _parse_human_time_us(self, txt, expect_match=True):
+        m = re.search(r'^(?P<value>{float})(?P<unit>{unit})$'.format(
+            float=NvprofKernelHistogram.FLOAT_RE,
+            unit=NvprofKernelHistogram.UNIT_RE),
+            txt)
+        if not m:
+            assert not expect_match
+            return None
+        value = float(m.group('value'))
+        unit = m.group('unit')
+        if unit == 'ns':
+            return value / 1e3
+        elif unit == 'us':
+            return value
+        elif unit == 'ms':
+            return value * 1e3
+        elif unit in {'s', 'sec'}:
+            return value * 1e6
+        else:
+            raise NotImplementedError()
+
+    def _nvprof_api_trace_csv(self, nvprof_file):
+        return "{path}.api_trace.csv".format(path=nvprof_file)
+
+    def _nvprof_api_summary_csv(self, nvprof_file):
+        return "{path}.api_summary.csv".format(path=nvprof_file)
+
+    def _nvprof_gpu_trace_csv(self, nvprof_file):
+        return "{path}.gpu_trace.csv".format(path=nvprof_file)
+
+    def _nvprof_gpu_summary_csv(self, nvprof_file):
+        return "{path}.gpu_summary.csv".format(path=nvprof_file)
+
+    def add_bar_labels(self, ax, scale='linear'):
+        # set individual bar lables using above list
+        max_height = max(i.get_height() for i in ax.patches)
+        for i in ax.patches:
+            if i.get_height() == 0:
+                continue
+            # get_x pulls left or right; get_height pushes up or down
+            if scale == 'log':
+                x = i.get_x()
+                y = i.get_height() + 0.10*i.get_height()
+            else:
+                x = i.get_x()
+                y = i.get_height() + 0.025*max_height
+            label = "{y:.2f}".format(y=i.get_height())
+            ax.text(x, y, label,
+                    #                 fontsize=11,
+                    #                 color='dimgrey',
+                    #                     rotation=45
+                    )
+
+    def plot_binned_df(self, binned_df, y, ylabel, img_path=None):
+        ax = binned_df.plot.bar(x='hist_label', y=y, rot=45, logy=True)
+        ax.set_xlabel("Kernel duration ($\mu s$)")
+        ax.set_ylabel(ylabel)
+        # ax.set_ylabel("Number of kernel invocations")
+        ax.set_title("Histogram of minigo worker kernel durations")
+        ax.get_legend().remove()
+        self.add_bar_labels(ax, scale='log')
+        if img_path is not None:
+            plt.tight_layout()
+            plt.savefig(img_path)
+        return ax
+
+    def plot_binned(self, binned_df, suffix):
+        self.plot_binned_df(binned_df, y='total_sec', ylabel="Total GPU time (sec)", img_path=self.get_img_path(suffix, "total_sec"))
+        self.plot_binned_df(binned_df, y='percent_time', ylabel="Percent total GPU time (%)", img_path=self.get_img_path(suffix, "percent_time"))
+        self.plot_binned_df(binned_df, y='total_invocations', ylabel="Kernel invocations", img_path=self.get_img_path(suffix, "total_invocations"))
+        self.plot_binned_df(binned_df, y='percent_invocations', ylabel="Percent total kernel invocations (%)", img_path=self.get_img_path(suffix, "percent_invocations"))
+
+    def get_img_path(self, suffix, y):
+        return "{path}.minigo_kernel_histograms.{suffix}.{y}.svg".format(
+            suffix=suffix,
+            path=self.nvprof_file,
+            y=y)
+
+    def hist_df_from_summary(self, summary_df, duration_field='avg_duration_us', calls_field='num_calls'):
+        hist_df = pd.DataFrame({
+            duration_field: np.repeat(summary_df[duration_field], summary_df[calls_field])
+        })
+        return hist_df
+
+    def hist_df_from_trace(self, trace_df, duration_field='avg_duration_us'):
+        return trace_df[[duration_field]]
+
+    def binned_df_from_hist(self, hist_df, n_bins=10, duration_field='avg_duration_us'):
+        total_time_us = hist_df[duration_field].sum()
+        max_dur_us = hist_df[duration_field].max()
+        min_dur_us = hist_df[duration_field].min()
+        bin_size = int(np.ceil((max_dur_us - min_dur_us)/n_bins))
+
+        binned_dfs = []
+        for i in range(n_bins):
+            bin_start = bin_size*i
+            bin_end = bin_size*(i+1)
+            # [..)
+            bin_df = hist_df[(bin_start <= hist_df[duration_field]) & (hist_df[duration_field] < bin_end)]
+            # bin_df = hist_df[bin_start <= hist_df[duration_field] < bin_end]
+
+            binned_df = pd.DataFrame({
+                'total_us': [bin_df[duration_field].sum()],
+                'total_invocations': [len(bin_df)],
+                'hist_label': "[{start},{end})".format(start=bin_start, end=bin_end),
+            })
+            binned_dfs.append(binned_df)
+        binned_df = pd.concat(binned_dfs)
+        binned_df['total_sec'] = binned_df['total_us']/1e6
+        binned_df['percent_time'] = 100*binned_df['total_us']/binned_df['total_us'].sum()
+        binned_df['percent_invocations'] = 100*binned_df['total_invocations']/binned_df['total_invocations'].sum()
+        return binned_df
+
+    def parse_api_trace(self):
+        """
+        Convert CUDA API call times into dataframe:
+        start_us,duration_us,cuda_api_name
+
+        # Read (start, duration, api)
+        $ nvprof --print-api-trace -i profile.nvprof 2>&1
+
+        ======== Profiling result:
+           Start  Duration  Name
+             0ns  2.4150us  cuDeviceGetPCIBusId
+        38.829ms  2.4050us  cuDeviceGetCount
+        38.833ms     180ns  cuDeviceGetCount
+        39.293ms     621ns  cuDeviceGet
+        39.295ms     912ns  cuDeviceGetAttribute
+        39.303ms     241ns  cuDeviceGetAttribute
+        39.303ms     521ns  cuDeviceGetAttribute
+        39.317ms     441ns  cuDeviceGetCount
+        ...
+
+        :return:
+        """
+        if not _e(self._nvprof_api_trace_csv(self.nvprof_file)):
+            with open(self._nvprof_api_trace_csv(self.nvprof_file), 'w') as f:
+                # This takes really long...
+                # For a relatively short 325MB file collected from 32 games in minigo, it takes 565 seconds (10 minutes!).
+                # real    565.79s
+                # user    564.22s
+                # sys     1.03s
+                start_nvprof_t = time.time()
+                proc = subprocess.Popen(
+                    # ["nvprof", "--print-api-trace", "-i", self.nvprof_file],
+                    ["nvprof", "--print-api-trace", "-i", self.nvprof_file, "--csv", "--normalized-time-unit", "us"],
+                    stdout=f,
+                    stderr=subprocess.STDOUT)
+                ret = proc.wait()
+                end_nvprof_t = time.time()
+                assert ret == 0
+                logging.info("Writing {path} took {sec} sec".format(
+                    path=self._nvprof_api_trace_csv(self.nvprof_file),
+                    sec=end_nvprof_t - start_nvprof_t))
+        with open(self._nvprof_api_trace_csv(self.nvprof_file), 'r') as f:
+            start_read_csv_t = time.time()
+            # header line.
+            line1 = f.readline()
+            assert re.search(r'^=+ Profiling result:', line1)
+            # header line.
+            line2 = f.readline()
+            assert re.search(r'^.*Start.+Duration.+Name', line2)
+            # units line.
+            line3 = f.readline()
+            assert re.search(r'^us,us,,', line3)
+            df = pd.read_csv(f,
+                             index_col=False,
+                             header=0,
+                             names=["start_us", "duration_us", "cuda_api_name"])
+            end_read_csv_t = time.time()
+            logging.info("Reading {path} took {sec} sec".format(
+                path=self._nvprof_api_trace_csv(self.nvprof_file),
+                sec=end_read_csv_t - start_read_csv_t))
+        logging.info("Read CUDA API trace:\n{df}\n".format(df=df))
+        return df
+
+    def parse_api_summary(self):
+        """
+        Convert CUDA API call times into dataframe:
+        start_us,duration_us,cuda_api_name
+
+        # Read (start, duration, api)
+        $ nvprof --print-api-summary -i profile.nvprof 2>&1
+        ======== Profiling result:
+        "Type","Time(%)","Time","Calls","Avg","Min","Max","Name"
+        ,%,us,,us,us,us,
+        "API calls",78.020031,7570567.921000,11,688233.447000,684120.984000,693194.046000,"cudaMemcpyAsync"
+        "API calls",15.389094,1493259.895000,8,186657.486000,1.313000,1493246.020000,"cudaStreamCreateWithFlags"
+        "API calls",3.686877,357751.097000,4,89437.774000,0.541000,357741.117000,"cudaFree"
+        "API calls",1.904952,184844.416000,1,184844.416000,184844.416000,184844.416000,"cuDevicePrimaryCtxRetain"
+        ...
+
+        :return:
+        """
+        if not _e(self._nvprof_api_summary_csv(self.nvprof_file)):
+            with open(self._nvprof_api_summary_csv(self.nvprof_file), 'w') as f:
+                # This takes really long...
+                # For a relatively short 325MB file collected from 32 games in minigo, it takes 565 seconds (10 minutes!).
+                # real    565.79s
+                # user    564.22s
+                # sys     1.03s
+                start_nvprof_t = time.time()
+                proc = subprocess.Popen(
+                    ["nvprof", "--print-api-summary", "-i", self.nvprof_file, "--csv", "--normalized-time-unit", "us"],
+                    stdout=f,
+                    stderr=subprocess.STDOUT)
+                ret = proc.wait()
+                end_nvprof_t = time.time()
+                assert ret == 0
+                logging.info("Writing {path} took {sec} sec".format(
+                    path=self._nvprof_api_summary_csv(self.nvprof_file),
+                    sec=end_nvprof_t - start_nvprof_t))
+        with open(self._nvprof_api_summary_csv(self.nvprof_file), 'r') as f:
+            start_read_csv_t = time.time()
+            # header line.
+            line1 = f.readline()
+            assert re.search(r'^=+ Profiling result:', line1)
+            # header line.
+            line2 = f.readline()
+            assert re.search(r'^.*Type.+Time\(%\).+Time', line2)
+            # units line.
+            line3 = f.readline()
+            assert re.search(r'^,%,us,,us,us,us,', line3)
+            df = pd.read_csv(f,
+                             index_col=False,
+                             header=0,
+                             # "Type","Time(%)","Time","Calls","Avg","Min","Max","Name"
+                             names=["api_type", "time_percent", "total_time_us", "num_calls", "avg_duration_us", "min_duration_us", "max_duration_us", "name"])
+            end_read_csv_t = time.time()
+            logging.info("Reading {path} took {sec} sec".format(
+                path=self._nvprof_api_summary_csv(self.nvprof_file),
+                sec=end_read_csv_t - start_read_csv_t))
+        logging.info("Read CUDA API summary:\n{df}\n".format(df=df))
+        return df
+
+    def parse_gpu_trace(self):
+        """
+        Convert CUDA kernel times into dataframe:
+        start_us,duration_us,cuda_api_name
+
+        # Read (start, duration, api)
+        $ nvprof --print-gpu-trace -i /home/jgleeson/clone/iml/output/minigo/nvprof.debug/minigo_base_dir/nvprof --csv
+        ======== Profiling result:
+        "Start","Duration","Grid X","Grid Y","Grid Z","Block X","Block Y","Block Z","Registers Per Thread","Static SMem","Dynamic SMem","Size","Throughput","SrcMemType","DstMemType","Device","Context","Stream","Name","Correlation_ID"
+        us,us,,,,,,,,KB,KB,KB,GB/s,,,,,,,
+        0.000000,1.888000,,,,,,,,,,1.003906,0.507097,"Device",,"GeForce RTX 2080 Ti (0)","1","7","[CUDA memset]",272
+        4421.878000,1.408000,,,,,,,,,,0.125000,0.084666,"Pinned","Device","GeForce RTX 2080 Ti (0)","1","22","[CUDA memcpy HtoD]",305
+
+        :return:
+        """
+        if not _e(self._nvprof_gpu_trace_csv(self.nvprof_file)):
+            with open(self._nvprof_gpu_trace_csv(self.nvprof_file), 'w') as f:
+                # This takes really long...
+                # For a relatively short 325MB file collected from 32 games in minigo, it takes 565 seconds (10 minutes!).
+                # real    565.79s
+                # user    564.22s
+                # sys     1.03s
+                start_nvprof_t = time.time()
+                proc = subprocess.Popen(
+                    # ["nvprof", "--print-gpu-trace", "-i", self.nvprof_file],
+                    ["nvprof", "--print-gpu-trace", "-i", self.nvprof_file, "--csv", "--normalized-time-unit", "us"],
+                    stdout=f,
+                    stderr=subprocess.STDOUT)
+                ret = proc.wait()
+                end_nvprof_t = time.time()
+                assert ret == 0
+                logging.info("Writing {path} took {sec} sec".format(
+                    path=self._nvprof_gpu_trace_csv(self.nvprof_file),
+                    sec=end_nvprof_t - start_nvprof_t))
+        with open(self._nvprof_gpu_trace_csv(self.nvprof_file), 'r') as f:
+            start_read_csv_t = time.time()
+            # header line.
+            line1 = f.readline()
+            assert re.search(r'^=+ Profiling result:', line1)
+            # header line.
+            line2 = f.readline()
+            assert re.search(r'^.*Start.+Duration.+Name', line2)
+            # units line.
+            line3 = f.readline()
+            assert re.search(r'^us,us,,,,,,,,KB,KB,KB,GB/s,,,,,,,', line3)
+            df = pd.read_csv(f,
+                             index_col=False,
+                             usecols=[0, 1, 18],
+                             header=0,
+                             names=["start_us", "duration_us", "name"])
+            end_read_csv_t = time.time()
+            logging.info("Reading {path} took {sec} sec".format(
+                path=self._nvprof_gpu_trace_csv(self.nvprof_file),
+                sec=end_read_csv_t - start_read_csv_t))
+        logging.info("Read CUDA GPU trace:\n{df}\n".format(df=df))
+        return df
+
+    def parse_gpu_summary(self):
+        """
+        Convert CUDA GPU call times into dataframe:
+        start_us,duration_us,name
+
+        # Read (start, duration, name)
+        $ nvprof --print-gpu-summary -i profile.nvprof 2>&1
+        ======== Profiling result:
+        "Type","Time(%)","Time","Calls","Avg","Min","Max","Name"
+        ,%,us,,us,us,us,
+        "GPU activities",29.820746,6659.683000,510,13.058000,10.944000,22.048000,"volta_sgemm_128x64_nn"
+        "GPU activities",8.283205,1849.837000,458,4.038000,3.904000,5.952000,"void cudnn::winograd_nonfused::winogradForwardData4x4<float, float>(cudnn::winograd_nonfused::WinogradDataParams<float, float>)"
+        "GPU activities",7.780943,1737.670000,458,3.794000,3.712000,5.504000,"void cudnn::winograd_nonfused::winogradForwardOutput4x4<float, float>(cudnn::winograd_nonfused::WinogradOutputParams<float, float>)"
+        ...
+
+        :return:
+        """
+        if not _e(self._nvprof_gpu_summary_csv(self.nvprof_file)):
+            with open(self._nvprof_gpu_summary_csv(self.nvprof_file), 'w') as f:
+                # This takes really long...
+                # For a relatively short 325MB file collected from 32 games in minigo, it takes 565 seconds (10 minutes!).
+                # real    565.79s
+                # user    564.22s
+                # sys     1.03s
+                start_nvprof_t = time.time()
+                proc = subprocess.Popen(
+                    ["nvprof", "--print-gpu-summary", "-i", self.nvprof_file, "--csv", "--normalized-time-unit", "us"],
+                    stdout=f,
+                    stderr=subprocess.STDOUT)
+                ret = proc.wait()
+                end_nvprof_t = time.time()
+                assert ret == 0
+                logging.info("Writing {path} took {sec} sec".format(
+                    path=self._nvprof_gpu_summary_csv(self.nvprof_file),
+                    sec=end_nvprof_t - start_nvprof_t))
+        with open(self._nvprof_gpu_summary_csv(self.nvprof_file), 'r') as f:
+            start_read_csv_t = time.time()
+            # header line.
+            line1 = f.readline()
+            assert re.search(r'^=+ Profiling result:', line1)
+            # header line.
+            line2 = f.readline()
+            assert re.search(r'^.*Type.+Time\(%\).+Time', line2)
+            # units line.
+            line3 = f.readline()
+            assert re.search(r'^,%,us,,us,us,us,', line3)
+            df = pd.read_csv(f,
+                             index_col=False,
+                             header=0,
+                             # "Type","Time(%)","Time","Calls","Avg","Min","Max","Name"
+                             names=["api_type", "time_percent", "total_time_us", "num_calls", "avg_duration_us", "min_duration_us", "max_duration_us", "name"])
+            end_read_csv_t = time.time()
+            logging.info("Reading {path} took {sec} sec".format(
+                path=self._nvprof_gpu_summary_csv(self.nvprof_file),
+                sec=end_read_csv_t - start_read_csv_t))
+        logging.info("Read CUDA GPU summary:\n{df}\n".format(df=df))
+        return df
+
+    @property
+    def directory(self):
+        return _d(self.nvprof_file)
+
+    def run(self):
+        gpu_trace = self.parse_gpu_trace()
+        gpu_trace_hist_df = self.hist_df_from_trace(gpu_trace, duration_field='duration_us')
+        binned_df = self.binned_df_from_hist(gpu_trace_hist_df, duration_field='duration_us')
+        self.plot_binned(binned_df, 'gpu_trace')
+
+        gpu_summary = self.parse_gpu_summary()
+        gpu_summary_hist_df = self.hist_df_from_summary(gpu_summary, duration_field='avg_duration_us')
+        binned_df = self.binned_df_from_hist(gpu_summary_hist_df, duration_field='avg_duration_us')
+        self.plot_binned(binned_df, 'gpu_summary')
+
+        api_trace = self.parse_api_trace()
+        api_trace_hist_df = self.hist_df_from_trace(api_trace, duration_field='duration_us')
+        binned_df = self.binned_df_from_hist(api_trace_hist_df, duration_field='duration_us')
+        self.plot_binned(binned_df, 'api_trace')
+
+        api_summary = self.parse_api_summary()
+        api_summary_hist_df = self.hist_df_from_summary(api_summary, duration_field='avg_duration_us')
+        binned_df = self.binned_df_from_hist(api_summary_hist_df, duration_field='avg_duration_us')
+        self.plot_binned(binned_df, 'api_summary')
 
 class GPUUtilOverTimePlot:
     """

@@ -19,9 +19,6 @@ from iml_profiler.parser.db import SQLCategoryTimesReader, sql_input_path
 
 from iml_profiler.profiler import iml_logging
 
-import PIL
-
-
 class TrainingProgressParser:
     """
     PSEUDOCODE:
@@ -1112,6 +1109,7 @@ def add_hierarchical_labels(fig, ax, df, label_df, groupby_cols):
     fig.subplots_adjust(bottom=.1*len(groupby_cols))
 
 def trim_border(path):
+    import PIL
     # https://stackoverflow.com/questions/10615901/trim-whitespace-using-pil
     im = PIL.Image.open(path)
     bg = PIL.Image.new(im.mode, im.size, im.getpixel((0,0)))

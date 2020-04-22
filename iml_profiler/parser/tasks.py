@@ -26,7 +26,7 @@ from iml_profiler.parser.db import SQLParser, sql_input_path, GetConnectionPool
 from iml_profiler.parser import db
 from iml_profiler.parser.stacked_bar_plots import OverlapStackedBarPlot
 from iml_profiler.parser.common import print_cmd
-from iml_profiler.parser.cpu_gpu_util import UtilParser, UtilPlot, GPUUtilOverTimePlot
+from iml_profiler.parser.cpu_gpu_util import UtilParser, UtilPlot, GPUUtilOverTimePlot, NvprofKernelHistogram
 from iml_profiler.parser.training_progress import TrainingProgressParser, ProfilingOverheadPlot
 from iml_profiler.parser.extrapolated_training_time import ExtrapolatedTrainingTimeParser
 from iml_profiler.parser.profiling_overhead import CallInterceptionOverheadParser, CUPTIOverheadParser, CUPTIScalingOverheadParser, CorrectedTrainingTimeParser, PyprofOverheadParser, TotalTrainingTimeParser, SQLOverheadEventsParser
@@ -1440,6 +1440,31 @@ class GPUUtilOverTimePlotTask(IMLTask):
         dumper = GPUUtilOverTimePlot(**kwargs)
         dumper.run()
 
+# NvprofKernelHistogramTask
+class NvprofKernelHistogramTask(luigi.Task):
+    """
+    Compare GPU utilization over time using a synthetic experiment that varies two parameters:
+    - kernel_delay_us: time between launching consecutive kernels.
+    - kernel_duration_us: time that kernels run for.
+    """
+
+    debug = param_debug
+    debug_single_thread = param_debug_single_thread
+    debug_perf = param_debug_perf
+
+    nvprof_file = luigi.Parameter(description="$ nvprof -o <nvprof_file.nvprof>")
+
+    def requires(self):
+        return []
+
+    def output(self):
+        return []
+
+    def run(self):
+        kwargs = kwargs_from_task(self)
+        dumper = NvprofKernelHistogram(**kwargs)
+        dumper.run()
+
 NOT_RUNNABLE_TASKS = get_NOT_RUNNABLE_TASKS()
 IML_TASKS = get_IML_TASKS()
 IML_TASKS.add(TraceEventsTask)
@@ -1461,6 +1486,7 @@ IML_TASKS.add(VennJsPlotOneTask)
 IML_TASKS.add(SlidingWindowUtilizationPlotTask)
 IML_TASKS.add(CUDAEventCSVTask)
 IML_TASKS.add(GPUUtilOverTimePlotTask)
+IML_TASKS.add(NvprofKernelHistogramTask)
 
 if __name__ == "__main__":
     main()
