@@ -299,19 +299,187 @@ class UtilParser:
         )
         util_plot.run()
 
+
+class NvprofCSVParser:
+    """
+    Parse output from:
+    $ nvprof --csv -i profile.nvprof ...
+    """
+    def __init__(self,
+                 nvprof_file,
+                 csv_file,
+                 nvprof_csv_opts,
+                 debug=False,
+                 debug_single_thread=False,
+                 ):
+        """
+
+        :param nvprof_file:
+            Raw nvprof file from running:
+            $ nvprof -o profile.nvprof
+        :param nvprof_csv_opts:
+            Command line parameters to pass to:
+                $ nvprof --csv -i <csv_file> <nvprof_csv_opts...>
+        :param csv_file:
+            CSV file from processing nvprof file using:
+            $ nvprof --csv -i profile.nvprof ...
+        # :param skip_line_regexes
+        #     List of regexes for lines we should ignore at the start of the "nvprof --csv" output.
+        # :param warning_line_regexes
+        #     List of regexes for lines we should warn about at the start of the "nvprof --csv" output (but skip)
+
+            NOTE: any other lines will cause an ERROR in pandas.read_csv, since we'll assume they're input.
+        """
+        self.nvprof_file = nvprof_file
+        self.csv_file = csv_file
+        self.nvprof_csv_opts = nvprof_csv_opts
+        self.debug = debug
+        self.debug_single_thread = debug_single_thread
+
+    def _read_row(self, x):
+        line = None
+        if type(x) == str:
+            line = x
+        else:
+            line = x.readline().rstrip()
+        reader = csv.reader([line])
+        rows = [row for row in reader]
+        assert len(rows) == 1
+        row = rows[0]
+        return row
+
+    def _is_empty_file(self, path):
+        filesize = os.path.getsize(path)
+        return filesize == 0
+
+    def parse(self, read_csv_kwargs):
+        """
+        "nvprof --csv" output looks like ():
+
+            1. ======== Warning: 376746 records have invalid timestamps due to insufficient device buffer space. You can configure the buffer space using the option --device-buffer-size.
+            2. ======== Profiling result:
+            3. "Start","Duration","Grid X","Grid Y","Grid Z","Block X","Block Y","Block Z","Registers Per Thread","Static SMem","Dynamic SMem","Size","Throughput","SrcMemType","DstMemType","Device","Context","Stream","Name","Correlation_ID"
+            4. us,us,,,,,,,,KB,KB,KB,GB/s,,,,,,,
+            5. 0.000000,1.568000,,,,,,,,,,1.003906,0.610586,"Device",,"GeForce RTX 2080 Ti (0)","1","7","[CUDA memset]",274
+
+        NOTE: line numbers above aren't present in output
+
+        NOTE:
+        - line 1 is a warning line
+        - line 2 is skipped
+        - line 3 is a header line (first unskipped line)
+        - line 4 is a units line (second unskipped line)
+        - line >= 5 are input lines
+
+        :param read_csv_kwargs:
+            Extra arguments to pass to pandas.read_csv
+        :return:
+        """
+        if not _e(self.csv_file) or self._is_empty_file(self.csv_file):
+            with open(self.csv_file, 'w') as f:
+                # This takes really long...
+                # For a relatively short 325MB file collected from 32 games in minigo, it takes 565 seconds (10 minutes!).
+                # real    565.79s
+                # user    564.22s
+                # sys     1.03s
+                start_nvprof_t = time.time()
+                proc = subprocess.Popen(
+                    ["nvprof", "-i", self.nvprof_file, "--csv", "--normalized-time-unit", "us"] + self.nvprof_csv_opts,
+                    stdout=f,
+                    stderr=subprocess.STDOUT)
+                ret = proc.wait()
+                end_nvprof_t = time.time()
+                assert ret == 0
+                logging.info("Running \"nvprof --csv -i {path}\" took {sec} sec".format(
+                    path=self.nvprof_file,
+                    sec=end_nvprof_t - start_nvprof_t))
+        with open(self.csv_file, 'r') as f:
+            num_skip_lines = 0
+            num_other_lines = 0
+            for lineno, line in enumerate(f):
+                line = line.rstrip()
+                m = re.search('^=+\s+(?P<msg>.*)', line)
+                if m:
+                    msg = m.group('msg')
+                    if re.search('Warning', msg, flags=re.IGNORECASE):
+                        logging.warning("Saw WARNING in {path} at line {lineno}:\n{warning}".format(
+                            path=self.csv_file,
+                            lineno=lineno,
+                            warning=textwrap.indent(line, prefix="  ")))
+                else:
+                    if num_other_lines == 0:
+                        self.header = self._read_row(line)
+                    elif num_other_lines == 1:
+                        self.units = self._read_row(line)
+                    else:
+                        # We've encountered the first data line.
+                        break
+                    num_other_lines += 1
+
+                num_skip_lines += 1
+
+        with open(self.csv_file, 'r') as f:
+            for i in range(num_skip_lines):
+                f.readline()
+            start_read_csv_t = time.time()
+            # usecols=[0, 1, 18],
+            # header=0,
+            # names=["start_us", "duration_us", "name"])
+            read_csv_kwargs = dict(read_csv_kwargs)
+            if 'names' not in read_csv_kwargs:
+                # If user doesn't specify custom header names,
+                # use nvprof's header names as labels.
+                read_csv_kwargs['names'] = list(self.header)
+                if 'usecols' in read_csv_kwargs:
+                    # Only keep nvprof header names for the corresponding columns the user is selecting.
+                    read_csv_kwargs['names'] = [read_csv_kwargs['names'][i] for i in read_csv_kwargs['usecols']]
+            df = pd.read_csv(
+                f,
+                index_col=False,
+                **read_csv_kwargs)
+            end_read_csv_t = time.time()
+            logging.info("Reading {path} took {sec} sec".format(
+                path=self.csv_file,
+                sec=end_read_csv_t - start_read_csv_t))
+            if self.debug:
+                logging.info(
+                    textwrap.dedent("""\
+                    Read nvprof file {path} into dataframe:
+                      Header: {header}
+                      Units: {header}
+                      Dataframe:
+                    {df}
+                    """).format(
+                        path=self.nvprof_file,
+                        header=read_csv_kwargs['names'],
+                        units=self.units,
+                        df=textwrap.indent(str(df), prefix="    "),
+                    ))
+        return df
+
+NVPROF_HIST_DEFAULT_FMT = "{y:.2f}"
+# NVPROF_HIST_INT_FMT = "{y:d}"
+
+def nvprof_fmt_int(y):
+    return "{y:d}".format(y=int(np.round(y)))
+
 class NvprofKernelHistogram:
-
     FLOAT_RE = r'(?:[-+]?[0-9]*\.?[0-9]+(?:[eE][-+]?[0-9]+)?)'
-
     UNIT_RE = r'ns|ms|sec|s'
 
     def __init__(self,
                  nvprof_file,
+                 discard_top_percentile=None,
+                 discard_bottom_percentile=None,
+                 discard_iqr_whiskers=False,
                  debug=False,
                  debug_single_thread=False,
                  # Swallow any excess arguments
                  **kwargs):
         self.nvprof_file = nvprof_file
+        self.discard_top_percentile = discard_top_percentile
+        self.discard_bottom_percentile = discard_bottom_percentile
+        self.discard_iqr_whiskers = discard_iqr_whiskers
         self.debug = debug
         self.debug_single_thread = debug_single_thread
 
@@ -348,9 +516,24 @@ class NvprofKernelHistogram:
     def _nvprof_gpu_summary_csv(self, nvprof_file):
         return "{path}.gpu_summary.csv".format(path=nvprof_file)
 
-    def add_bar_labels(self, ax, scale='linear'):
+    def add_bar_labels(self, ax, scale='linear', fmt=NVPROF_HIST_DEFAULT_FMT):
+        """
+        :param ax:
+        :param scale:
+        :param fmt:
+            Format string, where "y" is the variable to format.
+            Default: "{y:.2f}"
+            i.e. 2 decimal places:
+            2.123123 => 2.12
+        :return:
+        """
         # set individual bar lables using above list
         max_height = max(i.get_height() for i in ax.patches)
+        min_y, max_y = ax.get_ylim()
+        if scale == 'log':
+            ax.set_ylim(min_y, 1.10*max_y)
+        else:
+            ax.set_ylim(min_y, 1.025*max_y)
         for i in ax.patches:
             if i.get_height() == 0:
                 continue
@@ -361,31 +544,46 @@ class NvprofKernelHistogram:
             else:
                 x = i.get_x()
                 y = i.get_height() + 0.025*max_height
-            label = "{y:.2f}".format(y=i.get_height())
-            ax.text(x, y, label,
-                    #                 fontsize=11,
-                    #                 color='dimgrey',
-                    #                     rotation=45
-                    )
+            if type(fmt) == str:
+                label = fmt.format(y=i.get_height())
+            else:
+                label = fmt(i.get_height())
+            ax.text(x, y, label)
 
-    def plot_binned_df(self, binned_df, y, ylabel, img_path=None):
+    def plot_binned_df(self, binned_df, y, xlabel, ylabel, img_path=None, fmt=NVPROF_HIST_DEFAULT_FMT):
         ax = binned_df.plot.bar(x='hist_label', y=y, rot=45, logy=True)
-        ax.set_xlabel("Kernel duration ($\mu s$)")
+        ax.set_xlabel(xlabel)
         ax.set_ylabel(ylabel)
         # ax.set_ylabel("Number of kernel invocations")
-        ax.set_title("Histogram of minigo worker kernel durations")
+        # ax.set_title("Histogram of minigo worker kernel durations")
         ax.get_legend().remove()
-        self.add_bar_labels(ax, scale='log')
+        self.add_bar_labels(ax, scale='log', fmt=fmt)
         if img_path is not None:
             plt.tight_layout()
             plt.savefig(img_path)
         return ax
 
-    def plot_binned(self, binned_df, suffix):
-        self.plot_binned_df(binned_df, y='total_sec', ylabel="Total GPU time (sec)", img_path=self.get_img_path(suffix, "total_sec"))
-        self.plot_binned_df(binned_df, y='percent_time', ylabel="Percent total GPU time (%)", img_path=self.get_img_path(suffix, "percent_time"))
-        self.plot_binned_df(binned_df, y='total_invocations', ylabel="Kernel invocations", img_path=self.get_img_path(suffix, "total_invocations"))
-        self.plot_binned_df(binned_df, y='percent_invocations', ylabel="Percent total kernel invocations (%)", img_path=self.get_img_path(suffix, "percent_invocations"))
+
+    def plot_binned_gpu_kernels(self, binned_df, suffix, fmt=NVPROF_HIST_DEFAULT_FMT):
+        xlabel = "Kernel duration ($\mu s$)"
+        self.plot_binned_df(binned_df, y='total_sec', xlabel=xlabel, ylabel="Total GPU time (sec)", img_path=self.get_img_path(suffix, "total_sec"), fmt=fmt)
+        self.plot_binned_df(binned_df, y='percent_time', xlabel=xlabel, ylabel="Percent total GPU time (%)", img_path=self.get_img_path(suffix, "percent_time"), fmt=fmt)
+        self.plot_binned_df(binned_df, y='total_invocations', xlabel=xlabel, ylabel="Kernel invocations", img_path=self.get_img_path(suffix, "total_invocations"), fmt=nvprof_fmt_int)
+        self.plot_binned_df(binned_df, y='percent_invocations', xlabel=xlabel, ylabel="Percent total kernel invocations (%)", img_path=self.get_img_path(suffix, "percent_invocations"), fmt=fmt)
+
+    def plot_binned_cudaLaunchKernel(self, binned_df, suffix, fmt=NVPROF_HIST_DEFAULT_FMT):
+        xlabel = "Duration of cudaLaunchKernel calls ($\mu s$)"
+        self.plot_binned_df(binned_df, y='total_sec', xlabel=xlabel, ylabel="Total GPU time (sec)", img_path=self.get_img_path(suffix, "total_sec"), fmt=fmt)
+        self.plot_binned_df(binned_df, y='percent_time', xlabel=xlabel, ylabel="Percent total GPU time (%)", img_path=self.get_img_path(suffix, "percent_time"), fmt=fmt)
+        self.plot_binned_df(binned_df, y='total_invocations', xlabel=xlabel, ylabel="Kernel invocations", img_path=self.get_img_path(suffix, "total_invocations"), fmt=nvprof_fmt_int)
+        self.plot_binned_df(binned_df, y='percent_invocations', xlabel=xlabel, ylabel="Percent total kernel invocations (%)", img_path=self.get_img_path(suffix, "percent_invocations"), fmt=fmt)
+
+    def plot_binned_delay(self, binned_df, suffix, fmt=NVPROF_HIST_DEFAULT_FMT):
+        xlabel = "Delay between cudaLaunchKernel calls ($\mu s$)"
+        self.plot_binned_df(binned_df, y='total_sec', xlabel=xlabel, ylabel="Total CUDA API time (sec)", img_path=self.get_img_path(suffix, "total_sec"), fmt=fmt)
+        self.plot_binned_df(binned_df, y='percent_time', xlabel=xlabel, ylabel="Percent total CUDA API time (%)", img_path=self.get_img_path(suffix, "percent_time"), fmt=fmt)
+        self.plot_binned_df(binned_df, y='total_invocations', xlabel=xlabel, ylabel="cudaLaunchKernel invocations", img_path=self.get_img_path(suffix, "total_invocations"), fmt=nvprof_fmt_int)
+        self.plot_binned_df(binned_df, y='percent_invocations', xlabel=xlabel, ylabel="Percent total cudaLaunchKernel invocations (%)", img_path=self.get_img_path(suffix, "percent_invocations"), fmt=fmt)
 
     def get_img_path(self, suffix, y):
         return "{path}.minigo_kernel_histograms.{suffix}.{y}.svg".format(
@@ -400,9 +598,73 @@ class NvprofKernelHistogram:
         return hist_df
 
     def hist_df_from_trace(self, trace_df, duration_field='avg_duration_us'):
+        """
+        Just keep the 'duration_us' column form the raw trace dataframe.
+
+        :param trace_df:
+            Raw trace dataframe
+        :param duration_field:
+            e.g. 'duration_us'
+        :return:
+        """
         return trace_df[[duration_field]]
 
+    def delay_df_from_trace(self, trace_df):
+        """
+        Just keep the 'duration_us' column form the raw trace dataframe.
+
+        :param trace_df:
+            Raw trace dataframe
+        :param duration_field:
+            e.g. 'duration_us'
+        :return:
+        """
+        trace_df['end_us'] = trace_df['start_us'] + trace_df['duration_us']
+        trace_df.sort_values(['start_us', 'end_us'], inplace=True)
+        delay_us = trace_df['start_us'][1:].values - trace_df['end_us'][:len(trace_df)-1].values
+        delay_non_neg_us = delay_us[delay_us >= 0]
+        # report_delay_us = delay_non_neg_us
+        # Q: What does this mean...?  The number of consecutive kernels that overlap.
+        delay_neg_us = delay_us[delay_us < 0]
+        # For a single process/thread, as long as cudaLaunchKernel is done from a single thread,
+        # overlapping cudaLaunchKernel's shouldn't happen.
+        assert len(delay_neg_us) == 0
+        # num_overlapped = len(delay_neg_us)
+        # mean_delay_neg_us =  delay_neg_us.mean()
+        # std_delay_neg_us = delay_neg_us.std()
+        #
+        # mean_delay_us =  report_delay_us.mean()
+        # std_delay_us = report_delay_us.std()
+        # num_delay_us = len(report_delay_us)
+        # mean_duration_us = trace_df['duration_us'].mean()
+        # std_duration_us = trace_df['duration_us'].std()
+        delay_df = pd.DataFrame({
+            'delay_us': delay_non_neg_us,
+        })
+        return delay_df
+
     def binned_df_from_hist(self, hist_df, n_bins=10, duration_field='avg_duration_us'):
+        """
+        Given a dataframe with 1 column ('duration_us'), divide the range of durations
+        into equally sized bins (n_bins), and compute aggregated values for each bin:
+
+        - total_us:
+          sum of 'duration_us'
+        - total_invocations:
+          total number of kernel calls
+        - total_sec :
+          sum of 'duration_us', in sec
+        - percent_time :
+          percent of the total GPU time that this bin makes up.
+        - percent_invocations :
+          percent of the total kernel invocations that this bin makes up.
+
+        :param hist_df:
+            Dataframe containing just a 'duration_us' column.
+        :param n_bins:
+        :param duration_field:
+        :return:
+        """
         total_time_us = hist_df[duration_field].sum()
         max_dur_us = hist_df[duration_field].max()
         min_dur_us = hist_df[duration_field].min()
@@ -428,10 +690,10 @@ class NvprofKernelHistogram:
         binned_df['percent_invocations'] = 100*binned_df['total_invocations']/binned_df['total_invocations'].sum()
         return binned_df
 
-    def parse_api_trace(self):
+    def parse_api_trace(self, debug=False):
         """
         Convert CUDA API call times into dataframe:
-        start_us,duration_us,cuda_api_name
+        start_us,duration_us,name
 
         # Read (start, duration, api)
         $ nvprof --print-api-trace -i profile.nvprof 2>&1
@@ -450,51 +712,23 @@ class NvprofKernelHistogram:
 
         :return:
         """
-        if not _e(self._nvprof_api_trace_csv(self.nvprof_file)):
-            with open(self._nvprof_api_trace_csv(self.nvprof_file), 'w') as f:
-                # This takes really long...
-                # For a relatively short 325MB file collected from 32 games in minigo, it takes 565 seconds (10 minutes!).
-                # real    565.79s
-                # user    564.22s
-                # sys     1.03s
-                start_nvprof_t = time.time()
-                proc = subprocess.Popen(
-                    # ["nvprof", "--print-api-trace", "-i", self.nvprof_file],
-                    ["nvprof", "--print-api-trace", "-i", self.nvprof_file, "--csv", "--normalized-time-unit", "us"],
-                    stdout=f,
-                    stderr=subprocess.STDOUT)
-                ret = proc.wait()
-                end_nvprof_t = time.time()
-                assert ret == 0
-                logging.info("Writing {path} took {sec} sec".format(
-                    path=self._nvprof_api_trace_csv(self.nvprof_file),
-                    sec=end_nvprof_t - start_nvprof_t))
-        with open(self._nvprof_api_trace_csv(self.nvprof_file), 'r') as f:
-            start_read_csv_t = time.time()
-            # header line.
-            line1 = f.readline()
-            assert re.search(r'^=+ Profiling result:', line1)
-            # header line.
-            line2 = f.readline()
-            assert re.search(r'^.*Start.+Duration.+Name', line2)
-            # units line.
-            line3 = f.readline()
-            assert re.search(r'^us,us,,', line3)
-            df = pd.read_csv(f,
-                             index_col=False,
-                             header=0,
-                             names=["start_us", "duration_us", "cuda_api_name"])
-            end_read_csv_t = time.time()
-            logging.info("Reading {path} took {sec} sec".format(
-                path=self._nvprof_api_trace_csv(self.nvprof_file),
-                sec=end_read_csv_t - start_read_csv_t))
-        logging.info("Read CUDA API trace:\n{df}\n".format(df=df))
+        nvprof_parser = NvprofCSVParser(
+            nvprof_file=self.nvprof_file,
+            csv_file=self._nvprof_api_trace_csv(self.nvprof_file),
+            nvprof_csv_opts=["--print-api-trace"],
+            debug=self.debug or debug,
+            debug_single_thread=self.debug_single_thread)
+        df = nvprof_parser.parse(
+            read_csv_kwargs=dict(
+                header=0,
+                names=["start_us", "duration_us", "name"],
+            ))
         return df
 
     def parse_api_summary(self):
         """
         Convert CUDA API call times into dataframe:
-        start_us,duration_us,cuda_api_name
+        start_us,duration_us,name
 
         # Read (start, duration, api)
         $ nvprof --print-api-summary -i profile.nvprof 2>&1
@@ -509,51 +743,25 @@ class NvprofKernelHistogram:
 
         :return:
         """
-        if not _e(self._nvprof_api_summary_csv(self.nvprof_file)):
-            with open(self._nvprof_api_summary_csv(self.nvprof_file), 'w') as f:
-                # This takes really long...
-                # For a relatively short 325MB file collected from 32 games in minigo, it takes 565 seconds (10 minutes!).
-                # real    565.79s
-                # user    564.22s
-                # sys     1.03s
-                start_nvprof_t = time.time()
-                proc = subprocess.Popen(
-                    ["nvprof", "--print-api-summary", "-i", self.nvprof_file, "--csv", "--normalized-time-unit", "us"],
-                    stdout=f,
-                    stderr=subprocess.STDOUT)
-                ret = proc.wait()
-                end_nvprof_t = time.time()
-                assert ret == 0
-                logging.info("Writing {path} took {sec} sec".format(
-                    path=self._nvprof_api_summary_csv(self.nvprof_file),
-                    sec=end_nvprof_t - start_nvprof_t))
-        with open(self._nvprof_api_summary_csv(self.nvprof_file), 'r') as f:
-            start_read_csv_t = time.time()
-            # header line.
-            line1 = f.readline()
-            assert re.search(r'^=+ Profiling result:', line1)
-            # header line.
-            line2 = f.readline()
-            assert re.search(r'^.*Type.+Time\(%\).+Time', line2)
-            # units line.
-            line3 = f.readline()
-            assert re.search(r'^,%,us,,us,us,us,', line3)
-            df = pd.read_csv(f,
-                             index_col=False,
-                             header=0,
-                             # "Type","Time(%)","Time","Calls","Avg","Min","Max","Name"
-                             names=["api_type", "time_percent", "total_time_us", "num_calls", "avg_duration_us", "min_duration_us", "max_duration_us", "name"])
-            end_read_csv_t = time.time()
-            logging.info("Reading {path} took {sec} sec".format(
-                path=self._nvprof_api_summary_csv(self.nvprof_file),
-                sec=end_read_csv_t - start_read_csv_t))
-        logging.info("Read CUDA API summary:\n{df}\n".format(df=df))
+
+        nvprof_parser = NvprofCSVParser(
+            nvprof_file=self.nvprof_file,
+            csv_file=self._nvprof_api_summary_csv(self.nvprof_file),
+            nvprof_csv_opts=["--print-api-summary"],
+            debug=self.debug,
+            debug_single_thread=self.debug_single_thread)
+        df = nvprof_parser.parse(
+            read_csv_kwargs=dict(
+                header=0,
+                # "Type","Time(%)","Time","Calls","Avg","Min","Max","Name"
+                names=["api_type", "time_percent", "total_time_us", "num_calls", "avg_duration_us", "min_duration_us", "max_duration_us", "name"],
+        ))
         return df
 
     def parse_gpu_trace(self):
         """
         Convert CUDA kernel times into dataframe:
-        start_us,duration_us,cuda_api_name
+        start_us,duration_us,name
 
         # Read (start, duration, api)
         $ nvprof --print-gpu-trace -i /home/jgleeson/clone/iml/output/minigo/nvprof.debug/minigo_base_dir/nvprof --csv
@@ -565,46 +773,19 @@ class NvprofKernelHistogram:
 
         :return:
         """
-        if not _e(self._nvprof_gpu_trace_csv(self.nvprof_file)):
-            with open(self._nvprof_gpu_trace_csv(self.nvprof_file), 'w') as f:
-                # This takes really long...
-                # For a relatively short 325MB file collected from 32 games in minigo, it takes 565 seconds (10 minutes!).
-                # real    565.79s
-                # user    564.22s
-                # sys     1.03s
-                start_nvprof_t = time.time()
-                proc = subprocess.Popen(
-                    # ["nvprof", "--print-gpu-trace", "-i", self.nvprof_file],
-                    ["nvprof", "--print-gpu-trace", "-i", self.nvprof_file, "--csv", "--normalized-time-unit", "us"],
-                    stdout=f,
-                    stderr=subprocess.STDOUT)
-                ret = proc.wait()
-                end_nvprof_t = time.time()
-                assert ret == 0
-                logging.info("Writing {path} took {sec} sec".format(
-                    path=self._nvprof_gpu_trace_csv(self.nvprof_file),
-                    sec=end_nvprof_t - start_nvprof_t))
-        with open(self._nvprof_gpu_trace_csv(self.nvprof_file), 'r') as f:
-            start_read_csv_t = time.time()
-            # header line.
-            line1 = f.readline()
-            assert re.search(r'^=+ Profiling result:', line1)
-            # header line.
-            line2 = f.readline()
-            assert re.search(r'^.*Start.+Duration.+Name', line2)
-            # units line.
-            line3 = f.readline()
-            assert re.search(r'^us,us,,,,,,,,KB,KB,KB,GB/s,,,,,,,', line3)
-            df = pd.read_csv(f,
-                             index_col=False,
-                             usecols=[0, 1, 18],
-                             header=0,
-                             names=["start_us", "duration_us", "name"])
-            end_read_csv_t = time.time()
-            logging.info("Reading {path} took {sec} sec".format(
-                path=self._nvprof_gpu_trace_csv(self.nvprof_file),
-                sec=end_read_csv_t - start_read_csv_t))
-        logging.info("Read CUDA GPU trace:\n{df}\n".format(df=df))
+
+        nvprof_parser = NvprofCSVParser(
+            nvprof_file=self.nvprof_file,
+            csv_file=self._nvprof_gpu_trace_csv(self.nvprof_file),
+            nvprof_csv_opts=["--print-gpu-trace"],
+            debug=self.debug,
+            debug_single_thread=self.debug_single_thread)
+        df = nvprof_parser.parse(
+            read_csv_kwargs=dict(
+                usecols=[0, 1, 18],
+                header=0,
+                names=["start_us", "duration_us", "name"],
+        ))
         return df
 
     def parse_gpu_summary(self):
@@ -624,45 +805,19 @@ class NvprofKernelHistogram:
 
         :return:
         """
-        if not _e(self._nvprof_gpu_summary_csv(self.nvprof_file)):
-            with open(self._nvprof_gpu_summary_csv(self.nvprof_file), 'w') as f:
-                # This takes really long...
-                # For a relatively short 325MB file collected from 32 games in minigo, it takes 565 seconds (10 minutes!).
-                # real    565.79s
-                # user    564.22s
-                # sys     1.03s
-                start_nvprof_t = time.time()
-                proc = subprocess.Popen(
-                    ["nvprof", "--print-gpu-summary", "-i", self.nvprof_file, "--csv", "--normalized-time-unit", "us"],
-                    stdout=f,
-                    stderr=subprocess.STDOUT)
-                ret = proc.wait()
-                end_nvprof_t = time.time()
-                assert ret == 0
-                logging.info("Writing {path} took {sec} sec".format(
-                    path=self._nvprof_gpu_summary_csv(self.nvprof_file),
-                    sec=end_nvprof_t - start_nvprof_t))
-        with open(self._nvprof_gpu_summary_csv(self.nvprof_file), 'r') as f:
-            start_read_csv_t = time.time()
-            # header line.
-            line1 = f.readline()
-            assert re.search(r'^=+ Profiling result:', line1)
-            # header line.
-            line2 = f.readline()
-            assert re.search(r'^.*Type.+Time\(%\).+Time', line2)
-            # units line.
-            line3 = f.readline()
-            assert re.search(r'^,%,us,,us,us,us,', line3)
-            df = pd.read_csv(f,
-                             index_col=False,
-                             header=0,
-                             # "Type","Time(%)","Time","Calls","Avg","Min","Max","Name"
-                             names=["api_type", "time_percent", "total_time_us", "num_calls", "avg_duration_us", "min_duration_us", "max_duration_us", "name"])
-            end_read_csv_t = time.time()
-            logging.info("Reading {path} took {sec} sec".format(
-                path=self._nvprof_gpu_summary_csv(self.nvprof_file),
-                sec=end_read_csv_t - start_read_csv_t))
-        logging.info("Read CUDA GPU summary:\n{df}\n".format(df=df))
+
+        nvprof_parser = NvprofCSVParser(
+            nvprof_file=self.nvprof_file,
+            csv_file=self._nvprof_gpu_summary_csv(self.nvprof_file),
+            nvprof_csv_opts=["--print-gpu-summary"],
+            debug=self.debug,
+            debug_single_thread=self.debug_single_thread)
+        df = nvprof_parser.parse(
+            read_csv_kwargs=dict(
+                header=0,
+                # "Type","Time(%)","Time","Calls","Avg","Min","Max","Name"
+                names=["api_type", "time_percent", "total_time_us", "num_calls", "avg_duration_us", "min_duration_us", "max_duration_us", "name"],
+        ))
         return df
 
     @property
@@ -673,22 +828,51 @@ class NvprofKernelHistogram:
         gpu_trace = self.parse_gpu_trace()
         gpu_trace_hist_df = self.hist_df_from_trace(gpu_trace, duration_field='duration_us')
         binned_df = self.binned_df_from_hist(gpu_trace_hist_df, duration_field='duration_us')
-        self.plot_binned(binned_df, 'gpu_trace')
+        self.plot_binned_gpu_kernels(binned_df, 'gpu_trace')
 
-        gpu_summary = self.parse_gpu_summary()
-        gpu_summary_hist_df = self.hist_df_from_summary(gpu_summary, duration_field='avg_duration_us')
-        binned_df = self.binned_df_from_hist(gpu_summary_hist_df, duration_field='avg_duration_us')
-        self.plot_binned(binned_df, 'gpu_summary')
+        # gpu_summary = self.parse_gpu_summary()
+        # gpu_summary_hist_df = self.hist_df_from_summary(gpu_summary, duration_field='avg_duration_us')
+        # binned_df = self.binned_df_from_hist(gpu_summary_hist_df, duration_field='avg_duration_us')
+        # self.plot_binned(binned_df, 'gpu_summary')
 
-        api_trace = self.parse_api_trace()
-        api_trace_hist_df = self.hist_df_from_trace(api_trace, duration_field='duration_us')
-        binned_df = self.binned_df_from_hist(api_trace_hist_df, duration_field='duration_us')
-        self.plot_binned(binned_df, 'api_trace')
+        api_trace = self.parse_api_trace(debug=True)
+        cudaLaunchKernel_api_trace_df = api_trace[api_trace['name'] == 'cudaLaunchKernel']
+        all_cudaLaunchKernel_api_trace_hist_df = self.hist_df_from_trace(cudaLaunchKernel_api_trace_df, duration_field='duration_us')
+        cudaLaunchKernel_api_trace_hist_df = self.discard_outliers(all_cudaLaunchKernel_api_trace_hist_df, duration_field='duration_us')
+        cudaLaunchKernel_api_trace_binned_df = self.binned_df_from_hist(cudaLaunchKernel_api_trace_hist_df, duration_field='duration_us')
+        self.plot_binned_cudaLaunchKernel(cudaLaunchKernel_api_trace_binned_df, 'api_trace.cudaLaunchKernel_duration_us')
+        # self.plot_binned_gpu_kernels(cudaLaunchKernel_delay_df, '')
 
-        api_summary = self.parse_api_summary()
-        api_summary_hist_df = self.hist_df_from_summary(api_summary, duration_field='avg_duration_us')
-        binned_df = self.binned_df_from_hist(api_summary_hist_df, duration_field='avg_duration_us')
-        self.plot_binned(binned_df, 'api_summary')
+        # Q: How to ignore outliers...?
+        cudaLaunchKernel_delay_df = self.delay_df_from_trace(cudaLaunchKernel_api_trace_df)
+        all_cudaLaunchKernel_delay_hist_df = self.hist_df_from_trace(cudaLaunchKernel_delay_df, duration_field='delay_us')
+        cudaLaunchKernel_delay_hist_df = self.discard_outliers(all_cudaLaunchKernel_delay_hist_df, duration_field='delay_us')
+        cudaLaunchKernel_delay_binned_df = self.binned_df_from_hist(cudaLaunchKernel_delay_hist_df, n_bins=10, duration_field='delay_us')
+        self.plot_binned_delay(cudaLaunchKernel_delay_binned_df, 'api_trace.cudaLaunchKernel_delay_us')
+
+        # api_summary = self.parse_api_summary()
+        # api_summary_hist_df = self.hist_df_from_summary(api_summary, duration_field='avg_duration_us')
+        # binned_df = self.binned_df_from_hist(api_summary_hist_df, duration_field='avg_duration_us')
+        # self.plot_binned(binned_df, 'api_summary')
+
+    def discard_outliers(self, df, duration_field):
+        """
+        Discard outliers the same way a boxplot does with its whiskers.
+        https://www.purplemath.com/modules/boxwhisk3.htm
+
+        :param df:
+        :param duration_field:
+        :return:
+        """
+        # quartiles
+        Q = np.percentile(df[duration_field], [25, 50, 75])
+        IQR = Q[-1] - Q[0]
+        # Q[0] - 1.5*(Q[2] - Q[0])
+        # == Q[0] - 1.5*Q[2] + 1.5*Q[0]
+        # == 2.5*Q[0] - 1.5*Q[2]
+        keep_df = df[(Q[0] - 1.5*IQR <= df[duration_field]) &
+                     (df[duration_field] <= Q[-1] + 1.5*IQR)]
+        return keep_df
 
 class GPUUtilOverTimePlot:
     """
