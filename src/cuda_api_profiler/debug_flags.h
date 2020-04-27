@@ -27,6 +27,7 @@
 namespace tensorflow {
 
 #define DBG_LOG(fmt, ...) SPDLOG_DEBUG("pid={} @ {}: " fmt, gettid(), __func__, __VA_ARGS__)
+#define DBG_WARN(fmt, ...) SPDLOG_WARN("pid={} @ {}: " fmt, gettid(), __func__, __VA_ARGS__)
 
 // NOTE: this is the only variation of bit-flags I saw the compiler successfully "optimize out" of my program.
 // Attempting to use constexpr in combination with std::bitset or even just plain uint64_t FAILS.
@@ -40,7 +41,7 @@ namespace tensorflow {
 constexpr bool FEATURE_OVERLAP = 0;
 constexpr bool FEATURE_OVERLAP_META = 0;
 constexpr bool FEATURE_LOAD_DATA = 1;
-constexpr bool FEATURE_SAVE_JS = 0;
+constexpr bool FEATURE_SAVE_JS = 1;
 constexpr bool FEATURE_PREPROCESS_DATA = 0;
 constexpr bool FEATURE_OVERHEAD_CORRECTION = 0;
 constexpr bool FEATURE_GPU_CLOCK_FREQ = 1;

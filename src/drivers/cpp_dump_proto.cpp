@@ -334,7 +334,7 @@ int main(int argc, char** argv) {
     auto parser = mk_parser();
     auto timer = parser.timer;
     size_t n_total_events = 0;
-    parser.EachEntireTrace([timer, &n_total_events] (std::unique_ptr<CategoryTimes> category_times, const EntireTraceMeta& meta) {
+    status = parser.EachEntireTrace([timer, &n_total_events] (std::unique_ptr<CategoryTimes> category_times, const EntireTraceMeta& meta) {
       if (FLAGS_debug) {
         std::cout << "Machine=" << meta.machine
                   << ", " << "Process=" << meta.process
@@ -406,6 +406,7 @@ int main(int argc, char** argv) {
 
       return MyStatus::OK();
     }, selector);
+    IF_BAD_STATUS_EXIT("Failed to compute overlap", status);
     if (timer) {
       auto total_time_sec = timer->TotalTimeSec();
       timer->RecordThroughput("overlap events", n_total_events);

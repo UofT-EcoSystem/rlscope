@@ -21,6 +21,7 @@
 #include <spdlog/spdlog.h>
 #include <spdlog/fmt/ostr.h>
 #include <boost/filesystem.hpp>
+#include <boost/tokenizer.hpp>
 
 // NOTE: not until gcc 7.1 (7.4.0 in Ubuntu 18.04); use boost::optional instead.
 // #include <optional>
@@ -101,6 +102,7 @@ enum RLSFileType {
   CUDA_API_STATS_FILE = 1,
   CATEGORY_EVENTS_FILE = 2,
   CUDA_DEVICE_EVENTS_FILE = 3,
+  NVPROF_CSV_FILE = 4,
 };
 
 extern const std::regex PROCESS_OPERATION_REGEX;
@@ -152,6 +154,11 @@ extern const std::set<RLSFileType> RLS_FILE_TYPES;
 
 //#define CUDA_DEVICE_EVENTS_REGEX (R"(cuda_device_events{trace}\.proto)")
 #define CUDA_DEVICE_EVENTS_REGEX (R"(cuda_device_events)" TRACE_SUFFIX_RE R"(\.proto)")
+
+// e.g.
+// profile.process_15562.nvprof.gpu_trace.csv
+//  profile.process_15562.nvprof.api_trace.csv
+#define NVPROF_CSV_REGEX (R"(.*\.nvprof.*(?:\.api_trace|\.gpu_trace).*\.csv)")
 
 // NOT supported until C++17 Ubuntu 18.04
 //using OptionalString = boost::optional<std::string_view>;
@@ -746,6 +753,8 @@ public:
   // TODO: if this slows stuff down, just make our own array template that avoids double dereference.
   // https://stackoverflow.com/questions/8947579/why-isnt-there-a-stdshared-ptrt-specialisation
   std::shared_ptr<std::vector<TimeUsec>> _events;
+  TimeUsec _min_start_ps;
+  TimeUsec _max_end_ps;
 
   // Assumption:
   // The number of unique event-names belonging to a single category is < 2^32.
@@ -873,6 +882,8 @@ public:
       _max_events(0),
       _next_event_to_set(0),
       _events(new std::vector<TimeUsec>()),
+      _min_start_ps(0),
+      _max_end_ps(0),
       _keep_names(false)
   {
   }
@@ -882,9 +893,14 @@ public:
       // 2*n_events: For each event, we need the (start, end) time.
       // , _events(new std::vector<TimeUsec>(2*n_events))
       , _events(new std::vector<TimeUsec>())
+      , _min_start_ps(0)
+      , _max_end_ps(0)
       , _keep_names(keep_names)
   {
     _events->reserve(2*n_events);
+    if (_keep_names) {
+      _names.reserve(n_events);
+    }
   }
 
   inline bool KeepNames() const {
@@ -932,6 +948,12 @@ public:
       assert(name.has_value());
       _names.push_back(name.value());
     }
+    if (_next_event_to_set == 0 || start_ps < _min_start_ps) {
+      _min_start_ps = start_ps;
+    }
+    if (_next_event_to_set == 0 || end_ps > _max_end_ps) {
+      _max_end_ps = end_ps;
+    }
     (*_events)[start_idx] = start_ps;
     (*_events)[end_idx] = end_ps;
     if (i > 0) {
@@ -947,6 +969,14 @@ public:
     auto start_us = (*_events)[start_idx] / PSEC_IN_USEC;
     auto end_us = (*_events)[end_idx] / PSEC_IN_USEC;
     return end_us - start_us;
+  }
+
+  inline TimeUsec MinStartUsec() const {
+    return _min_start_ps/PSEC_IN_USEC;
+  }
+
+  inline TimeUsec MaxEndUsec() const {
+    return _max_end_ps/PSEC_IN_USEC;
   }
 
   inline TimeUsec StartUsec(size_t i) const {
@@ -1392,6 +1422,19 @@ struct TraceFileMeta {
     _PrintField(out, indent + 1, "phase", phase);
     _PrintField(out, indent + 1, "trace_id", trace_id);
 
+  }
+
+  template <typename OStream>
+  friend OStream& operator<<(OStream& os, const TraceFileMeta& obj) {
+    os << "TraceFileMeta("
+       << "path=" << obj.path
+       << ", file_type=" << RLSFileTypeString(obj.file_type)
+       << ", machine=" << obj.machine
+       << ", process=" << obj.process
+       << ", phase=" << obj.phase
+       << ", trace_id=" << obj.trace_id
+       << ")";
+    return os;
   }
 
   inline const std::string& get_path() const {
@@ -2047,7 +2090,9 @@ public:
 
   virtual ~IEventFileProtoParser() = default;
 
-  IEventFileProtoParser(TraceParserMeta meta, RLSFileType file_type, const std::string& proto_nickname) :
+  IEventFileProtoParser(TraceParserMeta meta, RLSFileType file_type
+      , const std::string& proto_nickname
+      ) :
       IEventFileParser(meta),
       _file_type(file_type),
       _proto_nickname(proto_nickname)
@@ -2156,6 +2201,361 @@ public:
 
 
 };
+
+
+
+enum NvprofFileTypeCode {
+  NVPROF_CSV_UNKNOWN = 0,
+  NVPROF_CSV_API_TRACE = 1,
+  NVPROF_CSV_GPU_TRACE = 2,
+};
+class NvprofFileType {
+public:
+  struct EventRow {
+    const std::string& name;
+    TimeUsec start_us;
+    TimeUsec end_us;
+  };
+  std::vector<std::string> header;
+  NvprofFileTypeCode file_type;
+
+  NvprofFileType(
+      std::vector<std::string> header,
+      NvprofFileTypeCode file_type) :
+      header(header),
+      file_type(file_type) {
+  }
+  // API trace files contain cudaLaunchKernel start/end durations.
+  // - category = CATEGORY_CUDA_API_CPU
+  // GPU trace files contain GPU kernel start/end durations.
+  // - category = CATEGORY_GPU
+  // CategoryKey:
+  //   process = entire_meta.process
+  //   categoy = ^^^
+  // auto category_key = CategoryKey::FromCategory(entire_meta.process, category);
+  // NOTE: I think the category is the same for all the events in these csv files...
+  // Only additional events we need to create that don't match this category is the
+  // "fake" operation event (CATEGORY_OPERATION).
+  virtual std::string RowCategory() const = 0;
+  virtual EventRow ParseRowEvent(const std::vector<std::string>& row) const = 0;
+
+  CategoryKey RowCategoryKey(const Process& proc) const {
+    return CategoryKey::FromCategory(proc, RowCategory());
+  }
+};
+class NvprofAPITraceFileType : public NvprofFileType {
+public:
+  NvprofAPITraceFileType() :
+      NvprofFileType(
+          {"Start", "Duration", "Name", "Correlation_ID"},
+          NVPROF_CSV_API_TRACE)
+  {
+  }
+  virtual std::string RowCategory() const override {
+    return CATEGORY_CUDA_API_CPU;
+  }
+  virtual EventRow ParseRowEvent(const std::vector<std::string>& row) const override {
+    double start_us_dbl = atof(row[0].c_str());
+    double duration_us_dbl = atof(row[1].c_str());
+    const std::string& name = row[2];
+    TimeUsec start_us = static_cast<TimeUsec>(round(start_us_dbl));
+    TimeUsec end_us = static_cast<TimeUsec>(round(start_us_dbl + duration_us_dbl));
+    EventRow event_row {name, start_us, end_us};
+    return event_row;
+  }
+};
+class NvprofGPUTraceFileType : public NvprofFileType {
+public:
+  NvprofGPUTraceFileType() :
+      NvprofFileType(
+          {
+              "Start",
+              "Duration",
+              "Grid X",
+              "Grid Y",
+              "Grid Z",
+              "Block X",
+              "Block Y",
+              "Block Z",
+              "Registers Per Thread",
+              "Static SMem",
+              "Dynamic SMem",
+              "Size",
+              "Throughput",
+              "SrcMemType",
+              "DstMemType",
+              "Device",
+              "Context",
+              "Stream",
+              "Name",
+              "Correlation_ID",
+          },
+          NVPROF_CSV_GPU_TRACE)
+  {
+  }
+  virtual std::string RowCategory() const override {
+    return CATEGORY_CUDA_API_CPU;
+  }
+  virtual EventRow ParseRowEvent(const std::vector<std::string>& row) const override {
+    double start_us_dbl = atof(row[0].c_str());
+    double duration_us_dbl = atof(row[1].c_str());
+    const std::string& name = row[18];
+    TimeUsec start_us = static_cast<TimeUsec>(round(start_us_dbl));
+    TimeUsec end_us = static_cast<TimeUsec>(round(start_us_dbl + duration_us_dbl));
+    EventRow event_row {name, start_us, end_us};
+    return event_row;
+  }
+};
+static const std::vector<const NvprofFileType*> NVPROF_FILE_TYPES = {
+    new NvprofAPITraceFileType(),
+    new NvprofGPUTraceFileType(),
+};
+static MyStatus GetNvprofFileType(
+    const std::vector<std::string>& header,
+    const NvprofFileType** ret) {
+  for (const auto& nvprof_file_type : NVPROF_FILE_TYPES) {
+    if (nvprof_file_type->header == header) {
+      *ret = nvprof_file_type;
+      return MyStatus::OK();
+    }
+  }
+  std::stringstream ss;
+  ss << "Not sure what nvprof csv file type this is for header that looks like:\n";
+  PrintValue(ss, header);
+  return MyStatus(error::INVALID_ARGUMENT, ss.str());
+}
+class NvprofCSVParser : public IEventFileParser {
+public:
+  RLSFileType _file_type;
+
+  virtual ~NvprofCSVParser() = default;
+
+  NvprofCSVParser(TraceParserMeta meta) :
+      IEventFileParser(meta),
+      _file_type(NVPROF_CSV_FILE)
+  {
+  }
+
+  virtual bool IsFile(const std::string& path) const {
+    return isRLSFileWithType(_file_type, path);
+  }
+
+  virtual MyStatus Init() override {
+    return MyStatus::OK();
+  }
+
+  static std::vector<std::string> ParseCSVRow(const std::string& line) {
+    std::vector<std::string> cols;
+    using namespace boost;
+    tokenizer<escaped_list_separator<char> > tk(line, escaped_list_separator<char>('\\', ',', '\"'));
+    for (tokenizer<escaped_list_separator<char> >::iterator it(tk.begin()); it != tk.end(); ++it) {
+      cols.push_back(*it);
+    }
+    return cols;
+  }
+
+  virtual MyStatus AppendAllCategoryTimes(
+      const EntireTraceMeta& entire_meta,
+      const std::vector<TraceFileMeta>& metas,
+      CategoryTimes* out_category_times) override {
+    auto status = MyStatus::OK();
+
+    if (SHOULD_DEBUG(FEATURE_LOAD_DATA)) {
+      std::stringstream ss;
+      for (const auto& meta : metas) {
+        ss << "\n";
+        meta.Print(ss, 1);
+      }
+      DBG_LOG("Reading csv from {} metas:\n{}", metas.size(), ss.str());
+    }
+
+    // NOTE: api_trace and gpu_trace files for the same thread-id.
+    // Multiple threads may be part of the same csv file though...
+    for (const auto& meta : metas) {
+      status = _AppendCSV(entire_meta, meta.get_path(), out_category_times);
+      IF_BAD_STATUS_RETURN(status);
+    }
+
+    TimeUsec min_start_us = 0;
+    TimeUsec max_end_us = 0;
+    bool min_is_set = false;
+    bool max_is_set = false;
+    for (const auto& category : {CATEGORY_CUDA_API_CPU, CATEGORY_GPU}) {
+      auto cat_key = CategoryKey::FromCategory(entire_meta.process, category);
+      if (out_category_times->Count(cat_key)) {
+        auto& eo_events = out_category_times->Events(cat_key);
+        if (!min_is_set || eo_events.MinStartUsec() < min_start_us) {
+          min_start_us = eo_events.MinStartUsec();
+          min_is_set = true;
+        }
+        if (!max_is_set || eo_events.MaxEndUsec() > max_end_us) {
+          max_end_us = eo_events.MaxEndUsec();
+          max_is_set = true;
+        }
+      }
+    }
+    assert((min_is_set && max_is_set) || (!min_is_set && !max_is_set));
+    if (min_is_set && max_is_set) {
+      // Append "fake" operation name to make overlap code happy, and not have it discard any time...
+      // Ideally just switch a flag to avoid discarding, or recognize --nvprof_csv_files...?
+      auto operation_category_key = CategoryKey::FromCategory(entire_meta.process, CATEGORY_OPERATION);
+      out_category_times->Preallocate(operation_category_key, 1);
+      {
+        auto end_us = max_end_us;
+        auto start_us = min_start_us;
+        auto& eo_events = out_category_times->MutableEvents(operation_category_key);
+        std::string name = "operation";
+        if (end_us < start_us) {
+          DBG_LOG("BUG: skip negative duration Event(name=\"{}\", start_us={}, duration_us={} us)",
+                  name, start_us, end_us - start_us);
+          // Just insert a zero-length event since we've already preallocated space for it
+          // (they're effectively be ignored during overlap).
+          end_us = start_us;
+        }
+        eo_events.AppendEvent(name, start_us, end_us);
+      }
+    }
+
+    return MyStatus::OK();
+  }
+
+  MyStatus _AppendCSV(
+      const EntireTraceMeta& entire_meta,
+      const std::string& nvprof_file,
+      CategoryTimes* out_category_times) {
+    auto status = MyStatus::OK();
+
+    if (SHOULD_DEBUG(FEATURE_LOAD_DATA)) {
+      DBG_LOG("Reading csv={}", nvprof_file);
+    }
+
+    // File format looks like:
+#if 0
+// ==> profile.process_15562.nvprof.api_trace.csv <==
+// ======== Profiling result:
+// "Start","Duration","Name","Correlation_ID"
+// us,us,,
+// 0.000000,2.866000,"cuDeviceGetPCIBusId",1
+// 35863.518000,0.952000,"cuDeviceGetCount",2
+//
+// ==> profile.process_15562.nvprof.gpu_trace.csv <==
+// ======== Profiling result:
+// "Start","Duration","Grid X","Grid Y","Grid Z","Block X","Block Y","Block Z","Registers Per Thread","Static SMem","Dynamic SMem","Size","Throughput","SrcMemType","DstMemType","Device","Context","Stream","Name","Correlation_ID"
+// us,us,,,,,,,,KB,KB,KB,GB/s,,,,,,,
+// 0.000000,1.888000,,,,,,,,,,1.003906,0.507097,"Device",,"GeForce RTX 2080 Ti (0)","1","7","[CUDA memset]",272
+// 4643.346000,1.536000,,,,,,,,,,0.125000,0.077610,"Pinned","Device","GeForce RTX 2080 Ti (0)","1","22","[CUDA memcpy HtoD]",316
+#endif
+
+    // TODO: separate function with this as argument.
+    // NOTE: we assume csv files have been read ahead-of-time by iml-analyze.
+    size_t num_skip_lines = 0;
+    size_t num_other_lines = 0;
+    size_t data_lines = 0;
+
+    std::vector<std::string> header;
+    std::vector<std::string> units;
+
+    // Parse _header and _units.
+    {
+      std::ifstream infile(nvprof_file);
+      if (!infile) {
+        std::stringstream ss;
+        ss << "Failed to open file " << nvprof_file << " with error " << errno << "; " << strerror(errno);
+        return MyStatus(error::INVALID_ARGUMENT, ss.str());
+      } else {
+        std::string line;
+        size_t lineno = 1;
+        while (std::getline(infile, line)) {
+          const std::regex e(R"(^=+\s+(.*))");
+          std::smatch m;
+          if (std::regex_search(line, m, e)) {
+            if (std::regex_search(m.str(1), std::regex("warning", std::regex_constants::icase))) {
+              DBG_WARN("Saw WARNING in {} at line {}:\n{}", nvprof_file, lineno);
+            }
+          } else {
+            if (num_other_lines == 0) {
+              if (SHOULD_DEBUG(FEATURE_LOAD_DATA)) {
+                DBG_LOG("Parse nvprof csv header from line {}:\n  {}", lineno, line);
+              }
+              header = ParseCSVRow(line);
+            } else if (num_other_lines == 1) {
+              if (SHOULD_DEBUG(FEATURE_LOAD_DATA)) {
+                DBG_LOG("Parse nvprof csv units from line {}:\n  {}", lineno, line);
+              }
+              units = ParseCSVRow(line);
+            } else {
+              // We've encountered the first data line.
+              break;
+            }
+            num_other_lines += 1;
+          }
+          num_skip_lines += 1;
+          lineno += 1;
+
+        }
+
+        while (std::getline(infile, line)) {
+          data_lines += 1;
+          lineno += 1;
+        }
+      }
+    }
+
+    if (SHOULD_DEBUG(FEATURE_LOAD_DATA)) {
+      DBG_LOG("Read metadata for nvprof csv file {};  data_lines = {}, num_skip_lines = {}, num_other_lines = {}",
+          nvprof_file, data_lines, num_skip_lines, num_other_lines);
+    }
+
+    const NvprofFileType* nvprof_file_type = nullptr;
+    status = GetNvprofFileType(header, &nvprof_file_type);
+    if (status.code() != MyStatus::OK().code()) {
+      std::stringstream ss;
+      ss << "Failed to parse nvprof csv file " << nvprof_file << ": " << status.error_message();
+      return MyStatus(status.code(), ss.str());
+    }
+
+    // Read data.
+    auto category_key = nvprof_file_type->RowCategoryKey(entire_meta.process);
+    out_category_times->Preallocate(category_key, data_lines);
+    {
+      auto& eo_events = out_category_times->MutableEvents(category_key);
+      std::ifstream infile(nvprof_file);
+      size_t lineno = 1;
+      for (size_t i = 0; i < num_skip_lines + num_other_lines; i++) {
+        std::string line;
+        std::getline(infile, line);
+        lineno += 1;
+      }
+      std::string line;
+      while (std::getline(infile, line)) {
+        auto row = ParseCSVRow(line);
+        auto event_row = nvprof_file_type->ParseRowEvent(row);
+        auto start_us = event_row.start_us;
+        auto end_us = event_row.end_us;
+        OptionalString name;
+        if (eo_events.KeepNames()) {
+          name = event_row.name;
+        }
+        if (end_us < start_us) {
+          DBG_LOG("BUG: skip negative duration Event(name=\"{}\", start_us={}, duration_us={} us)",
+                  event_row.name, start_us, end_us - start_us);
+          // Just insert a zero-length event since we've already preallocated space for it
+          // (they're effectively be ignored during overlap).
+          end_us = start_us;
+        }
+        // FAIL: trying to add too many lines.
+        eo_events.AppendEvent(name, start_us, end_us);
+        lineno += 1;
+      }
+    }
+
+    return MyStatus::OK();
+  }
+
+
+};
+
+
 template <class ProtoKlass, class ProtoReader>
 class ISimpleProtoParser : public IEventFileProtoParser<ProtoKlass, ProtoReader> {
 public:

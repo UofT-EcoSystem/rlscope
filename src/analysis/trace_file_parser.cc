@@ -38,6 +38,7 @@ const std::set<RLSFileType> RLS_FILE_TYPES = {
     CUDA_API_STATS_FILE,
     CATEGORY_EVENTS_FILE,
     CUDA_DEVICE_EVENTS_FILE,
+    NVPROF_CSV_FILE,
 };
 
 const std::set<Category> CATEGORIES_C_EVENTS = std::set<Category>{
@@ -642,6 +643,9 @@ bool isRLSFileWithType(RLSFileType file_type, const std::string& path) {
     case RLSFileType::CUDA_DEVICE_EVENTS_FILE:
       return matches_regex(CUDA_DEVICE_EVENTS_REGEX);
       break;
+    case RLSFileType::NVPROF_CSV_FILE:
+      return matches_regex(NVPROF_CSV_REGEX);
+      break;
     case RLSFileType::UNKNOWN_FILE:
       return false;
   }
@@ -673,6 +677,9 @@ RLSFileType GetRLSFileType(const std::string& path) {
   if (matches_regex(CUDA_DEVICE_EVENTS_REGEX)) {
     return RLSFileType::CUDA_DEVICE_EVENTS_FILE;
   }
+  if (matches_regex(NVPROF_CSV_REGEX)) {
+    return RLSFileType::NVPROF_CSV_FILE;
+  }
 
   return RLSFileType::UNKNOWN_FILE;
 
@@ -685,6 +692,8 @@ const char* RLSFileTypeString(RLSFileType file_type) {
       return "CATEGORY_EVENTS_FILE";
     case CUDA_DEVICE_EVENTS_FILE:
       return "CUDA_DEVICE_EVENTS_FILE";
+    case NVPROF_CSV_FILE:
+      return "NVPROF_CSV_FILE";
     case UNKNOWN_FILE:
       return "UNKNOWN_FILE";
   }
@@ -735,6 +744,9 @@ MyStatus GetRLSEventParserFromType(RLSFileType file_type, TraceParserMeta parser
           std::move(parser_meta),
           selector));
       break;
+    case RLSFileType::NVPROF_CSV_FILE:
+      parser->reset(new NvprofCSVParser(std::move(parser_meta)));
+      break;
     default:
       assert(false);
   }
@@ -754,7 +766,8 @@ MyStatus GetTraceProtoReader(const std::string& path, std::unique_ptr<ITraceProt
       reader->reset(new CUDADeviceEventsProtoReader(path));
       break;
     default:
-      assert(false);
+      reader->reset(nullptr);
+      return MyStatus(error::NOT_FOUND, "Not a protobuf parser");
   }
   return MyStatus::OK();
 }
@@ -798,11 +811,27 @@ MyStatus TraceFileMeta::Init() {
 
   std::unique_ptr<ITraceProtoReader> reader;
   status = GetTraceProtoReader(path, &reader);
-  IF_BAD_STATUS_RETURN(status);
-  status = reader->ReadMeta(&parser_meta);
-  IF_BAD_STATUS_RETURN(status);
-  status = reader->ReadTraceFileMeta(this);
-  IF_BAD_STATUS_RETURN(status);
+  if (status.code() == MyStatus::OK().code()) {
+    IF_BAD_STATUS_RETURN(status);
+    status = reader->ReadMeta(&parser_meta);
+    IF_BAD_STATUS_RETURN(status);
+    status = reader->ReadTraceFileMeta(this);
+    IF_BAD_STATUS_RETURN(status);
+
+    machine = reader->get_machine();
+    process = reader->get_process();
+    phase = reader->get_phase();
+  } else if (status.code() == error::NOT_FOUND) {
+    // Fallback behaviour: it's not a recognized proto file, instead just use the
+    // basename of the file for machine/process/phase name.
+    boost::filesystem::path bpath = path;
+    auto basename = bpath.filename().string();
+    machine = basename;
+    process = basename;
+    phase = basename;
+  } else {
+    return status;
+  }
 
   // this->parser_meta = parser._parser_meta;
 //  this->parser_meta = parser->GetParserMeta();
@@ -811,10 +840,6 @@ MyStatus TraceFileMeta::Init() {
 //  , reinterpret_cast<void*>(this->parser_meta.get())
 //  , reinterpret_cast<void*>(this)
 //  );
-
-  machine = reader->get_machine();
-  process = reader->get_process();
-  phase = reader->get_phase();
 
   initialized = true;
   return MyStatus::OK();
@@ -827,6 +852,9 @@ MyStatus TraceFileWalker::ReadMeta(const std::string& path, TraceFileMeta* meta)
     TraceFileMeta new_meta(path);
     status = new_meta.Init();
     IF_BAD_STATUS_RETURN(status);
+    if (SHOULD_DEBUG(FEATURE_LOAD_DATA)) {
+      DBG_LOG("Add {}", new_meta);
+    }
     *meta = new_meta;
     _path_to_meta[path] = new_meta;
     _meta
@@ -922,6 +950,21 @@ MyStatus TraceFileWalker::Init() {
 
   return MyStatus::OK();
 }
+
+static std::vector<std::string> StringSplit(const std::string& s, std::string rgx_str = "\\s+") {
+  std::vector<std::string> elems;
+
+  std::regex rgx (rgx_str);
+  std::sregex_token_iterator iter(s.begin(), s.end(), rgx, -1);
+  std::sregex_token_iterator end;
+  while (iter != end)  {
+    //std::cout << "S43:" << *iter << std::endl;
+    elems.push_back(*iter);
+    ++iter;
+  }
+  return elems;
+}
+
 
 MyStatus RawTraceParser::Init() {
   MyStatus status = MyStatus::OK();
@@ -1080,6 +1123,10 @@ MyStatus RawTraceParser::ReadEntireTrace(
     EntireTraceMeta* entire_meta,
     const EntireTraceSelector& selector) {
   MyStatus status = MyStatus::OK();
+
+  if (SHOULD_DEBUG(FEATURE_LOAD_DATA)) {
+    DBG_LOG("ReadEntireTrace(machine={}, process={}, phase={})", machine, process, phase);
+  }
 
   *entire_meta = EntireTraceMeta(machine, process, phase);
 
@@ -1352,6 +1399,15 @@ MyStatus RawTraceParser::_AppendOverhead_PYTHON_ANNOTATION(
 
 MyStatus GetTraceID(const std::string& path, TraceID* trace_id) {
   RLSFileType file_type = GetRLSFileType(path);
+
+  if (file_type == NVPROF_CSV_FILE) {
+    // No trace_id's for nvprof csv files.
+    // There's only one .nvprof file for each process.
+    // Default to 0.
+    *trace_id = 0;
+    return MyStatus::OK();
+  }
+
   if (file_type == RLSFileType::UNKNOWN_FILE) {
     std::stringstream ss;
     ss << "Couldn't find trace_id in path=" << path;
