@@ -34,7 +34,6 @@ using json = nlohmann::json;
 
 //#include "tensorflow/core/lib/core/status.h"
 #include "common/my_status.h"
-#include "analysis/sample_periods.h"
 
 #include <list>
 #include <initializer_list>
@@ -42,7 +41,6 @@ using json = nlohmann::json;
 #include <gflags/gflags.h>
 #include <memory>
 
-#include "analysis/trace_file_parser.h"
 #include "gpu_util_experiment.h"
 
 DEFINE_bool(debug, false, "Debug: give additional verbose output");

@@ -340,7 +340,7 @@ public:
   GPUUtilExperimentArgs args;
   GPUKernel() = default;
   GPUKernel(GPUUtilExperimentArgs args) :
-      args(std::move(args))
+      args(args)
   {
   }
   // TODO: this needs to be called AFTER CUDA context has been allocated...
@@ -707,7 +707,7 @@ public:
 //      bool debug
       ) :
       _sync_block(nullptr),
-      args(std::move(args)),
+      args(args),
 //      _n_launches(n_launches),
 //      _kernel_delay_us(kernel_delay_us),
 //      _kernel_duration_us(kernel_duration_us),
