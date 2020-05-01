@@ -17,6 +17,12 @@ cmake_minimum_required(VERSION 3.8 FATAL_ERROR)
 project(iml)
 #https://github.com/robertmaynard/code-samples/blob/master/posts/cmake/CMakeLists.txt
 
+CMAKE_HOST_SYSTEM_INFORMATION(RESULT HOSTNAME QUERY HOSTNAME)
+set(MY_BUILD_DIR "build.${HOSTNAME}")
+set(MY_INSTALL_DIR "${MY_BUILD_DIR}/cmake_install")
+#message("HOSTNAME = ${HOSTNAME}")
+#return()
+
 # We want to be able to do std::move() for lambda captures (c++11 doesn't have that).
 #set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD 17)
@@ -118,10 +124,19 @@ if (NOT IS_WINDOWS AND NOT (
             "  $ bash ./setup.sh")
 endif()
 
+#if (NOT IS_WINDOWS)
+#    set(BOOST_INCLUDEDIR ${CMAKE_SOURCE_DIR}/third_party/boost_${BOOST_VERSION_UNDERSCORES}/${MY_BUILD_DIR}/include)
+##    target_include_directories(${TARGET} PRIVATE ${BOOST_INCLUDEDIR})
+#    include_directories(PRIVATE ${BOOST_INCLUDEDIR})
+#    set(BOOST_LIBRARYDIR ${CMAKE_SOURCE_DIR}/third_party/boost_${BOOST_VERSION_UNDERSCORES}/${MY_BUILD_DIR}/lib)
+#    #    target_link_directories(${TARGET} PRIVATE ${BOOST_LIBRARYDIR})
+#    link_directories(PRIVATE ${BOOST_LIBRARYDIR})
+#endif()
+
 if (NOT IS_WINDOWS)
 #    add_subdirectory(third_party/googletest)
     find_package(GTest REQUIRED
-            HINTS third_party/googletest/build/cmake_install)
+            HINTS third_party/googletest/${MY_INSTALL_DIR})
     include_directories(${GTEST_INCLUDE_DIRS})
 endif()
 
@@ -136,7 +151,7 @@ add_subdirectory(third_party/backward-cpp)
 #add_subdirectory(third_party/eigen)
 #target_include_directories(sample_cuda_api third_party/eigen)
 find_package(Eigen3 REQUIRED
-        HINTS third_party/eigen/build/cmake_install)
+        HINTS third_party/eigen/${MY_INSTALL_DIR})
 
 set(NSYNC_ENABLE_TESTS OFF)
 #set(BUILD_SHARED_LIBS ON)
@@ -400,10 +415,10 @@ function(AddUnitTest TARGET)
     # NOTE: this doesn't find gtest...
 #    enable_testing()
 #    find_package(GTest REQUIRED
-#            HINTS third_party/googletest/build/cmake_install
+#            HINTS third_party/googletest/${MY_INSTALL_DIR}
 #            )
-    set(GTEST_INCLUDE_DIR ${PROJECT_SOURCE_DIR}/third_party/googletest/build/cmake_install/include)
-    set(GTEST_LIBDIR ${PROJECT_SOURCE_DIR}/third_party/googletest/build/cmake_install/lib)
+    set(GTEST_INCLUDE_DIR ${PROJECT_SOURCE_DIR}/third_party/googletest/${MY_INSTALL_DIR}/include)
+    set(GTEST_LIBDIR ${PROJECT_SOURCE_DIR}/third_party/googletest/${MY_INSTALL_DIR}/lib)
     set(GTEST_LIBRARY
             # ${GTEST_LIBDIR}/libgtest_main.a
             ${GTEST_LIBDIR}/libgtest.a)
@@ -461,20 +476,22 @@ function(AddTensorflowDependencies TARGET INCLUDE_CUDA)
     set(CTPL_INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/third_party/CTPL)
     target_include_directories(${TARGET} PRIVATE ${CTPL_INCLUDE_DIRS})
 
-    set(BOOST_INCLUDEDIR ${CMAKE_SOURCE_DIR}/third_party/boost_${BOOST_VERSION_UNDERSCORES}/build/include)
+    set(BOOST_INCLUDEDIR ${CMAKE_SOURCE_DIR}/third_party/boost_${BOOST_VERSION_UNDERSCORES}/${MY_BUILD_DIR}/include)
     target_include_directories(${TARGET} PRIVATE ${BOOST_INCLUDEDIR})
-    set(BOOST_LIBRARYDIR ${CMAKE_SOURCE_DIR}/third_party/boost_${BOOST_VERSION_UNDERSCORES}/build/lib)
+    set(BOOST_LIBRARYDIR ${CMAKE_SOURCE_DIR}/third_party/boost_${BOOST_VERSION_UNDERSCORES}/${MY_BUILD_DIR}/lib)
     target_link_directories(${TARGET} PRIVATE ${BOOST_LIBRARYDIR})
+#    link_directories(PRIVATE ${BOOST_LIBRARYDIR})
+
     target_link_libraries(${TARGET} PRIVATE boost_filesystem)
 
     target_link_libraries(${TARGET} PRIVATE nsync_includes)
 
     find_package(spdlog REQUIRED
-            HINTS third_party/spdlog/build/cmake_install)
+            HINTS third_party/spdlog/${MY_INSTALL_DIR})
     target_link_libraries(${TARGET} PRIVATE spdlog::spdlog)
 
     target_link_libraries(${TARGET} PRIVATE nsync_cpp)
-    target_link_libraries(${TARGET} PRIVATE pthread)
+#    target_link_libraries(${TARGET} PRIVATE pthread)
     #target_include_directories(${TARGET} PRIVATE ${DOUBLE_CONVERSION_INCLUDE_DIRS})
     target_include_directories(${TARGET} PRIVATE ${double_conversion_INCLUDE_DIR})
     #target_link_libraries(${TARGET} ${DOUBLE_CONVERSION_LIBRARY})
@@ -622,10 +639,12 @@ add_dependencies(sample_cuda_api double_conversion)
 # by setting each property on the target.
 add_backward(sample_cuda_api)
 
-set(BOOST_INCLUDEDIR ${CMAKE_SOURCE_DIR}/third_party/boost_${BOOST_VERSION_UNDERSCORES}/build/include)
+set(BOOST_INCLUDEDIR ${CMAKE_SOURCE_DIR}/third_party/boost_${BOOST_VERSION_UNDERSCORES}/${MY_BUILD_DIR}/include)
 target_include_directories(sample_cuda_api PRIVATE ${BOOST_INCLUDEDIR})
-set(BOOST_LIBRARYDIR ${CMAKE_SOURCE_DIR}/third_party/boost_${BOOST_VERSION_UNDERSCORES}/build/lib)
+set(BOOST_LIBRARYDIR ${CMAKE_SOURCE_DIR}/third_party/boost_${BOOST_VERSION_UNDERSCORES}/${MY_BUILD_DIR}/lib)
 target_link_directories(sample_cuda_api PRIVATE ${BOOST_LIBRARYDIR})
+#link_directories(PRIVATE ${BOOST_LIBRARYDIR})
+
 target_link_libraries(sample_cuda_api PRIVATE boost_filesystem)
 
 target_link_libraries(sample_cuda_api PRIVATE nlohmann_json::nlohmann_json)
@@ -640,7 +659,7 @@ target_link_libraries(sample_cuda_api PRIVATE
         absl::memory)
 target_link_libraries(sample_cuda_api PRIVATE nsync)
 target_link_libraries(sample_cuda_api PRIVATE nsync_cpp)
-target_link_libraries(sample_cuda_api PRIVATE pthread)
+#target_link_libraries(sample_cuda_api PRIVATE pthread)
 #target_include_directories(sample_cuda_api PRIVATE ${DOUBLE_CONVERSION_INCLUDE_DIRS})
 target_include_directories(sample_cuda_api PRIVATE ${double_conversion_INCLUDE_DIR})
 #target_link_libraries(sample_cuda_api ${DOUBLE_CONVERSION_LIBRARY})
@@ -920,7 +939,7 @@ if (ENABLE_DQN_CPP)
         include_directories(${GTEST_INCLUDE_DIRS})
         target_link_libraries(tests ${GTEST_LIBRARY})
         foreach(executable ${EXEC_NAMES})
-            target_link_libraries(${executable} pthread)
+#            target_link_libraries(${executable} pthread)
             target_link_libraries(${executable} nlohmann_json::nlohmann_json)
         endforeach()
     endif()

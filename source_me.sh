@@ -6,6 +6,7 @@ else
     # Fails in container...not sure why.
     ROOT="$(readlink -f "$(dirname "$0")")"
 fi
+_local_dir=$ROOT/local.$(hostname)
 
 _maybe_add_path() {
     local direc="$1"
@@ -20,14 +21,15 @@ _maybe_add_path() {
     fi
 }
 
-PROTOBUF_INSTALL_DIR="$(ls -d $ROOT/third_party/protobuf-*/build/bin)"
+PROTOBUF_INSTALL_DIR="$(ls -d $ROOT/third_party/protobuf-*/build.$(hostname)/bin)"
 _maybe_add_path "$PROTOBUF_INSTALL_DIR"
-_maybe_add_path "$ROOT/local/bin"
+_maybe_add_path "$_local_dir/bin"
 # Keep gdb-symbols for debugging.
 # For some reason, cmake "install()" isn't finding compiled third_party libraries.
 #_maybe_add_path "$ROOT/local/Debug/bin"
-_maybe_add_path "$ROOT/Debug"
+_maybe_add_path "$ROOT/Debug.$(hostname)"
 unset PROTOBUF_INSTALL_DIR
 
 unset _maybe_add_path
 unset ROOT
+unset _local_dir

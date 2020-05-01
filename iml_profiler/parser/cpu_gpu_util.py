@@ -28,6 +28,8 @@ import multiprocessing
 from iml_profiler.profiler.concurrent import map_pool
 from concurrent.futures import ProcessPoolExecutor
 
+FLOAT_RE = r'(?:[-+]?[0-9]*\.?[0-9]+(?:[eE][-+]?[0-9]+)?)'
+
 def protobuf_to_dict(pb):
     return dict((field.name, value) for field, value in pb.ListFields())
 
@@ -352,6 +354,26 @@ class NvprofCSVParser:
         filesize = os.path.getsize(path)
         return filesize == 0
 
+    def write_csv(self, skip_if_exists=True):
+        if not skip_if_exists or not _e(self.csv_file) or self._is_empty_file(self.csv_file):
+            with open(self.csv_file, 'w') as f:
+                # This takes really long...
+                # For a relatively short 325MB file collected from 32 games in minigo, it takes 565 seconds (10 minutes!).
+                # real    565.79s
+                # user    564.22s
+                # sys     1.03s
+                start_nvprof_t = time.time()
+                proc = subprocess.Popen(
+                    ["nvprof", "-i", self.nvprof_file, "--csv", "--normalized-time-unit", "us"] + self.nvprof_csv_opts,
+                    stdout=f,
+                    stderr=subprocess.STDOUT)
+                ret = proc.wait()
+                end_nvprof_t = time.time()
+                assert ret == 0
+                logging.info("Running \"nvprof --csv -i {path}\" took {sec} sec".format(
+                    path=self.nvprof_file,
+                    sec=end_nvprof_t - start_nvprof_t))
+
     def parse(self, read_csv_kwargs):
         """
         "nvprof --csv" output looks like ():
@@ -375,24 +397,7 @@ class NvprofCSVParser:
             Extra arguments to pass to pandas.read_csv
         :return:
         """
-        if not _e(self.csv_file) or self._is_empty_file(self.csv_file):
-            with open(self.csv_file, 'w') as f:
-                # This takes really long...
-                # For a relatively short 325MB file collected from 32 games in minigo, it takes 565 seconds (10 minutes!).
-                # real    565.79s
-                # user    564.22s
-                # sys     1.03s
-                start_nvprof_t = time.time()
-                proc = subprocess.Popen(
-                    ["nvprof", "-i", self.nvprof_file, "--csv", "--normalized-time-unit", "us"] + self.nvprof_csv_opts,
-                    stdout=f,
-                    stderr=subprocess.STDOUT)
-                ret = proc.wait()
-                end_nvprof_t = time.time()
-                assert ret == 0
-                logging.info("Running \"nvprof --csv -i {path}\" took {sec} sec".format(
-                    path=self.nvprof_file,
-                    sec=end_nvprof_t - start_nvprof_t))
+        self.write_csv()
         with open(self.csv_file, 'r') as f:
             num_skip_lines = 0
             num_other_lines = 0
@@ -463,8 +468,223 @@ NVPROF_HIST_DEFAULT_FMT = "{y:.2f}"
 def nvprof_fmt_int(y):
     return "{y:d}".format(y=int(np.round(y)))
 
+class CategoryKey:
+    def __init__(self):
+        self.procs = frozenset()
+        self.ops = frozenset()
+        self.non_ops = frozenset()
+
+    @staticmethod
+    def from_js(obj):
+        self = CategoryKey()
+        assert obj['typename'] == 'CategoryKey'
+        self.procs = frozenset(obj['procs'])
+        self.ops = frozenset(obj['ops'])
+        self.non_ops = frozenset(obj['non_ops'])
+        return self
+
+    def __eq__(self, rhs):
+        lhs = self
+        return lhs.procs == rhs.procs and \
+               lhs.ops == rhs.ops and \
+               lhs.non_ops == rhs.non_ops
+
+    def __hash__(self):
+        return hash((self.procs, self.ops, self.non_ops))
+
+    def __str__(self):
+        bldr = ToStringBuilder(obj=self)
+        bldr.add_param('procs', self.procs)
+        bldr.add_param('ops', self.ops)
+        bldr.add_param('non_ops', self.non_ops)
+        return bldr.to_string()
+
+    def __repr__(self):
+        return str(self)
+
+# class OverlapResult:
+#     def __init__(self):
+#         self.procs = frozenset()
+#         self.ops = frozenset()
+#         self.non_ops = frozenset()
+#
+#     @staticmethod
+#     def from_js(obj):
+#         self = OverlapResult()
+#         self.overlap_map = dict()
+#         assert obj['typename'] == 'CategoryKey'
+#         self.procs = frozenset(obj['procs'])
+#         self.ops = frozenset(obj['ops'])
+#         self.non_ops = frozenset(obj['non_ops'])
+#         return self
+
+def from_js(obj):
+    if type(obj) == dict and 'typename' in obj:
+        if obj['typename'] == 'dict':
+            return dict_from_js(obj)
+        elif obj['typename'] in JS_TYPENAME_TO_KLASS:
+            Klass = JS_TYPENAME_TO_KLASS[obj['typename']]
+            parsed = Klass.from_js(obj)
+            return parsed
+        else:
+            raise NotImplementedError("Not sure how to parse js object with typename={typename}".format(typename=obj['typename']))
+    elif type(obj) == list:
+        return [from_js(x) for x in obj]
+    else:
+        return obj
+
+def dict_from_js(obj):
+    assert obj['typename'] == 'dict'
+    d = dict()
+    for key, value in obj['key_value_pairs']:
+        parsed_key = from_js(key)
+        if type(parsed_key) == list:
+            parsed_key = tuple(parsed_key)
+        d[parsed_key] = from_js(value)
+    return d
+
+JS_TYPENAME_TO_KLASS = {
+    'CategoryKey': CategoryKey,
+    # 'OverlapResult': OverlapResult,
+}
+
+class CrossProcessOverlapHistogram:
+    def __init__(self,
+                 cross_process_overlap,
+                 # discard_top_percentile=None,
+                 # discard_bottom_percentile=None,
+                 # discard_iqr_whiskers=False,
+                 debug=False,
+                 debug_single_thread=False,
+                 # Swallow any excess arguments
+                 **kwargs):
+        self.cross_process_overlap = cross_process_overlap
+        # self.discard_top_percentile = discard_top_percentile
+        # self.discard_bottom_percentile = discard_bottom_percentile
+        # self.discard_iqr_whiskers = discard_iqr_whiskers
+        self.debug = debug
+        self.debug_single_thread = debug_single_thread
+
+    def parse_js(self):
+        js = load_json(self.cross_process_overlap)
+        overlap_result_obj = from_js(js)
+        overlap_result = dict()
+        for key, value in overlap_result_obj.items():
+            overlap_result[frozenset(key)] = value
+        return overlap_result
+
+    def read_df(self):
+        # js = load_json(self.cross_process_overlap)
+        overlap_result = self.parse_js()
+        pprint.pprint(overlap_result)
+        gpu_time_sec = dict()
+        for overlap_key, time_sec in overlap_result.items():
+            kernels_running = 0
+            for category_key in overlap_key:
+                if CATEGORY_GPU in category_key.non_ops:
+                    kernels_running += 1
+            if kernels_running not in gpu_time_sec:
+                gpu_time_sec[kernels_running] = 0
+            gpu_time_sec[kernels_running] += time_sec
+        data = {
+            'time_sec': [],
+            'kernels_running': [],
+        }
+        for kernels_running, time_sec in gpu_time_sec.items():
+            data['time_sec'].append(time_sec)
+            data['kernels_running'].append(kernels_running)
+        df = pd.DataFrame(data=data)
+        df['percent'] = df['time_sec'] / df['time_sec'].sum()
+        DataFrame.print_df(df)
+
+        """
+        We want to read a dataframe of this format:
+        
+            kernels_running  time_sec  percent_time
+            0                ...       ...
+            1
+            2
+            ...
+            16
+            
+        When 2 kernels are running, that means we have an overlap key that looks like:
+          {
+              CategoryKey(procs={1234}, non_ops={CATEGORY_GPU},
+              CategoryKey(procs={4567}, non_ops={CATEGORY_GPU},
+          } 
+        """
+
+    def run(self):
+        self.read_df()
+
+class NvprofTraces:
+    UNIT_RE = r'ns|ms|sec|s'
+
+    def __init__(self,
+                 directory,
+                 n_workers=None,
+                 force=False,
+                 debug=False,
+                 debug_single_thread=False,
+                 # Swallow any excess arguments
+                 **kwargs):
+        self.directory = directory
+        self.n_workers = n_workers
+        self.force = force
+        self.debug = debug
+        self.debug_single_thread = debug_single_thread
+
+    @staticmethod
+    def nvprof_print_gpu_trace(self, nvprof_file):
+        # raise RuntimeError("FAIL1")
+        nvprof_parser = NvprofCSVParser(
+            nvprof_file=nvprof_file,
+            csv_file=self._nvprof_gpu_trace_csv(nvprof_file),
+            nvprof_csv_opts=["--print-gpu-trace"],
+            debug=self.debug,
+            debug_single_thread=self.debug_single_thread)
+        nvprof_parser.write_csv(skip_if_exists=not self.force)
+
+    @staticmethod
+    def nvprof_print_api_trace(self, nvprof_file):
+        # raise RuntimeError("FAIL2")
+        nvprof_parser = NvprofCSVParser(
+            nvprof_file=nvprof_file,
+            csv_file=self._nvprof_api_trace_csv(nvprof_file),
+            nvprof_csv_opts=["--print-api-trace"],
+            debug=self.debug,
+            debug_single_thread=self.debug_single_thread)
+        nvprof_parser.write_csv(skip_if_exists=not self.force)
+
+    def run(self):
+        nvprof_files = [path for path in each_file_recursive(self.directory) if is_nvprof_file(path)]
+        logging.info("nvprof_files = {nvprof_files}".format(nvprof_files=pprint_msg(nvprof_files)))
+        with ProcessPoolExecutor() as pool:
+            results = []
+            for nvprof_file in nvprof_files:
+                if not self.debug_single_thread:
+                    results.append(pool.submit(self.nvprof_print_gpu_trace, self, nvprof_file))
+                    results.append(pool.submit(self.nvprof_print_api_trace, self, nvprof_file))
+                else:
+                    self.nvprof_print_gpu_trace(nvprof_file)
+                    self.nvprof_print_api_trace(nvprof_file)
+            for result in results:
+                # If exception was raised, it will be re-raised here.
+                result.result()
+
+    def _nvprof_api_trace_csv(self, nvprof_file):
+        return "{path}.api_trace.csv".format(path=nvprof_file)
+
+    def _nvprof_api_summary_csv(self, nvprof_file):
+        return "{path}.api_summary.csv".format(path=nvprof_file)
+
+    def _nvprof_gpu_trace_csv(self, nvprof_file):
+        return "{path}.gpu_trace.csv".format(path=nvprof_file)
+
+    def _nvprof_gpu_summary_csv(self, nvprof_file):
+        return "{path}.gpu_summary.csv".format(path=nvprof_file)
+
 class NvprofKernelHistogram:
-    FLOAT_RE = r'(?:[-+]?[0-9]*\.?[0-9]+(?:[eE][-+]?[0-9]+)?)'
     UNIT_RE = r'ns|ms|sec|s'
 
     def __init__(self,
@@ -485,7 +705,7 @@ class NvprofKernelHistogram:
 
     def _parse_human_time_us(self, txt, expect_match=True):
         m = re.search(r'^(?P<value>{float})(?P<unit>{unit})$'.format(
-            float=NvprofKernelHistogram.FLOAT_RE,
+            float=FLOAT_RE,
             unit=NvprofKernelHistogram.UNIT_RE),
             txt)
         if not m:

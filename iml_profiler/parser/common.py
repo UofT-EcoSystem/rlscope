@@ -1332,6 +1332,11 @@ def is_iml_config_file(path):
     ), base)
     return m
 
+def is_nvprof_file(path):
+    base = _b(path)
+    m = re.search(r'.*\.nvprof$', base)
+    return m
+
 def is_microbench_path(path):
     return re.search(r"^microbenchmark\.json$", _b(path))
 
@@ -1570,6 +1575,22 @@ def is_category_events_file(path):
 def is_venn_js_file(path):
     base = _b(path)
     m = re.search(r'\.venn_js\.json$'.format(
+        bench=BENCH_SUFFIX_RE,
+        trace=TRACE_SUFFIX_RE,
+    ), base)
+    return m
+
+def is_overlap_result_js_file(path):
+    base = _b(path)
+    m = re.search(r'OverlapResult\..*\.json$'.format(
+        bench=BENCH_SUFFIX_RE,
+        trace=TRACE_SUFFIX_RE,
+    ), base)
+    return m
+
+def is_cross_process_overlap_result_js_file(path):
+    base = _b(path)
+    m = re.search(r'OverlapResult\.cross_process.*\.json$'.format(
         bench=BENCH_SUFFIX_RE,
         trace=TRACE_SUFFIX_RE,
     ), base)
@@ -2058,6 +2079,8 @@ def zero_if_none(x):
     return x
 
 def each_file_recursive(root_dir):
+    if not os.path.isdir(root_dir):
+        raise ValueError("No such directory {root_dir}".format(root_dir=root_dir))
     for dirpath, dirnames, filenames in os.walk(root_dir):
         for base in filenames:
             path = _j(dirpath, base)

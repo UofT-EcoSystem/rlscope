@@ -1930,13 +1930,16 @@ MyStatus NvprofTraceFileReader::_ReadCSVMeta() {
     } else {
       std::string line;
       size_t lineno = 1;
+      const std::regex comment_regex(R"(^=+\s+(.*))");
+      const std::regex ignore_line_regex(R"(^no kernels were profiled)", std::regex_constants::icase);
       while (std::getline(infile, line)) {
-        const std::regex e(R"(^=+\s+(.*))");
         std::smatch m;
-        if (std::regex_search(line, m, e)) {
+        if (std::regex_search(line, m, comment_regex)) {
           if (std::regex_search(m.str(1), std::regex("warning", std::regex_constants::icase))) {
             DBG_WARN("Saw WARNING in {} at line {}:\n{}", _path, lineno);
           }
+        } else if (std::regex_search(line, m, ignore_line_regex)) {
+          // pass
         } else {
           if (_num_other_lines == 0) {
             if (SHOULD_DEBUG(FEATURE_LOAD_DATA)) {
@@ -1972,11 +1975,22 @@ MyStatus NvprofTraceFileReader::_ReadCSVMeta() {
   }
 
   _nvprof_file_type = nullptr;
-  status = GetNvprofFileType(_header, &_nvprof_file_type);
+  status = GetNvprofFileType(_header, _file_type, &_nvprof_file_type);
   if (status.code() != MyStatus::OK().code()) {
     std::stringstream ss;
     ss << "Failed to parse nvprof csv file " << _path << ": " << status.error_message();
-    return MyStatus(status.code(), ss.str());
+    return MyStatus(error::INVALID_ARGUMENT, ss.str());
+  }
+  if (_num_data_lines > 0 && _header.size() > 0) {
+    if (_nvprof_file_type->HeaderMatches(_header)) {
+      _header_meta = _nvprof_file_type->ParseHeaderMeta(_header);
+    } else {
+      std::stringstream ss;
+      ss << "Not sure how to parse nvprof csv file " << _path << " with header that looks like:\n"
+         << "  ";
+      PrintValue(ss, _header);
+      return MyStatus(error::INVALID_ARGUMENT, ss.str());
+    }
   }
 
   if (
@@ -1997,6 +2011,9 @@ MyStatus NvprofTraceFileReader::_ReadCSVMeta() {
 }
 MyStatus NvprofTraceFileReader::EachEvent(const Category& category, EachEventFunc func) const {
   assert(_initialized);
+  if (_num_data_lines == 0) {
+    return MyStatus::OK();
+  }
   // Read data.
   {
     std::ifstream infile(_path);
@@ -2011,7 +2028,7 @@ MyStatus NvprofTraceFileReader::EachEvent(const Category& category, EachEventFun
     TimeUsec last_start_us = 0;
     while (std::getline(infile, line)) {
       auto row = ParseCSVRow(line);
-      auto event_row = _nvprof_file_type->ParseRowEvent(row);
+      auto event_row = _nvprof_file_type->ParseRowEvent(_header_meta, row);
       auto start_us = event_row.start_us;
       auto end_us = event_row.end_us;
       if (i != 0) {
@@ -2125,6 +2142,66 @@ std::map<std::set<CategoryKey>, TimeUsec> OverlapResult::AsOverlapMap() const {
   }
   return overlap_map;
 }
+
+bool NvprofFileType::HeaderMatches(const std::vector<std::string>& row) const {
+  // row contains all the columns present in nvprof file-type header.
+  // NOTE: row may contain extra columns we don't care about.
+  // ==> header subsetof row
+  std::set<std::string> row_set;
+  for (const auto& field : row) {
+    row_set.insert(field);
+  }
+  for (const auto& field : header) {
+    if (!row_set.count(field)) {
+      return false;
+    }
+  }
+  return true;
+}
+std::map<std::string, size_t> NvprofFileType::ParseColIdxMap(const std::vector<std::string>& row) const {
+  std::map<std::string, size_t> col_idx_map;
+  for (size_t i = 0; i < row.size(); i++) {
+    col_idx_map[row[i]] = i;
+  }
+  return col_idx_map;
+}
+
+NvprofFileType::HeaderMeta NvprofAPITraceFileType::ParseHeaderMeta(const std::vector<std::string>& row) const {
+  HeaderMeta header_meta;
+  header_meta.col_idx_map = ParseColIdxMap(row);
+  header_meta.start_idx = header_meta.col_idx_map.at("Start");
+  header_meta.duration_idx = header_meta.col_idx_map.at("Duration");
+  header_meta.name_idx = header_meta.col_idx_map.at("Name");
+  return header_meta;
+}
+NvprofFileType::HeaderMeta NvprofGPUTraceFileType::ParseHeaderMeta(const std::vector<std::string>& row) const {
+  HeaderMeta header_meta;
+  header_meta.col_idx_map = ParseColIdxMap(row);
+  header_meta.start_idx = header_meta.col_idx_map.at("Start");
+  header_meta.duration_idx = header_meta.col_idx_map.at("Duration");
+  header_meta.name_idx = header_meta.col_idx_map.at("Name");
+  return header_meta;
+}
+
+NvprofFileType::EventRow NvprofAPITraceFileType::ParseRowEvent(const HeaderMeta& header_meta, const std::vector<std::string>& row) const {
+  double start_us_dbl = atof(row[header_meta.start_idx].c_str());
+  double duration_us_dbl = atof(row[header_meta.duration_idx].c_str());
+  const std::string& name = row[header_meta.name_idx];
+  TimeUsec start_us = static_cast<TimeUsec>(round(start_us_dbl));
+  TimeUsec end_us = static_cast<TimeUsec>(round(start_us_dbl + duration_us_dbl));
+  EventRow event_row {name, start_us, end_us};
+  return event_row;
+}
+NvprofFileType::EventRow NvprofGPUTraceFileType::ParseRowEvent(const HeaderMeta& header_meta, const std::vector<std::string>& row) const {
+  double start_us_dbl = atof(row[header_meta.start_idx].c_str());
+  double duration_us_dbl = atof(row[header_meta.duration_idx].c_str());
+  const std::string& name = row[header_meta.name_idx];
+  TimeUsec start_us = static_cast<TimeUsec>(round(start_us_dbl));
+  TimeUsec end_us = static_cast<TimeUsec>(round(start_us_dbl + duration_us_dbl));
+  EventRow event_row {name, start_us, end_us};
+  return event_row;
+}
+
 
 } // namespace tensorflow
 

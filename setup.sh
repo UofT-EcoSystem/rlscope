@@ -165,15 +165,15 @@ github_url() {
 
 CMAKE_VERSION=3.15.1
 setup_cmake() {
-    if [ "$FORCE" != 'yes' ] && [ -e $ROOT/local/bin/cmake ]; then
+    if [ "$FORCE" != 'yes' ] && [ -e "$(local_dir)"/cmake ]; then
         return
     fi
     local url=https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/cmake-${CMAKE_VERSION}-Linux-x86_64.sh
     _wget "$url"
     local path=$(_wget_output_path "$url")
     chmod +x $path
-    mkdir -p $ROOT/local
-    bash $path --prefix=$ROOT/local --skip-license --exclude-subdir
+    mkdir -p "$(local_dir)"
+    bash $path --prefix="$(local_dir)" --skip-license --exclude-subdir
 }
 JSON_CPP_LIB_DIR="$ROOT/third_party/json"
 setup_json_cpp_library() {
@@ -201,21 +201,33 @@ setup_abseil_cpp_library() {
 
 GTEST_CPP_LIB_DIR="$ROOT/third_party/googletest"
 setup_gtest_cpp_library() {
-    if [ "$FORCE" != 'yes' ] && [ -e $GTEST_CPP_LIB_DIR ]; then
+    if [ "$FORCE" != 'yes' ] && [ -e "$(cmake_install_prefix "$GTEST_CPP_LIB_DIR")" ]; then
         return
     fi
     local commit="release-1.8.1"
     _clone "$GTEST_CPP_LIB_DIR" \
         google/googletest.git \
         $commit
-    (
-    cd $GTEST_CPP_LIB_DIR
-    mkdir -p build
-    cd build
-    cmake .. -DCMAKE_INSTALL_PREFIX=$PWD/cmake_install
-    make -j$(nproc)
-    make install
-    )
+    cmake_build "$GTEST_CPP_LIB_DIR"
+}
+
+#cmake_install_prefix() {
+#    echo "$PWD/cmake_install.$(hostname)"
+#}
+cmake_install_prefix() {
+    local root="$1"
+    shift 1
+    echo "$(cmake_build_dir "$root")/cmake_install"
+}
+cmake_build_dir() {
+    local root="$1"
+    shift 1
+    echo "$root/build.$(hostname)"
+}
+local_dir() {
+    # When installing things with configure/make-install
+    # $ configure --prefix="$(local_dir)"
+    echo "$ROOT/local.$(hostname)"
 }
 
 NSYNC_CPP_LIB_DIR="$ROOT/third_party/nsync"
@@ -242,7 +254,7 @@ setup_backward_cpp_library() {
 
 SPDLOG_CPP_LIB_DIR="$ROOT/third_party/spdlog"
 setup_spdlog_cpp_library() {
-    if [ "$FORCE" != 'yes' ] && [ -e $SPDLOG_CPP_LIB_DIR/build ]; then
+    if [ "$FORCE" != 'yes' ] && [ -e "$(cmake_install_prefix "$SPDLOG_CPP_LIB_DIR")" ]; then
         return
     fi
     local commit="v1.4.2"
@@ -268,13 +280,13 @@ BOOST_CPP_LIB_VERSION_UNDERSCORES="$(perl -lape 's/\./_/g'<<<"$BOOST_CPP_LIB_VER
 BOOST_CPP_LIB_DIR="$ROOT/third_party/boost_${BOOST_CPP_LIB_VERSION_UNDERSCORES}"
 BOOST_CPP_LIB_URL="https://dl.bintray.com/boostorg/release/${BOOST_CPP_LIB_VERSION}/source/boost_${BOOST_CPP_LIB_VERSION_UNDERSCORES}.tar.gz"
 setup_boost_cpp_library() {
-    if [ "$FORCE" != 'yes' ] && [ -e $BOOST_CPP_LIB_DIR/build ]; then
+    if [ "$FORCE" != 'yes' ] && [ -e "$(cmake_build_dir "$BOOST_CPP_LIB_DIR")" ]; then
         return
     fi
     _wget_tar "$BOOST_CPP_LIB_URL" "third_party"
     (
     cd $BOOST_CPP_LIB_DIR
-    ./bootstrap.sh --prefix=$BOOST_CPP_LIB_DIR/build
+    ./bootstrap.sh --prefix="$(cmake_build_dir "$BOOST_CPP_LIB_DIR")"
     if [ ! -e project-config.jam.bkup ]; then
         # https://github.com/boostorg/build/issues/289#issuecomment-515712785
         # Compiling boost fails inside a virtualenv; complains about pyconfig.h not existing
@@ -292,21 +304,14 @@ setup_boost_cpp_library() {
 
 EIGEN_CPP_LIB_DIR="$ROOT/third_party/eigen"
 setup_eigen_cpp_library() {
-    if [ "$FORCE" != 'yes' ] && [ -e $EIGEN_CPP_LIB_DIR ]; then
+    if [ "$FORCE" != 'yes' ] && [ -e "$(cmake_install_prefix "$EIGEN_CPP_LIB_DIR")" ]; then
         return
     fi
     local commit="9f48e814419e"
     _hg_clone "$EIGEN_CPP_LIB_DIR" \
         https://bitbucket.org/eigen/eigen \
         $commit
-    (
-    cd $EIGEN_CPP_LIB_DIR
-    mkdir -p build
-    cd build
-    cmake .. -DCMAKE_INSTALL_PREFIX=$PWD/cmake_install
-    make -j$(nproc)
-    make install
-    )
+    cmake_build "$EIGEN_CPP_LIB_DIR"
 }
 
 cmake_build() {
@@ -315,9 +320,9 @@ cmake_build() {
 
     (
     cd "$src_dir"
-    mkdir -p build
-    cd build
-    cmake .. -DCMAKE_INSTALL_PREFIX=$PWD/cmake_install
+    mkdir -p "$(cmake_build_dir "$src_dir")"
+    cd "$(cmake_build_dir "$src_dir")"
+    cmake "$src_dir" -DCMAKE_INSTALL_PREFIX="$(cmake_install_prefix "$src_dir")"
     make -j$(nproc)
     make install
     )
@@ -332,7 +337,7 @@ PROTOBUF_CPP_LIB_DIR="$ROOT/third_party/protobuf-${PROTOBUF_VERSION}"
 PROTOBUF_URL="https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOBUF_VERSION}/protobuf-all-${PROTOBUF_VERSION}.tar.gz"
 #PROTOBUF_URL="https://github.com/protocolbuffers/protobuf/archive/v${PROTOBUF_VERSION}.tar.gz"
 setup_protobuf_cpp_library() {
-    if [ "$FORCE" != 'yes' ] && [ -e $PROTOBUF_CPP_LIB_DIR ]; then
+    if [ "$FORCE" != 'yes' ] && [ -e "$(cmake_build_dir "$PROTOBUF_CPP_LIB_DIR")" ]; then
         return
     fi
     _wget_tar "$PROTOBUF_URL" "third_party"
@@ -340,10 +345,10 @@ setup_protobuf_cpp_library() {
     cd $PROTOBUF_CPP_LIB_DIR
     ./configure \
         "CFLAGS=-fPIC" "CXXFLAGS=-fPIC" \
-        --prefix="${PROTOBUF_CPP_LIB_DIR}/build"
+        --prefix="$(cmake_build_dir "$PROTOBUF_CPP_LIB_DIR")"
     make -j$(nproc)
     make install
-    ${PROTOBUF_CPP_LIB_DIR}/build/bin/protoc --version
+    "$(cmake_build_dir "$PROTOBUF_CPP_LIB_DIR")"/bin/protoc --version
     )
 }
 

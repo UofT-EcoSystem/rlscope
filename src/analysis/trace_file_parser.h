@@ -2268,6 +2268,12 @@ public:
     TimeUsec start_us;
     TimeUsec end_us;
   };
+  struct HeaderMeta {
+    size_t start_idx;
+    size_t duration_idx;
+    size_t name_idx;
+    std::map<std::string, size_t> col_idx_map;
+  };
   std::vector<std::string> header;
   NvprofFileTypeCode file_type;
   Category category;
@@ -2293,7 +2299,10 @@ public:
   // Only additional events we need to create that don't match this category is the
   // "fake" operation event (CATEGORY_OPERATION).
   virtual std::string RowCategory() const = 0;
-  virtual EventRow ParseRowEvent(const std::vector<std::string>& row) const = 0;
+  virtual EventRow ParseRowEvent(const HeaderMeta& header_meta, const std::vector<std::string>& row) const = 0;
+  bool HeaderMatches(const std::vector<std::string>& row) const;
+  virtual HeaderMeta ParseHeaderMeta(const std::vector<std::string>& row) const = 0;
+  std::map<std::string, size_t> ParseColIdxMap(const std::vector<std::string>& row) const;
 
   CategoryKey RowCategoryKey(const Process& proc) const {
     return CategoryKey::FromCategory(proc, RowCategory());
@@ -2311,15 +2320,9 @@ public:
   virtual std::string RowCategory() const override {
     return CATEGORY_CUDA_API_CPU;
   }
-  virtual EventRow ParseRowEvent(const std::vector<std::string>& row) const override {
-    double start_us_dbl = atof(row[0].c_str());
-    double duration_us_dbl = atof(row[1].c_str());
-    const std::string& name = row[2];
-    TimeUsec start_us = static_cast<TimeUsec>(round(start_us_dbl));
-    TimeUsec end_us = static_cast<TimeUsec>(round(start_us_dbl + duration_us_dbl));
-    EventRow event_row {name, start_us, end_us};
-    return event_row;
-  }
+
+  virtual HeaderMeta ParseHeaderMeta(const std::vector<std::string>& row) const override;
+  virtual EventRow ParseRowEvent(const HeaderMeta& header_meta, const std::vector<std::string>& row) const override;
 };
 class NvprofGPUTraceFileType : public NvprofFileType {
 public:
@@ -2334,13 +2337,14 @@ public:
               "Block X",
               "Block Y",
               "Block Z",
-              "Registers Per Thread",
-              "Static SMem",
-              "Dynamic SMem",
-              "Size",
-              "Throughput",
-              "SrcMemType",
-              "DstMemType",
+//              "Registers Per Thread",
+//              "Static SMem",
+//              "Dynamic SMem",
+// NOTE: This columns aren't always present...
+//              "Size",
+//              "Throughput",
+//              "SrcMemType",
+//              "DstMemType",
               "Device",
               "Context",
               "Stream",
@@ -2354,15 +2358,9 @@ public:
   virtual std::string RowCategory() const override {
     return CATEGORY_CUDA_API_CPU;
   }
-  virtual EventRow ParseRowEvent(const std::vector<std::string>& row) const override {
-    double start_us_dbl = atof(row[0].c_str());
-    double duration_us_dbl = atof(row[1].c_str());
-    const std::string& name = row[18];
-    TimeUsec start_us = static_cast<TimeUsec>(round(start_us_dbl));
-    TimeUsec end_us = static_cast<TimeUsec>(round(start_us_dbl + duration_us_dbl));
-    EventRow event_row {name, start_us, end_us};
-    return event_row;
-  }
+
+  virtual HeaderMeta ParseHeaderMeta(const std::vector<std::string>& row) const override;
+  virtual EventRow ParseRowEvent(const HeaderMeta& header_meta, const std::vector<std::string>& row) const override;
 };
 static const std::vector<const NvprofFileType*> NVPROF_FILE_TYPES = {
     new NvprofAPITraceFileType(),
@@ -2370,17 +2368,32 @@ static const std::vector<const NvprofFileType*> NVPROF_FILE_TYPES = {
 };
 static MyStatus GetNvprofFileType(
     const std::vector<std::string>& header,
-    const NvprofFileType** ret) {
-  for (const auto& nvprof_file_type : NVPROF_FILE_TYPES) {
-    if (nvprof_file_type->header == header) {
-      *ret = nvprof_file_type;
-      return MyStatus::OK();
-    }
+    RLSFileType rls_file_type,
+    std::unique_ptr<NvprofFileType>* ret) {
+  switch (rls_file_type) {
+    case NVPROF_API_TRACE_CSV_FILE:
+      ret->reset(new NvprofAPITraceFileType());
+      break;
+    case NVPROF_GPU_TRACE_CSV_FILE:
+      ret->reset(new NvprofGPUTraceFileType());
+      break;
+    default:
+      std::stringstream ss;
+      ret->reset(nullptr);
+      ss << "Not sure what nvprof csv file type to use for RLS file type = " << RLSFileTypeString(rls_file_type);
+      return MyStatus(error::INVALID_ARGUMENT, ss.str());
   }
-  std::stringstream ss;
-  ss << "Not sure what nvprof csv file type this is for header that looks like:\n";
-  PrintValue(ss, header);
-  return MyStatus(error::INVALID_ARGUMENT, ss.str());
+//  for (const auto& nvprof_file_type : NVPROF_FILE_TYPES) {
+//    if (nvprof_file_type->HeaderMatches(header)) {
+//      *ret = nvprof_file_type;
+//      return MyStatus::OK();
+//    }
+//  }
+//  std::stringstream ss;
+//  ss << "Not sure what nvprof csv file type this is for header that looks like:\n";
+//  PrintValue(ss, header);
+//  return MyStatus(error::INVALID_ARGUMENT, ss.str());
+  return MyStatus::OK();
 }
 class NvprofCSVParser : public IEventFileParser {
 public:
@@ -3189,6 +3202,8 @@ public:
 
   bool _initialized;
 
+  NvprofFileType::HeaderMeta _header_meta;
+
   std::vector<std::string> _header;
   std::vector<std::string> _units;
 
@@ -3196,7 +3211,7 @@ public:
   size_t _num_other_lines;
   size_t _num_data_lines;
 
-  const NvprofFileType* _nvprof_file_type;
+  std::unique_ptr<NvprofFileType> _nvprof_file_type;
 
   NvprofTraceFileReader(RLSAnalyzeArgs args, const std::string& path, RLSFileType file_type) :
       args(args)
@@ -3206,7 +3221,6 @@ public:
       , _num_skip_lines(0)
       , _num_other_lines(0)
       , _num_data_lines(0)
-      , _nvprof_file_type(nullptr)
   {
   }
   virtual ~NvprofTraceFileReader() = default;

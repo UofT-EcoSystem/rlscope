@@ -26,7 +26,7 @@ from iml_profiler.parser.db import SQLParser, sql_input_path, GetConnectionPool
 from iml_profiler.parser import db
 from iml_profiler.parser.stacked_bar_plots import OverlapStackedBarPlot
 from iml_profiler.parser.common import print_cmd
-from iml_profiler.parser.cpu_gpu_util import UtilParser, UtilPlot, GPUUtilOverTimePlot, NvprofKernelHistogram
+from iml_profiler.parser.cpu_gpu_util import UtilParser, UtilPlot, GPUUtilOverTimePlot, NvprofKernelHistogram, CrossProcessOverlapHistogram, NvprofTraces
 from iml_profiler.parser.training_progress import TrainingProgressParser, ProfilingOverheadPlot
 from iml_profiler.parser.extrapolated_training_time import ExtrapolatedTrainingTimeParser
 from iml_profiler.parser.profiling_overhead import CallInterceptionOverheadParser, CUPTIOverheadParser, CUPTIScalingOverheadParser, CorrectedTrainingTimeParser, PyprofOverheadParser, TotalTrainingTimeParser, SQLOverheadEventsParser
@@ -1440,7 +1440,6 @@ class GPUUtilOverTimePlotTask(IMLTask):
         dumper = GPUUtilOverTimePlot(**kwargs)
         dumper.run()
 
-# NvprofKernelHistogramTask
 class NvprofKernelHistogramTask(luigi.Task):
     """
     Compare GPU utilization over time using a synthetic experiment that varies two parameters:
@@ -1465,6 +1464,61 @@ class NvprofKernelHistogramTask(luigi.Task):
         dumper = NvprofKernelHistogram(**kwargs)
         dumper.run()
 
+class CrossProcessOverlapHistogramTask(luigi.Task):
+    """
+    Plot a histogram of inter-worker (cross process) overlap between GPU kernels.
+    """
+
+    debug = param_debug
+    debug_single_thread = param_debug_single_thread
+    debug_perf = param_debug_perf
+
+    cross_process_overlap = luigi.Parameter(description="Output file from analysis: OverlapResult.cross_process.json")
+
+    def requires(self):
+        return []
+
+    def output(self):
+        return []
+
+    def run(self):
+        kwargs = kwargs_from_task(self)
+        dumper = CrossProcessOverlapHistogram(**kwargs)
+        dumper.run()
+
+class NvprofTracesTask(luigi.Task):
+    """
+    Generate nvprof csv files of traces:
+    $ nvprof -i profile.nvprof --print-gpu-trace 2>&1 > profile.nvprof.gpu_trace.csv
+    $ nvprof -i profile.nvprof --print-api-trace 2>&1 > profile.nvprof.api_trace.csv
+    Plot a histogram of inter-worker (cross process) overlap between GPU kernels.
+    """
+    debug = param_debug
+    debug_single_thread = param_debug_single_thread
+    debug_perf = param_debug_perf
+
+    iml_directory = luigi.Parameter(description="Location of trace-files")
+
+    n_workers = luigi.IntParameter(
+        description="How many threads to simultaneously run",
+        default=multiprocessing.cpu_count())
+
+    force = luigi.BoolParameter(description="re-run nvprof even if csv file exists")
+
+    def requires(self):
+        return []
+
+    def output(self):
+        return []
+
+    def run(self):
+        kwargs = kwargs_from_task(self)
+        assert 'directory' not in kwargs
+        kwargs['directory'] = kwargs['iml_directory']
+        del kwargs['iml_directory']
+        dumper = NvprofTraces(**kwargs)
+        dumper.run()
+
 NOT_RUNNABLE_TASKS = get_NOT_RUNNABLE_TASKS()
 IML_TASKS = get_IML_TASKS()
 IML_TASKS.add(TraceEventsTask)
@@ -1487,6 +1541,8 @@ IML_TASKS.add(SlidingWindowUtilizationPlotTask)
 IML_TASKS.add(CUDAEventCSVTask)
 IML_TASKS.add(GPUUtilOverTimePlotTask)
 IML_TASKS.add(NvprofKernelHistogramTask)
+IML_TASKS.add(CrossProcessOverlapHistogramTask)
+IML_TASKS.add(NvprofTracesTask)
 
 if __name__ == "__main__":
     main()
