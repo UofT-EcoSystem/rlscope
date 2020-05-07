@@ -5,6 +5,7 @@
 //#include "common/debug.h"
 
 #include "experiment/gpu_freq.h"
+#include "experiment/gpu_freq.cuh"
 
 #include "error_codes.pb.h"
 
@@ -58,14 +59,20 @@ DEFINE_bool(processes, false, "When --num_threads > 1, use separate processes to
 DEFINE_bool(sync, false, "Wait for kernel to finish after each launch. Useful for running really long kernels (e.g., 10 sec) to avoid creating long queues of kernels accidentally.");
 DEFINE_bool(cuda_context, false, "Create new CUDA context for each thread.");
 DEFINE_int64(repetitions, 5, "Repetitions when guessing GPU clock frequency");
+DEFINE_int32(device, 0, "zero-based CUDA device id");
 
 DEFINE_bool(internal_is_child, false, "(Internal) this process is a child of some parent instance of gpu_util_experiment => open existing shared memory (don't create)");
+DEFINE_int64(internal_thread_id, -1, "(Internal) 0-based thread-id for child");
 
 DEFINE_string(kernel, "compute_kernel", "What GPU kernel should we run?");
 // URL: https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__CTX.html#group__CUDA__CTX_1g65dc0012348bc84810e2103a40d8e2cf
 DEFINE_string(gpu_sched_policy, "default", "What GPU scheduling policy to use for the CUDA context (see: CUDA Driver API documentation for cuCtxCreate for details)?");
 DEFINE_int64(kern_arg_iterations, 1000*1000*1000, "(Kernel arg) compute_kernel: how many loop iterations to perform (increase compute)");
+DEFINE_int64(kern_arg_num_blocks, 1, "(Kernel arg) compute_sched_info_kernel: how many GPU thread blocks to run (increase parallelism)?");
+DEFINE_int64(kern_arg_threads_per_block, 1, "(Kernel arg) compute_kernel: how many threads for each GPU thread block (increase parallelism)?");
+DEFINE_int64(kern_arg_iterations_per_sched_sample, -1, "(Kernel arg) compute_sched_info_kernel: how many iterations of execution before sample GPU scheduling info (sm_id/warp_id/lane_id)? Default: just take a single sample at the start of the kernel (== --kern_arg_iterations)");
 // TODO: add grid size and thread block size args.
+
 
 //using namespace tensorflow;
 namespace tensorflow {
@@ -169,8 +176,15 @@ static std::string BINARY_PATH;
   SET_FLAG(FLAGS_sync);
   SET_FLAG(FLAGS_cuda_context);
   SET_FLAG(FLAGS_repetitions);
+  SET_FLAG(FLAGS_device);
   SET_FLAG(FLAGS_internal_is_child);
+  if (::FLAGS_internal_thread_id != -1) {
+    SET_FLAG(FLAGS_internal_thread_id);
+  }
   SET_FLAG(FLAGS_kern_arg_iterations);
+  SET_FLAG(FLAGS_kern_arg_num_blocks);
+  SET_FLAG(FLAGS_kern_arg_threads_per_block);
+  SET_FLAG(FLAGS_kern_arg_iterations_per_sched_sample);
   SET_FLAG(FLAGS_kernel);
   SET_FLAG(FLAGS_gpu_sched_policy);
 #undef SET_FLAG
@@ -202,8 +216,13 @@ boost::process::child ReinvokeProcess(const GPUUtilExperimentArgs& overwrite_arg
   APPEND_CMD_ARG("sync", FLAGS_sync);
   APPEND_CMD_ARG("cuda_context", FLAGS_cuda_context);
   APPEND_CMD_ARG("repetitions", FLAGS_repetitions);
+  APPEND_CMD_ARG("device", FLAGS_device);
   APPEND_CMD_ARG("internal_is_child", FLAGS_internal_is_child);
+  APPEND_CMD_ARG("internal_thread_id", FLAGS_internal_thread_id);
   APPEND_CMD_ARG("kern_arg_iterations", FLAGS_kern_arg_iterations);
+  APPEND_CMD_ARG("kern_arg_num_blocks", FLAGS_kern_arg_num_blocks);
+  APPEND_CMD_ARG("kern_arg_threads_per_block", FLAGS_kern_arg_threads_per_block);
+  APPEND_CMD_ARG("kern_arg_iterations_per_sched_sample", FLAGS_kern_arg_iterations_per_sched_sample);
   APPEND_CMD_ARG("kernel", FLAGS_kernel);
   APPEND_CMD_ARG("gpu_sched_policy", FLAGS_gpu_sched_policy);
 #undef APPEND_CMD_ARG
@@ -348,12 +367,25 @@ int main(int argc, char** argv) {
 
   }
 
+  if (FLAGS_kern_arg_iterations_per_sched_sample == -1) {
+    // By default, just take a single sample at the start of the kernel
+    FLAGS_kern_arg_iterations_per_sched_sample = FLAGS_kern_arg_iterations;
+  }
+
   auto args = GPUUtilExperimentArgs::FromFlags();
   if (SHOULD_DEBUG(FEATURE_GPU_CLOCK_FREQ)
       || SHOULD_DEBUG(FEATURE_GPU_UTIL_CUDA_CONTEXT)
       || SHOULD_DEBUG(FEATURE_GPU_UTIL_SYNC)
       || FLAGS_debug) {
     DBG_LOG("{}", args);
+  }
+
+  cudaError_t cuda_err;
+  int num_devices;
+  cuda_err = cudaGetDeviceCount(&num_devices);
+  CHECK_CUDA(cuda_err);
+  if (args.FLAGS_device.get() >= num_devices) {
+    std::cout << "ERROR: --device must be in [0.." << num_devices << "]" << std::endl;
   }
 
   unsigned int cuda_context_flags;
@@ -374,6 +406,9 @@ int main(int argc, char** argv) {
     std::unique_ptr<GPUKernel> gpu_kernel;
     status = GetGPUKernel(args, &gpu_kernel);
     IF_BAD_STATUS_EXIT("Failed to setup --kernel", status);
+
+    status = gpu_kernel->CheckArgs();
+    IF_BAD_STATUS_EXIT("Kernel arguments looked incorrect", status);
 
 //    GPUClockFreq gpu_clock_freq(args);
 //    status = gpu_clock_freq.load_json(FLAGS_gpu_clock_freq_json);

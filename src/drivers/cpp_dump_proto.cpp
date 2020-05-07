@@ -42,6 +42,7 @@ using json = nlohmann::json;
 #include "cpp_dump_proto.h"
 
 DEFINE_bool(debug, false, "Debug: give additional verbose output");
+DEFINE_bool(output_csv, false, "Output interval csv files: Interval.*Intervals.csv = start/duration of overlap intervals, Interval.*Events.csv = start/duration of each event belonging to an overlap interval");
 DEFINE_bool(ignore_memcpy, false, "Ignore CUDA memcpy events when reading cuda_device_events*.proto");
 DEFINE_bool(cross_process, false, "Compute CPU/GPU overlap across all processes");
 DEFINE_string(proto, "", "Path to RLS trace-file protobuf file");
@@ -54,6 +55,7 @@ DEFINE_string(python_annotation_json, "", "Path to calibration file: means for o
 DEFINE_string(python_clib_interception_tensorflow_json, "", "Path to calibration file: means for TensorFlow Python->C++ interception overhead (see: PyprofOverheadTask)");
 DEFINE_string(python_clib_interception_simulator_json, "", "Path to calibration file: means for Simulator Python->C++ interception overhead (see: PyprofOverheadTask)");
 DEFINE_string(nvprof_process_regex, "", "For nvprof csv files, use this regex to extract the process name from the basename of the csv file; if capturing group is present, use that, otherwise use entire match");
+DEFINE_string(nvprof_keep_column_names, "", "For nvprof csv files, when outputting interval csv, preserve these columns from the original csv file.");
 
 
 // Window size (a.k.a. sample period [NVIDIA documentation]): the number of "bins" we look at when calculating the GPU kernel time.
@@ -90,6 +92,7 @@ namespace tensorflow {
 
   SET_FLAG(FLAGS_debug);
   SET_FLAG(FLAGS_ignore_memcpy);
+  SET_FLAG(FLAGS_output_csv);
   SET_FLAG(FLAGS_cross_process);
   SET_NONEMPTY_STRING_FLAG(FLAGS_proto);
   SET_NONEMPTY_STRING_FLAG(FLAGS_iml_directory);
@@ -100,6 +103,9 @@ namespace tensorflow {
   SET_NONEMPTY_STRING_FLAG(FLAGS_python_clib_interception_tensorflow_json);
   SET_NONEMPTY_STRING_FLAG(FLAGS_python_clib_interception_simulator_json);
   SET_NONEMPTY_STRING_FLAG(FLAGS_nvprof_process_regex);
+  if (::FLAGS_nvprof_keep_column_names != "") {
+    args.FLAGS_nvprof_keep_column_names = StringSplit(::FLAGS_nvprof_keep_column_names, ",");
+  }
   SET_FLAG(FLAGS_polling_interval_us);
 #undef SET_FLAG
 
@@ -460,7 +466,9 @@ int main(int argc, char** argv) {
       if (SHOULD_DEBUG(FEATURE_OVERLAP)) {
         overlap_computer.debug = true;
       }
-      auto r = overlap_computer.ComputeOverlap(/*keep_empty_time=*/FLAGS_cross_process);
+      auto r = overlap_computer.ComputeOverlap(
+          /*keep_empty_time=*/FLAGS_cross_process,
+          /*keep_intervals*/FLAGS_output_csv);
 
       if (SHOULD_DEBUG(FEATURE_ANY) || FLAGS_debug) {
         std::cout << std::endl;
@@ -489,6 +497,27 @@ int main(int argc, char** argv) {
           ss << "DumpVennJS(machine=" << meta.machine << ", process=" << meta.process << ", phase=" << meta.phase << ")";
           timer->EndOperation(ss.str());
         }
+      }
+
+      if (FLAGS_output_csv) {
+        std::stringstream base_ss;
+        if (!FLAGS_cross_process) {
+          base_ss << "Interval"
+                  << ".machine_" << meta.machine
+                  << ".process_" << meta.process
+                  << ".phase_" << meta.phase;
+        } else {
+          base_ss << "Interval"
+                  << ".cross_process";
+        }
+        auto interval_base = iml_dir / base_ss.str();
+        auto dump_status = r.DumpCSVFiles(interval_base.string());
+        if (timer) {
+          std::stringstream ss;
+          ss << "DumpIntervalCSV(" << interval_base.filename() << ")";
+          timer->EndOperation(ss.str());
+        }
+        IF_BAD_STATUS_EXIT("Failed to dump interval csv", dump_status);
       }
 
       return MyStatus::OK();

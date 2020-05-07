@@ -10,9 +10,11 @@ if [ "$DEBUG" = 'yes' ]; then
     set -x
 fi
 cd $(dirname $0)
-#python ./run.py bash -c "cd Debug && make -j1 VERBOSE=1"
-#python ./run.py bash -c "cd Debug && make -j$(nproc)"
-#python ./run.py bash -c "cd Debug && make -j1"
-python ./run.py bash -c "cd Debug && make -j8"
+#BUILD_DIR="Debug.$(hostname)"
+BUILD_DIR="Debug"
+#python ./run.py bash -c "cd $BUILD_DIR && make -j1 VERBOSE=1"
+#python ./run.py bash -c "cd $BUILD_DIR && make -j$(nproc)"
+#python ./run.py bash -c "cd $BUILD_DIR && make -j1"
+python ./run.py bash -c "cd $BUILD_DIR && make -j8"
 python ./run.py "$@"
-# Debug/cpp_dump_proto --mode overlap --iml_directory output/perf_debug
+# $BUILD_DIR/cpp_dump_proto --mode overlap --iml_directory output/perf_debug

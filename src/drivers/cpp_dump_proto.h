@@ -19,6 +19,7 @@ struct RLSAnalyzeArgs {
   // Flags
   boost::optional<bool> FLAGS_debug;
   boost::optional<bool> FLAGS_ignore_memcpy;
+  boost::optional<bool> FLAGS_output_csv;
   boost::optional<bool> FLAGS_cross_process;
   boost::optional<std::string> FLAGS_proto;
   boost::optional<std::string> FLAGS_iml_directory;
@@ -30,6 +31,8 @@ struct RLSAnalyzeArgs {
   boost::optional<std::string> FLAGS_python_clib_interception_tensorflow_json;
   boost::optional<std::string> FLAGS_python_clib_interception_simulator_json;
   boost::optional<std::string> FLAGS_nvprof_process_regex;
+  boost::optional<std::vector<std::string>> FLAGS_nvprof_keep_column_names;
+
 
   boost::optional<int64_t> FLAGS_polling_interval_us;
 
@@ -44,7 +47,7 @@ struct RLSAnalyzeArgs {
     if (!FLAGS_var.has_value()) {
       out << "None";
     } else {
-      out << FLAGS_var.get();
+      PrintValue(out, FLAGS_var.get());
     }
   }
 
@@ -59,6 +62,7 @@ struct RLSAnalyzeArgs {
 
     PRINT_FLAG(FLAGS_debug);
     PRINT_FLAG(FLAGS_ignore_memcpy);
+    PRINT_FLAG(FLAGS_output_csv);
     PRINT_FLAG(FLAGS_cross_process);
     PRINT_FLAG(FLAGS_proto);
     PRINT_FLAG(FLAGS_iml_directory);
@@ -69,6 +73,7 @@ struct RLSAnalyzeArgs {
     PRINT_FLAG(FLAGS_python_clib_interception_tensorflow_json);
     PRINT_FLAG(FLAGS_python_clib_interception_simulator_json);
     PRINT_FLAG(FLAGS_nvprof_process_regex);
+    PRINT_FLAG(FLAGS_nvprof_keep_column_names);
     PRINT_FLAG(FLAGS_polling_interval_us);
 #undef PRINT_FLAG
 

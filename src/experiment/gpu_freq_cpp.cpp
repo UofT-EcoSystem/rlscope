@@ -3,7 +3,9 @@
 //
 
 #include <cuda.h>
+#include <cupti.h>
 #include <cuda_runtime.h>
+#include <nvToolsExtCudaRt.h>
 
 #include <chrono>
 #include <iostream>
@@ -11,7 +13,6 @@
 #include <thread>
 #include <memory>
 
-#include <cuda_runtime.h>
 #include <cassert>
 #include <sstream>
 
@@ -19,6 +20,7 @@
 #include <boost/filesystem.hpp>
 
 #include "experiment/gpu_freq.h"
+#include "experiment/gpu_freq.cuh"
 
 #include "common/json.h"
 
@@ -36,10 +38,23 @@ using json = nlohmann::json;
 
 #include <sys/syscall.h>
 #include "drivers/gpu_util_experiment.h"
+#include "gpu_freq.h"
 
 static pid_t my_gettid() {
   return syscall(SYS_gettid);
 }
+
+// Used by ActivityBuffer and DeviceTracerImpl
+#define CUPTI_CALL(call)                                            \
+  do {                                                              \
+    CUptiResult _status = call;                                     \
+    if (_status != CUPTI_SUCCESS) {                                 \
+      const char *errstr;                                           \
+      cuptiGetResultString(_status, &errstr);                       \
+      DBG_LOG("ERROR: libcupti call {} failed with {}", #call, errstr); \
+      exit(EXIT_FAILURE); \
+    }                                                               \
+  } while (0)
 
 namespace tensorflow {
 
@@ -50,6 +65,9 @@ using steady_clock = std::chrono::steady_clock;
 MyStatus GPUComputeKernel::Init() {
   // MyStatus status;
   this->run_ctx.reset(new RunCtx(1));
+  return MyStatus::OK();
+}
+MyStatus GPUComputeKernel::CheckArgs() {
   return MyStatus::OK();
 }
 std::unique_ptr<GPUKernel> GPUComputeKernel::clone() const {
@@ -67,6 +85,88 @@ void GPUComputeKernel::RunSync(CudaStream stream) {
 void GPUComputeKernel::RunAsync(CudaStream stream) {
   _gpu_compute_kernel(stream, /*sync=*/false);
 }
+MyStatus GPUComputeKernel::DumpKernelInfo(int thread_id, CudaStream stream) {
+  return MyStatus::OK();
+}
+
+
+MyStatus GPUComputeSchedInfoKernel::Init() {
+  CUPTI_CALL(cuptiGetTimestamp(&gpu_base_timestamp_ns));
+  cpu_base_timestamp_us = get_timestamp_us();
+
+  cudaError_t cuda_err;
+  cuda_err = cudaGetDeviceProperties(&device_prop, args.FLAGS_device.get());
+  CHECK_CUDA(cuda_err);
+
+  this->run_ctx.reset(new RunCtx(
+      args,
+      device_prop,
+      1));
+  return MyStatus::OK();
+}
+std::unique_ptr<GPUKernel> GPUComputeSchedInfoKernel::clone() const {
+  std::unique_ptr<GPUComputeSchedInfoKernel> obj(new GPUComputeSchedInfoKernel(this->args));
+  if (this->run_ctx) {
+    obj->device_prop = device_prop;
+    obj->gpu_base_timestamp_ns = gpu_base_timestamp_ns;
+    obj->cpu_base_timestamp_us = cpu_base_timestamp_us;
+    obj->run_ctx.reset(new RunCtx(
+        args,
+        device_prop,
+        this->run_ctx->output.num_elems()));
+  }
+  return obj;
+}
+void GPUComputeSchedInfoKernel::RunSync(CudaStream stream) {
+  _gpu_compute_kernel(stream, /*sync=*/true);
+}
+void GPUComputeSchedInfoKernel::RunAsync(CudaStream stream) {
+  _gpu_compute_kernel(stream, /*sync=*/false);
+}
+MyStatus GPUComputeSchedInfoKernel::DumpKernelInfo(int thread_id, CudaStream stream) {
+  auto status = MyStatus::OK();
+  auto stream_id = stream._stream_id;
+  // Output:
+  // GPUComputeSchedInfoKernel.thread_id_<>.stream_id_<>.json
+  json js;
+  json params_js;
+  params_js["num_total_gpu_threads"] = run_ctx->sched_info.num_elems();
+  params_js["num_blocks"] = args.FLAGS_kern_arg_num_blocks.get();
+  params_js["threads_per_block"] = args.FLAGS_kern_arg_threads_per_block.get();
+  params_js["iterations_per_sched_sample"] = args.FLAGS_kern_arg_iterations_per_sched_sample.get();
+  params_js["iterations"] = args.FLAGS_kern_arg_iterations.get();
+  params_js["n_samples"] = args.FLAGS_kern_arg_iterations.get() / args.FLAGS_kern_arg_iterations_per_sched_sample.get();
+  params_js["n_launches"] = args.FLAGS_n_launches.get();
+  params_js["processes"] = args.FLAGS_processes.get();
+  params_js["cuda_context"] = args.FLAGS_cuda_context.get();
+  params_js["device"] = args.FLAGS_device.get();
+  params_js["cpu_base_timestamp_us"] = cpu_base_timestamp_us.time_since_epoch().count();
+  params_js["gpu_base_timestamp_ns"] = gpu_base_timestamp_ns;
+
+  js["params"] = params_js;
+  js["sm_id"] = args.FLAGS_kern_arg_threads_per_block.get();
+  DBG_LOG("run_ctx->sched_info.num_elems() = {}", run_ctx->sched_info.num_elems());
+  auto vectors = GPUThreadSchedInfoVectors::FromStructArray(run_ctx->sched_info.get(), run_ctx->sched_info.num_elems());
+  js["stream_id"] = vectors.stream_id;
+  js["kernel_id"] = vectors.kernel_id;
+  js["sm_id"] = vectors.sm_id;
+  js["warp_id"] = vectors.warp_id;
+  js["lane_id"] = vectors.lane_id;
+  js["globaltimer_ns"] = vectors.globaltimer_ns;
+  boost::filesystem::path iml_dir(args.FLAGS_iml_directory.get());
+  std::stringstream base_ss;
+  base_ss << "GPUComputeSchedInfoKernel"
+          << ".thread_id_" << thread_id
+          << ".stream_id_" << stream_id
+          << ".json";
+  auto path = iml_dir / base_ss.str();
+  status = WriteJson(path.string(), js);
+  IF_BAD_STATUS_RETURN(status);
+  DBG_LOG("Dumped kernel info to {}", path);
+  return MyStatus::OK();
+}
+
+
 
 MyStatus GPUClockFreq::Init() {
   return this->load_json(args.FLAGS_gpu_clock_freq_json.get());
@@ -80,12 +180,20 @@ void GPUClockFreq::RunSync(CudaStream stream) {
 void GPUClockFreq::RunAsync(CudaStream stream) {
   gpu_sleep_us(stream, args.FLAGS_kernel_duration_us.get());
 }
+MyStatus GPUClockFreq::CheckArgs() {
+  return MyStatus::OK();
+}
+MyStatus GPUClockFreq::DumpKernelInfo(int thread_id, CudaStream stream) {
+  return MyStatus::OK();
+}
 
 MyStatus GetGPUKernel(GPUUtilExperimentArgs args, std::unique_ptr<GPUKernel>* gpu_kernel) {
   if (args.FLAGS_kernel.get() == "gpu_sleep") {
     (*gpu_kernel).reset(new GPUClockFreq(args));
   } else if (args.FLAGS_kernel.get() == "compute_kernel") {
     (*gpu_kernel).reset(new GPUComputeKernel(args));
+  } else if (args.FLAGS_kernel.get() == "compute_kernel_sched_info") {
+    (*gpu_kernel).reset(new GPUComputeSchedInfoKernel(args));
   } else {
     (*gpu_kernel).reset(nullptr);
     std::stringstream ss;
@@ -260,6 +368,7 @@ void ThreadedGPUKernelRunner::run() {
     // Run in same thread.
     std::unique_ptr<GPUKernel> gpu_kernel = _gpu_kernel->clone();
     GPUKernelRunner gpu_kernel_runner(
+        args.FLAGS_internal_thread_id.get(),
         std::move(gpu_kernel),
         args);
     gpu_kernel_runner.run();
@@ -271,6 +380,7 @@ void ThreadedGPUKernelRunner::run() {
   }
 
   assert(!args.FLAGS_internal_is_child.get());
+  assert(!args.FLAGS_internal_thread_id.has_value());
 
   // >= 2 threads.
   // Launch kernels from multiple threads
@@ -287,6 +397,7 @@ void ThreadedGPUKernelRunner::run() {
   for (int i = 0; i < static_cast<int>(args.FLAGS_num_threads.get()); i++) {
     std::unique_ptr<GPUKernel> gpu_kernel = _gpu_kernel->clone();
     gpu_kernel_runners.emplace_back(
+        i,
         std::move(gpu_kernel),
         child_args);
   }
@@ -351,6 +462,7 @@ void GPUKernelRunner::run_async_process(int thread_id) {
   GPUUtilExperimentArgs child_args = args;
   child_args.FLAGS_num_threads = 1;
   child_args.FLAGS_internal_is_child = true;
+  child_args.FLAGS_internal_thread_id = _thread_id;
 
   //get a handle to the current environment
   auto env = boost::this_process::environment();
@@ -368,7 +480,16 @@ void GPUKernelRunner::wait_process(int thread_id) {
   _async_process.reset(nullptr);
 }
 
+void GPUKernelRunner::SetCurrentThreadName(const std::string& name) {
+  nvtxNameOsThreadA(pthread_self(), name.c_str());
+}
 void GPUKernelRunner::run() {
+
+  {
+    std::stringstream ss;
+    ss << _thread_id;
+    this->SetCurrentThreadName(ss.str());
+  }
 
   // NOTE: this is NOT a member variable, since we want it to be destructed within the child thread, NOT the parent.
   // That's because the CUDA context is bound to this thread.
@@ -386,6 +507,7 @@ void GPUKernelRunner::run() {
   }
 
   _run_ctx.reset(new RunContext(
+      _thread_id,
       args.FLAGS_cuda_context.get(),
       args.FLAGS_cuda_context_flags.get()));
 
@@ -484,6 +606,8 @@ void GPUKernelRunner::run() {
     // to launch --n_launches kernels, WITHOUT considering setup cost.
     sync_block->barrier.arrive_and_wait();
   }
+
+  _gpu_kernel->DumpKernelInfo(_thread_id, *_run_ctx->_stream);
 
   if (args.FLAGS_debug.get()) {
     std::stringstream ss;
@@ -592,7 +716,9 @@ CudaContextWrapper::~CudaContextWrapper() {
   }
 }
 
-CudaStream::CudaStream() : _stream(new CudaStreamWrapper()) {
+CudaStream::CudaStream() :
+    _stream_id(0),
+    _stream(new CudaStreamWrapper()) {
 }
 cudaStream_t CudaStream::get() const {
   return _stream->_handle;
@@ -600,6 +726,16 @@ cudaStream_t CudaStream::get() const {
 void CudaStream::synchronize() {
   return _stream->synchronize();
 }
+void CudaStream::_set_name(const std::string& name) {
+  nvtxNameCudaStreamA(_stream->_handle, name.c_str());
+}
+void CudaStream::set_stream_id(uint64_t stream_id) {
+  _stream_id = stream_id;
+  std::stringstream ss;
+  ss << _stream_id;
+  _set_name(ss.str());
+}
+void set_stream_id(uint64_t stream_id);
 
 void CudaStreamWrapper::synchronize() {
   cudaError_t ret;

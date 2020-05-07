@@ -5,6 +5,7 @@
 #include "analysis/trace_file_parser.h"
 #include "cuda_api_profiler/generic_logging.h"
 #include "cuda_api_profiler/debug_flags.h"
+#include "trace_file_parser.h"
 
 #include <Eigen/Dense>
 
@@ -29,6 +30,10 @@ using json = nlohmann::json;
 #include <regex>
 
 using namespace Eigen;
+
+#define CSV_DELIM_STR ","
+#define CSV_ESCAPE_CHAR '\\'
+#define CSV_QUOTE_CHAR '"'
 
 namespace tensorflow {
 
@@ -108,6 +113,10 @@ TimeUsec EOEvent::duration_us() const {
   return _eo_events->DurationUsec(_i);
 }
 
+const IEventMetadata* EOEvent::metadata() const {
+  return _eo_events->GetEventMetadata(_i);
+}
+
 void EOEvents::Print(std::ostream& out, int indent) const {
   PrintIndent(out, indent);
   out << "EOEvents: size = " << this->size() << ", capacity = " << this->capacity();
@@ -140,9 +149,15 @@ void EOEvents::CheckIntegrity(std::ostream& out, int indent) const {
     }
   }
 }
-EOEvents EOEvents::Preallocate(const CategoryKey& category_key, size_t n_events) {
+
+EOEvents EOEvents::Preallocate(const CategoryKey& category_key, size_t n_events, bool keep_event_metadata) {
   bool keep_names = CategoryShouldKeepNames(category_key);
-  EOEvents eo_events(n_events, keep_names);
+  EOEvents eo_events(n_events, keep_names, keep_event_metadata);
+  return eo_events;
+}
+
+EOEvents EOEvents::PreallocateEvents(const CategoryKey& category_key, size_t n_events, bool keep_names, bool keep_event_metadata) {
+  EOEvents eo_events(n_events, keep_names, keep_event_metadata);
   return eo_events;
 }
 
@@ -378,7 +393,7 @@ void CategoryTimes::MergeEventsInto(const CategoryKey& category_key, EOEvents& e
 }
 void CategoryTimes::_Preallocate(EOTimes* eo_times, const CategoryKey& category_key, size_t n_events) {
   bool keep_names = CategoryShouldKeepNames(category_key);
-  (*eo_times)[category_key] = EOEvents(n_events, keep_names);
+  (*eo_times)[category_key] = EOEvents(n_events, keep_names, /*keep_event_metadata=*/false);
 }
 void CategoryTimes::Preallocate(const CategoryTimesCount& count) {
   for (const auto& pair : count.num_events) {
@@ -474,7 +489,7 @@ CategoryTimes::CategoryTimes(const Process& process_, const CategoryTimesCount& 
             category_key,
             n_events);
       }
-      (*eo_times)[category_key] = EOEvents(n_events, keep_names);
+      (*eo_times)[category_key] = EOEvents(n_events, keep_names, false);
     }
   };
   preallocate("eo_times", &eo_times, count.num_events);
@@ -917,7 +932,7 @@ MyStatus TraceFileWalker::Init() {
   return MyStatus::OK();
 }
 
-static std::vector<std::string> StringSplit(const std::string& s, std::string rgx_str = "\\s+") {
+std::vector<std::string> StringSplit(const std::string& s, std::string rgx_str) {
   std::vector<std::string> elems;
 
   std::regex rgx (rgx_str);
@@ -1452,7 +1467,7 @@ void CategoryKeyBitset::Print(std::ostream& out, int indent) const {
 
   // Print each CategoryKey individually.
   PrintIndent(out, indent);
-  out << "CategoryKeyBitset: bits = " << bitset.to_string() << ", size = " << keys.size();
+  out << "CategoryKeyBitset: set_id = " << SetID() << ", bits = " << bitset.to_string() << ", size = " << keys.size();
   for (const auto& key : keys) {
     out << "\n";
     key.Print(out, indent + 1);
@@ -1476,10 +1491,63 @@ CategoryKeyBitset CategoryKeyBitset::EmptySet(std::shared_ptr<const CategoryIdxM
   return ctimes;
 }
 
+MyStatus OverlapInterval::EachEvent(const OverlapResult& result, EachEventFunc func) const {
+  auto status = MyStatus::OK();
+  // Iterate over the non-zero categories, extract EOEvent's.
+
+  using IndexType = int;
+  OverlapInterval::IdxArray index = start_events;
+
+  assert(start_events.size() == end_events.size());
+  assert(result.ctimes.eo_times.size() == static_cast<size_t>(start_events.size()));
+  for (auto const& pair : result.ctimes.eo_times) {
+    auto const& category_key = pair.first;
+    auto const& eo_events = pair.second;
+    const auto i = result.idx_map->Idx(category_key);
+    auto end_events_size = end_events.size();
+    assert(i <= static_cast<size_t>(end_events_size));
+    auto end_events_i = end_events(i);
+    assert(end_events_i <= eo_events.size());
+  }
+
+  for (IndexType i = 0; i < index.size(); i++) {
+    const auto& category_key = result.idx_map->Key(i);
+    if (!result.ctimes.Count(category_key)) {
+      continue;
+    }
+    const auto& eo_events = result.ctimes.MaybeEvents(category_key).value();
+
+    auto eo_events_size = eo_events.size();
+    auto end_events_i = end_events(i);
+    // assert(end_events_i <= eo_events_size); // FAIL
+    if (!(end_events_i <= eo_events_size)) {
+      DBG_LOG("FAIL: end_events_i ({}) <= ({}) eo_events_size\n{}",
+              end_events_i, eo_events_size,
+              *this);
+      assert(end_events_i <= eo_events_size); // FAIL
+    }
+
+    while (index(i) < end_events(i)) {
+
+      auto idx = index(i);
+      assert(idx < eo_events_size);
+
+      auto event_idx = index(i);
+      auto event = eo_events.Event(event_idx);
+      status = func(category_key, event);
+      if (status.code() != error::OK) {
+        return status;
+      }
+      index(i) += 1;
+    }
+  }
+  return MyStatus::OK();
+}
+
 #define IS_START_IDX(i) (i % 2 == 0)
 #define IS_END_IDX(i) (i % 2 == 1)
-OverlapResult OverlapComputer::ComputeOverlap(bool keep_empty_time) const {
-  OverlapResult r;
+OverlapResult OverlapComputer::ComputeOverlap(bool keep_empty_time, bool keep_intervals) const {
+  OverlapResult r(category_times);
   r.idx_map = ctimes.idx_map;
 
   // NOTE: eigen uses int for indexing rows/columns, not size_t...
@@ -1489,19 +1557,38 @@ OverlapResult OverlapComputer::ComputeOverlap(bool keep_empty_time) const {
 
   using IdxArray = Array<size_t, Dynamic, 1>;
   size_t k = ctimes.size();
+  assert(ctimes.size() == category_times.size());
   IdxArray index = IdxArray::Zero(k);
 
   // std::vector<EOEvents> times;
   std::vector<const TimeUsec*> times;
+  std::vector<size_t> n_events;
   times.reserve(k);
   for (const auto& pair : ctimes.eo_times) {
     const auto& eo_events = pair.second;
     times.push_back(eo_events.RawPtr());
+    n_events.push_back(eo_events.size());
+  }
+
+  // Q: Can we establish how many intervals there will be ahead of time... or an upper bound?
+  //    With two events we could have 2 intervals (the events), or 3 (overlap between the two).
+  //    With three events, we could have anywhere between 3 and 5 events.
+  //    I suspect the most overlap happens when we consider adjacent events partially overlapping each other,
+  //    leading to an upper bound of (2*N - 1) intervals for N events... but I'm not sure how to show this.
+  //    But I'm not sure how to show this.
+  size_t N = 0;
+  for (const auto& pair : ctimes.eo_times) {
+    const auto& eo_events = pair.second;
+    N += eo_events.size();
+  }
+  if (keep_intervals) {
+    r.interval_meta.intervals.reserve(2*N - 1);
   }
 
   IdxArray lengths = IdxArray(k);
   {
     IndexType i = 0;
+    // NOTE: index order of lengths(...) is determined by iteration order of ctimes.eo_times...
     for (const auto& pair : ctimes.eo_times) {
       lengths(i) = 2 * pair.second.size();
       i += 1;
@@ -1513,6 +1600,34 @@ OverlapResult OverlapComputer::ComputeOverlap(bool keep_empty_time) const {
   CategoryKeyBitset cur_cat = CategoryKeyBitset::EmptySet(ctimes.idx_map);
   auto const& all_ops_set = CategoryKeyBitset::Ops(cur_cat);
 
+  // If we just STARTED a new event:
+  //   // Time to record the LAST interval.
+  //   // We DON'T include the new event in the next interval.
+  //   // But we might be in the middle of existing events.
+  //   start_events = last_interval_end_events
+  //   end_events = (index + 1)/2
+  //   last_interval_end_events = end_events
+  //   start_us = last_time
+  //   end_us = min_time
+  // If we just ENDED a new event:
+  //   // Time to record the LAST interval.
+  //   // We DO include the ending event in the next interval.
+  //   // But we might be in the middle of existing events.
+  //   start_events = last_interval_end_events
+  //   end_events = (index + 1)/2
+  //   last_interval_end_events = end_events
+  //   start_us = last_time
+  //   end_us = min_time
+  //
+  // // Update indices
+  // index(min_event) += 1
+  //
+  // // NOTE: As long as we record interval information BEFORE updating the index,
+  // // we can use the same code to record interval info when adding/removing events.
+
+  size_t next_interval_id = 0;
+  auto zero_indices = IdxArray::Zero(k);
+  IdxArray last_interval_end_events = zero_indices;
   while ((index < lengths).any()) {
     // Find the non-empty category with the next minimum start/end time.
     IndexType min_cat = 0;
@@ -1616,6 +1731,43 @@ OverlapResult OverlapComputer::ComputeOverlap(bool keep_empty_time) const {
     if (non_zero_time) {
       // NOTE: std::map<Key, Number> defaults to 0 if the key doesn't exist.
       r.overlap[cur_cat] += time_chunk;
+
+      if (keep_intervals) {
+        auto end_events = (index + 1)/2;
+//        assert(n_events.size() == static_cast<size_t>(end_events.size()));
+//        for (int i = 0; i < end_events.size(); i++) {
+//          auto end_events_i = end_events(i);
+//          auto n_events_i = n_events[i];
+//          assert(end_events_i <= n_events_i);
+//          auto start_events_i = last_interval_end_events[i];
+//          assert(start_events_i <= end_events_i);
+//        }
+        OverlapInterval overlap_interval(
+            next_interval_id,
+            last_interval_end_events,
+            end_events,
+            last_time,
+            time_chunk);
+
+//        assert(overlap_interval.start_events.size() == overlap_interval.end_events.size());
+//        assert(category_times.eo_times.size() == static_cast<size_t>(overlap_interval.start_events.size())); // FAIL
+
+//        for (int i = 0; i < end_events.size(); i++) {
+//          auto end_events_i = overlap_interval.end_events(i);
+//          auto n_events_i = n_events[i];
+//          assert(end_events_i <= n_events_i);
+//          auto start_events_i = overlap_interval.start_events(i);
+//          assert(start_events_i <= end_events_i);
+//        }
+
+
+        next_interval_id += 1;
+        last_interval_end_events = overlap_interval.end_events;
+        // ASSUME: number of intervals is <= 2*N - 1
+        // I'm not sure if this is the case, but it seems to be the upper-bound trend for examples with 2/3/4 events.
+        assert(overlap_interval.interval_id < r.interval_meta.intervals.capacity());
+        r.interval_meta.intervals.push_back(std::move(overlap_interval));
+      }
     }
 
     // Update current list of active categories.
@@ -1712,6 +1864,10 @@ OverlapResult OverlapComputer::ComputeOverlap(bool keep_empty_time) const {
 
   r.ConvertPsecToUsec();
 
+  size_t k_end = ctimes.size();
+  assert(k_end == k);
+  DBG_LOG("ctimes.size at start = {}, ctimes.size at end = {}", k, k_end);
+
   return r;
 }
 #undef IS_START_IDX
@@ -1773,6 +1929,216 @@ void OverlapResult::DumpVennJS(const std::string& directory,
         reduced_overlap);
 
   }
+}
+
+template<class OStream, typename Arg>
+OStream & WriteCSVCol(OStream& os, const std::string& delimiter, const char escape, Arg&& arg) {
+  std::stringstream ss;
+  ss << std::forward<Arg>(arg);
+  os << std::quoted(ss.str(), CSV_QUOTE_CHAR, escape);
+  return os;
+}
+
+
+template<class OStream, typename Arg>
+OStream & WriteCSVCols(OStream& os, const std::string& delimiter, const char escape, Arg&& arg) {
+  return WriteCSVCol(os, delimiter, escape, std::forward<Arg>(arg));
+}
+
+template<class OStream, typename Arg, typename ...Args>
+OStream & WriteCSVCols(OStream& os, const std::string& delimiter, const char escape, Arg&& arg, Args&&... args)
+{
+  WriteCSVCol(os, delimiter, escape, std::forward<Arg>(arg));
+  os << delimiter;
+  return WriteCSVCols(os, delimiter, escape, std::forward<Args>(args)...);
+}
+
+template<class OStream, typename Iterable>
+OStream & WriteCSVColsForIterable(OStream& os, const std::string& delimiter, const char escape, const Iterable& xs)
+{
+  size_t i = 0;
+  for (auto const& x : xs) {
+    if (i != 0) {
+      os << delimiter;
+    }
+    os << std::quoted(x, CSV_QUOTE_CHAR, escape);
+    i += 1;
+  }
+  return os;
+}
+
+template<class OStream, typename T>
+OStream & WriteCSVCols(OStream& os, const std::string& delimiter, const char escape, const std::vector<T>& xs)
+{
+  return WriteCSVColsForIterable(os, delimiter, escape, xs);
+}
+template<class OStream, typename T>
+OStream & WriteCSVCols(OStream& os, const std::string& delimiter, const char escape, const std::list<T>& xs)
+{
+  return WriteCSVColsForIterable(os, delimiter, escape, xs);
+}
+template<class OStream, typename T>
+OStream & WriteCSVCols(OStream& os, const std::string& delimiter, const char escape, const std::set<T>& xs)
+{
+  return WriteCSVColsForIterable(os, delimiter, escape, xs);
+}
+
+//template <class OStream, typename Iterable>
+//void WriteCSVRow(OStream& os, Iterable xs, const std::string& delimiter, const std::string& escape) {
+//  size_t i = 0;
+//  for (auto const& x : xs) {
+//    if (i != 0) {
+//      os << delimiter;
+//    }
+//    os << std::quoted(x, delimiter, escape);
+//  }
+//  os << std::endl;
+//}
+
+MyStatus IntervalMeta::EachInterval(const OverlapResult& this_result, EachIntervalFunc func) const {
+  auto status = MyStatus::OK();
+  for (const auto& interval : intervals) {
+    status = func(interval);
+    if (status.code() != error::OK) {
+      return status;
+    }
+  }
+  return status;
+}
+
+const std::vector<std::string>& NvprofEventMetadata::GetHeader() const {
+  return *header;
+}
+const std::vector<std::string>& NvprofEventMetadata::GetRow() const {
+  return row;
+}
+IEventMetadata* NvprofEventMetadata::clone() const {
+  auto obj = new NvprofEventMetadata(header, row);
+  return obj;
+}
+
+MyStatus OverlapResult::DumpIntervalCSV(const std::string& base_path) const {
+  boost::filesystem::path bbase_path(base_path);
+  auto csv_path = bbase_path.string() + (std::string(".Intervals") + ".csv");
+  std::ofstream out(csv_path);
+  if (!out) {
+    std::stringstream ss;
+    ss << "Failed to write to " << csv_path << ": " << strerror(errno);
+    return MyStatus(error::INVALID_ARGUMENT, ss.str());
+  }
+  size_t csv_line = 0;
+  return interval_meta.EachInterval(*this, [&] (const OverlapInterval& interval) {
+    return interval.EachEvent(*this, [&] (const CategoryKey& category_key, const EOEvent& event) {
+      // NOTE: this COULD be an operation event...
+      auto event_metadata = event.metadata();
+
+      if (csv_line == 0) {
+        // Output header
+        WriteCSVCols(out, CSV_DELIM_STR, CSV_ESCAPE_CHAR, "interval_id", "start_us", "duration_us", "num_events");
+        out << std::endl;
+      }
+
+      //
+      // Output data line
+      //
+
+      // Data: interval_id, event_name, start_us, duration_us
+      auto num_events = (interval.end_events - interval.start_events).sum();
+      // I don't think we should have any empty intervals...?
+      assert(num_events > 0);
+      WriteCSVCols(out, CSV_DELIM_STR, CSV_ESCAPE_CHAR, interval.interval_id, interval.start_us, interval.duration_us, num_events);
+      out << std::endl;
+
+      csv_line += 1;
+      return MyStatus::OK();
+    });
+  });
+}
+
+MyStatus OverlapResult::DumpCSVFiles(const std::string& base_path) const {
+  auto status = MyStatus::OK();
+  status = DumpIntervalCSV(base_path);
+  IF_BAD_STATUS_RETURN(status);
+  status = DumpIntervalEventsCSV(base_path);
+  IF_BAD_STATUS_RETURN(status);
+  return MyStatus::OK();
+}
+
+MyStatus OverlapResult::DumpIntervalEventsCSV(const std::string& base_path) const {
+  boost::filesystem::path bbase_path(base_path);
+  auto csv_path = bbase_path.string() + (std::string(".Events") + ".csv");
+  std::ofstream out(csv_path);
+  if (!out) {
+    std::stringstream ss;
+    ss << "Failed to write to " << csv_path << ": " << strerror(errno);
+    return MyStatus(error::INVALID_ARGUMENT, ss.str());
+  }
+  size_t csv_line = 0;
+  int header_size = -1;
+  return interval_meta.EachInterval(*this, [&] (const OverlapInterval& interval) {
+    return interval.EachEvent(*this, [&] (const CategoryKey& category_key, const EOEvent& event) {
+      // NOTE: this COULD be an operation event...
+      auto event_metadata = event.metadata();
+
+      if (csv_line == 0) {
+        // Output header
+
+        // Header: interval_id, event_name, start_us, duration_us
+        WriteCSVCols(out, CSV_DELIM_STR, CSV_ESCAPE_CHAR, "interval_id", "event_name", "start_us", "duration_us");
+        // Header: category
+        out << CSV_DELIM_STR;
+        WriteCSVCols(out, CSV_DELIM_STR, CSV_ESCAPE_CHAR, "category");
+        // Header: process
+        out << CSV_DELIM_STR;
+        WriteCSVCols(out, CSV_DELIM_STR, CSV_ESCAPE_CHAR, "process");
+        if (event_metadata) {
+          // Header: --nvprof_keep_column_names
+          out << CSV_DELIM_STR;
+          WriteCSVCols(out, CSV_DELIM_STR, CSV_ESCAPE_CHAR, event_metadata->GetHeader());
+          header_size = static_cast<int>(event_metadata->GetHeader().size());
+        }
+        out << std::endl;
+
+      }
+
+      //
+      // Output data line
+      //
+
+      // Data: interval_id, event_name, start_us, duration_us
+      WriteCSVCols(out, CSV_DELIM_STR, CSV_ESCAPE_CHAR, interval.interval_id, event.name(), event.start_time_us(), event.duration_us());
+
+      // Data: category
+      assert(category_key.non_ops.size() == 1);
+      auto const& category = *(category_key.non_ops.begin());
+      out << CSV_DELIM_STR;
+      WriteCSVCols(out, CSV_DELIM_STR, CSV_ESCAPE_CHAR, category);
+
+      // Data: process
+      out << CSV_DELIM_STR;
+      if (category_key.procs.size() > 0) {
+        assert(category_key.procs.size() == 1);
+        auto const& process = *(category_key.procs.begin());
+        WriteCSVCols(out, CSV_DELIM_STR, CSV_ESCAPE_CHAR, process);
+      } else {
+        WriteCSVCols(out, CSV_DELIM_STR, CSV_ESCAPE_CHAR, "");
+      }
+
+      // Data: --nvprof_keep_column_names
+      if (event_metadata) {
+        out << CSV_DELIM_STR;
+        WriteCSVCols(out, CSV_DELIM_STR, CSV_ESCAPE_CHAR, event_metadata->GetRow());
+        if (header_size != -1) {
+          assert(event_metadata->GetRow().size() == static_cast<size_t>(header_size));
+        }
+      }
+
+      out << std::endl;
+
+      csv_line += 1;
+      return MyStatus::OK();
+    });
+  });
 }
 
 void OverlapResult::Print(std::ostream& out, int indent) const {
@@ -1983,7 +2349,7 @@ MyStatus NvprofTraceFileReader::_ReadCSVMeta() {
   }
   if (_num_data_lines > 0 && _header.size() > 0) {
     if (_nvprof_file_type->HeaderMatches(_header)) {
-      _header_meta = _nvprof_file_type->ParseHeaderMeta(_header);
+      _header_meta = _nvprof_file_type->ParseHeaderMeta(args, _header);
     } else {
       std::stringstream ss;
       ss << "Not sure how to parse nvprof csv file " << _path << " with header that looks like:\n"
@@ -2028,7 +2394,16 @@ MyStatus NvprofTraceFileReader::EachEvent(const Category& category, EachEventFun
     TimeUsec last_start_us = 0;
     while (std::getline(infile, line)) {
       auto row = ParseCSVRow(line);
-      auto event_row = _nvprof_file_type->ParseRowEvent(_header_meta, row);
+      NvprofFileType::EventRow event_row;
+      auto status = _nvprof_file_type->ParseRowEvent(_header_meta, row, &event_row);
+      if (_file_type == NVPROF_GPU_TRACE_CSV_FILE && args.FLAGS_nvprof_keep_column_names.has_value()) {
+        assert(event_row.event_metadata.size() > 0);
+      }
+      if (status.code() != error::OK) {
+        std::stringstream ss;
+        ss << "Failed to parse nvprof CSV file = " << _path << ": " << status.error_message();
+        return MyStatus(status.code(), ss.str());
+      }
       auto start_us = event_row.start_us;
       auto end_us = event_row.end_us;
       if (i != 0) {
@@ -2037,8 +2412,8 @@ MyStatus NvprofTraceFileReader::EachEvent(const Category& category, EachEventFun
         // If this fails, it just means we need to sort the events before recording them.
         assert(last_start_us <= start_us);
       }
-      OptionalString name;
-      name = event_row.name;
+//      OptionalString name;
+//      name = event_row.name;
       if (end_us < start_us) {
         DBG_LOG("BUG: skip negative duration Event(name=\"{}\", start_us={}, duration_us={} us)",
                 event_row.name, start_us, end_us - start_us);
@@ -2046,7 +2421,8 @@ MyStatus NvprofTraceFileReader::EachEvent(const Category& category, EachEventFun
         // (they're effectively be ignored during overlap).
         end_us = start_us;
       }
-      func(name, start_us, end_us);
+      // func(name, start_us, end_us);
+      func(event_row);
 
       lineno += 1;
       i += 1;
@@ -2079,12 +2455,18 @@ MyStatus NvprofCSVParser::_ReadEOEvents(
   auto status = MyStatus::OK();
   auto cat_key = CategoryKey::FromCategory(meta.process, category);
   auto n_events = meta.n_events.at(category);
-  *eo_events = EOEvents::Preallocate(cat_key, n_events);
+  *eo_events = EOEvents::PreallocateEvents(cat_key, n_events,
+      /*keep_names=*/true,
+      /*keep_event_metadata=*/true);
   NvprofTraceFileReader reader(args, meta.get_path(), _file_type);
   status = reader.Init();
   IF_BAD_STATUS_RETURN(status);
-  status = reader.EachEvent(category, [eo_events] (OptionalString name, TimeUsec start_us, TimeUsec end_us) {
-    eo_events->AppendEvent(name, start_us, end_us);
+  status = reader.EachEvent(category, [this, eo_events] (const NvprofFileType::EventRow& event_row) {
+    std::unique_ptr<IEventMetadata> event_metadata;
+    if (args.FLAGS_nvprof_keep_column_names.has_value()) {
+      event_metadata = std::make_unique<NvprofEventMetadata>(_event_metadata_header, event_row.event_metadata);
+    }
+    eo_events->AppendEvent(event_row.name, event_row.start_us, event_row.end_us, std::move(event_metadata));
     return MyStatus::OK();
   });
   IF_BAD_STATUS_RETURN(status);
@@ -2166,40 +2548,83 @@ std::map<std::string, size_t> NvprofFileType::ParseColIdxMap(const std::vector<s
   return col_idx_map;
 }
 
-NvprofFileType::HeaderMeta NvprofAPITraceFileType::ParseHeaderMeta(const std::vector<std::string>& row) const {
-  HeaderMeta header_meta;
-  header_meta.col_idx_map = ParseColIdxMap(row);
+template <class Self>
+NvprofFileType::HeaderMeta CommonParseHeaderMeta(const Self* self, const RLSAnalyzeArgs& args, const std::vector<std::string>& row) {
+  NvprofFileType::HeaderMeta header_meta;
+  header_meta.col_idx_map = self->ParseColIdxMap(row);
   header_meta.start_idx = header_meta.col_idx_map.at("Start");
   header_meta.duration_idx = header_meta.col_idx_map.at("Duration");
   header_meta.name_idx = header_meta.col_idx_map.at("Name");
-  return header_meta;
-}
-NvprofFileType::HeaderMeta NvprofGPUTraceFileType::ParseHeaderMeta(const std::vector<std::string>& row) const {
-  HeaderMeta header_meta;
-  header_meta.col_idx_map = ParseColIdxMap(row);
-  header_meta.start_idx = header_meta.col_idx_map.at("Start");
-  header_meta.duration_idx = header_meta.col_idx_map.at("Duration");
-  header_meta.name_idx = header_meta.col_idx_map.at("Name");
+  if (args.FLAGS_nvprof_keep_column_names.has_value()) {
+    header_meta.event_metadata_cols = args.FLAGS_nvprof_keep_column_names.value();
+  }
   return header_meta;
 }
 
-NvprofFileType::EventRow NvprofAPITraceFileType::ParseRowEvent(const HeaderMeta& header_meta, const std::vector<std::string>& row) const {
-  double start_us_dbl = atof(row[header_meta.start_idx].c_str());
-  double duration_us_dbl = atof(row[header_meta.duration_idx].c_str());
-  const std::string& name = row[header_meta.name_idx];
-  TimeUsec start_us = static_cast<TimeUsec>(round(start_us_dbl));
-  TimeUsec end_us = static_cast<TimeUsec>(round(start_us_dbl + duration_us_dbl));
-  EventRow event_row {name, start_us, end_us};
-  return event_row;
+NvprofFileType::HeaderMeta NvprofAPITraceFileType::ParseHeaderMeta(const RLSAnalyzeArgs& args, const std::vector<std::string>& row) const {
+  return CommonParseHeaderMeta(this, args, row);
 }
-NvprofFileType::EventRow NvprofGPUTraceFileType::ParseRowEvent(const HeaderMeta& header_meta, const std::vector<std::string>& row) const {
+NvprofFileType::HeaderMeta NvprofGPUTraceFileType::ParseHeaderMeta(const RLSAnalyzeArgs& args, const std::vector<std::string>& row) const {
+  return CommonParseHeaderMeta(this, args, row);
+}
+
+template <class Self>
+MyStatus CommonParseRowEvent(
+    const Self* self, const NvprofFileType::HeaderMeta& header_meta, const std::vector<std::string>& row,
+    NvprofFileType::EventRow* event_row) {
   double start_us_dbl = atof(row[header_meta.start_idx].c_str());
   double duration_us_dbl = atof(row[header_meta.duration_idx].c_str());
   const std::string& name = row[header_meta.name_idx];
   TimeUsec start_us = static_cast<TimeUsec>(round(start_us_dbl));
   TimeUsec end_us = static_cast<TimeUsec>(round(start_us_dbl + duration_us_dbl));
-  EventRow event_row {name, start_us, end_us};
-  return event_row;
+  for (auto const& fieldname : header_meta.event_metadata_cols) {
+    auto it = header_meta.col_idx_map.find(fieldname);
+    if (it == header_meta.col_idx_map.end()) {
+      event_row->event_metadata.push_back("");
+      continue;
+    }
+//    if (it == header_meta.col_idx_map.end()) {
+//      std::stringstream ss;
+//      std::vector<std::string> choices;
+//      for (const auto& pair : header_meta.col_idx_map) {
+//        choices.push_back(pair.first);
+//      }
+//      ss << "Didn't see colname=" << fieldname << " in csv file; choices are: ";
+//      PrintValue(ss, choices);
+//      return MyStatus(error::INVALID_ARGUMENT, ss.str());
+//    }
+    auto idx = it->second;
+    event_row->event_metadata.push_back(row[idx]);
+  }
+  event_row->name = name;
+  event_row->start_us = start_us;
+  event_row->end_us = end_us;
+  return MyStatus::OK();
+}
+
+MyStatus NvprofAPITraceFileType::ParseRowEvent(
+    const HeaderMeta& header_meta, const std::vector<std::string>& row,
+    NvprofFileType::EventRow* event_row) const {
+  return CommonParseRowEvent(this, header_meta, row, event_row);
+//  double start_us_dbl = atof(row[header_meta.start_idx].c_str());
+//  double duration_us_dbl = atof(row[header_meta.duration_idx].c_str());
+//  const std::string& name = row[header_meta.name_idx];
+//  TimeUsec start_us = static_cast<TimeUsec>(round(start_us_dbl));
+//  TimeUsec end_us = static_cast<TimeUsec>(round(start_us_dbl + duration_us_dbl));
+//  EventRow event_row {name, start_us, end_us};
+//  return event_row;
+}
+MyStatus NvprofGPUTraceFileType::ParseRowEvent(
+    const HeaderMeta& header_meta, const std::vector<std::string>& row,
+    NvprofFileType::EventRow* event_row) const {
+  return CommonParseRowEvent(this, header_meta, row, event_row);
+//  double start_us_dbl = atof(row[header_meta.start_idx].c_str());
+//  double duration_us_dbl = atof(row[header_meta.duration_idx].c_str());
+//  const std::string& name = row[header_meta.name_idx];
+//  TimeUsec start_us = static_cast<TimeUsec>(round(start_us_dbl));
+//  TimeUsec end_us = static_cast<TimeUsec>(round(start_us_dbl + duration_us_dbl));
+//  EventRow event_row {name, start_us, end_us};
+//  return event_row;
 }
 
 

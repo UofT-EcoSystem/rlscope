@@ -28,6 +28,7 @@
 
 #include "cuda_api_profiler/generic_logging.h"
 #include "cuda_api_profiler/defines.h"
+#include "cuda_api_profiler/debug_flags.h"
 
 //#include "tensorflow/core/platform/notification.h"
 
@@ -62,6 +63,13 @@
 })
 
 namespace tensorflow {
+
+// https://stackoverflow.com/questions/32188956/get-current-timestamp-in-microseconds-since-epoch
+using timestamp_us = std::chrono::time_point<std::chrono::system_clock, std::chrono::microseconds>;
+static inline timestamp_us get_timestamp_us() {
+  timestamp_us ts = std::chrono::time_point_cast<std::chrono::microseconds>(std::chrono::system_clock::now());
+  return ts;
+}
 
 template <class Container>
 double Average(Container& buffer) {
@@ -240,11 +248,14 @@ class CudaStream {
 public:
   // We want to inherit shared_ptr copy/move constructor functionality, but we need new/delete
   // to create a cudaStream_t using cudaStreamCreate/cudaStreamDestroy.
+  uint64_t _stream_id;
   std::shared_ptr<CudaStreamWrapper> _stream;
 //  cudaStream_t _stream;
   CudaStream();
   cudaStream_t get() const;
   void synchronize();
+  void _set_name(const std::string& name);
+  void set_stream_id(uint64_t stream_id);
 };
 
 struct CudaContextWrapper {
@@ -345,9 +356,11 @@ public:
   }
   // TODO: this needs to be called AFTER CUDA context has been allocated...
   virtual MyStatus Init() = 0;
+  virtual MyStatus CheckArgs() = 0;
   virtual std::unique_ptr<GPUKernel> clone() const = 0;
   virtual void RunSync(CudaStream stream) = 0;
   virtual void RunAsync(CudaStream stream) = 0;
+  virtual MyStatus DumpKernelInfo(int thread_id, CudaStream stream) = 0;
 };
 
 class GPUComputeKernel : public GPUKernel {
@@ -368,9 +381,111 @@ public:
   void _gpu_compute_kernel(CudaStream stream, bool sync);
 
   virtual MyStatus Init() override;
+  virtual MyStatus CheckArgs() override;
   virtual std::unique_ptr<GPUKernel> clone() const override;
   virtual void RunSync(CudaStream stream) override;
   virtual void RunAsync(CudaStream stream) override;
+  virtual MyStatus DumpKernelInfo(int thread_id, CudaStream stream) override;
+
+};
+
+
+struct GPUThreadSchedInfo {
+  // A numeric identifier that tells us which CUDA stream this kernel was launched to.
+  // Useful for determining which CPU thread this kernel is launched from (given we know which thread uses which CUDA stream).
+  uint64_t stream_id;
+  // kernel_id = i if this is the i-th kernel launched to this stream.
+  uint64_t kernel_id;
+  // Determined by the GPU-side hardware scheduler.
+  // We can record these to determine how the GPU multiplexes kernels.
+  uint32_t sm_id;
+  uint32_t warp_id;
+  uint32_t lane_id;
+  // GPU-side nanosecond timestamp collected using the special %globaltimer register.
+  // We can use this to establish global order of GPU-side events.
+  // https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#special-registers-globaltimer
+  uint64_t globaltimer_ns;
+};
+struct GPUThreadSchedInfoVectors {
+  std::vector<decltype(GPUThreadSchedInfo::stream_id)> stream_id;
+  std::vector<decltype(GPUThreadSchedInfo::kernel_id)> kernel_id;
+  std::vector<decltype(GPUThreadSchedInfo::sm_id)> sm_id;
+  std::vector<decltype(GPUThreadSchedInfo::warp_id)> warp_id;
+  std::vector<decltype(GPUThreadSchedInfo::lane_id)> lane_id;
+  std::vector<decltype(GPUThreadSchedInfo::globaltimer_ns)> globaltimer_ns;
+
+  static GPUThreadSchedInfoVectors FromStructArray(const GPUThreadSchedInfo* sched_info, size_t n_elems) {
+    GPUThreadSchedInfoVectors self;
+    self.stream_id.reserve(n_elems);
+    self.kernel_id.reserve(n_elems);
+    self.sm_id.reserve(n_elems);
+    self.warp_id.reserve(n_elems);
+    self.lane_id.reserve(n_elems);
+    self.globaltimer_ns.reserve(n_elems);
+    for (size_t i = 0; i < n_elems; i++) {
+      self.stream_id.push_back(sched_info[i].stream_id);
+      self.kernel_id.push_back(sched_info[i].kernel_id);
+      self.sm_id.push_back(sched_info[i].sm_id);
+      self.warp_id.push_back(sched_info[i].warp_id);
+      self.lane_id.push_back(sched_info[i].lane_id);
+      self.globaltimer_ns.push_back(sched_info[i].globaltimer_ns);
+    }
+    return self;
+  }
+};
+class GPUComputeSchedInfoKernel : public GPUKernel {
+public:
+  // WARNING: If you add fields, you MUST update GPUComputeSchedInfoKernel::clone
+  cudaDeviceProp device_prop;
+  uint64_t gpu_base_timestamp_ns;
+  timestamp_us cpu_base_timestamp_us;
+  struct RunCtx {
+    GPUUtilExperimentArgs args;
+    cudaDeviceProp device_prop;
+    uint64_t kernel_id;
+    CudaHostBuffer<int64_t> output;
+    CudaHostBuffer<GPUThreadSchedInfo> sched_info;
+    RunCtx(
+        GPUUtilExperimentArgs args,
+        cudaDeviceProp device_prop,
+        size_t n_elems
+        ) :
+        args(args),
+        device_prop(device_prop),
+        kernel_id(0),
+        output(n_elems),
+        sched_info(ComputeNumTotalSchedSamples(args, device_prop)) {
+    }
+
+    static size_t ComputeNumTotalSchedSamples(
+        const GPUUtilExperimentArgs& args,
+        const cudaDeviceProp& device_prop) {
+      // DBG_BREAKPOINT("ComputeNumTotalSchedSamples");
+      size_t n_samples_per_warp = args.FLAGS_kern_arg_iterations.get() / args.FLAGS_kern_arg_iterations_per_sched_sample.get();
+      // n_total_samples = ((num_blocks * threads_per_block) / warp_size) * n_samples_per_warp * n_launches
+      size_t n_total_warps = static_cast<size_t>(ceil((args.FLAGS_kern_arg_num_blocks.get() * args.FLAGS_kern_arg_threads_per_block.get()) / static_cast<double>(device_prop.warpSize)));
+      assert(n_total_warps >= 1);
+      size_t n_total_sched_samples = n_total_warps * n_samples_per_warp * args.FLAGS_n_launches.get();
+      return n_total_sched_samples;
+    }
+
+  };
+  std::unique_ptr<RunCtx> run_ctx;
+
+  GPUComputeSchedInfoKernel(GPUUtilExperimentArgs args
+  ) : GPUKernel(args)
+      , gpu_base_timestamp_ns(0)
+  {
+  }
+
+  void _gpu_compute_kernel(CudaStream stream, bool sync);
+
+  virtual MyStatus Init() override;
+  virtual MyStatus CheckArgs() override;
+  virtual std::unique_ptr<GPUKernel> clone() const override;
+  virtual void RunSync(CudaStream stream) override;
+  virtual void RunAsync(CudaStream stream) override;
+  virtual MyStatus DumpKernelInfo(int thread_id, CudaStream stream) override;
 
 };
 
@@ -402,6 +517,8 @@ public:
   virtual std::unique_ptr<GPUKernel> clone() const override;
   virtual void RunSync(CudaStream stream) override;
   virtual void RunAsync(CudaStream stream) override;
+  virtual MyStatus CheckArgs() override;
+  virtual MyStatus DumpKernelInfo(int thread_id, CudaStream stream) override;
 
   void guess_cycles(CudaStream stream);
 
@@ -429,16 +546,21 @@ public:
   struct RunContext {
     // NOTE: We DON'T make these member variables, since we need to create it AFTER separate threads have started running
     // (the context is BOUND to the current thread once created with cuCtxCreate).
+    int _thread_id;
     std::unique_ptr<CudaContext> _context;
     std::unique_ptr<CudaStream> _stream;
 
-    RunContext(bool cuda_context, unsigned int cuda_context_flags) {
+    RunContext(int thread_id, bool cuda_context, unsigned int cuda_context_flags) :
+        _thread_id(thread_id) {
       if (cuda_context) {
         // Create a per-thread CUDA context.
         // NEED to create CUcontext before anything else (e.g., streams).
         _context.reset(new CudaContext(cuda_context_flags));
       }
       _stream.reset(new CudaStream());
+      // https://stackoverflow.com/questions/44266820/how-can-i-access-the-numeric-stream-ids-seen-in-nvprof-using-a-cudastream-t
+      // It's no clear how to obtain the 0-based stream ids reported by nvprof, so instead assign them manually.
+      _stream->set_stream_id(_thread_id);
     }
 
     void synchronize() {
@@ -455,62 +577,25 @@ public:
 
   GPUUtilExperimentArgs args;
 
-//  std::unique_ptr<CudaContext> _context;
-//  CudaStream _stream;
-//  std::unique_ptr<std::thread> _async_thread;
-//  std::unique_ptr<boost::process::child> _async_process;
-
-//  // "Number of kernels to launch per-thread."
-//  int64_t _n_launches;
-//  // "Time between kernel launches in microseconds"
-//  int64_t _kernel_delay_us;
-//  // "Duration of kernel in microseconds"
-//  int64_t _kernel_duration_us;
-//  // "How to long to run for (in seconds)"
-//  double _run_sec;
-//  // After launching a kernel, wait for it to finish.
-//  // Useful for running really long kernels (e.g., 10 sec)
-//  // without creating a giant queue of kernel launches (e.g., delay=1us)
-//  bool _sync;
-//  bool _cuda_context;
-//  bool _internal_is_child;
-//
   std::unique_ptr<GPUKernel> _gpu_kernel;
-//  std::string _directory;
-//  bool _debug;
+  int _thread_id;
 
-//  std::unique_ptr<Notification> _async_thread_done;
 
   GPUKernelRunner(
+      int thread_id,
       std::unique_ptr<GPUKernel> gpu_kernel,
       GPUUtilExperimentArgs args
-//      int64_t n_launches,
-//      int64_t kernel_delay_us,
-//      int64_t kernel_duration_us,
-//      double run_sec,
-//      bool sync,
-//      bool cuda_context,
-//      bool internal_is_child,
-//      const std::string& directory,
-//      bool debug
       ) :
-      args(args),
-//      _n_launches(n_launches),
-//      _kernel_delay_us(kernel_delay_us),
-//      _kernel_duration_us(kernel_duration_us),
-//      _run_sec(run_sec),
-//      _sync(sync),
-//      _cuda_context(cuda_context),
-//      _internal_is_child(internal_is_child),
-      _gpu_kernel(std::move(gpu_kernel))
-//      _directory(directory),
-//      _debug(debug)
+      args(args)
+      , _gpu_kernel(std::move(gpu_kernel))
+      , _thread_id(thread_id)
   {
   }
 
   void DelayUs(int64_t usec);
 
   void run();
+  void SetCurrentThreadName(const std::string& name);
 
   void run_async_thread();
   void wait_thread();

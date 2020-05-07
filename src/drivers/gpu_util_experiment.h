@@ -31,8 +31,13 @@ struct GPUUtilExperimentArgs {
   boost::optional<bool> FLAGS_sync;
   boost::optional<bool> FLAGS_cuda_context;
   boost::optional<int64_t> FLAGS_repetitions;
+  boost::optional<int32_t> FLAGS_device;
   boost::optional<bool> FLAGS_internal_is_child;
+  boost::optional<int64_t> FLAGS_internal_thread_id;
   boost::optional<int64_t> FLAGS_kern_arg_iterations;
+  boost::optional<int64_t> FLAGS_kern_arg_num_blocks;
+  boost::optional<int64_t> FLAGS_kern_arg_threads_per_block;
+  boost::optional<int64_t> FLAGS_kern_arg_iterations_per_sched_sample;
   boost::optional<std::string> FLAGS_kernel;
 
   boost::optional<std::string> FLAGS_gpu_sched_policy;
@@ -80,8 +85,13 @@ struct GPUUtilExperimentArgs {
     PRINT_FLAG(FLAGS_sync);
     PRINT_FLAG(FLAGS_cuda_context);
     PRINT_FLAG(FLAGS_repetitions);
+    PRINT_FLAG(FLAGS_device);
     PRINT_FLAG(FLAGS_internal_is_child);
+    PRINT_FLAG(FLAGS_internal_thread_id);
     PRINT_FLAG(FLAGS_kern_arg_iterations);
+    PRINT_FLAG(FLAGS_kern_arg_num_blocks);
+    PRINT_FLAG(FLAGS_kern_arg_threads_per_block);
+    PRINT_FLAG(FLAGS_kern_arg_iterations_per_sched_sample);
     PRINT_FLAG(FLAGS_kernel);
     PRINT_FLAG(FLAGS_gpu_sched_policy);
 

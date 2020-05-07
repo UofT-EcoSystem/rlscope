@@ -334,6 +334,11 @@ struct IdxMaps {
     return from_idx.at(idx);
   }
 
+  inline size_t size() const {
+    assert(from_idx.size() == to_idx.size());
+    return from_idx.size();
+  }
+
   template <std::size_t N>
   std::set<K> KeySetFrom(const std::bitset<N>& bitset) const {
     std::set<K> keys;
@@ -588,7 +593,9 @@ public:
   CategoryKeyBitset() : idx_map(nullptr) {
   }
   CategoryKeyBitset(size_t category_idx, std::shared_ptr<const CategoryIdxMap> idx_map) :
-      bitset(1 << category_idx),
+      // NOTE: refer to "WARNING regarding std::bitset" to understand why we need the static_cast<uint64_t>(1).
+      // TLDR: want to guarantee 64-bit width, and prevent unexpected (compiler silent!) signed values; bare "1" is an "int" (32-bit signed!)
+      bitset(static_cast<uint64_t>(1) << category_idx),
       idx_map(idx_map) {
     // Each CategoryKey is a unique bit in the bitset.
     // This allows us to do set operations.
@@ -669,6 +676,10 @@ public:
 
   }
 
+  unsigned long long SetID() const {
+    return bitset.to_ullong();
+  }
+
   bool operator==(const CategoryKeyBitset& rhs) const {
     auto const& lhs = *this;
     return lhs.bitset == rhs.bitset;
@@ -739,6 +750,15 @@ class EOEvents;
 
 bool CategoryShouldKeepNames(const CategoryKey& key);
 
+class IEventMetadata {
+public:
+  // Internally, we don't care how parser stores event metadata.
+  // However, we do require that we can output the metadata to a standard format (csv).
+  virtual const std::vector<std::string>& GetHeader() const = 0;
+  virtual const std::vector<std::string>& GetRow() const = 0;
+  virtual IEventMetadata* clone() const = 0;
+};
+
 class EOEvent {
 public:
   const EOEvents* _eo_events;
@@ -753,6 +773,7 @@ public:
   TimeUsec start_time_us() const;
   TimeUsec end_time_us() const;
   TimeUsec duration_us() const;
+  const IEventMetadata* metadata() const;
 };
 
 #define EVENT_START_IDX(i) (2*i)
@@ -777,6 +798,9 @@ public:
   // NOTE: It's not clear to me what a reasonable value to use here really is...
   KeyVector<EventNameID, std::string> _names;
   bool _keep_names;
+
+  bool _keep_event_metadata;
+  std::shared_ptr<std::vector<std::unique_ptr<IEventMetadata>>> _event_metadata;
 
 //  typedef A allocator_type;
   typedef EOEvent value_type;
@@ -838,6 +862,11 @@ public:
     return iterator(this, this->size());
   }
 
+  inline EOEvent Event(size_t i) const {
+    assert(i < _next_event_to_set);
+    return EOEvent(this, i);
+  }
+
 //  class const_iterator {
 //  public:
 //    typedef const_iterator self_type;
@@ -863,15 +892,21 @@ public:
     }
     EOEvents merged(
         lhs._max_events + rhs._max_events,
-        lhs._keep_names);
+        lhs._keep_names,
+        lhs._keep_event_metadata);
 
     bool keep_names = merged.KeepNames();
-    auto append_event = [&merged, keep_names] (const EOEvents& eo_events, size_t* i) {
+    bool keep_event_metadata = merged.KeepEventMetadata();
+    auto append_event = [&merged, keep_names, keep_event_metadata] (const EOEvents& eo_events, size_t* i) {
       OptionalString name;
       if (keep_names) {
         name = eo_events.GetEventName(*i);
       }
-      merged.AppendEvent(name, eo_events.StartUsec(*i), eo_events.EndUsec(*i));
+      std::unique_ptr<IEventMetadata> event_metadata;
+      if (keep_event_metadata) {
+        event_metadata.reset(event_metadata->clone());
+      }
+      merged.AppendEvent(name, eo_events.StartUsec(*i), eo_events.EndUsec(*i), std::move(event_metadata));
       *i += 1;
     };
 
@@ -894,7 +929,8 @@ public:
     return merged;
   }
 
-  static EOEvents Preallocate(const CategoryKey& category_key, size_t n_events);
+  static EOEvents Preallocate(const CategoryKey& category_key, size_t n_events, bool keep_event_metadata = false);
+  static EOEvents PreallocateEvents(const CategoryKey& category_key, size_t n_events, bool keep_names, bool keep_event_metadata);
 
   EOEvents() :
       _max_events(0),
@@ -902,10 +938,11 @@ public:
       _events(new std::vector<TimeUsec>()),
       _min_start_ps(0),
       _max_end_ps(0),
-      _keep_names(false)
+      _keep_names(false),
+      _keep_event_metadata(false)
   {
   }
-  EOEvents(size_t n_events, bool keep_names) :
+  EOEvents(size_t n_events, bool keep_names, bool keep_event_metadata) :
       _max_events(n_events)
       , _next_event_to_set(0)
       // 2*n_events: For each event, we need the (start, end) time.
@@ -914,10 +951,15 @@ public:
       , _min_start_ps(0)
       , _max_end_ps(0)
       , _keep_names(keep_names)
+      , _keep_event_metadata(keep_event_metadata)
+      , _event_metadata(new std::vector<std::unique_ptr<IEventMetadata>>())
   {
     _events->reserve(2*n_events);
     if (_keep_names) {
       _names.reserve(n_events);
+    }
+    if (_keep_event_metadata) {
+      (*_event_metadata).reserve(n_events);
     }
   }
 
@@ -925,8 +967,21 @@ public:
     return _keep_names;
   }
 
+  inline bool KeepEventMetadata() const {
+    return _keep_event_metadata;
+  }
+
   inline const std::set<std::string>& UniqueNames() const {
     return _names.Keys();
+  }
+
+  inline const IEventMetadata* GetEventMetadata(size_t i) const {
+    assert(i < _next_event_to_set);
+    // assert(_keep_event_metadata);
+    if (!_keep_event_metadata) {
+      return nullptr;
+    }
+    return (*_event_metadata)[i].get();
   }
 
   // Return read-only raw pointer to array of times.
@@ -944,11 +999,11 @@ public:
   void PrintSummary(std::ostream& out, int indent) const;
   void CheckIntegrity(std::ostream& out, int indent) const;
 
-  inline void SetEvent(OptionalString name, size_t i, TimeUsec start_us, TimeUsec end_us) {
-    SetEventPsec(name, i, start_us*PSEC_IN_USEC, end_us*PSEC_IN_USEC);
+  inline void SetEvent(OptionalString name, size_t i, TimeUsec start_us, TimeUsec end_us, std::unique_ptr<IEventMetadata> event_metadata = nullptr) {
+    SetEventPsec(name, i, start_us*PSEC_IN_USEC, end_us*PSEC_IN_USEC, std::move(event_metadata));
   }
 
-  inline void SetEventPsec(OptionalString name, size_t i, TimePsec start_ps, TimePsec end_ps) {
+  inline void SetEventPsec(OptionalString name, size_t i, TimePsec start_ps, TimePsec end_ps, std::unique_ptr<IEventMetadata> event_metadata = nullptr) {
 
 //    if (start_ps == 1571629741190258000 && end_ps == 1571629774546157000) {
 //      DBG_BREAKPOINT("A");
@@ -965,6 +1020,10 @@ public:
     if (_keep_names) {
       assert(name.has_value());
       _names.push_back(name.value());
+    }
+    if (_keep_event_metadata) {
+      // assert(event_metadata != nullptr);
+      (*_event_metadata).push_back(std::move(event_metadata));
     }
     if (_next_event_to_set == 0 || start_ps < _min_start_ps) {
       _min_start_ps = start_ps;
@@ -1042,12 +1101,12 @@ public:
     return _names.HasID(name);
   }
 
-  inline void AppendEvent(OptionalString name, TimeUsec start_us, TimeUsec end_us) {
-    SetEvent(name, _next_event_to_set, start_us, end_us);
+  inline void AppendEvent(OptionalString name, TimeUsec start_us, TimeUsec end_us, std::unique_ptr<IEventMetadata> event_metadata = nullptr) {
+    SetEvent(name, _next_event_to_set, start_us, end_us, std::move(event_metadata));
   }
 
-  inline void AppendEventPsec(OptionalString name, TimePsec start_ps, TimePsec end_ps) {
-    SetEventPsec(name, _next_event_to_set, start_ps, end_ps);
+  inline void AppendEventPsec(OptionalString name, TimePsec start_ps, TimePsec end_ps, std::unique_ptr<IEventMetadata> event_metadata = nullptr) {
+    SetEventPsec(name, _next_event_to_set, start_ps, end_ps, std::move(event_metadata));
   }
 
   inline size_t size() const {
@@ -1322,8 +1381,10 @@ public:
     for (auto const& pair : category_times.eo_times) {
       auto idx = idx_map->Idx(pair.first);
       CategoryKeyBitset category(idx, idx_map);
+      assert(eo_times.find(category) == eo_times.end());
       eo_times[category] = pair.second;
     }
+    assert(category_times.size() == this->size());
   }
   CategoryTimesBitset() = default;
   inline size_t size() const {
@@ -2264,15 +2325,20 @@ enum NvprofFileTypeCode {
 class NvprofFileType {
 public:
   struct EventRow {
-    const std::string& name;
+    std::string name;
     TimeUsec start_us;
     TimeUsec end_us;
+    std::vector<std::string> event_metadata;
+    EventRow() : start_us(0), end_us(0) {
+    }
   };
   struct HeaderMeta {
     size_t start_idx;
     size_t duration_idx;
     size_t name_idx;
     std::map<std::string, size_t> col_idx_map;
+    // --nvprof_keep_column_names
+    std::vector<std::string> event_metadata_cols;
   };
   std::vector<std::string> header;
   NvprofFileTypeCode file_type;
@@ -2299,9 +2365,9 @@ public:
   // Only additional events we need to create that don't match this category is the
   // "fake" operation event (CATEGORY_OPERATION).
   virtual std::string RowCategory() const = 0;
-  virtual EventRow ParseRowEvent(const HeaderMeta& header_meta, const std::vector<std::string>& row) const = 0;
+  virtual MyStatus ParseRowEvent(const HeaderMeta& header_meta, const std::vector<std::string>& row, NvprofFileType::EventRow* event_row) const = 0;
   bool HeaderMatches(const std::vector<std::string>& row) const;
-  virtual HeaderMeta ParseHeaderMeta(const std::vector<std::string>& row) const = 0;
+  virtual HeaderMeta ParseHeaderMeta(const RLSAnalyzeArgs& args, const std::vector<std::string>& row) const = 0;
   std::map<std::string, size_t> ParseColIdxMap(const std::vector<std::string>& row) const;
 
   CategoryKey RowCategoryKey(const Process& proc) const {
@@ -2321,8 +2387,8 @@ public:
     return CATEGORY_CUDA_API_CPU;
   }
 
-  virtual HeaderMeta ParseHeaderMeta(const std::vector<std::string>& row) const override;
-  virtual EventRow ParseRowEvent(const HeaderMeta& header_meta, const std::vector<std::string>& row) const override;
+  virtual HeaderMeta ParseHeaderMeta(const RLSAnalyzeArgs& args, const std::vector<std::string>& row) const override;
+  virtual MyStatus ParseRowEvent(const HeaderMeta& header_meta, const std::vector<std::string>& row, NvprofFileType::EventRow* event_row) const override;
 };
 class NvprofGPUTraceFileType : public NvprofFileType {
 public:
@@ -2359,8 +2425,8 @@ public:
     return CATEGORY_CUDA_API_CPU;
   }
 
-  virtual HeaderMeta ParseHeaderMeta(const std::vector<std::string>& row) const override;
-  virtual EventRow ParseRowEvent(const HeaderMeta& header_meta, const std::vector<std::string>& row) const override;
+  virtual HeaderMeta ParseHeaderMeta(const RLSAnalyzeArgs& args, const std::vector<std::string>& row) const override;
+  virtual MyStatus ParseRowEvent(const HeaderMeta& header_meta, const std::vector<std::string>& row, NvprofFileType::EventRow* event_row) const override;
 };
 static const std::vector<const NvprofFileType*> NVPROF_FILE_TYPES = {
     new NvprofAPITraceFileType(),
@@ -2395,10 +2461,26 @@ static MyStatus GetNvprofFileType(
 //  return MyStatus(error::INVALID_ARGUMENT, ss.str());
   return MyStatus::OK();
 }
+class NvprofEventMetadata : public IEventMetadata {
+public:
+  // const std::vector<std::string>& header;
+  std::shared_ptr<std::vector<std::string>> header;
+  std::vector<std::string> row;
+  NvprofEventMetadata(
+      std::shared_ptr<std::vector<std::string>> header,
+  std::vector<std::string> row) : header(header), row(row) {
+  }
+  // Internally, we don't care how parser stores event metadata.
+  // However, we do require that we can output the metadata to a standard format (csv).
+  virtual const std::vector<std::string>& GetHeader() const override;
+  virtual const std::vector<std::string>& GetRow() const override;
+  virtual IEventMetadata* clone() const override;
+};
 class NvprofCSVParser : public IEventFileParser {
 public:
   RLSAnalyzeArgs args;
   RLSFileType _file_type;
+  std::shared_ptr<std::vector<std::string>> _event_metadata_header;
 
   virtual ~NvprofCSVParser() = default;
 
@@ -2407,6 +2489,11 @@ public:
       , args(args)
       , _file_type(file_type)
   {
+    if (args.FLAGS_nvprof_keep_column_names.has_value()) {
+      _event_metadata_header.reset(new std::vector<std::string>());
+      *_event_metadata_header = args.FLAGS_nvprof_keep_column_names.value();
+    }
+
   }
 
   virtual bool IsFile(const std::string& path) const {
@@ -2617,7 +2704,7 @@ MyStatus GetRLSEventParser(const RLSAnalyzeArgs& args, const std::string& path, 
 MyStatus GetRLSEventParserFromType(const RLSAnalyzeArgs& args, RLSFileType file_type, TraceParserMeta parser_meta, std::unique_ptr<IEventFileParser>* parser, const EntireTraceSelector& selector);
 MyStatus GetTraceFileReader(const RLSAnalyzeArgs& args, const std::string& path, std::unique_ptr<ITraceFileReader>* reader);
 
-using EachEventFunc = std::function<MyStatus(OptionalString name, TimeUsec start_us, TimeUsec end_us)>;
+using EachEventFunc = std::function<MyStatus(NvprofFileType::EventRow event_row)>;
 
 template <typename EventProto>
 class EventFlattener {
@@ -3576,6 +3663,7 @@ struct OverlapMetadata {
     regions.at(category_key).AddEvent(start_us, end_us);
   }
 };
+struct OverlapResult;
 struct OverlapMetadataReducer {
   std::map<CategoryKey, RegionMetadataReducer> regions;
 
@@ -3627,11 +3715,123 @@ struct OverlapMetadataReducer {
   }
 
 };
+
+template <typename OStream>
+void PrintVector(OStream& os, const Eigen::Array<size_t, Eigen::Dynamic, 1>& value) {
+  os << "[";
+  size_t i = 0;
+  for (auto const& val : value) {
+    if (i > 0) {
+      os << ", ";
+    }
+    PrintValue(os, val);
+    i += 1;
+  }
+  os << "]";
+}
+
+struct OverlapInterval {
+  using IdxArray = Eigen::Array<size_t, Eigen::Dynamic, 1>;
+  size_t interval_id;
+  // CategoryIdx => EOEvent index
+  // inclusive.
+  IdxArray start_events;
+  // exclusive (o/w we cannot represent empty categories)
+  IdxArray end_events;
+  TimeUsec start_us;
+  TimeUsec duration_us;
+
+  OverlapInterval (
+      size_t interval_id,
+      IdxArray start_events,
+      IdxArray end_events,
+      TimeUsec start_us,
+      TimeUsec duration_us) :
+      interval_id(interval_id)
+      , start_events(start_events)
+      , end_events(end_events)
+      , start_us(start_us)
+      , duration_us(duration_us)
+  {
+  }
+  // TODO: EachEvent(...)
+
+  void ConvertPsecToUsec() {
+    start_us = start_us / PSEC_IN_USEC;
+    duration_us = duration_us / PSEC_IN_USEC;
+  }
+
+  using EachEventFunc = std::function<MyStatus (const CategoryKey& category, const EOEvent& event)>;
+  MyStatus EachEvent(const OverlapResult& result, EachEventFunc func) const;
+
+  template <typename OStream>
+  void Print(OStream& out, int indent) const {
+    PrintIndent(out, indent);
+    auto size = (end_events - start_events).sum();
+    out << "OverlapInterval[" << interval_id << "] size = " << size;
+
+    out << "\n";
+    PrintIndent(out, indent + 1);
+    out << "start_events=";
+//    PrintValue(out, this->start_events);
+    PrintVector(out, this->start_events);
+
+    out << "\n";
+    PrintIndent(out, indent + 1);
+    out << "end_events=";
+//    PrintValue(out, this->end_events);
+    PrintVector(out, this->end_events);
+
+    out << "\n";
+    PrintIndent(out, indent + 1);
+    out << "start_us=";
+    PrintValue(out, this->start_us);
+
+    out << "\n";
+    PrintIndent(out, indent + 1);
+    out << "duration_us=";
+    PrintValue(out, this->duration_us);
+  }
+
+
+  template <typename OStream>
+  friend OStream &operator<<(OStream &os, const OverlapInterval &obj)
+  {
+    obj.Print(os, 0);
+    return os;
+  }
+
+};
+struct IntervalMeta {
+  const OverlapResult& result;
+  std::vector<OverlapInterval> intervals;
+  IntervalMeta(const OverlapResult& result) :
+      result(result) {
+  }
+
+  void ConvertPsecToUsec() {
+    for (auto& interval : intervals) {
+      interval.ConvertPsecToUsec();
+    }
+  }
+
+  using IndexType = int;
+
+  using EachIntervalFunc = std::function<MyStatus (const OverlapInterval& interval)>;
+  MyStatus EachInterval(const OverlapResult& result, EachIntervalFunc func) const;
+
+};
 struct OverlapResult {
   Overlap overlap;
   OverlapMetadata meta;
   std::shared_ptr<CategoryIdxMap> idx_map;
+  const CategoryTimes& ctimes;
+  IntervalMeta interval_meta;
 
+  OverlapResult(const CategoryTimes& ctimes) :
+      ctimes(ctimes),
+      interval_meta(*this) {
+  }
 
   void ConvertPsecToUsec() {
     for (auto& pair : overlap) {
@@ -3639,6 +3839,7 @@ struct OverlapResult {
       pair.second = pair.second / PSEC_IN_USEC;
     }
     meta.ConvertPsecToUsec();
+    interval_meta.ConvertPsecToUsec();
   }
 
   inline const RegionMetadata& GetMeta(const CategoryKeyBitset& bitset) const {
@@ -3654,6 +3855,10 @@ struct OverlapResult {
       const Phase& phase) const;
 
   void Print(std::ostream& out, int indent) const;
+
+  MyStatus DumpCSVFiles(const std::string& base_path) const;
+  MyStatus DumpIntervalEventsCSV(const std::string& base_path) const;
+  MyStatus DumpIntervalCSV(const std::string& base_path) const;
 
   DECLARE_PRINT_DEBUG
   DECLARE_PRINT_OPERATOR(OverlapResult)
@@ -3952,8 +4157,11 @@ public:
       category_times(category_times_),
       ctimes(category_times)
   {
+    assert(ctimes.size() == category_times.size());
   }
-  OverlapResult ComputeOverlap(bool keep_empty_time = false) const;
+  OverlapResult ComputeOverlap(
+      bool keep_empty_time = false,
+      bool keep_intervals = false) const;
 };
 
 #define DECLARE_DumpOverlapJS \
@@ -5075,6 +5283,8 @@ inline nlohmann::json ValueAsJson(const OverlapResult& value) {
 
   return js;
 }
+
+std::vector<std::string> StringSplit(const std::string& s, std::string rgx_str = "\\s+");
 
 } // namespace tensorflow
 

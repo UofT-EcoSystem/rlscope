@@ -34,6 +34,16 @@ set(ENABLE_BACKTRACE ON CACHE BOOL "Enable pretty-printed stacktrace during LOG(
 
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
+# Not until cmake 3.17
+#if (NOT IS_WINDOWS)
+#    find_package(CUDAToolkit REQUIRED)
+#endif()
+set(CUDA_PATH /usr/local/cuda)
+if (NOT EXISTS ${CUDA_PATH} AND IS_DIRECTORY ${CUDA_PATH})
+    message(FATAL_ERROR
+            "You must set CUDA_PATH to the root of your CUDA installation (didn't find it at ${CUDA_PATH})")
+endif()
+
 #set(WITH_CUDA_LD_PRELOAD ON CACHE BOOL "Wrap CUDA API calls using LD_PRELOAD trick; do this to see whether wrapping CUDA API calls manually is faster than using libcupti.")
 ##set(WITH_CUDA_LD_PRELOAD OFF CACHE BOOL "Wrap CUDA API calls using LD_PRELOAD trick; do this to see whether wrapping CUDA API calls manually is faster than using libcupti.")
 
@@ -428,6 +438,14 @@ function(AddUnitTest TARGET)
 
     target_include_directories(${TARGET} PRIVATE ${GTEST_INCLUDE_DIR})
     target_link_libraries(${TARGET} PRIVATE ${GTEST_LIBRARY})
+endfunction()
+
+function(AddCUPTIDependencies TARGET)
+    find_package(Libcupti REQUIRED)
+    target_link_libraries(${TARGET} PUBLIC ${Libcupti_LIBRARY})
+    # https://stackoverflow.com/questions/26243169/cmake-target-include-directories-meaning-of-scope
+    # NOTE: I still don't fully understand the PUBLIC/PRIVATE/INTERFACE scope here...
+    target_include_directories(${TARGET} PRIVATE ${Libcupti_INCLUDE_DIR})
 endfunction()
 
 function(AddTensorflowDependencies TARGET INCLUDE_CUDA)
@@ -873,6 +891,10 @@ if (WITH_CXX_EXPERIMENTS)
     message("> GPU_UTIL_EXPERIMENT_SRCS = ${GPU_UTIL_EXPERIMENT_SRCS}")
     add_executable(gpu_util_experiment ${GPU_UTIL_EXPERIMENT_SRCS})
     AddTensorflowDependencies(gpu_util_experiment FALSE)
+    AddCUPTIDependencies(gpu_util_experiment)
+    # target_link_libraries(${TARGET} PRIVATE ${CUDA::nvToolsExt})
+    find_library(LIBNVTOOLSEXT libnvToolsExt.so PATHS ${CUDA_PATH}/lib64)
+    target_link_libraries(gpu_util_experiment PRIVATE ${LIBNVTOOLSEXT})
 
     find_library(GFLAGS_LIB gflags REQUIRED)
     target_link_libraries(gpu_util_experiment PUBLIC ${GFLAGS_LIB})
