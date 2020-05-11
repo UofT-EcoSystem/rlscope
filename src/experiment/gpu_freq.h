@@ -438,6 +438,7 @@ public:
   // WARNING: If you add fields, you MUST update GPUComputeSchedInfoKernel::clone
   cudaDeviceProp device_prop;
   uint64_t gpu_base_timestamp_ns;
+  uint64_t device_base_timestamp_ns;
   timestamp_us cpu_base_timestamp_us;
   struct RunCtx {
     GPUUtilExperimentArgs args;
@@ -475,6 +476,7 @@ public:
   GPUComputeSchedInfoKernel(GPUUtilExperimentArgs args
   ) : GPUKernel(args)
       , gpu_base_timestamp_ns(0)
+      , device_base_timestamp_ns(0)
   {
   }
 

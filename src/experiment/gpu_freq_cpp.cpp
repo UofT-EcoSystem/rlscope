@@ -56,6 +56,12 @@ static pid_t my_gettid() {
     }                                                               \
   } while (0)
 
+#define IF_BAD_STATUS_EXIT(msg, status)  \
+      if (status.code() != MyStatus::OK().code()) { \
+        std::cout << "ERROR: " << msg << ": " << status.ToString() << std::endl; \
+        exit(EXIT_FAILURE); \
+      }
+
 namespace tensorflow {
 
 using clock_value_t = long long;
@@ -92,6 +98,10 @@ MyStatus GPUComputeKernel::DumpKernelInfo(int thread_id, CudaStream stream) {
 
 MyStatus GPUComputeSchedInfoKernel::Init() {
   CUPTI_CALL(cuptiGetTimestamp(&gpu_base_timestamp_ns));
+
+  CUcontext context;
+  CHECK_CUDA_DRIVER(cuCtxGetCurrent(&context));
+  CUPTI_CALL(cuptiDeviceGetTimestamp(context, &device_base_timestamp_ns));
   cpu_base_timestamp_us = get_timestamp_us();
 
   cudaError_t cuda_err;
@@ -109,6 +119,7 @@ std::unique_ptr<GPUKernel> GPUComputeSchedInfoKernel::clone() const {
   if (this->run_ctx) {
     obj->device_prop = device_prop;
     obj->gpu_base_timestamp_ns = gpu_base_timestamp_ns;
+    obj->device_base_timestamp_ns = device_base_timestamp_ns;
     obj->cpu_base_timestamp_us = cpu_base_timestamp_us;
     obj->run_ctx.reset(new RunCtx(
         args,
@@ -142,6 +153,7 @@ MyStatus GPUComputeSchedInfoKernel::DumpKernelInfo(int thread_id, CudaStream str
   params_js["device"] = args.FLAGS_device.get();
   params_js["cpu_base_timestamp_us"] = cpu_base_timestamp_us.time_since_epoch().count();
   params_js["gpu_base_timestamp_ns"] = gpu_base_timestamp_ns;
+  params_js["device_base_timestamp_ns"] = device_base_timestamp_ns;
 
   js["params"] = params_js;
   js["sm_id"] = args.FLAGS_kern_arg_threads_per_block.get();
@@ -202,7 +214,7 @@ MyStatus GetGPUKernel(GPUUtilExperimentArgs args, std::unique_ptr<GPUKernel>* gp
     return MyStatus(error::INVALID_ARGUMENT, ss.str());
 
   }
-  return (*gpu_kernel)->Init();
+  return MyStatus::OK();
 }
 
 void GPUClockFreq::guess_cycles(CudaStream stream) {
@@ -510,6 +522,11 @@ void GPUKernelRunner::run() {
       _thread_id,
       args.FLAGS_cuda_context.get(),
       args.FLAGS_cuda_context_flags.get()));
+
+  // NOTE: some GPU kernels need to initialize AFTER CUDA context has been created.
+  MyStatus status = MyStatus::OK();
+  status = _gpu_kernel->Init();
+  IF_BAD_STATUS_EXIT("Failed to initialize kernel", status);
 
   if (args.FLAGS_internal_is_child.get()) {
     // Barrier synchronization to wait for ALL threads to finish creating CUDA context.
