@@ -550,8 +550,24 @@ void GPUKernelRunner::run() {
 
   TimeHistogram hist("cudaLaunchKernel");
 
+  // bool nvtx_is_pushed = false;
+
   int64_t launches = 0;
+//   nvtxRangePush("run_kernels");
+// //  const int NVTX_PUSH_EVERY = 2;
+//   const int NVTX_PUSH_EVERY = 1;
   while (true) {
+    // if (launches % NVTX_PUSH_EVERY == 0)  {
+    //   if (nvtx_is_pushed) {
+    //     // run_kernel_every
+    //     DBG_LOG("nvtxRangePop() @ launches = {}", launches);
+    //     nvtxRangePop();
+    //   }
+    //   DBG_LOG("nvtxRangePush(\"{}\") @ launches = {}", "run_kernel_every", launches);
+    //   nvtxRangePush("run_kernel_every");
+    //   nvtx_is_pushed = true;
+    // }
+
     time_type now_t = time_now();
     auto time_sec = elapsed_sec(start_t, now_t);
     if (
@@ -578,6 +594,7 @@ void GPUKernelRunner::run() {
     // - wait for just the launched kernel to finish using cudaEvent => multi-threaded friendly
     // - Q: Do we want to launch another kernel BEFORE the last one finishes...?
     //   ... if waiting for it to finish takes a long time (> 5 us)... then yes?
+    // nvtxRangePush("run_kernel_each");
     if (args.FLAGS_sync.get()) {
       _gpu_kernel->RunSync(*_run_ctx->_stream);
 //      _freq.gpu_sleep_us_sync(*_run_ctx->_stream, args.FLAGS_kernel_duration_us.get());
@@ -585,6 +602,8 @@ void GPUKernelRunner::run() {
       _gpu_kernel->RunAsync(*_run_ctx->_stream);
 //      _freq.gpu_sleep_us(*_run_ctx->_stream, args.FLAGS_kernel_duration_us.get());
     }
+    // run_kernel
+    // nvtxRangePop();
 
     launches += 1;
     auto after_sleep_t = time_now();
@@ -614,6 +633,15 @@ void GPUKernelRunner::run() {
       kernel_runs.push_back(std::move(kernel_run));
     }
   }
+  //
+  // if (nvtx_is_pushed) {
+  //   // run_kernel_every
+  //   DBG_LOG("nvtxRangePop() @ launches = {}", launches);
+  //   nvtxRangePop();
+  // }
+  //
+  // // run_kernels
+  // nvtxRangePop();
 
   _run_ctx->synchronize();
   if (args.FLAGS_internal_is_child.get()) {

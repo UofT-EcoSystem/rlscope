@@ -167,6 +167,7 @@ slice_sets:
           - iml/pip_dependencies
           - iml/user_custom
           - shell
+          - ubuntu/bazelisk
           - ubuntu/entrypoint
           test_runtime: nvidia
           args:
@@ -216,6 +217,7 @@ slice_sets:
           - shell
           - iml/user_custom
           - ubuntu/cublas-workaround-cuda-10-1
+          - ubuntu/bazelisk
           - ubuntu/entrypoint
         test_runtime: nvidia
         args:

@@ -199,6 +199,11 @@ _check_MLPERF_DIR() {
     _check_env_var MLPERF_DIR "$description"
 }
 
+_check_MINIGO_DIR() {
+    local description="The root directory of a checkout of the minigo repo (https://github.com/tensorflow/minigo)"
+    _check_env_var MINIGO_DIR "$description"
+}
+
 _check_STABLE_BASELINES_DIR() {
     local description="The root directory of a checkout of the stable-baselines repo (https://github.com/hill-a/stable-baselines)"
     _check_env_var STABLE_BASELINES_DIR "$description"
