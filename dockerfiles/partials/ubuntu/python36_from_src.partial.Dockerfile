@@ -5,7 +5,7 @@
 ARG PYTHON_VERSION=3.6.8
 
 WORKDIR /root/tar_files
-RUN wget https://www.python.org/ftp/python/${PYTHON_VERSION}/Python-${PYTHON_VERSION}.tar.xz
+RUN wget --quiet https://www.python.org/ftp/python/${PYTHON_VERSION}/Python-${PYTHON_VERSION}.tar.xz
 WORKDIR /root/python3.6
 RUN tar -xf /root/tar_files/Python-${PYTHON_VERSION}.tar.xz
 WORKDIR /root/python3.6/Python-${PYTHON_VERSION}

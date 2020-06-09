@@ -89,3 +89,44 @@ _process_minigo() {
 
 )
 }
+
+_maybe_add_path() {
+    local direc="$1"
+    shift 1
+
+    if [ -d "$direc" ]; then
+        echo "> INFO: Add to PATH: $direc"
+        export PATH="$direc:$PATH"
+    else
+        echo "> WARNING: SKIP adding non-existent directory to PATH: $direc"
+        echo "  Perhaps you forgot to run setup:"
+        echo "  $ bash setup.sh"
+    fi
+}
+
+# NOTE: this will modify your PATH to include IML
+# dependencies that were built from source (e.g. protobuf v3).
+# Fails in container...not sure why.
+ROOT="$(readlink -f "$(dirname "$0")")"
+_local_dir=$ROOT/local.$(hostname)
+#_local_dir=$ROOT/install
+#if [ -e $ROOT/venv ]; then
+#  source $ROOT/venv/bin/activate
+#else
+#  echo "ERROR: didn't find python3 virtualenv at $ROOT/venv; try running setup.sh first:"
+#  echo "  $ cd $ROOT"
+#  echo "  $ bash setup.sh"
+#fi
+
+#PROTOBUF_INSTALL_DIR="$(ls -d $ROOT/third_party/protobuf-*/build.$(hostname)/bin)"
+#_maybe_add_path "$PROTOBUF_INSTALL_DIR"
+_maybe_add_path "$_local_dir/bin"
+# Keep gdb-symbols for debugging.
+# For some reason, cmake "install()" isn't finding compiled third_party libraries.
+#_maybe_add_path "$ROOT/local/Debug/bin"
+#_maybe_add_path "$ROOT/Debug.$(hostname)"
+#unset PROTOBUF_INSTALL_DIR
+
+unset _maybe_add_path
+unset ROOT
+unset _local_dir

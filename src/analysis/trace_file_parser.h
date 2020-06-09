@@ -19,7 +19,10 @@
 #include <assert.h>
 
 #include <spdlog/spdlog.h>
-#include <spdlog/fmt/ostr.h>
+//#include <sys/types.h>
+// Must be included in order operator<< to work with spd logging.
+// https://github.com/gabime/spdlog#user-defined-types
+#include "spdlog/fmt/ostr.h"
 #include <boost/filesystem.hpp>
 #include <boost/tokenizer.hpp>
 

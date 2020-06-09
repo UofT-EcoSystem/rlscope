@@ -1,0 +1,1 @@
+MakeCudaLibraryFromDir(LIBNAME SOURCE_FILES)

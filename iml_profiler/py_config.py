@@ -1,7 +1,11 @@
 from os.path import join as _j, abspath as _a, exists as _e, dirname as _d, basename as _b
 from os import environ as ENV
 import numpy as np
-import numba as nb
+
+USE_NUMBA = False
+nb = None
+if USE_NUMBA:
+  import numba as nb
 
 ROOT = _d(_d(_a(__file__)))
 
@@ -182,6 +186,12 @@ IML_USE_NUMBA = EnvVars.get_bool('IML_USE_NUMBA', dflt=False)
 IML_DEBUG_UNIT_TESTS = EnvVars.get_bool('IML_DEBUG_UNIT_TESTS', dflt=False)
 IML_DEBUG_UNIQUE_SPLITS_BASE = EnvVars.get_string('IML_DEBUG_UNIQUE_SPLITS_BASE', dflt=None)
 
+HOST_INSTALL_PREFIX = _j(ROOT, "local.host")
+DOCKER_INSTALL_PREFIX = _j(ROOT, "local.docker")
+
+HOST_BUILD_PREFIX = _j(ROOT, "build.host")
+DOCKER_BUILD_PREFIX = _j(ROOT, "build.docker")
+
 # NOTE: Don't touch this, it gets set manually by unit-tests.
 IS_UNIT_TEST = False
 
@@ -197,11 +207,12 @@ IS_UNIT_TEST = False
 # I haven't bothered too hard to try to fix them... hopefully an int64 is big enough for our purposes...
 # should probably add a check for that!
 
-NUMPY_TIME_USEC_TYPE = np.int64
-NUMBA_TIME_USEC_TYPE = nb.int64
+if USE_NUMBA:
+  NUMPY_TIME_USEC_TYPE = np.int64
+  NUMBA_TIME_USEC_TYPE = nb.int64
 
-NUMPY_TIME_PSEC_TYPE = np.int64
-NUMBA_TIME_PSEC_TYPE = nb.int64
+  NUMPY_TIME_PSEC_TYPE = np.int64
+  NUMBA_TIME_PSEC_TYPE = nb.int64
 
-NUMPY_CATEGORY_KEY_TYPE = np.int64
-NUMBA_CATEGORY_KEY_TYPE = nb.int64
+  NUMPY_CATEGORY_KEY_TYPE = np.int64
+  NUMBA_CATEGORY_KEY_TYPE = nb.int64

@@ -1,29 +1,64 @@
-ARG CUDA=10.0
+ARG CUDA=10.1
 #FROM nvidia/cuda:10.0-base-ubuntu${UBUNTU_VERSION} as base
 FROM nvidia/cuda:${CUDA}-base-ubuntu${UBUNTU_VERSION} as base
 # ARCH and CUDA are specified again because the FROM directive resets ARGs
 # (but their default value is retained if set previously)
 ARG CUDA
-ARG CUDNN=7.4.1.5-1
+#ARG CUDNN=7.4.1.5-1
 #ARG CUDNN=7.6.0.64-1
-ARG CUDNN_MAJOR_VERSION=7
+#ARG CUDNN_MAJOR_VERSION=7
+
 
 # Needed for string substitution
 SHELL ["/bin/bash", "-c"]
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        build-essential \
-        cuda-command-line-tools-${CUDA/./-} \
-        cuda-cublas-dev-${CUDA/./-} \
+
+RUN apt-get update
+
+# >= CUDA 10.0
+# https://forums.developer.nvidia.com/t/cublas-for-10-1-is-missing/71015
+ARG CUBLAS_VERSION=10.1.0.105-1
+RUN apt-get install -y --no-install-recommends \
+    libcublas10=${CUBLAS_VERSION} \
+    libcublas-dev=${CUBLAS_VERSION}
+
+##<= CUDA 10.0
+#RUN apt-get install -y --no-install-recommends \
+#    cuda-cublas-dev-${CUDA/./-}
+
+RUN apt-get install -y --no-install-recommends \
+        build-essential
+
+RUN apt-get install -y --no-install-recommends \
+        cuda-command-line-tools-${CUDA/./-}
+
+RUN apt-get install -y --no-install-recommends \
         cuda-cufft-dev-${CUDA/./-} \
         cuda-curand-dev-${CUDA/./-} \
         cuda-cusolver-dev-${CUDA/./-} \
-        cuda-cusparse-dev-${CUDA/./-} \
-        libcudnn7=${CUDNN}+cuda${CUDA} \
-        libcudnn7-dev=${CUDNN}+cuda${CUDA} \
+        cuda-cusparse-dev-${CUDA/./-}
+
+# Install cuDNN library.
+#
+# To install a different cuDNN version, list available versions using:
+# $ apt list libcudnn7 --all-versions
+ARG CUDNN=7.6.5.32-1
+ARG CUDNN_MAJOR_VERSION=7
+RUN apt-get install -y \
+    libcudnn7=${CUDNN}+cuda${CUDA} \
+    libcudnn7-dev=${CUDNN}+cuda${CUDA}
+
+## CUDA 10.0
+#RUN apt-get install -y --no-install-recommends \
+#        libpng12-dev
+
+# CUDA 10.1
+RUN apt-get install -y --no-install-recommends \
+        libpng-dev
+
+RUN apt-get install -y --no-install-recommends \
         libcurl3-dev \
         libfreetype6-dev \
         libhdf5-serial-dev \
-        libpng12-dev \
         libzmq3-dev \
         pkg-config \
         rsync \
@@ -32,17 +67,27 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         zip \
         zlib1g-dev \
         wget \
-        git \
-        && \
-    find /usr/local/cuda-10.0/lib64/ -type f -name 'lib*_static.a' -not -name 'libcudart_static.a' -delete && \
-    rm /usr/lib/x86_64-linux-gnu/libcudnn_static_v7.a
+        git
 
-RUN { apt-get update && \
-        apt-get install nvinfer-runtime-trt-repo-ubuntu1604-5.0.2-ga-cuda${CUDA} \
-        && apt-get update \
-        && apt-get install -y --no-install-recommends \
-            libnvinfer5=5.0.2-1+cuda${CUDA} \
-            libnvinfer-dev=5.0.2-1+cuda${CUDA} \
+## CUDA 10.0
+#RUN find /usr/local/cuda-10.0/lib64/ -type f -name 'lib*_static.a' -not -name 'libcudart_static.a' -delete && \
+#    rm /usr/lib/x86_64-linux-gnu/libcudnn_static_v7.a
+
+## <= CUDA 10.0
+#RUN { apt-get update && \
+#        apt-get install nvinfer-runtime-trt-repo-ubuntu1604-5.0.2-ga-cuda${CUDA} \
+#        && apt-get update \
+#        && apt-get install -y --no-install-recommends \
+#            libnvinfer5=5.0.2-1+cuda${CUDA} \
+#            libnvinfer-dev=5.0.2-1+cuda${CUDA} \
+#        && apt-get clean \
+#        && rm -rf /var/lib/apt/lists/*; }
+
+ARG LIBNVINFER_VERSION=5.1.5-1+cuda${CUDA}
+RUN { \
+        apt-get install -y --no-install-recommends \
+            libnvinfer5=${LIBNVINFER_VERSION} \
+            libnvinfer-dev=${LIBNVINFER_VERSION} \
         && apt-get clean \
         && rm -rf /var/lib/apt/lists/*; }
 

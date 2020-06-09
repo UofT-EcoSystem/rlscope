@@ -8,7 +8,7 @@
 ARG PROTOBUF_VERSION=3.9.1
 
 WORKDIR /root/tar_files
-RUN wget https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOBUF_VERSION}/protobuf-all-${PROTOBUF_VERSION}.tar.gz
+RUN wget --quiet https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOBUF_VERSION}/protobuf-all-${PROTOBUF_VERSION}.tar.gz
 WORKDIR /root/protobuf
 RUN tar -xf /root/tar_files/protobuf-all-${PROTOBUF_VERSION}.tar.gz
 WORKDIR /root/protobuf/protobuf-${PROTOBUF_VERSION}

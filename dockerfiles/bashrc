@@ -106,7 +106,28 @@ _as_iml_user() {
 
     if [ -d "$IML_DIR" ]; then
         export PATH="$IML_DIR/dockerfiles/sh:$PATH"
+        export PATH="/usr/local/cuda/bin:$PATH"
+        export HISTFILE=$IML_DIR/.bash_history
+
+        # Make bash append to the history file after every command invocation.
+        #
+        # https://askubuntu.com/questions/67283/is-it-possible-to-make-writing-to-bash-history-immediate
+        # append to history, don't overwrite it
+        shopt -s histappend
+        export PROMPT_COMMAND="history -a; history -c; history -r; $PROMPT_COMMAND"
+
     fi
+
+    # Make ctrl-w in bash delete up to a separator-character, instead of space-character
+    # This behaves like ctrl-w in zsh.
+    #
+    # https://superuser.com/questions/212446/binding-backward-kill-word-to-ctrlw
+    stty werase undef
+    bind '"\C-w": backward-kill-word'
+
+    # Make ctrl-u in bash "undo" the last change (typically word deletion using ctrl-w)
+    stty kill undef
+    bind '"\C-u": undo'
 
     # Shows when running the container as-is.
     iml-banner

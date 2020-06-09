@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+package iml;
+
+message GPUHwCounterSampleProto {
+    ConfigDataProto config_data = 1;
+    repeated CounterDataProto counter_data = 2;
+    string chip_name = 3;
+    repeated string metrics = 4;
+    int64 num_passes = 5;
+}
+
+message CounterDataProto {
+    int64 start_time_us = 1;
+    int64 duration_us = 2;
+    bytes data = 3;
+}
+
+message ConfigDataProto {
+    bytes data = 1;
+}

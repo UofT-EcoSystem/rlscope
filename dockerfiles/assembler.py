@@ -58,14 +58,7 @@ from pathlib import Path
 
 from iml_profiler import py_config
 
-def get_username():
-    return pwd.getpwuid(os.getuid())[0]
-
-def get_user_id():
-    return os.getuid()
-
-def get_group_id():
-    return os.getgid()
+TENSORFLOW_VERSION = "1.15.0"
 
 HOME = str(Path.home())
 DEFAULT_POSTGRES_PORT = 5432
@@ -557,6 +550,9 @@ def get_docker_run_env(tag_def, env_list):
     env['IML_USER'] = get_username()
     env['IML_USER_ID'] = get_user_id()
     env['IML_GROUP_ID'] = get_group_id()
+    env['TENSORFLOW_VERSION'] = TENSORFLOW_VERSION
+    env['IML_INSTALL_PREFIX'] = py_config.DOCKER_INSTALL_PREFIX
+    env['IML_BUILD_PREFIX'] = py_config.DOCKER_BUILD_PREFIX
 
     return env
 
@@ -606,6 +602,11 @@ def main():
                         instead of building locally.
                         
                         See --pull-image for specifying the image to pull.
+                        """))
+
+    parser.add_argument('--stop', action='store_true',
+                        help=textwrap.dedent("""
+                        Stop docker-compose containers (opposite of --deploy).
                         """))
 
     parser.add_argument('--reload', action='store_true',
@@ -936,6 +937,7 @@ class Assembler:
             cap_add=['SYS_PTRACE'],
             security_opt=['seccomp=unconfined'],
             runtime=runtime,
+            name="iml",
         )
         if tag_def['test_runtime'] == 'rocm':
             def device_opt(path):
@@ -1061,6 +1063,33 @@ class Assembler:
                 break
             time.sleep(0.1)
 
+    def docker_stop(self, extra_argv):
+        # Terminate/remove an existing deployment if it exists first.
+        self.docker_stack_rm()
+
+        # cmd = ['docker', 'stack', 'deploy']
+        # cmd.extend(extra_argv)
+        # cmd.extend([
+        #     '--compose-file', 'stack.yml',
+        #     # Name of the created stack.
+        #     'iml',
+        # ])
+        # container_filter = "iml_bash"
+
+        cmd = ['docker-compose']
+        cmd.extend([
+            '--file', 'stack.yml',
+        ])
+        cmd.extend([
+            'stop',
+        ])
+        cmd.extend(extra_argv)
+        container_filter = "iml"
+
+        eprint(get_cmd_string(cmd))
+        subprocess.check_call(cmd, stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr)
+
+
     def docker_deploy(self, extra_argv, reload):
         """
         $ docker stack deploy {extra_args} --compose-file stack.yml iml
@@ -1091,13 +1120,15 @@ class Assembler:
             'up',
             # Run containers in background (similar to docker stack deploy)
             '--detach',
+            # When container_name changes, deleted old container_name.
+            '--remove-orphans'
             # Name of the created stack.
             # 'iml',
         ])
         if reload:
             cmd.append('--force-recreate')
         cmd.extend(extra_argv)
-        container_filter = "dockerfiles_bash"
+        container_filter = "iml"
 
         eprint(get_cmd_string(cmd))
         subprocess.check_call(cmd, stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr)
@@ -1331,12 +1362,16 @@ class Assembler:
 
                         # ROCM_EXTRA_PARAMS="--device=/dev/kfd --device=/dev/dri --group-add video"
 
-                        if args.run:
+                        if args.run and not args.stop:
                             self.docker_run(image, tag_def, extra_argv)
 
-                        if args.deploy:
+                        if args.deploy and not args.stop:
                             self.generate_stack_yml(tag_def)
                             self.docker_deploy(extra_argv, reload=args.reload)
+
+                        if args.stop:
+                            self.generate_stack_yml(tag_def)
+                            self.docker_stop(extra_argv)
 
                         # if args.run_tests_path:
                         #     tag_failed = self.run_tests(image, repo_tag, tag, tag_def)
@@ -1359,7 +1394,8 @@ class Assembler:
 
                     # Clean temporary dockerfiles if they were created earlier
                     if not args.keep_temp_dockerfiles:
-                        os.remove(dockerfile)
+                        if _e(dockerfile):
+                            os.remove(dockerfile)
 
                 # # Upload new images to DockerHub as long as they built + passed tests
                 # if args.upload_to_hub:
@@ -1457,7 +1493,8 @@ def get_implicit_build_args():
     #     "GROUP_ID": get_user_id(),
     #     "USER_NAME": get_username(),
     # }
-    build_args = {}
+    build_args = dict()
+    build_args['TENSORFLOW_VERSION'] = TENSORFLOW_VERSION
     for k in build_args.keys():
         # Otherwise, when we do dock_cli.build we get:
         #     docker.errors.APIError: 400 Client Error: Bad Request ("error reading build args: json: cannot unmarshal number into Go value of type string")
@@ -1617,6 +1654,7 @@ def get_docker_cmdline(docker_command='run', extra_argv=[], **kwargs):
         cmd.append(value)
 
     add_opt('runtime')
+    add_opt('name')
 
     add_opt_from('workdir', 'working_dir')
 
@@ -1693,6 +1731,7 @@ class StackYMLGenerator:
         :param cmd
             assembler.py command.
         """
+        # restart: always
         self.template = textwrap.dedent("""\
         # DO NOT MODIFY!
         # Automatically generated using assembler.py with the following command/working-directory:
@@ -1712,27 +1751,27 @@ class StackYMLGenerator:
             #   $ psql -h db
             # - To connect to postgres from host (OUTSIDE container):
             #   $ psql -h localhost
-            db:
-                image: postgres
-                restart: always
-                environment:
-                    # Use the current user as postgres user (default when using psql).
-                    # `psql` at the command-line defaults to this user, as do API's 
-                    # for making postgres connections.
-                    - POSTGRES_USER={USER}
-                ports:
-                    - {postgres_port}:{DEFAULT_POSTGRES_PORT}
-                volumes:
-                    # Persist processed trace-logs between deployments on the host inside {postgres_pgdata_dir}.
-                    #
-                    # NOTE: {postgres_pgdata_dir} will have different permissions than the host user; 
-                    # We don't bother to fix this since: 
-                    # (1) Fixes are host OS dependent [See "Arbitrary --user Notes" @ https://hub.docker.com/_/postgres]
-                    #     and hence sacrifice reproducibility
-                    # (2) Database access isn't sacrificed since it's still all done through 
-                    #     "psql -h localhost".
-                    #
-                    - {postgres_pgdata_dir}:/var/lib/postgresql/data
+            # db:
+            #     container_name: iml_postgres
+            #     image: postgres
+            #     environment:
+            #         # Use the current user as postgres user (default when using psql).
+            #         # `psql` at the command-line defaults to this user, as do API's 
+            #         # for making postgres connections.
+            #         - POSTGRES_USER={USER}
+            #     ports:
+            #         - {postgres_port}:{DEFAULT_POSTGRES_PORT}
+            #     volumes:
+            #         # Persist processed trace-logs between deployments on the host inside {postgres_pgdata_dir}.
+            #         #
+            #         # NOTE: {postgres_pgdata_dir} will have different permissions than the host user; 
+            #         # We don't bother to fix this since: 
+            #         # (1) Fixes are host OS dependent [See "Arbitrary --user Notes" @ https://hub.docker.com/_/postgres]
+            #         #     and hence sacrifice reproducibility
+            #         # (2) Database access isn't sacrificed since it's still all done through 
+            #         #     "psql -h localhost".
+            #         #
+            #         - {postgres_pgdata_dir}:/var/lib/postgresql/data
 
             # "Bash" development environment.
             #
@@ -1745,11 +1784,11 @@ class StackYMLGenerator:
                 #     built separately via "docker build ..."
                 #
                 # build: ./dockerfiles/devel-iml-gpu-cuda.Dockerfile
+                container_name: iml
                 image: {iml_image}
                 
-                depends_on:
-                    - db
-                restart: always
+                # depends_on:
+                #     - db
                 
                 # Fails, not supported yet: instead for now just manually edit /etc/docker/daemon.json
                 # as described below:
@@ -1878,6 +1917,15 @@ def get_cmd_string(cmd):
 
 def ind(string, indent=1):
     textwrap.indent(string, prefix='  '*indent)
+
+def get_username():
+    return pwd.getpwuid(os.getuid())[0]
+
+def get_user_id():
+    return os.getuid()
+
+def get_group_id():
+    return os.getgid()
 
 if __name__ == '__main__':
     main()

@@ -12,10 +12,28 @@
 
 # Need cmake >= 3.8 so that we can do:
 #   set(LANGUAGES CXX CUDA)
-set(CMAKE_LEGACY_CYGWIN_WIN32 0)
-cmake_minimum_required(VERSION 3.8 FATAL_ERROR)
+#set(CMAKE_LEGACY_CYGWIN_WIN32 0)
+#cmake_minimum_required(VERSION 3.8 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.15 FATAL_ERROR)
 project(iml)
 #https://github.com/robertmaynard/code-samples/blob/master/posts/cmake/CMakeLists.txt
+
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
+#message("> CMAKE_MODULE_PATH = ${CMAKE_MODULE_PATH}")
+
+include(LibFindMacros)
+# Dependencies
+#libfind_package(CUDAProfilingAPI CUDA)
+#find_package(CUDA)
+#libfind_pkg_check_modules(CUDAProfilingAPI_PKGCONF CUDAProfilingAPI)
+
+# Use pkg-config to get hints about paths
+#libfind_pkg_check_modules(CUDAProfilingAPI_PKGCONF CUDAProfilingAPI)
+
+find_package(CUDAProfilingAPI REQUIRED)
+#include_directories(${CUDAProfilingAPI_INCLUDE_DIR})
+# Gets included by libraries that require it (e.g., profilerhost_util)
+#link_libraries(${CUDAProfilingAPI_LIBRARY})
 
 CMAKE_HOST_SYSTEM_INFORMATION(RESULT HOSTNAME QUERY HOSTNAME)
 set(MY_BUILD_DIR "build.${HOSTNAME}")
@@ -23,9 +41,30 @@ set(MY_INSTALL_DIR "${MY_BUILD_DIR}/cmake_install")
 #message("HOSTNAME = ${HOSTNAME}")
 #return()
 
+if(DEFINED ENV{IML_INSTALL_PREFIX})
+    message("> Building for docker:")
+    set(IML_INSTALL_PREFIX $ENV{IML_INSTALL_PREFIX})
+else()
+    message("> Building for host")
+    set(IML_INSTALL_PREFIX "${CMAKE_SOURCE_DIR}/local.host")
+endif()
+message("  IML_INSTALL_PREFIX=${IML_INSTALL_PREFIX}")
+
+link_directories(${IML_INSTALL_PREFIX}/lib)
+include_directories(${IML_INSTALL_PREFIX}/include)
+
+# https://stackoverflow.com/questions/32469953/why-is-cmake-designed-so-that-it-removes-runtime-path-when-installing
+#list(APPEND CMAKE_INSTALL_RPATH ${BOOST_LIBRARYDIR})
+# NOTE: This isn't enough to keep BOOST_LIBRARYDIR in RUNPATH for some reason.
+# See CMAKE_INSTALL_RPATH related line below.
+# This line does however cause CUDA/CUPTI directories to be kept oddly (which presumably we want...).
+set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
+
 # We want to be able to do std::move() for lambda captures (c++11 doesn't have that).
 #set(CMAKE_CXX_STANDARD 14)
+set(LANGUAGES CXX CUDA)
 set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CUDA_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
@@ -63,20 +102,58 @@ set(WITH_CUDA_LD_PRELOAD OFF)
 # Implement reading raw trace-files into eo_times format using C++.
 set(WITH_CXX_ANALYSIS ON)
 #message("> WITH_CUDA_LD_PRELOAD = ${WITH_CUDA_LD_PRELOAD}")
-set(WITH_CXX_EXPERIMENTS ON)
+#set(WITH_CXX_EXPERIMENTS ON)
 
 #FIND_PACKAGE(CUDA)
 
 set(ENABLE_DQN_CPP OFF)
 
-set(BOOST_VERSION 1.70.0)
-set(BOOST_VERSION_UNDERSCORES 1_70_0)
+set(BOOST_VERSION 1.73.0)
+set(BOOST_VERSION_UNDERSCORES 1_73_0)
 
 #set(PROTOBUF_VERSION 3.6.1)
 set(PROTOBUF_VERSION 3.9.1)
 
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
-#message("> CMAKE_MODULE_PATH = ${CMAKE_MODULE_PATH}")
+#        gflags
+#        backward-cpp
+#        protobuf-${PROTOBUF_VERSION}
+#        boost_${BOOST_VERSION_UNDERSCORES}
+#        spdlog
+#        json
+set(THIRD_PARTY_LIB_DIRNAMES
+        json
+        abseil-cpp
+        nsync
+        backward-cpp
+        eigen
+        protobuf-${PROTOBUF_VERSION}
+        # libpqxx
+        boost_${BOOST_VERSION_UNDERSCORES}
+        spdlog
+        CTPL
+        googletest
+        )
+
+macro(CheckSetupScriptRan VAR ERR_MSG)
+    set(${VAR} TRUE)
+    foreach(THIRD_PARTY_LIB_DIRNAME IN LISTS THIRD_PARTY_LIB_DIRNAMES)
+        set(THIRD_PARTY_LIB_PATH ${PROJECT_SOURCE_DIR}/third_party/${THIRD_PARTY_LIB_DIRNAME})
+        if (NOT EXISTS ${THIRD_PARTY_LIB_PATH})
+            set(${ERR_MSG} "couldn't find third_party library at ${THIRD_PARTY_LIB_PATH}")
+            set(${VAR} FALSE)
+            break()
+        endif()
+    endforeach()
+endmacro()
+
+CheckSetupScriptRan(HAS_SETUP_RAN ERR_MSG)
+if (NOT HAS_SETUP_RAN)
+    message(FATAL_ERROR
+            "ERROR: ${ERR_MSG}\n"
+            "You need to run setup.sh first:\n"
+            "  $ cd ${PROJECT_SOURCE_DIR}\n"
+            "  $ bash ./setup.sh")
+endif()
 
 if(MINGW OR CYGWIN OR WIN32 OR MSVC OR CLION)
 #    message(FATAL_ERROR "WHY")
@@ -102,7 +179,6 @@ endif()
 #    include_directories(SYSTEM /usr/local/cuda/extras/CUPTI/include)
 #endif()
 
-set(LANGUAGES CXX CUDA)
 #if(IS_WINDOWS)
 #    set(LANGUAGES CXX)
 #else()
@@ -114,41 +190,11 @@ set(LANGUAGES CXX CUDA)
 #endif()
 project(iml LANGUAGES ${LANGUAGES})
 
-#NOT EXISTS ${PROJECT_SOURCE_DIR}/external_libs/lib
-if (NOT IS_WINDOWS AND NOT (
-        EXISTS ${PROJECT_SOURCE_DIR}/third_party/json
-        AND EXISTS ${PROJECT_SOURCE_DIR}/third_party/abseil-cpp
-        AND EXISTS ${PROJECT_SOURCE_DIR}/third_party/nsync
-        AND EXISTS ${PROJECT_SOURCE_DIR}/third_party/backward-cpp
-        AND EXISTS ${PROJECT_SOURCE_DIR}/third_party/eigen
-        AND EXISTS ${PROJECT_SOURCE_DIR}/third_party/protobuf-${PROTOBUF_VERSION}
-#        AND EXISTS ${PROJECT_SOURCE_DIR}/third_party/libpqxx
-        AND EXISTS ${PROJECT_SOURCE_DIR}/third_party/boost_${BOOST_VERSION_UNDERSCORES}/build
-        AND EXISTS ${PROJECT_SOURCE_DIR}/third_party/spdlog
-        AND EXISTS ${PROJECT_SOURCE_DIR}/third_party/CTPL
-        AND EXISTS ${PROJECT_SOURCE_DIR}/third_party/googletest
-        ) )
-    message(FATAL_ERROR
-            "You need to run setup.sh first:\n"
-            "  $ cd ${PROJECT_SOURCE_DIR}\n"
-            "  $ bash ./setup.sh")
-endif()
-
 #if (NOT IS_WINDOWS)
-#    set(BOOST_INCLUDEDIR ${CMAKE_SOURCE_DIR}/third_party/boost_${BOOST_VERSION_UNDERSCORES}/${MY_BUILD_DIR}/include)
-##    target_include_directories(${TARGET} PRIVATE ${BOOST_INCLUDEDIR})
-#    include_directories(PRIVATE ${BOOST_INCLUDEDIR})
-#    set(BOOST_LIBRARYDIR ${CMAKE_SOURCE_DIR}/third_party/boost_${BOOST_VERSION_UNDERSCORES}/${MY_BUILD_DIR}/lib)
-#    #    target_link_directories(${TARGET} PRIVATE ${BOOST_LIBRARYDIR})
-#    link_directories(PRIVATE ${BOOST_LIBRARYDIR})
+##    add_subdirectory(third_party/googletest)
+#    find_package(GTest REQUIRED)
+#    include_directories(${GTEST_INCLUDE_DIRS})
 #endif()
-
-if (NOT IS_WINDOWS)
-#    add_subdirectory(third_party/googletest)
-    find_package(GTest REQUIRED
-            HINTS third_party/googletest/${MY_INSTALL_DIR})
-    include_directories(${GTEST_INCLUDE_DIRS})
-endif()
 
 # https://github.com/abseil/abseil-cpp/blob/master/CMake/README.md
 set(ABSL_RUN_TESTS OFF)
@@ -160,8 +206,7 @@ add_subdirectory(third_party/backward-cpp)
 
 #add_subdirectory(third_party/eigen)
 #target_include_directories(sample_cuda_api third_party/eigen)
-find_package(Eigen3 REQUIRED
-        HINTS third_party/eigen/${MY_INSTALL_DIR})
+find_package(Eigen3 REQUIRED)
 
 set(NSYNC_ENABLE_TESTS OFF)
 #set(BUILD_SHARED_LIBS ON)
@@ -189,6 +234,8 @@ SET(CMAKE_EXE_LINKER_FLAGS  "${CMAKE_EXE_LINKER_FLAGS} -demangle")
 include_directories(
         ./
         ./src
+        ./src/libs/include
+        ./src/libs
         ./external_libs/include
 )
 
@@ -251,7 +298,13 @@ set(TEST_ANALYSIS_SRC_DIRS
         )
 
 set(SRC_DIRS
-        ./src
+        # ./src
+        ./src/analysis
+        ./src/common
+        ./src/cuda_api_profiler
+        ./src/drivers
+        ./src/experiment
+
         # NOTE: don't include drivers.
         # ./src/drivers
         ./src/tf
@@ -421,23 +474,11 @@ function(AddFlags TARGET PROPERTY NEW_FLAGS)
 endfunction()
 
 function(AddUnitTest TARGET)
-
-    # NOTE: this doesn't find gtest...
-#    enable_testing()
-#    find_package(GTest REQUIRED
-#            HINTS third_party/googletest/${MY_INSTALL_DIR}
-#            )
-    set(GTEST_INCLUDE_DIR ${PROJECT_SOURCE_DIR}/third_party/googletest/${MY_INSTALL_DIR}/include)
-    set(GTEST_LIBDIR ${PROJECT_SOURCE_DIR}/third_party/googletest/${MY_INSTALL_DIR}/lib)
-    set(GTEST_LIBRARY
-            # ${GTEST_LIBDIR}/libgtest_main.a
-            ${GTEST_LIBDIR}/libgtest.a)
-
-    message("> GTEST_INCLUDE_DIR = ${GTEST_INCLUDE_DIR}")
-    message("> GTEST_LIBRARY = ${GTEST_LIBRARY}")
-
-    target_include_directories(${TARGET} PRIVATE ${GTEST_INCLUDE_DIR})
-    target_link_libraries(${TARGET} PRIVATE ${GTEST_LIBRARY})
+    find_package(GTest REQUIRED)
+    # message("> GTEST_LIBRARIES = ${GTEST_LIBRARIES}")
+    # message("> GTEST_INCLUDE_DIRS = ${GTEST_INCLUDE_DIRS}")
+    target_include_directories(${TARGET} PRIVATE ${GTEST_INCLUDE_DIRS})
+    target_link_libraries(${TARGET} PRIVATE ${GTEST_LIBRARIES})
 endfunction()
 
 function(AddCUPTIDependencies TARGET)
@@ -475,7 +516,8 @@ function(AddTensorflowDependencies TARGET INCLUDE_CUDA)
 
         get_target_property(CUR_FLAG ${TARGET} COMPILE_DEFINITIONS)
         message("> BEFORE CUR_FLAG = ${CUR_FLAG}")
-        set_target_properties(${TARGET} PROPERTIES COMPILE_DEFINITIONS "${CUR_FLAG};SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_DEBUG;SPDLOG_TRACE=ON")
+#        SPDLOG_TRACE=ON
+        set_target_properties(${TARGET} PROPERTIES COMPILE_DEFINITIONS "${CUR_FLAG};SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_DEBUG")
         get_target_property(CUR_FLAG ${TARGET} COMPILE_DEFINITIONS)
         message("> AFTER CUR_FLAG = ${CUR_FLAG}")
     ELSE()
@@ -504,8 +546,7 @@ function(AddTensorflowDependencies TARGET INCLUDE_CUDA)
 
     target_link_libraries(${TARGET} PRIVATE nsync_includes)
 
-    find_package(spdlog REQUIRED
-            HINTS third_party/spdlog/${MY_INSTALL_DIR})
+    find_package(spdlog REQUIRED)
     target_link_libraries(${TARGET} PRIVATE spdlog::spdlog)
 
     target_link_libraries(${TARGET} PRIVATE nsync_cpp)
@@ -877,28 +918,28 @@ if (WITH_CXX_ANALYSIS)
     target_link_libraries(cpp_dump_proto PUBLIC ${GFLAGS_LIB})
 endif()
 
-if (WITH_CXX_EXPERIMENTS)
-    set(GPU_UTIL_EXPERIMENT_SRCS
-            ./src/drivers/gpu_util_experiment.cc
-            ${EXPERIMENT_SOURCES}
-            ${COMMON_SOURCES}
-            ${ANALYSIS_SOURCES}
-#            ${TF_SOURCES}
-            ${BACKWARD_ENABLE}
-            ${PROTO_SRCS} ${PROTO_HDRS})
-    list(FILTER GPU_UTIL_EXPERIMENT_SRCS EXCLUDE REGEX "/c_test_util.cc")
-
-    message("> GPU_UTIL_EXPERIMENT_SRCS = ${GPU_UTIL_EXPERIMENT_SRCS}")
-    add_executable(gpu_util_experiment ${GPU_UTIL_EXPERIMENT_SRCS})
-    AddTensorflowDependencies(gpu_util_experiment FALSE)
-    AddCUPTIDependencies(gpu_util_experiment)
-    # target_link_libraries(${TARGET} PRIVATE ${CUDA::nvToolsExt})
-    find_library(LIBNVTOOLSEXT libnvToolsExt.so PATHS ${CUDA_PATH}/lib64)
-    target_link_libraries(gpu_util_experiment PRIVATE ${LIBNVTOOLSEXT})
-
-    find_library(GFLAGS_LIB gflags REQUIRED)
-    target_link_libraries(gpu_util_experiment PUBLIC ${GFLAGS_LIB})
-endif()
+#if (WITH_CXX_EXPERIMENTS)
+#    set(GPU_UTIL_EXPERIMENT_SRCS
+#            ./src/drivers/gpu_util_experiment.cc
+#            ${EXPERIMENT_SOURCES}
+#            ${COMMON_SOURCES}
+#            ${ANALYSIS_SOURCES}
+##            ${TF_SOURCES}
+#            ${BACKWARD_ENABLE}
+#            ${PROTO_SRCS} ${PROTO_HDRS})
+#    list(FILTER GPU_UTIL_EXPERIMENT_SRCS EXCLUDE REGEX "/c_test_util.cc")
+#
+#    message("> GPU_UTIL_EXPERIMENT_SRCS = ${GPU_UTIL_EXPERIMENT_SRCS}")
+#    add_executable(gpu_util_experiment ${GPU_UTIL_EXPERIMENT_SRCS})
+#    AddTensorflowDependencies(gpu_util_experiment FALSE)
+#    AddCUPTIDependencies(gpu_util_experiment)
+#    # target_link_libraries(${TARGET} PRIVATE ${CUDA::nvToolsExt})
+#    find_library(LIBNVTOOLSEXT libnvToolsExt.so PATHS ${CUDA_PATH}/lib64)
+#    target_link_libraries(gpu_util_experiment PRIVATE ${LIBNVTOOLSEXT})
+#
+#    find_library(GFLAGS_LIB gflags REQUIRED)
+#    target_link_libraries(gpu_util_experiment PUBLIC ${GFLAGS_LIB})
+#endif()
 
 
 #./test/py_interface/py_interface_src.cpp
@@ -929,7 +970,8 @@ if (ENABLE_DQN_CPP)
         message("> TENSORFLOW_LIB HINT = ${PROJECT_SOURCE_DIR}/external_libs/lib")
         find_library(TENSORFLOW_LIB tensorflow
                 REQUIRED
-                HINTS "${PROJECT_SOURCE_DIR}/external_libs/lib")
+                HINTS "${PROJECT_SOURCE_DIR}/external_libs/lib"
+                )
         message("> TENSORFLOW_LIB = ${TENSORFLOW_LIB}")
         foreach(executable ${EXEC_NAMES})
             target_link_libraries(${executable} ${TENSORFLOW_LIB})
@@ -953,19 +995,19 @@ endif()
 #    target_link_libraries(tests ${GTEST_LIB})
 #endif()
 
-if (ENABLE_DQN_CPP)
-    if(NOT IS_WINDOWS)
-        message("CMAKE_MODULE_PATH = ${CMAKE_MODULE_PATH}")
-        find_package(GTest REQUIRED)
-        # find_package(gtest REQUIRED)
-        include_directories(${GTEST_INCLUDE_DIRS})
-        target_link_libraries(tests ${GTEST_LIBRARY})
-        foreach(executable ${EXEC_NAMES})
-#            target_link_libraries(${executable} pthread)
-            target_link_libraries(${executable} nlohmann_json::nlohmann_json)
-        endforeach()
-    endif()
-endif()
+#if (ENABLE_DQN_CPP)
+#    if(NOT IS_WINDOWS)
+#        message("CMAKE_MODULE_PATH = ${CMAKE_MODULE_PATH}")
+#        find_package(GTest REQUIRED)
+#        # find_package(gtest REQUIRED)
+#        include_directories(${GTEST_INCLUDE_DIRS})
+#        target_link_libraries(tests ${GTEST_LIBRARY})
+#        foreach(executable ${EXEC_NAMES})
+##            target_link_libraries(${executable} pthread)
+#            target_link_libraries(${executable} nlohmann_json::nlohmann_json)
+#        endforeach()
+#    endif()
+#endif()
 
 #if (ENABLE_DQN_CPP)
 #    foreach(trg ${ALL_TARGETS})
@@ -974,8 +1016,8 @@ endif()
 #endif()
 
 # Link to CUDA driver API.
-target_link_libraries(gpu_util_experiment PRIVATE cuda)
-set_property(TARGET gpu_util_experiment PROPERTY CUDA_STANDARD 11)
+#target_link_libraries(gpu_util_experiment PRIVATE cuda)
+#set_property(TARGET gpu_util_experiment PROPERTY CUDA_STANDARD 11)
 
 configure_file(normalized_car_features.csv ${CMAKE_CURRENT_BINARY_DIR}/normalized_car_features.csv COPYONLY)
 if(MSVC)
@@ -985,10 +1027,18 @@ endif(MSVC)
 set(COMPILE_FLAGS_HIDDEN_VISIBILITY "-fvisibility=hidden")
 AddFlags(sample_cuda_api COMPILE_FLAGS ${COMPILE_FLAGS_HIDDEN_VISIBILITY})
 
-set(ALL_TARGETS cpp_dump_proto test_analysis gpu_util_experiment)
+set(ALL_TARGETS
+        cpp_dump_proto
+        test_analysis
+        )
+#if (WITH_CXX_EXPERIMENTS)
+#    list(APPEND ALL_TARGETS gpu_util_experiment)
+#endif()
 install(TARGETS ${ALL_TARGETS}
         CONFIGURATIONS Debug
-        RUNTIME DESTINATION Debug/bin)
+        RUNTIME DESTINATION bin)
 install(TARGETS ${ALL_TARGETS}
         CONFIGURATIONS Release
-        RUNTIME DESTINATION Release/bin)
+        RUNTIME DESTINATION bin)
+
+include(libs.cmake)

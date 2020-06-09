@@ -165,7 +165,7 @@ github_url() {
 
 CMAKE_VERSION=3.15.1
 setup_cmake() {
-    if [ "$FORCE" != 'yes' ] && [ -e "$(local_dir)"/cmake ]; then
+    if [ "$FORCE" != 'yes' ] && [ -e "$(local_dir)"/bin/cmake ]; then
         return
     fi
     local url=https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/cmake-${CMAKE_VERSION}-Linux-x86_64.sh
@@ -199,9 +199,16 @@ setup_abseil_cpp_library() {
         $commit
 }
 
+# Return true if we see at least one file in the glob pattern.
+glob_any() {
+  local glob="$1"
+  shift 1
+  test -n "$(eval ls $glob 2>/dev/null || true)"
+}
+
 GTEST_CPP_LIB_DIR="$ROOT/third_party/googletest"
 setup_gtest_cpp_library() {
-    if [ "$FORCE" != 'yes' ] && [ -e "$(cmake_install_prefix "$GTEST_CPP_LIB_DIR")" ]; then
+    if [ "$FORCE" != 'yes' ] && glob_any "$(third_party_install_prefix "$GTEST_CPP_LIB_DIR")/lib/libgtest*"; then
         return
     fi
     local commit="release-1.8.1"
@@ -211,23 +218,41 @@ setup_gtest_cpp_library() {
     cmake_build "$GTEST_CPP_LIB_DIR"
 }
 
-#cmake_install_prefix() {
-#    echo "$PWD/cmake_install.$(hostname)"
-#}
-cmake_install_prefix() {
-    local root="$1"
+third_party_install_prefix() {
+    local third_party_dir="$1"
     shift 1
-    echo "$(cmake_build_dir "$root")/cmake_install"
+
+    # Local install directory within cmake build directory:
+    # echo "$(cmake_build_dir "$third_party_dir")/cmake_install"
+
+    # Install in $ROOT/local.$(hostname)
+    local_dir
 }
 cmake_build_dir() {
-    local root="$1"
+    local third_party_dir="$1"
     shift 1
-    echo "$root/build.$(hostname)"
+    # echo "$third_party_dir/build.$(hostname)"
+    # echo "$ROOT/build.$(hostname)/$(dirname "$third_party_dir")"
+
+    local build_prefix=
+    if [ "$IML_BUILD_PREFIX" != "" ]; then
+      build_prefix="$IML_BUILD_PREFIX"
+    else
+      # Assume we're running in host environment.
+      build_prefix="$ROOT/local.host"
+    fi
+    echo "$build_prefix/$(basename "$third_party_dir")"
 }
 local_dir() {
     # When installing things with configure/make-install
     # $ configure --prefix="$(local_dir)"
-    echo "$ROOT/local.$(hostname)"
+    if [ "$IML_INSTALL_PREFIX" != "" ]; then
+      echo "$IML_INSTALL_PREFIX"
+    else
+      # Assume we're running in host environment.
+      echo "$ROOT/local.host"
+    fi
+    # echo "$ROOT/local.$(hostname)"
 }
 
 NSYNC_CPP_LIB_DIR="$ROOT/third_party/nsync"
@@ -254,7 +279,7 @@ setup_backward_cpp_library() {
 
 SPDLOG_CPP_LIB_DIR="$ROOT/third_party/spdlog"
 setup_spdlog_cpp_library() {
-    if [ "$FORCE" != 'yes' ] && [ -e "$(cmake_install_prefix "$SPDLOG_CPP_LIB_DIR")" ]; then
+    if [ "$FORCE" != 'yes' ] && glob_any "$(third_party_install_prefix "$SPDLOG_CPP_LIB_DIR")/lib/libspdlog*"; then
         return
     fi
     local commit="v1.4.2"
@@ -275,18 +300,19 @@ setup_ctpl_cpp_library() {
         $commit
 }
 
-BOOST_CPP_LIB_VERSION="1.70.0"
+#BOOST_CPP_LIB_VERSION="1.70.0"
+BOOST_CPP_LIB_VERSION="1.73.0"
 BOOST_CPP_LIB_VERSION_UNDERSCORES="$(perl -lape 's/\./_/g'<<<"$BOOST_CPP_LIB_VERSION")"
 BOOST_CPP_LIB_DIR="$ROOT/third_party/boost_${BOOST_CPP_LIB_VERSION_UNDERSCORES}"
 BOOST_CPP_LIB_URL="https://dl.bintray.com/boostorg/release/${BOOST_CPP_LIB_VERSION}/source/boost_${BOOST_CPP_LIB_VERSION_UNDERSCORES}.tar.gz"
 setup_boost_cpp_library() {
-    if [ "$FORCE" != 'yes' ] && [ -e "$(cmake_build_dir "$BOOST_CPP_LIB_DIR")" ]; then
+    if [ "$FORCE" != 'yes' ] && glob_any "$(third_party_install_prefix "$BOOST_CPP_LIB_DIR")/lib/libboost_*"; then
         return
     fi
     _wget_tar "$BOOST_CPP_LIB_URL" "third_party"
     (
     cd $BOOST_CPP_LIB_DIR
-    ./bootstrap.sh --prefix="$(cmake_build_dir "$BOOST_CPP_LIB_DIR")"
+    ./bootstrap.sh --prefix="$(third_party_install_prefix "$BOOST_CPP_LIB_DIR")"
     if [ ! -e project-config.jam.bkup ]; then
         # https://github.com/boostorg/build/issues/289#issuecomment-515712785
         # Compiling boost fails inside a virtualenv; complains about pyconfig.h not existing
@@ -298,13 +324,19 @@ setup_boost_cpp_library() {
         sed --in-place=.bkup "s|using python : .*|using python : ${py_ver} : ${py_path} : ${py_include} ;|" project-config.jam
     fi
 #    ./b2 -j$(nproc) install
-    ./b2 cxxflags="-fPIC" cflags="-fPIC" -j$(nproc) install
+    # HACK: boost installer likes to run unit tests and I don't know how to disable them.
+    # Inveitably, it ends up failing some unit tests but seems to install fine:
+    #   ...failed updating 66 targets...
+    #   ...skipped 24 targets...
+    #   ...updated 16973 targets...
+    # So, just ignore bad exit status so we can continue with everything else...
+    ./b2 cxxflags="-fPIC" cflags="-fPIC" -j$(nproc) install || true
     )
 }
 
 EIGEN_CPP_LIB_DIR="$ROOT/third_party/eigen"
 setup_eigen_cpp_library() {
-    if [ "$FORCE" != 'yes' ] && [ -e "$(cmake_install_prefix "$EIGEN_CPP_LIB_DIR")" ]; then
+    if [ "$FORCE" != 'yes' ] && glob_any "$(third_party_install_prefix "$EIGEN_CPP_LIB_DIR")/include/eigen*"; then
         return
     fi
     local commit="9f48e814419e"
@@ -322,7 +354,7 @@ cmake_build() {
     cd "$src_dir"
     mkdir -p "$(cmake_build_dir "$src_dir")"
     cd "$(cmake_build_dir "$src_dir")"
-    cmake "$src_dir" -DCMAKE_INSTALL_PREFIX="$(cmake_install_prefix "$src_dir")"
+    cmake "$src_dir" -DCMAKE_INSTALL_PREFIX="$(third_party_install_prefix "$src_dir")"
     make -j$(nproc)
     make install
     )
@@ -337,18 +369,20 @@ PROTOBUF_CPP_LIB_DIR="$ROOT/third_party/protobuf-${PROTOBUF_VERSION}"
 PROTOBUF_URL="https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOBUF_VERSION}/protobuf-all-${PROTOBUF_VERSION}.tar.gz"
 #PROTOBUF_URL="https://github.com/protocolbuffers/protobuf/archive/v${PROTOBUF_VERSION}.tar.gz"
 setup_protobuf_cpp_library() {
-    if [ "$FORCE" != 'yes' ] && [ -e "$(cmake_build_dir "$PROTOBUF_CPP_LIB_DIR")" ]; then
+    if [ "$FORCE" != 'yes' ] && glob_any "$(third_party_install_prefix "$PROTOBUF_CPP_LIB_DIR")/lib/libprotobuf*"; then
         return
     fi
     _wget_tar "$PROTOBUF_URL" "third_party"
     (
     cd $PROTOBUF_CPP_LIB_DIR
+    # NOTE: if --prefix changes, we need to run "make clean" first.
+    make clean
     ./configure \
         "CFLAGS=-fPIC" "CXXFLAGS=-fPIC" \
-        --prefix="$(cmake_build_dir "$PROTOBUF_CPP_LIB_DIR")"
+        --prefix="$(third_party_install_prefix "$PROTOBUF_CPP_LIB_DIR")"
     make -j$(nproc)
     make install
-    "$(cmake_build_dir "$PROTOBUF_CPP_LIB_DIR")"/bin/protoc --version
+    "$(third_party_install_prefix "$PROTOBUF_CPP_LIB_DIR")"/bin/protoc --version
     )
 }
 

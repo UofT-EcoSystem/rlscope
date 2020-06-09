@@ -8,7 +8,7 @@
 ARG OPENMPI_VERSION=3.1.4
 
 WORKDIR /root/tar_files
-RUN wget https://download.open-mpi.org/release/open-mpi/v3.1/openmpi-${OPENMPI_VERSION}.tar.bz2
+RUN wget --quiet https://download.open-mpi.org/release/open-mpi/v3.1/openmpi-${OPENMPI_VERSION}.tar.bz2
 WORKDIR /root/openmpi
 RUN tar -xf /root/tar_files/openmpi-${OPENMPI_VERSION}.tar.bz2
 WORKDIR /root/openmpi/openmpi-${OPENMPI_VERSION}

@@ -6,9 +6,12 @@ from os.path import join as _j, dirname as _d
 import copy
 
 import types
-import numba
-import numba as nb
-from numba import jit, jitclass, njit
+
+from iml_profiler import py_config
+
+if py_config.USE_NUMBA:
+    import numba
+    from numba import njit
 
 from iml_profiler.parser.common import *
 # from tensorflow.core.profiler.tfprof_log_pb2 import ProfileProto
@@ -37,7 +40,6 @@ from iml_profiler.parser.readers import TFProfCategoryTimesReader, \
    DEFAULT_ignore_categories, \
    DEFAULT_debug
 
-from iml_profiler import py_config
 
 from iml_profiler.scripts.unique_intervals import UniqueSplits, PlotOutput, ShowOrSave, \
     bitset_add, \
@@ -544,39 +546,40 @@ class OverlapMetadata:
     def __str__(self):
         return "OverlapMetadata(regions={regions})".format(regions=self.regions)
 
-@njit
-def best_by_index_start(lle, cindices):
-    """
-    Find next minimum start-time.
+if py_config.USE_NUMBA:
+    @numba.njit
+    def best_by_index_start(lle, cindices):
+        """
+        Find next minimum start-time.
 
-    :param lle: [[Events]]
-        Category times, represented as a List-of-List-of-Events (lle).
-    :param cindices:
-        Next category time to consider, for each Category categories[i].
-    :return:
-    """
-    best = -1
-    best_time = sys.maxsize
-    for i in range(len(cindices)):
-        if cindices[i] < len(lle[i]) and \
-            lle[i][cindices[i]].start_time_usec <= best_time:
-                best_time = lle[i][cindices[i]].start_time_usec
-                best = i
-    return best, best_time
+        :param lle: [[Events]]
+            Category times, represented as a List-of-List-of-Events (lle).
+        :param cindices:
+            Next category time to consider, for each Category categories[i].
+        :return:
+        """
+        best = -1
+        best_time = sys.maxsize
+        for i in range(len(cindices)):
+            if cindices[i] < len(lle[i]) and \
+                lle[i][cindices[i]].start_time_usec <= best_time:
+                    best_time = lle[i][cindices[i]].start_time_usec
+                    best = i
+        return best, best_time
 
-@njit
-def best_by_index_end(lle, cindices):
-    """
-    Same as best_by_index_start, but find next minimum end-time.
-    """
-    best = -1
-    best_time = sys.maxsize
-    for i in range(len(cindices)):
-        if cindices[i] < len(lle[i]) and \
-            lle[i][cindices[i]].end_time_usec <= best_time:
-                best_time = lle[i][cindices[i]].end_time_usec
-                best = i
-    return best, best_time
+    @numba.njit
+    def best_by_index_end(lle, cindices):
+        """
+        Same as best_by_index_start, but find next minimum end-time.
+        """
+        best = -1
+        best_time = sys.maxsize
+        for i in range(len(cindices)):
+            if cindices[i] < len(lle[i]) and \
+                lle[i][cindices[i]].end_time_usec <= best_time:
+                    best_time = lle[i][cindices[i]].end_time_usec
+                    best = i
+        return best, best_time
 
 
 
@@ -616,195 +619,195 @@ class Overlap:
             overlap[category_key] = us_from_unit(time_usec, time_unit)
         return overlap
 
+if py_config.USE_NUMBA:
+    @numba.njit
+    def numba_compute_overlap(
+        by_start, by_end,
+        show_progress=False,
+        debug=False):
+        """
+        Convert event overlap computation into something that is optimizable by numba.
+        In particular:
+            - avoid classes and complicated Python data-structures (dicts, lists, sets, combinations thereof)
+            - use numpy operations/arrays (e.g. broadcasting adds)
+        To get an idea of what numba can optimize and cannot, see the following:
+            https://numba.pydata.org/numba-doc/dev/user/5minguide.html
 
-@njit
-def numba_compute_overlap(
-    by_start, by_end,
-    show_progress=False,
-    debug=False):
-    """
-    Convert event overlap computation into something that is optimizable by numba.
-    In particular:
-        - avoid classes and complicated Python data-structures (dicts, lists, sets, combinations thereof)
-        - use numpy operations/arrays (e.g. broadcasting adds)
-    To get an idea of what numba can optimize and cannot, see the following:
-        https://numba.pydata.org/numba-doc/dev/user/5minguide.html
+        :param by_start:
+            Category -> [Event]
+            Represented as [[Event]]
+            In particular, by_start[i][...] are all the Event's that belong to Category=categories[i]
+            Events in each list are sorted by start time.
+        :param by_end:
+            Category -> [Event]
+            Represented as [[Event]]
+            Same as by_start, except Events in each list are sorted by end time.
+        :return: overlap:
+             { Category }     ->          Int64
+             ------------                 -----
+            Overlap region        Duration of overlap
 
-    :param by_start:
-        Category -> [Event]
-        Represented as [[Event]]
-        In particular, by_start[i][...] are all the Event's that belong to Category=categories[i]
-        Events in each list are sorted by start time.
-    :param by_end:
-        Category -> [Event]
-        Represented as [[Event]]
-        Same as by_start, except Events in each list are sorted by end time.
-    :return: overlap:
-         { Category }     ->          Int64
-         ------------                 -----
-        Overlap region        Duration of overlap
+            Mapping from a set of Categories (a.k.a. overlap region) to total time (in microseconds).
+            An "overlap region" is a set of overlapping categories, and the total duration of the overlap.
 
-        Mapping from a set of Categories (a.k.a. overlap region) to total time (in microseconds).
-        An "overlap region" is a set of overlapping categories, and the total duration of the overlap.
+        # :param categories
+        #     List of strings representing category names:
+        #     e.g. {"CPU", "GPU", ...}
+        """
 
-    # :param categories
-    #     List of strings representing category names:
-    #     e.g. {"CPU", "GPU", ...}
-    """
+        # NOTE: assertions cause unsupported opcode error:
+        #   Use of unknown opcode 'IMPORT_NAME'
+        # Work-around: push the assertions up into our python caller.
+        # assert len(by_start) == len(by_end)
+        k = len(by_start)
 
-    # NOTE: assertions cause unsupported opcode error:
-    #   Use of unknown opcode 'IMPORT_NAME'
-    # Work-around: push the assertions up into our python caller.
-    # assert len(by_start) == len(by_end)
-    k = len(by_start)
+        overlap = NumbaOverlap()
 
-    overlap = NumbaOverlap()
+        # How many events are in each Category.
+        lengths = np.array([len(l) for l in by_start], dtype=int)
 
-    # How many events are in each Category.
-    lengths = np.array([len(l) for l in by_start], dtype=int)
+        if debug:
+            # NOTE: we use print instead of logging.info so that
+            # these will print when running Numba JIT compiled code.
+            print("(1) after lengths = ...")
 
-    if debug:
-        # NOTE: we use print instead of logging.info so that
-        # these will print when running Numba JIT compiled code.
-        print("(1) after lengths = ...")
+        overlap_metadata = NumbaOverlapMetadata()
+        if len(lengths) == 0 or np.sum(lengths) == 0:
+            # Either no categories, or no
+            return overlap, overlap_metadata
 
-    overlap_metadata = NumbaOverlapMetadata()
-    if len(lengths) == 0 or np.sum(lengths) == 0:
-        # Either no categories, or no
-        return overlap, overlap_metadata
+        if debug:
+            print("(2) NumbaOverlapMetadata()")
 
-    if debug:
-        print("(2) NumbaOverlapMetadata()")
+        start_index = np.zeros(k, dtype=int)
+        end_index = np.zeros(k, dtype=int)
 
-    start_index = np.zeros(k, dtype=int)
-    end_index = np.zeros(k, dtype=int)
-
-    # cur_categories = set()
-    cur_categories = bitset_empty_set()
-    min_by_start, min_time_by_start = best_by_index_start(by_start, start_index)
-    if debug:
-        print("(3) after finding start time of earliest event with best_by_index_start")
-    cur_time = min_time_by_start
-    # cur_categories.add(min_by_start)
-    cur_categories = bitset_add(cur_categories, min_by_start)
-
-    while (start_index < lengths).any() or (end_index < lengths).any():
+        # cur_categories = set()
+        cur_categories = bitset_empty_set()
         min_by_start, min_time_by_start = best_by_index_start(by_start, start_index)
         if debug:
-            print("(4) after best_by_index_start")
-        min_by_end, min_time_by_end = best_by_index_end(by_end, end_index)
-        if debug:
-            print("(5) after best_by_index_end")
-        # assert min_by_start >= 0 or min_by_end >= 0
+            print("(3) after finding start time of earliest event with best_by_index_start")
+        cur_time = min_time_by_start
+        # cur_categories.add(min_by_start)
+        cur_categories = bitset_add(cur_categories, min_by_start)
 
-        if min_time_by_start <= min_time_by_end:
-            min_time = min_time_by_start
-            event = by_start[min_by_start][start_index[min_by_start]]
+        while (start_index < lengths).any() or (end_index < lengths).any():
+            min_by_start, min_time_by_start = best_by_index_start(by_start, start_index)
             if debug:
-                print("(6) after by_start[min_by_start]")
-            min_category = min_by_start
-            is_start = True
-        else:
-            min_time = min_time_by_end
-            event = by_end[min_by_end][end_index[min_by_end]]
+                print("(4) after best_by_index_start")
+            min_by_end, min_time_by_end = best_by_index_end(by_end, end_index)
             if debug:
-                print("(7) after by_end[min_by_end]")
-            min_category = min_by_end
-            is_start = False
+                print("(5) after best_by_index_end")
+            # assert min_by_start >= 0 or min_by_end >= 0
 
-        time_chunk = min_time - cur_time
+            if min_time_by_start <= min_time_by_end:
+                min_time = min_time_by_start
+                event = by_start[min_by_start][start_index[min_by_start]]
+                if debug:
+                    print("(6) after by_start[min_by_start]")
+                min_category = min_by_start
+                is_start = True
+            else:
+                min_time = min_time_by_end
+                event = by_end[min_by_end][end_index[min_by_end]]
+                if debug:
+                    print("(7) after by_end[min_by_end]")
+                min_category = min_by_end
+                is_start = False
 
-        # if len(cur_categories) > 0 and time_chunk > 0:
-        if not bitset_is_empty(cur_categories) and time_chunk > 0:
-            # Don't bother recording empty gaps between times.
-            # categories_key = frozenset(cur_categories)
+            time_chunk = min_time - cur_time
 
-            # if cur_categories not in overlap:
-            #     overlap[cur_categories] = 0
-            # overlap[cur_categories] += time_chunk
-            overlap.add_time(cur_categories, time_chunk)
-            if debug:
-                print("(8) overlap.add_time")
-            overlap_metadata.add_event(cur_categories, event)
-            if debug:
-                print("(8) overlap_metadata.add_event")
+            # if len(cur_categories) > 0 and time_chunk > 0:
+            if not bitset_is_empty(cur_categories) and time_chunk > 0:
+                # Don't bother recording empty gaps between times.
+                # categories_key = frozenset(cur_categories)
 
-        if is_start:
-            start_index[min_by_start] += 1
-            # cur_categories.add(min_category)
-            cur_categories = bitset_add(cur_categories, min_category)
-            if debug:
-                print("(9) after is_start")
-        else:
-            end_index[min_by_end] += 1
-            # cur_categories.remove(min_category)
-            cur_categories = bitset_remove(cur_categories, min_category)
-            if debug:
-                print("(9) after not is_start")
+                # if cur_categories not in overlap:
+                #     overlap[cur_categories] = 0
+                # overlap[cur_categories] += time_chunk
+                overlap.add_time(cur_categories, time_chunk)
+                if debug:
+                    print("(8) overlap.add_time")
+                overlap_metadata.add_event(cur_categories, event)
+                if debug:
+                    print("(8) overlap_metadata.add_event")
 
-        # if show_progress:
-        #     count_left = CategoryTimesWrapper.total_left(by_start, by_end)
-        #     bar.update(total_events - count_left)
+            if is_start:
+                start_index[min_by_start] += 1
+                # cur_categories.add(min_category)
+                cur_categories = bitset_add(cur_categories, min_category)
+                if debug:
+                    print("(9) after is_start")
+            else:
+                end_index[min_by_end] += 1
+                # cur_categories.remove(min_category)
+                cur_categories = bitset_remove(cur_categories, min_category)
+                if debug:
+                    print("(9) after not is_start")
 
-        cur_time = min_time
+            # if show_progress:
+            #     count_left = CategoryTimesWrapper.total_left(by_start, by_end)
+            #     bar.update(total_events - count_left)
 
-    # assert len(cur_categories) == 0
+            cur_time = min_time
 
-    return overlap, overlap_metadata
+        # assert len(cur_categories) == 0
+
+        return overlap, overlap_metadata
 
 
-def compute_overlap_single_thread_numba(
-    # category_times,
-    eo_times_dict,
-    overlaps_with=None,
-    check_key=None,
-    debug=False,
-    show_progress=False,
-    timer=None):
-
-    # Python -> Numba:
-    #   Convert Python types to Numba types.
-    category_to_idx, idx_to_category = category_to_idx_maps(eo_times_dict)
-    eo_times = AsNumbaEOTimes(
-        eo_times_dict,
+    def compute_overlap_single_thread_numba(
         # category_times,
-        category_to_idx, idx_to_category,
-        # debug=debug,
-    )
-    if timer is not None:
-        timer.end_operation('compute_overlap_single_thread_numba(...): Python -> Numba (eo_times)')
+        eo_times_dict,
+        overlaps_with=None,
+        check_key=None,
+        debug=False,
+        show_progress=False,
+        timer=None):
 
-    # logging.info("{msg}".format(msg=pprint_msg({
-    #     'idx_to_category': idx_to_category,
-    #     # 'eo_times': eo_times,
-    # })))
-    # logging.info("eo_times: {msg}".format(msg=pprint_msg(eo_times)))
-
-    # Call into Numba
-    use_numba = not py_config.IML_DISABLE_JIT
-    # numba_overlap, numba_overlap_metadata = UniqueSplits(eo_times, use_numba=use_numba)
-    numba_overlap, numba_overlap_metadata, outputs, output_categories = UniqueSplits(eo_times, use_numba=use_numba)
-    if py_config.IML_DEBUG_UNIQUE_SPLITS_BASE:
-        cat_idx_pairs = sorted([(cat, idx) for (cat, idx) in category_to_idx.items()], key=lambda cat_idx: cat_idx[1])
-        categories = [cat for cat, idx in cat_idx_pairs]
-        PlotOutput(outputs, output_categories, categories)
-        ShowOrSave(
-            base=py_config.IML_DEBUG_UNIQUE_SPLITS_BASE,
-            interactive=False,
+        # Python -> Numba:
+        #   Convert Python types to Numba types.
+        category_to_idx, idx_to_category = category_to_idx_maps(eo_times_dict)
+        eo_times = AsNumbaEOTimes(
+            eo_times_dict,
+            # category_times,
+            category_to_idx, idx_to_category,
+            # debug=debug,
         )
+        if timer is not None:
+            timer.end_operation('compute_overlap_single_thread_numba(...): Python -> Numba (eo_times)')
 
-    if timer is not None:
-        timer.end_operation('compute_overlap_single_thread_numba(...): Event overlap; UniqueSplits(eo_times)')
+        # logging.info("{msg}".format(msg=pprint_msg({
+        #     'idx_to_category': idx_to_category,
+        #     # 'eo_times': eo_times,
+        # })))
+        # logging.info("eo_times: {msg}".format(msg=pprint_msg(eo_times)))
 
-    # Numba -> Python:
-    #   Convert Numba types back to Python types.
-    overlap_metadata = OverlapMetadata.from_NumbaOverlapMetadata(numba_overlap_metadata, category_to_idx, idx_to_category, time_unit='ps')
-    overlap = Overlap.from_NumbaOverlap(numba_overlap, category_to_idx, idx_to_category, time_unit='ps')
+        # Call into Numba
+        use_numba = not py_config.IML_DISABLE_JIT
+        # numba_overlap, numba_overlap_metadata = UniqueSplits(eo_times, use_numba=use_numba)
+        numba_overlap, numba_overlap_metadata, outputs, output_categories = UniqueSplits(eo_times, use_numba=use_numba)
+        if py_config.IML_DEBUG_UNIQUE_SPLITS_BASE:
+            cat_idx_pairs = sorted([(cat, idx) for (cat, idx) in category_to_idx.items()], key=lambda cat_idx: cat_idx[1])
+            categories = [cat for cat, idx in cat_idx_pairs]
+            PlotOutput(outputs, output_categories, categories)
+            ShowOrSave(
+                base=py_config.IML_DEBUG_UNIQUE_SPLITS_BASE,
+                interactive=False,
+            )
 
-    if timer is not None:
-        timer.end_operation('compute_overlap_single_thread_numba(...): Numba -> Python')
+        if timer is not None:
+            timer.end_operation('compute_overlap_single_thread_numba(...): Event overlap; UniqueSplits(eo_times)')
 
-    return overlap, overlap_metadata
+        # Numba -> Python:
+        #   Convert Numba types back to Python types.
+        overlap_metadata = OverlapMetadata.from_NumbaOverlapMetadata(numba_overlap_metadata, category_to_idx, idx_to_category, time_unit='ps')
+        overlap = Overlap.from_NumbaOverlap(numba_overlap, category_to_idx, idx_to_category, time_unit='ps')
+
+        if timer is not None:
+            timer.end_operation('compute_overlap_single_thread_numba(...): Numba -> Python')
+
+        return overlap, overlap_metadata
 
 def compute_overlap_single_thread(
     category_times,

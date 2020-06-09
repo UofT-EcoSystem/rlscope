@@ -1,4 +1,4 @@
-# Download v1.13.1 GPU install of tensorflow.
+# Download GPU install of tensorflow.
 # May be useful for running stuff.
 #WORKDIR $HOME/pip_whl
 
@@ -11,4 +11,6 @@
 #    WORKDIR <dir>
 RUN mkdir -p /root/pip_whl && cd /root/pip_whl
 WORKDIR /root/pip_whl
-RUN pip download tensorflow-gpu==1.13.1
+# Defined in assembler.py
+ARG TENSORFLOW_VERSION
+RUN pip download tensorflow-gpu==${TENSORFLOW_VERSION}

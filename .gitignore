@@ -21,3 +21,4 @@ ssh_config*
 /dockerfiles/dockerfiles/gpu-jupyter.Dockerfile
 /dockerfiles/dockerfiles/gpu.Dockerfile
 /dockerfiles/requirements.txt
+.bash_history

@@ -154,8 +154,8 @@ slice_sets:
           - ubuntu/nvidia_nccl
           - ubuntu/nvidia_rtx_2070_env
           - ubuntu/add_user
-          - ubuntu/pip_download_tf_v1.13.1
-          - ubuntu/openmpi_from_src
+          - ubuntu/pip_download_tf
+          # - ubuntu/openmpi_from_src
           - ubuntu/nodejs
           # - ubuntu/python36_from_src
           - ubuntu/virtualenv
@@ -166,8 +166,9 @@ slice_sets:
           - iml/apt_install
           - iml/pip_dependencies
           - iml/user_custom
-          - shell
           - ubuntu/bazelisk
+          - ubuntu/bash
+          - shell
           - ubuntu/entrypoint
           test_runtime: nvidia
           args:
@@ -203,7 +204,7 @@ slice_sets:
           - ubuntu/nvidia_nccl
           - ubuntu/nvidia_rtx_2070_env
           - ubuntu/add_user
-          - ubuntu/pip_download_tf_v1.13.1
+          - ubuntu/pip_download_tf
           - ubuntu/openmpi_from_src
           - ubuntu/nodejs
           - ubuntu/python36_from_src
