@@ -218,6 +218,19 @@ setup_gtest_cpp_library() {
     cmake_build "$GTEST_CPP_LIB_DIR"
 }
 
+GFLAGS_CPP_LIB_DIR="$ROOT/third_party/gflags"
+setup_gflags_cpp_library() {
+    if [ "$FORCE" != 'yes' ] && glob_any "$(third_party_install_prefix "$GFLAGS_CPP_LIB_DIR")/lib/libgflags*"; then
+        return
+    fi
+    local commit="v2.2.2"
+    _clone "$GFLAGS_CPP_LIB_DIR" \
+        gflags/gflags.git \
+        $commit
+    CMAKE_OPTS=(-DBUILD_SHARED_LIBS=ON -DBUILD_STATIC_LIBS=ON)
+    cmake_build "$GFLAGS_CPP_LIB_DIR"
+}
+
 third_party_install_prefix() {
     local third_party_dir="$1"
     shift 1
@@ -346,6 +359,7 @@ setup_eigen_cpp_library() {
     cmake_build "$EIGEN_CPP_LIB_DIR"
 }
 
+CMAKE_OPTS=()
 cmake_build() {
     local src_dir="$1"
     shift 1
@@ -354,7 +368,8 @@ cmake_build() {
     cd "$src_dir"
     mkdir -p "$(cmake_build_dir "$src_dir")"
     cd "$(cmake_build_dir "$src_dir")"
-    cmake "$src_dir" -DCMAKE_INSTALL_PREFIX="$(third_party_install_prefix "$src_dir")"
+    cmake "$src_dir" -DCMAKE_INSTALL_PREFIX="$(third_party_install_prefix "$src_dir")" "${CMAKE_OPTS[@]}"
+    CMAKE_OPTS=()
     make -j$(nproc)
     make install
     )
@@ -497,16 +512,14 @@ setup_apt_packages() {
     # binutils-dev
     #   Needed for pretty stack-traces from backward-cpp library during segfaults:
     #   https://github.com/bombela/backward-cpp#libraries-to-read-the-debug-info
-    _apt_install \
-        mercurial \
-        git \
-        'libgflags*' \
-        binutils-dev \
-        gdb \
-        gdbserver \
-
-        # libgflags-dev libgflags2v5
-
+    local APT_DEPS=(
+        mercurial
+        git
+        binutils-dev
+        gdb
+        gdbserver
+    )
+    _apt_install "${APT_DEPS[@]}"
 }
 
 main() {
@@ -529,6 +542,7 @@ main() {
     _do setup_json_cpp_library
     _do setup_abseil_cpp_library
     _do setup_gtest_cpp_library
+    _do setup_gflags_cpp_library
     _do setup_nsync_cpp_library
     _do setup_backward_cpp_library
     _do setup_eigen_cpp_library

@@ -39,14 +39,10 @@ macro(_GatherTargetSources TARGET_VAR SOURCE_FILES_VAR)
 endmacro()
 
 function(_AddTargetDependencies TARGET)
+    # message("TARGET = ${TARGET}")
     add_backward(${TARGET})
     target_link_libraries(${TARGET} spdlog::spdlog)
     target_link_libraries(${TARGET} nlohmann_json::nlohmann_json)
-    message("BOOST_INCLUDEDIR = ${BOOST_INCLUDEDIR}")
-    message("BOOST_LIBRARYDIR = ${BOOST_LIBRARYDIR}")
-    message("TARGET = ${TARGET}")
-    target_include_directories(${TARGET} PRIVATE ${BOOST_INCLUDEDIR})
-    target_link_directories(${TARGET} PRIVATE ${BOOST_LIBRARYDIR})
 
     if(CMAKE_BUILD_TYPE STREQUAL "Debug")
         get_target_property(CUR_FLAG ${TARGET} COMPILE_DEFINITIONS)
@@ -67,6 +63,14 @@ macro(MakeCudaLibraryFromDir LIBNAME_VAR SOURCE_FILES)
     cuda_add_library(${${LIBNAME_VAR}}
             ${${SOURCE_FILES}})
     _AddTargetDependencies(${${LIBNAME_VAR}})
+    install(
+            TARGETS ${${LIBNAME_VAR}}
+            DESTINATION lib
+            CONFIGURATIONS Debug)
+    install(
+            TARGETS ${${LIBNAME_VAR}}
+            DESTINATION lib
+            CONFIGURATIONS Release)
 endmacro()
 
 # Buld CUDA executable from recursively discovered source files.

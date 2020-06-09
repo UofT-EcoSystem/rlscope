@@ -488,7 +488,7 @@ void DeviceTracerImpl::_Register_LD_PRELOAD_Callbacks() {
       void *devPtr);
 
 #else
-  DCHECK(false) << "LD_PRELOAD callbacks cannot be enabled unless libsample_cuda_api.so is compiled with WITH_CUDA_LD_PRELOAD=ON in CMakeLists.txt";
+  DCHECK(false) << "LD_PRELOAD callbacks cannot be enabled unless librlscope.so is compiled with WITH_CUDA_LD_PRELOAD=ON in CMakeLists.txt";
 #endif // WITH_CUDA_LD_PRELOAD
 }
 

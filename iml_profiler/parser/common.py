@@ -2071,7 +2071,7 @@ def list_files(direc):
     return paths
 
 def is_sample_cuda_api_lib(path):
-    return _b(path) == 'libsample_cuda_api.so'
+    return _b(path) == 'librlscope.so'
 
 def zero_if_none(x):
     if x is None:

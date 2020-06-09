@@ -453,11 +453,11 @@ def _mk(kwargs, TaskKlass):
             msg=pprint_msg(task_kwargs)))
     return TaskKlass(**task_kwargs)
 
-# ASSUME: cpp_dump_proto is on $PATH;
+# ASSUME: rls-analyze is on $PATH;
 # i.e. they have run:
 # $ cd $IML_DIR
 # $ source source_me.sh
-CPP_ANALYZE_BIN = 'cpp_dump_proto'
+CPP_ANALYZE_BIN = 'rls-analyze'
 class CppAnalyze(IMLTask):
 
     # NOT optional (to ensure we remember to do overhead correction).
@@ -1368,7 +1368,7 @@ class VennJsPlotOneTask(luigi.Task):
 
 
 class SlidingWindowUtilizationPlotTask(IMLTask):
-    polling_util_json = luigi.Parameter(description="Output from: cpp_dump_proto --mode=polling_util")
+    polling_util_json = luigi.Parameter(description="Output from: rls-analyze --mode=polling_util")
     window_size_us = luigi.FloatParameter(description=textwrap.dedent("""\
     The sampling period (in nvidia-smi documentation lingo); nvidia-smi's GPU utilization metric looks 
     at a sliding window of time to determine the (%) of bins that had a kernel executing in them.  
@@ -1381,7 +1381,7 @@ class SlidingWindowUtilizationPlotTask(IMLTask):
 
     skip_output = False
 
-    # TODO: require running "cpp_dump_proto --mode=polling_util", and lookup polling_util_json from that task.
+    # TODO: require running "rls-analyze --mode=polling_util", and lookup polling_util_json from that task.
     def requires(self):
         return []
 

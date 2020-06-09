@@ -1,4 +1,4 @@
-# Wrapper around libsample_cuda_api.so LD_PRELOAD library.
+# Wrapper around librlscope.so LD_PRELOAD library.
 import ctypes
 
 from iml_profiler.parser.common import *
@@ -65,7 +65,7 @@ def load_library(allow_fail=None):
 
     # except OSError as e:
     try:
-        _so = ctypes.cdll.LoadLibrary('libsample_cuda_api.so')
+        _so = ctypes.cdll.LoadLibrary('librlscope.so')
         # os.error
     except OSError as e:
         if not allow_fail or not re.search(r'no such file', str(e), re.IGNORECASE):
@@ -74,7 +74,7 @@ def load_library(allow_fail=None):
         #     'e.__dict__':e.__dict__,
         #     'e.errno':e.errno,
         # })
-        logging.info("Failed to load libsample_cuda_api.so")
+        logging.info("Failed to load librlscope.so")
         return
 
     _so.setup.argtypes = []
@@ -129,7 +129,7 @@ def load_library(allow_fail=None):
     _so.async_dump.restype = c_int
     _set_api_wrapper('async_dump')
 
-    logging.info("Loaded symbols from libsample_cuda_api.so")
+    logging.info("Loaded symbols from librlscope.so")
 
 def _set_api_wrapper(api_name):
     from iml_profiler.clib import sample_cuda_api

@@ -32,7 +32,7 @@ def main():
     #     IML: Skip any profiling. Used for uninstrumented runs.
     #     Useful for ensuring minimal libcupti registration when we run --cuda-api-calls during config_uninstrumented.
     #
-    #     Effect: sets "export IML_DISABLE=1" for libsample_cuda_api.so.
+    #     Effect: sets "export IML_DISABLE=1" for librlscope.so.
     # """))
     parser.add_argument('--cuda-api-calls', action='store_true',
                         help=textwrap.dedent("""
@@ -40,13 +40,13 @@ def main():
                         
                         i.e. total number of calls, and total time (usec) spent in a given API call.
                         
-                        Effect: sets "export IML_CUDA_API_CALLS=1" for libsample_cuda_api.so.
+                        Effect: sets "export IML_CUDA_API_CALLS=1" for librlscope.so.
                         """))
     parser.add_argument('--cuda-activities', action='store_true',
                         help=textwrap.dedent("""
                         Trace CUDA activities (i.e. GPU kernel runtimes, memcpy's).
                         
-                        Effect: sets "export IML_CUDA_ACTIVITIES=yes" for libsample_cuda_api.so.
+                        Effect: sets "export IML_CUDA_ACTIVITIES=yes" for librlscope.so.
                         """))
     parser.add_argument('--fuzz-cuda-api', action='store_true',
                         help=textwrap.dedent("""
@@ -55,14 +55,14 @@ def main():
                         NOTE: this SHOULDN'T be used for finding profiling book-keeping "subtractions", since it 
                         adds a LOT of overhead to add start/end callbacks to all CUDA API functions.
                         
-                        Effect: sets "export IML_FUZZ_CUDA_API=yes" for libsample_cuda_api.so.
+                        Effect: sets "export IML_FUZZ_CUDA_API=yes" for librlscope.so.
                         """))
     parser.add_argument('--cuda-api-events', action='store_true',
                         help=textwrap.dedent("""
                         Trace all the start/end timestamps of CUDA API calls.
                         Needed during instrumented runs so we know when to subtract profiling overheads.
                         
-                        Effect: sets "export IML_CUDA_API_EVENTS=yes" for libsample_cuda_api.so.
+                        Effect: sets "export IML_CUDA_API_EVENTS=yes" for librlscope.so.
                         """))
     parser.add_argument('--pc-sampling', action='store_true',
                         help=textwrap.dedent("""
@@ -70,19 +70,19 @@ def main():
                         
                         Currently, we're just going to record GPUSamplingState.is_gpu_active.
                         
-                        Effect: sets "export IML_PC_SAMPLING=1" for libsample_cuda_api.so.
+                        Effect: sets "export IML_PC_SAMPLING=1" for librlscope.so.
                         """))
     parser.add_argument('--trace-at-start', action='store_true',
                         help=textwrap.dedent("""
                         Start tracing right at application startup.
                         
-                        Effect: sets "export IML_TRACE_AT_START=yes" for libsample_cuda_api.so.
+                        Effect: sets "export IML_TRACE_AT_START=yes" for librlscope.so.
                         """))
     parser.add_argument('--stream-sampling', action='store_true',
                         help=textwrap.dedent("""
                         Poll cudaStreamQuery() to see if the GPU is being used.
                         
-                        Effect: sets "export IML_STREAM_SAMPLING=yes" for libsample_cuda_api.so.
+                        Effect: sets "export IML_STREAM_SAMPLING=yes" for librlscope.so.
                         """))
     parser.add_argument('--config',
                         choices=['interception',

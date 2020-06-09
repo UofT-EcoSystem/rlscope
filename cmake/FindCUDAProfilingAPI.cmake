@@ -137,8 +137,8 @@ set_target_properties(nvtx PROPERTIES
 # NOTE: Singular variables for this library, plural for libraries this this lib depends on.
 set(CUDAProfilingAPI_PROCESS_INCLUDES ${CUDAProfilingAPI_INCLUDE_DIR})
 set(CUDAProfilingAPI_PROCESS_LIBS ${CUDAProfilingAPI_LIBRARY})
-message("CUDAProfilingAPI_PROCESS_INCLUDES = ${CUDAProfilingAPI_PROCESS_INCLUDES}")
-message("CUDAProfilingAPI_PROCESS_LIBS = ${CUDAProfilingAPI_PROCESS_LIBS}")
+#message("CUDAProfilingAPI_PROCESS_INCLUDES = ${CUDAProfilingAPI_PROCESS_INCLUDES}")
+#message("CUDAProfilingAPI_PROCESS_LIBS = ${CUDAProfilingAPI_PROCESS_LIBS}")
 libfind_process(CUDAProfilingAPI)
-message("CUDAProfilingAPI_LIBRARIES = ${CUDAProfilingAPI_LIBRARIES}")
-message("CUDAProfilingAPI_INCLUDE_DIRS = ${CUDAProfilingAPI_INCLUDE_DIRS}")
+#message("CUDAProfilingAPI_LIBRARIES = ${CUDAProfilingAPI_LIBRARIES}")
+#message("CUDAProfilingAPI_INCLUDE_DIRS = ${CUDAProfilingAPI_INCLUDE_DIRS}")

@@ -81,7 +81,7 @@ def patch_environ():
 
     os.environ['LD_PRELOAD'] = ':'.join(keep_ld_preloads)
     logging.info((
-        "Remove libsample_cuda_api.so from LD_PRELOAD:\n"
+        "Remove librlscope.so from LD_PRELOAD:\n"
         "  LD_PRELOAD={LD_PRELOAD}").format(
         LD_PRELOAD=os.environ['LD_PRELOAD']))
 
@@ -111,7 +111,7 @@ def handle_iml_args(parser, args, directory=None, reports_progress=False):
     # We only want to wrap the "main" training script processes;
     # i.e. the processes we already explicitly handle via the python-api.
     #
-    # TLDR: remove libsample_cuda_api.so from env['LD_PRELOAD'] if it's there, re-add it when we use python-IML to
+    # TLDR: remove librlscope.so from env['LD_PRELOAD'] if it's there, re-add it when we use python-IML to
     # launch new training scripts.
     patch_environ()
 

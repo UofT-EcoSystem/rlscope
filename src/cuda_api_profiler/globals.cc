@@ -169,7 +169,7 @@ boost::process::environment Globals::PatchedEnviron() {
   auto is_sample_lib = [] (const std::string& path) -> bool {
     boost::filesystem::path bpath = path;
     auto basename = bpath.filename().string();
-    return (basename == "libsample_cuda_api.so");
+    return (basename == "librlscope.so");
   };
   std::vector<std::string> keep_paths;
   keep_paths.reserve(paths.size());

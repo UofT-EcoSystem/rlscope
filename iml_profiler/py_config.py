@@ -58,7 +58,7 @@ DEBUG_SPLIT_STACK_OPS = False
 # If True, skip inserting any profiling-overhead events.
 DEBUG_SKIP_PROFILING_OVERHEAD = False
 
-# If True, then log all calls into libsample_cuda_api.so
+# If True, then log all calls into librlscope.so
 # DEBUG_SAMPLE_CUDA_API = True
 
 # If True, then log all calls into a wrapped library (e.g. TensorFlow, simulator, etc.).
@@ -86,12 +86,12 @@ DEBUG_WRAP_CLIB = False
 DEBUG_CRITICAL_PATH = False
 
 LIB_SAMPLE_CUDA_API = None
-if _e(_j(ROOT, 'Debug', 'libsample_cuda_api.so')):
-  LIB_SAMPLE_CUDA_API = _j(ROOT, 'Debug', 'libsample_cuda_api.so')
-elif _e(_j(ROOT, 'Release', 'libsample_cuda_api.so')):
-  LIB_SAMPLE_CUDA_API = _j(ROOT, 'Release', 'libsample_cuda_api.so')
-elif _e(_j(ROOT, 'build', 'libsample_cuda_api.so')):
-  LIB_SAMPLE_CUDA_API =  _j(ROOT, 'build', 'libsample_cuda_api.so')
+if _e(_j(ROOT, 'Debug', 'librlscope.so')):
+  LIB_SAMPLE_CUDA_API = _j(ROOT, 'Debug', 'librlscope.so')
+elif _e(_j(ROOT, 'Release', 'librlscope.so')):
+  LIB_SAMPLE_CUDA_API = _j(ROOT, 'Release', 'librlscope.so')
+elif _e(_j(ROOT, 'build', 'librlscope.so')):
+  LIB_SAMPLE_CUDA_API =  _j(ROOT, 'build', 'librlscope.so')
 
 # Use a custom-built/modified version of TF for benchmarking things.
 # Modifies C++ code to make tfprof add less overhead to the critical path.

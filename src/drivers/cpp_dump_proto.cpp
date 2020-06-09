@@ -136,13 +136,13 @@ enum Mode {
 void Usage() {
   std::cout << "Usage: " << std::endl;
   std::cout << "  # Dump protobuf file" << std::endl;
-  std::cout << "  $ cpp_dump_proto [--mode proto] --proto path/to/trace_file.proto" << std::endl;
+  std::cout << "  $ rls-analyze [--mode proto] --proto path/to/trace_file.proto" << std::endl;
   std::cout << std::endl;
   std::cout << "  # ls trace-files" << std::endl;
-  std::cout << "  $ cpp_dump_proto --mode ls --iml_directory path/to/iml_directory" << std::endl;
+  std::cout << "  $ rls-analyze --mode ls --iml_directory path/to/iml_directory" << std::endl;
   std::cout << std::endl;
   std::cout << "  # read eo_times for entire trace and dump statistics for each category" << std::endl;
-  std::cout << "  $ cpp_dump_proto --mode stats --iml_directory path/to/iml_directory" << std::endl;
+  std::cout << "  $ rls-analyze --mode stats --iml_directory path/to/iml_directory" << std::endl;
 }
 void UsageAndExit(const std::string& msg) {
   Usage();
