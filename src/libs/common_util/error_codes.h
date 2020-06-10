@@ -8,7 +8,7 @@
 #include <limits>
 #include <string>
 
-namespace CuptiSamples {
+namespace rlscope {
 namespace error {
 
 enum Code : int {
@@ -35,6 +35,6 @@ enum Code : int {
 };
 
 } // namespace error
-} // namespace CuptiSamples
+} // namespace rlscope
 
 #endif //CUPTI_SAMPLES_ERROR_CODES_H

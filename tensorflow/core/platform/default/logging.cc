@@ -38,7 +38,7 @@ limitations under the License.
 #include <string>
 #include <unordered_map>
 
-namespace tensorflow {
+namespace rlscope {
 namespace internal {
 
 #if defined(PLATFORM_POSIX_ANDROID)
@@ -85,7 +85,7 @@ void LogMessage::GenerateLogMessage() {
 #else
 
 void LogMessage::GenerateLogMessage() {
-  static EnvTime* env_time = tensorflow::EnvTime::Default();
+  static EnvTime* env_time = rlscope::EnvTime::Default();
   uint64 now_micros = env_time->NowMicros();
   time_t now_seconds = static_cast<time_t>(now_micros / 1000000);
   int32 micros_remainder = static_cast<int32>(now_micros % 1000000);
@@ -214,7 +214,7 @@ int64 MinLogLevelFromEnv() {
   // the value we're interested on to disable printing is the maximum severity.
   // See also http://llvm.org/docs/LibFuzzer.html#fuzzer-friendly-build-mode
 #ifdef FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION
-  return tensorflow::NUM_SEVERITIES;
+  return rlscope::NUM_SEVERITIES;
 #else
   const char* tf_env_var_val = getenv("IML_CPP_MIN_LOG_LEVEL");
   return LogLevelStrToInt(tf_env_var_val);
@@ -336,4 +336,4 @@ string* CheckOpMessageBuilder::NewString() {
 }
 
 }  // namespace internal
-}  // namespace tensorflow
+}  // namespace rlscope

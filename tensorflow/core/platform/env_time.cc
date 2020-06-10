@@ -15,8 +15,8 @@ limitations under the License.
 
 #include "tensorflow/core/platform/env_time.h"
 
-namespace tensorflow {
+namespace rlscope {
 
 EnvTime::EnvTime() {}
 
-}  // namespace tensorflow
+}  // namespace rlscope

@@ -94,7 +94,7 @@ namespace {
 
 }  // namespace
 
-namespace tensorflow {
+namespace rlscope {
 
 class CUDAAPIProfiler;
 
@@ -1019,5 +1019,5 @@ std::unique_ptr<DeviceTracer> CreateDeviceTracer() {
 
 
 
-}  // namespace tensorflow
+}  // namespace rlscope
 

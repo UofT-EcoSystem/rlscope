@@ -13,7 +13,7 @@
 
 using namespace Eigen;
 
-namespace tensorflow {
+namespace rlscope {
 
 template <typename T>
 void PrintGot(const T& got) {

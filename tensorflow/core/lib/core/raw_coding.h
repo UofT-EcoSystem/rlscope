@@ -20,7 +20,7 @@ limitations under the License.
 #include "tensorflow/core/platform/byte_order.h"
 #include "tensorflow/core/platform/types.h"
 
-namespace tensorflow {
+namespace rlscope {
 namespace core {
 
 // Lower-level versions of Get... that read directly from a character buffer
@@ -66,6 +66,6 @@ inline uint64 DecodeFixed64(const char* ptr) {
 }
 
 }  // namespace core
-}  // namespace tensorflow
+}  // namespace rlscope
 
 #endif  // TENSORFLOW_CORE_LIB_CORE_RAW_CODING_H_

@@ -13,7 +13,7 @@
 #include <cupti.h>
 #include <cuda.h>
 
-namespace tensorflow {
+namespace rlscope {
 
 static std::shared_ptr<CuptiAPI> _cupti_api;
 

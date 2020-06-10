@@ -24,7 +24,7 @@ limitations under the License.
 #include "tensorflow/core/platform/types.h"
 
 // Basic string utility routines
-namespace tensorflow {
+namespace rlscope {
 namespace str_util {
 
 // Returns a version of 'src' where unprintable characters have been
@@ -162,7 +162,7 @@ string Join(const T& s, const char* sep) {
   string result;
   bool first = true;
   for (const auto& x : s) {
-    tensorflow::strings::StrAppend(&result, (first ? "" : sep), x);
+    rlscope::strings::StrAppend(&result, (first ? "" : sep), x);
     first = false;
   }
   return result;
@@ -229,6 +229,6 @@ std::vector<string> Split(StringPiece text, char delims, Predicate p) {
 size_t Strnlen(const char* str, const size_t string_max_len);
 
 }  // namespace str_util
-}  // namespace tensorflow
+}  // namespace rlscope
 
 #endif  // TENSORFLOW_CORE_LIB_STRINGS_STR_UTIL_H_

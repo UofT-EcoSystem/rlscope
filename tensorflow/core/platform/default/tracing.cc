@@ -21,7 +21,7 @@ limitations under the License.
 #include <unistd.h>
 #endif
 
-namespace tensorflow {
+namespace rlscope {
 namespace tracing {
 namespace {
 bool TryGetEnv(const char* name, const char** value) {
@@ -44,4 +44,4 @@ const char* GetLogDir() {
   return ".";  // Default to current directory.
 }
 }  // namespace tracing
-}  // namespace tensorflow
+}  // namespace rlscope

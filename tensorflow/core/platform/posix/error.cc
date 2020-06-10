@@ -21,7 +21,7 @@ limitations under the License.
 #include "tensorflow/core/lib/core/status.h"
 #include "tensorflow/core/lib/strings/strcat.h"
 
-namespace tensorflow {
+namespace rlscope {
 
 error::Code ErrnoToCode(int err_number) {
   error::Code code;
@@ -175,4 +175,4 @@ Status IOError(const string& context, int err_number) {
   return Status(code, strings::StrCat(context, "; ", strerror(err_number)));
 }
 
-}  // namespace tensorflow
+}  // namespace rlscope

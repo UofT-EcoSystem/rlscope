@@ -25,7 +25,7 @@ limitations under the License.
 #include "tensorflow/core/platform/file_system.h"
 #include "tensorflow/core/platform/platform.h"
 
-namespace tensorflow {
+namespace rlscope {
 
 FileSystem::~FileSystem() {}
 
@@ -44,7 +44,7 @@ Status FileSystem::IsDirectory(const string& name) {
   if (stat.is_directory) {
     return Status::OK();
   }
-  return Status(tensorflow::error::FAILED_PRECONDITION, "Not a directory");
+  return Status(rlscope::error::FAILED_PRECONDITION, "Not a directory");
 }
 
 void FileSystem::FlushCaches() {}
@@ -162,7 +162,7 @@ Status FileSystem::RecursivelyCreateDir(const string& dirname) {
   for (const StringPiece sub_dir : sub_dirs) {
     built_path = io::JoinPath(built_path, sub_dir);
     Status status = CreateDir(io::CreateURI(scheme, host, built_path));
-    if (!status.ok() && status.code() != tensorflow::error::ALREADY_EXISTS) {
+    if (!status.ok() && status.code() != rlscope::error::ALREADY_EXISTS) {
       return status;
     }
   }
@@ -173,4 +173,4 @@ Status FileSystem::CopyFile(const string& src, const string& target) {
   return FileSystemCopyFile(this, src, this, target);
 }
 
-}  // namespace tensorflow
+}  // namespace rlscope

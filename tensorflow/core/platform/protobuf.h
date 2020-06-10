@@ -20,9 +20,9 @@ limitations under the License.
 #include "tensorflow/core/platform/types.h"
 
 // Import whatever namespace protobuf comes from into the
-// ::tensorflow::protobuf namespace.
+// ::rlscope::protobuf namespace.
 //
-// TensorFlow code should use the ::tensorflow::protobuf namespace to
+// TensorFlow code should use the ::rlscope::protobuf namespace to
 // refer to all protobuf APIs.
 
 #if defined(PLATFORM_GOOGLE) && !defined(USE_DEFAULT_PROTOBUF)
@@ -31,7 +31,7 @@ limitations under the License.
 #include "tensorflow/core/platform/default/protobuf.h"
 #endif
 
-namespace tensorflow {
+namespace rlscope {
 // Parses a protocol buffer contained in a string in the binary wire format.
 // Returns true on success. Note: Unlike protobuf's builtin ParseFromString,
 // this function has no size restrictions on the total size of the encoded
@@ -50,6 +50,6 @@ inline void SetProtobufStringSwapAllowed(string* src, string* dest) {
   dest->swap(*src);
 }
 
-}  // namespace tensorflow
+}  // namespace rlscope
 
 #endif  // TENSORFLOW_CORE_PLATFORM_PROTOBUF_H_

@@ -17,7 +17,7 @@
 
 #include <boost/filesystem.hpp>
 
-namespace tensorflow {
+namespace rlscope {
 
 }
 

@@ -4,7 +4,7 @@
 
 #include "analysis/trace_file_parser.h"
 #include "cuda_api_profiler/generic_logging.h"
-#include "cuda_api_profiler/debug_flags.h"
+#include "common_util.h"
 #include "trace_file_parser.h"
 
 #include <Eigen/Dense>
@@ -39,7 +39,7 @@ using namespace Eigen;
 #define CSV_ESCAPE_CHAR '\\'
 #define CSV_QUOTE_CHAR '"'
 
-namespace tensorflow {
+namespace rlscope {
 
 const std::regex PROCESS_OPERATION_REGEX = std::regex(R"(\[.*\])");
 
@@ -935,21 +935,6 @@ MyStatus TraceFileWalker::Init() {
 
   return MyStatus::OK();
 }
-
-std::vector<std::string> StringSplit(const std::string& s, std::string rgx_str) {
-  std::vector<std::string> elems;
-
-  std::regex rgx (rgx_str);
-  std::sregex_token_iterator iter(s.begin(), s.end(), rgx, -1);
-  std::sregex_token_iterator end;
-  while (iter != end)  {
-    //std::cout << "S43:" << *iter << std::endl;
-    elems.push_back(*iter);
-    ++iter;
-  }
-  return elems;
-}
-
 
 MyStatus RawTraceParser::Init() {
   MyStatus status = MyStatus::OK();
@@ -2632,5 +2617,5 @@ MyStatus NvprofGPUTraceFileType::ParseRowEvent(
 }
 
 
-} // namespace tensorflow
+} // namespace rlscope
 

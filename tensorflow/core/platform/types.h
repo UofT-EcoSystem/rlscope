@@ -31,9 +31,9 @@ limitations under the License.
 #error Define the appropriate PLATFORM_<foo> macro for this platform
 #endif
 
-namespace tensorflow {
+namespace rlscope {
 
-// Define tensorflow::string to refer to appropriate platform specific type.
+// Define rlscope::string to refer to appropriate platform specific type.
 // TODO(josh11b): Move this into the platform/*/integral_types.h files
 // above, and rename them platform/*/types.h.
 #if defined(PLATFORM_GOOGLE)
@@ -58,12 +58,12 @@ static const int64 kint64max = ((int64)0x7FFFFFFFFFFFFFFFll);
 // A typedef for a uint64 used as a short fingerprint.
 typedef uint64 Fprint;
 
-}  // namespace tensorflow
+}  // namespace rlscope
 
-// Alias namespace ::stream_executor as ::tensorflow::se.
+// Alias namespace ::stream_executor as ::rlscope::se.
 namespace stream_executor {}
-namespace tensorflow {
+namespace rlscope {
 namespace se = ::stream_executor;
-}  // namespace tensorflow
+}  // namespace rlscope
 
 #endif  // TENSORFLOW_PLATFORM_TYPES_H_

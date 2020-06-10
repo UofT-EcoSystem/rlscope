@@ -39,7 +39,7 @@ limitations under the License.
 #include <pmmintrin.h>
 #endif
 
-namespace tensorflow {
+namespace rlscope {
 namespace port {
 
 static void SetDenormalState(bool flush_zero_mode, bool denormals_zero_mode) {
@@ -90,4 +90,4 @@ ScopedDontFlushDenormal::ScopedDontFlushDenormal() {
 }
 
 }  // namespace port
-}  // namespace tensorflow
+}  // namespace rlscope

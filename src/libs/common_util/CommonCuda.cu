@@ -6,7 +6,7 @@
 
 #include <iostream>
 
-namespace CuptiSamples {
+namespace rlscope {
 
 // Device code
 __global__ void VecAdd(const int* A, const int* B, int* C, int N)
@@ -165,4 +165,4 @@ void ComputeVectorAddSubtract(size_t N)
         free(h_D);
 }
 
-} // namespace CuptiSamples
+} // namespace rlscope

@@ -23,7 +23,7 @@ limitations under the License.
 #include "tensorflow/core/lib/gtl/stl_util.h"
 #include "tensorflow/core/platform/logging.h"
 
-namespace tensorflow {
+namespace rlscope {
 namespace strings {
 
 AlphaNum::AlphaNum(Hex hex) {
@@ -206,4 +206,4 @@ void StrAppend(string *result, const AlphaNum &a, const AlphaNum &b,
 }
 
 }  // namespace strings
-}  // namespace tensorflow
+}  // namespace rlscope

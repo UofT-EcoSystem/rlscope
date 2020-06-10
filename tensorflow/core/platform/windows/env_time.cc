@@ -19,7 +19,7 @@ limitations under the License.
 #include <windows.h>
 #include <chrono>
 
-namespace tensorflow {
+namespace rlscope {
 
 namespace {
 
@@ -81,4 +81,4 @@ EnvTime* EnvTime::Default() {
   return default_time_env;
 }
 
-}  // namespace tensorflow
+}  // namespace rlscope

@@ -9,7 +9,7 @@
 
 #include <nlohmann/json.hpp>
 
-namespace tensorflow {
+namespace rlscope {
 
 class PollingUtil {
 public:
@@ -31,6 +31,6 @@ public:
 
 };
 
-} // namespace tensorflow
+} // namespace rlscope
 
 #endif //IML_SAMPLE_PERIODS_H

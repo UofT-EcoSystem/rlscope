@@ -26,8 +26,8 @@ limitations under the License.
 #include <cassert>
 #include <iostream>
 
-//using tensorflow::GraphDef;
-//using tensorflow::NodeDef;
+//using rlscope::GraphDef;
+//using rlscope::NodeDef;
 
 //LOG(INFO) << "SavedModel load for tags { " << str_util::Join(tags, " ")
 //<< " }; Status: " << status_str << ". Took "
@@ -314,7 +314,7 @@ TF_Operation* RandomUniform(TF_Operation* shape, TF_DataType dtype,
 void Split3Helper(TF_Operation* input, TF_Graph* graph, TF_Status* s,
                   const char* name, TF_Operation** op) {
   TF_Operation* zero = ScalarConst(
-      0, graph, s, ::tensorflow::strings::StrCat(name, "_const0").c_str());
+      0, graph, s, ::rlscope::strings::StrCat(name, "_const0").c_str());
   TF_OperationDescription* desc = TF_NewOperation(graph, "Split", name);
   TF_AddInput(desc, {zero, 0});
   TF_AddInput(desc, {input, 0});
@@ -337,7 +337,7 @@ TF_Operation* Split3(TF_Operation* input, TF_Graph* graph, TF_Status* s,
   return op;
 }
 
-bool IsPlaceholder(const tensorflow::NodeDef& node_def) {
+bool IsPlaceholder(const rlscope::NodeDef& node_def) {
   if (node_def.op() != "Placeholder" || node_def.name() != "feed") {
     return false;
   }
@@ -345,7 +345,7 @@ bool IsPlaceholder(const tensorflow::NodeDef& node_def) {
   bool found_shape = false;
   for (const auto& attr : node_def.attr()) {
     if (attr.first == "dtype") {
-      if (attr.second.type() == tensorflow::DT_INT32) {
+      if (attr.second.type() == rlscope::DT_INT32) {
         found_dtype = true;
       } else {
         return false;
@@ -357,7 +357,7 @@ bool IsPlaceholder(const tensorflow::NodeDef& node_def) {
   return found_dtype && found_shape;
 }
 
-bool IsScalarConst(const tensorflow::NodeDef& node_def, int v) {
+bool IsScalarConst(const rlscope::NodeDef& node_def, int v) {
   if (node_def.op() != "Const" || node_def.name() != "scalar") {
     return false;
   }
@@ -365,7 +365,7 @@ bool IsScalarConst(const tensorflow::NodeDef& node_def, int v) {
   bool found_value = false;
   for (const auto& attr : node_def.attr()) {
     if (attr.first == "dtype") {
-      if (attr.second.type() == tensorflow::DT_INT32) {
+      if (attr.second.type() == rlscope::DT_INT32) {
         found_dtype = true;
       } else {
         return false;
@@ -383,7 +383,7 @@ bool IsScalarConst(const tensorflow::NodeDef& node_def, int v) {
   return found_dtype && found_value;
 }
 
-bool IsAddN(const tensorflow::NodeDef& node_def, int n) {
+bool IsAddN(const rlscope::NodeDef& node_def, int n) {
   if (node_def.op() != "AddN" || node_def.name() != "add" ||
       node_def.input_size() != n) {
     return false;
@@ -392,7 +392,7 @@ bool IsAddN(const tensorflow::NodeDef& node_def, int n) {
   bool found_n = false;
   for (const auto& attr : node_def.attr()) {
     if (attr.first == "T") {
-      if (attr.second.type() == tensorflow::DT_INT32) {
+      if (attr.second.type() == rlscope::DT_INT32) {
         found_t = true;
       } else {
         return false;
@@ -408,12 +408,12 @@ bool IsAddN(const tensorflow::NodeDef& node_def, int n) {
   return found_t && found_n;
 }
 
-bool IsNeg(const tensorflow::NodeDef& node_def, const string& input) {
+bool IsNeg(const rlscope::NodeDef& node_def, const string& input) {
   return node_def.op() == "Neg" && node_def.name() == "neg" &&
          node_def.input_size() == 1 && node_def.input(0) == input;
 }
 
-bool GetGraphDef(TF_Graph* graph, tensorflow::GraphDef* graph_def) {
+bool GetGraphDef(TF_Graph* graph, rlscope::GraphDef* graph_def) {
   TF_Status* s = TF_NewStatus();
   TF_Buffer* buffer = TF_NewBuffer();
   TF_GraphToGraphDef(graph, buffer, s);
@@ -425,7 +425,7 @@ bool GetGraphDef(TF_Graph* graph, tensorflow::GraphDef* graph_def) {
   return ret;
 }
 
-bool GetNodeDef(TF_Operation* oper, tensorflow::NodeDef* node_def) {
+bool GetNodeDef(TF_Operation* oper, rlscope::NodeDef* node_def) {
   TF_Status* s = TF_NewStatus();
   TF_Buffer* buffer = TF_NewBuffer();
   TF_OperationToNodeDef(oper, buffer, s);
@@ -437,7 +437,7 @@ bool GetNodeDef(TF_Operation* oper, tensorflow::NodeDef* node_def) {
   return ret;
 }
 
-bool GetFunctionDef(TF_Function* func, tensorflow::FunctionDef* func_def) {
+bool GetFunctionDef(TF_Function* func, rlscope::FunctionDef* func_def) {
   TF_Status* s = TF_NewStatus();
   TF_Buffer* buffer = TF_NewBuffer();
   TF_FunctionToFunctionDef(func, buffer, s);
@@ -450,7 +450,7 @@ bool GetFunctionDef(TF_Function* func, tensorflow::FunctionDef* func_def) {
 }
 
 bool GetAttrValue(TF_Operation* oper, const char* attr_name,
-                  tensorflow::AttrValue* attr_value, TF_Status* s) {
+                  rlscope::AttrValue* attr_value, TF_Status* s) {
   TF_Buffer* buffer = TF_NewBuffer();
   TF_OperationGetAttrValueProto(oper, attr_name, buffer, s);
   bool ret = TF_GetCode(s) == TF_OK;
@@ -460,18 +460,18 @@ bool GetAttrValue(TF_Operation* oper, const char* attr_name,
 }
 
 std::vector<std::pair<string, string>> GetGradDefs(
-    const tensorflow::GraphDef& graph_def) {
+    const rlscope::GraphDef& graph_def) {
   std::vector<std::pair<string, string>> grads;
-  for (const tensorflow::GradientDef& grad : graph_def.library().gradient()) {
+  for (const rlscope::GradientDef& grad : graph_def.library().gradient()) {
     grads.emplace_back(grad.function_name(), grad.gradient_func());
   }
   std::sort(grads.begin(), grads.end());
   return grads;
 }
 
-std::vector<string> GetFuncNames(const tensorflow::GraphDef& graph_def) {
+std::vector<string> GetFuncNames(const rlscope::GraphDef& graph_def) {
   std::vector<string> names;
-  for (const tensorflow::FunctionDef& func : graph_def.library().function()) {
+  for (const rlscope::FunctionDef& func : graph_def.library().function()) {
     names.push_back(func.signature().name());
   }
   std::sort(names.begin(), names.end());

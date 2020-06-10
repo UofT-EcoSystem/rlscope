@@ -19,7 +19,7 @@
 
 #define THREAD_ID_UNSET (-1)
 
-namespace tensorflow {
+namespace rlscope {
 
 using namespace iml;
 

@@ -34,8 +34,7 @@ using json = nlohmann::json;
 
 //#include "cuda_api_profiler/generic_logging.h"
 //#include "cuda_api_profiler/debug_flags.h"
-#include "common/my_status.h"
-#include "common/json.h"
+#include "common_util.h"
 
 #define MAYBE_RETURN_ERROR(status) \
   if (status.code() != Status::OK().code()) { \
@@ -45,7 +44,7 @@ using json = nlohmann::json;
 
 namespace bp = boost::process;
 
-namespace tensorflow {
+namespace rlscope {
 
 Globals globals;
 
@@ -67,7 +66,7 @@ Globals::Globals() {
 //          << "  CMD = " << cmdline;
 
 //  VLOG(1) << "SKIP creating device_tracer";
-  device_tracer = tensorflow::CreateDeviceTracer();
+  device_tracer = rlscope::CreateDeviceTracer();
   auto IML_TRACE_AT_START = getenv("IML_TRACE_AT_START");
   VLOG(1) << "IML_TRACE_AT_START = " << IML_TRACE_AT_START;
   if (device_tracer && env_is_on("IML_TRACE_AT_START", false, true)) {

@@ -16,7 +16,7 @@ limitations under the License.
 #ifndef TENSORFLOW_CORE_PLATFORM_CONTEXT_H_
 #define TENSORFLOW_CORE_PLATFORM_CONTEXT_H_
 
-namespace tensorflow {
+namespace rlscope {
 
 enum class ContextKind {
   // Initial state with default (empty) values.
@@ -34,7 +34,7 @@ class Context;
 // destroyed.
 class WithContext;
 
-}  // namespace tensorflow
+}  // namespace rlscope
 
 #if defined(PLATFORM_GOOGLE)
 #include "tensorflow/core/platform/google/context.h"

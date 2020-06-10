@@ -27,7 +27,7 @@ limitations under the License.
 #include "tensorflow/core/lib/core/stringpiece.h"
 #include "tensorflow/core/platform/types.h"
 
-namespace tensorflow {
+namespace rlscope {
 
 extern uint32 Hash32(const char* data, size_t n, uint32 seed);
 extern uint64 Hash64(const char* data, size_t n, uint64 seed);
@@ -53,7 +53,7 @@ inline uint64 Hash64CombineUnordered(uint64 a, uint64 b) { return a + b; }
 // Hash functor suitable for use with power-of-two sized hashtables.  Use
 // instead of std::hash<T>.
 //
-// In particular, tensorflow::hash is not the identity function for pointers.
+// In particular, rlscope::hash is not the identity function for pointers.
 // This is important for power-of-two sized hashtables like FlatMap and FlatSet,
 // because otherwise they waste the majority of their hash buckets.
 //
@@ -71,7 +71,7 @@ struct hash<T, typename std::enable_if<std::is_enum<T>::value>::type> {
     // http://www.open-std.org/jtc1/sc22/wg21/docs/lwg-defects.html#2148
     //
     // We should be able to remove this and use the default
-    // tensorflow::hash<EnumTy>() once we stop building with GCC versions old
+    // rlscope::hash<EnumTy>() once we stop building with GCC versions old
     // enough to not have this defect fixed.
     return std::hash<uint64>()(static_cast<uint64>(value));
   }
@@ -99,7 +99,7 @@ struct hash<StringPiece> {
     return static_cast<size_t>(Hash64(sp.data(), sp.size()));
   }
 };
-using StringPieceHasher = ::tensorflow::hash<StringPiece>;
+using StringPieceHasher = ::rlscope::hash<StringPiece>;
 
 template <typename T, typename U>
 struct hash<std::pair<T, U>> {
@@ -108,6 +108,6 @@ struct hash<std::pair<T, U>> {
   }
 };
 
-}  // namespace tensorflow
+}  // namespace rlscope
 
 #endif  // TENSORFLOW_CORE_LIB_HASH_HASH_H_

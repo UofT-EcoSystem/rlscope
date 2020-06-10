@@ -19,7 +19,7 @@ limitations under the License.
 #include "tensorflow/core/platform/platform.h"
 #include "tensorflow/core/platform/types.h"
 
-namespace tensorflow {
+namespace rlscope {
 namespace port {
 
 // Returns true iff NUMA functions are supported.
@@ -58,5 +58,5 @@ void NUMAFree(void* ptr, size_t size);
 int NUMAGetMemAffinity(const void* ptr);
 
 }  // namespace port
-}  // namespace tensorflow
+}  // namespace rlscope
 #endif  // TENSORFLOW_CORE_PLATFORM_NUMA_H_

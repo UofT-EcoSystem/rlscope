@@ -24,7 +24,7 @@ limitations under the License.
 #include <mutex>
 #include "tensorflow/core/platform/thread_annotations.h"
 
-namespace tensorflow {
+namespace rlscope {
 
 #undef mutex_lock
 
@@ -59,10 +59,10 @@ class LOCKABLE mutex {
   external_mu_space mu_;
 };
 
-// Mimic a subset of the std::unique_lock<tensorflow::mutex> functionality.
+// Mimic a subset of the std::unique_lock<rlscope::mutex> functionality.
 class SCOPED_LOCKABLE mutex_lock {
  public:
-  typedef ::tensorflow::mutex mutex_type;
+  typedef ::rlscope::mutex mutex_type;
 
   explicit mutex_lock(mutex_type& mu) EXCLUSIVE_LOCK_FUNCTION(mu) : mu_(&mu) {
     mu_->lock();
@@ -97,11 +97,11 @@ class SCOPED_LOCKABLE mutex_lock {
 // Catch bug where variable name is omitted, e.g. mutex_lock (mu);
 #define mutex_lock(x) static_assert(0, "mutex_lock_decl_missing_var_name");
 
-// Mimic a subset of the std::shared_lock<tensorflow::mutex> functionality.
+// Mimic a subset of the std::shared_lock<rlscope::mutex> functionality.
 // Name chosen to minimise conflicts with the tf_shared_lock macro, below.
 class SCOPED_LOCKABLE tf_shared_lock {
  public:
-  typedef ::tensorflow::mutex mutex_type;
+  typedef ::rlscope::mutex mutex_type;
 
   explicit tf_shared_lock(mutex_type& mu) SHARED_LOCK_FUNCTION(mu) : mu_(&mu) {
     mu_->lock_shared();
@@ -171,6 +171,6 @@ inline ConditionResult WaitForMilliseconds(mutex_lock* mu,
   return (s == std::cv_status::timeout) ? kCond_Timeout : kCond_MaybeNotified;
 }
 
-}  // namespace tensorflow
+}  // namespace rlscope
 
 #endif  // TENSORFLOW_CORE_PLATFORM_DEFAULT_MUTEX_H_

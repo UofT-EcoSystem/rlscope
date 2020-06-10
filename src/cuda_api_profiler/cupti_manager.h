@@ -14,7 +14,7 @@
 #include <cuda.h>
 #include <cupti.h>
 
-namespace tensorflow {
+namespace rlscope {
 
 class CUPTIManager;
 

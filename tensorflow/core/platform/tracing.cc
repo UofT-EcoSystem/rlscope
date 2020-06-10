@@ -25,7 +25,7 @@ limitations under the License.
 #include "tensorflow/core/lib/strings/strcat.h"
 #include "tensorflow/core/platform/logging.h"
 
-namespace tensorflow {
+namespace rlscope {
 namespace tracing {
 namespace {
 std::atomic<uint64> unique_arg{1};
@@ -82,4 +82,4 @@ const TraceCollector* GetTraceCollector() {
 }
 
 }  // namespace tracing
-}  // namespace tensorflow
+}  // namespace rlscope

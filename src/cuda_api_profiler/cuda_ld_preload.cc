@@ -19,7 +19,7 @@
 
 //#error "CUDA LD_PRELOAD file was included"
 
-using namespace tensorflow;
+using namespace rlscope;
 
 CudaAPI::CudaAPI() {
   cudaLaunchKernel = nullptr;

@@ -18,7 +18,7 @@
 #include <sys/time.h>
 #include <sys/resource.h>
 
-namespace tensorflow {
+namespace rlscope {
 
 template <typename K, typename V>
 class OrderedMap {

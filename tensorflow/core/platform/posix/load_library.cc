@@ -21,7 +21,7 @@ limitations under the License.
 
 #include "tensorflow/core/platform/env.h"
 
-namespace tensorflow {
+namespace rlscope {
 
 namespace internal {
 
@@ -100,4 +100,4 @@ string FormatLibraryFileName(const string& name, const string& version) {
 
 }  // namespace internal
 
-}  // namespace tensorflow
+}  // namespace rlscope

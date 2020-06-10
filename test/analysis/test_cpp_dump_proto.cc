@@ -11,7 +11,7 @@
 
 using namespace Eigen;
 
-namespace tensorflow {
+namespace rlscope {
 
 //TEST(FailingTest, OneEqZero) {
 // EXPECT_EQ(1, 0);

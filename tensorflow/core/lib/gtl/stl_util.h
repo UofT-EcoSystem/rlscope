@@ -26,7 +26,7 @@ limitations under the License.
 #include <utility>
 #include <vector>
 
-namespace tensorflow {
+namespace rlscope {
 namespace gtl {
 
 // Returns a char* pointing to the beginning of a string's internal buffer.
@@ -115,6 +115,6 @@ inline void STLSortAndRemoveDuplicates(T* v) {
 }
 
 }  // namespace gtl
-}  // namespace tensorflow
+}  // namespace rlscope
 
 #endif  // TENSORFLOW_LIB_GTL_STL_UTIL_H_

@@ -29,7 +29,7 @@ limitations under the License.
 #include "tensorflow/core/platform/macros.h"
 #include "tensorflow/core/platform/types.h"
 
-namespace tensorflow {
+namespace rlscope {
 namespace strings {
 
 // Return a C++ string
@@ -47,6 +47,6 @@ extern void Appendf(string* dst, const char* format, ...)
 extern void Appendv(string* dst, const char* format, va_list ap);
 
 }  // namespace strings
-}  // namespace tensorflow
+}  // namespace rlscope
 
 #endif  // TENSORFLOW_CORE_LIB_STRINGS_STRINGPRINTF_H_

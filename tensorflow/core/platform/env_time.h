@@ -19,7 +19,7 @@ limitations under the License.
 
 #include "tensorflow/core/platform/types.h"
 
-namespace tensorflow {
+namespace rlscope {
 
 /// \brief An interface used by the tensorflow implementation to
 /// access timer related operations.
@@ -51,6 +51,6 @@ class EnvTime {
   virtual uint64 NowSeconds() { return NowNanos() / kSecondsToNanos; }
 };
 
-}  // namespace tensorflow
+}  // namespace rlscope
 
 #endif  // TENSORFLOW_CORE_PLATFORM_ENV_TIME_H_

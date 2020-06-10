@@ -45,7 +45,7 @@ limitations under the License.
 #include <thread>
 #endif
 
-namespace tensorflow {
+namespace rlscope {
 namespace port {
 
 void InitMain(const char* usage, int* argc, char*** argv) {}
@@ -109,7 +109,7 @@ int GetCurrentCPU() {
 }
 
 int NumHyperthreadsPerCore() {
-  static const int ht_per_core = tensorflow::port::CPUIDNumSMT();
+  static const int ht_per_core = rlscope::port::CPUIDNumSMT();
   return (ht_per_core > 0) ? ht_per_core : 1;
 }
 
@@ -216,4 +216,4 @@ int64 AvailableRam() {
 }
 
 }  // namespace port
-}  // namespace tensorflow
+}  // namespace rlscope

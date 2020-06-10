@@ -14,7 +14,7 @@
 
 #include "get_env_var.h"
 
-namespace tensorflow {
+namespace rlscope {
 
 int ParseFloat(const char* str, size_t size) {
   // Ideally we would use env_var / safe_strto64, but it is

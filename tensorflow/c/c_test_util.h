@@ -30,7 +30,7 @@ limitations under the License.
 // Avoid gtest dependency
 #include "tensorflow/core/platform/test_lite.h"
 
-using ::tensorflow::string;
+using ::rlscope::string;
 
 typedef std::unique_ptr<TF_Tensor, decltype(&TF_DeleteTensor)>
     unique_tensor_ptr;
@@ -105,30 +105,30 @@ TF_Operation* Split3(TF_Operation* input, TF_Graph* graph, TF_Status* s,
                      const char* name = "split3");
 
 #if TF_BUILD_ONLY
-bool IsPlaceholder(const tensorflow::NodeDef& node_def);
+bool IsPlaceholder(const rlscope::NodeDef& node_def);
 
-bool IsScalarConst(const tensorflow::NodeDef& node_def, int v);
+bool IsScalarConst(const rlscope::NodeDef& node_def, int v);
 
-bool IsAddN(const tensorflow::NodeDef& node_def, int n);
+bool IsAddN(const rlscope::NodeDef& node_def, int n);
 
-bool IsNeg(const tensorflow::NodeDef& node_def, const string& input);
+bool IsNeg(const rlscope::NodeDef& node_def, const string& input);
 
-bool GetGraphDef(TF_Graph* graph, tensorflow::GraphDef* graph_def);
+bool GetGraphDef(TF_Graph* graph, rlscope::GraphDef* graph_def);
 
-bool GetNodeDef(TF_Operation* oper, tensorflow::NodeDef* node_def);
+bool GetNodeDef(TF_Operation* oper, rlscope::NodeDef* node_def);
 
-bool GetFunctionDef(TF_Function* func, tensorflow::FunctionDef* func_def);
+bool GetFunctionDef(TF_Function* func, rlscope::FunctionDef* func_def);
 
 bool GetAttrValue(TF_Operation* oper, const char* attr_name,
-                  tensorflow::AttrValue* attr_value, TF_Status* s);
+                  rlscope::AttrValue* attr_value, TF_Status* s);
 
 // Returns a sorted vector of std::pair<function_name, gradient_func> from
 // graph_def.library().gradient()
 std::vector<std::pair<string, string>> GetGradDefs(
-    const tensorflow::GraphDef& graph_def);
+    const rlscope::GraphDef& graph_def);
 
 // Returns a sorted vector of names contained in `grad_def`
-std::vector<string> GetFuncNames(const tensorflow::GraphDef& graph_def);
+std::vector<string> GetFuncNames(const rlscope::GraphDef& graph_def);
 #endif // TF_BUILD_ONLY
 
 class CSession {

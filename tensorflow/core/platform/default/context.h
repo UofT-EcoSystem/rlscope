@@ -16,7 +16,7 @@ limitations under the License.
 #ifndef TENSORFLOW_CORE_PLATFORM_DEFAULT_CONTEXT_H_
 #define TENSORFLOW_CORE_PLATFORM_DEFAULT_CONTEXT_H_
 
-namespace tensorflow {
+namespace rlscope {
 
 class Context {
  public:
@@ -32,6 +32,6 @@ class WithContext {
   ~WithContext() {}
 };
 
-}  // namespace tensorflow
+}  // namespace rlscope
 
 #endif  // TENSORFLOW_CORE_PLATFORM_DEFAULT_CONTEXT_H_

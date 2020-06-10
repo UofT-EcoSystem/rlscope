@@ -29,7 +29,7 @@ limitations under the License.
 // TODO(mrry): Prevent this Windows.h #define from leaking out of our headers.
 #undef ERROR
 
-namespace tensorflow {
+namespace rlscope {
 const int INFO = 0;            // base_logging::INFO;
 const int WARNING = 1;         // base_logging::WARNING;
 const int ERROR = 2;           // base_logging::ERROR;
@@ -109,20 +109,20 @@ class LogMessageFatal : public LogMessage {
 };
 
 #define _TF_LOG_INFO \
-  ::tensorflow::internal::LogMessage(__FILE__, __LINE__, ::tensorflow::INFO)
+  ::rlscope::internal::LogMessage(__FILE__, __LINE__, ::rlscope::INFO)
 #define _TF_LOG_WARNING \
-  ::tensorflow::internal::LogMessage(__FILE__, __LINE__, ::tensorflow::WARNING)
+  ::rlscope::internal::LogMessage(__FILE__, __LINE__, ::rlscope::WARNING)
 #define _TF_LOG_ERROR \
-  ::tensorflow::internal::LogMessage(__FILE__, __LINE__, ::tensorflow::ERROR)
+  ::rlscope::internal::LogMessage(__FILE__, __LINE__, ::rlscope::ERROR)
 #define _TF_LOG_FATAL \
-  ::tensorflow::internal::LogMessageFatal(__FILE__, __LINE__)
+  ::rlscope::internal::LogMessageFatal(__FILE__, __LINE__)
 
 #define _TF_LOG_QFATAL _TF_LOG_FATAL
 
-#define DECLARE_LOG_INFO(logger_stmt_name) ::tensorflow::internal::LogMessage logger_stmt_name(__FILE__, __LINE__, ::tensorflow::INFO)
-#define DECLARE_LOG_WARNING(logger_stmt_name) ::tensorflow::internal::LogMessage logger_stmt_name(__FILE__, __LINE__, ::tensorflow::WARNING)
-#define DECLARE_LOG_ERROR(logger_stmt_name) ::tensorflow::internal::LogMessage logger_stmt_name(__FILE__, __LINE__, ::tensorflow::ERROR)
-#define DECLARE_LOG_FATAL(logger_stmt_name) ::tensorflow::internal::LogMessageFatal logger_stmt_name(__FILE__, __LINE__)
+#define DECLARE_LOG_INFO(logger_stmt_name) ::rlscope::internal::LogMessage logger_stmt_name(__FILE__, __LINE__, ::rlscope::INFO)
+#define DECLARE_LOG_WARNING(logger_stmt_name) ::rlscope::internal::LogMessage logger_stmt_name(__FILE__, __LINE__, ::rlscope::WARNING)
+#define DECLARE_LOG_ERROR(logger_stmt_name) ::rlscope::internal::LogMessage logger_stmt_name(__FILE__, __LINE__, ::rlscope::ERROR)
+#define DECLARE_LOG_FATAL(logger_stmt_name) ::rlscope::internal::LogMessageFatal logger_stmt_name(__FILE__, __LINE__)
 
 #define LOG(severity) _TF_LOG_##severity
 
@@ -139,7 +139,7 @@ class LogMessageFatal : public LogMessage {
 #define VLOG_IS_ON(lvl)                                                     \
   (([](int level, const char* fname) {                                      \
     static const bool vmodule_activated =                                   \
-        ::tensorflow::internal::LogMessage::VmoduleActivated(fname, level); \
+        ::rlscope::internal::LogMessage::VmoduleActivated(fname, level); \
     return vmodule_activated;                                               \
   })(lvl, __FILE__))
 
@@ -148,9 +148,9 @@ class LogMessageFatal : public LogMessage {
 #define VLOG(level)                                              \
   TF_PREDICT_TRUE(!VLOG_IS_ON(level))                            \
   ? (void)0                                                      \
-  : ::tensorflow::internal::Voidifier() &                        \
-          ::tensorflow::internal::LogMessage(__FILE__, __LINE__, \
-                                             tensorflow::INFO)
+  : ::rlscope::internal::Voidifier() &                        \
+          ::rlscope::internal::LogMessage(__FILE__, __LINE__, \
+                                             rlscope::INFO)
 
 // CHECK dies with a fatal error if condition is not true.  It is *not*
 // controlled by NDEBUG, so the check will be executed regardless of
@@ -262,7 +262,7 @@ string* MakeCheckOpString(const T1& v1, const T2& v2, const char* exprtext) {
     if (TF_PREDICT_TRUE(v1 op v2))                                        \
       return NULL;                                                        \
     else                                                                  \
-      return ::tensorflow::internal::MakeCheckOpString(v1, v2, exprtext); \
+      return ::rlscope::internal::MakeCheckOpString(v1, v2, exprtext); \
   }                                                                       \
   inline string* name##Impl(int v1, int v2, const char* exprtext) {       \
     return name##Impl<int, int>(v1, v2, exprtext);                        \
@@ -270,7 +270,7 @@ string* MakeCheckOpString(const T1& v1, const T2& v2, const char* exprtext) {
   inline string* name##Impl(const size_t v1, const int v2,                \
                             const char* exprtext) {                       \
     if (TF_PREDICT_FALSE(v2 < 0)) {                                       \
-      return ::tensorflow::internal::MakeCheckOpString(v1, v2, exprtext); \
+      return ::rlscope::internal::MakeCheckOpString(v1, v2, exprtext); \
     }                                                                     \
     const size_t uval = (size_t)((unsigned)v1);                           \
     return name##Impl<size_t, size_t>(uval, v2, exprtext);                \
@@ -278,7 +278,7 @@ string* MakeCheckOpString(const T1& v1, const T2& v2, const char* exprtext) {
   inline string* name##Impl(const int v1, const size_t v2,                \
                             const char* exprtext) {                       \
     if (TF_PREDICT_FALSE(v2 >= std::numeric_limits<int>::max())) {        \
-      return ::tensorflow::internal::MakeCheckOpString(v1, v2, exprtext); \
+      return ::rlscope::internal::MakeCheckOpString(v1, v2, exprtext); \
     }                                                                     \
     const size_t uval = (size_t)((unsigned)v2);                           \
     return name##Impl<size_t, size_t>(v1, uval, exprtext);                \
@@ -300,12 +300,12 @@ TF_DEFINE_CHECK_OP_IMPL(Check_GT, >)
 // In optimized mode, use CheckOpString to hint to compiler that
 // the while condition is unlikely.
 #define CHECK_OP_LOG(name, op, val1, val2)                            \
-  while (::tensorflow::internal::CheckOpString _result =              \
-             ::tensorflow::internal::name##Impl(                      \
-                 ::tensorflow::internal::GetReferenceableValue(val1), \
-                 ::tensorflow::internal::GetReferenceableValue(val2), \
+  while (::rlscope::internal::CheckOpString _result =              \
+             ::rlscope::internal::name##Impl(                      \
+                 ::rlscope::internal::GetReferenceableValue(val1), \
+                 ::rlscope::internal::GetReferenceableValue(val2), \
                  #val1 " " #op " " #val2))                            \
-  ::tensorflow::internal::LogMessageFatal(__FILE__, __LINE__) << *(_result.str_)
+  ::rlscope::internal::LogMessageFatal(__FILE__, __LINE__) << *(_result.str_)
 
 #define CHECK_OP(name, op, val1, val2) CHECK_OP_LOG(name, op, val1, val2)
 
@@ -317,7 +317,7 @@ TF_DEFINE_CHECK_OP_IMPL(Check_GT, >)
 #define CHECK_GE(val1, val2) CHECK_OP(Check_GE, >=, val1, val2)
 #define CHECK_GT(val1, val2) CHECK_OP(Check_GT, >, val1, val2)
 #define CHECK_NOTNULL(val)                                 \
-  ::tensorflow::internal::CheckNotNull(__FILE__, __LINE__, \
+  ::rlscope::internal::CheckNotNull(__FILE__, __LINE__, \
                                        "'" #val "' Must be non NULL", (val))
 
 #ifndef NDEBUG
@@ -374,6 +374,6 @@ int64 MinLogLevelFromEnv();
 int64 MinVLogLevelFromEnv();
 
 }  // namespace internal
-}  // namespace tensorflow
+}  // namespace rlscope
 
 #endif  // TENSORFLOW_CORE_PLATFORM_DEFAULT_LOGGING_H_

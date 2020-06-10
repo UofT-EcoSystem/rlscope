@@ -35,12 +35,12 @@ limitations under the License.
   do {                           \
   } while (0)
 
-namespace tensorflow {
+namespace rlscope {
 namespace tracing {
 
 inline bool EventCollector::IsEnabled() { return false; }
 
 }  // namespace tracing
-}  // namespace tensorflow
+}  // namespace rlscope
 
 #endif  // TENSORFLOW_CORE_PLATFORM_DEFAULT_TRACING_IMPL_H_

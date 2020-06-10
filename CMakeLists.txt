@@ -17,6 +17,10 @@ project(iml LANGUAGES ${LANGUAGES})
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
 #message("> CMAKE_MODULE_PATH = ${CMAKE_MODULE_PATH}")
 
+# What to use for:
+# target_link_libraries(${TARGET} PRIVATE ...)
+set(CUDA_LINK_LIBRARIES_KEYWORD PRIVATE)
+
 include(LibFindMacros)
 
 if(DEFINED ENV{IML_INSTALL_PREFIX})
@@ -28,13 +32,26 @@ else()
 endif()
 message("  IML_INSTALL_PREFIX=${IML_INSTALL_PREFIX}")
 # Override system installation of libraries (e.g., gflags)
+message("    link_directories: ${IML_INSTALL_PREFIX}/lib")
 link_directories(BEFORE ${IML_INSTALL_PREFIX}/lib)
+message("    include_directories: ${IML_INSTALL_PREFIX}/include")
 include_directories(BEFORE ${IML_INSTALL_PREFIX}/include)
+
+
+#list(PREPEND CMAKE_PROGRAM_PATH "${IML_INSTALL_PREFIX}/bin")
+list(PREPEND CMAKE_INCLUDE_PATH ${IML_INSTALL_PREFIX}/include)
+list(PREPEND CMAKE_INCLUDE_PATH ${IML_INSTALL_PREFIX}/bin)
+list(PREPEND CMAKE_LIBRARY_PATH ${IML_INSTALL_PREFIX}/lib)
 
 # Use pkg-config to get hints about paths
 #libfind_pkg_check_modules(CUDAProfilingAPI_PKGCONF CUDAProfilingAPI)
 
 find_package(CUDAProfilingAPI REQUIRED)
+#TRY_ALIAS_LIB(cuda::nvperf_host nvperf_host_LIBRARY)
+#TRY_ALIAS_LIB(cuda::nvperf_target nvperf_target_LIBRARY)
+#TRY_ALIAS_LIB(cuda::nvtx nvtx_LIBRARY)
+#TRY_ALIAS_LIB(cuda::cupti cupti_LIBRARY)
+
 #include_directories(${CUDAProfilingAPI_INCLUDE_DIR})
 # Gets included by libraries that require it (e.g., profilerhost_util)
 #link_libraries(${CUDAProfilingAPI_LIBRARY})
@@ -328,7 +345,6 @@ endif()
 # TLDR: Oh well, just generate cpp files in iml/build/*.pb.cpp
 # set(PROTOBUF_GENERATE_CPP_APPEND_PATH OFF)
 protobuf_generate_cpp(PROTO_SRCS PROTO_HDRS
-        tensorflow/core/lib/core/error_codes.proto
         iml_profiler/protobuf/iml_prof.proto
         iml_profiler/protobuf/pyprof.proto
         )
@@ -400,6 +416,16 @@ function(AddFlags TARGET PROPERTY NEW_FLAGS)
     set_target_properties(${TARGET} PROPERTIES ${PROPERTY} "${OLD_FLAGS}" )
 endfunction()
 
+function(AddCUDA TARGET)
+    find_package(CUDA REQUIRED)
+    # message(">> CUDA_LIBRARIES = ${CUDA_LIBRARIES}")
+    target_link_libraries(${TARGET} PRIVATE ${CUDA_LIBRARIES})
+    target_include_directories(${TARGET} PRIVATE ${CUDA_INCLUDE_DIRS})
+    # NOTE: We want to link to the CUDA "driver API" which is contained in libcuda.so.
+    # Doesn't look like FindCUDA.cmake has a CUDA_*_LIBRARY for it though... oh well.
+    target_link_libraries(${TARGET} PRIVATE cuda)
+endfunction()
+
 function(AddUnitTest TARGET)
     find_package(GTest REQUIRED)
     # message("> GTEST_LIBRARIES = ${GTEST_LIBRARIES}")
@@ -409,11 +435,12 @@ function(AddUnitTest TARGET)
 endfunction()
 
 function(AddCUPTIDependencies TARGET)
-    find_package(Libcupti REQUIRED)
-    target_link_libraries(${TARGET} PUBLIC ${Libcupti_LIBRARY})
-    # https://stackoverflow.com/questions/26243169/cmake-target-include-directories-meaning-of-scope
-    # NOTE: I still don't fully understand the PUBLIC/PRIVATE/INTERFACE scope here...
-    target_include_directories(${TARGET} PRIVATE ${Libcupti_INCLUDE_DIR})
+    find_package(CUDAProfilingAPI REQUIRED)
+    target_link_libraries(${TARGET} PUBLIC ${CUDAProfilingAPI_LIBRARIES})
+    target_include_directories(${TARGET} PRIVATE ${CUDAProfilingAPI_INCLUDE_DIRS})
+    # message("> CUDAProfilingAPI_LIBRARIES = ${CUDAProfilingAPI_LIBRARIES}")
+    # message("> CUDAProfilingAPI_INCLUDE_DIRS = ${CUDAProfilingAPI_INCLUDE_DIRS}")
+    AddCUDA(${TARGET})
 endfunction()
 
 function(AddTensorflowDependencies TARGET INCLUDE_CUDA)
@@ -461,8 +488,16 @@ function(AddTensorflowDependencies TARGET INCLUDE_CUDA)
 
     target_link_libraries(${TARGET} PRIVATE nsync_includes)
 
-    find_package(spdlog REQUIRED)
-    target_link_libraries(${TARGET} PRIVATE spdlog::spdlog)
+    # This works in docker, but no on Ubuntu 18.04 host...
+    # so just make our own find_package for spdlog
+    # find_package(spdlog REQUIRED)
+    # target_link_libraries(${TARGET} PRIVATE spdlog::spdlog)
+
+    find_package(MySpdlog REQUIRED)
+    target_link_libraries(${TARGET} PRIVATE ${MySpdlog_LIBRARIES})
+    target_include_directories(${TARGET} PRIVATE ${MySpdlog_INCLUDE_DIRS})
+    # message("> MySpdlog_LIBRARIES = ${MySpdlog_LIBRARIES}")
+    # message("> MySpdlog_INCLUDE_DIRS = ${MySpdlog_INCLUDE_DIRS}")
 
     target_link_libraries(${TARGET} PRIVATE nsync_cpp)
     target_include_directories(${TARGET} PRIVATE ${double_conversion_INCLUDE_DIR})
@@ -470,16 +505,10 @@ function(AddTensorflowDependencies TARGET INCLUDE_CUDA)
     target_link_libraries(${TARGET} PRIVATE Eigen3::Eigen)
     target_link_libraries(${TARGET} PRIVATE "-ldl")
     if(INCLUDE_CUDA)
-        find_package(Libcupti REQUIRED)
-        target_link_libraries(${TARGET} PUBLIC ${Libcupti_LIBRARY})
-        # https://stackoverflow.com/questions/26243169/cmake-target-include-directories-meaning-of-scope
-        # NOTE: I still don't fully understand the PUBLIC/PRIVATE/INTERFACE scope here...
-        target_include_directories(${TARGET} PRIVATE ${Libcupti_INCLUDE_DIR})
+        AddCUPTIDependencies(${TARGET})
 
         if (NOT WITH_CUDA_LD_PRELOAD)
-            # CUDA_LIBRARIES = /usr/local/cuda/lib64/libcudart_static.a;-pthread;dl;/usr/lib/x86_64-linux-gnu/librt.so
-            # message("> CUDA_LIBRARIES = ${CUDA_LIBRARIES}")
-            target_link_libraries(${TARGET} PUBLIC ${CUDA_LIBRARIES})
+            AddCUDA(${TARGET})
         endif()
 
         # Link driver API by adding -lcuda:
@@ -521,16 +550,10 @@ function(AddRLScopeTarget TARGET)
     target_include_directories(${TARGET} PRIVATE ${double_conversion_INCLUDE_DIR})
     target_link_libraries(${TARGET} PRIVATE ${double_conversion_LIBRARIES})
     target_link_libraries(${TARGET} PRIVATE Eigen3::Eigen)
-    find_package(Libcupti REQUIRED)
-    target_link_libraries(${TARGET} PUBLIC ${Libcupti_LIBRARY})
-    # https://stackoverflow.com/questions/26243169/cmake-target-include-directories-meaning-of-scope
-    # NOTE: I still don't fully understand the PUBLIC/PRIVATE/INTERFACE scope here...
-    target_include_directories(${TARGET} PRIVATE ${Libcupti_INCLUDE_DIR})
+    AddCUPTIDependencies(${TARGET})
 
     if (NOT WITH_CUDA_LD_PRELOAD)
-        # CUDA_LIBRARIES = /usr/local/cuda/lib64/libcudart_static.a;-pthread;dl;/usr/lib/x86_64-linux-gnu/librt.so
-        # message("> CUDA_LIBRARIES = ${CUDA_LIBRARIES}")
-        target_link_libraries(${TARGET} PUBLIC ${CUDA_LIBRARIES})
+        AddCUDA(${TARGET})
     endif()
 
     if (WITH_CUDA_LD_PRELOAD)
@@ -570,7 +593,7 @@ function(AddRLScopeTarget TARGET)
     # Ensure only symbols we want exported by our LD_PRELOAD library get exported to the application.
     #
 
-    # For our source files, only expose symbols that are marked with SAMPLE_CUDA_API_EXPORT.
+    # For our source files, only expose symbols that are marked with RLSCOPE_EXPORT.
     include(GenerateExportHeader)
     generate_export_header(${TARGET})
 
@@ -645,6 +668,8 @@ function(AddTestAnalysisTarget TARGET)
     add_executable(${TARGET} ${TEST_ANALYSIS_SOURCES})
     AddTensorflowDependencies(${TARGET} FALSE)
     AddUnitTest(${TARGET})
+    target_link_libraries(${TARGET} PRIVATE common_util)
+    target_link_libraries(${TARGET} PRIVATE range_sampling)
 endfunction()
 
 function(AddRLSAnalyzeTarget TARGET)
@@ -655,6 +680,8 @@ function(AddRLSAnalyzeTarget TARGET)
     # message("> GFLAGS_LIBRARIES = ${GFLAGS_LIBRARIES}")
     # message("> GFLAGS_INCLUDE_DIRS = ${GFLAGS_INCLUDE_DIRS}")
     target_link_libraries(${TARGET} PUBLIC ${GFLAGS_LIBRARIES})
+    target_link_libraries(${TARGET} PRIVATE common_util)
+    target_link_libraries(${TARGET} PRIVATE range_sampling)
 endfunction()
 
 #

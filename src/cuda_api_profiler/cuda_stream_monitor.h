@@ -21,7 +21,7 @@
 #include "tensorflow/core/platform/notification.h"
 #include "tensorflow/core/platform/types.h"
 
-namespace tensorflow {
+namespace rlscope {
 
 struct PollStreamResult {
   PollStreamResult(cudaStream_t stream, bool is_active, bool is_valid) :

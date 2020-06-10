@@ -9,7 +9,7 @@
 
 #include <functional>
 
-namespace tensorflow {
+namespace rlscope {
 
 struct RegisteredHandleInterface {
   virtual ~RegisteredHandleInterface() = default;

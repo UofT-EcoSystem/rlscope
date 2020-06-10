@@ -16,7 +16,7 @@
 #include <absl/memory/memory.h>
 #include <memory>
 
-namespace tensorflow {
+namespace rlscope {
 
 // Used by ActivityBuffer and DeviceTracerImpl
 #define CUPTI_CALL(call)                                            \

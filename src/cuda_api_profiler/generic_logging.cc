@@ -11,7 +11,7 @@
 #include <ostream>
 #include <iostream>
 
-namespace tensorflow {
+namespace rlscope {
 
 SimpleTimer::SimpleTimer(const std::string& name) :
     _name(name),

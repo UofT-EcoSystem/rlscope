@@ -25,7 +25,7 @@
 #include <sys/syscall.h>
 #define gettid() syscall(SYS_gettid)
 
-namespace CuptiSamples {
+namespace rlscope {
 
 // If defined, print every CUDA/CUPTI/NVPW API call to stderr.
 //#define SHOULD_PRINT_CUDA_API_CALLS
@@ -120,8 +120,8 @@ static void __attribute_noinline__ _dbg_breakpoint(const std::string& name, cons
   std::cout << "[ HIT BREAKPOINT \"" << name << "\" @ " << file << ":" << lineno << " ]" << std::endl;
   dbg_breakpoint(name, file, lineno);
 }
-#define DBG_BREAKPOINT(name) CuptiSamples::_dbg_breakpoint(name, __FILE__, __LINE__)
+#define DBG_BREAKPOINT(name) rlscope::_dbg_breakpoint(name, __FILE__, __LINE__)
 
-};
+} // namespace rlscope
 
 #endif //IML_DEBUG_FLAGS_H

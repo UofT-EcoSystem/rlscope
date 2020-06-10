@@ -15,7 +15,7 @@
 
 #include <fstream>
 
-namespace tensorflow {
+namespace rlscope {
 
 #define CUPTI_CALL(call)                                            \
   do {                                                              \

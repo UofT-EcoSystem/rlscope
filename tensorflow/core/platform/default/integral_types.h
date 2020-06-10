@@ -19,7 +19,7 @@ limitations under the License.
 // IWYU pragma: private, include "third_party/tensorflow/core/platform/types.h"
 // IWYU pragma: friend third_party/tensorflow/core/platform/types.h
 
-namespace tensorflow {
+namespace rlscope {
 
 typedef signed char int8;
 typedef short int16;
@@ -31,6 +31,6 @@ typedef unsigned short uint16;
 typedef unsigned int uint32;
 typedef unsigned long long uint64;
 
-}  // namespace tensorflow
+}  // namespace rlscope
 
 #endif  // TENSORFLOW_PLATFORM_DEFAULT_INTEGRAL_TYPES_H_

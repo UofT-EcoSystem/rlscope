@@ -22,7 +22,7 @@
 #define MY_kSecondsToMicros (1000ULL * 1000ULL)
 #define MY_kSecondsToNanos (1000ULL * 1000ULL * 1000ULL)
 
-namespace tensorflow {
+namespace rlscope {
 
 static uint64_t TimeNowNanos() {
   struct timespec ts;

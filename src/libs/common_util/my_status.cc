@@ -18,10 +18,10 @@ limitations under the License.
 #include <stdio.h>
 #include <assert.h>
 
-namespace CuptiSamples {
+namespace rlscope {
 
-MyStatus::MyStatus(CuptiSamples::error::Code code, const std::string& msg) {
-  assert(code != CuptiSamples::error::OK);
+MyStatus::MyStatus(rlscope::error::Code code, const std::string& msg) {
+  assert(code != rlscope::error::OK);
   state_ = std::unique_ptr<State>(new State);
   state_->code = code;
   state_->msg = msg;
@@ -55,52 +55,52 @@ std::string MyStatus::ToString() const {
     char tmp[30];
     const char* type;
     switch (code()) {
-      case CuptiSamples::error::CANCELLED:
+      case rlscope::error::CANCELLED:
         type = "Cancelled";
         break;
-      case CuptiSamples::error::UNKNOWN:
+      case rlscope::error::UNKNOWN:
         type = "Unknown";
         break;
-      case CuptiSamples::error::INVALID_ARGUMENT:
+      case rlscope::error::INVALID_ARGUMENT:
         type = "Invalid argument";
         break;
-      case CuptiSamples::error::DEADLINE_EXCEEDED:
+      case rlscope::error::DEADLINE_EXCEEDED:
         type = "Deadline exceeded";
         break;
-      case CuptiSamples::error::NOT_FOUND:
+      case rlscope::error::NOT_FOUND:
         type = "Not found";
         break;
-      case CuptiSamples::error::ALREADY_EXISTS:
+      case rlscope::error::ALREADY_EXISTS:
         type = "Already exists";
         break;
-      case CuptiSamples::error::PERMISSION_DENIED:
+      case rlscope::error::PERMISSION_DENIED:
         type = "Permission denied";
         break;
-      case CuptiSamples::error::UNAUTHENTICATED:
+      case rlscope::error::UNAUTHENTICATED:
         type = "Unauthenticated";
         break;
-      case CuptiSamples::error::RESOURCE_EXHAUSTED:
+      case rlscope::error::RESOURCE_EXHAUSTED:
         type = "Resource exhausted";
         break;
-      case CuptiSamples::error::FAILED_PRECONDITION:
+      case rlscope::error::FAILED_PRECONDITION:
         type = "Failed precondition";
         break;
-      case CuptiSamples::error::ABORTED:
+      case rlscope::error::ABORTED:
         type = "Aborted";
         break;
-      case CuptiSamples::error::OUT_OF_RANGE:
+      case rlscope::error::OUT_OF_RANGE:
         type = "Out of range";
         break;
-      case CuptiSamples::error::UNIMPLEMENTED:
+      case rlscope::error::UNIMPLEMENTED:
         type = "Unimplemented";
         break;
-      case CuptiSamples::error::INTERNAL:
+      case rlscope::error::INTERNAL:
         type = "Internal";
         break;
-      case CuptiSamples::error::UNAVAILABLE:
+      case rlscope::error::UNAVAILABLE:
         type = "Unavailable";
         break;
-      case CuptiSamples::error::DATA_LOSS:
+      case rlscope::error::DATA_LOSS:
         type = "Data loss";
         break;
       default:
@@ -125,7 +125,7 @@ std::ostream& operator<<(std::ostream& os, const MyStatus& x) {
   return os;
 }
 
-//std::string* TfCheckOpHelperOutOfLine(const ::CuptiSamples::MyStatus& v,
+//std::string* TfCheckOpHelperOutOfLine(const ::rlscope::MyStatus& v,
 //                                 const char* msg) {
 //  std::string r("Non-OK-status: ");
 //  r += msg;
@@ -135,4 +135,4 @@ std::ostream& operator<<(std::ostream& os, const MyStatus& x) {
 //  return new std::string(r);
 //}
 
-}  // namespace CuptiSamples
+}  // namespace rlscope

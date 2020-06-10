@@ -32,7 +32,7 @@ using boost::uuids::detail::md5;
 #include <iostream>
 #include <fstream>
 
-namespace CuptiSamples {
+namespace rlscope {
 
 // 50 MB.
 // In a simple script, one sample can take up 11K, so I expect the size to be large in general
@@ -746,7 +746,7 @@ MyStatus GPUHwCounterSampler::_InitSamplerState() {
 MyStatus GPUHwCounterSampler::_NextSamplerState() {
     MyStatus ret = MyStatus::OK();
     _pass_idx = 0;
-    state.start_profiling_t = CuptiSamples::get_timestamp_us();
+    state.start_profiling_t = rlscope::get_timestamp_us();
     return MyStatus::OK();
 }
 MyStatus GPUHwCounterSamplerProtoState::DumpSync() {
@@ -782,7 +782,7 @@ MyStatus GPUHwCounterSampler::_MaybeRecordSample(bool* recorded) {
     ret = profiler_state.Flush(state.config_data, state.counter_data);
     IF_BAD_STATUS_RETURN(ret);
     // Record timestamp before or after flush?  Lets go with after.
-    state.stop_profiling_t = CuptiSamples::get_timestamp_us();
+    state.stop_profiling_t = rlscope::get_timestamp_us();
 
     {
         // NOTE: explicitly COPY the configImage buffer, leaving the original in-place so that future
@@ -1281,4 +1281,4 @@ size_t GPUHwCounterSampler::NumPasses() const {
     return this->UseMaxNestingLevels() * this->UseMaxUniqueRanges();
 }
 
-} // namespace CuptiSamples
+} // namespace rlscope

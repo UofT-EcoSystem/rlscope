@@ -24,10 +24,10 @@ limitations under the License.
 #include "tensorflow/core/platform/logging.h"
 #include "tensorflow/core/platform/macros.h"
 
-namespace tensorflow {
+namespace rlscope {
 namespace errors {
 
-typedef ::tensorflow::error::Code Code;
+typedef ::rlscope::error::Code Code;
 
 namespace internal {
 
@@ -60,24 +60,24 @@ inline const strings::AlphaNum& PrepareForStrCat(const strings::AlphaNum& a) {
 // context put it on a new line, since it is possible for there
 // to be several layers of additional context.
 template <typename... Args>
-void AppendToMessage(::tensorflow::Status* status, Args... args) {
-  *status = ::tensorflow::Status(
+void AppendToMessage(::rlscope::Status* status, Args... args) {
+  *status = ::rlscope::Status(
       status->code(),
-      ::tensorflow::strings::StrCat(status->error_message(), "\n\t", args...));
+      ::rlscope::strings::StrCat(status->error_message(), "\n\t", args...));
 }
 
 // For propagating errors when calling a function.
 #define TF_RETURN_IF_ERROR(...)                          \
   do {                                                   \
-    const ::tensorflow::Status _status = (__VA_ARGS__);  \
+    const ::rlscope::Status _status = (__VA_ARGS__);  \
     if (TF_PREDICT_FALSE(!_status.ok())) return _status; \
   } while (0)
 
 #define TF_RETURN_WITH_CONTEXT_IF_ERROR(expr, ...)                  \
   do {                                                              \
-    ::tensorflow::Status _status = (expr);                          \
+    ::rlscope::Status _status = (expr);                          \
     if (TF_PREDICT_FALSE(!_status.ok())) {                          \
-      ::tensorflow::errors::AppendToMessage(&_status, __VA_ARGS__); \
+      ::rlscope::errors::AppendToMessage(&_status, __VA_ARGS__); \
       return _status;                                               \
     }                                                               \
   } while (0)
@@ -90,14 +90,14 @@ void AppendToMessage(::tensorflow::Status* status, Args... args) {
 
 #define DECLARE_ERROR(FUNC, CONST)                                       \
   template <typename... Args>                                            \
-  ::tensorflow::Status FUNC(Args... args) {                              \
-    return ::tensorflow::Status(                                         \
-        ::tensorflow::error::CONST,                                      \
-        ::tensorflow::strings::StrCat(                                   \
-            ::tensorflow::errors::internal::PrepareForStrCat(args)...)); \
+  ::rlscope::Status FUNC(Args... args) {                              \
+    return ::rlscope::Status(                                         \
+        ::rlscope::error::CONST,                                      \
+        ::rlscope::strings::StrCat(                                   \
+            ::rlscope::errors::internal::PrepareForStrCat(args)...)); \
   }                                                                      \
-  inline bool Is##FUNC(const ::tensorflow::Status& status) {             \
-    return status.code() == ::tensorflow::error::CONST;                  \
+  inline bool Is##FUNC(const ::rlscope::Status& status) {             \
+    return status.code() == ::rlscope::error::CONST;                  \
   }
 
 DECLARE_ERROR(Cancelled, CANCELLED)
@@ -131,9 +131,9 @@ inline string FormatNodeNameForError(const string& name) {
 // LINT.ThenChange(//tensorflow/python/client/session.py)
 template <typename T>
 string FormatNodeNamesForError(const T& names) {
-  return ::tensorflow::str_util::Join(
+  return ::rlscope::str_util::Join(
       names, ", ", [](string* output, const string& s) {
-        ::tensorflow::strings::StrAppend(output, FormatNodeNameForError(s));
+        ::rlscope::strings::StrAppend(output, FormatNodeNameForError(s));
       });
 }
 // LINT.IfChange
@@ -143,17 +143,17 @@ inline string FormatColocationNodeForError(const string& name) {
 // LINT.ThenChange(//tensorflow/python/framework/error_interpolation.py)
 template <typename T>
 string FormatColocationNodeForError(const T& names) {
-  return ::tensorflow::str_util::Join(
+  return ::rlscope::str_util::Join(
       names, ", ", [](string* output, const string& s) {
-        ::tensorflow::strings::StrAppend(output,
+        ::rlscope::strings::StrAppend(output,
                                          FormatColocationNodeForError(s));
       });
 }
 
 // The CanonicalCode() for non-errors.
-using ::tensorflow::error::OK;
+using ::rlscope::error::OK;
 
 }  // namespace errors
-}  // namespace tensorflow
+}  // namespace rlscope
 
 #endif  // TENSORFLOW_CORE_LIB_CORE_ERRORS_H_

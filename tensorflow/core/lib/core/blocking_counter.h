@@ -21,7 +21,7 @@ limitations under the License.
 #include "tensorflow/core/platform/logging.h"
 #include "tensorflow/core/platform/mutex.h"
 
-namespace tensorflow {
+namespace rlscope {
 
 class BlockingCounter {
  public:
@@ -76,6 +76,6 @@ class BlockingCounter {
   bool notified_;
 };
 
-}  // namespace tensorflow
+}  // namespace rlscope
 
 #endif  // TENSORFLOW_LIB_CORE_BLOCKING_COUNTER_H_

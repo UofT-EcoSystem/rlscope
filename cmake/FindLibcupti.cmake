@@ -15,6 +15,7 @@ find_package(CUDA)
 libfind_pkg_check_modules(Libcupti_PKGCONF Libcupti)
 
 # Include dir
+message("> CUDA_TOOLKIT_ROOT_DIR = ${CUDA_TOOLKIT_ROOT_DIR}")
 find_path(Libcupti_INCLUDE_DIR
         NAMES cupti.h
         PATHS ${Libcupti_PKGCONF_INCLUDE_DIRS}

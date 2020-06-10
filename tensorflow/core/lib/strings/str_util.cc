@@ -22,7 +22,7 @@ limitations under the License.
 #include "tensorflow/core/lib/strings/stringprintf.h"
 #include "tensorflow/core/platform/logging.h"
 
-namespace tensorflow {
+namespace rlscope {
 namespace str_util {
 
 static char hex_char[] = "0123456789abcdef";
@@ -479,4 +479,4 @@ bool EndsWith(StringPiece text, StringPiece suffix) {
 }
 
 }  // namespace str_util
-}  // namespace tensorflow
+}  // namespace rlscope

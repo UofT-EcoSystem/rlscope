@@ -27,7 +27,7 @@
 #include "cuda_api_profiler/cupti_logging.h"
 #include "common/util.h"
 
-namespace tensorflow {
+namespace rlscope {
 
 OpStack::~OpStack() {
 //  if (VLOG_IS_ON(1)) {

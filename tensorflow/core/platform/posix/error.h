@@ -18,10 +18,10 @@ limitations under the License.
 
 #include "tensorflow/core/lib/core/status.h"
 
-namespace tensorflow {
+namespace rlscope {
 
 Status IOError(const string& context, int err_number);
 
-}  // namespace tensorflow
+}  // namespace rlscope
 
 #endif  // TENSORFLOW_CORE_PLATFORM_POSIX_ERROR_H_

@@ -18,7 +18,7 @@ limitations under the License.
 
 #include "tensorflow/core/platform/macros.h"
 
-namespace tensorflow {
+namespace rlscope {
 namespace port {
 
 // Remembers the flush denormal state on construction and restores that same
@@ -57,6 +57,6 @@ class ScopedDontFlushDenormal {
 };
 
 }  // namespace port
-}  // namespace tensorflow
+}  // namespace rlscope
 
 #endif  // TENSORFLOW_CORE_PLATFORM_DENORMAL_H_

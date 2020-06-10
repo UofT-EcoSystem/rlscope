@@ -15,9 +15,9 @@ limitations under the License.
 
 #include "tensorflow/core/platform/default/protobuf.h"
 
-namespace tensorflow {
+namespace rlscope {
 
 const char* kProtobufInt64Typename = "::google::protobuf::int64";
 const char* kProtobufUint64Typename = "::google::protobuf::uint64";
 
-}  // namespace tensorflow
+}  // namespace rlscope

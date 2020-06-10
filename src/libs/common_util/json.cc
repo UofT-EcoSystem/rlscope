@@ -15,7 +15,7 @@ using json = nlohmann::json;
 
 #include "error_codes.h"
 
-namespace CuptiSamples {
+namespace rlscope {
 
 MyStatus ReadJson(std::string path, json* j) {
   boost::filesystem::path file(path);
@@ -62,4 +62,4 @@ MyStatus WriteJson(std::string path, const nlohmann::json& j) {
   return MyStatus::OK();
 }
 
-} // namespace CuptiSamples
+} // namespace rlscope

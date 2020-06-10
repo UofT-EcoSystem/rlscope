@@ -34,7 +34,7 @@ limitations under the License.
 #undef DeleteFile
 #endif
 
-namespace tensorflow {
+namespace rlscope {
 
 class RandomAccessFile;
 class ReadOnlyMemoryRegion;
@@ -207,7 +207,7 @@ class FileSystem {
   ///
   /// The implementation in this class cleans up the path, removing
   /// duplicate /'s, resolving .. and . (more details in
-  /// tensorflow::lib::io::CleanPath).
+  /// rlscope::lib::io::CleanPath).
   virtual string TranslateName(const string& name) const;
 
   /// \brief Returns whether the given path is a directory or not.
@@ -342,6 +342,6 @@ class FileSystemRegistry {
       std::vector<string>* schemes) = 0;
 };
 
-}  // namespace tensorflow
+}  // namespace rlscope
 
 #endif  // TENSORFLOW_CORE_PLATFORM_FILE_SYSTEM_H_

@@ -24,7 +24,7 @@
 #include <memory>
 #include <thread>
 
-namespace tensorflow {
+namespace rlscope {
 
 struct CUDAAPIStats {
     int64 total_api_time_usec;

@@ -1460,7 +1460,7 @@ TF_CAPI_EXPORT extern void TF_AwaitTraceDataDumps();
 // handle should be deleted with TF_DeletePRunHandle when it is no longer
 // needed.
 //
-// On failure, out_status contains a tensorflow::Status with an error
+// On failure, out_status contains a rlscope::Status with an error
 // message. *handle is set to nullptr.
 TF_CAPI_EXPORT extern void TF_SessionPRunSetup(
     TF_Session*,

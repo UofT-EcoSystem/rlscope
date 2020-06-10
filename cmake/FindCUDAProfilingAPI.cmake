@@ -55,7 +55,11 @@ macro(TRY_FIND_PATH PATH_VAR HINT_FILE TRY_DIRECTORIES)
     endif()
 endmacro()
 
-macro(TRY_FIND_LIB LIB_VAR HINT_LIB TRY_DIRECTORIES)
+macro(TRY_FIND_LIB LIB_ALIAS LIB_VAR HINT_LIB TRY_DIRECTORIES)
+    if (${LIB_VAR})
+        # Already found.
+        return()
+    endif()
     foreach(lib_path IN LISTS ${TRY_DIRECTORIES})
         find_library(${LIB_VAR}
                 NAMES ${HINT_LIB}
@@ -70,75 +74,57 @@ macro(TRY_FIND_LIB LIB_VAR HINT_LIB TRY_DIRECTORIES)
     endif()
 endmacro()
 
-#set(CUPTI_INCLUDE_DIR_TRY ${CUPTI_INCLUDE_DIR} ${CUDA_TARGETS_INCLUDE_DIR})
-#TRY_FIND_PATH(CUDAProfilingAPI_INCLUDE_DIR nvperf_host.h CUPTI_INCLUDE_DIR_TRY)
+set(nvperf_host_INCLUDE_DIR_TRY ${CUPTI_INCLUDE_DIR} ${CUDA_TARGETS_INCLUDE_DIR})
+TRY_FIND_PATH(nvperf_host_INCLUDE_DIR nvperf_host.h nvperf_host_INCLUDE_DIR_TRY)
 
-#set(TRY_DIRECTORIES ${CUPTI_INCLUDE_DIR} ${CUDA_TARGETS_INCLUDE_DIR})
-#foreach(include_path IN LISTS TRY_DIRECTORIES)
-#    find_path(CUDAProfilingAPI_INCLUDE_DIR
-#            NAMES nvperf_host.h
-#            PATHS ${CUDAProfilingAPI_PKGCONF_INCLUDE_DIRS}
-#            HINTS ${include_path})
-#endforeach()
-#if (NOT CUDAProfilingAPI_INCLUDE_DIR AND CUDAProfilingAPI_FIND_REQUIRED)
-#    message("Couldn't find nvperf_host.h; tried:")
-#    foreach(include_path IN LISTS TRY_DIRECTORIES)
-#        message("  ${include_path}")
-#    endforeach()
-#    message(FATAL_ERROR)
-#endif()
+set(nvperf_target_INCLUDE_DIR_TRY ${CUPTI_INCLUDE_DIR} ${CUDA_TARGETS_INCLUDE_DIR})
+TRY_FIND_PATH(nvperf_target_INCLUDE_DIR nvperf_target.h nvperf_target_INCLUDE_DIR_TRY)
 
-#foreach(lib_path IN LISTS CUPTI_LIB64_DIR CUDA_TARGETS_LIB64_DIR)
-#    find_library(nvperf_host_LIBRARY
-#            NAMES nvperf_host
-#            HINTS ${lib_path})
-#endforeach()
+set(nvtx_INCLUDE_DIR_TRY ${CUPTI_INCLUDE_DIR} ${CUDA_TARGETS_INCLUDE_DIR})
+TRY_FIND_PATH(nvtx_INCLUDE_DIR nvToolsExt.h nvtx_INCLUDE_DIR_TRY)
+
+set(CUPTI_INCLUDE_DIR_TRY ${CUPTI_INCLUDE_DIR} ${CUDA_TARGETS_INCLUDE_DIR})
+TRY_FIND_PATH(cupti_INCLUDE_DIR cupti.h CUPTI_INCLUDE_DIR_TRY)
+
+
 set(nvperf_host_LIBRARY_TRY ${CUPTI_LIB64_DIR} ${CUDA_TARGETS_LIB64_DIR})
-TRY_FIND_LIB(nvperf_host_LIBRARY nvperf_host nvperf_host_LIBRARY_TRY)
+TRY_FIND_LIB(nvperf_host nvperf_host_LIBRARY nvperf_host nvperf_host_LIBRARY_TRY)
 
-foreach(lib_path IN LISTS CUPTI_LIB64_DIR CUDA_TARGETS_LIB64_DIR)
-    find_library(nvperf_target_LIBRARY
-            NAMES nvperf_target
-            HINTS ${lib_path})
-endforeach()
+set(nvperf_target_LIBRARY_TRY ${CUPTI_LIB64_DIR} ${CUDA_TARGETS_LIB64_DIR})
+TRY_FIND_LIB(nvperf_target nvperf_target_LIBRARY nvperf_target nvperf_target_LIBRARY_TRY)
 
-foreach(lib_path IN LISTS CUPTI_LIB64_DIR CUDA_TARGETS_LIB64_DIR)
-    find_library(nvtx_LIBRARY
-            NAMES nvToolsExt
-            HINTS ${lib_path})
-endforeach()
+set(nvtx_LIBRARY_TRY ${CUPTI_LIB64_DIR} ${CUDA_TARGETS_LIB64_DIR})
+TRY_FIND_LIB(nvtx nvtx_LIBRARY nvToolsExt nvtx_LIBRARY_TRY)
 
-set(CUDAProfilingAPI_LIBRARY
-        ${nvperf_host_LIBRARY}
-        ${nvperf_target_LIBRARY}
-        ${nvtx_LIBRARY}
-        )
-#message("CUDAProfilingAPI_LIBRARY = ${CUDAProfilingAPI_LIBRARY}")
-
-add_library(nvperf_target SHARED IMPORTED)
-set_target_properties(nvperf_target PROPERTIES
-        IMPORTED_LOCATION ${nvperf_target_LIBRARY}
-        # INTERFACE_COMPILE_DEFINITIONS "SOME_FEATURE"
-        )
-
-add_library(nvperf_host SHARED IMPORTED)
-set_target_properties(nvperf_host PROPERTIES
-        IMPORTED_LOCATION ${nvperf_host_LIBRARY}
-        # INTERFACE_COMPILE_DEFINITIONS "SOME_FEATURE"
-        )
-
-add_library(nvtx SHARED IMPORTED)
-set_target_properties(nvtx PROPERTIES
-        IMPORTED_LOCATION ${nvtx_LIBRARY}
-        # INTERFACE_COMPILE_DEFINITIONS "SOME_FEATURE"
-        )
+set(cupti_LIBRARY_TRY ${CUPTI_LIB64_DIR} ${CUDA_TARGETS_LIB64_DIR})
+TRY_FIND_LIB(cupti cupti_LIBRARY cupti cupti_LIBRARY_TRY)
 
 # Set the include dir variables and the libraries and let libfind_process do the rest.
 # NOTE: Singular variables for this library, plural for libraries this this lib depends on.
-set(CUDAProfilingAPI_PROCESS_INCLUDES ${CUDAProfilingAPI_INCLUDE_DIR})
-set(CUDAProfilingAPI_PROCESS_LIBS ${CUDAProfilingAPI_LIBRARY})
-#message("CUDAProfilingAPI_PROCESS_INCLUDES = ${CUDAProfilingAPI_PROCESS_INCLUDES}")
-#message("CUDAProfilingAPI_PROCESS_LIBS = ${CUDAProfilingAPI_PROCESS_LIBS}")
-libfind_process(CUDAProfilingAPI)
-#message("CUDAProfilingAPI_LIBRARIES = ${CUDAProfilingAPI_LIBRARIES}")
-#message("CUDAProfilingAPI_INCLUDE_DIRS = ${CUDAProfilingAPI_INCLUDE_DIRS}")
+set(CUDAProfilingAPI_PROCESS_INCLUDES
+        ${nvperf_host_INCLUDE_DIR}
+        ${nvperf_target_INCLUDE_DIR}
+        ${nvtx_INCLUDE_DIR}
+        ${cupti_INCLUDE_DIR}
+        )
+message("> CUDAProfilingAPI_PROCESS_INCLUDES = ${CUDAProfilingAPI_PROCESS_INCLUDES}")
+set(CUDAProfilingAPI_PROCESS_LIBS
+        ${nvperf_host_LIBRARY}
+        ${nvperf_target_LIBRARY}
+        ${nvtx_LIBRARY}
+        ${cupti_LIBRARY}
+        )
+# This doesn't work for some reason...
+#message("> CUDAProfilingAPI_PROCESS_LIBS = ${CUDAProfilingAPI_PROCESS_LIBS}")
+#message("> CUDAProfilingAPI_FIND_REQUIRED = ${CUDAProfilingAPI_FIND_REQUIRED}")
+#libfind_process(CUDAProfilingAPI)
+
+set(CUDAProfilingAPI_LIBRARIES ${CUDAProfilingAPI_PROCESS_LIBS} CACHE STRING "CUDA profiling libs")
+set(CUDAProfilingAPI_INCLUDE_DIRS ${CUDAProfilingAPI_PROCESS_INCLUDES} CACHE STRING "CUDA profiling libs")
+set(CUDAProfilingAPI_FOUND TRUE CACHE BOOL "CUDA profiling libs")
+
+message("> CUDAProfilingAPI_LIBRARIES = ${CUDAProfilingAPI_LIBRARIES}")
+message("> CUDAProfilingAPI_INCLUDE_DIRS = ${CUDAProfilingAPI_INCLUDE_DIRS}")
+find_package_handle_standard_args(CUDAProfilingAPI
+        REQUIRED_VARS CUDAProfilingAPI_LIBRARIES CUDAProfilingAPI_INCLUDE_DIRS)
+

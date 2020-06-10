@@ -40,7 +40,7 @@ limitations under the License.
         exit(EXIT_FAILURE); \
       }
 
-namespace CuptiSamples {
+namespace rlscope {
 
 //#if defined(__clang__)
 //// Only clang supports warn_unused_result as a type annotation.
@@ -56,7 +56,7 @@ class MyStatus {
 
   /// \brief Create a status with the specified error code and msg as a
   /// human-readable string containing more detailed information.
-  MyStatus(CuptiSamples::error::Code code, const std::string& msg);
+  MyStatus(rlscope::error::Code code, const std::string& msg);
 
   /// Copy the specified status.
   MyStatus(const MyStatus& s);
@@ -67,8 +67,8 @@ class MyStatus {
   /// Returns true iff the status indicates success.
   bool ok() const { return (state_ == NULL); }
 
-  CuptiSamples::error::Code code() const {
-    return ok() ? CuptiSamples::error::OK : state_->code;
+  rlscope::error::Code code() const {
+    return ok() ? rlscope::error::OK : state_->code;
   }
 
   const std::string& error_message() const {
@@ -101,7 +101,7 @@ class MyStatus {
  private:
   static const std::string& empty_string();
   struct State {
-    CuptiSamples::error::Code code;
+    rlscope::error::Code code;
     std::string msg;
   };
   // OK status has a `NULL` state_.  Otherwise, `state_` points to
@@ -134,16 +134,16 @@ std::ostream& operator<<(std::ostream& os, const MyStatus& x);
 typedef std::function<void(const MyStatus&)> MyStatusCallback;
 
 //extern std::string* TfCheckOpHelperOutOfLine(
-//    const ::CuptiSamples::MyStatus& v, const char* msg);
+//    const ::rlscope::MyStatus& v, const char* msg);
 //
-//inline CuptiSamples::string* TfCheckOpHelper(::CuptiSamples::MyStatus v,
+//inline rlscope::string* TfCheckOpHelper(::rlscope::MyStatus v,
 //                                           const char* msg) {
 //  if (v.ok()) return nullptr;
 //  return TfCheckOpHelperOutOfLine(v, msg);
 //}
 
 //#define TF_DO_CHECK_OK(val, level)
-//  while (auto _result = ::CuptiSamples::TfCheckOpHelper(val, #val))
+//  while (auto _result = ::rlscope::TfCheckOpHelper(val, #val))
 //  LOG(level) << *(_result)
 //
 //#define TF_CHECK_OK(val) TF_DO_CHECK_OK(val, FATAL)
@@ -155,9 +155,9 @@ typedef std::function<void(const MyStatus&)> MyStatusCallback;
 //#define TF_DCHECK_OK(val) TF_CHECK_OK(val)
 //#else
 //#define TF_DCHECK_OK(val)
-//  while (false && (::CuptiSamples::MyStatus::OK() == (val))) LOG(FATAL)
+//  while (false && (::rlscope::MyStatus::OK() == (val))) LOG(FATAL)
 //#endif
 
-}  // namespace CuptiSamples
+}  // namespace rlscope
 
 #endif  // MY_TENSORFLOW_CORE_LIB_CORE_STATUS_H_

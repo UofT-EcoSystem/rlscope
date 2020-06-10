@@ -21,7 +21,7 @@ limitations under the License.
 
 #include "tensorflow/core/lib/core/status.h"
 
-namespace tensorflow {
+namespace rlscope {
 
 class FileSystem;
 class Env;
@@ -46,6 +46,6 @@ Status GetMatchingPaths(FileSystem* fs, Env* env, const string& pattern,
                         std::vector<string>* results);
 
 }  // namespace internal
-}  // namespace tensorflow
+}  // namespace rlscope
 
 #endif  // TENSORFLOW_CORE_PLATFORM_FILE_SYSTEM_HELPER_H_

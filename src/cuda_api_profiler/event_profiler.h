@@ -23,7 +23,7 @@
 #include <memory>
 #include <thread>
 
-namespace tensorflow {
+namespace rlscope {
 
 struct EventRecord;
 

@@ -11,7 +11,7 @@
 #include <string>
 #include <cstring>
 
-namespace tensorflow {
+namespace rlscope {
 
 
 }

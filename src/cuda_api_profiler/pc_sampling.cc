@@ -24,7 +24,7 @@
 #include "cuda_api_profiler/pc_sampling.h"
 #include "cuda_api_profiler/defines.h"
 
-namespace tensorflow {
+namespace rlscope {
 
 using namespace iml;
 

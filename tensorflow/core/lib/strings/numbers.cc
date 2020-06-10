@@ -32,7 +32,7 @@ limitations under the License.
 #include "tensorflow/core/platform/macros.h"
 #include "tensorflow/core/platform/types.h"
 
-namespace tensorflow {
+namespace rlscope {
 
 namespace {
 
@@ -545,4 +545,4 @@ string HumanReadableElapsedTime(double seconds) {
 }
 
 }  // namespace strings
-}  // namespace tensorflow
+}  // namespace rlscope

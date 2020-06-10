@@ -20,7 +20,7 @@ limitations under the License.
 
 #include "tensorflow/core/platform/macros.h"
 
-namespace tensorflow {
+namespace rlscope {
 namespace port {
 
 // While this class is active, floating point rounding mode is set to the given
@@ -40,6 +40,6 @@ class ScopedSetRound {
 };
 
 }  // namespace port
-}  // namespace tensorflow
+}  // namespace rlscope
 
 #endif  // TENSORFLOW_CORE_PLATFORM_SETROUND_H_

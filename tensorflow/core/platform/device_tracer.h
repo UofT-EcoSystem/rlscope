@@ -25,7 +25,7 @@ limitations under the License.
 
 #define CONFIG_TRACE_STATS
 
-namespace tensorflow {
+namespace rlscope {
 
 class StepStatsCollector;
 
@@ -103,6 +103,6 @@ class DeviceTracer {
 // Returns 'nullptr' on platforms where tracing is not supported.
 std::unique_ptr<DeviceTracer> CreateDeviceTracer();
 
-}  // namespace tensorflow
+}  // namespace rlscope
 
 #endif  // TENSORFLOW_CORE_PLATFORM_DEVICE_TRACER_H_

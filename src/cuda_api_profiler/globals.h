@@ -11,7 +11,7 @@
 
 #include "cuda_api_profiler/cuda_ld_preload.h"
 
-namespace tensorflow {
+namespace rlscope {
 
 class Globals {
 public:
@@ -33,7 +33,7 @@ public:
 //  std::shared_ptr<CudaLibrary> cuda_library;
   CudaLibrary* cuda_library;
 #endif
-  std::unique_ptr<tensorflow::DeviceTracer> device_tracer;
+  std::unique_ptr<rlscope::DeviceTracer> device_tracer;
   boost::process::child _util_sampler;
   std::string _directory;
   std::string _process_name;

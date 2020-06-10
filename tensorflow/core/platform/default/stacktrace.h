@@ -34,7 +34,7 @@ limitations under the License.
 #include <string>
 #include "tensorflow/core/platform/abi.h"
 
-namespace tensorflow {
+namespace rlscope {
 
 // Function to create a pretty stacktrace.
 inline std::string CurrentStackTrace() {
@@ -56,7 +56,7 @@ inline std::string CurrentStackTrace() {
       }
     }
 
-    std::string demangled = tensorflow::port::MaybeAbiDemangle(symbol);
+    std::string demangled = rlscope::port::MaybeAbiDemangle(symbol);
     if (demangled.length()) {
       ss << "\t" << demangled << std::endl;
     } else {
@@ -94,6 +94,6 @@ class SavedStackTrace {
   void* stack_[32];
 };
 
-}  // namespace tensorflow
+}  // namespace rlscope
 
 #endif  // TENSORFLOW_CORE_PLATFORM_DEFAULT_STACKTRACE_H_

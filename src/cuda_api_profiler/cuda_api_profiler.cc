@@ -33,7 +33,7 @@
 // roundup: 400 000
 #define CUDA_API_PROFILER_MAX_RECORDS_PER_DUMP 400000
 
-namespace tensorflow {
+namespace rlscope {
 
 #define CUPTI_CALL(call)                                            \
   do {                                                              \

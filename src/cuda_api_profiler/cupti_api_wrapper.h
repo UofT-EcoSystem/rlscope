@@ -16,7 +16,7 @@
 
 #include "tensorflow/core/platform/mutex.h"
 
-namespace tensorflow {
+namespace rlscope {
 
 // There are some singleton instances that get managed by the CUPTI API.
 // For example, only ONE call to cuptiSubscribe(&handle, callback) is allowed.

@@ -45,7 +45,7 @@ limitations under the License.
 #endif
 #endif
 
-namespace tensorflow {
+namespace rlscope {
 namespace port {
 namespace {
 
@@ -368,4 +368,4 @@ int CPUIDNumSMT() {
 }
 
 }  // namespace port
-}  // namespace tensorflow
+}  // namespace rlscope

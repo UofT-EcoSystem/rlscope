@@ -19,7 +19,7 @@
 #include <memory>
 #include <thread>
 
-namespace tensorflow {
+namespace rlscope {
 
 struct OverheadEvent {
   int64 num_events;

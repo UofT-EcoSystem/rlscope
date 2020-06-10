@@ -22,7 +22,7 @@
 #include "cuda_api_profiler/cupti_manager.h"
 #include "cuda_api_profiler/thread_pool_wrapper.h"
 
-namespace tensorflow {
+namespace rlscope {
 
 // Internal struct to record kernel launches.
 struct KernelRecord {

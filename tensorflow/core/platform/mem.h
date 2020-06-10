@@ -21,7 +21,7 @@ limitations under the License.
 #include "tensorflow/core/platform/platform.h"
 #include "tensorflow/core/platform/types.h"
 
-namespace tensorflow {
+namespace rlscope {
 namespace port {
 
 // Aligned allocation/deallocation. `minimum_alignment` must be a power of 2
@@ -63,6 +63,6 @@ std::size_t MallocExtension_GetAllocatedSize(const void* p);
 int64 AvailableRam();
 
 }  // namespace port
-}  // namespace tensorflow
+}  // namespace rlscope
 
 #endif  // TENSORFLOW_CORE_PLATFORM_MEM_H_

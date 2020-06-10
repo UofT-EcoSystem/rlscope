@@ -32,7 +32,7 @@ limitations under the License.
 #include "tensorflow/core/platform/protobuf.h"
 #include "tensorflow/core/platform/types.h"
 
-namespace tensorflow {
+namespace rlscope {
 
 class Thread;
 struct ThreadOptions;
@@ -427,21 +427,21 @@ Status WriteStringToFile(Env* env, const string& fname,
 
 /// Write binary representation of "proto" to the named file.
 Status WriteBinaryProto(Env* env, const string& fname,
-                        const ::tensorflow::protobuf::MessageLite& proto);
+                        const ::rlscope::protobuf::MessageLite& proto);
 
 /// Reads contents of named file and parse as binary encoded proto data
 /// and store into `*proto`.
 Status ReadBinaryProto(Env* env, const string& fname,
-                       ::tensorflow::protobuf::MessageLite* proto);
+                       ::rlscope::protobuf::MessageLite* proto);
 
 /// Write the text representation of "proto" to the named file.
 Status WriteTextProto(Env* env, const string& fname,
-                      const ::tensorflow::protobuf::Message& proto);
+                      const ::rlscope::protobuf::Message& proto);
 
 /// Read contents of named file and parse as text encoded proto data
 /// and store into `*proto`.
 Status ReadTextProto(Env* env, const string& fname,
-                     ::tensorflow::protobuf::Message* proto);
+                     ::rlscope::protobuf::Message* proto);
 
 // START_SKIP_DOXYGEN
 
@@ -450,7 +450,7 @@ namespace register_file_system {
 template <typename Factory>
 struct Register {
   Register(Env* env, const string& scheme) {
-    // TODO(b/32704451): Don't just ignore the ::tensorflow::Status object!
+    // TODO(b/32704451): Don't just ignore the ::rlscope::Status object!
     env->RegisterFileSystem(scheme, []() -> FileSystem* { return new Factory; })
         .IgnoreError();
   }
@@ -460,7 +460,7 @@ struct Register {
 
 // END_SKIP_DOXYGEN
 
-}  // namespace tensorflow
+}  // namespace rlscope
 
 // Register a FileSystem implementation for a scheme. Files with names that have
 // "scheme://" prefixes are routed to use this implementation.
@@ -469,11 +469,11 @@ struct Register {
 #define REGISTER_FILE_SYSTEM_UNIQ_HELPER(ctr, env, scheme, factory) \
   REGISTER_FILE_SYSTEM_UNIQ(ctr, env, scheme, factory)
 #define REGISTER_FILE_SYSTEM_UNIQ(ctr, env, scheme, factory)   \
-  static ::tensorflow::register_file_system::Register<factory> \
+  static ::rlscope::register_file_system::Register<factory> \
       register_ff##ctr TF_ATTRIBUTE_UNUSED =                   \
-          ::tensorflow::register_file_system::Register<factory>(env, scheme)
+          ::rlscope::register_file_system::Register<factory>(env, scheme)
 
 #define REGISTER_FILE_SYSTEM(scheme, factory) \
-  REGISTER_FILE_SYSTEM_ENV(::tensorflow::Env::Default(), scheme, factory);
+  REGISTER_FILE_SYSTEM_ENV(::rlscope::Env::Default(), scheme, factory);
 
 #endif  // TENSORFLOW_CORE_PLATFORM_ENV_H_

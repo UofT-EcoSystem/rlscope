@@ -19,10 +19,10 @@ limitations under the License.
 #include "tensorflow/core/lib/core/stringpiece.h"
 #include "tensorflow/core/platform/types.h"
 
-namespace tensorflow {
+namespace rlscope {
 namespace io {
 namespace internal {
-string JoinPathImpl(std::initializer_list<tensorflow::StringPiece> paths);
+string JoinPathImpl(std::initializer_list<rlscope::StringPiece> paths);
 }
 
 // Utility routines for processing filenames
@@ -49,20 +49,20 @@ string JoinPath(const T&... args) {
 #endif /* SWIG */
 
 // Return true if path is absolute.
-bool IsAbsolutePath(tensorflow::StringPiece path);
+bool IsAbsolutePath(rlscope::StringPiece path);
 
 // Returns the part of the path before the final "/".  If there is a single
 // leading "/" in the path, the result will be the leading "/".  If there is
 // no "/" in the path, the result is the empty prefix of the input.
-tensorflow::StringPiece Dirname(tensorflow::StringPiece path);
+rlscope::StringPiece Dirname(rlscope::StringPiece path);
 
 // Returns the part of the path after the final "/".  If there is no
 // "/" in the path, the result is the same as the input.
-tensorflow::StringPiece Basename(tensorflow::StringPiece path);
+rlscope::StringPiece Basename(rlscope::StringPiece path);
 
 // Returns the part of the basename of path after the final ".".  If
 // there is no "." in the basename, the result is empty.
-tensorflow::StringPiece Extension(tensorflow::StringPiece path);
+rlscope::StringPiece Extension(rlscope::StringPiece path);
 
 // Collapse duplicate "/"s, resolve ".." and "." path elements, remove
 // trailing "/".
@@ -71,7 +71,7 @@ tensorflow::StringPiece Extension(tensorflow::StringPiece path);
 // invoke any system calls (getcwd(2)) in order to resolve relative
 // paths with respect to the actual working directory.  That is, this is purely
 // string manipulation, completely independent of process state.
-string CleanPath(tensorflow::StringPiece path);
+string CleanPath(rlscope::StringPiece path);
 
 // Populates the scheme, host, and path from a URI. scheme, host, and path are
 // guaranteed by this function to point into the contents of uri, even if
@@ -81,18 +81,18 @@ string CleanPath(tensorflow::StringPiece path);
 // - If the URI is invalid, scheme and host are set to empty strings and the
 //   passed string is assumed to be a path
 // - If the URI omits the path (e.g. file://host), then the path is left empty.
-void ParseURI(tensorflow::StringPiece uri, tensorflow::StringPiece* scheme,
-              tensorflow::StringPiece* host, tensorflow::StringPiece* path);
+void ParseURI(rlscope::StringPiece uri, rlscope::StringPiece* scheme,
+              rlscope::StringPiece* host, rlscope::StringPiece* path);
 
 // Creates a URI from a scheme, host, and path. If the scheme is empty, we just
 // return the path.
-string CreateURI(tensorflow::StringPiece scheme, tensorflow::StringPiece host,
-                 tensorflow::StringPiece path);
+string CreateURI(rlscope::StringPiece scheme, rlscope::StringPiece host,
+                 rlscope::StringPiece path);
 
 // Creates a temporary file name with an extension.
 string GetTempFilename(const string& extension);
 
 }  // namespace io
-}  // namespace tensorflow
+}  // namespace rlscope
 
 #endif  // TENSORFLOW_CORE_LIB_IO_PATH_H_

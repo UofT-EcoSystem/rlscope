@@ -15,7 +15,7 @@ limitations under the License.
 
 #include "tensorflow/core/platform/setround.h"
 
-namespace tensorflow {
+namespace rlscope {
 namespace port {
 
 ScopedSetRound::ScopedSetRound(const int mode) {
@@ -30,4 +30,4 @@ ScopedSetRound::ScopedSetRound(const int mode) {
 ScopedSetRound::~ScopedSetRound() { std::fesetround(original_mode_); }
 
 }  // namespace port
-}  // namespace tensorflow
+}  // namespace rlscope

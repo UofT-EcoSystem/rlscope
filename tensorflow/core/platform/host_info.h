@@ -18,13 +18,13 @@ limitations under the License.
 
 #include "tensorflow/core/platform/types.h"
 
-namespace tensorflow {
+namespace rlscope {
 namespace port {
 
 // Return the hostname of the machine on which this process is running
 string Hostname();
 
 }  // namespace port
-}  // namespace tensorflow
+}  // namespace rlscope
 
 #endif  // TENSORFLOW_CORE_PLATFORM_HOST_INFO_H_

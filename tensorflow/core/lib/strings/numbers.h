@@ -21,7 +21,7 @@ limitations under the License.
 #include "tensorflow/core/lib/core/stringpiece.h"
 #include "tensorflow/core/platform/types.h"
 
-namespace tensorflow {
+namespace rlscope {
 namespace strings {
 
 // ----------------------------------------------------------------------
@@ -174,6 +174,6 @@ string HumanReadableNumBytes(int64 num_bytes);
 string HumanReadableElapsedTime(double seconds);
 
 }  // namespace strings
-}  // namespace tensorflow
+}  // namespace rlscope
 
 #endif  // TENSORFLOW_CORE_LIB_STRINGS_NUMBERS_H_

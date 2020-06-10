@@ -16,10 +16,10 @@ limitations under the License.
 #include "tensorflow/core/lib/core/status.h"
 #include <stdio.h>
 
-namespace tensorflow {
+namespace rlscope {
 
-Status::Status(tensorflow::error::Code code, StringPiece msg) {
-  assert(code != tensorflow::error::OK);
+Status::Status(rlscope::error::Code code, StringPiece msg) {
+  assert(code != rlscope::error::OK);
   state_ = std::unique_ptr<State>(new State);
   state_->code = code;
   state_->msg = string(msg);
@@ -51,52 +51,52 @@ string Status::ToString() const {
     char tmp[30];
     const char* type;
     switch (code()) {
-      case tensorflow::error::CANCELLED:
+      case rlscope::error::CANCELLED:
         type = "Cancelled";
         break;
-      case tensorflow::error::UNKNOWN:
+      case rlscope::error::UNKNOWN:
         type = "Unknown";
         break;
-      case tensorflow::error::INVALID_ARGUMENT:
+      case rlscope::error::INVALID_ARGUMENT:
         type = "Invalid argument";
         break;
-      case tensorflow::error::DEADLINE_EXCEEDED:
+      case rlscope::error::DEADLINE_EXCEEDED:
         type = "Deadline exceeded";
         break;
-      case tensorflow::error::NOT_FOUND:
+      case rlscope::error::NOT_FOUND:
         type = "Not found";
         break;
-      case tensorflow::error::ALREADY_EXISTS:
+      case rlscope::error::ALREADY_EXISTS:
         type = "Already exists";
         break;
-      case tensorflow::error::PERMISSION_DENIED:
+      case rlscope::error::PERMISSION_DENIED:
         type = "Permission denied";
         break;
-      case tensorflow::error::UNAUTHENTICATED:
+      case rlscope::error::UNAUTHENTICATED:
         type = "Unauthenticated";
         break;
-      case tensorflow::error::RESOURCE_EXHAUSTED:
+      case rlscope::error::RESOURCE_EXHAUSTED:
         type = "Resource exhausted";
         break;
-      case tensorflow::error::FAILED_PRECONDITION:
+      case rlscope::error::FAILED_PRECONDITION:
         type = "Failed precondition";
         break;
-      case tensorflow::error::ABORTED:
+      case rlscope::error::ABORTED:
         type = "Aborted";
         break;
-      case tensorflow::error::OUT_OF_RANGE:
+      case rlscope::error::OUT_OF_RANGE:
         type = "Out of range";
         break;
-      case tensorflow::error::UNIMPLEMENTED:
+      case rlscope::error::UNIMPLEMENTED:
         type = "Unimplemented";
         break;
-      case tensorflow::error::INTERNAL:
+      case rlscope::error::INTERNAL:
         type = "Internal";
         break;
-      case tensorflow::error::UNAVAILABLE:
+      case rlscope::error::UNAVAILABLE:
         type = "Unavailable";
         break;
-      case tensorflow::error::DATA_LOSS:
+      case rlscope::error::DATA_LOSS:
         type = "Data loss";
         break;
       default:
@@ -121,7 +121,7 @@ std::ostream& operator<<(std::ostream& os, const Status& x) {
   return os;
 }
 
-string* TfCheckOpHelperOutOfLine(const ::tensorflow::Status& v,
+string* TfCheckOpHelperOutOfLine(const ::rlscope::Status& v,
                                  const char* msg) {
   string r("Non-OK-status: ");
   r += msg;
@@ -131,4 +131,4 @@ string* TfCheckOpHelperOutOfLine(const ::tensorflow::Status& v,
   return new string(r);
 }
 
-}  // namespace tensorflow
+}  // namespace rlscope

@@ -18,7 +18,7 @@ limitations under the License.
 
 #include "tensorflow/core/lib/core/status.h"
 
-namespace tensorflow {
+namespace rlscope {
 
 namespace internal {
 
@@ -29,6 +29,6 @@ string FormatLibraryFileName(const string& name, const string& version);
 
 }  // namespace internal
 
-}  // namespace tensorflow
+}  // namespace rlscope
 
 #endif  // TENSORFLOW_CORE_PLATFORM_LOAD_LIBRARY_H_

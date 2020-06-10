@@ -10,7 +10,7 @@
 
 #include "cuda_api_profiler/generic_logging.h"
 
-namespace tensorflow {
+namespace rlscope {
 
 struct RLSAnalyzeArgs {
 //   Environment variables

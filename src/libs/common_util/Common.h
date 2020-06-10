@@ -49,9 +49,9 @@
         NVPA_Status _status = apiFuncCall; \
         if (_status != NVPA_STATUS_SUCCESS) { \
             std::stringstream _err_ss; \
-            auto _err_str = CuptiSamples::nvperfGetErrorString(_status); \
+            auto _err_str = rlscope::nvperfGetErrorString(_status); \
             _err_ss << __FILE__ << ":" << __LINE__ << ": error: function " << #apiFuncCall << " failed with error (" << _status << ") " << _err_str; \
-            auto _my_status = MyStatus(CuptiSamples::error::INVALID_ARGUMENT, _err_ss.str()); \
+            auto _my_status = MyStatus(rlscope::error::INVALID_ARGUMENT, _err_ss.str()); \
             PRINT_AND_DBG_BREAKPOINT("NVPW_API_CALL", _my_status); \
             return _my_status; \
         } \
@@ -65,9 +65,9 @@
         CUptiResult _status = apiFuncCall; \
         if (_status != CUPTI_SUCCESS) { \
             std::stringstream _err_ss; \
-            auto _err_str = CuptiSamples::cuptiGetDetailedErrorString(_status); \
+            auto _err_str = rlscope::cuptiGetDetailedErrorString(_status); \
             _err_ss << __FILE__ << ":" << __LINE__ << ": error: function " << #apiFuncCall << " failed with error (" << _status << ") " << _err_str; \
-            auto _my_status = MyStatus(CuptiSamples::error::INVALID_ARGUMENT, _err_ss.str()); \
+            auto _my_status = MyStatus(rlscope::error::INVALID_ARGUMENT, _err_ss.str()); \
             PRINT_AND_DBG_BREAKPOINT("CUPTI_API_CALL", _my_status); \
             return _my_status; \
         } \
@@ -83,7 +83,7 @@
             auto _err_status = cuGetErrorString(_status, &_err_str); \
             assert(_err_status == CUDA_SUCCESS); \
             _err_ss << __FILE__ << ":" << __LINE__ << ": error: function " << #apiFuncCall << " failed with error (" << _status << ") " << _err_str; \
-            auto _my_status = MyStatus(CuptiSamples::error::INVALID_ARGUMENT, _err_ss.str()); \
+            auto _my_status = MyStatus(rlscope::error::INVALID_ARGUMENT, _err_ss.str()); \
             PRINT_AND_DBG_BREAKPOINT("DRIVER_API_CALL", _my_status); \
             return _my_status; \
         } \
@@ -95,7 +95,7 @@
         NVPA_Status _status = apiFuncCall; \
         if (_status != NVPA_STATUS_SUCCESS) { \
             std::stringstream _err_ss; \
-            auto _err_str = CuptiSamples::nvperfGetErrorString(_status); \
+            auto _err_str = rlscope::nvperfGetErrorString(_status); \
             _err_ss << __FILE__ << ":" << __LINE__ << ": error: function " << #apiFuncCall << " failed with error (" << _status << ") " << _err_str; \
             std::cerr << "ERROR: " << _err_ss.str() << std::endl; \
             exit(-1); \
@@ -108,7 +108,7 @@
         CUptiResult _status = apiFuncCall; \
         if (_status != CUPTI_SUCCESS) { \
             std::stringstream _err_ss; \
-            auto _err_str = CuptiSamples::cuptiGetDetailedErrorString(_status); \
+            auto _err_str = rlscope::cuptiGetDetailedErrorString(_status); \
             _err_ss << __FILE__ << ":" << __LINE__ << ": error: function " << #apiFuncCall << " failed with error (" << _status << ") " << _err_str; \
             std::cerr << "ERROR: " << _err_ss.str() << std::endl; \
             DBG_BREAKPOINT("CUPTI_API_CALL"); \
@@ -154,13 +154,13 @@
             std::stringstream _err_ss; \
             auto _err_str = cudaGetErrorString(_status); \
             _err_ss << __FILE__ << ":" << __LINE__ << ": error: function " << #apiFuncCall << " failed with error (" << _status << ") " << _err_str; \
-            auto _my_status = MyStatus(CuptiSamples::error::INVALID_ARGUMENT, _err_ss.str()); \
+            auto _my_status = MyStatus(rlscope::error::INVALID_ARGUMENT, _err_ss.str()); \
             PRINT_AND_DBG_BREAKPOINT("RUNTIME_API_CALL", _my_status); \
             return _my_status; \
         } \
     } while (0)
 
-namespace CuptiSamples {
+namespace rlscope {
 
 std::vector<std::string> StringSplit(const std::string& s, std::string rgx_str);
 
@@ -181,6 +181,6 @@ MyStatus RecursiveFindFiles(std::list<std::string>* paths, const std::string& ro
 
 char path_separator();
 
-} // namespace CuptiSamples
+} // namespace rlscope
 
 #endif //CUPTI_SAMPLES_COMMON_H

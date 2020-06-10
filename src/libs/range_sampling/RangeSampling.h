@@ -22,7 +22,7 @@
 #include <boost/asio/thread_pool.hpp>
 #include <boost/asio/post.hpp>
 
-namespace CuptiSamples {
+namespace rlscope {
 
 struct RangeNode {
     RangeNode* parent;
@@ -185,8 +185,8 @@ struct GPUHwCounterSamplerState {
     std::string directory;
     ConfigData config_data;
     CounterData counter_data;
-    CuptiSamples::timestamp_us start_profiling_t;
-    CuptiSamples::timestamp_us stop_profiling_t;
+    rlscope::timestamp_us start_profiling_t;
+    rlscope::timestamp_us stop_profiling_t;
 
 //    timestamp_us start_profiling_t;
 //    timestamp_us stop_profiling_t;
@@ -383,6 +383,6 @@ public:
     bool Enabled() const;
 };
 
-} // namespace CuptiSamples
+} // namespace rlscope
 
 #endif //CUPTI_RANGE_SAMPLING_H

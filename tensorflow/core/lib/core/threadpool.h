@@ -25,7 +25,7 @@ limitations under the License.
 namespace Eigen {
 class Allocator;
 }  // namespace Eigen
-namespace tensorflow {
+namespace rlscope {
 namespace thread {
 
 class ThreadPool {
@@ -128,6 +128,6 @@ class ThreadPool {
 };
 
 }  // namespace thread
-}  // namespace tensorflow
+}  // namespace rlscope
 
 #endif  // TENSORFLOW_CORE_LIB_CORE_THREADPOOL_H_

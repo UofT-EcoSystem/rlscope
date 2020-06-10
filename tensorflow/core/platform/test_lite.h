@@ -23,7 +23,7 @@ limitations under the License.
 #include "tensorflow/core/platform/platform.h"
 #include "tensorflow/core/platform/types.h"
 
-namespace tensorflow {
+namespace rlscope {
 namespace testing {
 
 // Return a temporary directory suitable for temporary testing files.
@@ -42,6 +42,6 @@ int RandomSeed();
 int PickUnusedPortOrDie();
 
 }  // namespace testing
-}  // namespace tensorflow
+}  // namespace rlscope
 
 #endif  // TENSORFLOW_PLATFORM_TEST_H_

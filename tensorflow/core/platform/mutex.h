@@ -19,9 +19,9 @@ limitations under the License.
 #include "tensorflow/core/platform/platform.h"
 #include "tensorflow/core/platform/types.h"
 
-namespace tensorflow {
+namespace rlscope {
 enum ConditionResult { kCond_Timeout, kCond_MaybeNotified };
-}  // namespace tensorflow
+}  // namespace rlscope
 
 // Include appropriate platform-dependent implementations of mutex etc.
 #if defined(PLATFORM_GOOGLE)
@@ -39,7 +39,7 @@ enum ConditionResult { kCond_Timeout, kCond_MaybeNotified };
 //   class condition_variable;
 // It also defines the following:
 
-namespace tensorflow {
+namespace rlscope {
 
 // Like "cv->wait(*mu)", except that it only waits for up to "ms" milliseconds.
 //
@@ -48,6 +48,6 @@ namespace tensorflow {
 // return either kCond_Timeout or kCond_MaybeNotified
 ConditionResult WaitForMilliseconds(mutex_lock* mu, condition_variable* cv,
                                     int64 ms);
-}  // namespace tensorflow
+}  // namespace rlscope
 
 #endif  // TENSORFLOW_CORE_PLATFORM_MUTEX_H_

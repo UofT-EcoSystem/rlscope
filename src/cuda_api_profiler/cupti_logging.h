@@ -43,7 +43,7 @@
     out << "iml-prof C++ API '" << func << "' failed with: " << status; \
   }
 
-namespace tensorflow {
+namespace rlscope {
 
 const char* runtime_cbid_to_string(CUpti_CallbackId cbid);
 const char* driver_cbid_to_string(CUpti_CallbackId cbid);

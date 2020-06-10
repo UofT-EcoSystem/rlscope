@@ -8,7 +8,7 @@
 #include <memory>
 #include <assert.h>
 
-namespace tensorflow {
+namespace rlscope {
 
 class ILRUEntry {
 public:

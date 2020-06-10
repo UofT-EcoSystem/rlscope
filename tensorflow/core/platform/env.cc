@@ -41,7 +41,7 @@ limitations under the License.
 #include "tensorflow/core/platform/host_info.h"
 #include "tensorflow/core/platform/protobuf.h"
 
-namespace tensorflow {
+namespace rlscope {
 
 // 128KB copy buffer
 constexpr size_t kCopyFileBufferSize = 128 * 1024;
@@ -444,7 +444,7 @@ Status FileSystemCopyFile(FileSystem* src_fs, const string& src,
 
 // A ZeroCopyInputStream on a RandomAccessFile.
 namespace {
-class FileStream : public ::tensorflow::protobuf::io::ZeroCopyInputStream {
+class FileStream : public ::rlscope::protobuf::io::ZeroCopyInputStream {
  public:
   explicit FileStream(RandomAccessFile* file) : file_(file), pos_(0) {}
 
@@ -481,14 +481,14 @@ class FileStream : public ::tensorflow::protobuf::io::ZeroCopyInputStream {
 }  // namespace
 
 Status WriteBinaryProto(Env* env, const string& fname,
-                        const ::tensorflow::protobuf::MessageLite& proto) {
+                        const ::rlscope::protobuf::MessageLite& proto) {
   string serialized;
   proto.AppendToString(&serialized);
   return WriteStringToFile(env, fname, serialized);
 }
 
 Status ReadBinaryProto(Env* env, const string& fname,
-                       ::tensorflow::protobuf::MessageLite* proto) {
+                       ::rlscope::protobuf::MessageLite* proto) {
   std::unique_ptr<RandomAccessFile> file;
   TF_RETURN_IF_ERROR(env->NewRandomAccessFile(fname, &file));
   std::unique_ptr<FileStream> stream(new FileStream(file.get()));
@@ -497,7 +497,7 @@ Status ReadBinaryProto(Env* env, const string& fname,
   // one to parse arbitrarily large messages for MessageLite. One most likely
   // doesn't want to put protobufs larger than 64MB on Android, so we should
   // eventually remove this and quit loud when a large protobuf is passed in.
-  ::tensorflow::protobuf::io::CodedInputStream coded_stream(stream.get());
+  ::rlscope::protobuf::io::CodedInputStream coded_stream(stream.get());
   // Total bytes hard limit / warning limit are set to 1GB and 512MB
   // respectively.
   coded_stream.SetTotalBytesLimit(1024LL << 20, 512LL << 20);
@@ -510,10 +510,10 @@ Status ReadBinaryProto(Env* env, const string& fname,
 }
 
 Status WriteTextProto(Env* env, const string& fname,
-                      const ::tensorflow::protobuf::Message& proto) {
+                      const ::rlscope::protobuf::Message& proto) {
 #if !defined(TENSORFLOW_LITE_PROTOS)
   string serialized;
-  if (!::tensorflow::protobuf::TextFormat::PrintToString(proto, &serialized)) {
+  if (!::rlscope::protobuf::TextFormat::PrintToString(proto, &serialized)) {
     return errors::FailedPrecondition("Unable to convert proto to text.");
   }
   return WriteStringToFile(env, fname, serialized);
@@ -523,13 +523,13 @@ Status WriteTextProto(Env* env, const string& fname,
 }
 
 Status ReadTextProto(Env* env, const string& fname,
-                     ::tensorflow::protobuf::Message* proto) {
+                     ::rlscope::protobuf::Message* proto) {
 #if !defined(TENSORFLOW_LITE_PROTOS)
   std::unique_ptr<RandomAccessFile> file;
   TF_RETURN_IF_ERROR(env->NewRandomAccessFile(fname, &file));
   std::unique_ptr<FileStream> stream(new FileStream(file.get()));
 
-  if (!::tensorflow::protobuf::TextFormat::Parse(stream.get(), proto)) {
+  if (!::rlscope::protobuf::TextFormat::Parse(stream.get(), proto)) {
     TF_RETURN_IF_ERROR(stream->status());
     return errors::DataLoss("Can't parse ", fname, " as text proto");
   }
@@ -539,4 +539,4 @@ Status ReadTextProto(Env* env, const string& fname,
 #endif
 }
 
-}  // namespace tensorflow
+}  // namespace rlscope

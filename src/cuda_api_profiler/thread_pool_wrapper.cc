@@ -8,7 +8,7 @@
 #include "tensorflow/core/platform/notification.h"
 #include "tensorflow/core/platform/env.h"
 
-namespace tensorflow {
+namespace rlscope {
 
 ThreadPoolWrapper::ThreadPoolWrapper(const string& name, int num_threads) :
         async_dump_pool_(Env::Default(), ThreadOptions(), name, num_threads, false),

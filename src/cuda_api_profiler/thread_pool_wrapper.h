@@ -9,7 +9,7 @@
 #include "tensorflow/core/platform/notification.h"
 #include "tensorflow/core/platform/env.h"
 
-namespace tensorflow {
+namespace rlscope {
 
 // Singleton class for dumping TraceDataProto asynchronously to avoid blocking python-side.
 class ThreadPoolWrapper {

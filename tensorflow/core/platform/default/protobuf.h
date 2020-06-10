@@ -35,12 +35,12 @@ limitations under the License.
 #include "google/protobuf/map.h"
 #include "google/protobuf/repeated_field.h"
 
-namespace tensorflow {
+namespace rlscope {
 namespace protobuf = ::google::protobuf;
 using protobuf_int64 = ::google::protobuf::int64;
 using protobuf_uint64 = ::google::protobuf::uint64;
 extern const char* kProtobufInt64Typename;
 extern const char* kProtobufUint64Typename;
-}  // namespace tensorflow
+}  // namespace rlscope
 
 #endif  // TENSORFLOW_CORE_PLATFORM_DEFAULT_PROTOBUF_H_

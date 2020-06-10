@@ -4,7 +4,7 @@
 
 //#include "common/debug.h"
 
-#include "error_codes.pb.h"
+//#include "error_codes.pb.h"
 
 #include <spdlog/spdlog.h>
 //#include <sys/types.h>
@@ -16,7 +16,7 @@
 #include <boost/any.hpp>
 
 #include "cuda_api_profiler/generic_logging.h"
-#include "cuda_api_profiler/debug_flags.h"
+#include "common_util.h"
 
 // Time breakdown:
 // - metric: how many events are processed per second by compute overlap.
@@ -33,7 +33,6 @@ using json = nlohmann::json;
 #include <assert.h>
 
 //#include "tensorflow/core/lib/core/status.h"
-#include "common/my_status.h"
 #include "analysis/sample_periods.h"
 
 #include <list>
@@ -68,7 +67,7 @@ DEFINE_string(nvprof_keep_column_names, "", "For nvprof csv files, when outputti
 DEFINE_int64(polling_interval_us, 0, "nvidia-smi sampling period in microseconds (http://developer.download.nvidia.com/compute/DCGM/docs/nvidia-smi-367.38.pdf): Percent of time over the past sample period during which one or more kernels was executing on the GPU. The sample period may be between 1 second and 1/6 second depending on the product");
 //DEFINE_int64(window_size_us, 0, "nvidia-smi sampling period in microseconds (http://developer.download.nvidia.com/compute/DCGM/docs/nvidia-smi-367.38.pdf): Percent of time over the past sample period during which one or more kernels was executing on the GPU. The sample period may be between 1 second and 1/6 second depending on the product");
 
-namespace tensorflow {
+namespace rlscope {
 
 /* static */ RLSAnalyzeArgs RLSAnalyzeArgs::FromFlags() {
   RLSAnalyzeArgs args;
@@ -180,8 +179,8 @@ void PrintCategoryTimes(OStream& out, const CategoryTimes& category_times) {
   }
 }
 
-} // namespace tensorflow
-using namespace tensorflow;
+} // namespace rlscope
+using namespace rlscope;
 
 int main(int argc, char** argv) {
   backward::SignalHandling sh;

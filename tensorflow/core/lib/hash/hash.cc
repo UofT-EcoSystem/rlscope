@@ -21,7 +21,7 @@ limitations under the License.
 
 #include <string.h>
 
-namespace tensorflow {
+namespace rlscope {
 
 // 0xff is in case char is signed.
 static inline uint32 ByteAs32(char c) { return static_cast<uint32>(c) & 0xff; }
@@ -126,4 +126,4 @@ uint64 Hash64(const char* data, size_t n, uint64 seed) {
   return h;
 }
 
-}  // namespace tensorflow
+}  // namespace rlscope

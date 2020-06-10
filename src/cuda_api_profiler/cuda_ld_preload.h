@@ -120,17 +120,17 @@ struct CudaAPICallbacks {
   }
   // For some reason, just the act of adding this data-memmber makes cudaLanch time go from  1:26:35 -> 1:29:13...
   // I doubt this is something we should care about... (likely miniscule caching effect we cannot control anyways.)
-//  tensorflow::mutex _mu;
+//  rlscope::mutex _mu;
   // e.g.
   // start_cb = cudaLaunchKernel_start_cb
   // exit_cb = cudaLaunchKernel_exit_cb
   template <typename StartCallback, typename ExitCallback>
-  tensorflow::RegisteredHandle<CudaAPIFuncId> RegisterCallback(StartCallback start_cb, ExitCallback exit_cb) {
-//    tensorflow::mutex_lock lock(_mu);
+  rlscope::RegisteredHandle<CudaAPIFuncId> RegisterCallback(StartCallback start_cb, ExitCallback exit_cb) {
+//    rlscope::mutex_lock lock(_mu);
     auto func_id = _next_func_id;
     _next_func_id += 1;
     callbacks.emplace_back(func_id, start_cb, exit_cb);
-    tensorflow::RegisteredHandle<CudaAPIFuncId> handle(func_id, /*unregister_cb=*/[this] (CudaAPIFuncId func_id) {
+    rlscope::RegisteredHandle<CudaAPIFuncId> handle(func_id, /*unregister_cb=*/[this] (CudaAPIFuncId func_id) {
       this->UnregisterCallback(func_id);
     });
     VLOG(1) << "Register func_id = " << func_id;
@@ -138,7 +138,7 @@ struct CudaAPICallbacks {
   }
 
   void UnregisterCallback(CudaAPIFuncId func_id) {
-//    tensorflow::mutex_lock lock(_mu);
+//    rlscope::mutex_lock lock(_mu);
     std::remove_if(callbacks.begin(), callbacks.end(),
                    [func_id](const CudaCallbackType& cb) { return cb.func_id == func_id; });
   }

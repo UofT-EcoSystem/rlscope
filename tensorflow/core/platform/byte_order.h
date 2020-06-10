@@ -25,13 +25,13 @@ limitations under the License.
 #define __BYTE_ORDER__ __ORDER_LITTLE_ENDIAN__
 #endif
 
-namespace tensorflow {
+namespace rlscope {
 namespace port {
 
 // TODO(jeff,sanjay): Make portable
 constexpr bool kLittleEndian = __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__;
 
 }  // namespace port
-}  // namespace tensorflow
+}  // namespace rlscope
 
 #endif  // TENSORFLOW_CORE_PLATFORM_BYTE_ORDER_H_

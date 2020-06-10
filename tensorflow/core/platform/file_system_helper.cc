@@ -27,7 +27,7 @@ limitations under the License.
 #include "tensorflow/core/platform/file_system.h"
 #include "tensorflow/core/platform/platform.h"
 
-namespace tensorflow {
+namespace rlscope {
 namespace internal {
 
 namespace {
@@ -83,7 +83,7 @@ Status GetMatchingPaths(FileSystem* fs, Env* env, const string& pattern,
     std::vector<string> children;
     Status s = fs->GetChildren(current_dir, &children);
     // In case PERMISSION_DENIED is encountered, we bail here.
-    if (s.code() == tensorflow::error::PERMISSION_DENIED) {
+    if (s.code() == rlscope::error::PERMISSION_DENIED) {
       continue;
     }
     ret.Update(s);
@@ -97,7 +97,7 @@ Status GetMatchingPaths(FileSystem* fs, Env* env, const string& pattern,
               // In case the child_path doesn't start with the fixed_prefix then
               // we don't need to explore this path.
               if (!str_util::StartsWith(child_path, fixed_prefix)) {
-                children_dir_status[i] = Status(tensorflow::error::CANCELLED,
+                children_dir_status[i] = Status(rlscope::error::CANCELLED,
                                                 "Operation not needed");
               } else {
                 children_dir_status[i] = fs->IsDirectory(child_path);
@@ -106,7 +106,7 @@ Status GetMatchingPaths(FileSystem* fs, Env* env, const string& pattern,
     for (std::size_t i = 0; i < children.size(); ++i) {
       const string child_path = io::JoinPath(current_dir, children[i]);
       // If the IsDirectory call was cancelled we bail.
-      if (children_dir_status[i].code() == tensorflow::error::CANCELLED) {
+      if (children_dir_status[i].code() == rlscope::error::CANCELLED) {
         continue;
       }
       // If the child is a directory add it to the queue.
@@ -127,4 +127,4 @@ Status GetMatchingPaths(FileSystem* fs, Env* env, const string& pattern,
 }
 
 }  // namespace internal
-}  // namespace tensorflow
+}  // namespace rlscope

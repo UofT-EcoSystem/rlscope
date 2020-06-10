@@ -34,7 +34,7 @@ limitations under the License.
 #include "tensorflow/core/platform/logging.h"
 #include "tensorflow/core/platform/posix/posix_file_system.h"
 
-namespace tensorflow {
+namespace rlscope {
 
 namespace {
 
@@ -105,18 +105,18 @@ class PosixEnv : public Env {
   }
 
   Status LoadLibrary(const char* library_filename, void** handle) override {
-    return tensorflow::internal::LoadLibrary(library_filename, handle);
+    return rlscope::internal::LoadLibrary(library_filename, handle);
   }
 
   Status GetSymbolFromLibrary(void* handle, const char* symbol_name,
                               void** symbol) override {
-    return tensorflow::internal::GetSymbolFromLibrary(handle, symbol_name,
+    return rlscope::internal::GetSymbolFromLibrary(handle, symbol_name,
                                                       symbol);
   }
 
   string FormatLibraryFileName(const string& name,
                                const string& version) override {
-    return tensorflow::internal::FormatLibraryFileName(name, version);
+    return rlscope::internal::FormatLibraryFileName(name, version);
   }
 
   string GetRunfilesDir() override {
@@ -184,4 +184,4 @@ void PosixEnv::GetLocalTempDirectories(std::vector<string>* list) {
   }
 }
 
-}  // namespace tensorflow
+}  // namespace rlscope

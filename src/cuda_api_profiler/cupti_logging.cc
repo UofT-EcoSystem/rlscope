@@ -16,7 +16,7 @@
 #define XSTR(a) STR(a)
 #define STR(a) #a
 
-namespace tensorflow {
+namespace rlscope {
 
 const char* driver_cbid_to_string(CUpti_CallbackId cbid) {
 

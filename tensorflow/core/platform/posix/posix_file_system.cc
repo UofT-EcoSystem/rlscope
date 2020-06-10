@@ -28,7 +28,8 @@ limitations under the License.
 #include <unistd.h>
 
 //#include "tensorflow/core/lib/core/error_codes.pb.h"
-#include "error_codes.pb.h"
+//#include "error_codes.pb.h"
+#include "common_util.h"
 #include "tensorflow/core/lib/core/status.h"
 #include "tensorflow/core/lib/strings/strcat.h"
 #include "tensorflow/core/platform/env.h"
@@ -37,7 +38,7 @@ limitations under the License.
 #include "tensorflow/core/platform/posix/error.h"
 #include "tensorflow/core/platform/posix/posix_file_system.h"
 
-namespace tensorflow {
+namespace rlscope {
 
 // 128KB of copy buffer
 constexpr size_t kPosixCopyFileBufferSize = 128 * 1024;
@@ -358,4 +359,4 @@ Status PosixFileSystem::CopyFile(const string& src, const string& target) {
   return result;
 }
 
-}  // namespace tensorflow
+}  // namespace rlscope

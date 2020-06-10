@@ -17,7 +17,7 @@
 #include <regex>
 #include <chrono>
 
-namespace CuptiSamples {
+namespace rlscope {
 
 std::vector<std::string> StringSplit(const std::string& s, std::string rgx_str) {
     std::vector<std::string> elems;
@@ -77,7 +77,6 @@ void mkdir_p(const std::string &dir, bool exist_ok) {
     if (!exist_ok) {
         assert(was_created);
     }
-//  return mkdir_p_with_mode(dir, exist_ok);
 }
 
 std::string nvperfGetErrorString(NVPA_Status status) {
@@ -255,4 +254,4 @@ MyStatus RecursiveFindFiles(std::list<std::string>* paths, const std::string& ro
 }
 
 
-} // namespace CuptiSamples
+} // namespace rlscope

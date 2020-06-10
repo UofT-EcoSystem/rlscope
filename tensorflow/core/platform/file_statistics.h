@@ -18,7 +18,7 @@ limitations under the License.
 
 #include "tensorflow/core/platform/types.h"
 
-namespace tensorflow {
+namespace rlscope {
 
 struct FileStatistics {
   // The length of the file or -1 if finding file length is not supported.
@@ -34,6 +34,6 @@ struct FileStatistics {
   ~FileStatistics() {}
 };
 
-}  // namespace tensorflow
+}  // namespace rlscope
 
 #endif  // TENSORFLOW_CORE_PLATFORM_FILE_STATISTICS_H_

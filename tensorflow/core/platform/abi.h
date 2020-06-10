@@ -19,12 +19,12 @@ limitations under the License.
 #include <string>
 #include "tensorflow/core/platform/types.h"
 
-namespace tensorflow {
+namespace rlscope {
 namespace port {
 
 string MaybeAbiDemangle(const char* name);
 
 }  // namespace port
-}  // namespace tensorflow
+}  // namespace rlscope
 
 #endif  // TENSORFLOW_CORE_PLATFORM_ABI_H_

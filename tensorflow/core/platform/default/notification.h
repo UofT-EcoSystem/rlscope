@@ -24,7 +24,7 @@ limitations under the License.
 #include "tensorflow/core/platform/mutex.h"
 #include "tensorflow/core/platform/types.h"
 
-namespace tensorflow {
+namespace rlscope {
 
 class Notification {
  public:
@@ -82,6 +82,6 @@ inline bool WaitForNotificationWithTimeout(Notification* n,
   return n->WaitForNotificationWithTimeout(timeout_in_us);
 }
 
-}  // namespace tensorflow
+}  // namespace rlscope
 
 #endif  // TENSORFLOW_CORE_PLATFORM_DEFAULT_NOTIFICATION_H_

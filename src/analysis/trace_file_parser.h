@@ -51,13 +51,11 @@
 //#include <sys/stat.h>
 
 //#include "tensorflow/core/lib/core/error_codes.pb.h"
-#include "error_codes.pb.h"
+//#include "error_codes.pb.h"
 //#include "tensorflow/core/lib/core/status.h"
-#include "common/my_status.h"
-#include "common/json.h"
 
 #include <set>
-#include <cuda_api_profiler/debug_flags.h>
+#include "common_util.h"
 #include <drivers/cpp_dump_proto.h>
 
 //#define PSEC_IN_USEC (1000)
@@ -96,7 +94,7 @@
 #define DECLARE_GET_PARSER_META \
   ParserMeta* GetParserMetaDerived() const;
 
-namespace tensorflow {
+namespace rlscope {
 
 // forward decls
 class IEventFileParser;
@@ -5287,8 +5285,6 @@ inline nlohmann::json ValueAsJson(const OverlapResult& value) {
   return js;
 }
 
-std::vector<std::string> StringSplit(const std::string& s, std::string rgx_str = "\\s+");
-
-} // namespace tensorflow
+} // namespace rlscope
 
 #endif //IML_TRACE_FILE_PARSER_H

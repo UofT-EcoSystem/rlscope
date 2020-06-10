@@ -10,7 +10,7 @@
 
 #include "tensorflow/core/platform/types.h"
 
-namespace tensorflow {
+namespace rlscope {
 
 struct RegisteredFunc {
   using FuncId = int;

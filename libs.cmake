@@ -40,9 +40,16 @@ endmacro()
 
 function(_AddTargetDependencies TARGET)
     # message("TARGET = ${TARGET}")
+    AddCUDA(${TARGET})
     add_backward(${TARGET})
-    target_link_libraries(${TARGET} spdlog::spdlog)
-    target_link_libraries(${TARGET} nlohmann_json::nlohmann_json)
+
+    find_package(MySpdlog REQUIRED)
+    target_link_libraries(${TARGET} PRIVATE ${MySpdlog_LIBRARIES})
+    target_include_directories(${TARGET} PRIVATE ${MySpdlog_INCLUDE_DIRS})
+    # message("> MySpdlog_LIBRARIES = ${MySpdlog_LIBRARIES}")
+    # message("> MySpdlog_INCLUDE_DIRS = ${MySpdlog_INCLUDE_DIRS}")
+
+    target_link_libraries(${TARGET} PRIVATE nlohmann_json::nlohmann_json)
 
     if(CMAKE_BUILD_TYPE STREQUAL "Debug")
         get_target_property(CUR_FLAG ${TARGET} COMPILE_DEFINITIONS)

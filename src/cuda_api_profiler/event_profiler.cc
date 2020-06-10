@@ -31,7 +31,7 @@
 // Q: How many events should we dump per file to reach 20MB?
 #define EVENT_PROFILER_MAX_RECORDS_PER_DUMP 731500
 
-namespace tensorflow {
+namespace rlscope {
 
 void EventProfiler::SetMetadata(const char* directory, const char* process_name, const char* machine_name, const char* phase_name) {
   mutex_lock lock(_mu);

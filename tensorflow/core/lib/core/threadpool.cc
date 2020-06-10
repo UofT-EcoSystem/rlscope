@@ -28,7 +28,7 @@ limitations under the License.
 #include "tensorflow/core/platform/tracing.h"
 #include "tensorflow/core/platform/types.h"
 
-namespace tensorflow {
+namespace rlscope {
 namespace thread {
 
 struct EigenEnvironment {
@@ -210,4 +210,4 @@ void ThreadPool::SetStealPartitions(
   impl_->SetStealPartitions(partitions);
 }
 }  // namespace thread
-}  // namespace tensorflow
+}  // namespace rlscope

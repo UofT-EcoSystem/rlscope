@@ -28,12 +28,12 @@ limitations under the License.
 
 #include "absl/strings/string_view.h"
 
-namespace tensorflow {
+namespace rlscope {
 
 // Deprecated: please use absl::string_view directly.
 using StringPiece = absl::string_view;
 //using StringPiece = std::string;
 
-}  // namespace tensorflow
+}  // namespace rlscope
 
 #endif  // TENSORFLOW_CORE_LIB_CORE_STRINGPIECE_H_

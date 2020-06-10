@@ -17,7 +17,7 @@
 #include <memory>
 #include <thread>
 
-namespace tensorflow {
+namespace rlscope {
 
 // Sample every millisecond.
 // There are a lot of tiny kernels that execute... (look at q-forward trace from powerpoint)... so I suspect it's unlikely

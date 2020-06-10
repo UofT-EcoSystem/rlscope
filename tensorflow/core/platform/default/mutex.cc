@@ -19,12 +19,12 @@ limitations under the License.
 #include "nsync_cv.h"
 #include "nsync_mu.h"
 
-namespace tensorflow {
+namespace rlscope {
 
 // Check that the external_mu_space struct used to reserve space for the mutex
-// in tensorflow::mutex is big enough.
+// in rlscope::mutex is big enough.
 static_assert(sizeof(nsync::nsync_mu) <= sizeof(mutex::external_mu_space),
-              "tensorflow::mutex::external_mu_space needs to be bigger");
+              "rlscope::mutex::external_mu_space needs to be bigger");
 
 // Cast a pointer to mutex::external_mu_space to a pointer to the mutex mutex
 // representation.  This is done so that the header files for nsync_mu do not
@@ -50,10 +50,10 @@ bool mutex::try_lock_shared() {
 void mutex::unlock_shared() { nsync::nsync_mu_runlock(mu_cast(&mu_)); }
 
 // Check that the external_cv_space struct used to reserve space for the
-// condition variable in tensorflow::condition_variable is big enough.
+// condition variable in rlscope::condition_variable is big enough.
 static_assert(
     sizeof(nsync::nsync_cv) <= sizeof(condition_variable::external_cv_space),
-    "tensorflow::condition_variable::external_cv_space needs to be bigger");
+    "rlscope::condition_variable::external_cv_space needs to be bigger");
 
 // Cast a pointer to mutex::external_cv_space to a pointer to the condition
 // variable representation.  This is done so that the header files for nsync_mu
@@ -86,4 +86,4 @@ void condition_variable::notify_all() {
   nsync::nsync_cv_broadcast(cv_cast(&cv_));
 }
 
-}  // namespace tensorflow
+}  // namespace rlscope

@@ -17,7 +17,7 @@
 #include <sys/time.h>
 #include <sys/resource.h>
 
-namespace CuptiSamples {
+namespace rlscope {
 
 template <typename K, typename V>
 class OrderedMap {

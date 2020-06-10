@@ -10,11 +10,11 @@
 #include <string>
 #include <nlohmann/json.hpp>
 
-namespace CuptiSamples {
+namespace rlscope {
 
 MyStatus ReadJson(std::string path, nlohmann::json *j);
 MyStatus WriteJson(std::string path, const nlohmann::json &j);
 
-} // namespace CuptiSamples
+} // namespace rlscope
 
 #endif //IML_JSON_H

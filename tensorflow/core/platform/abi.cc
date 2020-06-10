@@ -34,7 +34,7 @@ extern "C" char* __unDName(char* output_string, const char* name,
 
 #endif  // defined(_MSC_VER)
 
-namespace tensorflow {
+namespace rlscope {
 namespace port {
 
 string MaybeAbiDemangle(const char* name) {
@@ -53,4 +53,4 @@ string MaybeAbiDemangle(const char* name) {
 }
 
 }  // namespace port
-}  // namespace tensorflow
+}  // namespace rlscope

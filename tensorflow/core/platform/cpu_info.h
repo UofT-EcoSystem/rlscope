@@ -26,7 +26,7 @@ limitations under the License.
 #include "tensorflow/core/platform/windows/cpu_info.h"
 #endif
 
-namespace tensorflow {
+namespace rlscope {
 namespace port {
 
 // Returns an estimate of the number of schedulable CPUs for this
@@ -128,6 +128,6 @@ double NominalCPUFrequency();
 int CPUIDNumSMT();
 
 }  // namespace port
-}  // namespace tensorflow
+}  // namespace rlscope
 
 #endif  // TENSORFLOW_CORE_PLATFORM_CPU_INFO_H_

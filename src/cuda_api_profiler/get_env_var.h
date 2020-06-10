@@ -6,8 +6,9 @@
 #define IML_GET_ENV_VAR_H
 
 #include <cstdlib>
+#include "common_util.h"
 
-namespace tensorflow {
+namespace rlscope {
 
 
 int ParseFloat(const char* str, size_t size);
@@ -22,15 +23,6 @@ static const float IML_SAMPLE_EVERY_SEC_DEFAULT = 1.0;
 float get_IML_SAMPLE_EVERY_SEC(float user_value);
 
 bool env_is_on(const char* var, bool dflt, bool debug);
-
-static inline char path_separator()
-{
-#ifdef _WIN32
-    return '\\';
-#else
-    return '/';
-#endif
-}
 
 bool is_yes(const char* env_var, bool default_value);
 bool is_no(const char* env_var, bool default_value);

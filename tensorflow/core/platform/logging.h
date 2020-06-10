@@ -25,7 +25,7 @@ limitations under the License.
 #include "tensorflow/core/platform/default/logging.h"
 #endif
 
-namespace tensorflow {
+namespace rlscope {
 
 namespace internal {
 // Emit "message" as a log message to the log for the specified
@@ -34,6 +34,6 @@ void LogString(const char* fname, int line, int severity,
                const string& message);
 }  // namespace internal
 
-}  // namespace tensorflow
+}  // namespace rlscope
 
 #endif  // TENSORFLOW_CORE_PLATFORM_LOGGING_H_

@@ -2,6 +2,7 @@
 // Created by jgleeson on 2020-01-21.
 //
 
+#include "common_util.h"
 #include "analysis/sample_periods.h"
 #include "analysis/trace_file_parser.h"
 
@@ -11,7 +12,7 @@
 
  using json = nlohmann::json;
 
-namespace tensorflow {
+namespace rlscope {
 
 template <typename IntType>
 IntType ceiling_div(IntType numerator, IntType denominator) {
@@ -154,5 +155,5 @@ std::string PollingUtil::JSBasename() const {
 }
 
 
-} // namespace tensorflow
+} // namespace rlscope
 

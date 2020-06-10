@@ -8,7 +8,7 @@
 #include <ostream>
 #include <iostream>
 
-namespace CuptiSamples {
+namespace rlscope {
 
 SimpleTimer::SimpleTimer(const std::string& name) :
     _name(name),

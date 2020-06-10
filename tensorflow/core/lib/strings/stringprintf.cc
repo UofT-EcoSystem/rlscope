@@ -19,7 +19,7 @@ limitations under the License.
 #include <stdarg.h>  // For va_list and related operations
 #include <stdio.h>   // MSVC requires this for _vsnprintf
 
-namespace tensorflow {
+namespace rlscope {
 namespace strings {
 
 void Appendv(string* dst, const char* format, va_list ap) {
@@ -90,4 +90,4 @@ void Appendf(string* dst, const char* format, ...) {
 }
 
 }  // namespace strings
-}  // namespace tensorflow
+}  // namespace rlscope

@@ -30,7 +30,7 @@ limitations under the License.
 #include "tensorflow/core/platform/platform.h"
 #include "tensorflow/core/platform/types.h"
 
-namespace tensorflow {
+namespace rlscope {
 namespace tracing {
 
 // This enumeration contains the identifiers of all TensorFlow CPU profiler
@@ -237,7 +237,7 @@ class ScopedActivity {
 const char* GetLogDir();
 
 }  // namespace tracing
-}  // namespace tensorflow
+}  // namespace rlscope
 
 #if defined(PLATFORM_GOOGLE)
 #include "tensorflow/core/platform/google/tracing_impl.h"

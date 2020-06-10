@@ -16,7 +16,8 @@
 #include "tensorflow/core/platform/device_tracer.h"
 #include "tensorflow/core/lib/core/status.h"
 //#include "tensorflow/core/lib/core/error_codes.pb.h"
-#include "error_codes.pb.h"
+//#include "error_codes.pb.h"
+#include "common_util.h"
 #include "tensorflow/core/lib/core/errors.h"
 
 #ifdef WITH_CUDA_LD_PRELOAD
@@ -26,9 +27,9 @@
 #include "cuda_api_profiler/cupti_logging.h"
 #include "cuda_api_profiler/globals.h"
 
-#include "sample_cuda_api_export.h"
+#include "rlscope_export.h"
 
-namespace tensorflow {
+namespace rlscope {
 
 
 
@@ -99,11 +100,11 @@ namespace tensorflow {
 //   MAYBE_RETURN(CUPTI_CALL(cuptiGetTimestamp(&startTimestamp));
 // }
 
-using StatusRet = tensorflow::error::Code;
+using StatusRet = rlscope::error::Code;
 
 extern "C" {
 
-typedef enum SAMPLE_CUDA_API_EXPORT TF_Code {
+typedef enum RLSCOPE_EXPORT TF_Code {
   TF_OK = 0,
   TF_CANCELLED = 1,
   TF_UNKNOWN = 2,
@@ -126,20 +127,20 @@ typedef enum SAMPLE_CUDA_API_EXPORT TF_Code {
 //using RetCode = TF_Code;
 using RetCode = int;
 
-RetCode SAMPLE_CUDA_API_EXPORT setup() {
+RetCode RLSCOPE_EXPORT setup() {
   // Initialize global state.
   VLOG(1) << __func__;
-  return tensorflow::Status::OK().code();
+  return rlscope::Status::OK().code();
 }
 
-RetCode SAMPLE_CUDA_API_EXPORT print() {
+RetCode RLSCOPE_EXPORT print() {
   VLOG(1) << __func__;
   auto status = globals.device_tracer->Print();
   MAYBE_LOG_ERROR(LOG(INFO), __func__, status);
   return status.code();
 }
 
-RetCode SAMPLE_CUDA_API_EXPORT set_metadata(const char* directory, const char* process_name, const char* machine_name, const char* phase_name) {
+RetCode RLSCOPE_EXPORT set_metadata(const char* directory, const char* process_name, const char* machine_name, const char* phase_name) {
   VLOG(1) << __func__
           << ", " << "directory = " << directory
           << ", " << "process_name = " << process_name
@@ -150,7 +151,7 @@ RetCode SAMPLE_CUDA_API_EXPORT set_metadata(const char* directory, const char* p
   return status.code();
 }
 
-RetCode SAMPLE_CUDA_API_EXPORT enable_tracing() {
+RetCode RLSCOPE_EXPORT enable_tracing() {
   // Enable call-backs.
   VLOG(1) << __func__;
   auto status = globals.device_tracer->Start();
@@ -161,17 +162,17 @@ RetCode SAMPLE_CUDA_API_EXPORT enable_tracing() {
   return status.code();
 }
 
-RetCode SAMPLE_CUDA_API_EXPORT is_enabled(int* retval) {
+RetCode RLSCOPE_EXPORT is_enabled(int* retval) {
   VLOG(1) << __func__;
   if (globals.device_tracer->IsEnabled()) {
     *retval = 1;
   } else {
     *retval = 0;
   }
-  return tensorflow::Status::OK().code();
+  return rlscope::Status::OK().code();
 }
 
-RetCode SAMPLE_CUDA_API_EXPORT disable_tracing() {
+RetCode RLSCOPE_EXPORT disable_tracing() {
   // Disable call-backs.
   VLOG(1) << __func__;
   auto status = globals.device_tracer->Stop();
@@ -179,7 +180,7 @@ RetCode SAMPLE_CUDA_API_EXPORT disable_tracing() {
   return status.code();
 }
 
-RetCode SAMPLE_CUDA_API_EXPORT async_dump() {
+RetCode RLSCOPE_EXPORT async_dump() {
   // Dump traces (asynchronously).
   VLOG(1) << __func__;
   Status status;
@@ -188,7 +189,7 @@ RetCode SAMPLE_CUDA_API_EXPORT async_dump() {
   return status.code();
 }
 
-RetCode SAMPLE_CUDA_API_EXPORT await_dump() {
+RetCode RLSCOPE_EXPORT await_dump() {
   // Wait for async dump traces to complete.
   VLOG(1) << __func__;
   Status status;
@@ -201,7 +202,7 @@ RetCode SAMPLE_CUDA_API_EXPORT await_dump() {
 }
 
 
-RetCode SAMPLE_CUDA_API_EXPORT record_event(
+RetCode RLSCOPE_EXPORT record_event(
     const char* category,
     int64 start_us,
     int64 duration_us,
@@ -218,7 +219,7 @@ RetCode SAMPLE_CUDA_API_EXPORT record_event(
   return status.code();
 }
 
-RetCode SAMPLE_CUDA_API_EXPORT record_overhead_event(
+RetCode RLSCOPE_EXPORT record_overhead_event(
     const char* overhead_type,
     int num_events) {
   VLOG(1) << __func__;
@@ -230,7 +231,7 @@ RetCode SAMPLE_CUDA_API_EXPORT record_overhead_event(
   return status.code();
 }
 
-RetCode SAMPLE_CUDA_API_EXPORT record_overhead_event_for_operation(
+RetCode RLSCOPE_EXPORT record_overhead_event_for_operation(
     const char* overhead_type,
     const char* operation,
     int num_events) {
@@ -244,7 +245,7 @@ RetCode SAMPLE_CUDA_API_EXPORT record_overhead_event_for_operation(
   return status.code();
 }
 
-RetCode SAMPLE_CUDA_API_EXPORT push_operation(
+RetCode RLSCOPE_EXPORT push_operation(
     const char* operation) {
   VLOG(1) << __func__;
   Status status;
@@ -254,7 +255,7 @@ RetCode SAMPLE_CUDA_API_EXPORT push_operation(
   return status.code();
 }
 
-RetCode SAMPLE_CUDA_API_EXPORT pop_operation() {
+RetCode RLSCOPE_EXPORT pop_operation() {
   VLOG(1) << __func__;
   Status status;
   status = globals.device_tracer->PopOperation();

@@ -19,7 +19,7 @@ limitations under the License.
 #include "tensorflow/core/lib/io/path.h"
 #include "tensorflow/core/platform/env.h"
 
-namespace tensorflow {
+namespace rlscope {
 
 class PosixFileSystem : public FileSystem {
  public:
@@ -74,6 +74,6 @@ class LocalPosixFileSystem : public PosixFileSystem {
   }
 };
 
-}  // namespace tensorflow
+}  // namespace rlscope
 
 #endif  // TENSORFLOW_CORE_PLATFORM_POSIX_POSIX_FILE_SYSTEM_H_

@@ -10,7 +10,7 @@
 
 #include <algorithm>
 
-namespace tensorflow {
+namespace rlscope {
 
 // Sleep for at MOST 0.5 seconds.
 // We need to be able to terminate quickly, so this sleep time affects that.

@@ -38,32 +38,32 @@ limitations under the License.
 #include "tensorflow/core/platform/types.h"
 #include "tensorflow/core/public/session.h"
 
-namespace tensorflow {
+namespace rlscope {
 class Device;
 class DeviceMgr;
-}  // namespace tensorflow
+}  // namespace rlscope
 
 // Internal structures used by the C API. These are likely to change and should
 // not be depended on.
 
 struct TF_Status {
-  tensorflow::Status status;
+  rlscope::Status status;
 };
 
 struct TF_Tensor {
   ~TF_Tensor();
 
   TF_DataType dtype;
-  tensorflow::TensorShape shape;
-  tensorflow::TensorBuffer* buffer;
+  rlscope::TensorShape shape;
+  rlscope::TensorBuffer* buffer;
 };
 
 struct TF_SessionOptions {
-  tensorflow::SessionOptions options;
+  rlscope::SessionOptions options;
 };
 
 struct TF_DeprecatedSession {
-  tensorflow::Session* session;
+  rlscope::Session* session;
 };
 
 struct TF_Library {
@@ -74,14 +74,14 @@ struct TF_Library {
 struct TF_Graph {
   TF_Graph();
 
-  tensorflow::mutex mu;
-  tensorflow::Graph graph GUARDED_BY(mu);
+  rlscope::mutex mu;
+  rlscope::Graph graph GUARDED_BY(mu);
 
   // Runs shape inference.
-  tensorflow::ShapeRefiner refiner GUARDED_BY(mu);
+  rlscope::ShapeRefiner refiner GUARDED_BY(mu);
 
   // Maps from name of an operation to the Node* in 'graph'.
-  std::unordered_map<tensorflow::string, tensorflow::Node*> name_map
+  std::unordered_map<rlscope::string, rlscope::Node*> name_map
       GUARDED_BY(mu);
 
   // The keys of this map are all the active sessions using this graph. Each
@@ -97,7 +97,7 @@ struct TF_Graph {
   //
   // TODO(b/74949947): mutations currently trigger a warning instead of a bad
   // status, this should be reverted when possible.
-  tensorflow::gtl::FlatMap<TF_Session*, tensorflow::string> sessions
+  rlscope::gtl::FlatMap<TF_Session*, rlscope::string> sessions
       GUARDED_BY(mu);
   bool delete_requested GUARDED_BY(mu);  // set true by TF_DeleteGraph
 
@@ -112,22 +112,22 @@ struct TF_OperationDescription {
                           const char* node_name)
       : node_builder(node_name, op_type, g->graph.op_registry()), graph(g) {}
 
-  tensorflow::NodeBuilder node_builder;
+  rlscope::NodeBuilder node_builder;
   TF_Graph* graph;
-  std::set<tensorflow::string> colocation_constraints;
+  std::set<rlscope::string> colocation_constraints;
 };
 
 struct TF_Operation {
-  tensorflow::Node node;
+  rlscope::Node node;
 };
 
 struct TF_Session {
-  TF_Session(tensorflow::Session* s, TF_Graph* g);
+  TF_Session(rlscope::Session* s, TF_Graph* g);
 
-  tensorflow::Session* session;
+  rlscope::Session* session;
   TF_Graph* const graph;
 
-  tensorflow::mutex mu ACQUIRED_AFTER(TF_Graph::mu);
+  rlscope::mutex mu ACQUIRED_AFTER(TF_Graph::mu);
   int last_num_graph_nodes;
 
   // If true, TF_SessionRun and similar methods will call
@@ -138,11 +138,11 @@ struct TF_Session {
 };
 
 struct TF_ImportGraphDefOptions {
-  tensorflow::ImportGraphDefOptions opts;
+  rlscope::ImportGraphDefOptions opts;
 
   // Backing memory for TensorId fields in opts.
   // TODO(skyewm): it'd be better if ImportGraphDefOptions owned this.
-  std::list<tensorflow::string> tensor_id_data;
+  std::list<rlscope::string> tensor_id_data;
 };
 
 struct TF_ImportGraphDefResults {
@@ -152,19 +152,19 @@ struct TF_ImportGraphDefResults {
   std::vector<int> missing_unused_key_indexes;
 
   // Backing memory for missing_unused_key_names values.
-  std::list<tensorflow::string> missing_unused_key_names_data;
+  std::list<rlscope::string> missing_unused_key_names_data;
 };
 
 struct TF_DeviceList {
-  std::vector<tensorflow::DeviceAttributes> response;
+  std::vector<rlscope::DeviceAttributes> response;
 };
 
 struct TF_Function {
-  tensorflow::FunctionDef fdef;
+  rlscope::FunctionDef fdef;
 };
 
 struct TF_ApiDefMap {
-  explicit TF_ApiDefMap(const tensorflow::OpList& op_list)
+  explicit TF_ApiDefMap(const rlscope::OpList& op_list)
       :
 #ifndef __ANDROID__
         api_def_map(op_list),
@@ -173,13 +173,13 @@ struct TF_ApiDefMap {
   }
 
 #ifndef __ANDROID__
-  tensorflow::ApiDefMap api_def_map GUARDED_BY(lock);
+  rlscope::ApiDefMap api_def_map GUARDED_BY(lock);
 #endif
   bool update_docs_called GUARDED_BY(lock);
-  tensorflow::mutex lock;
+  rlscope::mutex lock;
 };
 
-namespace tensorflow {
+namespace rlscope {
 
 class TensorCApi {
  public:
@@ -194,7 +194,7 @@ Status TF_TensorToTensor(const TF_Tensor* src, Tensor* dst);
 
 TF_Tensor* TF_TensorFromTensor(const Tensor& src, TF_Status* status);
 
-Status MessageToBuffer(const tensorflow::protobuf::Message& in, TF_Buffer* out);
+Status MessageToBuffer(const rlscope::protobuf::Message& in, TF_Buffer* out);
 
 // Set the shapes and types of the output's handle.
 //
@@ -218,6 +218,6 @@ void RecordMutation(TF_Graph* graph, const TF_Operation& op,
 bool ExtendSessionGraphHelper(TF_Session* session, TF_Status* status)
     LOCKS_EXCLUDED(session->graph->mu, session->mu);
 
-}  // end namespace tensorflow
+}  // end namespace rlscope
 
 #endif  // TENSORFLOW_C_C_API_INTERNAL_H_

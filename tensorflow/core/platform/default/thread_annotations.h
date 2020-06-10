@@ -157,7 +157,7 @@ limitations under the License.
 // annotations will be ignored by the analysis.
 #define TS_UNCHECKED(x) ""
 
-namespace tensorflow {
+namespace rlscope {
 namespace thread_safety_analysis {
 
 // Takes a reference to a guarded data member, and returns an unguarded
@@ -172,6 +172,6 @@ inline T& ts_unchecked_read(T& v) NO_THREAD_SAFETY_ANALYSIS {
   return v;
 }
 }  // namespace thread_safety_analysis
-}  // namespace tensorflow
+}  // namespace rlscope
 
 #endif  // TENSORFLOW_CORE_PLATFORM_DEFAULT_THREAD_ANNOTATIONS_H_

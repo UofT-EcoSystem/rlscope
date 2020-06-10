@@ -55,7 +55,7 @@ limitations under the License.
 // of Printf("%04x", my_int) is StrCat(Hex(my_int, strings::ZERO_PAD_4))
 //
 // This class has implicit constructors.
-namespace tensorflow {
+namespace rlscope {
 namespace strings {
 
 enum PadSpec {
@@ -122,7 +122,7 @@ class AlphaNum {
 
   AlphaNum(const char *c_str) : piece_(c_str) {}   // NOLINT(runtime/explicit)
   AlphaNum(const StringPiece &pc) : piece_(pc) {}  // NOLINT(runtime/explicit)
-  AlphaNum(const tensorflow::string &str)          // NOLINT(runtime/explicit)
+  AlphaNum(const rlscope::string &str)          // NOLINT(runtime/explicit)
       : piece_(str) {}
   template <typename A>
   AlphaNum(const std::basic_string<char, std::char_traits<char>, A> &str)
@@ -234,6 +234,6 @@ inline void StrAppend(string *dest, const AlphaNum &a, const AlphaNum &b,
 }
 
 }  // namespace strings
-}  // namespace tensorflow
+}  // namespace rlscope
 
 #endif  // TENSORFLOW_CORE_LIB_STRINGS_STRCAT_H_

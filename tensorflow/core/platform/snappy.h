@@ -18,7 +18,7 @@ limitations under the License.
 
 #include "tensorflow/core/platform/types.h"
 
-namespace tensorflow {
+namespace rlscope {
 namespace port {
 
 // Snappy compression/decompression support
@@ -29,6 +29,6 @@ bool Snappy_GetUncompressedLength(const char* input, size_t length,
 bool Snappy_Uncompress(const char* input, size_t length, char* output);
 
 }  // namespace port
-}  // namespace tensorflow
+}  // namespace rlscope
 
 #endif  // TENSORFLOW_CORE_PLATFORM_SNAPPY_H_
