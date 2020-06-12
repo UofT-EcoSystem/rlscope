@@ -1,23 +1,28 @@
 #!/usr/bin/env bash
 set -e
+set -u
 
 # Need a checkout of tensorflow to build:
 # 1) Python pip package
 # 2) C-API
-TENSORFLOW_SRC_ROOT=$HOME/clone/tensorflow
+#TENSORFLOW_SRC_ROOT=$HOME/clone/tensorflow
+JOBS=${JOBS:-$(nproc)}
+echo "> Using JOBS=$JOBS"
 
 # Force re-running setup
-if [ "$FORCE" = "" ]; then
-    FORCE=no
-fi
+FORCE=${FORCE:-no}
+#if [ "$FORCE" = "" ]; then
+#    FORCE=no
+#fi
 
+DEBUG=${DEBUG:-no}
 if [ "$DEBUG" = 'yes' ]; then
     set -x
 fi
 
 ROOT="$(readlink -f $(dirname "$0"))"
 
-NCPU=$(grep -c ^processor /proc/cpuinfo)
+#NCPU=$(grep -c ^processor /proc/cpuinfo)
 
 info() {
     echo "$@"
@@ -165,25 +170,27 @@ github_url() {
 
 CMAKE_VERSION=3.15.1
 setup_cmake() {
-    if [ "$FORCE" != 'yes' ] && [ -e "$(local_dir)"/bin/cmake ]; then
+    if [ "$FORCE" != 'yes' ] && [ -e "$(_local_dir)"/bin/cmake ]; then
         return
     fi
     local url=https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/cmake-${CMAKE_VERSION}-Linux-x86_64.sh
     _wget "$url"
     local path=$(_wget_output_path "$url")
     chmod +x $path
-    mkdir -p "$(local_dir)"
-    bash $path --prefix="$(local_dir)" --skip-license --exclude-subdir
+    mkdir -p "$(_local_dir)"
+    bash $path --prefix="$(_local_dir)" --skip-license --exclude-subdir
 }
 JSON_CPP_LIB_DIR="$ROOT/third_party/json"
 setup_json_cpp_library() {
-    if [ "$FORCE" != 'yes' ] && [ -e $JSON_CPP_LIB_DIR ]; then
+#    if [ "$FORCE" != 'yes' ] && [ -e $JSON_CPP_LIB_DIR ]; then
+    if [ "$FORCE" != 'yes' ] && glob_any "$(third_party_install_prefix "$JSON_CPP_LIB_DIR/include/nlohmann/json.hpp")"; then
         return
     fi
     local commit="v3.4.0"
     _clone "$JSON_CPP_LIB_DIR" \
         nlohmann/json.git \
         $commit
+    cmake_build "$JSON_CPP_LIB_DIR"
 #    cd $JSON_CPP_LIB_DIR
 #    _configure_make_install
 }
@@ -239,16 +246,15 @@ third_party_install_prefix() {
     # echo "$(cmake_build_dir "$third_party_dir")/cmake_install"
 
     # Install in $ROOT/local.$(hostname)
-    local_dir
+    _local_dir
 }
 cmake_build_dir() {
     local third_party_dir="$1"
     shift 1
-    # echo "$third_party_dir/build.$(hostname)"
-    # echo "$ROOT/build.$(hostname)/$(dirname "$third_party_dir")"
 
     local build_prefix=
-    if [ "$IML_BUILD_PREFIX" != "" ]; then
+    if is_defined IML_BUILD_PREFIX; then
+      # Docker container environment.
       build_prefix="$IML_BUILD_PREFIX"
     else
       # Assume we're running in host environment.
@@ -256,16 +262,45 @@ cmake_build_dir() {
     fi
     echo "$build_prefix/$(basename "$third_party_dir")"
 }
-local_dir() {
+is_defined() {
+  # Check if an environment variable is defined:
+  # https://unix.stackexchange.com/questions/402067/bash-find-if-all-env-variables-are-declared-by-variable-name
+  # NOTE: returns TRUE if varname is empty-string.
+  # If you want empty-string to be false, check should be:
+  #   if is_defined $VAR && [ "$VAR" != "" ]; then
+  #     ...
+  #   fi
+  (
+  set +u
+  local varname="$1"
+  [ -z ${!varname}+x ]
+  )
+}
+_local_dir() {
     # When installing things with configure/make-install
-    # $ configure --prefix="$(local_dir)"
-    if [ "$IML_INSTALL_PREFIX" != "" ]; then
+    # $ configure --prefix="$(_local_dir)"
+    if is_defined IML_INSTALL_PREFIX; then
+      # Docker container environment.
       echo "$IML_INSTALL_PREFIX"
     else
       # Assume we're running in host environment.
       echo "$ROOT/local.host"
     fi
-    # echo "$ROOT/local.$(hostname)"
+}
+_add_PATH() {
+    local direc="$1"
+    shift 1
+
+    echo "> INFO: Add to PATH: $direc"
+    export PATH="$direc:$PATH"
+}
+
+_add_LD_LIBRARY_PATH() {
+  local lib_dir="$1"
+  shift 1
+
+  echo "> INFO: Add to LD_LIBRARY_PATH: $lib_dir"
+  export LD_LIBRARY_PATH="$lib_dir:$LD_LIBRARY_PATH"
 }
 
 NSYNC_CPP_LIB_DIR="$ROOT/third_party/nsync"
@@ -336,14 +371,14 @@ setup_boost_cpp_library() {
         local py_include="$(python -c "from sysconfig import get_paths; info = get_paths(); print(info['include']);")";
         sed --in-place=.bkup "s|using python : .*|using python : ${py_ver} : ${py_path} : ${py_include} ;|" project-config.jam
     fi
-#    ./b2 -j$(nproc) install
+#    ./b2 -j${JOBS} install
     # HACK: boost installer likes to run unit tests and I don't know how to disable them.
     # Inveitably, it ends up failing some unit tests but seems to install fine:
     #   ...failed updating 66 targets...
     #   ...skipped 24 targets...
     #   ...updated 16973 targets...
     # So, just ignore bad exit status so we can continue with everything else...
-    ./b2 cxxflags="-fPIC" cflags="-fPIC" -j$(nproc) install || true
+    ./b2 cxxflags="-fPIC" cflags="-fPIC" -j${JOBS} install || true
     )
 }
 
@@ -360,19 +395,72 @@ setup_eigen_cpp_library() {
 }
 
 CMAKE_OPTS=()
+CMAKE_VERBOSE=
 cmake_build() {
     local src_dir="$1"
     shift 1
 
+    local old_DO_VERBOSE="$DO_VERBOSE"
+    DO_VERBOSE="$CMAKE_VERBOSE"
     (
     cd "$src_dir"
     mkdir -p "$(cmake_build_dir "$src_dir")"
-    cd "$(cmake_build_dir "$src_dir")"
-    cmake "$src_dir" -DCMAKE_INSTALL_PREFIX="$(third_party_install_prefix "$src_dir")" "${CMAKE_OPTS[@]}"
-    CMAKE_OPTS=()
-    make -j$(nproc)
-    make install
+    _dov cd "$(cmake_build_dir "$src_dir")"
+    _dov cmake "$src_dir" -DCMAKE_INSTALL_PREFIX="$(third_party_install_prefix "$src_dir")" "${CMAKE_OPTS[@]}"
+    _dov make -j${JOBS}
+#    _dov make install -j${JOBS}
+    _dov make install
     )
+    CMAKE_OPTS=()
+    CMAKE_VERBOSE=
+    DO_VERBOSE="$old_DO_VERBOSE"
+}
+cmake_prepare() {
+    local src_dir="$1"
+    shift 1
+
+    local old_DO_VERBOSE="$DO_VERBOSE"
+    DO_VERBOSE="$CMAKE_VERBOSE"
+    (
+    cd "$src_dir"
+    mkdir -p "$(cmake_build_dir "$src_dir")"
+    _dov cd "$(cmake_build_dir "$src_dir")"
+    _dov cmake "$src_dir" -DCMAKE_INSTALL_PREFIX="$(third_party_install_prefix "$src_dir")" "${CMAKE_OPTS[@]}"
+    )
+    CMAKE_OPTS=()
+    CMAKE_VERBOSE=
+    DO_VERBOSE="$old_DO_VERBOSE"
+}
+cmake_make() {
+    local src_dir="$1"
+    shift 1
+
+    local old_DO_VERBOSE="$DO_VERBOSE"
+    DO_VERBOSE="$CMAKE_VERBOSE"
+    (
+    cd "$src_dir"
+    _dov cd "$(cmake_build_dir "$src_dir")"
+    _dov make -j${JOBS} "$@"
+    # _dov make install
+    )
+    CMAKE_OPTS=()
+    CMAKE_VERBOSE=
+    DO_VERBOSE="$old_DO_VERBOSE"
+}
+cmake_install() {
+    local src_dir="$1"
+    shift 1
+
+    local old_DO_VERBOSE="$DO_VERBOSE"
+    DO_VERBOSE="$CMAKE_VERBOSE"
+    (
+    cd "$src_dir"
+    _dov cd "$(cmake_build_dir "$src_dir")"
+    _dov make install
+    )
+    CMAKE_OPTS=()
+    CMAKE_VERBOSE=
+    DO_VERBOSE="$old_DO_VERBOSE"
 }
 
 #PROTOBUF_VERSION='3.6.1.2'
@@ -395,7 +483,7 @@ setup_protobuf_cpp_library() {
     ./configure \
         "CFLAGS=-fPIC" "CXXFLAGS=-fPIC" \
         --prefix="$(third_party_install_prefix "$PROTOBUF_CPP_LIB_DIR")"
-    make -j$(nproc)
+    make -j${JOBS}
     make install
     "$(third_party_install_prefix "$PROTOBUF_CPP_LIB_DIR")"/bin/protoc --version
     )
@@ -435,7 +523,7 @@ _configure_make_install()
 #    export CXXFLAGS="$CXXFLAGS ${CONFIG_CXXFLAGS[@]}"
 #    export CFLAGS="$CFLAGS ${CONFIG_CFLAGS[@]}"
     _configure
-    _maybe make -j$NCPU
+    _maybe make -j${JOBS}
     _maybe make install
     )
     CONFIG_FLAGS=()
@@ -475,33 +563,41 @@ _maybe() {
 #      |--- libtensorflow_framework.so
 # |--- include/
 # ...
-TENSORFLOW_LIB_DIR=external_libs
-_download_tensorflow_c_api() {
-    local libtensorflow_cpu_url="https://storage.googleapis.com/tensorflow/libtensorflow/libtensorflow-cpu-linux-x86_64-1.12.0.tar.gz"
-    _wget_tar "$libtensorflow_cpu_url" $TENSORFLOW_LIB_DIR
-}
-_build_tensorflow_c_api() {
-    local output_tar=$ROOT/libtensorflow.tar.gz
-    if [ ! -e $ROOT/libtensorflow.tar.gz ]; then
-        # Build tensorflow C-API package using bazel.
-        (
-        info "> Build TensorFlow C-API from source using Bazel:"
-        info "  SrcDir: $TENSORFLOW_SRC_ROOT"
-        info "  Output: $output_tar"
-
-        cd $TENSORFLOW_SRC_ROOT
-        bazel build --config opt //tensorflow/tools/lib_package:libtensorflow
-        )
-        cp $TENSORFLOW_SRC_ROOT/bazel-bin/tensorflow/tools/lib_package/libtensorflow.tar.gz \
-           $ROOT
-    fi
-    _untar $output_tar $TENSORFLOW_LIB_DIR
-}
+#TENSORFLOW_LIB_DIR=external_libs
+#_download_tensorflow_c_api() {
+#    local libtensorflow_cpu_url="https://storage.googleapis.com/tensorflow/libtensorflow/libtensorflow-cpu-linux-x86_64-1.12.0.tar.gz"
+#    _wget_tar "$libtensorflow_cpu_url" $TENSORFLOW_LIB_DIR
+#}
+#_build_tensorflow_c_api() {
+#    local output_tar=$ROOT/libtensorflow.tar.gz
+#    if [ ! -e $ROOT/libtensorflow.tar.gz ]; then
+#        # Build tensorflow C-API package using bazel.
+#        (
+#        info "> Build TensorFlow C-API from source using Bazel:"
+#        info "  SrcDir: $TENSORFLOW_SRC_ROOT"
+#        info "  Output: $output_tar"
+#
+#        cd $TENSORFLOW_SRC_ROOT
+#        bazel build --config opt //tensorflow/tools/lib_package:libtensorflow
+#        )
+#        cp $TENSORFLOW_SRC_ROOT/bazel-bin/tensorflow/tools/lib_package/libtensorflow.tar.gz \
+#           $ROOT
+#    fi
+#    _untar $output_tar $TENSORFLOW_LIB_DIR
+#}
 
 _do() {
     echo "> CMD: $@"
     echo "  $ $@"
     "$@"
+}
+DO_VERBOSE=
+_dov() {
+  if [ "$DO_VERBOSE" = 'yes' ]; then
+    echo "> CMD: $@"
+    echo "  $ $@"
+  fi
+  "$@"
 }
 
 _apt_install() {
@@ -538,6 +634,10 @@ main() {
         return
     fi
 
+    _add_LD_LIBRARY_PATH "$(_local_dir)/lib"
+    _add_PATH "$(_local_dir)/bin"
+
+    _do setup_cmake
     _do setup_apt_packages
     _do setup_json_cpp_library
     _do setup_abseil_cpp_library
@@ -550,9 +650,34 @@ main() {
     _do setup_boost_cpp_library
     _do setup_spdlog_cpp_library
     _do setup_ctpl_cpp_library
-    # TODO: setup protobuf
-   _do setup_cmake
+    _do setup_iml
     echo "> Success!"
+}
+
+setup_iml() {
+  _set_cmake_opts() {
+    CMAKE_OPTS=(-DCMAKE_BUILD_TYPE=Debug)
+    CMAKE_VERBOSE=yes
+  }
+
+  _set_cmake_opts
+  cmake_prepare "$ROOT"
+
+  # The first time we build RLScope, for some reason, if we just do the normal "cmake .. && make && make install",
+  # the "make install" triggers ANOTHER full build.  I have no idea WHY this happens.
+  # It also only happens on the "intial" cmake build (i.e. subsequent builds only happen once).
+  # Anyways, hacky workaround is to just call "make" twice the first time we build RLScope.
+  _set_cmake_opts
+  cmake_make "$ROOT"
+  _set_cmake_opts
+  cmake_make "$ROOT"
+
+  _set_cmake_opts
+  cmake_install "$ROOT"
+
+  echo "To re-build RLScope library when you change source files, do:"
+  echo "  $ cd $(cmake_build_dir "$ROOT")"
+  echo "  $ make -j\$(nproc) install"
 }
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then

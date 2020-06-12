@@ -594,6 +594,9 @@ MyStatus GPUHwCounterSampler::Init() {
     }
     MyStatus ret = MyStatus::OK();
 
+    // Programmer error; you haven't called SetDevice.
+    assert(_device >= 0);
+
     ret = CheckCUPTIProfilingAPISupported();
     IF_BAD_STATUS_RETURN(ret);
 
@@ -619,7 +622,19 @@ MyStatus GPUHwCounterSampler::Push(const std::string &operation) {
         return MyStatus::OK();
     }
     assert(_initialized);
-    _range_tree.Push(operation);
+    bool allow_insert = (_mode == PROFILE);
+    bool would_insert = _range_tree.Push(operation, allow_insert);
+    if (!allow_insert && would_insert) {
+      std::stringstream ss;
+      ss << "GPUHwCounterSampler: Tried to push operation=\"" << operation << "\", but we never saw this operation during the configuration pass.  Operation stack at time of push was:";
+      auto node_stack = _range_tree.CurStack();
+      for (auto const& node : node_stack) {
+        ss << "\n";
+        PrintIndent(ss, 1);
+        ss << node->name;
+      }
+      return MyStatus(error::INVALID_ARGUMENT, ss.str());
+    }
     if (_mode == PROFILE) {
         CUpti_Profiler_PushRange_Params pushRangeParams = {CUpti_Profiler_PushRange_Params_STRUCT_SIZE};
         pushRangeParams.pRangeName = operation.c_str();
@@ -1102,19 +1117,24 @@ bool GPUHwCounterSampler::IsProtoFile(const boost::filesystem::path& path) {
 }
 
 
-void RangeTree::Push(const std::string& name) {
+bool RangeTree::Push(const std::string& name, bool allow_insert) {
     // If there's an existing entry, set cur_node to it.
     // Otherwise create a new node, and set cur_node to it.
     assert(root != nullptr);
     auto it = cur_node->children.find(name);
     if (it == cur_node->children.end()) {
-        cur_node->children[name].reset(new RangeNode(cur_node, name));
-        _UpdateStatsOnPush(true);
-        cur_node = cur_node->children[name].get();
-    } else {
-        _UpdateStatsOnPush(false);
-        cur_node = it->second.get();
+        if (allow_insert) {
+          cur_node->children[name].reset(new RangeNode(cur_node, name));
+          _UpdateStatsOnPush(true);
+          cur_node = cur_node->children[name].get();
+        }
+        // This Push DID result in an insert.
+        return true;
     }
+    _UpdateStatsOnPush(false);
+    cur_node = it->second.get();
+    // This Push did not result in an insert.
+    return false;
 }
 
 void RangeTree::Pop() {
@@ -1124,6 +1144,17 @@ void RangeTree::Pop() {
     // Otherwise, user of class probably called pop() too many times.
     assert(cur_node != nullptr);
     _UpdateStatsOnPop();
+}
+
+std::list<const RangeNode*> RangeTree::CurStack() const {
+  RangeNode* node = cur_node;
+  std::list<const RangeNode*> stack;
+  while (node != nullptr) {
+    stack.push_back(node);
+    node = node->parent;
+  }
+  stack.reverse();
+  return stack;
 }
 
 void RangeTree::_UpdateStatsOnPush(bool was_insert) {
@@ -1279,6 +1310,17 @@ size_t GPUHwCounterSampler::NumPasses() const {
 //    passes = eventGroupSets->numSets;
 
     return this->UseMaxNestingLevels() * this->UseMaxUniqueRanges();
+}
+
+void GPUHwCounterSampler::SetDirectory(std::string& directory) {
+  _directory = directory;
+}
+void GPUHwCounterSampler::SetDevice(int device) {
+  _device = device;
+}
+
+GPUHwCounterSamplerMode GPUHwCounterSampler::Mode() const {
+  return _mode;
 }
 
 } // namespace rlscope

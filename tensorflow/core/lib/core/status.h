@@ -63,6 +63,8 @@ class Status {
     return ok() ? empty_string() : state_->msg;
   }
 
+  static Status FromMyStatus(const MyStatus& my_status);
+
   bool operator==(const Status& x) const;
   bool operator!=(const Status& x) const;
 

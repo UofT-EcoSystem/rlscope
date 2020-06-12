@@ -79,6 +79,8 @@ class DeviceTracer {
       int64 duration_us,
       const char* name) = 0;
 
+  virtual Status StartPass() = 0;
+  virtual Status EndPass() = 0;
   virtual Status PushOperation(const char* operation) = 0;
   virtual Status RecordOverheadEvent(
       const char* overhead_type,

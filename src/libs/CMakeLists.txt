@@ -1,2 +1,3 @@
 add_subdirectory(common_util)
 add_subdirectory(range_sampling)
+add_subdirectory(rlscope_common)

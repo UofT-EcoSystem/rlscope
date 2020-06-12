@@ -25,7 +25,7 @@ void SimpleTimer::MakeVerbose(std::ostream* out) {
 }
 
 void SimpleTimer::ResetStartTime() {
-//  auto now_us = Env::Default()->NowMicros();
+//  auto now_us = rlscope::TimeNowMicros();
   auto now_us = TimeNowMicros();
   auto now_bytes = ResidentMemBytes();
   _last_time_usec = now_us;
@@ -46,7 +46,7 @@ size_t SimpleTimer::TotalMemBytes() const {
 
 
 void SimpleTimer::EndOperation(const std::string& operation) {
-//  auto now_us = Env::Default()->NowMicros();
+//  auto now_us = rlscope::TimeNowMicros();
   auto now_us = TimeNowMicros();
   auto now_bytes = ResidentMemBytes();
   assert(_last_time_usec != 0);

@@ -12,27 +12,76 @@
 #include <fstream>
 #include <memory>
 
+#include <boost/optional.hpp>
+
+#include "tensorflow/core/platform/logging.h"
+
 #include "get_env_var.h"
 
 namespace rlscope {
 
-int ParseFloat(const char* str, size_t size) {
+template <typename T>
+MyStatus ParseValue(const char* type_name, const char* str, size_t size, T* value) {
   // Ideally we would use env_var / safe_strto64, but it is
   // hard to use here without pulling in a lot of dependencies,
   // so we use std:istringstream instead
   std::string integer_str(str, size);
   std::istringstream ss(integer_str);
-  float val = 0;
-  ss >> val;
-  return val;
+  ss >> *value;
+  if (ss.fail()) {
+    std::stringstream err_ss;
+    err_ss << "Failed to parse " << type_name << " from \"" << str << "\"";
+    return MyStatus(error::INVALID_ARGUMENT, err_ss.str());
+  }
+  return MyStatus::OK();
 }
 
-float get_IML_SAMPLE_EVERY_SEC(float user_value) {
-  return ParseEnvFloatOrDefault("IML_SAMPLE_EVERY_SEC", user_value, IML_SAMPLE_EVERY_SEC_DEFAULT);
+template <typename T>
+T ParseEnvOrDefault(const char* type_name, const char* env_name, boost::optional<T> user_value, float dflt) {
+  MyStatus my_status = MyStatus::OK();
+  if (user_value.has_value()) {
+    return user_value.get();
+  }
+  const char* env_val = getenv(env_name);
+  if (env_val == nullptr) {
+    return dflt;
+  }
+  T value;
+  my_status = ParseValue(type_name, env_val, strlen(env_val), &value);
+  if (!my_status.ok()) {
+    LOG(FATAL) << "Failed to parse env variable " << env_name << ": " << my_status.error_message();
+  }
+  return value;
 }
 
-float get_TF_CUDA_API_PRINT_EVERY_SEC(float user_value) {
-  return ParseEnvFloatOrDefault("TF_CUDA_API_PRINT_EVERY_SEC", user_value, TF_CUDA_API_PRINT_EVERY_SEC_DEFAULT);
+float get_IML_SAMPLE_EVERY_SEC(boost::optional<float> user_value) {
+  return ParseEnvOrDefault("float", "IML_SAMPLE_EVERY_SEC", user_value, IML_SAMPLE_EVERY_SEC_DEFAULT);
+}
+
+int get_IML_GPU_HW_CONFIG_PASSES(boost::optional<int> user_value) {
+  return ParseEnvOrDefault("integer", "IML_GPU_HW_CONFIG_PASSES", user_value, IML_GPU_HW_CONFIG_PASSES_DEFAULT);
+}
+
+std::vector<std::string> get_IML_GPU_HW_METRICS(boost::optional<std::string> user_value) {
+  // return ParseEnvOrDefault("integer", "IML_GPU_HW_METRICS", user_value, IML_GPU_HW_METRICS_DEFAULT);
+  std::string dflt = IML_GPU_HW_METRICS_DEFAULT;
+  std::string env_name = "IML_GPU_HW_METRICS";
+  std::string value;
+
+  MyStatus my_status = MyStatus::OK();
+  if (user_value.has_value()) {
+    value = user_value.get();
+  } else {
+    const char* env_val = getenv(env_name.c_str());
+    if (env_val == nullptr) {
+      value = dflt;
+    }
+  }
+  return StringSplit(value, ",");
+}
+
+float get_TF_CUDA_API_PRINT_EVERY_SEC(boost::optional<float> user_value) {
+  return ParseEnvOrDefault("float", "TF_CUDA_API_PRINT_EVERY_SEC", user_value, TF_CUDA_API_PRINT_EVERY_SEC_DEFAULT);
 }
 
 float ParseEnvFloatOrDefault(const char* env_name, float user_value, float dflt) {

@@ -111,7 +111,7 @@ REQUIRED_PACKAGES = [
     'gym == 0.13.0',
 
     # Trying to get nvidia dockerfile to run with assembler.py
-    'absl-py==0.6.1',
+    'absl-py>=0.6.1',
     'Cerberus==1.3.1',
     'docker==4.0.1',
     'PyYAML==5.1',

@@ -24,7 +24,7 @@ void EventHandler::EventLoop(std::function<bool()> should_stop) {
     // - sleep until the next event has to run
     // - next_event_to_run = func such that func.time_until_next_run is minimized
     // - if time is negative, RunFuncs and skip sleeping.
-    auto now_usec = Env::Default()->NowMicros();
+    auto now_usec = rlscope::TimeNowMicros();
     RunFuncs(now_usec);
     uint64_t sleep_for_us;
     if (_funcs.size() > 0) {
@@ -89,7 +89,7 @@ void EventHandler::UnregisterFunc(RegisteredFunc::FuncId func_id) {
 }
 
 void EventHandler::RunFuncs(uint64 now_usec) {
-//  auto now_usec = Env::Default()->NowMicros();
+//  auto now_usec = rlscope::TimeNowMicros();
   for (auto& func : _funcs) {
     if (func.ShouldRun(now_usec)) {
       func.Run(now_usec);

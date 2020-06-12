@@ -133,6 +133,8 @@ class CLibWrapper:
 
 
 # py_lib = cdll.LoadLibrary(_j(py_config.BUILD_DIR, 'libpy_interface.so'))
+# Deprecated
+assert py_config.BUILD_DIR is not None
 py_lib = CLibWrapper(_j(py_config.BUILD_DIR, 'libpy_interface.so'))
 
 py_lib.NewLibHandle.argtypes = None

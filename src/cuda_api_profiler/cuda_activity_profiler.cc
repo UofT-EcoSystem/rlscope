@@ -344,7 +344,7 @@ Status CUDAActivityProfiler::Start() {
   VLOG(1) << "CUDAActivityProfiler: " << __func__ << ", call EnableTrace";
   TF_RETURN_IF_ERROR(cupti_manager_->EnableTrace(this));
   CUPTI_CALL(cuptiGetTimestamp(&_state.start_timestamp_));
-  _state.start_walltime_us_ = Env::Default()->NowMicros();
+  _state.start_walltime_us_ = rlscope::TimeNowMicros();
   return Status::OK();
 }
 
@@ -356,7 +356,7 @@ Status CUDAActivityProfiler::Stop() {
   status = cupti_manager_->DisableTrace();
 //  TF_RETURN_IF_ERROR(cupti_manager_->DisableTrace());
   MAYBE_LOG_ERROR(LOG(FATAL), __func__, status);
-  _state.end_walltime_us_ = Env::Default()->NowMicros();
+  _state.end_walltime_us_ = rlscope::TimeNowMicros();
   CUPTI_CALL(cuptiGetTimestamp(&_state.end_timestamp_));
   return Status::OK();
 }

@@ -136,37 +136,39 @@ Status FileSystem::DeleteRecursively(const string& dirname,
 }
 
 Status FileSystem::RecursivelyCreateDir(const string& dirname) {
-  StringPiece scheme, host, remaining_dir;
-  io::ParseURI(dirname, &scheme, &host, &remaining_dir);
-  std::vector<StringPiece> sub_dirs;
-  while (!remaining_dir.empty()) {
-    Status status = FileExists(io::CreateURI(scheme, host, remaining_dir));
-    if (status.ok()) {
-      break;
-    }
-    if (status.code() != error::Code::NOT_FOUND) {
-      return status;
-    }
-    // Basename returns "" for / ending dirs.
-    if (!str_util::EndsWith(remaining_dir, "/")) {
-      sub_dirs.push_back(io::Basename(remaining_dir));
-    }
-    remaining_dir = io::Dirname(remaining_dir);
-  }
-
-  // sub_dirs contains all the dirs to be created but in reverse order.
-  std::reverse(sub_dirs.begin(), sub_dirs.end());
-
-  // Now create the directories.
-  string built_path(remaining_dir);
-  for (const StringPiece sub_dir : sub_dirs) {
-    built_path = io::JoinPath(built_path, sub_dir);
-    Status status = CreateDir(io::CreateURI(scheme, host, built_path));
-    if (!status.ok() && status.code() != rlscope::error::ALREADY_EXISTS) {
-      return status;
-    }
-  }
-  return Status::OK();
+  assert(false);
+  return Status(error::UNIMPLEMENTED, "RLScope: Not implemented");
+//  StringPiece scheme, host, remaining_dir;
+//  io::ParseURI(dirname, &scheme, &host, &remaining_dir);
+//  std::vector<StringPiece> sub_dirs;
+//  while (!remaining_dir.empty()) {
+//    Status status = FileExists(io::CreateURI(scheme, host, remaining_dir));
+//    if (status.ok()) {
+//      break;
+//    }
+//    if (status.code() != error::Code::NOT_FOUND) {
+//      return status;
+//    }
+//    // Basename returns "" for / ending dirs.
+//    if (!str_util::EndsWith(remaining_dir, "/")) {
+//      sub_dirs.push_back(io::Basename(remaining_dir));
+//    }
+//    remaining_dir = io::Dirname(remaining_dir);
+//  }
+//
+//  // sub_dirs contains all the dirs to be created but in reverse order.
+//  std::reverse(sub_dirs.begin(), sub_dirs.end());
+//
+//  // Now create the directories.
+//  string built_path(remaining_dir);
+//  for (const StringPiece sub_dir : sub_dirs) {
+//    built_path = io::JoinPath(built_path, sub_dir);
+//    Status status = CreateDir(io::CreateURI(scheme, host, built_path));
+//    if (!status.ok() && status.code() != rlscope::error::ALREADY_EXISTS) {
+//      return status;
+//    }
+//  }
+//  return Status::OK();
 }
 
 Status FileSystem::CopyFile(const string& src, const string& target) {

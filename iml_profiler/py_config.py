@@ -1,6 +1,11 @@
 from os.path import join as _j, abspath as _a, exists as _e, dirname as _d, basename as _b
 from os import environ as ENV
 import numpy as np
+import ctypes.util
+import sys
+import textwrap
+
+
 
 USE_NUMBA = False
 nb = None
@@ -15,13 +20,27 @@ IML_TEST_DIR = _j(IML_DIR, 'test_results')
 
 DEBUG = False
 
-BUILD_DIR = None
-DEBUG_BUILD_DIR = _j(ROOT, "Debug")
-RELEASE_BUILD_DIR = _j(ROOT, "Release")
-if _e(DEBUG_BUILD_DIR):
-  BUILD_DIR = DEBUG_BUILD_DIR
-elif _e(RELEASE_BUILD_DIR):
-  BUILD_DIR = RELEASE_BUILD_DIR
+RLSCOPE_LIBNAME = 'rlscope'
+# Older version of python (<=3.6) need 'LIBRARY_PATH' to be defined for find_library to work.
+assert 'LIBRARY_PATH' not in ENV or ENV['LIBRARY_PATH'] == ENV['LD_LIBRARY_PATH']
+ENV['LIBRARY_PATH'] = ENV['LD_LIBRARY_PATH']
+RLSCOPE_CLIB = ctypes.util.find_library(RLSCOPE_LIBNAME)
+# RLSCOPE_CLIB = 'lib{name}.so'.format(
+#   name=RLSCOPE_LIBNAME)
+
+# if not _e(so_path):
+if RLSCOPE_CLIB is None:
+  sys.stderr.write(textwrap.dedent("""
+      IML ERROR: couldn't find RLScope library (lib{name}.so); to build it, do:
+        $ cd {root}
+        $ bash ./setup.sh
+        # To modify your LD_LIBRARY_PATH to include lib{name}.so, run:
+        $ source source_me.sh
+      """.format(
+    name=RLSCOPE_LIBNAME,
+    root=ROOT,
+  )))
+  sys.exit(1)
 
 CLONE = _j(ENV['HOME'], 'clone')
 BASELINES_ROOT = _j(CLONE, 'baselines')
@@ -85,13 +104,13 @@ DEBUG_WRAP_CLIB = False
 # Print information about delays that happen during Profiler.finish().
 DEBUG_CRITICAL_PATH = False
 
-LIB_SAMPLE_CUDA_API = None
-if _e(_j(ROOT, 'Debug', 'librlscope.so')):
-  LIB_SAMPLE_CUDA_API = _j(ROOT, 'Debug', 'librlscope.so')
-elif _e(_j(ROOT, 'Release', 'librlscope.so')):
-  LIB_SAMPLE_CUDA_API = _j(ROOT, 'Release', 'librlscope.so')
-elif _e(_j(ROOT, 'build', 'librlscope.so')):
-  LIB_SAMPLE_CUDA_API =  _j(ROOT, 'build', 'librlscope.so')
+# LIB_SAMPLE_CUDA_API = None
+# if _e(_j(ROOT, 'Debug', RLSCOPE_LIB)):
+#   LIB_SAMPLE_CUDA_API = _j(ROOT, 'Debug', RLSCOPE_LIB)
+# elif _e(_j(ROOT, 'Release', RLSCOPE_LIB)):
+#   LIB_SAMPLE_CUDA_API = _j(ROOT, 'Release', RLSCOPE_LIB)
+# elif _e(_j(ROOT, 'build', RLSCOPE_LIB)):
+#   LIB_SAMPLE_CUDA_API =  _j(ROOT, 'build', RLSCOPE_LIB)
 
 # Use a custom-built/modified version of TF for benchmarking things.
 # Modifies C++ code to make tfprof add less overhead to the critical path.

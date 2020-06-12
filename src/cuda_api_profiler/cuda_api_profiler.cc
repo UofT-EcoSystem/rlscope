@@ -231,7 +231,7 @@ void CUDAAPIProfiler::ApiCallback(
         // Capture as much profiling book-keeping overhead as we can before getting now_us.
         // - Looking up stuff in hash-maps.
         // - Allocating list-entries.
-        auto now_us = Env::Default()->NowMicros();
+        auto now_us = rlscope::TimeNowMicros();
         if (_state._event_recording) {
           // Now that we have now_us, fixup the event we recorded with the correct duration_us.
           auto last = _state._events.end();
@@ -256,7 +256,7 @@ void CUDAAPIProfiler::ApiCallback(
 
       } else if (cb_site == CUPTI_API_ENTER) {
         // Before cudaLaunchKernel
-        _state._start_t[api_key] = Env::Default()->NowMicros();
+        _state._start_t[api_key] = rlscope::TimeNowMicros();
       }
     }
 

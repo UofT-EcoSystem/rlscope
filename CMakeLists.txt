@@ -38,10 +38,10 @@ message("    include_directories: ${IML_INSTALL_PREFIX}/include")
 include_directories(BEFORE ${IML_INSTALL_PREFIX}/include)
 
 
-#list(PREPEND CMAKE_PROGRAM_PATH "${IML_INSTALL_PREFIX}/bin")
-list(PREPEND CMAKE_INCLUDE_PATH ${IML_INSTALL_PREFIX}/include)
-list(PREPEND CMAKE_INCLUDE_PATH ${IML_INSTALL_PREFIX}/bin)
-list(PREPEND CMAKE_LIBRARY_PATH ${IML_INSTALL_PREFIX}/lib)
+list(PREPEND CMAKE_PROGRAM_PATH "${IML_INSTALL_PREFIX}/bin")
+list(PREPEND CMAKE_INCLUDE_PATH "${IML_INSTALL_PREFIX}/include")
+list(PREPEND CMAKE_INCLUDE_PATH "${IML_INSTALL_PREFIX}/bin")
+list(PREPEND CMAKE_LIBRARY_PATH "${IML_INSTALL_PREFIX}/lib")
 
 # Use pkg-config to get hints about paths
 #libfind_pkg_check_modules(CUDAProfilingAPI_PKGCONF CUDAProfilingAPI)
@@ -174,6 +174,7 @@ endif()
 #
 
 # Third party: protobuf
+set(Protobuf_USE_STATIC_LIBS ON)
 find_package(Protobuf REQUIRED)
 #message("> Protobuf_INCLUDE_DIRS = ${Protobuf_INCLUDE_DIRS}")
 #message("> Protobuf_LIBRARIES = ${Protobuf_LIBRARIES}")
@@ -208,8 +209,12 @@ add_subdirectory(third_party/backward-cpp)
 find_package(Eigen3 REQUIRED)
 
 # Third party: json
-set(JSON_BuildTests OFF CACHE INTERNAL "")
-add_subdirectory(third_party/json)
+#set(JSON_BuildTests OFF CACHE INTERNAL "")
+#add_subdirectory(third_party/json)
+find_package(nlohmann_json REQUIRED)
+#...
+#add_library(foo ...)
+#...
 
 #
 # Compiler definitions.
@@ -219,7 +224,11 @@ set(ADD_WARNINGS_FLAGS "-Wuninitialized")
 #set(CMAKE_CXX_STANDARD 11)
 #-std=c++11
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${ADD_WARNINGS_FLAGS} -Wall -Werror ${IGNORE_ERRORS} ")
-SET(CMAKE_EXE_LINKER_FLAGS  "${CMAKE_EXE_LINKER_FLAGS} -demangle")
+#-Wl,--unresolved-symbols=ignore-in-shared-libs
+#-Wl,--unresolved-symbols=report-all
+set(IML_LINKER_FLAGS "-demangle -Wl,--no-undefined")
+SET(CMAKE_EXE_LINKER_FLAGS  "${CMAKE_EXE_LINKER_FLAGS} ${IML_LINKER_FLAGS}")
+set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} ${IML_LINKER_FLAGS}")
 
 include_directories(
         ./
@@ -233,7 +242,7 @@ set(SOURCES)
 # $ find tensorflow -type d
 set(TF_SRC_DIRS
         tensorflow
-        tensorflow/c
+        # tensorflow/c
         tensorflow/core
         tensorflow/core/lib
         tensorflow/core/lib/hash
@@ -325,8 +334,8 @@ if (DEBUG_CMAKE_VERBOSE)
     message("> ANALYSIS_SOURCES = ${ANALYSIS_SOURCES}")
     message("> COMMON_SOURCES = ${COMMON_SOURCES}")
     #message("> TEST_ANALYSIS_SOURCES = ${TEST_ANALYSIS_SOURCES}")
-    message("> PROTO_SRCS = ${PROTO_SRCS}")
-    message("> PROTO_HDRS = ${PROTO_HDRS}")
+    message("> IML_PROTO_SRCS = ${IML_PROTO_SRCS}")
+    message("> IML_PROTO_HDRS = ${IML_PROTO_HDRS}")
     message("> BACKWARD_ENABLE = ${BACKWARD_ENABLE}")
 endif()
 
@@ -340,16 +349,17 @@ endif()
 # HOWEVER; this no longer works in CMake 3.14.5 (Ubuntu 18.04)
 #       The directory structure for generated files becomes:
 #         iml/build/CMakeFiles/tensorflow/core/lib/core/error_codes.pb.h
-#       BUT, PROTO_SRCS still matches this directory structure (non-existent files):
+#       BUT, IML_PROTO_SRCS still matches this directory structure (non-existent files):
 #         iml/build/error_codes.pb.h
 # TLDR: Oh well, just generate cpp files in iml/build/*.pb.cpp
 # set(PROTOBUF_GENERATE_CPP_APPEND_PATH OFF)
-protobuf_generate_cpp(PROTO_SRCS PROTO_HDRS
+protobuf_generate_cpp(IML_PROTO_SRCS IML_PROTO_HDRS
         iml_profiler/protobuf/iml_prof.proto
         iml_profiler/protobuf/pyprof.proto
         )
 set(SAMPLE_CUDA_API_SOURCES
         ${TF_SOURCES}
+
         # Add SIGSEGV handler that prints out stack-trace.
         # NOTE: For some reason this doesn't always work and gdb is required to debug...
         # I think that's because the program being executed overrides the SIGSEGV handler
@@ -358,7 +368,7 @@ set(SAMPLE_CUDA_API_SOURCES
         # NOTE: we should probably put "common" stuff between 'analysis' and libsample in the common directory,
         # instead of pulling in all of the analysis sources.
         ${COMMON_SOURCES}
-        ${PROTO_SRCS} ${PROTO_HDRS}
+        ${IML_PROTO_SRCS} ${IML_PROTO_HDRS}
         ${CUDA_PROF_SRCS}
         )
 if (NOT WITH_CUDA_LD_PRELOAD)
@@ -378,7 +388,7 @@ if (WITH_CXX_ANALYSIS)
             ${COMMON_SOURCES}
             #            ${TF_SOURCES}
             ${BACKWARD_ENABLE}
-            ${PROTO_SRCS} ${PROTO_HDRS} src/analysis/lru_cache.cc src/analysis/sample_periods.cc src/analysis/sample_periods.h)
+            ${IML_PROTO_SRCS} ${IML_PROTO_HDRS} src/analysis/lru_cache.cc src/analysis/sample_periods.cc src/analysis/sample_periods.h)
     list(FILTER RLS_ANALYZE_SRCS EXCLUDE REGEX "/c_test_util.cc")
     if (DEBUG_CMAKE_VERBOSE)
         message("> RLS_ANALYZE_SRCS = ${RLS_ANALYZE_SRCS}")
@@ -390,7 +400,7 @@ if (WITH_CXX_ANALYSIS)
             ${TEST_ANALYSIS_SOURCES}
             #            ${TF_SOURCES}
             ${BACKWARD_ENABLE}
-            ${PROTO_SRCS} ${PROTO_HDRS})
+            ${IML_PROTO_SRCS} ${IML_PROTO_HDRS})
     list(FILTER TEST_ANALYSIS_SOURCES EXCLUDE REGEX "/c_test_util.cc")
     if (DEBUG_CMAKE_VERBOSE)
         message("> TEST_ANALYSIS_SOURCES = ${TEST_ANALYSIS_SOURCES}")
@@ -443,6 +453,57 @@ function(AddCUPTIDependencies TARGET)
     AddCUDA(${TARGET})
 endfunction()
 
+function(FindProtobufDeps)
+    # IMPORTANT: link libprotobuf statically into librlscope.so so LD_PRELOAD
+    # doesn't override the protobuf library used by libtensorflow_framework.so.
+    # librlscope.so is careful to hide its symbols, so libprotobuf.a symbols will be hidden.
+    # If we DON'T do this, libprotobuf.so will complain about compile-version and
+    # runtime-version discrepancies.
+    set(Protobuf_USE_STATIC_LIBS ON)
+    find_package(Protobuf REQUIRED)
+    include_directories(${Protobuf_INCLUDE_DIRS})
+    include_directories(${CMAKE_CURRENT_BINARY_DIR})
+endfunction()
+
+function(AddProtobufDeps TARGET)
+    FindProtobufDeps()
+    target_link_libraries(${TARGET} PRIVATE ${Protobuf_LIBRARIES})
+    #message("> Protobuf_INCLUDE_DIRS = ${Protobuf_INCLUDE_DIRS}")
+    #message("> Protobuf_LIBRARIES = ${Protobuf_LIBRARIES}")
+    target_include_directories(${TARGET} PRIVATE ${Protobuf_INCLUDE_DIRS})
+    target_include_directories(${TARGET} PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
+endfunction()
+
+function (AddLoggingDeps TARGET)
+    # This works in docker, but no on Ubuntu 18.04 host...
+    # so just make our own find_package for spdlog
+    # find_package(spdlog REQUIRED)
+    # target_link_libraries(${TARGET} PRIVATE spdlog::spdlog)
+    find_package(MySpdlog REQUIRED)
+    target_link_libraries(${TARGET} PRIVATE ${MySpdlog_LIBRARIES})
+    target_include_directories(${TARGET} PRIVATE ${MySpdlog_INCLUDE_DIRS})
+    # message("> MySpdlog_LIBRARIES = ${MySpdlog_LIBRARIES}")
+    # message("> MySpdlog_INCLUDE_DIRS = ${MySpdlog_INCLUDE_DIRS}")
+
+    IF(CMAKE_BUILD_TYPE STREQUAL "Debug")
+        message("> Enable spdlog logging for target=${TARGET}")
+        get_target_property(CUR_FLAG ${TARGET} COMPILE_DEFINITIONS)
+        if (NOT CUR_FLAG)
+            set(CUR_FLAG)
+        endif()
+        set_target_properties(${TARGET} PROPERTIES COMPILE_DEFINITIONS "${CUR_FLAG};SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_DEBUG")
+        get_target_property(CUR_FLAG ${TARGET} COMPILE_DEFINITIONS)
+    ELSE()
+        message("> SKIP: spdlog logging for target=${TARGET}")
+        get_target_property(CUR_FLAG ${TARGET} COMPILE_DEFINITIONS)
+        if (NOT CUR_FLAG)
+            set(CUR_FLAG)
+        endif()
+        set_target_properties(${TARGET} PROPERTIES COMPILE_DEFINITIONS "${CUR_FLAG};SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_OFF")
+        get_target_property(CUR_FLAG ${TARGET} COMPILE_DEFINITIONS)
+    ENDIF()
+endfunction()
+
 function(AddTensorflowDependencies TARGET INCLUDE_CUDA)
     add_dependencies(${TARGET} double_conversion)
     # This will add libraries, definitions and include directories needed by backward
@@ -455,28 +516,18 @@ function(AddTensorflowDependencies TARGET INCLUDE_CUDA)
         AddFlags(${TARGET} LINK_FLAGS ${BACKTRACE_SYMS_FLAGS})
     endif()
 
-    target_link_libraries(${TARGET} PRIVATE ${Protobuf_LIBRARIES})
-    #message("> PROTO_SRCS = ${PROTO_SRCS}")
-    #message("> PROTO_HDRS = ${PROTO_HDRS}")
+    AddProtobufDeps(${TARGET})
+#    target_link_libraries(${TARGET} PRIVATE ${Protobuf_LIBRARIES})
+
+    #message("> IML_PROTO_SRCS = ${IML_PROTO_SRCS}")
+    #message("> IML_PROTO_HDRS = ${IML_PROTO_HDRS}")
     target_link_libraries(${TARGET} PRIVATE
             absl::base
             absl::strings
             absl::memory)
     target_link_libraries(${TARGET} PRIVATE nsync)
 
-    IF(CMAKE_BUILD_TYPE STREQUAL "Debug")
-        message("> Enable spdlog logging for target=${TARGET}")
-
-        get_target_property(CUR_FLAG ${TARGET} COMPILE_DEFINITIONS)
-        set_target_properties(${TARGET} PROPERTIES COMPILE_DEFINITIONS "${CUR_FLAG};SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_DEBUG")
-        get_target_property(CUR_FLAG ${TARGET} COMPILE_DEFINITIONS)
-    ELSE()
-        message("> SKIP: spdlog logging for target=${TARGET}")
-
-        get_target_property(CUR_FLAG ${TARGET} COMPILE_DEFINITIONS)
-        set_target_properties(${TARGET} PROPERTIES COMPILE_DEFINITIONS "${CUR_FLAG};SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_OFF")
-        get_target_property(CUR_FLAG ${TARGET} COMPILE_DEFINITIONS)
-    ENDIF()
+    AddLoggingDeps(${TARGET})
 
     target_link_libraries(${TARGET} PRIVATE nlohmann_json::nlohmann_json)
 
@@ -487,17 +538,6 @@ function(AddTensorflowDependencies TARGET INCLUDE_CUDA)
     target_link_libraries(${TARGET} PRIVATE boost_filesystem)
 
     target_link_libraries(${TARGET} PRIVATE nsync_includes)
-
-    # This works in docker, but no on Ubuntu 18.04 host...
-    # so just make our own find_package for spdlog
-    # find_package(spdlog REQUIRED)
-    # target_link_libraries(${TARGET} PRIVATE spdlog::spdlog)
-
-    find_package(MySpdlog REQUIRED)
-    target_link_libraries(${TARGET} PRIVATE ${MySpdlog_LIBRARIES})
-    target_include_directories(${TARGET} PRIVATE ${MySpdlog_INCLUDE_DIRS})
-    # message("> MySpdlog_LIBRARIES = ${MySpdlog_LIBRARIES}")
-    # message("> MySpdlog_INCLUDE_DIRS = ${MySpdlog_INCLUDE_DIRS}")
 
     target_link_libraries(${TARGET} PRIVATE nsync_cpp)
     target_include_directories(${TARGET} PRIVATE ${double_conversion_INCLUDE_DIR})
@@ -528,6 +568,9 @@ endfunction()
 
 function(AddRLScopeTarget TARGET)
     add_library(${TARGET} SHARED ${SAMPLE_CUDA_API_SOURCES})
+    AddCommonRLSDeps(${TARGET})
+    AddLoggingDeps(${TARGET})
+#    cuda_add_library(${TARGET} SHARED ${SAMPLE_CUDA_API_SOURCES})
     add_dependencies(${TARGET} double_conversion)
     # This will add libraries, definitions and include directories needed by backward
     # by setting each property on the target.
@@ -537,9 +580,11 @@ function(AddRLScopeTarget TARGET)
 
     target_link_libraries(${TARGET} PRIVATE nlohmann_json::nlohmann_json)
 
-    target_link_libraries(${TARGET} PRIVATE ${Protobuf_LIBRARIES})
-    #message("> PROTO_SRCS = ${PROTO_SRCS}")
-    #message("> PROTO_HDRS = ${PROTO_HDRS}")
+#    target_link_libraries(${TARGET} PRIVATE ${Protobuf_LIBRARIES})
+    AddProtobufDeps(${TARGET})
+
+    #message("> IML_PROTO_SRCS = ${IML_PROTO_SRCS}")
+    #message("> IML_PROTO_HDRS = ${IML_PROTO_HDRS}")
     #absl::synchronization
     target_link_libraries(${TARGET} PRIVATE
             absl::base
@@ -668,8 +713,22 @@ function(AddTestAnalysisTarget TARGET)
     add_executable(${TARGET} ${TEST_ANALYSIS_SOURCES})
     AddTensorflowDependencies(${TARGET} FALSE)
     AddUnitTest(${TARGET})
+    AddCommonRLSDeps(${TARGET})
+endfunction()
+
+function(AddCommonRLSDeps TARGET)
+    # This will find the ALREADY INSTALLED libcommon_util.a from previous cmake runs,
+    # NOT the one we are building in this run...
+#    find_library(common_util_LIBRARY libcommon_util.a)
+#    if (NOT common_util_LIBRARY)
+#        message(FATAL_ERROR "NOTFOUND: Couldn't find libcommon_util.a")
+#    else()
+#        message("FOUND: found libcommon_util.a @ ${common_util_LIBRARY}")
+#    endif()
+#    target_link_libraries(${TARGET} PRIVATE ${common_util_LIBRARY})
     target_link_libraries(${TARGET} PRIVATE common_util)
     target_link_libraries(${TARGET} PRIVATE range_sampling)
+    target_link_libraries(${TARGET} PRIVATE rlscope_common)
 endfunction()
 
 function(AddRLSAnalyzeTarget TARGET)
@@ -680,9 +739,17 @@ function(AddRLSAnalyzeTarget TARGET)
     # message("> GFLAGS_LIBRARIES = ${GFLAGS_LIBRARIES}")
     # message("> GFLAGS_INCLUDE_DIRS = ${GFLAGS_INCLUDE_DIRS}")
     target_link_libraries(${TARGET} PUBLIC ${GFLAGS_LIBRARIES})
-    target_link_libraries(${TARGET} PRIVATE common_util)
-    target_link_libraries(${TARGET} PRIVATE range_sampling)
+    AddCommonRLSDeps(${TARGET})
 endfunction()
+
+#
+# Library targets: ./src/libs
+# e.g., common_util, range_sampling
+#
+
+include(libs.cmake)
+#return()
+
 
 #
 # Create targets.
@@ -694,13 +761,6 @@ if (WITH_CXX_ANALYSIS)
 endif()
 AddRLScopeTarget(rlscope)
 
-
-#
-# Library targets: ./src/libs
-# e.g., common_util, range_sampling
-#
-
-include(libs.cmake)
 
 #
 # Install targets.

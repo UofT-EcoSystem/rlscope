@@ -18,6 +18,13 @@ limitations under the License.
 
 namespace rlscope {
 
+Status Status::FromMyStatus(const MyStatus& my_status) {
+  if (my_status.code() == MyStatus::OK().code()) {
+    return OK();
+  }
+  return Status(my_status.code(), my_status.error_message());
+}
+
 Status::Status(rlscope::error::Code code, StringPiece msg) {
   assert(code != rlscope::error::OK);
   state_ = std::unique_ptr<State>(new State);

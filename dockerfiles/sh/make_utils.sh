@@ -138,15 +138,16 @@ check_tensorflow_build() {
 }
 
 _check_tensorflow() {
-    if ! py_module_installed "tensorflow"; then
-        echo "ERROR: doesn't look like you installed tensorflow with IML modifications yet."
-        echo "  You have two options:"
-        echo "    (1) Install a pre-compiled TensorFlow with IML modifications from https://github.com/UofT-EcoSystem/iml/releases"
-        echo "    (2) Compile it yourself, then run install_tensorflow.sh"
-        echo "  For details, see the wiki: "
-        echo "    https://github.com/UofT-EcoSystem/iml/wiki/Installing-tensorflow-with-IML-modifications"
-        exit 1
-    fi
+  (
+  set -u
+  pip install tensorflow-gpu==$TENSORFLOW_VERSION
+  )
+#    if ! py_module_installed "tensorflow"; then
+#      echo "ERROR: you need to install tensorflow."
+#      echo "  Recommended way to install tensorflow:"
+#      echo "  $ pip install tensorflow-gpu==\$TENSORFLOW_VERSION"
+#      exit 1
+#    fi
 }
 
 _upgrade_pip() {

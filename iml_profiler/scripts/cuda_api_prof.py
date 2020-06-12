@@ -140,25 +140,8 @@ def main():
 
     env = dict(os.environ)
     # TODO: figure out how to install pre-built .so file with "pip install iml_profiler"
-    so_path = py_config.LIB_SAMPLE_CUDA_API
-    if not _e(so_path):
-        sys.stderr.write(textwrap.dedent("""
-        IML ERROR: couldn't find CUDA sampling library @ {path}; to build it, do:
-          $ cd {root}
-          # Download library dependencies
-          $ bash ./setup.sh
-        
-          # Perform cmake build
-          $ mkdir build
-          $ cd build
-          # Assuming you installed protobuf 3.9.1 at --prefix=$HOME/protobuf
-          $ cmake ..
-          $ make -j$(nproc)
-        """.format(
-            root=py_config.ROOT,
-            path=so_path,
-        )))
-        sys.exit(1)
+    so_path = py_config.RLSCOPE_CLIB
+    assert so_path is not None
     add_env = dict()
     add_env['LD_PRELOAD'] = "{ld}:{so_path}".format(
         ld=env.get('LD_PRELOAD', ''),

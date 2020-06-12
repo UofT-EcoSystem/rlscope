@@ -72,7 +72,9 @@ if [ "$ALGO" = "" ]; then
 fi
 
 #OUTPUT_DIR="$RL_BASELINES_ZOO_DIR/retrained_agents"
-OUTPUT_DIR="$RL_BASELINES_ZOO_DIR/output"
+if [ "$OUTPUT_DIR" = "" ]; then
+  OUTPUT_DIR="$RL_BASELINES_ZOO_DIR/output"
+fi
 
 echo "> Training ALGO = $ALGO, ENV_ID = $ENV_ID, OUTPUT_DIR = $OUTPUT_DIR"
 
@@ -105,6 +107,14 @@ NVPROF=()
 #    NVPROF=(nvprof --source-level-analysis)
 #fi
 
+IML_PROF="${IML_PROF:-iml-prof}"
+
+#IML_PROF_ARGS=()
+#if [ "$IML_PROF" != "" ]; then
+#  IML_PROF_ARGS=(
+#    "$IML_PROF"
+#  )
+#fi
 
 # NOTE: IML_PROF, if defined, will be a command (iml-prof) that wraps the training script
 # using LD_PRELOAD=librlscope.so in order to sample CUDA API calls during
@@ -118,6 +128,7 @@ _do $IML_PROF "${NVPROF[@]}" "${PYTHON[@]}" $RL_BASELINES_ZOO_DIR/train.py \
     --log-folder $OUTPUT_DIR \
     --log-interval 1 \
     --iml-delay \
+    --iml-training-progress \
     "$@"
 # Sanity check that train.py has exited,
 # for those weird runs where iml-bench hangs unexpectedly during p.stdout.readline().

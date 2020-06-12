@@ -5,6 +5,8 @@ from iml_profiler.parser.common import *
 
 from ctypes import *
 
+from iml_profiler import py_config
+
 from iml_profiler.profiler import iml_logging
 from iml_profiler import py_config
 iml_logging.setup_logging()
@@ -65,7 +67,7 @@ def load_library(allow_fail=None):
 
     # except OSError as e:
     try:
-        _so = ctypes.cdll.LoadLibrary('librlscope.so')
+        _so = ctypes.cdll.LoadLibrary(py_config.RLSCOPE_CLIB)
         # os.error
     except OSError as e:
         if not allow_fail or not re.search(r'no such file', str(e), re.IGNORECASE):
@@ -74,7 +76,7 @@ def load_library(allow_fail=None):
         #     'e.__dict__':e.__dict__,
         #     'e.errno':e.errno,
         # })
-        logging.info("Failed to load librlscope.so")
+        logging.info(f"Failed to load {py_config.RLSCOPE_CLIB}")
         return
 
     _so.setup.argtypes = []
@@ -121,6 +123,12 @@ def load_library(allow_fail=None):
     _so.pop_operation.restype = c_int
     # _set_api_wrapper('pop_operation')
 
+    _so.start_pass.argtypes = []
+    _so.start_pass.restype = c_int
+
+    _so.end_pass.argtypes = []
+    _so.end_pass.restype = c_int
+
     _so.await_dump.argtypes = []
     _so.await_dump.restype = c_int
     _set_api_wrapper('await_dump')
@@ -129,7 +137,7 @@ def load_library(allow_fail=None):
     _so.async_dump.restype = c_int
     _set_api_wrapper('async_dump')
 
-    logging.info("Loaded symbols from librlscope.so")
+    logging.info(f"Loaded symbols from {py_config.RLSCOPE_CLIB}")
 
 def _set_api_wrapper(api_name):
     from iml_profiler.clib import sample_cuda_api
@@ -201,6 +209,18 @@ def push_operation(operation):
 
 def pop_operation():
     ret = _so.pop_operation()
+    if ret != TF_OK:
+        raise IMLProfError(ret)
+    return ret
+
+def start_pass():
+    ret = _so.start_pass()
+    if ret != TF_OK:
+        raise IMLProfError(ret)
+    return ret
+
+def end_pass():
+    ret = _so.end_pass()
     if ret != TF_OK:
         raise IMLProfError(ret)
     return ret

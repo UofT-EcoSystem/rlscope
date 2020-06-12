@@ -309,7 +309,7 @@ void SampleAPI::_RunMakeGPUInactive(GPUSampleState* gpu_sample_state) {
         // We slept through the sampling-interval time, but the GPU wasn't marked as active again.
         // Assume it's inactive.
         gpu_sample_state->is_gpu_active = false;
-        sample_api._sample_events.event.sample_time_us = Env::Default()->NowMicros();
+        sample_api._sample_events.event.sample_time_us = rlscope::TimeNowMicros();
       }
     }
   }

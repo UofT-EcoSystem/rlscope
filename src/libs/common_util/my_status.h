@@ -29,8 +29,9 @@ limitations under the License.
 //#include "tensorflow/core/platform/macros.h"
 //#include "tensorflow/core/platform/types.h"
 
+//if (status.code() != MyStatus::OK().code()) {
 #define IF_BAD_STATUS_RETURN(status)  \
-      if (status.code() != MyStatus::OK().code()) { \
+      if (!status.ok()) { \
         return status; \
       }
 

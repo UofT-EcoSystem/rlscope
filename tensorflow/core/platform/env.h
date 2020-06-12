@@ -74,7 +74,7 @@ class Env {
                                     FileSystemRegistry::Factory factory);
 
   /// \brief Flush filesystem caches for all registered filesystems.
-  Status FlushFileSystemCaches();
+//  Status FlushFileSystemCaches();
 
   /// \brief Creates a brand new random access read-only file with the
   /// specified name.

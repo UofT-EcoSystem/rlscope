@@ -255,6 +255,22 @@ RetCode RLSCOPE_EXPORT push_operation(
   return status.code();
 }
 
+RetCode RLSCOPE_EXPORT start_pass() {
+  VLOG(1) << __func__;
+  Status status;
+  status = globals.device_tracer->StartPass();
+  MAYBE_LOG_ERROR(LOG(INFO), __func__, status);
+  return status.code();
+}
+
+RetCode RLSCOPE_EXPORT end_pass() {
+  VLOG(1) << __func__;
+  Status status;
+  status = globals.device_tracer->EndPass();
+  MAYBE_LOG_ERROR(LOG(INFO), __func__, status);
+  return status.code();
+}
+
 RetCode RLSCOPE_EXPORT pop_operation() {
   VLOG(1) << __func__;
   Status status;

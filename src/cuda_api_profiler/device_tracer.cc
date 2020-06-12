@@ -45,6 +45,9 @@ limitations under the License.
 //#include <mutex>
 #include <vector>
 
+#include <boost/optional.hpp>
+//#include <boost/none.hpp>
+
 #ifdef CONFIG_TRACE_STATS
 
 // Record memcpy/kernel launch timings.
@@ -67,20 +70,14 @@ limitations under the License.
 #include <list>
 #include <cassert>
 
-//#include <google/protobuf/arena.h>
-
-//#include "tensorflow/core/common_runtime/step_stats_collector.h"
-//#include "tensorflow/core/framework/step_stats.pb.h"
-//#include "tensorflow/core/lib/core/errors.h"
-//#include "tensorflow/core/lib/strings/strcat.h"
-//#include "tensorflow/core/lib/strings/stringprintf.h"
-//#include "tensorflow/core/platform/cupti_wrapper.h"
 #include "tensorflow/core/platform/env.h"
-//#include "tensorflow/core/platform/macros.h"
 #include "tensorflow/core/platform/mem.h"
 #include "tensorflow/core/platform/mutex.h"
 #include "tensorflow/core/platform/tracing.h"
 #include "cuda_api_profiler/cupti_logging.h"
+#include "range_sampling.h"
+#include "common_util.h"
+#include "rlscope_common.h"
 
 //#define mutex std::mutex
 //#define mutex_lock std::lock_guard<std::mutex>
@@ -227,6 +224,8 @@ class DeviceTracerImpl : public DeviceTracer {
       int64 duration_us,
       const char* name) override;
 
+  Status StartPass() override;
+  Status EndPass() override;
   Status PushOperation(const char* operation) override;
   Status RecordOverheadEvent(
       const char* overhead_type,
@@ -324,13 +323,15 @@ class DeviceTracerImpl : public DeviceTracer {
 //  void AddCorrelationId(uint32 correlation_id, const string &name);
 
   // Returns the current system time in microseconds.
-  inline int64 NowInUsec() { return Env::Default()->NowMicros(); }
+  inline int64 NowInUsec() { return rlscope::TimeNowMicros(); }
 
   std::vector<std::unique_ptr<ActivityBuffer>> activity_buffers_;
   OpStack _op_stack;
+  int _device;
   CUDAAPIProfiler _api_profiler;
   CUDAAPIProfilerPrinter api_printer_;
   CUDAActivityProfiler _activity_profiler;
+  GPUHwCounterSampler _hw_profiler;
   std::shared_ptr<CudaStreamMonitor> stream_monitor_;
   EventProfiler _event_profiler;
   RegisteredFunc::FuncId _cuda_stream_monitor_cbid;
@@ -365,6 +366,8 @@ class DeviceTracerImpl : public DeviceTracer {
   std::string _machine_name GUARDED_BY(mu_);
   std::string _phase_name GUARDED_BY(mu_);
 
+  int _configure_pass_index;
+
   TF_DISALLOW_COPY_AND_ASSIGN(DeviceTracerImpl);
 };
 
@@ -374,11 +377,14 @@ DeviceTracerImpl::DeviceTracerImpl(CUPTIManager *cupti_manager)
         _api_profiler(_op_stack),
         api_printer_(_api_profiler, get_TF_CUDA_API_PRINT_EVERY_SEC(0)),
         _activity_profiler(cupti_manager),
+//        _hw_profiler(_device, _directory, ""),
         _cuda_stream_monitor_cbid(-1),
         _cupti_api(CuptiAPI::GetCuptiAPI()),
 //        _cupti_api_device_tracer_callback_id(-1),
-        cupti_manager_(cupti_manager)
-    {
+        cupti_manager_(cupti_manager),
+        _configure_pass_index(0)
+{
+  _device = -1;
   VLOG(1) << "DeviceTracer created.";
 //  cupti_wrapper_.reset(new perftools::gputools::profiler::CuptiWrapper());
   if (is_yes("TF_CUPTI_PROTOBUF_ARENA", false)) {
@@ -546,6 +552,8 @@ void DeviceTracerImpl::_EnableAllCUDAAPICallbacks() {
 }
 
 Status DeviceTracerImpl::Start() {
+  Status status = Status::OK();
+  MyStatus my_status = MyStatus::OK();
   VLOG(1) << "DeviceTracer::Start";
   mutex_lock l(mu_);
   if (VLOG_IS_ON(1)) {
@@ -554,6 +562,9 @@ Status DeviceTracerImpl::Start() {
   if (stream_monitor_) {
     stream_monitor_->Start();
   }
+  my_status = _hw_profiler.StartProfiling();
+  status = Status::FromMyStatus(my_status);
+  IF_BAD_STATUS_RETURN(status);
   if (enabled_) {
     return errors::FailedPrecondition("DeviceTracer is already enabled.");
   }
@@ -716,11 +727,21 @@ Status DeviceTracerImpl::Print() {
 
 
 Status DeviceTracerImpl::Stop() {
+  Status status = Status::OK();
+  MyStatus my_status = MyStatus::OK();
+
   VLOG(1) << "DeviceTracer::Stop";
   mutex_lock l(mu_);
+
   // VLOG(1) << "DeviceTracerImpl." << __func__ << ": api_printer.Stop()";
   SimpleTimer timer("DeviceTracerImpl.Stop");
   timer.ResetStartTime();
+
+  my_status = _hw_profiler.StopProfiling();
+  timer.EndOperation("GPUHwCounterSampler.Stop");
+  status = Status::FromMyStatus(my_status);
+  IF_BAD_STATUS_RETURN(status);
+
   api_printer_.Stop();
   timer.EndOperation("api_printer_.Stop");
   if (is_yes("IML_CUDA_ACTIVITIES", false)) {
@@ -852,6 +873,8 @@ bool DeviceTracerImpl::IsEnabled() {
 
 Status DeviceTracerImpl::SetMetadata(const char* directory, const char* process_name, const char* machine_name, const char* phase_name) {
   mutex_lock l(mu_);
+  // TODO: allow profiling other GPUs by adding "device" to the SetMetadata call.
+  _device = 0;
   _op_stack.SetMetadata(directory, process_name, machine_name, phase_name);
   _activity_profiler.SetMetadata(directory, process_name, machine_name, phase_name);
   _directory = directory;
@@ -860,26 +883,42 @@ Status DeviceTracerImpl::SetMetadata(const char* directory, const char* process_
   _phase_name = phase_name;
   _api_profiler.SetMetadata(directory, process_name, machine_name, phase_name);
   _event_profiler.SetMetadata(directory, process_name, machine_name, phase_name);
+//  _hw_profiler.Setup(_device, _directory, "");
+  auto dump_path = DumpDirectory(directory, phase_name, process_name);
+  _hw_profiler.SetDirectory(dump_path);
+  _hw_profiler.SetDevice(_device);
   return Status::OK();
 }
 
 Status DeviceTracerImpl::AsyncDump() {
+  Status status = Status::OK();
+  MyStatus my_status = MyStatus::OK();
   mutex_lock l(mu_);
   _op_stack.AsyncDump();
   if (is_yes("IML_CUDA_ACTIVITIES", false)) {
     _activity_profiler.AsyncDump();
+  }
+  if (_hw_profiler.CanDump()) {
+    my_status = _hw_profiler.DumpAsync();
+    status = Status::FromMyStatus(my_status);
+    IF_BAD_STATUS_RETURN(status);
   }
   _api_profiler.AsyncDump();
   _event_profiler.AsyncDump();
   return Status::OK();
 }
 Status DeviceTracerImpl::AwaitDump() {
+  Status status = Status::OK();
+  MyStatus my_status = MyStatus::OK();
   // Q: Do we need to grab this...?
   mutex_lock l(mu_);
   _op_stack.AwaitDump();
   if (is_yes("IML_CUDA_ACTIVITIES", false)) {
     _activity_profiler.AwaitDump();
   }
+  my_status = _hw_profiler.AwaitDump();
+  status = Status::FromMyStatus(my_status);
+  IF_BAD_STATUS_RETURN(status);
   _api_profiler.AwaitDump();
   _event_profiler.AwaitDump();
   return Status::OK();
@@ -901,8 +940,56 @@ Status DeviceTracerImpl::RecordEvent(
   return Status::OK();
 }
 
+Status DeviceTracerImpl::StartPass() {
+  Status status = Status::OK();
+  MyStatus my_status = MyStatus::OK();
+
+  my_status = _hw_profiler.StartPass();
+  status = Status::FromMyStatus(my_status);
+  IF_BAD_STATUS_RETURN(status);
+
+  if (_configure_pass_index < get_IML_GPU_HW_CONFIG_PASSES(boost::none)) {
+    if (_configure_pass_index == 0) {
+      my_status = _hw_profiler.StartConfig(get_IML_GPU_HW_METRICS(boost::none));
+      status = Status::FromMyStatus(my_status);
+      IF_BAD_STATUS_RETURN(status);
+    }
+    _configure_pass_index += 1;
+  }
+
+  return Status::OK();
+}
+Status DeviceTracerImpl::EndPass() {
+  Status status = Status::OK();
+  MyStatus my_status = MyStatus::OK();
+
+  // Q: What do we do if we attempt to push an operation we HAVE NOT seen before?
+  // For now, just detect and error out if it happens.
+
+  my_status = _hw_profiler.EndPass();
+  status = Status::FromMyStatus(my_status);
+  IF_BAD_STATUS_RETURN(status);
+
+  if (_hw_profiler.Mode() == GPUHwCounterSamplerMode::CONFIG && _configure_pass_index < get_IML_GPU_HW_CONFIG_PASSES(boost::none)) {
+    _configure_pass_index += 1;
+  }
+
+  if (_hw_profiler.Mode() == GPUHwCounterSamplerMode::CONFIG && _configure_pass_index >= get_IML_GPU_HW_CONFIG_PASSES(boost::none)) {
+    my_status = _hw_profiler.StartProfiling();
+    status = Status::FromMyStatus(my_status);
+    IF_BAD_STATUS_RETURN(status);
+  }
+
+  return Status::OK();
+}
+
 Status DeviceTracerImpl::PushOperation(const char* operation) {
+  Status status = Status::OK();
+  MyStatus my_status = MyStatus::OK();
   _op_stack.PushOperation(operation);
+  my_status = _hw_profiler.Push(operation);
+  status = Status::FromMyStatus(my_status);
+  IF_BAD_STATUS_RETURN(status);
   return Status::OK();
 }
 Status DeviceTracerImpl::RecordOverheadEvent(
@@ -925,6 +1012,7 @@ Status DeviceTracerImpl::RecordOverheadEventForOperation(
 }
 Status DeviceTracerImpl::PopOperation() {
   _op_stack.PopOperation();
+  _hw_profiler.Pop();
   return Status::OK();
 }
 

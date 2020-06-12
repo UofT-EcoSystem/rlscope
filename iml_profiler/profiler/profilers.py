@@ -785,6 +785,7 @@ class Profiler:
 
         self.percent_complete = None
         self._tracing_enabled = False
+        self._hw_pass_running = False
         self._incremental_training_progress = dict()
         self._last_dumped_training_progress = None
         self._start_percent_complete = 0.
@@ -1338,6 +1339,16 @@ class Profiler:
         self._op_stack.pop()
         sample_cuda_api.pop_operation()
 
+    def _start_pass(self):
+        assert not self._hw_pass_running
+        self._hw_pass_running = True
+        sample_cuda_api.start_pass()
+
+    def _end_pass(self):
+        assert self._hw_pass_running
+        self._hw_pass_running = False
+        sample_cuda_api.end_pass()
+
     @property
     def _cur_operation(self):
         if len(self._op_stack) == 0:
@@ -1802,6 +1813,9 @@ class Profiler:
 
         if self.unit_test:
             self.ut.stop()
+
+        if self._hw_pass_running:
+            self._end_pass()
 
         self.maybe_terminate_utilization_sampler(warn_terminated=False)
         timer.end_operation('maybe_terminate_utilization_sampler')
@@ -2416,6 +2430,12 @@ class Profiler:
                 self._incremental_training_progress[self.phase] = RecordedIncrementalTrainingProgress(self.machine_name, self.process_name, self.phase)
             self._incremental_training_progress[self.phase].report_start_of_progress(percent_complete, num_timesteps, total_timesteps, self.start_trace_time_sec)
 
+        if self._tracing_enabled and percent_complete < 1 and self._hw_pass_running:
+            self._end_pass()
+
+        if self._tracing_enabled and percent_complete > 0:
+            self._start_pass()
+
         if self.max_timesteps is not None and num_timesteps is None:
             self._failing = True
             raise RuntimeError("IML ERROR: if you use --iml-max-timesteps, you must call iml.prof.report_progress(num_timesteps=NUMBER)")
@@ -2895,7 +2915,7 @@ def _iml_env(prof : Profiler, keep_executable=False, keep_non_iml_args=False, en
         ld_preloads = []
         if 'LD_PRELOAD' in env:
             ld_preloads.append(env['LD_PRELOAD'])
-        ld_preloads.append(py_config.LIB_SAMPLE_CUDA_API)
+        ld_preloads.append(py_config.RLSCOPE_CLIB)
         env['LD_PRELOAD'] = ':'.join(ld_preloads)
 
     return env

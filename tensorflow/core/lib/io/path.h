@@ -86,8 +86,8 @@ void ParseURI(rlscope::StringPiece uri, rlscope::StringPiece* scheme,
 
 // Creates a URI from a scheme, host, and path. If the scheme is empty, we just
 // return the path.
-string CreateURI(rlscope::StringPiece scheme, rlscope::StringPiece host,
-                 rlscope::StringPiece path);
+//string CreateURI(rlscope::StringPiece scheme, rlscope::StringPiece host,
+//                 rlscope::StringPiece path);
 
 // Creates a temporary file name with an extension.
 string GetTempFilename(const string& extension);
