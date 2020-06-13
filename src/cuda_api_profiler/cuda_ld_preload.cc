@@ -2,8 +2,7 @@
 // Created by jagle on 8/19/2019.
 //
 
-#include "tensorflow/core/platform/logging.h"
-#include "tensorflow/core/lib/core/status.h"
+#include "common_util.h"
 
 #include "cuda_api_profiler/cuda_ld_preload.h"
 #include "cuda_ld_preload_export.h"

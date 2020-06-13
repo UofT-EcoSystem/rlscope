@@ -6,7 +6,7 @@
 
 using namespace std;
 
-void DataSet::ReadCSVFile(string dir, string file_name) {
+void DataSet::ReadCSVFile(std::string dir, std::string file_name) {
   // if cmake is used to build, the csv file will be next to the binary
   // - binary
   // - file.csv
@@ -24,7 +24,7 @@ void DataSet::ReadCSVFile(string dir, string file_name) {
   }
   stringstream buffer;
   buffer << file.rdbuf();
-  string line;
+  std::string line;
   vector<string> lines;
   while(getline(buffer, line, '\n')) {
     lines.push_back(line);
@@ -56,7 +56,7 @@ void DataSet::ReadCSVFile(string dir, string file_name) {
   }
 }
 
-vector<float> DataSet::ReadCSVLine(string line) {
+vector<float> DataSet::ReadCSVLine(std::string line) {
   vector<float> line_data;
   std::stringstream lineStream(line);
   std::string cell;

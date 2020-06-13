@@ -13,10 +13,8 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "tensorflow/core/platform/default/logging.h"
-#include "tensorflow/core/platform/env_time.h"
-#include "tensorflow/core/platform/macros.h"
-#include "tensorflow/core/platform/stacktrace.h"
+#include "logging.h"
+#include "common_util.h"
 
 //#include <boost/stacktrace.hpp>
 
@@ -85,10 +83,11 @@ void LogMessage::GenerateLogMessage() {
 #else
 
 void LogMessage::GenerateLogMessage() {
-  static EnvTime* env_time = rlscope::EnvTime::Default();
-  uint64 now_micros = env_time->NowMicros();
+//  static EnvTime* env_time = rlscope::EnvTime::Default();
+//  uint64_t now_micros = env_time->NowMicros();
+  uint64_t now_micros = rlscope::TimeNowMicros();
   time_t now_seconds = static_cast<time_t>(now_micros / 1000000);
-  int32 micros_remainder = static_cast<int32>(now_micros % 1000000);
+  int32_t micros_remainder = static_cast<int32_t>(now_micros % 1000000);
   const size_t time_buffer_size = 30;
   char time_buffer[time_buffer_size];
   strftime(time_buffer, time_buffer_size, "%Y-%m-%d %H:%M:%S",
@@ -122,15 +121,15 @@ int ParseInteger(const char* str, size_t size) {
   // Ideally we would use env_var / safe_strto64, but it is
   // hard to use here without pulling in a lot of dependencies,
   // so we use std:istringstream instead
-  string integer_str(str, size);
+  std::string integer_str(str, size);
   std::istringstream ss(integer_str);
   int level = 0;
   ss >> level;
   return level;
 }
 
-// Parse log level (int64) from environment variable (char*)
-int64 LogLevelStrToInt(const char* tf_env_var_val) {
+// Parse log level (int64_t) from environment variable (char*)
+int64_t LogLevelStrToInt(const char* tf_env_var_val) {
   if (tf_env_var_val == nullptr) {
     return 0;
   }
@@ -206,7 +205,7 @@ VmoduleMap* VmodulesMapFromEnv() {
 
 }  // namespace
 
-int64 MinLogLevelFromEnv() {
+int64_t MinLogLevelFromEnv() {
   // We don't want to print logs during fuzzing as that would slow fuzzing down
   // by almost 2x. So, if we are in fuzzing mode (not just running a test), we
   // return a value so that nothing is actually printed. Since LOG uses >=
@@ -221,7 +220,7 @@ int64 MinLogLevelFromEnv() {
 #endif
 }
 
-int64 MinVLogLevelFromEnv() {
+int64_t MinVLogLevelFromEnv() {
   // We don't want to print logs during fuzzing as that would slow fuzzing down
   // by almost 2x. So, if we are in fuzzing mode (not just running a test), we
   // return a value so that nothing is actually printed. Since VLOG uses <=
@@ -241,14 +240,14 @@ LogMessage::LogMessage(const char* fname, int line, int severity)
 
 LogMessage::~LogMessage() {
   // Read the min log level once during the first call to logging.
-  static int64 min_log_level = MinLogLevelFromEnv();
+  static int64_t min_log_level = MinLogLevelFromEnv();
   if (severity_ >= min_log_level) {
     GenerateLogMessage();
   }
 }
 
-int64 LogMessage::MinVLogLevel() {
-  static int64 min_vlog_level = MinVLogLevelFromEnv();
+int64_t LogMessage::MinVLogLevel() {
+  static int64_t min_vlog_level = MinVLogLevelFromEnv();
   return min_vlog_level;
 }
 
@@ -280,7 +279,7 @@ LogMessageFatal::~LogMessageFatal() {
 }
 
 void LogString(const char* fname, int line, int severity,
-               const string& message) {
+               const std::string& message) {
   LogMessage(fname, line, severity) << message;
 }
 
@@ -330,9 +329,9 @@ std::ostream* CheckOpMessageBuilder::ForVar2() {
   return stream_;
 }
 
-string* CheckOpMessageBuilder::NewString() {
+std::string* CheckOpMessageBuilder::NewString() {
   *stream_ << ")";
-  return new string(stream_->str());
+  return new std::string(stream_->str());
 }
 
 }  // namespace internal

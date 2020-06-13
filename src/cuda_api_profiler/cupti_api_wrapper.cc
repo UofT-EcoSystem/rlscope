@@ -5,13 +5,15 @@
 #include <memory>
 #include <algorithm>
 
-#include "tensorflow/core/platform/logging.h"
+#include "common_util.h"
 
 #include "cuda_api_profiler/cupti_logging.h"
 #include "cuda_api_profiler/cupti_api_wrapper.h"
 
 #include <cupti.h>
 #include <cuda.h>
+
+#include <mutex>
 
 namespace rlscope {
 
@@ -25,7 +27,7 @@ static std::shared_ptr<CuptiAPI> _cupti_api;
 }
 
 RegisteredHandle<CuptiCallback::FuncId> CuptiAPI::RegisterCallback(CuptiCallback::Callback callback) {
-  mutex_lock lock(_mu);
+  std::unique_lock<std::mutex> lock(_mu);
   CUptiResult ret;
   if (_next_func_id == 0) {
     ret = cuptiSubscribe(&_subscriber, CuptiAPI::__RunCUPTICallbacks, this);
@@ -56,7 +58,7 @@ void CuptiAPI::_RunCUPTICallbacks(
 }
 
 void CuptiAPI::UnregisterCallback(CuptiCallback::FuncId func_id) {
-  mutex_lock lock(_mu);
+  std::unique_lock<std::mutex> lock(_mu);
   std::remove_if(_cupti_subscribe_callbacks.begin(), _cupti_subscribe_callbacks.end(),
                  [func_id](const CuptiCallback& cb) { return cb.func_id == func_id; });
 }

@@ -9,9 +9,9 @@
 #include "common/util.h"
 
 #include <cstdlib>
+#include <mutex>
 
-#include "tensorflow/core/platform/logging.h"
-#include "tensorflow/core/platform/env.h"
+#include "common_util.h"
 #include <unistd.h>
 #include <sys/syscall.h>
 #define gettid() syscall(SYS_gettid)
@@ -34,7 +34,7 @@
 namespace rlscope {
 
 void EventProfiler::SetMetadata(const char* directory, const char* process_name, const char* machine_name, const char* phase_name) {
-  mutex_lock lock(_mu);
+  std::unique_lock<std::mutex> lock(_mu);
   if (_state.CanDump()) {
     _AsyncDump();
   }
@@ -50,7 +50,7 @@ void EventProfiler::SetMetadata(const char* directory, const char* process_name,
 }
 
 void EventProfiler::Print(std::ostream& out, int indent) {
-    mutex_lock l(_mu);
+    std::unique_lock<std::mutex> l(_mu);
     PrintIndent(out, indent);
     out << "EventProfiler: size = " << _state._events.size();
     const int MAX_PRINT_EVENTS = 15;
@@ -82,7 +82,7 @@ void EventProfiler::Print(std::ostream& out, int indent) {
 }
 
 void EventProfiler::AsyncDump() {
-  mutex_lock lock(_mu);
+  std::unique_lock<std::mutex> lock(_mu);
   _AsyncDump();
 }
 
@@ -191,7 +191,7 @@ void EventProfiler::RecordEvent(
     EventProfilerState::TimeUsec start_us,
     EventProfilerState::TimeUsec duration_us,
     const EventProfilerState::EventName& name) {
-  mutex_lock lock(_mu);
+  std::unique_lock<std::mutex> lock(_mu);
   auto& events = _state._events[category];
   pid_t tid = gettid();
   events.emplace_back(tid, start_us, duration_us, name);

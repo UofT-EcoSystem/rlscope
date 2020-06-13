@@ -8,14 +8,14 @@
 #include "cuda_api_profiler/cupti_logging.h"
 #include "cuda_api_profiler/cupti_api_wrapper.h"
 
-#include "tensorflow/core/platform/logging.h"
-#include "tensorflow/core/lib/core/errors.h"
+#include "common_util.h"
 
 #include <cuda.h>
 #include <cupti.h>
 
 #include <memory>
 #include <thread>
+#include <mutex>
 
 namespace rlscope {
 
@@ -264,14 +264,14 @@ void CudaStreamMonitor::Stop() {
 }
 
 void CudaStreamMonitor::AddStream(cudaStream_t stream) {
-  mutex_lock lock(mu_);
+  std::unique_lock<std::mutex> lock(mu_);
   VLOG(1) << "AddStream = " << reinterpret_cast<void*>(stream);
   _active_streams.push_back(stream);
   _poll_stream_summaries.emplace_back(stream);
 }
 
 void CudaStreamMonitor::RemoveStream(cudaStream_t stream) {
-  mutex_lock lock(mu_);
+  std::unique_lock<std::mutex> lock(mu_);
   VLOG(1) << "RemoveStream = " << reinterpret_cast<void*>(stream);
   std::remove_if(_active_streams.begin(), _active_streams.end(),
                  [stream](cudaStream_t s) { return stream == s; });
@@ -281,7 +281,7 @@ void CudaStreamMonitor::RemoveStream(cudaStream_t stream) {
 
 std::vector<PollStreamResult> CudaStreamMonitor::PollStreams() {
 //  VLOG(1) << "CudaStreamMonitor::PollStreams";
-  mutex_lock lock(mu_);
+  std::unique_lock<std::mutex> lock(mu_);
   std::vector<PollStreamResult> results;
   results.reserve(_active_streams.size());
   DCHECK(_active_streams.size() == _poll_stream_summaries.size());

@@ -477,7 +477,7 @@ bool GPUHwCounterSamplerState::CanDump() const {
 }
 
 //void GPUHwCounterSampler::AsyncDump() {
-//    mutex_lock lock(_mu);
+//    std::unique_lock<std::mutex> lock(_mu);
 //    _AsyncDump();
 //}
 //

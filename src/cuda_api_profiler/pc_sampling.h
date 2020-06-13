@@ -8,9 +8,9 @@
 #include <list>
 #include <string>
 #include <thread>
+#include <mutex>
 
-#include "tensorflow/core/platform/mutex.h"
-#include "tensorflow/core/platform/notification.h"
+#include "common_util.h"
 
 #include "cuda_api_profiler/get_env_var.h"
 
@@ -60,10 +60,10 @@ public:
 class CPUSampleState {
 public:
   pid_t tid;
-  int64 thread_id;
+  int64_t thread_id;
   std::string device_name;
   CPUSampleState() = default;
-  CPUSampleState(pid_t tid, int64 thread_id);
+  CPUSampleState(pid_t tid, int64_t thread_id);
   // The current active "stack" of annotations.
   std::list<Annotation> annotations;
 
@@ -87,7 +87,7 @@ public:
 
   struct SyncState {
     Notification _should_stop;
-    condition_variable _cv_is_gpu_active;
+    std::condition_variable _cv_is_gpu_active;
     std::unique_ptr<std::thread> _make_gpu_inactive_thread;
     ~SyncState();
   };
@@ -118,7 +118,7 @@ public:
 // Ideally, we capture the sampling-state of each thread on the machine.
 class SampleEvent {
 public:
-  int64 sample_time_us;
+  int64_t sample_time_us;
   std::vector<CPUSampleState> cpu_sample_state;
   std::vector<GPUSampleState> gpu_sample_state;
 
@@ -152,19 +152,19 @@ public:
 class SampleAPI {
 public:
 
-  mutex _mu;
+  std::mutex _mu;
 
   // GPU device-name -> 0-based device integer ID
-  std::map<std::string, int> _dev_to_dev_id GUARDED_BY(_mu);
-  int _next_gpu_id GUARDED_BY(_mu);
+  std::map<std::string, int> _dev_to_dev_id;
+  int _next_gpu_id;
 
   // POSIX thread_id -> 0-based integer ID
-  std::map<pid_t, int> _tid_to_id GUARDED_BY(_mu);
-  int _next_thread_id GUARDED_BY(_mu);
+  std::map<pid_t, int> _tid_to_id;
+  int _next_thread_id;
 
   float _sample_every_sec;
 
-  SampleEvents _sample_events GUARDED_BY(_mu);
+  SampleEvents _sample_events;
 
   SampleAPI() :
       _next_gpu_id(0),

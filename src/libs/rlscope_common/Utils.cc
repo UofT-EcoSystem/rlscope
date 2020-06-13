@@ -36,4 +36,5 @@ void AddTraceIDSuffix(std::stringstream& ss, int trace_id) {
   ss << ".trace_" << trace_id;
 }
 
+
 } // namespace rlscope

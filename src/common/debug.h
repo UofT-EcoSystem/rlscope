@@ -5,7 +5,7 @@
 #ifndef DNN_TENSORFLOW_CPP_DEBUG_H
 #define DNN_TENSORFLOW_CPP_DEBUG_H
 
-#include "tensorflow/core/platform/logging.h"
+#include "common_util.h"
 
 #define STR(s) #s
 

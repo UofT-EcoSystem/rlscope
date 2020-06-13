@@ -8,11 +8,10 @@
 #include "cuda_api_profiler/registered_handle.h"
 #include "cuda_api_profiler/cupti_manager.h"
 
-#include "tensorflow/core/lib/core/status.h"
-#include "tensorflow/core/platform/mutex.h"
-
 #include <cuda.h>
 #include <cupti.h>
+
+#include <mutex>
 
 namespace rlscope {
 
@@ -73,13 +72,13 @@ public:
   // Enables tracing and delivers event callbacks to 'client'.
   // Does not take ownership of client.  Client's lifetime must persist
   // until tracing is disabled.
-  Status EnableTrace(CUPTIClient *client);
-  Status _EnablePCSampling();
-  Status _DisablePCSampling();
-  Status Flush();
+  MyStatus EnableTrace(CUPTIClient *client);
+  MyStatus _EnablePCSampling();
+  MyStatus _DisablePCSampling();
+  MyStatus Flush();
 
   // Disable tracing.  No further events will be delivered to 'client'.
-  Status DisableTrace();
+  MyStatus DisableTrace();
 
 private:
   // Static functions which we can use as CUPTI callbacks.
@@ -98,8 +97,8 @@ private:
   // Required alignment of CUPTI buffers.
   static constexpr size_t kBufferAlignment = 8;
 
-  mutex mu_;
-  CUPTIClient *client_ GUARDED_BY(mu_);
+  std::mutex mu_;
+  CUPTIClient *client_;
 //  std::unique_ptr<perftools::gputools::profiler::CuptiWrapper> cupti_wrapper_;
 
   TF_DISALLOW_COPY_AND_ASSIGN(CUPTIManager);

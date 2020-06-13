@@ -3,8 +3,7 @@
 //
 
 
-#include "tensorflow/core/platform/logging.h"
-#include "tensorflow/core/platform/env.h"
+#include "common_util.h"
 
 #include <map>
 
@@ -26,6 +25,8 @@
 #include "cuda_api_profiler/defines.h"
 #include "cuda_api_profiler/cupti_logging.h"
 #include "common/util.h"
+
+#include <mutex>
 
 namespace rlscope {
 
@@ -92,7 +93,7 @@ std::unique_ptr<iml::OpStackProto> OpStackState::AsProto() {
 }
 
 void OpStack::Print(std::ostream& out, int indent) {
-  mutex_lock l(_mu);
+  std::unique_lock<std::mutex> l(_mu);
   PrintIndent(out, indent);
   out << "OpStack: size = " << _state.size();
 
@@ -154,7 +155,7 @@ std::string OpStackState::DumpPath(int trace_id) {
 }
 
 void OpStack::SetMetadata(const char* directory, const char* process_name, const char* machine_name, const char* phase_name) {
-  mutex_lock lock(_mu);
+  std::unique_lock<std::mutex> lock(_mu);
   if (_state.CanDump()) {
     _AsyncDump();
   }
@@ -170,7 +171,7 @@ void OpStack::SetMetadata(const char* directory, const char* process_name, const
 }
 
 void OpStack::AsyncDump() {
-  mutex_lock lock(_mu);
+  std::unique_lock<std::mutex> lock(_mu);
   _AsyncDump();
 }
 
@@ -197,7 +198,7 @@ void OpStack::AwaitDump() {
 
 std::string OpStack::ActiveOperation() {
 //  VLOG(1) << "OpStack." << __func__ << ", size() == " << _state._operation_stack.size();
-  mutex_lock lock(_mu);
+  std::unique_lock<std::mutex> lock(_mu);
   if (_state._operation_stack.size() == 0) {
     // It's possible (though strange) to run GPU kernels without an operation active.
     return OPERATION_UNKNOWN;
@@ -208,14 +209,14 @@ std::string OpStack::ActiveOperation() {
 }
 void OpStack::PushOperation(const std::string& operation) {
 //  VLOG(1) << "OpStack." << __func__ << ", operation=" << operation;
-  mutex_lock lock(_mu);
+  std::unique_lock<std::mutex> lock(_mu);
   _state._operation_stack.push_back(operation);
 }
 void OpStack::RecordOverheadEvent(
     const std::string& overhead_type,
-    int64 num_events) {
+    int64_t num_events) {
 //  VLOG(1) << "OpStack." << __func__ << ", overhead_type=" << overhead_type << ", num_events = " << num_events;
-  mutex_lock lock(_mu);
+  std::unique_lock<std::mutex> lock(_mu);
   std::string operation;
   if (_state._operation_stack.size() == 0) {
     operation = OPERATION_UNKNOWN;
@@ -229,16 +230,16 @@ void OpStack::RecordOverheadEvent(
 void OpStack::RecordOverheadEventForOperation(
     const std::string& overhead_type,
     const std::string& operation,
-    int64 num_events) {
+    int64_t num_events) {
 //  VLOG(1) << "OpStack." << __func__ << ", overhead_type = " << overhead_type << ", operation=" << operation << ", num_events = " << num_events;
-  mutex_lock lock(_mu);
+  std::unique_lock<std::mutex> lock(_mu);
   DCHECK(_state._phase_name != "");
   _state._overhead_events[overhead_type][_state._phase_name][operation].num_events += num_events;
 }
 
 void OpStack::PopOperation() {
 //  VLOG(1) << "OpStack." << __func__ << ", size() == " << _state._operation_stack.size();
-  mutex_lock lock(_mu);
+  std::unique_lock<std::mutex> lock(_mu);
   DCHECK(_state._operation_stack.size() > 0);
   _state._operation_stack.pop_back();
 }

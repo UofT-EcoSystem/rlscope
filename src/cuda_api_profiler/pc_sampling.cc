@@ -17,12 +17,14 @@
 
 #include <sstream>
 
-#include "tensorflow/core/platform/mutex.h"
-#include "tensorflow/core/platform/logging.h"
-#include "tensorflow/core/platform/env.h"
+#include "rlscope_common.h"
+
+#include "common_util.h"
 
 #include "cuda_api_profiler/pc_sampling.h"
 #include "cuda_api_profiler/defines.h"
+
+#include <mutex>
 
 namespace rlscope {
 
@@ -110,7 +112,7 @@ AnnotationProto Annotation::AsProto() const {
 }
 
 int SampleAPI::SetThreadID() {
-  mutex_lock lock(_mu);
+  std::unique_lock<std::mutex> lock(_mu);
   return _SetThreadID();
 }
 int SampleAPI::_SetThreadID() {
@@ -126,7 +128,7 @@ int SampleAPI::_SetThreadID() {
 }
 
 int SampleAPI::SetGPUID(const std::string& device_name) {
-  mutex_lock lock(_mu);
+  std::unique_lock<std::mutex> lock(_mu);
   return _SetGPUID(device_name);
 }
 int SampleAPI::_SetGPUID(const std::string& device_name) {
@@ -141,7 +143,7 @@ int SampleAPI::_SetGPUID(const std::string& device_name) {
 }
 
 void SampleAPI::MarkGPUActive(const std::string& device_name) {
-  mutex_lock lock(_mu);
+  std::unique_lock<std::mutex> lock(_mu);
 
   auto it = _dev_to_dev_id.find(device_name);
   int dev_id;
@@ -173,7 +175,7 @@ SampleEventProto SampleEvent::AsProto() const {
   return proto;
 }
 
-CPUSampleState::CPUSampleState(pid_t tid, int64 thread_id) :
+CPUSampleState::CPUSampleState(pid_t tid, int64_t thread_id) :
     tid(tid),
     thread_id(thread_id),
     device_name(get_cpu_name())
@@ -245,7 +247,7 @@ void GPUSampleState::Sample(GPUSampleState* data) {
 }
 
 SampleEvents SampleAPI::Sample() {
-  mutex_lock lock(_mu);
+  std::unique_lock<std::mutex> lock(_mu);
   SampleEvents sample_events;
   sample_events.Sample(&_sample_events);
   return sample_events;
@@ -253,7 +255,7 @@ SampleEvents SampleAPI::Sample() {
 
 void SampleAPI::MaybeSetThreadID(ThreadInfo* tinfo) {
   if (tinfo->thread_id == THREAD_ID_UNSET) {
-    mutex_lock lock(_mu);
+    std::unique_lock<std::mutex> lock(_mu);
     tinfo->thread_id = sample_api._SetThreadID();
   }
 }
@@ -270,19 +272,19 @@ ThreadInfo* SampleAPI::_CurrentThreadInfo() {
 }
 
 void SampleAPI::Push(const std::string& name, const std::string& operation) {
-  mutex_lock lock(_mu);
+  std::unique_lock<std::mutex> lock(_mu);
   auto tinfo = _CurrentThreadInfo();
   _sample_events.event.cpu_sample_state[tinfo->thread_id].Push(name, operation);
 }
 
 void SampleAPI::Pop() {
-  mutex_lock lock(_mu);
+  std::unique_lock<std::mutex> lock(_mu);
   auto tinfo = _CurrentThreadInfo();
   _sample_events.event.cpu_sample_state[tinfo->thread_id].Pop();
 }
 
 void SampleAPI::_RunMakeGPUInactive(GPUSampleState* gpu_sample_state) {
-  mutex_lock lock(_mu);
+  std::unique_lock<std::mutex> lock(_mu);
 //  _mu.lock();
   while (true) {
     while (!gpu_sample_state->is_gpu_active && !gpu_sample_state->_sync_state->_should_stop.HasBeenNotified()) {
@@ -300,9 +302,9 @@ void SampleAPI::_RunMakeGPUInactive(GPUSampleState* gpu_sample_state) {
       // However, currently the sampling interval determines how accurate our "GPU active"
       // reading is...
       // Ideally, the CUDA API would inform us IMMEDIATELY when the GPU becomes inactive...
-      int64 sleep_for_usec = round(1.5*_sample_every_sec * USEC_IN_SEC);
+      int64_t sleep_for_usec = round(1.5*_sample_every_sec * USEC_IN_SEC);
       _mu.unlock();
-      Env::Default()->SleepForMicroseconds(sleep_for_usec);
+      rlscope::SleepForMicroseconds(sleep_for_usec);
       _mu.lock();
       auto last_marked_active_usec_after_sleep = sample_api._sample_events.event.sample_time_us;
       if (last_marked_active_usec_after_sleep == last_marked_active_usec_before_sleep) {

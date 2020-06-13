@@ -2,7 +2,7 @@
 // Created by jagle on 8/21/2019.
 //
 
-#include "tensorflow/core/platform/logging.h"
+#include "common_util.h"
 
 #include "common/util.h"
 

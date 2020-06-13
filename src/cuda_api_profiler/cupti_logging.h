@@ -5,8 +5,6 @@
 #ifndef IML_CUPTI_LOGGING_H
 #define IML_CUPTI_LOGGING_H
 
-#include "tensorflow/core/lib/core/status.h"
-
 #include "cuda_api_profiler/generic_logging.h"
 
 #include <cupti.h>
@@ -24,22 +22,22 @@
   if (err != CUPTI_SUCCESS) { \
     const char* errstr = nullptr; \
     auto errstrRet = cuptiGetResultString(err, &errstr); \
-    DCHECK(errstrRet == CUPTI_SUCCESS) << "Failed to obtain error string for CUPTI error code = " << err; \
+    DCHECK(errstrRet == CUPTI_SUCCESS) << "Failed to obtain error std::string for CUPTI error code = " << err; \
     out << "error " << err << " for CUPTI API function " << cuptifunc <<  ": " << errstr; \
   }
 
 #define MAYBE_RETURN(status) \
-  if (status.code() != Status::OK().code()) { \
+  if (status.code() != MyStatus::OK().code()) { \
     return status.code(); \
   }
 
 #define MAYBE_EXIT(status) \
-  if (status.code() != Status::OK().code()) { \
+  if (status.code() != MyStatus::OK().code()) { \
     exit(status.code()); \
   }
 
 #define MAYBE_LOG_ERROR(out, func, status) \
-  if (status.code() != Status::OK().code()) { \
+  if (status.code() != MyStatus::OK().code()) { \
     out << "iml-prof C++ API '" << func << "' failed with: " << status; \
   }
 
@@ -50,8 +48,8 @@ const char* driver_cbid_to_string(CUpti_CallbackId cbid);
 
 void printActivity(const CUpti_Activity *record);
 
-//inline static void MAYBE_LOG_ERROR(std::ostream&& out, const char* func, const Status& status) {
-//  if (status.code() != Status::OK().code()) {
+//inline static void MAYBE_LOG_ERROR(std::ostream&& out, const char* func, const MyStatus& status) {
+//  if (status.code() != MyStatus::OK().code()) {
 //    out << "iml-prof C++ API '" << func << "' failed with: " << status;
 //  }
 //}

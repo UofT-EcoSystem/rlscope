@@ -8,12 +8,12 @@
 #include <cstdint>
 #include <time.h>
 
-//static constexpr uint64 kMicrosToNanos = 1000ULL;
-//static constexpr uint64 kMillisToMicros = 1000ULL;
-//static constexpr uint64 kMillisToNanos = 1000ULL * 1000ULL;
-//static constexpr uint64 kSecondsToMillis = 1000ULL;
-//static constexpr uint64 kSecondsToMicros = 1000ULL * 1000ULL;
-//static constexpr uint64 kSecondsToNanos = 1000ULL * 1000ULL * 1000ULL;
+//static constexpr uint64_t kMicrosToNanos = 1000ULL;
+//static constexpr uint64_t kMillisToMicros = 1000ULL;
+//static constexpr uint64_t kMillisToNanos = 1000ULL * 1000ULL;
+//static constexpr uint64_t kSecondsToMillis = 1000ULL;
+//static constexpr uint64_t kSecondsToMicros = 1000ULL * 1000ULL;
+//static constexpr uint64_t kSecondsToNanos = 1000ULL * 1000ULL * 1000ULL;
 
 #define MY_kMicrosToNanos (1000ULL)
 #define MY_kMillisToMicros (1000ULL)

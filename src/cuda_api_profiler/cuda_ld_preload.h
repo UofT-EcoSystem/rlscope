@@ -12,8 +12,6 @@
 
 #include "cuda_api_profiler/registered_handle.h"
 
-#include "tensorflow/core/platform/mutex.h"
-
 #include <vector>
 #include <string>
 #include <functional>

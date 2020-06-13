@@ -25,8 +25,7 @@ using json = nlohmann::json;
 
 #include "cuda_api_profiler/cupti_logging.h"
 
-#include "tensorflow/core/lib/core/status.h"
-#include "tensorflow/core/platform/device_tracer.h"
+#include "cuda_api_profiler/device_tracer.h"
 
 #include "cuda_api_profiler/cuda_ld_preload.h"
 #include "cuda_api_profiler/globals.h"
@@ -37,7 +36,7 @@ using json = nlohmann::json;
 #include "common_util.h"
 
 #define MAYBE_RETURN_ERROR(status) \
-  if (status.code() != Status::OK().code()) { \
+  if (status.code() != MyStatus::OK().code()) { \
     VLOG(INFO) << "iml-prof C++ API @ " << __func__ << " failed with " << status.ToString(); \
     return; \
   }
@@ -50,7 +49,7 @@ Globals globals;
 
 Globals::Globals() {
 
-  Status status = Status::OK();
+  MyStatus status = MyStatus::OK();
 
 #ifdef WITH_CUDA_LD_PRELOAD
   VLOG(1) << "dlopen(\"libcudart.so\")";
@@ -247,7 +246,7 @@ void Globals::StartUtilSampler() {
 }
 
 void Globals::TraceAtStart() {
-  Status status = Status::OK();
+  MyStatus status = MyStatus::OK();
 
   // Should we trace sub-processes?
   // The problem here is that we want to run a sub-process during library loading.
@@ -357,7 +356,7 @@ Globals::~Globals() {
   }
 
 //#define MAYBE_RETURN_ERROR(status)
-//  if (status.code() != Status::OK().code()) {
+//  if (status.code() != MyStatus::OK().code()) {
 //    DBG_LOG("iml-prof C++ API @ {} failed with {}", __func__, status.ToString());
 //    return;
 //  }
@@ -383,7 +382,7 @@ Globals::~Globals() {
   auto IML_TRACE_AT_START = getenv("IML_TRACE_AT_START");
 //  VLOG(1) << "IML_TRACE_AT_START = " << IML_TRACE_AT_START;
   if (device_tracer && env_is_on("IML_TRACE_AT_START", false, true)) {
-    Status status;
+    MyStatus status;
     status = device_tracer->Print();
     MAYBE_RETURN_ERROR(status);
     status = device_tracer->AsyncDump();

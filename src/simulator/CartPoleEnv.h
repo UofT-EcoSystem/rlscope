@@ -22,7 +22,7 @@ struct CartPoleAction {
   };
 //  Action action;
 //  int64_t action;
-  // The action placeholder variable for baselines DQN uses int32.
+  // The action placeholder variable for baselines DQN uses int32_t.
   int32_t action;
 
   // STL

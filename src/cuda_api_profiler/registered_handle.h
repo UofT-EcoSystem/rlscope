@@ -5,7 +5,7 @@
 #ifndef IML_REGISTERED_HANDLE_H
 #define IML_REGISTERED_HANDLE_H
 
-#include "tensorflow/core/platform/logging.h"
+#include "common_util.h"
 
 #include <functional>
 

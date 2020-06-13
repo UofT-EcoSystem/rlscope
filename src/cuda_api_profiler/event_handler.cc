@@ -2,11 +2,12 @@
 // Created by jagle on 8/16/2019.
 //
 
+#include "rlscope_common.h"
+
 #include "cuda_api_profiler/event_handler.h"
 #include "cuda_api_profiler/defines.h"
 
-#include "tensorflow/core/platform/logging.h"
-#include "tensorflow/core/platform/env.h"
+#include "common_util.h"
 
 #include <algorithm>
 
@@ -40,11 +41,11 @@ void EventHandler::EventLoop(std::function<bool()> should_stop) {
     } else {
       sleep_for_us = MAX_SLEEP_FOR_USEC;
     }
-    Env::Default()->SleepForMicroseconds(sleep_for_us);
+    rlscope::SleepForMicroseconds(sleep_for_us);
   }
 }
 
-uint64_t RegisteredFunc::TimeUsecUntilNextRun(uint64 now_usec) const {
+uint64_t RegisteredFunc::TimeUsecUntilNextRun(uint64_t now_usec) const {
   // every_sec seconds into the future, we would like to run this function.
   uint64_t next_run_usec = last_run_usec + every_sec*USEC_IN_SEC;
   if (next_run_usec >= now_usec) {
@@ -57,7 +58,7 @@ uint64_t RegisteredFunc::TimeUsecUntilNextRun(uint64 now_usec) const {
   return 0;
 }
 
-bool RegisteredFunc::ShouldRun(uint64 now_usec) {
+bool RegisteredFunc::ShouldRun(uint64_t now_usec) {
   DCHECK(last_run_usec <= now_usec);
   bool ret = last_run_usec == 0 or
              (now_usec - last_run_usec) >= (every_sec*USEC_IN_SEC);
@@ -71,7 +72,7 @@ bool RegisteredFunc::ShouldRun(uint64 now_usec) {
 }
 
 
-void RegisteredFunc::Run(uint64 now_usec) {
+void RegisteredFunc::Run(uint64_t now_usec) {
   last_run_usec = now_usec;
   func();
 }
@@ -88,7 +89,7 @@ void EventHandler::UnregisterFunc(RegisteredFunc::FuncId func_id) {
                  [func_id](const RegisteredFunc& f) { return f.func_id == func_id; });
 }
 
-void EventHandler::RunFuncs(uint64 now_usec) {
+void EventHandler::RunFuncs(uint64_t now_usec) {
 //  auto now_usec = rlscope::TimeNowMicros();
   for (auto& func : _funcs) {
     if (func.ShouldRun(now_usec)) {

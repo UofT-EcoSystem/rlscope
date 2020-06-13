@@ -2,19 +2,17 @@
 // Created by jagle on 8/23/2019.
 //
 
-#include "tensorflow/core/lib/core/status.h"
-#include "tensorflow/core/platform/mutex.h"
-#include "tensorflow/core/platform/mem.h"
-
-
 #include "cuda_api_profiler/cupti_manager.h"
 #include "cuda_api_profiler/get_env_var.h"
 
 #include <cuda.h>
 #include <cupti.h>
 
+#include "common_util.h"
+
 #include <absl/memory/memory.h>
 #include <memory>
+#include <mutex>
 
 namespace rlscope {
 
@@ -110,7 +108,7 @@ void CUPTIManager::FreeBufferCallback(uint8_t *_buffer) {
     allocation_pool_.FreeBuffer(reinterpret_cast<char*>(_buffer));
   }
   if (!use_arena) {
-    port::AlignedFree(_buffer);
+    rlscope::AlignedFree(_buffer);
   }
 }
 
@@ -151,7 +149,7 @@ void CUPTIManager::RecordActivityCallback(CUPTIClient* client, const CUpti_Activ
                                              validSize);
 }
 
-Status CUPTIManager::_EnablePCSampling() {
+MyStatus CUPTIManager::_EnablePCSampling() {
   VLOG(0) << "Enabling PC sampling";
 
   CUPTI_CALL(cuptiActivityEnable(CUPTI_ACTIVITY_KIND_PC_SAMPLING));
@@ -167,23 +165,23 @@ Status CUPTIManager::_EnablePCSampling() {
 
   CUPTI_CALL(cuptiActivityConfigurePCSampling(cuCtx, &configPC));
 
-  return Status::OK();
+  return MyStatus::OK();
 }
 
-Status CUPTIManager::_DisablePCSampling() {
+MyStatus CUPTIManager::_DisablePCSampling() {
   VLOG(1) << "CUPTIManager." << __func__ << ": disable PC sampling";
   CUPTI_CALL(cuptiActivityDisable(CUPTI_ACTIVITY_KIND_PC_SAMPLING));
-  return Status::OK();
+  return MyStatus::OK();
 }
 
-Status CUPTIManager::Flush() {
+MyStatus CUPTIManager::Flush() {
   VLOG(1) << "CUPTIManager." << __func__ << ": flush cupti activities";
   CUPTI_CALL(cuptiActivityFlushAll(0));
-  return Status::OK();
+  return MyStatus::OK();
 }
 
-Status CUPTIManager::EnableTrace(CUPTIClient *client) {
-  mutex_lock l(mu_);
+MyStatus CUPTIManager::EnableTrace(CUPTIClient *client) {
+  std::unique_lock<std::mutex> l(mu_);
   VLOG(0) << __func__;
   // TODO(pbar) Work out the minimal set to trace.
   // We can currently manage without driver/runtime tracing.
@@ -210,10 +208,10 @@ Status CUPTIManager::EnableTrace(CUPTIClient *client) {
   }
 
   client_ = client;
-  return Status::OK();
+  return MyStatus::OK();
 }
 
-Status CUPTIManager::DisableTrace() {
+MyStatus CUPTIManager::DisableTrace() {
   // We turn off all tracing regardless.
   if (is_yes("IML_PC_SAMPLING", false)) {
     _DisablePCSampling();
@@ -236,10 +234,10 @@ Status CUPTIManager::DisableTrace() {
   {
     // Don't acquire this lock until Flush returns, since Flush
     // will potentially cause callbacks into BufferCompleted.
-    mutex_lock l(mu_);
+    std::unique_lock<std::mutex> l(mu_);
     client_ = nullptr;
   }
-  return Status::OK();
+  return MyStatus::OK();
 }
 
 void CUPTIManager::InternalBufferRequested(uint8_t **buffer, size_t *size,
@@ -266,7 +264,7 @@ void CUPTIManager::InternalBufferRequested(uint8_t **buffer, size_t *size,
 
   } else {
     // VLOG(1) << "CUPTIManager." << __func__ << ": alloc " << kBufferSize << " bytes";
-    void *p = port::AlignedMalloc(kBufferSize, kBufferAlignment);
+    void *p = rlscope::AlignedMalloc(kBufferSize, kBufferAlignment);
     *size = kBufferSize;
     *buffer = reinterpret_cast<uint8_t *>(p);
   }
@@ -297,7 +295,7 @@ void CUPTIManager::InternalBufferCompleted(CUcontext ctx, uint32_t streamId,
 //                                                           });
 
 //  if (!is_yes("TF_CUPTI_EMPTY_TRACING_CALLBACKS", false) && client_ && validSize > 0) {
-//    mutex_lock l(mu_);  // Hold mu_ while using client_.
+//    std::unique_lock<std::mutex> l(mu_);  // Hold mu_ while using client_.
 //    if (is_yes("TF_CUPTI_ASYNC_RECORD_ACTIVITY", false)) {
 //      auto activity_buffer = absl::make_unique<ActivityBuffer>(ctx, streamId, buffer, size, validSize,
 //                                                               this, client_);
@@ -337,7 +335,7 @@ void CUPTIManager::InternalBufferCompleted(CUcontext ctx, uint32_t streamId,
   }
   bool use_arena = is_yes("TF_CUPTI_BUFFER_ARENA", false);
   if (!use_arena) {
-    port::AlignedFree(buffer);
+    rlscope::AlignedFree(buffer);
   }
 
 }

@@ -13,21 +13,97 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#ifndef TENSORFLOW_CORE_PLATFORM_DEFAULT_LOGGING_H_
-#define TENSORFLOW_CORE_PLATFORM_DEFAULT_LOGGING_H_
+#pragma once
+//#ifndef TENSORFLOW_CORE_PLATFORM_DEFAULT_LOGGING_H_
+//#define TENSORFLOW_CORE_PLATFORM_DEFAULT_LOGGING_H_
 
 // IWYU pragma: private, include "third_party/tensorflow/core/platform/logging.h"
 // IWYU pragma: friend third_party/tensorflow/core/platform/logging.h
 
 #include <limits>
 #include <sstream>
-#include "tensorflow/core/platform/macros.h"
-#include "tensorflow/core/platform/types.h"
 
 #include <backward.hpp>
 
 // TODO(mrry): Prevent this Windows.h #define from leaking out of our headers.
 #undef ERROR
+
+// Compiler attributes
+#if (defined(__GNUC__) || defined(__APPLE__)) && !defined(SWIG)
+// Compiler supports GCC-style attributes
+#define TF_ATTRIBUTE_NORETURN __attribute__((noreturn))
+#define TF_ATTRIBUTE_ALWAYS_INLINE __attribute__((always_inline))
+#define TF_ATTRIBUTE_NOINLINE __attribute__((noinline))
+#define TF_ATTRIBUTE_UNUSED __attribute__((unused))
+#define TF_ATTRIBUTE_COLD __attribute__((cold))
+#define TF_ATTRIBUTE_WEAK __attribute__((weak))
+#define TF_PACKED __attribute__((packed))
+#define TF_MUST_USE_RESULT __attribute__((warn_unused_result))
+#define TF_PRINTF_ATTRIBUTE(string_index, first_to_check) \
+  __attribute__((__format__(__printf__, string_index, first_to_check)))
+#define TF_SCANF_ATTRIBUTE(string_index, first_to_check) \
+  __attribute__((__format__(__scanf__, string_index, first_to_check)))
+#elif defined(_MSC_VER)
+// Non-GCC equivalents
+#define TF_ATTRIBUTE_NORETURN __declspec(noreturn)
+#define TF_ATTRIBUTE_ALWAYS_INLINE __forceinline
+#define TF_ATTRIBUTE_NOINLINE
+#define TF_ATTRIBUTE_UNUSED
+#define TF_ATTRIBUTE_COLD
+#define TF_ATTRIBUTE_WEAK
+#define TF_MUST_USE_RESULT
+#define TF_PACKED
+#define TF_PRINTF_ATTRIBUTE(string_index, first_to_check)
+#define TF_SCANF_ATTRIBUTE(string_index, first_to_check)
+#else
+// Non-GCC equivalents
+#define TF_ATTRIBUTE_NORETURN
+#define TF_ATTRIBUTE_ALWAYS_INLINE
+#define TF_ATTRIBUTE_NOINLINE
+#define TF_ATTRIBUTE_UNUSED
+#define TF_ATTRIBUTE_COLD
+#define TF_ATTRIBUTE_WEAK
+#define TF_MUST_USE_RESULT
+#define TF_PACKED
+#define TF_PRINTF_ATTRIBUTE(string_index, first_to_check)
+#define TF_SCANF_ATTRIBUTE(string_index, first_to_check)
+#endif
+
+#ifdef __has_builtin
+#define TF_HAS_BUILTIN(x) __has_builtin(x)
+#else
+#define TF_HAS_BUILTIN(x) 0
+#endif
+
+// Compilers can be told that a certain branch is not likely to be taken
+// (for instance, a CHECK failure), and use that information in static
+// analysis. Giving it this information can help it optimize for the
+// common case in the absence of better information (ie.
+// -fprofile-arcs).
+//
+// We need to disable this for GPU builds, though, since nvcc8 and older
+// don't recognize `__builtin_expect` as a builtin, and fail compilation.
+#if (!defined(__NVCC__)) && \
+    (TF_HAS_BUILTIN(__builtin_expect) || (defined(__GNUC__) && __GNUC__ >= 3))
+#define TF_PREDICT_FALSE(x) (__builtin_expect(x, 0))
+#define TF_PREDICT_TRUE(x) (__builtin_expect(!!(x), 1))
+#else
+#define TF_PREDICT_FALSE(x) (x)
+#define TF_PREDICT_TRUE(x) (x)
+#endif
+
+// A macro to disallow the copy constructor and operator= functions
+// This is usually placed in the private: declarations for a class.
+#define TF_DISALLOW_COPY_AND_ASSIGN(TypeName) \
+  TypeName(const TypeName&) = delete;         \
+  void operator=(const TypeName&) = delete
+
+// For propagating errors when calling a function.
+#define TF_RETURN_IF_ERROR(...)                          \
+  do {                                                   \
+    const ::rlscope::MyStatus _status = (__VA_ARGS__);  \
+    if (TF_PREDICT_FALSE(!_status.ok())) return _status; \
+  } while (0)
 
 namespace rlscope {
 const int INFO = 0;            // base_logging::INFO;
@@ -68,7 +144,7 @@ class LogMessage : public std::basic_ostringstream<char> {
   // Returns the minimum log level for VLOG statements.
   // E.g., if MinVLogLevel() is 2, then VLOG(2) statements will produce output,
   // but VLOG(3) will not. Defaults to 0.
-  static int64 MinVLogLevel();
+  static int64_t MinVLogLevel();
 
   // Returns whether VLOG level lvl is activated for the file fname.
   //
@@ -203,19 +279,19 @@ template <>
 void MakeCheckOpValueString(std::ostream* os, const std::nullptr_t& p);
 #endif
 
-// A container for a string pointer which can be evaluated to a bool -
+// A container for a std::string pointer which can be evaluated to a bool -
 // true iff the pointer is non-NULL.
 struct CheckOpString {
-  CheckOpString(string* str) : str_(str) {}
+  CheckOpString(std::string* str) : str_(str) {}
   // No destructor: if str_ is non-NULL, we're about to LOG(FATAL),
   // so there's no point in cleaning up str_.
   operator bool() const { return TF_PREDICT_FALSE(str_ != NULL); }
-  string* str_;
+  std::string* str_;
 };
 
-// Build the error message string. Specify no inlining for code size.
+// Build the error message std::string. Specify no inlining for code size.
 template <typename T1, typename T2>
-string* MakeCheckOpString(const T1& v1, const T2& v2,
+std::string* MakeCheckOpString(const T1& v1, const T2& v2,
                           const char* exprtext) TF_ATTRIBUTE_NOINLINE;
 
 // A helper class for formatting "expr (V1 vs. V2)" in a CHECK_XX
@@ -235,14 +311,14 @@ class CheckOpMessageBuilder {
   // For inserting the second variable (adds an intermediate " vs. ").
   std::ostream* ForVar2();
   // Get the result (inserts the closing ")").
-  string* NewString();
+  std::string* NewString();
 
  private:
   std::ostringstream* stream_;
 };
 
 template <typename T1, typename T2>
-string* MakeCheckOpString(const T1& v1, const T2& v2, const char* exprtext) {
+std::string* MakeCheckOpString(const T1& v1, const T2& v2, const char* exprtext) {
   CheckOpMessageBuilder comb(exprtext);
   MakeCheckOpValueString(comb.ForVar1(), v1);
   MakeCheckOpValueString(comb.ForVar2(), v2);
@@ -257,17 +333,17 @@ string* MakeCheckOpString(const T1& v1, const T2& v2, const char* exprtext) {
 // comparison errors while still being thorough with the comparison.
 #define TF_DEFINE_CHECK_OP_IMPL(name, op)                                 \
   template <typename T1, typename T2>                                     \
-  inline string* name##Impl(const T1& v1, const T2& v2,                   \
+  inline std::string* name##Impl(const T1& v1, const T2& v2,                   \
                             const char* exprtext) {                       \
     if (TF_PREDICT_TRUE(v1 op v2))                                        \
       return NULL;                                                        \
     else                                                                  \
       return ::rlscope::internal::MakeCheckOpString(v1, v2, exprtext); \
   }                                                                       \
-  inline string* name##Impl(int v1, int v2, const char* exprtext) {       \
+  inline std::string* name##Impl(int v1, int v2, const char* exprtext) {       \
     return name##Impl<int, int>(v1, v2, exprtext);                        \
   }                                                                       \
-  inline string* name##Impl(const size_t v1, const int v2,                \
+  inline std::string* name##Impl(const size_t v1, const int v2,                \
                             const char* exprtext) {                       \
     if (TF_PREDICT_FALSE(v2 < 0)) {                                       \
       return ::rlscope::internal::MakeCheckOpString(v1, v2, exprtext); \
@@ -275,7 +351,7 @@ string* MakeCheckOpString(const T1& v1, const T2& v2, const char* exprtext) {
     const size_t uval = (size_t)((unsigned)v1);                           \
     return name##Impl<size_t, size_t>(uval, v2, exprtext);                \
   }                                                                       \
-  inline string* name##Impl(const int v1, const size_t v2,                \
+  inline std::string* name##Impl(const int v1, const size_t v2,                \
                             const char* exprtext) {                       \
     if (TF_PREDICT_FALSE(v2 >= std::numeric_limits<int>::max())) {        \
       return ::rlscope::internal::MakeCheckOpString(v1, v2, exprtext); \
@@ -364,16 +440,16 @@ TF_DEFINE_CHECK_OP_IMPL(Check_GT, >)
 template <typename T>
 T&& CheckNotNull(const char* file, int line, const char* exprtext, T&& t) {
   if (t == nullptr) {
-    LogMessageFatal(file, line) << string(exprtext);
+    LogMessageFatal(file, line) << std::string(exprtext);
   }
   return std::forward<T>(t);
 }
 
-int64 MinLogLevelFromEnv();
+int64_t MinLogLevelFromEnv();
 
-int64 MinVLogLevelFromEnv();
+int64_t MinVLogLevelFromEnv();
 
 }  // namespace internal
 }  // namespace rlscope
 
-#endif  // TENSORFLOW_CORE_PLATFORM_DEFAULT_LOGGING_H_
+//#endif  // TENSORFLOW_CORE_PLATFORM_DEFAULT_LOGGING_H_

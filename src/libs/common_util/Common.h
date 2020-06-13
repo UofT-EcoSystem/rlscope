@@ -181,6 +181,77 @@ MyStatus RecursiveFindFiles(std::list<std::string>* paths, const std::string& ro
 
 char path_separator();
 
+// FROM TENSORFLOW
+// Aligned allocation/deallocation. `minimum_alignment` must be a power of 2
+// and a multiple of sizeof(void*).
+void* AlignedMalloc(size_t size, int minimum_alignment);
+void AlignedFree(void* aligned_memory);
+
+
+template <typename T1>
+std::string StrCat(const T1& t1) {
+  std::stringstream ss;
+  ss << t1;
+  return ss.str();
+}
+template <typename T1, typename T2>
+std::string StrCat(const T1& t1, const T2& t2) {
+  std::stringstream ss;
+  ss << t1;
+  ss << t2;
+  return ss.str();
+}
+template <typename T1, typename T2, typename T3>
+std::string StrCat(const T1& t1, const T2& t2, const T3& t3) {
+  std::stringstream ss;
+  ss << t1;
+  ss << t2;
+  ss << t3;
+  return ss.str();
+}
+template <typename T1, typename T2, typename T3, typename T4>
+std::string StrCat(const T1& t1, const T2& t2, const T3& t3, const T4& t4) {
+  std::stringstream ss;
+  ss << t1;
+  ss << t2;
+  ss << t3;
+  ss << t4;
+  return ss.str();
+}
+template <typename T1, typename T2, typename T3, typename T4, typename T5>
+std::string StrCat(const T1& t1, const T2& t2, const T3& t3, const T4& t4, const T5& t5) {
+  std::stringstream ss;
+  ss << t1;
+  ss << t2;
+  ss << t3;
+  ss << t4;
+  ss << t5;
+  return ss.str();
+}
+template <typename T1, typename T2, typename T3, typename T4, typename T5, typename T6>
+std::string StrCat(const T1& t1, const T2& t2, const T3& t3, const T4& t4, const T5& t5, const T6& t6) {
+  std::stringstream ss;
+  ss << t1;
+  ss << t2;
+  ss << t3;
+  ss << t4;
+  ss << t5;
+  ss << t6;
+  return ss.str();
+}
+template <typename T1, typename T2, typename T3, typename T4, typename T5, typename T6, typename T7>
+std::string StrCat(const T1& t1, const T2& t2, const T3& t3, const T4& t4, const T5& t5, const T6& t6, const T7& t7) {
+  std::stringstream ss;
+  ss << t1;
+  ss << t2;
+  ss << t3;
+  ss << t4;
+  ss << t5;
+  ss << t6;
+  ss << t7;
+  return ss.str();
+}
+
 } // namespace rlscope
 
 #endif //CUPTI_SAMPLES_COMMON_H

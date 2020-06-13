@@ -4,7 +4,8 @@
 
 #include "CartPoleEnv.h"
 
-#include "tensorflow/core/platform/logging.h"
+//#include "tensorflow/core/platform/logging.h"
+#include "common_util.h"
 
 #include <iostream>
 #include <random>

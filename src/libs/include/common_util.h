@@ -15,5 +15,7 @@
 #include "common_util/generic_logging.h"
 #include "common_util/usec_timer.h"
 #include "common_util/json.h"
+#include "common_util/notify.h"
+#include "common_util/logging.h"
 
 #endif //CUPTI_SAMPLES_COMMON_UNTIL_H

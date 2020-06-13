@@ -2,8 +2,6 @@
 // Created by jagle on 11/13/2018.
 //
 
-//#include "tensorflow/core/platform/logging.h"
-
 #include "common/util.h"
 
 #include <sys/stat.h>

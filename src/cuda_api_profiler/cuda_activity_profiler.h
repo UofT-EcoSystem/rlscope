@@ -14,7 +14,7 @@
 #include <vector>
 #include <memory>
 
-#include "tensorflow/core/platform/types.h"
+#include <mutex>
 
 //#include "iml_profiler/protobuf/iml_prof.pb.h"
 #include "iml_prof.pb.h"
@@ -29,9 +29,9 @@ struct KernelRecord {
   KernelRecord(
       uint64_t start_timestamp_,
       uint64_t end_timestamp_,
-      uint32 device_id_,
-      uint32 stream_id_
-//      uint32 correlation_id_,
+      uint32_t device_id_,
+      uint32_t stream_id_
+//      uint32_t correlation_id_,
   ) :
       start_timestamp(start_timestamp_)
       , end_timestamp(end_timestamp_)
@@ -42,21 +42,21 @@ struct KernelRecord {
   }
   uint64_t start_timestamp;
   uint64_t end_timestamp;
-  uint32 device_id;
-  uint32 stream_id;
-//  uint32 correlation_id;
+  uint32_t device_id;
+  uint32_t stream_id;
+//  uint32_t correlation_id;
 };
 // Internal struct to record memcpy operations.
 struct MemcpyRecord {
   MemcpyRecord(
       uint64_t start_timestamp_,
       uint64_t end_timestamp_,
-      uint32 device_id_,
-      uint32 stream_id_,
-//      uint32 correlation_id_,
-      uint8 copyKind_,
-      uint8 srcKind_,
-      uint8 dstKind_,
+      uint32_t device_id_,
+      uint32_t stream_id_,
+//      uint32_t correlation_id_,
+      uint8_t copyKind_,
+      uint8_t srcKind_,
+      uint8_t dstKind_,
       uint64_t bytes_) :
       start_timestamp(start_timestamp_)
       , end_timestamp(end_timestamp_)
@@ -71,18 +71,18 @@ struct MemcpyRecord {
   }
   uint64_t start_timestamp;
   uint64_t end_timestamp;
-  uint32 device_id;
-  uint32 stream_id;
-//  uint32 correlation_id;
-  uint8 copyKind;
-  uint8 srcKind;
-  uint8 dstKind;
+  uint32_t device_id;
+  uint32_t stream_id;
+//  uint32_t correlation_id;
+  uint8_t copyKind;
+  uint8_t srcKind;
+  uint8_t dstKind;
   uint64_t bytes;
 };
 
 static constexpr size_t kMaxRecords = 1024 * 1024;
 struct CUDAActivityProfilerState {
-  // GUARDED_BY(_mu)
+  //
   std::string _directory;
   std::string _process_name;
   std::string _machine_name;
@@ -90,16 +90,16 @@ struct CUDAActivityProfilerState {
   int _next_trace_id;
   int _trace_id;
 
-  // GUARDED_BY(_trace_mu)
-  std::map<uint32, string> correlations_;
+  //
+  std::map<uint32_t, std::string> correlations_;
   std::vector<KernelRecord> kernel_records_;
   std::vector<MemcpyRecord> memcpy_records_;
 
 //  std::vector<std::unique_ptr<ActivityBuffer>> activity_buffers_;
 
-  // GUARDED_BY(_mu)
-  int64 start_walltime_us_;
-  int64 end_walltime_us_;
+  //
+  int64_t start_walltime_us_;
+  int64_t end_walltime_us_;
   uint64_t start_timestamp_;
   uint64_t end_timestamp_;
 
@@ -131,16 +131,16 @@ public:
   ThreadPoolWrapper _pool;
   // - Protects start/end-tracing timestamps
   // - Monitor lock used to serialize all the DeviceTracerImpl method calls (Start/Stop/Collect).
-  mutex _mu;
+  std::mutex _mu;
   // - Protects kernel_records, memcpy_records, correlations
   // - Grabbed during:
   //   - Activity callbacks
   //   - When collecting records
-  mutex _trace_mu;
-//  CUDAActivityProfilerState _state GUARDED_BY(_mu);
+  std::mutex _trace_mu;
+//  CUDAActivityProfilerState _state;
   CUDAActivityProfilerState _state;
-//  std::vector<std::unique_ptr<ActivityBuffer>> activity_buffers_ GUARDED_BY(_mu);
-  bool _enabled GUARDED_BY(_mu);
+//  std::vector<std::unique_ptr<ActivityBuffer>> activity_buffers_;
+  bool _enabled;
   CUPTIManager* cupti_manager_;
   CUDAActivityProfiler(CUPTIManager* cupti_manager);
 
@@ -153,47 +153,47 @@ public:
   void _MaybeDump();
   void AwaitDump();
 
-  Status Start();
-  Status Stop();
+  MyStatus Start();
+  MyStatus Stop();
 
   void ActivityCallback(const CUpti_Activity &activity) override;
 //  void ActivityBufferCallback(std::unique_ptr<ActivityBuffer> activity_buffer) override;
 };
 
-class ActivityBuffer {
-public:
-//  using RecordActivityCallback = std::function<void(const CUpti_Activity &activity)>;
-  ActivityBuffer(CUcontext ctx, uint32_t streamId, uint8_t *buffer, size_t size, size_t validSize,
-                 CUPTIManager* manager, CUPTIClient* client) :
-//      RecordActivityCallback record_activity_callback) :
-      _ctx(ctx)
-      , _streamId(streamId)
-      , _buffer(buffer)
-      , _size(size)
-      , _validSize(validSize)
-      , _manager(manager)
-      , _client(client)
-//      , _record_activity_callback(record_activity_callback)
-  {
-//    cupti_wrapper_.reset(new perftools::gputools::profiler::CuptiWrapper());
-  }
-  CUcontext _ctx;
-  uint32_t _streamId;
-  uint8_t *_buffer;
-  size_t _size;
-  size_t _validSize;
-  CUPTIManager* _manager;
-  CUPTIClient* _client;
-//  RecordActivityCallback _record_activity_callback;
-//  std::unique_ptr<perftools::gputools::profiler::CuptiWrapper> cupti_wrapper_;
-
-  void RecordActivitiesFromBuffer();
-
-  void FreeBuffer();
-
-  ~ActivityBuffer();
-
-};
+//class ActivityBuffer {
+//public:
+////  using RecordActivityCallback = std::function<void(const CUpti_Activity &activity)>;
+//  ActivityBuffer(CUcontext ctx, uint32_t streamId, uint8_t *buffer, size_t size, size_t validSize,
+//                 CUPTIManager* manager, CUPTIClient* client) :
+////      RecordActivityCallback record_activity_callback) :
+//      _ctx(ctx)
+//      , _streamId(streamId)
+//      , _buffer(buffer)
+//      , _size(size)
+//      , _validSize(validSize)
+//      , _manager(manager)
+//      , _client(client)
+////      , _record_activity_callback(record_activity_callback)
+//  {
+////    cupti_wrapper_.reset(new perftools::gputools::profiler::CuptiWrapper());
+//  }
+//  CUcontext _ctx;
+//  uint32_t _streamId;
+//  uint8_t *_buffer;
+//  size_t _size;
+//  size_t _validSize;
+//  CUPTIManager* _manager;
+//  CUPTIClient* _client;
+////  RecordActivityCallback _record_activity_callback;
+////  std::unique_ptr<perftools::gputools::profiler::CuptiWrapper> cupti_wrapper_;
+//
+//  void RecordActivitiesFromBuffer();
+//
+//  void FreeBuffer();
+//
+//  ~ActivityBuffer();
+//
+//};
 
 //class TracedStepData {
 //public:
@@ -215,19 +215,19 @@ public:
 //    }
 //
 //  };
-//  std::unordered_map<int64, StepData> step_data;
+//  std::unordered_map<int64_t, StepData> step_data;
 //  std::unique_ptr<TraceDataProto> processed_step_data;
 //
 //  TracedStepData();
-//  StepStats* GetNewStepStats(int64 tracer_step);
+//  StepStats* GetNewStepStats(int64_t tracer_step);
 //  void AddStep(
-//      int64 tracer_step,
+//      int64_t tracer_step,
 //      std::unique_ptr<DeviceTracer> tracer,
 //      std::unique_ptr<StepStatsCollector> collector);
-//  Status ProcessSteps();
-//  Status StopTracer(int64 step);
-//  Status ProcessStep(int64 step);
-//  std::vector<int64> Steps() const;
+//  MyStatus ProcessSteps();
+//  MyStatus StopTracer(int64_t step);
+//  MyStatus ProcessStep(int64_t step);
+//  std::vector<int64_t> Steps() const;
 //  void Clear();
 //  std::unique_ptr<TraceDataProto> GetTraceData();
 //};
@@ -271,9 +271,9 @@ public:
 //
 //  thread::ThreadPool async_dump_pool_;
 //  std::unique_ptr<Notification> all_done_;
-//  mutex mu_;
-//  int dumps_scheduled_ GUARDED_BY(mu_);
-//  int waiters_ GUARDED_BY(mu_);
+//  std::mutex mu_;
+//  int dumps_scheduled_;
+//  int waiters_;
 //};
 //
 //extern std::unique_ptr<AsyncTraceDumper> _async_trace_dumper;

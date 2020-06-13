@@ -10,7 +10,8 @@
 
 #include "cuda_api_profiler/event_handler.h"
 #include "cuda_api_profiler/thread_pool_wrapper.h"
-#include "tensorflow/core/platform/notification.h"
+
+#include "common_util.h"
 
 #include <map>
 #include <list>
@@ -18,11 +19,12 @@
 #include <tuple>
 #include <memory>
 #include <thread>
+#include <mutex>
 
 namespace rlscope {
 
 struct OverheadEvent {
-  int64 num_events;
+  int64_t num_events;
   OverheadEvent() : num_events(0) {
   }
 };
@@ -66,7 +68,7 @@ struct OpStackState {
 class OpStack {
 public:
   ThreadPoolWrapper _pool;
-  mutex _mu;
+  std::mutex _mu;
   OpStackState _state;
 
   OpStack();
@@ -83,11 +85,11 @@ public:
   void PushOperation(const std::string& operation);
   void RecordOverheadEvent(
       const std::string& overhead_type,
-      int64 num_events);
+      int64_t num_events);
   void RecordOverheadEventForOperation(
       const std::string& overhead_type,
       const std::string& operation,
-      int64 num_events);
+      int64_t num_events);
   void PopOperation();
 
 };

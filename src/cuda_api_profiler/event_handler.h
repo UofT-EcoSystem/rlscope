@@ -8,8 +8,6 @@
 #include <list>
 #include <functional>
 
-#include "tensorflow/core/platform/types.h"
-
 namespace rlscope {
 
 struct RegisteredFunc {
@@ -18,7 +16,7 @@ struct RegisteredFunc {
 
   FuncId func_id;
   Func func;
-  uint64 last_run_usec;
+  uint64_t last_run_usec;
   float every_sec;
   RegisteredFunc(FuncId func_id, Func func, float every_sec) :
       func_id(func_id)
@@ -27,9 +25,9 @@ struct RegisteredFunc {
       , every_sec(every_sec)
   {
   }
-  bool ShouldRun(uint64 now_usec);
-  void Run(uint64 now_usec);
-  uint64_t TimeUsecUntilNextRun(uint64 now_usec) const;
+  bool ShouldRun(uint64_t now_usec);
+  void Run(uint64_t now_usec);
+  uint64_t TimeUsecUntilNextRun(uint64_t now_usec) const;
 };
 
 class EventHandler {
@@ -40,7 +38,7 @@ public:
   }
   RegisteredFunc::FuncId RegisterFunc(RegisteredFunc::Func func, float every_sec);
   void UnregisterFunc(RegisteredFunc::FuncId func_id);
-  void RunFuncs(uint64 now_usec);
+  void RunFuncs(uint64_t now_usec);
   void EventLoop(std::function<bool()> should_stop);
   std::list<RegisteredFunc> _funcs;
   RegisteredFunc::FuncId _next_func_id;

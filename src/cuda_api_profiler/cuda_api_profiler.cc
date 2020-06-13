@@ -3,8 +3,9 @@
 //
 
 
-#include "tensorflow/core/platform/logging.h"
-#include "tensorflow/core/platform/env.h"
+#include "common_util.h"
+
+#include <mutex>
 
 #include <map>
 
@@ -152,7 +153,7 @@ std::map<CUpti_CallbackId, std::string> CUDAAPIProfiler::DriverCallbackIDToName(
 }
 
 void CUDAAPIProfiler::Print(std::ostream& out, int indent) {
-    mutex_lock l(_mu);
+    std::unique_lock<std::mutex> l(_mu);
     PrintIndent(out, indent);
     out << "CUDAAPIProfiler: size = " << _state._api_stats.size();
     for (auto const& pair : _state._api_stats) {
@@ -212,7 +213,7 @@ void CUDAAPIProfiler::ApiCallback(
     // This code will capture as much "profile-book-keeping overhead" added by this code as possible.
     // If we want to subtract from CUDA API events, we need those CUDA API events to capture the total overhead.
     {
-      mutex_lock l(_mu);
+      std::unique_lock<std::mutex> l(_mu);
       if (cb_site == CUPTI_API_EXIT) {
         // After cudaLaunchKernel
         auto const& active_operation = _op_stack.ActiveOperation();
@@ -305,7 +306,7 @@ std::string CUDAAPIProfilerState::DumpPath(int trace_id) {
 }
 
 void CUDAAPIProfiler::SetMetadata(const char* directory, const char* process_name, const char* machine_name, const char* phase_name) {
-  mutex_lock lock(_mu);
+  std::unique_lock<std::mutex> lock(_mu);
   if (_state.CanDump()) {
     _AsyncDump();
   }
@@ -321,7 +322,7 @@ void CUDAAPIProfiler::SetMetadata(const char* directory, const char* process_nam
 }
 
 //void CUDAAPIProfiler::SetProcessName(const std::string& process_name) {
-//  mutex_lock lock(_mu);
+//  std::unique_lock<std::mutex> lock(_mu);
 //  if (_state.CanDump()) {
 //    _AsyncDump();
 //  }
@@ -329,7 +330,7 @@ void CUDAAPIProfiler::SetMetadata(const char* directory, const char* process_nam
 //}
 //
 //void CUDAAPIProfiler::SetPhaseName(const std::string& phase_name) {
-//  mutex_lock lock(_mu);
+//  std::unique_lock<std::mutex> lock(_mu);
 //  if (_state.CanDump()) {
 //    _AsyncDump();
 //  }
@@ -337,7 +338,7 @@ void CUDAAPIProfiler::SetMetadata(const char* directory, const char* process_nam
 //}
 //
 //void CUDAAPIProfiler::SetMachineName(const std::string& machine_name) {
-//  mutex_lock lock(_mu);
+//  std::unique_lock<std::mutex> lock(_mu);
 //  if (_state.CanDump()) {
 //    _AsyncDump();
 //  }
@@ -354,7 +355,7 @@ void CUDAAPIProfiler::_MaybeDump() {
 }
 
 void CUDAAPIProfiler::AsyncDump() {
-  mutex_lock lock(_mu);
+  std::unique_lock<std::mutex> lock(_mu);
   _AsyncDump();
 }
 

@@ -7,7 +7,7 @@
 
 #include <boost/process.hpp>
 
-#include "tensorflow/core/platform/device_tracer.h"
+#include "cuda_api_profiler/device_tracer.h"
 
 #include "cuda_api_profiler/cuda_ld_preload.h"
 

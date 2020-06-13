@@ -7,7 +7,8 @@
 
 
 #include "tensorflow/c/c_test_util.h"
-#include "tensorflow/core/platform/logging.h"
+//#include "tensorflow/core/platform/logging.h"
+#include "common_util.h"
 
 #include "tensorflow/c/c_api.h"
 //#include "tensorflow/c/c_api_internal.h"

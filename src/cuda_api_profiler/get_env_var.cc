@@ -14,7 +14,7 @@
 
 #include <boost/optional.hpp>
 
-#include "tensorflow/core/platform/logging.h"
+#include "common_util.h"
 
 #include "get_env_var.h"
 
@@ -82,17 +82,6 @@ std::vector<std::string> get_IML_GPU_HW_METRICS(boost::optional<std::string> use
 
 float get_TF_CUDA_API_PRINT_EVERY_SEC(boost::optional<float> user_value) {
   return ParseEnvOrDefault("float", "TF_CUDA_API_PRINT_EVERY_SEC", user_value, TF_CUDA_API_PRINT_EVERY_SEC_DEFAULT);
-}
-
-float ParseEnvFloatOrDefault(const char* env_name, float user_value, float dflt) {
-  if (user_value != 0) {
-    return user_value;
-  }
-  const char* env_val = getenv(env_name);
-  if (env_val == nullptr) {
-    return dflt;
-  }
-  return ParseFloat(env_val, strlen(env_val));
 }
 
 bool env_is_on(const char* var, bool dflt, bool debug) {

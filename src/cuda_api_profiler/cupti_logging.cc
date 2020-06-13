@@ -4,7 +4,6 @@
 
 #include "cuda_api_profiler/cupti_logging.h"
 
-//#include "tensorflow/core/platform/env.h"
 #include "cuda_api_profiler/usec_timer.h"
 #include "cuda_api_profiler/generic_logging.h"
 
@@ -1221,7 +1220,7 @@ getComputeApiKindString(CUpti_ActivityComputeApiKind kind)
   return "<unknown>";
 }
 
-// Maps a MemcpyKind enum to a const string.
+// Maps a MemcpyKind enum to a const std::string.
 const char *getMemcpyKindString(CUpti_ActivityMemcpyKind kind) {
   switch (kind) {
     case CUPTI_ACTIVITY_MEMCPY_KIND_HTOD:
@@ -1250,7 +1249,7 @@ const char *getMemcpyKindString(CUpti_ActivityMemcpyKind kind) {
   return "<unknown>";
 }
 
-// Maps a MemoryKind enum to a const string.
+// Maps a MemoryKind enum to a const std::string.
 const char *getMemoryKindString(CUpti_ActivityMemoryKind kind) {
   switch (kind) {
     case CUPTI_ACTIVITY_MEMORY_KIND_UNKNOWN:
@@ -1269,7 +1268,7 @@ const char *getMemoryKindString(CUpti_ActivityMemoryKind kind) {
   return "<unknown>";
 }
 
-// Maps an OverheadKind enum to a const string.
+// Maps an OverheadKind enum to a const std::string.
 const char *getActivityOverheadKindString(CUpti_ActivityOverheadKind kind) {
   switch (kind) {
     case CUPTI_ACTIVITY_OVERHEAD_DRIVER_COMPILER:

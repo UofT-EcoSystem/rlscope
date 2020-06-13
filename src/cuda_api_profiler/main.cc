@@ -12,13 +12,8 @@
 #include <fstream>
 #include <memory>
 
-#include "tensorflow/core/platform/logging.h"
-#include "tensorflow/core/platform/device_tracer.h"
-#include "tensorflow/core/lib/core/status.h"
-//#include "tensorflow/core/lib/core/error_codes.pb.h"
-//#include "error_codes.pb.h"
 #include "common_util.h"
-#include "tensorflow/core/lib/core/errors.h"
+#include "cuda_api_profiler/device_tracer.h"
 
 #ifdef WITH_CUDA_LD_PRELOAD
 #include "cuda_api_profiler/cuda_ld_preload.h"
@@ -63,7 +58,7 @@ namespace rlscope {
 //    }
 //} while (0);
 
-// Status initTrace()
+// MyStatus initTrace()
 // {
 //   size_t attrValue = 0, attrValueSize = sizeof(size_t);
 //   // Device activity record is created when CUDA initializes, so we
@@ -130,7 +125,7 @@ using RetCode = int;
 RetCode RLSCOPE_EXPORT setup() {
   // Initialize global state.
   VLOG(1) << __func__;
-  return rlscope::Status::OK().code();
+  return rlscope::MyStatus::OK().code();
 }
 
 RetCode RLSCOPE_EXPORT print() {
@@ -155,7 +150,7 @@ RetCode RLSCOPE_EXPORT enable_tracing() {
   // Enable call-backs.
   VLOG(1) << __func__;
   auto status = globals.device_tracer->Start();
-//  if (status.code() != Status::OK()) {
+//  if (status.code() != MyStatus::OK()) {
 //    VLOG(0) << "iml-prof C++ API " << __func__ << " failed with: " << status;
 //  }
   MAYBE_LOG_ERROR(LOG(INFO), __func__, status);
@@ -169,7 +164,7 @@ RetCode RLSCOPE_EXPORT is_enabled(int* retval) {
   } else {
     *retval = 0;
   }
-  return rlscope::Status::OK().code();
+  return rlscope::MyStatus::OK().code();
 }
 
 RetCode RLSCOPE_EXPORT disable_tracing() {
@@ -183,7 +178,7 @@ RetCode RLSCOPE_EXPORT disable_tracing() {
 RetCode RLSCOPE_EXPORT async_dump() {
   // Dump traces (asynchronously).
   VLOG(1) << __func__;
-  Status status;
+  MyStatus status;
   status = globals.device_tracer->AsyncDump();
   MAYBE_LOG_ERROR(LOG(INFO), __func__, status);
   return status.code();
@@ -192,7 +187,7 @@ RetCode RLSCOPE_EXPORT async_dump() {
 RetCode RLSCOPE_EXPORT await_dump() {
   // Wait for async dump traces to complete.
   VLOG(1) << __func__;
-  Status status;
+  MyStatus status;
   status = globals.device_tracer->AsyncDump();
   MAYBE_RETURN(status);
   status = globals.device_tracer->AwaitDump();
@@ -204,12 +199,12 @@ RetCode RLSCOPE_EXPORT await_dump() {
 
 RetCode RLSCOPE_EXPORT record_event(
     const char* category,
-    int64 start_us,
-    int64 duration_us,
+    int64_t start_us,
+    int64_t duration_us,
     const char* name) {
   // Wait for async dump traces to complete.
   VLOG(1) << __func__;
-  Status status;
+  MyStatus status;
   status = globals.device_tracer->RecordEvent(
       category,
       start_us,
@@ -223,7 +218,7 @@ RetCode RLSCOPE_EXPORT record_overhead_event(
     const char* overhead_type,
     int num_events) {
   VLOG(1) << __func__;
-  Status status;
+  MyStatus status;
   status = globals.device_tracer->RecordOverheadEvent(
       overhead_type,
       num_events);
@@ -236,7 +231,7 @@ RetCode RLSCOPE_EXPORT record_overhead_event_for_operation(
     const char* operation,
     int num_events) {
   VLOG(1) << __func__;
-  Status status;
+  MyStatus status;
   status = globals.device_tracer->RecordOverheadEventForOperation(
       overhead_type,
       operation,
@@ -248,7 +243,7 @@ RetCode RLSCOPE_EXPORT record_overhead_event_for_operation(
 RetCode RLSCOPE_EXPORT push_operation(
     const char* operation) {
   VLOG(1) << __func__;
-  Status status;
+  MyStatus status;
   status = globals.device_tracer->PushOperation(
       operation);
   MAYBE_LOG_ERROR(LOG(INFO), __func__, status);
@@ -257,7 +252,7 @@ RetCode RLSCOPE_EXPORT push_operation(
 
 RetCode RLSCOPE_EXPORT start_pass() {
   VLOG(1) << __func__;
-  Status status;
+  MyStatus status;
   status = globals.device_tracer->StartPass();
   MAYBE_LOG_ERROR(LOG(INFO), __func__, status);
   return status.code();
@@ -265,7 +260,7 @@ RetCode RLSCOPE_EXPORT start_pass() {
 
 RetCode RLSCOPE_EXPORT end_pass() {
   VLOG(1) << __func__;
-  Status status;
+  MyStatus status;
   status = globals.device_tracer->EndPass();
   MAYBE_LOG_ERROR(LOG(INFO), __func__, status);
   return status.code();
@@ -273,7 +268,7 @@ RetCode RLSCOPE_EXPORT end_pass() {
 
 RetCode RLSCOPE_EXPORT pop_operation() {
   VLOG(1) << __func__;
-  Status status;
+  MyStatus status;
   status = globals.device_tracer->PopOperation();
   MAYBE_LOG_ERROR(LOG(INFO), __func__, status);
   return status.code();

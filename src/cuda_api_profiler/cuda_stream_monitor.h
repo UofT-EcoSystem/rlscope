@@ -13,13 +13,12 @@
 #include <thread>
 #include <memory>
 #include <functional>
+#include <mutex>
 
 #include "cuda_api_profiler/event_handler.h"
 #include "cuda_api_profiler/cupti_api_wrapper.h"
 
-#include "tensorflow/core/platform/mutex.h"
-#include "tensorflow/core/platform/notification.h"
-#include "tensorflow/core/platform/types.h"
+#include "common_util.h"
 
 namespace rlscope {
 
@@ -45,8 +44,8 @@ struct PollStreamSummary {
   {
   }
   cudaStream_t stream;
-  uint64 num_samples_is_active;
-  uint64 num_samples_is_inactive;
+  uint64_t num_samples_is_active;
+  uint64_t num_samples_is_inactive;
 
   std::ostream& Print(std::ostream& out, int indent);
 
@@ -56,10 +55,10 @@ struct PollStreamSummary {
 class CudaStreamMonitor {
 public:
   using PollStreamsCallback = std::function<void(const std::vector<PollStreamResult>&)>;
-  std::list<cudaStream_t> _active_streams GUARDED_BY(mu_);
+  std::list<cudaStream_t> _active_streams;
   std::vector<PollStreamsCallback> _callbacks;
   std::vector<PollStreamSummary> _poll_stream_summaries;
-  mutex mu_;
+  std::mutex mu_;
   EventHandler _event_handler;
   Notification _should_stop;
   std::unique_ptr<std::thread> _polling_thread;

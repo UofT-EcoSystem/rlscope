@@ -34,7 +34,7 @@ nlohmann::json PollingUtil::Compute() const {
   // first_start_us = all_gpu_kernels[0].start_us
   // n_bins = Math.ceiling( ( first_start_us - last_end_us ) / polling_interval_us  )
   // // We can use a bit-vector here… std::vector<bool>
-  // bins = std::vector<uint8>()
+  // bins = std::vector<uint8_t>()
   // bins.resize(n_bins)
   //
   // i = 0

@@ -239,21 +239,6 @@ include_directories(
 )
 
 set(SOURCES)
-# $ find tensorflow -type d
-set(TF_SRC_DIRS
-        tensorflow
-        # tensorflow/c
-        tensorflow/core
-        tensorflow/core/lib
-        tensorflow/core/lib/hash
-        tensorflow/core/lib/core
-        tensorflow/core/lib/io
-        tensorflow/core/lib/strings
-        tensorflow/core/lib/gtl
-        tensorflow/core/platform
-        tensorflow/core/platform/posix
-        tensorflow/core/platform/default
-        )
 
 set(ANALYSIS_SRC_DIRS
         ./src/analysis
@@ -280,7 +265,6 @@ set(SRC_DIRS
         # ./src/model
         # ./src/dqn
         # ./src/simulator
-        ${TF_SRC_DIRS}
         )
 
 #
@@ -316,7 +300,6 @@ set(ANALYSIS_SOURCES
         ./src/cuda_api_profiler/generic_logging.h
         ${ANALYSIS_SOURCES})
 gather_sources(SOURCES SRC_DIRS)
-gather_sources(TF_SOURCES TF_SRC_DIRS)
 
 set(CUDA_PROF_DIRS
         ./src/cuda_api_profiler
@@ -330,7 +313,6 @@ gather_sources(CUDA_PROF_SRCS CUDA_PROF_DIRS)
 
 if (DEBUG_CMAKE_VERBOSE)
     message("> CUDA_PROF_SRCS = ${CUDA_PROF_SRCS}")
-    message("> TF_SOURCES = ${TF_SOURCES}")
     message("> ANALYSIS_SOURCES = ${ANALYSIS_SOURCES}")
     message("> COMMON_SOURCES = ${COMMON_SOURCES}")
     #message("> TEST_ANALYSIS_SOURCES = ${TEST_ANALYSIS_SOURCES}")
@@ -358,7 +340,6 @@ protobuf_generate_cpp(IML_PROTO_SRCS IML_PROTO_HDRS
         iml_profiler/protobuf/pyprof.proto
         )
 set(SAMPLE_CUDA_API_SOURCES
-        ${TF_SOURCES}
 
         # Add SIGSEGV handler that prints out stack-trace.
         # NOTE: For some reason this doesn't always work and gdb is required to debug...
@@ -386,7 +367,6 @@ if (WITH_CXX_ANALYSIS)
             ./src/drivers/cpp_dump_proto.cpp
             ${ANALYSIS_SOURCES}
             ${COMMON_SOURCES}
-            #            ${TF_SOURCES}
             ${BACKWARD_ENABLE}
             ${IML_PROTO_SRCS} ${IML_PROTO_HDRS} src/analysis/lru_cache.cc src/analysis/sample_periods.cc src/analysis/sample_periods.h)
     list(FILTER RLS_ANALYZE_SRCS EXCLUDE REGEX "/c_test_util.cc")
@@ -398,7 +378,6 @@ if (WITH_CXX_ANALYSIS)
             ${COMMON_SOURCES}
             ${ANALYSIS_SOURCES}
             ${TEST_ANALYSIS_SOURCES}
-            #            ${TF_SOURCES}
             ${BACKWARD_ENABLE}
             ${IML_PROTO_SRCS} ${IML_PROTO_HDRS})
     list(FILTER TEST_ANALYSIS_SOURCES EXCLUDE REGEX "/c_test_util.cc")

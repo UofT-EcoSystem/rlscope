@@ -14,14 +14,13 @@
 #include "cuda_api_profiler/event_handler.h"
 #include "cuda_api_profiler/thread_pool_wrapper.h"
 
-#include "tensorflow/core/platform/mutex.h"
-
 #include <map>
 #include <list>
 #include <string>
 #include <tuple>
 #include <memory>
 #include <thread>
+#include <mutex>
 
 namespace rlscope {
 
@@ -31,8 +30,8 @@ struct EventRecord;
 struct EventProfilerState {
   using Category = std::string;
   using EventName = std::string;
-  using TimeUsec = int64;
-  using TidType = int64;
+  using TimeUsec = int64_t;
+  using TidType = int64_t;
 
   std::string _directory;
   std::string _process_name;
@@ -84,7 +83,7 @@ struct EventRecord {
 class EventProfiler {
 public:
   ThreadPoolWrapper _pool;
-  mutex _mu;
+  std::mutex _mu;
   EventProfilerState _state;
 
   EventProfiler();

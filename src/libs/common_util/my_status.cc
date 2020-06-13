@@ -13,12 +13,18 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-//#include "tensorflow/core/lib/core/status.h"
 #include "my_status.h"
 #include <stdio.h>
 #include <assert.h>
 
 namespace rlscope {
+
+MyStatus MyStatus::FromMyStatus(const MyStatus& my_status) {
+  if (my_status.code() == MyStatus::OK().code()) {
+    return OK();
+  }
+  return MyStatus(my_status.code(), my_status.error_message());
+}
 
 MyStatus::MyStatus(rlscope::error::Code code, const std::string& msg) {
   assert(code != rlscope::error::OK);
@@ -42,7 +48,7 @@ void MyStatus::SlowCopyFrom(const State* src) {
 }
 
 const std::string& MyStatus::empty_string() {
-//  static std::string* empty = new string;
+//  static std::string* empty = new std::string;
 //  return *empty;
   static std::string empty = std::string("");
   return empty;
@@ -131,7 +137,7 @@ std::ostream& operator<<(std::ostream& os, const MyStatus& x) {
 //  r += msg;
 //  r += " status: ";
 //  r += v.ToString();
-//  // Leaks string but this is only to be used in a fatal error message
+//  // Leaks std::string but this is only to be used in a fatal error message
 //  return new std::string(r);
 //}
 

@@ -13,8 +13,8 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "tensorflow/core/platform/device_tracer.h"
-#include "tensorflow/core/platform/logging.h"
+#include "cuda_api_profiler/device_tracer.h"
+#include "common_util.h"
 
 #include "cuda_api_profiler/op_stack.h"
 #include "cuda_api_profiler/cuda_api_profiler.h"
@@ -42,7 +42,7 @@ limitations under the License.
 
 #include <atomic>
 #include <map>
-//#include <mutex>
+#include <mutex>
 #include <vector>
 
 #include <boost/optional.hpp>
@@ -70,10 +70,7 @@ limitations under the License.
 #include <list>
 #include <cassert>
 
-#include "tensorflow/core/platform/env.h"
-#include "tensorflow/core/platform/mem.h"
-#include "tensorflow/core/platform/mutex.h"
-#include "tensorflow/core/platform/tracing.h"
+#include "cuda_api_profiler/tracing.h"
 #include "cuda_api_profiler/cupti_logging.h"
 #include "range_sampling.h"
 #include "common_util.h"
@@ -132,7 +129,7 @@ namespace devicetracer {
   }  // namespace
 
 // Thread-local state recording the most recent annotation (if any).
-// When non-null, this points to a string in the active annotation
+// When non-null, this points to a std::string in the active annotation
 // of the current thread.  The annotation is guaranteed to remain live
 // for the duration of the CUPTI API callback.
 TF_STATIC_THREAD_LOCAL_POD(const char *, tls_current_annotation);
@@ -152,10 +149,10 @@ public:
 
   // Note the method can be called after a call to Stop().
   virtual std::unique_ptr<Handle> CreateAnnotationHandle(
-      StringPiece name_part1, StringPiece name_part2) const {
+      const std::string& name_part1, const std::string& name_part2) const {
     struct Impl : public tracing::TraceCollector::Handle {
-      string annotation;
-      explicit Impl(string &&name_scope) : annotation(name_scope) {
+      std::string annotation;
+      explicit Impl(std::string &&name_scope) : annotation(name_scope) {
         VLOG(2) << "CreateAnnotationHandle " << annotation;
         // Remember the most recent ScopedAnnotation for each thread.
         tls_current_annotation.get() = annotation.c_str();
@@ -166,7 +163,7 @@ public:
         new Impl{ConcatenateNames(name_part1, name_part2)});
   }
 
-  virtual std::unique_ptr<Handle> CreateActivityHandle(StringPiece, StringPiece,
+  virtual std::unique_ptr<Handle> CreateActivityHandle(const std::string&, const std::string&,
                                                        bool) const {
     // We don't do anything with 'Activities' yet.
     return nullptr;
@@ -211,30 +208,30 @@ class DeviceTracerImpl : public DeviceTracer {
   ~DeviceTracerImpl() override;
 
   // DeviceTracer interface:
-  Status Start() override;
-  Status Stop() override;
-  Status Print() override;
-//  Status Collect() override;
-  Status SetMetadata(const char* directory, const char* process_name, const char* machine_name, const char* phase_name) override;
-  Status AsyncDump() override;
-  Status AwaitDump() override;
-  Status RecordEvent(
+  MyStatus Start() override;
+  MyStatus Stop() override;
+  MyStatus Print() override;
+//  MyStatus Collect() override;
+  MyStatus SetMetadata(const char* directory, const char* process_name, const char* machine_name, const char* phase_name) override;
+  MyStatus AsyncDump() override;
+  MyStatus AwaitDump() override;
+  MyStatus RecordEvent(
       const char* category,
-      int64 start_us,
-      int64 duration_us,
+      int64_t start_us,
+      int64_t duration_us,
       const char* name) override;
 
-  Status StartPass() override;
-  Status EndPass() override;
-  Status PushOperation(const char* operation) override;
-  Status RecordOverheadEvent(
+  MyStatus StartPass() override;
+  MyStatus EndPass() override;
+  MyStatus PushOperation(const char* operation) override;
+  MyStatus RecordOverheadEvent(
       const char* overhead_type,
-      int64 num_events) override;
-  Status RecordOverheadEventForOperation(
+      int64_t num_events) override;
+  MyStatus RecordOverheadEventForOperation(
       const char* overhead_type,
       const char* operation,
-      int64 num_events) override;
-  Status PopOperation() override;
+      int64_t num_events) override;
+  MyStatus PopOperation() override;
 
   void _Register_LD_PRELOAD_Callbacks();
   void _RegisterCUDAAPICallbacks();
@@ -260,9 +257,9 @@ class DeviceTracerImpl : public DeviceTracer {
 //    KernelRecord(
 //        uint64_t start_timestamp_,
 //        uint64_t end_timestamp_,
-//        uint32 device_id_,
-//        uint32 stream_id_,
-//        uint32 correlation_id_) :
+//        uint32_t device_id_,
+//        uint32_t stream_id_,
+//        uint32_t correlation_id_) :
 //        start_timestamp(start_timestamp_)
 //        , end_timestamp(end_timestamp_)
 //        , device_id(device_id_)
@@ -272,22 +269,22 @@ class DeviceTracerImpl : public DeviceTracer {
 //    }
 //    uint64_t start_timestamp;
 //    uint64_t end_timestamp;
-//    uint32 device_id;
-//    uint32 stream_id;
-//    uint32 correlation_id;
+//    uint32_t device_id;
+//    uint32_t stream_id;
+//    uint32_t correlation_id;
 //  };
 //  // Internal struct to record memcpy operations.
 //  struct MemcpyRecord {
 //    MemcpyRecord(
 //        uint64_t start_timestamp_,
 //        uint64_t end_timestamp_,
-//        uint32 device_id_,
-//        uint32 stream_id_,
-//        uint32 correlation_id_,
-//        uint8 copyKind_,
-//        uint8 srcKind_,
-//        uint8 dstKind_,
-//        uint64 bytes_) :
+//        uint32_t device_id_,
+//        uint32_t stream_id_,
+//        uint32_t correlation_id_,
+//        uint8_t copyKind_,
+//        uint8_t srcKind_,
+//        uint8_t dstKind_,
+//        uint64_t bytes_) :
 //        start_timestamp(start_timestamp_)
 //        , end_timestamp(end_timestamp_)
 //        , device_id(device_id_)
@@ -301,13 +298,13 @@ class DeviceTracerImpl : public DeviceTracer {
 //    }
 //    uint64_t start_timestamp;
 //    uint64_t end_timestamp;
-//    uint32 device_id;
-//    uint32 stream_id;
-//    uint32 correlation_id;
-//    uint8 copyKind;
-//    uint8 srcKind;
-//    uint8 dstKind;
-//    uint64 bytes;
+//    uint32_t device_id;
+//    uint32_t stream_id;
+//    uint32_t correlation_id;
+//    uint8_t copyKind;
+//    uint8_t srcKind;
+//    uint8_t dstKind;
+//    uint64_t bytes;
 //  };
 
   // This is the subscriber callback which is invoked directly by CUPTI.
@@ -320,12 +317,12 @@ class DeviceTracerImpl : public DeviceTracer {
 //      CUpti_CallbackId cbid, const void *cbdata);
 
   // Records the mapping between correlation ID and kernel name.
-//  void AddCorrelationId(uint32 correlation_id, const string &name);
+//  void AddCorrelationId(uint32_t correlation_id, const std::string &name);
 
   // Returns the current system time in microseconds.
-  inline int64 NowInUsec() { return rlscope::TimeNowMicros(); }
+  inline int64_t NowInUsec() { return rlscope::TimeNowMicros(); }
 
-  std::vector<std::unique_ptr<ActivityBuffer>> activity_buffers_;
+//  std::vector<std::unique_ptr<ActivityBuffer>> activity_buffers_;
   OpStack _op_stack;
   int _device;
   CUDAAPIProfiler _api_profiler;
@@ -347,24 +344,24 @@ class DeviceTracerImpl : public DeviceTracer {
 //  std::unique_ptr<perftools::gputools::profiler::CuptiWrapper> cupti_wrapper_;
   CUpti_SubscriberHandle subscriber_;
 
-  mutex trace_mu_;
+  std::mutex trace_mu_;
   static constexpr size_t kMaxRecords = 1024 * 1024;
 
-//  std::map<uint32, string> correlations_ GUARDED_BY(trace_mu_);
-//  std::vector<KernelRecord> kernel_records_ GUARDED_BY(trace_mu_);
-//  std::vector<MemcpyRecord> memcpy_records_ GUARDED_BY(trace_mu_);
+//  std::map<uint32_t, std::string> correlations_;
+//  std::vector<KernelRecord> kernel_records_;
+//  std::vector<MemcpyRecord> memcpy_records_;
 
-  mutex mu_;
-  bool enabled_ GUARDED_BY(mu_);
-//  int64 start_walltime_us_ GUARDED_BY(mu_);
-//  int64 end_walltime_us_ GUARDED_BY(mu_);
-//  uint64_t start_timestamp_ GUARDED_BY(mu_);
-//  uint64_t end_timestamp_ GUARDED_BY(mu_);
+  std::mutex mu_;
+  bool enabled_;
+//  int64_t start_walltime_us_;
+//  int64_t end_walltime_us_;
+//  uint64_t start_timestamp_;
+//  uint64_t end_timestamp_;
 
-  std::string _directory GUARDED_BY(mu_);
-  std::string _process_name GUARDED_BY(mu_);
-  std::string _machine_name GUARDED_BY(mu_);
-  std::string _phase_name GUARDED_BY(mu_);
+  std::string _directory;
+  std::string _process_name;
+  std::string _machine_name;
+  std::string _phase_name;
 
   int _configure_pass_index;
 
@@ -551,11 +548,11 @@ void DeviceTracerImpl::_EnableAllCUDAAPICallbacks() {
   _cupti_api->EnableDomain(/*enable=*/1, CUPTI_CB_DOMAIN_RUNTIME_API);
 }
 
-Status DeviceTracerImpl::Start() {
-  Status status = Status::OK();
+MyStatus DeviceTracerImpl::Start() {
+  MyStatus status = MyStatus::OK();
   MyStatus my_status = MyStatus::OK();
   VLOG(1) << "DeviceTracer::Start";
-  mutex_lock l(mu_);
+  std::unique_lock<std::mutex> l(mu_);
   if (VLOG_IS_ON(1)) {
     api_printer_.Start();
   }
@@ -563,10 +560,10 @@ Status DeviceTracerImpl::Start() {
     stream_monitor_->Start();
   }
   my_status = _hw_profiler.StartProfiling();
-  status = Status::FromMyStatus(my_status);
+  status = MyStatus::FromMyStatus(my_status);
   IF_BAD_STATUS_RETURN(status);
   if (enabled_) {
-    return errors::FailedPrecondition("DeviceTracer is already enabled.");
+    return MyStatus(rlscope::error::FAILED_PRECONDITION, "DeviceTracer is already enabled.");
   }
   if (!is_yes("TF_CUPTI_SKIP_REGISTER_CUPTI_CALLBACKS", false)) {
     VLOG(1) << "TF_CUPTI_SKIP_REGISTER_CUPTI_CALLBACKS is not set";
@@ -699,11 +696,11 @@ Status DeviceTracerImpl::Start() {
   }
 
   enabled_ = true;
-  return Status::OK();
+  return MyStatus::OK();
 }
 
-Status DeviceTracerImpl::Print() {
-  mutex_lock l(mu_);
+MyStatus DeviceTracerImpl::Print() {
+  std::unique_lock<std::mutex> l(mu_);
   DECLARE_LOG_INFO(info);
   PrintIndent(info, 0);
   info << "DeviceTracerImpl:\n";
@@ -722,16 +719,16 @@ Status DeviceTracerImpl::Print() {
   // internally we limit printing to 15 events (per category).
   info << "\n";
   _event_profiler.Print(info, 1);
-  return Status::OK();
+  return MyStatus::OK();
 }
 
 
-Status DeviceTracerImpl::Stop() {
-  Status status = Status::OK();
+MyStatus DeviceTracerImpl::Stop() {
+  MyStatus status = MyStatus::OK();
   MyStatus my_status = MyStatus::OK();
 
   VLOG(1) << "DeviceTracer::Stop";
-  mutex_lock l(mu_);
+  std::unique_lock<std::mutex> l(mu_);
 
   // VLOG(1) << "DeviceTracerImpl." << __func__ << ": api_printer.Stop()";
   SimpleTimer timer("DeviceTracerImpl.Stop");
@@ -739,7 +736,7 @@ Status DeviceTracerImpl::Stop() {
 
   my_status = _hw_profiler.StopProfiling();
   timer.EndOperation("GPUHwCounterSampler.Stop");
-  status = Status::FromMyStatus(my_status);
+  status = MyStatus::FromMyStatus(my_status);
   IF_BAD_STATUS_RETURN(status);
 
   api_printer_.Stop();
@@ -757,7 +754,7 @@ Status DeviceTracerImpl::Stop() {
     // VLOG(1) << "DeviceTracerImpl." << __func__ << ": stream_monitor.Stop() done";
   }
   if (!enabled_) {
-    return Status::OK();
+    return MyStatus::OK();
   }
 #ifdef CONFIG_TRACE_STATS
   // VLOG(1) << "DeviceTracerImpl." << __func__ << ": GlobalDefaultTraceCollector.Stop()";
@@ -784,7 +781,7 @@ Status DeviceTracerImpl::Stop() {
   }
 #endif // DEBUG_CRITICAL_PATH
   VLOG(1) << "DeviceTracerImpl." << __func__ << ": done";
-  return Status::OK();
+  return MyStatus::OK();
 }
 
 
@@ -798,7 +795,7 @@ Status DeviceTracerImpl::Stop() {
 
 // CorrelationID is used for associating information gathered during a CUDA API runtime callback
 // with information gathered from a GPU-activity-record.
-// This functionality is used by TensorFlow to label each GPU activity record with a string-identifier
+// This functionality is used by TensorFlow to label each GPU activity record with a std::string-identifier
 // (an annotation in the TensorFlow source-code at the site of the cudaLaunch call).
 //
 // IML: since we create our own CUDA API wrappers separate from libcupti, we DON'T use this.
@@ -825,7 +822,7 @@ Status DeviceTracerImpl::Stop() {
 //                  VLOG(2) << "LAUNCH stream " << params->hStream << " correllation "
 //                      << cbInfo->correlationId << " kernel " << cbInfo->symbolName;
 //              }
-//              const string annotation =
+//              const std::string annotation =
 //                  tls_annotation ? tls_annotation : cbInfo->symbolName;
 //              this->AddCorrelationId(cbInfo->correlationId, annotation);
 //          }
@@ -841,7 +838,7 @@ Status DeviceTracerImpl::Stop() {
 //                  VLOG(2) << "MEMCPY count " << count << " kind " << kind;
 //              }
 //              if (tls_annotation) {
-//                  const string annotation = tls_annotation;
+//                  const std::string annotation = tls_annotation;
 //                  this->AddCorrelationId(cbInfo->correlationId, annotation);
 //              }
 //          }
@@ -853,7 +850,7 @@ Status DeviceTracerImpl::Stop() {
 //               cbid == CUPTI_DRIVER_TRACE_CBID_cuMemcpyDtoHAsync_v2 ||
 //               cbid == CUPTI_DRIVER_TRACE_CBID_cuMemcpyDtoDAsync_v2)) {
 //          if (cbInfo->callbackSite == CUPTI_API_EXIT && tls_annotation) {
-//              const string annotation = tls_annotation;
+//              const std::string annotation = tls_annotation;
 //              this->AddCorrelationId(cbInfo->correlationId, annotation);
 //          }
 //      } else {
@@ -866,13 +863,13 @@ Status DeviceTracerImpl::Stop() {
 
 #ifdef CONFIG_TRACE_STATS
 bool DeviceTracerImpl::IsEnabled() {
-  mutex_lock l(mu_);
+  std::unique_lock<std::mutex> l(mu_);
   return enabled_;
 }
 #endif // CONFIG_TRACE_STATS
 
-Status DeviceTracerImpl::SetMetadata(const char* directory, const char* process_name, const char* machine_name, const char* phase_name) {
-  mutex_lock l(mu_);
+MyStatus DeviceTracerImpl::SetMetadata(const char* directory, const char* process_name, const char* machine_name, const char* phase_name) {
+  std::unique_lock<std::mutex> l(mu_);
   // TODO: allow profiling other GPUs by adding "device" to the SetMetadata call.
   _device = 0;
   _op_stack.SetMetadata(directory, process_name, machine_name, phase_name);
@@ -887,87 +884,87 @@ Status DeviceTracerImpl::SetMetadata(const char* directory, const char* process_
   auto dump_path = DumpDirectory(directory, phase_name, process_name);
   _hw_profiler.SetDirectory(dump_path);
   _hw_profiler.SetDevice(_device);
-  return Status::OK();
+  return MyStatus::OK();
 }
 
-Status DeviceTracerImpl::AsyncDump() {
-  Status status = Status::OK();
+MyStatus DeviceTracerImpl::AsyncDump() {
+  MyStatus status = MyStatus::OK();
   MyStatus my_status = MyStatus::OK();
-  mutex_lock l(mu_);
+  std::unique_lock<std::mutex> l(mu_);
   _op_stack.AsyncDump();
   if (is_yes("IML_CUDA_ACTIVITIES", false)) {
     _activity_profiler.AsyncDump();
   }
   if (_hw_profiler.CanDump()) {
     my_status = _hw_profiler.DumpAsync();
-    status = Status::FromMyStatus(my_status);
+    status = MyStatus::FromMyStatus(my_status);
     IF_BAD_STATUS_RETURN(status);
   }
   _api_profiler.AsyncDump();
   _event_profiler.AsyncDump();
-  return Status::OK();
+  return MyStatus::OK();
 }
-Status DeviceTracerImpl::AwaitDump() {
-  Status status = Status::OK();
+MyStatus DeviceTracerImpl::AwaitDump() {
+  MyStatus status = MyStatus::OK();
   MyStatus my_status = MyStatus::OK();
   // Q: Do we need to grab this...?
-  mutex_lock l(mu_);
+  std::unique_lock<std::mutex> l(mu_);
   _op_stack.AwaitDump();
   if (is_yes("IML_CUDA_ACTIVITIES", false)) {
     _activity_profiler.AwaitDump();
   }
   my_status = _hw_profiler.AwaitDump();
-  status = Status::FromMyStatus(my_status);
+  status = MyStatus::FromMyStatus(my_status);
   IF_BAD_STATUS_RETURN(status);
   _api_profiler.AwaitDump();
   _event_profiler.AwaitDump();
-  return Status::OK();
+  return MyStatus::OK();
 }
 
-Status DeviceTracerImpl::RecordEvent(
+MyStatus DeviceTracerImpl::RecordEvent(
     const char* category,
-    int64 start_us,
-    int64 duration_us,
+    int64_t start_us,
+    int64_t duration_us,
     const char* name) {
   // NOTE: don't grab the lock, don't need to.
-  // mutex_lock l(mu_);
+  // std::unique_lock<std::mutex> l(mu_);
   _event_profiler.RecordEvent(
       category,
       start_us,
       duration_us,
       name);
 
-  return Status::OK();
+  return MyStatus::OK();
 }
 
-Status DeviceTracerImpl::StartPass() {
-  Status status = Status::OK();
+MyStatus DeviceTracerImpl::StartPass() {
+  MyStatus status = MyStatus::OK();
   MyStatus my_status = MyStatus::OK();
 
   my_status = _hw_profiler.StartPass();
-  status = Status::FromMyStatus(my_status);
+  status = MyStatus::FromMyStatus(my_status);
   IF_BAD_STATUS_RETURN(status);
 
   if (_configure_pass_index < get_IML_GPU_HW_CONFIG_PASSES(boost::none)) {
     if (_configure_pass_index == 0) {
       my_status = _hw_profiler.StartConfig(get_IML_GPU_HW_METRICS(boost::none));
-      status = Status::FromMyStatus(my_status);
+      status = MyStatus::FromMyStatus(my_status);
       IF_BAD_STATUS_RETURN(status);
     }
     _configure_pass_index += 1;
   }
 
-  return Status::OK();
+  return MyStatus::OK();
 }
-Status DeviceTracerImpl::EndPass() {
-  Status status = Status::OK();
+MyStatus DeviceTracerImpl::EndPass() {
+  MyStatus status = MyStatus::OK();
   MyStatus my_status = MyStatus::OK();
 
   // Q: What do we do if we attempt to push an operation we HAVE NOT seen before?
   // For now, just detect and error out if it happens.
 
   my_status = _hw_profiler.EndPass();
-  status = Status::FromMyStatus(my_status);
+  status = MyStatus::FromMyStatus(my_status);
   IF_BAD_STATUS_RETURN(status);
 
   if (_hw_profiler.Mode() == GPUHwCounterSamplerMode::CONFIG && _configure_pass_index < get_IML_GPU_HW_CONFIG_PASSES(boost::none)) {
@@ -976,48 +973,48 @@ Status DeviceTracerImpl::EndPass() {
 
   if (_hw_profiler.Mode() == GPUHwCounterSamplerMode::CONFIG && _configure_pass_index >= get_IML_GPU_HW_CONFIG_PASSES(boost::none)) {
     my_status = _hw_profiler.StartProfiling();
-    status = Status::FromMyStatus(my_status);
+    status = MyStatus::FromMyStatus(my_status);
     IF_BAD_STATUS_RETURN(status);
   }
 
-  return Status::OK();
+  return MyStatus::OK();
 }
 
-Status DeviceTracerImpl::PushOperation(const char* operation) {
-  Status status = Status::OK();
+MyStatus DeviceTracerImpl::PushOperation(const char* operation) {
+  MyStatus status = MyStatus::OK();
   MyStatus my_status = MyStatus::OK();
   _op_stack.PushOperation(operation);
   my_status = _hw_profiler.Push(operation);
-  status = Status::FromMyStatus(my_status);
+  status = MyStatus::FromMyStatus(my_status);
   IF_BAD_STATUS_RETURN(status);
-  return Status::OK();
+  return MyStatus::OK();
 }
-Status DeviceTracerImpl::RecordOverheadEvent(
+MyStatus DeviceTracerImpl::RecordOverheadEvent(
     const char* overhead_type,
-    int64 num_events) {
+    int64_t num_events) {
   _op_stack.RecordOverheadEvent(
       overhead_type,
       num_events);
-  return Status::OK();
+  return MyStatus::OK();
 }
-Status DeviceTracerImpl::RecordOverheadEventForOperation(
+MyStatus DeviceTracerImpl::RecordOverheadEventForOperation(
     const char* overhead_type,
     const char* operation,
-    int64 num_events) {
+    int64_t num_events) {
   _op_stack.RecordOverheadEventForOperation(
       overhead_type,
       operation,
       num_events);
-  return Status::OK();
+  return MyStatus::OK();
 }
-Status DeviceTracerImpl::PopOperation() {
+MyStatus DeviceTracerImpl::PopOperation() {
   _op_stack.PopOperation();
   _hw_profiler.Pop();
-  return Status::OK();
+  return MyStatus::OK();
 }
 
-//Status DeviceTracerImpl::Collect() {
-//  mutex_lock l(mu_);
+//MyStatus DeviceTracerImpl::Collect() {
+//  std::unique_lock<std::mutex> l(mu_);
 //  if (enabled_) {
 //    return errors::FailedPrecondition("DeviceTracer is still enabled.");
 //  }
@@ -1032,27 +1029,27 @@ Status DeviceTracerImpl::PopOperation() {
 //  bool use_arena = is_yes("TF_CUPTI_PROTOBUF_ARENA", false);
 //
 //  // TODO(pbar) Handle device IDs and prefix properly.
-//  const string prefix = "";
+//  const std::string prefix = "";
 //  const int id = 0;
-//  const string stream_device =
-//      strings::StrCat(prefix, "/device:GPU:", id, "/stream:");
-//  const string memcpy_device =
-//      strings::StrCat(prefix, "/device:GPU:", id, "/memcpy");
+//  const std::string stream_device =
+//      rlscope::StrCat(prefix, "/device:GPU:", id, "/stream:");
+//  const std::string memcpy_device =
+//      rlscope::StrCat(prefix, "/device:GPU:", id, "/memcpy");
 //
-//  mutex_lock l2(trace_mu_);
+//  std::unique_lock<std::mutex> l2(trace_mu_);
 //
 //  // TODO: pass kernel_records and memcpy_records to a class that handles all this stuff OFF the critical path.
 //
 //  // SKIP until we start dumping to our own protobuf.
 //  for (const auto &rec : kernel_records_) {
 //    auto it = correlations_.find(rec.correlation_id);
-//    const string name = (it != correlations_.cend()) ? it->second : "unknown";
+//    const std::string name = (it != correlations_.cend()) ? it->second : "unknown";
 //    NodeExecStats *ns = new NodeExecStats;
 //    ns->set_all_start_micros(start_walltime_us_ +
 //                             ((rec.start_timestamp - start_timestamp_) / 1000));
 //    ns->set_op_start_rel_micros(0);
 //    auto elapsed_us =
-//        std::max<int64>((rec.end_timestamp - rec.start_timestamp) / 1000, 1);
+//        std::max<int64_t>((rec.end_timestamp - rec.start_timestamp) / 1000, 1);
 //    ns->set_op_end_rel_micros(elapsed_us);
 //    ns->set_all_end_rel_micros(elapsed_us);
 //    ns->set_node_name(name);
@@ -1060,36 +1057,36 @@ Status DeviceTracerImpl::PopOperation() {
 //    // ns->set_timeline_label(details);
 //    auto nscopy = new NodeExecStats;
 //    *nscopy = *ns;
-//    collector->Save(strings::StrCat(stream_device, "all"), ns);
-//    collector->Save(strings::StrCat(stream_device, rec.stream_id), nscopy);
+//    collector->Save(rlscope::StrCat(stream_device, "all"), ns);
+//    collector->Save(rlscope::StrCat(stream_device, rec.stream_id), nscopy);
 //  }
 //  for (const auto &rec : memcpy_records_) {
 //    auto it = correlations_.find(rec.correlation_id);
-//    const string name = (it != correlations_.cend()) ? it->second : "unknown";
+//    const std::string name = (it != correlations_.cend()) ? it->second : "unknown";
 //    NodeExecStats *ns = new NodeExecStats;
 //    ns->set_all_start_micros(start_walltime_us_ +
 //                             ((rec.start_timestamp - start_timestamp_) / 1000));
 //    ns->set_op_start_rel_micros(0);
 //    auto elapsed_us =
-//        std::max<int64>((rec.end_timestamp - rec.start_timestamp) / 1000, 1);
+//        std::max<int64_t>((rec.end_timestamp - rec.start_timestamp) / 1000, 1);
 //    ns->set_op_end_rel_micros(elapsed_us);
 //    ns->set_all_end_rel_micros(elapsed_us);
 //    auto copyKind = static_cast<CUpti_ActivityMemcpyKind>(rec.copyKind);
 //    auto srcKind = static_cast<CUpti_ActivityMemoryKind>(rec.srcKind);
 //    auto dstKind = static_cast<CUpti_ActivityMemoryKind>(rec.dstKind);
-//    const string details = strings::Printf(
+//    const std::string details = strings::Printf(
 //        "MEMCPY%s %llu bytes (%s to %s)", getMemcpyKindString(copyKind),
 //        rec.bytes, getMemoryKindString(srcKind), getMemoryKindString(dstKind));
 //    ns->set_node_name(
-//        strings::StrCat(name, ":MEMCPY", getMemcpyKindString(copyKind)));
+//        rlscope::StrCat(name, ":MEMCPY", getMemcpyKindString(copyKind)));
 //    ns->set_timeline_label(details);
 //    auto nscopy = new NodeExecStats;
 //    *nscopy = *ns;
 //    collector->Save(memcpy_device, ns);
-//    collector->Save(strings::StrCat(stream_device, rec.stream_id), nscopy);
+//    collector->Save(rlscope::StrCat(stream_device, rec.stream_id), nscopy);
 //  }
 //
-//  return Status::OK();
+//  return MyStatus::OK();
 //}
 
 }  // namespace devicetracer

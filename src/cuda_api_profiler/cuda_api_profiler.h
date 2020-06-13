@@ -15,7 +15,7 @@
 #include "cuda_api_profiler/event_handler.h"
 #include "cuda_api_profiler/thread_pool_wrapper.h"
 
-#include "tensorflow/core/platform/notification.h"
+#include "common_util.h"
 
 #include <map>
 #include <list>
@@ -23,19 +23,20 @@
 #include <tuple>
 #include <memory>
 #include <thread>
+#include <mutex>
 
 namespace rlscope {
 
 struct CUDAAPIStats {
-    int64 total_api_time_usec;
-    int64 n_calls;
+    int64_t total_api_time_usec;
+    int64_t n_calls;
 
     CUDAAPIStats() :
             total_api_time_usec(0),
             n_calls(0) {
     }
 
-    void AddCall(int64 start_call_usec, int64 end_call_usec) {
+    void AddCall(int64_t start_call_usec, int64_t end_call_usec) {
         auto delta = end_call_usec - start_call_usec;
         total_api_time_usec += delta;
         n_calls += 1;
@@ -49,7 +50,7 @@ struct CUDAAPICallRecord;
 struct CUDAAPIProfilerState {
   // (thread-id, api-cbid)
   using APIKey = std::tuple<pid_t, CUpti_CallbackDomain, CUpti_CallbackId>;
-  using TimeUsec = int64;
+  using TimeUsec = int64_t;
   using OperationName = std::string;
 
   std::map<APIKey, TimeUsec> _start_t;
@@ -101,7 +102,7 @@ struct CUDAAPICallRecord {
 class CUDAAPIProfiler {
 public:
   ThreadPoolWrapper _pool;
-  mutex _mu;
+  std::mutex _mu;
   CUDAAPIProfilerState _state;
   OpStack& _op_stack;
 

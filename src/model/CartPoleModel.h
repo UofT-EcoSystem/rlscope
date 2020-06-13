@@ -213,7 +213,7 @@ public:
 // stochastic receives a bool of True
 //
 // Outputs:
-// [<tf.Tensor 'deepq/cond/Merge:0' shape=(?,) dtype=int64>,
+// [<tf.Tensor 'deepq/cond/Merge:0' shape=(?,) dtype=int64_t>,
 //  <tf.Operation 'deepq/group_deps' type=NoOp>]
 // They discard the last result though since it is None.
 // _Function.__init__ @ baselines/common/tf_util.py:186

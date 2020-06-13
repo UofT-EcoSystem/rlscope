@@ -13,9 +13,6 @@
 namespace rlscope {
 
 
-int ParseFloat(const char* str, size_t size);
-float ParseEnvFloatOrDefault(const char* env_name, float user_value, float dflt);
-
 // TF_CUDA_API_PRINT_EVERY_SEC
 static const float TF_CUDA_API_PRINT_EVERY_SEC_DEFAULT = 5.0;
 float get_TF_CUDA_API_PRINT_EVERY_SEC(boost::optional<float> user_value);

@@ -21,13 +21,7 @@ limitations under the License.
 #include <memory>
 #include <iostream>
 #include <string>
-//#include "tensorflow/core/lib/core/error_codes.pb.h"
-//#include "error_codes.pb.h"
 #include "error_codes.h"
-//#include "tensorflow/core/lib/core/stringpiece.h"
-//#include "tensorflow/core/platform/logging.h"
-//#include "tensorflow/core/platform/macros.h"
-//#include "tensorflow/core/platform/types.h"
 
 //if (status.code() != MyStatus::OK().code()) {
 #define IF_BAD_STATUS_RETURN(status)  \
@@ -56,7 +50,7 @@ class MyStatus {
   MyStatus() {}
 
   /// \brief Create a status with the specified error code and msg as a
-  /// human-readable string containing more detailed information.
+  /// human-readable std::string containing more detailed information.
   MyStatus(rlscope::error::Code code, const std::string& msg);
 
   /// Copy the specified status.
@@ -64,6 +58,8 @@ class MyStatus {
   void operator=(const MyStatus& s);
 
   static MyStatus OK() { return MyStatus(); }
+
+  static MyStatus FromMyStatus(const MyStatus& my_status);
 
   /// Returns true iff the status indicates success.
   bool ok() const { return (state_ == NULL); }
@@ -90,8 +86,8 @@ class MyStatus {
   ///   `overall_status.Update(new_status);`
   void Update(const MyStatus& new_status);
 
-  /// \brief Return a string representation of this status suitable for
-  /// printing. Returns the string `"OK"` for success.
+  /// \brief Return a std::string representation of this status suitable for
+  /// printing. Returns the std::string `"OK"` for success.
   std::string ToString() const;
 
   // Ignores any errors. This method does nothing except potentially suppress

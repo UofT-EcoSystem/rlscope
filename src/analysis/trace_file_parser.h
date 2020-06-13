@@ -50,9 +50,6 @@
 #include <sys/types.h>
 //#include <sys/stat.h>
 
-//#include "tensorflow/core/lib/core/error_codes.pb.h"
-//#include "error_codes.pb.h"
-//#include "tensorflow/core/lib/core/status.h"
 
 #include <set>
 #include "common_util.h"
@@ -589,7 +586,7 @@ class CategoryKeyBitset {
 public:
   bool debug{false};
   std::bitset<MAX_CATEGORY_KEYS> bitset;
-  // Keep this for debugging purposes, so we can convert a bitset into a string.
+  // Keep this for debugging purposes, so we can convert a bitset into a std::string.
   std::shared_ptr<const CategoryIdxMap> idx_map;
   CategoryKeyBitset() : idx_map(nullptr) {
   }
@@ -1661,7 +1658,7 @@ public:
   // A: This assumption should hold with a thread...if it fails split by thread-id?
   //
   // Basic: Single eo_times:
-  // - Create an array of int64 and read usec->psec for each category.
+  // - Create an array of int64_t and read usec->psec for each category.
   // - Pass it to Python, OR, implement event overlap in C++.
   //
   // Advanced: Splitting event trace:

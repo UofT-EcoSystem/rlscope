@@ -9,7 +9,7 @@
 #include "common/util.h"
 #include "cuda_api_profiler/cupti_logging.h"
 
-#include "tensorflow/core/platform/env.h"
+#include <mutex>
 
 #define CONFIG_TRACE_STATS
 
@@ -116,7 +116,7 @@ static void _AddEvent(
   }
 
   auto start_us = self.start_walltime_us_ + ((rec.start_timestamp - self.start_timestamp_) / 1000);
-  auto duration_us = std::max<int64>((rec.end_timestamp - rec.start_timestamp) / 1000, 1);
+  auto duration_us = std::max<int64_t>((rec.end_timestamp - rec.start_timestamp) / 1000, 1);
 
   auto* event = dev_events.add_events();
   // Ideally we would record the operator name.
@@ -135,22 +135,22 @@ std::unique_ptr<iml::MachineDevsEventsProto> CUDAActivityProfilerState::AsProto(
   proto->set_machine_name(_machine_name);
   proto->set_phase(_phase_name);
 
-  const string prefix = "";
+  const std::string prefix = "";
   // TODO: only works with gpu:0.
   const int id = 0;
-  const string stream_device =
-      strings::StrCat(prefix, "/device:GPU:", id, "/stream:");
-  const string memcpy_device =
-      strings::StrCat(prefix, "/device:GPU:", id, "/memcpy");
+  const std::string stream_device =
+      rlscope::StrCat(prefix, "/device:GPU:", id, "/stream:");
+  const std::string memcpy_device =
+      rlscope::StrCat(prefix, "/device:GPU:", id, "/memcpy");
 
   for (auto const& rec : kernel_records_) {
-    auto device_name = strings::StrCat(stream_device, "all");
+    auto device_name = rlscope::StrCat(stream_device, "all");
     // TODO: TF also saves this under "${stream_device}:${rec.stream_id}"
     _AddEvent<KernelRecord>(*this, iml::CudaEventType::KERNEL, proto.get(), device_name, rec);
   }
 
   for (auto const& rec : memcpy_records_) {
-    auto device_name = strings::StrCat(stream_device, "all");
+    auto device_name = rlscope::StrCat(stream_device, "all");
     // TODO: TF also saves this under "${stream_device}:${rec.stream_id}"
     _AddEvent<MemcpyRecord>(*this, iml::CudaEventType::MEMCPY, proto.get(), memcpy_device, rec);
   }
@@ -159,7 +159,7 @@ std::unique_ptr<iml::MachineDevsEventsProto> CUDAActivityProfilerState::AsProto(
 }
 
 void CUDAActivityProfiler::Print(std::ostream& out, int indent) {
-  mutex_lock l(_mu);
+  std::unique_lock<std::mutex> l(_mu);
   PrintIndent(out, indent);
   out << "CUDAActivityProfiler: "
       << "kernel_records.size() = " << _state.kernel_records_.size()
@@ -182,9 +182,9 @@ void CUDAActivityProfiler::Print(std::ostream& out, int indent) {
 void CUDAActivityProfiler::AsyncDump() {
 //  _cupti_api->ActivityFlushAll(0);
   cupti_manager_->Flush();
-  mutex_lock lock(_mu);
+  std::unique_lock<std::mutex> lock(_mu);
   {
-    mutex_lock lock(_trace_mu);
+    std::unique_lock<std::mutex> lock(_trace_mu);
     _AsyncDump();
   }
 }
@@ -224,9 +224,9 @@ void CUDAActivityProfiler::AwaitDump() {
 }
 
 void CUDAActivityProfiler::SetMetadata(const char* directory, const char* process_name, const char* machine_name, const char* phase_name) {
-  mutex_lock lock(_mu);
+  std::unique_lock<std::mutex> lock(_mu);
   {
-    mutex_lock lock(_trace_mu);
+    std::unique_lock<std::mutex> lock(_trace_mu);
     if (_state.CanDump()) {
       _AsyncDump();
     }
@@ -253,7 +253,7 @@ void CUDAActivityProfiler::ActivityCallback(const CUpti_Activity &record) {
   // - _state.DumpState()
   // - This callback
   {
-  mutex_lock l(_trace_mu);
+  std::unique_lock<std::mutex> l(_trace_mu);
   switch (record.kind) {
     case CUPTI_ACTIVITY_KIND_MEMCPY: {
       if (_state.memcpy_records_.size() >= kMaxRecords) return;
@@ -338,31 +338,31 @@ void CUDAActivityProfiler::_MaybeDump() {
   }
 }
 
-Status CUDAActivityProfiler::Start() {
-  mutex_lock lock(_mu);
+MyStatus CUDAActivityProfiler::Start() {
+  std::unique_lock<std::mutex> lock(_mu);
   // NOTE: This registers ActivityCallback to be called, until DisableTrace is called.
   VLOG(1) << "CUDAActivityProfiler: " << __func__ << ", call EnableTrace";
   TF_RETURN_IF_ERROR(cupti_manager_->EnableTrace(this));
   CUPTI_CALL(cuptiGetTimestamp(&_state.start_timestamp_));
   _state.start_walltime_us_ = rlscope::TimeNowMicros();
-  return Status::OK();
+  return MyStatus::OK();
 }
 
-Status CUDAActivityProfiler::Stop() {
+MyStatus CUDAActivityProfiler::Stop() {
   // VLOG(1) << "CUDAActivityProfiler." << __func__ << ": Grab mutex";
-  mutex_lock lock(_mu);
+  std::unique_lock<std::mutex> lock(_mu);
   // VLOG(1) << "CUDAActivityProfiler." << __func__ << ": Mutex grabbed";
-  Status status;
+  MyStatus status;
   status = cupti_manager_->DisableTrace();
 //  TF_RETURN_IF_ERROR(cupti_manager_->DisableTrace());
   MAYBE_LOG_ERROR(LOG(FATAL), __func__, status);
   _state.end_walltime_us_ = rlscope::TimeNowMicros();
   CUPTI_CALL(cuptiGetTimestamp(&_state.end_timestamp_));
-  return Status::OK();
+  return MyStatus::OK();
 }
 
 //void CUDAActivityProfiler::ActivityBufferCallback(std::unique_ptr<ActivityBuffer> activity_buffer) {
-//  mutex_lock lock(_mu);
+//  std::unique_lock<std::mutex> lock(_mu);
 //  VLOG(2) << "ActivityBufferCallback";
 //  // We're running on the main-thread;
 //  // we don't want to delay until Collect is called, since we'll end up keeping the libcupti buffer allocated,
@@ -453,7 +453,7 @@ Status CUDAActivityProfiler::Stop() {
 //          profile_node.set_name(name);
 //        }
 //        if (node_stat.all_start_micros() > 0) {
-//          auto op_end_rel_micros = std::max(static_cast<::google::protobuf::int64>(1), node_stat.op_end_rel_micros());
+//          auto op_end_rel_micros = std::max(static_cast<::google::protobuf::int64_t>(1), node_stat.op_end_rel_micros());
 //
 //          auto start_us = node_stat.all_start_micros();
 //          auto end_us = op_end_rel_micros;
@@ -544,10 +544,10 @@ CUDAActivityProfiler::CUDAActivityProfiler(CUPTIManager* cupti_manager) :
 {
 }
 
-//void CUDAActivityProfiler::AddCorrelationId(uint32 correlation_id,
-//                                        const string &name) {
+//void CUDAActivityProfiler::AddCorrelationId(uint32_t correlation_id,
+//                                        const std::string &name) {
 //  VLOG(2) << correlation_id << " : " << name;
-//  mutex_lock l(mu_);
+//  std::unique_lock<std::mutex> l(mu_);
 //  if (_state.correlations_.size() >= kMaxRecords) return;
 //  _state.correlations_.emplace(correlation_id, name);
 //}

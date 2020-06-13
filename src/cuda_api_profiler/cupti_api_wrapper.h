@@ -14,7 +14,7 @@
 
 #include "cuda_api_profiler/registered_handle.h"
 
-#include "tensorflow/core/platform/mutex.h"
+#include <mutex>
 
 namespace rlscope {
 
@@ -44,10 +44,10 @@ public:
   static std::shared_ptr<CuptiAPI> GetCuptiAPI();
 
   using FuncId = int;
-  mutex _mu;
+  std::mutex _mu;
 
   CUpti_SubscriberHandle _subscriber;
-  FuncId _next_func_id GUARDED_BY(_mu);
+  FuncId _next_func_id;
 
   std::vector<CuptiCallback> _cupti_subscribe_callbacks;
 
