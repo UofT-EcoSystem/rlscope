@@ -35,6 +35,12 @@ limitations under the License.
         exit(EXIT_FAILURE); \
       }
 
+#define IF_BAD_STATUS_EXIT_WITH(status)  \
+      if (status.code() != MyStatus::OK().code()) { \
+        std::cout << "ERROR: " << status.ToString() << std::endl; \
+        exit(EXIT_FAILURE); \
+      }
+
 namespace rlscope {
 
 //#if defined(__clang__)

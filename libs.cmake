@@ -47,6 +47,8 @@ macro(_GatherTargetSources TARGET_VAR SOURCE_FILES_VAR PROTO_SRCS_VAR PROTO_HDRS
         list(APPEND ${SOURCE_FILES_VAR} ${${PROTO_SRCS_VAR}} ${${PROTO_HDRS_VAR}})
         # message("> PROTOBUF: ${${TARGET_VAR}}: append sources: ${${PROTO_SRCS_VAR}} ${${PROTO_HDRS_VAR}}")
     endif()
+
+    RmGTestSources(${SOURCE_FILES_VAR})
 endmacro()
 
 function(_AddTargetDependencies TARGET)

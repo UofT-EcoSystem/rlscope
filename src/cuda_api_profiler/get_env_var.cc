@@ -75,6 +75,8 @@ std::vector<std::string> get_IML_GPU_HW_METRICS(boost::optional<std::string> use
     const char* env_val = getenv(env_name.c_str());
     if (env_val == nullptr) {
       value = dflt;
+    } else {
+      value = env_val;
     }
   }
   return StringSplit(value, ",");

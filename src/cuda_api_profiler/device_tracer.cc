@@ -559,9 +559,6 @@ MyStatus DeviceTracerImpl::Start() {
   if (stream_monitor_) {
     stream_monitor_->Start();
   }
-  my_status = _hw_profiler.StartProfiling();
-  status = MyStatus::FromMyStatus(my_status);
-  IF_BAD_STATUS_RETURN(status);
   if (enabled_) {
     return MyStatus(rlscope::error::FAILED_PRECONDITION, "DeviceTracer is already enabled.");
   }
@@ -869,6 +866,7 @@ bool DeviceTracerImpl::IsEnabled() {
 #endif // CONFIG_TRACE_STATS
 
 MyStatus DeviceTracerImpl::SetMetadata(const char* directory, const char* process_name, const char* machine_name, const char* phase_name) {
+  MyStatus status = MyStatus::OK();
   std::unique_lock<std::mutex> l(mu_);
   // TODO: allow profiling other GPUs by adding "device" to the SetMetadata call.
   _device = 0;
@@ -884,6 +882,8 @@ MyStatus DeviceTracerImpl::SetMetadata(const char* directory, const char* proces
   auto dump_path = DumpDirectory(directory, phase_name, process_name);
   _hw_profiler.SetDirectory(dump_path);
   _hw_profiler.SetDevice(_device);
+  status = _hw_profiler.Init();
+  IF_BAD_STATUS_RETURN(status);
   return MyStatus::OK();
 }
 
@@ -941,18 +941,28 @@ MyStatus DeviceTracerImpl::StartPass() {
   MyStatus status = MyStatus::OK();
   MyStatus my_status = MyStatus::OK();
 
-  my_status = _hw_profiler.StartPass();
-  status = MyStatus::FromMyStatus(my_status);
-  IF_BAD_STATUS_RETURN(status);
-
   if (_configure_pass_index < get_IML_GPU_HW_CONFIG_PASSES(boost::none)) {
     if (_configure_pass_index == 0) {
+//      {
+//        std::stringstream ss;
+//        ss << "get_IML_GPU_HW_METRICS(boost::none) = ";
+//        PrintValue(ss, get_IML_GPU_HW_METRICS(boost::none));
+//        LOG(INFO) << ss.str();
+//      }
       my_status = _hw_profiler.StartConfig(get_IML_GPU_HW_METRICS(boost::none));
       status = MyStatus::FromMyStatus(my_status);
       IF_BAD_STATUS_RETURN(status);
     }
     _configure_pass_index += 1;
+  } else if (_hw_profiler.Mode() == GPUHwCounterSamplerMode::CONFIG) {
+    my_status = _hw_profiler.StartProfiling();
+    status = MyStatus::FromMyStatus(my_status);
+    IF_BAD_STATUS_RETURN(status);
   }
+
+  my_status = _hw_profiler.StartPass();
+  status = MyStatus::FromMyStatus(my_status);
+  IF_BAD_STATUS_RETURN(status);
 
   return MyStatus::OK();
 }
@@ -969,12 +979,6 @@ MyStatus DeviceTracerImpl::EndPass() {
 
   if (_hw_profiler.Mode() == GPUHwCounterSamplerMode::CONFIG && _configure_pass_index < get_IML_GPU_HW_CONFIG_PASSES(boost::none)) {
     _configure_pass_index += 1;
-  }
-
-  if (_hw_profiler.Mode() == GPUHwCounterSamplerMode::CONFIG && _configure_pass_index >= get_IML_GPU_HW_CONFIG_PASSES(boost::none)) {
-    my_status = _hw_profiler.StartProfiling();
-    status = MyStatus::FromMyStatus(my_status);
-    IF_BAD_STATUS_RETURN(status);
   }
 
   return MyStatus::OK();

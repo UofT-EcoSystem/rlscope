@@ -1341,11 +1341,15 @@ class Profiler:
 
     def _start_pass(self):
         assert not self._hw_pass_running
+        if py_config.DEBUG and py_config.DEBUG_GPU_HW:
+            logging.info("> GPU_HW: start_pass")
         self._hw_pass_running = True
         sample_cuda_api.start_pass()
 
     def _end_pass(self):
         assert self._hw_pass_running
+        if py_config.DEBUG and py_config.DEBUG_GPU_HW:
+            logging.info("> GPU_HW: end_pass")
         self._hw_pass_running = False
         sample_cuda_api.end_pass()
 

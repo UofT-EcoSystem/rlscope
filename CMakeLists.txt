@@ -238,18 +238,12 @@ include_directories(
         ./external_libs/include
 )
 
-set(SOURCES)
-
 set(ANALYSIS_SRC_DIRS
         ./src/analysis
         )
 
 set(COMMON_SRC_DIRS
         ./src/common
-        )
-
-set(TEST_ANALYSIS_SRC_DIRS
-        ./test/analysis
         )
 
 set(SRC_DIRS
@@ -271,35 +265,81 @@ set(SRC_DIRS
 # Gather paths of source files for creating RLScope targets (i.e., binaries, libraries)
 #
 
+macro(RmGTestSources SRCS_VAR)
+    list(FILTER ${SRCS_VAR} EXCLUDE REGEX "/test/")
+endmacro()
+
+macro(_glob_sources glob_type srcs_var direc)
+    set(direc_sources)
+
+    file(${glob_type} direc_sources ${direc}/*.c)
+    list(APPEND ${srcs_var} ${direc_sources})
+
+    file(${glob_type} direc_sources ${direc}/*.cc)
+    list(APPEND ${srcs_var} ${direc_sources})
+
+    file(${glob_type} direc_sources ${direc}/*.cpp)
+    list(APPEND ${srcs_var} ${direc_sources})
+
+    file(${glob_type} direc_sources ${direc}/*.cxx)
+    list(APPEND ${srcs_var} ${direc_sources})
+
+    file(${glob_type} direc_sources ${direc}/*.cu)
+    list(APPEND ${srcs_var} ${direc_sources})
+endmacro()
+
+macro(_glob_gtest_sources glob_type srcs_var direc)
+    set(direc_sources)
+
+    file(${glob_type} direc_sources ${direc}/test_*.c)
+    list(APPEND ${srcs_var} ${direc_sources})
+
+    file(${glob_type} direc_sources ${direc}/test_*.cc)
+    list(APPEND ${srcs_var} ${direc_sources})
+
+    file(${glob_type} direc_sources ${direc}/test_*.cpp)
+    list(APPEND ${srcs_var} ${direc_sources})
+
+    file(${glob_type} direc_sources ${direc}/test_*.cxx)
+    list(APPEND ${srcs_var} ${direc_sources})
+
+    file(${glob_type} direc_sources ${direc}/test_*.cu)
+    list(APPEND ${srcs_var} ${direc_sources})
+endmacro()
+
 macro(gather_sources srcs_var directories)
     foreach(direc ${${directories}})
-
-        file(GLOB direc_sources ${direc}/*.c)
-        list(APPEND ${srcs_var} ${direc_sources})
-
-        file(GLOB direc_sources ${direc}/*.cc)
-        list(APPEND ${srcs_var} ${direc_sources})
-
-        file(GLOB direc_sources ${direc}/*.cpp)
-        list(APPEND ${srcs_var} ${direc_sources})
-
-        file(GLOB direc_sources ${direc}/*.cxx)
-        list(APPEND ${srcs_var} ${direc_sources})
-
-        file(GLOB direc_sources ${direc}/*.cu)
-        list(APPEND ${srcs_var} ${direc_sources})
-
+        _glob_sources(GLOB ${srcs_var} ${direc})
     endforeach()
 endmacro()
 
+macro(gather_sources_recursive srcs_var directories)
+    foreach(direc ${${directories}})
+        _glob_sources(GLOB_RECURSE ${srcs_var} ${direc})
+    endforeach()
+endmacro()
+
+macro(gather_gtest_sources srcs_var directories)
+    foreach(direc ${${directories}})
+        _glob_gtest_sources(GLOB_RECURSE ${srcs_var} ${direc})
+    endforeach()
+endmacro()
+
+# Find directories named "test" with ./src
+# These are gtest unit tests for libraries in ./src/libs
+set(SOURCE_ROOTS
+        ./src
+        ./test)
+gather_gtest_sources(RLS_TEST_SRCS SOURCE_ROOTS)
+
 gather_sources(ANALYSIS_SOURCES ANALYSIS_SRC_DIRS)
+RmGTestSources(ANALYSIS_SOURCES)
 gather_sources(COMMON_SOURCES COMMON_SRC_DIRS)
-gather_sources(TEST_ANALYSIS_SOURCES TEST_ANALYSIS_SRC_DIRS)
+RmGTestSources(COMMON_SOURCES)
 set(ANALYSIS_SOURCES
         ./src/cuda_api_profiler/generic_logging.cc
         ./src/cuda_api_profiler/generic_logging.h
         ${ANALYSIS_SOURCES})
-gather_sources(SOURCES SRC_DIRS)
 
 set(CUDA_PROF_DIRS
         ./src/cuda_api_profiler
@@ -308,6 +348,7 @@ include_directories(/usr/local/cuda/extras/CUPTI/include)
 include_directories(/usr/local/cuda/include)
 
 gather_sources(CUDA_PROF_SRCS CUDA_PROF_DIRS)
+RmGTestSources(CUDA_PROF_SRCS)
 
 # https://github.com/bombela/backward-cpp/tree/84ae4f5e80381aca765a0810d4c811acae3cd7c7#configuration--dependencies
 
@@ -318,6 +359,7 @@ if (DEBUG_CMAKE_VERBOSE)
     #message("> TEST_ANALYSIS_SOURCES = ${TEST_ANALYSIS_SOURCES}")
     message("> IML_PROTO_SRCS = ${IML_PROTO_SRCS}")
     message("> IML_PROTO_HDRS = ${IML_PROTO_HDRS}")
+    message("> RLS_TEST_SRCS = ${RLS_TEST_SRCS}")
     message("> BACKWARD_ENABLE = ${BACKWARD_ENABLE}")
 endif()
 
@@ -374,16 +416,6 @@ if (WITH_CXX_ANALYSIS)
         message("> RLS_ANALYZE_SRCS = ${RLS_ANALYZE_SRCS}")
     endif()
 
-    set(TEST_ANALYSIS_SOURCES
-            ${COMMON_SOURCES}
-            ${ANALYSIS_SOURCES}
-            ${TEST_ANALYSIS_SOURCES}
-            ${BACKWARD_ENABLE}
-            ${IML_PROTO_SRCS} ${IML_PROTO_HDRS})
-    list(FILTER TEST_ANALYSIS_SOURCES EXCLUDE REGEX "/c_test_util.cc")
-    if (DEBUG_CMAKE_VERBOSE)
-        message("> TEST_ANALYSIS_SOURCES = ${TEST_ANALYSIS_SOURCES}")
-    endif()
 endif()
 
 #
@@ -729,14 +761,35 @@ endfunction()
 include(libs.cmake)
 #return()
 
+message("> common_util_GTEST_DIRS = ${common_util_GTEST_DIRS}")
+
+set(TEST_ANALYSIS_SOURCES)
+if (RLS_TEST_SRCS)
+    set(TEST_ANALYSIS_SOURCES
+            ${COMMON_SOURCES}
+            ${ANALYSIS_SOURCES}
+            ${RLS_TEST_SRCS}
+            ${BACKWARD_ENABLE}
+            ${IML_PROTO_SRCS} ${IML_PROTO_HDRS})
+    list(FILTER TEST_ANALYSIS_SOURCES EXCLUDE REGEX "/c_test_util.cc")
+    if (DEBUG_CMAKE_VERBOSE)
+        message("> TEST_ANALYSIS_SOURCES = ${TEST_ANALYSIS_SOURCES}")
+    endif()
+endif()
+
 
 #
 # Create targets.
 #
 
+set(BINARIES)
 if (WITH_CXX_ANALYSIS)
     AddRLSAnalyzeTarget(rls-analyze)
-    AddTestAnalysisTarget(rls-test)
+    list(APPEND BINARIES rls-analyze)
+    if (TEST_ANALYSIS_SOURCES)
+        AddTestAnalysisTarget(rls-test)
+        list(APPEND BINARIES rls-test)
+    endif()
 endif()
 AddRLScopeTarget(rlscope)
 
@@ -745,10 +798,6 @@ AddRLScopeTarget(rlscope)
 # Install targets.
 #
 
-set(BINARIES
-        rls-analyze
-        rls-test
-        )
 install(TARGETS ${BINARIES}
         CONFIGURATIONS Debug
         RUNTIME DESTINATION bin)

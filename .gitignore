@@ -22,3 +22,11 @@ ssh_config*
 /dockerfiles/dockerfiles/gpu.Dockerfile
 /dockerfiles/requirements.txt
 .bash_history
+
+/local/
+/build/
+/local.host/
+/local.docker/
+/build.host/
+/build.docker/
+/cmake-build-debug/

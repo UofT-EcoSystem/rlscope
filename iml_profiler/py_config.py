@@ -77,6 +77,8 @@ DEBUG_SPLIT_STACK_OPS = False
 # If True, skip inserting any profiling-overhead events.
 DEBUG_SKIP_PROFILING_OVERHEAD = False
 
+DEBUG_GPU_HW = True
+
 # If True, then log all calls into librlscope.so
 # DEBUG_SAMPLE_CUDA_API = True
 

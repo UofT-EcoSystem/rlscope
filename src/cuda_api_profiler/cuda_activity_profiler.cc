@@ -184,7 +184,7 @@ void CUDAActivityProfiler::AsyncDump() {
   cupti_manager_->Flush();
   std::unique_lock<std::mutex> lock(_mu);
   {
-    std::unique_lock<std::mutex> lock(_trace_mu);
+    std::unique_lock<std::mutex> trace_lock(_trace_mu);
     _AsyncDump();
   }
 }
@@ -226,7 +226,7 @@ void CUDAActivityProfiler::AwaitDump() {
 void CUDAActivityProfiler::SetMetadata(const char* directory, const char* process_name, const char* machine_name, const char* phase_name) {
   std::unique_lock<std::mutex> lock(_mu);
   {
-    std::unique_lock<std::mutex> lock(_trace_mu);
+    std::unique_lock<std::mutex> trace_lock(_trace_mu);
     if (_state.CanDump()) {
       _AsyncDump();
     }

@@ -18,6 +18,7 @@
 #include <string>
 #include <regex>
 #include <chrono>
+#include <functional>
 
 #include <boost/asio/thread_pool.hpp>
 #include <boost/asio/post.hpp>
@@ -45,6 +46,7 @@ struct RangeNode {
 };
 
 struct RangeTree {
+  using Stack = std::list<const RangeNode*>;
   size_t max_nesting_levels;
   size_t max_unique_ranges;
 
@@ -61,7 +63,25 @@ struct RangeTree {
 
   void Pop();
 
-  std::list<const RangeNode*> CurStack() const;
+  RangeTree::Stack CurStack() const;
+
+  using EachStackSeenCb = std::function<void(const RangeTree::Stack&)>;
+  void EachStackSeen(EachStackSeenCb func) const;
+  void _EachStackSeen(RangeNode* node, RangeTree::Stack stack, EachStackSeenCb func) const;
+  template <class OStream>
+  void PrintStack(OStream& out, int indent, RangeTree::Stack node_stack) {
+    int i = 0;
+    PrintIndent(out, indent);
+    out << "[";
+    for (auto const& node : node_stack) {
+      if (i != 0) {
+        out << ", ";
+      }
+      out << node->name;
+      i += 1;
+    }
+    out << "]";
+  }
 
   void _UpdateStatsOnPush(bool was_insert);
 
@@ -306,6 +326,8 @@ public:
   MyStatus CheckCUPTIProfilingAPISupported();
 
   MyStatus StartConfig(const std::vector<std::string> &metrics);
+
+  MyStatus _CheckInitialized(const char* file, int lineno, const char* func) const;
 
   MyStatus StartProfiling();
 

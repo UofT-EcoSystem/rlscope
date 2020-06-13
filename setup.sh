@@ -253,7 +253,7 @@ cmake_build_dir() {
     shift 1
 
     local build_prefix=
-    if is_defined IML_BUILD_PREFIX; then
+    if _is_non_empty IML_BUILD_PREFIX; then
       # Docker container environment.
       build_prefix="$IML_BUILD_PREFIX"
     else
@@ -262,24 +262,22 @@ cmake_build_dir() {
     fi
     echo "$build_prefix/$(basename "$third_party_dir")"
 }
-is_defined() {
-  # Check if an environment variable is defined:
-  # https://unix.stackexchange.com/questions/402067/bash-find-if-all-env-variables-are-declared-by-variable-name
-  # NOTE: returns TRUE if varname is empty-string.
-  # If you want empty-string to be false, check should be:
-  #   if is_defined $VAR && [ "$VAR" != "" ]; then
-  #     ...
-  #   fi
+_is_non_empty() {
+  # Check if an environment variable is defined and not equal to empty string
   (
   set +u
   local varname="$1"
-  [ -z ${!varname}+x ]
+  # Indirect variable dereference that works with both bash and zsh.
+  # https://unix.stackexchange.com/questions/68035/foo-and-zsh
+  local value=
+  eval "value=\"\$${varname}\""
+  [ "${value}" != "" ]
   )
 }
 _local_dir() {
     # When installing things with configure/make-install
     # $ configure --prefix="$(_local_dir)"
-    if is_defined IML_INSTALL_PREFIX; then
+    if _is_non_empty IML_INSTALL_PREFIX; then
       # Docker container environment.
       echo "$IML_INSTALL_PREFIX"
     else
