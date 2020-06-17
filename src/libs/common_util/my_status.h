@@ -106,6 +106,7 @@ class MyStatus {
   struct State {
     rlscope::error::Code code;
     std::string msg;
+    std::string stacktrace;
   };
   // OK status has a `NULL` state_.  Otherwise, `state_` points to
   // a `State` structure containing the error code and message(s)

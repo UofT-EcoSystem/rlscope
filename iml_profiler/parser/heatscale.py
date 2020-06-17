@@ -270,8 +270,6 @@ class HeatScale:
         self.plot.set_xlabel(None)
         self.plot.set_ylabel(None)
 
-        if self.debug:
-            import ipdb; ipdb.set_trace()
         print("> Save HeatScale @ {path}".format(path=self.png))
         fig.savefig(self.png)
 

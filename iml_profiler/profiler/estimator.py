@@ -121,7 +121,7 @@ class EstimatorWrapper:
         # export_savedmodel from 1.0 is deprecated.
         raise NotImplementedError("IML: Haven't bothered to wrap tf.estimator.Estimator.export_saved_model with profiling set_operation/end_operation annotations.")
 
-class ProfileEstimatorHook(tf.train.SessionRunHook):
+class ProfileEstimatorHook(tf.estimator.SessionRunHook):
     def __init__(self, operation, prof=None):
         """
         Hook for Estimator callback API to add profiling set_operation/end_operation

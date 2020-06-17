@@ -59,7 +59,10 @@ GENERATE_INDEX_PY = _j(ROOT, "python/scripts", "generate_iml_profiler_plot_index
 DEBUG_TRACE_SESSION = False
 
 # Verbose debugging: Print calls to set_operation/end_operation
-DEBUG_OPERATIONS = False
+DEBUG_OPERATIONS = True
+
+# Verbose debugging: Print calls to librlscope.so
+DEBUG_RLSCOPE_LIB_CALLS = True
 
 # If true, have iml-util-sampler log to stdout the GPU/CPU info it queries.
 # This can be noisy.

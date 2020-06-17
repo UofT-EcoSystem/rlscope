@@ -28,13 +28,15 @@ macro(_GatherTargetSources TARGET_VAR SOURCE_FILES_VAR PROTO_SRCS_VAR PROTO_HDRS
     set(${TARGET_VAR} ${DIRNAME})
     # message("TARGET_VAR (${TARGET_VAR}) = ${${TARGET_VAR}}")
 
+    set(${PROTO_SRCS_VAR})
+    set(${PROTO_HDRS_VAR})
     list(LENGTH PROTO_BUF_SOURCE_FILES PROTO_BUF_SOURCE_FILES_LENGTH)
     if (PROTO_BUF_SOURCE_FILES_LENGTH GREATER 0)
         # message("> PROTOBUF: ${${TARGET_VAR}}: PROTO_BUF_SOURCE_FILES_LENGTH = ${PROTO_BUF_SOURCE_FILES_LENGTH}")
-        message("> PROTOBUF: ${${TARGET_VAR}}: protobuf_generate_cpp")
-        message("            ${PROTO_SRCS_VAR}")
-        message("            ${PROTO_HDRS_VAR}")
-        message("            ${PROTO_BUF_SOURCE_FILES}")
+#        message("> PROTOBUF: ${${TARGET_VAR}}: protobuf_generate_cpp")
+#        message("            ${PROTO_SRCS_VAR}")
+#        message("            ${PROTO_HDRS_VAR}")
+#        message("            ${PROTO_BUF_SOURCE_FILES}")
         protobuf_generate_cpp(${PROTO_SRCS_VAR} ${PROTO_HDRS_VAR}
                 ${PROTO_BUF_SOURCE_FILES})
 #        include_directories(
@@ -56,6 +58,7 @@ function(_AddTargetDependencies TARGET)
     AddCUDA(${TARGET})
     add_backward(${TARGET})
     AddLoggingDeps(${TARGET})
+    AddGFlagsDeps(${TARGET})
 
 #    find_package(MySpdlog REQUIRED)
 #    target_link_libraries(${TARGET} PRIVATE ${MySpdlog_LIBRARIES})
@@ -77,12 +80,25 @@ function(_AddTargetDependencies TARGET)
 
 endfunction()
 
+function(_AddProtoDeps TARGET PROTO_SRCS PROTO_HDRS)
+    # message("> _AddProtoDeps : PROTO_SRCS = ${PROTO_SRCS}")
+    AddProtobufDeps(${TARGET})
+    # Magical incantation to FORCE protobuf sources to be generated BEFORE people that depend
+    # on range_sampling library (librlscope.so) are built.
+    # OTHERWISE, first cmake build fails every time.
+    #
+    # Long story short: protobuf uses add_custom_command to output generated files, but cmake sucks
+    # at letting you depend on those files directly, so we need to add an extra level of indirection
+    # (add_custom_target) to depend on the generated proto srcs.
+    add_custom_target(${TARGET}_cpp_proto_srcs
+            DEPENDS ${PROTO_SRCS} ${PROTO_HDRS})
+    add_dependencies(${TARGET} ${TARGET}_cpp_proto_srcs)
+endfunction()
+
 # Build CUDA library from recursively discovered source files.
 macro(MakeCudaLibraryFromDir LIBNAME_VAR SOURCE_FILES)
-    set(PROTO_SRCS)
-    set(PROTO_HDRS)
     _GatherTargetSources(${LIBNAME_VAR} ${SOURCE_FILES} PROTO_SRCS PROTO_HDRS)
-    message("> PROTOBUF: ${${LIBNAME_VAR}}: SOURCE_FILES (${SOURCE_FILES}) = ${${SOURCE_FILES}}")
+#    message("> PROTOBUF: ${${LIBNAME_VAR}}: SOURCE_FILES (${SOURCE_FILES}) = ${${SOURCE_FILES}}")
     # message("> PROTOBUF: ${${LIBNAME_VAR}}: LIBNAME_VAR (${LIBNAME_VAR}) = ${${LIBNAME_VAR}}")
     cuda_add_library(${${LIBNAME_VAR}}
             ${${SOURCE_FILES}}
@@ -90,17 +106,19 @@ macro(MakeCudaLibraryFromDir LIBNAME_VAR SOURCE_FILES)
     _AddTargetDependencies(${${LIBNAME_VAR}})
     # Third party: protobuf
     if (PROTO_SRCS OR PROTO_HDRS)
-        AddProtobufDeps(${${LIBNAME_VAR}})
-        # Magical incantation to FORCE protobuf sources to be generated BEFORE people that depend
-        # on range_sampling library (librlscope.so) are built.
-        # OTHERWISE, first cmake build fails every time.
-        #
-        # Long story short: protobuf uses add_custom_command to output generated files, but cmake sucks
-        # at letting you depend on those files directly, so we need to add an extra level of indirection
-        # (add_custom_target) to depend on the generated proto srcs.
-        add_custom_target(${${LIBNAME_VAR}}_cpp_proto_srcs
-                DEPENDS ${PROTO_SRCS} ${PROTO_HDRS})
-        add_dependencies(${${LIBNAME_VAR}} ${${LIBNAME_VAR}}_cpp_proto_srcs)
+        message("> PROTO_SRCS = ${PROTO_SRCS}")
+        _AddProtoDeps(${${LIBNAME_VAR}} ${PROTO_SRCS} ${PROTO_HDRS})
+#        AddProtobufDeps(${${LIBNAME_VAR}})
+#        # Magical incantation to FORCE protobuf sources to be generated BEFORE people that depend
+#        # on range_sampling library (librlscope.so) are built.
+#        # OTHERWISE, first cmake build fails every time.
+#        #
+#        # Long story short: protobuf uses add_custom_command to output generated files, but cmake sucks
+#        # at letting you depend on those files directly, so we need to add an extra level of indirection
+#        # (add_custom_target) to depend on the generated proto srcs.
+#        add_custom_target(${${LIBNAME_VAR}}_cpp_proto_srcs
+#                DEPENDS ${PROTO_SRCS} ${PROTO_HDRS})
+#        add_dependencies(${${LIBNAME_VAR}} ${${LIBNAME_VAR}}_cpp_proto_srcs)
     endif()
 #    install(
 #            TARGETS ${${LIBNAME_VAR}}
@@ -114,6 +132,8 @@ endmacro()
 
 # Buld CUDA executable from recursively discovered source files.
 macro(MakeCudaExecutableFromDir EXEC_NAME_VAR SOURCE_FILES)
+    set(PROTO_SRCS)
+    set(PROTO_HDRS)
     _GatherTargetSources(${EXEC_NAME_VAR} ${SOURCE_FILES} PROTO_SRCS PROTO_HDRS)
     #    message("SOURCE_FILES = ${SOURCE_FILES}")
     #    message("EXEC_NAME_VAR (${EXEC_NAME_VAR}) = ${${EXEC_NAME_VAR}}")
@@ -122,8 +142,11 @@ macro(MakeCudaExecutableFromDir EXEC_NAME_VAR SOURCE_FILES)
     _AddTargetDependencies(${${EXEC_NAME_VAR}})
     # Third party: protobuf
     if (PROTO_SRCS OR PROTO_HDRS)
-        AddProtobufDeps(${${LIBNAME_VAR}})
+        _AddProtoDeps(${${EXEC_NAME_VAR}} PROTO_SRCS PROTO_HDRS)
     endif()
+#    if (PROTO_SRCS OR PROTO_HDRS)
+#        AddProtobufDeps(${${LIBNAME_VAR}})
+#    endif()
     install(
             TARGETS ${${EXEC_NAME_VAR}}
             DESTINATION bin
@@ -140,7 +163,7 @@ endmacro()
 #link_libraries(${CUDAProfilingAPI_LIBRARY})
 
 # Include directories containing generated *.pb.h protobuf header files.
-message(" >> PROTOBUF: include_directories: ${CMAKE_CURRENT_BINARY_DIR}/src/libs")
+#message(" >> PROTOBUF: include_directories: ${CMAKE_CURRENT_BINARY_DIR}/src/libs")
 include_directories(
         ${CMAKE_CURRENT_BINARY_DIR}/src/libs
 )

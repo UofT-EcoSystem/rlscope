@@ -5,7 +5,6 @@
 #ifndef IML_CUPTI_LOGGING_H
 #define IML_CUPTI_LOGGING_H
 
-#include "cuda_api_profiler/generic_logging.h"
 
 #include <cupti.h>
 #include <cuda.h>

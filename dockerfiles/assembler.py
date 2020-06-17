@@ -480,7 +480,6 @@ def check_null_byte(name, string):
         ).format(str=textwrap.indent(
             string[null_idx:],
             prefix='  ')))
-        import ipdb; ipdb.set_trace()
 
 def get_build_logfile(repo_tag):
     return "{repo_tag}.build.log.txt".format(

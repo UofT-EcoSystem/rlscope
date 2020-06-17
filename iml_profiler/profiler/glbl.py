@@ -57,7 +57,7 @@ def init_session(**kwargs):
     # Allow multiple users to use the TensorFlow API.
     config.gpu_options.allow_growth = True
 
-    sess = tf.Session(graph=graph, config=config, **kwargs)
+    sess = tf.compat.v1.Session(graph=graph, config=config, **kwargs)
     sess.__enter__()
 
     return session

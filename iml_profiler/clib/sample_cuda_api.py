@@ -1,9 +1,13 @@
 # Wrapper around librlscope.so LD_PRELOAD library.
 import ctypes
 
+from io import StringIO
+import logging
 from iml_profiler.parser.common import *
 
 from ctypes import *
+
+c_int_p = ctypes.POINTER(ctypes.c_int)
 
 from iml_profiler import py_config
 
@@ -129,6 +133,12 @@ def load_library(allow_fail=None):
     _so.end_pass.argtypes = []
     _so.end_pass.restype = c_int
 
+    _so.has_next_pass.argtypes = [c_int_p]
+    _so.has_next_pass.restype = c_int
+
+    _so.disable_gpu_hw.argtypes = []
+    _so.disable_gpu_hw.restype = c_int
+
     _so.await_dump.argtypes = []
     _so.await_dump.restype = c_int
     _set_api_wrapper('await_dump')
@@ -143,6 +153,9 @@ def _set_api_wrapper(api_name):
     from iml_profiler.clib import sample_cuda_api
     func = getattr(_so, api_name)
     def api_wrapper(*args, **kwargs):
+        if py_config.DEBUG and py_config.DEBUG_RLSCOPE_LIB_CALLS:
+            logging.info(_log_api_call_msg(api_name,
+                                           *args, **kwargs))
         ret = func(*args, **kwargs)
         if ret != TF_OK:
             raise IMLProfError(ret)
@@ -150,6 +163,9 @@ def _set_api_wrapper(api_name):
     setattr(sample_cuda_api, api_name, api_wrapper)
 
 def set_metadata(directory, process_name, machine_name, phase):
+    if py_config.DEBUG and py_config.DEBUG_RLSCOPE_LIB_CALLS:
+        logging.info(_log_api_call_msg('set_metadata',
+                                       directory, process_name, machine_name, phase))
     ret = _so.set_metadata(
         _as_c_string(directory),
         _as_c_string(process_name),
@@ -165,6 +181,9 @@ def record_event(
     start_us,
     duration_us,
     name):
+    if py_config.DEBUG and py_config.DEBUG_RLSCOPE_LIB_CALLS:
+        logging.info(_log_api_call_msg('record_event',
+                                       category, start_us, duration_us, name))
     ret = _so.record_event(
         _as_c_string(category),
         c_int64(int(start_us)),
@@ -178,6 +197,9 @@ def record_event(
 def record_overhead_event(
     overhead_type,
     num_events):
+    if py_config.DEBUG and py_config.DEBUG_RLSCOPE_LIB_CALLS:
+        logging.info(_log_api_call_msg('record_overhead_event',
+                                       overhead_type, num_events))
     ret = _so.record_overhead_event(
         _as_c_string(overhead_type),
         c_int(num_events)
@@ -190,6 +212,9 @@ def record_overhead_event_for_operation(
     overhead_type,
     operation,
     num_events):
+    if py_config.DEBUG and py_config.DEBUG_RLSCOPE_LIB_CALLS:
+        logging.info(_log_api_call_msg('record_overhead_event_for_operation',
+                                       overhead_type, operation, num_events))
     ret = _so.record_overhead_event_for_operation(
         _as_c_string(overhead_type),
         _as_c_string(operation),
@@ -200,6 +225,8 @@ def record_overhead_event_for_operation(
     return ret
 
 def push_operation(operation):
+    if py_config.DEBUG and py_config.DEBUG_RLSCOPE_LIB_CALLS:
+        logging.info(_log_api_call_msg('push_operation', operation))
     ret = _so.push_operation(
         _as_c_string(operation),
     )
@@ -208,23 +235,49 @@ def push_operation(operation):
     return ret
 
 def pop_operation():
+    if py_config.DEBUG and py_config.DEBUG_RLSCOPE_LIB_CALLS:
+        logging.info(_log_api_call_msg('pop_operation'))
     ret = _so.pop_operation()
     if ret != TF_OK:
         raise IMLProfError(ret)
     return ret
 
 def start_pass():
+    if py_config.DEBUG and py_config.DEBUG_RLSCOPE_LIB_CALLS:
+        logging.info(_log_api_call_msg('start_pass'))
     ret = _so.start_pass()
     if ret != TF_OK:
         raise IMLProfError(ret)
     return ret
 
 def end_pass():
+    if py_config.DEBUG and py_config.DEBUG_RLSCOPE_LIB_CALLS:
+        logging.info(_log_api_call_msg('end_pass'))
     ret = _so.end_pass()
     if ret != TF_OK:
         raise IMLProfError(ret)
     return ret
 
+def has_next_pass():
+    if py_config.DEBUG and py_config.DEBUG_RLSCOPE_LIB_CALLS:
+        logging.info(_log_api_call_msg('has_next_pass'))
+    has_next_pass = c_int(0)
+    ret = _so.has_next_pass(ctypes.byref(has_next_pass))
+    if ret != TF_OK:
+        raise IMLProfError(ret)
+    value = bool(has_next_pass.value)
+    if py_config.DEBUG and py_config.DEBUG_RLSCOPE_LIB_CALLS:
+        if value:
+            logging.info(f"[RLSCOPE_LIB]  returned: {value}")
+    return value
+
+def disable_gpu_hw():
+    if py_config.DEBUG and py_config.DEBUG_RLSCOPE_LIB_CALLS:
+        logging.info(_log_api_call_msg('disable_gpu_hw'))
+    ret = _so.disable_gpu_hw()
+    if ret != TF_OK:
+        raise IMLProfError(ret)
+    return ret
 
 #
 # API wrapper helpers.
@@ -247,6 +300,26 @@ def error_string(retcode):
 def _as_c_string(py_string):
     return c_char_p(py_string.encode('ascii'))
 
-# Q: Make wrapper that converts status code into exception + error message?
+def _arg_string(arg):
+    if type(arg) == str:
+        return f'"{arg}"'
+    return str(arg)
 
+def _log_api_call_msg(name, *args, **kwargs):
+    if len(kwargs) == 0:
+        kwargs_str = ''
+    else:
+        ss = StringIO()
+        for i, key, value in enumerate(kwargs.items()):
+            if len(args) > 0 or i > 0:
+                ss.write(', ')
+            ss.write(key)
+            ss.write('=')
+            ss.write(_arg_string(value))
+        kwargs_str = ss.getvalue()
+    return "[RLSCOPE_LIB] {func}({args}{kwargs})".format(
+        func=name,
+        args=', '.join([_arg_string(arg) for arg in args]),
+        kwargs=kwargs_str,
+    )
 

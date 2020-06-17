@@ -8,7 +8,6 @@
 #include <boost/optional.hpp>
 #include <boost/process.hpp>
 
-#include "cuda_api_profiler/generic_logging.h"
 
 namespace rlscope {
 

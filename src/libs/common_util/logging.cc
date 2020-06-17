@@ -275,7 +275,9 @@ LogMessageFatal::~LogMessageFatal() {
   // abort() ensures we don't return (we promised we would not via
   // ATTRIBUTE_NORETURN).
   GenerateLogMessage();
-  abort();
+  // Somewhere within abort() we are getting a segfault...WHY?
+  // abort();
+  exit(EXIT_FAILURE);
 }
 
 void LogString(const char* fname, int line, int severity,

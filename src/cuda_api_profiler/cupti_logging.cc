@@ -5,7 +5,6 @@
 #include "cuda_api_profiler/cupti_logging.h"
 
 #include "cuda_api_profiler/usec_timer.h"
-#include "cuda_api_profiler/generic_logging.h"
 
 #include <cupti.h>
 #include <cuda.h>

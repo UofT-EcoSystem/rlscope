@@ -9,6 +9,12 @@
 
 #include "range_sampling/range_sampling.pb.h"
 
+#include <spdlog/spdlog.h>
+//#include <sys/types.h>
+// Must be included in order operator<< to work with spd logging.
+// https://github.com/gabime/spdlog#user-defined-types
+#include "spdlog/fmt/ostr.h"
+
 #include <cupti_target.h>
 #include <cupti_profiler_target.h>
 #include <nvperf_target.h>
@@ -31,6 +37,13 @@ using boost::uuids::detail::md5;
 
 #include <iostream>
 #include <fstream>
+
+#define LOG_FUNC_ENTRY() \
+  if (SHOULD_DEBUG(FEATURE_GPU_HW)) { \
+    DBG_LOG("LOG_FUNC_ENTRY", ""); \
+  } \
+
+//#define LOG_FUNC_ENTRY()
 
 namespace rlscope {
 
@@ -235,12 +248,13 @@ static MyStatus GetRawMetricRequests(
 //        NVPW_MetricsContext_SetCounterData(&setCounterDataParams);
 //        NVPW_API_CALL_MAYBE_STATUS(NVPW_RawMetricsConfig_GetMetricProperties(NVPW_RawMetricsConfig_GetMetricProperties_Params* pParams));
 
-    {
+    if (SHOULD_DEBUG(FEATURE_GPU_HW)) {
       std::stringstream ss;
-      ss << "CONFIG: metric = " << rawMetricName << std::endl
-         << "  isolated = " << isolated << std::endl
-         << "  keepInstances = " << keepInstances << std::endl;
-      DBG_LOG("{}", ss.str());
+      ss << "CONFIG: metric = " << rawMetricName
+         << std::endl << "  isolated = " << isolated
+         << std::endl << "  keepInstances = " << keepInstances;
+      RLS_LOG("GPU_HW", "{}", ss.str());
+//      RLS_LOG()
     }
     metricRequest.pMetricName = rawMetricName.c_str();
     metricRequest.isolated = isolated;
@@ -374,7 +388,13 @@ MyStatus CUPTIProfilerState::_InitConfig(ConfigData& config_data) {
   // the configImage buffer, then I get errors from the CUPTI API.  So, instead I explicitly re-use the same buffer
   // so that I don't need to call cuptiProfilerSetConfig more than once.
   assert(config_data.configImage.size() != 0);
-  std::cerr << "> configImage.size() = " << config_data.configImage.size() << std::endl;
+
+  {
+    std::stringstream ss;
+    ss << "configImage.size() = " << config_data.configImage.size();
+    RLS_LOG("GPU_HW", "{}", ss.str());
+  }
+
   CUpti_Profiler_SetConfig_Params setConfigParams = {CUpti_Profiler_SetConfig_Params_STRUCT_SIZE};
   setConfigParams.pConfig = &config_data.configImage[0];
   setConfigParams.configSize = config_data.configImage.size();
@@ -388,6 +408,10 @@ MyStatus CUPTIProfilerState::_InitConfig(ConfigData& config_data) {
 
 MyStatus CUPTIProfilerState::StartProfiling(ConfigData& config_data, CounterData& counter_data) {
   MyStatus ret = MyStatus::OK();
+
+  // Already called this; fail fast to avoid weird CUPTI errors.
+  assert(!_profiler_running);
+  assert(!_pass_running);
 
   CUpti_ProfilerReplayMode profilerReplayMode = CUPTI_UserReplay;
   CUpti_ProfilerRange profilerRange = CUPTI_UserRange;
@@ -412,22 +436,23 @@ MyStatus CUPTIProfilerState::StartProfiling(ConfigData& config_data, CounterData
   ret = _InitConfig(config_data);
   IF_BAD_STATUS_RETURN(ret);
 
-  CUpti_Profiler_EnableProfiling_Params enableProfilingParams = {CUpti_Profiler_EnableProfiling_Params_STRUCT_SIZE};
-  CUPTI_API_CALL_MAYBE_STATUS(cuptiProfilerEnableProfiling(&enableProfilingParams));
+  _profiler_running = true;
 
   return MyStatus::OK();
 }
 
 MyStatus CUPTIProfilerState::StopProfiling(ConfigData& config_data, CounterData& counter_data) {
-
-  CUpti_Profiler_DisableProfiling_Params disableProfilingParams = {CUpti_Profiler_DisableProfiling_Params_STRUCT_SIZE};
-  CUPTI_API_CALL_MAYBE_STATUS(cuptiProfilerDisableProfiling(&disableProfilingParams));
+  if (!_profiler_running) {
+    return MyStatus::OK();
+  }
 
   CUpti_Profiler_UnsetConfig_Params unsetConfigParams = {CUpti_Profiler_UnsetConfig_Params_STRUCT_SIZE};
   CUPTI_API_CALL_MAYBE_STATUS(cuptiProfilerUnsetConfig(&unsetConfigParams));
 
   CUpti_Profiler_EndSession_Params endSessionParams = {CUpti_Profiler_EndSession_Params_STRUCT_SIZE};
   CUPTI_API_CALL_MAYBE_STATUS(cuptiProfilerEndSession(&endSessionParams));
+
+  _profiler_running = false;
 
   return MyStatus::OK();
 }
@@ -438,22 +463,37 @@ bool CUPTIProfilerState::HasNextPass() const {
 
 MyStatus CUPTIProfilerState::StartPass(ConfigData& config_data) {
   MyStatus ret = MyStatus::OK();
+  assert(!_pass_running);
+  _pass_running = true;
 
   CUpti_Profiler_BeginPass_Params beginPassParamsLocal = {CUpti_Profiler_BeginPass_Params_STRUCT_SIZE};
   CUPTI_API_CALL_MAYBE_STATUS(cuptiProfilerBeginPass(&beginPassParamsLocal));
+
+  CUpti_Profiler_EnableProfiling_Params enableProfilingParams = {CUpti_Profiler_EnableProfiling_Params_STRUCT_SIZE};
+  CUPTI_API_CALL_MAYBE_STATUS(cuptiProfilerEnableProfiling(&enableProfilingParams));
 
   return MyStatus::OK();
 }
 
 MyStatus CUPTIProfilerState::EndPass() {
+  if (!_pass_running || !_profiler_running) {
+    return MyStatus::OK();
+  }
+
+  CUpti_Profiler_DisableProfiling_Params disableProfilingParams = {CUpti_Profiler_DisableProfiling_Params_STRUCT_SIZE};
+  CUPTI_API_CALL_MAYBE_STATUS(cuptiProfilerDisableProfiling(&disableProfilingParams));
+
   CUpti_Profiler_EndPass_Params endPassParamsLocal = {CUpti_Profiler_EndPass_Params_STRUCT_SIZE};
   CUPTI_API_CALL_MAYBE_STATUS(cuptiProfilerEndPass(&endPassParamsLocal));
   _endPassParams_allPassesSubmitted = endPassParamsLocal.allPassesSubmitted;
+
+  _pass_running = false;
 
   return MyStatus::OK();
 }
 
 MyStatus CUPTIProfilerState::Flush(ConfigData &config_data, CounterData &counter_data) {
+  LOG_FUNC_ENTRY();
   // Flush counters to counter-data.
   CUpti_Profiler_FlushCounterData_Params flushCounterDataParams = {CUpti_Profiler_FlushCounterData_Params_STRUCT_SIZE};
   CUPTI_API_CALL_MAYBE_STATUS(cuptiProfilerFlushCounterData(&flushCounterDataParams));
@@ -574,8 +614,15 @@ GPUHwCounterSampler::~GPUHwCounterSampler() {
   // - multi-context (single process) GPU workload
   //   My guess: N times for N threads
   //   ... lets just not bother with this scenario ...
-  CUpti_Profiler_DeInitialize_Params profilerDeInitializeParams = {CUpti_Profiler_DeInitialize_Params_STRUCT_SIZE};
-  CUPTI_API_CALL_MAYBE_EXIT(cuptiProfilerDeInitialize(&profilerDeInitializeParams));
+//  if (!RLS_GPU_HW_SKIP_PROF_API) {
+    CUpti_Profiler_DeInitialize_Params profilerDeInitializeParams = {CUpti_Profiler_DeInitialize_Params_STRUCT_SIZE};
+    CUPTI_API_CALL_MAYBE_EXIT(cuptiProfilerDeInitialize(&profilerDeInitializeParams));
+//  }
+
+  if (_context != nullptr) {
+    cuCtxDestroy(_context);
+    _context = nullptr;
+  }
 }
 
 MyStatus GetGPUChipName(int device, std::string* chip_name) {
@@ -589,6 +636,17 @@ MyStatus GetGPUChipName(int device, std::string* chip_name) {
 }
 
 MyStatus GPUHwCounterSampler::Init() {
+  LOG_FUNC_ENTRY();
+  assert(_device != -1);
+  if (_initialized_device == _device) {
+    // We've already initialized profiling for this device.
+    if (SHOULD_DEBUG(FEATURE_GPU_HW)) {
+      DBG_LOG("SKIP: GPUHwCounterSampler already initialized with device={}, dir={}",
+              _device,
+              _directory);
+    }
+    return MyStatus::OK();
+  }
   if (!_enabled) {
     return MyStatus::OK();
   }
@@ -600,11 +658,25 @@ MyStatus GPUHwCounterSampler::Init() {
     CUresult cu_ret = cuDeviceGetCount(&deviceCount);
     if (cu_ret == CUDA_ERROR_NOT_INITIALIZED) {
       // cuInit(0) hasn't been called yet; call it so we can make CUDA API calls.
+      RLS_LOG("GPU_HW", "Initializing CUDA driver API with cuInit(0)", _device);
       DRIVER_API_CALL_MAYBE_STATUS(cuInit(0));
     } else {
       // cuDeviceGetCount failed with an error we don't know how to handle...
       // Call it again to report the error:
       DRIVER_API_CALL_MAYBE_STATUS(cuDeviceGetCount(&deviceCount));
+    }
+  }
+
+  {
+    // CUcontext _context = nullptr;
+    // FAILS during api.set_metadata with initialization error (3)
+    DRIVER_API_CALL_MAYBE_STATUS(cuCtxGetCurrent(&_context));
+    if (_context == nullptr) {
+      std::stringstream ss;
+      RLS_LOG("GPU_HW", "Created CUDA context for device={} since it didn't already exist", _device);
+      DRIVER_API_CALL_MAYBE_STATUS(cuCtxCreate(&_context, 0, _device));
+//      ss << "GPUHwCounterSampler: no CUDA context has been created yet";
+//      return MyStatus(error::INVALID_ARGUMENT, ss.str());
     }
   }
 
@@ -617,27 +689,51 @@ MyStatus GPUHwCounterSampler::Init() {
 //    CUdevice cuDevice;
 //    DRIVER_API_CALL_MAYBE_STATUS(cuDeviceGet(&cuDevice, _device));
 
-  CUpti_Profiler_Initialize_Params profilerInitializeParams = {CUpti_Profiler_Initialize_Params_STRUCT_SIZE};
-  CUPTI_API_CALL_MAYBE_STATUS(cuptiProfilerInitialize(&profilerInitializeParams));
-  ret = GetGPUChipName(_device, &_chip_name);
-  IF_BAD_STATUS_RETURN(ret);
+//  if (!RLS_GPU_HW_SKIP_PROF_API) {
+    CUpti_Profiler_Initialize_Params profilerInitializeParams = {CUpti_Profiler_Initialize_Params_STRUCT_SIZE};
+    CUPTI_API_CALL_MAYBE_STATUS(cuptiProfilerInitialize(&profilerInitializeParams));
+    ret = GetGPUChipName(_device, &_chip_name);
+    IF_BAD_STATUS_RETURN(ret);
 
-  /* Generate configuration for metrics, this can also be done offline*/
-  NVPW_InitializeHost_Params initializeHostParams = { NVPW_InitializeHost_Params_STRUCT_SIZE };
-  NVPW_API_CALL_MAYBE_STATUS(NVPW_InitializeHost(&initializeHostParams));
+    /* Generate configuration for metrics, this can also be done offline*/
+    NVPW_InitializeHost_Params initializeHostParams = {NVPW_InitializeHost_Params_STRUCT_SIZE};
+    NVPW_API_CALL_MAYBE_STATUS(NVPW_InitializeHost(&initializeHostParams));
+//  }
 
   _initialized = true;
+  _initialized_device = _device;
 
   return MyStatus::OK();
 }
 
+const char* GPUHwCounterSampler::ModeString(GPUHwCounterSamplerMode mode) {
+  switch (mode) {
+    case PROFILE:
+      return "PROFILE";
+    case CONFIG:
+      return "CONFIG";
+    case EVAL:
+      return "EVAL";
+    default:
+      assert(false);
+      return "";
+  }
+}
+
 MyStatus GPUHwCounterSampler::Push(const std::string &operation) {
+  // LOG_FUNC_ENTRY();
   MyStatus status = MyStatus::OK();
-  if (!_enabled) {
+  if (!_enabled || !_running_pass) {
     return MyStatus::OK();
   }
+
+#ifdef CONFIG_CHECK_PROF_BUFFER_OVERFLOW
+  _Check();
+#endif
+
   status = _CheckInitialized(__FILE__, __LINE__, __FUNCTION__);
   IF_BAD_STATUS_RETURN(status);
+
   bool allow_insert = (_mode == CONFIG);
   bool would_insert = _range_tree.Push(operation, allow_insert);
   if (!allow_insert && would_insert) {
@@ -646,43 +742,57 @@ MyStatus GPUHwCounterSampler::Push(const std::string &operation) {
     _range_tree.PrintStack(ss, 1, _range_tree.CurStack());
     ss << "\n";
     ss << "Stacks seen during configuration passes:\n";
-    size_t i = 0;
-    _range_tree.EachStackSeen([&i, &ss, this] (const RangeTree::Stack& stack) {
-      PrintIndent(ss, 1);
-      ss << (i + 1) << ": ";
-      _range_tree.PrintStack(ss, 0, stack);
-      ss << "\n";
-      i += 1;
-    });
-    PrintIndent(ss, 1);
-    ss << "Saw " << i << " stacks in total.";
+    _range_tree.PrintStacks(ss, 1);
     return MyStatus(error::INVALID_ARGUMENT, ss.str());
   }
-  if (_mode == PROFILE) {
-    CUpti_Profiler_PushRange_Params pushRangeParams = {CUpti_Profiler_PushRange_Params_STRUCT_SIZE};
-    pushRangeParams.pRangeName = operation.c_str();
-    pushRangeParams.rangeNameLength = operation.size();
-    CUPTI_API_CALL_MAYBE_STATUS(cuptiProfilerPushRange(&pushRangeParams));
+
+  if (SHOULD_DEBUG(FEATURE_GPU_HW)) {
+    std::stringstream ss;
+    const char* mode_str = GPUHwCounterSampler::ModeString(_mode);
+    ss << "mode=" << mode_str << ", ";
+    ss << "Push: operation =\"" << operation << "\"";
+    RLS_LOG("GPU_HW", "{}", ss.str());
   }
+
+  if (_mode == PROFILE) {
+    if (!RLS_GPU_HW_SKIP_PROF_API) {
+      CUpti_Profiler_PushRange_Params pushRangeParams = {CUpti_Profiler_PushRange_Params_STRUCT_SIZE};
+      pushRangeParams.pRangeName = operation.c_str();
+       pushRangeParams.rangeNameLength = operation.size();
+      // assert(pushRangeParams.pRangeName[pushRangeParams.rangeNameLength] == '\0');
+      assert(pushRangeParams.pRangeName[operation.size()] == '\0');
+      CUPTI_API_CALL_MAYBE_STATUS(cuptiProfilerPushRange(&pushRangeParams));
+    }
+  }
+
   return MyStatus::OK();
 }
 
 MyStatus GPUHwCounterSampler::Pop() {
+  // LOG_FUNC_ENTRY();
   MyStatus status = MyStatus::OK();
-  if (!_enabled) {
+  if (!_enabled || !_running_pass) {
     return MyStatus::OK();
   }
   status = _CheckInitialized(__FILE__, __LINE__, __FUNCTION__);
   IF_BAD_STATUS_RETURN(status);
   _range_tree.Pop();
   if (_mode == PROFILE) {
-    CUpti_Profiler_PopRange_Params popRangeParams = {CUpti_Profiler_PopRange_Params_STRUCT_SIZE};
-    CUPTI_API_CALL_MAYBE_STATUS(cuptiProfilerPopRange(&popRangeParams));
+    if (!RLS_GPU_HW_SKIP_PROF_API) {
+      CUpti_Profiler_PopRange_Params popRangeParams = {CUpti_Profiler_PopRange_Params_STRUCT_SIZE};
+      CUPTI_API_CALL_MAYBE_STATUS(cuptiProfilerPopRange(&popRangeParams));
+    }
   }
+
+#ifdef CONFIG_CHECK_PROF_BUFFER_OVERFLOW
+  _Check();
+#endif
+
   return MyStatus::OK();
 }
 
 MyStatus GPUHwCounterSampler::Disable() {
+  LOG_FUNC_ENTRY();
   _enabled = false;
   return MyStatus::OK();
 }
@@ -698,6 +808,7 @@ MyStatus GPUHwCounterSampler::_CheckInitialized(const char* file, int lineno, co
   return MyStatus::OK();
 }
 MyStatus GPUHwCounterSampler::StartConfig(const std::vector<std::string>& metrics) {
+  LOG_FUNC_ENTRY();
   MyStatus status = MyStatus::OK();
   if (!_enabled) {
     return MyStatus::OK();
@@ -748,6 +859,7 @@ MyStatus GPUHwCounterSampler::CheckCUPTIProfilingAPISupported() {
   return MyStatus::OK();
 }
 MyStatus GPUHwCounterSampler::StartProfiling() {
+  LOG_FUNC_ENTRY();
   MyStatus status = MyStatus::OK();
   if (!_enabled) {
     return MyStatus::OK();
@@ -757,11 +869,34 @@ MyStatus GPUHwCounterSampler::StartProfiling() {
   MyStatus ret = MyStatus::OK();
   _mode = PROFILE;
 
+  if (SHOULD_DEBUG(FEATURE_GPU_HW)) {
+    std::stringstream ss;
+    ss << "GPU HW configuration:"
+       << std::endl << "  MaxNestingLevels = " << MaxNestingLevels()
+       << std::endl << "  MaxUniqueRanges = " << MaxUniqueRanges()
+       << std::endl << "  NumPasses = " << NumPasses();
+    RLS_LOG("GPU_HW", "{}", ss.str());
+  }
+
+  if (MaxNestingLevels() == 0 || MaxUniqueRanges() == 0) {
+    std::stringstream ss;
+    ss << "Didn't see any operation annotations " <<
+       "(MaxNestingLevels = " << MaxNestingLevels() <<
+       ", MaxUniqueRanges = " << MaxUniqueRanges() << ").";
+    ss << "\n";
+    ss << "Stacks seen during configuration passes:\n";
+    _range_tree.PrintStacks(ss, 1);
+    // RLS_LOG("GPU_HW", "{}", ss.str());
+    return MyStatus(error::INVALID_ARGUMENT, ss.str());
+  }
+
   ret = _InitSamplerState();
   IF_BAD_STATUS_RETURN(ret);
 
-  ret = profiler_state.StartProfiling(state.config_data, state.counter_data);
-  IF_BAD_STATUS_RETURN(ret);
+//  if (!RLS_GPU_HW_SKIP_PROF_API) {
+    ret = profiler_state.StartProfiling(state.config_data, state.counter_data);
+    IF_BAD_STATUS_RETURN(ret);
+//  }
 
   return MyStatus::OK();
 }
@@ -769,33 +904,39 @@ MyStatus GPUHwCounterSampler::_InitSamplerState() {
   MyStatus ret = MyStatus::OK();
 //    _pass_idx = 0;
   if (MaxNestingLevels() == 0) {
-    std::cerr << "WARNING: did you forget to call StartConfig()? MaxNestingLevels() == " << MaxNestingLevels() << std::endl;
+    std::stringstream ss;
+    ss << "WARNING: did you forget to call StartConfig()? MaxNestingLevels() == " << MaxNestingLevels();
+    RLS_LOG("GPU_HW", "{}", ss.str());
   }
   if (MaxUniqueRanges() == 0) {
-    std::cerr << "WARNING: did you forget to call StartConfig()? MaxUniqueRanges() == " << MaxUniqueRanges() << std::endl;
+    std::stringstream ss;
+    ss << "WARNING: did you forget to call StartConfig()? MaxUniqueRanges() == " << MaxUniqueRanges();
+    RLS_LOG("GPU_HW", "{}", ss.str());
   }
 
-  profiler_state = CUPTIProfilerState(/*counter_data_max_num_ranges=*/UseMaxUniqueRanges());
+//  if (!RLS_GPU_HW_SKIP_PROF_API) {
+    profiler_state = CUPTIProfilerState(/*counter_data_max_num_ranges=*/UseMaxUniqueRanges());
 
-  state.directory = _directory;
-  assert(_metrics.size() > 0);
+    state.directory = _directory;
+    assert(_metrics.size() > 0);
 
-  state.config_data = ConfigData(
-      _chip_name,
-      _metrics,
-      /*counter_data_max_num_nesting_levels*/UseMaxNestingLevels());
-  ret = state.config_data.Init();
-  IF_BAD_STATUS_RETURN(ret);
+    state.config_data = ConfigData(
+        _chip_name,
+        _metrics,
+        /*counter_data_max_num_nesting_levels*/UseMaxNestingLevels());
+    ret = state.config_data.Init();
+    IF_BAD_STATUS_RETURN(ret);
 
-  state.counter_data = CounterData(
-      _chip_name,
-      _metrics,
-      /*counter_data_max_num_ranges=*/UseMaxUniqueRanges());
-  ret = state.counter_data.Init();
-  IF_BAD_STATUS_RETURN(ret);
+    state.counter_data = CounterData(
+        _chip_name,
+        _metrics,
+        /*counter_data_max_num_ranges=*/UseMaxUniqueRanges());
+    ret = state.counter_data.Init();
+    IF_BAD_STATUS_RETURN(ret);
 
-  ret = _NextSamplerState();
-  IF_BAD_STATUS_RETURN(ret);
+    ret = _NextSamplerState();
+    IF_BAD_STATUS_RETURN(ret);
+//  }
 
   return MyStatus::OK();
 }
@@ -825,7 +966,9 @@ MyStatus GPUHwCounterSamplerProtoState::DumpSync() {
     ss << "Failed to dump " << path << " : " << strerror(errno);
     return MyStatus(error::INVALID_ARGUMENT, ss.str());
   }
-  DBG_LOG("Dumped {}", path);
+  if (SHOULD_DEBUG(FEATURE_GPU_HW)) {
+    RLS_LOG("GPU_HW", "Dumped {}", path);
+  }
   return MyStatus::OK();
 }
 
@@ -836,27 +979,33 @@ MyStatus GPUHwCounterSampler::_MaybeRecordSample(bool* recorded) {
     return MyStatus::OK();
   }
 
-  ret = profiler_state.Flush(state.config_data, state.counter_data);
-  IF_BAD_STATUS_RETURN(ret);
-  // Record timestamp before or after flush?  Lets go with after.
-  state.stop_profiling_t = rlscope::get_timestamp_us();
+//  if (!RLS_GPU_HW_SKIP_PROF_API) {
+    ret = profiler_state.Flush(state.config_data, state.counter_data);
+    IF_BAD_STATUS_RETURN(ret);
+//  }
 
-  {
-    // NOTE: explicitly COPY the configImage buffer, leaving the original in-place so that future
-    // passes for future samples can re-use it.  I found that attempting to reallocate/reconfigure
-    // configImage buffer led to CUPTI errors. See CUPTIProfilerState::_InitConfig for details.
-    std::unique_ptr<GPUHwCounterSamplerState> sample(new GPUHwCounterSamplerState);
-    *sample = state;
-    _size_bytes += sample->size_bytes();
-    _samples.push_back(std::move(sample));
+  if (!RLS_GPU_HW_SKIP_PROF_API) {
+    // Record timestamp before or after flush?  Lets go with after.
+    state.stop_profiling_t = rlscope::get_timestamp_us();
+
+    {
+      // NOTE: explicitly COPY the configImage buffer, leaving the original in-place so that future
+      // passes for future samples can re-use it.  I found that attempting to reallocate/reconfigure
+      // configImage buffer led to CUPTI errors. See CUPTIProfilerState::_InitConfig for details.
+      std::unique_ptr<GPUHwCounterSamplerState> sample(new GPUHwCounterSamplerState);
+      *sample = state;
+      _size_bytes += sample->size_bytes();
+      _samples.push_back(std::move(sample));
+    }
+
+    *recorded = true;
   }
-
-  *recorded = true;
   return MyStatus::OK();
 }
 
 
 MyStatus GPUHwCounterSampler::StopProfiling() {
+  LOG_FUNC_ENTRY();
   MyStatus status = MyStatus::OK();
   if (!_enabled) {
     return MyStatus::OK();
@@ -864,6 +1013,11 @@ MyStatus GPUHwCounterSampler::StopProfiling() {
   status = _CheckInitialized(__FILE__, __LINE__, __FUNCTION__);
   IF_BAD_STATUS_RETURN(status);
   MyStatus ret = MyStatus::OK();
+
+  if (_running_pass) {
+    ret = EndPass();
+    IF_BAD_STATUS_RETURN(ret);
+  }
 
   if (CanRecord()) {
     ret = RecordSample();
@@ -879,13 +1033,16 @@ MyStatus GPUHwCounterSampler::StopProfiling() {
   IF_BAD_STATUS_RETURN(ret);
 
   if (_pass_idx > 0) {
-    std::cerr << "WARNING: GPU hw counter didn't run for enough passes so the last sample will be discarded; "
-              << "only ran for " << (_pass_idx + 1) << " passes but likely needed at least " << UseMaxUniqueRanges()
-              << std::endl;
+    std::stringstream ss;
+    ss << "WARNING: GPU hw counter didn't run for enough passes so the last sample will be discarded; "
+       << "only ran for " << (_pass_idx + 1) << " passes but likely needed at least " << UseMaxUniqueRanges();
+    RLS_LOG("GPU_HW", "{}", ss.str());
   }
 
-  ret = profiler_state.StopProfiling(state.config_data, state.counter_data);
-  IF_BAD_STATUS_RETURN(ret);
+//  if (!RLS_GPU_HW_SKIP_PROF_API) {
+    ret = profiler_state.StopProfiling(state.config_data, state.counter_data);
+    IF_BAD_STATUS_RETURN(ret);
+//  }
 
   return MyStatus::OK();
 }
@@ -924,8 +1081,9 @@ bool GPUHwCounterSampler::ShouldDump() const {
   return CanDump() && this->size_bytes() >= GPUHwCounterSampler::MaxSampleFileSizeBytes;
 }
 MyStatus GPUHwCounterSampler::StartPass() {
+  LOG_FUNC_ENTRY();
   MyStatus status = MyStatus::OK();
-  if (!_enabled) {
+  if (!_enabled || !HasNextPass()) {
     return MyStatus::OK();
   }
   status = _CheckInitialized(__FILE__, __LINE__, __FUNCTION__);
@@ -934,15 +1092,19 @@ MyStatus GPUHwCounterSampler::StartPass() {
   MyStatus ret = MyStatus::OK();
   if (_mode == PROFILE) {
 
-    ret = profiler_state.StartPass(state.config_data);
-    IF_BAD_STATUS_RETURN(ret);
+//    if (!RLS_GPU_HW_SKIP_PROF_API) {
+      ret = profiler_state.StartPass(state.config_data);
+      IF_BAD_STATUS_RETURN(ret);
+//    }
 
   }
+  _running_pass = true;
   return MyStatus::OK();
 }
 MyStatus GPUHwCounterSampler::EndPass() {
+  LOG_FUNC_ENTRY();
   MyStatus status = MyStatus::OK();
-  if (!_enabled) {
+  if (!_enabled || !_running_pass) {
     return MyStatus::OK();
   }
   status = _CheckInitialized(__FILE__, __LINE__, __FUNCTION__);
@@ -952,20 +1114,34 @@ MyStatus GPUHwCounterSampler::EndPass() {
 
   if (_mode == PROFILE) {
     _pass_idx += 1;
+    // GOAL: if we try to run too many passes, then just "turn off" GPU HW sampler.
     assert(_pass_idx <= this->NumPasses());
-    size_t num_ranges_collected = 0;
-    ret = state.counter_data.getNumRangeCollected(&num_ranges_collected);
-    IF_BAD_STATUS_RETURN(ret);
 
-    std::cout << "After pass " << _pass_idx << ":" << std::endl
-              << "  total_num_ranges_collected = " << num_ranges_collected << std::endl;
-//              << "  increase in total_num_ranges_collected since last pass = " << (num_ranges_collected - last_num_ranges_collected) << std::endl;
+    if (!RLS_GPU_HW_SKIP_PROF_API) {
+      if (SHOULD_DEBUG(FEATURE_GPU_HW)) {
+        size_t num_ranges_collected = 0;
+        ret = state.counter_data.getNumRangeCollected(&num_ranges_collected);
+        IF_BAD_STATUS_RETURN(ret);
 
-    ret = profiler_state.EndPass();
-    IF_BAD_STATUS_RETURN(ret);
+        std::stringstream ss;
+        ss << "After pass " << _pass_idx << ":"
+           << std::endl << "  total_num_ranges_collected = " << num_ranges_collected;
+        // << std::endl << "  increase in total_num_ranges_collected since last pass = " << (num_ranges_collected - last_num_ranges_collected);
+        RLS_LOG("GPU_HW", "{}", ss.str());
+      }
+    }
 
+//    if (!RLS_GPU_HW_SKIP_PROF_API) {
+      ret = profiler_state.EndPass();
+      IF_BAD_STATUS_RETURN(ret);
+//    }
 
   }
+  _running_pass = false;
+
+#ifdef CONFIG_CHECK_PROF_BUFFER_OVERFLOW
+  _Check();
+#endif
 
   return MyStatus::OK();
 }
@@ -992,12 +1168,14 @@ MyStatus GPUHwCounterSampler::_DumpSync() {
   return MyStatus::OK();
 }
 MyStatus GPUHwCounterSampler::DumpSync() {
+  LOG_FUNC_ENTRY();
   if (!_enabled) {
     return MyStatus::OK();
   }
   return _Dump(/*sync=*/true);
 }
 MyStatus GPUHwCounterSampler::DumpAsync() {
+  LOG_FUNC_ENTRY();
   if (!_enabled) {
     return MyStatus::OK();
   }
@@ -1059,8 +1237,9 @@ std::unique_ptr<iml::GPUHwCounterSampleProto> GPUHwCounterSamplerProtoState::AsP
 }
 
 MyStatus GPUHwCounterSampler::RecordSample() {
+  LOG_FUNC_ENTRY();
   MyStatus status = MyStatus::OK();
-  if (!_enabled) {
+  if (!_enabled || RLS_GPU_HW_SKIP_PROF_API) {
     return MyStatus::OK();
   }
   status = _CheckInitialized(__FILE__, __LINE__, __FUNCTION__);
@@ -1147,9 +1326,15 @@ MyStatus GPUHwCounterSampler::PrintCSV(std::ostream &out, bool& printed_header) 
   });
   IF_BAD_STATUS_RETURN(ret);
 
-
-  for (const auto& path : paths) {
-    DBG_LOG("path = {}", path);
+  {
+    std::stringstream ss;
+    ss << "GPU HW trace files:";
+    for (const auto& path : paths) {
+      ss << std::endl;
+      PrintIndent(ss, 1);
+      ss << path;
+    }
+    RLS_INFO("GPU_HW", "{}", ss.str());
   }
 
   for (const auto& path : paths) {
@@ -1163,7 +1348,7 @@ MyStatus GPUHwCounterSampler::PrintCSV(std::ostream &out, bool& printed_header) 
       }
     }
     // TODO: port metric printing code to print metrics using counter and config data images.
-    DBG_LOG("path = {}", path);
+    // DBG_LOG("path = {}", path);
     ret = this->PrintCSV(out, proto, printed_header);
     IF_BAD_STATUS_RETURN(ret);
   }
@@ -1175,7 +1360,6 @@ const std::regex GPUHwCounterSampler::FilenameRegex(R"(^GPUHwCounterSampleProto\
 bool GPUHwCounterSampler::IsProtoFile(const boost::filesystem::path& path) {
   std::smatch match;
   return std::regex_search(path.filename().string(), match, FilenameRegex);
-  return false;
 }
 
 
@@ -1257,6 +1441,7 @@ void RangeTree::_UpdateStatsOnPush(bool was_insert) {
 }
 
 void RangeTree::_UpdateStatsOnPop() {
+  assert(cur_depth > 0);
   cur_depth -= 1;
 }
 
@@ -1384,6 +1569,7 @@ GPUHwCounterSamplerProtoState GPUHwCounterSampler::AsProtoState() {
 }
 
 MyStatus GPUHwCounterSampler::AwaitDump() {
+  LOG_FUNC_ENTRY();
   if (!_enabled) {
     return MyStatus::OK();
   }

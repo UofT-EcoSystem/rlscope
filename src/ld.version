@@ -16,6 +16,8 @@ SAMPLE_CUDA_API_1.0 {
     pop_operation;
     start_pass;
     end_pass;
+    has_next_pass;
+    disable_gpu_hw;
 
     /* CUDA API calls that we intercept */
     cuLaunchKernel;

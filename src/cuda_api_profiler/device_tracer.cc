@@ -209,6 +209,7 @@ class DeviceTracerImpl : public DeviceTracer {
 
   // DeviceTracer interface:
   MyStatus Start() override;
+  MyStatus DisableGpuHW() override;
   MyStatus Stop() override;
   MyStatus Print() override;
 //  MyStatus Collect() override;
@@ -223,6 +224,7 @@ class DeviceTracerImpl : public DeviceTracer {
 
   MyStatus StartPass() override;
   MyStatus EndPass() override;
+  MyStatus HasNextPass(bool* has_next_pass) override;
   MyStatus PushOperation(const char* operation) override;
   MyStatus RecordOverheadEvent(
       const char* overhead_type,
@@ -548,9 +550,17 @@ void DeviceTracerImpl::_EnableAllCUDAAPICallbacks() {
   _cupti_api->EnableDomain(/*enable=*/1, CUPTI_CB_DOMAIN_RUNTIME_API);
 }
 
+MyStatus DeviceTracerImpl::DisableGpuHW() {
+  MyStatus status = MyStatus::OK();
+  VLOG(1) << "DeviceTracer::DisableGpuHW";
+  std::unique_lock<std::mutex> l(mu_);
+  status = _hw_profiler.Disable();
+  IF_BAD_STATUS_RETURN(status);
+  return MyStatus::OK();
+}
+
 MyStatus DeviceTracerImpl::Start() {
   MyStatus status = MyStatus::OK();
-  MyStatus my_status = MyStatus::OK();
   VLOG(1) << "DeviceTracer::Start";
   std::unique_lock<std::mutex> l(mu_);
   if (VLOG_IS_ON(1)) {
@@ -609,83 +619,12 @@ MyStatus DeviceTracerImpl::Start() {
         this->_api_profiler.EnableEventRecording();
       }
 
-//      VLOG(1) << "cuptiSubscribe";
-//      ret = cuptiSubscribe(&subscriber_, static_cast<CUpti_CallbackFunc>(ApiCallback), this);
-//      if (ret == CUPTI_ERROR_MAX_LIMIT_REACHED) {
-//        VLOG(1) << "Fail 1";
-//        return errors::Unavailable("CUPTI subcriber limit reached.");
-//      } else if (ret != CUPTI_SUCCESS) {
-//        VLOG(1) << "Fail 2";
-//        const char *errstr;
-//        cuptiGetResultString(ret, &errstr);
-//        return errors::Internal("Failed to create CUPTI subcriber: ", errstr);
-//      }
-
       // Register as a TraceEngine to receive ScopedAnnotations.
       GlobalDefaultTraceCollector()->Start();
 
-      // Intercept launch and memcpy calls to capture the Op name annotation.
-      // TODO(pbar) Add callbacks for memcpy variants.
-//      if (!is_yes("IML_DISABLE", false)) {
-//        // NOTE: runtime API callbacks cause significant slow-downs.
-//        CUPTI_CALL(_cupti_api->EnableCallback(
-//            /*enable=*/1,
-//            // subscriber_,
-//                       CUPTI_CB_DOMAIN_DRIVER_API,
-//                       CUPTI_DRIVER_TRACE_CBID_cuLaunchKernel));
-////      if (!is_yes("IML_DISABLE", false)) {
-//        CUPTI_CALL(_cupti_api->EnableCallback(
-//            /*enable=*/1,
-//            // subscriber_,
-//                       CUPTI_CB_DOMAIN_RUNTIME_API,
-//                       CUPTI_RUNTIME_TRACE_CBID_cudaMemcpy_v3020));
-//        CUPTI_CALL(_cupti_api->EnableCallback(
-//            /*enable=*/1,
-//            // subscriber_,
-//                       CUPTI_CB_DOMAIN_RUNTIME_API,
-//                       CUPTI_RUNTIME_TRACE_CBID_cudaMemcpyAsync_v3020));
-//
-//        CUPTI_CALL(_cupti_api->EnableCallback(
-//            /*enable=*/1,
-//            // subscriber_,
-//                       CUPTI_CB_DOMAIN_DRIVER_API,
-//                       CUPTI_DRIVER_TRACE_CBID_cuMemcpyDtoH_v2));
-//        CUPTI_CALL(_cupti_api->EnableCallback(
-//            /*enable=*/1,
-//            // subscriber_,
-//                       CUPTI_CB_DOMAIN_DRIVER_API,
-//                       CUPTI_DRIVER_TRACE_CBID_cuMemcpyDtoHAsync_v2));
-//        CUPTI_CALL(_cupti_api->EnableCallback(
-//            /*enable=*/1,
-//            // subscriber_,
-//                       CUPTI_CB_DOMAIN_DRIVER_API,
-//                       CUPTI_DRIVER_TRACE_CBID_cuMemcpyHtoD_v2));
-//        CUPTI_CALL(_cupti_api->EnableCallback(
-//            /*enable=*/1,
-//            // subscriber_,
-//                       CUPTI_CB_DOMAIN_DRIVER_API,
-//                       CUPTI_DRIVER_TRACE_CBID_cuMemcpyHtoDAsync_v2));
-//        CUPTI_CALL(_cupti_api->EnableCallback(
-//            /*enable=*/1,
-//            // subscriber_,
-//                       CUPTI_CB_DOMAIN_DRIVER_API,
-//                       CUPTI_DRIVER_TRACE_CBID_cuMemcpyDtoD_v2));
-//        CUPTI_CALL(_cupti_api->EnableCallback(
-//            /*enable=*/1,
-//            // subscriber_,
-//                       CUPTI_CB_DOMAIN_DRIVER_API,
-//                       CUPTI_DRIVER_TRACE_CBID_cuMemcpyDtoDAsync_v2));
-//      }
-//      }
     }
 
-//    VLOG(1) << "Run EnableTrace";
-//    TF_RETURN_IF_ERROR(cupti_manager_->EnableTrace(this));
-
-//    CUPTI_CALL(cuptiGetTimestamp(&start_timestamp_));
   }
-
-//  start_walltime_us_ = NowInUsec();
 
   if (is_yes("IML_CUDA_ACTIVITIES", false)) {
     VLOG(1) << "Start CUDAActivityProfiler";
@@ -722,7 +661,6 @@ MyStatus DeviceTracerImpl::Print() {
 
 MyStatus DeviceTracerImpl::Stop() {
   MyStatus status = MyStatus::OK();
-  MyStatus my_status = MyStatus::OK();
 
   VLOG(1) << "DeviceTracer::Stop";
   std::unique_lock<std::mutex> l(mu_);
@@ -731,9 +669,8 @@ MyStatus DeviceTracerImpl::Stop() {
   SimpleTimer timer("DeviceTracerImpl.Stop");
   timer.ResetStartTime();
 
-  my_status = _hw_profiler.StopProfiling();
+  status = _hw_profiler.StopProfiling();
   timer.EndOperation("GPUHwCounterSampler.Stop");
-  status = MyStatus::FromMyStatus(my_status);
   IF_BAD_STATUS_RETURN(status);
 
   api_printer_.Stop();
@@ -755,16 +692,15 @@ MyStatus DeviceTracerImpl::Stop() {
   }
 #ifdef CONFIG_TRACE_STATS
   // VLOG(1) << "DeviceTracerImpl." << __func__ << ": GlobalDefaultTraceCollector.Stop()";
-  GlobalDefaultTraceCollector()->Stop();
-  timer.EndOperation("GlobalDefaultTraceCollector()->Stop()");
-  // VLOG(1) << "DeviceTracerImpl." << __func__ << ": GlobalDefaultTraceCollector.Stop() done";
-
-//  TF_RETURN_IF_ERROR(cupti_manager_->DisableTrace());
-//  end_walltime_us_ = NowInUsec();
-//  CUPTI_CALL(cuptiGetTimestamp(&end_timestamp_));
+  if (GlobalDefaultTraceCollector()->IsEnabledForAnnotations()) {
+    GlobalDefaultTraceCollector()->Stop();
+    timer.EndOperation("GlobalDefaultTraceCollector()->Stop()");
+  }
 #else
   CUPTI_CALL(cuptiUnsubscribe(subscriber_));
-  GlobalDefaultTraceCollector()->Stop();
+  if (GlobalDefaultTraceCollector()->IsEnabledForAnnotations()) {
+    GlobalDefaultTraceCollector()->Stop();
+  }
 
   TF_RETURN_IF_ERROR(cupti_manager_->DisableTrace());
   end_walltime_us_ = NowInUsec();
@@ -889,15 +825,13 @@ MyStatus DeviceTracerImpl::SetMetadata(const char* directory, const char* proces
 
 MyStatus DeviceTracerImpl::AsyncDump() {
   MyStatus status = MyStatus::OK();
-  MyStatus my_status = MyStatus::OK();
   std::unique_lock<std::mutex> l(mu_);
   _op_stack.AsyncDump();
   if (is_yes("IML_CUDA_ACTIVITIES", false)) {
     _activity_profiler.AsyncDump();
   }
-  if (_hw_profiler.CanDump()) {
-    my_status = _hw_profiler.DumpAsync();
-    status = MyStatus::FromMyStatus(my_status);
+  if (_hw_profiler.Enabled() && _hw_profiler.CanDump()) {
+    status = _hw_profiler.DumpAsync();
     IF_BAD_STATUS_RETURN(status);
   }
   _api_profiler.AsyncDump();
@@ -906,15 +840,13 @@ MyStatus DeviceTracerImpl::AsyncDump() {
 }
 MyStatus DeviceTracerImpl::AwaitDump() {
   MyStatus status = MyStatus::OK();
-  MyStatus my_status = MyStatus::OK();
   // Q: Do we need to grab this...?
   std::unique_lock<std::mutex> l(mu_);
   _op_stack.AwaitDump();
   if (is_yes("IML_CUDA_ACTIVITIES", false)) {
     _activity_profiler.AwaitDump();
   }
-  my_status = _hw_profiler.AwaitDump();
-  status = MyStatus::FromMyStatus(my_status);
+  status = _hw_profiler.AwaitDump();
   IF_BAD_STATUS_RETURN(status);
   _api_profiler.AwaitDump();
   _event_profiler.AwaitDump();
@@ -939,7 +871,6 @@ MyStatus DeviceTracerImpl::RecordEvent(
 
 MyStatus DeviceTracerImpl::StartPass() {
   MyStatus status = MyStatus::OK();
-  MyStatus my_status = MyStatus::OK();
 
   if (_configure_pass_index < get_IML_GPU_HW_CONFIG_PASSES(boost::none)) {
     if (_configure_pass_index == 0) {
@@ -949,32 +880,31 @@ MyStatus DeviceTracerImpl::StartPass() {
 //        PrintValue(ss, get_IML_GPU_HW_METRICS(boost::none));
 //        LOG(INFO) << ss.str();
 //      }
-      my_status = _hw_profiler.StartConfig(get_IML_GPU_HW_METRICS(boost::none));
-      status = MyStatus::FromMyStatus(my_status);
+      status = _hw_profiler.StartConfig(get_IML_GPU_HW_METRICS(boost::none));
       IF_BAD_STATUS_RETURN(status);
     }
     _configure_pass_index += 1;
   } else if (_hw_profiler.Mode() == GPUHwCounterSamplerMode::CONFIG) {
-    my_status = _hw_profiler.StartProfiling();
-    status = MyStatus::FromMyStatus(my_status);
+    std::stringstream ss;
+    ss << "call hw_profiler.StartProfiling: _configure_pass_index = " << _configure_pass_index << ", IML_GPU_HW_CONFIG_PASSES = ";
+    PrintValue(ss, get_IML_GPU_HW_METRICS(boost::none));
+    RLS_LOG("GPU_HW", "{}", ss.str());
+    status = _hw_profiler.StartProfiling();
     IF_BAD_STATUS_RETURN(status);
   }
 
-  my_status = _hw_profiler.StartPass();
-  status = MyStatus::FromMyStatus(my_status);
+  status = _hw_profiler.StartPass();
   IF_BAD_STATUS_RETURN(status);
 
   return MyStatus::OK();
 }
 MyStatus DeviceTracerImpl::EndPass() {
   MyStatus status = MyStatus::OK();
-  MyStatus my_status = MyStatus::OK();
 
   // Q: What do we do if we attempt to push an operation we HAVE NOT seen before?
   // For now, just detect and error out if it happens.
 
-  my_status = _hw_profiler.EndPass();
-  status = MyStatus::FromMyStatus(my_status);
+  status = _hw_profiler.EndPass();
   IF_BAD_STATUS_RETURN(status);
 
   if (_hw_profiler.Mode() == GPUHwCounterSamplerMode::CONFIG && _configure_pass_index < get_IML_GPU_HW_CONFIG_PASSES(boost::none)) {
@@ -983,13 +913,15 @@ MyStatus DeviceTracerImpl::EndPass() {
 
   return MyStatus::OK();
 }
+MyStatus DeviceTracerImpl::HasNextPass(bool* has_next_pass) {
+  *has_next_pass = _hw_profiler.HasNextPass();
+  return MyStatus::OK();
+}
 
 MyStatus DeviceTracerImpl::PushOperation(const char* operation) {
   MyStatus status = MyStatus::OK();
-  MyStatus my_status = MyStatus::OK();
   _op_stack.PushOperation(operation);
-  my_status = _hw_profiler.Push(operation);
-  status = MyStatus::FromMyStatus(my_status);
+  status = _hw_profiler.Push(operation);
   IF_BAD_STATUS_RETURN(status);
   return MyStatus::OK();
 }

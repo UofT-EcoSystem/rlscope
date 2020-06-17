@@ -5766,8 +5766,6 @@ class RowIterator:
         # Make it so user can ask for length of query whenever (even inside loop)
         # NOTE: hopefully this isn't expensive...
         self._rows = self._run_select(timer=timer)
-        if self.debug:
-            import ipdb; ipdb.set_trace()
         self._count = len(self._rows)
 
         if self.RowKlass is None:

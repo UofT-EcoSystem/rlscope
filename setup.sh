@@ -183,7 +183,7 @@ setup_cmake() {
 JSON_CPP_LIB_DIR="$ROOT/third_party/json"
 setup_json_cpp_library() {
 #    if [ "$FORCE" != 'yes' ] && [ -e $JSON_CPP_LIB_DIR ]; then
-    if [ "$FORCE" != 'yes' ] && glob_any "$(third_party_install_prefix "$JSON_CPP_LIB_DIR/include/nlohmann/json.hpp")"; then
+    if [ "$FORCE" != 'yes' ] && glob_any "$(third_party_install_prefix "$JSON_CPP_LIB_DIR")/include/nlohmann/json.hpp"; then
         return
     fi
     local commit="v3.4.0"
@@ -627,13 +627,13 @@ main() {
 #    _download_tensorflow_c_api
 #    _build_tensorflow_c_api
 
+    _add_LD_LIBRARY_PATH "$(_local_dir)/lib"
+    _add_PATH "$(_local_dir)/bin"
+
     if [ $# -gt 0 ]; then
         _do "$@"
         return
     fi
-
-    _add_LD_LIBRARY_PATH "$(_local_dir)/lib"
-    _add_PATH "$(_local_dir)/bin"
 
     _do setup_cmake
     _do setup_apt_packages

@@ -28,10 +28,14 @@
 namespace rlscope {
 
 // If defined, print every CUDA/CUPTI/NVPW API call to stderr.
-//#define SHOULD_PRINT_CUDA_API_CALLS
+#define SHOULD_PRINT_CUDA_API_CALLS
 
 #define DBG_LOG(fmt, ...) SPDLOG_DEBUG("pid={} @ {}: " fmt, gettid(), __func__, __VA_ARGS__)
 #define DBG_WARN(fmt, ...) SPDLOG_WARN("pid={} @ {}: " fmt, gettid(), __func__, __VA_ARGS__)
+
+#define RLS_INFO(flag_name, fmt, ...) SPDLOG_INFO("[{}] pid={} @ {}: " fmt, flag_name, gettid(), __func__, __VA_ARGS__)
+#define RLS_LOG(flag_name, fmt, ...) SPDLOG_DEBUG("[{}] pid={} @ {}: " fmt, flag_name, gettid(), __func__, __VA_ARGS__)
+#define RLS_WARN(flag_name, fmt, ...) SPDLOG_WARN("[{}] pid={} @ {}: " fmt, flag_name, gettid(), __func__, __VA_ARGS__)
 
 // NOTE: this is the only variation of bit-flags I saw the compiler successfully "optimize out" of my program.
 // Attempting to use constexpr in combination with std::bitset or even just plain uint64_t FAILS.
@@ -52,6 +56,7 @@ constexpr bool FEATURE_GPU_CLOCK_FREQ = 1;
 constexpr bool FEATURE_GPU_UTIL_CUDA_CONTEXT = 0;
 constexpr bool FEATURE_GPU_UTIL_SYNC = 0;
 constexpr bool FEATURE_GPU_UTIL_KERNEL_TIME = 0;
+constexpr bool FEATURE_GPU_HW = 1;
 constexpr bool FEATURE_ANY =
     FEATURE_OVERLAP
     || FEATURE_OVERLAP_META
@@ -62,7 +67,8 @@ constexpr bool FEATURE_ANY =
     || FEATURE_GPU_CLOCK_FREQ
     || FEATURE_GPU_UTIL_CUDA_CONTEXT
     || FEATURE_GPU_UTIL_SYNC
-    || FEATURE_GPU_UTIL_KERNEL_TIME;
+    || FEATURE_GPU_UTIL_KERNEL_TIME
+    || FEATURE_GPU_HW;
 #define SHOULD_DEBUG(feature) ((SPDLOG_ACTIVE_LEVEL <= SPDLOG_LEVEL_DEBUG) && feature)
 
 constexpr bool FEATURE_BREAKPOINT_DUMP_STACK = 0;

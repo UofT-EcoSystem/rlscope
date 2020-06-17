@@ -1718,8 +1718,6 @@ def test_grouped_xlabel():
     fig = plt.figure()
     ax = fig.add_subplot(111)
 
-    import ipdb; ipdb.set_trace()
-
     df.plot(kind='bar', stacked=True, ax=fig.gca())
     # sns.barplot(x=df[''])
 

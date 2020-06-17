@@ -175,6 +175,14 @@ RetCode RLSCOPE_EXPORT disable_tracing() {
   return status.code();
 }
 
+RetCode RLSCOPE_EXPORT disable_gpu_hw() {
+  // Disable GPU HW sampler.
+  VLOG(1) << __func__;
+  auto status = globals.device_tracer->DisableGpuHW();
+  MAYBE_LOG_ERROR(LOG(INFO), __func__, status);
+  return status.code();
+}
+
 RetCode RLSCOPE_EXPORT async_dump() {
   // Dump traces (asynchronously).
   VLOG(1) << __func__;
@@ -263,6 +271,19 @@ RetCode RLSCOPE_EXPORT end_pass() {
   MyStatus status;
   status = globals.device_tracer->EndPass();
   MAYBE_LOG_ERROR(LOG(INFO), __func__, status);
+  return status.code();
+}
+
+RetCode RLSCOPE_EXPORT has_next_pass(int* has_next_pass) {
+  VLOG(1) << __func__;
+  MyStatus status;
+  bool bool_has_next_pass = false;
+  *has_next_pass = 0;
+  status = globals.device_tracer->HasNextPass(&bool_has_next_pass);
+  MAYBE_LOG_ERROR(LOG(INFO), __func__, status);
+  if (status.ok()) {
+    *has_next_pass = static_cast<int>(bool_has_next_pass);
+  }
   return status.code();
 }
 

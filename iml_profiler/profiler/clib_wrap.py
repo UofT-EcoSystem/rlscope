@@ -612,11 +612,13 @@ def register_detected_libs():
     except ImportError:
         pass
 
-    try:
-        import tensorflow
-        register_wrap_module(wrap_tensorflow, unwrap_tensorflow)
-    except ImportError:
-        pass
+    # TODO: Looks like pywrap_tensorflow shared library object no longer exists in TensorFlow v2...
+    # Figure out where it's gone and wrap it
+    # try:
+    #     import tensorflow
+    #     register_wrap_module(wrap_tensorflow, unwrap_tensorflow)
+    # except ImportError:
+    #     pass
 
 def wrap_tensorflow(category=CATEGORY_TF_API, debug=False):
     logging.info("> IML: Wrapping module=tensorflow call with category={category} annotations".format(

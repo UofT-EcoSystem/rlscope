@@ -13,7 +13,6 @@
 #include <ctpl.h>
 #include <Eigen/Dense>
 
-#include "cuda_api_profiler/generic_logging.h"
 #include "cuda_api_profiler/defines.h"
 
 #include <assert.h>
@@ -2425,10 +2424,6 @@ public:
 
   virtual HeaderMeta ParseHeaderMeta(const RLSAnalyzeArgs& args, const std::vector<std::string>& row) const override;
   virtual MyStatus ParseRowEvent(const HeaderMeta& header_meta, const std::vector<std::string>& row, NvprofFileType::EventRow* event_row) const override;
-};
-static const std::vector<const NvprofFileType*> NVPROF_FILE_TYPES = {
-    new NvprofAPITraceFileType(),
-    new NvprofGPUTraceFileType(),
 };
 static MyStatus GetNvprofFileType(
     const std::vector<std::string>& header,

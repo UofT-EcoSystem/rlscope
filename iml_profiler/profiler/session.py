@@ -180,6 +180,15 @@ def _wrapped_BaseSession_init(self, *args, **kwargs):
     self.session_id = _get_next_session_id()
     _before_active_hooks(session=self)
     _make_active(session=self)
+
+    # import ipdb; ipdb.set_trace()
+
+    if 'config' not in kwargs:
+        # allow_soft_placement=True, log_device_placement=True
+        kwargs['config'] = tf.compat.v1.ConfigProto()
+    config = kwargs['config']
+    config.log_device_placement = True
+
     _original_BaseSession_init(self, *args, **kwargs)
     _after_active_hooks(session=self)
 

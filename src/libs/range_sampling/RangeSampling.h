@@ -23,6 +23,10 @@
 #include <boost/asio/thread_pool.hpp>
 #include <boost/asio/post.hpp>
 
+// Allocate extra 1MB on the left/right of each profiling data buffer (config data, scratch buffer, etc.).
+// Check the 1MB regions regularly for buffer overruns.
+#define CONFIG_CHECK_PROF_BUFFER_OVERFLOW
+
 namespace rlscope {
 
 struct RangeNode {
@@ -82,18 +86,175 @@ struct RangeTree {
     }
     out << "]";
   }
+  template <class OStream>
+  void PrintStacks(OStream& out, int indent) {
+    size_t i = 0;
+    this->EachStackSeen([&i, &out, indent, this] (const RangeTree::Stack& stack) {
+      PrintIndent(out, indent);
+      out << (i + 1) << ": ";
+      this->PrintStack(out, 0, stack);
+      out << "\n";
+      i += 1;
+    });
+    PrintIndent(out, indent);
+    out << "Saw " << i << " stacks in total.";
+  }
+
 
   void _UpdateStatsOnPush(bool was_insert);
 
   void _UpdateStatsOnPop();
 };
 
+template <typename T, T guard_value, size_t guard_size_bytes, T dflt_value = T()>
+struct GuardedBuffer {
+  //
+  // [  guard_size bytes  ][  buffer  ][  guard_size bytes  ]
+  //          0xbe                              0xbe
+  //
+  size_t _n_elems;
+  size_t _alloc_count;
+//  T _dflt_value;
+//  T _guard_value;
+  size_t _guard_size_elems;
+  size_t _guard_size_bytes;
+  std::vector<T> _buffer;
+
+  GuardedBuffer() {
+    _n_elems = 0;
+    _alloc_count = 0;
+    _init_bytes_and_elems();
+  }
+
+  GuardedBuffer(size_t n_elems
+      // size_t guard_size_bytes, T guard_value, T dflt_value = T()
+          )
+  {
+    _n_elems = n_elems;
+    _alloc_count = 0;
+//    _dflt_value = dflt_value;
+    size_t _alloc_count;
+//    _guard_value = guard_value;
+    _init_bytes_and_elems();
+    _init_buffer();
+  }
+
+  void _init_bytes_and_elems() {
+    _guard_size_elems = ( (guard_size_bytes + sizeof(T) - 1) / sizeof(T) );
+    _guard_size_bytes = _guard_size_elems*sizeof(T);
+  }
+
+  void _init_buffer() {
+    _buffer.resize(actual_size());
+    _alloc_count += 1;
+    if (!(_alloc_count <= 1)) {
+      std::cerr << "Saw more than one allocation of buffer (alloc_count = " << _alloc_count  << ")." << std::endl;
+      rlscope::DumpStacktrace(std::cerr, 4);
+      assert(_alloc_count <= 1);
+    }
+    // Left guard bytes = _guard_value
+    std::fill_n(_buffer.begin(), _guard_size_elems, guard_value);
+    // Usable bytes = _dflt_value
+    std::fill_n(_buffer.begin() + _guard_size_elems, _n_elems, dflt_value);
+    // Right guard bytes = _guard_value
+    std::fill_n(_buffer.begin() + _guard_size_elems + _n_elems, _guard_size_elems, guard_value);
+    // Sanity check.
+    check();
+  }
+
+  void resize(size_t n_elems) {
+    _n_elems = n_elems;
+    _init_buffer();
+  }
+
+  // Return USABLE data (don't include left/right guard bytes)
+  inline size_t size() const {
+    return _n_elems;
+  }
+
+  // INCLUDE guard bytes.
+  inline size_t actual_size() const {
+    return _guard_size_elems*2 + _n_elems;
+  }
+
+  inline void check_i(size_t i) const {
+    if (_buffer[i] != guard_value) {
+      std::cerr << "Saw corrupted data in buffer "
+                << "(usable size = " << _n_elems*sizeof(T)
+                << ", left/right guard bytes = " << _guard_size_bytes << ")." << std::endl;
+      const char* location = nullptr;
+      const char* offset_sign = nullptr;
+      size_t array_offset = 0;
+      if (i < _guard_size_bytes) {
+        location = "[left buffer guard]";
+        array_offset = _guard_size_elems - i;
+        offset_sign = "-";
+      } else if (i < _guard_size_bytes + _n_elems) {
+        // Shouldn't be checking usable area.
+        assert(false);
+      } else {
+        location = "[right buffer guard]";
+        array_offset = i - (_guard_size_bytes + _n_elems);
+        offset_sign = "+";
+      }
+      std::cerr << "  Buffer offset ('+' = beyond end, '-' = before start): "
+                << location << " " << offset_sign << array_offset << std::endl;
+      rlscope::DumpStacktrace(std::cerr, 4);
+      assert(_buffer[i] == guard_value);
+    }
+  }
+
+  void check() const {
+    if (_buffer.size() == 0) {
+      // Default constructed buffer; hasn't been resize()ed yet.
+      return;
+    }
+    // Left guard bytes.
+    for (size_t i = 0; i < _guard_size_elems; i++) {
+      check_i(i);
+    }
+    // Right guard bytes.
+    for (size_t i = _guard_size_elems + _n_elems; i < _guard_size_elems; i++) {
+      check_i(i);
+    }
+  }
+
+  // Return USABLE data (don't include left/right guard bytes)
+  inline const T* data() const {
+    return _buffer.data() + _guard_size_elems;
+  }
+  inline T* data() {
+    return _buffer.data() + _guard_size_elems;
+  }
+  T& operator[](size_t i) {
+    assert(i >= 0);
+    assert(i < _n_elems);
+    return _buffer[i + _guard_size_elems];
+  }
+  const T& operator[](size_t i) const {
+    assert(i >= 0);
+    assert(i < _n_elems);
+    return _buffer[i + _guard_size_elems];
+  }
+
+};
+#define KB_BYTES (1024)
+#define MB_BYTES (1024*KB_BYTES)
+#define GUARD_BYTE (0xbe)
+using GuardedByteBuffer = GuardedBuffer<uint8_t, GUARD_BYTE, MB_BYTES>;
+
+#ifdef CONFIG_CHECK_PROF_BUFFER_OVERFLOW
+using ProfilingByteBuffer = GuardedByteBuffer;
+#else
+//using ProfilingByteBuffer = std::vector<uint8_t>;
+#endif // CONFIG_CHECK_PROF_BUFFER_OVERFLOW
+
 struct ConfigData {
   std::string chipName;
   std::vector<std::string> metricNames;
   uint16_t counter_data_max_num_nesting_levels;
 
-  std::vector<uint8_t> configImage;
+  ProfilingByteBuffer configImage;
 
   ConfigData() :
       counter_data_max_num_nesting_levels(0) {
@@ -128,6 +289,12 @@ struct ConfigData {
     return configImage.size();
   }
 
+#ifdef CONFIG_CHECK_PROF_BUFFER_OVERFLOW
+  void _Check() const {
+    configImage.check();
+  }
+#endif
+
 };
 
 struct CounterData {
@@ -135,9 +302,9 @@ struct CounterData {
   std::vector<std::string> metricNames;
   uint32_t counter_data_max_num_ranges;
 
-  std::vector<uint8_t> counterDataImage;
-  std::vector<uint8_t> counterDataScratchBuffer;
-  std::vector<uint8_t> counterDataImagePrefix;
+  ProfilingByteBuffer counterDataImage;
+  ProfilingByteBuffer counterDataScratchBuffer;
+  ProfilingByteBuffer counterDataImagePrefix;
 
   CounterData() :
       counter_data_max_num_ranges(0) {
@@ -163,20 +330,37 @@ struct CounterData {
 
   MyStatus getNumRangeCollected(size_t *numRanges) const;
 
+#ifdef CONFIG_CHECK_PROF_BUFFER_OVERFLOW
+  void _Check() const {
+    counterDataImage.check();
+    counterDataScratchBuffer.check();
+    counterDataImagePrefix.check();
+  }
+#endif
+
 };
 
 struct CUPTIProfilerState {
   size_t counter_data_max_num_ranges;
 
   bool _endPassParams_allPassesSubmitted;
+  bool _profiler_running;
+  bool _pass_running;
 
   CUPTIProfilerState() :
-      counter_data_max_num_ranges(0),
-      _endPassParams_allPassesSubmitted(false) {
+      counter_data_max_num_ranges(0) {
+    _ConstructorInit();
   }
 
   CUPTIProfilerState(size_t counter_data_max_num_ranges) :
       counter_data_max_num_ranges(counter_data_max_num_ranges) {
+    _ConstructorInit();
+  }
+
+  void _ConstructorInit() {
+    _endPassParams_allPassesSubmitted = false;
+    _profiler_running = false;
+    _pass_running = false;
   }
 
   bool HasNextPass() const;
@@ -215,6 +399,12 @@ struct GPUHwCounterSamplerState {
     return config_data.size_bytes() + counter_data.size_bytes();
   }
 
+#ifdef CONFIG_CHECK_PROF_BUFFER_OVERFLOW
+  void _Check() const {
+    config_data._Check();
+    counter_data._Check();
+  }
+#endif
 
 };
 
@@ -261,6 +451,8 @@ public:
 
   static const size_t MaxSampleFileSizeBytes;
 
+  static const char* ModeString(GPUHwCounterSamplerMode mode);
+
   int _device;
   GPUHwCounterSamplerMode _mode;
   std::string _directory;
@@ -285,12 +477,17 @@ public:
 //    uint64_t trace_id;
   uint64_t _next_trace_id;
   bool _initialized;
+  int _initialized_device;
+  bool RLS_GPU_HW_SKIP_PROF_API;
 
   boost::asio::thread_pool _pool{4};
 
   size_t _size_bytes;
 
   bool _enabled;
+  bool _running_pass;
+
+  CUcontext _context;
 
   GPUHwCounterSampler() {
     _device = -1;
@@ -309,8 +506,12 @@ public:
     _pass_idx = 0;
     _next_trace_id = 0;
     _initialized = false;
+    _initialized_device = -1;
+    RLS_GPU_HW_SKIP_PROF_API = is_yes("RLS_GPU_HW_SKIP_PROF_API", false);
     _size_bytes = 0;
     _enabled = true;
+    _running_pass = false;
+    _context = nullptr;
   }
 
   void SetDirectory(std::string &directory);
@@ -426,6 +627,13 @@ public:
   MyStatus Disable();
 
   bool Enabled() const;
+
+#ifdef CONFIG_CHECK_PROF_BUFFER_OVERFLOW
+  void _Check() const {
+    state._Check();
+  }
+#endif
+
 };
 
 } // namespace rlscope

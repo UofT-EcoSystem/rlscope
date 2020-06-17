@@ -2,8 +2,7 @@
 // Created by jagle on 11/13/2019.
 //
 
-#ifndef IML_GENERIC_LOGGING_H
-#define IML_GENERIC_LOGGING_H
+#pragma once
 
 #include <assert.h>
 #include "defines.h"
@@ -17,7 +16,30 @@
 #include <sys/time.h>
 #include <sys/resource.h>
 
+#include <backward.hpp>
+
 namespace rlscope {
+
+template <class OStream>
+void DumpStacktrace(OStream& os, size_t skip_frames) {
+  backward::StackTrace st;
+  const size_t MAX_STACKFRAMES = 32;
+  st.load_here(MAX_STACKFRAMES);
+  // Last 4 frames are always related to backward.hpp or logging.cc.
+  // Skip those frames; make the latest frame the LOG(FAIL) or DCHECK failure.
+  size_t idx;
+  if (st.size() < skip_frames) {
+    // Print the whole thing.
+    idx = 0;
+  } else {
+    // Skip the last 4 frames.
+    idx = skip_frames;
+  }
+  st.load_from(st[idx].addr, MAX_STACKFRAMES);
+  backward::Printer p;
+  p.print(st, os);
+}
+
 
 template <typename K, typename V>
 class OrderedMap {
@@ -298,4 +320,3 @@ void PrintValue(OStream& os, const std::map<K, V>& value) {
 
 }
 
-#endif //IML_GENERIC_LOGGING_H

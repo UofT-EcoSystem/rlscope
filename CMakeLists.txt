@@ -227,8 +227,12 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${ADD_WARNINGS_FLAGS} -Wall -Werror ${IG
 #-Wl,--unresolved-symbols=ignore-in-shared-libs
 #-Wl,--unresolved-symbols=report-all
 set(IML_LINKER_FLAGS "-demangle -Wl,--no-undefined")
-SET(CMAKE_EXE_LINKER_FLAGS  "${CMAKE_EXE_LINKER_FLAGS} ${IML_LINKER_FLAGS}")
+set(CMAKE_EXE_LINKER_FLAGS  "${CMAKE_EXE_LINKER_FLAGS} ${IML_LINKER_FLAGS}")
 set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} ${IML_LINKER_FLAGS}")
+
+# Address sanitizer doesn't appear to work on CUDA programs...
+#set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -fno-omit-frame-pointer -fsanitize=address")
+#set(CMAKE_LINKER_FLAGS_DEBUG "${CMAKE_LINKER_FLAGS_DEBUG} -fno-omit-frame-pointer -fsanitize=address")
 
 include_directories(
         ./
@@ -336,10 +340,6 @@ gather_sources(ANALYSIS_SOURCES ANALYSIS_SRC_DIRS)
 RmGTestSources(ANALYSIS_SOURCES)
 gather_sources(COMMON_SOURCES COMMON_SRC_DIRS)
 RmGTestSources(COMMON_SOURCES)
-set(ANALYSIS_SOURCES
-        ./src/cuda_api_profiler/generic_logging.cc
-        ./src/cuda_api_profiler/generic_logging.h
-        ${ANALYSIS_SOURCES})
 
 set(CUDA_PROF_DIRS
         ./src/cuda_api_profiler
@@ -742,14 +742,18 @@ function(AddCommonRLSDeps TARGET)
     target_link_libraries(${TARGET} PRIVATE rlscope_common)
 endfunction()
 
-function(AddRLSAnalyzeTarget TARGET)
-    add_executable(${TARGET} ${RLS_ANALYZE_SRCS})
-    AddTensorflowDependencies(${TARGET} FALSE)
-
+function(AddGFlagsDeps TARGET)
     find_package(GFlags REQUIRED)
     # message("> GFLAGS_LIBRARIES = ${GFLAGS_LIBRARIES}")
     # message("> GFLAGS_INCLUDE_DIRS = ${GFLAGS_INCLUDE_DIRS}")
     target_link_libraries(${TARGET} PUBLIC ${GFLAGS_LIBRARIES})
+endfunction()
+
+function(AddRLSAnalyzeTarget TARGET)
+    add_executable(${TARGET} ${RLS_ANALYZE_SRCS})
+    AddTensorflowDependencies(${TARGET} FALSE)
+
+    AddGFlagsDeps(${TARGET})
     AddCommonRLSDeps(${TARGET})
 endfunction()
 

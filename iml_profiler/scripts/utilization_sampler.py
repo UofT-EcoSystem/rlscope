@@ -604,9 +604,9 @@ def disable_test_sample_gpu_util():
         def __init__(self, should_stop):
             self.should_stop = should_stop
             # Allow multiple users to use the TensorFlow API.
-            config = tf.ConfigProto()
+            config = tf.compat.v1.ConfigProto()
             config.gpu_options.allow_growth = True
-            self.sess = tf.Session(config=config)
+            self.sess = tf.compat.v1.Session(config=config)
             self.name = 'GPURunner'
 
             self.N = 1000

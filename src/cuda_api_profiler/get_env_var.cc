@@ -86,36 +86,4 @@ float get_TF_CUDA_API_PRINT_EVERY_SEC(boost::optional<float> user_value) {
   return ParseEnvOrDefault("float", "TF_CUDA_API_PRINT_EVERY_SEC", user_value, TF_CUDA_API_PRINT_EVERY_SEC_DEFAULT);
 }
 
-bool env_is_on(const char* var, bool dflt, bool debug) {
-  const char* val = getenv(var);
-  if (val == nullptr) {
-//    VLOG(0) << "Return dflt = " << dflt << " for " << var;
-    return dflt;
-  }
-  std::string val_str(val);
-  std::transform(
-      val_str.begin(), val_str.end(), val_str.begin(),
-      [](unsigned char c){ return std::tolower(c); });
-  bool ret =
-      val_str == "on"
-      || val_str == "1"
-      || val_str == "true"
-      || val_str == "yes";
-//  VLOG(0) << "val_str = \"" << val_str << "\", " << " ret = " << ret << " for " << var;
-  return ret;
-}
-
-bool is_yes(const char* env_var, bool default_value) {
-  if (getenv(env_var) == nullptr) {
-    return default_value;
-  }
-  return strcmp("yes", getenv(env_var)) == 0;
-}
-bool is_no(const char* env_var, bool default_value) {
-  if (getenv(env_var) == nullptr) {
-    return default_value;
-  }
-  return strcmp("no", getenv(env_var)) == 0;
-}
-
 }

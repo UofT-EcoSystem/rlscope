@@ -3,7 +3,7 @@
 //
 
 #include "analysis/trace_file_parser.h"
-#include "cuda_api_profiler/generic_logging.h"
+//#include "cuda_api_profiler/generic_logging.h"
 #include "common_util.h"
 #include "trace_file_parser.h"
 
@@ -1435,7 +1435,8 @@ MyStatus GetTraceID(const std::string& path, TraceID* trace_id) {
   std::smatch match;
   boost::filesystem::path bpath(path);
   std::regex re(TRACE_SUFFIX_RE);
-  if (!std::regex_search(bpath.filename().string(), match, re)) {
+  std::string filename = bpath.filename().string();
+  if (!std::regex_search(filename, match, re)) {
     std::stringstream ss;
     ss << "Couldn't find trace_id in path=" << path << " (it doesn't match *.trace_id_\\d+)";
     return MyStatus(error::INVALID_ARGUMENT, ss.str());
@@ -2199,12 +2200,13 @@ MyStatus NvprofTraceFileReader::Init() {
 MyStatus NvprofTraceFileReader::_ReadProcess() {
   std::string match_group;
   boost::filesystem::path bpath(_path);
-  std::smatch m;
   if (!args.FLAGS_nvprof_process_regex.has_value()) {
     match_group = bpath.filename().string();
   } else {
     std::regex nvprof_process_regex(args.FLAGS_nvprof_process_regex.value());
-    if (!std::regex_search(bpath.filename().string(), m, nvprof_process_regex)) {
+    std::string filename = bpath.filename().string();
+    std::smatch m;
+    if (!std::regex_search(filename, m, nvprof_process_regex)) {
       std::stringstream ss;
       ss << "--nvprof-process-regex=\"" << args.FLAGS_nvprof_process_regex.value()
          << "\" doesn't match " << bpath.filename().string()

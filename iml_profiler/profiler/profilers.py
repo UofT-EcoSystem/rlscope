@@ -105,7 +105,7 @@ def modify_tensorflow(tfprof_enabled, pyprof_enabled):
 
     setup(tfprof_enabled, pyprof_enabled)
     if not uninstrumented_run:
-        # iml_profiler.profiler.session.setup()
+        iml_profiler.profiler.session.setup()
         iml_profiler.profiler.estimator.setup()
         # iml_profiler.profiler.tensorflow_profile_context.setup()
 
@@ -669,9 +669,12 @@ class Profiler:
                  disable_pyprof=None,
                  disable_tfprof=None,
                  disable_pyprof_trace=None,
+                 disable_gpu_hw=None,
                  delay=None,
                  delay_training_loop_iters=None,
                  max_training_loop_iters=None,
+                 delay_passes=None,
+                 max_passes=None,
                  unit_test=None,
                  unit_test_name=None,
                  skip_rm_traces=None,
@@ -726,6 +729,8 @@ class Profiler:
         self._failing = False
         self._has_called_enable_tracing = False
         self.num_training_loop_iters = 0
+        self.num_passes = 0
+        self.has_next_pass = False
         self.debug = get_argval('debug', debug, False)
         self.calibration = get_argval('calibration', calibration, False)
         if self.debug:
@@ -749,10 +754,14 @@ class Profiler:
         self.disable_tfprof = get_argval('disable_tfprof', disable_tfprof, False)
         # Disable OLD tfprof tracing code.  We now use iml-prof to trace stuff.
         self.disable_pyprof_trace = get_argval('disable_pyprof_trace', disable_pyprof_trace, False)
+        self.disable_gpu_hw = get_argval('disable_gpu_hw', disable_gpu_hw, False)
         self.delay = get_argval('delay', delay, False)
 
         self.delay_training_loop_iters = get_argval('delay_training_loop_iters', delay_training_loop_iters, None)
         self.max_training_loop_iters = get_argval('max_training_loop_iters', max_training_loop_iters, None)
+
+        self.delay_passes = get_argval('delay_passes', delay_passes, None)
+        self.max_passes = get_argval('max_passes', max_passes, None)
 
         self.just_sample_util = get_argval('just_sample_util', just_sample_util, False)
         self.training_progress = get_argval('training_progress', training_progress, False)
@@ -768,6 +777,9 @@ class Profiler:
         )
         if self.disable:
             logging.info("IML: note that profiling is disabled for this run")
+        if self.disable or self.disable_gpu_hw:
+            logging.info("(--iml-disable-gpu-hw) Disable GPU HW sampling")
+            sample_cuda_api.disable_gpu_hw()
 
         # self.manager = multiprocessing.Manager()
         # self.pyprof_dump_manager = clib_wrap.PyprofDumpManager(self.manager)
@@ -1131,10 +1143,34 @@ class Profiler:
         return self._tracing_enabled
 
     def _should_enable_tracing(self):
-        return not self._tracing_enabled and self._has_called_enable_tracing and (
-            self.delay_training_loop_iters is None or
-            self.num_training_loop_iters >= self.delay_training_loop_iters
-        )
+        if py_config.DEBUG and py_config.DEBUG_GPU_HW:
+            if not self._tracing_enabled:
+                rls_log('GPU_HW',
+                        textwrap.dedent(f"""\
+                            tracing_enabled = {self._tracing_enabled}
+                            has_called_enable_tracing = {self._has_called_enable_tracing}
+                            delay_training_loop_iters = {self.delay_training_loop_iters}
+                               num_training_loop_iters =  {self.num_training_loop_iters}
+                               delay_training_loop_iters =  {self.delay_training_loop_iters}
+                            delay_passes = {self.delay_passes}
+                               num_passes =  {self.num_passes}
+                               delay_passes =  {self.delay_passes}
+                        """))
+        if self._tracing_enabled:
+            return False
+        if not self._has_called_enable_tracing:
+            return False
+        if self.delay_training_loop_iters is not None:
+            return self.num_training_loop_iters >= self.delay_training_loop_iters
+        if self.delay_passes is not None:
+            return self.num_passes >= self.delay_passes
+        return True
+        # return not self._tracing_enabled and self._has_called_enable_tracing and (
+        #     (
+        #         self.delay_training_loop_iters is None or
+        #         self.num_training_loop_iters >= self.delay_training_loop_iters
+        #     )
+        # )
 
     def enable_tracing(self):
         """
@@ -1342,16 +1378,23 @@ class Profiler:
     def _start_pass(self):
         assert not self._hw_pass_running
         if py_config.DEBUG and py_config.DEBUG_GPU_HW:
-            logging.info("> GPU_HW: start_pass")
+            rls_log('GPU_HW', f"start_pass")
         self._hw_pass_running = True
         sample_cuda_api.start_pass()
 
     def _end_pass(self):
         assert self._hw_pass_running
         if py_config.DEBUG and py_config.DEBUG_GPU_HW:
-            logging.info("> GPU_HW: end_pass")
+            rls_log('GPU_HW', f"end_pass")
         self._hw_pass_running = False
         sample_cuda_api.end_pass()
+        self.has_next_pass = self._has_next_pass()
+
+    def _has_next_pass(self):
+        assert not self._hw_pass_running
+        if py_config.DEBUG and py_config.DEBUG_GPU_HW:
+            rls_log('GPU_HW', f"has_next_pass")
+        return sample_cuda_api.has_next_pass()
 
     @property
     def _cur_operation(self):
@@ -1375,8 +1418,8 @@ class Profiler:
 
         self.start_call_us[bench_name] = clib_wrap.now_us()
 
-    def operation(self, operation):
-        return Operation(operation, prof=self)
+    def operation(self, operation, skip=False):
+        return Operation(operation, prof=self, skip=skip)
 
     def profile(self, process_name, phase_name=DEFAULT_PHASE, handle_utilization_sampler=True):
         """
@@ -1608,16 +1651,21 @@ class Profiler:
     def _is_term_opt_set(self):
         return self.max_timesteps is not None or \
                self.max_training_loop_iters is not None or \
+               self.max_passes is not None or \
                self.trace_time_sec is not None
 
     def _term_opts(self):
         return dict(
             max_timesteps=self.max_timesteps,
             max_training_loop_iters=self.max_training_loop_iters,
+            max_passes=self.max_passes,
             trace_time_sec=self.trace_time_sec,
         )
 
     def _set_term_opt(self, func, opt, value, skip_if_set):
+        """
+        Only set self.opt if another termination opt isn't already set.
+        """
         term_opts = self._term_opts()
         # Should be one of --iml-trace-time-sec, --iml-max-timesteps, --iml-max-training-loop-iters
         assert opt in term_opts
@@ -1628,6 +1676,28 @@ class Profiler:
                 opt=opt,
                 value=value,
                 opts=pprint_msg(self._term_opts()),
+            ))
+            return
+        logging.info("IML: Setting iml.prof.{var} = {val}".format(
+            var=opt,
+            val=value,
+        ))
+        setattr(self, opt, value)
+
+    def _maybe_set_opt(self, opt, value, funcname, skip_if_set):
+        """
+        Only set self.opt if self.opt is currently None
+        """
+        if skip_if_set and getattr(self, opt) is not None:
+            logging.info(("IML: SKIP {func}({opt}={value}) "
+                          "since {opt} is already set: {opts}").format(
+                # e.g., 'iml.prof.set_delay_passes',
+                func=funcname,
+                opt=opt,
+                value=value,
+                opts={
+                    opt: getattr(self, opt),
+                },
             ))
             return
         logging.info("IML: Setting iml.prof.{var} = {val}".format(
@@ -1658,6 +1728,23 @@ class Profiler:
                            skip_if_set)
         self._maybe_dump_iml_config()
 
+    def set_max_passes(self, max_passes, skip_if_set):
+        assert not self._tracing_enabled
+        assert not self._has_called_enable_tracing
+        self._set_term_opt('iml.prof.set_max_passes',
+                           'max_passes', max_passes,
+                           skip_if_set)
+        self._maybe_dump_iml_config()
+
+    def set_delay_passes(self, delay_passes, skip_if_set):
+        """
+        Set the delay in "passes" (calls to iml.prof.report_progress) before trace collection begins.
+        """
+        assert not self._tracing_enabled
+        assert not self._has_called_enable_tracing
+        self._maybe_set_opt('delay_passes', delay_passes, 'iml.prof.set_delay_passes', skip_if_set)
+        self._maybe_dump_iml_config()
+
     def set_delay_training_loop_iters(self, delay_training_loop_iters, skip_if_set):
         """
         Set the delay in training loop iterations before trace collection begins.
@@ -1673,22 +1760,7 @@ class Profiler:
         """
         assert not self._tracing_enabled
         assert not self._has_called_enable_tracing
-        if skip_if_set and self.delay_training_loop_iters is not None:
-            logging.info(("IML: SKIP {func}({opt}={value}) "
-                          "since {opt} is already set: {opts}").format(
-                func='iml.prof.set_delay_training_loop_iters',
-                opt='delay_training_loop_iters',
-                value=delay_training_loop_iters,
-                opts=dict(
-                    delay_training_loop_iters=self.delay_training_loop_iters,
-                ),
-            ))
-            return
-        logging.info("IML: Setting iml.prof.{var} = {val}".format(
-            var='delay_training_loop_iters',
-            val=delay_training_loop_iters,
-        ))
-        self.delay_training_loop_iters = delay_training_loop_iters
+        self._maybe_set_opt('delay_training_loop_iters', delay_training_loop_iters, 'iml.prof.set_delay_training_loop_iters', skip_if_set)
         self._maybe_dump_iml_config()
 
     def set_process_name(self, process_name):
@@ -1809,6 +1881,10 @@ class Profiler:
         if should_exit:
             self._is_finishing = True
 
+        if self._hw_pass_running:
+            # Q: Any way to "discard" an incomplete pass?
+            self._end_pass()
+
         self._disable_tracing()
         timer.end_operation('disable_tracing')
 
@@ -1817,9 +1893,6 @@ class Profiler:
 
         if self.unit_test:
             self.ut.stop()
-
-        if self._hw_pass_running:
-            self._end_pass()
 
         self.maybe_terminate_utilization_sampler(warn_terminated=False)
         timer.end_operation('maybe_terminate_utilization_sampler')
@@ -2113,9 +2186,9 @@ class Profiler:
             process_metadata.parent_process_name = self.parent_process_name
 
         # Q: multiple processes reporting training progress...consider that an error?
-        if self.reports_progress and self.percent_complete is None:
-            self._failing = True
-            raise RuntimeError("IML ERROR: profiler was created with iml.handle_iml_args(..., reports_progress=True), but process NEVER called iml.prof.report_progress(...)")
+        # if self.reports_progress and self.percent_complete is None:
+        #     self._failing = True
+        #     raise RuntimeError("IML ERROR: profiler was created with iml.handle_iml_args(..., reports_progress=True), but process NEVER called iml.prof.report_progress(...)")
 
         # This should be prevented from self.report_progress(...)
         assert not(not self.reports_progress and self.percent_complete is not None)
@@ -2287,19 +2360,26 @@ class Profiler:
         total_trace_time_sec = self._total_trace_time_sec()
         ret = finish_now or (
             (
-                self.num_traces is not None and
-                self.next_trace_id >= self.num_traces
-            ) or (
-                total_trace_time_sec is not None and
-                self.trace_time_sec is not None
-                and total_trace_time_sec >= self.trace_time_sec
-            ) or (
-                self.max_timesteps is not None and
-                self.num_timesteps is not None and
-                self.num_timesteps >= self.max_timesteps
-            ) or (
-                self.max_training_loop_iters is not None and
-                self.num_training_loop_iters >= zero_if_none(self.delay_training_loop_iters) + self.max_training_loop_iters
+                self.disable_gpu_hw or not self.has_next_pass
+            ) and (
+                (
+                    self.num_traces is not None and
+                    self.next_trace_id >= self.num_traces
+                ) or (
+                    total_trace_time_sec is not None and
+                    self.trace_time_sec is not None
+                    and total_trace_time_sec >= self.trace_time_sec
+                ) or (
+                    self.max_timesteps is not None and
+                    self.num_timesteps is not None and
+                    self.num_timesteps >= self.max_timesteps
+                ) or (
+                    self.max_training_loop_iters is not None and
+                    self.num_training_loop_iters >= zero_if_none(self.delay_training_loop_iters) + self.max_training_loop_iters
+                ) or (
+                    self.max_passes is not None and
+                    self.num_passes >= zero_if_none(self.delay_passes) + self.max_passes
+                )
             )
         )
         self._should_finish_idx += 1
@@ -2313,6 +2393,11 @@ class Profiler:
                 finish_now=ret,
                 skip_finish=skip_finish,
             )), prefix="  "))
+            if not self.disable_gpu_hw:
+                logging.info(textwrap.indent(textwrap.dedent("""
+                - has_next_pass = {has_next_pass}""".format(
+                    has_next_pass=self.has_next_pass,
+                )), prefix="  "))
             if self.num_traces is not None:
                 logging.info(textwrap.indent(textwrap.dedent("""
                 - self.next_trace_id >= self.num_traces = {next_bool}
@@ -2350,6 +2435,17 @@ class Profiler:
                     num_training_loop_iters=self.num_training_loop_iters,
                     delay_training_loop_iters=self.delay_training_loop_iters,
                     max_training_loop_iters=self.max_training_loop_iters,
+                )), prefix="  "))
+            if self.max_passes is not None:
+                logging.info(textwrap.indent(textwrap.dedent("""
+                - self.num_passes >= self.delay_passes + self.max_timesteps = {bool}
+                  - self.delay_passes = {delay_passes}
+                  - self.num_passes = {num_passes}
+                  - self.max_passes = {max_passes}""".format(
+                    bool=self.num_passes >= zero_if_none(self.delay_passes) + self.max_passes,
+                    num_passes=self.num_passes,
+                    delay_passes=self.delay_passes,
+                    max_passes=self.max_passes,
                 )), prefix="  "))
         return ret
 
@@ -2437,6 +2533,8 @@ class Profiler:
         if self._tracing_enabled and percent_complete < 1 and self._hw_pass_running:
             self._end_pass()
 
+        if py_config.DEBUG and py_config.DEBUG_GPU_HW:
+            rls_log('GPU_HW', f"tracing_enabled = {self._tracing_enabled}, percent_complete = {percent_complete}")
         if self._tracing_enabled and percent_complete > 0:
             self._start_pass()
 
@@ -2480,6 +2578,7 @@ class Profiler:
             # They've called iml.prof.enable_tracing() since their algorithm has "warmed up";
             # start counting training loop iterations.
             self.num_training_loop_iters += 1
+            self.num_passes += 1
 
     def _maybe_finish(self, finish_now=False, should_exit=True, debug=False):
 
@@ -2579,16 +2678,19 @@ class Profiler:
 #         self.stop()
 
 class Operation:
-    def __init__(self, operation, prof):
+    def __init__(self, operation, prof, skip):
         self.operation = operation
         self.prof = prof
+        self.skip = skip
 
     def __enter__(self):
-        self.prof.set_operation(self.operation)
+        if not self.skip:
+            self.prof.set_operation(self.operation)
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         # Q: Should we call this when an exception is thrown?
-        self.prof.end_operation(self.operation)
+        if not self.skip:
+            self.prof.end_operation(self.operation)
 
 class Profile:
     def __init__(self, prof, process_name, phase_name=DEFAULT_PHASE, handle_utilization_sampler=True):
@@ -2760,6 +2862,17 @@ def add_iml_arguments(parser):
                             IML: Delay trace collection for the first X "training loop iterations"; 
                             see --iml-max-training-loop-iters for a description of training loop iterations.
                             """))
+
+    iml_parser.add_argument('--iml-max-passes', type=int,
+                            help=textwrap.dedent("""
+                            IML: how long should we profile for, in "passes" (i.e., calls to iml.prof.report_progress); 
+                            a single "pass" is one call to iml.prof.report_progress. 
+                            """))
+    iml_parser.add_argument('--iml-delay-passes', type=int,
+                            help=textwrap.dedent("""
+                            IML: Delay trace collection for the first X "passes" (i.e., calls to iml.prof.report_progress).
+                            """))
+
     iml_parser.add_argument('--iml-internal-start-trace-time-sec', type=float,
                         help=textwrap.dedent("""
         IML: (internal use)
@@ -2844,6 +2957,9 @@ def add_iml_arguments(parser):
     """))
     iml_parser.add_argument('--iml-disable-pyprof-trace', action='store_true', help=textwrap.dedent("""
         IML: Disable most of pyprof trace-collection (but not entirely).
+    """))
+    iml_parser.add_argument('--iml-disable-gpu-hw', action='store_true', help=textwrap.dedent("""
+        IML: Disable GPU HW sampling trace-collection.
     """))
     iml_parser.add_argument('--iml-delay', action='store_true', help=textwrap.dedent("""
         IML: Delay trace collection until your training script has warmed up; 
@@ -3307,3 +3423,5 @@ def get_tensorflow_config():
 
     return conf
 
+def rls_log(flag_name, msg):
+    logging.info(f"[{flag_name}] {msg}")

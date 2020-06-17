@@ -80,9 +80,12 @@
         if (_status != CUDA_SUCCESS) { \
             std::stringstream _err_ss; \
             const char* _err_str = nullptr; \
+            const char* _err_name = nullptr; \
             auto _err_status = cuGetErrorString(_status, &_err_str); \
             assert(_err_status == CUDA_SUCCESS); \
-            _err_ss << __FILE__ << ":" << __LINE__ << ": error: function " << #apiFuncCall << " failed with error (" << _status << ") " << _err_str; \
+            _err_status = cuGetErrorName(_status, &_err_name); \
+            assert(_err_status == CUDA_SUCCESS); \
+            _err_ss << __FILE__ << ":" << __LINE__ << ": error: function " << #apiFuncCall << " failed with " << _err_name << " (" << _status << ") " << _err_str; \
             auto _my_status = MyStatus(rlscope::error::INVALID_ARGUMENT, _err_ss.str()); \
             PRINT_AND_DBG_BREAKPOINT("DRIVER_API_CALL", _my_status); \
             return _my_status; \
@@ -123,9 +126,12 @@
         if (_status != CUDA_SUCCESS) { \
             std::stringstream _err_ss; \
             const char* _err_str = nullptr; \
+            const char* _err_name = nullptr; \
             auto _err_status = cuGetErrorString(_status, &_err_str); \
             assert(_err_status == CUDA_SUCCESS); \
-            _err_ss << __FILE__ << ":" << __LINE__ << ": error: function " << #apiFuncCall << " failed with error (" << _status << ") " << _err_str; \
+            _err_status = cuGetErrorName(_status, &_err_name); \
+            assert(_err_status == CUDA_SUCCESS); \
+            _err_ss << __FILE__ << ":" << __LINE__ << ": error: function " << #apiFuncCall << " failed with " << _err_name << " (" << _status << ") " << _err_str; \
             std::cerr << "ERROR: " << _err_ss.str() << std::endl; \
             DBG_BREAKPOINT("DRIVER_API_CALL"); \
             exit(-1); \

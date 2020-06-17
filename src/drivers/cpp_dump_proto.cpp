@@ -15,8 +15,8 @@
 #include <boost/filesystem.hpp>
 #include <boost/any.hpp>
 
-#include "cuda_api_profiler/generic_logging.h"
 #include "common_util.h"
+#include "range_sampling.h"
 
 // Time breakdown:
 // - metric: how many events are processed per second by compute overlap.
@@ -43,13 +43,31 @@ using json = nlohmann::json;
 #include "analysis/trace_file_parser.h"
 #include "cpp_dump_proto.h"
 
+static const std::set<std::string> MODE_CHOICES = {
+    "ls",
+    "stats",
+    "read",
+    "overlap",
+    "proto",
+    "polling_util",
+    "gpu_kernels",
+    "gpu_hw",
+};
+static std::string init_MODE_CHOICES_PRETTY() {
+  std::stringstream ss;
+  rlscope::PrintValue(ss, MODE_CHOICES);
+  return ss.str();
+}
+static const std::string MODE_CHOICES_PRETTY = init_MODE_CHOICES_PRETTY();
+static const std::string mode_flag_help = "One of: " + MODE_CHOICES_PRETTY;
+
 DEFINE_bool(debug, false, "Debug: give additional verbose output");
 DEFINE_bool(output_csv, false, "Output interval csv files: Interval.*Intervals.csv = start/duration of overlap intervals, Interval.*Events.csv = start/duration of each event belonging to an overlap interval");
 DEFINE_bool(ignore_memcpy, false, "Ignore CUDA memcpy events when reading cuda_device_events*.proto");
 DEFINE_bool(cross_process, false, "Compute CPU/GPU overlap across all processes");
 DEFINE_string(proto, "", "Path to RLS trace-file protobuf file");
 DEFINE_string(iml_directory, "", "Path to --iml-directory used when collecting trace-files");
-DEFINE_string(mode, "", "One of: [stats, ls, proto, polling_util]");
+DEFINE_string(mode, "", mode_flag_help.c_str());
 
 DEFINE_string(cupti_overhead_json, "", "Path to calibration file: mean per-CUDA API CUPTI overhead when GPU activities are recorded (see: CUPTIOverheadTask) ");
 DEFINE_string(LD_PRELOAD_overhead_json, "", "Path to calibration file: mean overhead for intercepting CUDA API calls with LD_PRELOAD  (see: CallInterceptionOverheadTask)");
@@ -129,6 +147,7 @@ enum Mode {
   MODE_READ_FILES = 4,
   MODE_POLLING_UTIL = 5,
   MODE_GPU_KERNELS = 6,
+  MODE_GPU_HW = 7,
 };
 
 void Usage() {
@@ -234,6 +253,7 @@ int main(int argc, char** argv) {
 
   Mode mode;
   if (FLAGS_mode != "") {
+    assert(MODE_CHOICES.find(FLAGS_mode) != MODE_CHOICES.end());
     if (FLAGS_mode == "ls") {
       mode = Mode::MODE_LS_FILES;
     } else if (FLAGS_mode == "stats") {
@@ -248,8 +268,13 @@ int main(int argc, char** argv) {
       mode = Mode::MODE_POLLING_UTIL;
     } else if (FLAGS_mode == "gpu_kernels") {
       mode = Mode::MODE_GPU_KERNELS;
+    } else if (FLAGS_mode == "gpu_hw") {
+      mode = Mode::MODE_GPU_HW;
     } else {
-      UsageAndExit("--mode must be one of [stats, ls, proto]");
+      std::stringstream ss;
+      ss << "--mode must be one of:";
+      PrintValue(ss, MODE_CHOICES);
+      UsageAndExit(ss.str());
     }
   } else if (FLAGS_proto != "") {
     mode = Mode::MODE_DUMP_PROTO;
@@ -308,6 +333,12 @@ int main(int argc, char** argv) {
   if (mode == Mode::MODE_GPU_KERNELS) {
     if (FLAGS_iml_directory == "") {
       UsageAndExit("--iml-directory is required for --mode=gpu_kernels");
+    }
+  }
+
+  if (mode == Mode::MODE_GPU_KERNELS) {
+    if (FLAGS_iml_directory == "") {
+      UsageAndExit("--iml-directory is required for --mode=gpu_hw");
     }
   }
 
@@ -657,6 +688,27 @@ int main(int argc, char** argv) {
       timer->Print(std::cout, 0);
       std::cout << std::endl;
     }
+    exit(EXIT_SUCCESS);
+  }
+
+  if (mode == Mode::MODE_GPU_HW) {
+    MyStatus ret = MyStatus::OK();
+    rlscope::GPUHwCounterSampler sampler(0, FLAGS_iml_directory, "");
+
+    ret = sampler.Init();
+    IF_BAD_STATUS_EXIT("Failed to initialize GPUHwCounterSampler", ret);
+
+    boost::filesystem::path dir_path(FLAGS_iml_directory);
+    auto csv_path = dir_path / "GPUHwCounterSampler.csv";
+    bool printed_header = false;
+    std::ofstream csv_f(csv_path.string(), std::ios::out | std::ios::trunc);
+    if (csv_f.fail()) {
+      std::cerr << "ERROR: Failed to write to GPU HW csv file @ " << csv_path << " : " << strerror(errno) << std::endl;
+      exit(EXIT_FAILURE);
+    }
+    ret = sampler.PrintCSV(csv_f, printed_header);
+    IF_BAD_STATUS_EXIT("Failed to print GPU hw sample files in csv format", ret);
+    std::cout << "Output GPU HW csv file @ " << csv_path << std::endl;
     exit(EXIT_SUCCESS);
   }
 

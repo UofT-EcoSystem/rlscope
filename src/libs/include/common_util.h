@@ -14,7 +14,14 @@
 #include "common_util/error_codes.h"
 #include "common_util/generic_logging.h"
 #include "common_util/usec_timer.h"
+#include "common_util/env_var.h"
+
+// nvcc bugs: cannot import json.hpp without errors:
+// https://github.com/nlohmann/json/issues/1347
+#ifndef RLS_IGNORE_JSON
 #include "common_util/json.h"
+#endif // RLS_IGNORE_JSON
+
 #include "common_util/notify.h"
 #include "common_util/logging.h"
 

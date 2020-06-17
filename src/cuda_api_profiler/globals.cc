@@ -21,7 +21,11 @@
 #include <nlohmann/json.hpp>
 using json = nlohmann::json;
 
-//#include <spdlog/spdlog.h>
+#include <spdlog/spdlog.h>
+//#include <sys/types.h>
+// Must be included in order operator<< to work with spd logging.
+// https://github.com/gabime/spdlog#user-defined-types
+#include "spdlog/fmt/ostr.h"
 
 #include "cuda_api_profiler/cupti_logging.h"
 
@@ -50,6 +54,8 @@ Globals globals;
 Globals::Globals() {
 
   MyStatus status = MyStatus::OK();
+
+  spdlog::set_level(spdlog::level::debug); // Set global log level to debug
 
 #ifdef WITH_CUDA_LD_PRELOAD
   VLOG(1) << "dlopen(\"libcudart.so\")";

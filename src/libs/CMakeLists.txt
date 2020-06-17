@@ -1,3 +1,6 @@
 add_subdirectory(common_util)
 add_subdirectory(range_sampling)
 add_subdirectory(rlscope_common)
+add_subdirectory(profilerhost_util)
+add_subdirectory(achieved_occupancy_range_profiling)
+add_subdirectory(achieved_occupancy_range_profiling_refactored)

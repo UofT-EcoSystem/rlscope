@@ -68,6 +68,7 @@ class DeviceTracer {
   // Stop device tracing.
   // It is safe to call 'Stop' on a tracer which is not enabled.
   virtual MyStatus Stop() = 0;
+  virtual MyStatus DisableGpuHW() = 0;
 
   virtual MyStatus Print() = 0;
   virtual MyStatus SetMetadata(const char* directory, const char* process_name, const char* machine_name, const char* phase_name) = 0;
@@ -81,6 +82,7 @@ class DeviceTracer {
 
   virtual MyStatus StartPass() = 0;
   virtual MyStatus EndPass() = 0;
+  virtual MyStatus HasNextPass(bool* has_next_pass) = 0;
   virtual MyStatus PushOperation(const char* operation) = 0;
   virtual MyStatus RecordOverheadEvent(
       const char* overhead_type,

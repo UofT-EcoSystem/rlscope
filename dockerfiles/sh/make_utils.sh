@@ -140,7 +140,7 @@ check_tensorflow_build() {
 _check_tensorflow() {
   (
   set -u
-  pip install tensorflow-gpu==$TENSORFLOW_VERSION
+  # pip install tensorflow-gpu==$TENSORFLOW_VERSION
   )
 #    if ! py_module_installed "tensorflow"; then
 #      echo "ERROR: you need to install tensorflow."

@@ -13,9 +13,11 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "my_status.h"
 #include <stdio.h>
 #include <assert.h>
+
+#include "my_status.h"
+#include "generic_logging.h"
 
 namespace rlscope {
 
@@ -31,6 +33,11 @@ MyStatus::MyStatus(rlscope::error::Code code, const std::string& msg) {
   state_ = std::unique_ptr<State>(new State);
   state_->code = code;
   state_->msg = msg;
+  {
+    std::stringstream ss;
+    rlscope::DumpStacktrace(ss, 4);
+    state_->stacktrace = ss.str();
+  }
 }
 
 void MyStatus::Update(const MyStatus& new_status) {
@@ -115,10 +122,15 @@ std::string MyStatus::ToString() const {
         type = tmp;
         break;
     }
-    std::string result(type);
-    result += ": ";
-    result += state_->msg;
-    return result;
+    std::stringstream ss;
+    ss << type;
+    ss << ": ";
+    ss << state_->msg;
+    if (state_->stacktrace != "") {
+      ss << std::endl;
+      ss << state_->stacktrace;
+    }
+    return ss.str();
   }
 }
 

@@ -95,12 +95,12 @@ cd $RL_BASELINES_ZOO_DIR
 #fi
 #    --iml-trace-time-sec $IML_TRACE_TIME_SEC \
 
-#if [ "$DEBUG" == 'yes' ]; then
-#    PYTHON=(python -m ipdb)
-#else
-#    PYTHON=(python)
-#fi
-PYTHON=(python)
+if [ "$DEBUG" == 'yes' ]; then
+    PYTHON=(python -m ipdb)
+else
+    PYTHON=(python)
+fi
+#PYTHON=(python)
 
 NVPROF=()
 #if [ "$IML_USE_NVPROF" == "yes" ]; then
@@ -108,6 +108,7 @@ NVPROF=()
 #fi
 
 IML_PROF="${IML_PROF:-iml-prof}"
+
 
 #IML_PROF_ARGS=()
 #if [ "$IML_PROF" != "" ]; then
@@ -122,7 +123,7 @@ IML_PROF="${IML_PROF:-iml-prof}"
 # Instrumented runs should instead use the profiler built-in to tensorflow to avoid libcupti
 # callback registration conflicts.
 
-_do $IML_PROF "${NVPROF[@]}" "${PYTHON[@]}" $RL_BASELINES_ZOO_DIR/train.py \
+_do $VALGRIND $IML_PROF "${NVPROF[@]}" "${PYTHON[@]}" $RL_BASELINES_ZOO_DIR/train.py \
     --algo $ALGO \
     --env $ENV_ID \
     --log-folder $OUTPUT_DIR \
