@@ -268,7 +268,7 @@ def has_next_pass():
     value = bool(has_next_pass.value)
     if py_config.DEBUG and py_config.DEBUG_RLSCOPE_LIB_CALLS:
         if value:
-            logging.info(f"[RLSCOPE_LIB]  returned: {value}")
+            logging.info(f"[PY_RLSCOPE_LIB]  returned: {value}")
     return value
 
 def disable_gpu_hw():
@@ -317,7 +317,7 @@ def _log_api_call_msg(name, *args, **kwargs):
             ss.write('=')
             ss.write(_arg_string(value))
         kwargs_str = ss.getvalue()
-    return "[RLSCOPE_LIB] {func}({args}{kwargs})".format(
+    return "[PY_RLSCOPE_LIB] {func}({args}{kwargs})".format(
         func=name,
         args=', '.join([_arg_string(arg) for arg in args]),
         kwargs=kwargs_str,

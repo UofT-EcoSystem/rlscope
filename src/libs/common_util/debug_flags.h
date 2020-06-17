@@ -57,6 +57,7 @@ constexpr bool FEATURE_GPU_UTIL_CUDA_CONTEXT = 0;
 constexpr bool FEATURE_GPU_UTIL_SYNC = 0;
 constexpr bool FEATURE_GPU_UTIL_KERNEL_TIME = 0;
 constexpr bool FEATURE_GPU_HW = 1;
+constexpr bool FEATURE_GPU_HW_TRACE = 1;
 constexpr bool FEATURE_ANY =
     FEATURE_OVERLAP
     || FEATURE_OVERLAP_META
@@ -68,7 +69,8 @@ constexpr bool FEATURE_ANY =
     || FEATURE_GPU_UTIL_CUDA_CONTEXT
     || FEATURE_GPU_UTIL_SYNC
     || FEATURE_GPU_UTIL_KERNEL_TIME
-    || FEATURE_GPU_HW;
+    || FEATURE_GPU_HW
+    || FEATURE_GPU_HW_TRACE;
 #define SHOULD_DEBUG(feature) ((SPDLOG_ACTIVE_LEVEL <= SPDLOG_LEVEL_DEBUG) && feature)
 
 constexpr bool FEATURE_BREAKPOINT_DUMP_STACK = 0;

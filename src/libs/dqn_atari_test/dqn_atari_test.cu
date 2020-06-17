@@ -111,14 +111,13 @@ static int COUNTER_DATA_MAX_NUM_NESTING_LEVELS;
 static int COUNTER_DATA_MAX_NUM_RANGES;
 
 void run_gpu_compute() {
-//    CuptiSamples::ComputeVectorAddSubtract(FLAGS_n_int32s);
     auto start_compute_t = rlscope::get_timestamp_us();
     CuptiSamples::ComputeVecAdd(FLAGS_iterations, FLAGS_n_int32s);
     cudaDeviceSynchronize();
     auto end_compute_t = rlscope::get_timestamp_us();
 
     float compute_sec = (end_compute_t - start_compute_t).count()/FLOAT_MICROSECONDS_IN_SEC;
-    std::cout << "ComputeVecAdd(iterations=" << FLAGS_iterations << ", n=" << FLAGS_n_int32s << ") took " << compute_sec << " seconds" << std::endl;
+    // std::cout << "ComputeVecAdd(iterations=" << FLAGS_iterations << ", n=" << FLAGS_n_int32s << ") took " << compute_sec << " seconds" << std::endl;
 }
 
 // We want an interface like this:
@@ -202,26 +201,125 @@ static MyStatus with_N_ranges(rlscope::GPUHwCounterSampler& sampler, int N, cons
     return MyStatus::OK();
 }
 
+
+static size_t CUR_NESTING_LEVEL = 0;
+static size_t MAX_NESTING_LEVEL = 0;
+template <typename Func>
+MyStatus ScopedOperation(rlscope::GPUHwCounterSampler& sampler, const std::string& operation, Func func) {
+    MyStatus status = MyStatus::OK();
+
+    status = sampler.Push(operation);
+    IF_BAD_STATUS_RETURN(status);
+    CUR_NESTING_LEVEL += 1;
+    MAX_NESTING_LEVEL = std::max(CUR_NESTING_LEVEL, MAX_NESTING_LEVEL);
+
+    // GPUHwCounterSamplerMode::CONFIG
+    if (sampler.Mode() == GPU_HW_COUNTER_SAMPLER_MODE_PROFILE && CUR_NESTING_LEVEL > sampler.UseMaxNestingLevels()) {
+        std::stringstream ss;
+        ss << "WARNING: The number of consecutive cuptiProfilerPushRange calls (" << CUR_NESTING_LEVEL << ") has exceeded setConfigParams.numNestingLevels = " << sampler.UseMaxNestingLevels();
+        RLS_LOG("GPU_HW", "{}", ss.str());
+    }
+
+    status = func();
+    IF_BAD_STATUS_RETURN(status);
+
+    status = sampler.Pop();
+    IF_BAD_STATUS_RETURN(status);
+    assert(CUR_NESTING_LEVEL > 0);
+    CUR_NESTING_LEVEL -= 1;
+
+    return MyStatus::OK();
+}
+
 MyStatus run_pass(rlscope::GPUHwCounterSampler& sampler) {
     MyStatus ret = MyStatus::OK();
 
     ret = sampler.StartPass();
     IF_BAD_STATUS_RETURN(ret);
-    // IF_BAD_STATUS_EXIT("Failed to start configuration pass for GPU hw counter profiler", ret);
 
-    for (int32_t userrange_i = 0; userrange_i < FLAGS_unique_paths; userrange_i++) {
-        std::stringstream range_ss;
-        range_ss << "userrange_path";
-        range_ss << userrange_i;
-        ret = with_N_ranges(sampler, FLAGS_nesting_levels, range_ss.str(), [&] {
-            run_gpu_compute();
+
+    for (size_t i = 0; i < 3; i++) {
+        IF_BAD_STATUS_RETURN(ScopedOperation(sampler, "training_loop", [&] {
+
+            IF_BAD_STATUS_RETURN(ScopedOperation(sampler, "q_forward", [&] {
+                run_gpu_compute();
+                return MyStatus::OK();
+            }));
+
+            IF_BAD_STATUS_RETURN(ScopedOperation(sampler, "step", [&] {
+                return MyStatus::OK();
+            }));
+
             return MyStatus::OK();
-        });
+        }));
+    }
+
+    for (size_t i = 0; i < 1; i++) {
+        IF_BAD_STATUS_RETURN(ScopedOperation(sampler, "training_loop", [&] {
+
+            IF_BAD_STATUS_RETURN(ScopedOperation(sampler, "q_forward", [&] {
+                run_gpu_compute();
+                return MyStatus::OK();
+            }));
+
+            IF_BAD_STATUS_RETURN(ScopedOperation(sampler, "step", [&] {
+                return MyStatus::OK();
+            }));
+
+            IF_BAD_STATUS_RETURN(ScopedOperation(sampler, "q_backward", [&] {
+                run_gpu_compute();
+                return MyStatus::OK();
+            }));
+
+            return MyStatus::OK();
+        }));
+    }
+
+    for (size_t i = 0; i < 3; i++) {
+        IF_BAD_STATUS_RETURN(ScopedOperation(sampler, "training_loop", [&] {
+
+            IF_BAD_STATUS_RETURN(ScopedOperation(sampler, "q_forward", [&] {
+                run_gpu_compute();
+                return MyStatus::OK();
+            }));
+
+            IF_BAD_STATUS_RETURN(ScopedOperation(sampler, "step", [&] {
+                return MyStatus::OK();
+            }));
+
+            return MyStatus::OK();
+        }));
+    }
+
+    for (size_t i = 0; i < 1; i++) {
+        IF_BAD_STATUS_RETURN(ScopedOperation(sampler, "training_loop", [&] {
+
+            IF_BAD_STATUS_RETURN(ScopedOperation(sampler, "q_forward", [&] {
+                run_gpu_compute();
+                return MyStatus::OK();
+            }));
+
+            IF_BAD_STATUS_RETURN(ScopedOperation(sampler, "step", [&] {
+                return MyStatus::OK();
+            }));
+
+            IF_BAD_STATUS_RETURN(ScopedOperation(sampler, "q_backward", [&] {
+                run_gpu_compute();
+                return MyStatus::OK();
+            }));
+
+            IF_BAD_STATUS_RETURN(ScopedOperation(sampler, "q_update_target_network", [&] {
+                run_gpu_compute();
+                return MyStatus::OK();
+            }));
+
+
+            return MyStatus::OK();
+        }));
     }
 
     ret = sampler.EndPass();
     IF_BAD_STATUS_RETURN(ret);
-    // IF_BAD_STATUS_EXIT("Failed to end configuration pass for GPU hw counter profiler", ret);
 
     return MyStatus::OK();
 }
@@ -323,6 +421,16 @@ int main(int argc, char* argv[])
 
     ret = sampler.StopProfiling();
     IF_BAD_STATUS_EXIT("Failed to stop GPU hw counter profiler", ret);
+
+    {
+        std::stringstream ss;
+        ss << "Runtime info:"
+           << std::endl
+           << "  MAX_NESTING_LEVEL = " << MAX_NESTING_LEVEL
+           << std::endl
+           << "  setConfigParams.numNestingLevels = " << sampler.UseMaxNestingLevels();
+        RLS_LOG("GPU_HW", "{}", ss.str());
+    }
 
     return 0;
 }

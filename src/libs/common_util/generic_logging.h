@@ -318,5 +318,36 @@ void PrintValue(OStream& os, const std::map<K, V>& value) {
   os << "}";
 }
 
+template <typename OStream>
+void print_args(OStream& os, int arg_idx) {
+}
+template <typename OStream, typename Arg, typename ...Args>
+void print_args(OStream& os, int arg_idx, const Arg& arg, const Args&... args) {
+  if (arg_idx > 0) {
+    os << ", ";
+  }
+  rlscope::PrintValue(os, arg);
+  print_args(os, arg_idx + 1, args...);
+}
+
+template <typename OStream, typename ...Args>
+OStream& log_func_call_impl(OStream& os, char const * fname, Args &&... args)
+{
+    os << fname << "(";
+    print_args(os, 0, args...);
+    os << ")";
+    return os;
+}
+
+#define LOG_FUNC_CALL(os, ...) log_func_call_impl(os, __func__, ##__VA_ARGS__)
+
+#define RLS_LOG_FUNC(TAG, ...)        \
+  {                                   \
+    std::stringstream ss;             \
+    LOG_FUNC_CALL(ss, ##__VA_ARGS__); \
+    RLS_LOG(TAG, "{}", ss.str());     \
+  }
+
+
 }
 

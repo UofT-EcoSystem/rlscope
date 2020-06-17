@@ -124,6 +124,19 @@ bool CreateCounterDataImage(
     counterDataImageOptions.maxNumRanges = COUNTER_DATA_MAX_NUM_RANGES;
     counterDataImageOptions.maxNumRangeTreeNodes = COUNTER_DATA_MAX_NUM_RANGES;
     counterDataImageOptions.maxRangeNameLength = 64;
+    {
+        std::stringstream ss;
+        ss << "Runtime info: "
+           << std::endl
+           << "  counterDataImageOptions.maxNumRanges = " << counterDataImageOptions.maxNumRanges
+           << std::endl
+           << "  counterDataImageOptions.maxNumRangeTreeNodes = " << counterDataImageOptions.maxNumRangeTreeNodes
+           << std::endl
+           << "  counterDataImageOptions.maxRangeNameLength = " << counterDataImageOptions.maxRangeNameLength
+           ;
+        RLS_LOG("GPU_HW", "{}", ss.str());
+    }
+
 
     CUpti_Profiler_CounterDataImage_CalculateSize_Params calculateSizeParams = {CUpti_Profiler_CounterDataImage_CalculateSize_Params_STRUCT_SIZE};
 
@@ -168,7 +181,7 @@ void run_gpu_compute() {
     auto end_compute_t = rlscope::get_timestamp_us();
 
     float compute_sec = (end_compute_t - start_compute_t).count()/FLOAT_MICROSECONDS_IN_SEC;
-    std::cout << "ComputeVecAdd(iterations=" << FLAGS_iterations << ", n=" << FLAGS_n_int32s << ") took " << compute_sec << " seconds" << std::endl;
+    // std::cout << "ComputeVecAdd(iterations=" << FLAGS_iterations << ", n=" << FLAGS_n_int32s << ") took " << compute_sec << " seconds" << std::endl;
 }
 
 using RangeFunc = std::function<void()>;
@@ -182,6 +195,7 @@ static void with_range(const std::string& range_name, RangeFunc func) {
     }
     CUPTI_API_CALL_MAYBE_EXIT(cuptiProfilerPopRange(&popRangeParams));
 }
+
 
 using RangeFunc = std::function<void()>;
 static void with_N_ranges(int N, const std::string& range_name, RangeFunc func) {
@@ -239,6 +253,135 @@ size_t getNumRangeCollected(std::vector<uint8_t>& counterDataImage) {
     return getNumRangesParams.numRanges;
 }
 
+
+static size_t CUR_NESTING_LEVEL = 0;
+static size_t MAX_NESTING_LEVEL = 0;
+template <typename Func>
+void ScopedOperation(const std::string& operation, Func func) {
+    CUptiResult status;
+    CUpti_Profiler_PushRange_Params pushRangeParams = {CUpti_Profiler_PushRange_Params_STRUCT_SIZE};
+    pushRangeParams.pRangeName = operation.c_str();
+    {
+        std::stringstream ss;
+        rlscope::log_func_call_impl(ss, "cuptiProfilerPushRange", operation);
+        RLS_LOG("CUDA_API_TRACE", "{}", ss.str());
+    }
+    CUPTI_API_CALL_MAYBE_EXIT_SILENT(cuptiProfilerPushRange(&pushRangeParams));
+    CUR_NESTING_LEVEL += 1;
+    MAX_NESTING_LEVEL = std::max(CUR_NESTING_LEVEL, MAX_NESTING_LEVEL);
+
+    if (CUR_NESTING_LEVEL > static_cast<size_t>(COUNTER_DATA_MAX_NUM_NESTING_LEVELS)) {
+        std::stringstream ss;
+        ss << "WARNING: The number of consecutive cuptiProfilerPushRange calls (" << CUR_NESTING_LEVEL << ") has exceeded setConfigParams.numNestingLevels = " << COUNTER_DATA_MAX_NUM_NESTING_LEVELS;
+        RLS_LOG("GPU_HW", "{}", ss.str());
+    }
+
+    func();
+
+    CUR_NESTING_LEVEL -= 1;
+
+    CUpti_Profiler_PopRange_Params popRangeParams = {CUpti_Profiler_PopRange_Params_STRUCT_SIZE};
+    CUPTI_API_CALL_MAYBE_EXIT(cuptiProfilerPopRange(&popRangeParams));
+}
+
+// Q: if we visit the same path multiple times, should it be double-counted...?
+
+// WITHOUT double-counting ("unique" paths):
+//   [training_loop]
+//   [training_loop, q_forward]
+//   [training_loop, step]
+//   [training_loop, q_backward]
+//   [training_loop, q_update_target_network]
+// This causes SEGFAULT.
+// #define DQN_ATARI_UNIQUE_PATHS (5)
+
+// WITH double-counting.
+#define DQN_ATARI_UNIQUE_PATHS ((3*3)+(1*4)+(3*3)+(1*5))
+
+#define DQN_ATARI_NESTING_LEVELS (2)
+void run_pass_dqn_atari() {
+
+    // num_paths = 3 * 3
+    for (size_t i = 0; i < 3; i++) {
+        ScopedOperation("training_loop", [&] {
+
+            ScopedOperation("q_forward", [&] {
+                run_gpu_compute();
+            });
+
+            ScopedOperation("step", [&] {
+            });
+
+        });
+    }
+
+    // num_paths = 1 * 4
+    for (size_t i = 0; i < 1; i++) {
+        ScopedOperation("training_loop", [&] {
+
+            ScopedOperation("q_forward", [&] {
+                run_gpu_compute();
+            });
+
+            ScopedOperation("step", [&] {
+            });
+
+            ScopedOperation("q_backward", [&] {
+                run_gpu_compute();
+            });
+
+        });
+    }
+
+    // num_paths = 3 * 3
+    for (size_t i = 0; i < 3; i++) {
+        ScopedOperation("training_loop", [&] {
+
+            ScopedOperation("q_forward", [&] {
+                run_gpu_compute();
+            });
+
+            ScopedOperation("step", [&] {
+            });
+
+        });
+    }
+
+    // num_paths = 1 * 5
+    for (size_t i = 0; i < 1; i++) {
+        ScopedOperation("training_loop", [&] {
+
+            ScopedOperation("q_forward", [&] {
+                run_gpu_compute();
+            });
+
+            ScopedOperation("step", [&] {
+            });
+
+            ScopedOperation("q_backward", [&] {
+                run_gpu_compute();
+            });
+
+            ScopedOperation("q_update_target_network", [&] {
+                run_gpu_compute();
+            });
+
+        });
+    }
+
+}
+
+void run_pass() {
+    for (int32_t userrange_i = 0; userrange_i < FLAGS_unique_paths; userrange_i++) {
+        std::stringstream range_ss;
+        range_ss << "userrange_path";
+        range_ss << userrange_i;
+        with_N_ranges(FLAGS_nesting_levels, range_ss.str(), [&] {
+            run_gpu_compute();
+        });
+    }
+}
+
 bool runTest(CUdevice cuDevice,
              std::vector<uint8_t>& configImage,
              std::vector<uint8_t>& counterDataScratchBuffer,
@@ -265,6 +408,17 @@ bool runTest(CUdevice cuDevice,
     // Q: Does this matter...?  It's hard to know how many kernels might be launched.
     beginSessionParams.maxLaunchesPerPass = COUNTER_DATA_MAX_NUM_RANGES;
 
+    {
+        std::stringstream ss;
+        ss << "Runtime info: "
+           << std::endl
+           << "  beginSessionParams.maxRangesPerPass = " << beginSessionParams.maxRangesPerPass
+           << std::endl
+           << "  beginSessionParams.maxLaunchesPerPass = " << beginSessionParams.maxLaunchesPerPass
+           ;
+        RLS_LOG("GPU_HW", "{}", ss.str());
+    }
+
     CUPTI_API_CALL_MAYBE_EXIT(cuptiProfilerBeginSession(&beginSessionParams));
 
     setConfigParams.pConfig = &configImage[0];
@@ -273,7 +427,17 @@ bool runTest(CUdevice cuDevice,
     setConfigParams.passIndex = 0;
     setConfigParams.minNestingLevel = 1;
     setConfigParams.numNestingLevels = COUNTER_DATA_MAX_NUM_NESTING_LEVELS;
-    assert(COUNTER_DATA_MAX_NUM_NESTING_LEVELS * FLAGS_unique_paths <= COUNTER_DATA_MAX_NUM_RANGES);
+    // assert(COUNTER_DATA_MAX_NUM_NESTING_LEVELS * FLAGS_unique_paths <= COUNTER_DATA_MAX_NUM_RANGES);
+
+    {
+        std::stringstream ss;
+        ss << "Using setConfigParams.numNestingLevels = " << setConfigParams.numNestingLevels;
+        RLS_LOG("GPU_HW", "{}", ss.str());
+    }
+    // When experimenting with achieved_occupancy_range_profiling, I observed segfaults with config_data.counter_data_max_num_nesting_levels >= 12...
+    // I have NO IDEA why...
+    // TODO: post on nvidia forums and ask what's going on (reference ORIGINAL CUPTI sample program and how to reproduce the problem).
+    assert(setConfigParams.numNestingLevels < 12);
 
     CUPTI_API_CALL_MAYBE_EXIT(cuptiProfilerSetConfig(&setConfigParams));
     // DBG_BREAKPOINT("setConfigParams");
@@ -290,14 +454,8 @@ bool runTest(CUdevice cuDevice,
         {
             CUPTI_API_CALL_MAYBE_EXIT(cuptiProfilerEnableProfiling(&enableProfilingParams));
 
-            for (int32_t userrange_i = 0; userrange_i < FLAGS_unique_paths; userrange_i++) {
-                std::stringstream range_ss;
-                range_ss << "userrange_path";
-                range_ss << userrange_i;
-                with_N_ranges(FLAGS_nesting_levels, range_ss.str(), [&] {
-                    run_gpu_compute();
-                });
-            }
+            // run_pass();
+            run_pass_dqn_atari();
 
             pass_idx += 1;
             num_ranges_collected = getNumRangeCollected(counterDataImage);
@@ -305,14 +463,6 @@ bool runTest(CUdevice cuDevice,
             std::cout << "After pass " << pass_idx << ":" << std::endl
                     << "  total_num_ranges_collected = " << num_ranges_collected << std::endl
                     << "  increase in total_num_ranges_collected since last pass = " << (num_ranges_collected - last_num_ranges_collected) << std::endl;
-
-//            std::string rangeName = "userrange_01";
-//            pushRangeParams.pRangeName = rangeName.c_str();
-//            CUPTI_API_CALL_MAYBE_EXIT(cuptiProfilerPushRange(&pushRangeParams));
-//            {
-//                run_gpu_compute();
-//            }
-//            CUPTI_API_CALL_MAYBE_EXIT(cuptiProfilerPopRange(&popRangeParams));
 
             CUPTI_API_CALL_MAYBE_EXIT(cuptiProfilerDisableProfiling(&disableProfilingParams));
         }
@@ -474,9 +624,26 @@ int main(int argc, char* argv[])
     gflags::ParseCommandLineFlags(&argc, &argv, true);
     spdlog::set_level(spdlog::level::debug); // Set global log level to debug
 
-    RUNTIME_NUM_UNIQUE_RANGES = FLAGS_unique_paths*FLAGS_nesting_levels;
-    COUNTER_DATA_MAX_NUM_NESTING_LEVELS = FLAGS_nesting_levels*2;
-    COUNTER_DATA_MAX_NUM_RANGES = RUNTIME_NUM_UNIQUE_RANGES*2;
+
+    // RUNTIME_NUM_UNIQUE_RANGES = FLAGS_unique_paths*FLAGS_nesting_levels;
+    // COUNTER_DATA_MAX_NUM_NESTING_LEVELS = FLAGS_nesting_levels*2;
+    // COUNTER_DATA_MAX_NUM_RANGES = RUNTIME_NUM_UNIQUE_RANGES*2;
+
+    FLAGS_unique_paths = DQN_ATARI_UNIQUE_PATHS;
+    FLAGS_nesting_levels = DQN_ATARI_NESTING_LEVELS;
+    COUNTER_DATA_MAX_NUM_NESTING_LEVELS = FLAGS_nesting_levels;
+    COUNTER_DATA_MAX_NUM_RANGES = FLAGS_unique_paths;
+
+    {
+        std::stringstream ss;
+        ss << "Runtime info:"
+           << std::endl
+           << "  COUNTER_DATA_MAX_NUM_NESTING_LEVELS = " << COUNTER_DATA_MAX_NUM_NESTING_LEVELS
+           << std::endl
+           << "  COUNTER_DATA_MAX_NUM_RANGES = " << COUNTER_DATA_MAX_NUM_RANGES;
+        RLS_LOG("GPU_HW", "{}", ss.str());
+    }
+
 
     CUdevice cuDevice;
     std::vector<std::string> metricNames;
@@ -528,6 +695,16 @@ int main(int argc, char* argv[])
 //    NV::Metric::Enum::ListMetricBases(chipName.c_str());
 
     DRIVER_API_CALL_MAYBE_EXIT(cuCtxDestroy(cuContext));
+
+    {
+        std::stringstream ss;
+        ss << "Runtime info:"
+           << std::endl
+           << "  MAX_NESTING_LEVEL = " << MAX_NESTING_LEVEL
+           << std::endl
+           << "  setConfigParams.numNestingLevels = " << COUNTER_DATA_MAX_NUM_NESTING_LEVELS;
+        RLS_LOG("GPU_HW", "{}", ss.str());
+    }
 
     return 0;
 }

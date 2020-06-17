@@ -24,9 +24,18 @@ ssh_config*
 .bash_history
 
 /local/
+/local*
 /build/
 /local.host/
 /local.docker/
 /build.host/
 /build.docker/
 /cmake-build-debug/
+/output/
+*.deb
+*.tar.gz
+*.sw?
+/.idea
+/.vscode
+/.clangd
+*.egg-info

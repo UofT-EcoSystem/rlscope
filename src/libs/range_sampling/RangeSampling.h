@@ -1,8 +1,7 @@
 //
 // Created by jgleeson on 2020-05-14.
 //
-#ifndef CUPTI_RANGE_SAMPLING_H
-#define CUPTI_RANGE_SAMPLING_H
+#pragma once
 
 #include "common_util.h"
 
@@ -49,23 +48,54 @@ struct RangeNode {
 
 };
 
+struct RangeTree;
+struct RangeTreeStats { 
+  size_t max_nesting_levels{0};
+  size_t max_unique_ranges{0};
+  size_t max_num_ranges{0};
+  // Range name length (according to NVIDIA profiling API's definition...I think).
+  // range = [training_loop, q_forward]
+  // range_name = "training_loop/q_forward"
+  // len(range_name) + 1 = 23 + 1
+  //                     = 24
+  size_t max_range_name_length{0};
+  bool initialized{false};
+
+  RangeTreeStats() = default;
+  RangeTreeStats(const RangeTree& range_tree);
+};
 struct RangeTree {
   using Stack = std::list<const RangeNode*>;
-  size_t max_nesting_levels;
-  size_t max_unique_ranges;
+
 
   // Not a "real" push() annotation.  Use to handle multiple root push() annotations.
   std::shared_ptr<RangeNode> root;
   RangeNode *cur_node;
   size_t cur_depth;
+  size_t cur_range_name_length;
+  size_t cur_num_ranges;
 
-  RangeTree() :
-      max_nesting_levels(0), max_unique_ranges(0), root(new RangeNode("[ROOT]")), cur_node(root.get()), cur_depth(0) {
+  RangeTreeStats stats;
+  RangeTreeStats recorded_stats;
+
+  RangeTree() : root(new RangeNode("[ROOT]")),
+                cur_node(root.get()),
+                cur_depth(0),
+                cur_range_name_length(0),
+                stats(*this),
+                recorded_stats()
+  {
   }
 
-  bool Push(const std::string &name, bool allow_insert);
+  const RangeTreeStats& RecordedStats() const;
 
+  MyStatus Push(const std::string &name, bool update_stats);
   void Pop();
+
+  void StartPass(bool update_stats);
+  void EndPass(bool update_stats);
+
+  void _RecordStats();
 
   RangeTree::Stack CurStack() const;
 
@@ -100,6 +130,7 @@ struct RangeTree {
     out << "Saw " << i << " stacks in total.";
   }
 
+  size_t CurRangeNameLength() const;
 
   void _UpdateStatsOnPush(bool was_insert);
 
@@ -301,13 +332,15 @@ struct CounterData {
   std::string chipName;
   std::vector<std::string> metricNames;
   uint32_t counter_data_max_num_ranges;
+  uint32_t counter_data_maxRangeNameLength;
 
   ProfilingByteBuffer counterDataImage;
   ProfilingByteBuffer counterDataScratchBuffer;
   ProfilingByteBuffer counterDataImagePrefix;
 
   CounterData() :
-      counter_data_max_num_ranges(0) {
+      counter_data_max_num_ranges(0),
+      counter_data_maxRangeNameLength(0) {
   }
 
   size_t size() const {
@@ -320,8 +353,15 @@ struct CounterData {
   }
 
   CounterData(
-      const std::string &chipName, const std::vector<std::string> &metricNames, uint32_t counter_data_max_num_ranges) :
-      chipName(chipName), metricNames(metricNames), counter_data_max_num_ranges(counter_data_max_num_ranges) {
+      const std::string &chipName,
+      const std::vector<std::string> &metricNames,
+      uint32_t counter_data_max_num_ranges,
+      uint32_t counter_data_maxRangeNameLength)
+      : chipName(chipName),
+        metricNames(metricNames),
+        counter_data_max_num_ranges(counter_data_max_num_ranges),
+        counter_data_maxRangeNameLength(counter_data_maxRangeNameLength)
+  {
   }
 
   MyStatus Init();
@@ -435,10 +475,14 @@ struct GPUHwCounterSamplerProtoState {
   MyStatus DumpSync();
 };
 
+#define GPU_HW_COUNTER_SAMPLER_MODE_PROFILE 0
+#define GPU_HW_COUNTER_SAMPLER_MODE_CONFIG 1
+#define GPU_HW_COUNTER_SAMPLER_MODE_EVAL 2
+
 enum GPUHwCounterSamplerMode {
-  PROFILE,
-  CONFIG,
-  EVAL,
+  PROFILE = 0,
+  CONFIG = 1,
+  EVAL = 2,
 };
 
 class GPUHwCounterSampler {
@@ -553,22 +597,38 @@ public:
   bool IsProtoFile(const boost::filesystem::path &path);
 
   inline size_t MaxNestingLevels() const {
-    return _range_tree.max_nesting_levels;
+    return _range_tree.RecordedStats().max_nesting_levels;
   }
 
-  // HACK: use twice the max nesting level seen at runtime during config; hopefully it's big enough.
+
   inline size_t UseMaxNestingLevels() const {
-    return 2 * MaxNestingLevels();
+    return MaxNestingLevels();
   }
 
-  inline size_t MaxUniqueRanges() const {
-    return _range_tree.max_unique_ranges;
+  // inline size_t MaxUniqueRanges() const {
+  //   return _range_tree.RecordedStats().max_unique_ranges;
+  // }
+
+  // inline size_t UseMaxUniqueRanges() const {
+  //   return MaxUniqueRanges();
+  // }
+
+  inline size_t MaxRangeNameLength() const {
+    return _range_tree.RecordedStats().max_range_name_length;
   }
 
-  // HACK: use twice the max unique ranges seen at runtime during config; hopefully it's big enough.
-  inline size_t UseMaxUniqueRanges() const {
-    return 2 * MaxUniqueRanges();
+  inline size_t UseMaxRangeNameLength() const {
+    return MaxRangeNameLength();
   }
+
+  inline size_t MaxNumRanges() const {
+    return _range_tree.RecordedStats().max_num_ranges;
+  }
+
+  inline size_t UseMaxNumRanges() const {
+    return MaxNumRanges();
+  }
+
 
 //    bool IsEnabled();
   MyStatus Push(const std::string &operation);
@@ -638,4 +698,3 @@ public:
 
 } // namespace rlscope
 
-#endif //CUPTI_RANGE_SAMPLING_H

@@ -34,7 +34,7 @@
 
 #define DEBUG_PRINT_API_CALL(apiFuncCall) \
     do { \
-        DBG_LOG("[TRACE] {}", #apiFuncCall); \
+        RLS_LOG("CUDA_API_TRACE", "{}", #apiFuncCall); \
     } while(0)
 
 #else
@@ -108,6 +108,19 @@
 #define CUPTI_API_CALL_MAYBE_EXIT(apiFuncCall) \
     do { \
         DEBUG_PRINT_API_CALL(apiFuncCall); \
+        CUptiResult _status = apiFuncCall; \
+        if (_status != CUPTI_SUCCESS) { \
+            std::stringstream _err_ss; \
+            auto _err_str = rlscope::cuptiGetDetailedErrorString(_status); \
+            _err_ss << __FILE__ << ":" << __LINE__ << ": error: function " << #apiFuncCall << " failed with error (" << _status << ") " << _err_str; \
+            std::cerr << "ERROR: " << _err_ss.str() << std::endl; \
+            DBG_BREAKPOINT("CUPTI_API_CALL"); \
+            exit(-1); \
+        } \
+    } while (0)
+
+#define CUPTI_API_CALL_MAYBE_EXIT_SILENT(apiFuncCall) \
+    do { \
         CUptiResult _status = apiFuncCall; \
         if (_status != CUPTI_SUCCESS) { \
             std::stringstream _err_ss; \
