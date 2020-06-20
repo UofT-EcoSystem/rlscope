@@ -1,4 +1,5 @@
 import platform
+import typing
 import codecs
 import sys
 import shlex
@@ -342,6 +343,12 @@ def maybe_indent(txt, indents):
     # DON'T indent the first line (typically manually indented in code.
     txt = re.sub('^\s*', '', txt, count=1)
     return txt
+
+def txt_indent(txt, indent : typing.Optional[int]):
+    if indent is None:
+        return txt
+    return textwrap.indent(txt, prefix='  ')
+
 
 def maybe_clause(op_clause, keep, indents=None):
     if not keep:
@@ -1420,6 +1427,15 @@ class DataFrame:
         pd.options.display.width = 9999999
         print(df, **kwargs)
         pd.reset_option('all')
+
+    @staticmethod
+    def dataframe_string(df):
+        # No limit of column/display width
+        with pd.option_context('display.max_rows', None,
+                               'display.max_columns', None,
+                               'display.max_colwidth', 0,
+                               'display.width', 0):
+            return df.to_string(index=False)
 
 
     @staticmethod

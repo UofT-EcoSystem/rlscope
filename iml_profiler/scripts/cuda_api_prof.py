@@ -139,7 +139,7 @@ def main():
         return
 
     env = dict(os.environ)
-    # TODO: figure out how to install pre-built .so file with "pip install iml_profiler"
+    py_config.find_librlscope()
     so_path = py_config.RLSCOPE_CLIB
     assert so_path is not None
     add_env = dict()

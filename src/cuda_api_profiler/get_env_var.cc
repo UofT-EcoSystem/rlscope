@@ -15,44 +15,11 @@
 #include <boost/optional.hpp>
 
 #include "common_util.h"
+#include "range_sampling.h"
 
 #include "get_env_var.h"
 
 namespace rlscope {
-
-template <typename T>
-MyStatus ParseValue(const char* type_name, const char* str, size_t size, T* value) {
-  // Ideally we would use env_var / safe_strto64, but it is
-  // hard to use here without pulling in a lot of dependencies,
-  // so we use std:istringstream instead
-  std::string integer_str(str, size);
-  std::istringstream ss(integer_str);
-  ss >> *value;
-  if (ss.fail()) {
-    std::stringstream err_ss;
-    err_ss << "Failed to parse " << type_name << " from \"" << str << "\"";
-    return MyStatus(error::INVALID_ARGUMENT, err_ss.str());
-  }
-  return MyStatus::OK();
-}
-
-template <typename T>
-T ParseEnvOrDefault(const char* type_name, const char* env_name, boost::optional<T> user_value, float dflt) {
-  MyStatus my_status = MyStatus::OK();
-  if (user_value.has_value()) {
-    return user_value.get();
-  }
-  const char* env_val = getenv(env_name);
-  if (env_val == nullptr) {
-    return dflt;
-  }
-  T value;
-  my_status = ParseValue(type_name, env_val, strlen(env_val), &value);
-  if (!my_status.ok()) {
-    LOG(FATAL) << "Failed to parse env variable " << env_name << ": " << my_status.error_message();
-  }
-  return value;
-}
 
 float get_IML_SAMPLE_EVERY_SEC(boost::optional<float> user_value) {
   return ParseEnvOrDefault("float", "IML_SAMPLE_EVERY_SEC", user_value, IML_SAMPLE_EVERY_SEC_DEFAULT);
@@ -63,8 +30,7 @@ int get_IML_GPU_HW_CONFIG_PASSES(boost::optional<int> user_value) {
 }
 
 std::vector<std::string> get_IML_GPU_HW_METRICS(boost::optional<std::string> user_value) {
-  // return ParseEnvOrDefault("integer", "IML_GPU_HW_METRICS", user_value, IML_GPU_HW_METRICS_DEFAULT);
-  std::string dflt = IML_GPU_HW_METRICS_DEFAULT;
+  std::string dflt = rlscope::DEFAULT_METRICS_STR;
   std::string env_name = "IML_GPU_HW_METRICS";
   std::string value;
 

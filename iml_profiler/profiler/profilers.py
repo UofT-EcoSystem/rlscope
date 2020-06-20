@@ -129,6 +129,8 @@ def setup(tfprof_enabled, pyprof_enabled, allow_skip=False):
         return
     assert not SETUP_DONE
 
+    py_config.find_librlscope()
+
     uninstrumented_run = not tfprof_enabled and not pyprof_enabled
 
     # if not uninstrumented_run:

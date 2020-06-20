@@ -233,90 +233,110 @@ OStream& PrintIndent(OStream& out, int indent) {
 //}
 
 template <typename OStream, typename T>
+struct PrintValueImpl {
+  static void impl(OStream& os, const T& value) {
+    os << value;
+  }
+};
+template <typename OStream, typename T>
 void PrintValue(OStream& os, const T& value) {
-//template <typename T>
-//void PrintValue(std::ostream& os, const T& value) {
-  os << value;
+  PrintValueImpl<OStream, T>::impl(os, value);
 }
 
-//template <typename T>
-//void PrintValue(std::ostream& os, const std::set<T>& value) {
-template <typename OStream, typename T>
-void PrintValue(OStream& os, const std::set<T>& value) {
-  os << "{";
-  size_t i = 0;
-  for (auto const& val : value) {
-    if (i > 0) {
-      os << ", ";
-    }
-    PrintValue(os, val);
-    i += 1;
-  }
-  os << "}";
-}
+//template <typename OStream, typename T>
+//struct PrintValueImpl<OStream, ...> {
+//  static void impl(OStream& os, const T& value) {
+//  }
+//};
 
-// template <typename T>
-// void PrintValue(std::ostream& os, const std::list<T>& value) {
-template <typename OStream, typename T>
-void PrintValue(OStream& os, const std::list<T>& value) {
-  os << "[";
-  size_t i = 0;
-  for (auto const& val : value) {
-    if (i > 0) {
-      os << ", ";
-    }
-    PrintValue(os, val);
-    i += 1;
+template <typename OStream>
+struct PrintValueImpl<OStream, std::string> {
+  static void impl(OStream& os, const std::string& value) {
+    os << "\"" << value << "\"";
   }
-  os << "]";
-}
-// template <typename T>
-// void PrintValue(std::ostream& os, const std::vector<T>& value) {
-template <typename OStream, typename T>
-void PrintValue(OStream& os, const std::vector<T>& value) {
-  os << "[";
-  size_t i = 0;
-  for (auto const& val : value) {
-    if (i > 0) {
-      os << ", ";
-    }
-    PrintValue(os, val);
-    i += 1;
-  }
-  os << "]";
-}
+};
 
 template <typename OStream, typename T>
-void PrintValue(OStream& os, const std::initializer_list<T>& value) {
-  os << "[";
-  size_t i = 0;
-  for (auto const& val : value) {
-    if (i > 0) {
-      os << ", ";
+struct PrintValueImpl<OStream, std::set<T>> {
+  static void impl(OStream& os, const std::set<T>& value) {
+    os << "{";
+    size_t i = 0;
+    for (auto const& val : value) {
+      if (i > 0) {
+        os << ", ";
+      }
+      PrintValue(os, val);
+      i += 1;
     }
-    PrintValue(os, val);
-    i += 1;
+    os << "}";
   }
-  os << "]";
-}
+};
 
-// template <typename K, typename V>
-// void PrintValue(std::ostream& os, const std::map<K, V>& value) {
+template <typename OStream, typename T>
+struct PrintValueImpl<OStream, std::list<T>> {
+  static void impl(OStream& os, const std::list<T>& value) {
+    os << "[";
+    size_t i = 0;
+    for (auto const& val : value) {
+      if (i > 0) {
+        os << ", ";
+      }
+      PrintValue(os, val);
+      i += 1;
+    }
+    os << "]";
+  }
+};
+
+template <typename OStream, typename T>
+struct PrintValueImpl<OStream, std::vector<T>> {
+  static void impl(OStream& os, const std::vector<T>& value) {
+    os << "[";
+    size_t i = 0;
+    for (auto const& val : value) {
+      if (i > 0) {
+        os << ", ";
+      }
+      PrintValue(os, val);
+      i += 1;
+    }
+    os << "]";
+  }
+};
+
+template <typename OStream, typename T>
+struct PrintValueImpl<OStream, std::initializer_list<T>> {
+  static void impl(OStream& os, const std::initializer_list<T>& value) {
+    os << "[";
+    size_t i = 0;
+    for (auto const& val : value) {
+      if (i > 0) {
+        os << ", ";
+      }
+      PrintValue(os, val);
+      i += 1;
+    }
+    os << "]";
+  }
+};
+
 template <typename OStream, typename K, typename V>
-void PrintValue(OStream& os, const std::map<K, V>& value) {
-  os << "{";
-  size_t i = 0;
-  for (auto const& pair : value) {
-    if (i > 0) {
-      os << ", ";
+struct PrintValueImpl<OStream, std::map<K, V>> {
+  static void impl(OStream& os, const std::map<K, V>& value) {
+    os << "{";
+    size_t i = 0;
+    for (auto const& pair : value) {
+      if (i > 0) {
+        os << ", ";
+      }
+      PrintValue(os, pair.first);
+      os << "=";
+      PrintValue(os, pair.second);
+      i += 1;
     }
-    PrintValue(os, pair.first);
-    os << "=";
-    PrintValue(os, pair.second);
-    i += 1;
+    os << "}";
   }
-  os << "}";
-}
+};
 
 template <typename OStream>
 void print_args(OStream& os, int arg_idx) {

@@ -26,7 +26,6 @@ static const int IML_GPU_HW_CONFIG_PASSES_DEFAULT = 1;
 int get_IML_GPU_HW_CONFIG_PASSES(boost::optional<int> user_value);
 
 // IML_GPU_HW_METRICS
-static const std::string IML_GPU_HW_METRICS_DEFAULT = "sm__warps_active.avg.pct_of_peak_sustained_active+";
 std::vector<std::string> get_IML_GPU_HW_METRICS(boost::optional<std::string> user_value);
 
 }

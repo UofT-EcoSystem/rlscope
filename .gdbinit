@@ -1,4 +1,4 @@
-b tensorflow::dbg_breakpoint
+b rlscope::dbg_breakpoint
 
 # define str
 #     call (void)printf("> gdb: str $arg0\n")

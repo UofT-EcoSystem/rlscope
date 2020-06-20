@@ -4,6 +4,7 @@
 
 #include "Common.h"
 #include "my_status.h"
+#include "env_var.h"
 
 #include <boost/filesystem.hpp>
 
@@ -18,6 +19,12 @@
 #include <chrono>
 
 namespace rlscope {
+
+const bool TRACE_CUDA_DEFAULT = false;
+bool get_TRACE_CUDA(boost::optional<bool> user_value) {
+  return ParseEnvOrDefault("bool", "TRACE_CUDA", user_value, TRACE_CUDA_DEFAULT);
+}
+const bool TRACE_CUDA = get_TRACE_CUDA(boost::none);
 
 std::vector<std::string> StringSplit(const std::string& s, std::string rgx_str) {
     std::vector<std::string> elems;

@@ -21,26 +21,31 @@ IML_TEST_DIR = _j(IML_DIR, 'test_results')
 DEBUG = False
 
 RLSCOPE_LIBNAME = 'rlscope'
-# Older version of python (<=3.6) need 'LIBRARY_PATH' to be defined for find_library to work.
-assert 'LIBRARY_PATH' not in ENV or ENV['LIBRARY_PATH'] == ENV['LD_LIBRARY_PATH']
-ENV['LIBRARY_PATH'] = ENV['LD_LIBRARY_PATH']
-RLSCOPE_CLIB = ctypes.util.find_library(RLSCOPE_LIBNAME)
-# RLSCOPE_CLIB = 'lib{name}.so'.format(
-#   name=RLSCOPE_LIBNAME)
+RLSCOPE_CLIB = None
+def find_librlscope():
+  global RLSCOPE_CLIB
+  if RLSCOPE_CLIB is not None:
+    return
+  # Older version of python (<=3.6) need 'LIBRARY_PATH' to be defined for find_library to work.
+  assert 'LIBRARY_PATH' not in ENV or ENV['LIBRARY_PATH'] == ENV['LD_LIBRARY_PATH']
+  ENV['LIBRARY_PATH'] = ENV['LD_LIBRARY_PATH']
+  RLSCOPE_CLIB = ctypes.util.find_library(RLSCOPE_LIBNAME)
+  # RLSCOPE_CLIB = 'lib{name}.so'.format(
+  #   name=RLSCOPE_LIBNAME)
 
-# if not _e(so_path):
-if RLSCOPE_CLIB is None:
-  sys.stderr.write(textwrap.dedent("""
-      IML ERROR: couldn't find RLScope library (lib{name}.so); to build it, do:
-        $ cd {root}
-        $ bash ./setup.sh
-        # To modify your LD_LIBRARY_PATH to include lib{name}.so, run:
-        $ source source_me.sh
-      """.format(
-    name=RLSCOPE_LIBNAME,
-    root=ROOT,
-  )))
-  sys.exit(1)
+  # if not _e(so_path):
+  if RLSCOPE_CLIB is None:
+    sys.stderr.write(textwrap.dedent("""
+        IML ERROR: couldn't find RLScope library (lib{name}.so); to build it, do:
+          $ cd {root}
+          $ bash ./setup.sh
+          # To modify your LD_LIBRARY_PATH to include lib{name}.so, run:
+          $ source source_me.sh
+        """.format(
+      name=RLSCOPE_LIBNAME,
+      root=ROOT,
+    )))
+    sys.exit(1)
 
 CLONE = _j(ENV['HOME'], 'clone')
 BASELINES_ROOT = _j(CLONE, 'baselines')
@@ -59,10 +64,10 @@ GENERATE_INDEX_PY = _j(ROOT, "python/scripts", "generate_iml_profiler_plot_index
 DEBUG_TRACE_SESSION = False
 
 # Verbose debugging: Print calls to set_operation/end_operation
-DEBUG_OPERATIONS = True
+DEBUG_OPERATIONS = False
 
 # Verbose debugging: Print calls to librlscope.so
-DEBUG_RLSCOPE_LIB_CALLS = True
+DEBUG_RLSCOPE_LIB_CALLS = False
 
 # If true, have iml-util-sampler log to stdout the GPU/CPU info it queries.
 # This can be noisy.
@@ -80,7 +85,7 @@ DEBUG_SPLIT_STACK_OPS = False
 # If True, skip inserting any profiling-overhead events.
 DEBUG_SKIP_PROFILING_OVERHEAD = False
 
-DEBUG_GPU_HW = True
+DEBUG_GPU_HW = False
 
 # If True, then log all calls into librlscope.so
 # DEBUG_SAMPLE_CUDA_API = True

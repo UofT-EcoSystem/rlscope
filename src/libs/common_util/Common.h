@@ -18,34 +18,51 @@
 #include "debug_flags.h"
 
 #include <boost/filesystem.hpp>
+#include <boost/optional.hpp>
 
 #define FLOAT_MICROSECONDS_IN_SEC ((float)1e6)
 
-#define PRINT_AND_DBG_BREAKPOINT(name, status) \
-    std::cerr << "ERROR: " << status << std::endl; \
-    DBG_BREAKPOINT(name);
+#define DEBUG_PRINT_API_CALL(apiFuncCall) \
+  do { \
+      if (rlscope::TRACE_CUDA) { \
+        RLS_LOG("CUDA_API_TRACE", "{}", #apiFuncCall); \
+      } \
+  } while(0)
 
-#ifdef SHOULD_PRINT_CUDA_API_CALLS
-
+//#ifdef SHOULD_PRINT_CUDA_API_CALLS
+//
+////#define DEBUG_PRINT_API_CALL(apiFuncCall)
+////    do {
+////        std::cerr << "[DBG] " << __FILE__ << ":" << __LINE__ << ": " << #apiFuncCall << std::endl;
+////    } while(0)
+//
 //#define DEBUG_PRINT_API_CALL(apiFuncCall)
 //    do {
-//        std::cerr << "[DBG] " << __FILE__ << ":" << __LINE__ << ": " << #apiFuncCall << std::endl;
+//        RLS_LOG("CUDA_API_TRACE", "{}", #apiFuncCall);
 //    } while(0)
-
-#define DEBUG_PRINT_API_CALL(apiFuncCall) \
-    do { \
-        RLS_LOG("CUDA_API_TRACE", "{}", #apiFuncCall); \
-    } while(0)
-
-#else
-
-#define DEBUG_PRINT_API_CALL(apiFuncCall)
-
-#endif // SHOULD_PRINT_CUDA_API_CALLS
+//
+//#else
+//
+//#define DEBUG_PRINT_API_CALL(apiFuncCall)
+//
+//#endif // SHOULD_PRINT_CUDA_API_CALLS
 
 #define NVPW_API_CALL_MAYBE_STATUS(apiFuncCall) \
     do { \
         DEBUG_PRINT_API_CALL(apiFuncCall); \
+        NVPA_Status _status = apiFuncCall; \
+        if (_status != NVPA_STATUS_SUCCESS) { \
+            std::stringstream _err_ss; \
+            auto _err_str = rlscope::nvperfGetErrorString(_status); \
+            _err_ss << __FILE__ << ":" << __LINE__ << ": error: function " << #apiFuncCall << " failed with error (" << _status << ") " << _err_str; \
+            auto _my_status = MyStatus(rlscope::error::INVALID_ARGUMENT, _err_ss.str()); \
+            PRINT_AND_DBG_BREAKPOINT("NVPW_API_CALL", _my_status); \
+            return _my_status; \
+        } \
+    } while (0)
+
+#define NVPW_API_CALL_MAYBE_STATUS_SILENT(apiFuncCall) \
+    do { \
         NVPA_Status _status = apiFuncCall; \
         if (_status != NVPA_STATUS_SUCCESS) { \
             std::stringstream _err_ss; \
@@ -101,6 +118,7 @@
             auto _err_str = rlscope::nvperfGetErrorString(_status); \
             _err_ss << __FILE__ << ":" << __LINE__ << ": error: function " << #apiFuncCall << " failed with error (" << _status << ") " << _err_str; \
             std::cerr << "ERROR: " << _err_ss.str() << std::endl; \
+            DBG_BREAKPOINT_STACKTRACE("NVPW_API_CALL"); \
             exit(-1); \
         } \
     } while (0)
@@ -114,7 +132,7 @@
             auto _err_str = rlscope::cuptiGetDetailedErrorString(_status); \
             _err_ss << __FILE__ << ":" << __LINE__ << ": error: function " << #apiFuncCall << " failed with error (" << _status << ") " << _err_str; \
             std::cerr << "ERROR: " << _err_ss.str() << std::endl; \
-            DBG_BREAKPOINT("CUPTI_API_CALL"); \
+            DBG_BREAKPOINT_STACKTRACE("CUPTI_API_CALL"); \
             exit(-1); \
         } \
     } while (0)
@@ -127,7 +145,7 @@
             auto _err_str = rlscope::cuptiGetDetailedErrorString(_status); \
             _err_ss << __FILE__ << ":" << __LINE__ << ": error: function " << #apiFuncCall << " failed with error (" << _status << ") " << _err_str; \
             std::cerr << "ERROR: " << _err_ss.str() << std::endl; \
-            DBG_BREAKPOINT("CUPTI_API_CALL"); \
+            DBG_BREAKPOINT_STACKTRACE("CUPTI_API_CALL"); \
             exit(-1); \
         } \
     } while (0)
@@ -146,7 +164,7 @@
             assert(_err_status == CUDA_SUCCESS); \
             _err_ss << __FILE__ << ":" << __LINE__ << ": error: function " << #apiFuncCall << " failed with " << _err_name << " (" << _status << ") " << _err_str; \
             std::cerr << "ERROR: " << _err_ss.str() << std::endl; \
-            DBG_BREAKPOINT("DRIVER_API_CALL"); \
+            DBG_BREAKPOINT_STACKTRACE("DRIVER_API_CALL"); \
             exit(-1); \
         } \
     } while (0)
@@ -160,7 +178,7 @@
             auto _err_str = cudaGetErrorString(_status); \
             _err_ss << __FILE__ << ":" << __LINE__ << ": error: function " << #apiFuncCall << " failed with error (" << _status << ") " << _err_str; \
             std::cerr << "ERROR: " << _err_ss.str() << std::endl; \
-            DBG_BREAKPOINT("RUNTIME_API_CALL"); \
+            DBG_BREAKPOINT_STACKTRACE("RUNTIME_API_CALL"); \
             exit(-1); \
         } \
     } while (0)
@@ -180,6 +198,12 @@
     } while (0)
 
 namespace rlscope {
+
+// TRACE_CUDA:
+// If defined, print every CUDA/CUPTI/NVPW API call to stderr.
+extern const bool TRACE_CUDA;
+extern const bool TRACE_CUDA_DEFAULT;
+bool get_TRACE_CUDA(boost::optional<bool> user_value);
 
 std::vector<std::string> StringSplit(const std::string& s, std::string rgx_str);
 

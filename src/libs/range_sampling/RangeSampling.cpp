@@ -30,8 +30,10 @@
 
 #include <algorithm>
 #include <iterator>
+
 #include <boost/uuid/detail/md5.hpp>
 #include <boost/algorithm/hex.hpp>
+#include <boost/algorithm/string/join.hpp>
 
 using boost::uuids::detail::md5;
 
@@ -65,6 +67,105 @@ using boost::uuids::detail::md5;
 #define LOG_FUNC_ENTRY(...) 
 
 namespace rlscope {
+
+// - Parsed by: ParseMetricNameString
+//   - <metric_name>[$|&][+]
+//
+//   - default if NO symbols:
+//     keepInstances = false
+//     isolated = true
+//
+//   - keepInstances = "+" present
+//     isolated = "&" is NOT present
+//     (NOTE $ is redundant? it make isolated=True, but isolated=True is the default).
+const std::vector<std::string> DEFAULT_METRICS = {
+
+    // keepInstances = true
+    // isolated = true
+
+    //
+    // NOTE: To figure out useful metrics to collect, grep CUPTI-samples/userrange_profiling/*.txt files
+    // for deprecated CUPTI metrics that ACTUALLY HAVE DOCUMENTATION STRINGS (unlike new "profiling API"...),
+    // then lookup the mapping from old metric names to new "Profiling API" metric name using this table from
+    // the CUPTI documentation:
+    //    https://docs.nvidia.com/cupti/Cupti/r_main.html#metrics_map_table_70
+    //
+
+    // Deprecated CUPTI metric API -- achieved_occupancy:
+    //    Id        = 1205
+    //    Shortdesc = Achieved Occupancy
+    //    Longdesc  = Ratio of the average active warps per active cycle to the maximum number of warps supported on a multiprocessor
+    "sm__warps_active.avg.pct_of_peak_sustained_active+",
+
+    // Deprecated CUPTI metric API -- sm_efficiency:
+    //    Id        = 1203
+    //    Shortdesc = Multiprocessor Activity
+    //    Longdesc  = The percentage of time at least one warp is active on a multiprocessor averaged over all multiprocessors on the GPU
+    // See CUPTI documentation for mapping to new "Profiling API" metric name:
+    //    https://docs.nvidia.com/cupti/Cupti/r_main.html#metrics_map_table_70
+    "smsp__cycles_active.avg.pct_of_peak_sustained_elapsed+",
+
+    // Deprecated CUPTI metric API -- inst_executed:
+    //    Metric# 90
+    //    Id        = 1290
+    //    Name      = inst_executed
+    //    Shortdesc = Instructions Executed
+    //    Longdesc  = The number of instructions executed
+    "smsp__inst_executed.sum+",
+
+    // Deprecated CUPTI metric API -- active_cycles:
+    //    Event# 25
+    //    Id        = 2629
+    //    Name      = active_cycles
+    //    Shortdesc = Active cycles
+    //    Longdesc  = Number of cycles a multiprocessor has at least one active warp.
+    //    Category  = CUPTI_EVENT_CATEGORY_INSTRUCTION
+    "sm__cycles_active.sum+",
+
+    // Deprecated CUPTI metric API -- active_warps:
+    //    Event# 26
+    //    Id        = 2630
+    //    Name      = active_warps
+    //    Shortdesc = Active warps
+    //    Longdesc  = Accumulated number of active warps per cycle. For every cycle it increments by the number of active warps in the cycle which can be in the range 0 to 64.
+    //    Category  = CUPTI_EVENT_CATEGORY_INSTRUCTION
+    "sm__warps_active.sum+",
+
+    // Deprecated CUPTI metric API -- elapsed_cycles_sm:
+    //    Event# 33
+    //    Id        = 2193
+    //    Name      = elapsed_cycles_sm
+    //    Shortdesc = Elapsed clocks
+    //    Longdesc  = Elapsed clocks
+    //    Category  = CUPTI_EVENT_CATEGORY_INSTRUCTION
+    "sm__cycles_elapsed.sum+"
+
+//    // FAILS:
+//    //   ERROR: Invalid argument: /home/jgleeson/clone/iml/src/libs/range_sampling/RangeSampling.cpp:384: error:
+//    //   function NVPW_RawMetricsConfig_AddMetrics(&addMetricsParams) failed with error
+//    //   (1) NVPA_STATUS_ERROR: Generic error.
+//    // keepInstances = true
+//    // isolated = false
+//    "sm__warps_active.avg.pct_of_peak_sustained_active&+",
+//    "smsp__inst_executed.sum&+",
+//    "sm__cycles_active.sum&+",
+//    "sm__warps_active.sum&+",
+//    "sm__cycles_elapsed.sum&+"
+
+//    // keepInstances = false
+//    // isolated = true
+//    // No difference?
+//    "sm__warps_active.avg.pct_of_peak_sustained_active",
+//    "smsp__inst_executed.sum",
+//    "sm__cycles_active.sum",
+//    "sm__warps_active.sum",
+//    "sm__cycles_elapsed.sum"
+
+};
+static std::string init_DEFAULT_METRICS_STR() {
+  return boost::algorithm::join(DEFAULT_METRICS, ",");
+}
+const std::string DEFAULT_METRICS_STR = init_DEFAULT_METRICS_STR();
 
 // 50 MB.
 // In a simple script, one sample can take up 11K, so I expect the size to be large in general
@@ -117,7 +218,7 @@ MyStatus CounterData::Init() {
   counterDataImageOptions.maxRangeNameLength = counter_data_maxRangeNameLength;
   // counterDataImageOptions.maxRangeNameLength = 64;
 
-  {
+  if (SHOULD_DEBUG(FEATURE_GPU_HW)) {
     std::stringstream ss;
     ss << "Runtime info: "
        << std::endl
@@ -244,6 +345,15 @@ static MyStatus GetRawMetricRequests(
   bool isolated = true;
   bool keepInstances = true;
 
+  if (SHOULD_DEBUG(FEATURE_GPU_HW)) {
+    std::stringstream ss;
+    ss << "metricNames = ";
+//    std::vector<std::string> metricNamesCopy = metricNames;
+//    PrintValue(ss, metricNamesCopy);
+    PrintValue(ss, metricNames);
+    RLS_LOG("GPU_HW", "{}", ss.str());
+  }
+
   for (auto& metricName : metricNames)
   {
     ParseMetricNameString(metricName, &reqName, &isolated, &keepInstances);
@@ -253,7 +363,12 @@ static MyStatus GetRawMetricRequests(
     getMetricPropertiesBeginParams.pMetricsContext = pMetricsContext;
     getMetricPropertiesBeginParams.pMetricName = reqName.c_str();
 
-    NVPW_API_CALL_MAYBE_STATUS(NVPW_MetricsContext_GetMetricProperties_Begin(&getMetricPropertiesBeginParams));
+    if (rlscope::TRACE_CUDA) {
+      std::stringstream ss;
+      rlscope::log_func_call_impl(ss, "NVPW_MetricsContext_GetMetricProperties_Begin", reqName);
+      RLS_LOG("CUDA_API_TRACE", "{}", ss.str());
+    }
+    NVPW_API_CALL_MAYBE_STATUS_SILENT(NVPW_MetricsContext_GetMetricProperties_Begin(&getMetricPropertiesBeginParams));
 
     for (const char** ppMetricDependencies = getMetricPropertiesBeginParams.ppRawMetricDependencies; *ppMetricDependencies; ++ppMetricDependencies)
     {
@@ -421,7 +536,7 @@ MyStatus CUPTIProfilerState::_InitConfig(ConfigData& config_data) {
   // so that I don't need to call cuptiProfilerSetConfig more than once.
   assert(config_data.configImage.size() != 0);
 
-  {
+  if (SHOULD_DEBUG(FEATURE_GPU_HW)) {
     std::stringstream ss;
     ss << "configImage.size() = " << config_data.configImage.size();
     RLS_LOG("GPU_HW", "{}", ss.str());
@@ -434,7 +549,7 @@ MyStatus CUPTIProfilerState::_InitConfig(ConfigData& config_data) {
   setConfigParams.minNestingLevel = 1;
   setConfigParams.numNestingLevels = config_data.counter_data_max_num_nesting_levels;
 
-  {
+  if (SHOULD_DEBUG(FEATURE_GPU_HW)) {
     std::stringstream ss;
     ss << "Using setConfigParams.numNestingLevels = " << setConfigParams.numNestingLevels;
     RLS_LOG("GPU_HW", "{}", ss.str());
@@ -472,7 +587,7 @@ MyStatus CUPTIProfilerState::StartProfiling(ConfigData& config_data, CounterData
   // Q: Does this matter...?  It's hard to know how many kernels might be launched.
   beginSessionParams.maxLaunchesPerPass = counter_data_max_num_ranges;
 
-  {
+  if (SHOULD_DEBUG(FEATURE_GPU_HW)) {
     std::stringstream ss;
     ss << "Runtime info: "
        << std::endl
@@ -783,10 +898,10 @@ MyStatus GPUHwCounterSampler::Push(const std::string &operation) {
       pushRangeParams.rangeNameLength = operation.size();
       // assert(pushRangeParams.pRangeName[pushRangeParams.rangeNameLength] == '\0');
       assert(pushRangeParams.pRangeName[operation.size()] == '\0');
-      {
-          std::stringstream ss;
-          rlscope::log_func_call_impl(ss, "cuptiProfilerPushRange", operation);
-          RLS_LOG("CUDA_API_TRACE", "{}", ss.str());
+      if (rlscope::TRACE_CUDA) {
+        std::stringstream ss;
+        rlscope::log_func_call_impl(ss, "cuptiProfilerPushRange", operation);
+        RLS_LOG("CUDA_API_TRACE", "{}", ss.str());
       }
       CUPTI_API_CALL_MAYBE_EXIT_SILENT(cuptiProfilerPushRange(&pushRangeParams));
     }
@@ -1629,11 +1744,11 @@ size_t RangeTree::CurRangeNameLength() const {
   }
   // null terminator.
   len += 1;
-  {
-    std::stringstream ss;
-    ss << "CurRangeNameLength = " << len;
-    RLS_LOG("GPU_HW_TRACE", "{}", ss.str());
-  }
+//  {
+//    std::stringstream ss;
+//    ss << "CurRangeNameLength = " << len;
+//    RLS_LOG("GPU_HW_TRACE", "{}", ss.str());
+//  }
   return len;
 }
 

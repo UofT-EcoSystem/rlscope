@@ -219,7 +219,13 @@ find_package(nlohmann_json REQUIRED)
 #
 # Compiler definitions.
 #
-set(IGNORE_ERRORS "-Wno-unused -Wno-unknown-pragmas")
+
+# NOTE: -Wno-deprecated-declarations
+#   Get rid of "‘template<class> class std::auto_ptr’ is deprecated" errors
+#   when compiling gpu_util_experiment.
+#   NOTE: attempts to set target specific compile options didn't work since
+#   nvcc ignored them... not sure why.
+set(IGNORE_ERRORS "-Wno-unused -Wno-unknown-pragmas -Wno-deprecated-declarations")
 set(ADD_WARNINGS_FLAGS "-Wuninitialized")
 #set(CMAKE_CXX_STANDARD 11)
 #-std=c++11

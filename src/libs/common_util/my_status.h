@@ -22,22 +22,26 @@ limitations under the License.
 #include <iostream>
 #include <string>
 #include "error_codes.h"
+#include "debug_flags.h"
 
 //if (status.code() != MyStatus::OK().code()) {
 #define IF_BAD_STATUS_RETURN(status)  \
       if (!status.ok()) { \
+        DBG_BREAKPOINT("Return with bad status"); \
         return status; \
       }
 
 #define IF_BAD_STATUS_EXIT(msg, status)  \
       if (status.code() != MyStatus::OK().code()) { \
-        std::cout << "ERROR: " << msg << ": " << status.ToString() << std::endl; \
+        std::cerr << "ERROR: " << msg << ": " << status.ToString() << std::endl; \
+        DBG_BREAKPOINT("Exit with bad status"); \
         exit(EXIT_FAILURE); \
       }
 
 #define IF_BAD_STATUS_EXIT_WITH(status)  \
       if (status.code() != MyStatus::OK().code()) { \
-        std::cout << "ERROR: " << status.ToString() << std::endl; \
+        std::cerr << "ERROR: " << status.ToString() << std::endl; \
+        DBG_BREAKPOINT("Exit with bad status"); \
         exit(EXIT_FAILURE); \
       }
 
@@ -76,6 +80,13 @@ class MyStatus {
 
   const std::string& error_message() const {
     return ok() ? empty_string() : state_->msg;
+  }
+
+  void PrependMsg(const std::string& msg) {
+    state_->msg = msg + ": " + state_->msg;
+  }
+  void AppendMsg(const std::string& msg) {
+    state_->msg = state_->msg + ": " + msg;
   }
 
   bool operator==(const MyStatus& x) const;

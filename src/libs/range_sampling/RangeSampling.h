@@ -24,9 +24,12 @@
 
 // Allocate extra 1MB on the left/right of each profiling data buffer (config data, scratch buffer, etc.).
 // Check the 1MB regions regularly for buffer overruns.
-#define CONFIG_CHECK_PROF_BUFFER_OVERFLOW
+// #define CONFIG_CHECK_PROF_BUFFER_OVERFLOW
 
 namespace rlscope {
+
+extern const std::vector<std::string> DEFAULT_METRICS;
+extern const std::string DEFAULT_METRICS_STR;
 
 struct RangeNode {
   RangeNode *parent;
@@ -277,7 +280,7 @@ using GuardedByteBuffer = GuardedBuffer<uint8_t, GUARD_BYTE, MB_BYTES>;
 #ifdef CONFIG_CHECK_PROF_BUFFER_OVERFLOW
 using ProfilingByteBuffer = GuardedByteBuffer;
 #else
-//using ProfilingByteBuffer = std::vector<uint8_t>;
+using ProfilingByteBuffer = std::vector<uint8_t>;
 #endif // CONFIG_CHECK_PROF_BUFFER_OVERFLOW
 
 struct ConfigData {

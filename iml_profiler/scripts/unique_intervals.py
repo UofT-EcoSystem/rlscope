@@ -9,8 +9,6 @@ import argparse
 import textwrap
 import numpy as np
 import matplotlib.pyplot as plt
-import numba
-import numba as nb
 import pprint
 
 from iml_profiler.parser.common import *
@@ -18,6 +16,9 @@ from iml_profiler.parser.common import *
 import logging
 
 from iml_profiler import py_config
+if py_config.USE_NUMBA:
+    import numba
+    import numba as nb
 
 UNICODE_TIMES = u"\u00D7"
 BITS_PER_BYTE = 8
@@ -138,54 +139,55 @@ Adding elements to the set:
                                                             -
                                                             flipped this bit to 1
 """
-@numba.njit
-def bitset_add(bitset, idx):
-    return bitset | (1 << idx)
-@numba.njit
-def bitset_remove(bitset, idx):
-    return bitset & ~(1 << idx)
-@numba.njit
-def bitset_contains(bitset, idx):
-    return bitset & (1 << idx)
-@numba.njit
-def bitset_union(bitset1, bitset2):
-    return bitset1 | bitset2
-@numba.njit
-def bitset_empty_set():
-    return 0
-@numba.njit
-def bitset_full_set(N):
-    """
-    e.g. N = 4
-    0b1111
-        == 0b10000 - 1
-        == (1 << N) - 1
+if py_config.USE_NUMBA:
+    @numba.njit
+    def bitset_add(bitset, idx):
+        return bitset | (1 << idx)
+    @numba.njit
+    def bitset_remove(bitset, idx):
+        return bitset & ~(1 << idx)
+    @numba.njit
+    def bitset_contains(bitset, idx):
+        return bitset & (1 << idx)
+    @numba.njit
+    def bitset_union(bitset1, bitset2):
+        return bitset1 | bitset2
+    @numba.njit
+    def bitset_empty_set():
+        return 0
+    @numba.njit
+    def bitset_full_set(N):
+        """
+        e.g. N = 4
+        0b1111
+            == 0b10000 - 1
+            == (1 << N) - 1
 
 
-    :param N:
-        Number of elements in the set.
-    :return:
-        A bitset containing all members {0, 1, 2, ..., N-1}
-    """
-    return (1 << N) - 1
-@numba.njit
-def bitset_is_empty(bitset):
-    return bitset == 0
-@numba.njit
-def bitset_indices(bitset):
-    bits_left = bitset
-    # if py_config.NUMBA_DISABLE_JIT:
-    #     indices = []
-    # else:
-    #     indices = numba.typed.List.empty_list(nb.uint64)
-    indices = []
-    idx = 0
-    while not bitset_is_empty(bits_left):
-        if bitset_contains(bitset, idx):
-            indices.append(idx)
-            bits_left = bitset_remove(bits_left, idx)
-        idx += 1
-    return indices
+        :param N:
+            Number of elements in the set.
+        :return:
+            A bitset containing all members {0, 1, 2, ..., N-1}
+        """
+        return (1 << N) - 1
+    @numba.njit
+    def bitset_is_empty(bitset):
+        return bitset == 0
+    @numba.njit
+    def bitset_indices(bitset):
+        bits_left = bitset
+        # if py_config.NUMBA_DISABLE_JIT:
+        #     indices = []
+        # else:
+        #     indices = numba.typed.List.empty_list(nb.uint64)
+        indices = []
+        idx = 0
+        while not bitset_is_empty(bits_left):
+            if bitset_contains(bitset, idx):
+                indices.append(idx)
+                bits_left = bitset_remove(bits_left, idx)
+            idx += 1
+        return indices
 
 def bitset_np_bool_vector(bitset, N):
     """
@@ -223,209 +225,210 @@ def num_bits_numpy_type(DType):
     num_bytes = DType(0).nbytes
     return num_bytes * BITS_PER_BYTE
 
-@numba.njit
-def implUniqueSplit(index, lengths, times,
+if py_config.USE_NUMBA:
+    @numba.njit
+    def implUniqueSplit(index, lengths, times,
 
-                    outputs,
-                    output_cats,
+                        outputs,
+                        output_cats,
 
-                    # cur_cat,
-                    out_numba_overlap,
-                    out_overlap_metadata,
+                        # cur_cat,
+                        out_numba_overlap,
+                        out_overlap_metadata,
 
-                    # include_empty_time,
-                    ):
-    """
-    Preconditions:
-    - Events in each category have no self-intersection.
+                        # include_empty_time,
+                        ):
+        """
+        Preconditions:
+        - Events in each category have no self-intersection.
 
-    N = total number of intervals across all categories ( = np.sum(lengths) )
-    k = number of categories
-
-    :param index:
-        np.array of integers of size k (all zeros)
+        N = total number of intervals across all categories ( = np.sum(lengths) )
         k = number of categories
-    :param lengths:
-        array of k integers
-        length of each list i
-        For each category, the number of intervals/"times".
-    :param times:
-        # Example format:
-        #
-        # Each event-array is sorted by start time.
-        [
-            # Category A:
-            array( [ 14 , 15 , 36 , 45 , 63 , 67 , 78 , 80 , 101 , 103 ] ) ,
-            #        -------
-            #        first event.
-            #        start_time = 14
-            #        (even position)
-            #        end_time = 15
-            #        (odd position)
-            # Category B:
-            array( [ 18 , 19 , 33 , 37 , 49 , 52 , 69 , 69 , 82  , 82  ] ) ,
-            # Category C:
-            array( [ 22 , 26 , 36 , 43 , 62 , 69 , 84 , 92 , 103 , 105 ] ) ,
-        ]
-        List of k arrays.
-        Each array has integers with start time in even positions, and end time in odd positions.
-        Each array must be sorted by start time (individually).
-    :param outputs:
-        Input/output variable
-        Array of N integers initialized to zero, where N is the sum of lengths.
-    :param output_cats:
-        (N x k) array of booleans, initialized to false.
-        TODO: change to bitarrays?
-        For each event, which categories are active?
-        This is useful for creating visualizations (and other stuffs).
 
-        NOTE: if two events start at the same time, they will be represented at the SAME location in output_cats.
-        Also, we preallocate N entries in output_cats, but in reality, the number of "filled" entries will
-        be smaller when two events start at the same time.
-        "outputs" tells us how many entries in output_cats are filled.
+        :param index:
+            np.array of integers of size k (all zeros)
+            k = number of categories
+        :param lengths:
+            array of k integers
+            length of each list i
+            For each category, the number of intervals/"times".
+        :param times:
+            # Example format:
+            #
+            # Each event-array is sorted by start time.
+            [
+                # Category A:
+                array( [ 14 , 15 , 36 , 45 , 63 , 67 , 78 , 80 , 101 , 103 ] ) ,
+                #        -------
+                #        first event.
+                #        start_time = 14
+                #        (even position)
+                #        end_time = 15
+                #        (odd position)
+                # Category B:
+                array( [ 18 , 19 , 33 , 37 , 49 , 52 , 69 , 69 , 82  , 82  ] ) ,
+                # Category C:
+                array( [ 22 , 26 , 36 , 43 , 62 , 69 , 84 , 92 , 103 , 105 ] ) ,
+            ]
+            List of k arrays.
+            Each array has integers with start time in even positions, and end time in odd positions.
+            Each array must be sorted by start time (individually).
+        :param outputs:
+            Input/output variable
+            Array of N integers initialized to zero, where N is the sum of lengths.
+        :param output_cats:
+            (N x k) array of booleans, initialized to false.
+            TODO: change to bitarrays?
+            For each event, which categories are active?
+            This is useful for creating visualizations (and other stuffs).
 
-    :param cur_cat:
-        Scratch variable.
-        This is a "bit-vector" of the current active categories.
-        Array of k booleans, all initialized to false.
+            NOTE: if two events start at the same time, they will be represented at the SAME location in output_cats.
+            Also, we preallocate N entries in output_cats, but in reality, the number of "filled" entries will
+            be smaller when two events start at the same time.
+            "outputs" tells us how many entries in output_cats are filled.
 
-    :return:
-        Number of valid intervals in the output and output_cats array.
-        1 <= ... <= N
+        :param cur_cat:
+            Scratch variable.
+            This is a "bit-vector" of the current active categories.
+            Array of k booleans, all initialized to false.
 
-        NOTE: we don't output this format.
-        {
-            [A, B] : 120 seconds
-        }
-    """
+        :return:
+            Number of valid intervals in the output and output_cats array.
+            1 <= ... <= N
 
-    # Q: What integer type are we using to represent start/end timestamps?
-    # Currently, we using int64 to represent microsecond timestamps.
-    # However, in the future we may try to be more clever by something smaller like int16,
-    # by subtracting the very first start-time from all start/end events.
-    time_type = times[0].dtype
-    cur_output = 0
-    min_time_value = np.iinfo(time_type).min
-    max_time_value = np.iinfo(time_type).max
-    last_time = min_time_value
+            NOTE: we don't output this format.
+            {
+                [A, B] : 120 seconds
+            }
+        """
 
-    # cur_cat = py_config.NUMBA_CATEGORY_KEY_TYPE(0)
-    cur_cat = 0
+        # Q: What integer type are we using to represent start/end timestamps?
+        # Currently, we using int64 to represent microsecond timestamps.
+        # However, in the future we may try to be more clever by something smaller like int16,
+        # by subtracting the very first start-time from all start/end events.
+        time_type = times[0].dtype
+        cur_output = 0
+        min_time_value = np.iinfo(time_type).min
+        max_time_value = np.iinfo(time_type).max
+        last_time = min_time_value
 
-    while (index < lengths).any():
-        min_cat = 0
-        # min_cat = py_config.NUMBA_CATEGORY_KEY_TYPE(0)
-        min_time = max_time_value
-        # Find the non-empty category with the next minimum start/end time.
-        for i in range(len(index)):
-            # Check we haven't exhausted the intervals in the category.
-            if index[i] < lengths[i]:
-                # Non-empty category.
-                if times[i][index[i]] <= min_time:
-                    min_cat = i
-                    min_time = times[i][index[i]]
-                    # logging.info(": {msg}".format(msg=pprint_msg({
-                    #     'cond': "({left}) times[i][index[i]] <= min_time ({right})".format(
-                    #         left=times[i][index[i]],
-                    #         right=min_time,
-                    #     ),
-                    #     'min_cat': min_cat,
-                    #     'min_time': min_time,
-                    # })))
+        # cur_cat = py_config.NUMBA_CATEGORY_KEY_TYPE(0)
+        cur_cat = 0
 
-        # logging.info(": {msg}".format(msg=pprint_msg({
-        #     'min_cat': min_cat,
-        #     'min_time': min_time,
-        #     # 'index[min_cat]': index[min_cat],
-        #     # 'times[min_cat]': times[min_cat],
-        #     'cur_cat': "{cur_cat:b}".format(cur_cat=cur_cat),
-        #     'time_type': 'start' if (index[min_cat] % 2 == 0) else 'end',
-        # })))
+        while (index < lengths).any():
+            min_cat = 0
+            # min_cat = py_config.NUMBA_CATEGORY_KEY_TYPE(0)
+            min_time = max_time_value
+            # Find the non-empty category with the next minimum start/end time.
+            for i in range(len(index)):
+                # Check we haven't exhausted the intervals in the category.
+                if index[i] < lengths[i]:
+                    # Non-empty category.
+                    if times[i][index[i]] <= min_time:
+                        min_cat = i
+                        min_time = times[i][index[i]]
+                        # logging.info(": {msg}".format(msg=pprint_msg({
+                        #     'cond': "({left}) times[i][index[i]] <= min_time ({right})".format(
+                        #         left=times[i][index[i]],
+                        #         right=min_time,
+                        #     ),
+                        #     'min_cat': min_cat,
+                        #     'min_time': min_time,
+                        # })))
 
-        # min_cat = the Category with the next smallest time (could be a start or end time)
-        # min_time = the next smallest time (NOT the index, it's the time itself)
+            # logging.info(": {msg}".format(msg=pprint_msg({
+            #     'min_cat': min_cat,
+            #     'min_time': min_time,
+            #     # 'index[min_cat]': index[min_cat],
+            #     # 'times[min_cat]': times[min_cat],
+            #     'cur_cat': "{cur_cat:b}".format(cur_cat=cur_cat),
+            #     'time_type': 'start' if (index[min_cat] % 2 == 0) else 'end',
+            # })))
 
-        # (index[min_cat] % 2) == 0
-        # This checks if it is a start_time (even index).
-        
-        # Skip empty intervals.
-        #
-        # An empty interval has the start time equal to the end-time.
-        #
-        #   (index[min_cat] % 2) == 0
-        #   - This checks that we're currently looking at a start-time of an interval
-        #
-        #   min_time == times[min_cat][index[min_cat]+1]:
-        #   - times[min_cat][index[min_cat]+1] is the end-time of the interval we're look at,
-        #     and min_time is the start-time.
-        #   - this is just checking "if start_time == end_time"
-        if (index[min_cat] % 2) == 0 and min_time == times[min_cat][index[min_cat]+1]:
-            index[min_cat] += 2
-            continue
+            # min_cat = the Category with the next smallest time (could be a start or end time)
+            # min_time = the next smallest time (NOT the index, it's the time itself)
 
-        # if not include_empty_time and bitset_is_empty(cur_cat):
+            # (index[min_cat] % 2) == 0
+            # This checks if it is a start_time (even index).
 
-        time_chunk = min_time - last_time
-        if last_time != min_time_value and time_chunk > 0:
-            # Q: Does Dict have default values...?
-            if cur_cat not in out_numba_overlap:
-                out_numba_overlap[cur_cat] = 0
-            out_numba_overlap[cur_cat] += time_chunk
+            # Skip empty intervals.
+            #
+            # An empty interval has the start time equal to the end-time.
+            #
+            #   (index[min_cat] % 2) == 0
+            #   - This checks that we're currently looking at a start-time of an interval
+            #
+            #   min_time == times[min_cat][index[min_cat]+1]:
+            #   - times[min_cat][index[min_cat]+1] is the end-time of the interval we're look at,
+            #     and min_time is the start-time.
+            #   - this is just checking "if start_time == end_time"
+            if (index[min_cat] % 2) == 0 and min_time == times[min_cat][index[min_cat]+1]:
+                index[min_cat] += 2
+                continue
 
-        # Update current list of active categories.
-        #
-        is_start = (index[min_cat] % 2 == 0)
-        # assert is_start != cur_cat[min_cat]
-        # cur_cat[min_cat] = is_start
-        if is_start:
-            cur_cat = bitset_add(cur_cat, min_cat)
-        else:
-            start_time_usec = times[min_cat][index[min_cat]-1]
-            end_time_usec = min_time
+            # if not include_empty_time and bitset_is_empty(cur_cat):
 
-            # out_overlap_metadata.add_event(cur_cat, start_time_usec, end_time_usec)
-            if cur_cat not in out_overlap_metadata:
-                out_overlap_metadata[cur_cat] = NumbaRegionMetadata(cur_cat)
-            out_overlap_metadata[cur_cat].add_event(start_time_usec, end_time_usec)
+            time_chunk = min_time - last_time
+            if last_time != min_time_value and time_chunk > 0:
+                # Q: Does Dict have default values...?
+                if cur_cat not in out_numba_overlap:
+                    out_numba_overlap[cur_cat] = 0
+                out_numba_overlap[cur_cat] += time_chunk
 
-            overlap_region = out_overlap_metadata[cur_cat]
+            # Update current list of active categories.
+            #
+            is_start = (index[min_cat] % 2 == 0)
+            # assert is_start != cur_cat[min_cat]
+            # cur_cat[min_cat] = is_start
+            if is_start:
+                cur_cat = bitset_add(cur_cat, min_cat)
+            else:
+                start_time_usec = times[min_cat][index[min_cat]-1]
+                end_time_usec = min_time
 
-            # if out_overlap_metadata[cur_cat].start_time_usec == 0 or start_time_usec < out_overlap_metadata[cur_cat].start_time_usec:
-            #     out_overlap_metadata[cur_cat].start_time_usec = start_time_usec
-            # if out_overlap_metadata[cur_cat].end_time_usec == 0 or end_time_usec > out_overlap_metadata[cur_cat].end_time_usec:
-            #     out_overlap_metadata[cur_cat].end_time_usec = end_time_usec
+                # out_overlap_metadata.add_event(cur_cat, start_time_usec, end_time_usec)
+                if cur_cat not in out_overlap_metadata:
+                    out_overlap_metadata[cur_cat] = NumbaRegionMetadata(cur_cat)
+                out_overlap_metadata[cur_cat].add_event(start_time_usec, end_time_usec)
 
-            if overlap_region.start_time_usec == 0 or start_time_usec < overlap_region.start_time_usec:
-                overlap_region.start_time_usec = start_time_usec
-            if overlap_region.end_time_usec == 0 or end_time_usec > overlap_region.end_time_usec:
-                overlap_region.end_time_usec = end_time_usec
+                overlap_region = out_overlap_metadata[cur_cat]
 
-            cur_cat = bitset_remove(cur_cat, min_cat)
+                # if out_overlap_metadata[cur_cat].start_time_usec == 0 or start_time_usec < out_overlap_metadata[cur_cat].start_time_usec:
+                #     out_overlap_metadata[cur_cat].start_time_usec = start_time_usec
+                # if out_overlap_metadata[cur_cat].end_time_usec == 0 or end_time_usec > out_overlap_metadata[cur_cat].end_time_usec:
+                #     out_overlap_metadata[cur_cat].end_time_usec = end_time_usec
 
-        # Can have multiple categories entering and leaving, so just make sure we keep things correct
-        if last_time == min_time:
-            # Start of new interval which is the same as the previous interval.
-            # output_cats[cur_output-1, min_cat] = is_start
-            output_cats[cur_output-1] = bitset_add(output_cats[cur_output-1], min_cat)
-            pass
-        else:
-            # Normal case:
-            # Insert event if there is a change from last time
-            outputs[cur_output] = min_time
-            # output_cats[cur_output, :] = cur_cat
-            output_cats[cur_output] = cur_cat
-            cur_output += 1
-            # last_time = min_time
+                if overlap_region.start_time_usec == 0 or start_time_usec < overlap_region.start_time_usec:
+                    overlap_region.start_time_usec = start_time_usec
+                if overlap_region.end_time_usec == 0 or end_time_usec > overlap_region.end_time_usec:
+                    overlap_region.end_time_usec = end_time_usec
 
-        last_time = min_time
-        index[min_cat] += 1
-        
-    return cur_output
+                cur_cat = bitset_remove(cur_cat, min_cat)
+
+            # Can have multiple categories entering and leaving, so just make sure we keep things correct
+            if last_time == min_time:
+                # Start of new interval which is the same as the previous interval.
+                # output_cats[cur_output-1, min_cat] = is_start
+                output_cats[cur_output-1] = bitset_add(output_cats[cur_output-1], min_cat)
+                pass
+            else:
+                # Normal case:
+                # Insert event if there is a change from last time
+                outputs[cur_output] = min_time
+                # output_cats[cur_output, :] = cur_cat
+                output_cats[cur_output] = cur_cat
+                cur_output += 1
+                # last_time = min_time
+
+            last_time = min_time
+            index[min_cat] += 1
+
+        return cur_output
 
 
-Category_Numpy_DType = py_config.NUMPY_CATEGORY_KEY_TYPE
-Category_Numba_Type = py_config.NUMBA_CATEGORY_KEY_TYPE
-Time_Numba_Type = py_config.NUMBA_TIME_USEC_TYPE
+    Category_Numpy_DType = py_config.NUMPY_CATEGORY_KEY_TYPE
+    Category_Numba_Type = py_config.NUMBA_CATEGORY_KEY_TYPE
+    Time_Numba_Type = py_config.NUMBA_TIME_USEC_TYPE
 
 def UniqueSplits(
     times, use_numba=True):
@@ -489,48 +492,49 @@ def UniqueSplits(
 # NumbaOverlapMetadata_type = numba.deferred_type()
 # NumbaRegionMetadata_type = numba.deferred_type()
 
-# https://numba.pydata.org/numba-doc/dev/user/jitclass.html
-NumbaRegionMetadata_Fields = [
-    ('category_key', py_config.NUMBA_CATEGORY_KEY_TYPE),
-    ('start_time_usec', py_config.NUMBA_TIME_USEC_TYPE),
-    ('end_time_usec', py_config.NUMBA_TIME_USEC_TYPE),
-    ('num_events', nb.uint64),
-]
-@numba.jitclass(NumbaRegionMetadata_Fields)
-class NumbaRegionMetadata:
-    """
-    Numbified version of RegionMetadata class.
-    RegionMetadata is used to track the following statistics about each overlap region:
+if py_config.USE_NUMBA:
+    # https://numba.pydata.org/numba-doc/dev/user/jitclass.html
+    NumbaRegionMetadata_Fields = [
+        ('category_key', py_config.NUMBA_CATEGORY_KEY_TYPE),
+        ('start_time_usec', py_config.NUMBA_TIME_USEC_TYPE),
+        ('end_time_usec', py_config.NUMBA_TIME_USEC_TYPE),
+        ('num_events', nb.uint64),
+    ]
+    @numba.jitclass(NumbaRegionMetadata_Fields)
+    class NumbaRegionMetadata:
+        """
+        Numbified version of RegionMetadata class.
+        RegionMetadata is used to track the following statistics about each overlap region:
 
-        self.start_time_usec = None
-        self.end_time_usec = None
-        self.num_events = 0
-    - min(event.start_time)
-    - max(event.start_time)
-    - number of events in overlap region
+            self.start_time_usec = None
+            self.end_time_usec = None
+            self.num_events = 0
+        - min(event.start_time)
+        - max(event.start_time)
+        - number of events in overlap region
 
-    NOTE: I'm not sure if these statistics are entirely necessary, but they're just nice-to-have for debugging.
-    """
-    def __init__(self, category_key):
-        self.category_key = category_key
-        self.start_time_usec = 0
-        self.end_time_usec = 0
-        self.num_events = 0
+        NOTE: I'm not sure if these statistics are entirely necessary, but they're just nice-to-have for debugging.
+        """
+        def __init__(self, category_key):
+            self.category_key = category_key
+            self.start_time_usec = 0
+            self.end_time_usec = 0
+            self.num_events = 0
 
-    def add_event(self, start_time_usec, end_time_usec):
-        if self.start_time_usec == 0 or start_time_usec < self.start_time_usec:
-            self.start_time_usec = start_time_usec
+        def add_event(self, start_time_usec, end_time_usec):
+            if self.start_time_usec == 0 or start_time_usec < self.start_time_usec:
+                self.start_time_usec = start_time_usec
 
-        if self.end_time_usec == 0 or end_time_usec > self.end_time_usec:
-            self.end_time_usec = end_time_usec
+            if self.end_time_usec == 0 or end_time_usec > self.end_time_usec:
+                self.end_time_usec = end_time_usec
 
-        self.num_events += 1
-# if not py_config.NUMBA_DISABLE_JIT:
-#     NumbaRegionMetadata_type.define(NumbaRegionMetadata.class_type.instance_type)
-if not py_config.NUMBA_DISABLE_JIT:
-    NumbaRegionMetadata_type = NumbaRegionMetadata.class_type.instance_type
-else:
-    NumbaRegionMetadata_type = None
+            self.num_events += 1
+    # if not py_config.NUMBA_DISABLE_JIT:
+    #     NumbaRegionMetadata_type.define(NumbaRegionMetadata.class_type.instance_type)
+    if not py_config.NUMBA_DISABLE_JIT:
+        NumbaRegionMetadata_type = NumbaRegionMetadata.class_type.instance_type
+    else:
+        NumbaRegionMetadata_type = None
 
 
 # NumbaOverlapMetadata_Fields = [

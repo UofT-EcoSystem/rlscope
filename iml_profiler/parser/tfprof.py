@@ -41,16 +41,17 @@ from iml_profiler.parser.readers import TFProfCategoryTimesReader, \
    DEFAULT_debug
 
 
-from iml_profiler.scripts.unique_intervals import UniqueSplits, PlotOutput, ShowOrSave, \
-    bitset_add, \
-    bitset_contains, \
-    bitset_empty_set, \
-    bitset_full_set, \
-    bitset_indices, \
-    bitset_is_empty, \
-    bitset_remove, \
-    bitset_union, \
-    bitset_np_bool_vector
+if py_config.USE_NUMBA:
+    from iml_profiler.scripts.unique_intervals import UniqueSplits, PlotOutput, ShowOrSave, \
+        bitset_add, \
+        bitset_contains, \
+        bitset_empty_set, \
+        bitset_full_set, \
+        bitset_indices, \
+        bitset_is_empty, \
+        bitset_remove, \
+        bitset_union, \
+        bitset_np_bool_vector
 
 class ComputeOverlap:
     # DEBUG = True

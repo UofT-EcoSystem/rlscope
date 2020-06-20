@@ -133,12 +133,6 @@ namespace rlscope {
 }
 
 
-#define IF_BAD_STATUS_EXIT(msg, status)  \
-      if (status.code() != MyStatus::OK().code()) { \
-        std::cout << "ERROR: " << msg << ": " << status.ToString() << std::endl; \
-        exit(EXIT_FAILURE); \
-      }
-
 enum Mode {
   MODE_DUMP_PROTO = 0,
   MODE_LS_FILES = 1,
