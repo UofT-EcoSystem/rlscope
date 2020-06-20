@@ -30,7 +30,7 @@ int get_IML_GPU_HW_CONFIG_PASSES(boost::optional<int> user_value) {
 }
 
 std::vector<std::string> get_IML_GPU_HW_METRICS(boost::optional<std::string> user_value) {
-  std::string dflt = rlscope::DEFAULT_METRICS_STR;
+  std::string dflt = rlscope::get_DEFAULT_METRICS_STR();
   std::string env_name = "IML_GPU_HW_METRICS";
   std::string value;
 

@@ -6,10 +6,13 @@ import argparse
 import textwrap
 import psutil
 import platform
+import threading
 import cpuinfo
 import concurrent.futures
 import sys
 import numpy as np
+
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 
 from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, basename as _b
 
@@ -31,7 +34,8 @@ BYTES_IN_MB = 1 << 20
 MIN_UTIL_SAMPLE_FREQUENCY_SEC = 100/MILLISECONDS_IN_SECOND
 # 500 ms
 DEFAULT_UTIL_SAMPLE_FREQUENCY_SEC = 500/MILLISECONDS_IN_SECOND
-def get_util_sampler_parser(only_fwd_arguments=False):
+def get_util_sampler_parser(add_iml_root_pid=True, only_fwd_arguments=False):
+    # iml_root_pid=None,
     """
     :param fwd_arguments:
         Only add arguments that should be forwarded to utilization_sampler.py from ML scripts.
@@ -58,13 +62,15 @@ def get_util_sampler_parser(only_fwd_arguments=False):
     IML: How frequently (in seconds) should we sample GPU/CPU utilization?
     default: sample every 500 ms.
     """))
-    parser.add_argument('--iml-root-pid', required=True, type=int,
-                        help=textwrap.dedent("""
+    if add_iml_root_pid:
+        parser.add_argument('--iml-root-pid',
+                            required=True, type=int,
+                            help=textwrap.dedent("""
         IML: (internal use)
         The PID of the root training process on this machine.
         When sampling memory usage, we sample total memory usage of this 
         process and its entire process tree (i.e. to support multi-process training).
-    """))
+        """))
     parser.add_argument('--iml-util-dump-frequency-sec',
                         type=float,
                         default=10.,
@@ -124,9 +130,13 @@ def GPU_as_util(gpu, epoch_time_usec, total_resident_memory_bytes):
 
 class UtilizationSampler:
     def __init__(self, directory, pid, util_dump_frequency_sec, util_sample_frequency_sec,
+                 async_process=None,
                  debug=False, debug_single_thread=False):
         self.directory = directory
         self.pid = pid
+        self.async_process = async_process
+        if self.async_process is not None:
+            assert self.pid == self.async_process.pid
         self.util_dump_frequency_sec = util_dump_frequency_sec
         self.util_sample_frequency_sec = util_sample_frequency_sec
         self.trace_id = 0
@@ -201,6 +211,8 @@ class UtilizationSampler:
 
     def run(self):
         SigTermWatcher = _SigTermWatcher()
+        if self.async_process is not None:
+            proc_watcher = ProcessWatcher(self.async_process)
 
         if self.debug:
             logging.info("> {klass}: Start collecting CPU/GPU utilization samples".format(
@@ -208,6 +220,8 @@ class UtilizationSampler:
             ))
         self.last_dump_sec = time.time()
         self.n_samples = 0
+        self.exit_status = 0
+        should_stop = False
         with self.pool:
             while True:
                 before = time.time()
@@ -227,6 +241,18 @@ class UtilizationSampler:
                         logging.info("> {klass}: Got SIGINT; dumping remaining collected samples and exiting".format(
                             klass=self.__class__.__name__,
                         ))
+                    should_stop = True
+                elif proc_watcher is not None and proc_watcher.finished.is_set():
+                    if self.debug:
+                        logging.info("> {klass}: cmd terminated with exit status {ret}".format(
+                            klass=self.__class__.__name__,
+                            ret=proc_watcher.retcode,
+                        ))
+                    assert proc_watcher.retcode is not None
+                    should_stop = True
+                    self.exit_status = proc_watcher.retcode
+
+                if should_stop:
                     # Dump any remaining samples we have not dumped yet.
                     self._maybe_dump(cur_time_sec, dump=True)
                     self.check_pending_dump_calls(wait=True)
@@ -351,6 +377,20 @@ class _SigTermWatcher:
 
     def exit_gracefully(self, signum, frame):
         self.kill_now = True
+
+class ProcessWatcher:
+    def __init__(self, proc):
+        assert proc is not None
+        self.proc = proc
+        self.retcode = None
+        self.finished = threading.Event()
+        self.pool = ThreadPoolExecutor()
+        self.pool.submit(self._watch_process, self)
+
+    @staticmethod
+    def _watch_process(self):
+        self.retcode = self.proc.wait()
+        self.finished.set()
 
 # Cache cpuinfo, since this call takes 1 second to run, and we need to sample at millisecond frequency.
 # NOTE: This has all sorts of CPU architecture information (e.g. l2 cache size)
@@ -656,7 +696,10 @@ def disable_test_sample_gpu_util():
 from iml_profiler.profiler import iml_logging
 def main():
     iml_logging.setup_logging()
-    parser = get_util_sampler_parser()
+    iml_util_argv, cmd_argv = split_argv_on(sys.argv[1:])
+    parser = get_util_sampler_parser(add_iml_root_pid=len(cmd_argv) == 0)
+    args = parser.parse_args(iml_util_argv)
+
     # To make it easy to launch utilization sampler manually in certain code bases,
     # allow ignoring all the --iml-* arguments:
     #
@@ -711,15 +754,39 @@ def main():
             min=MIN_UTIL_SAMPLE_FREQUENCY_SEC,
         ))
 
+
+    iml_root_pid = None
+    cmd_proc = None
+    if len(cmd_argv) != 0:
+        exe_path = shutil.which(cmd_argv[0])
+        if exe_path is None:
+            print("IML ERROR: couldn't locate {exe} on $PATH; try giving a full path to {exe} perhaps?".format(
+                exe=cmd_argv[0],
+            ))
+            sys.exit(1)
+        cmd = [exe_path] + cmd_argv[1:]
+        print_cmd(cmd)
+
+        sys.stdout.flush()
+        sys.stderr.flush()
+        cmd_proc = subprocess.Popen(cmd)
+        iml_root_pid = cmd_proc.pid
+    else:
+        iml_root_pid = args.iml_root_pid
+
+    # NOTE: usually, we have iml-prof program signal us to terminate.
+    # However if they provide a cmd, we would like to terminate sampler when cmd finishes, and return cmd's exit status.
     util_sampler = UtilizationSampler(
         directory=args.iml_directory,
-        pid=args.iml_root_pid,
+        pid=iml_root_pid,
+        async_process=cmd_proc,
         util_dump_frequency_sec=args.iml_util_dump_frequency_sec,
         util_sample_frequency_sec=args.iml_util_sample_frequency_sec,
         debug=args.iml_debug,
         debug_single_thread=args.iml_debug_single_thread,
     )
     util_sampler.run()
+    sys.exit(util_sampler.exit_status)
 
 class UtilSamplerProcess:
     def __init__(self, iml_directory, debug=False):

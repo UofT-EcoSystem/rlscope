@@ -28,8 +28,8 @@
 
 namespace rlscope {
 
-extern const std::vector<std::string> DEFAULT_METRICS;
-extern const std::string DEFAULT_METRICS_STR;
+std::vector<std::string> get_DEFAULT_METRICS();
+std::string get_DEFAULT_METRICS_STR();
 
 struct RangeNode {
   RangeNode *parent;

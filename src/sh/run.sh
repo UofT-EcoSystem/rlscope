@@ -1,8 +1,16 @@
 #!/usr/bin/env bash
+
 # Currently we're in ROOT/src/sh.
 _script_dir="$(realpath "$(dirname "$0")/../..")"
 ROOT=$_script_dir
 cd $ROOT
+
+DEBUG=${DEBUG:-no}
+if [ "$DEBUG" = 'yes' ]; then
+    set -x
+fi
+
+DRY_RUN=${DRY_RUN:-no}
 
 CLONE=$HOME/clone
 MLPERF_DIR=$CLONE/mlperf_training
@@ -122,7 +130,157 @@ train_pong() {
 #    _train_minigo $base_dir $goparams
 #}
 
-if [ $# -gt 0 ]; then
-    set -x
+_do() {
+  (
+  set +x
+  local dry_str=""
+  if [ "${DRY_RUN}" = 'yes' ]; then
+    dry_str=" [dry-run]"
+  fi
+  echo "> CMD${dry_str}:"
+  echo "  PWD=$PWD"
+  echo "  $ $@"
+  if [ "${DRY_RUN}" != 'yes' ]; then
     "$@"
+  fi
+  )
+}
+_do_always() {
+  (
+  set +x
+  echo "> CMD:"
+  echo "  PWD=$PWD"
+  echo "  $ $@"
+  "$@"
+  )
+}
+
+nvidia_smi_expr() {
+  (
+  set -ue
+  _bool_attr() {
+      local opt="$1"
+      local yes_or_no="$2"
+      shift 2
+      echo ".${opt}_${yes_or_no}"
+  }
+  _bool_opt() {
+      local opt="$1"
+      local yes_or_no="$2"
+      shift 2
+      if [ "$yes_or_no" = 'yes' ]; then
+          echo "--${opt}"
+      fi
+  }
+#  _do_always cd $IML_DIR/build.docker/iml
+  (
+  cd "$(cmake_build_dir "$ROOT")"
+  _do_always make -j$(nproc) install
+  )
+#  kernel_delay_us=1000
+#  kernel_duration_us=1
+#  run_sec=20
+#  --run_sec ${run_sec}
+  export CUDA_VISIBLE_DEVICES=0
+  iterations=$((10*1000*1000*1000))
+  thread_blocks=1
+  thread_block_size=1
+  processes='no'
+  hw_counters='no'
+  num_threads=1
+  n_launches=1
+  iml_dir="$ROOT/output/gpu_util_experiment/nvidia_smi/thread_blocks_${thread_blocks}.thread_block_size_${thread_block_size}.n_launches_${n_launches}.iterations_${iterations}.num_threads_${num_threads}$(_bool_attr processes $processes)$(_bool_attr hw_counters $hw_counters)"
+  _do mkdir -p ${iml_dir}
+    #  --kernel_duration_us ${kernel_duration_us}
+    #    --kernel_delay_us ${kernel_delay_us}
+  _do iml-util-sampler --iml-directory ${iml_dir} -- \
+    gpu_util_experiment \
+    --mode run_kernels \
+    --iml_directory ${iml_dir} \
+    --gpu_clock_freq_json $IML_DIR/calibration/gpu_clock_freq/gpu_clock_freq.json \
+    --hw_counters \
+    --kernel compute_kernel_sched_info \
+    --kern_arg_iterations ${iterations} \
+    --kern_arg_threads_per_block ${thread_block_size} \
+    --kern_arg_num_blocks ${thread_blocks} \
+    --num_threads ${num_threads} \
+    --n_launches ${n_launches} \
+    $(_bool_opt processes $processes) \
+    $(_bool_opt hw_counters $hw_counters) \
+    2>&1 | tee ${iml_dir}/gpu_util_experiment.log.txt
+  _do rls-analyze --mode gpu_hw --iml_directory ${iml_dir} | \
+    2>&1 | tee ${iml_dir}/rls_analyze.log.txt
+)
+}
+
+cmake_build_dir() {
+    local third_party_dir="$1"
+    shift 1
+
+    local build_prefix=
+    if _is_non_empty IML_BUILD_PREFIX; then
+      # Docker container environment.
+      build_prefix="$IML_BUILD_PREFIX"
+    else
+      # Assume we're running in host environment.
+      build_prefix="$ROOT/local.host"
+    fi
+    echo "$build_prefix/$(basename "$third_party_dir")"
+}
+_is_non_empty() {
+  # Check if an environment variable is defined and not equal to empty string
+  (
+  set +u
+  local varname="$1"
+  # Indirect variable dereference that works with both bash and zsh.
+  # https://unix.stackexchange.com/questions/68035/foo-and-zsh
+  local value=
+  eval "value=\"\$${varname}\""
+  [ "${value}" != "" ]
+  )
+}
+_local_dir() {
+    # When installing things with configure/make-install
+    # $ configure --prefix="$(_local_dir)"
+    if _is_non_empty IML_INSTALL_PREFIX; then
+      # Docker container environment.
+      echo "$IML_INSTALL_PREFIX"
+    else
+      # Assume we're running in host environment.
+      echo "$ROOT/local.host"
+    fi
+}
+_add_PATH() {
+    local direc="$1"
+    shift 1
+
+    echo "> INFO: Add to PATH: $direc"
+    export PATH="$direc:$PATH"
+}
+
+_add_LD_LIBRARY_PATH() {
+  local lib_dir="$1"
+  shift 1
+
+  echo "> INFO: Add to LD_LIBRARY_PATH: $lib_dir"
+  export LD_LIBRARY_PATH="$lib_dir:$LD_LIBRARY_PATH"
+}
+
+main() {
+    _add_LD_LIBRARY_PATH "$(_local_dir)/lib"
+    _add_PATH "$(_local_dir)/bin"
+
+    if [ $# -gt 0 ]; then
+        _do_always "$@"
+        return
+    fi
+}
+
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    (
+    cd $ROOT
+    main "$@"
+    )
+else
+    echo "> BASH: Sourcing ${BASH_SOURCE[0]}"
 fi

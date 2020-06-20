@@ -227,7 +227,7 @@ def main():
     # Shouldn't return.
     assert False
 
-def gather_argv(argv):
+def gather_argv(argv, sep='--'):
     """
 
     $ iml-prof [options]         cmd_exec ...
@@ -246,11 +246,11 @@ def gather_argv(argv):
     i = 0
     def is_executable(opt):
         return shutil.which(opt) is not None
-    has_dashes = any(opt == '--' for opt in argv)
+    has_dashes = any(opt == sep for opt in argv)
     while i < len(argv):
 
         if has_dashes:
-            if argv[i] == '--':
+            if argv[i] == sep:
                 i += 1
                 break
         elif is_executable(argv[i]):

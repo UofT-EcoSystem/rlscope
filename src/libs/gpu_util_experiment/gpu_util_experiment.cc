@@ -30,6 +30,9 @@ using json = nlohmann::json;
 #include "gpu_freq.h"
 #include "gpu_freq.cuh"
 
+static const std::vector<std::string> DEFAULT_METRICS = rlscope::get_DEFAULT_METRICS();
+static const std::string DEFAULT_METRICS_STR = rlscope::get_DEFAULT_METRICS_STR();
+
 DEFINE_bool(debug, false, "Debug: give additional verbose output");
 DEFINE_string(iml_directory, "", "Path to --iml-directory used when collecting trace-files");
 DEFINE_string(gpu_clock_freq_json, "",
@@ -39,7 +42,7 @@ DEFINE_bool(hw_counters, false,
             "Use CUDA Profiling API to collect \"GPU occupancy\" related GPU hardware performance counters");
 DEFINE_int64(samples, 1, "How many times to run the experiment in a row; useful for hw_counters");
 //DEFINE_string(metrics, "sm__warps_active.avg.pct_of_peak_sustained_active+,smsp__inst_executed.sum+,sm__cycles_active.sum+,sm__warps_active.sum+,sm__cycles_elapsed.sum+", "Comma-delimited list of CUDA Profiling API metrics to collect.");
-DEFINE_string(metrics, rlscope::DEFAULT_METRICS_STR.c_str(), "Comma-delimited list of CUDA Profiling API metrics to collect.");
+DEFINE_string(metrics, DEFAULT_METRICS_STR.c_str(), "Comma-delimited list of CUDA Profiling API metrics to collect.");
 
 DEFINE_int64(n_launches, 1, "Number of kernels to launch per-thread.");
 DEFINE_int64(kernel_delay_us, 0, "Time between kernel launches in microseconds");
@@ -64,7 +67,7 @@ DEFINE_string(kernel, "compute_kernel", "What GPU kernel should we run?");
 DEFINE_string(gpu_sched_policy, "default",
               "What GPU scheduling policy to use for the CUDA context (see: CUDA Driver API documentation for cuCtxCreate for details)?");
 DEFINE_int64(kern_arg_iterations, 1000 * 1000 * 1000,
-             "(Kernel arg) compute_kernel: how many loop iterations to perform (increase compute)");
+             "(Kernel arg) compute_kernel: how many loop iterations to perform (increase compute); default = 1 million, roughly 1 second on a RTX 2080");
 DEFINE_int64(kern_arg_num_blocks, 1,
              "(Kernel arg) compute_sched_info_kernel: how many GPU thread blocks to run (increase parallelism)?");
 DEFINE_int64(kern_arg_threads_per_block, 1,
@@ -349,11 +352,11 @@ int main(int argc, char **argv) {
     }
 
     if (mode == Mode::MODE_RUN_KERNELS) {
-        if (FLAGS_kernel_delay_us <= 0) {
-            std::stringstream ss;
-            ss << "--kernel_delay_us > 0 is required for --mode=" << FLAGS_mode;
-            UsageAndExit(ss.str());
-        }
+//        if (FLAGS_kernel_delay_us <= 0) {
+//            std::stringstream ss;
+//            ss << "--kernel_delay_us > 0 is required for --mode=" << FLAGS_mode;
+//            UsageAndExit(ss.str());
+//        }
 
         if (FLAGS_n_launches < 0) {
             std::stringstream ss;
@@ -361,11 +364,11 @@ int main(int argc, char **argv) {
             UsageAndExit(ss.str());
         }
 
-        if (FLAGS_kernel_duration_us <= 0) {
-            std::stringstream ss;
-            ss << "--kernel_duration_us > 0 is required for --mode=" << FLAGS_mode;
-            UsageAndExit(ss.str());
-        }
+//        if (FLAGS_kernel_duration_us <= 0) {
+//            std::stringstream ss;
+//            ss << "--kernel_duration_us > 0 is required for --mode=" << FLAGS_mode;
+//            UsageAndExit(ss.str());
+//        }
 
 //    if (FLAGS_run_sec <= 0) {
 //      std::stringstream ss;

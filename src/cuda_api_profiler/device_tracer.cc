@@ -881,7 +881,7 @@ MyStatus DeviceTracerImpl::StartPass() {
 //        LOG(INFO) << ss.str();
 //      }
       if (SHOULD_DEBUG(FEATURE_GPU_HW)) {
-        RLS_LOG("GPU_HW", "DEFAULT_METRICS_STR = {}", rlscope::DEFAULT_METRICS_STR);
+        RLS_LOG("GPU_HW", "DEFAULT_METRICS_STR = {}", rlscope::get_DEFAULT_METRICS_STR());
       }
       status = _hw_profiler.StartConfig(get_IML_GPU_HW_METRICS(boost::none));
       IF_BAD_STATUS_RETURN(status);

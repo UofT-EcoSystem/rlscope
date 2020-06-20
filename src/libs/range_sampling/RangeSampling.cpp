@@ -68,77 +68,78 @@ using boost::uuids::detail::md5;
 
 namespace rlscope {
 
-// - Parsed by: ParseMetricNameString
-//   - <metric_name>[$|&][+]
-//
-//   - default if NO symbols:
-//     keepInstances = false
-//     isolated = true
-//
-//   - keepInstances = "+" present
-//     isolated = "&" is NOT present
-//     (NOTE $ is redundant? it make isolated=True, but isolated=True is the default).
-const std::vector<std::string> DEFAULT_METRICS = {
+std::vector<std::string> get_DEFAULT_METRICS() {
+  // - Parsed by: ParseMetricNameString
+  //   - <metric_name>[$|&][+]
+  //
+  //   - default if NO symbols:
+  //     keepInstances = false
+  //     isolated = true
+  //
+  //   - keepInstances = "+" present
+  //     isolated = "&" is NOT present
+  //     (NOTE $ is redundant? it make isolated=True, but isolated=True is the default).
+  std::vector<std::string> DEFAULT_METRICS = {
 
-    // keepInstances = true
-    // isolated = true
+      // keepInstances = true
+      // isolated = true
 
-    //
-    // NOTE: To figure out useful metrics to collect, grep CUPTI-samples/userrange_profiling/*.txt files
-    // for deprecated CUPTI metrics that ACTUALLY HAVE DOCUMENTATION STRINGS (unlike new "profiling API"...),
-    // then lookup the mapping from old metric names to new "Profiling API" metric name using this table from
-    // the CUPTI documentation:
-    //    https://docs.nvidia.com/cupti/Cupti/r_main.html#metrics_map_table_70
-    //
+      //
+      // NOTE: To figure out useful metrics to collect, grep CUPTI-samples/userrange_profiling/*.txt files
+      // for deprecated CUPTI metrics that ACTUALLY HAVE DOCUMENTATION STRINGS (unlike new "profiling API"...),
+      // then lookup the mapping from old metric names to new "Profiling API" metric name using this table from
+      // the CUPTI documentation:
+      //    https://docs.nvidia.com/cupti/Cupti/r_main.html#metrics_map_table_70
+      //
 
-    // Deprecated CUPTI metric API -- achieved_occupancy:
-    //    Id        = 1205
-    //    Shortdesc = Achieved Occupancy
-    //    Longdesc  = Ratio of the average active warps per active cycle to the maximum number of warps supported on a multiprocessor
-    "sm__warps_active.avg.pct_of_peak_sustained_active+",
+      // Deprecated CUPTI metric API -- achieved_occupancy:
+      //    Id        = 1205
+      //    Shortdesc = Achieved Occupancy
+      //    Longdesc  = Ratio of the average active warps per active cycle to the maximum number of warps supported on a multiprocessor
+      "sm__warps_active.avg.pct_of_peak_sustained_active+",
 
-    // Deprecated CUPTI metric API -- sm_efficiency:
-    //    Id        = 1203
-    //    Shortdesc = Multiprocessor Activity
-    //    Longdesc  = The percentage of time at least one warp is active on a multiprocessor averaged over all multiprocessors on the GPU
-    // See CUPTI documentation for mapping to new "Profiling API" metric name:
-    //    https://docs.nvidia.com/cupti/Cupti/r_main.html#metrics_map_table_70
-    "smsp__cycles_active.avg.pct_of_peak_sustained_elapsed+",
+      // Deprecated CUPTI metric API -- sm_efficiency:
+      //    Id        = 1203
+      //    Shortdesc = Multiprocessor Activity
+      //    Longdesc  = The percentage of time at least one warp is active on a multiprocessor averaged over all multiprocessors on the GPU
+      // See CUPTI documentation for mapping to new "Profiling API" metric name:
+      //    https://docs.nvidia.com/cupti/Cupti/r_main.html#metrics_map_table_70
+      "smsp__cycles_active.avg.pct_of_peak_sustained_elapsed+",
 
-    // Deprecated CUPTI metric API -- inst_executed:
-    //    Metric# 90
-    //    Id        = 1290
-    //    Name      = inst_executed
-    //    Shortdesc = Instructions Executed
-    //    Longdesc  = The number of instructions executed
-    "smsp__inst_executed.sum+",
+      // Deprecated CUPTI metric API -- inst_executed:
+      //    Metric# 90
+      //    Id        = 1290
+      //    Name      = inst_executed
+      //    Shortdesc = Instructions Executed
+      //    Longdesc  = The number of instructions executed
+      "smsp__inst_executed.sum+",
 
-    // Deprecated CUPTI metric API -- active_cycles:
-    //    Event# 25
-    //    Id        = 2629
-    //    Name      = active_cycles
-    //    Shortdesc = Active cycles
-    //    Longdesc  = Number of cycles a multiprocessor has at least one active warp.
-    //    Category  = CUPTI_EVENT_CATEGORY_INSTRUCTION
-    "sm__cycles_active.sum+",
+      // Deprecated CUPTI metric API -- active_cycles:
+      //    Event# 25
+      //    Id        = 2629
+      //    Name      = active_cycles
+      //    Shortdesc = Active cycles
+      //    Longdesc  = Number of cycles a multiprocessor has at least one active warp.
+      //    Category  = CUPTI_EVENT_CATEGORY_INSTRUCTION
+      "sm__cycles_active.sum+",
 
-    // Deprecated CUPTI metric API -- active_warps:
-    //    Event# 26
-    //    Id        = 2630
-    //    Name      = active_warps
-    //    Shortdesc = Active warps
-    //    Longdesc  = Accumulated number of active warps per cycle. For every cycle it increments by the number of active warps in the cycle which can be in the range 0 to 64.
-    //    Category  = CUPTI_EVENT_CATEGORY_INSTRUCTION
-    "sm__warps_active.sum+",
+      // Deprecated CUPTI metric API -- active_warps:
+      //    Event# 26
+      //    Id        = 2630
+      //    Name      = active_warps
+      //    Shortdesc = Active warps
+      //    Longdesc  = Accumulated number of active warps per cycle. For every cycle it increments by the number of active warps in the cycle which can be in the range 0 to 64.
+      //    Category  = CUPTI_EVENT_CATEGORY_INSTRUCTION
+      "sm__warps_active.sum+",
 
-    // Deprecated CUPTI metric API -- elapsed_cycles_sm:
-    //    Event# 33
-    //    Id        = 2193
-    //    Name      = elapsed_cycles_sm
-    //    Shortdesc = Elapsed clocks
-    //    Longdesc  = Elapsed clocks
-    //    Category  = CUPTI_EVENT_CATEGORY_INSTRUCTION
-    "sm__cycles_elapsed.sum+"
+      // Deprecated CUPTI metric API -- elapsed_cycles_sm:
+      //    Event# 33
+      //    Id        = 2193
+      //    Name      = elapsed_cycles_sm
+      //    Shortdesc = Elapsed clocks
+      //    Longdesc  = Elapsed clocks
+      //    Category  = CUPTI_EVENT_CATEGORY_INSTRUCTION
+      "sm__cycles_elapsed.sum+"
 
 //    // FAILS:
 //    //   ERROR: Invalid argument: /home/jgleeson/clone/iml/src/libs/range_sampling/RangeSampling.cpp:384: error:
@@ -161,11 +162,13 @@ const std::vector<std::string> DEFAULT_METRICS = {
 //    "sm__warps_active.sum",
 //    "sm__cycles_elapsed.sum"
 
-};
-static std::string init_DEFAULT_METRICS_STR() {
+  };
+  return DEFAULT_METRICS;
+}
+std::string get_DEFAULT_METRICS_STR() {
+  auto DEFAULT_METRICS = get_DEFAULT_METRICS();
   return boost::algorithm::join(DEFAULT_METRICS, ",");
 }
-const std::string DEFAULT_METRICS_STR = init_DEFAULT_METRICS_STR();
 
 // 50 MB.
 // In a simple script, one sample can take up 11K, so I expect the size to be large in general

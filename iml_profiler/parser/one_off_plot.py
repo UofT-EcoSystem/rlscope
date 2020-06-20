@@ -24,6 +24,7 @@ import seaborn as sns
 from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, basename as _b
 
 from iml_profiler.parser.stacked_bar_plots import get_x_env, get_x_algo
+from iml_profiler.parser.dataframe import UtilDataframeReader
 
 from iml_profiler import py_config
 from iml_profiler.parser.common import *
@@ -192,6 +193,7 @@ class GpuUtilExperiment:
         self._read_sm_efficiency_df()
         self._read_achieved_occupancy_df()
         self._read_rlscope_df()
+        self._read_util_data()
 
     def _read_rlscope_df(self):
         self.rlscope_df = None
@@ -220,6 +222,108 @@ class GpuUtilExperiment:
         logging.info("rlscope dataframe:\n{msg}".format(
             msg=txt_indent(DataFrame.dataframe_string(self.rlscope_df), indent=1),
         ))
+
+    def gpu_hw_csv_paths(self, root_dir):
+        paths = []
+        for path in each_file_recursive(root_dir):
+            if not re.search(r'^GPUHwCounterSampler.*\.csv$', _b(path)):
+                continue
+            paths.append(path)
+        return paths
+
+    def read_gpu_hw_csv(self, path, attrs, dflt_attrs):
+        attr_dict = parse_path_attrs(
+            path,
+            attrs,
+            dflt_attrs)
+        df = pd.read_csv(path, comment='#')
+        for attr_name, attr_value in attr_dict.items():
+            assert attr_name not in df
+            df[attr_name] = maybe_number(attr_value)
+        return df
+
+    def _plot_util_data(self):
+        if self.util_data is None:
+            return
+        util_data = copy.deepcopy(self.util_data)
+        util_df = util_data['util_df']
+
+        device_id = 0
+        util_df = util_df[
+            (util_df['device_id'] == device_id)
+            & (util_df['device_type'] == 'GPU')
+            ]
+
+        def _x_label(row):
+            return '\n'.join([
+                f"Thread blocks = {row['thread_blocks']}",
+                f"Thread block size = {row['thread_block_size']}",
+            ])
+        util_df = util_df.copy()
+        util_df['x_label'] = util_df.apply(_x_label, axis=1)
+
+        sns.set(style="whitegrid")
+        ax = sns.boxplot(x="x_label", y="util", data=util_df,
+                         # The first samples tend to be zero since they capture time before kernel starts running.
+                         showfliers=False)
+        y_min, y_max = ax.get_ylim()
+        ax.set_ylim(0, y_max)
+        ax.set_ylabel('Utilization (%)')
+        ax.set_xlabel('Kernel configuration')
+        ax.set_title(r'$\mathtt{nvidia-smi}$ utilization')
+
+        save_plot(util_df, _j(self.args['util_dir'], 'util.svg'))
+
+    def _read_util_data(self):
+        self.util_data = None
+        if self.args['util_dir'] is None:
+            return
+
+        util_dflt_attrs = None
+        util_attrs = {
+            'thread_blocks',
+            'thread_block_size',
+            'n_launches',
+            'iterations',
+            'num_threads',
+            'processes',
+            'hw_counters',
+        }
+
+        gpu_hw_csv_paths = self.gpu_hw_csv_paths(self.args['util_dir'])
+        assert len(gpu_hw_csv_paths) == 1
+        gpu_hw_csv_path = gpu_hw_csv_paths[0]
+        gpu_hw_df = self.read_gpu_hw_csv(
+            gpu_hw_csv_path,
+            util_attrs,
+            util_dflt_attrs)
+
+        thread_blocks = gpu_hw_df['thread_blocks'].unique()
+        assert len(thread_blocks) == 1
+        thread_blocks = thread_blocks[0]
+
+        thread_block_size = gpu_hw_df['thread_block_size'].unique()
+        assert len(thread_block_size) == 1
+        thread_block_size = thread_block_size[0]
+
+        util_df_reader = UtilDataframeReader(
+            self.args['util_dir'],
+            debug=self.debug)
+        util_df = util_df_reader.read()
+        util_df = util_df.sort_values(['machine_name', 'device_name', 'start_time_us'])
+        util_df['start_time_sec'] = util_df['start_time_us']/MICROSECONDS_IN_SECOND
+        util_df['thread_block_size'] = thread_block_size
+        util_df['thread_blocks'] = thread_blocks
+
+        self.util_data = dict(
+            util_df=util_df,
+            gpu_hw_df=gpu_hw_df,
+        )
+
+    @property
+    def debug(self):
+        return self.args['debug']
+
 
     def _read_sm_efficiency_df(self):
         self.sm_df = None
@@ -288,6 +392,7 @@ class GpuUtilExperiment:
         self._plot_achieved_occupancy()
         self._plot_rlscope_sm_efficiency()
         self._plot_rlscope_achieved_occupancy()
+        self._plot_util_data()
 
     def keep_cupti_metric(self, df, cupti_metric_name):
         prof_metric_name = METRIC_NAME_CUPTI_TO_PROF[cupti_metric_name]
@@ -493,6 +598,7 @@ def main():
     args, argv = parser.parse_known_args()
     logging.info(pprint_msg({'argv': argv}))
 
+    all_args = copy.deepcopy(vars(args))
     def _main():
         if args.test_plot_grouped_bar:
             test_plot_grouped_bar()
@@ -503,10 +609,12 @@ def main():
             sub_parser.add_argument('--sm-efficiency-dir')
             sub_parser.add_argument('--achieved-occupancy-dir')
             sub_parser.add_argument('--rlscope-dir')
+            sub_parser.add_argument('--util-dir')
             sub_args, sub_argv = sub_parser.parse_known_args(argv)
             logging.info(pprint_msg({'sub_argv': sub_argv}))
 
-            plot = GpuUtilExperiment(args=vars(sub_args))
+            all_args.update(vars(sub_args))
+            plot = GpuUtilExperiment(args=all_args)
             plot.run()
         else:
             parser.error("Need --plot-type")

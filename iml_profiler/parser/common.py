@@ -1,5 +1,6 @@
 import platform
 import typing
+import shutil
 import codecs
 import sys
 import shlex
@@ -2260,3 +2261,67 @@ def CategoryKey(ops, non_ops, procs):
         ops=tuple(sorted(ops)),
         non_ops=frozenset(non_ops),
         procs=frozenset(procs))
+
+def split_argv_on(argv, sep='--'):
+    """
+    # Case 1
+    $ cmd [cmd-options] -- sub-cmd [sub-cmd-options]
+        RETURN:
+            cmd_argv = [cmd] + [cmd-options]
+            sub_cmd_argv = [sub_cmd] + [sub-cmd-options]
+
+    # Case 2
+    $ cmd [cmd-options] sub-cmd      [sub-cmd-options]
+                        -------
+                        executable
+        RETURN:
+            cmd_argv = [cmd] + [cmd-options]
+            sub_cmd_argv = [sub_cmd] + [sub-cmd-options]
+
+    # Case 3
+    $ cmd [cmd-options]
+        RETURN:
+            cmd_argv = [cmd] + [cmd-options]
+            sub_cmd_argv = []
+
+    :param argv:
+        sys.argv
+    :return:
+    """
+
+    def is_executable(opt):
+        return shutil.which(opt) is not None
+
+    def index_of_first(xs, pred, dflt=None):
+        for i, v in enumerate(xs):
+            if pred(v):
+                return i
+        return dflt
+
+    has_dashes = any(opt == sep for opt in argv)
+    # has_executable = any(is_executable(opt) for opt in argv)
+    executable_idx = index_of_first(argv[1:], is_executable)
+    if executable_idx is not None:
+        executable_idx += 1
+
+    sub_cmd_start_idx = None
+    cmd_end_idx = None
+    if has_dashes:
+        sep_idx = argv.index(sep)
+        sub_cmd_start_idx = sep_idx + 1
+        cmd_end_idx = sep_idx - 1
+    elif executable_idx is not None:
+        sub_cmd_start_idx = executable_idx
+        cmd_end_idx = executable_idx - 1
+    else:
+        cmd_argv = argv
+        sub_cmd_argv = []
+        return cmd_argv, sub_cmd_argv
+
+    assert cmd_end_idx < sub_cmd_start_idx
+    if cmd_end_idx < 0:
+        cmd_argv = []
+    else:
+        cmd_argv = argv[:cmd_end_idx + 1]
+    sub_cmd_argv = argv[sub_cmd_start_idx:]
+    return cmd_argv, sub_cmd_argv
