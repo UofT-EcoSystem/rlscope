@@ -155,32 +155,88 @@ _do_always() {
   )
 }
 
-nvidia_smi_expr() {
+_bool_attr() {
+    local opt="$1"
+    local yes_or_no="$2"
+    shift 2
+    echo ".${opt}_${yes_or_no}"
+}
+_bool_opt() {
+    local opt="$1"
+    local yes_or_no="$2"
+    shift 2
+    if [ "$yes_or_no" = 'yes' ]; then
+        echo "--${opt}"
+    fi
+}
+
+multithread_expr() {
+  (
+    subdir=multithread_expr
+    # num_threads=68
+    # Want to match multiprocess_expr
+    num_threads=60
+    processes='no'
+    _multi_expr
+  )
+}
+
+multiprocess_expr() {
+  (
+    subdir=multiprocess_expr
+    # NOTE: each thread uses 177 MB of memory... cannot use all 68 SM's.
+    num_threads=60
+    processes='yes'
+    _multi_expr
+  )
+}
+
+_multi_expr() {
+(
+  set -ue
+  _make_install
+  export CUDA_VISIBLE_DEVICES=0
+  iterations=$((10*1000*1000*1000))
+  # Sample sm_id 10 times over the course of the 10 second kernel execution
+  # ( I expect the sm_id to remain the same )
+  n_sched_samples=10
+  iterations_per_sched_sample=$((iterations/n_sched_samples))
+  thread_blocks=1
+  thread_block_size=1024
+  hw_counters='no'
+  n_launches=1
+  iml_dir="$ROOT/output/gpu_util_experiment/${subdir}/thread_blocks_${thread_blocks}.thread_block_size_${thread_block_size}.n_launches_${n_launches}.iterations_${iterations}.num_threads_${num_threads}.iterations_per_sched_sample_${iterations_per_sched_sample}$(_bool_attr processes $processes)$(_bool_attr hw_counters $hw_counters)"
+  _do mkdir -p ${iml_dir}
+  _do iml-util-sampler --iml-directory ${iml_dir} -- \
+    gpu_util_experiment \
+    --mode run_kernels \
+    --iml_directory ${iml_dir} \
+    --gpu_clock_freq_json $IML_DIR/calibration/gpu_clock_freq/gpu_clock_freq.json \
+    --kernel compute_kernel_sched_info \
+    --kern_arg_iterations ${iterations} \
+    --kern_arg_threads_per_block ${thread_block_size} \
+    --kern_arg_num_blocks ${thread_blocks} \
+    --kern_arg_iterations_per_sched_sample ${iterations_per_sched_sample} \
+    --num_threads ${num_threads} \
+    --n_launches ${n_launches} \
+    $(_bool_opt processes $processes) \
+    $(_bool_opt hw_counters $hw_counters) \
+    2>&1 | tee ${iml_dir}/gpu_util_experiment.log.txt
+)
+}
+
+_make_install() {
   (
   set -ue
-  _bool_attr() {
-      local opt="$1"
-      local yes_or_no="$2"
-      shift 2
-      echo ".${opt}_${yes_or_no}"
-  }
-  _bool_opt() {
-      local opt="$1"
-      local yes_or_no="$2"
-      shift 2
-      if [ "$yes_or_no" = 'yes' ]; then
-          echo "--${opt}"
-      fi
-  }
-#  _do_always cd $IML_DIR/build.docker/iml
-  (
   cd "$(cmake_build_dir "$ROOT")"
   _do_always make -j$(nproc) install
   )
-#  kernel_delay_us=1000
-#  kernel_duration_us=1
-#  run_sec=20
-#  --run_sec ${run_sec}
+}
+
+nvidia_smi_expr() {
+(
+  set -ue
+  _make_install
   export CUDA_VISIBLE_DEVICES=0
   iterations=$((10*1000*1000*1000))
   thread_blocks=1
@@ -198,7 +254,6 @@ nvidia_smi_expr() {
     --mode run_kernels \
     --iml_directory ${iml_dir} \
     --gpu_clock_freq_json $IML_DIR/calibration/gpu_clock_freq/gpu_clock_freq.json \
-    --hw_counters \
     --kernel compute_kernel_sched_info \
     --kern_arg_iterations ${iterations} \
     --kern_arg_threads_per_block ${thread_block_size} \
@@ -208,8 +263,8 @@ nvidia_smi_expr() {
     $(_bool_opt processes $processes) \
     $(_bool_opt hw_counters $hw_counters) \
     2>&1 | tee ${iml_dir}/gpu_util_experiment.log.txt
-  _do rls-analyze --mode gpu_hw --iml_directory ${iml_dir} | \
-    2>&1 | tee ${iml_dir}/rls_analyze.log.txt
+#  _do rls-analyze --mode gpu_hw --iml_directory ${iml_dir} | \
+#    2>&1 | tee ${iml_dir}/rls_analyze.log.txt
 )
 }
 

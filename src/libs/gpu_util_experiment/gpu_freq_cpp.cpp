@@ -677,7 +677,6 @@ void ThreadedGPUKernelRunner::run_parent() {
             ret = sampler.DumpSync();
             IF_BAD_STATUS_EXIT("Failed to dump GPU hw counter sample", ret);
         } else {
-            assert(false);
             parent_run_pass(false, false);
         }
     }
@@ -1122,7 +1121,6 @@ void GPUKernelRunner::run_child_process() {
             ret = sampler.DumpSync();
             IF_BAD_STATUS_EXIT("Failed to dump GPU hw counter sample", ret);
         } else {
-            assert(false);
             child_run_pass(false, false);
         }
     }
