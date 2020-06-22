@@ -191,11 +191,24 @@ multiprocess_expr() {
   )
 }
 
+nvidia_smi_expr() {
+  (
+    subdir=nvidia_smi_expr
+    # NOTE: each thread uses 177 MB of memory... cannot use all 68 SM's.
+    num_threads=1
+    thread_blocks=1
+    thread_block_size=1
+    processes='no'
+    _multi_expr
+  )
+}
+
 _multi_expr() {
 (
   set -ue
   _make_install
   export CUDA_VISIBLE_DEVICES=0
+  # ~ 10 seconds of executing a GPU kernel with a single thread.
   iterations=$((10*1000*1000*1000))
   # Sample sm_id 10 times over the course of the 10 second kernel execution
   # ( I expect the sm_id to remain the same )

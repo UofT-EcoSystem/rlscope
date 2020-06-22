@@ -384,13 +384,13 @@ class GpuUtilExperiment:
 
 
     def _read_multithread_df(self):
-        self.multithread_data = None
+        self.multithread_df = None
         if self.args['multithread_dir'] is None:
             return
         self.multithread_df = self._read_multi_df(self.args['multithread_dir'])
 
     def _read_multiprocess_df(self):
-        self.multiprocess_data = None
+        self.multiprocess_df = None
         if self.args['multiprocess_dir'] is None:
             return
         self.multiprocess_df = self._read_multi_df(self.args['multiprocess_dir'])
@@ -590,7 +590,7 @@ class GpuUtilExperiment:
         g.despine(left=True)
         g.set_ylabels(SM_OCCUPANCY_Y_LABEL)
         g.set_xlabels(RLSCOPE_X_LABEL)
-        title = SM_EFFICIENCY_TITLE
+        title = SM_OCCUPANCY_TITLE
         g.fig.suptitle(title)
         g.fig.subplots_adjust(top=0.90)
         g.fig.axes[0].set_xticklabels(

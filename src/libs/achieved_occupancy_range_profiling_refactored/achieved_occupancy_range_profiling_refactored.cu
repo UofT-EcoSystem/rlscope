@@ -202,6 +202,32 @@ static MyStatus with_N_ranges(rlscope::GPUHwCounterSampler& sampler, int N, cons
     return MyStatus::OK();
 }
 
+// void run_profiling() {
+//     sampler.StartConfig({"sm_occupancy", "sm_efficiency"});
+// 
+//     sampler.StartProfiling();
+// 
+//     // Training loop.
+//     for (int iteration = 0; i < N; i++) {
+//         // Tell profiler when we start/end 
+//         // a repeatable computation that wish 
+//         // to profile.
+//         sampler.StartPass();
+// 
+//         sampler.Push("vec_add");
+//             vec_add<<<blocks, block_size>>>(A, B, C);
+//             vec_add<<<blocks, block_size>>>(A, B, C);
+//             vec_add<<<blocks, block_size>>>(A, B, C);
+//         sampler.Pop();
+// 
+//         sampler.EndPass();
+//     }
+// 
+//     sampler.StopProfiling();
+// 
+//     sampler.PrintCSV();
+// }
+
 MyStatus run_pass(rlscope::GPUHwCounterSampler& sampler) {
     MyStatus ret = MyStatus::OK();
 
