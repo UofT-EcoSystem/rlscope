@@ -139,8 +139,8 @@ check_tensorflow_build() {
 
 _check_tensorflow() {
   (
-  set -u
-  # pip install tensorflow-gpu==$TENSORFLOW_VERSION
+#  set -u
+#  pip install tensorflow-gpu==$TENSORFLOW_VERSION
   )
 #    if ! py_module_installed "tensorflow"; then
 #      echo "ERROR: you need to install tensorflow."
@@ -152,7 +152,11 @@ _check_tensorflow() {
 
 _upgrade_pip() {
     # I've seen pip commands fail when pip isn't up-to-date.
-    pip install --upgrade pip
+    # pip install --upgrade pip
+
+    # HACK: bug in pip is causing optuna installation to fail:
+    # https://github.com/pypa/pip/issues/6264#issuecomment-572896391
+    pip install --upgrade pip==19.0
 }
 
 _check_iml() {

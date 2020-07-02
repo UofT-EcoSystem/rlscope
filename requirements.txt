@@ -47,3 +47,6 @@ pdbpp >= 0.10.0
 gym == 0.13.0
 
 numba==0.46.0
+
+# Needed for TensorRT Python API.
+pycuda>=2019.1.2

@@ -162,12 +162,13 @@ slice_sets:
           - ubuntu/pip_dependencies
           - ubuntu/protobuf_from_src
           - ubuntu/cmake_from_src
+          - ubuntu/bazelisk
+          - ubuntu/bash
+          - ubuntu/tensorrt
           - iml/env
           - iml/apt_install
           - iml/pip_dependencies
           - iml/user_custom
-          - ubuntu/bazelisk
-          - ubuntu/bash
           - shell
           - ubuntu/entrypoint
           test_runtime: nvidia

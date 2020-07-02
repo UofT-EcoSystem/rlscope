@@ -83,11 +83,26 @@ RUN apt-get install -y --no-install-recommends \
 #        && apt-get clean \
 #        && rm -rf /var/lib/apt/lists/*; }
 
+
+#ARG LIBNVINFER_VERSION_NUMBER_FULL=5.1.5-1
+#ARG LIBNVINFER_VERSION_NUMBER_PARTIAL=5.1.5
+## <= CUDA 10.0
+#RUN { apt-get update && \
+#        apt-get install nvinfer-runtime-trt-repo-${UBUNTU_VERSION/./}-${LIBNVINFER_VERSION_NUMBER_PARTIAL}-ga-cuda${CUDA} \
+#        && apt-get update \
+#        && apt-get install -y --no-install-recommends \
+#            libnvinfer5=${LIBNVINFER_VERSION} \
+#            libnvinfer-dev=${LIBNVINFER_VERSION} \
+#        && apt-get clean \
+#        && rm -rf /var/lib/apt/lists/*; }
+
+
 ARG LIBNVINFER_VERSION=5.1.5-1+cuda${CUDA}
 RUN { \
         apt-get install -y --no-install-recommends \
             libnvinfer5=${LIBNVINFER_VERSION} \
             libnvinfer-dev=${LIBNVINFER_VERSION} \
+            python3-libnvinfer=${LIBNVINFER_VERSION} \
         && apt-get clean \
         && rm -rf /var/lib/apt/lists/*; }
 

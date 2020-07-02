@@ -58,7 +58,8 @@ from pathlib import Path
 
 from iml_profiler import py_config
 
-TENSORFLOW_VERSION = "1.15.0"
+# TENSORFLOW_VERSION = "1.15.0"
+TENSORFLOW_VERSION = "2.2.0"
 
 HOME = str(Path.home())
 DEFAULT_POSTGRES_PORT = 5432
