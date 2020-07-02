@@ -41,9 +41,9 @@ class ParserOnnxConfig : public nvonnxparser::IOnnxConfig
 {
 
 protected:
-    string mModelFilename{};
-    string mTextFilename{};
-    string mFullTextFilename{};
+    std::string mModelFilename{};
+    std::string mTextFilename{};
+    std::string mFullTextFilename{};
     nvinfer1::DataType mModelDtype;
     nvonnxparser::IOnnxConfig::Verbosity mVerbosity;
     bool mPrintLayercInfo;
@@ -90,7 +90,7 @@ public:
     }
     virtual void setModelFileName(const char* onnxFilename)
     {
-        mModelFilename = string(onnxFilename);
+        mModelFilename = std::string(onnxFilename);
     }
     virtual nvonnxparser::IOnnxConfig::Verbosity getVerbosityLevel() const
     {
@@ -115,7 +115,7 @@ public:
     }
     virtual void setTextFileName(const char* textFilename)
     {
-        mTextFilename = string(textFilename);
+        mTextFilename = std::string(textFilename);
     }
     virtual const char* getFullTextFileName() const
     {
@@ -123,7 +123,7 @@ public:
     }
     virtual void setFullTextFileName(const char* fullTextFilename)
     {
-        mFullTextFilename = string(fullTextFilename);
+        mFullTextFilename = std::string(fullTextFilename);
     }
     virtual bool getPrintLayerInfo() const
     {

@@ -108,7 +108,7 @@ public:
 
     void setModelFileName(const char* onnxFilename)
     {
-        mModelFilename = string(onnxFilename);
+        mModelFilename = std::string(onnxFilename);
     }
     Verbosity getVerbosityLevel() const
     {
@@ -132,7 +132,7 @@ public:
     }
     void setEngineFileName(const char* engineFilename)
     {
-        mEngineFilename = string(engineFilename);
+        mEngineFilename = std::string(engineFilename);
     }
     const char* getTextFileName() const
     {
@@ -140,7 +140,7 @@ public:
     }
     void setTextFileName(const char* textFilename)
     {
-        mTextFilename = string(textFilename);
+        mTextFilename = std::string(textFilename);
     }
     const char* getFullTextFileName() const
     {
@@ -148,7 +148,7 @@ public:
     }
     void setFullTextFileName(const char* fullTextFilename)
     {
-        mFullTextFilename = string(fullTextFilename);
+        mFullTextFilename = std::string(fullTextFilename);
     }
     void setLabel(int64_t label)
     {
@@ -236,7 +236,7 @@ public:
     }
     void setImageFileName(const char* imageFilename) //!< get the Image file name
     {
-        mImageFilename = string(imageFilename);
+        mImageFilename = std::string(imageFilename);
     }
     const char* getReferenceFileName() const
     {
@@ -244,7 +244,7 @@ public:
     }
     void setReferenceFileName(const char* referenceFilename) //!<  set reference file name
     {
-        mReferenceFilename = string(referenceFilename);
+        mReferenceFilename = std::string(referenceFilename);
     }
 
     void setInputDataFormat(InputDataFormat idt)
@@ -262,7 +262,7 @@ public:
     }
     void setOutputFileName(const char* outputFilename) //!<  get the output file name
     {
-        mOutputFilename = string(outputFilename);
+        mOutputFilename = std::string(outputFilename);
     }
 
     const char* getCalibrationFileName() const
@@ -271,7 +271,7 @@ public:
     } //!<  specifies the file containing the list of image files for int8 calibration
     void setCalibrationFileName(const char* calibrationFilename) //!<  get the int 8 calibration list file name
     {
-        mCalibrationFilename = string(calibrationFilename);
+        mCalibrationFilename = std::string(calibrationFilename);
     }
 
     uint64_t getTopK() const

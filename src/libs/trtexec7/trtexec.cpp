@@ -33,14 +33,7 @@
 #include "NvInfer.h"
 #include "NvInferPlugin.h"
 
-#include "buffers.h"
-#include "common.h"
-#include "logger.h"
-#include "sampleDevice.h"
-#include "sampleOptions.h"
-#include "sampleEngines.h"
-#include "sampleInference.h"
-#include "sampleReporting.h"
+#include "tensorrt_common7.h"
 
 using namespace nvinfer1;
 using namespace sample;

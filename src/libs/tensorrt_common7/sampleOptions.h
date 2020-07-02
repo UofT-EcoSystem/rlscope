@@ -116,7 +116,7 @@ struct BuildOptions : public Options
     bool save{false};
     bool load{false};
     bool builderCache{true};
-    nvinfer1::ProfilingVerbosity nvtxMode{nvinfer1::ProfilingVerbosity::kDEFAULT};
+//    nvinfer1::ProfilingVerbosity nvtxMode{nvinfer1::ProfilingVerbosity::kDEFAULT};
     std::string engine;
     std::string calibration;
     std::unordered_map<std::string, ShapeRange> shapes;

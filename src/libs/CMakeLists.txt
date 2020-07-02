@@ -6,5 +6,9 @@ add_subdirectory(achieved_occupancy_range_profiling)
 add_subdirectory(achieved_occupancy_range_profiling_refactored)
 add_subdirectory(dqn_atari_test)
 add_subdirectory(gpu_util_experiment)
+
 add_subdirectory(tensorrt_common6)
 add_subdirectory(trtexec6)
+
+add_subdirectory(tensorrt_common7)
+add_subdirectory(trtexec7)

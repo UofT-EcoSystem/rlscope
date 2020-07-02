@@ -519,24 +519,24 @@ void BuildOptions::parse(Arguments& arguments)
     }
     checkEraseNegativeOption(arguments, "--noBuilderCache", builderCache);
 
-    std::string nvtxModeString;
-    checkEraseOption(arguments, "--nvtxMode", nvtxModeString);
-    if (nvtxModeString == "default")
-    {
-        nvtxMode = nvinfer1::ProfilingVerbosity::kDEFAULT;
-    }
-    else if (nvtxModeString == "none")
-    {
-        nvtxMode = nvinfer1::ProfilingVerbosity::kNONE;
-    }
-    else if (nvtxModeString == "verbose")
-    {
-        nvtxMode = nvinfer1::ProfilingVerbosity::kVERBOSE;
-    }
-    else if (!nvtxModeString.empty())
-    {
-        throw std::invalid_argument(std::string("Unknown nvtxMode: ") + nvtxModeString);
-    }
+//    std::string nvtxModeString;
+//    checkEraseOption(arguments, "--nvtxMode", nvtxModeString);
+//    if (nvtxModeString == "default")
+//    {
+//        nvtxMode = nvinfer1::ProfilingVerbosity::kDEFAULT;
+//    }
+//    else if (nvtxModeString == "none")
+//    {
+//        nvtxMode = nvinfer1::ProfilingVerbosity::kNONE;
+//    }
+//    else if (nvtxModeString == "verbose")
+//    {
+//        nvtxMode = nvinfer1::ProfilingVerbosity::kVERBOSE;
+//    }
+//    else if (!nvtxModeString.empty())
+//    {
+//        throw std::invalid_argument(std::string("Unknown nvtxMode: ") + nvtxModeString);
+//    }
 
     if (checkEraseOption(arguments, "--loadEngine", engine))
     {
@@ -827,11 +827,11 @@ std::ostream& operator<<(std::ostream& os, const IOFormat& format)
         os << "int32:";
         break;
     }
-    case nvinfer1::DataType::kBOOL:
-    {
-        os << "Bool:";
-        break;
-    }
+//    case nvinfer1::DataType::kBOOL:
+//    {
+//        os << "Bool:";
+//        break;
+//    }
     }
 
     for (int f = 0; f < nvinfer1::EnumMax<nvinfer1::TensorFormat>(); ++f)
@@ -909,8 +909,8 @@ std::ostream& operator<<(std::ostream& os, const BuildOptions& options)
           "Safe mode: "      << boolToEnabled(options.safe)                                                             << std::endl <<
           "Save engine: "    << (options.save ? options.engine : "")                                                    << std::endl <<
           "Load engine: "    << (options.load ? options.engine : "")                                                    << std::endl <<
-          "Builder Cache: "  << boolToEnabled(options.builderCache)                                                     << std::endl <<
-          "NVTX verbosity: " << static_cast<int>(options.nvtxMode)                                                      << std::endl;
+          "Builder Cache: "  << boolToEnabled(options.builderCache)                                                     << std::endl;
+//          "NVTX verbosity: " << static_cast<int>(options.nvtxMode)                                                      << std::endl;
     // clang-format on
 
     auto printIOFormats = [](std::ostream& os, const char* direction, const std::vector<IOFormat> formats) {
@@ -1080,7 +1080,7 @@ void BuildOptions::help(std::ostream& os)
           "                                          fmt   ::= (\"chw\"|\"chw2\"|\"chw4\"|\"hwc8\"|\"chw16\"|\"chw32\")[\"+\"fmt]"    << std::endl <<
           "  --workspace=N               Set workspace size in megabytes (default = "                      << defaultWorkspace << ")" << std::endl <<
           "  --noBuilderCache            Disable timing cache in builder (default is to enable timing cache)"                         << std::endl <<
-          "  --nvtxMode=[default|verbose|none] Specify NVTX annotation verbosity"                                                     << std::endl <<
+//          "  --nvtxMode=[default|verbose|none] Specify NVTX annotation verbosity"                                                     << std::endl <<
           "  --minTiming=M               Set the minimum number of iterations used in kernel selection (default = "
                                                                                                            << defaultMinTiming << ")" << std::endl <<
           "  --avgTiming=M               Set the number of times averaged in each iteration for kernel selection (default = "
