@@ -68,7 +68,10 @@
 #include "NvOnnxParser.h"
 #include "NvUffParser.h"
 
-#include "tensorrt_common.h"
+#include "tensorrt_common6.h"
+
+#include "range_sampling.h"
+#include "common_util.h"
 
 using namespace nvinfer1;
 using namespace sample;
@@ -85,117 +88,132 @@ float percentile(float percentage, std::vector<float>& times)
     return std::numeric_limits<float>::infinity();
 }
 
-bool doInference(ICudaEngine& engine, const InferenceOptions& inference, const ReportingOptions& reporting)
+bool doInference(ICudaEngine& engine, const InferenceOptions& inference, const ReportingOptions& reporting, const AllOptions& all_options)
 {
-    IExecutionContext* context = engine.createExecutionContext();
+  IExecutionContext* context = engine.createExecutionContext();
 
-    // Dump inferencing time per layer basis
-    SimpleProfiler profiler("Layer time");
-    if (reporting.profile)
+  // Dump inferencing time per layer basis
+  SimpleProfiler profiler("Layer time");
+  if (reporting.profile)
+  {
+    context->setProfiler(&profiler);
+  }
+
+//  MyStatus status = MyStatus::OK();
+//  rlscope::GPUHwCounterSampler sampler(all_options.system.device, ".", "");
+//  if (!reporting.hw_counters) {
+//    status = sampler.Disable();
+//    IF_BAD_STATUS_EXIT_WITH(status);
+//  }
+
+//  status = sampler.Init();
+//  IF_BAD_STATUS_EXIT("Failed to initialize GPU hw counter profiler", status);
+
+//  status = sampler.StartConfig(reporting.hw_metrics);
+//  IF_BAD_STATUS_EXIT("Failed to configure GPU hw counter profiler", status);
+
+  for (int b = 0; b < engine.getNbBindings(); ++b)
+  {
+    if (!engine.bindingIsInput(b))
     {
-        context->setProfiler(&profiler);
+      continue;
+    }
+    auto dims = context->getBindingDimensions(b);
+    if (dims.d[0] == -1)
+    {
+      auto shape = inference.shapes.find(engine.getBindingName(b));
+      if (shape == inference.shapes.end())
+      {
+        gLogError << "Missing dynamic batch size in inference" << std::endl;
+        return false;
+      }
+      dims.d[0] = shape->second.d[0];
+      context->setBindingDimensions(b, dims);
+    }
+  }
+
+  // Use an aliasing shared_ptr since we don't want engine to be deleted when bufferManager goes out of scope.
+  std::shared_ptr<ICudaEngine> emptyPtr{};
+  std::shared_ptr<ICudaEngine> aliasPtr(emptyPtr, &engine);
+  samplesCommon::BufferManager bufferManager(aliasPtr, inference.batch, inference.batch ? nullptr : context);
+  std::vector<void*> buffers = bufferManager.getDeviceBindings();
+
+  cudaStream_t stream;
+  TRT6_CHECK_CUDA(cudaStreamCreate(&stream));
+  cudaEvent_t start, end;
+  unsigned int cudaEventFlags = inference.spin ? cudaEventDefault : cudaEventBlockingSync;
+  TRT6_CHECK_CUDA(cudaEventCreateWithFlags(&start, cudaEventFlags));
+  TRT6_CHECK_CUDA(cudaEventCreateWithFlags(&end, cudaEventFlags));
+
+  std::vector<float> times(reporting.avgs);
+  for (int j = 0; j < inference.iterations; j++)
+  {
+    float totalGpu{0};  // GPU timer
+    float totalHost{0}; // Host timer
+
+    for (int i = 0; i < reporting.avgs; i++)
+    {
+      auto tStart = std::chrono::high_resolution_clock::now();
+      cudaEventRecord(start, stream);
+      if (inference.batch)
+      {
+        context->enqueue(inference.batch, &buffers[0], stream, nullptr);
+      }
+      else
+      {
+        context->enqueueV2(&buffers[0], stream, nullptr);
+      }
+      cudaEventRecord(end, stream);
+      cudaEventSynchronize(end);
+
+      auto tEnd = std::chrono::high_resolution_clock::now();
+      totalHost += std::chrono::duration<float, std::milli>(tEnd - tStart).count();
+      float ms;
+      cudaEventElapsedTime(&ms, start, end);
+      times[i] = ms;
+      totalGpu += ms;
     }
 
-    for (int b = 0; b < engine.getNbBindings(); ++b)
+    totalGpu /= reporting.avgs;
+    totalHost /= reporting.avgs;
+    gLogInfo << "Average over " << reporting.avgs << " runs is " << totalGpu << " ms (host walltime is "
+             << totalHost << " ms, " << static_cast<int>(reporting.percentile) << "\% percentile time is "
+             << percentile(reporting.percentile, times) << ")." << std::endl;
+  }
+
+  if (reporting.output)
+  {
+    bufferManager.copyOutputToHost();
+    int nbBindings = engine.getNbBindings();
+    for (int i = 0; i < nbBindings; i++)
     {
-        if (!engine.bindingIsInput(b))
-        {
-            continue;
-        }
-        auto dims = context->getBindingDimensions(b);
-        if (dims.d[0] == -1)
-        {
-            auto shape = inference.shapes.find(engine.getBindingName(b));
-            if (shape == inference.shapes.end())
-            {
-                gLogError << "Missing dynamic batch size in inference" << std::endl;
-                return false;
-            }
-            dims.d[0] = shape->second.d[0];
-            context->setBindingDimensions(b, dims);
-        }
+      if (!engine.bindingIsInput(i))
+      {
+        const char* tensorName = engine.getBindingName(i);
+        gLogInfo << "Dumping output tensor " << tensorName << ":" << std::endl;
+        bufferManager.dumpBuffer(gLogInfo, tensorName);
+      }
     }
+  }
 
-    // Use an aliasing shared_ptr since we don't want engine to be deleted when bufferManager goes out of scope.
-    std::shared_ptr<ICudaEngine> emptyPtr{};
-    std::shared_ptr<ICudaEngine> aliasPtr(emptyPtr, &engine);
-    samplesCommon::BufferManager bufferManager(aliasPtr, inference.batch, inference.batch ? nullptr : context);
-    std::vector<void*> buffers = bufferManager.getDeviceBindings();
+  if (reporting.profile)
+  {
+    gLogInfo << profiler;
+  }
 
-    cudaStream_t stream;
-    CHECK(cudaStreamCreate(&stream));
-    cudaEvent_t start, end;
-    unsigned int cudaEventFlags = inference.spin ? cudaEventDefault : cudaEventBlockingSync;
-    CHECK(cudaEventCreateWithFlags(&start, cudaEventFlags));
-    CHECK(cudaEventCreateWithFlags(&end, cudaEventFlags));
+  cudaStreamDestroy(stream);
+  cudaEventDestroy(start);
+  cudaEventDestroy(end);
+  context->destroy();
 
-    std::vector<float> times(reporting.avgs);
-    for (int j = 0; j < inference.iterations; j++)
-    {
-        float totalGpu{0};  // GPU timer
-        float totalHost{0}; // Host timer
-
-        for (int i = 0; i < reporting.avgs; i++)
-        {
-            auto tStart = std::chrono::high_resolution_clock::now();
-            cudaEventRecord(start, stream);
-            if (inference.batch)
-            {
-                context->enqueue(inference.batch, &buffers[0], stream, nullptr);
-            }
-            else
-            {
-                context->enqueueV2(&buffers[0], stream, nullptr);
-            }
-            cudaEventRecord(end, stream);
-            cudaEventSynchronize(end);
-
-            auto tEnd = std::chrono::high_resolution_clock::now();
-            totalHost += std::chrono::duration<float, std::milli>(tEnd - tStart).count();
-            float ms;
-            cudaEventElapsedTime(&ms, start, end);
-            times[i] = ms;
-            totalGpu += ms;
-        }
-
-        totalGpu /= reporting.avgs;
-        totalHost /= reporting.avgs;
-        gLogInfo << "Average over " << reporting.avgs << " runs is " << totalGpu << " ms (host walltime is "
-                 << totalHost << " ms, " << static_cast<int>(reporting.percentile) << "\% percentile time is "
-                 << percentile(reporting.percentile, times) << ")." << std::endl;
-    }
-
-    if (reporting.output)
-    {
-        bufferManager.copyOutputToHost();
-        int nbBindings = engine.getNbBindings();
-        for (int i = 0; i < nbBindings; i++)
-        {
-            if (!engine.bindingIsInput(i))
-            {
-                const char* tensorName = engine.getBindingName(i);
-                gLogInfo << "Dumping output tensor " << tensorName << ":" << std::endl;
-                bufferManager.dumpBuffer(gLogInfo, tensorName);
-            }
-        }
-    }
-
-    if (reporting.profile)
-    {
-        gLogInfo << profiler;
-    }
-
-    cudaStreamDestroy(stream);
-    cudaEventDestroy(start);
-    cudaEventDestroy(end);
-    context->destroy();
-
-    return true;
+  return true;
 }
 
 int main(int argc, char** argv)
 {
-    const std::string sampleName = "TensorRT.trtexec";
+  backward::SignalHandling sh;
+
+  const std::string sampleName = "TensorRT.trtexec";
     auto sampleTest = gLogger.defineTest(sampleName, argc, argv);
 
     gLogger.reportTestStart(sampleTest);
@@ -292,7 +310,7 @@ int main(int argc, char** argv)
                         "or alternatively run with your own application" << std::endl;
             return gLogger.reportFail(sampleTest);
         }
-        if (!doInference(*engine, options.inference, options.reporting))
+        if (!doInference(*engine, options.inference, options.reporting, options))
         {
             gLogError << "Inference failure" << std::endl;
             return gLogger.reportFail(sampleTest);

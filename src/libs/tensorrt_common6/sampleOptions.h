@@ -191,6 +191,8 @@ struct ReportingOptions: public Options
     float percentile{defaultPercentile};
     bool output{false};
     bool profile{false};
+    bool hw_counters{false};
+    std::vector<std::string> hw_metrics;
     std::string exportTimes{};
     std::string exportProfile{};
 

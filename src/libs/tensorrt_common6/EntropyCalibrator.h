@@ -37,13 +37,13 @@ public:
     {
         nvinfer1::Dims imageDims = mStream.getImageDims();
         mInputCount = samplesCommon::volume(imageDims) * mStream.getBatchSize();
-        CHECK(cudaMalloc(&mDeviceInput, mInputCount * sizeof(float)));
+        TRT6_CHECK_CUDA(cudaMalloc(&mDeviceInput, mInputCount * sizeof(float)));
         mStream.reset(firstBatch);
     }
 
     virtual ~EntropyCalibratorImpl()
     {
-        CHECK(cudaFree(mDeviceInput));
+        TRT6_CHECK_CUDA(cudaFree(mDeviceInput));
     }
 
     int getBatchSize() const { return mStream.getBatchSize(); }
@@ -54,7 +54,7 @@ public:
         {
             return false;
         }
-        CHECK(cudaMemcpy(mDeviceInput, mStream.getBatch(), mInputCount * sizeof(float), cudaMemcpyHostToDevice));
+        TRT6_CHECK_CUDA(cudaMemcpy(mDeviceInput, mStream.getBatch(), mInputCount * sizeof(float), cudaMemcpyHostToDevice));
         assert(!strcmp(names[0], mInputBlobName));
         bindings[0] = mDeviceInput;
         return true;

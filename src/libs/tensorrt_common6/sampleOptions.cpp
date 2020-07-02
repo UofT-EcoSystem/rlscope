@@ -59,6 +59,8 @@
 
 #include "sampleOptions.h"
 
+#include "range_sampling.h"
+
 namespace sample
 {
 
@@ -322,17 +324,26 @@ void InferenceOptions::parse(Arguments& arguments)
 
 void ReportingOptions::parse(Arguments& arguments)
 {
-    checkEraseOption(arguments, "--percentile", percentile);
-    checkEraseOption(arguments, "--avgRuns", avgs);
-    checkEraseOption(arguments, "--verbose", verbose);
-    checkEraseOption(arguments, "--dumpOutput", output);
-    checkEraseOption(arguments, "--dumpProfile", profile);
-    checkEraseOption(arguments, "--exportTimes", exportTimes);
-    checkEraseOption(arguments, "--exportProfile", exportProfile);
-    if (percentile < 0 || percentile > 100)
-    {
-        throw std::invalid_argument(std::string("Percentile ") + std::to_string(percentile) + "is not in [0,100]");
-    }
+  checkEraseOption(arguments, "--percentile", percentile);
+  checkEraseOption(arguments, "--avgRuns", avgs);
+  checkEraseOption(arguments, "--verbose", verbose);
+  checkEraseOption(arguments, "--dumpOutput", output);
+  checkEraseOption(arguments, "--dumpProfile", profile);
+  checkEraseOption(arguments, "--hw-counters", hw_counters);
+
+  std::string hw_metrics_string;
+  checkEraseOption(arguments, "--hw-metrics", hw_metrics_string);
+  if (hw_metrics_string == "") {
+    hw_metrics_string = rlscope::get_DEFAULT_METRICS_STR();
+    hw_metrics = rlscope::StringSplit(hw_metrics_string, ",");
+  }
+
+  checkEraseOption(arguments, "--exportTimes", exportTimes);
+  checkEraseOption(arguments, "--exportProfile", exportProfile);
+  if (percentile < 0 || percentile > 100)
+  {
+    throw std::invalid_argument(std::string("Percentile ") + std::to_string(percentile) + "is not in [0,100]");
+  }
 }
 
 bool parseHelp(Arguments& arguments)

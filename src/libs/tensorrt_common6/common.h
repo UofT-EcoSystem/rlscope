@@ -96,7 +96,7 @@ using namespace plugin;
 #define ENABLE_DLA_API 1
 #endif
 
-#define CHECK(status)                                          \
+#define TRT6_CHECK_CUDA(status)                                          \
     do                                                         \
     {                                                          \
         auto ret = (status);                                   \
@@ -127,7 +127,7 @@ using namespace plugin;
 template <typename T, typename T_>
 OBJ_GUARD(T) makeObjGuard(T_* t)
 {
-    CHECK(!(std::is_base_of<T, T_>::value || std::is_same<T, T_>::value));
+    TRT6_CHECK_CUDA(!(std::is_base_of<T, T_>::value || std::is_same<T, T_>::value));
     auto deleter = [](T* t) { t->destroy(); };
     return std::unique_ptr<T, decltype(deleter)>{static_cast<T*>(t), deleter};
 }
@@ -351,7 +351,7 @@ inline T swapEndianness(const T& value)
 inline void* safeCudaMalloc(size_t memSize)
 {
     void* deviceMem;
-    CHECK(cudaMalloc(&deviceMem, memSize));
+    TRT6_CHECK_CUDA(cudaMalloc(&deviceMem, memSize));
     if (deviceMem == nullptr)
     {
         std::cerr << "Out of memory" << std::endl;
@@ -730,21 +730,21 @@ public:
     GpuTimer(cudaStream_t stream)
         : mStream(stream)
     {
-        CHECK(cudaEventCreate(&mStart));
-        CHECK(cudaEventCreate(&mStop));
+        TRT6_CHECK_CUDA(cudaEventCreate(&mStart));
+        TRT6_CHECK_CUDA(cudaEventCreate(&mStop));
     }
     ~GpuTimer()
     {
-        CHECK(cudaEventDestroy(mStart));
-        CHECK(cudaEventDestroy(mStop));
+        TRT6_CHECK_CUDA(cudaEventDestroy(mStart));
+        TRT6_CHECK_CUDA(cudaEventDestroy(mStop));
     }
-    void start() { CHECK(cudaEventRecord(mStart, mStream)); }
+    void start() { TRT6_CHECK_CUDA(cudaEventRecord(mStart, mStream)); }
     void stop()
     {
-        CHECK(cudaEventRecord(mStop, mStream));
+        TRT6_CHECK_CUDA(cudaEventRecord(mStop, mStream));
         float ms{0.0f};
-        CHECK(cudaEventSynchronize(mStop));
-        CHECK(cudaEventElapsedTime(&ms, mStart, mStop));
+        TRT6_CHECK_CUDA(cudaEventSynchronize(mStop));
+        TRT6_CHECK_CUDA(cudaEventElapsedTime(&ms, mStart, mStop));
         mMs += ms;
     }
 
