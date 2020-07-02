@@ -491,6 +491,14 @@ function(AddProtobufDeps TARGET)
     target_include_directories(${TARGET} PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
 endfunction()
 
+function(AddTensorRTDeps TARGET)
+    find_package(TensorRT REQUIRED)
+    #message("> TensorRT_INCLUDE_DIRS = ${TensorRT_INCLUDE_DIRS}")
+    #message("> TensorRT_LIBRARIES = ${TensorRT_LIBRARIES}")
+    target_link_libraries(${TARGET} PRIVATE ${TensorRT_LIBRARIES})
+    target_include_directories(${TARGET} PRIVATE ${TensorRT_INCLUDE_DIRS})
+endfunction()
+
 function (AddLoggingDeps TARGET)
     # This works in docker, but no on Ubuntu 18.04 host...
     # so just make our own find_package for spdlog

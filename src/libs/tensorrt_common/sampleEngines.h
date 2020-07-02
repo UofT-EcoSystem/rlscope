@@ -57,6 +57,7 @@
 #include "NvOnnxParser.h"
 #include "NvUffParser.h"
 
+#include "sampleOptions.h"
 #include "sampleUtils.h"
 
 namespace sample

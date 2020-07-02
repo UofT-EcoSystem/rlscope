@@ -68,11 +68,7 @@
 #include "NvOnnxParser.h"
 #include "NvUffParser.h"
 
-#include "buffers.h"
-#include "common.h"
-#include "logger.h"
-#include "sampleOptions.h"
-#include "sampleEngines.h"
+#include "tensorrt_common.h"
 
 using namespace nvinfer1;
 using namespace sample;
