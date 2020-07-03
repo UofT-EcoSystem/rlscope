@@ -516,6 +516,7 @@ ICudaEngine* networkToEngine(const BuildOptions& build, const SystemOptions& sys
             }
             SMP_RETVAL_IF_FALSE(profileCalib->isValid(), "Calibration profile is invalid", nullptr, err);
             // Q: Not present in TensorRT 6... Is this required...?
+            assert(false);
 //            SMP_RETVAL_IF_FALSE(
 //                config->setCalibrationProfile(profileCalib), "Error in set calibration profile", nullptr, err);
         }

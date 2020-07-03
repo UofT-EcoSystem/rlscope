@@ -187,6 +187,8 @@ public:
 
     void operator() (TrtCudaStream& stream) const
     {
+        // With --streams=2, prints two different stream pointers as expected.
+        // std::cerr << "EnqueueImplicit.enqueue: stream = " << stream.get() << std::endl;
         mContext.enqueue(mBatch, mBuffers, stream.get(), nullptr);
     }
 
@@ -282,29 +284,56 @@ public:
 
     void query()
     {
-        if (mActive[mNext])
-        {
-            return;
-        }
+      if (mActive[mNext])
+      {
+        return;
+      }
 
-        record(EventType::kINPUT_S, StreamType::kINPUT);
-        mBindings.transferInputToDevice(getStream(StreamType::kINPUT));
-        record(EventType::kINPUT_E, StreamType::kINPUT);
+      // If defined, use separate CUDA streams for [(1) copy-to, (2) enqueue, (3) copy-from],
+      // and use cudaEvent's to serialize [(1), (2), (3)].
+      // For some reason, this ends up being FASTER than just launching (1), (2), (3) on the
+      // same CUDA stream and removing synchronization via cudaEvent's...not sure why.
+#define USE_MULTI_STREAM
+#ifdef USE_MULTI_STREAM
+      record(EventType::kINPUT_S, StreamType::kINPUT);
+      mBindings.transferInputToDevice(getStream(StreamType::kINPUT));
+      record(EventType::kINPUT_E, StreamType::kINPUT);
 
-        wait(EventType::kINPUT_E, StreamType::kCOMPUTE); // Wait for input DMA before compute
-        record(EventType::kCOMPUTE_S, StreamType::kCOMPUTE);
-        recordEnqueueTime();
-        mEnqueue(getStream(StreamType::kCOMPUTE));
-        recordEnqueueTime();
-        record(EventType::kCOMPUTE_E, StreamType::kCOMPUTE);
+      // Q: Why are we blocking waiting on the stream...the stream should ensure the operations happen in order.
+      wait(EventType::kINPUT_E, StreamType::kCOMPUTE); // Wait for input DMA before compute
+      record(EventType::kCOMPUTE_S, StreamType::kCOMPUTE);
+      recordEnqueueTime();
+      mEnqueue(getStream(StreamType::kCOMPUTE));
+      recordEnqueueTime();
+      record(EventType::kCOMPUTE_E, StreamType::kCOMPUTE);
 
-        wait(EventType::kCOMPUTE_E, StreamType::kOUTPUT); // Wait for compute before output DMA
-        record(EventType::kOUTPUT_S, StreamType::kOUTPUT);
-        mBindings.transferOutputToHost(getStream(StreamType::kOUTPUT));
-        record(EventType::kOUTPUT_E, StreamType::kOUTPUT);
+      wait(EventType::kCOMPUTE_E, StreamType::kOUTPUT); // Wait for compute before output DMA
+      record(EventType::kOUTPUT_S, StreamType::kOUTPUT);
+      mBindings.transferOutputToHost(getStream(StreamType::kOUTPUT));
+      record(EventType::kOUTPUT_E, StreamType::kOUTPUT);
+#else // USE_MULTI_STREAM
+      // Launch copy-to/kernels/copy-from onto the same stream.
 
-        mActive[mNext] = true;
-        moveNext();
+      record(EventType::kINPUT_S, StreamType::kCOMPUTE);
+      mBindings.transferInputToDevice(getStream(StreamType::kCOMPUTE));
+      record(EventType::kINPUT_E, StreamType::kCOMPUTE);
+
+      // NOTE adding/removing wait(...) calls makes no difference.
+      wait(EventType::kINPUT_E, StreamType::kCOMPUTE); // Wait for input DMA before compute
+      record(EventType::kCOMPUTE_S, StreamType::kCOMPUTE);
+      recordEnqueueTime();
+      mEnqueue(getStream(StreamType::kCOMPUTE));
+      recordEnqueueTime();
+      record(EventType::kCOMPUTE_E, StreamType::kCOMPUTE);
+
+      wait(EventType::kCOMPUTE_E, StreamType::kCOMPUTE); // Wait for compute before output DMA
+      record(EventType::kOUTPUT_S, StreamType::kCOMPUTE);
+      mBindings.transferOutputToHost(getStream(StreamType::kCOMPUTE));
+      record(EventType::kOUTPUT_E, StreamType::kCOMPUTE);
+#endif // USE_MULTI_STREAM
+
+      mActive[mNext] = true;
+      moveNext();
     }
 
     float sync(const TimePoint& cpuStart, const TrtCudaEvent& gpuStart, std::vector<InferenceTrace>& trace)

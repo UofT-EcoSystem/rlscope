@@ -10,6 +10,8 @@ if [ "$DEBUG" = 'yes' ]; then
     set -x
 fi
 
+FORCE=${FORCE:-no}
+
 DRY_RUN=${DRY_RUN:-no}
 
 CLONE=$HOME/clone
@@ -145,6 +147,23 @@ _do() {
   fi
   )
 }
+_do_with_logfile() {
+  (
+  set +x
+  set -u
+  local dry_str=""
+  if [ "${DRY_RUN}" = 'yes' ]; then
+    dry_str=" [dry-run]"
+  fi
+  echo "> CMD${dry_str}:"
+  echo "  PWD=$PWD"
+  echo "  $ $@"
+  if [ "${DRY_RUN}" != 'yes' ]; then
+    "$@" 2>&1 | tee "$logfile"
+  fi
+  )
+}
+
 _do_always() {
   (
   set +x
@@ -278,6 +297,67 @@ nvidia_smi_expr() {
     2>&1 | tee ${iml_dir}/gpu_util_experiment.log.txt
 #  _do rls-analyze --mode gpu_hw --iml_directory ${iml_dir} | \
 #    2>&1 | tee ${iml_dir}/rls_analyze.log.txt
+)
+}
+
+all_trtexec_expr() {
+(
+  set -ue
+  _make_install
+  export CUDA_VISIBLE_DEVICES=0
+
+  for batch_size in 1 8 16 32 64; do
+    for streams in 1 2; do
+      for threads in yes no; do
+        trtexec_expr
+      done
+    done
+  done
+)
+}
+
+trtexec_expr() {
+(
+  set -ue
+
+#  threads='yes'
+#  streams=2
+#  batch_size=32
+
+  threads=${threads:-yes}
+  streams=${streams:-1}
+  batch_size=${batch_size:-32}
+  subdir=${subdir:-}
+  if [ "$subdir" != "" ]; then
+    subdir="${subdir}/"
+  fi
+
+  iml_dir="$ROOT/output/trtexec/${subdir}batch_size_${batch_size}.streams_${streams}$(_bool_attr threads $threads)"
+
+  if [ -d $iml_dir ]; then
+    if [ "$FORCE" != 'yes' ]; then
+      echo "> SKIP: $iml_dir"
+      return
+    else
+      echo "> FORCE: $iml_dir"
+    fi
+  fi
+
+  _make_install
+  export CUDA_VISIBLE_DEVICES=0
+
+  _do mkdir -p ${iml_dir}
+  logfile=${iml_dir}/trtexec.log.txt
+  _do_with_logfile trtexec7 \
+    --uffNHWC \
+    --uffInput=input/Ob,84,84,4 \
+    --uff=$HOME/clone/rl-baselines-zoo/tf_model.uff \
+    --output=output/Softmax \
+    --hw-counters \
+    --profile-dir=${iml_dir} \
+    --batch=${batch_size} \
+    --streams=${streams} \
+    $(_bool_opt threads $threads)
 )
 }
 
