@@ -201,8 +201,21 @@ public:
     void endCapture(TrtCudaStream& stream)
     {
         cudaCheck(cudaStreamEndCapture(stream.get(), &mGraph));
-        cudaCheck(cudaGraphInstantiate(&mGraphExec, mGraph, nullptr, nullptr, 0));
-        cudaCheck(cudaGraphDestroy(mGraph));
+
+//        cudaCheck(cudaGraphInstantiate(&mGraphExec, mGraph, nullptr, nullptr, 0));
+
+      cudaGraphNode_t pErrorNode{};
+      std::string pLogBuffer;
+      pLogBuffer.resize(512);
+      cudaError_t ret = cudaSuccess;
+      ret = cudaGraphInstantiate(&mGraphExec, mGraph, &pErrorNode, pLogBuffer.data(), pLogBuffer.size());
+      if (ret != cudaSuccess) {
+        std::cerr << "cudaGraphInstantiate failed with:" << std::endl
+                  << pLogBuffer << std::endl;
+      }
+
+      cudaCheck(ret);
+      cudaCheck(cudaGraphDestroy(mGraph));
     }
 
 private:

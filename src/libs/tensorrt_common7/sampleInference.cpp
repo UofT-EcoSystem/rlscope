@@ -451,10 +451,14 @@ void inferenceLoop(IterationStreams& iStreams, const TimePoint& cpuStart, const 
     }
 }
 
-void inferenceExecution(const InferenceOptions& inference, InferenceEnvironment& iEnv, SyncStruct& sync, int offset, int streams, int device, std::vector<InferenceTrace>& trace)
+void inferenceExecution(int thread_id, const InferenceOptions& inference, InferenceEnvironment& iEnv, SyncStruct& sync, int offset, int streams, int device, std::vector<InferenceTrace>& trace)
 {
     float warmupMs = static_cast<float>(inference.warmup);
     float durationMs = static_cast<float>(inference.duration) * 1000 + warmupMs;
+
+    sync.mutex.lock();
+    sample::gLogInfo << "Running inference thread " << thread_id << std::endl;
+    sync.mutex.unlock();
 
     cudaCheck(cudaSetDevice(device));
 
@@ -478,9 +482,9 @@ void inferenceExecution(const InferenceOptions& inference, InferenceEnvironment&
 }
 
 inline
-std::thread makeThread(const InferenceOptions& inference, InferenceEnvironment& iEnv, SyncStruct& sync, int thread, int streamsPerThread, int device, std::vector<InferenceTrace>& trace)
+std::thread makeThread(int thread_id, const InferenceOptions& inference, InferenceEnvironment& iEnv, SyncStruct& sync, int thread, int streamsPerThread, int device, std::vector<InferenceTrace>& trace)
 {
-    return std::thread(inferenceExecution, std::cref(inference), std::ref(iEnv), std::ref(sync), thread, streamsPerThread, device, std::ref(trace));
+    return std::thread(inferenceExecution, thread_id, std::cref(inference), std::ref(iEnv), std::ref(sync), thread, streamsPerThread, device, std::ref(trace));
 }
 
 } // namespace
@@ -501,7 +505,7 @@ void runInference(const InferenceOptions& inference, InferenceEnvironment& iEnv,
     std::vector<std::thread> threads;
     for (int t = 0; t < threadsNum; ++t)
     {
-        threads.emplace_back(makeThread(inference, iEnv, sync, t, streamsPerThread, device, trace));
+        threads.emplace_back(makeThread(t, inference, iEnv, sync, t, streamsPerThread, device, trace));
     }
     for (auto& th : threads)
     {

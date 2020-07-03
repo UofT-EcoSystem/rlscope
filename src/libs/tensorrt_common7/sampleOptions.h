@@ -44,6 +44,7 @@ constexpr int defaultDevice{0};
 constexpr int defaultBatch{1};
 constexpr int defaultStreams{1};
 constexpr int defaultIterations{10};
+constexpr int defaultPasses{1};
 constexpr int defaultWarmUp{200};
 constexpr int defaultDuration{3};
 constexpr int defaultSleep{0};
@@ -145,6 +146,7 @@ struct InferenceOptions : public Options
 {
     int batch{defaultBatch}; // Parsing sets batch to 0 is shapes is not empty
     int iterations{defaultIterations};
+    int passes{defaultPasses};
     int warmup{defaultWarmUp};
     int duration{defaultDuration};
     int sleep{defaultSleep};
@@ -169,6 +171,9 @@ struct ReportingOptions : public Options
     float percentile{defaultPercentile};
     bool output{false};
     bool profile{false};
+    bool hw_counters{false};
+    std::vector<std::string> hw_metrics;
+    std::string profile_dir;
     std::string exportTimes;
     std::string exportOutput;
     std::string exportProfile;

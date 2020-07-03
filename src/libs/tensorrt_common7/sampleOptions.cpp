@@ -27,6 +27,8 @@
 #include "sampleUtils.h"
 #include "sampleOptions.h"
 
+#include "range_sampling.h"
+
 namespace sample
 {
 
@@ -568,6 +570,7 @@ void InferenceOptions::parse(Arguments& arguments)
 {
     checkEraseOption(arguments, "--streams", streams);
     checkEraseOption(arguments, "--iterations", iterations);
+    checkEraseOption(arguments, "--passes", passes);
     checkEraseOption(arguments, "--duration", duration);
     checkEraseOption(arguments, "--warmUp", warmup);
     checkEraseOption(arguments, "--sleepTime", sleep);
@@ -615,6 +618,17 @@ void ReportingOptions::parse(Arguments& arguments)
     checkEraseOption(arguments, "--verbose", verbose);
     checkEraseOption(arguments, "--dumpOutput", output);
     checkEraseOption(arguments, "--dumpProfile", profile);
+    checkEraseOption(arguments, "--hw-counters", hw_counters);
+
+    std::string hw_metrics_string;
+    checkEraseOption(arguments, "--hw-metrics", hw_metrics_string);
+    if (hw_metrics_string == "") {
+      hw_metrics_string = rlscope::get_DEFAULT_METRICS_STR();
+      hw_metrics = rlscope::StringSplit(hw_metrics_string, ",");
+    }
+
+    checkEraseOption(arguments, "--profile-dir", profile_dir);
+
     checkEraseOption(arguments, "--exportTimes", exportTimes);
     checkEraseOption(arguments, "--exportOutput", exportOutput);
     checkEraseOption(arguments, "--exportProfile", exportProfile);
@@ -970,6 +984,7 @@ std::ostream& operator<<(std::ostream& os, const InferenceOptions& options)
     }
     printShapes(os, "inference", options.shapes);
     os << "Iterations: "     << options.iterations                   << std::endl <<
+          "Passes: "         << options.passes                       << std::endl <<
           "Duration: "       << options.duration   << "s (+ "
                              << options.warmup     << "ms warm up)"  << std::endl <<
           "Sleep time: "     << options.sleep      << "ms"           << std::endl <<
@@ -1126,6 +1141,7 @@ void InferenceOptions::help(std::ostream& os)
           "                              Input values spec ::= Ival[\",\"spec]"                                                     << std::endl <<
           "                                           Ival ::= name\":\"file"                                                       << std::endl <<
           "  --iterations=N              Run at least N inference iterations (default = "               << defaultIterations << ")" << std::endl <<
+          "  --passes=N              Run the --iterations for N passes (default = "               << defaultPasses << ")" << std::endl <<
           "  --warmUp=N                  Run for N milliseconds to warmup before measuring performance (default = "
                                                                                                             << defaultWarmUp << ")" << std::endl <<
           "  --duration=N                Run performance measurements for at least N seconds wallclock time (default = "
