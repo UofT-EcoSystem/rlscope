@@ -117,7 +117,9 @@ struct BuildOptions : public Options
     bool save{false};
     bool load{false};
     bool builderCache{true};
-//    nvinfer1::ProfilingVerbosity nvtxMode{nvinfer1::ProfilingVerbosity::kDEFAULT};
+#if NV_TENSORRT_MAJOR >= 7 && NV_TENSORRT_MINOR >= 1
+    nvinfer1::ProfilingVerbosity nvtxMode{nvinfer1::ProfilingVerbosity::kDEFAULT};
+#endif
     std::string engine;
     std::string calibration;
     std::unordered_map<std::string, ShapeRange> shapes;
@@ -171,8 +173,10 @@ struct ReportingOptions : public Options
     float percentile{defaultPercentile};
     bool output{false};
     bool profile{false};
+#ifdef RLS_ENABLE_HW_COUNTERS
     bool hw_counters{false};
     std::vector<std::string> hw_metrics;
+#endif
     std::string profile_dir;
     std::string exportTimes;
     std::string exportOutput;

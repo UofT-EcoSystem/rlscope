@@ -325,16 +325,18 @@ trtexec_expr() {
 #  batch_size=32
 
   threads=${threads:-yes}
+  cuda_graph=${cuda_graph:-no}
   streams=${streams:-1}
   batch_size=${batch_size:-32}
   subdir=${subdir:-}
+  hw_counters=${hw_counters:-yes}
   if [ "$subdir" != "" ]; then
     subdir="${subdir}/"
   fi
 
-  iml_dir="$ROOT/output/trtexec/${subdir}batch_size_${batch_size}.streams_${streams}$(_bool_attr threads $threads)"
+  iml_dir="$ROOT/output/trtexec/${subdir}batch_size_${batch_size}.streams_${streams}$(_bool_attr threads $threads)$(_bool_attr cuda_graph $cuda_graph)$(_bool_attr hw_counters $hw_counters)"
 
-  if [ -d $iml_dir ]; then
+  if [ -d $iml_dir ] && [ "$DRY_RUN" = 'no' ]; then
     if [ "$FORCE" != 'yes' ]; then
       echo "> SKIP: $iml_dir"
       return
@@ -353,11 +355,12 @@ trtexec_expr() {
     --uffInput=input/Ob,84,84,4 \
     --uff=$HOME/clone/rl-baselines-zoo/tf_model.uff \
     --output=output/Softmax \
-    --hw-counters \
     --profile-dir=${iml_dir} \
     --batch=${batch_size} \
     --streams=${streams} \
-    $(_bool_opt threads $threads)
+    $(_bool_opt threads $threads) \
+    $(_bool_opt hw-counters $hw_counters) \
+    $(_bool_opt useCudaGraph $cuda_graph)
 )
 }
 

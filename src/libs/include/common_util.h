@@ -15,6 +15,7 @@
 #include "common_util/generic_logging.h"
 #include "common_util/usec_timer.h"
 #include "common_util/env_var.h"
+#include "common_util/concurrency.h"
 
 // nvcc bugs: cannot import json.hpp without errors:
 // https://github.com/nlohmann/json/issues/1347

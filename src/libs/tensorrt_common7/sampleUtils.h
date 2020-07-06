@@ -98,7 +98,9 @@ inline int dataTypeSize(nvinfer1::DataType dataType)
     case nvinfer1::DataType::kINT32:
     case nvinfer1::DataType::kFLOAT: return 4;
     case nvinfer1::DataType::kHALF: return 2;
-//    case nvinfer1::DataType::kBOOL:
+#if NV_TENSORRT_MAJOR >= 7
+    case nvinfer1::DataType::kBOOL:
+#endif
     case nvinfer1::DataType::kINT8: return 1;
     }
     return 0;
@@ -176,11 +178,13 @@ struct Binding
     {
         switch (dataType)
         {
-//        case nvinfer1::DataType::kBOOL:
-//        {
-//            fillBuffer<bool>(buffer.getHostBuffer(), volume, 0, 1);
-//            break;
-//        }
+#if NV_TENSORRT_MAJOR >= 7
+        case nvinfer1::DataType::kBOOL:
+        {
+            fillBuffer<bool>(buffer.getHostBuffer(), volume, 0, 1);
+            break;
+        }
+#endif
         case nvinfer1::DataType::kINT32:
         {
             fillBuffer<int32_t>(buffer.getHostBuffer(), volume, -128, 127);
@@ -212,11 +216,13 @@ struct Binding
     {
         switch (dataType)
         {
-//        case nvinfer1::DataType::kBOOL:
-//        {
-//            dumpBuffer<bool>(buffer.getHostBuffer(), volume, separator, os);
-//            break;
-//        }
+#if NV_TENSORRT_MAJOR >= 7
+        case nvinfer1::DataType::kBOOL:
+        {
+            dumpBuffer<bool>(buffer.getHostBuffer(), volume, separator, os);
+            break;
+        }
+#endif
         case nvinfer1::DataType::kINT32:
         {
             dumpBuffer<int32_t>(buffer.getHostBuffer(), volume, separator, os);

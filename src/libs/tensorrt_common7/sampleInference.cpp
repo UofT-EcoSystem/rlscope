@@ -422,6 +422,7 @@ private:
         if (inference.graph)
         {
             TrtCudaStream& stream = getStream(StreamType::kCOMPUTE);
+            mGraph.prepareCapture(stream);
             mEnqueue(stream);
             stream.synchronize();
             mGraph.beginCapture(stream);
@@ -502,6 +503,8 @@ void inferenceExecution(int thread_id, const InferenceOptions& inference, Infere
         s->wait(sync.gpuStart);
     }
 
+    iEnv.barrier.arrive_and_wait("threads initialized");
+
     std::vector<InferenceTrace> localTrace;
     inferenceLoop(iStreams, sync.cpuStart, sync.gpuStart, inference.iterations, durationMs, warmupMs, localTrace);
 
@@ -532,6 +535,7 @@ void runInference(const InferenceOptions& inference, InferenceEnvironment& iEnv,
     int streamsPerThread  = inference.streams / threadsNum;
 
     std::vector<std::thread> threads;
+    assert(threadsNum == static_cast<int>(iEnv.num_threads));
     for (int t = 0; t < threadsNum; ++t)
     {
         threads.emplace_back(makeThread(t, inference, iEnv, sync, t, streamsPerThread, device, trace));

@@ -616,7 +616,9 @@ inline unsigned int getElementSize(nvinfer1::DataType t)
     case nvinfer1::DataType::kINT32: return 4;
     case nvinfer1::DataType::kFLOAT: return 4;
     case nvinfer1::DataType::kHALF: return 2;
-//    case nvinfer1::DataType::kBOOL:
+#if NV_TENSORRT_MAJOR >= 7
+    case nvinfer1::DataType::kBOOL:
+#endif
     case nvinfer1::DataType::kINT8: return 1;
     }
     throw std::runtime_error("Invalid DataType.");
@@ -635,7 +637,9 @@ inline unsigned int elementSize(DataType t)
     case DataType::kINT32:
     case DataType::kFLOAT: return 4;
     case DataType::kHALF: return 2;
-//    case DataType::kBOOL:
+#if NV_TENSORRT_MAJOR >= 7
+    case DataType::kBOOL:
+#endif // NV_TENSORRT_MAJOR >= 7
     case DataType::kINT8: return 1;
     }
     return 0;

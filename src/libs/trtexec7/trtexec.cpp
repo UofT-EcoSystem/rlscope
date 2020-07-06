@@ -35,8 +35,15 @@
 
 #include "tensorrt_common7.h"
 
+//#ifdef RLS_ENABLE_HW_COUNTERS
+//#error "RLS_ENABLE_HW_COUNTERS = ON"
+//#else
+//#error "RLS_ENABLE_HW_COUNTERS = OFF"
+//#endif
 
+#ifdef RLS_ENABLE_HW_COUNTERS
 #include "range_sampling.h"
+#endif
 #include "common_util.h"
 using rlscope::MyStatus;
 
@@ -117,7 +124,13 @@ int main(int argc, char** argv)
     samplesCommon::loadLibrary(pluginPath);
   }
 
-  InferenceEnvironment iEnv;
+  size_t num_threads;
+  if (options.inference.threads) {
+    num_threads = options.inference.streams;
+  } else {
+    num_threads = 1;
+  }
+  InferenceEnvironment iEnv(num_threads);
   iEnv.engine = getEngine(options.model, options.build, options.system, sample::gLogError);
   if (!iEnv.engine)
   {
@@ -157,6 +170,7 @@ int main(int argc, char** argv)
   }
   boost::filesystem::create_directories(profile_dir);
 
+#ifdef RLS_ENABLE_HW_COUNTERS
   MyStatus status = MyStatus::OK();
   rlscope::GPUHwCounterSampler sampler(options.system.device, profile_dir.string(), "");
   if (!options.reporting.hw_counters) {
@@ -169,17 +183,20 @@ int main(int argc, char** argv)
 
   status = sampler.StartConfig(options.reporting.hw_metrics);
   IF_BAD_STATUS_EXIT("Failed to configure GPU hw counter profiler", status);
+#endif
 
   sample::gLogInfo << "Starting inference threads" << std::endl;
 
   std::vector<InferenceTrace> trace;
   auto run_pass = [&] (int pass_idx, bool is_config_pass) {
 
+#ifdef RLS_ENABLE_HW_COUNTERS
     status = sampler.StartPass();
     IF_BAD_STATUS_EXIT("Failed to start GPU hw pass", status);
 
     status = sampler.Push("inference_iterations");
     IF_BAD_STATUS_EXIT("Failed to push range for GPU hw pass", status);
+#endif
 
     if (is_config_pass) {
       sample::gLogInfo << "Config pass " << pass_idx << std::endl;
@@ -188,30 +205,37 @@ int main(int argc, char** argv)
     }
     runInference(options.inference, iEnv, options.system.device, trace);
 
+#ifdef RLS_ENABLE_HW_COUNTERS
     // "inference_iterations"
     status = sampler.Pop();
     IF_BAD_STATUS_EXIT("Failed to pop range for GPU hw pass", status);
 
     status = sampler.EndPass();
     IF_BAD_STATUS_EXIT("Failed to end GPU hw pass", status);
+#endif
 
   };
 
+#ifdef RLS_ENABLE_HW_COUNTERS
   if (sampler.Enabled()) {
     run_pass(0, true);
   }
 
   status = sampler.StartProfiling();
   IF_BAD_STATUS_EXIT("Failed to start GPU hw counter profiler", status);
+#endif
 
   for (int pass_idx = 0; pass_idx < options.inference.passes; pass_idx++) {
     run_pass(pass_idx, false);
   }
+#ifdef RLS_ENABLE_HW_COUNTERS
   assert(!sampler.HasNextPass());
+#endif
 
   // Print trace information only for the final pass.
   printPerformanceReport(trace, options.reporting, static_cast<float>(options.inference.warmup), options.inference.batch, sample::gLogInfo);
 
+#ifdef RLS_ENABLE_HW_COUNTERS
   status = sampler.RecordSample();
   IF_BAD_STATUS_EXIT("Failed to record GPU hw counter sample", status);
 
@@ -230,6 +254,7 @@ int main(int argc, char** argv)
     IF_BAD_STATUS_EXIT("Failed to print GPU hw sample files in csv format", status);
     std::cout << "Output GPU HW csv file @ " << csv_path << std::endl;
   }
+#endif
 
   if (options.reporting.output)
   {

@@ -120,6 +120,8 @@ void printEpilog(std::vector<InferenceTime> timings, float walltimeMs, float per
     const float latencyMax = timings.back().latency();
     const float latencyMedian = findMedian(timings, getLatency);
     const float latencyPercentile = findPercentile(percentile, timings, getLatency);
+    // # samples = batch_size * (number of minibatch runs across all threads)
+    //           = queries    * timings.size()
     const float latencyThroughput = queries * timings.size() / walltimeMs * 1000;
 
     const auto getEndToEnd = [](const InferenceTime& t) { return t.e2e; };
@@ -160,6 +162,8 @@ void printEpilog(std::vector<InferenceTime> timings, float walltimeMs, float per
           "(end to end "         << endToEndPercentile                   << " ms "
           "at "                  << percentile                           << "%)"   << std::endl <<
           "throughput: "         << latencyThroughput                    << " qps" << std::endl <<
+          "  # samples: "          << (queries * timings.size())                    << std::endl <<
+          "  time: "               << (walltimeMs / 1000)                    << std::endl <<
           "walltime: "           << walltimeMs / 1000                    << " s"   << std::endl <<
           "Enqueue Time"                                                           << std::endl <<
           "min: "                << enqMin                               << " ms"  << std::endl <<
@@ -181,6 +185,9 @@ void printPerformanceReport(const std::vector<InferenceTrace>& trace, const Repo
     const auto isNotWarmup = [&warmupMs](const InferenceTrace& a) { return a.computeStart >= warmupMs; };
     const auto noWarmup = std::find_if(trace.begin(), trace.end(), isNotWarmup);
     const int warmups = noWarmup - trace.begin();
+    // Total benchmark running time =
+    //   (end time of last sample from any thread) -
+    //   (start time of first sample from any thread)
     const float benchTime = trace.back().outEnd - noWarmup->inStart;
     printProlog(warmups * queries, (trace.size() - warmups) * queries, warmupMs, benchTime, os);
 
@@ -212,7 +219,7 @@ void exportJSONTrace(const std::vector<InferenceTrace>& trace, const std::string
            << "\"startOutMs\" : "     << t.outStart     << sep << "\"endOutMs\" : "     << t.outEnd     << sep
            << "\"inMs\" : "           << it.in          << sep << "\"computeMs\" : "    << it.compute   << sep
            << "\"outMs\" : "          << it.out         << sep << "\"latencyMs\" : "    << it.latency() << sep
-           << "\"endToEndMs\" : "     << it.e2e         << " }"                                         << std::endl;
+           << "\"endToEndMs\" : "     << it.e2e         << sep << "\"stream\" : "       << t.stream << " }"                                         << std::endl;
 // clang on
     }
     os << "]" << std::endl;

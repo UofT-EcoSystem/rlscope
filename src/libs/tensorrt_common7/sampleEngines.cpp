@@ -333,7 +333,9 @@ ICudaEngine* networkToEngine(const BuildOptions& build, const SystemOptions& sys
             switch (input->getType())
             {
             case DataType::kINT32:
-//            case DataType::kBOOL:
+#if NV_TENSORRT_MAJOR >= 7
+            case DataType::kBOOL:
+#endif // NV_TENSORRT_MAJOR >= 7
             case DataType::kHALF:
                 // Leave these as is.
                 break;
@@ -451,17 +453,19 @@ ICudaEngine* networkToEngine(const BuildOptions& build, const SystemOptions& sys
 
     config->setMaxWorkspaceSize(static_cast<size_t>(build.workspace) << 20);
 
-//    if (!build.builderCache)
-//    {
-//        config->setFlag(BuilderFlag::kDISABLE_TIMING_CACHE);
-//    }
+#if NV_TENSORRT_MAJOR >= 7 && NV_TENSORRT_MINOR >= 1
+    if (!build.builderCache)
+    {
+        config->setFlag(BuilderFlag::kDISABLE_TIMING_CACHE);
+    }
 
-//    if (!build.tf32)
-//    {
-//        config->clearFlag(BuilderFlag::kTF32);
-//    }
+    if (!build.tf32)
+    {
+        config->clearFlag(BuilderFlag::kTF32);
+    }
 
-//    config->setProfilingVerbosity(build.nvtxMode);
+    config->setProfilingVerbosity(build.nvtxMode);
+#endif // NV_TENSORRT_MAJOR >= 7 && NV_TENSORRT_MINOR >= 1
     config->setMinTimingIterations(build.minTiming);
     config->setAvgTimingIterations(build.avgTiming);
 
@@ -516,9 +520,12 @@ ICudaEngine* networkToEngine(const BuildOptions& build, const SystemOptions& sys
             }
             SMP_RETVAL_IF_FALSE(profileCalib->isValid(), "Calibration profile is invalid", nullptr, err);
             // Q: Not present in TensorRT 6... Is this required...?
+#if NV_TENSORRT_MAJOR >= 7 && NV_TENSORRT_MINOR >= 1
+            SMP_RETVAL_IF_FALSE(
+                config->setCalibrationProfile(profileCalib), "Error in set calibration profile", nullptr, err);
+#else
             assert(false);
-//            SMP_RETVAL_IF_FALSE(
-//                config->setCalibrationProfile(profileCalib), "Error in set calibration profile", nullptr, err);
+#endif // NV_TENSORRT_MAJOR >= 7 && NV_TENSORRT_MINOR >= 1
         }
 
         std::vector<int> elemCount{};

@@ -19,6 +19,9 @@
 
 #include <iostream>
 #include <thread>
+#include <mutex>
+#include <cassert>
+
 #include <cuda.h>
 #include <cuda_runtime.h>
 
@@ -168,6 +171,7 @@ inline void TrtCudaStream::wait(TrtCudaEvent& event)
 //!
 class TrtCudaGraph
 {
+  static std::mutex capture_lock;
 public:
     explicit TrtCudaGraph() = default;
 
@@ -185,10 +189,24 @@ public:
         {
             cudaGraphExecDestroy(mGraphExec);
         }
+        if (mHasCaptureLock) {
+          capture_lock.unlock();
+          mHasCaptureLock = false;
+        }
+    }
+
+    void prepareCapture(TrtCudaStream& stream)
+    {
+      assert(!mHasCaptureLock);
+      capture_lock.lock();
+      mHasCaptureLock = true;
     }
 
     void beginCapture(TrtCudaStream& stream)
     {
+        assert(mHasCaptureLock);
+//        capture_lock.lock();
+//        mHasCaptureLock = true;
         cudaCheck(cudaGraphCreate(&mGraph, 0));
         cudaCheck(cudaStreamBeginCapture(stream.get(), cudaStreamCaptureModeGlobal));
     }
@@ -216,12 +234,16 @@ public:
 
       cudaCheck(ret);
       cudaCheck(cudaGraphDestroy(mGraph));
+      assert(mHasCaptureLock);
+      capture_lock.unlock();
+      mHasCaptureLock = false;
     }
 
 private:
 
     cudaGraph_t mGraph{};
     cudaGraphExec_t mGraphExec{};
+    bool mHasCaptureLock{false};
 };
 
 //!

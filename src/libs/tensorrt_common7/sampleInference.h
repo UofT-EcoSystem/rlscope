@@ -27,15 +27,24 @@
 #include "sampleUtils.h"
 #include "sampleReporting.h"
 
+#include "common_util.h"
+
 namespace sample
 {
 
 struct InferenceEnvironment
 {
-    TrtUniquePtr<nvinfer1::ICudaEngine> engine;
-    std::unique_ptr<Profiler> profiler;
-    std::vector<TrtUniquePtr<nvinfer1::IExecutionContext>> context;
-    std::vector<std::unique_ptr<Bindings>> bindings;
+  size_t num_threads;
+
+  TrtUniquePtr<nvinfer1::ICudaEngine> engine;
+  std::unique_ptr<Profiler> profiler;
+  std::vector<TrtUniquePtr<nvinfer1::IExecutionContext>> context;
+  std::vector<std::unique_ptr<Bindings>> bindings;
+  rlscope::InterProcessBarrier barrier;
+  InferenceEnvironment(size_t num_threads) :
+      num_threads(num_threads),
+      barrier(num_threads) {
+  }
 };
 
 //!

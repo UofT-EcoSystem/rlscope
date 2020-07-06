@@ -25,6 +25,7 @@ Utils to print traces and profiles in CSV format
 from __future__ import print_function
 
 
+COMMA_SEP = ','
 
 def combineDescriptions(prolog, features, descriptions):
     ''' Combine features with their descriptions '''
@@ -33,7 +34,7 @@ def combineDescriptions(prolog, features, descriptions):
     sep = ' '
     for feature, description in zip(features, descriptions):
         fullDescription += sep + feature + ' (' + description + ')'
-        sep = ', '
+        sep = COMMA_SEP
 
     return fullDescription
 
@@ -52,7 +53,7 @@ def printHeader(allFeatures, selection, gp = False, count = False):
     for feature in allFeatures:
        if feature in selection:
            print(sep + feature, end = '')
-           sep = ', '
+           sep = COMMA_SEP
 
     print('')
 
@@ -66,7 +67,7 @@ def printCsv(data, count = False):
         if count:
             print(c, end = '')
             c += 1
-            sep = ', '
+            sep = COMMA_SEP
         else:
             sep = ''
         for r in row:
@@ -74,7 +75,7 @@ def printCsv(data, count = False):
                 print(sep + r, end = '')
             else:
                 print('{}{:.6}'.format(sep, float(r)), end = '')
-            sep = ', '
+            sep = COMMA_SEP
         print('')
 
 

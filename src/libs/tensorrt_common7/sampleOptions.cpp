@@ -521,24 +521,26 @@ void BuildOptions::parse(Arguments& arguments)
     }
     checkEraseNegativeOption(arguments, "--noBuilderCache", builderCache);
 
-//    std::string nvtxModeString;
-//    checkEraseOption(arguments, "--nvtxMode", nvtxModeString);
-//    if (nvtxModeString == "default")
-//    {
-//        nvtxMode = nvinfer1::ProfilingVerbosity::kDEFAULT;
-//    }
-//    else if (nvtxModeString == "none")
-//    {
-//        nvtxMode = nvinfer1::ProfilingVerbosity::kNONE;
-//    }
-//    else if (nvtxModeString == "verbose")
-//    {
-//        nvtxMode = nvinfer1::ProfilingVerbosity::kVERBOSE;
-//    }
-//    else if (!nvtxModeString.empty())
-//    {
-//        throw std::invalid_argument(std::string("Unknown nvtxMode: ") + nvtxModeString);
-//    }
+#if NV_TENSORRT_MAJOR >= 7 && NV_TENSORRT_MINOR >= 1
+    std::string nvtxModeString;
+    checkEraseOption(arguments, "--nvtxMode", nvtxModeString);
+    if (nvtxModeString == "default")
+    {
+        nvtxMode = nvinfer1::ProfilingVerbosity::kDEFAULT;
+    }
+    else if (nvtxModeString == "none")
+    {
+        nvtxMode = nvinfer1::ProfilingVerbosity::kNONE;
+    }
+    else if (nvtxModeString == "verbose")
+    {
+        nvtxMode = nvinfer1::ProfilingVerbosity::kVERBOSE;
+    }
+    else if (!nvtxModeString.empty())
+    {
+        throw std::invalid_argument(std::string("Unknown nvtxMode: ") + nvtxModeString);
+    }
+#endif // NV_TENSORRT_MAJOR >= 7 && NV_TENSORRT_MINOR >= 1
 
     if (checkEraseOption(arguments, "--loadEngine", engine))
     {
@@ -618,14 +620,16 @@ void ReportingOptions::parse(Arguments& arguments)
     checkEraseOption(arguments, "--verbose", verbose);
     checkEraseOption(arguments, "--dumpOutput", output);
     checkEraseOption(arguments, "--dumpProfile", profile);
-    checkEraseOption(arguments, "--hw-counters", hw_counters);
 
+#ifdef RLS_ENABLE_HW_COUNTERS
+    checkEraseOption(arguments, "--hw-counters", hw_counters);
     std::string hw_metrics_string;
     checkEraseOption(arguments, "--hw-metrics", hw_metrics_string);
     if (hw_metrics_string == "") {
       hw_metrics_string = rlscope::get_DEFAULT_METRICS_STR();
-      hw_metrics = rlscope::StringSplit(hw_metrics_string, ",");
     }
+    hw_metrics = rlscope::StringSplit(hw_metrics_string, ",");
+#endif
 
     checkEraseOption(arguments, "--profile-dir", profile_dir);
 
@@ -841,11 +845,13 @@ std::ostream& operator<<(std::ostream& os, const IOFormat& format)
         os << "int32:";
         break;
     }
-//    case nvinfer1::DataType::kBOOL:
-//    {
-//        os << "Bool:";
-//        break;
-//    }
+#if NV_TENSORRT_MAJOR >= 7
+    case nvinfer1::DataType::kBOOL:
+    {
+        os << "Bool:";
+        break;
+    }
+#endif // NV_TENSORRT_MAJOR >= 7
     }
 
     for (int f = 0; f < nvinfer1::EnumMax<nvinfer1::TensorFormat>(); ++f)
@@ -912,19 +918,21 @@ std::ostream& operator<<(std::ostream& os, const ShapeRange& dims)
 std::ostream& operator<<(std::ostream& os, const BuildOptions& options)
 {
 // clang-format off
-    os << "=== Build Options ==="                                                                                       << std::endl <<
-
-          "Max batch: ";        printBatch(os, options.maxBatch)                                                        << std::endl <<
-          "Workspace: "      << options.workspace << " MB"                                                              << std::endl <<
-          "minTiming: "      << options.minTiming                                                                       << std::endl <<
-          "avgTiming: "      << options.avgTiming                                                                       << std::endl <<
-          "Precision: ";        printPrecision(os, options)                                                             << std::endl <<
-          "Calibration: "    << (options.int8 && options.calibration.empty() ? "Dynamic" : options.calibration.c_str()) << std::endl <<
-          "Safe mode: "      << boolToEnabled(options.safe)                                                             << std::endl <<
-          "Save engine: "    << (options.save ? options.engine : "")                                                    << std::endl <<
-          "Load engine: "    << (options.load ? options.engine : "")                                                    << std::endl <<
-          "Builder Cache: "  << boolToEnabled(options.builderCache)                                                     << std::endl;
-//          "NVTX verbosity: " << static_cast<int>(options.nvtxMode)                                                      << std::endl;
+    os << "=== Build Options ==="                                                                                       << std::endl
+       << "Max batch: ";        printBatch(os, options.maxBatch)                                                    << std::endl
+       << "Workspace: "      << options.workspace << " MB"                                                              << std::endl
+       << "minTiming: "      << options.minTiming                                                                       << std::endl
+       << "avgTiming: "      << options.avgTiming                                                                       << std::endl
+       << "Precision: ";        printPrecision(os, options)                                                          << std::endl
+       << "Calibration: "    << (options.int8 && options.calibration.empty() ? "Dynamic" : options.calibration.c_str()) << std::endl
+       << "Safe mode: "      << boolToEnabled(options.safe)                                                             << std::endl
+       << "Save engine: "    << (options.save ? options.engine : "")                                                    << std::endl
+       << "Load engine: "    << (options.load ? options.engine : "")                                                    << std::endl
+       << "Builder Cache: "  << boolToEnabled(options.builderCache)                                                     << std::endl
+#if NV_TENSORRT_MAJOR >= 7 && NV_TENSORRT_MINOR >= 1
+       << "NVTX verbosity: " << static_cast<int>(options.nvtxMode)                                                      << std::endl
+#endif
+      ;
     // clang-format on
 
     auto printIOFormats = [](std::ostream& os, const char* direction, const std::vector<IOFormat> formats) {
@@ -1095,7 +1103,9 @@ void BuildOptions::help(std::ostream& os)
           "                                          fmt   ::= (\"chw\"|\"chw2\"|\"chw4\"|\"hwc8\"|\"chw16\"|\"chw32\")[\"+\"fmt]"    << std::endl <<
           "  --workspace=N               Set workspace size in megabytes (default = "                      << defaultWorkspace << ")" << std::endl <<
           "  --noBuilderCache            Disable timing cache in builder (default is to enable timing cache)"                         << std::endl <<
-//          "  --nvtxMode=[default|verbose|none] Specify NVTX annotation verbosity"                                                     << std::endl <<
+#if NV_TENSORRT_MAJOR >= 7 && NV_TENSORRT_MINOR >= 1
+          "  --nvtxMode=[default|verbose|none] Specify NVTX annotation verbosity"                                                     << std::endl <<
+#endif
           "  --minTiming=M               Set the minimum number of iterations used in kernel selection (default = "
                                                                                                            << defaultMinTiming << ")" << std::endl <<
           "  --avgTiming=M               Set the number of times averaged in each iteration for kernel selection (default = "
