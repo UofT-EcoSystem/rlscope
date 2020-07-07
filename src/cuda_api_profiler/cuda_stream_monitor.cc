@@ -11,7 +11,7 @@
 #include "common_util.h"
 
 #include <cuda.h>
-#include <cupti.h>
+#include <cupti_target.h>
 
 #include <memory>
 #include <thread>

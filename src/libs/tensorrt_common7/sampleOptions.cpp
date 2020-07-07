@@ -22,6 +22,8 @@
 #include <stdexcept>
 #include <iostream>
 
+#include <boost/algorithm/string/join.hpp>
+
 #include "NvInfer.h"
 
 #include "sampleUtils.h"
@@ -613,6 +615,190 @@ void InferenceOptions::parse(Arguments& arguments)
     }
 }
 
+#ifdef RLS_ENABLE_HW_COUNTERS
+std::vector<std::string> get_TRT_DEFAULT_METRICS() {
+  // - Parsed by: ParseMetricNameString
+  //   - <metric_name>[$|&][+]
+  //
+  //   - default if NO symbols:
+  //     keepInstances = false
+  //     isolated = true
+  //
+  //   - keepInstances = "+" present
+  //     isolated = "&" is NOT present
+  //     (NOTE $ is redundant? it make isolated=True, but isolated=True is the default).
+  std::vector<std::string> TRT_DEFAULT_METRICS = {
+      //
+      // SOL SM Breakdown: when an SM is active, what functional units is it using?
+      //
+
+          // SOL SM: issue active [%]
+          // # of cycles where an SMSP issued an instruction
+          "sm__issue_active.avg.pct_of_peak_sustained_elapsed+",
+
+          // SOL SM: inst executed [%]
+          // # of warp instructions executed
+          "sm__inst_executed.avg.pct_of_peak_sustained_elapsed+",
+
+          // SOL SM: Pipe alu cycles active [%]
+          // # of cycles where ALU pipe was active
+          "sm__pipe_alu_cycles_active.avg.pct_of_peak_sustained_elapsed+",
+
+          // SOL SM: Pip fma cycles active[%]
+          // # of cycles where fma pipe was active
+          "sm__pipe_fma_cycles_active.avg.pct_of_peak_sustained_elapsed+",
+
+          // SOL SM: Inst executged pipe lsu [%]
+          // # of warp instructions executed by lsu pipe
+          "sm__inst_executed_pipe_lsu.avg.pct_of_peak_sustained_elapsed+",
+
+          // SOL SM: Mio pq write cycles active [%]
+          // # of cycles where register operands form the register file were written to MIO PQ
+          "sm__mio_pq_write_cycles_active.avg.pct_of_peak_sustained_elapsed+",
+
+          // SOL SM: Mio inst issued [%]
+          // # of instructions issued from MIOC to MIO
+          "sm__mio_inst_issued.avg.pct_of_peak_sustained_elapsed+",
+
+          // SOL SM: Inst executed pip xu [%]
+          // # of warp instructions executed by xu pipe
+          "sm__inst_executed_pipe_xu.avg.pct_of_peak_sustained_elapsed+",
+
+          // SOL SM: Inst executed pip cbu pred on any [%]
+          // # of warp instructions executed by cbu pipe with at least 1 thread predicated on
+          "sm__inst_executed_pipe_cbu_pred_on_any.avg.pct_of_peak_sustained_elapsed+",
+
+          // SOL SM: Mio pq read cycles active [%]
+          // # of cycles where MIOP PQ sent register operands to a pipeline
+          "sm__mio_pq_read_cycles_active.avg.pct_of_peak_sustained_elapsed+",
+
+          // SOL SM: Inst executed pipe adu [%]
+          // # of warp instructions executed by adu pipe
+          "sm__inst_executed_pipe_adu.avg.pct_of_peak_sustained_elapsed+",
+
+          // SOL SM: Mio2rf writeback active [%]
+          // # of cycles where the MIO to register file writeback interface was active
+          "sm__mio2rf_writeback_active.avg.pct_of_peak_sustained_elapsed+",
+
+          // SOL SM: Inst executed pipe uniform [%]
+          // # of warp instructions executed by uniform pipe
+          "sm__inst_executed_pipe_uniform.avg.pct_of_peak_sustained_elapsed+",
+
+          // SOL IDC: Request cycles active [%]
+          // # of cycles where IDC processed request from SM
+          "idc__request_cycles_active.avg.pct_of_peak_sustained_elapsed+",
+
+          // SOL SM: Inst executed pipe tex [%]
+          // # of warp instructions executed by tex pipe
+          "sm__inst_executed_pipe_tex.avg.pct_of_peak_sustained_elapsed+",
+
+          // SOL SM: Inst executed pipe ipa [%]
+          // # of warp instructions exeuted by ipa pipe
+          "sm__inst_executed_pipe_ipa.avg.pct_of_peak_sustained_elapsed+",
+
+          // SOL SM: Inst executed pipe fp16 [%]
+          // # of warp instructions executed by fp16 pipe
+          "sm__inst_executed_pipe_fp16.avg.pct_of_peak_sustained_elapsed+",
+
+          // SOL SM: Pip fp64 cycles active [%]
+          // # of cycles where fp64 pipe was active
+          "sm__pipe_fp64_cycles_active.avg.pct_of_peak_sustained_elapsed+",
+
+          // SOL SM: Pipe shared cycles active [%]
+          // # of cycles where the 'shared pipe' fp16+tensor was active
+          "sm__pipe_shared_cycles_active.avg.pct_of_peak_sustained_elapsed+",
+
+          // # of cycles where tensor pipe was active
+          // SOL SM: Pipe tensor cycles active [%]
+          "sm__pipe_tensor_cycles_active.avg.pct_of_peak_sustained_elapsed+",
+
+      //
+      // Additional compute-bound / memory-bound metrics that Nsight shows in its summary view.
+      //
+
+          // SOL SM [%]
+          // "SM throughput assuming ideal load balancing across SMSPs"
+          "sm__throughput.avg.pct_of_peak_sustained_elapsed+",
+
+          // SOL memory [%]
+          // "Compute memory pipeline throughput"
+          "gpu__compute_memory_throughput.avg.pct_of_peak_sustained_elapsed+",
+
+          // SOL L2 [%]
+          // "LTS throughput"
+          "lts__throughput.avg.pct_of_peak_sustained_elapsed+",
+
+          // SOL FB [%]
+          // "GPU DRAM throughput"
+          "gpu__dram_throughput.avg.pct_of_peak_sustained_elapsed+",
+
+
+      //
+      // NOTE: To figure out useful metrics to collect, grep CUPTI-samples/userrange_profiling/*.txt files
+      // for deprecated CUPTI metrics that ACTUALLY HAVE DOCUMENTATION STRINGS (unlike new "profiling API"...),
+      // then lookup the mapping from old metric names to new "Profiling API" metric name using this table from
+      // the CUPTI documentation:
+      //    https://docs.nvidia.com/cupti/Cupti/r_main.html#metrics_map_table_70
+      //
+
+      // Deprecated CUPTI metric API -- achieved_occupancy:
+      //    Id        = 1205
+      //    Shortdesc = Achieved Occupancy
+      //    Longdesc  = Ratio of the average active warps per active cycle to the maximum number of warps supported on a multiprocessor
+      "sm__warps_active.avg.pct_of_peak_sustained_active+",
+
+      // Deprecated CUPTI metric API -- sm_efficiency:
+      //    Id        = 1203
+      //    Shortdesc = Multiprocessor Activity
+      //    Longdesc  = The percentage of time at least one warp is active on a multiprocessor averaged over all multiprocessors on the GPU
+      // See CUPTI documentation for mapping to new "Profiling API" metric name:
+      //    https://docs.nvidia.com/cupti/Cupti/r_main.html#metrics_map_table_70
+      "smsp__cycles_active.avg.pct_of_peak_sustained_elapsed+",
+
+      // Deprecated CUPTI metric API -- inst_executed:
+      //    Metric# 90
+      //    Id        = 1290
+      //    Name      = inst_executed
+      //    Shortdesc = Instructions Executed
+      //    Longdesc  = The number of instructions executed
+      "smsp__inst_executed.sum+",
+
+      // Deprecated CUPTI metric API -- active_cycles:
+      //    Event# 25
+      //    Id        = 2629
+      //    Name      = active_cycles
+      //    Shortdesc = Active cycles
+      //    Longdesc  = Number of cycles a multiprocessor has at least one active warp.
+      //    Category  = CUPTI_EVENT_CATEGORY_INSTRUCTION
+      "sm__cycles_active.sum+",
+
+      // Deprecated CUPTI metric API -- active_warps:
+      //    Event# 26
+      //    Id        = 2630
+      //    Name      = active_warps
+      //    Shortdesc = Active warps
+      //    Longdesc  = Accumulated number of active warps per cycle. For every cycle it increments by the number of active warps in the cycle which can be in the range 0 to 64.
+      //    Category  = CUPTI_EVENT_CATEGORY_INSTRUCTION
+      "sm__warps_active.sum+",
+
+      // Deprecated CUPTI metric API -- elapsed_cycles_sm:
+      //    Event# 33
+      //    Id        = 2193
+      //    Name      = elapsed_cycles_sm
+      //    Shortdesc = Elapsed clocks
+      //    Longdesc  = Elapsed clocks
+      //    Category  = CUPTI_EVENT_CATEGORY_INSTRUCTION
+      "sm__cycles_elapsed.sum+"
+
+  };
+  return TRT_DEFAULT_METRICS;
+}
+std::string get_TRT_DEFAULT_METRICS_STR() {
+  auto TRT_DEFAULT_METRICS = get_TRT_DEFAULT_METRICS();
+  return boost::algorithm::join(TRT_DEFAULT_METRICS, ",");
+}
+#endif
+
 void ReportingOptions::parse(Arguments& arguments)
 {
     checkEraseOption(arguments, "--percentile", percentile);
@@ -626,7 +812,8 @@ void ReportingOptions::parse(Arguments& arguments)
     std::string hw_metrics_string;
     checkEraseOption(arguments, "--hw-metrics", hw_metrics_string);
     if (hw_metrics_string == "") {
-      hw_metrics_string = rlscope::get_DEFAULT_METRICS_STR();
+//      hw_metrics_string = rlscope::get_DEFAULT_METRICS_STR();
+      hw_metrics_string = get_TRT_DEFAULT_METRICS_STR();
     }
     hw_metrics = rlscope::StringSplit(hw_metrics_string, ",");
 #endif

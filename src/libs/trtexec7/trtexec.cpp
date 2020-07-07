@@ -54,6 +54,11 @@ int main(int argc, char** argv)
 {
   backward::SignalHandling sh;
 
+  // NOTE: If you only define SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_DEBUG, this doesn't enable debug logging.
+  // It just ensures that the SPDLOG_DEBUG statements are **compiled in**!
+  // We still need to turn them on though!
+  spdlog::set_level(static_cast<spdlog::level::level_enum>(SPDLOG_ACTIVE_LEVEL));
+
   const std::string sampleName = "TensorRT.trtexec";
 
   auto sampleTest = sample::gLogger.defineTest(sampleName, argc, argv);
@@ -150,7 +155,10 @@ int main(int argc, char** argv)
     return sample::gLogger.reportFail(sampleTest);
   }
 
-  if (options.reporting.profile || !options.reporting.exportTimes.empty())
+  if (options.reporting.profile ||
+      //  !options.reporting.exportTimes.empty()
+      !options.reporting.exportProfile.empty()
+  )
   {
     iEnv.profiler.reset(new Profiler);
   }
@@ -164,9 +172,14 @@ int main(int argc, char** argv)
   boost::filesystem::path profile_dir;
   if (!options.reporting.profile_dir.empty()) {
     profile_dir = options.reporting.profile_dir;
-  } else {
+  } else if (!options.model.baseModel.model.empty()) {
     boost::filesystem::path model_dir = boost::filesystem::path(options.model.baseModel.model).parent_path();
     profile_dir = model_dir / (options.model.baseModel.model + ".profiling");
+  } else if (!options.build.engine.empty()) {
+    boost::filesystem::path model_dir = boost::filesystem::path(options.build.engine).parent_path();
+    profile_dir = model_dir / (boost::filesystem::path(options.build.engine).filename().string() + ".profiling");
+  } else {
+    profile_dir = ".";
   }
   boost::filesystem::create_directories(profile_dir);
 
@@ -225,11 +238,18 @@ int main(int argc, char** argv)
   IF_BAD_STATUS_EXIT("Failed to start GPU hw counter profiler", status);
 #endif
 
+
+#ifdef RLS_ENABLE_HW_COUNTERS
+  int pass_idx = 0;
+  do {
+    run_pass(pass_idx, false);
+    pass_idx += 1;
+  } while (sampler.HasNextPass());
+  assert(!sampler.HasNextPass());
+#else
   for (int pass_idx = 0; pass_idx < options.inference.passes; pass_idx++) {
     run_pass(pass_idx, false);
   }
-#ifdef RLS_ENABLE_HW_COUNTERS
-  assert(!sampler.HasNextPass());
 #endif
 
   // Print trace information only for the final pass.
@@ -247,12 +267,12 @@ int main(int argc, char** argv)
     bool printed_header = false;
     std::ofstream csv_f(csv_path.string(), std::ios::out | std::ios::trunc);
     if (csv_f.fail()) {
-      std::cerr << "ERROR: Failed to write to GPU HW csv file @ " << csv_path << " : " << strerror(errno) << std::endl;
+      std::cerr << "ERROR: Failed to write to GPU HW csv file @ " << csv_path.string() << " : " << strerror(errno) << std::endl;
       exit(EXIT_FAILURE);
     }
     status = sampler.PrintCSV(csv_f, printed_header);
     IF_BAD_STATUS_EXIT("Failed to print GPU hw sample files in csv format", status);
-    std::cout << "Output GPU HW csv file @ " << csv_path << std::endl;
+    std::cout << "Output GPU HW csv file @ " << csv_path.string() << std::endl;
   }
 #endif
 

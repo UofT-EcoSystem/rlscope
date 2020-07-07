@@ -344,6 +344,7 @@ static MyStatus GetRawMetricRequests(
     const std::vector<std::string>& metricNames,
     std::vector<NVPA_RawMetricRequest>& rawMetricRequests,
     std::vector<std::string>& temp) {
+  MyStatus status = MyStatus::OK();
   std::string reqName;
   bool isolated = true;
   bool keepInstances = true;
@@ -371,7 +372,15 @@ static MyStatus GetRawMetricRequests(
       rlscope::log_func_call_impl(ss, "NVPW_MetricsContext_GetMetricProperties_Begin", reqName);
       RLS_LOG("CUDA_API_TRACE", "{}", ss.str());
     }
-    NVPW_API_CALL_MAYBE_STATUS_SILENT(NVPW_MetricsContext_GetMetricProperties_Begin(&getMetricPropertiesBeginParams));
+//    NVPW_API_CALL_MAYBE_STATUS_SILENT(NVPW_MetricsContext_GetMetricProperties_Begin(&getMetricPropertiesBeginParams));
+    NVPA_Status nvpa_ret = NVPW_MetricsContext_GetMetricProperties_Begin(&getMetricPropertiesBeginParams);
+    if (nvpa_ret != NVPA_STATUS_SUCCESS) {
+      std::stringstream err_ss;
+      auto err_str = rlscope::nvperfGetErrorString(nvpa_ret);
+      err_ss << __FILE__ << ":" << __LINE__ << ": error: function " << "NVPW_MetricsContext_GetMetricProperties_Begin" << " failed for metric=" << reqName << " with error (" << nvpa_ret << ") " << err_str;
+      auto my_status = MyStatus(rlscope::error::INVALID_ARGUMENT, err_ss.str());
+      return my_status;
+    }
 
     for (const char** ppMetricDependencies = getMetricPropertiesBeginParams.ppRawMetricDependencies; *ppMetricDependencies; ++ppMetricDependencies)
     {
@@ -425,6 +434,7 @@ MyStatus CounterData::getNumRangeCollected(size_t* numRanges) const {
 
 MyStatus CounterData::_InitConfigImagePrefix()
 {
+  MyStatus status = MyStatus::OK();
   NVPW_CUDA_MetricsContext_Create_Params metricsContextCreateParams = { NVPW_CUDA_MetricsContext_Create_Params_STRUCT_SIZE };
   metricsContextCreateParams.pChipName = chipName.c_str();
   NVPW_API_CALL_MAYBE_STATUS(NVPW_CUDA_MetricsContext_Create(&metricsContextCreateParams));
@@ -435,7 +445,8 @@ MyStatus CounterData::_InitConfigImagePrefix()
 
   std::vector<NVPA_RawMetricRequest> rawMetricRequests;
   std::vector<std::string> temp;
-  GetRawMetricRequests(metricsContextCreateParams.pMetricsContext, metricNames, rawMetricRequests, temp);
+  status = GetRawMetricRequests(metricsContextCreateParams.pMetricsContext, metricNames, rawMetricRequests, temp);
+  IF_BAD_STATUS_RETURN(status);
 
   NVPW_CounterDataBuilder_Create_Params counterDataBuilderCreateParams = { NVPW_CounterDataBuilder_Create_Params_STRUCT_SIZE };
   counterDataBuilderCreateParams.pChipName = chipName.c_str();
@@ -469,6 +480,8 @@ MyStatus CounterData::_InitConfigImagePrefix()
 
 MyStatus ConfigData::_InitConfigImage()
 {
+  MyStatus status = MyStatus::OK();
+
   NVPW_CUDA_MetricsContext_Create_Params metricsContextCreateParams = { NVPW_CUDA_MetricsContext_Create_Params_STRUCT_SIZE };
   metricsContextCreateParams.pChipName = chipName.c_str();
   NVPW_API_CALL_MAYBE_STATUS(NVPW_CUDA_MetricsContext_Create(&metricsContextCreateParams));
@@ -479,7 +492,8 @@ MyStatus ConfigData::_InitConfigImage()
 
   std::vector<NVPA_RawMetricRequest> rawMetricRequests;
   std::vector<std::string> temp;
-  GetRawMetricRequests(metricsContextCreateParams.pMetricsContext, metricNames, rawMetricRequests, temp);
+  status = GetRawMetricRequests(metricsContextCreateParams.pMetricsContext, metricNames, rawMetricRequests, temp);
+  IF_BAD_STATUS_RETURN(status);
 
   NVPA_RawMetricsConfigOptions metricsConfigOptions = { NVPA_RAW_METRICS_CONFIG_OPTIONS_STRUCT_SIZE };
   metricsConfigOptions.activityKind = NVPA_ACTIVITY_KIND_PROFILER;
@@ -1313,7 +1327,9 @@ MyStatus GPUHwCounterSampler::EndPass() {
   if (_mode == PROFILE) {
     _pass_idx += 1;
     // GOAL: if we try to run too many passes, then just "turn off" GPU HW sampler.
-    assert(_pass_idx <= this->NumPasses());
+    // NOTE: The number of passes we need as we increase the number of hw-counters is BIGGER than NumPasses()
+    // (i.e., it's WRONG).
+//    assert(_pass_idx <= this->NumPasses());
 
     if (!RLS_GPU_HW_SKIP_PROF_API) {
       if (SHOULD_DEBUG(FEATURE_GPU_HW)) {

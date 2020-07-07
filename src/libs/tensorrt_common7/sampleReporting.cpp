@@ -25,6 +25,8 @@
 #include "sampleInference.h"
 #include "sampleReporting.h"
 
+#include "common_util.h"
+
 using namespace nvinfer1;
 
 namespace sample
@@ -227,6 +229,7 @@ void exportJSONTrace(const std::vector<InferenceTrace>& trace, const std::string
 
 void Profiler::reportLayerTime(const char* layerName, float timeMs)
 {
+//    RLS_LOG("GPU_HW", "layer = {}, time = {} ms", layerName, timeMs);
     if (mIterator == mLayers.end())
     {
         const bool first = !mLayers.empty() && mLayers.begin()->name == layerName;

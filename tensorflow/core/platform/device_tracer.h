@@ -21,7 +21,7 @@ limitations under the License.
 #include "tensorflow/core/lib/core/status.h"
 
 #include <cuda.h>
-#include <cupti.h>
+#include <cupti_target.h>
 
 #define CONFIG_TRACE_STATS
 

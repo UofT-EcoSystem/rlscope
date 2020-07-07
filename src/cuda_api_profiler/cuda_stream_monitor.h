@@ -6,7 +6,7 @@
 #define IML_CUDA_STREAM_MONITOR_H
 
 #include <cuda.h>
-#include <cupti.h>
+#include <cupti_target.h>
 
 #include <list>
 #include <vector>

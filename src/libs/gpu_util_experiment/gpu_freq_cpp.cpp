@@ -3,7 +3,7 @@
 //
 
 #include <cuda.h>
-#include <cupti.h>
+#include <cupti_target.h>
 #include <cuda_runtime.h>
 #include <nvToolsExtCudaRt.h>
 

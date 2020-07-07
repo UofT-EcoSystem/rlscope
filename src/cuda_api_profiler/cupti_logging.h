@@ -6,7 +6,7 @@
 #define IML_CUPTI_LOGGING_H
 
 
-#include <cupti.h>
+#include <cupti_target.h>
 #include <cuda.h>
 
 #include <ostream>

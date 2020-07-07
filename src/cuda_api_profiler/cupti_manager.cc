@@ -6,7 +6,7 @@
 #include "cuda_api_profiler/get_env_var.h"
 
 #include <cuda.h>
-#include <cupti.h>
+#include <cupti_target.h>
 
 #include "common_util.h"
 

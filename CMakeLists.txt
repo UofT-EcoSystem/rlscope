@@ -801,34 +801,37 @@ endif()
 #
 
 set(BINARIES)
-if (WITH_CXX_ANALYSIS)
-    AddRLSAnalyzeTarget(rls-analyze)
-    list(APPEND BINARIES rls-analyze)
-    if (TEST_ANALYSIS_SOURCES)
-        AddTestAnalysisTarget(rls-test)
-        list(APPEND BINARIES rls-test)
-    endif()
-endif()
-AddRLScopeTarget(rlscope)
-
+set(LIBRARIES)
+#if (WITH_CXX_ANALYSIS)
+#    AddRLSAnalyzeTarget(rls-analyze)
+#    list(APPEND BINARIES rls-analyze)
+#    if (TEST_ANALYSIS_SOURCES)
+#        AddTestAnalysisTarget(rls-test)
+#        list(APPEND BINARIES rls-test)
+#    endif()
+#endif()
+#AddRLScopeTarget(rlscope)
+#list(APPEND BINARIES rlscope)
 
 #
 # Install targets.
 #
 
-install(TARGETS ${BINARIES}
-        CONFIGURATIONS Debug
-        RUNTIME DESTINATION bin)
-install(TARGETS ${BINARIES}
-        CONFIGURATIONS Release
-        RUNTIME DESTINATION bin)
+if (BINARIES)
+    install(TARGETS ${BINARIES}
+            CONFIGURATIONS Debug
+            RUNTIME DESTINATION bin)
+    install(TARGETS ${BINARIES}
+            CONFIGURATIONS Release
+            RUNTIME DESTINATION bin)
+endif()
 
-set(LIBRARIES
-        rlscope
-        )
-install(TARGETS ${LIBRARIES}
-        CONFIGURATIONS Debug
-        RUNTIME DESTINATION lib)
-install(TARGETS ${LIBRARIES}
-        CONFIGURATIONS Release
-        RUNTIME DESTINATION lib)
+
+if (LIBRARIES)
+    install(TARGETS ${LIBRARIES}
+            CONFIGURATIONS Debug
+            RUNTIME DESTINATION lib)
+    install(TARGETS ${LIBRARIES}
+            CONFIGURATIONS Release
+            RUNTIME DESTINATION lib)
+endif()

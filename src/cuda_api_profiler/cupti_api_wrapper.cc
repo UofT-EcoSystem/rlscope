@@ -10,7 +10,7 @@
 #include "cuda_api_profiler/cupti_logging.h"
 #include "cuda_api_profiler/cupti_api_wrapper.h"
 
-#include <cupti.h>
+#include <cupti_target.h>
 #include <cuda.h>
 
 #include <mutex>

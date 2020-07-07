@@ -29,6 +29,7 @@ GNUPlot.
 '''
 
 import sys
+import os
 import json
 import argparse
 
@@ -102,8 +103,94 @@ descriptions = ['start input', 'end input', 'start compute', 'end compute', 'sta
 #
 #     return averaged
 
-# class ChromeTracerWriter:
-#     def __init__(self):
+def as_usec(x, unit):
+    if unit == 'us':
+        return x
+    elif unit == 'ms':
+        return x * 1000
+    elif unit in {'s', 'sec'}:
+        return x * 1000 * 1000
+    raise NotImplementedError()
+
+
+class ChromeTracerWriter:
+    def __init__(self, display_time_unit='ms'):
+        self.traceEvents = []
+        self.display_time_unit = display_time_unit
+
+    def add_event(self, thread_id, name, start_time, end_time, time_unit, category=None, args=None):
+        assert start_time <= end_time
+
+        def _trace_event(ph, ts):
+            tr_event = {
+                "name": name,
+                "tid": thread_id,
+                "pid": thread_id,
+                "ts": as_usec(ts, time_unit),
+            }
+            if args is not None:
+                tr_event["args"] = args
+            if category is not None:
+                tr_event["cat"] = category
+            tr_event["ph"] = ph
+            return tr_event
+
+        self.traceEvents.append(_trace_event("B", ts=start_time))
+        self.traceEvents.append(_trace_event("E", ts=end_time))
+
+        # {"name": "myFunction", "cat": "foo", "ph": "B", "ts": 123, "pid": 2343, "tid": 2347,
+        #  "args": {
+        #      "first": 1
+        #  }
+        #  },
+        # {"ph": "E", "ts": 145, "pid": 2343, "tid": 2347,
+        #  "args": {
+        #      "first": 4,
+        #      "second": 2
+        #  }
+        #  }
+
+    def from_df(self, df):
+        """
+        thread_id = stream
+        time_unit = 'ms'
+        category = Input
+            start_time = startInMs
+            end_time = endInMs
+        category = Output
+            start_time = startOutMs
+            end_time = endOutMs
+        category = Compute
+            start_time = startComputeMs
+            end_time = endComputeMs
+
+        :param df:
+        :return:
+        """
+        def _add_event(thread_id, category, alias):
+            start_field = f'start{alias}Ms'
+            end_field = f'end{alias}Ms'
+            self.add_event(thread_id, category, row[start_field], row[end_field], time_unit='ms', category=category)
+
+        for index, row in df.iterrows():
+            thread_id = row['stream']
+            _add_event(thread_id, 'Input', 'In')
+            _add_event(thread_id, 'Output', 'Out')
+            _add_event(thread_id, 'Compute', 'Compute')
+
+    def dump_json(self, path):
+        js = dict()
+        js['traceEvents'] = self.traceEvents
+        js['displayTimeUnit'] = self.display_time_unit
+        direc = os.path.dirname(path)
+        if direc != "":
+            os.makedirs(direc, exist_ok=True)
+        with open(path, 'w') as f:
+            json.dump(
+                js, f,
+                sort_keys=True,
+                indent=4,
+                skipkeys=False)
 
 def main():
     setup_logging()
@@ -157,6 +244,14 @@ def main():
             df.sort_values(by=["startInMs"], inplace=True)
         df.to_csv(csv_path, index=False)
         logger.info("Output csv to {path}".format(path=csv_path))
+
+        trace_events_path = re.sub(r'\.json$', '.traceEvents.json', args.name)
+        assert trace_events_path != args.name
+        trace_writer = ChromeTracerWriter()
+        trace_writer.from_df(df)
+        trace_writer.dump_json(trace_events_path)
+        logger.info("Output chrome://tracing to {path}".format(path=trace_events_path))
+
     else:
         logger.info("JSON trace file @ {path} was empty; didn't output anything".format(path=args.name))
         sys.exit(1)

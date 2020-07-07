@@ -7,8 +7,13 @@
 
 #include <stdlib.h>
 
+#include <driver_types.h>
+#include <cupti_target.h>
+
 #include <cuda.h>
-#include <cupti.h>
+//#include <driver_types.h>
+//#include <cupti.h>
+//#include <cupti_host.h>
 
 #include <map>
 #include <vector>

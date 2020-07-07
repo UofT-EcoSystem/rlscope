@@ -36,7 +36,7 @@ limitations under the License.
 #include "cuda_api_profiler/cuda_activity_profiler.h"
 
 #include <cuda.h>
-#include <cupti.h>
+#include <cupti_target.h>
 
 #include <absl/memory/memory.h>
 

@@ -6,7 +6,7 @@
 #define DNN_TENSORFLOW_CPP_CUDA_API_PROFILER_H
 
 #include <cuda.h>
-#include <cupti.h>
+#include <cupti_target.h>
 
 //#include "iml_profiler/protobuf/iml_prof.pb.h"
 #include "iml_prof.pb.h"

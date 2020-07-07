@@ -17,29 +17,33 @@
 ## /usr/bin/python.
 #ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 
+## TensorRT 6.0.1
 #ARG TENSOR_RT_VERSION=6.0.1-1+cuda10.1
 #ARG TENSOR_RT_VERSION_MAJOR=6
 #ARG TENSOR_RT_CUDA_VERSION=10.1
+#ARG TENSOR_RT_VERSION_THIRD_PARTY=6.0.1.5
+#ARG TENSOR_RT_TF_VERSION=1.14.0
 
+# TensorRT 7.1.3
 ARG TENSOR_RT_VERSION=7.1.3-1+cuda10.2
 ARG TENSOR_RT_VERSION_MAJOR=7
 ARG TENSOR_RT_CUDA_VERSION=10.2
-
-#RUN apt-get update && apt-get install -y --no-install-recommends \
-#    libnvinfer6=${TENSOR_RT_VERSION} \
-#    libnvonnxparsers6=${TENSOR_RT_VERSION} \
-#    libnvparsers6=${TENSOR_RT_VERSION} \
-#    libnvinfer-plugin6=${TENSOR_RT_VERSION} \
-
-RUN apt list --installed | grep 'cuda11\.0'
-#RUN exit 1
-
+ARG TENSOR_RT_VERSION_THIRD_PARTY=7.1.3.4
+ARG TENSOR_RT_TF_VERSION=1.15.2
 # NOTE: Need to install libcudnn8 before libnvinfer, otherwise libnvinfer
 # will automatically install libcudnn8=cuda-11.0 (not sure why...)
 ARG CUDNN8_VERSION=8.0.0.180-1+cuda${TENSOR_RT_CUDA_VERSION}
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libcudnn8=${CUDNN8_VERSION} \
     libcudnn8-dev=${CUDNN8_VERSION}
+
+
+# NOTE: For some reason I had cuDNN installed for CUDA 10.2…why?
+ARG CUDNN_VERSION=7.6.5.32-1+cuda${CUDA}
+#ARG CUDNN_VERSION=7.6.5.32-1+cuda${TENSOR_RT_CUDA_VERSION}
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libcudnn7=${CUDNN_VERSION} \
+    libcudnn7-dev=${CUDNN_VERSION}
 
 RUN apt list --installed | grep 'cuda11\.0'
 #RUN exit 1
@@ -65,19 +69,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-libnvinfer=${TENSOR_RT_VERSION}
 RUN sudo apt install cuda-nvrtc-${TENSOR_RT_CUDA_VERSION/./-}
 
-# NOTE: For some reason I had cuDNN installed for CUDA 10.2…why?
-ARG CUDNN_VERSION=7.6.5.32-1+cuda${CUDA}
-#ARG CUDNN_VERSION=7.6.5.32-1+cuda${TENSOR_RT_CUDA_VERSION}
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    libcudnn7=${CUDNN_VERSION} \
-    libcudnn7-dev=${CUDNN_VERSION}
-
 # NOTE: ideally, happens after pip setup.... could just install globally though.
 
 # Very Ubuntu version specific...oh well.
 ARG CP_PYTHON_VERSION=cp36
-#ARG TENSOR_RT_VERSION_THIRD_PARTY=6.0.1.5
-ARG TENSOR_RT_VERSION_THIRD_PARTY=7.1.3.4
 ADD third_party/TensorRT-${TENSOR_RT_VERSION_THIRD_PARTY} /root/third_party/TensorRT-${TENSOR_RT_VERSION_THIRD_PARTY}
 RUN pip install /root/third_party/TensorRT-${TENSOR_RT_VERSION_THIRD_PARTY}/graphsurgeon/*.whl
 RUN pip install /root/third_party/TensorRT-${TENSOR_RT_VERSION_THIRD_PARTY}/python/tensorrt*-${CP_PYTHON_VERSION}-*.whl
@@ -102,7 +97,7 @@ RUN python -m virtualenv -p /usr/bin/python3 $TF_V1_VIRTUAL_ENV --system-site-pa
 #RUN $TF_V1_VIRTUAL_ENV/bin/pip install 'tensorflow-gpu==1.14.0'
 
 # TensorRT 7.1.3
-RUN $TF_V1_VIRTUAL_ENV/bin/pip install 'tensorflow-gpu==1.15.2'
+RUN $TF_V1_VIRTUAL_ENV/bin/pip install "tensorflow-gpu==${TENSOR_RT_TF_VERSION}"
 RUN $TF_V1_VIRTUAL_ENV/bin/pip install /root/third_party/TensorRT-${TENSOR_RT_VERSION_THIRD_PARTY}/graphsurgeon/*.whl
 RUN $TF_V1_VIRTUAL_ENV/bin/pip install /root/third_party/TensorRT-${TENSOR_RT_VERSION_THIRD_PARTY}/python/tensorrt*-${CP_PYTHON_VERSION}-*.whl
 RUN $TF_V1_VIRTUAL_ENV/bin/pip install /root/third_party/TensorRT-${TENSOR_RT_VERSION_THIRD_PARTY}/uff/*.whl
