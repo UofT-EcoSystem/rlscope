@@ -536,13 +536,19 @@ void runInference(const InferenceOptions& inference, InferenceEnvironment& iEnv,
 
     std::vector<std::thread> threads;
     assert(threadsNum == static_cast<int>(iEnv.num_threads));
-    for (int t = 0; t < threadsNum; ++t)
-    {
+
+    if (threadsNum == 1) {
+      int t = 0;
+      inferenceExecution(t, inference, iEnv, sync, t, streamsPerThread, device, trace);
+    } else {
+      for (int t = 0; t < threadsNum; ++t)
+      {
         threads.emplace_back(makeThread(t, inference, iEnv, sync, t, streamsPerThread, device, trace));
-    }
-    for (auto& th : threads)
-    {
+      }
+      for (auto& th : threads)
+      {
         th.join();
+      }
     }
 
     auto cmpTrace = [](const InferenceTrace& a, const InferenceTrace& b) { return a.inStart < b.inStart; };

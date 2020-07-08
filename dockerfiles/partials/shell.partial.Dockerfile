@@ -7,3 +7,6 @@ RUN chmod -R ugo+rwx /root
 
 COPY bashrc /etc/bash.bashrc
 RUN chmod a+rwx /etc/bash.bashrc
+
+RUN rm -rf /root/tar_files/*
+RUN rm -rf /root/pip_whl

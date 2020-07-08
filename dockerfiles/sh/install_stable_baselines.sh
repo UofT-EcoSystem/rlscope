@@ -46,12 +46,19 @@ fi
 # NOTE: we DON'T install stable-baselines from pip;
 #   we want to use our custom stable-baselines repo with IML annotations added ($STABLE_BASELINES_DIR).
 # box2d-py==2.3.5
+
+# HACK: optuna fails to install with pip >= 19.0
+pip install --upgrade pip==19.0
+pip install optuna==0.12.0
+
+# HACK: gym-minigrid fails to install with pip <= 19.0
+pip install --upgrade pip
+pip install gym-minigrid==0.0.4
+
 pip install \
     'pyyaml>=5.1' \
     'Box2D==2.3.2' \
     pybullet==2.5.1 \
-    gym-minigrid==0.0.4 \
-    optuna==0.12.0 \
     pytablewriter==0.36.0 \
     progressbar2 \
     ipdb \

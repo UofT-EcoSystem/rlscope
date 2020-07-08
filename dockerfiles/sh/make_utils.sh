@@ -138,16 +138,16 @@ check_tensorflow_build() {
 }
 
 _check_tensorflow() {
-  (
+#  (
 #  set -u
-#  pip install tensorflow-gpu==$TENSORFLOW_VERSION
-  )
-#    if ! py_module_installed "tensorflow"; then
-#      echo "ERROR: you need to install tensorflow."
-#      echo "  Recommended way to install tensorflow:"
-#      echo "  $ pip install tensorflow-gpu==\$TENSORFLOW_VERSION"
-#      exit 1
-#    fi
+#  pip install --no-cache-dir tensorflow-gpu==$TENSORFLOW_VERSION
+#  )
+  if ! py_module_installed "tensorflow"; then
+    echo "ERROR: you need to install tensorflow."
+    echo "  Recommended way to install tensorflow:"
+    echo "  $ pip install tensorflow-gpu==\$TENSORFLOW_VERSION"
+    exit 1
+  fi
 }
 
 _upgrade_pip() {
@@ -156,7 +156,9 @@ _upgrade_pip() {
 
     # HACK: bug in pip is causing optuna installation to fail:
     # https://github.com/pypa/pip/issues/6264#issuecomment-572896391
-    pip install --upgrade pip==19.0
+    # pip install --upgrade pip==19.0
+
+    pip install --upgrade pip
 }
 
 _check_iml() {

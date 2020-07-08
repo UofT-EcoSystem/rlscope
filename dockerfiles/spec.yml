@@ -154,7 +154,7 @@ slice_sets:
           - ubuntu/nvidia_nccl
           - ubuntu/nvidia_rtx_2070_env
           - ubuntu/add_user
-          - ubuntu/pip_download_tf
+          # - ubuntu/pip_download_tf
           # - ubuntu/openmpi_from_src
           - ubuntu/nodejs
           # - ubuntu/python36_from_src
@@ -162,11 +162,12 @@ slice_sets:
           - ubuntu/pip_dependencies
           - ubuntu/protobuf_from_src
           - ubuntu/cmake_from_src
-          - ubuntu/bazelisk
+          # - ubuntu/bazelisk
           - ubuntu/bash
           - ubuntu/tensorrt
           - iml/env
           - iml/apt_install
+          - ubuntu/pip_install_tf
           - iml/pip_dependencies
           - iml/user_custom
           - shell

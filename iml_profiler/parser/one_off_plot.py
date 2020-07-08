@@ -83,10 +83,17 @@ def parse_filename_attrs(
         attr_vals[m.group('attr_name')] = m.group('attr_value')
     return attr_vals
 
+def yes_as_bool(yes_or_no):
+    if yes_or_no.lower() in {'yes', 'y', 'on', '1'}:
+        return True
+    return False
+
 def parse_path_attrs(
     path : str,
     attrs : Iterable[str],
-    dflt_attrs : Optional[Dict[str, Any]] = None):
+    dflt_attrs : Optional[Dict[str, Any]] = None,
+    attr_types : Optional[Dict[str, Any]] = None,
+    ):
 
     attr_name_regex = r'(?:{regex})'.format(
         regex='|'.join(sorted(attrs, key=lambda attr: (-1*len(attr), attr)))
@@ -111,7 +118,11 @@ def parse_path_attrs(
         for attr_string in attr_strings:
             m = re.search(attr_string_regex, attr_string)
             if m:
-                attr_vals[m.group('attr_name')] = m.group('attr_value')
+                value = m.group('attr_value')
+                attr_name = m.group('attr_name')
+                if attr_types is not None and attr_name in attr_types:
+                    value = attr_types[attr_name](value)
+                attr_vals[attr_name] = value
             # if not m:
             #     raise RuntimeError(f"""
             #     Not sure how to parse attribute name/value from \"{attr_string}\" found in {path}.
@@ -184,8 +195,16 @@ NUM_SMS = 68
 SM_OCCUPANCY_TITLE = "SM occupancy: average percent of warps\nthat are in use within an SM"
 SM_EFFICIENCY_TITLE = "SM efficiency: percent of SMs\nthat are in use across the entire GPU"
 
-SM_EFFICIENCY_Y_LABEL = f"SM efficiency (%)\n# SMs = f{NUM_SMS}"
+SM_EFFICIENCY_Y_LABEL = f"SM efficiency (%)\n# SMs = {NUM_SMS}"
 SM_OCCUPANCY_Y_LABEL = "SM occupancy (%)\nmax threads per block = 1024"
+CUPTI_METRIC_Y_LABEL = {
+    'sm_efficiency': SM_EFFICIENCY_Y_LABEL,
+    'achieved_occupancy': SM_OCCUPANCY_Y_LABEL,
+}
+
+SAMPLE_THROUGHPUT_Y_LABEL = "Throughput (samples/second)"
+BATCH_SIZE_X_LABEL = "Batch size"
+STREAMS_X_LABEL = "# of CUDA streams"
 
 RLSCOPE_X_LABEL = "(RL algorithm, Simulator)"
 
@@ -227,6 +246,523 @@ MULTI_TASK_JSON_ATTRS = {
     "stream_id",
     "warp_id",
 }
+
+FLOAT_RE = r'(?:[-+]?[0-9]*\.?[0-9]+(?:[eE][-+]?[0-9]+)?)'
+UNIT_RE = r'(?:\b(?:ms|s|qps)\b)'
+
+class TrtexecExperiment:
+    def __init__(self, args):
+        self.args = args
+
+    def run(self):
+        self.read_df()
+        self.plot_df()
+
+    def read_df(self):
+        self._read_trtexec_df()
+
+    def plot_df(self):
+        """
+        Plot trtexec7 experiments.
+        :return:
+        """
+
+        """
+        batch_size = 1, 8, 16, 32, 64
+        streams = 1
+        plot:
+          throughput
+          sm_efficiency
+          sm_occupancy
+        """
+        def _plot_batch_size_vs(streams, suffix=None):
+            self._plot_batch_size_vs_throughput(
+                title="Throughput with increasing batch size",
+                streams=streams,
+                suffix=suffix)
+            self._plot_batch_size_vs_metric(
+                title=SM_EFFICIENCY_TITLE,
+                cupti_metric='sm_efficiency',
+                streams=streams,
+                suffix=suffix)
+            self._plot_batch_size_vs_metric(
+                title=SM_OCCUPANCY_TITLE,
+                cupti_metric='achieved_occupancy',
+                streams=streams,
+                suffix=suffix)
+        _plot_batch_size_vs(streams=1)
+
+        def _plot_streams_vs(batch_size, suffix=None):
+            self._plot_streams_vs_throughput(
+                title="Throughput with increasing streams\n(batch size = {batch_size})".format(batch_size=batch_size),
+                batch_size=batch_size,
+                suffix=suffix)
+            self._plot_streams_vs_metric(
+                # title="Throughput with increasing streams\n(batch size = {batch_size})".format(batch_size=batch_size),
+                title=SM_EFFICIENCY_TITLE,
+                cupti_metric='sm_efficiency',
+                batch_size=batch_size,
+                suffix=suffix)
+            self._plot_streams_vs_metric(
+                # title="Throughput with increasing streams\n(batch size = {batch_size})".format(batch_size=batch_size),
+                title=SM_OCCUPANCY_TITLE,
+                cupti_metric='achieved_occupancy',
+                batch_size=batch_size,
+                suffix=suffix)
+        """
+        batch_size = 1
+        streams = 1, 2, 3, ..., 8
+        plot:
+          throughput
+          sm_efficiency
+          sm_occupancy
+        """
+        _plot_streams_vs(batch_size=1)
+        """
+        batch_size = (best batch size for streams == 1)
+        streams = 1, 2, 3, ..., 8
+        plot:
+          throughput
+          sm_efficiency
+          sm_occupancy
+        """
+        best_batch_size = self._compute_best_batch_size()
+        _plot_streams_vs(batch_size=best_batch_size, suffix='best_batch_size')
+
+    def _compute_best_batch_size(self):
+        df = self.trtexec_df[self.trtexec_df['streams'] == 1]
+        max_throughput = df['host_latency_throughput_qps'].max()
+        batch_sizes = df[df['host_latency_throughput_qps'] == max_throughput]['batch_size'].unique()
+        assert len(batch_sizes) == 1
+        best_batch_size = batch_sizes[0]
+        return best_batch_size
+
+    def _plot_streams_vs_metric(self, title, cupti_metric, batch_size, ylabel=None, suffix=None):
+        if self.trtexec_gpu_hw_df is None:
+            return
+        df = copy.copy(self.trtexec_gpu_hw_df)
+        """
+        WANT:
+        x_field: batch_size
+        y_field: metric_value
+        group_field: num_threads
+        """
+
+        df = df[df['batch_size'] == batch_size]
+
+        df = keep_cupti_metric(df, cupti_metric)
+
+        # titled_df = copy.copy(df)
+        # col_titles = {
+        #     'num_threads': 'Number of threads',
+        # }
+        # titled_df.rename(columns=col_titles, inplace=True)
+
+        sns.set(style="whitegrid")
+        # df = df[["thread_blocks", "metric_value", "num_threads"]]
+        g = sns.catplot(x="streams", y="metric_value",
+                        data=df,
+                        # hue="num_threads", data=df,
+                        # hue=col_titles["num_threads"], data=titled_df,
+                        # height=6,
+                        kind="bar",
+                        palette="muted"
+                        )
+        g.despine(left=True)
+        if ylabel is None:
+            ylabel = CUPTI_METRIC_Y_LABEL[cupti_metric]
+        g.set_ylabels(ylabel)
+        g.set_xlabels(STREAMS_X_LABEL)
+        # title = "SM efficiency: percent of SMs\nthat are in use across the entire GPU"
+        g.fig.suptitle(title)
+        g.fig.subplots_adjust(top=0.90)
+
+        if suffix is None:
+            suffix = ""
+        else:
+            suffix = f".{suffix}"
+
+        save_plot(df, _j(self.args['trtexec_dir'], f'streams_vs_{cupti_metric}.batch_size_{batch_size}{suffix}.svg'))
+
+    def _plot_batch_size_vs_metric(self, title, cupti_metric, streams, ylabel=None, suffix=None):
+        if self.trtexec_gpu_hw_df is None:
+            return
+        df = copy.copy(self.trtexec_gpu_hw_df)
+        """
+        WANT:
+        x_field: batch_size
+        y_field: metric_value
+        group_field: num_threads
+        """
+
+        df = df[df['streams'] == streams]
+
+        df = keep_cupti_metric(df, cupti_metric)
+
+        # titled_df = copy.copy(df)
+        # col_titles = {
+        #     'num_threads': 'Number of threads',
+        # }
+        # titled_df.rename(columns=col_titles, inplace=True)
+
+        sns.set(style="whitegrid")
+        # df = df[["thread_blocks", "metric_value", "num_threads"]]
+        g = sns.catplot(x="batch_size", y="metric_value",
+                        data=df,
+                        # hue="num_threads", data=df,
+                        # hue=col_titles["num_threads"], data=titled_df,
+                        # height=6,
+                        kind="bar",
+                        palette="muted"
+                        )
+        g.despine(left=True)
+        if ylabel is None:
+            ylabel = CUPTI_METRIC_Y_LABEL[cupti_metric]
+        g.set_ylabels(ylabel)
+        g.set_xlabels(BATCH_SIZE_X_LABEL)
+        # title = "SM efficiency: percent of SMs\nthat are in use across the entire GPU"
+        g.fig.suptitle(title)
+        g.fig.subplots_adjust(top=0.90)
+
+        if suffix is None:
+            suffix = ""
+        else:
+            suffix = f".{suffix}"
+
+        save_plot(df, _j(self.args['trtexec_dir'], f'batch_size_vs_{cupti_metric}.streams_{streams}{suffix}.svg'))
+
+    def _plot_streams_vs_throughput(self, title, batch_size, suffix=None):
+        if self.trtexec_df is None:
+            return
+        df = copy.copy(self.trtexec_df)
+        """
+        WANT:
+        x_field: batch_size
+        y_field: metric_value
+        group_field: num_threads
+        """
+
+        df = df[df['batch_size'] == batch_size]
+
+        # df = keep_cupti_metric(df, cupti_metric)
+
+        # titled_df = copy.copy(df)
+        # col_titles = {
+        #     'num_threads': 'Number of threads',
+        # }
+        # titled_df.rename(columns=col_titles, inplace=True)
+
+        sns.set(style="whitegrid")
+        g = sns.catplot(x="streams", y="host_latency_throughput_qps",
+                        # data=df,
+                        hue="cuda_graph", data=df,
+                        # hue="num_threads", data=df,
+                        # hue=col_titles["num_threads"], data=titled_df,
+                        # height=6,
+                        kind="bar",
+                        palette="muted"
+                        )
+        g.despine(left=True)
+        g.set_ylabels(SAMPLE_THROUGHPUT_Y_LABEL)
+        g.set_xlabels(STREAMS_X_LABEL)
+        g.fig.suptitle(title)
+        g.fig.subplots_adjust(top=0.90)
+
+        if suffix is None:
+            suffix = ""
+        else:
+            suffix = f".{suffix}"
+
+        save_plot(df, _j(self.args['trtexec_dir'], f'streams_vs_throughput.batch_size_{batch_size}{suffix}.svg'))
+
+    def _plot_batch_size_vs_throughput(self, title, streams, suffix=None):
+        if self.trtexec_df is None:
+            return
+        df = copy.copy(self.trtexec_df)
+        """
+        WANT:
+        x_field: batch_size
+        y_field: metric_value
+        group_field: num_threads
+        """
+
+        df = df[df['streams'] == streams]
+
+        # df = keep_cupti_metric(df, cupti_metric)
+
+        # titled_df = copy.copy(df)
+        # col_titles = {
+        #     'num_threads': 'Number of threads',
+        # }
+        # titled_df.rename(columns=col_titles, inplace=True)
+
+        sns.set(style="whitegrid")
+        # df = df[["thread_blocks", "metric_value", "num_threads"]]
+        g = sns.catplot(x="batch_size", y="host_latency_throughput_qps",
+                        # data=df,
+                        hue="cuda_graph", data=df,
+                        # hue=col_titles["num_threads"], data=titled_df,
+                        # height=6,
+                        kind="bar",
+                        palette="muted"
+                        )
+        g.despine(left=True)
+        g.set_ylabels(SAMPLE_THROUGHPUT_Y_LABEL)
+        g.set_xlabels(BATCH_SIZE_X_LABEL)
+        # title = "SM efficiency: percent of SMs\nthat are in use across the entire GPU"
+        g.fig.suptitle(title)
+        g.fig.subplots_adjust(top=0.90)
+
+        if suffix is None:
+            suffix = ""
+        else:
+            suffix = f".{suffix}"
+
+        save_plot(df, _j(self.args['trtexec_dir'], f'batch_size_vs_throughput.streams_{streams}{suffix}.svg'))
+
+    def parse_trtexec_logs_as_df(self, logs):
+
+        def each_field_value(log):
+            for section in log:
+                for attr, value in log[section].items():
+                    field = f"{section}_{attr}"
+                    yield field, value
+
+        all_fields = set()
+        if len(logs) > 0:
+            all_fields = set([field for field, value in each_field_value(logs[0])])
+
+        data = dict()
+        for log in logs:
+            for field, value in each_field_value(log):
+                if field not in all_fields:
+                    raise RuntimeError(f"Saw unexpected field={field}; expected one of {all_fields}")
+                if field not in data:
+                    data[field] = []
+                data[field].append(value)
+
+        df = pd.DataFrame(data)
+        return df
+
+    def parse_trtexec_log(self, trtexec_log_path):
+        """
+        {
+          'host_latency': {
+            'min_ms': 0.123,
+            'mean_ms': 0.123,
+            ...
+          }
+        }
+        :param trtexec_log_path:
+        :return:
+        """
+        with open(trtexec_log_path) as f:
+            section = None
+
+            data = dict()
+
+            def strip_log_prefix(line):
+                line = re.sub(r'^\[[^\]]+\]\s+\[I\]\s+', '', line)
+                return line
+
+            def as_attr(section):
+                attr = section
+                attr = re.sub(' ', '_', attr)
+                attr = attr.lower()
+                return attr
+
+            def parse_section(line):
+                m = re.search(r'(?P<section>Host Latency|GPU Compute|Enqueue Time)$', line, flags=re.IGNORECASE)
+                if m:
+                    section = as_attr(m.group('section'))
+                    return section
+                return None
+
+            def parse_e2e_metric(line):
+                # NOTE: end-to-end is the time = endOutput - startInput
+                #       non-end-to-end         = (endInput + startInput) + (endCompute + startCompute) + (endOutput + startOutput)
+                # So, "end-to-end" will include some time spent host-side, whereas non-end-to-end just includes time spent GPU side
+                # (the transfers, the kernel running).
+                m = re.search(r'(?P<name>min|max|mean|median): (?P<value>{float}) {unit} \(end to end (?P<e2e_value>{float}) (?P<unit>{unit})\)'.format(
+                    float=FLOAT_RE,
+                    unit=UNIT_RE), line)
+                if m:
+                    # Just ignore this value...
+                    value = float(m.group('value'))
+                    e2e_value = float(m.group('e2e_value'))
+                    name = "{name}_{unit}".format(name=m.group('name'), unit=m.group('unit'))
+                    name = as_attr(name)
+                    return {
+                        'name': name,
+                        'value': e2e_value,
+                    }
+                return None
+
+            def parse_metric_with_unit(line):
+                m = re.search(r'(?P<name>[a-zA-Z][a-zA-Z ]+): (?P<value>{float}) (?P<unit>{unit})'.format(
+                    float=FLOAT_RE,
+                    unit=UNIT_RE), line)
+                if m:
+                    value = float(m.group('value'))
+                    name = "{name}_{unit}".format(name=m.group('name'), unit=m.group('unit'))
+                    name = as_attr(name)
+                    return {
+                        'name': name,
+                        'value': value,
+                    }
+                return None
+
+            def parse_percentile(line):
+                m = re.search(r'(?P<name>percentile): (?P<value>{float}) (?P<unit>{unit}) at (?P<percent>\d+)%'.format(
+                    float=FLOAT_RE,
+                    unit=UNIT_RE), line)
+                if m:
+                    value = float(m.group('value'))
+                    name = "{name}_{percent}_{unit}".format(
+                        name=m.group('name'),
+                        percent=m.group('percent'),
+                        unit=m.group('unit'))
+                    name = as_attr(name)
+                    return {
+                        'name': name,
+                        'value': value,
+                    }
+                return None
+
+            def parse_e2e_percentile(line):
+                m = re.search(r'(?P<name>percentile): [^(]+\(end to end (?P<value>{float}) (?P<unit>{unit}) at (?P<percent>\d+)%\)'.format(
+                    float=FLOAT_RE,
+                    unit=UNIT_RE), line)
+                if m:
+                    value = float(m.group('value'))
+                    name = "{name}_{percent}_{unit}".format(
+                        name=m.group('name'),
+                        percent=m.group('percent'),
+                        unit=m.group('unit'))
+                    name = as_attr(name)
+                    return {
+                        'name': name,
+                        'value': value,
+                    }
+                return None
+
+            def _add_parsed_value(dic):
+                if section not in data:
+                    data[section] = dict()
+                data[section][dic['name']] = dic['value']
+
+            for lineno, line in enumerate(f, start=1):
+                line = line.rstrip()
+
+                ret = parse_section(line)
+                if ret:
+                    section = ret
+                    continue
+
+                if section is None:
+                    continue
+
+                line = strip_log_prefix(line)
+
+                ret = parse_e2e_metric(line)
+                if ret:
+                    _add_parsed_value(ret)
+                    continue
+
+                ret = parse_e2e_percentile(line)
+                if ret:
+                    _add_parsed_value(ret)
+                    continue
+
+                ret = parse_percentile(line)
+                if ret:
+                    _add_parsed_value(ret)
+                    continue
+
+                ret = parse_metric_with_unit(line)
+                if ret:
+                    _add_parsed_value(ret)
+                    continue
+
+                if self.debug:
+                    logging.info("Skip {path}:{lineno}: {line}".format(
+                        path=trtexec_log_path,
+                        lineno=lineno,
+                        line=line,
+                    ))
+
+            return data
+
+    @property
+    def debug(self):
+        return self.args['debug']
+
+    def _read_trtexec_df(self):
+        self.trtexec_df = None
+        self.trtexec_gpu_hw_df = None
+        if self.args['trtexec_dir'] is None:
+            return
+        """
+        /home/jgleeson/clone/iml/output/trtexec7/batch_size_1.streams_1.threads_no.cuda_graph_no.hw_counters_yes
+        """
+        trtexec_dflt_attrs = {
+        }
+        trtexec_attrs = {
+            'batch_size',
+            'streams',
+            'threads',
+            'cuda_graph',
+            'hw_counters',
+        }
+        trtexec_attr_types = {
+            'batch_size': maybe_number,
+            'streams': maybe_number,
+            'threads': yes_as_bool,
+            'cuda_graph': yes_as_bool,
+            'hw_counters': yes_as_bool,
+        }
+
+        dfs = []
+        for path in each_file_recursive(self.args['trtexec_dir']):
+            if not re.search(r'^GPUHwCounterSampler.*\.csv$', _b(path)):
+                continue
+            sm_attrs = parse_path_attrs(
+                path,
+                trtexec_attrs,
+                trtexec_dflt_attrs,
+                trtexec_attr_types)
+            df = pd.read_csv(path, comment='#')
+            for attr_name, attr_value in sm_attrs.items():
+                df[attr_name] = attr_value
+            dfs.append(df)
+        self.trtexec_gpu_hw_df = pd.concat(dfs)
+
+        dfs = []
+        for path in each_file_recursive(self.args['trtexec_dir']):
+            if not re.search(r'^trtexec\.log\.txt$', _b(path)):
+                continue
+            sm_attrs = parse_path_attrs(
+                path,
+                trtexec_attrs,
+                trtexec_dflt_attrs,
+                trtexec_attr_types,
+            )
+            trt_data = self.parse_trtexec_log(path)
+            df = self.parse_trtexec_logs_as_df([trt_data])
+            # logging.info("TRT DATA @ {path}\n{msg}".format(
+            #     path=path,
+            #     msg=textwrap.indent(pprint.pformat(trt_data), prefix='  ')))
+            for attr_name, attr_value in sm_attrs.items():
+                df[attr_name] = attr_value
+            dfs.append(df)
+        self.trtexec_df = pd.concat(dfs)
+
+        logging.info("trtexec_gpu_hw dataframe:\n{msg}".format(
+            msg=txt_indent(DataFrame.dataframe_string(self.trtexec_gpu_hw_df), indent=1),
+        ))
+        logging.info("trtexec dataframe:\n{msg}".format(
+            msg=txt_indent(DataFrame.dataframe_string(self.trtexec_df), indent=1),
+        ))
 
 class GpuUtilExperiment:
     def __init__(self, args):
@@ -509,18 +1045,6 @@ class GpuUtilExperiment:
         self._plot_multitask_sched_info()
         self._plot_multitask_sm_efficiency()
 
-    def keep_cupti_metric(self, df, cupti_metric_name):
-        prof_metric_name = METRIC_NAME_CUPTI_TO_PROF[cupti_metric_name]
-        prof_metric_name_re = re.compile(re.escape(prof_metric_name))
-        def _is_metric(metric_name):
-            # Ignore the weird +/& symbols
-            ret = bool(re.search(prof_metric_name_re, metric_name))
-            return ret
-            # return metric_name == prof_metric_name
-        df = df[df['metric_name'].apply(_is_metric)].copy()
-        df['cupti_metric_name'] = cupti_metric_name
-        return df
-
     def _pretty_algo(self, algo):
         return algo.upper()
 
@@ -531,7 +1055,7 @@ class GpuUtilExperiment:
         if self.rlscope_df is None:
             return
         df = copy.copy(self.rlscope_df)
-        df = self.keep_cupti_metric(df, 'sm_efficiency')
+        df = keep_cupti_metric(df, 'sm_efficiency')
 
         df = self._add_algo_env(df)
 
@@ -572,7 +1096,7 @@ class GpuUtilExperiment:
         if self.rlscope_df is None:
             return
         df = copy.copy(self.rlscope_df)
-        df = self.keep_cupti_metric(df, 'achieved_occupancy')
+        df = keep_cupti_metric(df, 'achieved_occupancy')
 
         df = self._add_algo_env(df)
 
@@ -605,7 +1129,7 @@ class GpuUtilExperiment:
             return
         df = copy.copy(self.occupancy_df)
 
-        df = self.keep_cupti_metric(df, 'achieved_occupancy')
+        df = keep_cupti_metric(df, 'achieved_occupancy')
 
         titled_df = copy.copy(df)
         col_titles = {
@@ -646,7 +1170,7 @@ class GpuUtilExperiment:
         group_field: num_threads
         """
 
-        df = self.keep_cupti_metric(df, 'sm_efficiency')
+        df = keep_cupti_metric(df, 'sm_efficiency')
 
         titled_df = copy.copy(df)
         col_titles = {
@@ -788,7 +1312,7 @@ class GpuUtilExperiment:
     #     # if self.sm_df is None:
     #     #     return
     #     df = copy.copy(df)
-    #     # df = self.keep_cupti_metric(df, 'sm_efficiency')
+    #     # df = keep_cupti_metric(df, 'sm_efficiency')
     #
     #     """
     #     x   = "SM", sm_id, [0..67]
@@ -890,7 +1414,7 @@ def main():
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--test-plot-grouped-bar', action='store_true')
-    parser.add_argument('--plot-type', choices=['gpu_util_experiment'])
+    parser.add_argument('--plot-type', choices=['gpu_util_experiment', 'trtexec'])
     parser.add_argument('--debug', action='store_true')
     args, argv = parser.parse_known_args()
     logging.info(pprint_msg({'argv': argv}))
@@ -914,6 +1438,15 @@ def main():
 
             all_args.update(vars(sub_args))
             plot = GpuUtilExperiment(args=all_args)
+            plot.run()
+        if args.plot_type == 'trtexec':
+            sub_parser = argparse.ArgumentParser()
+            sub_parser.add_argument('--trtexec-dir', required=True)
+            sub_args, sub_argv = sub_parser.parse_known_args(argv)
+            logging.info(pprint_msg({'sub_argv': sub_argv}))
+
+            all_args.update(vars(sub_args))
+            plot = TrtexecExperiment(args=all_args)
             plot.run()
         else:
             parser.error("Need --plot-type")
@@ -954,6 +1487,18 @@ def save_plot(df, plot_path, tee=True):
         bbox_inches='tight',
         pad_inches=0)
     plt.close()
+
+def keep_cupti_metric(df, cupti_metric_name):
+    prof_metric_name = METRIC_NAME_CUPTI_TO_PROF[cupti_metric_name]
+    prof_metric_name_re = re.compile(re.escape(prof_metric_name))
+    def _is_metric(metric_name):
+        # Ignore the weird +/& symbols
+        ret = bool(re.search(prof_metric_name_re, metric_name))
+        return ret
+        # return metric_name == prof_metric_name
+    df = df[df['metric_name'].apply(_is_metric)].copy()
+    df['cupti_metric_name'] = cupti_metric_name
+    return df
 
 
 if __name__ == '__main__':

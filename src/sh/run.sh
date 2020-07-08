@@ -13,6 +13,7 @@ fi
 FORCE=${FORCE:-no}
 
 DRY_RUN=${DRY_RUN:-no}
+SKIP_BUILD=${SKIP_BUILD:-no}
 
 CLONE=$HOME/clone
 MLPERF_DIR=$CLONE/mlperf_training
@@ -159,6 +160,7 @@ _do_with_logfile() {
   echo "  PWD=$PWD"
   echo "  $ $@"
   if [ "${DRY_RUN}" != 'yes' ]; then
+    mkdir -p "$(dirname "$logfile")"
     "$@" 2>&1 | tee "$logfile"
   fi
   )
@@ -261,7 +263,11 @@ _make_install() {
   (
   set -ue
   cd "$(cmake_build_dir "$ROOT")"
-  _do_always make -j$(nproc) install
+  if [ "$SKIP_BUILD" = 'yes' ]; then
+    _do make -j$(nproc) install
+  else
+    _do_always make -j$(nproc) install
+  fi
   )
 }
 
@@ -306,13 +312,112 @@ all_trtexec_expr() {
   _make_install
   export CUDA_VISIBLE_DEVICES=0
 
-  for batch_size in 1 8 16 32 64; do
-    for streams in 1 2; do
-      for threads in yes no; do
-        trtexec_expr
-      done
+  BATCH_SIZES=(1 8 16 32 64)
+  STREAMS=(1 2 3 4 5 6 7 8)
+
+  local uff_model_path=$(_uff_model_path)
+  if [ ! -f $uff_model_path ]; then
+    mk_uff_model
+  fi
+
+  for batch_size in "${BATCH_SIZES[@]}"; do
+    local engine_path=$(_engine_path)
+    if [ ! -f $engine_path ]; then
+      build_trt_from_uff
+    fi
+  done
+
+  threads=no
+  for batch_size in "${BATCH_SIZES[@]}"; do
+    for streams in "${STREAMS[@]}"; do
+      # for threads in yes no; do
+      # done
+      trtexec_expr
     done
   done
+)
+}
+
+_tf_model_output_dir() {
+  echo $(_trtexec_output_dir)/model
+}
+_trtexec_output_dir() {
+  echo $IML_DIR/output/trtexec7
+}
+
+_uff_model_path() {
+  # echo $RL_BASELINES_ZOO_DIR/tf_model.uff
+  echo $IML_DIR/output/trtexec7/model/tf_model.uff
+}
+_engine_path() {
+(
+  set -ue
+  echo $(_tf_model_output_dir)/tf_model.batch_size_${batch_size}.trt
+)
+}
+
+mk_uff_model() {
+(
+  set -ue
+  PYTHONPATH="${PYTHONPATH:-}"
+  export PYTHONPATH="$STABLE_BASELINES_DIR:$IML_DIR:$PYTHONPATH"
+  export CUDA_VISIBLE_DEVICES=0
+  cd $RL_BASELINES_ZOO_DIR
+
+  _do mkdir -p $(_tf_model_output_dir)
+  logfile=$(_tf_model_output_dir)/mk_uff_model.log.txt
+  _do_with_logfile python enjoy_trt.py \
+    --algo a2c \
+    --env BreakoutNoFrameskip-v4 \
+    --folder trained_agents/ \
+    -n 5000 \
+    --iml-directory output/tensorrt \
+    --mode save_tensorrt
+  _do mv tf_model* $(_tf_model_output_dir) || true
+  if [ "$DRY_RUN" != 'yes' ]; then
+    local uff_model_path=$(_uff_model_path)
+    if [ ! -f $uff_model_path ]; then
+      echo "INTERNAL ERROR: didn't find tensorrt uff file @ $uff_path after running save_tensorrt..."
+      exit 1
+    fi
+  fi
+)
+}
+
+build_trt_from_uff() {
+(
+  set -eu
+  batch_size=${batch_size:-32}
+
+  local uff_model_path=$(_uff_model_path)
+  if [ "$DRY_RUN" != 'yes' ]; then
+    if [ ! -f $uff_model_path ]; then
+      echo "ERROR: didn't find tensorrt uff file @ $uff_model_path; build it using mk_uff_model"
+      exit 1
+    fi
+  fi
+
+  _make_install
+  logfile=${uff_model_path}.log.txt
+  _do_with_logfile trtexec7 \
+    --uffNHWC \
+    --uffInput=input/Ob,84,84,4 \
+    --uff=${uff_model_path} \
+    --output=output/Softmax \
+    --batch=${batch_size} \
+    --saveEngine=${engine_path} \
+    --int8 \
+    --buildOnly \
+    --workspace=512
+
+  if [ "$DRY_RUN" != 'yes' ]; then
+    local engine_path=$(_engine_path)
+    if [ ! -f $engine_path ]; then
+      echo "INTERNAL ERROR: didn't find tensorrt engine file @ $engine_path"
+      exit 1
+    fi
+  fi
+
 )
 }
 
@@ -324,7 +429,7 @@ trtexec_expr() {
 #  streams=2
 #  batch_size=32
 
-  threads=${threads:-yes}
+  threads=${threads:-no}
   cuda_graph=${cuda_graph:-no}
   streams=${streams:-1}
   batch_size=${batch_size:-32}
@@ -334,7 +439,15 @@ trtexec_expr() {
     subdir="${subdir}/"
   fi
 
-  iml_dir="$ROOT/output/trtexec/${subdir}batch_size_${batch_size}.streams_${streams}$(_bool_attr threads $threads)$(_bool_attr cuda_graph $cuda_graph)$(_bool_attr hw_counters $hw_counters)"
+  local engine_path=$(_engine_path)
+  if [ "$DRY_RUN" != 'yes' ]; then
+    if [ ! -f $engine_path ]; then
+      echo "ERROR: didn't find tensorrt engine file @ $engine_path; build it using build_trt_from_uff"
+      exit 1
+    fi
+  fi
+
+  iml_dir="$(_trtexec_output_dir)/${subdir}batch_size_${batch_size}.streams_${streams}$(_bool_attr threads $threads)$(_bool_attr cuda_graph $cuda_graph)$(_bool_attr hw_counters $hw_counters)"
 
   if [ -d $iml_dir ] && [ "$DRY_RUN" = 'no' ]; then
     if [ "$FORCE" != 'yes' ]; then
@@ -351,16 +464,16 @@ trtexec_expr() {
   _do mkdir -p ${iml_dir}
   logfile=${iml_dir}/trtexec.log.txt
   _do_with_logfile trtexec7 \
-    --uffNHWC \
-    --uffInput=input/Ob,84,84,4 \
-    --uff=$HOME/clone/rl-baselines-zoo/tf_model.uff \
-    --output=output/Softmax \
+    --loadEngine=${engine_path} \
     --profile-dir=${iml_dir} \
     --batch=${batch_size} \
     --streams=${streams} \
+    --exportTimes=${iml_dir}/times.json \
     $(_bool_opt threads $threads) \
     $(_bool_opt hw-counters $hw_counters) \
     $(_bool_opt useCudaGraph $cuda_graph)
+
+  _do python $IML_DIR/src/libs/trtexec7/tracer.py ${iml_dir}/times.json
 )
 }
 

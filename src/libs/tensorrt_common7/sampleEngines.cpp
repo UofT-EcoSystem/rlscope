@@ -644,7 +644,7 @@ bool saveEngine(const ICudaEngine& engine, const std::string& fileName, std::ost
     std::ofstream engineFile(fileName, std::ios::binary);
     if (!engineFile)
     {
-        err << "Cannot open engine file: " << fileName << std::endl;
+        err << "Cannot open engine file: " << fileName << ": " << strerror(errno) << std::endl;
         return false;
     }
 

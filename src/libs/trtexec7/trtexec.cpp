@@ -30,6 +30,8 @@
 #include <vector>
 #include <memory>
 
+#include "nvToolsExt.h"
+
 #include "NvInfer.h"
 #include "NvInferPlugin.h"
 
@@ -53,6 +55,12 @@ using namespace sample;
 int main(int argc, char** argv)
 {
   backward::SignalHandling sh;
+
+  // NOTE: If we DON'T call this, then the libnvToolsExt.so library WON'T be included...
+//  if (0) {
+  // std::string thread_name = "MainThread";
+  // nvtxNameOsThreadA(pthread_self(), thread_name.c_str());
+//  }
 
   // NOTE: If you only define SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_DEBUG, this doesn't enable debug logging.
   // It just ensures that the SPDLOG_DEBUG statements are **compiled in**!
@@ -182,6 +190,18 @@ int main(int argc, char** argv)
     profile_dir = ".";
   }
   boost::filesystem::create_directories(profile_dir);
+
+//  https://docs.nvidia.com/cupti/Cupti/r_limitations.html#r_limitations
+
+  if (options.reporting.hw_counters && options.inference.graph) {
+    sample::gLogError << "LIMITATION: CUPTI profiling does not work with the CUDA graph API (results in segfaults):"
+                      << std::endl
+                      << "  https://docs.nvidia.com/cupti/Cupti/r_limitations.html#r_limitations"
+                      << std::endl
+                      << "  \"Profiling is not supported for CUDA kernel nodes launched by a CUDA Graph\""
+                      << std::endl;
+    return sample::gLogger.reportFail(sampleTest);
+  }
 
 #ifdef RLS_ENABLE_HW_COUNTERS
   MyStatus status = MyStatus::OK();
