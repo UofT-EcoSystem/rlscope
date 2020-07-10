@@ -197,12 +197,18 @@ SM_EFFICIENCY_TITLE = "SM efficiency: percent of SMs\nthat are in use across the
 
 SM_EFFICIENCY_Y_LABEL = f"SM efficiency (%)\n# SMs = {NUM_SMS}"
 SM_OCCUPANCY_Y_LABEL = "SM occupancy (%)\nmax threads per block = 1024"
+SAMPLE_THROUGHPUT_Y_LABEL = "Throughput (samples/second)"
 CUPTI_METRIC_Y_LABEL = {
     'sm_efficiency': SM_EFFICIENCY_Y_LABEL,
     'achieved_occupancy': SM_OCCUPANCY_Y_LABEL,
 }
+TRT_METRIC_YLABELS = {
+    'host_latency_throughput_qps': SAMPLE_THROUGHPUT_Y_LABEL,
+    'gpu_compute_mean_ms': "Mean GPU compute time (ms)",
+    'gpu_compute_percentile_99_ms': "99%-tile GPU compute time (ms)",
+}
 
-SAMPLE_THROUGHPUT_Y_LABEL = "Throughput (samples/second)"
+
 BATCH_SIZE_X_LABEL = "Batch size"
 STREAMS_X_LABEL = "# of CUDA streams"
 
@@ -293,10 +299,27 @@ class TrtexecExperiment:
         _plot_batch_size_vs(streams=1)
 
         def _plot_streams_vs(batch_size, suffix=None):
-            self._plot_streams_vs_throughput(
-                title="Throughput with increasing streams\n(batch size = {batch_size})".format(batch_size=batch_size),
-                batch_size=batch_size,
-                suffix=suffix)
+            def _title(title):
+                return f"{title}:\n(batch size = {batch_size})"
+            trt_metric_title = {
+                'host_latency_throughput_qps': _title("Throughput with increasing streams"),
+                'gpu_compute_mean_ms': _title("Mean GPU compute time with increasing streams"),
+                'gpu_compute_percentile_99_ms': _title("99-%tile GPU compute time with increasing streams"),
+            }
+            cuda_graph_dict = {
+                'host_latency_throughput_qps': None,
+                'gpu_compute_mean_ms': None,
+                'gpu_compute_percentile_99_ms': None,
+            }
+            for trt_metric in trt_metric_title.keys():
+                self._plot_streams_vs_trt_metric(
+                    trt_metric, batch_size,
+                    title=trt_metric_title[trt_metric],
+                    cuda_graph=cuda_graph_dict.get(trt_metric, None))
+            # self._plot_streams_vs_throughput(
+            #     title="Throughput with increasing streams\n(batch size = {batch_size})".format(batch_size=batch_size),
+            #     batch_size=batch_size,
+            #     suffix=suffix)
             self._plot_streams_vs_metric(
                 # title="Throughput with increasing streams\n(batch size = {batch_size})".format(batch_size=batch_size),
                 title=SM_EFFICIENCY_TITLE,
@@ -430,6 +453,75 @@ class TrtexecExperiment:
             suffix = f".{suffix}"
 
         save_plot(df, _j(self.args['trtexec_dir'], f'batch_size_vs_{cupti_metric}.streams_{streams}{suffix}.svg'))
+
+    def _plot_streams_vs_trt_metric(self, trt_metric, batch_size, title=None, ylabel=None, alias=None, cuda_graph=None, suffix=None):
+        if self.trtexec_df is None:
+            return
+        if alias is None:
+            alias = trt_metric
+        df = copy.copy(self.trtexec_df)
+        """
+        WANT:
+        x_field: batch_size
+        y_field: metric_value
+        group_field: num_threads
+        """
+
+        df = df[df['batch_size'] == batch_size]
+
+        # df = keep_cupti_metric(df, cupti_metric)
+
+        # titled_df = copy.copy(df)
+        # col_titles = {
+        #     'num_threads': 'Number of threads',
+        # }
+        # titled_df.rename(columns=col_titles, inplace=True)
+
+        sns.set(style="whitegrid")
+        plot_kwargs = dict(
+            x="streams",
+            y=trt_metric,
+            hue="cuda_graph",
+            kind="bar",
+            palette="muted",
+        )
+        if cuda_graph is None:
+            plot_kwargs.update(dict(
+                hue="cuda_graph",
+            ))
+        elif cuda_graph:
+            df = df[df['cuda_graph']]
+        else:
+            df = df[~ df['cuda_graph']]
+        plot_kwargs.update(dict(
+            data=df,
+        ))
+        g = sns.catplot(**plot_kwargs)
+        g.despine(left=True)
+        if ylabel is None:
+            ylabel = TRT_METRIC_YLABELS[trt_metric]
+        g.set_ylabels(ylabel)
+        # if xlabel is not None:
+        g.set_xlabels(STREAMS_X_LABEL)
+        if title is not None:
+            g.fig.suptitle(title)
+        g.fig.subplots_adjust(top=0.90)
+
+        ss = StringIO()
+
+        if cuda_graph is None:
+            pass
+        elif cuda_graph:
+            ss.write(f".cuda_graph_yes")
+        else:
+            ss.write(f".cuda_graph_no")
+
+        if suffix is not None:
+            ss.write(f".{suffix}")
+
+        ss = ss.getvalue()
+
+        save_plot(df, _j(self.args['trtexec_dir'], f'streams_vs_{alias}.batch_size_{batch_size}{ss}.svg'))
 
     def _plot_streams_vs_throughput(self, title, batch_size, suffix=None):
         if self.trtexec_df is None:
