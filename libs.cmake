@@ -147,6 +147,7 @@ macro(MakeCudaExecutableFromDir EXEC_NAME_VAR SOURCE_FILES)
 #    if (PROTO_SRCS OR PROTO_HDRS)
 #        AddProtobufDeps(${${LIBNAME_VAR}})
 #    endif()
+    message("> INSTALL: ${${EXEC_NAME_VAR}}")
     install(
             TARGETS ${${EXEC_NAME_VAR}}
             DESTINATION bin

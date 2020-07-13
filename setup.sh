@@ -260,7 +260,11 @@ cmake_build_dir() {
       # Assume we're running in host environment.
       build_prefix="$ROOT/local.host"
     fi
-    echo "$build_prefix/$(basename "$third_party_dir")"
+    local build_dir="$build_prefix/$(basename "$third_party_dir")"
+    if _is_non_empty IML_BUILD_SUFFIX; then
+      local build_dir="${build_dir}${IML_BUILD_SUFFIX}"
+    fi
+    echo "$build_dir"
 }
 _is_non_empty() {
   # Check if an environment variable is defined and not equal to empty string
@@ -394,6 +398,7 @@ setup_eigen_cpp_library() {
 
 CMAKE_OPTS=()
 CMAKE_VERBOSE=
+CMAKE_NO_CLEAR_OPTS=no
 cmake_build() {
     local src_dir="$1"
     shift 1
@@ -409,8 +414,10 @@ cmake_build() {
 #    _dov make install -j${JOBS}
     _dov make install
     )
-    CMAKE_OPTS=()
-    CMAKE_VERBOSE=
+    if [ "$CMAKE_NO_CLEAR_OPTS" != 'yes' ]; then
+      CMAKE_OPTS=()
+      CMAKE_VERBOSE=
+    fi
     DO_VERBOSE="$old_DO_VERBOSE"
 }
 cmake_prepare() {
@@ -648,34 +655,56 @@ main() {
     _do setup_boost_cpp_library
     _do setup_spdlog_cpp_library
     _do setup_ctpl_cpp_library
-    _do setup_iml
+    # NOTE: IDEALLY we would install it do a SEPARATE directory... but I'm not 100% sure how to make that work nicely
+    # and still have all the "installed" stuff in the same directory.
+    _do setup_project_cuda_10_1
     echo "> Success!"
 }
 
-setup_iml() {
-  _set_cmake_opts() {
-    CMAKE_OPTS=(-DCMAKE_BUILD_TYPE=Debug)
-    CMAKE_VERBOSE=yes
-  }
-
-  _set_cmake_opts
+_setup_project() {
+  # cmake will use whatever nvcc is on PATH, even if its outside of CUDA_TOOLKIT_ROOT_DIR
+  export PATH=$CUDA_TOOLKIT_ROOT_DIR/bin:$PATH
   cmake_prepare "$ROOT"
 
   # The first time we build RLScope, for some reason, if we just do the normal "cmake .. && make && make install",
   # the "make install" triggers ANOTHER full build.  I have no idea WHY this happens.
   # It also only happens on the "intial" cmake build (i.e. subsequent builds only happen once).
   # Anyways, hacky workaround is to just call "make" twice the first time we build RLScope.
-  _set_cmake_opts
   cmake_make "$ROOT"
-  _set_cmake_opts
   cmake_make "$ROOT"
 
-  _set_cmake_opts
   cmake_install "$ROOT"
 
   echo "To re-build RLScope library when you change source files, do:"
   echo "  $ cd $(cmake_build_dir "$ROOT")"
   echo "  $ make -j\$(nproc) install"
+}
+
+setup_project_cuda_10_2() {
+  (
+  cuda_version=10.2
+  _setup_project_with_cuda
+  )
+}
+
+setup_project_cuda_10_1() {
+  (
+  cuda_version=10.1
+  _setup_project_with_cuda
+  )
+}
+
+_setup_project_with_cuda() {
+  (
+  set -u
+  # e.g. IML_BUILD_SUFFIX=".cuda_10_2"
+  IML_BUILD_SUFFIX=$(echo ".cuda_${cuda_version}" | sed 's/[\.]/_/g')
+  CUDA_TOOLKIT_ROOT_DIR=/usr/local/cuda-${cuda_version}
+  CMAKE_OPTS=(-DCMAKE_BUILD_TYPE=Debug -DCUDA_TOOLKIT_ROOT_DIR=${CUDA_TOOLKIT_ROOT_DIR})
+  CMAKE_VERBOSE=yes
+  CMAKE_NO_CLEAR_OPTS=yes
+  _setup_project
+  )
 }
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then

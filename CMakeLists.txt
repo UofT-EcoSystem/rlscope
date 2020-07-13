@@ -818,6 +818,7 @@ set(LIBRARIES)
 #
 
 if (BINARIES)
+    message("> INSTALL BINARIES: ${BINARIES}")
     install(TARGETS ${BINARIES}
             CONFIGURATIONS Debug
             RUNTIME DESTINATION bin)
@@ -828,6 +829,7 @@ endif()
 
 
 if (LIBRARIES)
+    message("> INSTALL LIBRARIES: ${LIBRARIES}")
     install(TARGETS ${LIBRARIES}
             CONFIGURATIONS Debug
             RUNTIME DESTINATION lib)

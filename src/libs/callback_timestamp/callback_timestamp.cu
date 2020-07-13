@@ -1,3 +1,7 @@
+// nvcc bugs: cannot import json.hpp without errors:
+// https://github.com/nlohmann/json/issues/1347
+#define RLS_IGNORE_JSON
+
 /*
  * Copyright 2010-2017 NVIDIA Corporation. All rights reserved
  *
@@ -9,6 +13,12 @@
 #include <stdio.h>
 #include <cuda.h>
 #include <cupti.h>
+
+#include "range_sampling.h"
+#include "common_util.h"
+
+using rlscope::MyStatus;
+//using rlscope::error;
 
 #define CHECK_CU_ERROR(err, cufunc)                                     \
   if (err != CUDA_SUCCESS)                                              \
@@ -186,9 +196,19 @@ cleanUp(int *h_A, int *h_B, int *h_C, int *d_A, int *d_B, int *d_C)
     free(h_C);
 }
 
-int
-main()
+int main(int argc, char* argv[])
 {
+  backward::SignalHandling sh;
+  // gflags::ParseCommandLineFlags(&argc, &argv, true);
+
+  // NOTE: If you only define SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_DEBUG, this doesn't enable debug logging.
+  // It just ensures that the SPDLOG_DEBUG statements are **compiled in**!
+  // We still need to turn them on though!
+  spdlog::set_level(static_cast<spdlog::level::level_enum>(SPDLOG_ACTIVE_LEVEL));
+
+//  RLS_LOG("CB", "HELLO WORLD", "");
+//  std::cout << "HELLO WORLD" << std::endl;
+
   CUcontext context = 0;
   CUdevice device = 0;
   CUresult cuerr;
@@ -197,7 +217,7 @@ main()
   size_t size = N * sizeof(int);
   int threadsPerBlock = 0;
   int blocksPerGrid = 0;
-  int sum, i;
+  int sum;
   int *h_A, *h_B, *h_C;
   int *d_A, *d_B, *d_C;
 
@@ -231,31 +251,94 @@ main()
   cudaMalloc((void**)&d_B, size);
   cudaMalloc((void**)&d_C, size);
 
-  // Copy vectors from host memory to device memory
-  cudaMemcpy(d_A, h_A, size, cudaMemcpyHostToDevice);
-  cudaMemcpy(d_B, h_B, size, cudaMemcpyHostToDevice);
+  auto run_pass = [&] (rlscope::GPUHwCounterSampler& sampler) {
+    MyStatus ret;
 
-  // Invoke kernel
-  threadsPerBlock = 256;
-  blocksPerGrid = (N + threadsPerBlock - 1) / threadsPerBlock;
+    ret = sampler.StartPass();
+    IF_BAD_STATUS_RETURN(ret);
+    // IF_BAD_STATUS_EXIT("Failed to start configuration pass for GPU hw counter profiler", ret);
 
-  VecAdd<<<blocksPerGrid, threadsPerBlock>>>(d_A, d_B, d_C, N);
-  cudaDeviceSynchronize();
-    
-  // Copy result from device memory to host memory
-  // h_C contains the result in host memory
-  cudaMemcpy(h_C, d_C, size, cudaMemcpyDeviceToHost);
-    
-  // Verify result
-  for (i = 0; i < N; ++i) {
-    sum = h_A[i] + h_B[i];
-    if (h_C[i] != sum) {
-      printf("kernel execution FAILED\n");
-      goto Error;
+    ret = sampler.Push("VecAdd");
+    IF_BAD_STATUS_RETURN(ret);
+
+    // Copy vectors from host memory to device memory
+    cudaMemcpy(d_A, h_A, size, cudaMemcpyHostToDevice);
+    cudaMemcpy(d_B, h_B, size, cudaMemcpyHostToDevice);
+
+    // Invoke kernel
+    threadsPerBlock = 256;
+    blocksPerGrid = (N + threadsPerBlock - 1) / threadsPerBlock;
+
+    VecAdd<<<blocksPerGrid, threadsPerBlock>>>(d_A, d_B, d_C, N);
+    cudaDeviceSynchronize();
+
+    // Copy result from device memory to host memory
+    // h_C contains the result in host memory
+    cudaMemcpy(h_C, d_C, size, cudaMemcpyDeviceToHost);
+
+    // Verify result
+    for (int i = 0; i < N; ++i) {
+      sum = h_A[i] + h_B[i];
+      if (h_C[i] != sum) {
+        std::stringstream ss;
+        ss << "kernel execution FAILED";
+        MyStatus status(rlscope::error::INVALID_ARGUMENT, ss.str());
+        return status;
+      }
+    }
+
+    displayTimestamps(trace);
+
+    ret = sampler.Pop();
+    IF_BAD_STATUS_RETURN(ret);
+
+    ret = sampler.EndPass();
+    IF_BAD_STATUS_RETURN(ret);
+    // IF_BAD_STATUS_EXIT("Failed to end configuration pass for GPU hw counter profiler", ret);
+
+    return MyStatus::OK();
+  };
+
+  MyStatus ret = MyStatus::OK();
+  rlscope::GPUHwCounterSampler sampler(device, ".", "");
+
+  ret = sampler.Init();
+  IF_BAD_STATUS_EXIT("Failed to initialize GPU hw counter profiler", ret);
+
+  // Get the names of the metrics to collect
+  std::vector<std::string> metricNames;
+  metricNames = rlscope::StringSplit(rlscope::get_DEFAULT_METRICS_STR(), ",");
+  ret = sampler.StartConfig(metricNames);
+  IF_BAD_STATUS_EXIT("Failed to configure GPU hw counter profiler", ret);
+
+  int64_t config_passes = 1;
+  for (int64_t i = 0; i < config_passes; i++) {
+    ret = run_pass(sampler);
+    if (ret.code() != rlscope::error::OK) {
+      std::stringstream ss;
+      ss << "Failed to run configuration pass " << i << " with GPU hw counter profiler enabled";
+      IF_BAD_STATUS_EXIT(ss.str(), ret);
     }
   }
- 
-  displayTimestamps(trace);
+
+  ret = sampler.StartProfiling();
+  IF_BAD_STATUS_EXIT("Failed to start GPU hw counter profiler", ret);
+
+//  for (int64_t i = 0; i < FLAGS_samples; i++) {
+  while (sampler.HasNextPass()) {
+    DBG_LOG("Pass {}", sampler._pass_idx + 1);
+
+    ret = run_pass(sampler);
+    IF_BAD_STATUS_EXIT("Failed to run pass with GPU hw counter profiler enabled", ret);
+  }
+  if (sampler.CanRecord()) {
+    ret = sampler.RecordSample();
+    IF_BAD_STATUS_EXIT("Failed to record GPU hw counter sample", ret);
+  }
+//  }
+
+  ret = sampler.StopProfiling();
+  IF_BAD_STATUS_EXIT("Failed to stop GPU hw counter profiler", ret);
 
   cuptierr = cuptiUnsubscribe(subscriber);
   CHECK_CUPTI_ERROR(cuptierr, "cuptiUnsubscribe");
@@ -263,10 +346,5 @@ main()
   cleanUp(h_A, h_B, h_C, d_A, d_B, d_C);
   cudaDeviceSynchronize();
   return 0;
-
- Error:
-  cleanUp(h_A, h_B, h_C, d_A, d_B, d_C);
-  cudaDeviceSynchronize();
-  return -1;
 }
 
