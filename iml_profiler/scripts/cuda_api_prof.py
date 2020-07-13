@@ -34,7 +34,8 @@ def main():
     #
     #     Effect: sets "export IML_DISABLE=1" for librlscope.so.
     # """))
-    parser.add_argument('--cuda-api-calls', action='store_true',
+
+    add_bool_arg(parser, '--cuda-api-calls',
                         help=textwrap.dedent("""
                         Trace CUDA API runtime/driver calls.
                         
@@ -42,12 +43,20 @@ def main():
                         
                         Effect: sets "export IML_CUDA_API_CALLS=1" for librlscope.so.
                         """))
-    parser.add_argument('--cuda-activities', action='store_true',
+    add_bool_arg(parser, '--cuda-activities',
                         help=textwrap.dedent("""
                         Trace CUDA activities (i.e. GPU kernel runtimes, memcpy's).
                         
                         Effect: sets "export IML_CUDA_ACTIVITIES=yes" for librlscope.so.
                         """))
+    add_bool_arg(parser, '--cuda-api-events',
+                        help=textwrap.dedent("""
+                        Trace all the start/end timestamps of CUDA API calls.
+                        Needed during instrumented runs so we know when to subtract profiling overheads.
+                        
+                        Effect: sets "export IML_CUDA_API_EVENTS=yes" for librlscope.so.
+                        """))
+
     parser.add_argument('--fuzz-cuda-api', action='store_true',
                         help=textwrap.dedent("""
                         Use libcupti to trace ALL CUDA runtime API calls (# of calls, and total time spent in them).
@@ -57,13 +66,7 @@ def main():
                         
                         Effect: sets "export IML_FUZZ_CUDA_API=yes" for librlscope.so.
                         """))
-    parser.add_argument('--cuda-api-events', action='store_true',
-                        help=textwrap.dedent("""
-                        Trace all the start/end timestamps of CUDA API calls.
-                        Needed during instrumented runs so we know when to subtract profiling overheads.
-                        
-                        Effect: sets "export IML_CUDA_API_EVENTS=yes" for librlscope.so.
-                        """))
+
     parser.add_argument('--pc-sampling', action='store_true',
                         help=textwrap.dedent("""
                         Perform sample-profiling using CUDA's "PC Sampling" API.
@@ -265,6 +268,20 @@ def is_env_true(var, env=None):
     if env is None:
         env = os.environ
     return env.get(var, 'no').lower() not in {'no', 'false', '0', 'None', 'null'}
+
+def add_bool_arg(parser, opt, dest=None, default=None, **add_argument_kwargs):
+    if dest is None:
+        dest = opt
+        dest = re.sub(r'^--', '', dest)
+        dest = re.sub(r'-', '_', dest)
+    opt = re.sub(r'^--', '', opt)
+    # print(f"ADD: --{opt}, dest={dest}")
+    parser.add_argument(f"--{opt}", dest=dest, action='store_true', **add_argument_kwargs)
+    parser.add_argument(f"--no-{opt}", dest=dest, action='store_false', **add_argument_kwargs)
+    if default is not None:
+        parser.set_defaults(**{
+            dest: default,
+        })
 
 if __name__ == '__main__':
     main()

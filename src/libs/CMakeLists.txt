@@ -13,3 +13,5 @@ add_subdirectory(dqn_atari_test)
 
 add_subdirectory(tensorrt_common7)
 add_subdirectory(trtexec7)
+
+add_subdirectory(callback_timestamp)

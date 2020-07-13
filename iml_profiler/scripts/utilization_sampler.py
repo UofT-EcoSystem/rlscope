@@ -213,6 +213,8 @@ class UtilizationSampler:
         SigTermWatcher = _SigTermWatcher()
         if self.async_process is not None:
             proc_watcher = ProcessWatcher(self.async_process)
+        else:
+            proc_watcher = None
 
         if self.debug:
             logging.info("> {klass}: Start collecting CPU/GPU utilization samples".format(
