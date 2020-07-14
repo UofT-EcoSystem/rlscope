@@ -4,7 +4,7 @@
 # environment interface.
 __all__ = ['PythonInterface']
 
-import logging
+from iml_profiler.profiler.iml_logging import logger
 from ctypes import *
 import numpy as np
 from numpy.ctypeslib import as_ctypes
@@ -54,7 +54,7 @@ class CLibWrapper:
         # # wrapper_02
         # def call(*args, **kwargs):
         #   return self.c_func(*args, **kwargs)
-        # logging.info("> call.name = {name}".format(name=c_func.__name__))
+        # logger.info("> call.name = {name}".format(name=c_func.__name__))
         # call.__name__ = c_func.__name__
         # super().__setattr__('call', call)
 
@@ -71,7 +71,7 @@ class CLibWrapper:
         #
 
         name = self.wrapper_name(c_func.__name__)
-        logging.info("> call.name = {name}".format(name=name))
+        logger.info("> call.name = {name}".format(name=name))
         # c = call.func_code
         # Python3
         c = call.__code__

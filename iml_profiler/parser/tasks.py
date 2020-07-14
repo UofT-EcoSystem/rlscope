@@ -6,7 +6,7 @@ https://luigi.readthedocs.io/en/stable/index.html
 """
 import luigi
 
-import logging
+from iml_profiler.profiler.iml_logging import logger
 import subprocess
 import multiprocessing
 import re
@@ -173,9 +173,9 @@ class IMLTask(luigi.Task):
         return self._mark_done(task_file, start_t, end_t)
 
     def _mark_done(self, task_file, start_t, end_t):
-        # logging.info("MARK DONE @ {path}".format(path=self.output()))
+        # logger.info("MARK DONE @ {path}".format(path=self.output()))
         if self.skip_output:
-            logging.info("> Skipping output={path} for task {name}".format(
+            logger.info("> Skipping output={path} for task {name}".format(
                 path=self._done_file,
                 name=self._task_name))
             return
@@ -408,7 +408,7 @@ class _UtilizationPlotTask(IMLTaskDB):
         # If calibration files are provided, we can subtract it:
         #   Use whatever they want based on --visible-overhead
         if not calibration_files_present(task=self):
-            logging.warning(
+            logger.warning(
                 ("Calibration files aren't all present; we cannot subtract overhead without "
                  "all of these options present: {msg}").format(
                     msg=pprint_msg(CALIBRATION_OPTS),
@@ -448,7 +448,7 @@ class OperationOverlapTask(_UtilizationPlotTask):
 def _mk(kwargs, TaskKlass):
     task_kwargs = keep_task_kwargs(kwargs, TaskKlass)
     if kwargs.get('debug', False):
-        logging.info("{klass} kwargs: {msg}".format(
+        logger.info("{klass} kwargs: {msg}".format(
             klass=TaskKlass.__name__,
             msg=pprint_msg(task_kwargs)))
     return TaskKlass(**task_kwargs)
@@ -849,7 +849,7 @@ class ExtrapolatedTrainingTimeTask(IMLTaskDB):
         assert 'directory' not in kwargs
         kwargs['directory'] = kwargs['iml_directory']
         del kwargs['iml_directory']
-        # logging.info(pprint_msg({'kwargs': kwargs}))
+        # logger.info(pprint_msg({'kwargs': kwargs}))
         self.dumper = ExtrapolatedTrainingTimeParser(**kwargs)
         self.dumper.run()
 
@@ -1060,27 +1060,26 @@ def mk_SQL_tasks(task):
     kwargs.update(calibration_kwargs)
 
     # NOTE: SQLOverheadEventsParser depends on SQLParserTask.
-    # logging.info("mk SQLOverheadEventsParser: {msg}".format(
+    # logger.info("mk SQLOverheadEventsParser: {msg}".format(
     #     msg=pprint_msg(kwargs)))
     return SQLOverheadEventsTask(**kwargs)
 
-from iml_profiler.profiler import iml_logging
+from iml_profiler.profiler.iml_logging import logger
 def main(argv=None, should_exit=True):
-    iml_logging.setup_logging()
     if argv is None:
         argv = list(sys.argv[1:])
     ret = luigi.run(cmdline_args=argv, detailed_summary=True)
     retcode = 0
     if ret.status not in [luigi.LuigiStatusCode.SUCCESS, luigi.LuigiStatusCode.SUCCESS_WITH_RETRY]:
         retcode = 1
-        logging.info("luigi.run FAILED with {ret}".format(
+        logger.info("luigi.run FAILED with {ret}".format(
             ret=ret))
         print(textwrap.dedent("""\
         > Debug pro-tip:
           - Look for the last "> CMD:" that was run, and re-run it manually 
             but with the added "--pdb" flag to break when it fails.
         """))
-    # logging.info("Exiting with ret={ret}".format(
+    # logger.info("Exiting with ret={ret}".format(
     #     ret=retcode))
     sys.exit(retcode)
 
@@ -1329,7 +1328,7 @@ class VennJsPlotTask(IMLTask):
             if not is_venn_js_file(path):
                 continue
             venn_js_paths.append(path)
-        logging.info("Plot venn_js files:\n{msg}".format(
+        logger.info("Plot venn_js files:\n{msg}".format(
             msg=pprint_msg(venn_js_paths),
         ))
         for venn_js in venn_js_paths:
@@ -1361,7 +1360,7 @@ class VennJsPlotOneTask(luigi.Task):
         return []
 
     def run(self):
-        logging.info("HELLO")
+        logger.info("HELLO")
         kwargs = kwargs_from_task(self)
         plotter = VennJsPlotter(**kwargs)
         plotter.run()

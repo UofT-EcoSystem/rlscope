@@ -1,4 +1,4 @@
-import logging
+from iml_profiler.profiler.iml_logging import logger
 import re
 import copy
 import numpy as np
@@ -279,8 +279,8 @@ def _sel(selector, idx, sel_field, skip_missing_fields=False, debug=False):
     """
 
     if debug:
-        logging.info("> _sel:")
-        logging.info(textwrap.indent(pprint.pformat(locals()), prefix='  '))
+        logger.info("> _sel:")
+        logger.info(textwrap.indent(pprint.pformat(locals()), prefix='  '))
 
     if sel_field in selector and callable(selector[sel_field]):
         for value, subtree in idx.items():
@@ -331,7 +331,7 @@ def _sel_all(selector, sel_order, level, md, subtree, skip_missing_fields=False,
 
         if field not in subtree and skip_missing_fields:
             # Subtree is missing field, but there's only one choice of field-value to use.
-            logging.warning("Skipping field={field} since it is missing".format(field=field))
+            logger.warning("Skipping field={field} since it is missing".format(field=field))
             level += 1
         elif field in subtree:
             break
@@ -360,7 +360,7 @@ def test_sel():
         }
 
         for i, (value, subtree) in enumerate(_sel({'overlap_type':'ResourceSubplot'}, INDEX, 'overlap_type')):
-            logging.info(" HI1 ")
+            logger.info(" HI1 ")
             assert i == 0
             assert subtree == INDEX['ResourceSubplot']
 
@@ -368,7 +368,7 @@ def test_sel():
                 {'overlap_type':'ResourceSubplot', 'process':'loop_train_eval'},
                 INDEX['ResourceSubplot']['process'],
                 'process')):
-            logging.info(" HI2 ")
+            logger.info(" HI2 ")
             assert i == 0
             assert subtree == INDEX['ResourceSubplot']['process']['loop_train_eval']
 

@@ -1,4 +1,4 @@
-import logging
+from iml_profiler.profiler.iml_logging import logger
 import signal
 import time
 import subprocess
@@ -71,7 +71,7 @@ class GeneratePlotIndex:
         def map_resource_overlap(field, value):
 
             # if self.debug:
-            #     logging.info("field={field}, value={value}".format(
+            #     logger.info("field={field}, value={value}".format(
             #         field=field,
             #         value=value,
             #     ))
@@ -167,17 +167,17 @@ class GeneratePlotIndex:
         for path in self.each_file():
 
             if self.debug:
-                logging.info("path[{i}] = {path}".format(
+                logger.info("path[{i}] = {path}".format(
                     i=i,
                     path=path))
 
             md = self.read_metadata(path)
             if md is None:
-                logging.info("WARNING: didn't find any metadata in {path}; SKIP.".format(path=path))
+                logger.info("WARNING: didn't find any metadata in {path}; SKIP.".format(path=path))
                 continue
 
             if self.debug:
-                logging.info("> index: {path}".format(path=path))
+                logger.info("> index: {path}".format(path=path))
 
             entry = self.lookup_entry(md, path)
             relpath = os.path.relpath(path, self.directory)
@@ -202,13 +202,13 @@ class GeneratePlotIndex:
         if not self.dry_run:
             src = _j(py_config.ROOT, 'iml_profiler/scripts/iml_profiler_plot_index.py')
             dst = _j(self.out_dir, 'iml_profiler_plot_index.py')
-            logging.info("> cp {src} -> {dst}".format(src=src, dst=dst))
+            logger.info("> cp {src} -> {dst}".format(src=src, dst=dst))
             os.makedirs(_d(dst), exist_ok=True)
             shutil.copyfile(src, dst)
 
         os.makedirs(_d(self.plot_index_path), exist_ok=True)
         if _e(self.plot_index_path) and not self.replace:
-            logging.info("WARNING: {path} exists; skipping".format(path=self.plot_index_path))
+            logger.info("WARNING: {path} exists; skipping".format(path=self.plot_index_path))
             return
 
         with open(self.plot_index_path, 'w') as f:
@@ -235,8 +235,8 @@ class GeneratePlotIndex:
                 pwd=os.getcwd(),
             )
             if self.debug:
-                logging.info("> Generated file: {path}".format(path=self.plot_index_path))
-                logging.info(contents)
+                logger.info("> Generated file: {path}".format(path=self.plot_index_path))
+                logger.info(contents)
 
             if not self.dry_run:
                 f.write(contents)
@@ -251,9 +251,8 @@ def mkds(dic, *keys):
         dic = mkd(dic, key)
     return dic
 
-from iml_profiler.profiler import iml_logging
+from iml_profiler.profiler.iml_logging import logger
 def main():
-    iml_logging.setup_logging()
     parser = argparse.ArgumentParser("Generate index of *.venn_js.json files.")
     parser.add_argument('--iml-directory',
                         required=True,

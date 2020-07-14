@@ -1,4 +1,4 @@
-import logging
+from iml_profiler.profiler.iml_logging import logger
 import os
 from progressbar import progressbar
 import shutil
@@ -11,7 +11,7 @@ import multiprocessing
 
 from os.path import join as _j, abspath as _a, exists as _e, dirname as _d, basename as _b
 
-from iml_profiler.profiler import iml_logging
+from iml_profiler.profiler.iml_logging import logger
 
 from iml_profiler.parser.common import *
 
@@ -65,7 +65,7 @@ class ForkedProcessPool:
             if self.max_workers == ForkedProcessPool.UNLIMITED or len(self.active_workers) < self.max_workers:
                 break
             if self.debug:
-                logging.info("> Pool.sleep for {sec} sec".format(
+                logger.info("> Pool.sleep for {sec} sec".format(
                     sec=ForkedProcessPool.WAIT_WORKERS_TIMEOUT_SEC))
             time.sleep(ForkedProcessPool.WAIT_WORKERS_TIMEOUT_SEC)
 
@@ -83,7 +83,7 @@ class ForkedProcessPool:
         proc = MyProcess(target=fn, name=name, args=args, kwargs=kwargs)
         proc.start()
         if self.debug:
-            logging.info("> Pool(name={name}): submit pid={pid}, proc={proc}".format(
+            logger.info("> Pool(name={name}): submit pid={pid}, proc={proc}".format(
                 name=self.name,
                 pid=proc.pid,
                 proc=proc))
@@ -95,7 +95,7 @@ class ForkedProcessPool:
 
     def _join_child(self, i):
         if self.debug:
-            logging.info("> Pool(name={name}): Join pid={pid} active_workers[i={i}]={proc}".format(
+            logger.info("> Pool(name={name}): Join pid={pid} active_workers[i={i}]={proc}".format(
                 name=self.name,
                 i=i,
                 pid=self.active_workers[i].pid,
@@ -142,7 +142,7 @@ class MyProcess(MP_CTX.Process):
 
     if p.exception:
         error, traceback = p.exception
-        logging.info(traceback)
+        logger.info(traceback)
 
 
 
@@ -158,7 +158,6 @@ class MyProcess(MP_CTX.Process):
         try:
             # We need to do this otherwise log messages don't appear (on some machines).
             # Not sure why...
-            iml_logging.setup_logging()
             super().run()
             self._cconn.send(None)
             self._cconn.close()
@@ -205,7 +204,7 @@ class MyProcess(MP_CTX.Process):
 
 def map_pool(pool, func, kwargs_list, desc=None, show_progress=False, sync=False):
     if len(kwargs_list) == 1 or sync:
-        logging.info("Running map_pool synchronously")
+        logger.info("Running map_pool synchronously")
         # Run it on the current thread.
         # Easier to debug with pdb.
         results = []
@@ -214,7 +213,7 @@ def map_pool(pool, func, kwargs_list, desc=None, show_progress=False, sync=False
             results.append(result)
         return results
 
-    # logging.info("Running map_pool in parallel with n_workers")
+    # logger.info("Running map_pool in parallel with n_workers")
     results = []
     for i, result in enumerate(progress(
         pool.map(func, kwargs_list),
@@ -229,14 +228,14 @@ def _sys_exit_1():
     """
     For unit-testing.
     """
-    logging.info("Running child in ForkedProcessPool that exits with sys.exit(1)")
+    logger.info("Running child in ForkedProcessPool that exits with sys.exit(1)")
     sys.exit(1)
 
 def _exception():
     """
     For unit-testing.
     """
-    logging.info("Running child in ForkedProcessPool that raises an exception")
+    logger.info("Running child in ForkedProcessPool that raises an exception")
     raise RuntimeError("Child process exception")
 
 def _do_nothing():
@@ -280,7 +279,7 @@ def test_forked_process_pool():
         :return:
         """
         TEST_DIR = './iml_test_data.test_03_mkdir'
-        logging.info("TEST_DIR = {path}".format(path=_a(TEST_DIR)))
+        logger.info("TEST_DIR = {path}".format(path=_a(TEST_DIR)))
 
         def get_dir_path(i):
             return _j(TEST_DIR, 'dir_{i}'.format(i=i))
@@ -315,7 +314,7 @@ def test_forked_process_pool():
         """
         import resource
         test_name = test_04_file_limit.__name__
-        logging.info("Running {test}; this may take a minute...".format(
+        logger.info("Running {test}; this may take a minute...".format(
             test=test_name))
         soft_file_limit, hard_file_limit = resource.getrlimit(resource.RLIMIT_OFILE)
         # debug = True

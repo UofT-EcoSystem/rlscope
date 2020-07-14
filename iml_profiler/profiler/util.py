@@ -1,5 +1,5 @@
 import re
-import logging
+from iml_profiler.profiler.iml_logging import logger
 import sys
 
 from iml_profiler.parser.common import *
@@ -180,7 +180,7 @@ def args_to_cmdline(parser, args,
                 .union(ignore_argnames))
 
     if debug:
-        logging.info(pprint_msg({
+        logger.info(pprint_msg({
             'subparser_cmd_opts': subparser_cmd_opts,
             'parser_cmd_opts': parser_cmd_opts,
         }))

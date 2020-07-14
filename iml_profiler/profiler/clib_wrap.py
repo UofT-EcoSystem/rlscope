@@ -1,4 +1,4 @@
-import logging
+from iml_profiler.profiler.iml_logging import logger
 import contextlib
 import sys
 import multiprocessing
@@ -91,7 +91,7 @@ def unregister_record_event_hook(hook : RecordEventHook):
 #         self._step = step
 #         if step not in self.pyprof.steps:
 #             if py_config.DEBUG:
-#                 logging.info("> ADD PYPROF STEP: {s}".format(s=self._step))
+#                 logger.info("> ADD PYPROF STEP: {s}".format(s=self._step))
 #
 #             self.pyprof.steps.extend([step])
 #
@@ -105,7 +105,7 @@ def unregister_record_event_hook(hook : RecordEventHook):
 #         self.pyprof.phase = phase
 #
 #         with open(path, 'wb') as f:
-#             # logging.info("> dump pyprof.steps:")
+#             # logger.info("> dump pyprof.steps:")
 #             # pprint.pprint({
 #             #     'len(pyprof.steps)':len(self.pyprof.steps),
 #             #     'pyprof.process_name':self.pyprof.process_name,
@@ -134,7 +134,7 @@ def unregister_record_event_hook(hook : RecordEventHook):
 #             attrs=attrs)
 #
 #         if debug:
-#             logging.info("Record event: name={name}, category={cat}, duration={ms} ms".format(
+#             logger.info("Record event: name={name}, category={cat}, duration={ms} ms".format(
 #                 name=name,
 #                 cat=category,
 #                 ms=(end_us - start_us)*1e3,
@@ -314,13 +314,13 @@ class CFuncWrapper:
 
         name = self.wrapper_name(func.__name__)
         if py_config.DEBUG_WRAP_CLIB:
-            logging.info("> call.name = {name}".format(name=name))
+            logger.info("> call.name = {name}".format(name=name))
 
         def call(*args, **kwargs):
             # NOTE: for some reason, if we don't use a local variable here,
             # it will return None!  Bug in python3...?
             if self.debug:
-                logging.info("call: {name}".format(name=name))
+                logger.info("call: {name}".format(name=name))
             ret = self.func(*args, **kwargs)
             return ret
 
@@ -542,7 +542,7 @@ def disable_tracing():
     global _TRACING_ON
     _TRACING_ON = False
     if py_config.DEBUG:
-        logging.info("Disable pyprof tracing: _TRACING_ON={val}\n{stack}".format(
+        logger.info("Disable pyprof tracing: _TRACING_ON={val}\n{stack}".format(
             val=_TRACING_ON,
             stack=get_stacktrace()))
 
@@ -550,7 +550,7 @@ def disable_tracing():
 #     global _PYROF_TRACE_FULLY_ENABLED
 #     _PYROF_TRACE_FULLY_ENABLED = False
 #     # if py_config.DEBUG:
-#     logging.info("Disable pyprof tracing (--iml-disable-pyprof-trace): _PYROF_TRACE_FULLY_ENABLED={val}\n{stack}".format(
+#     logger.info("Disable pyprof tracing (--iml-disable-pyprof-trace): _PYROF_TRACE_FULLY_ENABLED={val}\n{stack}".format(
 #         val=_PYROF_TRACE_FULLY_ENABLED,
 #         stack=get_stacktrace()))
 
@@ -558,7 +558,7 @@ def disable_tracing():
 #     global _PYROF_TRACE_FULLY_ENABLED
 #     _PYROF_TRACE_FULLY_ENABLED = True
 #     # if py_config.DEBUG:
-#     logging.info("Enable pyprof tracing (--iml-disable-pyprof-trace): _PYROF_TRACE_FULLY_ENABLED={val}\n{stack}".format(
+#     logger.info("Enable pyprof tracing (--iml-disable-pyprof-trace): _PYROF_TRACE_FULLY_ENABLED={val}\n{stack}".format(
 #         val=_PYROF_TRACE_FULLY_ENABLED,
 #         stack=get_stacktrace()))
 
@@ -621,7 +621,7 @@ def register_detected_libs():
     #     pass
 
 def wrap_tensorflow(category=CATEGORY_TF_API, debug=False):
-    logging.info("> IML: Wrapping module=tensorflow call with category={category} annotations".format(
+    logger.info("> IML: Wrapping module=tensorflow call with category={category} annotations".format(
         category=category,
     ))
     success = wrap_util.wrap_lib(
@@ -633,7 +633,7 @@ def wrap_tensorflow(category=CATEGORY_TF_API, debug=False):
     assert success
 def unwrap_tensorflow():
     if py_config.DEBUG_WRAP_CLIB:
-        logging.info("> IML: Unwrapping module=tensorflow")
+        logger.info("> IML: Unwrapping module=tensorflow")
     wrap_util.unwrap_lib(
         CFuncWrapper,
         import_libname='tensorflow',
@@ -656,7 +656,7 @@ def unwrap_atari():
 
 def wrap_module(module, category, debug=False, **kwargs):
     if py_config.DEBUG_WRAP_CLIB:
-        logging.info("> IML: Wrapping module={mod} call with category={category} annotations".format(
+        logger.info("> IML: Wrapping module={mod} call with category={category} annotations".format(
             mod=module,
             category=category,
         ))
@@ -665,7 +665,7 @@ def wrap_module(module, category, debug=False, **kwargs):
         wrapper_args=(category, DEFAULT_PREFIX, debug), **kwargs)
 def unwrap_module(module):
     if py_config.DEBUG_WRAP_CLIB:
-        logging.info("> IML: Unwrapping module={mod}".format(
+        logger.info("> IML: Unwrapping module={mod}".format(
             mod=module))
     wrap_util.unwrap_module(
         CFuncWrapper,
@@ -725,14 +725,14 @@ class LibWrapper:
             return func
 
         if self.debug:
-            logging.info("Wrap: {name}".format(name=name))
+            logger.info("Wrap: {name}".format(name=name))
         func_wrapper = CFuncWrapper(func, self.category, self.prefix, self.debug)
         setattr(self, name, func_wrapper)
         return func_wrapper
 
 def wrap_entire_module(import_libname, category, debug=False, **kwargs):
     if py_config.DEBUG_WRAP_CLIB:
-        logging.info("> IML: Wrapping module={mod} call with category={category} annotations".format(
+        logger.info("> IML: Wrapping module={mod} call with category={category} annotations".format(
             mod=import_libname,
             category=category,
         ))
@@ -749,7 +749,7 @@ def unwrap_entire_module(import_libname):
     if import_libname not in sys.modules:
         return
     if py_config.DEBUG_WRAP_CLIB:
-        logging.info("> IML: Unwrapping module={mod}".format(
+        logger.info("> IML: Unwrapping module={mod}".format(
             mod=import_libname))
     lib_wrapper = sys.modules[import_libname]
     sys.modules[import_libname] = lib_wrapper.lib

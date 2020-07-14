@@ -9,6 +9,7 @@
 
 #include <driver_types.h>
 #include <cupti_target.h>
+#include <cupti.h>
 
 #include <cuda.h>
 //#include <driver_types.h>

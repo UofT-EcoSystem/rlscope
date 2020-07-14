@@ -17,13 +17,13 @@
 
 namespace rlscope {
 
-#define CUPTI_CALL(call)                                            \
-  do {                                                              \
-    CUptiResult _status = call;                     \
-    if (_status != CUPTI_SUCCESS) {                                 \
-      LOG(FATAL) << "cuda call " << #call << " failed " << _status; \
-    }                                                               \
-  } while (0)
+//#define CUPTI_CALL(call)
+//  do {
+//    CUptiResult _status = call;
+//    if (_status != CUPTI_SUCCESS) {
+//      LOG(FATAL) << "cuda call " << #call << " failed " << _status;
+//    }
+//  } while (0)
 
 
 bool CUDAActivityProfilerState::CanDump() {
@@ -343,7 +343,7 @@ MyStatus CUDAActivityProfiler::Start() {
   // NOTE: This registers ActivityCallback to be called, until DisableTrace is called.
   VLOG(1) << "CUDAActivityProfiler: " << __func__ << ", call EnableTrace";
   TF_RETURN_IF_ERROR(cupti_manager_->EnableTrace(this));
-  CUPTI_CALL(cuptiGetTimestamp(&_state.start_timestamp_));
+  CUPTI_API_CALL_MAYBE_EXIT(cuptiGetTimestamp(&_state.start_timestamp_));
   _state.start_walltime_us_ = rlscope::TimeNowMicros();
   return MyStatus::OK();
 }
@@ -357,7 +357,7 @@ MyStatus CUDAActivityProfiler::Stop() {
 //  TF_RETURN_IF_ERROR(cupti_manager_->DisableTrace());
   MAYBE_LOG_ERROR(LOG(FATAL), __func__, status);
   _state.end_walltime_us_ = rlscope::TimeNowMicros();
-  CUPTI_CALL(cuptiGetTimestamp(&_state.end_timestamp_));
+  CUPTI_API_CALL_MAYBE_EXIT(cuptiGetTimestamp(&_state.end_timestamp_));
   return MyStatus::OK();
 }
 
@@ -506,7 +506,7 @@ MyStatus CUDAActivityProfiler::Stop() {
 //
 //    // report any records dropped from the queue
 //    size_t dropped;
-//    CUPTI_CALL(cuptiActivityGetNumDroppedRecords(_ctx, _streamId, &dropped));
+//    CUPTI_API_CALL_MAYBE_EXIT(cuptiActivityGetNumDroppedRecords(_ctx, _streamId, &dropped));
 //    if (dropped != 0) {
 //      LOG(WARNING) << "Dropped " << dropped << " activity records";
 //    }

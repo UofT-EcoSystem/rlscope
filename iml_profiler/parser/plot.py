@@ -1,4 +1,4 @@
-import logging
+from iml_profiler.profiler.iml_logging import logger
 import argparse
 import copy
 import re
@@ -519,8 +519,8 @@ class PlotSummary(ProfilerParserCommonMixin):
             plot_df['device_order'] = self.device_order_key(device)
             dfs.append(plot_df)
         total_rows = pd.concat(dfs)
-        logging.info("> Added Total column for field={field}:".format(field=field))
-        logging.info(total_rows)
+        logger.info("> Added Total column for field={field}:".format(field=field))
+        logger.info(total_rows)
         df = pd.concat([total_rows, df])
         df = self._sort_df(df)
 
@@ -545,7 +545,7 @@ class PlotSummary(ProfilerParserCommonMixin):
 
         sns.set(style="whitegrid")
 
-        logging.info("> DataFrame:")
+        logger.info("> DataFrame:")
 
         mean_df = DataFrame.get_mean_std(df, self.value_field)
         plot_data_path = self._plot_data_path(field)
@@ -677,7 +677,7 @@ class CategoryOverlapPlot:
             # > compute_per_operation_overlap(bench_name=tree_search) took 400.79692363739014 seconds
             # > compute_per_operation_overlap(bench_name=eval_game) took 778.2323503494263 seconds
             # This thing takes a LONG time.
-            logging.info("> compute_per_operation_overlap(bench_name={op}) took {sec} seconds".format(
+            logger.info("> compute_per_operation_overlap(bench_name={op}) took {sec} seconds".format(
                 op=bench_name,
                 sec=end_t - start_t,
             ))
@@ -830,7 +830,7 @@ class StackedBarPlotter:
         # Need enough distinct hash-styles to fit categories.
         # assert len(xs) <= len(HATCH_STYLES)
         if len(xs) > len(HATCH_STYLES):
-            logging.info("> WARNING: We only have {h} HATCH_STYLES, but there are {x} category-overlap labels".format(
+            logger.info("> WARNING: We only have {h} HATCH_STYLES, but there are {x} category-overlap labels".format(
                 h=len(HATCH_STYLES),
                 x=len(xs),
             ))
@@ -953,7 +953,7 @@ class StackedBarPlotter:
 
             with open(self.get_plot_data_pt(bench_name), 'w') as f:
                 DataFrame.print_df(bench_df, file=f)
-            logging.info("> DataFrame:")
+            logger.info("> DataFrame:")
             print(bench_df)
 
             self._add_lines(bench_name)
@@ -1053,12 +1053,12 @@ class StackedBarPlotter:
         categories = [k for k in json.get_categories() if k in self.category_order]
         # categories = self._get_categories(json_data)
         if debug:
-            logging.info("> bench_name={op}, json_data = ".format(op=bench_name))
-            logging.info(textwrap.indent(pprint.pformat(json_data), prefix="  "))
-            logging.info("  > categories = {c}".format(c=categories))
+            logger.info("> bench_name={op}, json_data = ".format(op=bench_name))
+            logger.info(textwrap.indent(pprint.pformat(json_data), prefix="  "))
+            logger.info("  > categories = {c}".format(c=categories))
         for category in categories:
             if debug:
-                logging.info("> add category={c}: {times}".format(
+                logger.info("> add category={c}: {times}".format(
                     c=category,
                     times=json.get_times_sec(category)))
                     # times=json_data[category]))
@@ -1212,13 +1212,13 @@ class StackedBarPlotter:
         self.orig_df = pd.DataFrame(self.df_data)
 
         self.df = DataFrame.get_mean_std(self.orig_df, self.value_field)
-        logging.info("> DATAFRAME BEFORE SORT:")
-        logging.info(self.df)
+        logger.info("> DATAFRAME BEFORE SORT:")
+        logger.info(self.df)
         self.df = self.df.sort_values(by=['impl_name_order', 'device_order', 'bench_name_order', 'category_order'])
         # self.df = self.df.sort_values(by=['impl_name_order', 'device_order', 'bench_name_order', 'category_order'], ascending=False)
         # self.df = self.df.sort_values(by=['bench_name_order'])
-        logging.info("> DATAFRAME AFTER SORT:")
-        logging.info(self.df)
+        logger.info("> DATAFRAME AFTER SORT:")
+        logger.info(self.df)
         # groupby_cols = DataFrame.get_groupby_cols(self.orig_df, value_field)
         self.df['std_div_mean_percent'] = 100 * self.df['std']/self.df['mean']
 
@@ -1364,7 +1364,7 @@ class TFProfReader:
             if category == cat_str:
                 # Ignore the first time since it includes libcupti.so load time.
                 return times_sec[1:]
-        logging.info("> json_data = ")
+        logger.info("> json_data = ")
         pprint.pprint(self.json_data, indent=2)
         raise RuntimeError("Couldn't find category=\"{cat}\"".format(cat=category))
 
@@ -1417,7 +1417,7 @@ class ProcessTimelineReader:
         #     if category == cat_str:
         #         # Ignore the first time since it includes libcupti.so load time.
         #         return times_sec[1:]
-        logging.info("> json_data = ")
+        logger.info("> json_data = ")
         pprint.pprint(self.json_data, indent=2)
         raise RuntimeError("Couldn't find category=\"{cat}\"".format(cat=category))
 
@@ -1692,7 +1692,7 @@ class LegendMaker:
     #             legend.set_bbox_to_anchor((0, 1.04))
     #         art = plt.gca().add_artist(legend)
     #         # art = ax.add_artist(legend)
-    #         # logging.info('HI')
+    #         # logger.info('HI')
     #         # import ipdb; ipdb.set_trace()
     #     return legends
 
@@ -1814,7 +1814,7 @@ class CombinedProfileParser(ProfilerParserCommonMixin):
         combined = make_json_serializable(combined_nd)
         # combined['CppAndGPUTimeSec']
         do_dump_json(combined, json_path)
-        logging.info("> Created combined profile breakdown @ {path}".format(path=json_path))
+        logger.info("> Created combined profile breakdown @ {path}".format(path=json_path))
 
     def dump(self, bench_name):
         pass
@@ -2352,7 +2352,7 @@ class SlidingWindowUtilizationPlot:
         ax.set_ylabel(r"GPU utilization (%)")
         ax.set_xlabel(r"Training time (sec)")
         fig.savefig(self._plot_path, bbox_inches="tight", pad_inches=0)
-        logging.info('Save figure to {path}'.format(path=self._plot_path))
+        logger.info('Save figure to {path}'.format(path=self._plot_path))
         plt.close(fig)
 
     def _path_with_ext(self, ext):
@@ -2373,7 +2373,7 @@ class SlidingWindowUtilizationPlot:
     def run(self):
         self.df, self.polling_interval_us = self.read_dataframe()
         self.df.to_csv(self._csv_path, index=False)
-        logging.info("Output SlidingWindowUtilizationPlot data @ {path}".format(path=self._csv_path))
+        logger.info("Output SlidingWindowUtilizationPlot data @ {path}".format(path=self._csv_path))
         self.plot(self.df)
 
 
@@ -2461,7 +2461,7 @@ class UtilizationPlot:
         self.debug_ops = debug_ops
         self.debug_memoize = debug_memoize
         if self.debug_memoize:
-            logging.info("debug_memoize = {b}".format(b=self.debug_memoize))
+            logger.info("debug_memoize = {b}".format(b=self.debug_memoize))
         self.entire_trace = entire_trace
 
         self.bar_width = 0.25
@@ -2569,13 +2569,13 @@ class UtilizationPlot:
 
         machine_names = self.sql_reader.machine_names
         if self.debug:
-            logging.info(pprint_msg({
+            logger.info(pprint_msg({
                 'machine_names':machine_names}))
 
         for machine_name in machine_names:
             process_names = self.sql_reader.process_names(machine_name, debug=self.debug)
             if self.debug:
-                logging.info(pprint_msg({
+                logger.info(pprint_msg({
                     'machine_name':machine_name,
                     'process_names':process_names}))
 
@@ -2587,7 +2587,7 @@ class UtilizationPlot:
                 #           for phase_name in phase_names]
                 phases = self.sql_reader.phases(machine_name, process_name, debug=self.debug)
                 if self.debug:
-                    logging.info(pprint_msg({
+                    logger.info(pprint_msg({
                         'machine_name':machine_name,
                         'process_name':process_name,
                         'phases':phases}))
@@ -2614,7 +2614,7 @@ class UtilizationPlot:
 
         # training_progress = self.sql_reader.training_progress(machine_name=machine_name, process_name=process_name, phase_name=phase_name, allow_none=True)
         # if training_progress is None and phase != DEFAULT_PHASE:
-        #     logging.info('TrainingProgress was None for ')
+        #     logger.info('TrainingProgress was None for ')
         #     import ipdb; ipdb.set_trace()
 
         overlap_computer = OverlapComputer(self.db_path,
@@ -2664,7 +2664,7 @@ class UtilizationPlot:
             return ret
 
         overlap, overlap_metadata = compute_overlap()
-        logging.info("Event overlap results: {msg}".format(msg=pprint_msg({
+        logger.info("Event overlap results: {msg}".format(msg=pprint_msg({
             'overlap_type': self.overlap_type,
             'IML_USE_NUMBA': py_config.IML_USE_NUMBA,
             'overlap': overlap,
@@ -2765,7 +2765,7 @@ class UtilizationPlot:
 
     def _dump_process_timeline_json(self, operation_overlap):
         path = self._process_timeline_json_path()
-        logging.info("> DEBUG: dump process timeline compute overlap @ {path}".format(path=path))
+        logger.info("> DEBUG: dump process timeline compute overlap @ {path}".format(path=path))
 
         # PROBLEM: overlap JSON file is usually for a single operation.
         # However, now we have multiple operations for a given overlap calculation.
@@ -2971,7 +2971,7 @@ class ConvertResourceOverlapToResourceSubplot:
         new_base = re.sub(r'ResourceOverlap', 'ResourceSubplot', base)
         resource_subplot_path = _j(direc, new_base)
         assert resource_subplot_path != venn_path
-        logging.info(textwrap.dedent("""\
+        logger.info(textwrap.dedent("""\
         Convert:
           From: {src}
           To:   {dst}
@@ -3116,7 +3116,7 @@ class VennJsPlotter:
 
         if self.width is not None and self.height is not None:
             figsize = (self.width, self.height)
-            logging.info("Setting figsize = {fig}".format(fig=figsize))
+            logger.info("Setting figsize = {fig}".format(fig=figsize))
             # sns.set_context({"figure.figsize": figsize})
         else:
             figsize = None
@@ -3169,7 +3169,7 @@ class VennJsPlotter:
 
         for plot_path in self.plot_paths(venn_path):
             # plot_path = self.plot_path(venn_path)
-            logging.info("Plot venn_js @ {path}".format(
+            logger.info("Plot venn_js @ {path}".format(
                 path=plot_path,
             ))
             fig.savefig(plot_path)
@@ -3342,8 +3342,8 @@ class HeatScalePlot:
                     'util':samples['util'],
                     'start_time_sec':raw_centered_time_secs,
                 }).astype(float)
-                logging.info("> DEBUG: Unadjusted raw utilization measurements for device={dev}".format(dev=device_name))
-                logging.info(raw_df)
+                logger.info("> DEBUG: Unadjusted raw utilization measurements for device={dev}".format(dev=device_name))
+                logger.info(raw_df)
             norm_time_secs, norm_utils = exponential_moving_average(
                 samples['start_time_sec'], samples['util'],
                 start_time_sec, self.step_sec, self.decay)
@@ -3358,7 +3358,7 @@ class HeatScalePlot:
             }
 
             util_stats = pd.DataFrame(norm_utils).agg([pd.np.min, pd.np.max, pd.np.mean])
-            logging.info("Utilization stats for device={dev}\n{msg}".format(
+            logger.info("Utilization stats for device={dev}\n{msg}".format(
                 dev=device_name,
                 msg=pprint_msg(util_stats)))
 
@@ -3427,7 +3427,7 @@ class HeatScalePlot:
         print("> HeatScalePlot @ plot data @ {path}".format(path=path))
         with open(path, 'w') as f:
             DataFrame.print_df(plot_df, file=f)
-        logging.info(plot_df)
+        logger.info(plot_df)
 
     @property
     def db_path(self):
@@ -3710,7 +3710,7 @@ def add_grouped_stacked_bars(
             groupby_cols = [hue]
         data_groupby = data.groupby(groupby_cols)
         groups = [pair[0] for pair in list(data_groupby)]
-        logging.info("groups: " + pprint_msg(groups))
+        logger.info("groups: " + pprint_msg(groups))
         means = dict()
         stds = dict()
         for group, group_df in data_groupby:
@@ -3750,7 +3750,7 @@ def add_grouped_stacked_bars(
                 # group = hue
                 label_str = group
             if debug:
-                logging.info("add_stacked_bars:\n{msg}".format(
+                logger.info("add_stacked_bars:\n{msg}".format(
                     msg=pprint_msg({
                         'xs':xs,
                         'xticks':xticks,
@@ -3788,7 +3788,7 @@ def add_grouped_stacked_bars(
     xgroup_groupby = data.groupby([x_group])
     xgroup_barplot = dict()
     for xgroup_idx, (xgroup, xgroup_df) in enumerate(xgroup_groupby):
-        logging.info("xgroup = {xgroup}".format(xgroup=xgroup))
+        logger.info("xgroup = {xgroup}".format(xgroup=xgroup))
         # Q: Does order of "data" affect groups returned by groupby?
         barplot = _add_stacked_bars(xgroup_idx, data=xgroup_df)
         xgroup_barplot[xgroup] = barplot
@@ -3879,11 +3879,11 @@ class CUDAEventCSVReader:
 
     def read_df(self, verbose=False):
         if verbose:
-            logging.info("Read cuda device events dataframe @ {path}".format(path=self.directory))
+            logger.info("Read cuda device events dataframe @ {path}".format(path=self.directory))
         reader = CUDADeviceEventsReader(self.directory)
         df = reader.read()
         if verbose:
-            logging.info("Output csv @ {path}".format(path=self._csv_path))
+            logger.info("Output csv @ {path}".format(path=self._csv_path))
         # colnames = [
         #     'machine_name',
         #     'process_name',
@@ -3924,9 +3924,8 @@ def fix_seaborn_legend(ax, legend_kwargs=dict()):
         **legend_kwargs,
     )
 
-from iml_profiler.profiler import iml_logging
+from iml_profiler.profiler.iml_logging import logger
 def main():
-    iml_logging.setup_logging()
     p = argparse.ArgumentParser()
     p.add_argument('--test-stacked-bar', action='store_true')
     p.add_argument('--test-pixel-bar', action='store_true')

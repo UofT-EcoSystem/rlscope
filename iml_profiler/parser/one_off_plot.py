@@ -1,4 +1,4 @@
-import logging
+from iml_profiler.profiler.iml_logging import logger
 import argparse
 import traceback
 import bdb
@@ -266,6 +266,14 @@ class TrtexecExperiment:
 
     def read_df(self):
         self._read_trtexec_df()
+        self._read_tf_inference_df()
+        """
+        TODO: merge trtexec_df and tf_inference_df
+        trtexec_field               tf_inference_field
+        host_latency_throughput_qps throughput_qps
+        
+        
+        """
 
     def plot_df(self):
         """
@@ -374,6 +382,7 @@ class TrtexecExperiment:
         df = df[df['batch_size'] == batch_size]
 
         df = keep_cupti_metric(df, cupti_metric)
+        df = self._add_config(df, df_type='trtexec')
 
         # titled_df = copy.copy(df)
         # col_titles = {
@@ -384,6 +393,7 @@ class TrtexecExperiment:
         sns.set(style="whitegrid")
         # df = df[["thread_blocks", "metric_value", "num_threads"]]
         g = sns.catplot(x="streams", y="metric_value",
+                        hue="config",
                         data=df,
                         # hue="num_threads", data=df,
                         # hue=col_titles["num_threads"], data=titled_df,
@@ -410,7 +420,6 @@ class TrtexecExperiment:
     def _plot_batch_size_vs_metric(self, title, cupti_metric, streams, ylabel=None, suffix=None):
         if self.trtexec_gpu_hw_df is None:
             return
-        df = copy.copy(self.trtexec_gpu_hw_df)
         """
         WANT:
         x_field: batch_size
@@ -418,9 +427,23 @@ class TrtexecExperiment:
         group_field: num_threads
         """
 
-        df = df[df['streams'] == streams]
+        plot_df = pd.DataFrame(columns=['batch_size', 'metric_value', 'config'])
 
-        df = keep_cupti_metric(df, cupti_metric)
+        if self.trtexec_gpu_hw_df is not None:
+            df = copy.copy(self.trtexec_gpu_hw_df)
+            df = df[df['streams'] == streams]
+            df = keep_cupti_metric(df, cupti_metric)
+            df = self._add_config(df, df_type='trtexec')
+            plot_df = plot_df.append(df[plot_df.columns])
+
+        if self.tf_inference_gpu_hw_df is not None:
+            df = copy.copy(self.tf_inference_gpu_hw_df)
+            df = df[df['range_name'] == 'inference_loop/inference']
+            df = keep_cupti_metric(df, cupti_metric)
+            df = self._add_config(df, df_type='tf_inference')
+            plot_df = plot_df.append(df[plot_df.columns])
+
+        plot_df.sort_values(by=['config', 'batch_size'], inplace=True)
 
         # titled_df = copy.copy(df)
         # col_titles = {
@@ -431,7 +454,8 @@ class TrtexecExperiment:
         sns.set(style="whitegrid")
         # df = df[["thread_blocks", "metric_value", "num_threads"]]
         g = sns.catplot(x="batch_size", y="metric_value",
-                        data=df,
+                        hue="config",
+                        data=plot_df,
                         # hue="num_threads", data=df,
                         # hue=col_titles["num_threads"], data=titled_df,
                         # height=6,
@@ -452,7 +476,7 @@ class TrtexecExperiment:
         else:
             suffix = f".{suffix}"
 
-        save_plot(df, _j(self.args['trtexec_dir'], f'batch_size_vs_{cupti_metric}.streams_{streams}{suffix}.svg'))
+        save_plot(plot_df, _j(self.args['trtexec_dir'], f'batch_size_vs_{cupti_metric}.streams_{streams}{suffix}.svg'))
 
     def _plot_streams_vs_trt_metric(self, trt_metric, batch_size, title=None, ylabel=None, alias=None, cuda_graph=None, suffix=None):
         if self.trtexec_df is None:
@@ -477,17 +501,18 @@ class TrtexecExperiment:
         # }
         # titled_df.rename(columns=col_titles, inplace=True)
 
+        df = self._add_config(df, df_type='trtexec')
+
         sns.set(style="whitegrid")
         plot_kwargs = dict(
             x="streams",
             y=trt_metric,
-            hue="cuda_graph",
             kind="bar",
             palette="muted",
         )
         if cuda_graph is None:
             plot_kwargs.update(dict(
-                hue="cuda_graph",
+                hue="config",
             ))
         elif cuda_graph:
             df = df[df['cuda_graph']]
@@ -544,10 +569,12 @@ class TrtexecExperiment:
         # }
         # titled_df.rename(columns=col_titles, inplace=True)
 
+        df = self._add_config(df, df_type='trtexec')
+
         sns.set(style="whitegrid")
         g = sns.catplot(x="streams", y="host_latency_throughput_qps",
                         # data=df,
-                        hue="cuda_graph", data=df,
+                        hue="config", data=df,
                         # hue="num_threads", data=df,
                         # hue=col_titles["num_threads"], data=titled_df,
                         # height=6,
@@ -567,10 +594,28 @@ class TrtexecExperiment:
 
         save_plot(df, _j(self.args['trtexec_dir'], f'streams_vs_throughput.batch_size_{batch_size}{suffix}.svg'))
 
+    def _add_config(self, df, df_type):
+        assert df_type in {'trtexec', 'tf_inference'}
+
+        if df_type == 'trtexec':
+            def _config(row):
+                if row['cuda_graph']:
+                    return 'TensorRT - CUDA graph ON'
+                return 'TensorRT'
+            df['config'] = df.apply(_config, axis=1)
+        elif df_type == 'tf_inference':
+            def _config(row):
+                if row['xla']:
+                    return 'TF - XLA ON'
+                return 'TF'
+            df['config'] = df.apply(_config, axis=1)
+        else:
+            raise NotImplementedError()
+        return df
+
     def _plot_batch_size_vs_throughput(self, title, streams, suffix=None):
         if self.trtexec_df is None:
             return
-        df = copy.copy(self.trtexec_df)
         """
         WANT:
         x_field: batch_size
@@ -578,7 +623,24 @@ class TrtexecExperiment:
         group_field: num_threads
         """
 
-        df = df[df['streams'] == streams]
+
+        plot_df = pd.DataFrame(columns=['batch_size', 'throughput_qps', 'config'])
+
+        if self.trtexec_df is not None:
+            df = copy.copy(self.trtexec_df)
+            df = df[df['streams'] == streams]
+            df.rename(columns={
+                'host_latency_throughput_qps': 'throughput_qps',
+            }, inplace=True)
+            df = self._add_config(df, df_type='trtexec')
+            plot_df = plot_df.append(df[plot_df.columns])
+
+        if self.tf_inference_result_df is not None:
+            df = copy.copy(self.tf_inference_result_df)
+            df = self._add_config(df, df_type='tf_inference')
+            plot_df = plot_df.append(df[plot_df.columns])
+
+        plot_df.sort_values(by=['config', 'batch_size'], inplace=True)
 
         # df = keep_cupti_metric(df, cupti_metric)
 
@@ -590,9 +652,9 @@ class TrtexecExperiment:
 
         sns.set(style="whitegrid")
         # df = df[["thread_blocks", "metric_value", "num_threads"]]
-        g = sns.catplot(x="batch_size", y="host_latency_throughput_qps",
+        g = sns.catplot(x="batch_size", y="throughput_qps",
                         # data=df,
-                        hue="cuda_graph", data=df,
+                        hue="config", data=plot_df,
                         # hue=col_titles["num_threads"], data=titled_df,
                         # height=6,
                         kind="bar",
@@ -610,7 +672,7 @@ class TrtexecExperiment:
         else:
             suffix = f".{suffix}"
 
-        save_plot(df, _j(self.args['trtexec_dir'], f'batch_size_vs_throughput.streams_{streams}{suffix}.svg'))
+        save_plot(plot_df, _j(self.args['trtexec_dir'], f'batch_size_vs_throughput.streams_{streams}{suffix}.svg'))
 
     def parse_trtexec_logs_as_df(self, logs):
 
@@ -777,7 +839,7 @@ class TrtexecExperiment:
                     continue
 
                 if self.debug:
-                    logging.info("Skip {path}:{lineno}: {line}".format(
+                    logger.info("Skip {path}:{lineno}: {line}".format(
                         path=trtexec_log_path,
                         lineno=lineno,
                         line=line,
@@ -788,6 +850,76 @@ class TrtexecExperiment:
     @property
     def debug(self):
         return self.args['debug']
+
+    def _read_tf_inference_df(self):
+        self.tf_inference_df = None
+        if self.args['tf_inference_dir'] is None:
+            return
+        """
+        /home/jgleeson/clone/iml/output/tf_inference/batch_size_8.xla_no/GPUHwCounterSampler.csv
+        """
+        tf_inference_dflt_attrs = {
+        }
+        tf_inference_attrs = {
+            'batch_size',
+            'xla',
+        }
+        tf_inference_attr_types = {
+            'batch_size': maybe_number,
+            'xla': yes_as_bool,
+        }
+
+        dfs = []
+        for path in each_file_recursive(self.args['tf_inference_dir']):
+            if not re.search(r'^GPUHwCounterSampler.*\.csv$', _b(path)):
+                continue
+            sm_attrs = parse_path_attrs(
+                path,
+                tf_inference_attrs,
+                tf_inference_dflt_attrs,
+                tf_inference_attr_types)
+            df = pd.read_csv(path, comment='#')
+            for attr_name, attr_value in sm_attrs.items():
+                df[attr_name] = attr_value
+            dfs.append(df)
+        self.tf_inference_gpu_hw_df = pd.concat(dfs)
+
+        dfs = []
+        for path in each_file_recursive(self.args['tf_inference_dir']):
+            if not re.search(r'^mode_microbench_inference\.json$', _b(path)):
+                continue
+            inference_js = load_json(path)
+            df = pd.DataFrame(
+                dict((k, [v]) for k, v in inference_js['summary_metrics'].items())
+            )
+            sm_attrs = parse_path_attrs(
+                path,
+                tf_inference_attrs,
+                tf_inference_dflt_attrs,
+                tf_inference_attr_types,
+            )
+            # trt_data = self.parse_tf_inference_log(path)
+            # df = self.parse_tf_inference_logs_as_df([trt_data])
+            # logger.info("TRT DATA @ {path}\n{msg}".format(
+            #     path=path,
+            #     msg=textwrap.indent(pprint.pformat(trt_data), prefix='  ')))
+            for attr_name, attr_value in sm_attrs.items():
+                df[attr_name] = attr_value
+            dfs.append(df)
+        self.tf_inference_result_df = pd.concat(dfs)
+
+        join_attrs = sorted(tf_inference_attrs)
+        self.tf_inference_df = self.tf_inference_gpu_hw_df.set_index(join_attrs).join(self.tf_inference_result_df.set_index(join_attrs))
+
+        logger.info("tf_inference_gpu_hw dataframe:\n{msg}".format(
+            msg=txt_indent(DataFrame.dataframe_string(self.tf_inference_gpu_hw_df), indent=1),
+        ))
+        logger.info("tf_inference_result dataframe:\n{msg}".format(
+            msg=txt_indent(DataFrame.dataframe_string(self.tf_inference_result_df), indent=1),
+        ))
+        logger.info("tf_inference dataframe:\n{msg}".format(
+            msg=txt_indent(DataFrame.dataframe_string(self.tf_inference_df), indent=1),
+        ))
 
     def _read_trtexec_df(self):
         self.trtexec_df = None
@@ -841,7 +973,7 @@ class TrtexecExperiment:
             )
             trt_data = self.parse_trtexec_log(path)
             df = self.parse_trtexec_logs_as_df([trt_data])
-            # logging.info("TRT DATA @ {path}\n{msg}".format(
+            # logger.info("TRT DATA @ {path}\n{msg}".format(
             #     path=path,
             #     msg=textwrap.indent(pprint.pformat(trt_data), prefix='  ')))
             for attr_name, attr_value in sm_attrs.items():
@@ -849,10 +981,10 @@ class TrtexecExperiment:
             dfs.append(df)
         self.trtexec_df = pd.concat(dfs)
 
-        logging.info("trtexec_gpu_hw dataframe:\n{msg}".format(
+        logger.info("trtexec_gpu_hw dataframe:\n{msg}".format(
             msg=txt_indent(DataFrame.dataframe_string(self.trtexec_gpu_hw_df), indent=1),
         ))
-        logging.info("trtexec dataframe:\n{msg}".format(
+        logger.info("trtexec dataframe:\n{msg}".format(
             msg=txt_indent(DataFrame.dataframe_string(self.trtexec_df), indent=1),
         ))
 
@@ -893,7 +1025,7 @@ class GpuUtilExperiment:
                 df[attr_name] = maybe_number(attr_value)
             dfs.append(df)
         self.rlscope_df = pd.concat(dfs)
-        logging.info("rlscope dataframe:\n{msg}".format(
+        logger.info("rlscope dataframe:\n{msg}".format(
             msg=txt_indent(DataFrame.dataframe_string(self.rlscope_df), indent=1),
         ))
 
@@ -1093,7 +1225,7 @@ class GpuUtilExperiment:
                 df[attr_name] = maybe_number(attr_value)
             dfs.append(df)
         self.sm_df = pd.concat(dfs)
-        logging.info("sm_efficiency dataframe:\n{msg}".format(
+        logger.info("sm_efficiency dataframe:\n{msg}".format(
             msg=txt_indent(DataFrame.dataframe_string(self.sm_df), indent=1),
         ))
 
@@ -1124,7 +1256,7 @@ class GpuUtilExperiment:
                 df[attr_name] = maybe_number(attr_value)
             dfs.append(df)
         self.occupancy_df = pd.concat(dfs)
-        logging.info("achieved_occupancy dataframe:\n{msg}".format(
+        logger.info("achieved_occupancy dataframe:\n{msg}".format(
             msg=txt_indent(DataFrame.dataframe_string(self.occupancy_df), indent=1),
         ))
 
@@ -1391,7 +1523,7 @@ class GpuUtilExperiment:
         ])
         for i, line in enumerate(ax.get_lines()):
             if i in should_set_markersize:
-                logging.info(f"line[{i}].set_markersize({larger_markersize})")
+                logger.info(f"line[{i}].set_markersize({larger_markersize})")
                 line.set_markersize(larger_markersize)
 
         save_plot(plot_df, _j(_d(self.args['multithread_dir']), 'multitask_sched_info.svg'))
@@ -1477,7 +1609,7 @@ def test_plot_grouped_bar():
     # https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.DataFrame.plot.bar.html
     # if self.width is not None and self.height is not None:
     #     figsize = (self.width, self.height)
-    #     logging.info("Setting figsize = {fig}".format(fig=figsize))
+    #     logger.info("Setting figsize = {fig}".format(fig=figsize))
     #     # sns.set_context({"figure.figsize": figsize})
     # else:
     # figsize = None
@@ -1500,16 +1632,14 @@ def test_plot_grouped_bar():
     _plot('./test_plot_grouped_bar.01.svg')
     _plot('./test_plot_grouped_bar.02.svg')
 
-from iml_profiler.profiler import iml_logging
+from iml_profiler.profiler.iml_logging import logger
 def main():
-    iml_logging.setup_logging()
-
     parser = argparse.ArgumentParser()
     parser.add_argument('--test-plot-grouped-bar', action='store_true')
     parser.add_argument('--plot-type', choices=['gpu_util_experiment', 'trtexec'])
     parser.add_argument('--debug', action='store_true')
     args, argv = parser.parse_known_args()
-    logging.info(pprint_msg({'argv': argv}))
+    logger.info(pprint_msg({'argv': argv}))
 
     all_args = copy.deepcopy(vars(args))
     def _main():
@@ -1526,16 +1656,21 @@ def main():
             sub_parser.add_argument('--multithread-dir')
             sub_parser.add_argument('--multiprocess-dir')
             sub_args, sub_argv = sub_parser.parse_known_args(argv)
-            logging.info(pprint_msg({'sub_argv': sub_argv}))
+            logger.info(pprint_msg({'sub_argv': sub_argv}))
 
             all_args.update(vars(sub_args))
             plot = GpuUtilExperiment(args=all_args)
             plot.run()
         if args.plot_type == 'trtexec':
             sub_parser = argparse.ArgumentParser()
-            sub_parser.add_argument('--trtexec-dir', required=True)
+            sub_parser.add_argument('--trtexec-dir'
+                                    # , required=True
+                                    )
+            sub_parser.add_argument('--tf-inference-dir'
+                                    # , required=True
+                                    )
             sub_args, sub_argv = sub_parser.parse_known_args(argv)
-            logging.info(pprint_msg({'sub_argv': sub_argv}))
+            logger.info(pprint_msg({'sub_argv': sub_argv}))
 
             all_args.update(vars(sub_args))
             plot = TrtexecExperiment(args=all_args)
@@ -1566,14 +1701,14 @@ def save_plot(df, plot_path, tee=True):
     with open(dataframe_txt_path, 'w') as f:
         f.write(DataFrame.dataframe_string(df))
     if tee:
-        logging.info("{plot_path} dataframe:\n{msg}".format(
+        logger.info("{plot_path} dataframe:\n{msg}".format(
             msg=txt_indent(DataFrame.dataframe_string(df), indent=1),
             plot_path=plot_path,
         ))
 
     df.to_csv(dataframe_csv_path, index=False)
 
-    logging.info("Output plot @ {path}".format(path=plot_path))
+    logger.info("Output plot @ {path}".format(path=plot_path))
     plt.savefig(
         plot_path,
         bbox_inches='tight',

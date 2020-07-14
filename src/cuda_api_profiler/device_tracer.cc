@@ -37,6 +37,7 @@ limitations under the License.
 
 #include <cuda.h>
 #include <cupti_target.h>
+#include <cupti.h>
 
 #include <absl/memory/memory.h>
 
@@ -94,16 +95,16 @@ class CUDAAPIProfiler;
 
 namespace devicetracer {
 
-// Used by ActivityBuffer and DeviceTracerImpl
-#define CUPTI_CALL(call)                                            \
-  do {                                                              \
-    CUptiResult _status = call;                                     \
-    if (_status != CUPTI_SUCCESS) {                                 \
-      const char *errstr;                                           \
-      cuptiGetResultString(_status, &errstr);                       \
-      LOG(FATAL) << "libcupti call " << #call << " failed with " << errstr; \
-    }                                                               \
-  } while (0)
+//// Used by ActivityBuffer and DeviceTracerImpl
+//#define CUPTI_CALL(call)
+//  do {
+//    CUptiResult _status = call;
+//    if (_status != CUPTI_SUCCESS) {
+//      const char *errstr;
+//      cuptiGetResultString(_status, &errstr);
+//      LOG(FATAL) << "libcupti call " << #call << " failed with " << errstr;
+//    }
+//  } while (0)
 
 #ifdef _MSC_VER
 #define __thread __declspec(thread)
@@ -210,6 +211,7 @@ class DeviceTracerImpl : public DeviceTracer {
   // DeviceTracer interface:
   MyStatus Start() override;
   MyStatus DisableGpuHW() override;
+  MyStatus _DisableGpuHW();
   MyStatus Stop() override;
   MyStatus Print() override;
 //  MyStatus Collect() override;
@@ -330,11 +332,13 @@ class DeviceTracerImpl : public DeviceTracer {
   CUDAAPIProfiler _api_profiler;
   CUDAAPIProfilerPrinter api_printer_;
   CUDAActivityProfiler _activity_profiler;
-  GPUHwCounterSampler _hw_profiler;
+//  GPUHwCounterSampler _hw_profiler;
   std::shared_ptr<CudaStreamMonitor> stream_monitor_;
   EventProfiler _event_profiler;
   RegisteredFunc::FuncId _cuda_stream_monitor_cbid;
   std::shared_ptr<CuptiAPI> _cupti_api;
+  // Q: Do we need to call cuptiProfilerDeinitialize(...) this AFTER cuptiUnsubscribe...?
+  GPUHwCounterSampler _hw_profiler;
   RegisteredHandle<CuptiCallback::FuncId> _cupti_cb_handle;
 
 #ifdef WITH_CUDA_LD_PRELOAD
@@ -344,7 +348,7 @@ class DeviceTracerImpl : public DeviceTracer {
 
   CUPTIManager *cupti_manager_;
 //  std::unique_ptr<perftools::gputools::profiler::CuptiWrapper> cupti_wrapper_;
-  CUpti_SubscriberHandle subscriber_;
+//  CUpti_SubscriberHandle subscriber_;
 
   std::mutex trace_mu_;
   static constexpr size_t kMaxRecords = 1024 * 1024;
@@ -426,6 +430,12 @@ DeviceTracerImpl::~DeviceTracerImpl() {
     DCHECK(_cuda_stream_monitor_cbid != -1);
     stream_monitor_->UnregisterCallback(_cuda_stream_monitor_cbid);
   }
+  // IMPORTANT: This MUST be called to ensure that GPUHwCounterSampler calls cuptiProfilerDeInitialize AFTER
+  // cuptiUnsubscribe is called.  Otherwise, you'll get "CUPTI_ERROR_NOT_INITIALIZED" errors from cuptiUnsubscribe.
+  // I'm not sure WHY this happens... the CUPTI API has no indication about it, and I would expect
+  // cuptiProfilerDeInitialize to only affect new "Profiling API" calls.
+  // Also, this issue is NOT reproducible in isolation in the "callback_timestamps" CUPTI sample program.
+  _cupti_api->ClearCallbacks();
 }
 
 void DeviceTracerImpl::_Register_LD_PRELOAD_Callbacks() {
@@ -512,7 +522,7 @@ void DeviceTracerImpl::_RegisterCUDAAPICallbacks() {
 
 void DeviceTracerImpl::_EnableSomeCUDAAPICallbacks() {
 
-  CUPTI_CALL(_cupti_api->EnableCallback(
+  CUPTI_API_CALL_MAYBE_EXIT(_cupti_api->EnableCallback(
       /*enable=*/1,
       // subscriber_,
                  CUPTI_CB_DOMAIN_RUNTIME_API,
@@ -520,23 +530,23 @@ void DeviceTracerImpl::_EnableSomeCUDAAPICallbacks() {
 
   // cudaMemcpy isn't asynchronous, so time spent in the API call will vary depending on the size of the copy.
   // Q: Not sure why, but we still end up tracing cudaMemcpy calls even though we said to trace only cudaMemcpyAsync.
-//  CUPTI_CALL(_cupti_api->EnableCallback(
+//  CUPTI_API_CALL_MAYBE_EXIT(_cupti_api->EnableCallback(
 //      /*enable=*/1,
 //      // subscriber_,
 //                 CUPTI_CB_DOMAIN_RUNTIME_API,
 //                 CUPTI_RUNTIME_TRACE_CBID_cudaMemcpy_v3020));
 
-  CUPTI_CALL(_cupti_api->EnableCallback(
+  CUPTI_API_CALL_MAYBE_EXIT(_cupti_api->EnableCallback(
       /*enable=*/1,
       // subscriber_,
                  CUPTI_CB_DOMAIN_RUNTIME_API,
                  CUPTI_RUNTIME_TRACE_CBID_cudaMemcpyAsync_v3020));
-  CUPTI_CALL(_cupti_api->EnableCallback(
+  CUPTI_API_CALL_MAYBE_EXIT(_cupti_api->EnableCallback(
       /*enable=*/1,
       // subscriber_,
                  CUPTI_CB_DOMAIN_RUNTIME_API,
                  CUPTI_RUNTIME_TRACE_CBID_cudaMalloc_v3020));
-  CUPTI_CALL(_cupti_api->EnableCallback(
+  CUPTI_API_CALL_MAYBE_EXIT(_cupti_api->EnableCallback(
       /*enable=*/1,
       // subscriber_,
                  CUPTI_CB_DOMAIN_RUNTIME_API,
@@ -551,9 +561,12 @@ void DeviceTracerImpl::_EnableAllCUDAAPICallbacks() {
 }
 
 MyStatus DeviceTracerImpl::DisableGpuHW() {
+  std::unique_lock<std::mutex> l(mu_);
+  return _DisableGpuHW();
+}
+MyStatus DeviceTracerImpl::_DisableGpuHW() {
   MyStatus status = MyStatus::OK();
   VLOG(1) << "DeviceTracer::DisableGpuHW";
-  std::unique_lock<std::mutex> l(mu_);
   status = _hw_profiler.Disable();
   IF_BAD_STATUS_RETURN(status);
   return MyStatus::OK();
@@ -697,14 +710,14 @@ MyStatus DeviceTracerImpl::Stop() {
     timer.EndOperation("GlobalDefaultTraceCollector()->Stop()");
   }
 #else
-  CUPTI_CALL(cuptiUnsubscribe(subscriber_));
+  CUPTI_API_CALL_MAYBE_EXIT(cuptiUnsubscribe(subscriber_));
   if (GlobalDefaultTraceCollector()->IsEnabledForAnnotations()) {
     GlobalDefaultTraceCollector()->Stop();
   }
 
   TF_RETURN_IF_ERROR(cupti_manager_->DisableTrace());
   end_walltime_us_ = NowInUsec();
-  CUPTI_CALL(cuptiGetTimestamp(&end_timestamp_));
+  CUPTI_API_CALL_MAYBE_EXIT(cuptiGetTimestamp(&end_timestamp_));
 #endif // CONFIG_TRACE_STATS
   enabled_ = false;
 #ifdef DEBUG_CRITICAL_PATH
@@ -818,6 +831,9 @@ MyStatus DeviceTracerImpl::SetMetadata(const char* directory, const char* proces
   auto dump_path = DumpDirectory(directory, phase_name, process_name);
   _hw_profiler.SetDirectory(dump_path);
   _hw_profiler.SetDevice(_device);
+  if (!is_yes("IML_GPU_HW", false)) {
+    _DisableGpuHW();
+  }
   status = _hw_profiler.Init();
   IF_BAD_STATUS_RETURN(status);
   return MyStatus::OK();

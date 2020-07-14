@@ -1,5 +1,5 @@
 import subprocess
-import logging
+from iml_profiler.profiler.iml_logging import logger
 import contextlib
 
 import os
@@ -59,7 +59,7 @@ def tee(cmd, to_file, cwd=None, append=False, makedirs=True, check=True, dry_run
                 while True:
 
                     if debug:
-                        logging.info("RUN [05]: p.poll()")
+                        logger.info("RUN [05]: p.poll()")
                     rc = p.poll()
                     if rc is not None:
                         break
@@ -68,16 +68,16 @@ def tee(cmd, to_file, cwd=None, append=False, makedirs=True, check=True, dry_run
                     # train_stable_baselines.sh is terminated (it shows up as a Zombie process in htop/top).
                     # Sadly, this only happens occasionally, and I have yet to understand WHY it happens.
                     if debug:
-                        logging.info("RUN [06]: line = p.stdout.readline()")
+                        logger.info("RUN [06]: line = p.stdout.readline()")
                     line = p.stdout.readline()
 
                     # b'\n'-separated lines
                     if debug:
-                        logging.info("RUN [07]: line.decode")
+                        logger.info("RUN [07]: line.decode")
                     line = line.decode("utf-8")
 
                     if debug:
-                        logging.info("RUN [08]: line (\"{line}\") == '' (result={result})".format(
+                        logger.info("RUN [08]: line (\"{line}\") == '' (result={result})".format(
                             result=(line == ''),
                             line=line))
                     if line == '':
@@ -85,21 +85,21 @@ def tee(cmd, to_file, cwd=None, append=False, makedirs=True, check=True, dry_run
 
                     if re.search(r'> train\.py has exited', line):
                         pass
-                        # logging.info("> ENABLE TEE DEBUGGING")
+                        # logger.info("> ENABLE TEE DEBUGGING")
                         # debug = True
 
                     if debug:
-                        logging.info("RUN [01]: sys.stdout.write(line)")
+                        logger.info("RUN [01]: sys.stdout.write(line)")
                     sys.stdout.write(line)
                     if debug:
-                        logging.info("RUN [02]: sys.stdout.flush()")
+                        logger.info("RUN [02]: sys.stdout.flush()")
                     sys.stdout.flush()
 
                     if debug:
-                        logging.info("RUN [03]: f.write(line)")
+                        logger.info("RUN [03]: f.write(line)")
                     f.write(line)
                     if debug:
-                        logging.info("RUN [04]: f.flush()")
+                        logger.info("RUN [04]: f.flush()")
                     f.flush()
             sys.stdout.flush()
             f.flush()
@@ -128,9 +128,9 @@ class ScopedLogFile:
             else:
                 self.mode = 'w'
             if self.makedirs:
-                # logging.info("mkdirs {path}".format(path=_d(self.file)))
+                # logger.info("mkdirs {path}".format(path=_d(self.file)))
                 os.makedirs(_d(self.file), exist_ok=True)
-                # logging.info("ScopedLogFile.file = {path}".format(path=self.file))
+                # logger.info("ScopedLogFile.file = {path}".format(path=self.file))
             self.f = open(self.file, self.mode)
             return self.f
         else:
@@ -187,18 +187,18 @@ def expr_run_cmd(cmd, to_file,
             failed = False
         except subprocess.CalledProcessError as e:
             if not skip_error:
-                logging.info((
+                logger.info((
                                  "> Command failed: see {path}; exiting early "
                                  "(use --skip-error to ignore individual experiment errors)"
                              ).format(path=to_file))
                 ret = 1
                 if debug:
-                    logging.info("Exiting with ret={ret}\n{stack}".format(
+                    logger.info("Exiting with ret={ret}\n{stack}".format(
                         ret=ret,
                         stack=get_stacktrace(),
                     ))
                 sys.exit(ret)
-            logging.info(
+            logger.info(
                 "> Command failed; see {path}; continuing (--skip-error was set)".format(
                     path=to_file,
                 ))
@@ -206,7 +206,7 @@ def expr_run_cmd(cmd, to_file,
 
         if not failed:
             if not dry_run and proc.returncode != 0:
-                logging.info("BUG: saw returncode = {ret}, expected 0".format(
+                logger.info("BUG: saw returncode = {ret}, expected 0".format(
                     ret=proc.returncode))
                 assert proc.returncode == 0
             if not dry_run:
@@ -225,7 +225,7 @@ def expr_already_ran(to_file, debug=False):
             line = line.rstrip()
             if re.search(r'{success_line}'.format(success_line=EXPERIMENT_SUCCESS_LINE), line):
                 if debug:
-                    logging.info("Saw \"{success_line}\" in {path} @ line {lineno}; skipping.".format(
+                    logger.info("Saw \"{success_line}\" in {path} @ line {lineno}; skipping.".format(
                         success_line=EXPERIMENT_SUCCESS_LINE,
                         lineno=lineno,
                         path=to_file))

@@ -1,4 +1,4 @@
-import logging
+from iml_profiler.profiler.iml_logging import logger
 import re
 import numpy as np
 import csv
@@ -350,7 +350,7 @@ class PythonProfileParser:
 
     # def _parse_num_calls(self, bench_name):
     #     call_times_path = self._call_times_path(bench_name)
-    #     logging.info("> Parsing call times: {f}".format(f=call_times_path))
+    #     logger.info("> Parsing call times: {f}".format(f=call_times_path))
     #     # self.call_times = self.load_call_times(bench_name)
     #     # if self.is_dqn:
     #     #     micro_data = self.load_microbench(bench_name)
@@ -363,7 +363,7 @@ class PythonProfileParser:
     #     # else:
     #     #     # Already read it from self.config in __init__
     #     #     assert self.num_calls is not None
-    #     logging.info("> num_calls = {num_calls}".format(
+    #     logger.info("> num_calls = {num_calls}".format(
     #         num_calls=self.num_calls))
 
     def run(self):
@@ -407,7 +407,7 @@ class PythonProfileParser:
         # call_times_path = self._call_times_path(op_name)
         # # if not _e(call_times_path):
         # #     return
-        # logging.info("> Parsing call times: {f}".format(f=call_times_path))
+        # logger.info("> Parsing call times: {f}".format(f=call_times_path))
         # call_times = self.load_call_times(op_name)
         # micro_data = self.load_microbench(op_name)
         # micro_name = self.get_micro_name()
@@ -416,7 +416,7 @@ class PythonProfileParser:
         # # We expect the number of times a particular CUDA-function/CUDA-API is called to be a multiple of
         # # num_calls = iterations*repetitions
         # self.num_calls = compute_num_calls_dqn(bench_data)
-        # logging.info("> num_calls = {num_calls}".format(
+        # logger.info("> num_calls = {num_calls}".format(
         #     num_calls=self.num_calls))
         # start_parse_call_times = time.time()
         # self._parse_num_calls(op_name)
@@ -432,7 +432,7 @@ class PythonProfileParser:
         )
 
         if len(category_times) == 0:
-            logging.info("> WARNING: cannot generate python profile for op={op}; no events found for any process.".format(
+            logger.info("> WARNING: cannot generate python profile for op={op}; no events found for any process.".format(
                 op=op_name))
             return
 
@@ -447,9 +447,9 @@ class PythonProfileParser:
         self.num_calls = len(category_times[CATEGORY_OPERATION])
 
         # end_parse_call_times = time.time()
-        # logging.info("> Parsing call times took: {sec} seconds".format(sec=end_parse_call_times - start_parse_call_times)) # 45 seconds, ~ 6-7 GB
+        # logger.info("> Parsing call times took: {sec} seconds".format(sec=end_parse_call_times - start_parse_call_times)) # 45 seconds, ~ 6-7 GB
 
-        # logging.info("> Adding call times to pyfunc_stats:") # 249 seconds / 4min 9sec; this takes up a LOT of memory: 34.5 GIG.
+        # logger.info("> Adding call times to pyfunc_stats:") # 249 seconds / 4min 9sec; this takes up a LOT of memory: 34.5 GIG.
         start_add_call_times = time.time()
         progress_label = as_progress_label('parse_call_times', debug_label)
         for i, ktime in enumerate(progress(category_times[CATEGORY_PYTHON_PROFILER],
@@ -467,19 +467,19 @@ class PythonProfileParser:
             assert type(ktime) == KernelTime
             pyfunc_stats.add_ktime(ktime)
         end_add_call_times = time.time()
-        logging.info("> Adding call times to pyfunc_stats took: {sec} seconds".format(sec=end_add_call_times - start_add_call_times))
+        logger.info("> Adding call times to pyfunc_stats took: {sec} seconds".format(sec=end_add_call_times - start_add_call_times))
 
         # TODO: convert cycles to usec!
 
         # Q: I don't think it makes sense to call 'split'...?
-        logging.info("> Split pyfunc stats:") # 20 seconds
+        logger.info("> Split pyfunc stats:") # 20 seconds
         start_split_call_times = time.time()
         pyfunc_stats.split(self.num_calls)
         end_split_call_times = time.time()
-        logging.info("> Split pyfunc stats took: {sec} seconds".format(sec=end_split_call_times - start_split_call_times))
+        logger.info("> Split pyfunc stats took: {sec} seconds".format(sec=end_split_call_times - start_split_call_times))
 
         # This takes a while and we don't use it; skip.
-        logging.info("> Dumping pyfunc stats:") # 467 seconds
+        logger.info("> Dumping pyfunc stats:") # 467 seconds
         start_dump_call_times = time.time()
         with open(self._call_times_summary_path(op_name), 'w') as f:
             # with open(self._call_times_pyprof_path(op_name), 'w') as f_pyprof:
@@ -488,8 +488,8 @@ class PythonProfileParser:
             # we can make sure we're doing things correctly.
             # pyfunc_stats.dump_nvprof(f_pyprof, 'Python')
         end_dump_call_times = time.time()
-        logging.info("> Dumping pyfunc stats took: {sec} seconds".format(sec=end_dump_call_times - start_dump_call_times))
-        logging.info("> Parsed call times into: {f}".format(f=self._call_times_summary_path(op_name)))
+        logger.info("> Dumping pyfunc stats took: {sec} seconds".format(sec=end_dump_call_times - start_dump_call_times))
+        logger.info("> Parsed call times into: {f}".format(f=self._call_times_summary_path(op_name)))
 
     def total_iterations(self, bench_name):
         if self.num_calls is None:
@@ -504,7 +504,7 @@ class PythonProfileParser:
     # def parse_python_overhead(self, bench_name, dump_json=True, get_raw_data=False):
     #     self.parse_call_times(bench_name)
     #
-    #     logging.info("> Parsing python overhead: {f}".format(f=self._python_overhead_path(bench_name)))
+    #     logger.info("> Parsing python overhead: {f}".format(f=self._python_overhead_path(bench_name)))
     #
     #     # TODO: This is tensorflow specific, we need to try wrapping end-to-end test
     #     # and making this work for all C++ libraries
@@ -523,16 +523,16 @@ class PythonProfileParser:
     #     # 22000 calls
     #     # 22 different calls to this function in each iteration
     #
-    #     logging.info("> Compute python overhead")
+    #     logger.info("> Compute python overhead")
     #     start_compute_python_overhead = time.time()
     #     if self.debug:
-    #         logging.info("> cpp_func_re = {regex}".format(regex=cpp_func_re))
+    #         logger.info("> cpp_func_re = {regex}".format(regex=cpp_func_re))
     #     for stat in pyfunc_stats.stats:
     #         # Returns an array of size self.num_calls, one entry for each time
     #         # an "iteration" of the expierment was run.
     #         times_sec = stat.iteration_times_sec(self.num_calls)
     #         if self.debug:
-    #             logging.info("> stat.name = {name}".format(name=stat.name))
+    #             logger.info("> stat.name = {name}".format(name=stat.name))
     #             if stat.name == "/mnt/data/james/clone/dnn_tensorflow_cpp/python/test/py_interface.py:78(CLIB__run_cpp)":
     #                 import ipdb; ipdb.set_trace()
     #         if is_cpp_func(stat.name):
@@ -540,7 +540,7 @@ class PythonProfileParser:
     #         else:
     #             python_times += times_sec
     #     end_compute_python_overhead = time.time()
-    #     logging.info("> Compute python overhead took: {sec} seconds".format(sec=end_compute_python_overhead - start_compute_python_overhead))
+    #     logger.info("> Compute python overhead took: {sec} seconds".format(sec=end_compute_python_overhead - start_compute_python_overhead))
     #
     #     total_times = cpp_and_gpu_times + python_times
     #
@@ -723,7 +723,7 @@ class PythonProfileTotalParser(ProfilerParser):
             raw_datas.append(raw_data)
             profile_paths.append(python_overhead_path)
 
-        logging.info("> Using the first {n} samples from each DQN stage to compute Total...".format(
+        logger.info("> Using the first {n} samples from each DQN stage to compute Total...".format(
             n=smallest_length))
 
         cpp_and_gpu_times = np.zeros(smallest_length)
@@ -734,7 +734,7 @@ class PythonProfileTotalParser(ProfilerParser):
 
         data = compute_plot_data(cpp_and_gpu_times, python_times)
         do_dump_json(data, path)
-        logging.info("> Output pyprof Total: {f}".format(f=path))
+        logger.info("> Output pyprof Total: {f}".format(f=path))
 
         # parse_pyprof_total(self.directory(bench_name), src_files.bench_names, self.parser, self.args)
         # self.parse_pyprof_total()

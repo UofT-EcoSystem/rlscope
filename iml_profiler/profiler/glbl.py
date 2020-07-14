@@ -2,13 +2,13 @@
 Manage a singleton instance to a Profiler object.
 """
 
-import logging
+from iml_profiler.profiler.iml_logging import logger
 import sys
 import os
 import re
 import platform
 
-from iml_profiler.profiler import iml_logging
+from iml_profiler.profiler.iml_logging import logger
 from iml_profiler.profiler import profilers
 from iml_profiler.profiler import nvidia_gpu_query
 from iml_profiler.clib import sample_cuda_api
@@ -20,8 +20,7 @@ import tensorflow as tf
 from os.path import join as _j, abspath as _a, exists as _e, dirname as _d, basename as _b
 
 import iml_profiler
-
-logger = logging.getLogger('iml')
+from iml_profiler.profiler.iml_logging import logger
 
 # prof = None
 session = None
@@ -80,7 +79,7 @@ def patch_environ():
             keep_ld_preloads.append(ld_preload)
 
     os.environ['LD_PRELOAD'] = ':'.join(keep_ld_preloads)
-    logging.info((
+    logger.info((
         "Remove librlscope.so from LD_PRELOAD:\n"
         "  LD_PRELOAD={LD_PRELOAD}").format(
         LD_PRELOAD=os.environ['LD_PRELOAD']))
@@ -114,8 +113,6 @@ def handle_iml_args(parser, args, directory=None, reports_progress=False):
     # TLDR: remove librlscope.so from env['LD_PRELOAD'] if it's there, re-add it when we use python-IML to
     # launch new training scripts.
     patch_environ()
-
-    iml_logging.setup_logging()
 
     if iml_directory is None:
         raise RuntimeError("IML: you must provide a location to store trace files: --iml-directory <dir>")

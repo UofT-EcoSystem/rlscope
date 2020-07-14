@@ -1,4 +1,4 @@
-import logging
+from iml_profiler.profiler.iml_logging import logger
 import psutil
 import os
 import multiprocessing
@@ -60,14 +60,14 @@ USE_CONNECTION_POOLING = False
 
 def Worker_get_device_names(kwargs):
     if kwargs['debug']:
-        logging.info("> Start: Worker_get_device_names cuda_device_events_path={path}".format(path=kwargs['cuda_device_events_path']))
+        logger.info("> Start: Worker_get_device_names cuda_device_events_path={path}".format(path=kwargs['cuda_device_events_path']))
     reader = CUDADeviceEventsReader(kwargs['cuda_device_events_path'])
     device_names = reader.get_device_names()
     if kwargs['debug']:
         pprint.pprint({
             'device_names':device_names,
             'cuda_device_events_path':kwargs['cuda_device_events_path']})
-        logging.info("> Stop: Worker_get_device_names cuda_device_events_path={path}".format(path=kwargs['cuda_device_events_path']))
+        logger.info("> Stop: Worker_get_device_names cuda_device_events_path={path}".format(path=kwargs['cuda_device_events_path']))
 
     return reader.machine_name, device_names
 
@@ -151,7 +151,7 @@ class SQLParser:
 
         For details; see CFuncWrapper.__call__
         """
-        logging.info("> BUG: remove Python Events with negative Event.duration_us")
+        logger.info("> BUG: remove Python Events with negative Event.duration_us")
         c = self.cursor
 
         negative_duration_query = textwrap.dedent("""
@@ -328,7 +328,7 @@ class SQLParser:
         })
 
         if self.debug:
-            logging.info("> Read metadata.")
+            logger.info("> Read metadata.")
 
         # Read metadata from CPU/GPU utilization files
         # e.g. machine_util.trace_0.proto
@@ -337,7 +337,7 @@ class SQLParser:
             if not is_machine_util_file(path):
                 continue
             if self.debug:
-                logging.info("> get_util_metadata path={path}".format(path=path))
+                logger.info("> get_util_metadata path={path}".format(path=path))
             md = get_util_metadata(path)
             util_metas.append(md)
         machine_name_to_device_names = dict()
@@ -347,13 +347,13 @@ class SQLParser:
             machine_name_to_device_names[util_meta['machine_name']].update(util_meta['device_names'])
 
         if self.debug:
-            logging.info("> Insert machines.")
-            logging.info(pprint_msg({'machine_name_to_device_names':machine_name_to_device_names}))
+            logger.info("> Insert machines.")
+            logger.info(pprint_msg({'machine_name_to_device_names':machine_name_to_device_names}))
         for machine_name in machine_name_to_device_names.keys():
             self.insert_machine_name(machine_name, debug=self.debug)
 
         if self.debug:
-            logging.info("> Insert devices.")
+            logger.info("> Insert devices.")
         for machine_name, device_names in machine_name_to_device_names.items():
             machine_id = self.machine_to_id[machine_name]
             for device_name in device_names:
@@ -366,7 +366,7 @@ class SQLParser:
             if not is_process_trace_file(path):
                 continue
             if self.debug:
-                logging.info("> get_process_trace_metadata path={path}".format(path=path))
+                logger.info("> get_process_trace_metadata path={path}".format(path=path))
             md = get_process_trace_metadata(path)
             process_trace_metas.append(md)
 
@@ -379,7 +379,7 @@ class SQLParser:
                              if is_process_metadata_file(path)]
 
         if self.debug:
-            logging.info("> Insert processes.")
+            logger.info("> Insert processes.")
 
         # Options
         # 1. Insert each process in reference order
@@ -391,7 +391,7 @@ class SQLParser:
         process_to_assigned_id = dict((process_name, ident) for ident, process_name in enumerate(process_names, start=1))
 
         if self.debug:
-            logging.info(pprint_msg({'process_to_assigned_id': process_to_assigned_id}))
+            logger.info(pprint_msg({'process_to_assigned_id': process_to_assigned_id}))
 
         for md in process_metadatas:
             fields = {
@@ -410,24 +410,24 @@ class SQLParser:
             self.insert_process_name(md.process_name, fields=fields, debug=True)
 
         if self.debug:
-            logging.info("> Insert phases.")
+            logger.info("> Insert phases.")
 
         phase_names = sorted(meta['phase_name'] for meta in process_trace_metas)
         for phase_name in phase_names:
             self.insert_phase_name(phase_name)
 
         if self.debug:
-            logging.info("> Read util metadata.")
+            logger.info("> Read util metadata.")
 
 
         if self.debug:
-            logging.info("> Insert categories.")
+            logger.info("> Insert categories.")
         categories = sorted(set(CATEGORIES_ALL))
         for category in categories:
             self.insert_category_name(category)
 
         if self.debug:
-            logging.info("> Insert tfprof device names.")
+            logger.info("> Insert tfprof device names.")
 
         def get_Worker_get_device_names_kwargs(cuda_device_events_path):
             return {'cuda_device_events_path':cuda_device_events_path, 'debug':self.debug}
@@ -450,7 +450,7 @@ class SQLParser:
             #     reader = TFProfCategoryTimesReader(path)
             #     device_names.update(reader.get_device_names())
         if self.debug:
-            logging.info(pprint_msg({'machine_to_device_names':machine_to_device_names}))
+            logger.info(pprint_msg({'machine_to_device_names':machine_to_device_names}))
 
         if not self.debug_single_thread:
             device_name_pool.close()
@@ -464,10 +464,10 @@ class SQLParser:
                 })
 
         if self.debug:
-            logging.info("> Commit.")
+            logger.info("> Commit.")
         self.conn.commit()
 
-        logging.info("Entity id maps:\n{maps}".format(
+        logger.info("Entity id maps:\n{maps}".format(
             maps=textwrap.indent(pprint.pformat({
                 'process_to_id':self.process_to_id,
                 'category_to_id':self.category_to_id,
@@ -482,7 +482,7 @@ class SQLParser:
         id_field = None
 
         if self.debug:
-            logging.info("> Insert table files.")
+            logger.info("> Insert table files.")
 
         def get_worker_kwargs(path):
             if is_machine_util_file(path):
@@ -508,16 +508,16 @@ class SQLParser:
 
         if not self.debug_single_thread:
             if self.debug:
-                logging.info("> Insert table files using thread pool.")
+                logger.info("> Insert table files using thread pool.")
             imap_iter = pool.imap_unordered(mk_TraceFileInserter, worker_kwargs)
         else:
             if self.debug:
-                logging.info("> Insert table files using single thread.")
+                logger.info("> Insert table files using single thread.")
             imap_iter = self.single_thread_iter(mk_TraceFileInserter, worker_kwargs)
 
         with progressbar.ProgressBar(max_value=len(src_files), prefix="SQL insert") as bar:
             for i, result in enumerate(imap_iter):
-                # logging.info("> i={i}, result={result}".format(
+                # logger.info("> i={i}, result={result}".format(
                 #     i=i, result=result))
                 bar.update(i)
 
@@ -550,12 +550,12 @@ class SQLParser:
         """
         Run any post-insert checks not captured by database constraints.
         """
-        logging.info("> Check event data...")
+        logger.info("> Check event data...")
         start_t = time.time()
         self._check_no_partial_or_complete_op_overlap()
         end_t = time.time()
         time_sec = end_t - start_t
-        logging.info("  Took {sec} seconds".format(sec=time_sec))
+        logger.info("  Took {sec} seconds".format(sec=time_sec))
 
     def _HACK_clean_data(self):
         self._remove_buggy_data()
@@ -674,20 +674,20 @@ class SQLParser:
             if fields is not None:
                 dic.update(fields)
             if debug:
-                logging.info(pprint_msg({'insert_dict':dic}))
+                logger.info(pprint_msg({'insert_dict':dic}))
             ident = self.conn.insert_dict(table, dic, id_field=id_field, debug=debug)
         else:
             # Row exists; obtain primary-key.
             ident = rows[0][id_field]
             if debug:
-                logging.info("Row exists but primary-key wasn't cached: {table}['{name}'] = {id}".format(
+                logger.info("Row exists but primary-key wasn't cached: {table}['{name}'] = {id}".format(
                     table=table,
                     name=name,
                     id=ident,
                 ))
 
         if debug:
-            logging.info("Cache entity: {table}['{name}'] = {id}".format(
+            logger.info("Cache entity: {table}['{name}'] = {id}".format(
                 table=table,
                 name=name,
                 id=ident,
@@ -701,9 +701,9 @@ class SQLParser:
     #         proto = CategoryEventsProto()
     #         proto.ParseFromString(f.read())
     #
-    #     logging.info("> Insert pyprof file: {p}".format(p=path))
+    #     logger.info("> Insert pyprof file: {p}".format(p=path))
     #     if self.debug:
-    #         logging.info(proto)
+    #         logger.info(proto)
     #
     #     c = self.cursor
     #     # Insert Process
@@ -764,20 +764,20 @@ class SQLParser:
         # self.cursor.executescript(script)
 
     def create_indices(self):
-        logging.info("> Create indices...")
+        logger.info("> Create indices...")
         start_t = time.time()
         self.conn.create_indices()
         end_t = time.time()
         time_sec = end_t - start_t
-        logging.info("  Took {sec} seconds".format(sec=time_sec))
+        logger.info("  Took {sec} seconds".format(sec=time_sec))
 
     def create_constraints(self):
-        logging.info("> Create constraints...")
+        logger.info("> Create constraints...")
         start_t = time.time()
         self.conn.create_constraints()
         end_t = time.time()
         time_sec = end_t - start_t
-        logging.info("  Took {sec} seconds".format(sec=time_sec))
+        logger.info("  Took {sec} seconds".format(sec=time_sec))
 
     @property
     def db_path(self):
@@ -847,7 +847,7 @@ class BulkInserter:
         ident = row['id']
         if ident is None:
             # There are no rows in the table!
-            # logging.info("> IDENT is None, use 0")
+            # logger.info("> IDENT is None, use 0")
             ident = 0
         return ident
 
@@ -919,7 +919,7 @@ class AutoincrementID:
         ident = row['id']
         if ident is None:
             # There are no rows in the table!
-            # logging.info("> IDENT is None, use 0")
+            # logger.info("> IDENT is None, use 0")
             ident = 0
         return ident
 
@@ -1096,7 +1096,7 @@ class CSVInserter:
                 self.cursor.conn.insert_csv(self.tmp_path, self.table)
             end_t = time.time()
             if self.debug:
-                logging.info("> Loading CSV into {table} took {sec} seconds".format(
+                logger.info("> Loading CSV into {table} took {sec} seconds".format(
                     table=self.table,
                     sec=end_t - start_t))
 
@@ -1194,7 +1194,7 @@ class TraceFileInserter:
 
     def lookup_device_id(self, path, device):
         if device not in self.csv_inserter.device_to_id:
-            logging.info("> ERROR: Couldn't find device={dev} in path={path}".format(
+            logger.info("> ERROR: Couldn't find device={dev} in path={path}".format(
                 dev=device,
                 path=path))
             pprint.pprint({
@@ -1205,7 +1205,7 @@ class TraceFileInserter:
     def insert_cuda_api_stats_file(self, path):
         reader = CUDAAPIStatsReader(path)
 
-        logging.info("> Insert CUDA API Stats file: {p}".format(p=path))
+        logger.info("> Insert CUDA API Stats file: {p}".format(p=path))
 
         process_id = self.csv_inserter.process_to_id[reader.process_name]
         phase_id = self.csv_inserter.phase_to_id[reader.phase_name]
@@ -1222,7 +1222,7 @@ class TraceFileInserter:
     def insert_cuda_device_events_file(self, path):
         reader = CUDADeviceEventsReader(path)
 
-        logging.info("> Insert CUDA Device Events file: {p}".format(p=path))
+        logger.info("> Insert CUDA Device Events file: {p}".format(p=path))
 
         process_id = self.csv_inserter.process_to_id[reader.process_name]
         phase_id = self.csv_inserter.phase_to_id[reader.phase_name]
@@ -1237,7 +1237,7 @@ class TraceFileInserter:
     def insert_tfprof_file(self, path):
         reader = TFProfCategoryTimesReader(path)
 
-        logging.info("> Insert tfprof file: {p}".format(p=path))
+        logger.info("> Insert tfprof file: {p}".format(p=path))
 
         process_id = self.csv_inserter.process_to_id[reader.process_name]
         phase_id = self.csv_inserter.phase_to_id[reader.phase_name]
@@ -1260,7 +1260,7 @@ class TraceFileInserter:
     def insert_training_progress_file(self, path):
         proto = read_training_progress_file(path)
 
-        logging.info("> Insert training_progress file: {p}".format(p=path))
+        logger.info("> Insert training_progress file: {p}".format(p=path))
 
         process_id = self.csv_inserter.process_to_id[proto.process_name]
         phase_id = self.csv_inserter.phase_to_id[proto.phase]
@@ -1284,7 +1284,7 @@ class TraceFileInserter:
     def insert_category_events_file(self, path):
         reader = CategoryEventsReader(path)
 
-        logging.info("> Insert Category Events file: {p}".format(p=path))
+        logger.info("> Insert Category Events file: {p}".format(p=path))
 
         process_id = self.csv_inserter.process_to_id[reader.process_name]
         phase_id = self.csv_inserter.phase_to_id[reader.phase_name]
@@ -1301,7 +1301,7 @@ class TraceFileInserter:
     def insert_machine_util_file(self, path):
         proto = read_machine_util_file(path)
 
-        logging.info("> Insert machine CPU/GPU utilization file: {p}".format(p=path))
+        logger.info("> Insert machine CPU/GPU utilization file: {p}".format(p=path))
 
         machine_id = self.csv_inserter.machine_to_id[proto.machine_name]
 
@@ -1401,13 +1401,13 @@ class TracesPostgresConnection:
             assert rows[0][0] == 1
         except psycopg2.OperationalError as e:
             if not allow_reconnect:
-                logging.info("Detected dead connection to {user}@{host} db={db}; failed reconnect".format(
+                logger.info("Detected dead connection to {user}@{host} db={db}; failed reconnect".format(
                     user=self.user,
                     host=self.host,
                     db=self.db_name,
                 ))
                 raise
-            logging.info("Detected closed connection to {user}@{host} db={db}; attempting reconnect".format(
+            logger.info("Detected closed connection to {user}@{host} db={db}; attempting reconnect".format(
                 user=self.user,
                 host=self.host,
                 db=self.db_name,
@@ -1484,7 +1484,7 @@ class TracesPostgresConnection:
         cols, placeholders, colnames = self._get_insert_info(dic)
         values = [dic[col] for col in cols]
         if debug:
-            logging.info(pprint_msg({
+            logger.info(pprint_msg({
                 'cols':cols, 'colnames':colnames, 'values':values,
             }))
         query_lines = [
@@ -1512,7 +1512,7 @@ class TracesPostgresConnection:
         else:
             primary_key = c.lastrowid
         if debug:
-            logging.info("Autoincrement id = {id}".format(id=primary_key))
+            logger.info("Autoincrement id = {id}".format(id=primary_key))
         return primary_key
 
     def _get_insert_info(self, dic):
@@ -1574,9 +1574,9 @@ class TracesPostgresConnection:
             # “idle in transaction”, an undesirable condition for several reasons (locks are
             # held by the session, tables bloat…). For long lived scripts, either ensure to terminate a
             # transaction as soon as possible or use an autocommit connection."
-            # logging.info("autocommit before: {auto}".format(auto=conn.autocommit))
+            # logger.info("autocommit before: {auto}".format(auto=conn.autocommit))
             conn.autocommit = True
-            # logging.info("autocommit after: {auto}".format(auto=conn.autocommit))
+            # logger.info("autocommit after: {auto}".format(auto=conn.autocommit))
             assert conn.autocommit
         except psycopg2.OperationalError as e:
             if not re.search(r'database.*does not exist', e.args[0]):
@@ -1621,7 +1621,7 @@ class TracesPostgresConnection:
         return self.db_config is not None
 
     def _drop_connections(self):
-        logging.info("> Drop existing connections to {db}".format(db=self.db_name))
+        logger.info("> Drop existing connections to {db}".format(db=self.db_name))
         # psutil.
         # pid = 1234 # The pid whose info you're looking for
         # p = psutil.Process(pid)
@@ -1762,7 +1762,7 @@ class TracesPostgresConnection:
             self._conn = None
 
     def _drop_database(self):
-        logging.info("> Drop database = {db}".format(db=self.db_name))
+        logger.info("> Drop database = {db}".format(db=self.db_name))
         self._maybe_create_postgres_connection()
         self._maybe_close_db_connection()
         c = self.pg_cursor
@@ -1772,7 +1772,7 @@ class TracesPostgresConnection:
 
     def _drop_tables(self):
         tables = self.tables
-        logging.info("> Drop database tables: db={db}, tables={tables}".format(
+        logger.info("> Drop database tables: db={db}, tables={tables}".format(
             db=self.db_name,
             tables=tables))
 
@@ -1804,7 +1804,7 @@ class TracesPostgresConnection:
         self.run_sql_file(self.db_name, PSQL_INDICES_SQL)
 
     def _load_tables(self):
-        logging.info("> Load table schema into {db} from {path}".format(
+        logger.info("> Load table schema into {db} from {path}".format(
             db=self.db_name,
             path=PSQL_TABLE_SQL,
         ))
@@ -1821,7 +1821,7 @@ class TracesPostgresConnection:
         """
         with open(sql_path, 'r') as sql_f:
             # cmd_kwargs = self._psql_cmd_args(db_name)
-            logging.info("run sql file: {msg}".format(
+            logger.info("run sql file: {msg}".format(
                 msg=pprint_msg({
                     'host':self.host,
                     'user':self.user,
@@ -2359,7 +2359,7 @@ class SQLCategoryTimesReader:
             return training_progress.end_training_time_us
         training_progresses.sort(key=by_end_training_time_us)
         if allow_none and len(training_progresses) == 0:
-            logging.warning("Didn't find any TrainingProgress rows for args={args}, kwargs={kwargs}".format(
+            logger.warning("Didn't find any TrainingProgress rows for args={args}, kwargs={kwargs}".format(
                 args=args,
                 kwargs=kwargs))
             return None
@@ -2661,14 +2661,14 @@ class SQLCategoryTimesReader:
             self._steps[machine_name][process_name] = dict()
         self._steps[machine_name][process_name][bench_name] = rows
         if debug:
-            logging.info("fetch_steps(proc={proc}, op={op}) fetched {n} rows.".format(
+            logger.info("fetch_steps(proc={proc}, op={op}) fetched {n} rows.".format(
                 proc=process_name,
                 op=bench_name,
                 n=len(self._steps[machine_name][process_name][bench_name])))
         end_fetch_t = time.time()
         sec_fetch = end_fetch_t - start_fetch_t
         if debug or SQLCategoryTimesReader.DEBUG_FETCH_STEPS:
-            logging.info("> fetch_steps process={proc}, op={op} took {sec} seconds".format(
+            logger.info("> fetch_steps process={proc}, op={op} took {sec} seconds".format(
                 proc=process_name,
                 op=bench_name,
                 sec=sec_fetch,
@@ -2704,7 +2704,7 @@ class SQLCategoryTimesReader:
 
             keep_steps = self.keep_steps(process_name, machine_name, bench_name, skip_first_step, debug=debug)
             if debug:
-                logging.info("keep_steps = {steps}".format(steps=keep_steps))
+                logger.info("keep_steps = {steps}".format(steps=keep_steps))
             if bench_name == NO_BENCH_NAME:
                 pprint.pprint({
                     'name':'SQLCategoryTimesReader.each_op_instance',
@@ -2724,7 +2724,7 @@ class SQLCategoryTimesReader:
                     #   yield(process=loop_train_eval, step=0)
                     #   Why is step 0 so slow?
                     # - often 0.02 seconds, 0.10 seconds
-                    logging.info("> each_op_instance yield(process={proc}, step={step}) took {sec} seconds".format(
+                    logger.info("> each_op_instance yield(process={proc}, step={step}) took {sec} seconds".format(
                         proc=process_name,
                         step=step,
                         sec=sec,
@@ -2960,7 +2960,7 @@ class SQLCategoryTimesReader:
         # assert len(operation_types) > 0
 
         # if debug:
-        #     logging.info("> DEBUG: parse_timeline: ")
+        #     logger.info("> DEBUG: parse_timeline: ")
         #     pprint.pprint({
         #         'proc_types':proc_types,
         #         'operation_types':operation_types,
@@ -3259,7 +3259,7 @@ class SQLCategoryTimesReader:
             event_split = EventSplit(start_time_us=start_time_us, end_time_us=end_time_us)
 
         if fetchall and event_split is not None and debug:
-            logging.info("{event_split} has {n} event-rows".format(
+            logger.info("{event_split} has {n} event-rows".format(
                 event_split=event_split,
                 n=len(rows),
             ))
@@ -3463,7 +3463,7 @@ class SQLCategoryTimesReader:
         if SQLCategoryTimesReader.DEBUG_PARSE:
             end_get_events = time.time()
             sec_get_events = end_get_events - start_get_events
-            logging.info("> parse.get_events process={proc}, op={op}, step={step} took {sec} seconds".format(
+            logger.info("> parse.get_events process={proc}, op={op}, step={step} took {sec} seconds".format(
                 proc=process_name,
                 op=bench_name,
                 step=step,
@@ -3471,7 +3471,7 @@ class SQLCategoryTimesReader:
             ))
 
         if parse_debug:
-            logging.info("> step={step}, process={proc}, op={bench}, time={time}".format(
+            logger.info("> step={step}, process={proc}, op={bench}, time={time}".format(
                 step=step, proc=process_name, bench=bench_name, time=op_event))
 
         return self.events_that_overlap_with(
@@ -3603,7 +3603,7 @@ class SQLCategoryTimesReader:
         if SQLCategoryTimesReader.DEBUG_PARSE:
             end_parse_query_t = time.time()
             sec_parse_query = end_parse_query_t - start_parse_query_t
-            logging.info("> parse.query process={proc}, op={op}, step={step} took {sec} seconds".format(
+            logger.info("> parse.query process={proc}, op={op}, step={step} took {sec} seconds".format(
                 proc=process_name,
                 op=bench_name,
                 step=step,
@@ -3621,7 +3621,7 @@ class SQLCategoryTimesReader:
         if SQLCategoryTimesReader.DEBUG_PARSE:
             end_add_event_rows_t = time.time()
             sec_add_event_rows_t = end_add_event_rows_t - start_add_event_rows_t
-            logging.info("> parse.add_event_rows process={proc}, op={op}, step={step} took {sec} seconds".format(
+            logger.info("> parse.add_event_rows process={proc}, op={op}, step={step} took {sec} seconds".format(
                 proc=process_name,
                 op=bench_name,
                 step=step,
@@ -3635,7 +3635,7 @@ class SQLCategoryTimesReader:
                 proc=process_suffix(process_name),
                 step=step_suffix(step, allow_none=True),
                 bench=bench_suffix(bench_name)))
-            logging.info("> DEBUG: dump trace events BEFORE process_op_nest @ {path}".format(path=json_path))
+            logger.info("> DEBUG: dump trace events BEFORE process_op_nest @ {path}".format(path=json_path))
             dump_category_times(category_times, json_path, print_log=False)
 
         if SQLCategoryTimesReader.DEBUG_PARSE:
@@ -3652,7 +3652,7 @@ class SQLCategoryTimesReader:
         if SQLCategoryTimesReader.DEBUG_PARSE:
             end_process_op_nest_t = time.time()
             sec_process_op_nest_t = end_process_op_nest_t - start_process_op_nest_t
-            logging.info("> parse.process_op_nest process={proc}, op={op}, step={step} took {sec} seconds".format(
+            logger.info("> parse.process_op_nest process={proc}, op={op}, step={step} took {sec} seconds".format(
                 proc=process_name,
                 op=bench_name,
                 step=step,
@@ -3661,14 +3661,14 @@ class SQLCategoryTimesReader:
 
             end_parse_t = time.time()
             sec_parse = end_parse_t - start_parse_t
-            logging.info("> parse process={proc}, op={op}, step={step} took {sec} seconds".format(
+            logger.info("> parse process={proc}, op={op}, step={step} took {sec} seconds".format(
                 proc=process_name,
                 op=bench_name,
                 step=step,
                 sec=sec_parse,
             ))
             sec_total = sec_get_events + sec_add_event_rows_t + sec_process_op_nest_t + sec_parse_query
-            logging.info("> total parse subops = {sec} seconds".format(
+            logger.info("> total parse subops = {sec} seconds".format(
                 sec=sec_total,
             ))
 
@@ -3759,7 +3759,7 @@ class EventCategoryMapper:
 #             self.categories.add(cat)
 #         elif old_category == CATEGORY_OPERATION:
 #             cat = event.name
-#             # logging.info("> operation_types.add {cat}".format(cat=cat))
+#             # logger.info("> operation_types.add {cat}".format(cat=cat))
 #             self.operation_types.add(cat)
 #         else:
 #             # Q: What about category operation...?
@@ -3856,7 +3856,7 @@ def bin_category_times(
         #     categories.add(cat)
         # elif category == CATEGORY_OPERATION:
         #     cat = event.name
-        #     # logging.info("> operation_types.add {cat}".format(cat=cat))
+        #     # logger.info("> operation_types.add {cat}".format(cat=cat))
         #     operation_types.add(cat)
         # else:
         #     # Q: What about category operation...?
@@ -4174,11 +4174,11 @@ def sql_exec_query(cursor, query, params=None, klass=None, debug=False):
         if klass is not None:
             name_str = "{name} ".format(
                 name=klass.__name__)
-        logging.info("> {name_str}query:".format(
+        logger.info("> {name_str}query:".format(
             name_str=name_str))
-        logging.info(query)
+        logger.info(query)
         if params is not None:
-            logging.info("> params:")
+            logger.info("> params:")
             pprint.pprint(params, indent=2)
     start_t = time.time()
     if params is not None:
@@ -4187,7 +4187,7 @@ def sql_exec_query(cursor, query, params=None, klass=None, debug=False):
         c.execute(query)
     end_t = time.time()
     if debug:
-        logging.info("> query took {sec} seconds".format(sec=end_t - start_t))
+        logger.info("> query took {sec} seconds".format(sec=end_t - start_t))
 
 def sql_count_from(cursor, sql_query, debug=False):
     count_query = textwrap.dedent("""
@@ -4237,12 +4237,12 @@ def sql_fetch_rows(c, fetchall, debug=False):
         query_end_t = time.time()
         time_sec = query_end_t - query_start_t
         if debug:
-            logging.info("> query.fetchall took {sec} seconds".format(
+            logger.info("> query.fetchall took {sec} seconds".format(
                 sec=time_sec,
             ))
     else:
         if debug:
-            logging.info("> fetchall = {fetchall}".format(
+            logger.info("> fetchall = {fetchall}".format(
                 fetchall=fetchall,
             ))
         rows = c
@@ -4313,7 +4313,7 @@ def sql_get_conn_kwargs(db_path, host=None, user=None, password=None, debug=Fals
         # No default password.
 
     if debug:
-        logging.info("Using DB_HOST = {host}".format(host=host))
+        logger.info("Using DB_HOST = {host}".format(host=host))
 
     if py_config.SQL_IMPL == 'psql':
         # TracesPostgresConnection(db_path, host=host, user=user, password=password)
@@ -4635,7 +4635,7 @@ def process_op_nest_single_thread(op_events, filter_by_op=None,
             if filter_by_op is not None and event.name != filter_by_op:
                 continue
             if event.process_name is None:
-                logging.warning("Saw process_name = {proc} for event = {ev}".format(
+                logger.warning("Saw process_name = {proc} for event = {ev}".format(
                     proc=event.process_name,
                     ev=event,
                 ))
@@ -4644,12 +4644,12 @@ def process_op_nest_single_thread(op_events, filter_by_op=None,
 
         if py_config.DEBUG_SPLIT_STACK_OPS:
             end_i = len(all_events)
-            logging.info("OpStack[{i}]\n{events}".format(
+            logger.info("OpStack[{i}]\n{events}".format(
                 i=i,
                 events=textwrap.indent(pprint.pformat(all_events[start_i:end_i]), prefix="  "),
             ))
 
-        # logging.info(pprint_msg(all_events))
+        # logger.info(pprint_msg(all_events))
         # raise RuntimeError("Exit early")
 
     # raise RuntimeError("Exit early")
@@ -4760,7 +4760,7 @@ def process_op_nest_parallel(op_events, filter_by_op=None,
     # check_no_complete_overlap(op_events)
 
     # total_op_stacks = len(list(split_op_stacks(op_events, filter_by_op, debug, show_progress=True)))
-    # logging.info("> total_op_stacks = {total_op_stacks}".format(
+    # logger.info("> total_op_stacks = {total_op_stacks}".format(
     #     total_op_stacks=total_op_stacks,
     # ))
     total_op_stacks = None
@@ -5690,7 +5690,7 @@ def AsNumbaEOTimes(
     """
 
     # if debug:
-    #     logging.info("converting to NumbaEvent's: {msg}".format(
+    #     logger.info("converting to NumbaEvent's: {msg}".format(
     #         msg=pprint_msg({
     #             'category_times': category_times,
     #         }),

@@ -1,4 +1,4 @@
-import logging
+from iml_profiler.profiler.iml_logging import logger
 import copy
 import itertools
 import argparse
@@ -17,7 +17,7 @@ from iml_profiler.parser.dataframe import TrainingProgressDataframeReader
 from iml_profiler.parser import stacked_bar_plots
 from iml_profiler.parser.db import SQLCategoryTimesReader, sql_input_path
 
-from iml_profiler.profiler import iml_logging
+from iml_profiler.profiler.iml_logging import logger
 
 class ExtrapolatedTrainingTimeParser:
     def __init__(self,
@@ -164,7 +164,7 @@ class ExtrapolatedTrainingTimeParser:
             processes = self.sql_reader.processes(machine_name=machine.machine_name)
             for process in processes:
                 phases = self.sql_reader.phases(machine_name=machine.machine_name, process_name=process.process_name)
-                logging.info(pprint_msg({
+                logger.info(pprint_msg({
                     'machines': machines,
                     'processes': processes,
                     'phases': phases}))

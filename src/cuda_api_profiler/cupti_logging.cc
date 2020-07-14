@@ -7,6 +7,7 @@
 #include "cuda_api_profiler/usec_timer.h"
 
 #include <cupti_target.h>
+#include <cupti.h>
 #include <cuda.h>
 
 #include <ostream>

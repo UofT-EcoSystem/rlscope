@@ -7,6 +7,7 @@
 
 
 #include <cupti_target.h>
+#include <cupti.h>
 #include <cuda.h>
 
 #include <ostream>

@@ -1,4 +1,4 @@
-import logging
+from iml_profiler.profiler.iml_logging import logger
 import copy
 import itertools
 import argparse
@@ -17,7 +17,7 @@ from iml_profiler.parser.dataframe import TrainingProgressDataframeReader
 from iml_profiler.parser import stacked_bar_plots
 from iml_profiler.parser.db import SQLCategoryTimesReader, sql_input_path
 
-from iml_profiler.profiler import iml_logging
+from iml_profiler.profiler.iml_logging import logger
 
 class TrainingProgressParser:
     """
@@ -112,7 +112,7 @@ class TrainingProgressParser:
         path = experiment.experiment_config_path(directory)
         if not _e(path):
             if self.debug:
-                logging.info("Didn't find {path}; skip adding experiment columns to csv".format(path=path))
+                logger.info("Didn't find {path}; skip adding experiment columns to csv".format(path=path))
             return None
         data = experiment.load_experiment_config(directory)
         return data
@@ -224,19 +224,19 @@ class TrainingProgressParser:
         #     df_group['trace_percent'] = (df_group['start_time_us'] - start_time) / length_time
         #     dfs.append(df_group)
         #
-        #     logging.info(pprint_msg({
+        #     logger.info(pprint_msg({
         #         'group': group,
         #         'start_time': start_time,
         #         'max_time': max_time,
         #     }))
-        #     logging.info(pprint_msg(df_group))
+        #     logger.info(pprint_msg(df_group))
         #
         #     # import ipdb; ipdb.set_trace()
         #
         # new_df = pd.concat(dfs)
 
         # OUTPUT raw thing here.
-        logging.info("Output raw un-aggregated machine utilization data @ {path}".format(path=self._raw_csv_path))
+        logger.info("Output raw un-aggregated machine utilization data @ {path}".format(path=self._raw_csv_path))
         raw_df.to_csv(self._raw_csv_path, index=False)
 
         agg_df = raw_df
@@ -266,7 +266,7 @@ class TrainingProgressParser:
             keep_dfs.append(df_keep)
         keep_agg_df = pd.concat(keep_dfs)
 
-        logging.info("Add 'total_training_time_sec' and only keep the 'last' sampled training progress data for each (config, algo, env) @ {path}".format(path=self._last_agg_csv_path))
+        logger.info("Add 'total_training_time_sec' and only keep the 'last' sampled training progress data for each (config, algo, env) @ {path}".format(path=self._last_agg_csv_path))
         keep_agg_df.to_csv(self._last_agg_csv_path, index=False)
 
         join_cols = set(groupby_cols)
@@ -303,14 +303,14 @@ class TrainingProgressParser:
         other_calc = 100. * ( (1./all_df['timesteps_per_sec_ins']) - (1./all_df['timesteps_per_sec_unins']) ) / (1./all_df['timesteps_per_sec_unins'])
         assert np.all(np.isclose(all_df['profiling_overhead_percent'], other_calc))
 
-        logging.info("Add 'profiling_overhead_percent' for each (config, algo, env) @ {path}".format(path=self._profiling_overhead_agg_csv_path))
+        logger.info("Add 'profiling_overhead_percent' for each (config, algo, env) @ {path}".format(path=self._profiling_overhead_agg_csv_path))
         all_df.to_csv(self._profiling_overhead_agg_csv_path, index=True)
 
         # df_agg = new_df.groupby(groupby_cols).agg(['min', 'max', 'mean', 'std'])
         # flat_df_agg = self.flattened_agg_df(df_agg)
 
         # import ipdb; ipdb.set_trace()
-        # logging.info("Output min/max/std aggregated machine utilization data @ {path}".format(path=self._agg_csv_path))
+        # logger.info("Output min/max/std aggregated machine utilization data @ {path}".format(path=self._agg_csv_path))
         # flat_df_agg.to_csv(self._agg_csv_path, index=False)
 
         # if conf == 'instrumented':
@@ -589,7 +589,7 @@ class ProfilingOverheadPlot:
         ## Only keep config's used in preset conf.
         ##
         if self.preset_conf is not None:
-            logging.info("Using preset = {preset}: only keep these configs: {conf}".format(
+            logger.info("Using preset = {preset}: only keep these configs: {conf}".format(
                 preset=self.preset,
                 conf=sorted(self.preset_config_set)))
             def is_preset_config(config):
@@ -639,7 +639,7 @@ class ProfilingOverheadPlot:
 
         if self.width is not None and self.height is not None:
             figsize = (self.width, self.height)
-            logging.info("Setting figsize = {fig}".format(fig=figsize))
+            logger.info("Setting figsize = {fig}".format(fig=figsize))
             # sns.set_context({"figure.figsize": figsize})
         else:
             figsize = None
@@ -678,7 +678,7 @@ class ProfilingOverheadPlot:
         #
         # self.df_gpu = self.df_gpu[self.df_gpu.apply(should_keep, axis=1)]
 
-        logging.info(pprint_msg(self.df))
+        logger.info(pprint_msg(self.df))
 
         # ax = sns.violinplot(x=self.df_gpu['x_field'], y=100*self.df_gpu['util'],
         #                     inner="box",
@@ -689,7 +689,7 @@ class ProfilingOverheadPlot:
         #                  showfliers=False,
         #                  )
 
-        logging.info(pprint_msg(self.df[self.plot_data_fields]))
+        logger.info(pprint_msg(self.df[self.plot_data_fields]))
         ax = sns.barplot(x='x_field', y='total_trace_time_sec', hue='config_pretty', data=self.df,
                          ax=ax)
         ax.get_legend().remove()
@@ -716,7 +716,7 @@ class ProfilingOverheadPlot:
                     bar_order[config] = i
                     i += 1
 
-            logging.info(pprint_msg({
+            logger.info(pprint_msg({
                 'len(patches)': len(ax.patches),
                 'len(df)': len(df),
                 'bar_width': bar_width,
@@ -770,7 +770,7 @@ class ProfilingOverheadPlot:
                 # pos = (xtick - bar_width / 2, total_trace_time_sec)
                 pos = (xtick + (bar_order[config] - num_bars/2)*bar_width + bar_width/2, total_trace_time_sec)
 
-                logging.info(pprint_msg({
+                logger.info(pprint_msg({
                     'bar_label': bar_label,
                     'x_field': x_field,
                     'pos': pos,
@@ -823,7 +823,7 @@ class ProfilingOverheadPlot:
             ax.set_ylabel(self.y_title)
 
         png_path = self._get_plot_path('png')
-        logging.info('Save figure to {path}'.format(path=png_path))
+        logger.info('Save figure to {path}'.format(path=png_path))
         fig.tight_layout()
         fig.savefig(png_path)
         plt.close(fig)
@@ -1019,7 +1019,7 @@ class ProfilingOverheadPlot:
             # ticks = f(ax2.get_yticks())
             # ax.yaxis.set_major_locator(matplotlib.ticker.FixedLocator(ticks))
 
-        logging.info('Save figure to {path}'.format(path=self.path))
+        logger.info('Save figure to {path}'.format(path=self.path))
         fig.tight_layout()
         fig.savefig(self.path)
         plt.close(fig)
@@ -1059,7 +1059,7 @@ def my_label_len(label_df, col):
     # labels = my_index.get_level_values(level)
     labels = label_df[col]
     ret = [(k, sum(1 for i in g)) for k,g in itertools.groupby(labels)]
-    logging.info(pprint_msg({'label_len': ret}))
+    logger.info(pprint_msg({'label_len': ret}))
     return ret
 
 def label_group_bar_table(ax, df):

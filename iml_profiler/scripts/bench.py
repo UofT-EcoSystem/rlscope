@@ -7,7 +7,7 @@ import shlex
 from glob import glob
 import copy
 from glob import glob
-import logging
+from iml_profiler.profiler.iml_logging import logger
 import subprocess
 import sys
 import os
@@ -48,7 +48,7 @@ except ImportError:
 from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, basename as _b
 
 from iml_profiler.experiment import expr_config
-from iml_profiler.profiler import iml_logging
+from iml_profiler.profiler.iml_logging import logger
 from iml_profiler.profiler.concurrent import ForkedProcessPool, FailedProcessException
 from iml_profiler.experiment.util import tee
 
@@ -138,7 +138,6 @@ def add_stable_baselines_options(pars):
         help='Limit environments to LunarLander environments (i.e. LunarLanderContinuous-v2, LunarLander-v2)')
 
 def main():
-    iml_logging.setup_logging()
     parser = argparse.ArgumentParser(
         textwrap.dedent("""\
         Run a bunch of experiments for a paper.
@@ -324,7 +323,7 @@ def main():
 
 
     args, extra_argv = parser.parse_known_args()
-    # logging.info("parsed arguments: {msg}".format(
+    # logger.info("parsed arguments: {msg}".format(
     #     msg=pprint_msg({
     #         'args': args,
     #         'extra_argv': extra_argv,
@@ -339,7 +338,7 @@ def main():
     print(textwrap.indent("\n".join(sorted(STABLE_BASELINES_UNAVAIL_ENV_IDS.keys())), prefix='  '))
 
     if args.debug:
-        logging.info(pprint_msg({'args': args.__dict__}))
+        logger.info(pprint_msg({'args': args.__dict__}))
 
     args.func(parser, args, extra_argv)
 
@@ -370,7 +369,7 @@ class Experiment:
                 line = line.rstrip()
                 if re.search(r'IML BENCH DONE', line):
                     if self.args.debug:
-                        logging.info("Saw \"IML BENCH DONE\" in {path} @ line {lineno}; skipping.".format(
+                        logger.info("Saw \"IML BENCH DONE\" in {path} @ line {lineno}; skipping.".format(
                             lineno=lineno,
                             path=to_file))
                     return True
@@ -403,29 +402,29 @@ class Experiment:
         if ( replace or args.replace ) or not self.already_ran(to_file):
 
             try:
-                logging.info("> Calling tee: cmd =\n  $ {cmd}".format(cmd=cmd_as_string(cmd + self.extra_argv)))
+                logger.info("> Calling tee: cmd =\n  $ {cmd}".format(cmd=cmd_as_string(cmd + self.extra_argv)))
                 proc = tee(
                     cmd=cmd + self.extra_argv,
                     to_file=to_file,
                     env=env,
                     dry_run=args.dry_run,
                 )
-                logging.info("> Done calling tee: cmd =\n  $ {cmd}".format(cmd=cmd_as_string(cmd + self.extra_argv)))
+                logger.info("> Done calling tee: cmd =\n  $ {cmd}".format(cmd=cmd_as_string(cmd + self.extra_argv)))
                 failed = False
             except subprocess.CalledProcessError as e:
                 if not args.skip_error:
-                    logging.info((
+                    logger.info((
                                      "> Command failed: see {path}; exiting early "
                                      "(use --skip-error to ignore individual experiment errors)"
                                  ).format(path=to_file))
                     ret = 1
                     if debug:
-                        logging.info("Exiting with ret={ret}\n{stack}".format(
+                        logger.info("Exiting with ret={ret}\n{stack}".format(
                             ret=ret,
                             stack=get_stacktrace(),
                         ))
                     sys.exit(ret)
-                logging.info(
+                logger.info(
                     "> Command failed; see {path}; continuing (--skip-error was set)".format(
                         path=to_file,
                     ))
@@ -433,7 +432,7 @@ class Experiment:
 
             if not failed:
                 if proc is not None and proc.returncode != 0:
-                    logging.info("BUG: saw returncode = {ret}, expected 0".format(
+                    logger.info("BUG: saw returncode = {ret}, expected 0".format(
                         ret=proc.returncode))
                     assert proc.returncode == 0
                 if not args.dry_run:
@@ -550,7 +549,7 @@ class ExperimentGroup(Experiment):
         algo_env_pairs = [(algo, env)]
         opts = ['--env-id', env, '--algo', algo]
         if self.should_run_algo_env_group(expr):
-            logging.info(rl_workloads_msg(expr, algo_env_pairs))
+            logger.info(rl_workloads_msg(expr, algo_env_pairs))
             self.iml_bench(parser, subparser, 'train_stable_baselines.sh', opts, suffix=bench_log(expr), debug=True)
             overlap_type = 'ResourceOverlap'
             self.stacked_plot([
@@ -566,7 +565,7 @@ class ExperimentGroup(Experiment):
         algo_env_pairs = gather.pairs_by_env(env)
         opts = ['--env-id', env]
         if self.should_run_algo_env_group(expr):
-            logging.info(rl_workloads_msg(expr, algo_env_pairs))
+            logger.info(rl_workloads_msg(expr, algo_env_pairs))
             self.iml_bench(parser, subparser, 'train_stable_baselines.sh', opts, suffix=bench_log(expr))
             overlap_type = 'ResourceOverlap'
             self.stacked_plot([
@@ -582,7 +581,7 @@ class ExperimentGroup(Experiment):
         # NOTE: --algo-env-group is forwarded automatically since it's an option that belongs to the "main" parser, not the subparser
         opts = []
         if self.should_run_algo_env_group(expr):
-            logging.info(rl_workloads_msg(expr, algo_env_pairs))
+            logger.info(rl_workloads_msg(expr, algo_env_pairs))
             self.iml_bench(parser, subparser, 'train_stable_baselines.sh', opts, suffix=bench_log(expr))
             # overlap_type = 'OperationOverlap'
             overlap_type = 'CategoryOverlap'
@@ -656,7 +655,7 @@ class ExperimentGroup(Experiment):
         opts = []
 
         if self.should_run_algo_env_group(expr):
-            logging.info(rl_workloads_msg(expr, algo_env_pairs))
+            logger.info(rl_workloads_msg(expr, algo_env_pairs))
             self.iml_bench(parser, subparser, 'train_stable_baselines.sh', opts, suffix=bench_log(expr))
             overlap_type = 'CategoryOverlap'
             self.stacked_plot([
@@ -836,7 +835,7 @@ class ExperimentGroup(Experiment):
         algo_env_pairs = gather.pairs_by_algo_env_group(expr)
         opts = []
         if self.should_run_algo_env_group(expr):
-            logging.info(rl_workloads_msg(expr, algo_env_pairs))
+            logger.info(rl_workloads_msg(expr, algo_env_pairs))
             self.iml_bench(parser, subparser, 'train_stable_baselines.sh', opts, suffix=bench_log(expr))
         plot_expr_algorithm_choice(expr=expr, algo_env_pairs=algo_env_pairs)
 
@@ -844,7 +843,7 @@ class ExperimentGroup(Experiment):
         algo_env_pairs = gather.pairs_by_algo_env_group(expr)
         opts = []
         if self.should_run_algo_env_group(expr):
-            logging.info(rl_workloads_msg(expr, algo_env_pairs))
+            logger.info(rl_workloads_msg(expr, algo_env_pairs))
             self.iml_bench(parser, subparser, 'train_stable_baselines.sh', opts, suffix=bench_log(expr))
         plot_expr_algorithm_choice(expr=expr, algo_env_pairs=algo_env_pairs)
 
@@ -861,7 +860,7 @@ class ExperimentGroup(Experiment):
             '--show-legend', 'False',
         ]
         if self.should_run_algo_env_group(expr):
-            logging.info(rl_workloads_msg(expr, algo_env_pairs))
+            logger.info(rl_workloads_msg(expr, algo_env_pairs))
             # self.iml_bench(parser, subparser, 'train_stable_baselines.sh', opts, suffix=bench_log(expr))
             # # - Statement: GPU utilization is low across all workloads.
             # # - Plot: ResourceOverlap that compares [CPU] vs [CPU + GPU] breakdown
@@ -995,7 +994,7 @@ class ExperimentGroup(Experiment):
     def iml_dirs_air_learning(self, debug=False):
         algo_env_pairs = [(algo, env) for algo, env in self.algo_env_pairs() \
                           if self._is_air_learning_env(env)]
-        logging.info(pprint_msg({
+        logger.info(pprint_msg({
             'self.algo_env_pairs()': self.algo_env_pairs(),
             'algo_env_pairs': algo_env_pairs}))
         iml_dirs = [self.iml_directory(algo, env) for algo, env in algo_env_pairs]
@@ -1041,9 +1040,9 @@ class ExperimentGroup(Experiment):
             if os.path.isdir(unins_iml_dir):
                 unins_iml_dirs.append(unins_iml_dir)
             else:
-                logging.info("OverlapStackedBarTask.SKIP unins_iml_dir = {path}".format(
+                logger.info("OverlapStackedBarTask.SKIP unins_iml_dir = {path}".format(
                     path=unins_iml_dir))
-        logging.info("OverlapStackedBarTask.args =\n{msg}".format(
+        logger.info("OverlapStackedBarTask.args =\n{msg}".format(
             msg=pprint_msg({
                 'algo_env_pairs': algo_env_pairs,
                 'unins_iml_dirs': unins_iml_dirs,
@@ -1138,7 +1137,7 @@ class ExperimentGroup(Experiment):
             if plot_args is not None:
                 util_plot_cmd.extend(plot_args)
             if not _e(util_csv):
-                logging.info("SKIP UtilTaskPlot; {path} doesn't exist")
+                logger.info("SKIP UtilTaskPlot; {path} doesn't exist")
                 return
             to_file = self._get_logfile(suffix="UtilPlot.{suffix}.log".format(suffix=suffix))
             self._run_cmd(cmd=util_plot_cmd, to_file=to_file, replace=True)
@@ -1153,7 +1152,7 @@ class ExperimentGroup(Experiment):
         main_cmd = self._get_main_cmd(parser, subparser, subcommand)
         cmd = main_cmd + subcmd_args
         to_file = self._get_logfile(suffix=suffix)
-        logging.info("Logging iml-bench to file {path}".format(path=to_file))
+        logger.info("Logging iml-bench to file {path}".format(path=to_file))
         self._run_cmd(cmd=cmd, to_file=to_file, env=env, debug=debug)
 
     def _get_main_cmd(self, parser, subparser, subcommand):
@@ -1207,7 +1206,7 @@ class StableBaselines(Experiment):
         cmd = ['iml-analyze', "--iml-directory", iml_directory]
 
         to_file = self._get_logfile(algo, env_id, suffix='analyze.log')
-        logging.info("Analyze logfile = {path}".format(path=to_file))
+        logger.info("Analyze logfile = {path}".format(path=to_file))
 
         self._run_cmd(cmd=cmd, to_file=to_file)
 
@@ -1331,7 +1330,7 @@ class StableBaselines(Experiment):
         del self.args.subparser
 
         # if args.debug:
-        # logging.info(pprint_msg({'StableBaselines.args': args.__dict__}))
+        # logger.info(pprint_msg({'StableBaselines.args': args.__dict__}))
 
         if args.subcommand == 'dummy_error.sh':
             self._error()
@@ -1343,7 +1342,7 @@ class StableBaselines(Experiment):
             sys.exit(1)
 
         if args.analyze and config_is_uninstrumented(args.config):
-            logging.info(("Cannot run iml-analyze on --config={config}; config must be instrumented "
+            logger.info(("Cannot run iml-analyze on --config={config}; config must be instrumented "
                           "(e.g. --config instrumented), otherwise there are no IML traces to process.").format(
                 config=args.config,
             ))
@@ -1354,7 +1353,7 @@ class StableBaselines(Experiment):
             gather = GatherAlgoEnv(args)
             algo_env_pairs = gather.pairs_by_args()
             # if args.debug:
-            logging.info("Run --analyze over (algo, env) pairs: {msg}".format(
+            logger.info("Run --analyze over (algo, env) pairs: {msg}".format(
                 msg=pprint_msg({
                     'algo_env_pairs': algo_env_pairs,
                 })
@@ -1386,13 +1385,13 @@ class StableBaselines(Experiment):
                 algo_env_group=args.algo_env_group,
             )
             if algo_env_pairs is None:
-                logging.info('Please provide either --env-id or --algo')
+                logger.info('Please provide either --env-id or --algo')
                 sys.exit(1)
 
             if args.debug:
-                logging.info({'algo_env_pairs': algo_env_pairs, 'args.analyze': args.analyze})
+                logger.info({'algo_env_pairs': algo_env_pairs, 'args.analyze': args.analyze})
 
-            logging.info("Collect trace-data over (algo, env) pairs: {msg}".format(
+            logger.info("Collect trace-data over (algo, env) pairs: {msg}".format(
                 msg=pprint_msg({
                     'algo_env_pairs': algo_env_pairs,
                 })
@@ -1463,7 +1462,7 @@ class GatherAlgoEnv:
                 continue
             if not self._is_algo_dir(algo_path):
                 if args.debug:
-                    logging.info("Skip algo_path={dir}".format(dir=algo_path))
+                    logger.info("Skip algo_path={dir}".format(dir=algo_path))
                 continue
             algo = _b(algo_path)
             if self.should_skip_algo(algo):
@@ -1472,14 +1471,14 @@ class GatherAlgoEnv:
             for env_path in env_paths:
                 if not self._is_env_dir(env_path):
                     if args.debug:
-                        logging.info("Skip env_path={dir}".format(dir=env_path))
+                        logger.info("Skip env_path={dir}".format(dir=env_path))
                     continue
                 env = _b(env_path)
                 if self.should_skip_env(env):
                     continue
                 if self.should_skip_algo_env(algo, env):
                     if args.debug:
-                        logging.info("Skip (algo={algo}, env={env}) @ {dir}".format(
+                        logger.info("Skip (algo={algo}, env={env}) @ {dir}".format(
                             algo=algo,
                             env=env,
                             dir=env_path))

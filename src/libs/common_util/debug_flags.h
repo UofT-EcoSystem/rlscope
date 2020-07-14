@@ -60,6 +60,7 @@ constexpr bool FEATURE_GPU_UTIL_CUDA_CONTEXT = 0;
 constexpr bool FEATURE_GPU_UTIL_SYNC = 0;
 constexpr bool FEATURE_GPU_UTIL_KERNEL_TIME = 0;
 constexpr bool FEATURE_GPU_HW = 1;
+constexpr bool FEATURE_RLSCOPE_LIB_TRACE = 0;
 constexpr bool FEATURE_GPU_HW_TRACE = 0;
 constexpr bool FEATURE_ANY =
     FEATURE_OVERLAP

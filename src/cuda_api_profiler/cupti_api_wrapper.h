@@ -6,6 +6,7 @@
 #define IML_CUPTI_API_WRAPPER_H
 
 #include <cupti_target.h>
+#include <cupti.h>
 #include <cuda.h>
 
 #include <vector>
@@ -46,10 +47,14 @@ public:
   using FuncId = int;
   std::mutex _mu;
 
-  CUpti_SubscriberHandle _subscriber;
-  FuncId _next_func_id;
+  CUpti_SubscriberHandle _subscriber{nullptr};
+  FuncId _next_func_id{0};
 
   std::vector<CuptiCallback> _cupti_subscribe_callbacks;
+
+  CuptiAPI() = default;
+  ~CuptiAPI();
+  void ClearCallbacks();
 
   static void CUPTIAPI __RunCUPTICallbacks(
       void *userdata, CUpti_CallbackDomain domain,
@@ -75,8 +80,6 @@ public:
 
   void UnregisterCallback(CuptiCallback::FuncId func_id);
 
-  CuptiAPI();
-  ~CuptiAPI();
 };
 
 }

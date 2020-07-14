@@ -22,6 +22,7 @@ limitations under the License.
 
 #include <cuda.h>
 #include <cupti_target.h>
+#include <cupti.h>
 
 #define CONFIG_TRACE_STATS
 

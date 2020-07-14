@@ -4,6 +4,7 @@
 
 #include <cuda.h>
 #include <cupti_target.h>
+#include <cupti.h>
 #include <cuda_runtime.h>
 #include <nvToolsExtCudaRt.h>
 
@@ -41,17 +42,17 @@ static pid_t my_gettid() {
     return syscall(SYS_gettid);
 }
 
-// Used by ActivityBuffer and DeviceTracerImpl
-#define CUPTI_CALL(call)                                            \
-  do {                                                              \
-    CUptiResult _status = call;                                     \
-    if (_status != CUPTI_SUCCESS) {                                 \
-      const char *errstr;                                           \
-      cuptiGetResultString(_status, &errstr);                       \
-      RLS_LOG("GPU_UTIL", "ERROR: libcupti call {} failed with {}", #call, errstr); \
-      exit(EXIT_FAILURE); \
-    }                                                               \
-  } while (0)
+//// Used by ActivityBuffer and DeviceTracerImpl
+//#define CUPTI_CALL(call)
+//  do {
+//    CUptiResult _status = call;
+//    if (_status != CUPTI_SUCCESS) {
+//      const char *errstr;
+//      cuptiGetResultString(_status, &errstr);
+//      RLS_LOG("GPU_UTIL", "ERROR: libcupti call {} failed with {}", #call, errstr);
+//      exit(EXIT_FAILURE);
+//    }
+//  } while (0)
 
 namespace rlscope {
 
@@ -93,12 +94,12 @@ MyStatus GPUComputeKernel::DumpKernelInfo(int thread_id, CudaStream stream) {
 
 
 MyStatus GPUComputeSchedInfoKernel::Init() {
-    CUPTI_CALL(cuptiGetTimestamp(&gpu_base_timestamp_ns));
+    CUPTI_API_CALL_MAYBE_EXIT(cuptiGetTimestamp(&gpu_base_timestamp_ns));
 
     CUcontext context;
     DRIVER_API_CALL_MAYBE_EXIT(cuCtxGetCurrent(&context));
     assert(context != nullptr);
-    CUPTI_CALL(cuptiDeviceGetTimestamp(context, &device_base_timestamp_ns));
+    CUPTI_API_CALL_MAYBE_EXIT(cuptiDeviceGetTimestamp(context, &device_base_timestamp_ns));
     cpu_base_timestamp_us = get_timestamp_us();
 
     RUNTIME_API_CALL_MAYBE_EXIT(cudaGetDeviceProperties(&device_prop, args.FLAGS_device.get()));

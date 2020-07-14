@@ -1,4 +1,4 @@
-import logging
+from iml_profiler.profiler.iml_logging import logger
 import shutil
 import subprocess
 import argparse
@@ -13,10 +13,9 @@ from iml_profiler import py_config
 
 from iml_profiler.parser.common import *
 
-from iml_profiler.profiler import iml_logging
+from iml_profiler.profiler.iml_logging import logger
 
 def main():
-    iml_logging.setup_logging()
 
     iml_prof_argv, cmd_argv = gather_argv(sys.argv[1:])
 
@@ -56,6 +55,12 @@ def main():
                         
                         Effect: sets "export IML_CUDA_API_EVENTS=yes" for librlscope.so.
                         """))
+    add_bool_arg(parser, '--gpu-hw',
+                 help=textwrap.dedent("""
+                        Collect GPU hardware counters.
+                        
+                        Effect: sets "export IML_GPU_HW=yes" for librlscope.so.
+                        """))
 
     parser.add_argument('--fuzz-cuda-api', action='store_true',
                         help=textwrap.dedent("""
@@ -94,6 +99,7 @@ def main():
                                  'gpu-activities-api-time',
                                  'no-gpu-activities',
                                  'full',
+                                 'gpu-hw',
                                  'uninstrumented',
                                  ],
                         # By default, run with full IML instrumentation.
@@ -133,11 +139,14 @@ def main():
                                 Enable all of tfprof and pyprof collection.
                                 $ iml-prof --cuda-api-calls --cuda-api-events --cuda-activities --iml-disable
                                 NOTE: we still use --iml-disable to prevent "old" tfprof collection.
+                                
+                        gpu-hw:
+                          ONLY collect GPU hardware counters
                         """))
     args = parser.parse_args(iml_prof_argv)
 
     if args.iml_rm_traces_from is not None:
-        logging.info("iml-prof: Delete trace-files rooted at --iml-directory = {dir}".format(
+        logger.info("iml-prof: Delete trace-files rooted at --iml-directory = {dir}".format(
             dir=args.iml_rm_traces_from))
         return
 
@@ -150,32 +159,40 @@ def main():
         ld=env.get('LD_PRELOAD', ''),
         so_path=so_path)
 
+    def _set_if_none(attr, value):
+        if getattr(args, attr) is None:
+            setattr(args, attr, value)
+
     if args.config is not None:
         add_env['IML_CONFIG'] = args.config
         if args.config == 'interception':
             "iml-prof --debug --cuda-api-calls --cuda-api-events"
-            args.cuda_api_calls = True
-            args.cuda_api_events = True
+            _set_if_none('cuda_api_calls', True)
+            _set_if_none('cuda_api_events', True)
         elif args.config in ['no-interception', 'uninstrumented']:
             "iml-prof --debug"
             pass
-        elif args.config == 'gpu-activities':
-            "$ iml-prof --debug --cuda-api-calls --cuda-activities"
-            args.cuda_api_calls = True
-            args.cuda_activities = True
-        elif args.config == 'gpu-activities-api-time':
-            "$ iml-prof --debug --cuda-api-calls --cuda-api-events --cuda-activities"
-            args.cuda_api_calls = True
-            args.cuda_api_events = True
-            args.cuda_activities = True
+        elif args.config == 'gpu-hw':
+            "$ iml-prof --debug --gpu-hw"
+            _set_if_none('gpu_hw', True)
         elif args.config == 'no-gpu-activities':
             "$ iml-prof --debug --cuda-api-calls"
-            args.cuda_api_calls = True
+            _set_if_none('cuda_api_calls', True)
+        elif args.config == 'gpu-activities':
+            "$ iml-prof --debug --cuda-api-calls --cuda-activities"
+            _set_if_none('cuda_api_calls', True)
+            _set_if_none('cuda_activities', True)
+        elif args.config == 'gpu-activities-api-time':
+            "$ iml-prof --debug --cuda-api-calls --cuda-api-events --cuda-activities"
+            _set_if_none('cuda_api_calls', True)
+            _set_if_none('cuda_api_events', True)
+            _set_if_none('cuda_activities', True)
         elif args.config == 'full':
             "$ iml-prof --cuda-api-calls --cuda-api-events --cuda-activities"
-            args.cuda_api_calls = True
-            args.cuda_api_events = True
-            args.cuda_activities = True
+            _set_if_none('cuda_api_calls', True)
+            _set_if_none('cuda_api_events', True)
+            _set_if_none('cuda_activities', True)
+            _set_if_none('gpu_hw', True)
         else:
             raise NotImplementedError()
 
@@ -183,7 +200,7 @@ def main():
         parser.error("Can only run iml-prof with --fuzz-cuda-api or --cuda-api-calls, not both")
 
     if args.debug or args.iml_debug or is_env_true('IML_DEBUG'):
-        logging.info("Detected debug mode; enabling C++ logging statements (export IML_CPP_MIN_VLOG_LEVEL=1)")
+        logger.info("Detected debug mode; enabling C++ logging statements (export IML_CPP_MIN_VLOG_LEVEL=1)")
         add_env['IML_CPP_MIN_VLOG_LEVEL'] = 1
 
     # if args.iml_disable:
@@ -195,6 +212,9 @@ def main():
     if args.cuda_activities:
         add_env['IML_CUDA_ACTIVITIES'] = 'yes'
 
+    if args.gpu_hw:
+        add_env['IML_GPU_HW'] = 'yes'
+
     if args.pc_sampling:
         add_env['IML_PC_SAMPLING'] = 'yes'
 
@@ -203,6 +223,9 @@ def main():
 
     if args.cuda_api_events:
         add_env['IML_CUDA_API_EVENTS'] = 'yes'
+
+    if args.gpu_hw:
+        add_env['IML_GPU_HW'] = 'yes'
 
     if args.trace_at_start:
         add_env['IML_TRACE_AT_START'] = 'yes'
@@ -278,10 +301,10 @@ def add_bool_arg(parser, opt, dest=None, default=None, **add_argument_kwargs):
     # print(f"ADD: --{opt}, dest={dest}")
     parser.add_argument(f"--{opt}", dest=dest, action='store_true', **add_argument_kwargs)
     parser.add_argument(f"--no-{opt}", dest=dest, action='store_false', **add_argument_kwargs)
-    if default is not None:
-        parser.set_defaults(**{
-            dest: default,
-        })
+    # if default is not None:
+    parser.set_defaults(**{
+        dest: default,
+    })
 
 if __name__ == '__main__':
     main()

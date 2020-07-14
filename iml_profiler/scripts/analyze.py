@@ -1,7 +1,7 @@
 """
 iml-analyze script for processing trace-data produced from an ML script.
 """
-import logging
+from iml_profiler.profiler.iml_logging import logger
 import subprocess
 import sys
 import os
@@ -14,11 +14,9 @@ import textwrap
 import multiprocessing
 from iml_profiler.parser import tasks
 from iml_profiler.parser.common import print_cmd
-from iml_profiler.profiler import iml_logging
+from iml_profiler.profiler.iml_logging import logger
 
 def main():
-    iml_logging.setup_logging()
-
     parser = argparse.ArgumentParser(
         textwrap.dedent("""\
         Process trace-files collected from running an ML script with the IML profiler.
@@ -79,11 +77,11 @@ def main():
         luigi_argv.extend(['--help'])
 
     if args.workers > 1:
-        logging.warning("Each overlap plot uses all the cores; forcing --workers=1")
+        logger.warning("Each overlap plot uses all the cores; forcing --workers=1")
         args.workers = 1
 
     if args.pdb:
-        logging.info("Registering pdb breakpoint (--pdb)")
+        logger.info("Registering pdb breakpoint (--pdb)")
         register_pdb_breakpoint()
         # Debugger is useless when multithreaded.
         args.workers = 1
@@ -100,7 +98,7 @@ def main():
 def register_pdb_breakpoint():
 
     def pdb_breakpoint(task, ex):
-        logging.info("> Detected unhandled exception {ex} in {task}; entering pdb".format(
+        logger.info("> Detected unhandled exception {ex} in {task}; entering pdb".format(
             ex=ex.__class__.__name__,
             task=task.__class__.__name__,
         ))

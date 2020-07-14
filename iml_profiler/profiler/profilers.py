@@ -1,4 +1,4 @@
-import logging
+from iml_profiler.profiler.iml_logging import logger
 import pytest
 import cProfile, pstats, io
 import codecs
@@ -23,6 +23,8 @@ import iml_profiler
 
 from iml_profiler.scripts.utilization_sampler import util_sampler
 from iml_profiler.profiler.util import args_to_cmdline
+
+from iml_profiler.profiler.iml_logging import logger
 
 ORIG_EXCEPT_HOOK = sys.excepthook
 def cleanup_profiler_excepthook(exctype, value, traceback):
@@ -302,7 +304,7 @@ def setup(tfprof_enabled, pyprof_enabled, allow_skip=False):
 #
 #     def dump(self):
 #         if self.debug:
-#             logging.info(("> TfprofDumper.dump: start\n"
+#             logger.info(("> TfprofDumper.dump: start\n"
 #                    "{dict}").format(
 #                 dict=textwrap.indent(pprint.pformat(self.__dict__), prefix="  "),
 #             ))
@@ -312,7 +314,7 @@ def setup(tfprof_enabled, pyprof_enabled, allow_skip=False):
 #         pctx.dump(self.tfprof_path, self.process_name)
 #
 #         if self.debug:
-#             logging.info(("> TfprofDumper.dump: done\n"
+#             logger.info(("> TfprofDumper.dump: done\n"
 #                    "{dict}").format(
 #                 dict=textwrap.indent(pprint.pformat(self.__dict__), prefix="  "),
 #             ))
@@ -360,7 +362,7 @@ def setup(tfprof_enabled, pyprof_enabled, allow_skip=False):
 #         - config.trace_<next_trace_id>.proto
 #         """
 #         if self.debug:
-#             logging.info("PyprofDumper.dump start, path={path}".format(
+#             logger.info("PyprofDumper.dump start, path={path}".format(
 #                 path=self.pyprof_proto_path))
 #
 #         # Q: Should we be calling this again...?  We'd like to update num_calls if it was computed dynamically...
@@ -382,7 +384,7 @@ def setup(tfprof_enabled, pyprof_enabled, allow_skip=False):
 #         assert os.path.exists(self.pyprof_proto_path)
 #
 #         if self.debug:
-#             logging.info("PyprofDumper.dump done, path={path}".format(
+#             logger.info("PyprofDumper.dump done, path={path}".format(
 #                 path=self.pyprof_proto_path))
 
 def get_tfprof_path(directory, bench_name, session_id, trace_id):
@@ -414,7 +416,7 @@ class ProtoDumper:
         - {proto}.trace_<next_trace_id>.proto
         """
         if self.debug:
-            logging.info("{name}.dump start, path={path}".format(
+            logger.info("{name}.dump start, path={path}".format(
                 name=self.name,
                 path=self.proto_path))
 
@@ -422,7 +424,7 @@ class ProtoDumper:
             f.write(self.proto.SerializeToString())
 
         if self.debug:
-            logging.info("{name}.dump done, path={path}".format(
+            logger.info("{name}.dump done, path={path}".format(
                 name=self.name,
                 path=self.proto_path))
 
@@ -444,7 +446,7 @@ class ProcessMetadataDumper:
         - process_metadata.trace_<next_trace_id>.proto
         """
         if self.debug:
-            logging.info("{klass}.dump start, path={path}".format(
+            logger.info("{klass}.dump start, path={path}".format(
                 klass=self.__class__.__name__,
                 path=self.process_metadata_proto_path))
 
@@ -452,7 +454,7 @@ class ProcessMetadataDumper:
             f.write(self.process_metadata.SerializeToString())
 
         if self.debug:
-            logging.info("{klass}.dump done, path={path}".format(
+            logger.info("{klass}.dump done, path={path}".format(
                 klass=self.__class__.__name__,
                 path=self.process_metadata_proto_path))
 
@@ -508,7 +510,7 @@ class ProcessMetadataDumper:
 #         Run after tf.Session() is called, in case we wish to do anything that requires the C++ API.
 #         """
 #         if py_config.DEBUG and py_config.DEBUG_TRACE_SESSION:
-#             logging.info("[trace-session : tf.Session()] session={sess}\n{stack}".format(
+#             logger.info("[trace-session : tf.Session()] session={sess}\n{stack}".format(
 #                 sess=session,
 #                 stack=get_stacktrace(indent=1)
 #             ))
@@ -554,7 +556,7 @@ Add after-inactive hooks to call remove_profile_context, and after-active hooks 
 #             pctx = getattr(session, 'profile_context', None)
 #             if pctx is not None:
 #                 phase = pctx.phase
-#             logging.info("[trace-session : after run] session={sess}, session.pctx.phase={phase}".format(
+#             logger.info("[trace-session : after run] session={sess}, session.pctx.phase={phase}".format(
 #                 sess=session,
 #                 phase=phase
 #             ))
@@ -577,7 +579,7 @@ Add after-inactive hooks to call remove_profile_context, and after-active hooks 
 #             num_events = clib_wrap.num_events_recorded()
 #             # NOTE: I've seen this assertion fail with minigo, not sure why though...
 #             if num_events != 0 and not iml_profiler.api.prof.disable_pyprof_dump:
-#                 logging.info(("> IML: WARNING, after dumping pyprof data, there were "
+#                 logger.info(("> IML: WARNING, after dumping pyprof data, there were "
 #                        "still {n} pyprof events recorded").format(n=num_events))
 #             # assert num_events == 0
 # DumpPyprofTraceHook = _DumpPyprofTraceHook()
@@ -746,7 +748,7 @@ class Profiler:
                 # In order for calibration to work properly, we need to be able to enable each book-keeping feature in isolation!
                 # Q: What code depends on "--config uninstrumented" (without --iml-calibration) implying --iml-disable?
                 # A: minigo code.
-                logging.warning("DISABLE ALL IML FEATURES for --config={config} run".format(
+                logger.warning("DISABLE ALL IML FEATURES for --config={config} run".format(
                     config=self.iml_config))
                 self.disable = True
         self.disable_pyprof_annotations = get_argval('disable_pyprof_annotations', disable_pyprof_annotations, False)
@@ -778,9 +780,9 @@ class Profiler:
             pyprof_enabled=pyprof_enabled,
         )
         if self.disable:
-            logging.info("IML: note that profiling is disabled for this run")
+            logger.info("IML: note that profiling is disabled for this run")
         if self.disable or self.disable_gpu_hw:
-            logging.info("(--iml-disable-gpu-hw) Disable GPU HW sampling")
+            logger.info("(--iml-disable-gpu-hw) Disable GPU HW sampling")
             sample_cuda_api.disable_gpu_hw()
 
         # self.manager = multiprocessing.Manager()
@@ -885,7 +887,7 @@ class Profiler:
             self.pyprof = PythonProfiler(self.directory)
 
         if self.debug:
-            logging.info(pprint_msg({'Profiler.attrs': self.__dict__}))
+            logger.info(pprint_msg({'Profiler.attrs': self.__dict__}))
 
         # self.sess = None
         # self.pctx = None
@@ -912,7 +914,7 @@ class Profiler:
         """
         os.makedirs(self.directory, exist_ok=True)
         if self.skip_rm_traces:
-            logging.info("IML: SKIP deleting trace-files rooted at {dir} (--iml-skip-rm-traces)")
+            logger.info("IML: SKIP deleting trace-files rooted at {dir} (--iml-skip-rm-traces)")
             return
         recursive_delete_trace_files(self.directory)
 
@@ -947,7 +949,7 @@ class Profiler:
             self.next_trace_id = 0
 
         if py_config.DEBUG:
-            logging.info("> Using next_trace_id = {id}".format(id=self.next_trace_id))
+            logger.info("> Using next_trace_id = {id}".format(id=self.next_trace_id))
 
     def _init_num_calls(self, bench_name, func, *args, **kwargs):
         """
@@ -998,10 +1000,10 @@ class Profiler:
         min_guess_sec = 1.
 
         def report_decision(total_time_sec, iterations):
-            logging.info("> Dynamic iterations for bench_name={b} decided on: {it} iterations".format(
+            logger.info("> Dynamic iterations for bench_name={b} decided on: {it} iterations".format(
                 it=iterations,
                 b=bench_name))
-            logging.info("  1 repetition takes ~ {sec} seconds".format(sec=total_time_sec))
+            logger.info("  1 repetition takes ~ {sec} seconds".format(sec=total_time_sec))
 
         # repetition_time_sec = np.zeros(self.repetitions, dtype=np.float32)
         total_time_sec = None
@@ -1118,7 +1120,7 @@ class Profiler:
                 stack=get_stacktrace(), msg_type="ERROR"))
 
     def _enable_tracing(self):
-        logging.info("IML: enable tracing")
+        logger.info("IML: enable tracing")
 
         self._check_no_annotations(caller_name='iml.prof.enable_tracing()')
 
@@ -1196,7 +1198,7 @@ class Profiler:
             self._enable_tracing()
 
     def _disable_tracing(self):
-        logging.info("IML: disable tracing")
+        logger.info("IML: disable tracing")
         self._stop_pyprof()
         self._stop_tfprof()
         self._stop_iml_prof()
@@ -1261,7 +1263,7 @@ class Profiler:
             return
 
         if self.debug:
-            logging.info('Start iml-prof libcupti tracing')
+            logger.info('Start iml-prof libcupti tracing')
         sample_cuda_api.enable_tracing()
 
         self._iml_prof_enabled = True
@@ -1271,7 +1273,7 @@ class Profiler:
             return
 
         if self.debug:
-            logging.info('Stop iml-prof libcupti tracing')
+            logger.info('Stop iml-prof libcupti tracing')
 
         assert sample_cuda_api.is_used()
 
@@ -1299,7 +1301,7 @@ class Profiler:
 
         if self._tfprof_enabled or self.disable_tfprof:
             if self.disable_tfprof:
-                logging.info("Skipping tfprof profiling (--iml-disable-tfprof)")
+                logger.info("Skipping tfprof profiling (--iml-disable-tfprof)")
             return
 
         # if self.step_start_tracing is None:
@@ -1414,7 +1416,7 @@ class Profiler:
         self._check_profiling_started()
 
         if py_config.DEBUG and py_config.DEBUG_OPERATIONS:
-            logging.info("> set_operation(op={op})".format(op=bench_name))
+            logger.info("> set_operation(op={op})".format(op=bench_name))
 
         self._push_operation(bench_name)
 
@@ -1463,7 +1465,7 @@ class Profiler:
         attrs['tensorflow_config'] = tensorflow_config
         attrs['env'] = dict(os.environ)
         if self.debug:
-            logging.info("Dump IML configuration information to {path}".format(path=path))
+            logger.info("Dump IML configuration information to {path}".format(path=path))
         dump_json(attrs, path)
 
     def _init_trace_time(self):
@@ -1478,14 +1480,14 @@ class Profiler:
     def _start_pyprof(self):
         if self._pyprof_enabled or self.disable_pyprof:
             if self.disable_pyprof:
-                logging.info("Skipping pyprof profiling (--iml-disable-pyprof)")
+                logger.info("Skipping pyprof profiling (--iml-disable-pyprof)")
             return
         if self.debug:
-            logging.info("Start pyprof\n{stack}".format(stack=get_stacktrace()))
+            logger.info("Start pyprof\n{stack}".format(stack=get_stacktrace()))
         self._init_trace_time()
         if self.python:
             # Using cProfile python profiler to collect python events.
-            logging.info("IML: Enabling python cProfile profiler")
+            logger.info("IML: Enabling python cProfile profiler")
             self.pyprof.enable()
         else:
             # Use custom function-wrappers around TensorFlow/Simulator C++ libraries to record
@@ -1493,7 +1495,7 @@ class Profiler:
             clib_wrap.enable_tracing()
             # clib_wrap.set_step(self._pyprof_step, expect_traced=True)
             # if (py_config.DEBUG or TF_PRINT_TIMESTAMP) and clib_wrap.is_recording():
-            #     logging.info("> RECORDING pyprof_step = {step}".format(step=self._pyprof_step))
+            #     logger.info("> RECORDING pyprof_step = {step}".format(step=self._pyprof_step))
         self._pyprof_enabled = True
 
     def _stop_pyprof(self):
@@ -1540,19 +1542,19 @@ class Profiler:
 
             if py_config.DEBUG and py_config.DEBUG_OPERATIONS:
                 should_finish = self.should_finish()
-                logging.info('> end_operation({op}), tracing time = {sec}, should_finish = {should_finish}'.format(
+                logger.info('> end_operation({op}), tracing time = {sec}, should_finish = {should_finish}'.format(
                     sec=self._total_trace_time_sec(),
                     should_finish=should_finish,
                     op=bench_name))
 
 
             # if self.calls_traced > self.num_calls and len(self._op_stack) > 0 and self.calls_traced % WARN_EVERY_CALL_MODULO == 0:
-            #     logging.info("> IML: WARNING, use more fine grained operations so we can free memory by dumping traces more frequently")
-            #     logging.info("  - calls traced = {calls_traced}, number of calls per-trace = {num_calls}".format(
+            #     logger.info("> IML: WARNING, use more fine grained operations so we can free memory by dumping traces more frequently")
+            #     logger.info("  - calls traced = {calls_traced}, number of calls per-trace = {num_calls}".format(
             #         calls_traced=self.calls_traced,
             #         num_calls=self.num_calls,
             #     ))
-            #     logging.info("  - currently active operations: {ops} <-- make these more fine-grained!".format(
+            #     logger.info("  - currently active operations: {ops} <-- make these more fine-grained!".format(
             #         ops=self._op_stack))
 
             if self._cur_operation == NO_BENCH_NAME and bench_name != self._cur_operation:
@@ -1672,7 +1674,7 @@ class Profiler:
         # Should be one of --iml-trace-time-sec, --iml-max-timesteps, --iml-max-training-loop-iters
         assert opt in term_opts
         if skip_if_set and self._is_term_opt_set():
-            logging.info(("IML: SKIP {func}({opt}={value}) "
+            logger.info(("IML: SKIP {func}({opt}={value}) "
                           "since trace-termination-options are already set: {opts}").format(
                 func=func,
                 opt=opt,
@@ -1680,7 +1682,7 @@ class Profiler:
                 opts=pprint_msg(self._term_opts()),
             ))
             return
-        logging.info("IML: Setting iml.prof.{var} = {val}".format(
+        logger.info("IML: Setting iml.prof.{var} = {val}".format(
             var=opt,
             val=value,
         ))
@@ -1691,7 +1693,7 @@ class Profiler:
         Only set self.opt if self.opt is currently None
         """
         if skip_if_set and getattr(self, opt) is not None:
-            logging.info(("IML: SKIP {func}({opt}={value}) "
+            logger.info(("IML: SKIP {func}({opt}={value}) "
                           "since {opt} is already set: {opts}").format(
                 # e.g., 'iml.prof.set_delay_passes',
                 func=funcname,
@@ -1702,7 +1704,7 @@ class Profiler:
                 },
             ))
             return
-        logging.info("IML: Setting iml.prof.{var} = {val}".format(
+        logger.info("IML: Setting iml.prof.{var} = {val}".format(
             var=opt,
             val=value,
         ))
@@ -1801,10 +1803,10 @@ class Profiler:
         assert not self.just_sample_util
 
         if not self.is_root_process:
-            logging.info("IML: Warning; you are starting the utilization sampler later than expected (this is not the root process of your training script")
+            logger.info("IML: Warning; you are starting the utilization sampler later than expected (this is not the root process of your training script")
 
         if self.util_sampler_pid is not None:
-            logging.info("IML: Warning; you're already running utilization sampler @ pid={pid}".format(pid=self.util_sampler_pid))
+            logger.info("IML: Warning; you're already running utilization sampler @ pid={pid}".format(pid=self.util_sampler_pid))
             return
 
         util_cmdline = ['iml-util-sampler']
@@ -1817,23 +1819,23 @@ class Profiler:
         # (to avoid false alarms when training is busy with the CPU/GPU).
         util_cmdline.append('--skip-smi-check')
         # if self.debug:
-        logging.info("> CMDLINE: {cmd}".format(cmd=' '.join(util_cmdline)))
+        logger.info("> CMDLINE: {cmd}".format(cmd=' '.join(util_cmdline)))
         # self.util_sampler_proc = subprocess.Popen(util_cmdline, creationflags=subprocess.DETACHED_PROCESS)
         self.util_sampler_proc = subprocess.Popen(util_cmdline)
         self.util_sampler_pid = self.util_sampler_proc.pid
-        logging.info("IML: CPU/GPU utilization sampler running @ pid={pid}".format(pid=self.util_sampler_pid))
+        logger.info("IML: CPU/GPU utilization sampler running @ pid={pid}".format(pid=self.util_sampler_pid))
 
     def _terminate_utilization_sampler(self, warn_terminated=True):
         assert not self.just_sample_util
 
         assert self.util_sampler_pid is not None
-        logging.info("IML: terminating CPU/GPU utilization sampler @ pid={pid}".format(pid=self.util_sampler_pid))
+        logger.info("IML: terminating CPU/GPU utilization sampler @ pid={pid}".format(pid=self.util_sampler_pid))
 
         try:
             proc = psutil.Process(self.util_sampler_pid)
         except psutil.NoSuchProcess as e:
             if warn_terminated:
-                logging.info("IML: Warning; tried to terminate utilization sampler @ pid={pid} but it wasn't running".format(pid=self.util_sampler_pid))
+                logger.info("IML: Warning; tried to terminate utilization sampler @ pid={pid} but it wasn't running".format(pid=self.util_sampler_pid))
             return
 
         proc.terminate()
@@ -1891,7 +1893,7 @@ class Profiler:
         timer.end_operation('disable_tracing')
 
         if self.debug:
-            logging.info("> IML: finishing profiling\n{stack}".format(stack=get_stacktrace(indent=1)))
+            logger.info("> IML: finishing profiling\n{stack}".format(stack=get_stacktrace(indent=1)))
 
         if self.unit_test:
             self.ut.stop()
@@ -1916,7 +1918,7 @@ class Profiler:
         # For each active session, schedule its results to be dumped.
         # for sess in ACTIVE_SESSIONS:
         #   self.dump_tfprof(sess)
-        # logging.info("> IML: Schedule any remaining traces to be dumped.")
+        # logger.info("> IML: Schedule any remaining traces to be dumped.")
         # for sess in iml_profiler.profiler.session.ACTIVE_SESSIONS:
         #     self._dump_tfprof(sess, debug=self.debug)
         # At the very least, make sure to dump the [PROC:<process_name>] we recorded above.
@@ -1931,39 +1933,39 @@ class Profiler:
         timer.end_operation('_dump_training_progress')
 
         if self.unit_test:
-            logging.info("> IML: _dump_unit_test")
+            logger.info("> IML: _dump_unit_test")
             self._dump_unit_test()
             timer.end_operation('_dump_unit_test')
-            logging.info("> IML: _dump_unit_test done")
+            logger.info("> IML: _dump_unit_test done")
             # Make sure ALL unit-test data has been recorded before we exit.
             if not self.ut.is_empty:
                 self.ut.debug_empty()
                 assert self.ut.is_empty
 
         # Wait on all dump-processes to finish executing.
-        # logging.info("> IML: Waiting for trace-dump background threads to complete.")
+        # logger.info("> IML: Waiting for trace-dump background threads to complete.")
         # self.bg_dumper.shutdown()
         # timer.end_operation('bg_dumper.shutdown')
 
         # Wait for any async tfprof trace file dumps in C++ to finish.
-        # logging.info("> IML: Wait for tfprof trace-file dumps in TensorFlow C++ to finish.")
+        # logger.info("> IML: Wait for tfprof trace-file dumps in TensorFlow C++ to finish.")
         # c_api_util.await_trace_data_dumps()
 
         # TODO: sample_cuda_api.await_trace_dumps()
 
-        # logging.info("> IML: Done")
+        # logger.info("> IML: Done")
 
         # Prevent weird bugs from happening at exit, like exceptions thrown during __del__ functions.
         clib_wrap.unwrap_libs()
         timer.end_operation('clib_wrap.unwrap_libs')
 
         if py_config.DEBUG_CRITICAL_PATH:
-            logging.info("Profiler.finish critical-path inflation: {msg}".format(
+            logger.info("Profiler.finish critical-path inflation: {msg}".format(
                 msg=pprint_msg(timer),
             ))
 
         if should_exit:
-            logging.info("> IML: Exiting training script early")
+            logger.info("> IML: Exiting training script early")
             sys.exit(0)
 
     # def _dump_tfprof(self, session, debug=False):
@@ -1980,7 +1982,7 @@ class Profiler:
     #         should_skip_dump = True
     #
     #     if hasattr(session, 'iml_skip_dump') and session.iml_skip_dump:
-    #         logging.info('session.iml_skip_dump was set; skipping dumping tfprof for session={s}'.format(
+    #         logger.info('session.iml_skip_dump was set; skipping dumping tfprof for session={s}'.format(
     #             s=session,
     #         ))
     #         should_skip_dump = True
@@ -1994,9 +1996,9 @@ class Profiler:
     #     if pctx.iml_traced_calls == 0:
     #         # Silently skip dumping this pctx since it contains no trace-data (unless --iml-debug).
     #         if pctx.phase is None and debug:
-    #             logging.info("Skip dumping tfprof @ {path}: your training script creates a tf.Session() object that never gets used so it has 0 traced-calls.".format(path=tfprof_path))
+    #             logger.info("Skip dumping tfprof @ {path}: your training script creates a tf.Session() object that never gets used so it has 0 traced-calls.".format(path=tfprof_path))
     #         elif debug:
-    #             logging.info("Skip dumping tfprof @ {path}: since it has 0 traced-calls.".format(path=tfprof_path))
+    #             logger.info("Skip dumping tfprof @ {path}: since it has 0 traced-calls.".format(path=tfprof_path))
     #         should_skip_dump = True
     #
     #     if not should_skip_dump:
@@ -2099,7 +2101,7 @@ class Profiler:
     #     end_sec = time.time()
     #     time_sec = end_sec - start_sec
     #     if py_config.DEBUG:
-    #         logging.info("Dump pyprof took {sec} seconds on the critical path".format(
+    #         logger.info("Dump pyprof took {sec} seconds on the critical path".format(
     #             sec=time_sec,
     #         ))
 
@@ -2133,7 +2135,7 @@ class Profiler:
         else:
             # Skip dumping training_progress, 10 seconds haven't expired yet.
 
-            # logging.info("Skip dumping IncrementalTrainingProgress")
+            # logger.info("Skip dumping IncrementalTrainingProgress")
             # fields = {
             #     'phase': self.phase,
             #     'incremental_training_progress': self._incremental_training_progress,
@@ -2142,7 +2144,7 @@ class Profiler:
             # }
             # if self.phase in self._incremental_training_progress:
             #     fields['can_dump'] = self._incremental_training_progress[self.phase].can_dump(self.reports_progress)
-            # logging.info(pprint_msg(fields))
+            # logger.info(pprint_msg(fields))
 
             return
 
@@ -2170,7 +2172,7 @@ class Profiler:
         end_sec = time.time()
         time_sec = end_sec - start_sec
         if py_config.DEBUG:
-            logging.info("Dump {proto} took {sec} seconds on the critical path".format(
+            logger.info("Dump {proto} took {sec} seconds on the critical path".format(
                 proto=proto_name,
                 sec=time_sec,
             ))
@@ -2202,7 +2204,7 @@ class Profiler:
             # we don't want to inflate the percent_complete'd over that duration of training time.
             percent_complete = self.percent_complete - self._start_percent_complete
             if self.debug:
-                logging.info("percent_complete ({perc}) = latest_percent_complete ({latest}) - start_percent_complete ({start})".format(
+                logger.info("percent_complete ({perc}) = latest_percent_complete ({latest}) - start_percent_complete ({start})".format(
                     perc=percent_complete,
                     latest=self.percent_complete,
                     start=self._start_percent_complete,
@@ -2234,7 +2236,7 @@ class Profiler:
         end_sec = time.time()
         time_sec = end_sec - start_sec
         if py_config.DEBUG:
-            logging.info("Dump ProcessMetaData took {sec} seconds on the critical path".format(
+            logger.info("Dump ProcessMetaData took {sec} seconds on the critical path".format(
                 sec=time_sec,
             ))
 
@@ -2282,7 +2284,7 @@ class Profiler:
                 total_trace_time_sec > self.trace_time_sec and \
                 len(self._op_stack) > 0 and \
                 ( self._last_warned_trace_time_sec is None or time.time() - self._last_warned_trace_time_sec >= WARN_EVERY_SEC ):
-            logging.warning(textwrap.dedent("""\
+            logger.warning(textwrap.dedent("""\
             IML: Warning; tracing time (sec) has exceeded limit (--iml-trace-time-sec {limit_sec}), 
             but annotations are still active:
               process_name = {proc}
@@ -2319,7 +2321,7 @@ class Profiler:
                 warn_idx > self._last_warned_report_progress_idx
             )
         ):
-            logging.warning(textwrap.dedent("""\
+            logger.warning(textwrap.dedent("""\
             IML: Warning; tracing time so far ({sec} sec) has exceeded tracing time-limit (--iml-trace-time-sec {limit_sec}), but process={proc} 
             hasn't called iml.prof.report_progress(...); did you forget to call this in that process?
               process_name = {proc}
@@ -2386,7 +2388,7 @@ class Profiler:
         )
         self._should_finish_idx += 1
         if py_config.DEBUG and (ret or self._should_finish_idx % 1000 == 0):
-            logging.info(textwrap.indent(textwrap.dedent("""
+            logger.info(textwrap.indent(textwrap.dedent("""
             - process_name = {proc}
             - finish_now = {finish_now}
             - skip_finish = {skip_finish}
@@ -2396,12 +2398,12 @@ class Profiler:
                 skip_finish=skip_finish,
             )), prefix="  "))
             if not self.disable_gpu_hw:
-                logging.info(textwrap.indent(textwrap.dedent("""
+                logger.info(textwrap.indent(textwrap.dedent("""
                 - has_next_pass = {has_next_pass}""".format(
                     has_next_pass=self.has_next_pass,
                 )), prefix="  "))
             if self.num_traces is not None:
-                logging.info(textwrap.indent(textwrap.dedent("""
+                logger.info(textwrap.indent(textwrap.dedent("""
                 - self.next_trace_id >= self.num_traces = {next_bool}
                   - self.next_trace_id = {next_trace_id}
                   - self.num_traces = {num_traces}""".format(
@@ -2410,7 +2412,7 @@ class Profiler:
                     next_trace_id=self.next_trace_id,
                 )), prefix="  "))
             if total_trace_time_sec is not None and self.trace_time_sec is not None:
-                logging.info(textwrap.indent(textwrap.dedent("""
+                logger.info(textwrap.indent(textwrap.dedent("""
                 - total_trace_time_sec >= self.trace_time_sec = {total_bool}
                   - total_trace_time_sec = {total_trace_time_sec}
                   - self.trace_time_sec = {trace_time_sec}""".format(
@@ -2419,7 +2421,7 @@ class Profiler:
                     trace_time_sec=self.trace_time_sec,
                 )), prefix="  "))
             if self.max_timesteps is not None and self.num_timesteps is not None:
-                logging.info(textwrap.indent(textwrap.dedent("""
+                logger.info(textwrap.indent(textwrap.dedent("""
                 - self.num_timesteps >= self.max_timesteps = {bool}
                   - self.num_timesteps = {num_timesteps}
                   - self.max_timesteps = {max_timesteps}""".format(
@@ -2428,7 +2430,7 @@ class Profiler:
                     max_timesteps=self.max_timesteps,
                 )), prefix="  "))
             if self.max_training_loop_iters is not None:
-                logging.info(textwrap.indent(textwrap.dedent("""
+                logger.info(textwrap.indent(textwrap.dedent("""
                 - self.num_training_loop_iters >= self.delay_training_loop_iters + self.max_timesteps = {bool}
                   - self.delay_training_loop_iters = {delay_training_loop_iters}
                   - self.num_training_loop_iters = {num_training_loop_iters}
@@ -2439,7 +2441,7 @@ class Profiler:
                     max_training_loop_iters=self.max_training_loop_iters,
                 )), prefix="  "))
             if self.max_passes is not None:
-                logging.info(textwrap.indent(textwrap.dedent("""
+                logger.info(textwrap.indent(textwrap.dedent("""
                 - self.num_passes >= self.delay_passes + self.max_timesteps = {bool}
                   - self.delay_passes = {delay_passes}
                   - self.num_passes = {num_passes}
@@ -2485,7 +2487,7 @@ class Profiler:
             return
 
         if py_config.DEBUG and py_config.DEBUG_REPORT_PROGRESS_ALL:
-            logging.info("[report-progress] vars={vars}\n{stack}".format(
+            logger.info("[report-progress] vars={vars}\n{stack}".format(
                 vars=dict(
                     percent_complete=percent_complete,
                     num_timesteps=num_timesteps,
@@ -2537,7 +2539,7 @@ class Profiler:
 
         if py_config.DEBUG and py_config.DEBUG_GPU_HW:
             rls_log('GPU_HW', f"tracing_enabled = {self._tracing_enabled}, percent_complete = {percent_complete}")
-        if self._tracing_enabled and percent_complete > 0:
+        if self._tracing_enabled and percent_complete > 0 and percent_complete < 1.:
             self._start_pass()
 
         if self.max_timesteps is not None and num_timesteps is None:
@@ -2621,7 +2623,7 @@ class Profiler:
     #     if self._loaded_libcupti:
     #         return
     #
-    #     logging.info("Forcing libcupti to load before tracing begins.")
+    #     logger.info("Forcing libcupti to load before tracing begins.")
     #
     #     import tensorflow as tf
     #     config = tf.ConfigProto()
@@ -2736,14 +2738,14 @@ class PythonProfiler:
             if hasattr(self.profile, 'make_use_monotonic_clock'):
                 self.profile.make_use_monotonic_clock()
             else:
-                logging.info("WARNING: couldn't enable monotonic_clock for cProfiler; "
+                logger.info("WARNING: couldn't enable monotonic_clock for cProfiler; "
                       "are you using a modified python3 with support for collecting raw start/end timestamps?")
 
         # if self.record_call_times:
         if hasattr(self.profile, 'make_record_call_times'):
             self.profile.make_record_call_times()
         else:
-            logging.info("WARNING: couldn't enable make_record_call_times for cProfiler; "
+            logger.info("WARNING: couldn't enable make_record_call_times for cProfiler; "
                   "are you using a modified python3 with support for collecting raw start/end timestamps?")
 
     def __enter__(self):
@@ -2796,7 +2798,7 @@ class PythonProfiler:
 
     def _dump_call_times_pickle(self, data, call_times_path):
         os.makedirs(os.path.dirname(call_times_path), exist_ok=True)
-        logging.info("> dump pyprof call_times data @ {path}".format(
+        logger.info("> dump pyprof call_times data @ {path}".format(
             path=call_times_path))
         with open(call_times_path, 'wb') as f:
             # -1 specifies highest binary protocol
@@ -3054,10 +3056,10 @@ def _iml_argv(prof : Profiler, keep_executable=False, keep_non_iml_args=False):
     # JAMES TODO: forward set_phase to children.
     parser = argparse.ArgumentParser()
     add_iml_arguments(parser)
-    logging.info("> argv: {argv}".format(argv=' '.join(sys.argv)))
+    logger.info("> argv: {argv}".format(argv=' '.join(sys.argv)))
     # NOTE: sys.argv[0] is the python script name.
     args, extra_argv = parser.parse_known_args(sys.argv[1:])
-    logging.info("> extra_argv: {argv}".format(argv=' '.join(extra_argv)))
+    logger.info("> extra_argv: {argv}".format(argv=' '.join(extra_argv)))
     # Inherit arguments in our fork-ed children.
     args.iml_internal_start_trace_time_sec = prof.get_start_trace_time_sec()
     args.iml_phase = prof.phase
@@ -3073,7 +3075,7 @@ def _iml_argv(prof : Profiler, keep_executable=False, keep_non_iml_args=False):
 
 def run_with_nvprof(directory, parser, args,
                     bench_name=NO_BENCH_NAME):
-    logging.info("> Reinvoking script with nvprof; bench_name={b}".format(
+    logger.info("> Reinvoking script with nvprof; bench_name={b}".format(
         b=bench_name))
 
     nvprof_logfile = _j(directory, "nvidia{bench}.nvprof_logfile.txt".format(
@@ -3109,7 +3111,7 @@ def check_avail_gpus():
     if not( (len(avail_gpus) == 1) or
             (len(avail_gpus) == 0 and len(avail_cpus) == 1) ):
         CUDA_VISIBLE_DEVICES = ENV.get('CUDA_VISIBLE_DEVICES', None)
-        logging.info(textwrap.dedent("""
+        logger.info(textwrap.dedent("""
         > IML ERROR: Multiple GPUs were found; IML benchmark requires only one GPU to be visible to TensorFlow via (for example) "export CUDA_VISIBLE_DEVICES=0".
         Use one of the below available GPUs:
         """))
@@ -3256,7 +3258,7 @@ def get_available_gpus():
     # # Allow multiple users to use the TensorFlow API.
     # config.gpu_options.allow_growth = True  # <--- even with this, it still user 645 MB!
     #
-    # logging.info("Before list_local_devices")
+    # logger.info("Before list_local_devices")
     # local_device_protos = tf_device_lib.list_local_devices(config) # <-- this trigger GPU allocation
     # device_protos = [x for x in local_device_protos if x.device_type == 'GPU']
     # device_dicts = [_device_proto_as_dict(device_proto) for device_proto in device_protos]
@@ -3426,4 +3428,4 @@ def get_tensorflow_config():
     return conf
 
 def rls_log(flag_name, msg):
-    logging.info(f"[{flag_name}] {msg}")
+    logger.info(f"[{flag_name}] {msg}")

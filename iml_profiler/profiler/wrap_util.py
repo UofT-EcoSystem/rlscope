@@ -1,5 +1,5 @@
 import re
-import logging
+from iml_profiler.profiler.iml_logging import logger
 
 from iml_profiler import py_config
 
@@ -16,11 +16,11 @@ def wrap_lib(FuncWrapperKlass, import_libname, wrapper_args=tuple(), func_regex=
 
         # import tensorflow.pywrap_tensorflow
         if py_config.DEBUG_WRAP_CLIB:
-            logging.info('  ... success')
+            logger.info('  ... success')
     except (ImportError, NameError) as e:
         # Failed to import library; skip wrapping the library.
-        logging.info('  ... FAILED: cannot wrap module {lib}; stacktrace:'.format(lib=wrap_libname))
-        logging.info(e)
+        logger.info('  ... FAILED: cannot wrap module {lib}; stacktrace:'.format(lib=wrap_libname))
+        logger.info(e)
         return False
     wrap_module(FuncWrapperKlass, lib, wrapper_args, func_regex=func_regex)
     return True
@@ -28,17 +28,17 @@ def wrap_lib(FuncWrapperKlass, import_libname, wrapper_args=tuple(), func_regex=
 def unwrap_lib(FuncWrapperKlass, import_libname, wrap_libname):
     try:
         if py_config.DEBUG_WRAP_CLIB:
-            logging.info('> lookup {libname}...'.format(libname=wrap_libname))
+            logger.info('> lookup {libname}...'.format(libname=wrap_libname))
 
         exec("import {import_lib}".format(import_lib=import_libname))
         # May throw NameError
         lib = eval("{wrap_lib}".format(wrap_lib=wrap_libname))
 
         if py_config.DEBUG_WRAP_CLIB:
-            logging.info('  ... success')
+            logger.info('  ... success')
     except NameError as e:
-        logging.info('  ... FAILED: cannot unwrap module {lib}; stacktrace:'.format(lib=wrap_libname))
-        logging.info(e)
+        logger.info('  ... FAILED: cannot unwrap module {lib}; stacktrace:'.format(lib=wrap_libname))
+        logger.info(e)
         return
     unwrap_module(FuncWrapperKlass, lib)
 
@@ -47,7 +47,7 @@ def wrap_module(FuncWrapperKlass, module, wrapper_args,
     for name in dir(module):
         if re.search(ignore_func_regex, name):
             if py_config.DEBUG_WRAP_CLIB:
-                logging.info("  Skip func={name}".format(name=name))
+                logger.info("  Skip func={name}".format(name=name))
             continue
         func = getattr(module, name)
         if not re.search(ignore_func_regex, name) and (

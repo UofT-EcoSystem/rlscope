@@ -9,6 +9,7 @@
 #include <boost/filesystem.hpp>
 
 #include <cupti_target.h>
+#include <cupti.h>
 #include <cupti_profiler_target.h>
 #include <nvperf_target.h>
 #include <nvperf_host.h>

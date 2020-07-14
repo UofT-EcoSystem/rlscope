@@ -1,4 +1,4 @@
-import logging
+from iml_profiler.profiler.iml_logging import logger
 import traceback
 import textwrap
 
@@ -18,7 +18,7 @@ class FuzzFuncWrapper:
         super().__setattr__('func', func)
 
     def __call__(self, *args, **kwargs):
-        logging.info(textwrap.dedent("""
+        logger.info(textwrap.dedent("""
         > IML: Call to session.run(...):
         {stack}
         """.format(stack=get_stacktrace())))

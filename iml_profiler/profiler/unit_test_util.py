@@ -2,7 +2,7 @@
 # Utilities for recording data for unit-tests, and for reading in data for checking unit-test success/failure.
 #
 
-import logging
+from iml_profiler.profiler.iml_logging import logger
 from os.path import join as _j
 
 from iml_profiler.protobuf.unit_test_pb2 import IMLUnitTestOnce, IMLUnitTestMultiple
@@ -40,7 +40,7 @@ class TestData:
         assert self.directory is None
         self.directory = directory
         if self.debug:
-            logging.info("> Read {klass} rooted at {dir}".format(
+            logger.info("> Read {klass} rooted at {dir}".format(
                 klass=self.__class__.__name__,
                 dir=self.directory))
         for dirpath, dirnames, filenames in os.walk(self.directory):
@@ -48,12 +48,12 @@ class TestData:
                 path = _j(dirpath, base)
                 if is_unit_test_multiple_file(path):
                     if self.debug:
-                        logging.info("  Read {path}".format(path=path))
+                        logger.info("  Read {path}".format(path=path))
                     proto = read_unit_test_multiple_file(path)
                     self.merge_proto(proto)
                 elif is_unit_test_once_file(path):
                     if self.debug:
-                        logging.info("  Read {path}".format(path=path))
+                        logger.info("  Read {path}".format(path=path))
                     proto = read_unit_test_once_file(path)
                     self.merge_proto(proto)
 
@@ -337,7 +337,7 @@ class UnitTestDataDumper:
 
     def stop(self):
         if self.stopped:
-            logging.info("> Already ran UnitTestDataDumper.stop; ignoring.")
+            logger.info("> Already ran UnitTestDataDumper.stop; ignoring.")
             return
         assert not self.stopped
         # self.unwrapped_prof.stop()
@@ -366,7 +366,7 @@ class UnitTestDataDumper:
              process_name, test_name):
 
         def print_debug(proto_name, proto, path):
-            logging.info("> Dump {proto_name}(process_name={proc}, test_name={test}) @ {path}:".format(
+            logger.info("> Dump {proto_name}(process_name={proc}, test_name={test}) @ {path}:".format(
                 proto_name=proto_name,
                 proc=process_name, test=test_name,
                 path=path))

@@ -7,6 +7,7 @@
 
 #include <cuda.h>
 #include <cupti_target.h>
+#include <cupti.h>
 
 //#include "iml_profiler/protobuf/iml_prof.pb.h"
 #include "iml_prof.pb.h"

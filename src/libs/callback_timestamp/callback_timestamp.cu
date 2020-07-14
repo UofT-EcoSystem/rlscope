@@ -20,23 +20,23 @@
 using rlscope::MyStatus;
 //using rlscope::error;
 
-#define CHECK_CU_ERROR(err, cufunc)                                     \
-  if (err != CUDA_SUCCESS)                                              \
-    {                                                                   \
-      printf ("%s:%d: error %d for CUDA Driver API function '%s'\n",    \
-              __FILE__, __LINE__, err, cufunc);                         \
-      exit(-1);                                                         \
-    }
-
-#define CHECK_CUPTI_ERROR(err, cuptifunc)                               \
-  if (err != CUPTI_SUCCESS)                                             \
-    {                                                                   \
-      const char *errstr;                                               \
-      cuptiGetResultString(err, &errstr);                               \
-      printf ("%s:%d:Error %s for CUPTI API function '%s'.\n",          \
-              __FILE__, __LINE__, errstr, cuptifunc);                   \
-      exit(-1);                                                         \
-    }
+//#define CHECK_CU_ERROR(err, cufunc)
+//  if (err != CUDA_SUCCESS)
+//    {
+//      printf ("%s:%d: error %d for CUDA Driver API function '%s'n",
+//              __FILE__, __LINE__, err, cufunc);
+//      exit(-1);
+//    }
+//
+//#define CHECK_CUPTI_ERROR(err, cuptifunc)
+//  if (err != CUPTI_SUCCESS)
+//    {
+//      const char *errstr;
+//      cuptiGetResultString(err, &errstr);
+//      printf ("%s:%d:Error %s for CUPTI API function '%s'.n",
+//              __FILE__, __LINE__, errstr, cuptifunc);
+//      exit(-1);
+//    }
 
 // Structure to hold data collected by callback
 typedef struct RuntimeApiTrace_st {
@@ -112,16 +112,14 @@ getTimestampCallback(void *userdata, CUpti_CallbackDomain domain,
       }
         
       // Collect timestamp for API start
-      cuptiErr = cuptiDeviceGetTimestamp(cbInfo->context, &startTimestamp);
-      CHECK_CUPTI_ERROR(cuptiErr, "cuptiDeviceGetTimestamp");
+      CUPTI_API_CALL_MAYBE_EXIT(cuptiDeviceGetTimestamp(cbInfo->context, &startTimestamp));
             
       traceData->startTimestamp = startTimestamp;
     }
 
     if (cbInfo->callbackSite == CUPTI_API_EXIT) {
       // Collect timestamp for API exit
-      cuptiErr = cuptiDeviceGetTimestamp(cbInfo->context, &endTimestamp);
-      CHECK_CUPTI_ERROR(cuptiErr, "cuptiDeviceGetTimestamp");
+      CUPTI_API_CALL_MAYBE_EXIT(cuptiDeviceGetTimestamp(cbInfo->context, &endTimestamp));
             
       traceData->endTimestamp = endTimestamp;
      
@@ -196,8 +194,7 @@ cleanUp(int *h_A, int *h_B, int *h_C, int *d_A, int *d_B, int *d_C)
     free(h_C);
 }
 
-int main(int argc, char* argv[])
-{
+int main(int argc, char* argv[]) {
   backward::SignalHandling sh;
   // gflags::ParseCommandLineFlags(&argc, &argv, true);
 
@@ -223,23 +220,19 @@ int main(int argc, char* argv[])
 
   CUpti_SubscriberHandle subscriber;
   RuntimeApiTrace_t trace[LAUNCH_LAST];
-    
-  cuerr = cuInit(0);
-  CHECK_CU_ERROR(cuerr, "cuInit");
 
-  cuerr = cuCtxCreate(&context, 0, device);
-  CHECK_CU_ERROR(cuerr, "cuCtxCreate");
+  DRIVER_API_CALL_MAYBE_EXIT(cuInit(0));
 
-  cuptierr = cuptiSubscribe(&subscriber, (CUpti_CallbackFunc)getTimestampCallback , &trace);
-  CHECK_CUPTI_ERROR(cuptierr, "cuptiSubscribe");
+  DRIVER_API_CALL_MAYBE_EXIT(cuCtxCreate(&context, 0, device));
 
-  cuptierr = cuptiEnableDomain(1, subscriber, CUPTI_CB_DOMAIN_RUNTIME_API);
-  CHECK_CUPTI_ERROR(cuptierr, "cuptiEnableDomain");
+  CUPTI_API_CALL_MAYBE_EXIT(cuptiSubscribe(&subscriber, (CUpti_CallbackFunc) getTimestampCallback, &trace));
+
+  CUPTI_API_CALL_MAYBE_EXIT(cuptiEnableDomain(1, subscriber, CUPTI_CB_DOMAIN_RUNTIME_API));
 
   // Allocate input vectors h_A and h_B in host memory
-  h_A = (int*)malloc(size);
-  h_B = (int*)malloc(size);
-  h_C = (int*)malloc(size);
+  h_A = (int *) malloc(size);
+  h_B = (int *) malloc(size);
+  h_C = (int *) malloc(size);
 
   // Initialize input vectors
   initVec(h_A, N);
@@ -247,11 +240,11 @@ int main(int argc, char* argv[])
   memset(h_C, 0, size);
 
   // Allocate vectors in device memory
-  cudaMalloc((void**)&d_A, size);
-  cudaMalloc((void**)&d_B, size);
-  cudaMalloc((void**)&d_C, size);
+  cudaMalloc((void **) &d_A, size);
+  cudaMalloc((void **) &d_B, size);
+  cudaMalloc((void **) &d_C, size);
 
-  auto run_pass = [&] (rlscope::GPUHwCounterSampler& sampler) {
+  auto run_pass = [&](rlscope::GPUHwCounterSampler &sampler) {
     MyStatus ret;
 
     ret = sampler.StartPass();
@@ -299,6 +292,7 @@ int main(int argc, char* argv[])
     return MyStatus::OK();
   };
 
+  {
   MyStatus ret = MyStatus::OK();
   rlscope::GPUHwCounterSampler sampler(device, ".", "");
 
@@ -339,9 +333,9 @@ int main(int argc, char* argv[])
 
   ret = sampler.StopProfiling();
   IF_BAD_STATUS_EXIT("Failed to stop GPU hw counter profiler", ret);
+  } // Destruct sampler.
 
-  cuptierr = cuptiUnsubscribe(subscriber);
-  CHECK_CUPTI_ERROR(cuptierr, "cuptiUnsubscribe");
+  CUPTI_API_CALL_MAYBE_EXIT(cuptiUnsubscribe(subscriber));
 
   cleanUp(h_A, h_B, h_C, d_A, d_B, d_C);
   cudaDeviceSynchronize();

@@ -1,4 +1,4 @@
-import logging
+from iml_profiler.profiler.iml_logging import logger
 import signal
 import time
 import subprocess
@@ -181,7 +181,7 @@ class UtilizationSampler:
             trace_id = self.trace_id
 
             if self.debug:
-                logging.info("> {klass}: Dump CPU/GPU utilization after {sec} seconds (# samples = {n}, sampled every {every_ms} ms) @ {path}".format(
+                logger.info("> {klass}: Dump CPU/GPU utilization after {sec} seconds (# samples = {n}, sampled every {every_ms} ms) @ {path}".format(
                     klass=self.__class__.__name__,
                     sec=self.util_dump_frequency_sec,
                     every_ms=self.util_sample_frequency_sec*MILLISECONDS_IN_SECOND,
@@ -217,7 +217,7 @@ class UtilizationSampler:
             proc_watcher = None
 
         if self.debug:
-            logging.info("> {klass}: Start collecting CPU/GPU utilization samples".format(
+            logger.info("> {klass}: Start collecting CPU/GPU utilization samples".format(
                 klass=self.__class__.__name__,
             ))
         self.last_dump_sec = time.time()
@@ -231,7 +231,7 @@ class UtilizationSampler:
                 after = time.time()
                 one_ms = after - before
                 if self.debug:
-                    logging.info("> {klass}: Slept for {ms} ms".format(
+                    logger.info("> {klass}: Slept for {ms} ms".format(
                         klass=self.__class__.__name__,
                         ms=one_ms*MILLISECONDS_IN_SECOND,
                     ))
@@ -240,13 +240,13 @@ class UtilizationSampler:
 
                 if SigTermWatcher.kill_now:
                     if self.debug:
-                        logging.info("> {klass}: Got SIGINT; dumping remaining collected samples and exiting".format(
+                        logger.info("> {klass}: Got SIGINT; dumping remaining collected samples and exiting".format(
                             klass=self.__class__.__name__,
                         ))
                     should_stop = True
                 elif proc_watcher is not None and proc_watcher.finished.is_set():
                     if self.debug:
-                        logging.info("> {klass}: cmd terminated with exit status {ret}".format(
+                        logger.info("> {klass}: cmd terminated with exit status {ret}".format(
                             klass=self.__class__.__name__,
                             ret=proc_watcher.retcode,
                         ))
@@ -263,7 +263,7 @@ class UtilizationSampler:
                 self._maybe_dump(cur_time_sec)
 
                 if self.debug:
-                    logging.info("> {klass}: # Samples = {n} @ {sec}".format(
+                    logger.info("> {klass}: # Samples = {n} @ {sec}".format(
                         klass=self.__class__.__name__,
                         sec=cur_time_sec,
                         n=self.n_samples,
@@ -276,7 +276,7 @@ class UtilizationSampler:
                 machine_gpu_info = nvidia_gpu_query.MachineGPUInfo(debug=self.debug)
                 gpu_utils = sample_gpu_utilization(machine_gpu_info, self.pid, debug=self.debug)
                 if self.debug:
-                    logging.info("> {klass}: utils = \n{utils}".format(
+                    logger.info("> {klass}: utils = \n{utils}".format(
                         klass=self.__class__.__name__,
                         utils=textwrap.indent(
                             pprint.pformat({'cpu_util':cpu_util, 'gpu_utils':gpu_utils}),
@@ -328,7 +328,7 @@ def measure_samples_per_sec():
             func()
         end_sec = time.time()
         calls_per_sec = (end_sec - start_sec)/float(iterations)
-        logging.info("> {name}: {calls_per_sec} calls/sec, measured over {iters} calls".format(
+        logger.info("> {name}: {calls_per_sec} calls/sec, measured over {iters} calls".format(
             name=name,
             calls_per_sec=calls_per_sec,
             iters=iterations))
@@ -363,7 +363,7 @@ def dump_machine_util(directory, trace_id, machine_util, debug):
         f.write(machine_util.SerializeToString())
 
     if debug:
-        logging.info("> Dumped @ {path}".format(path=trace_path))
+        logger.info("> Dumped @ {path}".format(path=trace_path))
 
 def get_trace_path(directory, trace_id):
     path = _j(directory, 'machine_util{trace}.proto'.format(
@@ -442,7 +442,7 @@ class MachineProcessCPUInfo:
                 mem_infos.append(mem_info)
             except psutil.NoSuchProcess as e:
                 if self.debug:
-                    logging.info((
+                    logger.info((
                         "Tried to sample resident memory from proc={proc}, "
                         "but it looks like it exited; skipping").format(
                         proc=proc))
@@ -463,14 +463,14 @@ def get_process_tree(pid):
 def sample_gpu_total_resident_memory_bytes(machine_gpu_info, gpu, pid, debug=False):
     procs = get_process_tree(pid)
     # if debug:
-    #     logging.info(pprint_msg({'sample_gpu_bytes.procs': procs, 'pid': pid, 'gpu': gpu}))
+    #     logger.info(pprint_msg({'sample_gpu_bytes.procs': procs, 'pid': pid, 'gpu': gpu}))
 
     pids = set(proc.pid for proc in procs)
 
 
     gpu_procs = machine_gpu_info.processes(gpu)
     # if debug:
-    #     logging.info(pprint_msg({'sample_gpu_bytes.gpu_procs': gpu_procs}))
+    #     logger.info(pprint_msg({'sample_gpu_bytes.gpu_procs': gpu_procs}))
     total_resident_memory_bytes = 0
     for gpu_proc in gpu_procs:
         if not py_config.IS_DOCKER:
@@ -498,7 +498,7 @@ def sample_gpu_utilization(machine_gpu_info, pid, debug=False):
     epoch_time_usec = now_us()
     gpu_utils = []
     # if debug:
-    #     logging.info(pprint_msg({'sample_gpu_bytes.gpus': gpus}))
+    #     logger.info(pprint_msg({'sample_gpu_bytes.gpus': gpus}))
     for gpu in gpus:
         total_resident_memory_bytes = sample_gpu_total_resident_memory_bytes(machine_gpu_info, gpu, pid, debug=debug)
         gpu_util = GPU_as_util(
@@ -695,9 +695,8 @@ def disable_test_sample_gpu_util():
         gpu_runner.join(timeout=2)
         gpu_runner.terminate()
 
-from iml_profiler.profiler import iml_logging
+from iml_profiler.profiler.iml_logging import logger
 def main():
-    iml_logging.setup_logging()
     iml_util_argv, cmd_argv = split_argv_on(sys.argv[1:])
     parser = get_util_sampler_parser(add_iml_root_pid=len(cmd_argv) == 0)
     args = parser.parse_args(iml_util_argv)
@@ -723,9 +722,9 @@ def main():
             pprint.pprint({'pinfo': pinfo})
             # cmdline = proc.cmdline()
             try:
-                logging.info(pinfo['cmdline'])
+                logger.info(pinfo['cmdline'])
                 if re.search(r'iml-util-sampler', ' '.join(pinfo['cmdline'])) and pinfo['pid'] != os.getpid():
-                    logging.info("> Kill iml-util-sampler: {proc}".format(
+                    logger.info("> Kill iml-util-sampler: {proc}".format(
                         proc=proc))
                     proc.kill()
             except psutil.NoSuchProcess:
@@ -733,7 +732,7 @@ def main():
         sys.exit(0)
 
     if args.iml_directory is None:
-        logging.info("--iml-directory is required: directory where trace-files are saved")
+        logger.info("--iml-directory is required: directory where trace-files are saved")
         parser.print_help()
         sys.exit(1)
 
@@ -742,7 +741,7 @@ def main():
     # proc = psutil.Process(pid=os.getpid())
     # dump_cpus = get_dump_cpus()
     # proc.cpu_affinity(dump_cpus)
-    # logging.info("> Set CPU affinity of iml-util-sampler to: {cpus}".format(
+    # logger.info("> Set CPU affinity of iml-util-sampler to: {cpus}".format(
     #     cpus=dump_cpus,
     # ))
 
@@ -811,17 +810,17 @@ class UtilSamplerProcess:
             log_cmd(util_cmdline)
         self.proc = subprocess.Popen(util_cmdline)
         self.proc_pid = self.proc.pid
-        logging.info("IML: CPU/GPU utilization sampler running @ pid={pid}".format(pid=self.proc_pid))
+        logger.info("IML: CPU/GPU utilization sampler running @ pid={pid}".format(pid=self.proc_pid))
 
     def _terminate_utilization_sampler(self, warn_terminated=True):
         assert self.proc_pid is not None
-        logging.info("IML: terminating CPU/GPU utilization sampler @ pid={pid}".format(pid=self.proc_pid))
+        logger.info("IML: terminating CPU/GPU utilization sampler @ pid={pid}".format(pid=self.proc_pid))
 
         try:
             proc = psutil.Process(self.proc_pid)
         except psutil.NoSuchProcess as e:
             if warn_terminated:
-                logging.info("IML: Warning; tried to terminate utilization sampler @ pid={pid} but it wasn't running".format(pid=self.proc_pid))
+                logger.info("IML: Warning; tried to terminate utilization sampler @ pid={pid} but it wasn't running".format(pid=self.proc_pid))
             return
 
         proc.terminate()
@@ -857,7 +856,7 @@ def util_sampler(*args, **kwargs):
     :param iml_directory:
         Where to store trace-files containing CPU/GPU utilization info.
     :param debug:
-        Extra logging.
+        Extra logger.
     """
     import iml_profiler.api
     if iml_profiler.api.prof is not None:

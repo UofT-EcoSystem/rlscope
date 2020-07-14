@@ -16,7 +16,7 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-import logging
+from iml_profiler.profiler.iml_logging import logger
 from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, basename as _b
 
 import re
@@ -150,12 +150,12 @@ def _profiled_run_thin_wrapper(self,
   if locked and not self.profile_context._is_fast_path(step):
 
     if py_config.DEBUG and not self.profile_context._should_trace(step, self.graph, fetches):
-      logging.info("tfprof> SKIP step={step}".format(step=step))
+      logger.info("tfprof> SKIP step={step}".format(step=step))
 
     # Maybe trace this step.
     if self.profile_context._should_trace(step, self.graph, fetches):
       # if py_config.DEBUG:
-      #   logging.info("tfprof> with step={step}".format(step=step))
+      #   logger.info("tfprof> with step={step}".format(step=step))
       if self.profile_context._debug:
         sys.stderr.write('debug: tracing step: %d\n' % step)
       # Enable tracing, perform auto profiling or auto dump.
@@ -227,7 +227,7 @@ def _profiled_run_thin_wrapper(self,
     profile_context_state.__exit__(None, None, None)
   # Fast no lock path.
   # if py_config.DEBUG:
-  #     logging.info("tfprof> (2) SKIP step={step}".format(step=step))
+  #     logger.info("tfprof> (2) SKIP step={step}".format(step=step))
   return self._profiler_run_internal(
     fetches, feed_dict, options, run_metadata)
   # pylint: enable=protected-access
@@ -268,7 +268,7 @@ def _profiled_run(self,
     locked = False
 
   # if py_config.DEBUG:
-  #   logging.info(textwrap.dedent("""
+  #   logger.info(textwrap.dedent("""
   #   > _profile_run:
   #     - profile_context = {pctx}
   #     - step = {step}
@@ -279,7 +279,7 @@ def _profiled_run(self,
   #     locked=locked,
   #   )))
   #   if profile_context is not None:
-  #     logging.info(textwrap.dedent("""
+  #     logger.info(textwrap.dedent("""
   #     - not self.profile_context._is_fast_path(step) = {fast_path_bool}
   #       - self.profile_context._disable = {disable}
   #       - self.profile_context._trace_all = {trace_all}
@@ -292,7 +292,7 @@ def _profiled_run(self,
   #   #   # Q: Why isn't this Session object being traced with a ProfileContext object?
   #   #   import ipdb; ipdb.set_trace()
 
-  # logging.info("> tfprof debug: {vars}".format(vars={
+  # logger.info("> tfprof debug: {vars}".format(vars={
   #   'locked': locked,
   #   'step': step,
   #   'py_config.DEBUG': py_config.DEBUG,
@@ -304,12 +304,12 @@ def _profiled_run(self,
   if locked and not self.profile_context._is_fast_path(step):
 
     if py_config.DEBUG and not self.profile_context._should_trace(step, self.graph, fetches):
-        logging.info("tfprof> SKIP step={step}".format(step=step))
+        logger.info("tfprof> SKIP step={step}".format(step=step))
 
     # Maybe trace this step.
     if self.profile_context._should_trace(step, self.graph, fetches):
       # if py_config.DEBUG:
-      #   logging.info("tfprof> with step={step}".format(step=step))
+      #   logger.info("tfprof> with step={step}".format(step=step))
       if self.profile_context._debug:
         sys.stderr.write('debug: tracing step: %d\n' % step)
       # Enable tracing, perform auto profiling or auto dump.
@@ -361,7 +361,7 @@ def _profiled_run(self,
       #     # For q_backward, if profiling overhead from add_step is the issue, I expect:
       #     #   _profiler_run_internal to take ~ 0.10199415534734727 sec
       #     #   add_step to take ~ 1.196728 - 0.10199415534734727 = 1.0947338 sec
-      #     logging.info(textwrap.dedent("""
+      #     logger.info(textwrap.dedent("""
       #     tfprof> cache stats needed for add_step(step={step})
       #             _profiler_run_internal = {prof_sec} seconds
       #             add_step = {add_step_sec} seconds
@@ -371,7 +371,7 @@ def _profiled_run(self,
 
     else:
       # if py_config.DEBUG:
-      #   logging.info("tfprof> (1) SKIP step={step}".format(step=step))
+      #   logger.info("tfprof> (1) SKIP step={step}".format(step=step))
       ret = self._profiler_run_internal(fetches, feed_dict, options)
 
     # Maybe dump profile.
@@ -403,7 +403,7 @@ def _profiled_run(self,
     profile_context_state.__exit__(None, None, None)
   # Fast no lock path.
   # if py_config.DEBUG:
-  #     logging.info("tfprof> (2) SKIP step={step}".format(step=step))
+  #     logger.info("tfprof> (2) SKIP step={step}".format(step=step))
   return self._profiler_run_internal(
       fetches, feed_dict, options, run_metadata)
   # pylint: enable=protected-access
@@ -516,7 +516,7 @@ class ProfileContext(object):
     else:
       self._lock = None
 
-    logging.info("Ported profiler")
+    logger.info("Ported profiler")
 
   def add_auto_profiling(self, cmd, options, profile_steps):
     """Traces and profiles at some session run steps.
@@ -633,7 +633,7 @@ class ProfileContext(object):
       gfile.MakeDirs(self._profiler_dir)
 
     if py_config.DEBUG:
-      logging.info("tfprof> Dump @ step={step}".format(step=step))
+      logger.info("tfprof> Dump @ step={step}".format(step=step))
     filename = os.path.join(compat.as_bytes(self._profiler_dir),
                             compat.as_bytes('profile_%d' % step))
     self.profiler._write_profile(filename)  # pylint: disable=protected-access
@@ -655,16 +655,16 @@ class ProfileContext(object):
       # So just set it to True.
       acquired = True
     # if py_config.DEBUG:
-    #     logging.info("> tfprof: step={step}, locked={locked}".format(
+    #     logger.info("> tfprof: step={step}, locked={locked}".format(
     #       step=self._step,
     #       locked=acquired))
     # if py_config.DEBUG:
-    #   logging.info("> tfprof: step={step}".format(
+    #   logger.info("> tfprof: step={step}".format(
     #     step=self._step,
     #   ))
     yield (self._step, acquired)
     # if py_config.DEBUG:
-    #   logging.info("> tfprof: AFTER step={step}, locked={locked}".format(
+    #   logger.info("> tfprof: AFTER step={step}, locked={locked}".format(
     #     step=self._step,
     #     locked=acquired))
     self._step += 1
@@ -705,12 +705,12 @@ class ProfileContext(object):
     #   phase = self.phase
 
     if sess is None:
-      logging.info(("> WARNING: tfprof didn't trace sessions for cmd:\n"
+      logger.info(("> WARNING: tfprof didn't trace sessions for cmd:\n"
              "  cmd: {cmd}").format(cmd=" ".join(sys.argv)))
       return
 
     if py_config.DEBUG and self._disable:
-      logging.info("> SKIP pctx.clear(); --iml-disable")
+      logger.info("> SKIP pctx.clear(); --iml-disable")
       return
 
     # c_api_util.clear_trace_data(sess)
@@ -719,7 +719,7 @@ class ProfileContext(object):
 
     if py_config.DEBUG and py_config.DEBUG_TRACE_SESSION:
         sess = self._cur_session(allow_none=True)
-        logging.info("[trace-session : ProfileContext.dump] session={sess}, phase={phase}".format(
+        logger.info("[trace-session : ProfileContext.dump] session={sess}, phase={phase}".format(
           sess=sess,
           phase=self.phase,
         ))
@@ -728,7 +728,7 @@ class ProfileContext(object):
     assert self.machine_name is not None
     sess = self._cur_session()
     if py_config.DEBUG:
-        logging.info("> c_api_util.dump_trace_data_async: dump_path={path}, process={proc}, phase={phase}, machine_name={machine_name}".format(
+        logger.info("> c_api_util.dump_trace_data_async: dump_path={path}, process={proc}, phase={phase}, machine_name={machine_name}".format(
           path=dump_path,
           proc=process_name,
           phase=self.phase,
@@ -747,20 +747,20 @@ class ProfileContext(object):
     #   phase = self.phase
 
     if sess is None:
-        logging.info(("> WARNING: tfprof didn't trace sessions for cmd:\n"
+        logger.info(("> WARNING: tfprof didn't trace sessions for cmd:\n"
                "  cmd: {cmd}").format(cmd=" ".join(sys.argv)))
         return
 
     if py_config.DEBUG and self._disable:
-        logging.info("> SKIP pctx.dump(dump_path={path}, process={proc}); --iml-disable".format(
+        logger.info("> SKIP pctx.dump(dump_path={path}, process={proc}); --iml-disable".format(
           path=dump_path,
           proc=process_name))
         return
 
     self.trace_data = c_api_util.get_trace_data(sess)
     byte_size = self.trace_data.ByteSize()
-    logging.info("> trace_data size = {b} bytes".format(b=byte_size))
-    logging.info("> tfprof steps: ")
+    logger.info("> trace_data size = {b} bytes".format(b=byte_size))
+    logger.info("> tfprof steps: ")
     steps = sorted(list(self.trace_data.traced_steps.keys()))
     pprint.pprint({'len(steps)':len(steps)})
 
@@ -771,7 +771,7 @@ class ProfileContext(object):
 
     if len(self.trace_data.traced_steps) == 0:
       # No sess.run() calls were traced.
-      logging.info((
+      logger.info((
         "> WARNING: tfprof didn't capture any session.run(...) calls!\n",
          "Maybe try setting --iml-start-measuring-call lower (e.g. 0)?",
          ))
@@ -783,7 +783,7 @@ class ProfileContext(object):
     # profile_path = _j(self._profiler_dir, 'profile_{d}'.format(d=dump_step))
     # profile_path = self.get_dump_path()
     size_bytes = profile_proto_builder.size_bytes()
-    logging.info("> Dump tfprof ({b} bytes) to: {path}".format(
+    logger.info("> Dump tfprof ({b} bytes) to: {path}".format(
       b=size_bytes, path=dump_path))
     profile_proto_builder.dump(dump_path)
 
@@ -827,8 +827,8 @@ class ProfileContext(object):
     sess = self._cur_session()
     self.trace_data = c_api_util.get_trace_data(sess)
     byte_size = self.trace_data.ByteSize()
-    logging.info("> trace_data size = {b} bytes".format(b=byte_size))
-    logging.info("> tfprof steps: ")
+    logger.info("> trace_data size = {b} bytes".format(b=byte_size))
+    logger.info("> tfprof steps: ")
     steps = sorted(list(self.trace_data.traced_steps))
     pprint.pprint({'steps':steps})
     graph = self.graph
@@ -991,10 +991,10 @@ def now_in_usec():
 
 def preallocate_tracer(step, sess):
   # if py_config.DEBUG:
-  #   logging.info("> PREALLOCATE_TRACER for step={step}".format(step=step))
+  #   logger.info("> PREALLOCATE_TRACER for step={step}".format(step=step))
   assert sess is not None
   # sess = tf.get_default_session()
-  # logging.info("> preallocate_tracer: _session = {session}".format(session=sess._session))
+  # logger.info("> preallocate_tracer: _session = {session}".format(session=sess._session))
   print_mdl.TF_PreallocateTracer(sess._session, step)
 
 def IsGPUTime(device):

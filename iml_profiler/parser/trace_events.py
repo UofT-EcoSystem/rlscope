@@ -1,4 +1,4 @@
-import logging
+from iml_profiler.profiler.iml_logging import logger
 import decimal
 
 from iml_profiler.parser.common import *
@@ -22,7 +22,7 @@ class TraceEventsDumper:
         self.reset()
         self.js_add_category_times(self.category_times)
         if print_log:
-            logging.info("> Write traceEvents to: {path}".format(path=self.json_path))
+            logger.info("> Write traceEvents to: {path}".format(path=self.json_path))
 
         do_dump_json(self.js, self.json_path, cls=DecimalEncoder)
 

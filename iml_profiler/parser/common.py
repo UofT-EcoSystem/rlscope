@@ -7,7 +7,7 @@ import shlex
 import csv
 import decimal
 import json
-import logging
+from iml_profiler.profiler.iml_logging import logger
 import os
 import pickle
 import pprint
@@ -408,7 +408,7 @@ class ProfilerParserCommonMixin:
         matching_paths = dict()
         j = 0
         if debug:
-            logging.info("> allow_multiple={v}".format(v=allow_multiple))
+            logger.info("> allow_multiple={v}".format(v=allow_multiple))
         while j < len(regexes):
             regex_name, regex = regexes_left[j]
 
@@ -422,14 +422,14 @@ class ProfilerParserCommonMixin:
                     and m.groupdict().get('bench_name', None) is not None \
                     and re.search(ignore_bench_re, m.group('bench_name')):
                     if debug:
-                        logging.info("> regex={regex}, ignore_bench_re={ignore_regex} matches _b(path)={path}".format(
+                        logger.info("> regex={regex}, ignore_bench_re={ignore_regex} matches _b(path)={path}".format(
                             regex=regex,
                             ignore_regex=ignore_bench_re,
                             path=_b(path)))
                     del paths_left[i]
                 elif m:
                     if debug:
-                        logging.info("> regex={regex} matches _b(path)={path}".format(regex=regex, path=_b(path)))
+                        logger.info("> regex={regex} matches _b(path)={path}".format(regex=regex, path=_b(path)))
                     # PSEUDOCODE:
                     # if uses bench_name:
                     #     src_files.get('profile_path', bench_name)[bench_name]
@@ -457,7 +457,7 @@ class ProfilerParserCommonMixin:
                         break
                 else:
                     if debug:
-                        logging.info("> regex={regex} DOES NOT MATCH _b(path)={path}".format(regex=regex, path=_b(path)))
+                        logger.info("> regex={regex} DOES NOT MATCH _b(path)={path}".format(regex=regex, path=_b(path)))
                     i += 1
 
             if len(paths_left) == 0:
@@ -675,7 +675,7 @@ class ProfilerParser(ProfilerParserCommonMixin):
             for line in it:
 
                 if self.args.debug:
-                    logging.info("> {klass}, line :: {line}".format(
+                    logger.info("> {klass}, line :: {line}".format(
                         klass=self.__class__.__name__,
                         line=line))
 
@@ -798,7 +798,7 @@ class SrcFilesMixin:
 
     def check_has_all_required_paths(self, ParserKlass):
         if not self.has_all_required_paths:
-            logging.info(
+            logger.info(
                 textwrap.dedent("""
 ERROR: Didn't find all required source files in directory={dir} for parser={parser}
   src_files =
@@ -1735,7 +1735,7 @@ def get_stacktrace(n_skip=1, indent=None):
 
     # Dump the stack of the current location of this line.
     '\n'.join(get_stacktrace(0))
-    logging.info("First line before stacktrace\n{stack}".format(
+    logger.info("First line before stacktrace\n{stack}".format(
         stack=get_stacktrace())
 
     # Outputs to stdout:
@@ -1744,7 +1744,7 @@ def get_stacktrace(n_skip=1, indent=None):
           ...
       ...
       File "*.py", line 1658, in finish
-        logging.info("First line before stacktrace\n{stack}".format(
+        logger.info("First line before stacktrace\n{stack}".format(
 
     :param n_skip:
         Number of stack-levels to skip in the caller.
@@ -1800,7 +1800,7 @@ def should_load_memo(debug_memoize, path):
     return debug_memoize and _e(path) and os.stat(path).st_size > 0
 
 def load_memo(debug_memoize, path):
-    logging.info("Load memoized file: {path}".format(path=path))
+    logger.info("Load memoized file: {path}".format(path=path))
     with open(path, 'rb') as f:
         # -1 specifies highest binary protocol
         ret = pickle.load(f)
@@ -1809,7 +1809,7 @@ def load_memo(debug_memoize, path):
 def maybe_memoize(debug_memoize, ret, path):
     if debug_memoize:
         os.makedirs(_d(path), exist_ok=True)
-        logging.info("Write memoized file: {path}".format(path=path))
+        logger.info("Write memoized file: {path}".format(path=path))
         with open(path, 'wb') as f:
             # -1 specifies highest binary protocol
             pickle.dump(ret, f, -1)
@@ -1827,7 +1827,7 @@ def progress(xs=None, desc=None, total=None, show_progress=False):
         elif hasattr(xs, 'rowcount') and getattr(xs, 'rowcount') != -1:
             total = xs.rowcount
         else:
-            logging.info("> WARNING: not sure what total to use for progress(desc={desc})".format(
+            logger.info("> WARNING: not sure what total to use for progress(desc={desc})".format(
                 desc=desc))
     return tqdm_progress(xs, desc=desc, total=total)
 
@@ -1925,10 +1925,10 @@ def get_username():
 
 def pprint_msg(dic, prefix='  '):
     """
-    Give logging.info a string for neatly printing a dictionary.
+    Give logger.info a string for neatly printing a dictionary.
 
     Usage:
-    logging.info(pprint_msg(arbitrary_object))
+    logger.info(pprint_msg(arbitrary_object))
     """
     return "\n" + textwrap.indent(pprint.pformat(dic), prefix=prefix)
 
@@ -2068,7 +2068,7 @@ def cmd_debug_msg(cmd, env=None, dry_run=False):
 def log_cmd(cmd, env=None, dry_run=False):
     string = cmd_debug_msg(cmd, env=env, dry_run=dry_run)
 
-    logging.info(string)
+    logger.info(string)
 
 def print_cmd(cmd, files=sys.stdout, env=None, dry_run=False):
     string = cmd_debug_msg(cmd, env=env, dry_run=dry_run)
@@ -2112,14 +2112,14 @@ def obj_from_row(Klass, row):
 
 def recursive_delete_trace_files(directory):
     if py_config.DEBUG_WRAP_CLIB:
-        logging.info("> Delete trace files rooted at {dir}".format(dir=directory))
+        logger.info("> Delete trace files rooted at {dir}".format(dir=directory))
     for dirpath, dirnames, filenames in os.walk(directory):
         for base in filenames:
             path = _j(dirpath, base)
-            # logging.info("> Consider {path}".format(path=path))
+            # logger.info("> Consider {path}".format(path=path))
             if is_trace_file(path):
                 if py_config.DEBUG_WRAP_CLIB:
-                    logging.info("> RM {path}".format(path=path))
+                    logger.info("> RM {path}".format(path=path))
                 os.remove(path)
 
 

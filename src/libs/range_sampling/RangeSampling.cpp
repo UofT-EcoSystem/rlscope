@@ -16,6 +16,7 @@
 #include "spdlog/fmt/ostr.h"
 
 #include <cupti_target.h>
+#include <cupti.h>
 #include <cupti_profiler_target.h>
 #include <nvperf_target.h>
 #include <nvperf_host.h>
@@ -764,8 +765,11 @@ GPUHwCounterSampler::~GPUHwCounterSampler() {
   //   My guess: N times for N threads
   //   ... lets just not bother with this scenario ...
 //  if (!RLS_GPU_HW_SKIP_PROF_API) {
+//  if (Enabled()) {
+  if (_initialized) {
     CUpti_Profiler_DeInitialize_Params profilerDeInitializeParams = {CUpti_Profiler_DeInitialize_Params_STRUCT_SIZE};
     CUPTI_API_CALL_MAYBE_EXIT(cuptiProfilerDeInitialize(&profilerDeInitializeParams));
+  }
 //  }
 
   if (_context != nullptr) {

@@ -43,7 +43,7 @@ class OverallMachineUtilization:
         workers_dir = self.workers_dir(algo, env, num_workers)
         if not os.path.isdir(workers_dir):
             return
-        logging.info("Removing old {expr} results @ {dir} (replace=True)".format(
+        logger.info("Removing old {expr} results @ {dir} (replace=True)".format(
             expr=self.__class__.__name__,
             dir=workers_dir,
         ))

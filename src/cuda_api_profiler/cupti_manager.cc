@@ -7,6 +7,7 @@
 
 #include <cuda.h>
 #include <cupti_target.h>
+#include <cupti.h>
 
 #include "common_util.h"
 
@@ -16,16 +17,16 @@
 
 namespace rlscope {
 
-// Used by ActivityBuffer and DeviceTracerImpl
-#define CUPTI_CALL(call)                                            \
-  do {                                                              \
-    CUptiResult _status = call;                                     \
-    if (_status != CUPTI_SUCCESS) {                                 \
-      const char *errstr;                                           \
-      cuptiGetResultString(_status, &errstr);                       \
-      LOG(FATAL) << "libcupti call " << #call << " failed with " << errstr; \
-    }                                                               \
-  } while (0)
+//// Used by ActivityBuffer and DeviceTracerImpl
+//#define CUPTI_CALL(call)
+//  do {
+//    CUptiResult _status = call;
+//    if (_status != CUPTI_SUCCESS) {
+//      const char *errstr;
+//      cuptiGetResultString(_status, &errstr);
+//      LOG(FATAL) << "libcupti call " << #call << " failed with " << errstr;
+//    }
+//  } while (0)
 
 //
 // SimpleByteAllocationPool
@@ -152,7 +153,7 @@ void CUPTIManager::RecordActivityCallback(CUPTIClient* client, const CUpti_Activ
 MyStatus CUPTIManager::_EnablePCSampling() {
   VLOG(0) << "Enabling PC sampling";
 
-  CUPTI_CALL(cuptiActivityEnable(CUPTI_ACTIVITY_KIND_PC_SAMPLING));
+  CUPTI_API_CALL_MAYBE_EXIT(cuptiActivityEnable(CUPTI_ACTIVITY_KIND_PC_SAMPLING));
 
   CUpti_ActivityPCSamplingConfig configPC;
   CUcontext cuCtx;
@@ -163,20 +164,20 @@ MyStatus CUPTIManager::_EnablePCSampling() {
   configPC.samplingPeriod2 = 0;
   cuCtxGetCurrent(&cuCtx);
 
-  CUPTI_CALL(cuptiActivityConfigurePCSampling(cuCtx, &configPC));
+  CUPTI_API_CALL_MAYBE_EXIT(cuptiActivityConfigurePCSampling(cuCtx, &configPC));
 
   return MyStatus::OK();
 }
 
 MyStatus CUPTIManager::_DisablePCSampling() {
   VLOG(1) << "CUPTIManager." << __func__ << ": disable PC sampling";
-  CUPTI_CALL(cuptiActivityDisable(CUPTI_ACTIVITY_KIND_PC_SAMPLING));
+  CUPTI_API_CALL_MAYBE_EXIT(cuptiActivityDisable(CUPTI_ACTIVITY_KIND_PC_SAMPLING));
   return MyStatus::OK();
 }
 
 MyStatus CUPTIManager::Flush() {
   VLOG(1) << "CUPTIManager." << __func__ << ": flush cupti activities";
-  CUPTI_CALL(cuptiActivityFlushAll(0));
+  CUPTI_API_CALL_MAYBE_EXIT(cuptiActivityFlushAll(0));
   return MyStatus::OK();
 }
 
@@ -185,12 +186,12 @@ MyStatus CUPTIManager::EnableTrace(CUPTIClient *client) {
   VLOG(0) << __func__;
   // TODO(pbar) Work out the minimal set to trace.
   // We can currently manage without driver/runtime tracing.
-  // CUPTI_CALL(cuptiActivityEnable(CUPTI_ACTIVITY_KIND_CONTEXT));
-  // CUPTI_CALL(cuptiActivityEnable(CUPTI_ACTIVITY_KIND_DRIVER));
-  // CUPTI_CALL(cuptiActivityEnable(CUPTI_ACTIVITY_KIND_RUNTIME));
+  // CUPTI_API_CALL_MAYBE_EXIT(cuptiActivityEnable(CUPTI_ACTIVITY_KIND_CONTEXT));
+  // CUPTI_API_CALL_MAYBE_EXIT(cuptiActivityEnable(CUPTI_ACTIVITY_KIND_DRIVER));
+  // CUPTI_API_CALL_MAYBE_EXIT(cuptiActivityEnable(CUPTI_ACTIVITY_KIND_RUNTIME));
   // These might be useful for annotations but require NVTX API.
-  // CUPTI_CALL(cuptiActivityEnable(CUPTI_ACTIVITY_KIND_NAME));
-  // CUPTI_CALL(cuptiActivityEnable(CUPTI_ACTIVITY_KIND_MARKER));
+  // CUPTI_API_CALL_MAYBE_EXIT(cuptiActivityEnable(CUPTI_ACTIVITY_KIND_NAME));
+  // CUPTI_API_CALL_MAYBE_EXIT(cuptiActivityEnable(CUPTI_ACTIVITY_KIND_MARKER));
   if (!is_yes("TF_CUPTI_SKIP_REGISTER_ACTIVITY", false)) {
     if (is_yes("IML_PC_SAMPLING", false)) {
       _EnablePCSampling();
@@ -199,12 +200,12 @@ MyStatus CUPTIManager::EnableTrace(CUPTIClient *client) {
 
   if (is_yes("IML_CUDA_ACTIVITIES", false)) {
     VLOG(1) << "Enable GPU activities (IML_CUDA_ACTIVITIES=yes)";
-    CUPTI_CALL(cuptiActivityEnable(CUPTI_ACTIVITY_KIND_DEVICE));
-    CUPTI_CALL(cuptiActivityEnable(CUPTI_ACTIVITY_KIND_KERNEL));
-    CUPTI_CALL(cuptiActivityEnable(CUPTI_ACTIVITY_KIND_MEMCPY));
-    CUPTI_CALL(cuptiActivityEnable(CUPTI_ACTIVITY_KIND_MEMCPY2));
-//      CUPTI_CALL(cuptiActivityEnable(CUPTI_ACTIVITY_KIND_MEMSET));
-//      CUPTI_CALL(cuptiActivityEnable(CUPTI_ACTIVITY_KIND_OVERHEAD));
+    CUPTI_API_CALL_MAYBE_EXIT(cuptiActivityEnable(CUPTI_ACTIVITY_KIND_DEVICE));
+    CUPTI_API_CALL_MAYBE_EXIT(cuptiActivityEnable(CUPTI_ACTIVITY_KIND_KERNEL));
+    CUPTI_API_CALL_MAYBE_EXIT(cuptiActivityEnable(CUPTI_ACTIVITY_KIND_MEMCPY));
+    CUPTI_API_CALL_MAYBE_EXIT(cuptiActivityEnable(CUPTI_ACTIVITY_KIND_MEMCPY2));
+//      CUPTI_API_CALL_MAYBE_EXIT(cuptiActivityEnable(CUPTI_ACTIVITY_KIND_MEMSET));
+//      CUPTI_API_CALL_MAYBE_EXIT(cuptiActivityEnable(CUPTI_ACTIVITY_KIND_OVERHEAD));
   }
 
   client_ = client;
@@ -217,19 +218,19 @@ MyStatus CUPTIManager::DisableTrace() {
     _DisablePCSampling();
   }
   // VLOG(1) << "CUPTIManager." << __func__ << ": disable cupti activities";
-  CUPTI_CALL(cuptiActivityDisable(CUPTI_ACTIVITY_KIND_NAME));
-  CUPTI_CALL(cuptiActivityDisable(CUPTI_ACTIVITY_KIND_MARKER));
-//  CUPTI_CALL(cuptiActivityDisable(CUPTI_ACTIVITY_KIND_OVERHEAD));
-  CUPTI_CALL(cuptiActivityDisable(CUPTI_ACTIVITY_KIND_CONTEXT));
-  CUPTI_CALL(cuptiActivityDisable(CUPTI_ACTIVITY_KIND_DRIVER));
-  CUPTI_CALL(cuptiActivityDisable(CUPTI_ACTIVITY_KIND_RUNTIME));
-  CUPTI_CALL(cuptiActivityDisable(CUPTI_ACTIVITY_KIND_DEVICE));
-  CUPTI_CALL(cuptiActivityDisable(CUPTI_ACTIVITY_KIND_KERNEL));
-  CUPTI_CALL(cuptiActivityDisable(CUPTI_ACTIVITY_KIND_MEMCPY));
-  CUPTI_CALL(cuptiActivityDisable(CUPTI_ACTIVITY_KIND_MEMCPY2));
-//  CUPTI_CALL(cuptiActivityDisable(CUPTI_ACTIVITY_KIND_MEMSET));
+  CUPTI_API_CALL_MAYBE_EXIT(cuptiActivityDisable(CUPTI_ACTIVITY_KIND_NAME));
+  CUPTI_API_CALL_MAYBE_EXIT(cuptiActivityDisable(CUPTI_ACTIVITY_KIND_MARKER));
+//  CUPTI_API_CALL_MAYBE_EXIT(cuptiActivityDisable(CUPTI_ACTIVITY_KIND_OVERHEAD));
+  CUPTI_API_CALL_MAYBE_EXIT(cuptiActivityDisable(CUPTI_ACTIVITY_KIND_CONTEXT));
+  CUPTI_API_CALL_MAYBE_EXIT(cuptiActivityDisable(CUPTI_ACTIVITY_KIND_DRIVER));
+  CUPTI_API_CALL_MAYBE_EXIT(cuptiActivityDisable(CUPTI_ACTIVITY_KIND_RUNTIME));
+  CUPTI_API_CALL_MAYBE_EXIT(cuptiActivityDisable(CUPTI_ACTIVITY_KIND_DEVICE));
+  CUPTI_API_CALL_MAYBE_EXIT(cuptiActivityDisable(CUPTI_ACTIVITY_KIND_KERNEL));
+  CUPTI_API_CALL_MAYBE_EXIT(cuptiActivityDisable(CUPTI_ACTIVITY_KIND_MEMCPY));
+  CUPTI_API_CALL_MAYBE_EXIT(cuptiActivityDisable(CUPTI_ACTIVITY_KIND_MEMCPY2));
+//  CUPTI_API_CALL_MAYBE_EXIT(cuptiActivityDisable(CUPTI_ACTIVITY_KIND_MEMSET));
   // VLOG(1) << "CUPTIManager." << __func__ << ": flush cupti activities";
-  CUPTI_CALL(cuptiActivityFlushAll(CUPTI_ACTIVITY_FLAG_FLUSH_FORCED));
+  CUPTI_API_CALL_MAYBE_EXIT(cuptiActivityFlushAll(CUPTI_ACTIVITY_FLAG_FLUSH_FORCED));
   // VLOG(1) << "CUPTIManager." << __func__ << ": grab lock to nullify client";
   {
     // Don't acquire this lock until Flush returns, since Flush
@@ -328,7 +329,7 @@ void CUPTIManager::InternalBufferCompleted(CUcontext ctx, uint32_t streamId,
 
     // report any records dropped from the queue
     size_t dropped;
-    CUPTI_CALL(cuptiActivityGetNumDroppedRecords(ctx, streamId, &dropped));
+    CUPTI_API_CALL_MAYBE_EXIT(cuptiActivityGetNumDroppedRecords(ctx, streamId, &dropped));
     if (dropped != 0) {
       LOG(WARNING) << "Dropped " << dropped << " activity records";
     }

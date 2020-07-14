@@ -13,7 +13,7 @@ import pprint
 
 from iml_profiler.parser.common import *
 
-import logging
+from iml_profiler.profiler.iml_logging import logger
 
 from iml_profiler import py_config
 if py_config.USE_NUMBA:
@@ -327,7 +327,7 @@ if py_config.USE_NUMBA:
                     if times[i][index[i]] <= min_time:
                         min_cat = i
                         min_time = times[i][index[i]]
-                        # logging.info(": {msg}".format(msg=pprint_msg({
+                        # logger.info(": {msg}".format(msg=pprint_msg({
                         #     'cond': "({left}) times[i][index[i]] <= min_time ({right})".format(
                         #         left=times[i][index[i]],
                         #         right=min_time,
@@ -336,7 +336,7 @@ if py_config.USE_NUMBA:
                         #     'min_time': min_time,
                         # })))
 
-            # logging.info(": {msg}".format(msg=pprint_msg({
+            # logger.info(": {msg}".format(msg=pprint_msg({
             #     'min_cat': min_cat,
             #     'min_time': min_time,
             #     # 'index[min_cat]': index[min_cat],

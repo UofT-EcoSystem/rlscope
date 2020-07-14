@@ -4,6 +4,7 @@
 
 #include <cuda.h>
 #include <cupti_target.h>
+#include <cupti.h>
 
 #include <string>
 #include <algorithm>
@@ -25,7 +26,7 @@
 #include "rlscope_export.h"
 
 #define LOG_FUNC_ENTRY() \
-  if (SHOULD_DEBUG(FEATURE_GPU_HW)) { \
+  if (SHOULD_DEBUG(FEATURE_RLSCOPE_LIB_TRACE)) { \
     RLS_LOG("RLSCOPE_LIB_TRACE", "{}", ""); \
   }
 
@@ -33,29 +34,6 @@
 
 namespace rlscope {
 
-
-
-// #define CUPTI_CALL(call) ({
-//      CUptiResult _status = call;
-//      if (_status != CUPTI_SUCCESS) {
-//        const char *errstr;
-//        cuptiGetResultString(_status, &errstr);
-//        fprintf(stderr, "%s:%d: error: function %s failed with error %s.\n",
-//                __FILE__, __LINE__, #call, errstr);
-//      }
-//      _status;
-//  })
-
-#define CUPTI_CALL(call) do { \
-    CUptiResult _status = call; \
-    if (_status != CUPTI_SUCCESS) { \
-      const char *errstr; \
-      cuptiGetResultString(_status, &errstr); \
-      fprintf(stderr, "%s:%d: error: function %s failed with error %s.\n", \
-              __FILE__, __LINE__, #call, errstr); \
-    } \
-    _status; \
-} while (0);
 
 
 //#define MAYBE_RETURN(cupti_status) do {

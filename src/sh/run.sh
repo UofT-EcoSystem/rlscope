@@ -356,6 +356,86 @@ _engine_path() {
 )
 }
 
+_tf_inference_root_dir() {
+  echo $IML_DIR/output/tf_inference
+}
+_tf_inference_output_dir() {
+  (
+  set -u
+  echo $(_tf_inference_root_dir)/batch_size_${batch_size}$(_bool_attr xla $xla)
+  )
+}
+
+tf_inference_expr() {
+(
+  set -ue
+  PYTHONPATH="${PYTHONPATH:-}"
+  export PYTHONPATH="$STABLE_BASELINES_DIR:$IML_DIR:$PYTHONPATH"
+  export CUDA_VISIBLE_DEVICES=0
+
+  batch_size=${batch_size:-1}
+  xla=${xla:-no}
+
+  cd $RL_BASELINES_ZOO_DIR
+  n_warmup_batches=3
+  n_measure_batches=20
+  local n_timesteps=$((n_measure_batches + n_warmup_batches))
+  iml_prof_config="gpu-hw"
+  local out_dir=$(_tf_inference_output_dir)
+  if [ -e ${out_dir}/mode_microbench_inference.json ]; then
+    echo "> SKIP tf_inference_expr; already exists @ ${out_dir}/mode_microbench_inference.json"
+    return
+  fi
+  echo "> RUN: ${out_dir}/mode_microbench_inference.json"
+
+  if [ "$xla" = 'yes' ]; then
+    # Generate dump of what XLA did to the computational graph.
+    # https://www.tensorflow.org/xla#inspect_compiled_programs
+    export XLA_FLAGS="--xla_dump_to=${out_dir}/xla_codegen"
+    # https://www.tensorflow.org/xla#auto-clustering
+    export TF_XLA_FLAGS="--tf_xla_auto_jit=2"
+  fi
+
+  _do mkdir -p ${out_dir}
+  logfile=${out_dir}/log.txt
+  _do_with_logfile iml-prof --config ${iml_prof_config} python enjoy_trt.py \
+    --algo a2c \
+    --env BreakoutNoFrameskip-v4 \
+    --folder trained_agents/ \
+    -n ${n_timesteps} \
+    --iml-directory ${out_dir} \
+    --iml-delay \
+    --iml-debug \
+    --mode microbench_inference \
+    --warmup-iters ${n_warmup_batches} \
+    --batch-size ${batch_size}
+
+  logfile=${out_dir}/rls_analyze.log.txt
+  _do_with_logfile rls-analyze --mode gpu_hw --iml_directory ${out_dir}
+)
+}
+
+all_tf_inference_expr() {
+(
+  set -ue
+  _make_install
+
+  BATCH_SIZES=(1 8 16 32 64 128 256 512)
+  XLA_MODES=(no yes)
+
+#  # BATCH_SIZES=(1 8)
+#  BATCH_SIZES=(128)
+##  XLA_MODES=(no)
+#  XLA_MODES=(yes)
+
+  for xla in "${XLA_MODES[@]}"; do
+    for batch_size in "${BATCH_SIZES[@]}"; do
+      tf_inference_expr
+    done
+  done
+)
+}
+
 mk_uff_model() {
 (
   set -ue

@@ -1,4 +1,4 @@
-import logging
+from iml_profiler.profiler.iml_logging import logger
 import argparse
 import re
 import copy
@@ -130,7 +130,7 @@ class OverlapStackedBarPlot:
             raise ValueError("OverlapStackedBarPlot expects at least 1 trace-file directory for iml_directories")
         self.iml_directories = iml_directories
         self.unins_iml_directories = unins_iml_directories
-        logging.info("{klass}:\n{msg}".format(
+        logger.info("{klass}:\n{msg}".format(
             klass=self.__class__.__name__,
             msg=pprint_msg({
                 'iml_directories': self.iml_directories,
@@ -345,7 +345,7 @@ class OverlapStackedBarPlot:
         # Check that env_id's match; otherwise, warn the user.
         # This can happen when generating trace files on one machine, and changing the directory structure on another.
         if _b(iml_dir) != _b(index.directory):
-            logging.warning("iml_dir={iml_dir} != index.directory={index_dir}; make sure these paths use the same (algo, env)!".format(
+            logger.warning("iml_dir={iml_dir} != index.directory={index_dir}; make sure these paths use the same (algo, env)!".format(
                 iml_dir=iml_dir,
                 index_dir=index.directory,
             ))
@@ -501,7 +501,7 @@ class OverlapStackedBarPlot:
                                                                    'HACK_unins_start_num_timesteps',
                                                                    'HACK_total_timesteps'}):
                     # Extrapolate the total training time using uninstrumented run
-                    logging.info("HACK: ({algo}, {env}) @ {path} -- Extrapolate the total training time using uninstrumented run".format(
+                    logger.info("HACK: ({algo}, {env}) @ {path} -- Extrapolate the total training time using uninstrumented run".format(
                         algo=algo,
                         env=env,
                         path=path,
@@ -535,7 +535,7 @@ class OverlapStackedBarPlot:
                     extrap_dict['total_training_time'] = total_training_time
                 elif 'HACK_total_timesteps' in iml_metadata['metadata']:
                     # Extrapolate the total training time using percent_complete
-                    logging.info("HACK: ({algo}, {env}) @ {path} -- Override total number of training timesteps to be {t}".format(
+                    logger.info("HACK: ({algo}, {env}) @ {path} -- Override total number of training timesteps to be {t}".format(
                         algo=algo,
                         env=env,
                         path=path,
@@ -557,7 +557,7 @@ class OverlapStackedBarPlot:
             else:
                 new_stacked_dict['extrap_total_training_time'] = np.NAN
                 extrap_dict['isnan'] = True
-            logging.info("debug extrap:\n{msg}".format(msg=pprint_msg(extrap_dict)))
+            logger.info("debug extrap:\n{msg}".format(msg=pprint_msg(extrap_dict)))
 
             new_stacked_dict = dict((k, as_list(v)) for k, v in new_stacked_dict.items())
             df = pd.DataFrame(new_stacked_dict)
@@ -599,7 +599,7 @@ class OverlapStackedBarPlot:
                                                                'HACK_unins_start_num_timesteps',
                                                                'HACK_total_timesteps'}):
                 # Extrapolate the total training time using uninstrumented run
-                logging.info("HACK: ({algo}, {env}) @ {path} -- Extrapolate the total training time using uninstrumented run".format(
+                logger.info("HACK: ({algo}, {env}) @ {path} -- Extrapolate the total training time using uninstrumented run".format(
                     algo=algo,
                     env=env,
                     path=path,
@@ -637,7 +637,7 @@ class OverlapStackedBarPlot:
                 total_size = vd.total_size()
                 # Extrapolate the total training time using percent_complete
                 if 'HACK_total_timesteps' in iml_metadata['metadata']:
-                    logging.info("HACK: ({algo}, {env}) @ {path} -- Override total number of training timesteps to be {t}".format(
+                    logger.info("HACK: ({algo}, {env}) @ {path} -- Override total number of training timesteps to be {t}".format(
                         algo=algo,
                         env=env,
                         path=path,
@@ -683,7 +683,7 @@ class OverlapStackedBarPlot:
             regions_to_paths[k].sort()
 
         if self.debug:
-            logging.info(pprint_msg({'regions_to_paths': regions_to_paths}))
+            logger.info(pprint_msg({'regions_to_paths': regions_to_paths}))
 
         if len(regions_to_paths) > 1:
             """
@@ -718,14 +718,14 @@ class OverlapStackedBarPlot:
             if self.ignore_inconsistent_overlap_regions:
                 raise RuntimeError(msg)
             else:
-                logging.info(msg)
+                logger.info(msg)
 
         regions_by_num_files = sorted(
             regions_to_paths.keys(),
             key=lambda regions: (len(regions_to_paths[regions]), regions_to_paths[regions]))
         use_regions = regions_by_num_files[-1]
         if self.debug:
-            logging.info(pprint_msg({
+            logger.info(pprint_msg({
                 'regions_to_paths': regions_to_paths,
                 'use_regions': use_regions}))
         return use_regions
@@ -756,7 +756,7 @@ class OverlapStackedBarPlot:
             # new_df[('other',)] = df[('compute_advantage_estimates',)] +
             #                      df[('optimize_surrogate',)]
             if self.debug:
-                logging.info("--remap-df:\n{trans}".format(trans=textwrap.indent(df_transformation, prefix='  ')))
+                logger.info("--remap-df:\n{trans}".format(trans=textwrap.indent(df_transformation, prefix='  ')))
             exec(df_transformation)
         # Make sure they didn't modify df; they SHOULD be modifying new_df
         # (i.e. adding regions to a "fresh" slate)
@@ -765,24 +765,24 @@ class OverlapStackedBarPlot:
         assert df.equals(orig_df)
 
         # if self.debug:
-        #     logging.info("--remap-df complete")
-        #     logging.info("Old dataframe; regions={regions}".format(regions=self._regions(orig_df)))
-        #     logging.info(pprint_msg(orig_df))
+        #     logger.info("--remap-df complete")
+        #     logger.info("Old dataframe; regions={regions}".format(regions=self._regions(orig_df)))
+        #     logger.info(pprint_msg(orig_df))
         #
-        #     logging.info("New dataframe after --remap-df; regions={regions}".format(regions=self._regions(new_df)))
-        #     logging.info(pprint_msg(new_df))
+        #     logger.info("New dataframe after --remap-df; regions={regions}".format(regions=self._regions(new_df)))
+        #     logger.info(pprint_msg(new_df))
 
         if self.debug:
             buf = StringIO()
             DataFrame.print_df(orig_df, file=buf)
-            logging.info("Old dataframe; regions={regions}:\n{msg}".format(
+            logger.info("Old dataframe; regions={regions}:\n{msg}".format(
                 msg=textwrap.indent(buf.getvalue(), prefix='  '),
                 regions=self._regions(orig_df),
             ))
 
             buf = StringIO()
             DataFrame.print_df(new_df, file=buf)
-            logging.info("New dataframe after --remap-df; regions={regions}:\n{msg}".format(
+            logger.info("New dataframe after --remap-df; regions={regions}:\n{msg}".format(
                 msg=textwrap.indent(buf.getvalue(), prefix='  '),
                 regions=self._regions(orig_df),
             ))
@@ -809,7 +809,7 @@ class OverlapStackedBarPlot:
             # new_df[('other',)] = df[('compute_advantage_estimates',)] +
             #                      df[('optimize_surrogate',)]
             if self.debug:
-                logging.info("--remap-df:\n{trans}".format(trans=textwrap.indent(df_transformation, prefix='  ')))
+                logger.info("--remap-df:\n{trans}".format(trans=textwrap.indent(df_transformation, prefix='  ')))
             exec(df_transformation)
 
         # Make sure they didn't modify df; they SHOULD be modifying new_df
@@ -821,11 +821,11 @@ class OverlapStackedBarPlot:
         if self.debug:
             buf = StringIO()
             DataFrame.print_df(orig_df, file=buf)
-            logging.info("Old dataframe:\n{msg}".format(msg=textwrap.indent(buf.getvalue(), prefix='  ')))
+            logger.info("Old dataframe:\n{msg}".format(msg=textwrap.indent(buf.getvalue(), prefix='  ')))
 
             buf = StringIO()
             DataFrame.print_df(new_df, file=buf)
-            logging.info("New dataframe after --remap-df:\n{msg}".format(msg=textwrap.indent(buf.getvalue(), prefix='  ')))
+            logger.info("New dataframe after --remap-df:\n{msg}".format(msg=textwrap.indent(buf.getvalue(), prefix='  ')))
 
         return new_df
 
@@ -840,14 +840,14 @@ class OverlapStackedBarPlot:
         self.unins_df = self.read_unins_df()
         buf = StringIO()
         DataFrame.print_df(self.unins_df, file=buf)
-        logging.info("unins_df:\n{msg}".format(
+        logger.info("unins_df:\n{msg}".format(
             msg=textwrap.indent(buf.getvalue(), prefix='  '),
         ))
 
         self.ins_df = self.read_ins_df()
         buf = StringIO()
         DataFrame.print_df(self.ins_df, file=buf)
-        logging.info("ins_df:\n{msg}".format(
+        logger.info("ins_df:\n{msg}".format(
             msg=textwrap.indent(buf.getvalue(), prefix='  '),
         ))
 
@@ -883,14 +883,14 @@ class OverlapStackedBarPlot:
 
             # buf = StringIO()
             # DataFrame.print_df(self.df, file=buf)
-            # logging.info("ins_df:\n{msg}".format(
+            # logger.info("ins_df:\n{msg}".format(
             #     msg=textwrap.indent(buf.getvalue(), prefix='  '),
             #     # msg=pprint_msg(self.df),
             # ))
 
         buf = StringIO()
         DataFrame.print_df(self.df, file=buf)
-        logging.info("df:\n{msg}".format(
+        logger.info("df:\n{msg}".format(
             msg=textwrap.indent(buf.getvalue(), prefix='  '),
         ))
 
@@ -898,7 +898,7 @@ class OverlapStackedBarPlot:
 
         buf = StringIO()
         DataFrame.print_df(self.df, file=buf)
-        logging.info("reduced df:\n{msg}".format(
+        logger.info("reduced df:\n{msg}".format(
             msg=textwrap.indent(buf.getvalue(), prefix='  '),
         ))
 
@@ -937,7 +937,7 @@ class OverlapStackedBarPlot:
             for c in categories:
                 for region in common_regions:
                     if region.issubset(c):
-                        logging.info("cmap[c:{c}] - region:{region} = {new_c}".format(
+                        logger.info("cmap[c:{c}] - region:{region} = {new_c}".format(
                             c=c,
                             region=region,
                             new_c=cmap[c].difference(region),
@@ -1003,7 +1003,7 @@ class OverlapStackedBarPlot:
         for (algo, env), regions, path, df in df_iter:
             buf = StringIO()
             DataFrame.print_df(df)
-            logging.info("({algo}, {env}) @ path={path}:\n{msg}".format(
+            logger.info("({algo}, {env}) @ path={path}:\n{msg}".format(
                 algo=algo,
                 env=env,
                 path=path,
@@ -1011,7 +1011,7 @@ class OverlapStackedBarPlot:
             ))
 
             if not self.detailed and regions != use_regions:
-                logging.info(
+                logger.info(
                     textwrap.dedent("""\
                     Skipping {path} (--ignore-inconsistent-overlap-regions)
                       regions = {regions}
@@ -1027,17 +1027,17 @@ class OverlapStackedBarPlot:
                 self.regions = set(regions)
 
             # if self.debug:
-            #     logging.info(pprint_msg({
+            #     logger.info(pprint_msg({
             #         'path': path,
             #         'df': df}))
 
             dfs.append(df)
 
         if self.debug:
-            logging.info("ins_df before concat:\n{msg}".format(msg=pprint_msg(dfs)))
+            logger.info("ins_df before concat:\n{msg}".format(msg=pprint_msg(dfs)))
         ins_df = pd.concat(dfs)
         if self.debug:
-            logging.info("ins_df after concat:\n{msg}".format(msg=pprint_msg(ins_df)))
+            logger.info("ins_df after concat:\n{msg}".format(msg=pprint_msg(ins_df)))
 
         old_ins_df = ins_df
         all_cols = set(old_ins_df.keys())
@@ -1052,7 +1052,7 @@ class OverlapStackedBarPlot:
         ins_df = old_ins_df.groupby(list(non_numeric_cols)).agg(pd.DataFrame.sum, skipna=False).reset_index()
 
         if self.debug:
-            logging.info("ins_df after groupby.sum():\n{msg}".format(msg=pprint_msg(ins_df)))
+            logger.info("ins_df after groupby.sum():\n{msg}".format(msg=pprint_msg(ins_df)))
             # import ipdb; ipdb.set_trace()
 
         if self.detailed:
@@ -1091,7 +1091,7 @@ class OverlapStackedBarPlot:
             if self._is_region(colname):
                 op_name = colname[0]
                 if is_op_process_event(op_name, CATEGORY_OPERATION):
-                    # logging.info("HACK: remove process_name={proc} from operation dataframe".format(
+                    # logger.info("HACK: remove process_name={proc} from operation dataframe".format(
                     #     proc=op_name,
                     # ))
                     remove_cols.add(colname)
@@ -1182,7 +1182,7 @@ class OverlapStackedBarPlot:
         return get_x_field(algo, env, self.x_type, human_readable=human_readable)
 
     def _plot_df(self):
-        logging.info("Dataframe:\n{df}".format(df=self.df))
+        logger.info("Dataframe:\n{df}".format(df=self.df))
 
         if self.training_time:
             y2_field = 'total_training_time'
@@ -1213,7 +1213,7 @@ class OverlapStackedBarPlot:
     def _detailed_plot_df(self):
         buf = StringIO()
         DataFrame.print_df(self.df)
-        logging.info("Dataframe:\n{df}".format(
+        logger.info("Dataframe:\n{df}".format(
             df=textwrap.indent(buf.getvalue(), prefix='  ')))
 
         # if self.training_time:
@@ -1371,7 +1371,7 @@ class OverlapStackedBarPlot:
     def run(self):
         if self.debug:
             algo_env_pairs = [self._get_algo_env_from_dir(iml_dir) for iml_dir in self.iml_directories]
-            logging.info("{klass}: {msg}".format(
+            logger.info("{klass}: {msg}".format(
                 klass=self.__class__.__name__,
                 msg=pprint_msg({
                     'iml_directories': self.iml_directories,
@@ -1384,7 +1384,7 @@ class OverlapStackedBarPlot:
         self._add_df_fields(self.df)
         self.dump_plot_data()
         if self.skip_plot:
-            logging.info("Skipping plotting {path} (--skip-plot)".format(path=self._plot_path))
+            logger.info("Skipping plotting {path} (--skip-plot)".format(path=self._plot_path))
         else:
             if self.detailed:
                 self._detailed_plot_df()
@@ -1428,20 +1428,20 @@ class OverlapStackedBarPlot:
     def dump_plot_data(self):
         human_df = self.human_df()
 
-        logging.info("> {name} @ human readable plot data @ {path}".format(
+        logger.info("> {name} @ human readable plot data @ {path}".format(
             name=self.__class__.__name__,
             path=self._plot_data_path()))
         with open(self._plot_data_path(), 'w') as f:
             DataFrame.print_df(human_df, file=f)
 
-        logging.info("> {name} @ csv plot data @ {path}".format(
+        logger.info("> {name} @ csv plot data @ {path}".format(
             name=self.__class__.__name__,
             path=self._plot_csv_path()))
 
         human_df.to_csv(self._plot_csv_path(), index=False)
 
         # Print human readable plot data to stdout
-        logging.info(pprint_msg(human_df))
+        logger.info(pprint_msg(human_df))
 
     def human_df(self):
         """
@@ -1481,7 +1481,7 @@ def test_stacked_bar():
                    plt.bar([0, 1, 2, 3], df.C, align='edge',width= -0.2)]
 
     path = './test_stacked_bar.png'
-    logging.info('Save figure to {path}'.format(path=path))
+    logger.info('Save figure to {path}'.format(path=path))
     plt.savefig(path)
 
 class StackedBarPlot:
@@ -1567,7 +1567,7 @@ class StackedBarPlot:
 
         if self.width is not None and self.height is not None:
             figsize = (self.width, self.height)
-            logging.info("Setting figsize = {fig}".format(fig=figsize))
+            logger.info("Setting figsize = {fig}".format(fig=figsize))
             # sns.set_context({"figure.figsize": figsize})
         else:
             figsize = None
@@ -1712,7 +1712,7 @@ class StackedBarPlot:
 
         # https://stackoverflow.com/questions/4700614/how-to-put-the-legend-out-of-the-plot/43439132#43439132
         legend_handles, legend_labels = self._legend_handles_labels()
-        logging.info({
+        logger.info({
             # 'handles': handles,
             # 'labels': labels,
             'legend_handles': legend_handles,
@@ -1784,7 +1784,7 @@ class StackedBarPlot:
             # ticks = f(ax2.get_yticks())
             # ax.yaxis.set_major_locator(matplotlib.ticker.FixedLocator(ticks))
 
-        logging.info('Save figure to {path}'.format(path=self.path))
+        logger.info('Save figure to {path}'.format(path=self.path))
         fig.tight_layout()
         fig.savefig(self.path)
         plt.close(fig)
@@ -2084,15 +2084,15 @@ class DetailedStackedBarPlot:
         if self.func is not None:
             self.func(self)
 
-        logging.info("Output csv @ {path}".format(path=self._csv_path))
+        logger.info("Output csv @ {path}".format(path=self._csv_path))
         data.to_csv(self._csv_path, index=False)
 
-        logging.info("Output dataframe @ {path}".format(path=self._df_path))
+        logger.info("Output dataframe @ {path}".format(path=self._df_path))
         with open(self._df_path, 'w') as f:
             DataFrame.print_df(data, file=f)
         DataFrame.print_df(data, file=sys.stdout)
 
-        logging.info("Output plot @ {path}".format(path=self.path))
+        logger.info("Output plot @ {path}".format(path=self.path))
         fig.savefig(self.path, bbox_inches="tight", pad_inches=0)
         plt.close(fig)
 
@@ -2170,7 +2170,7 @@ class DetailedStackedBarPlot:
                         bottom=bottom,
                     )
 
-        logging.info("Plot debug:\n{msg}".format(
+        logger.info("Plot debug:\n{msg}".format(
             msg=pprint_msg({
                 'bar_kwargs': bar_kwargs,
             }),
@@ -2263,7 +2263,7 @@ class DetailedStackedBarPlot:
                             bottom=bottom,
                         )
 
-        logging.info("Plot debug:\n{msg}".format(
+        logger.info("Plot debug:\n{msg}".format(
             msg=pprint_msg({
                 'bar_kwargs': bar_kwargs,
             }),
@@ -2338,7 +2338,7 @@ class DetailedStackedBarPlot:
                         bottom=bottom,
                     )
 
-        logging.info("Plot debug:\n{msg}".format(
+        logger.info("Plot debug:\n{msg}".format(
             msg=pprint_msg({
                 'bar_kwargs': bar_kwargs,
             }),
@@ -2509,7 +2509,7 @@ class DetailedStackedBarPlot:
                     (df[self.x_field] == x_field) &
                     (df[self.x_group] == x_group)]
                 height = sub_df[self.y_field].sum()
-                logging.info("Add bar-label:\n{msg}".format(msg=pprint_msg({
+                logger.info("Add bar-label:\n{msg}".format(msg=pprint_msg({
                     'x_field': x_field,
                     'x_group': x_group,
                     'height': height,
@@ -2740,13 +2740,13 @@ class DetailedStackedBarPlot:
         self.orig_df = pd.DataFrame(self.df_data)
 
         self.df = DataFrame.get_mean_std(self.orig_df, self.value_field)
-        logging.info("> DATAFRAME BEFORE SORT:")
-        logging.info(self.df)
+        logger.info("> DATAFRAME BEFORE SORT:")
+        logger.info(self.df)
         self.df = self.df.sort_values(by=['impl_name_order', 'operation_order', 'category_order'])
         # self.df = self.df.sort_values(by=['impl_name_order', 'operation_order', 'category_order'], ascending=False)
         # self.df = self.df.sort_values(by=['operation_order'])
-        logging.info("> DATAFRAME AFTER SORT:")
-        logging.info(self.df)
+        logger.info("> DATAFRAME AFTER SORT:")
+        logger.info(self.df)
         # groupby_cols = DataFrame.get_groupby_cols(self.orig_df, value_field)
         self.df['std_div_mean_percent'] = 100 * self.df['std']/self.df['mean']
 
@@ -3094,7 +3094,7 @@ def test_stacked_bar_sns_old():
         item.set_fontsize(16)
 
     path = './test_stacked_bar_sns_old.png'
-    logging.info('Save figure to {path}'.format(path=path))
+    logger.info('Save figure to {path}'.format(path=path))
     plt.savefig(path)
 
 def test_double_yaxis():
@@ -3329,7 +3329,7 @@ class VdTree(_DataIndex):
     #                     ),
     #                     subtract_sec=cupti_overhead_sec)
     #         if len(missing_cupti_overhead_cuda_api_calls) > 0:
-    #             logging.warning("Saw CUDA API calls that we didn't have calibrated CUPTI overheads for overheads for {path}: {msg}".format(
+    #             logger.warning("Saw CUDA API calls that we didn't have calibrated CUPTI overheads for overheads for {path}: {msg}".format(
     #                 path=self.db_path,
     #                 msg=pprint_msg(missing_cupti_overhead_cuda_api_calls),
     #             ))

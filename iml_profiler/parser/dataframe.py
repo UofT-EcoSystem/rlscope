@@ -4,7 +4,7 @@ import copy
 import os
 import pprint
 import progressbar
-import logging
+from iml_profiler.profiler.iml_logging import logger
 import functools
 import multiprocessing
 
@@ -102,7 +102,7 @@ class BaseDataframeReader:
                                              sync=debug_single_thread)
         merged_result = functools.reduce(merge_fn, split_results)
         # if self.debug:
-        #     logging.info("split_map_merge.{name}: {msg}".format(
+        #     logger.info("split_map_merge.{name}: {msg}".format(
         #         name=name,
         #         msg=pprint_msg({
         #             'merged_result': merged_result,
@@ -112,7 +112,7 @@ class BaseDataframeReader:
 
     def merge_from_map(self, map_fn, a, b):
         # if self.debug:
-        #     logging.info("merge_from_map: {msg}".format(
+        #     logger.info("merge_from_map: {msg}".format(
         #         msg=pprint_msg({
         #             'a': a,
         #             'b': b,
@@ -121,7 +121,7 @@ class BaseDataframeReader:
         df = pd.concat([a, b])
         result = map_fn(df)
         # if self.debug:
-        #     logging.info("merge_from_map: {msg}".format(
+        #     logger.info("merge_from_map: {msg}".format(
         #         msg=pprint_msg({
         #             'result': result,
         #         })
@@ -274,11 +274,11 @@ class BaseDataframeReader:
         for proto_path in progress(proto_paths, desc="{klass}.read dataframe".format(
             klass=self.__class__.__name__), show_progress=True):
             if self.debug:
-                logging.info("Read proto_path={path}".format(path=proto_path))
+                logger.info("Read proto_path={path}".format(path=proto_path))
             self.add_proto_cols(proto_path, data=data)
             self._check_cols(data=data)
         if len(proto_paths) == 0:
-            logging.warning("{klass}: Saw 0 proto paths rooted at {dir}; returning empty dataframe".format(
+            logger.warning("{klass}: Saw 0 proto paths rooted at {dir}; returning empty dataframe".format(
                 klass=self.__class__.__name__,
                 dir=self.directory,
             ))
@@ -298,7 +298,7 @@ class BaseDataframeReader:
             df = pd.DataFrame(data)
             yield df
         if len(proto_paths) == 0:
-            logging.warning("{klass}: Saw 0 proto paths rooted at {dir}; returning empty dataframe".format(
+            logger.warning("{klass}: Saw 0 proto paths rooted at {dir}; returning empty dataframe".format(
                 klass=self.__class__.__name__,
                 dir=self.directory,
             ))
@@ -342,7 +342,7 @@ class OverlapDataframeReader(BaseDataframeReader):
 
     def add_proto_cols(self, path, data=None):
         if self.debug:
-            logging.info("Read OverlapDataframeReader from {path}".format(path=path))
+            logger.info("Read OverlapDataframeReader from {path}".format(path=path))
 
         venn_js = VennData(path)
 
@@ -421,7 +421,7 @@ class CUDADeviceEventsReader(BaseDataframeReader):
 
     def add_proto_cols(self, path, data=None):
         if self.debug:
-            logging.info("Read CUDADeviceEventsReader from {path}".format(path=path))
+            logger.info("Read CUDADeviceEventsReader from {path}".format(path=path))
 
         proto = read_cuda_device_events_file(path)
         category = CATEGORY_GPU
@@ -506,7 +506,7 @@ class UtilDataframeReader(BaseDataframeReader):
     def add_proto_cols(self, path, data=None):
         machine_util = read_machine_util_file(path)
         if self.debug:
-            logging.info("Read MachineUtilization from {path}".format(path=path))
+            logger.info("Read MachineUtilization from {path}".format(path=path))
         for device_name, device_utilization in machine_util.device_util.items():
             last_start_time_us = None
             device_id = 0
@@ -818,7 +818,7 @@ class CUDAAPIStatsDataframeReader(BaseDataframeReader):
     def add_proto_cols(self, path, data=None):
         proto = read_cuda_api_stats_file(path)
         # if self.debug:
-        #     logging.info("Read CUDAAPIPhaseStatsProto from {path}".format(path=path))
+        #     logger.info("Read CUDAAPIPhaseStatsProto from {path}".format(path=path))
 
         for api_thread_stats in proto.stats:
             self._add_col('process_name', proto.process_name, data=data)
@@ -933,7 +933,7 @@ class CUDAAPIStatsDataframeReader(BaseDataframeReader):
         df_sum = self._df_group_sum(df, groupby_cols, keep_cols)
 
         # if self.debug:
-        #     logging.info("_compute_per_api_stats: {msg}".format(
+        #     logger.info("_compute_per_api_stats: {msg}".format(
         #         msg=pprint_msg({
         #             'df_sum': df_sum,
         #         })
@@ -967,7 +967,7 @@ class PyprofDataframeReader(BaseDataframeReader):
     def add_proto_cols(self, path, data=None):
         proto = read_pyprof_file(path)
         # if self.debug:
-        #     logging.info("Read CategoryEventsProto from {path}".format(path=path))
+        #     logger.info("Read CategoryEventsProto from {path}".format(path=path))
 
         # Event from pyprof.proto
         event_colnames = [
@@ -992,7 +992,7 @@ class PyprofDataframeReader(BaseDataframeReader):
         #     num_events = 0
         #     for category, event_list in proto.category_events.items():
         #         num_events += len(event_list.events)
-        #     logging.info("{klass}.add_proto_cols path={path}".format(
+        #     logger.info("{klass}.add_proto_cols path={path}".format(
         #         path=path,
         #         klass=self.__class__.__name__,
         #     ))
@@ -1277,7 +1277,7 @@ def get_iml_config_path(directory, allow_many=False):
     # There should be exactly one iml_config.json file.
     # Q: Couldn't there be multiple for multi-process scripts like minigo?
     if len(iml_config_paths) != 1 and not allow_many:
-        logging.info("Expected 1 iml_config.json but saw {len} within iml_directory={dir}: {msg}".format(
+        logger.info("Expected 1 iml_config.json but saw {len} within iml_directory={dir}: {msg}".format(
             dir=directory,
             len=len(iml_config_paths),
             msg=pprint_msg(iml_config_paths)))
@@ -2062,7 +2062,7 @@ def test_venn_as_overlap_dict():
     def check_eq(name, got, expect):
         result = (got == expect)
         if not result:
-            logging.info(pprint_msg({
+            logger.info(pprint_msg({
                 'name': name,
                 'got': got,
                 'expect': expect,

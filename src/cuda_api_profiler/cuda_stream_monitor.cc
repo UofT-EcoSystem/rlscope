@@ -12,6 +12,7 @@
 
 #include <cuda.h>
 #include <cupti_target.h>
+#include <cupti.h>
 
 #include <memory>
 #include <thread>

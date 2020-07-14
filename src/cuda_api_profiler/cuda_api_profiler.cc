@@ -36,13 +36,13 @@
 
 namespace rlscope {
 
-#define CUPTI_CALL(call)                                            \
-  do {                                                              \
-    CUptiResult _status = cupti_wrapper_->call;                     \
-    if (_status != CUPTI_SUCCESS) {                                 \
-      LOG(ERROR) << "cuda call " << #call << " failed " << _status; \
-    }                                                               \
-  } while (0)
+//#define CUPTI_CALL(call)
+//  do {
+//    CUptiResult _status = cupti_wrapper_->call;
+//    if (_status != CUPTI_SUCCESS) {
+//      LOG(ERROR) << "cuda call " << #call << " failed " << _status;
+//    }
+//  } while (0)
 
 CUDAAPIProfiler::~CUDAAPIProfiler() {
 //  if (VLOG_IS_ON(1)) {

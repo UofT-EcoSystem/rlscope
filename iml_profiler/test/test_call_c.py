@@ -1,4 +1,4 @@
-import logging
+from iml_profiler.profiler.iml_logging import logger
 import argparse
 import textwrap
 from glob import glob
@@ -35,7 +35,7 @@ def disable_test_timestamp():
     # - 2.5, 4.0, 2.25, ...
     assert diff_us < margin_of_error_us
 
-    logging.info("> diff_us = {diff_us} usec".format(diff_us=diff_us))
+    logger.info("> diff_us = {diff_us} usec".format(diff_us=diff_us))
 
 class CallCTest:
     def __init__(self, args, parser):
@@ -69,17 +69,17 @@ class CallCTest:
         else:
             self._gpu_mhz = self.lib.guess_gpu_freq_mhz()
             self.dump_json()
-        logging.info("GPU mhz = {mhz}".format(mhz=self.gpu_mhz))
+        logger.info("GPU mhz = {mhz}".format(mhz=self.gpu_mhz))
 
     def dump_json(self):
-        logging.info("> Dump GPU clock frequency data to: {path}".format(path=self.args.gpu_clock_freq_json))
+        logger.info("> Dump GPU clock frequency data to: {path}".format(path=self.args.gpu_clock_freq_json))
         self.gpu_clock_freq_data = {
             'gpu_mhz':self._gpu_mhz,
         }
         profilers.dump_json(self.gpu_clock_freq_data, self.args.gpu_clock_freq_json)
 
     def load_json(self):
-        logging.info("> Load GPU clock frequency from: {path}".format(path=self.args.gpu_clock_freq_json))
+        logger.info("> Load GPU clock frequency from: {path}".format(path=self.args.gpu_clock_freq_json))
         self.gpu_clock_freq_data = profilers.load_json(self.args.gpu_clock_freq_json)
 
     @property
@@ -89,19 +89,19 @@ class CallCTest:
     def run_gpu(self):
         args = self.args
         if self.debug:
-            logging.info("> Running on GPU for {sec} seconds".format(sec=args.gpu_time_sec))
+            logger.info("> Running on GPU for {sec} seconds".format(sec=args.gpu_time_sec))
         self.time_slept_gpu_sec += self.lib.gpu_sleep(args.gpu_time_sec)
 
     def run_cpp(self):
         args = self.args
         if self.debug:
-            logging.info("> Running in CPP for {sec} seconds".format(sec=args.gpu_time_sec))
+            logger.info("> Running in CPP for {sec} seconds".format(sec=args.gpu_time_sec))
         self.time_slept_cpp_sec += self.lib.run_cpp(args.cpp_time_sec)
 
     def run_python(self):
         args = self.args
         if self.debug:
-            logging.info("> Running inside python for {sec} seconds".format(sec=args.python_time_sec))
+            logger.info("> Running inside python for {sec} seconds".format(sec=args.python_time_sec))
         start_t = time.time()
         time.sleep(args.python_time_sec)
 
@@ -127,7 +127,7 @@ class CallCTest:
 
         self.init()
 
-        logging.info(textwrap.dedent("""
+        logger.info(textwrap.dedent("""
         > Running {r} repetitions, {i} iterations, each iteration is:
             Run in python for {python_sec} seconds
             Run in C++ for {cpp_sec} seconds
@@ -144,7 +144,7 @@ class CallCTest:
         self.profiler.profile(profilers.NO_BENCH_NAME, self.iteration)
 
         results_json = _j(self.directory, "test_call_c.json")
-        logging.info("> Dump test_call_c.py results @ {path}".format(path=results_json))
+        logger.info("> Dump test_call_c.py results @ {path}".format(path=results_json))
         results = {
             'time_gpu_sec':self.time_slept_gpu_sec,
             'time_python_sec':self.time_run_python_sec,
@@ -157,9 +157,8 @@ class CallCTest:
 DEFAULT_TIME_SEC = 5
 # DEFAULT_TIME_SEC_DEBUG = 1
 DEFAULT_TIME_SEC_DEBUG = 5
-from iml_profiler.profiler import iml_logging
+from iml_profiler.profiler.iml_logging import logger
 def main():
-    iml_logging.setup_logging()
     parser = argparse.ArgumentParser(textwrap.dedent("""
     Test profiling scripts to make sure we correctly measure time spent in Python/C++/GPU.
     """))

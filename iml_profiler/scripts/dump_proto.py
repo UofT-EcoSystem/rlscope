@@ -1,4 +1,4 @@
-import logging
+from iml_profiler.profiler.iml_logging import logger
 import argparse
 import textwrap
 import sys
@@ -14,7 +14,7 @@ from iml_profiler.protobuf.unit_test_pb2 import \
 from iml_profiler.parser.common import *
 
 def dump_proto_txt(path, ProtoKlass, stream):
-    logging.info("> DUMP: {name} @ {path}".format(
+    logger.info("> DUMP: {name} @ {path}".format(
         name=ProtoKlass.__name__,
         path=path))
     with open(path, 'rb') as f:
@@ -22,9 +22,8 @@ def dump_proto_txt(path, ProtoKlass, stream):
         proto.ParseFromString(f.read())
     print(proto, file=stream)
 
-from iml_profiler.profiler import iml_logging
+from iml_profiler.profiler.iml_logging import logger
 def main():
-    iml_logging.setup_logging()
     parser = argparse.ArgumentParser("Dump protobuf files to txt")
     parser.add_argument("--proto",
                         required=True,
@@ -57,7 +56,7 @@ def main():
         call_times_data = read_pyprof_call_times_file(args.proto)
         pprint.pprint(call_times_data)
     else:
-        logging.info("ERROR: Not sure what protobuf class to use for files like \"{path}\"".format(
+        logger.info("ERROR: Not sure what protobuf class to use for files like \"{path}\"".format(
             path=args.proto))
         sys.exit(1)
 

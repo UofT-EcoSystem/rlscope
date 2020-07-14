@@ -1,6 +1,6 @@
 from iml_profiler.parser.common import print_cmd, pprint_msg
 
-import logging
+from iml_profiler.profiler.iml_logging import logger
 import textwrap
 import sys
 import time
@@ -265,7 +265,7 @@ def check_nvidia_smi(debug=False):
     end_t = time.time()
     nvidia_smi_sec = end_t - start_t
     if nvidia_smi_sec > MAX_NVIDIA_SMI_TIME_SEC:
-        logging.info(textwrap.dedent("""
+        logger.info(textwrap.dedent("""
         IML ERROR:
         nvidia-smi takes a long time to run on your system.
         In particular, it took {sec} sec to run nvidia-smi (we would prefer < {limit_sec}).
@@ -309,7 +309,7 @@ def _parse_entity(cmd_opts, csv_fields, post_process_entity=None, debug=False):
         fields = line.split(', ')
         if len(fields) != len(csv_fields):
             if debug:
-                logging.info(pprint_msg({
+                logger.info(pprint_msg({
                     'fields': fields,
                     'csv_fields': csv_fields,
                 }))

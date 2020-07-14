@@ -3,7 +3,7 @@
 import traceback
 import gym
 import re
-import logging
+from iml_profiler.profiler.iml_logging import logger
 
 ALGO_ENV_GROUP_CHOICES = [
     'on_vs_off_policy',
@@ -289,7 +289,7 @@ def stable_baselines_gather_algo_env_pairs(algo=None, env_id=None, bullet=False,
             if ( algo is None or expr.algo == algo ) and \
                 ( env_id is None or expr.env_id == env_id ):
                 return expr
-        # logging.info("is_supported algo={algo}, env={env} = False".format(algo=algo, env=env_id))
+        # logger.info("is_supported algo={algo}, env={env} = False".format(algo=algo, env=env_id))
         return None
 
     def should_run(algo, env_id):

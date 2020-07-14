@@ -1,4 +1,4 @@
-import logging
+from iml_profiler.profiler.iml_logging import logger
 import copy
 import itertools
 import subprocess
@@ -19,7 +19,7 @@ import matplotlib.gridspec
 
 from iml_profiler.parser import stacked_bar_plots
 
-from iml_profiler.profiler import iml_logging
+from iml_profiler.profiler.iml_logging import logger
 
 from iml_profiler.experiment import expr_config
 from iml_profiler.parser.plot import CUDAEventCSVReader, fix_seaborn_legend
@@ -160,7 +160,7 @@ class UtilParser:
         path = experiment.experiment_config_path(directory)
         if not _e(path):
             if self.debug:
-                logging.info("Didn't find {path}; skip adding experiment columns to csv".format(path=path))
+                logger.info("Didn't find {path}; skip adding experiment columns to csv".format(path=path))
             return None
         data = experiment.load_experiment_config(directory)
         return data
@@ -252,12 +252,12 @@ class UtilParser:
             df_group['trace_percent'] = (df_group['start_time_us'] - start_time) / length_time
             dfs.append(df_group)
 
-            logging.info(pprint_msg({
+            logger.info(pprint_msg({
                 'group': group,
                 'start_time': start_time,
                 'max_time': max_time,
             }))
-            logging.info(pprint_msg(df_group))
+            logger.info(pprint_msg(df_group))
 
             # import ipdb; ipdb.set_trace()
 
@@ -281,14 +281,14 @@ class UtilParser:
             new_df['device_type'])
 
         # OUTPUT raw thing here.
-        logging.info("Output raw un-aggregated machine utilization data @ {path}".format(path=self._raw_csv_path))
+        logger.info("Output raw un-aggregated machine utilization data @ {path}".format(path=self._raw_csv_path))
         new_df.to_csv(self._raw_csv_path, index=False)
 
         df_agg = new_df.groupby(groupby_cols).agg(['min', 'max', 'mean', 'std'])
         flat_df_agg = self.flattened_agg_df(df_agg)
 
         # import ipdb; ipdb.set_trace()
-        logging.info("Output min/max/std aggregated machine utilization data @ {path}".format(path=self._agg_csv_path))
+        logger.info("Output min/max/std aggregated machine utilization data @ {path}".format(path=self._agg_csv_path))
         flat_df_agg.to_csv(self._agg_csv_path, index=False)
 
         # Q: Which (algo, env) have at least one utilization readings > 0 a GPU whose device_id > 0?
@@ -370,7 +370,7 @@ class NvprofCSVParser:
                 ret = proc.wait()
                 end_nvprof_t = time.time()
                 assert ret == 0
-                logging.info("Running \"nvprof --csv -i {path}\" took {sec} sec".format(
+                logger.info("Running \"nvprof --csv -i {path}\" took {sec} sec".format(
                     path=self.nvprof_file,
                     sec=end_nvprof_t - start_nvprof_t))
 
@@ -407,7 +407,7 @@ class NvprofCSVParser:
                 if m:
                     msg = m.group('msg')
                     if re.search('Warning', msg, flags=re.IGNORECASE):
-                        logging.warning("Saw WARNING in {path} at line {lineno}:\n{warning}".format(
+                        logger.warning("Saw WARNING in {path} at line {lineno}:\n{warning}".format(
                             path=self.csv_file,
                             lineno=lineno,
                             warning=textwrap.indent(line, prefix="  ")))
@@ -443,11 +443,11 @@ class NvprofCSVParser:
                 index_col=False,
                 **read_csv_kwargs)
             end_read_csv_t = time.time()
-            logging.info("Reading {path} took {sec} sec".format(
+            logger.info("Reading {path} took {sec} sec".format(
                 path=self.csv_file,
                 sec=end_read_csv_t - start_read_csv_t))
             if self.debug:
-                logging.info(
+                logger.info(
                     textwrap.dedent("""\
                     Read nvprof file {path} into dataframe:
                       Header: {header}
@@ -658,7 +658,7 @@ class NvprofTraces:
 
     def run(self):
         nvprof_files = [path for path in each_file_recursive(self.directory) if is_nvprof_file(path)]
-        logging.info("nvprof_files = {nvprof_files}".format(nvprof_files=pprint_msg(nvprof_files)))
+        logger.info("nvprof_files = {nvprof_files}".format(nvprof_files=pprint_msg(nvprof_files)))
         with ProcessPoolExecutor() as pool:
             results = []
             for nvprof_file in nvprof_files:
@@ -1307,11 +1307,11 @@ class GPUUtilOverTimePlot:
             for k, v in dir_to_data[iml_directory].items():
                 if k != 'df':
                     metadata_js[iml_directory][k] = v
-        # logging.info('Dump metadata js to {path}'.format(path=json_path))
+        # logger.info('Dump metadata js to {path}'.format(path=json_path))
         do_dump_json(metadata_js, json_path)
 
         df.to_csv(csv_path, index=False)
-        logging.info('Save figure to {path}'.format(path=plot_path))
+        logger.info('Save figure to {path}'.format(path=plot_path))
         fig.tight_layout()
         fig.savefig(plot_path, bbox_inches="tight", pad_inches=0)
         plt.close(fig)
@@ -1370,7 +1370,7 @@ class UtilPlot:
         if len(df_count_more_than_1_gpu) > 0:
             buf = StringIO()
             DataFrame.print_df(df_count_more_than_1_gpu, file=buf)
-            logging.info("Saw > 1 GPU being using for at least one (algo, env) experiment; not sure which GPU to show:\n{msg}".format(
+            logger.info("Saw > 1 GPU being using for at least one (algo, env) experiment; not sure which GPU to show:\n{msg}".format(
                 msg=textwrap.indent(buf.getvalue(), prefix='  '),
             ))
             assert len(df_count_more_than_1_gpu) == 0
@@ -1395,7 +1395,7 @@ class UtilPlot:
     def _plot(self):
         if self.width is not None and self.height is not None:
             figsize = (self.width, self.height)
-            logging.info("Setting figsize = {fig}".format(fig=figsize))
+            logger.info("Setting figsize = {fig}".format(fig=figsize))
             # sns.set_context({"figure.figsize": figsize})
         else:
             figsize = None
@@ -1410,7 +1410,7 @@ class UtilPlot:
 
         figsize = (10, 2.5)
 
-        logging.info("Plot dimensions (inches) = {figsize}".format(
+        logger.info("Plot dimensions (inches) = {figsize}".format(
             figsize=figsize))
 
         # This is causing XIO error....
@@ -1443,7 +1443,7 @@ class UtilPlot:
 
         self.df_gpu = self.df
 
-        logging.info(pprint_msg(self.df_gpu))
+        logger.info(pprint_msg(self.df_gpu))
         # ax = sns.boxplot(x=self.df_gpu['x_field'], y=100*self.df_gpu['util'],
         #                  showfliers=False,
         #                  )
@@ -1506,7 +1506,7 @@ class UtilPlot:
                 df_gpu['algo'],
                 df_gpu['env'])
             ys = 100*df_gpu['util']
-            logging.info("Plot algo_env_group:\n{msg}".format(
+            logger.info("Plot algo_env_group:\n{msg}".format(
                 msg=pprint_msg({
                     'i': i,
                     'algo_env_group': algo_env_group,
@@ -1555,7 +1555,7 @@ class UtilPlot:
         for i, algo_env_group in enumerate(algo_env_groups):
             df_group = self.df_gpu[self.df_gpu['algo_env_group'] == algo_env_group]
             if len(df_group) == 0:
-                logging.warning("Found no GPU utilization data for algo_env_group={group}, SKIP plot".format(
+                logger.warning("Found no GPU utilization data for algo_env_group={group}, SKIP plot".format(
                     group=algo_env_group))
                 continue
             ax = axes[i]
@@ -1585,7 +1585,7 @@ class UtilPlot:
         #     ax.set_ylabel(self.y_title)
 
         png_path = self._get_plot_path('pdf')
-        logging.info('Save figure to {path}'.format(path=png_path))
+        logger.info('Save figure to {path}'.format(path=png_path))
         # fig.tight_layout()
         fig.savefig(png_path, bbox_inches="tight", pad_inches=0)
         plt.close(fig)
@@ -1594,7 +1594,7 @@ class UtilPlot:
 
         if self.width is not None and self.height is not None:
             figsize = (self.width, self.height)
-            logging.info("Setting figsize = {fig}".format(fig=figsize))
+            logger.info("Setting figsize = {fig}".format(fig=figsize))
             # sns.set_context({"figure.figsize": figsize})
         else:
             figsize = None
@@ -1604,7 +1604,7 @@ class UtilPlot:
 
         self.df_gpu = self.df
 
-        logging.info(pprint_msg(self.df_gpu))
+        logger.info(pprint_msg(self.df_gpu))
 
         ax = sns.boxplot(x=self.df_gpu['x_field'], y=100*self.df_gpu['util'],
                          showfliers=False,
@@ -1634,7 +1634,7 @@ class UtilPlot:
             ax.set_ylabel(self.y_title)
 
         png_path = self._get_plot_path('pdf')
-        logging.info('Save figure to {path}'.format(path=png_path))
+        logger.info('Save figure to {path}'.format(path=png_path))
         fig.tight_layout()
         fig.savefig(png_path, bbox_inches="tight", pad_inches=0)
         plt.close(fig)
@@ -1675,7 +1675,7 @@ def my_label_len(label_df, col):
     # labels = my_index.get_level_values(level)
     labels = label_df[col]
     ret = [(k, sum(1 for i in g)) for k,g in itertools.groupby(labels)]
-    logging.info(pprint_msg({'label_len': ret}))
+    logger.info(pprint_msg({'label_len': ret}))
     return ret
 
 def label_group_bar_table(ax, df):
@@ -1714,7 +1714,7 @@ def test_grouped_xlabel():
     sample_df = test_table()
     g = sample_df.groupby(['Room', 'Shelf', 'Staple'])
     df = g.sum()
-    logging.info(pprint_msg(df))
+    logger.info(pprint_msg(df))
     fig = plt.figure()
     ax = fig.add_subplot(111)
 
@@ -1766,8 +1766,6 @@ def main():
     """))
 
     args = parser.parse_args()
-
-    iml_logging.setup_logging()
 
     if args.test_grouped_xlabel:
         test_grouped_xlabel()

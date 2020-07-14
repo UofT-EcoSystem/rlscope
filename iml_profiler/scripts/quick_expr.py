@@ -1,4 +1,4 @@
-from iml_profiler.profiler import iml_logging
+from iml_profiler.profiler.iml_logging import logger
 import argparse
 import pprint
 from glob import glob
@@ -116,7 +116,6 @@ class QuickExpr:
         func(self.extra_argv)
 
 def main():
-    iml_logging.setup_logging()
     parser = argparse.ArgumentParser(
         textwrap.dedent("""\
         Make-once run-once experiments; 
@@ -292,7 +291,7 @@ class ExprSubtractionValidationConfig:
                ]
         cmd.extend(self.script_args)
         logfile = self.logfile(rep, iters)
-        # logging.info("Logging to file {path}".format(
+        # logger.info("Logging to file {path}".format(
         #     path=logfile))
         expr_run_cmd(
             cmd=cmd,
@@ -393,7 +392,7 @@ class ExprTotalTrainingTimeConfig:
         cmd = self._get_cmd(rep, extra_argv)
 
         logfile = self.logfile(rep)
-        # logging.info("Logging to file {path}".format(
+        # logger.info("Logging to file {path}".format(
         #     path=logfile))
         expr_run_cmd(
             cmd=cmd,
@@ -513,7 +512,7 @@ class ExprMicrobenchmarkConfig:
         cmd = self._get_cmd(rep, extra_argv)
 
         logfile = self.logfile(rep)
-        # logging.info("Logging to file {path}".format(
+        # logger.info("Logging to file {path}".format(
         #     path=logfile))
         expr_run_cmd(
             cmd=cmd,
@@ -812,7 +811,7 @@ class ExprMicrobenchmark:
         instrumented_json_path = self.conf(algo, env, mode, config).microbench_json_path()
 
         if self.quick_expr.args.debug:
-            logging.info("log = {msg}".format(
+            logger.info("log = {msg}".format(
                 msg=pprint_msg({
                     'uninstrumented_json_path': uninstrumented_json_path,
                     'instrumented_json_path': instrumented_json_path,
@@ -820,7 +819,7 @@ class ExprMicrobenchmark:
 
         if not _e(uninstrumented_json_path) or \
            not _e(instrumented_json_path):
-            logging.info(textwrap.dedent("""
+            logger.info(textwrap.dedent("""
                     {klass}: SKIP compute_microbench_pyprof_overhead;
                     Files present so far:
                     {files}
@@ -841,14 +840,14 @@ class ExprMicrobenchmark:
             field_name=field_name,
             uninstrumented_json_path=uninstrumented_json_path,
             instrumented_json_path=instrumented_json_path)
-        logging.info("Output json @ {path}".format(path=json_path))
+        logger.info("Output json @ {path}".format(path=json_path))
         do_dump_json(js, json_path)
 
     def compute_pyprof_overhead(self, algo, env, mode, config):
         task = "PyprofOverheadTask"
 
         # if self.quick_expr.args.debug:
-        #     logging.info("log = {msg}".format(
+        #     logger.info("log = {msg}".format(
         #         msg=pprint_msg({
         #             'iterations': self.iterations,
         #         })))
@@ -867,7 +866,7 @@ class ExprMicrobenchmark:
 
         pyprof_overhead_directories = self.conf(algo, env, mode, config).iml_directories()
         if self.quick_expr.args.debug:
-            logging.info("log = {msg}".format(
+            logger.info("log = {msg}".format(
                 msg=pprint_msg({
                     'uninstrumented_directories': uninstrumented_directories,
                     'pyprof_overhead_directories': pyprof_overhead_directories,
@@ -1127,8 +1126,8 @@ class ExprMicrobenchmark:
         #         )
         #         self.configs.append(config)
 
-        logging.info("configs: " + pprint_msg(self.configs))
-        logging.info("config_suffix_to_obj: " + pprint_msg(self.config_suffix_to_obj))
+        logger.info("configs: " + pprint_msg(self.configs))
+        logger.info("config_suffix_to_obj: " + pprint_msg(self.config_suffix_to_obj))
         # TODO: add config for minigo
         # Q: should we subclass ExprTotalTrainingTimeConfig to specialize running minigo experiment?
 
@@ -1328,7 +1327,7 @@ class ExprTotalTrainingTime:
                 iml_prof_config=iml_prof_config,
             )
             self.configs.append(config)
-        logging.info("configs: " + pprint_msg(self.configs))
+        logger.info("configs: " + pprint_msg(self.configs))
         # TODO: add config for minigo
         # Q: should we subclass ExprTotalTrainingTimeConfig to specialize running minigo experiment?
 
@@ -1461,7 +1460,7 @@ class ExprSubtractionValidation:
         iters_01 = self.get_iterations(self.conf(algo, env, 'gpu_activities_api_time_calibration'))
         iters_02 = self.get_iterations(self.conf(algo, env, 'interception_calibration'))
         if iters_01 != iters_02:
-            logging.info("data: {msg}".format(msg=pprint_msg({
+            logger.info("data: {msg}".format(msg=pprint_msg({
                 'iters_01': iters_01,
                 'iters_02': iters_02,
             })))
@@ -1469,7 +1468,7 @@ class ExprSubtractionValidation:
         iterations = self.get_iterations(self.conf(algo, env, 'gpu_activities_api_time_calibration'))
 
         if self.quick_expr.args.debug:
-            logging.info("log = {msg}".format(
+            logger.info("log = {msg}".format(
                 msg=pprint_msg({
                     'iterations': iterations,
                 })))
@@ -1514,7 +1513,7 @@ class ExprSubtractionValidation:
         iterations = self.get_iterations(self.conf(algo, env, 'gpu_activities_calibration'))
 
         if self.quick_expr.args.debug:
-            logging.info("log = {msg}".format(
+            logger.info("log = {msg}".format(
                 msg=pprint_msg({
                     'iterations': iterations,
                 })))
@@ -1524,7 +1523,7 @@ class ExprSubtractionValidation:
             gpu_activities_directories = self.conf(algo, env, 'gpu_activities_calibration').iml_directories(iters)
             no_gpu_activities_directories = self.conf(algo, env, 'no_gpu_activities_calibration').iml_directories(iters)
             if self.quick_expr.args.debug:
-                logging.info("log = {msg}".format(
+                logger.info("log = {msg}".format(
                     msg=pprint_msg({
                         'iters': iters,
                         'gpu_activities_directories': gpu_activities_directories,
@@ -1564,7 +1563,7 @@ class ExprSubtractionValidation:
         task = "CallInterceptionOverheadTask"
 
         if self.quick_expr.args.debug:
-            logging.info("log = {msg}".format(
+            logger.info("log = {msg}".format(
                 msg=pprint_msg({
                     'iterations': self.iterations,
                 })))
@@ -1573,14 +1572,14 @@ class ExprSubtractionValidation:
             interception_directories = self.conf(algo, env, 'interception_calibration').iml_directories(iters)
             uninstrumented_directories = self.conf(algo, env, 'uninstrumented_calibration').iml_directories(iters)
             if self.quick_expr.args.debug:
-                logging.info("log = {msg}".format(
+                logger.info("log = {msg}".format(
                     msg=pprint_msg({
                         'iters': iters,
                         'interception_directories': interception_directories,
                         'uninstrumented_directories': uninstrumented_directories,
                     })))
             if self.quick_expr.args.debug:
-                logging.info("log = {msg}".format(
+                logger.info("log = {msg}".format(
                     msg=pprint_msg({
                         'iters': iters,
                         'interception_directories': interception_directories,
@@ -1619,7 +1618,7 @@ class ExprSubtractionValidation:
         task = "PyprofOverheadTask"
 
         if self.quick_expr.args.debug:
-            logging.info("log = {msg}".format(
+            logger.info("log = {msg}".format(
                 msg=pprint_msg({
                     'iterations': self.iterations,
                 })))
@@ -1629,7 +1628,7 @@ class ExprSubtractionValidation:
             pyprof_annotations_directories = self.conf(algo, env, 'just_pyprof_annotations_calibration').iml_directories(iters)
             pyprof_interceptions_directories = self.conf(algo, env, 'just_pyprof_interceptions_calibration').iml_directories(iters)
             if self.quick_expr.args.debug:
-                logging.info("log = {msg}".format(
+                logger.info("log = {msg}".format(
                     msg=pprint_msg({
                         'iters': iters,
                         'uninstrumented_directories': uninstrumented_directories,
@@ -1699,7 +1698,7 @@ class ExprSubtractionValidation:
 
         config_uninstrumented = self.conf(algo, env, 'uninstrumented')
 
-        logging.info("log = {msg}".format(
+        logger.info("log = {msg}".format(
             msg=pprint_msg({
                 'iterations': iterations,
                 'iters': iters,
@@ -1723,7 +1722,7 @@ class ExprSubtractionValidation:
                     'cupti_overhead_jsons': cupti_overhead_jsons,
                     'LD_PRELOAD_overhead_jsons': LD_PRELOAD_overhead_jsons,
                 })
-                logging.info((
+                logger.info((
                     "{klass}: SKIP plotting iterations={iters}, config={config}, "
                     "since --iml-directories and --uninstrumented-directories haven't been generated yet.").format(
                     iters=iters,
@@ -1783,7 +1782,7 @@ class ExprSubtractionValidation:
             # --debug-memoize
 
             logfile = self.plot_logfile(config, iters)
-            # logging.info("Logging to file {path}".format(
+            # logger.info("Logging to file {path}".format(
             #     path=logfile))
             expr_run_cmd(
                 cmd=cmd,
@@ -1845,7 +1844,7 @@ class ExprSubtractionValidation:
         else:
             runs = list(range(self.args.num_runs))
 
-        # logging.info("Runs: {msg}".format(
+        # logger.info("Runs: {msg}".format(
         #     msg=pprint_msg(runs)))
 
         iterations = iters_from_runs(runs)
@@ -1880,7 +1879,7 @@ class ExprSubtractionValidation:
             self._add_configs(algo, env)
 
 
-        logging.info("Run configuration: {msg}".format(msg=pprint_msg({
+        logger.info("Run configuration: {msg}".format(msg=pprint_msg({
             '(algo, env)': self.stable_baselines_algo_env,
             'configs': self.configs,
         })))
@@ -2483,7 +2482,7 @@ class ExprPlotFig:
 
         logfile = self.plot_logfile(self.args.fig)
         if self.quick_expr.args.debug:
-            logging.info("Logging to file {path}".format(
+            logger.info("Logging to file {path}".format(
                 path=logfile))
         expr_run_cmd(
             cmd=cmd,
@@ -2508,7 +2507,7 @@ def add_iml_analyze_flags(cmd, args):
         cmd.append('--debug-single-thread')
 
 def log_missing_files(self, task, files):
-    logging.info(textwrap.dedent("""
+    logger.info(textwrap.dedent("""
             {klass}: SKIP iml-analyze --task={task}; still need you to collect 
             some additional runs using "iml-quick-expr".
             Files present so far:

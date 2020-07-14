@@ -1,4 +1,4 @@
-import logging
+from iml_profiler.profiler.iml_logging import logger
 import copy
 import numpy as np
 import itertools
@@ -35,7 +35,7 @@ from iml_profiler.parser.db import SQLCategoryTimesReader, CSVInserter, \
 
 from iml_profiler.parser.stats import KernelTime
 
-from iml_profiler.profiler import iml_logging
+from iml_profiler.profiler.iml_logging import logger
 from iml_profiler.parser.plot import get_sns_kwargs, get_plt_kwargs, add_grouped_stacked_bars, add_bar_labels
 
 class CalibrationJSON:
@@ -181,7 +181,7 @@ class CorrectedTrainingTimeParser:
 
         iml_config = IMLConfig(self.iml_directories[0])
         if self.debug:
-            logging.info("IMLConfig.iml_prof_args: {msg}".format(
+            logger.info("IMLConfig.iml_prof_args: {msg}".format(
                 msg=pprint_msg({
                     'iml_config.iml_prof_args': iml_config.iml_prof_args,
                     # 'iml_config.iml_config': iml_config.iml_config,
@@ -213,7 +213,7 @@ class CorrectedTrainingTimeParser:
             # $ iml-prof --config gpu-activities --cuda-api-calls --cuda-api-events
             # ===
             # $ iml-prof --cuda-api-calls --cuda-activities
-            logging.info(textwrap.dedent("""\
+            logger.info(textwrap.dedent("""\
                 WARNING: we cannot correct for runs like this, so there will be positive overhead (%):
                     $ iml-prof --cuda-api-calls --cuda-activities
                 In particular, LD_PRELOAD overhead is measured using "--cuda-api-calls --cuda-api-events", but 
@@ -232,7 +232,7 @@ class CorrectedTrainingTimeParser:
 
         should_subtract_attrs = dict((attr, val) for attr, val in self.__dict__.items() \
                                      if re.search(r'should_subtract', attr))
-        logging.info("Correction configuration: {msg}".format(
+        logger.info("Correction configuration: {msg}".format(
             msg=pprint_msg(should_subtract_attrs)))
 
         # NOTE: for pyprof overhead we SHOULD just be able to subtract regardless...
@@ -384,7 +384,7 @@ class CorrectedTrainingTimeParser:
             total_dfs = []
 
             if self.debug:
-                logging.info("load_dfs: {msg}".format(
+                logger.info("load_dfs: {msg}".format(
                     msg=pprint_msg({
                         'iml_directories':self.iml_directories,
                     })
@@ -396,7 +396,7 @@ class CorrectedTrainingTimeParser:
                                  show_progress=self.debug):
 
                 if self.debug:
-                    logging.info("iml_directory = {dir}".format(
+                    logger.info("iml_directory = {dir}".format(
                         dir=directory,
                     ))
 
@@ -421,7 +421,7 @@ class CorrectedTrainingTimeParser:
                     per_api_df['total_interception_overhead_us'] = per_api_df['num_calls'] * self.LD_PRELOAD_overhead_json['mean_interception_overhead_per_call_us']
                 else:
                     per_api_df['total_interception_overhead_us'] = 0
-                    logging.info("SKIP LD_PRELOAD overhead (total_interception_overhead_us = 0)")
+                    logger.info("SKIP LD_PRELOAD overhead (total_interception_overhead_us = 0)")
                 add_fields(per_api_df, iml_config)
 
                 # per_api_df = pd.DataFrame({
@@ -440,7 +440,7 @@ class CorrectedTrainingTimeParser:
                     per_api_df['total_cupti_overhead_us'] = per_api_df['num_calls'] * per_api_df['mean_cupti_overhead_per_call_us']
                 else:
                     per_api_df['total_cupti_overhead_us'] = 0
-                    logging.info("SKIP CUPTI overhead (total_cupti_overhead_us = 0)")
+                    logger.info("SKIP CUPTI overhead (total_cupti_overhead_us = 0)")
 
                 per_api_df['total_overhead_us'] = per_api_df['total_cupti_overhead_us'] + per_api_df['total_interception_overhead_us']
                 per_api_dfs.append(per_api_df)
@@ -543,7 +543,7 @@ class CorrectedTrainingTimeParser:
         #     json_data[mean_colname(name)] = np.mean(values)
         #     json_data[std_colname(name)] = np.std(values)
         #     json_data[num_colname(name)] = np.len(values)
-        # logging.info("Output json @ {path}".format(path=self._raw_json_path))
+        # logger.info("Output json @ {path}".format(path=self._raw_json_path))
         # do_dump_json(json_data, self._raw_json_path)
 
         def pretty_config(config):
@@ -575,7 +575,7 @@ class CorrectedTrainingTimeParser:
 
         # if self.width is not None and self.height is not None:
         #     figsize = (self.width, self.height)
-        #     logging.info("Setting figsize = {fig}".format(fig=figsize))
+        #     logger.info("Setting figsize = {fig}".format(fig=figsize))
         #     # sns.set_context({"figure.figsize": figsize})
         # else:
         #     figsize = None
@@ -590,7 +590,7 @@ class CorrectedTrainingTimeParser:
         # else:
         figsize = None
 
-        logging.info("Plot dimensions (inches) = {figsize}".format(
+        logger.info("Plot dimensions (inches) = {figsize}".format(
             figsize=figsize))
 
 
@@ -609,7 +609,7 @@ class CorrectedTrainingTimeParser:
             ax.set_ylabel('Total training time (sec)')
             ax.set_xlabel('CUDA API call')
             ax.set_title("Breakdown of profiling overhead by CUDA API call")
-            logging.info("Output plot @ {path}".format(path=self._per_api_png_path))
+            logger.info("Output plot @ {path}".format(path=self._per_api_png_path))
             fig.savefig(self._per_api_png_path, bbox_inches="tight", pad_inches=0)
             plt.close(fig)
 
@@ -678,7 +678,7 @@ class CorrectedTrainingTimeParser:
             ax.set_ylabel('Total training time (sec)')
             ax.set_xlabel('(algo, env)')
             ax.set_title("Breakdown of profiling overhead")
-            logging.info("Output plot @ {path}".format(path=self._total_png_path))
+            logger.info("Output plot @ {path}".format(path=self._total_png_path))
             fig.savefig(self._total_png_path, bbox_inches="tight", pad_inches=0)
             plt.close(fig)
 
@@ -959,7 +959,7 @@ class CorrectedTrainingTimeParser:
                 xlabel = get_xlabel(plot_group)
                 ax.set_xlabel(xlabel)
                 # ax.set_title("Breakdown of profiling overhead")
-                logging.info("Output plot @ {path}".format(path=self._overhead_correction_png_path(plot_group)))
+                logger.info("Output plot @ {path}".format(path=self._overhead_correction_png_path(plot_group)))
                 # fig.tight_layout()
                 fig.savefig(self._overhead_correction_png_path(plot_group), bbox_inches="tight", pad_inches=0)
                 plt.close(fig)
@@ -1024,7 +1024,7 @@ class CorrectedTrainingTimeParser:
         #     ax.set_ylabel('Total training time (sec)')
         #     ax.set_xlabel('(algo, env)')
         #     ax.set_title("Correcting training time by subtracting profiling overhead")
-        #     logging.info("Output plot @ {path}".format(path=self._training_time_png_path))
+        #     logger.info("Output plot @ {path}".format(path=self._training_time_png_path))
         #     fig.savefig(self._training_time_png_path)
         #     plt.close(fig)
 
@@ -1202,7 +1202,7 @@ class CallInterceptionOverheadParser:
 
         if self.width is not None and self.height is not None:
             figsize = (self.width, self.height)
-            logging.info("Setting figsize = {fig}".format(fig=figsize))
+            logger.info("Setting figsize = {fig}".format(fig=figsize))
             # sns.set_context({"figure.figsize": figsize})
         else:
             figsize = None
@@ -1221,9 +1221,9 @@ class CallInterceptionOverheadParser:
         fig.savefig(self._png_path)
         plt.close(fig)
 
-        logging.info("Output plot @ {path}".format(path=self._png_path))
-        logging.info("Output csv @ {path}".format(path=self._raw_csv_path))
-        logging.info("Output json @ {path}".format(path=self._raw_json_path))
+        logger.info("Output plot @ {path}".format(path=self._png_path))
+        logger.info("Output csv @ {path}".format(path=self._raw_csv_path))
+        logger.info("Output json @ {path}".format(path=self._raw_json_path))
 
 
 class PyprofOverheadCalculation:
@@ -1596,7 +1596,7 @@ class PyprofOverheadParser:
             jsons.append(pyprof_annotations_calc.json)
 
             path = self._python_annotation_json_path
-            logging.info("Output json @ {path}".format(path=path))
+            logger.info("Output json @ {path}".format(path=path))
             do_dump_json(pyprof_annotations_calc.json, path)
 
         if has_files(self.pyprof_interceptions_directory):
@@ -1604,12 +1604,12 @@ class PyprofOverheadParser:
             jsons.append(pyprof_interceptions_calc.json)
 
             path = self._clib_interception_json_path
-            logging.info("Output json @ {path}".format(path=path))
+            logger.info("Output json @ {path}".format(path=path))
             do_dump_json(pyprof_interceptions_calc.json, path)
 
         if pyprof_interceptions_calc is not None and pyprof_interceptions_calc is not None:
             json = merge_jsons(jsons)
-            logging.info("Output json @ {path}".format(path=self._json_path))
+            logger.info("Output json @ {path}".format(path=self._json_path))
             do_dump_json(json, self._json_path)
 
     def _plot(self, x='x_field', y=None, data=None, sns_kwargs=dict()):
@@ -1617,7 +1617,7 @@ class PyprofOverheadParser:
         assert data is not None
         if self.width is not None and self.height is not None:
             figsize = (self.width, self.height)
-            logging.info("Setting figsize = {fig}".format(fig=figsize))
+            logger.info("Setting figsize = {fig}".format(fig=figsize))
         else:
             figsize = None
         # This is causing XIO error....
@@ -1860,7 +1860,7 @@ class TotalTrainingTimeParser:
         def _plot():
             if self.width is not None and self.height is not None:
                 figsize = (self.width, self.height)
-                logging.info("Setting figsize = {fig}".format(fig=figsize))
+                logger.info("Setting figsize = {fig}".format(fig=figsize))
                 # sns.set_context({"figure.figsize": figsize})
             else:
                 figsize = None
@@ -1908,7 +1908,7 @@ class TotalTrainingTimeParser:
             #         transform=ax.transAxes)
             # g.fig.text()
 
-            logging.info("Output plot @ {path}".format(path=self._png_path))
+            logger.info("Output plot @ {path}".format(path=self._png_path))
             g.savefig(self._png_path)
 
         output_csv(df, self._csv_path, sort_by=['algo', 'env', 'training_duration_sec'])
@@ -2006,10 +2006,10 @@ class CUPTIScalingOverheadParser:
                 raise NotImplementedError()
         df['pretty_config'] = df['config'].apply(pretty_config)
 
-        logging.info("Output csv @ {path}".format(path=self._raw_csv_path))
+        logger.info("Output csv @ {path}".format(path=self._raw_csv_path))
         df.to_csv(self._raw_csv_path, index=False)
 
-        logging.info("Output json @ {path}".format(path=self._raw_json_path))
+        logger.info("Output json @ {path}".format(path=self._raw_json_path))
         do_dump_json(json_data, self._raw_json_path)
 
         return df, joined_df
@@ -2042,7 +2042,7 @@ class CUPTIScalingOverheadParser:
         def _plot():
             if self.width is not None and self.height is not None:
                 figsize = (self.width, self.height)
-                logging.info("Setting figsize = {fig}".format(fig=figsize))
+                logger.info("Setting figsize = {fig}".format(fig=figsize))
                 # sns.set_context({"figure.figsize": figsize})
             else:
                 figsize = None
@@ -2069,7 +2069,7 @@ class CUPTIScalingOverheadParser:
             g.fig.suptitle("CUDA API time with increased training loop iterations")
             for ax in g.axes.ravel():
                 ax.set_xticklabels(ax.get_xticklabels(), rotation=15)
-            logging.info("Output plot @ {path}".format(path=self._png_path))
+            logger.info("Output plot @ {path}".format(path=self._png_path))
             g.savefig(self._png_path)
 
             g = sns.FacetGrid(data=per_iteration_df, col="training_iterations",
@@ -2083,7 +2083,7 @@ class CUPTIScalingOverheadParser:
             g.fig.suptitle("Training loop iteration time with increased training loop iterations")
             for ax in g.axes.ravel():
                 ax.set_xticklabels(ax.get_xticklabels(), rotation=15)
-            logging.info("Output plot @ {path}".format(path=self._training_loop_png_path))
+            logger.info("Output plot @ {path}".format(path=self._training_loop_png_path))
             g.savefig(self._training_loop_png_path)
 
         _plot()
@@ -2153,7 +2153,7 @@ def cupti_read_cuda_api_stats(config_directories_pairs,
 
             per_api_stats = get_per_api_stats(directory, debug=debug, debug_single_thread=debug_single_thread)
             per_api_stats = per_api_stats.reset_index()
-            logging.info("per_api_stats: " + pprint_msg(per_api_stats))
+            logger.info("per_api_stats: " + pprint_msg(per_api_stats))
             for i, row in per_api_stats.iterrows():
                 total_api_time_us = row['total_time_us']
                 total_num_calls = row['num_calls']
@@ -2339,14 +2339,14 @@ class CUPTIOverheadParser:
                 raise NotImplementedError()
         df['pretty_config'] = df['config'].apply(pretty_config)
 
-        logging.info("Output csv @ {path}".format(path=self._raw_csv_path))
+        logger.info("Output csv @ {path}".format(path=self._raw_csv_path))
         df.to_csv(self._raw_csv_path, index=False)
-        logging.info("Output json @ {path}".format(path=self._raw_json_path))
+        logger.info("Output json @ {path}".format(path=self._raw_json_path))
         do_dump_json(json_data, self._raw_json_path)
 
         if self.width is not None and self.height is not None:
             figsize = (self.width, self.height)
-            logging.info("Setting figsize = {fig}".format(fig=figsize))
+            logger.info("Setting figsize = {fig}".format(fig=figsize))
             # sns.set_context({"figure.figsize": figsize})
         else:
             figsize = None
@@ -2365,7 +2365,7 @@ class CUPTIOverheadParser:
         ax.set_ylabel('Time per call (us)')
         ax.set_xlabel('CUDA API call')
         ax.set_title("CUPTI induced profiling overhead per CUDA API call")
-        logging.info("Output plot @ {path}".format(path=self._png_path))
+        logger.info("Output plot @ {path}".format(path=self._png_path))
         fig.savefig(self._png_path)
         plt.close(fig)
 
@@ -2473,7 +2473,7 @@ def add_stacked_bars(x, y, hue, label=None, data=None, ax=None, debug=False, **k
         groupby_cols = [hue]
     data_groupby = data.groupby(groupby_cols)
     groups = [pair[0] for pair in list(data_groupby)]
-    logging.info("groups: " + pprint_msg(groups))
+    logger.info("groups: " + pprint_msg(groups))
     means = dict()
     stds = dict()
     for group, group_df in data_groupby:
@@ -2500,7 +2500,7 @@ def add_stacked_bars(x, y, hue, label=None, data=None, ax=None, debug=False, **k
             # group = hue
             label_str = group
         if debug:
-            logging.info("add_stacked_bars:\n{msg}".format(
+            logger.info("add_stacked_bars:\n{msg}".format(
                 msg=pprint_msg({
                     'xs':xs,
                     'xticks':xticks,
@@ -2524,8 +2524,8 @@ def output_csv(plot_df, csv_path, sort_by=None):
     if sort_by is not None:
         plot_df = plot_df.sort_values(sort_by)
     plot_df.to_csv(csv_path, index=False)
-    logging.info("{path}: {msg}".format(path=csv_path, msg=pprint_msg(plot_df)))
-    logging.info("Output total csv @ {path}".format(path=csv_path))
+    logger.info("{path}: {msg}".format(path=csv_path, msg=pprint_msg(plot_df)))
+    logger.info("Output total csv @ {path}".format(path=csv_path))
 
 
 def get_short_env(env):
@@ -2725,7 +2725,7 @@ def sec_colname(us_colname):
     assert False
 
 def save_plot(fig, ax, png_path):
-    logging.info("Output plot @ {path}".format(path=png_path))
+    logger.info("Output plot @ {path}".format(path=png_path))
     fig.savefig(png_path)
     plt.close(fig)
 
@@ -2880,7 +2880,7 @@ class OverheadEventCountParser:
         for op_stack_file in op_stack_files:
             add_op_stack_counts(op_stack_file)
 
-        logging.info("Output json @ {path}".format(path=self._json_path))
+        logger.info("Output json @ {path}".format(path=self._json_path))
         do_dump_json(json, self._json_path)
 
     @property
@@ -2967,7 +2967,7 @@ class OverheadEventCountParser:
 #         for op_stack_file in op_stack_files:
 #             add_op_stack_counts(op_stack_file)
 #
-#         logging.info("Output json @ {path}".format(path=self._json_path))
+#         logger.info("Output json @ {path}".format(path=self._json_path))
 #         do_dump_json(json, self._json_path)
 #
 #     @property
@@ -3278,7 +3278,7 @@ class SQLOverheadEventsParser:
             """
             op_events = self.query_op_events(event_iter_cursor)
             desc = "(1) Insert overhead events: Python annotations"
-            logging.info("{desc}, num_events={n}".format(
+            logger.info("{desc}, num_events={n}".format(
                 desc=desc,
                 n=len(op_events),
             ))
@@ -3304,7 +3304,7 @@ class SQLOverheadEventsParser:
             """
             c_events = self.query_c_events(event_iter_cursor)
             desc = "(2) Insert overhead events: Python -> C-library interception"
-            logging.info("{desc}, num_events={n}".format(
+            logger.info("{desc}, num_events={n}".format(
                 desc=desc,
                 n=len(c_events),
             ))
@@ -3334,7 +3334,7 @@ class SQLOverheadEventsParser:
             """
             cuda_api_events = self.query_cuda_api_events(event_iter_cursor)
             desc = "(3) Insert overhead events: CUPTI & LD_PRELOAD"
-            logging.info("{desc}, num_events={n}".format(
+            logger.info("{desc}, num_events={n}".format(
                 desc=desc,
                 n=len(cuda_api_events),
             ))
@@ -3360,7 +3360,7 @@ class SQLOverheadEventsParser:
                     prof_category=CATEGORY_PROF_LD_PRELOAD)
 
             if len(missing_cupti_overhead_cuda_api_calls) > 0:
-                logging.warning("Saw CUDA API calls that we didn't have calibrated CUPTI overheads for overheads for in {path}: {msg}".format(
+                logger.warning("Saw CUDA API calls that we didn't have calibrated CUPTI overheads for overheads for in {path}: {msg}".format(
                     path=self.cupti_overhead_json_path,
                     msg=pprint_msg(missing_cupti_overhead_cuda_api_calls),
                 ))
@@ -3489,7 +3489,7 @@ class SQLOverheadEventsParser:
         rows = c.fetchall()
         assert len(rows) == 1
         num_rows = rows[0]['num_rows']
-        logging.info("Idempotent overhead-event insertion: deleting {n} profiling-overhead-events".format(
+        logger.info("Idempotent overhead-event insertion: deleting {n} profiling-overhead-events".format(
             n=num_rows,
         ))
         # delete_query = textwrap.dedent("""
