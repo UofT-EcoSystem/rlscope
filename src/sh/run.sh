@@ -366,6 +366,59 @@ _tf_inference_output_dir() {
   )
 }
 
+microbench_inference_expr() {
+(
+  set -ue
+  PYTHONPATH="${PYTHONPATH:-}"
+  export PYTHONPATH="$STABLE_BASELINES_DIR:$IML_DIR:$PYTHONPATH"
+  export CUDA_VISIBLE_DEVICES=0
+
+  env_id=${env_id:-BreakoutNoFrameskip-v4}
+  iterations=5000
+
+  cd $RL_BASELINES_ZOO_DIR
+  local out_dir=$IML_DIR/output/microbench_simulator/env_id_${env_id};
+  local expr_file=${out_dir}/mode_microbench_simulator.json
+  if [ -e ${expr_file} ]; then
+    echo "> SKIP tf_inference_expr; already exists @ ${expr_file}"
+    return
+  fi
+  echo "> RUN: ${expr_file}"
+  _do mkdir -p ${out_dir}
+  logfile=${out_dir}/log.txt
+  _do_with_logfile python enjoy_trt.py \
+    --env ${env_id} \
+    --folder trained_agents/ \
+    --iterations ${iterations}  \
+    --directory ${out_dir} \
+    --mode microbench_simulator
+
+#  logfile=${out_dir}/rls_analyze.log.txt
+#  _do_with_logfile rls-analyze --mode gpu_hw --iml_directory ${out_dir}
+)
+}
+
+all_microbench_inference_expr() {
+(
+  set -ue
+  _make_install
+
+  ENV_IDS=(
+    PongNoFrameskip-v4
+    Walker2DBulletEnv-v0
+    HopperBulletEnv-v0
+    HalfCheetahBulletEnv-v0
+    AntBulletEnv-v0
+  )
+
+#  ENV_IDS=(PongNoFrameskip-v4)
+
+  for env_id in "${ENV_IDS[@]}"; do
+    microbench_inference_expr
+  done
+)
+}
+
 tf_inference_expr() {
 (
   set -ue

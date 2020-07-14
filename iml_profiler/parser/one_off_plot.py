@@ -212,6 +212,10 @@ TRT_METRIC_YLABELS = {
 BATCH_SIZE_X_LABEL = "Batch size"
 STREAMS_X_LABEL = "# of CUDA streams"
 
+SIMULATOR_X_LABEL = "Simulator"
+STEP_THROUGHPUT_Y_LABEL = "Simulation throughput (samples/sec)"
+STEP_LATENCY_Y_LABEL = "Simulation latency (ms)"
+
 RLSCOPE_X_LABEL = "(RL algorithm, Simulator)"
 
 SM_ID_X_LABEL = f"SM ID\n# SMs = {NUM_SMS}"
@@ -267,6 +271,7 @@ class TrtexecExperiment:
     def read_df(self):
         self._read_trtexec_df()
         self._read_tf_inference_df()
+        self._read_simulator_df()
         """
         TODO: merge trtexec_df and tf_inference_df
         trtexec_field               tf_inference_field
@@ -349,16 +354,20 @@ class TrtexecExperiment:
           sm_occupancy
         """
         _plot_streams_vs(batch_size=1)
-        """
-        batch_size = (best batch size for streams == 1)
-        streams = 1, 2, 3, ..., 8
-        plot:
-          throughput
-          sm_efficiency
-          sm_occupancy
-        """
-        best_batch_size = self._compute_best_batch_size()
-        _plot_streams_vs(batch_size=best_batch_size, suffix='best_batch_size')
+        if self.trtexec_df is not None:
+            """
+            batch_size = (best batch size for streams == 1)
+            streams = 1, 2, 3, ..., 8
+            plot:
+              throughput
+              sm_efficiency
+              sm_occupancy
+            """
+            best_batch_size = self._compute_best_batch_size()
+            _plot_streams_vs(batch_size=best_batch_size, suffix='best_batch_size')
+
+        self._plot_simulator_vs_steptime()
+        self._plot_simulator_vs_throughput()
 
     def _compute_best_batch_size(self):
         df = self.trtexec_df[self.trtexec_df['streams'] == 1]
@@ -850,6 +859,145 @@ class TrtexecExperiment:
     @property
     def debug(self):
         return self.args['debug']
+
+    def _read_simulator_df(self):
+        self.simulator_df = None
+        if self.args['simulator_dir'] is None:
+            return
+        """
+        /home/jgleeson/clone/iml/output/simulator/batch_size_8.xla_no/GPUHwCounterSampler.csv
+        """
+        simulator_dflt_attrs = {
+        }
+        simulator_attrs = {
+            'env_id',
+        }
+        simulator_attr_types = {
+            'env_id': str,
+        }
+
+        dfs = []
+        raw_dfs = []
+        for path in each_file_recursive(self.args['simulator_dir']):
+            if not re.search(r'^mode_microbench_simulator\.json$', _b(path)):
+                continue
+
+            js = load_json(path)
+            df = pd.DataFrame(
+                dict((k, [v]) for k, v in js['summary_metrics'].items())
+            )
+            sm_attrs = parse_path_attrs(
+                path,
+                simulator_attrs,
+                simulator_dflt_attrs,
+                simulator_attr_types,
+            )
+            for attr_name, attr_value in sm_attrs.items():
+                df[attr_name] = attr_value
+            dfs.append(df)
+
+            # Q: Should we discard outliers...?
+            raw_df = pd.DataFrame(data={
+                'step_time_sec': js['raw_samples']['step_time_sec']
+            })
+            for attr_name, attr_value in sm_attrs.items():
+                raw_df[attr_name] = attr_value
+            raw_dfs.append(raw_df)
+
+        self.simulator_df = pd.concat(dfs)
+        self.simulator_raw_df = pd.concat(raw_dfs)
+
+        self.simulator_df = self._add_simulator(self.simulator_df)
+        self.simulator_raw_df = self._add_simulator(self.simulator_raw_df)
+
+        logger.info("simulator dataframe:\n{msg}".format(
+            msg=txt_indent(DataFrame.dataframe_string(self.simulator_df), indent=1),
+        ))
+        logger.info("simulator_raw dataframe:\n{msg}".format(
+            msg=txt_indent(DataFrame.dataframe_string(self.simulator_raw_df), indent=1),
+        ))
+
+    def _plot_simulator_vs_steptime(self):
+        """
+        x = simulator
+        y = mean step time (seconds)
+
+        :return:
+        """
+        if self.simulator_raw_df is None:
+            return
+
+        plot_df = pd.DataFrame(columns=['simulator', 'step_time_ms'])
+
+        if self.simulator_raw_df is not None:
+            df = copy.copy(self.simulator_raw_df)
+            df['step_time_ms'] = df['step_time_sec'] * 1000
+            plot_df = plot_df.append(df[plot_df.columns])
+
+        plot_df.sort_values(by=['simulator', 'step_time_ms'], inplace=True)
+
+        sns.set(style="whitegrid")
+        # Boxplot?
+        # CDF?
+        g = sns.catplot(x="simulator", y="step_time_ms",
+                        data=plot_df,
+                        kind="bar",
+                        palette="muted")
+        g.despine(left=True)
+        g.set_ylabels(STEP_LATENCY_Y_LABEL)
+        g.set_xlabels(SIMULATOR_X_LABEL)
+        title = "Simulation latency"
+        g.fig.suptitle(title)
+        g.fig.subplots_adjust(top=0.90)
+        g.fig.axes[0].set_xticklabels(
+            g.fig.axes[0].get_xticklabels(),
+            rotation=15,
+        )
+
+        save_plot(plot_df, _j(self.args['simulator_dir'], f'simulator_vs_latency.svg'))
+
+    def _add_simulator(self, df):
+        def _simulator(row):
+            return get_x_env(row['env_id'])
+        df['simulator'] = df.apply(_simulator, axis=1)
+        return df
+
+    def _plot_simulator_vs_throughput(self):
+        """
+        x = simulator
+        y = steps per second (samples/second)
+
+        :return:
+        """
+        if self.simulator_df is None:
+            return
+
+        plot_df = pd.DataFrame(columns=['simulator', 'throughput_step_per_sec'])
+
+        if self.simulator_df is not None:
+            df = copy.copy(self.simulator_df)
+            plot_df = plot_df.append(df[plot_df.columns])
+
+        plot_df.sort_values(by=['simulator', 'throughput_step_per_sec'], inplace=True)
+
+        sns.set(style="whitegrid")
+        g = sns.catplot(x="simulator", y="throughput_step_per_sec",
+                        data=plot_df,
+                        kind="bar",
+                        palette="muted"
+                        )
+        g.despine(left=True)
+        g.set_ylabels(STEP_THROUGHPUT_Y_LABEL)
+        g.set_xlabels(SIMULATOR_X_LABEL)
+        title = "Simulation throughput"
+        g.fig.suptitle(title)
+        g.fig.subplots_adjust(top=0.90)
+        g.fig.axes[0].set_xticklabels(
+            g.fig.axes[0].get_xticklabels(),
+            rotation=15,
+        )
+
+        save_plot(plot_df, _j(self.args['simulator_dir'], f'simulator_vs_throughput.svg'))
 
     def _read_tf_inference_df(self):
         self.tf_inference_df = None
@@ -1663,12 +1811,9 @@ def main():
             plot.run()
         if args.plot_type == 'trtexec':
             sub_parser = argparse.ArgumentParser()
-            sub_parser.add_argument('--trtexec-dir'
-                                    # , required=True
-                                    )
-            sub_parser.add_argument('--tf-inference-dir'
-                                    # , required=True
-                                    )
+            sub_parser.add_argument('--trtexec-dir')
+            sub_parser.add_argument('--tf-inference-dir')
+            sub_parser.add_argument('--simulator-dir')
             sub_args, sub_argv = sub_parser.parse_known_args(argv)
             logger.info(pprint_msg({'sub_argv': sub_argv}))
 
