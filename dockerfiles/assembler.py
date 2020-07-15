@@ -58,6 +58,9 @@ from pathlib import Path
 
 from iml_profiler import py_config
 
+PROJECT_NAME = 'iml'
+IML_BASH_SERVICE_NAME = 'bash'
+
 # TENSORFLOW_VERSION = "1.15.0"
 TENSORFLOW_VERSION = "2.2.0"
 
@@ -153,6 +156,10 @@ releases:
                     type: string
 """
 
+# https://stackoverflow.com/questions/17215400/python-format-string-unused-named-arguments
+class FormatDict(dict):
+    def __missing__(self, key):
+        return '{' + key + '}'
 
 class TfDockerTagValidator(cerberus.Validator):
     """Custom Cerberus validator for TF tag spec.
@@ -615,6 +622,14 @@ def main():
                         underlying docker file hasn't changed.
                         """))
 
+    parser.add_argument('--mps', action='store_true',
+                        help=textwrap.dedent("""
+                        Use CUDA multi-process service (MPS) daemon to allow multiple GPU processes to 
+                        share GPU execution simultaneously.
+                        
+                        This option will add mps related setup to the generated docker-compose file (stack.yml).
+                        """))
+
     parser.add_argument('--pull-image', default=DEFAULT_REMOTE_IML_IMAGE_TAG,
                         help=textwrap.dedent("""
                         IML dev environment image to pull from DockerHub
@@ -1044,6 +1059,8 @@ class Assembler:
             time.sleep(0.1)
 
     def docker_stack_rm(self):
+        # NOTE: DON'T remove the container...just stop it (unless --rm)
+        # This will make starting in mps/non-mps mode less annoying.
         services = self.dock.services.list(filters={'name': 'iml'})
         if len(services) == 0:
             # IML dev environment not running yet.
@@ -1063,9 +1080,16 @@ class Assembler:
                 break
             time.sleep(0.1)
 
+    def project_name(self):
+        args = self.args
+        if args.mps:
+            return "{PROJECT_NAME}_mps".format(PROJECT_NAME=PROJECT_NAME)
+        return PROJECT_NAME
+
     def docker_stop(self, extra_argv):
+        args = self.args
         # Terminate/remove an existing deployment if it exists first.
-        self.docker_stack_rm()
+        # self.docker_stack_rm()
 
         # cmd = ['docker', 'stack', 'deploy']
         # cmd.extend(extra_argv)
@@ -1079,6 +1103,7 @@ class Assembler:
         cmd = ['docker-compose']
         cmd.extend([
             '--file', 'stack.yml',
+            '--project-name', self.project_name(),
         ])
         cmd.extend([
             'stop',
@@ -1099,9 +1124,10 @@ class Assembler:
             Extra arguments to pass to "stack deploy"
         :return:
         """
+        args = self.args
 
         # Terminate/remove an existing deployment if it exists first.
-        self.docker_stack_rm()
+        # self.docker_stack_rm()
 
         # cmd = ['docker', 'stack', 'deploy']
         # cmd.extend(extra_argv)
@@ -1115,6 +1141,7 @@ class Assembler:
         cmd = ['docker-compose']
         cmd.extend([
             '--file', 'stack.yml',
+            '--project-name', self.project_name(),
         ])
         cmd.extend([
             'up',
@@ -1128,7 +1155,9 @@ class Assembler:
         if reload:
             cmd.append('--force-recreate')
         cmd.extend(extra_argv)
-        container_filter = "iml"
+        container_filter = "{project}_{IML_BASH_SERVICE_NAME}".format(
+            project=self.project_name(),
+            IML_BASH_SERVICE_NAME=IML_BASH_SERVICE_NAME)
 
         eprint(get_cmd_string(cmd))
         subprocess.check_call(cmd, stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr)
@@ -1221,7 +1250,7 @@ class Assembler:
 
     def generate_stack_yml(self, tag_def):
         args = self.args
-        generator = StackYMLGenerator()
+        generator = StackYMLGenerator(self.project_name())
 
         docker_run_env = get_docker_run_env(tag_def, args.env)
         iml_volumes = get_iml_volumes(docker_run_env, args.volume)
@@ -1246,6 +1275,7 @@ class Assembler:
             postgres_pgdata_dir=args.deploy_postgres_pgdata_dir,
             postgres_port=args.deploy_postgres_port,
             iml_image=iml_image,
+            use_mps=args.mps,
         )
         print("> Write 'docker stack deploy' stack.yml file to {path}".format(path=args.output_stack_yml))
         with open(args.output_stack_yml, 'w') as f:
@@ -1726,115 +1756,197 @@ class StackYMLGenerator:
     """
     Generate stack.yml.
     """
-    def __init__(self):
+    def __init__(self, project_name):
         """
         :param cmd
             assembler.py command.
         """
-        # restart: always
-        self.template = textwrap.dedent("""\
+        # Extra volumes added programmatically (e.g., tmpfs volume for nvidia mps IPC)
+        self._extra_volumes = dict()
+        self.indent_str = 4*' '
+        self.project_name = project_name
+
+    def _mps_daemon_container_name(self):
+        return "{project}_mps-daemon_1".format(project=self.project_name)
+
+    def get_template(self, use_mps):
+        if use_mps:
+            # NOTE: I think sample code uses this to run 3 instances of the nbody process.
+            # scale: 3
+
+            # volumes:
+            # - nvidia_mps:/tmp/nvidia-mps
+            mps_lines = textwrap.dedent("""\
+            
+            #
+            # MPS: launch container AFTER mps daemon is running to ensure all GPU apps use the daemon.
+            #
+            depends_on:
+              # - iml-mps-daemon
+              - mps-daemon
+            # Share the IPC namespace with the MPS control daemon.
+            # ipc: container:iml-mps-daemon
+            # HACK: as of docker-compose version 3.7, IPC doesn't (yet) support services.
+            # Instead, we must provide a container name and use "ipc: container:<container_name>".
+            # https://docs.docker.com/engine/reference/run/#ipc-settings---ipc
+            # Eventually this feature will be upstreamed though (it's been accepted):
+            # https://github.com/docker/compose/pull/7417
+            # ipc: service:mps-daemon
+            ipc: container:{IML_MPS_DAEMON_CONTAINER_NAME}
+            """)
+            self._extra_volumes['nvidia_mps'] = '/tmp/nvidia-mps'
+        else:
+            mps_lines = ""
+        template = textwrap.dedent("""\
         # DO NOT MODIFY!
         # Automatically generated using assembler.py with the following command/working-directory:
         #     > CMD: {assembler_cmd}
         #       PWD: {PWD}
 
-        version: '3.1'
+        version: '3.7'
 
         services:
 
-            # Postgres instance.
-            #
-            # iml uses this for storing/analyzing trace data.
-            #
-            # NOTE: 
-            # - To connect to postgres from inside the container:
-            #   $ psql -h db
-            # - To connect to postgres from host (OUTSIDE container):
-            #   $ psql -h localhost
-            # db:
-            #     container_name: iml_postgres
-            #     image: postgres
-            #     environment:
-            #         # Use the current user as postgres user (default when using psql).
-            #         # `psql` at the command-line defaults to this user, as do API's 
-            #         # for making postgres connections.
-            #         - POSTGRES_USER={USER}
-            #     ports:
-            #         - {postgres_port}:{DEFAULT_POSTGRES_PORT}
-            #     volumes:
-            #         # Persist processed trace-logs between deployments on the host inside {postgres_pgdata_dir}.
-            #         #
-            #         # NOTE: {postgres_pgdata_dir} will have different permissions than the host user; 
-            #         # We don't bother to fix this since: 
-            #         # (1) Fixes are host OS dependent [See "Arbitrary --user Notes" @ https://hub.docker.com/_/postgres]
-            #         #     and hence sacrifice reproducibility
-            #         # (2) Database access isn't sacrificed since it's still all done through 
-            #         #     "psql -h localhost".
-            #         #
-            #         - {postgres_pgdata_dir}:/var/lib/postgresql/data
-
-            # "Bash" development environment.
-            #
-            # Original docker cmd:
-            # $ docker run -it --runtime nvidia ... tensorflow:devel-iml-gpu-cuda
-            bash:
-                #
-                # NOTE:
-                # - "docker stack deploy" does NOT support 'build:', so this container must be
-                #     built separately via "docker build ..."
-                #
-                # build: ./dockerfiles/devel-iml-gpu-cuda.Dockerfile
-                container_name: iml
-                image: {iml_image}
+            {IML_BASH_SERVICE_NAME}:
+                {bash_template}
+                {mps_lines}
                 
-                # depends_on:
-                #     - db
-                
-                # Fails, not supported yet: instead for now just manually edit /etc/docker/daemon.json
-                # as described below:
-                #
-                #   https://github.com/NVIDIA/k8s-device-plugin#preparing-your-gpu-nodes
-                #
-                # In particular, add the line show below:
-                #   {{
-                #           "default-runtime": "nvidia",    // <-- add this ABOVE "runtimes"
-                #           "runtimes": {{
-                #              ...
-                #            }}
-                #   }}
-                #
-                # runtime: nvidia
-                
-                ports:
-                    # Expose port that the iml-drill web server runs on.
-                    - {iml_drill_port}:{DEFAULT_IML_DRILL_PORT}
-                    {port_list}
-                
-                volumes:
-                {volume_list}
-                
-                environment:
-                - IML_POSTGRES_HOST=db
-                {env_list}
-                
-                # docker run --cap-add=SYS_ADMIN
-                # We need this, otherwise libcupti PC sampling fails with CUPTI_ERROR_INSUFFICIENT_PRIVILEGES during cuptiActivityConfigurePCSampling.
-                cap_add:
-                  - SYS_ADMIN
-                  - SYS_PTRACE
-                security_opt:
-                  # Allow us to debug with gdb inside container:
-                  # https://stackoverflow.com/questions/35860527/warning-error-disabling-address-space-randomization-operation-not-permitted
-                  - seccomp:unconfined
-                
-                logging:
-                    driver: journald
-                stdin_open: true
-                tty: true
-                entrypoint: /bin/bash
+            {mps_template}
+            
+        {mps_volumes_template}
         """).rstrip()
+        # template.format(
+        template = template.format_map(FormatDict(
+            bash_template=self._indent(self._template_bash_body(), indent=2),
+            mps_template=self._indent(self._template_mps_services(), indent=1) if use_mps else "",
+            mps_volumes_template=self._indent(self._template_mps_volumes(), indent=0) if use_mps else "",
+            mps_lines=self._indent(mps_lines, indent=2),
+        ))
+        # )
+        return template
 
-        self.indent_str = 4*' '
+    def _template_mps_services(self):
+        """
+        Based on nvidia docker sample:
+        https://gitlab.com/nvidia/container-images/samples/-/blob/7a94cb4b1784ede192c18d6268205f4639f13176/mps/docker-compose.yml
+        Documentation:
+        https://github.com/NVIDIA/nvidia-docker/wiki/MPS-(EXPERIMENTAL)
+
+        """
+        template = textwrap.dedent("""\
+        # From the MPS documentation:
+        # When using MPS it is recommended to use EXCLUSIVE_PROCESS mode to ensure
+        # that only a single MPS server is using the GPU, which provides additional
+        # insurance that the MPS server is the single point of arbitration between
+        # all CUDA processes for that GPU.
+        # iml-exclusive-mode:
+        exclusive-mode:
+            image: debian:stretch-slim
+            command: nvidia-smi -c EXCLUSIVE_PROCESS
+            # https://github.com/nvidia/nvidia-container-runtime#environment-variables-oci-spec
+            # NVIDIA_VISIBLE_DEVICES will default to "all" (from file .env), unless
+            # the variable is exported on the command-line.
+            environment:
+              - "NVIDIA_VISIBLE_DEVICES"
+              - "NVIDIA_DRIVER_CAPABILITIES=utility"
+            # runtime: nvidia
+            network_mode: none
+            # CAP_SYS_ADMIN is required to modify the compute mode of the GPUs.
+            # This capability is granted only to this ephemeral container, not to
+            # the MPS daemon.
+            cap_add:
+              - SYS_ADMIN
+
+        # iml-mps-daemon:
+        mps-daemon:
+            image: nvidia/mps
+            container_name: {IML_MPS_DAEMON_CONTAINER_NAME}
+            restart: on-failure
+            # The "depends_on" only guarantees an ordering for container *start*:
+            # https://docs.docker.com/compose/startup-order/
+            # There is a potential race condition: the MPS or CUDA containers might
+            # start before the exclusive compute mode is set. If this happens, one
+            # of the CUDA application will fail to initialize since MPS will not be
+            # the single point of arbitration for GPU access.
+            depends_on:
+              # - iml-exclusive-mode
+              - exclusive-mode
+            environment:
+              - "NVIDIA_VISIBLE_DEVICES"
+              - "CUDA_MPS_ACTIVE_THREAD_PERCENTAGE"
+            # runtime: nvidia
+            init: true
+            network_mode: none
+            ulimits:
+              memlock:
+                soft: -1
+                hard: -1
+            # The MPS control daemon, the MPS server, and the associated MPS
+            # clients communicate with each other via named pipes and UNIX domain
+            # sockets. The default directory for these pipes and sockets is
+            # /tmp/nvidia-mps.
+            # Here we share a tmpfs between the applications and the MPS daemon.
+            volumes:
+              - nvidia_mps:/tmp/nvidia-mps
+                
+        """).rstrip()
+        return template
+
+    def _indent(self, txt, indent):
+        return textwrap.indent(txt, indent*self.indent_str).lstrip()
+
+    def _template_mps_volumes(self):
+        """
+        Based on nvidia docker sample:
+        https://gitlab.com/nvidia/container-images/samples/-/blob/7a94cb4b1784ede192c18d6268205f4639f13176/mps/docker-compose.yml
+        Documentation:
+        https://github.com/NVIDIA/nvidia-docker/wiki/MPS-(EXPERIMENTAL)
+        """
+        template = textwrap.dedent("""\
+        volumes:
+            nvidia_mps:
+                driver_opts:
+                    type: tmpfs
+                    device: tmpfs
+        """).rstrip()
+        return template
+
+    def _template_bash_body(self):
+        template = textwrap.dedent("""\
+        #
+        # "Bash" development environment.
+        #
+        image: {iml_image}
+        
+        ports:
+            # Expose port that the iml-drill web server runs on.
+            - {iml_drill_port}:{DEFAULT_IML_DRILL_PORT}
+            {port_list}
+        
+        volumes:
+        {volume_list}
+        
+        environment:
+        - IML_POSTGRES_HOST=db
+        {env_list}
+        
+        # docker run --cap-add=SYS_ADMIN
+        # We need this, otherwise libcupti PC sampling fails with CUPTI_ERROR_INSUFFICIENT_PRIVILEGES during cuptiActivityConfigurePCSampling.
+        cap_add:
+          - SYS_ADMIN
+          - SYS_PTRACE
+        security_opt:
+          # Allow us to debug with gdb inside container:
+          # https://stackoverflow.com/questions/35860527/warning-error-disabling-address-space-randomization-operation-not-permitted
+          - seccomp:unconfined
+        
+        logging:
+            driver: journald
+        stdin_open: true
+        tty: true
+        entrypoint: /bin/bash
+        """).rstrip()
+        return template
 
     def doesnt_work(self):
         # I tried added this to allow doing "gdb -p",
@@ -1856,7 +1968,8 @@ class StackYMLGenerator:
                  iml_drill_port=DEFAULT_IML_DRILL_PORT,
                  postgres_port=DEFAULT_POSTGRES_PORT,
                  postgres_pgdata_dir=DEFAULT_POSTGRES_PGDATA_DIR,
-                 iml_image=LOCAL_IML_IMAGE_TAG):
+                 iml_image=LOCAL_IML_IMAGE_TAG,
+                 use_mps=False):
 
         # +1 for "service: ..."
         # +1 for "bash: ..."
@@ -1866,8 +1979,9 @@ class StackYMLGenerator:
             path=postgres_pgdata_dir))
         os.makedirs(postgres_pgdata_dir, exist_ok=True)
 
-        # return textwrap.dedent(self.template.format(
-        return self.template.format(
+        template = self.get_template(use_mps=use_mps)
+
+        return template.format(
             env_list=self.env_list(env, indent=bash_indent),
             volume_list=self.volume_list(volumes, indent=bash_indent),
             port_list=self.port_list(ports, indent=bash_indent + 1),
@@ -1880,6 +1994,8 @@ class StackYMLGenerator:
             DEFAULT_IML_DRILL_PORT=DEFAULT_IML_DRILL_PORT,
             iml_drill_port=iml_drill_port,
             iml_image=iml_image,
+            IML_MPS_DAEMON_CONTAINER_NAME=self._mps_daemon_container_name(),
+            IML_BASH_SERVICE_NAME=IML_BASH_SERVICE_NAME,
         )
 
     def _yml_list(self, values, indent):
@@ -1897,7 +2013,12 @@ class StackYMLGenerator:
         return self._yml_list(envs, indent)
 
     def volume_list(self, volumes : dict, indent):
-        return self._yml_dict_as_list(volumes, sep=':', indent=indent)
+        all_volumes = dict(volumes)
+        for host_volume in self._extra_volumes:
+            # Don't overwrite volumes
+            assert host_volume not in all_volumes
+        all_volumes.update(self._extra_volumes)
+        return self._yml_dict_as_list(all_volumes, sep=':', indent=indent)
 
     def port_list(self, ports : list, indent):
         return self._yml_list(ports, indent=indent)

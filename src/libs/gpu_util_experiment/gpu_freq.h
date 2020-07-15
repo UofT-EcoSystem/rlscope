@@ -22,6 +22,7 @@
 #include <thread>
 #include <chrono>
 #include <vector>
+#include <list>
 #include <string>
 
 #include <boost/process.hpp>
@@ -768,10 +769,19 @@ struct SyncBlock {
 #define SHARED_MEM_NAME "SharedMem"
 #define SHARED_MEM_SIZE_BYTES (1*1024*1024)
 
+struct PassStats {
+  size_t pass_idx;
+  time_type start_kernels_t;
+  time_type done_kernels_t;
+
+  double DurationSec() const;
+  void Print(bool config_pass) const;
+};
+
 class ThreadedGPUKernelRunner {
 public:
-    SharedMem _shared_mem;
-    SyncBlock *_sync_block;
+  SharedMem _shared_mem;
+  SyncBlock *_sync_block;
 
 //  // "Number of kernels to launch per-thread."
 //  int64_t _n_launches;
@@ -831,6 +841,7 @@ public:
 
     void run();
 
+    MyStatus DumpJson(std::list<PassStats>& passes);
     void run_parent();
 };
 

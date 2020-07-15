@@ -93,6 +93,7 @@ def parse_path_attrs(
     attrs : Iterable[str],
     dflt_attrs : Optional[Dict[str, Any]] = None,
     attr_types : Optional[Dict[str, Any]] = None,
+    debug : bool = False,
     ):
 
     attr_name_regex = r'(?:{regex})'.format(
@@ -104,6 +105,9 @@ def parse_path_attrs(
     )
     # e.g.
     # path = 'GPUHwCounterSampler.thread_blocks_68.thread_block_size_1024.csv'
+
+    if debug:
+        logger.info(f"attr_name_regex = {attr_name_regex}")
 
     attr_vals = dict()
     if dflt_attrs is not None:
@@ -229,6 +233,15 @@ GPU_UTIL_EXPERIMENT_ATTRS = {
     'processes',
     'hw_counters',
 }
+GPU_UTIL_EXPERIMENT_ATTR_TYPES = {
+    'thread_blocks': maybe_number,
+    'thread_block_size': maybe_number,
+    'n_launches': maybe_number,
+    'iterations': maybe_number,
+    'num_threads': maybe_number,
+    'processes': yes_as_bool,
+    'hw_counters': yes_as_bool,
+}
 
 MULTI_TASK_ATTRS = set(GPU_UTIL_EXPERIMENT_ATTRS)
 MULTI_TASK_ATTRS.update({
@@ -256,6 +269,42 @@ MULTI_TASK_JSON_ATTRS = {
     "stream_id",
     "warp_id",
 }
+MULTI_TASK_ATTR_TYPES = dict(GPU_UTIL_EXPERIMENT_ATTR_TYPES)
+MULTI_TASK_ATTR_TYPES.update({
+    ## From directory attrs
+    # 'thread_blocks',
+    # 'thread_block_size',
+    # 'n_launches',
+    # 'iterations',
+    # 'num_threads',
+    'iterations_per_sched_sample': maybe_number,
+    # 'processes',
+    # 'hw_counters',
+
+    ## GPUComputeSchedInfoKernel.thread_id_9.stream_id_9.trace_id_0.json
+    'thread_id': maybe_number,
+    'stream_id': maybe_number,
+    'trace_id': maybe_number,
+})
+
+MULTI_TASK_RAW_ATTR_TYPES = dict(MULTI_TASK_ATTR_TYPES)
+MULTI_TASK_RAW_ATTR_TYPES.update({
+    'num_sms': maybe_number,
+    'sms_allocated': maybe_number,
+    'CUDA_MPS_ACTIVE_THREAD_PERCENTAGE': maybe_number,
+})
+# MULTI_TASK_RAW_ATTR_DFLTS = dict(MULTI_TASK)
+MULTI_TASK_RAW_ATTR_DFLTS = {
+    'num_sms': None,
+    'sms_allocated': None,
+    'CUDA_MPS_ACTIVE_THREAD_PERCENTAGE': None,
+}
+MULTI_TASK_RAW_ATTRS = MULTI_TASK_ATTRS.union(MULTI_TASK_RAW_ATTR_TYPES.keys()).difference({
+    'stream_id',
+    'thread_id',
+    'trace_id',
+})
+# suffix=".num_sms_${NUM_SMS}.sms_allocated_${sms_allocated}.CUDA_MPS_ACTIVE_THREAD_PERCENTAGE_${CUDA_MPS_ACTIVE_THREAD_PERCENTAGE}"
 
 FLOAT_RE = r'(?:[-+]?[0-9]*\.?[0-9]+(?:[eE][-+]?[0-9]+)?)'
 UNIT_RE = r'(?:\b(?:ms|s|qps)\b)'
@@ -1147,7 +1196,9 @@ class GpuUtilExperiment:
         self._read_util_data()
         self._read_multithread_df()
         self._read_multiprocess_df()
+        self._read_multiprocess_mps_df()
         self._read_multitask_df()
+        self._read_multitask_raw_df()
 
     def _read_rlscope_df(self):
         self.rlscope_df = None
@@ -1258,14 +1309,22 @@ class GpuUtilExperiment:
 
         return multi_df
 
-    def _read_multitask_df(self):
-        self.multitask_df = None
-        if self.multithread_df is None or self.multiprocess_df is None:
-            return
+    def _read_multitask_raw_df(self):
+        # self.multitask_raw_df = None
+        # self.multiprocess_raw_df = self._read_multi_raw_df()
 
-        multithread_df = copy.copy(self.multithread_df)
-        multiprocess_df = copy.copy(self.multiprocess_df)
+        multitask_raw_df = None
+        # for argname, argval in self.args.items():
+            # if re.search(r'^multi\w+_dir$', argname):
+            #     multitask_raw_df = self._append_multi_df(multitask_raw_df, self._read_multi_raw_df(self.args[argname]), 'thread', 'threads')
+        multitask_raw_df = self._append_multi_df(multitask_raw_df, self._read_multi_raw_df(self.args['multithread_dir']), 'thread', 'threads')
+        multitask_raw_df = self._append_multi_df(multitask_raw_df, self._read_multi_raw_df(self.args['multiprocess_dir']), 'process', 'processes')
+        "Multi-process MPS (...)"
+        multitask_raw_df = self._append_multi_df(multitask_raw_df, self._read_multi_raw_df(self.args['multiprocess_mps_dir'], debug=True), 'process MPS', 'processes', debug=True)
 
+        self.multitask_raw_df = multitask_raw_df
+
+    def _append_multi_df(self, multitask_df, df, task_type, task_type_plural, debug=False):
         def _title(task_type, task_type_plural, n_tasks, sep=' '):
             return sep.join([
                 "Multi-{task}",
@@ -1280,16 +1339,61 @@ class GpuUtilExperiment:
             df['expr'] = _title(task_type, task_type_plural, n_tasks, sep=' ')
             df['expr_x'] = _title(task_type, task_type_plural, n_tasks, sep='\n')
 
-        n_threads = len(multithread_df['thread_id'].unique())
-        _add_title(multithread_df, 'thread', 'threads', n_threads)
+        # def _append(multitask_df, df, task_type, task_type_plural):
+        if df is not None:
+            df = copy.copy(df)
+            if 'thread_id' in df.keys():
+                n_threads = len(df['thread_id'].unique())
+                df['num_tasks'] = n_threads
+            elif 'num_threads' in df.keys():
+                df['num_tasks'] = df['num_threads']
+                assert len(df['num_threads'].unique()) == 1
+                n_threads = df['num_threads'].unique()[0]
+            else:
+                raise NotImplementedError("Not sure how to obtain num_tasks; choices are {choices}".format(
+                    choices=sorted(df.keys()),
+                ))
+            _add_title(df, task_type, task_type_plural, n_threads)
+            if multitask_df is None:
+                multitask_df = df
+            else:
+                multitask_df = multitask_df.append(df)
+        return multitask_df
 
-        n_procs = len(multiprocess_df['thread_id'].unique())
-        _add_title(multiprocess_df, 'process', 'processes', n_procs)
-
-        multitask_df = pd.concat([multithread_df, multiprocess_df])
+    def _read_multitask_df(self):
+        multitask_df = None
+        multitask_df = self._append_multi_df(multitask_df, self.multithread_df, 'thread', 'threads')
+        multitask_df = self._append_multi_df(multitask_df, self.multiprocess_df, 'process', 'processes')
+        "Multi-process MPS (...)"
+        multitask_df = self._append_multi_df(multitask_df, self.multiprocess_mps_df, 'process MPS', 'processes')
 
         self.multitask_df = multitask_df
 
+    def _read_multi_raw_df(self, direc, debug=False):
+        if direc is None:
+            return None
+
+        raw_dfs = []
+        for path in each_file_recursive(direc):
+            if not re.search(r'^gpu_util_experiment\.json$', _b(path)):
+                continue
+
+            js = load_json(path)
+            raw_df = pd.DataFrame(data=js['raw_samples'])
+
+            attr_dict = parse_path_attrs(
+                path,
+                MULTI_TASK_RAW_ATTRS,
+                MULTI_TASK_RAW_ATTR_DFLTS,
+                MULTI_TASK_RAW_ATTR_TYPES,
+                debug=debug)
+            for attr_name, attr_value in attr_dict.items():
+                raw_df[attr_name] = attr_value
+
+            raw_dfs.append(raw_df)
+        multi_raw_df = pd.concat(raw_dfs)
+
+        return multi_raw_df
 
     def _read_multithread_df(self):
         self.multithread_df = None
@@ -1302,6 +1406,12 @@ class GpuUtilExperiment:
         if self.args['multiprocess_dir'] is None:
             return
         self.multiprocess_df = self._read_multi_df(self.args['multiprocess_dir'])
+
+    def _read_multiprocess_mps_df(self):
+        self.multiprocess_mps_df = None
+        if self.args['multiprocess_mps_dir'] is None:
+            return
+        self.multiprocess_mps_df = self._read_multi_df(self.args['multiprocess_mps_dir'])
 
     def _read_util_data(self):
         self.util_data = None
@@ -1416,6 +1526,7 @@ class GpuUtilExperiment:
         self._plot_util_data()
         self._plot_multitask_sched_info()
         self._plot_multitask_sm_efficiency()
+        self._plot_multitask_kernel_time()
 
     def _pretty_algo(self, algo):
         return algo.upper()
@@ -1566,6 +1677,28 @@ class GpuUtilExperiment:
 
         save_plot(df, _j(self.args['sm_efficiency_dir'], 'sm_efficiency.svg'))
 
+    def _plot_multitask_kernel_time(self):
+        if self.multitask_raw_df is None:
+            return
+
+        df = self.multitask_raw_df.copy()
+
+        sns.set(style="whitegrid")
+        g = sns.catplot(x="expr_x", y="total_kernel_run_time_sec",
+                        kind='bar',
+                        data=df)
+        # x_min, x_max = ax.get_xlim()
+        # -1 so we can see markers at x=0 without them being cut off.
+        # ax.set_xlim(-1, NUM_SMS)
+        g.despine(left=True)
+        g.set_xlabels('Configuration')
+        # g.set_ylabels(f"SM efficiency (%)\n(normalized by max # SMs = {max_num_sm})")
+        g.set_ylabels(f"Total kernel execution time (sec)")
+        g.fig.suptitle("Total kernel execution time\nunder different multi-task configurations")
+        g.fig.subplots_adjust(top=0.90)
+
+        save_plot(df, _j(self._multitask_dir(), 'multitask_kernel_time.svg'))
+
     def _plot_multitask_sm_efficiency(self):
         if self.multitask_df is None:
             return
@@ -1578,20 +1711,21 @@ class GpuUtilExperiment:
           for sm_id in all available sm_ids:
             y = len(df[df['sm_id'] == sm_id]['thread_id'].unique())
         """
-        plot_df = sched_df[['sm_id', 'expr_x']].drop_duplicates().reset_index()
+        plot_df = sched_df[['sm_id', 'expr_x', 'num_tasks']].drop_duplicates().reset_index()
         del plot_df['index']
 
         # Max num of SM ids this configuration could possibly use.
         # == num_threads
-        max_num_sm_choices = sched_df['num_threads'].unique()
-        assert len(max_num_sm_choices) == 1
-        max_num_sm = max_num_sm_choices[0]
-        assert max_num_sm <= NUM_SMS
+        # NOTE:
+        # - for MPS, max should be how many SMs are usable based on CUDA_MPS_ACTIVE_THREAD_PERCENTAGE and
+        #   the number of SMs on the device:
+        #   max_num_sm = math.ceil( (1/CUDA_MPS_ACTIVE_THREAD_PERCENTAGE) * NUM_SMS )
+        # - Perhaps normalize by the number of "CPU threads" the configuration uses?
 
         def _sm_efficiency(row):
             sm_ids = sched_df[(sched_df['expr_x'] == row['expr_x'])] \
                 ['sm_id'].unique()
-            ret = 100 * len(sm_ids) / float(max_num_sm)
+            ret = 100 * len(sm_ids) / row['num_tasks']
             return ret
         plot_df['sm_efficiency'] = plot_df.apply(_sm_efficiency, axis=1)
 
@@ -1604,11 +1738,24 @@ class GpuUtilExperiment:
         # ax.set_xlim(-1, NUM_SMS)
         g.despine(left=True)
         g.set_xlabels('Configuration')
-        g.set_ylabels(f"SM efficiency (%)\n(normalized by max # SMs = {max_num_sm})")
+        g.set_ylabels(f"SM efficiency (%)\n(normalized by max # SMs = $N_{{tasks}}$)")
         g.fig.suptitle(SM_EFFICIENCY_TITLE)
         g.fig.subplots_adjust(top=0.90)
 
-        save_plot(plot_df, _j(_d(self.args['multithread_dir']), 'multitask_sm_efficiency.svg'))
+        save_plot(plot_df, _j(self._multitask_dir(), 'multitask_sm_efficiency.svg'))
+
+    def _multitask_dir(self):
+
+        def _directory(multitask_dir, opt):
+            if self.args[opt] is not None and multitask_dir is None:
+                multitask_dir = _d(self.args[opt])
+            return multitask_dir
+
+        multitask_dir = None
+        multitask_dir = _directory(multitask_dir, 'multithread_dir')
+        multitask_dir = _directory(multitask_dir, 'multiprocess_dir')
+        multitask_dir = _directory(multitask_dir, 'multiprocess_mps_dir')
+        return multitask_dir
 
     def _plot_multitask_sched_info(self):
         if self.multitask_df is None:
@@ -1657,7 +1804,6 @@ class GpuUtilExperiment:
         ax.set_title('Fine-grained SM scheduling of\nmulti-process and multi-thread configurations')
         plt.gcf().subplots_adjust(top=0.90)
 
-        # import ipdb; ipdb.set_trace()
         # Q: How to select the "multi-process" line?
         # IDEA: same list index as legend title?
         # ax.lines[3].set_markersize(16)
@@ -1674,7 +1820,7 @@ class GpuUtilExperiment:
                 logger.info(f"line[{i}].set_markersize({larger_markersize})")
                 line.set_markersize(larger_markersize)
 
-        save_plot(plot_df, _j(_d(self.args['multithread_dir']), 'multitask_sched_info.svg'))
+        save_plot(plot_df, _j(self._multitask_dir(), 'multitask_sched_info.svg'))
 
     ##
     ## PROBLEM: Plot is unplottable...way too many "hue"s to plot (60 threads for EACH of the 68 SMs...)
@@ -1714,7 +1860,6 @@ class GpuUtilExperiment:
     #     plot_df.sort_values(['thread_id', 'sm_id'], inplace=True)
     #
     #     sns.set(style="whitegrid")
-    #     import ipdb; ipdb.set_trace()
     #
     #     g = sns.catplot(x="sm_id", y="sm_efficiency", hue="thread_id", data=plot_df,
     #                     # height=6,
@@ -1803,13 +1948,14 @@ def main():
             sub_parser.add_argument('--util-dir')
             sub_parser.add_argument('--multithread-dir')
             sub_parser.add_argument('--multiprocess-dir')
+            sub_parser.add_argument('--multiprocess-mps-dir')
             sub_args, sub_argv = sub_parser.parse_known_args(argv)
             logger.info(pprint_msg({'sub_argv': sub_argv}))
 
             all_args.update(vars(sub_args))
             plot = GpuUtilExperiment(args=all_args)
             plot.run()
-        if args.plot_type == 'trtexec':
+        elif args.plot_type == 'trtexec':
             sub_parser = argparse.ArgumentParser()
             sub_parser.add_argument('--trtexec-dir')
             sub_parser.add_argument('--tf-inference-dir')

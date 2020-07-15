@@ -212,6 +212,87 @@ multiprocess_expr() {
   )
 }
 
+all_gpu_util_experiment() {
+(
+  set -eu
+  multiprocess_expr
+  multithread_expr
+  # NOTE: cannot run them all at once... mps needs to be running in a special mps docker-compose file.
+  # multiprocess_mps_expr
+)
+}
+
+_math() {
+  local expression="$1"
+  shift 1
+  python -c "import math; print($expression)"
+}
+
+_gpu_num_sms() {
+  # Get the number of streaming multiprocessors (SMs) on device=0
+  # Parse this line from deviceQuery:
+  #    (68) Multiprocessors, ( 64) CUDA Cores/MP:     4352 CUDA Cores
+  deviceQuery | \
+    grep Multiprocessors | \
+    head -n 1 | \
+    perl -lape 's/.*\((\d+)\) Multiprocessors.*/$1/'
+}
+
+multiprocess_mps_expr() {
+  (
+    subdir=multiprocess_mps_expr
+    # NOTE: each thread uses 177 MB of memory... cannot use all 68 SM's.
+    # According to MPS documentation, post-Volta cards have a limit of 48 connections to MPS.
+    # Q:
+    # https://docs.nvidia.com/deploy/mps/index.html#topic_3_3_5_1
+    #   The pre-Volta MPS Server supports up to 16 client CUDA contexts per-device
+    #   concurrently. Volta MPS server supports 48 client CUDA contexts per-device. These
+    #   contexts may be distributed over multiple processes. If the connection limit is
+    #   exceeded, the CUDA application will fail to create a CUDA Context and return an API
+    #   error from cuCtxCreate() or the first CUDA Runtime API call that triggers context
+    #   creation. Failed connection attempts will be logged by the MPS server.
+    MPS_MAX_PARTITIONS=48
+    num_threads=$((MPS_MAX_PARTITIONS-1))
+    processes='yes'
+    mps='yes'
+    # TODO: add and compile deviceQuery so we can query this dynamically for a given GPU.
+    NUM_SMS=$(_gpu_num_sms)
+    # NUM_SMS=68
+    # Allocate a single SM on the GPU to each process.
+    sms_allocated=1
+    # Q: can CUDA_MPS_ACTIVE_THREAD_PERCENTAGE be a float, or does it have to be an integer?
+    # export CUDA_MPS_ACTIVE_THREAD_PERCENTAGE=$(_math "math.ceil(100*${sms_allocated}/${NUM_SMS})")
+
+    # """
+    # The limit will be internally rounded up to the next hardware-supported thread
+    # count limit. On Volta, the executed limit is reflected through device attribute
+    # cudaDevAttrMultiProcessorCount
+    # """
+    # So, we want to be careful to ensure we don't allocate 2 SMs instead of 1...
+    # so, if we need to use integer, we can use math.floor (NOT math.ceil).
+    get_mps_percentage() {
+      local sms="$1"
+      shift 1
+      # _math "math.floor(100*${sms}/${NUM_SMS})"
+      # _math "100*${sms}/${NUM_SMS}"
+      # Based on deviceQuery, CUDA_MPS_ACTIVE_THREAD_PERCENTAGE can be a float, and for RTX 2080 which has 68 SMs,
+      # SMs are always allocated 2 at a time (2, 4, 6, ..., 68).
+      _math "100*${sms}/${NUM_SMS}"
+    }
+    local mps_percent_1_sms=$(get_mps_percentage 1)
+    local mps_percent_2_sms=$(get_mps_percentage 2)
+    if [ "$mps_percent_1_sms" = "$mps_percent_2_sms" ]; then
+      echo "ERROR: CUDA_MPS_ACTIVE_THREAD_PERCENTAGE cannot discern between allocating 1 SM and 2 SMs; use float instead of math.floor([# SMs allocated]/[# SMs on GPU])"
+      return 1
+    fi
+    # export CUDA_MPS_ACTIVE_THREAD_PERCENTAGE=$(_math "math.floor(100*${sms_allocated}/${NUM_SMS})")
+    # export CUDA_MPS_ACTIVE_THREAD_PERCENTAGE=$(_math "100*${sms_allocated}/${NUM_SMS}")
+    export CUDA_MPS_ACTIVE_THREAD_PERCENTAGE=$(get_mps_percentage ${sms_allocated})
+    suffix=".num_sms_${NUM_SMS}.sms_allocated_${sms_allocated}.CUDA_MPS_ACTIVE_THREAD_PERCENTAGE_${CUDA_MPS_ACTIVE_THREAD_PERCENTAGE}"
+    _multi_expr
+  )
+}
+
 nvidia_smi_expr() {
   (
     subdir=nvidia_smi_expr
@@ -239,9 +320,23 @@ _multi_expr() {
   thread_block_size=1024
   hw_counters='no'
   n_launches=1
-  iml_dir="$ROOT/output/gpu_util_experiment/${subdir}/thread_blocks_${thread_blocks}.thread_block_size_${thread_block_size}.n_launches_${n_launches}.iterations_${iterations}.num_threads_${num_threads}.iterations_per_sched_sample_${iterations_per_sched_sample}$(_bool_attr processes $processes)$(_bool_attr hw_counters $hw_counters)"
+  mps=${mps:-no}
+  suffix=${suffix:-}
+  iml_dir="$ROOT/output/gpu_util_experiment/${subdir}/thread_blocks_${thread_blocks}.thread_block_size_${thread_block_size}.n_launches_${n_launches}.iterations_${iterations}.num_threads_${num_threads}.iterations_per_sched_sample_${iterations_per_sched_sample}$(_bool_attr processes $processes)$(_bool_attr hw_counters $hw_counters)$(_bool_attr mps $mps)${suffix}"
+  _already_ran() {
+    if [ ! -d ${iml_dir} ]; then
+      return 1
+    fi
+    find ${iml_dir} -type f \
+      | grep --perl-regexp '/GPUComputeSchedInfoKernel[^/]*\.json$' >/dev/null
+  }
+  if _already_ran; then
+    echo "> SKIP gpu_util_experiment; already exists @ ${iml_dir}"
+    return
+  fi
   _do mkdir -p ${iml_dir}
-  _do iml-util-sampler --iml-directory ${iml_dir} -- \
+  logfile=${iml_dir}/gpu_util_experiment.log.txt
+  _do_with_logfile iml-util-sampler --iml-directory ${iml_dir} -- \
     gpu_util_experiment \
     --mode run_kernels \
     --iml_directory ${iml_dir} \
@@ -254,20 +349,15 @@ _multi_expr() {
     --num_threads ${num_threads} \
     --n_launches ${n_launches} \
     $(_bool_opt processes $processes) \
-    $(_bool_opt hw_counters $hw_counters) \
-    2>&1 | tee ${iml_dir}/gpu_util_experiment.log.txt
+    $(_bool_opt hw_counters $hw_counters)
 )
 }
 
 _make_install() {
   (
   set -ue
-  cd "$(cmake_build_dir "$ROOT")"
-  if [ "$SKIP_BUILD" = 'yes' ]; then
-    _do make -j$(nproc) install
-  else
-    _do_always make -j$(nproc) install
-  fi
+  cd $ROOT
+  bash setup.sh
   )
 }
 
@@ -675,6 +765,7 @@ main() {
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     (
+    set -e
     cd $ROOT
     main "$@"
     )

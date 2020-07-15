@@ -184,7 +184,7 @@ MyStatus GPUComputeSchedInfoKernel::DumpKernelInfo(int thread_id, CudaStream str
     auto path = iml_dir / base_ss.str();
     status = WriteJson(path.string(), js);
     IF_BAD_STATUS_RETURN(status);
-    RLS_LOG("GPU_UTIL", "Dumped kernel info to {}", path);
+    RLS_LOG("GPU_UTIL", "Dumped kernel info to {}", path.string());
     return MyStatus::OK();
 }
 
@@ -454,6 +454,54 @@ MyStatus MaybeInitCUDA(int device, CUcontext* context) {
   return MyStatus::OK();
 }
 
+double PassStats::DurationSec() const {
+  double seconds = std::chrono::duration_cast<std::chrono::microseconds>(done_kernels_t - start_kernels_t).count() /
+                   static_cast<double>(MICROSECONDS_IN_SECOND);
+  return seconds;
+}
+void PassStats::Print(bool config_pass) const {
+  auto seconds = this->DurationSec();
+  std::string pass_type;
+  if (config_pass) {
+    pass_type = "[CONFIG] ";
+  }
+  RLS_LOG("GPU_UTIL", "{}Pass {}: running kernels took {} seconds", pass_type, pass_idx + 1, seconds);
+}
+
+MyStatus ThreadedGPUKernelRunner::DumpJson(std::list<PassStats>& passes) {
+  auto status = MyStatus::OK();
+  json js;
+
+  json meta_js;
+  meta_js["num_blocks"] = args.FLAGS_kern_arg_num_blocks.get();
+  meta_js["threads_per_block"] = args.FLAGS_kern_arg_threads_per_block.get();
+  meta_js["iterations_per_sched_sample"] = args.FLAGS_kern_arg_iterations_per_sched_sample.get();
+  meta_js["iterations"] = args.FLAGS_kern_arg_iterations.get();
+  meta_js["n_samples"] =
+      args.FLAGS_kern_arg_iterations.get() / args.FLAGS_kern_arg_iterations_per_sched_sample.get();
+  meta_js["n_launches"] = args.FLAGS_n_launches.get();
+  meta_js["processes"] = args.FLAGS_processes.get();
+  meta_js["cuda_context"] = args.FLAGS_cuda_context.get();
+  meta_js["device"] = args.FLAGS_device.get();
+
+  js["metadata"] = meta_js;
+
+  std::vector<double> kernel_time_secs;
+  for (const auto& pass : passes) {
+    kernel_time_secs.push_back(pass.DurationSec());
+  }
+  js["raw_samples"]["total_kernel_run_time_sec"] = kernel_time_secs;
+
+  boost::filesystem::path iml_dir(args.FLAGS_iml_directory.get());
+  std::stringstream base_ss;
+  base_ss << "gpu_util_experiment.json";
+  auto path = iml_dir / base_ss.str();
+  status = WriteJson(path.string(), js);
+  IF_BAD_STATUS_RETURN(status);
+  RLS_LOG("GPU_UTIL", "Dumped {}", path.string());
+  return MyStatus::OK();
+}
+
 void ThreadedGPUKernelRunner::run_parent() {
     // Parent only from here on.
     // We coordinate the children.
@@ -557,27 +605,6 @@ void ThreadedGPUKernelRunner::run_parent() {
     }
     _sync_block->barrier.arrive_and_wait("barrier 1: setup CUDA context");
 
-    struct PassStats {
-        size_t pass_idx;
-        time_type start_kernels_t;
-        time_type done_kernels_t;
-
-        double DurationSec() const {
-            double seconds = std::chrono::duration_cast<std::chrono::microseconds>(done_kernels_t - start_kernels_t).count() /
-                             static_cast<double>(MICROSECONDS_IN_SECOND);
-            return seconds;
-        }
-
-        void Print(bool config_pass) const {
-            auto seconds = this->DurationSec();
-            std::string pass_type;
-            if (config_pass) {
-                pass_type = "[CONFIG] ";
-            }
-            RLS_LOG("GPU_UTIL", "{}Pass {}: running kernels took {} seconds", pass_type, pass_idx + 1, seconds);
-        }
-
-    };
     std::list<PassStats> pass_stats;
     size_t pass_idx = 0;
 
@@ -703,15 +730,12 @@ void ThreadedGPUKernelRunner::run_parent() {
     ret = sampler.StopProfiling();
     IF_BAD_STATUS_EXIT("Failed to stop GPU hw counter profiler", ret);
 
-    {
-        for (const auto &stats : pass_stats) {
-            stats.Print(false);
-        }
-    }
-
     if (SHOULD_DEBUG(FEATURE_GPU_UTIL_SYNC)) {
         RLS_LOG("GPU_UTIL", "After children done, Parent sees: {}", *_sync_block);
     }
+
+    ret = DumpJson(pass_stats);
+    IF_BAD_STATUS_EXIT("Failed to dump passes", ret);
 
 }
 

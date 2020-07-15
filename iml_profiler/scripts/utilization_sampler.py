@@ -209,6 +209,11 @@ class UtilizationSampler:
 
         # return now_sec
 
+    def _prepare_to_stop(self, cur_time_sec):
+        # Dump any remaining samples we have not dumped yet.
+        self._maybe_dump(cur_time_sec, dump=True)
+        self.check_pending_dump_calls(wait=True)
+
     def run(self):
         SigTermWatcher = _SigTermWatcher()
         if self.async_process is not None:
@@ -255,9 +260,7 @@ class UtilizationSampler:
                     self.exit_status = proc_watcher.retcode
 
                 if should_stop:
-                    # Dump any remaining samples we have not dumped yet.
-                    self._maybe_dump(cur_time_sec, dump=True)
-                    self.check_pending_dump_calls(wait=True)
+                    self._prepare_to_stop(cur_time_sec)
                     break
 
                 self._maybe_dump(cur_time_sec)
@@ -271,10 +274,22 @@ class UtilizationSampler:
 
                 self.check_pending_dump_calls()
 
-                machine_cpu_info = MachineProcessCPUInfo(self.pid)
-                cpu_util = sample_cpu_utilization(machine_cpu_info)
-                machine_gpu_info = nvidia_gpu_query.MachineGPUInfo(debug=self.debug)
-                gpu_utils = sample_gpu_utilization(machine_gpu_info, self.pid, debug=self.debug)
+                cpu_util = None
+                gpu_utils = None
+                try:
+                    machine_cpu_info = MachineProcessCPUInfo(self.pid)
+                    cpu_util = sample_cpu_utilization(machine_cpu_info)
+                    machine_gpu_info = nvidia_gpu_query.MachineGPUInfo(debug=self.debug)
+                    gpu_utils = sample_gpu_utilization(machine_gpu_info, self.pid, debug=self.debug)
+                except psutil.NoSuchProcess as e:
+                    logger.info("Exiting iml-util-sampler since pid={pid} no longer exists".format(pid=e.pid))
+                    should_stop = True
+                    continue
+
+                if should_stop:
+                    self._prepare_to_stop(cur_time_sec)
+                    break
+
                 if self.debug:
                     logger.info("> {klass}: utils = \n{utils}".format(
                         klass=self.__class__.__name__,
@@ -282,10 +297,12 @@ class UtilizationSampler:
                             pprint.pformat({'cpu_util':cpu_util, 'gpu_utils':gpu_utils}),
                             prefix="  "),
                     ))
-                self.add_util(cur_time_sec, cpu_util)
-                self.add_utils(cur_time_sec, gpu_utils)
-
-                self.n_samples += 1
+                if cpu_util is not None:
+                    self.add_util(cur_time_sec, cpu_util)
+                if gpu_utils is not None:
+                    self.add_utils(cur_time_sec, gpu_utils)
+                if cpu_util is not None or gpu_utils is not None:
+                    self.n_samples += 1
 
     def check_pending_dump_calls(self, wait=False):
         del_indices = []

@@ -107,6 +107,9 @@ _check_env() {
     # TODO: these should be optional (i.e. if TENSORFLOW_DIR isn't provided, install it from a fresh git repo checkout).
     #
 
+    # Sometimes apt will fail on fresh containers unless we do this first.
+    sudo apt update
+
     if [ "$IML_DIR" = "" ] || [ ! -d "$IML_DIR" ]; then
         echo "ERROR: environment variable IML_DIR should be set to: The root directory of the iml_profiler repo checkout."
         exit 1
