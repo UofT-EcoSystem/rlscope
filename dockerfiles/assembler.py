@@ -58,6 +58,8 @@ from pathlib import Path
 
 from iml_profiler import py_config
 
+NVIDIA_VISIBLE_DEVICES = [0]
+assert len(NVIDIA_VISIBLE_DEVICES) > 0
 PROJECT_NAME = 'iml'
 IML_BASH_SERVICE_NAME = 'bash'
 
@@ -1114,6 +1116,11 @@ class Assembler:
         eprint(get_cmd_string(cmd))
         subprocess.check_call(cmd, stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr)
 
+        if args.mps:
+            # Reset the "compute mode" of the GPUs from "Exclsuive" back to "Default".
+            # We use exclusive mode just to make sure GPU apps are actually using MPS and not bypassing it.
+            nvidia_set_compute_mode('DEFAULT', NVIDIA_VISIBLE_DEVICES)
+            # nvidia_set_compute_mode('EXCLUSIVE_PROCESS', NVIDIA_VISIBLE_DEVICES)
 
     def docker_deploy(self, extra_argv, reload):
         """
@@ -1138,6 +1145,11 @@ class Assembler:
         # ])
         # container_filter = "iml_bash"
 
+        if args.mps:
+            # Set "compute mode" of the GPUs to "exclusive" to make sure GPU apps
+            # are actually using MPS and not bypassing it.
+            nvidia_set_compute_mode('EXCLUSIVE_PROCESS', NVIDIA_VISIBLE_DEVICES)
+
         cmd = ['docker-compose']
         cmd.extend([
             '--file', 'stack.yml',
@@ -1147,8 +1159,13 @@ class Assembler:
             'up',
             # Run containers in background (similar to docker stack deploy)
             '--detach',
+
+            # NOTE: Don't do this since we change stack.yml when using --mps
+            # (don't want to delete mps container).
+            #
             # When container_name changes, deleted old container_name.
-            '--remove-orphans'
+            # '--remove-orphans'
+
             # Name of the created stack.
             # 'iml',
         ])
@@ -1840,22 +1857,22 @@ class StackYMLGenerator:
         # insurance that the MPS server is the single point of arbitration between
         # all CUDA processes for that GPU.
         # iml-exclusive-mode:
-        exclusive-mode:
-            image: debian:stretch-slim
-            command: nvidia-smi -c EXCLUSIVE_PROCESS
-            # https://github.com/nvidia/nvidia-container-runtime#environment-variables-oci-spec
-            # NVIDIA_VISIBLE_DEVICES will default to "all" (from file .env), unless
-            # the variable is exported on the command-line.
-            environment:
-              - "NVIDIA_VISIBLE_DEVICES"
-              - "NVIDIA_DRIVER_CAPABILITIES=utility"
-            # runtime: nvidia
-            network_mode: none
-            # CAP_SYS_ADMIN is required to modify the compute mode of the GPUs.
-            # This capability is granted only to this ephemeral container, not to
-            # the MPS daemon.
-            cap_add:
-              - SYS_ADMIN
+        # exclusive-mode:
+        #     image: debian:stretch-slim
+        #     command: nvidia-smi -c EXCLUSIVE_PROCESS
+        #     # https://github.com/nvidia/nvidia-container-runtime#environment-variables-oci-spec
+        #     # NVIDIA_VISIBLE_DEVICES will default to "all" (from file .env), unless
+        #     # the variable is exported on the command-line.
+        #     environment:
+        #       - "NVIDIA_VISIBLE_DEVICES={NVIDIA_VISIBLE_DEVICES}"
+        #       - "NVIDIA_DRIVER_CAPABILITIES=utility"
+        #     # runtime: nvidia
+        #     network_mode: none
+        #     # CAP_SYS_ADMIN is required to modify the compute mode of the GPUs.
+        #     # This capability is granted only to this ephemeral container, not to
+        #     # the MPS daemon.
+        #     cap_add:
+        #       - SYS_ADMIN
 
         # iml-mps-daemon:
         mps-daemon:
@@ -1868,11 +1885,11 @@ class StackYMLGenerator:
             # start before the exclusive compute mode is set. If this happens, one
             # of the CUDA application will fail to initialize since MPS will not be
             # the single point of arbitration for GPU access.
-            depends_on:
-              # - iml-exclusive-mode
-              - exclusive-mode
+            # depends_on:
+            #   # - iml-exclusive-mode
+            #   - exclusive-mode
             environment:
-              - "NVIDIA_VISIBLE_DEVICES"
+              - "NVIDIA_VISIBLE_DEVICES={NVIDIA_VISIBLE_DEVICES}"
               - "CUDA_MPS_ACTIVE_THREAD_PERCENTAGE"
             # runtime: nvidia
             init: true
@@ -1996,6 +2013,7 @@ class StackYMLGenerator:
             iml_image=iml_image,
             IML_MPS_DAEMON_CONTAINER_NAME=self._mps_daemon_container_name(),
             IML_BASH_SERVICE_NAME=IML_BASH_SERVICE_NAME,
+            NVIDIA_VISIBLE_DEVICES=','.join([str(dev) for dev in NVIDIA_VISIBLE_DEVICES]),
         )
 
     def _yml_list(self, values, indent):
@@ -2047,6 +2065,19 @@ def get_user_id():
 
 def get_group_id():
     return os.getgid()
+
+def nvidia_set_compute_mode(compute_mode, device_ids):
+    assert compute_mode in {'EXCLUSIVE_PROCESS', 'DEFAULT', 'PROHIBITED'}
+    assert len(device_ids) > 0
+    device_id_str = ','.join([str(dev) for dev in device_ids])
+    cmd = [
+        'sudo',
+        'nvidia-smi',
+        f"--compute-mode={compute_mode}",
+        f"--id={device_id_str}",
+    ]
+    eprint(get_cmd_string(cmd))
+    subprocess.check_call(cmd, stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr)
 
 if __name__ == '__main__':
     main()

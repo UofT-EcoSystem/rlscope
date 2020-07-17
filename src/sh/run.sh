@@ -151,17 +151,28 @@ _do() {
 _do_with_logfile() {
   (
   set +x
-  set -u
+  set -eu
+  # If command we're running fails, propagate it (don't let "tee" mute the error)
+  set -o pipefail
   local dry_str=""
+  logfile_append=${logfile_append:-no}
+  logfile_quiet=${logfile_quiet:-no}
   if [ "${DRY_RUN}" = 'yes' ]; then
     dry_str=" [dry-run]"
   fi
-  echo "> CMD${dry_str}:"
-  echo "  PWD=$PWD"
-  echo "  $ $@"
+  if [ "${logfile_quiet}" != 'yes' ]; then
+    echo "> CMD${dry_str}:"
+    echo "  PWD=$PWD"
+    echo "  $ $@"
+  fi
+  local tee_opts=""
+  if [ "${logfile_append}" = 'yes' ]; then
+    tee_opts="${tee_opts} --append"
+  fi
+  local ret=
   if [ "${DRY_RUN}" != 'yes' ]; then
     mkdir -p "$(dirname "$logfile")"
-    "$@" 2>&1 | tee "$logfile"
+    "$@" 2>&1 | tee $tee_opts "$logfile"
   fi
   )
 }
@@ -196,7 +207,7 @@ multithread_expr() {
     subdir=multithread_expr
     # num_threads=68
     # Want to match multiprocess_expr
-    num_threads=60
+    num_threads=${num_threads:-60}
     processes='no'
     _multi_expr
   )
@@ -206,7 +217,7 @@ multiprocess_expr() {
   (
     subdir=multiprocess_expr
     # NOTE: each thread uses 177 MB of memory... cannot use all 68 SM's.
-    num_threads=60
+    num_threads=${num_threads:-60}
     processes='yes'
     _multi_expr
   )
@@ -215,10 +226,14 @@ multiprocess_expr() {
 all_gpu_util_experiment() {
 (
   set -eu
-  multiprocess_expr
-  multithread_expr
-  # NOTE: cannot run them all at once... mps needs to be running in a special mps docker-compose file.
-  # multiprocess_mps_expr
+  MPS_MAX_PARTITIONS=48
+  num_threads=$((MPS_MAX_PARTITIONS-1))
+  if is_mps; then
+    multiprocess_mps_expr
+  else
+    multiprocess_expr
+    multithread_expr
+  fi
 )
 }
 
@@ -235,7 +250,7 @@ _gpu_num_sms() {
   deviceQuery | \
     grep Multiprocessors | \
     head -n 1 | \
-    perl -lape 's/.*\((\d+)\) Multiprocessors.*/$1/'
+    perl -lape 's/.*\(\s*(\d+)\s*\) Multiprocessors.*/$1/'
 }
 
 multiprocess_mps_expr() {
@@ -251,15 +266,13 @@ multiprocess_mps_expr() {
     #   exceeded, the CUDA application will fail to create a CUDA Context and return an API
     #   error from cuCtxCreate() or the first CUDA Runtime API call that triggers context
     #   creation. Failed connection attempts will be logged by the MPS server.
-    MPS_MAX_PARTITIONS=48
-    num_threads=$((MPS_MAX_PARTITIONS-1))
+#    MPS_MAX_PARTITIONS=48
+#    num_threads=$((MPS_MAX_PARTITIONS-1))
     processes='yes'
     mps='yes'
     # TODO: add and compile deviceQuery so we can query this dynamically for a given GPU.
     NUM_SMS=$(_gpu_num_sms)
     # NUM_SMS=68
-    # Allocate a single SM on the GPU to each process.
-    sms_allocated=1
     # Q: can CUDA_MPS_ACTIVE_THREAD_PERCENTAGE be a float, or does it have to be an integer?
     # export CUDA_MPS_ACTIVE_THREAD_PERCENTAGE=$(_math "math.ceil(100*${sms_allocated}/${NUM_SMS})")
 
@@ -270,27 +283,34 @@ multiprocess_mps_expr() {
     # """
     # So, we want to be careful to ensure we don't allocate 2 SMs instead of 1...
     # so, if we need to use integer, we can use math.floor (NOT math.ceil).
-    get_mps_percentage() {
-      local sms="$1"
-      shift 1
-      # _math "math.floor(100*${sms}/${NUM_SMS})"
-      # _math "100*${sms}/${NUM_SMS}"
-      # Based on deviceQuery, CUDA_MPS_ACTIVE_THREAD_PERCENTAGE can be a float, and for RTX 2080 which has 68 SMs,
-      # SMs are always allocated 2 at a time (2, 4, 6, ..., 68).
-      _math "100*${sms}/${NUM_SMS}"
-    }
-    local mps_percent_1_sms=$(get_mps_percentage 1)
-    local mps_percent_2_sms=$(get_mps_percentage 2)
-    if [ "$mps_percent_1_sms" = "$mps_percent_2_sms" ]; then
-      echo "ERROR: CUDA_MPS_ACTIVE_THREAD_PERCENTAGE cannot discern between allocating 1 SM and 2 SMs; use float instead of math.floor([# SMs allocated]/[# SMs on GPU])"
-      return 1
-    fi
+#    local mps_percent_1_sms=$(_get_mps_percentage 1)
+#    local mps_percent_2_sms=$(_get_mps_percentage 2)
+#    if [ "$mps_percent_1_sms" = "$mps_percent_2_sms" ]; then
+#      echo "ERROR: CUDA_MPS_ACTIVE_THREAD_PERCENTAGE cannot discern between allocating 1 SM and 2 SMs; use float instead of math.floor([# SMs allocated]/[# SMs on GPU])"
+#      return 1
+#    fi
     # export CUDA_MPS_ACTIVE_THREAD_PERCENTAGE=$(_math "math.floor(100*${sms_allocated}/${NUM_SMS})")
     # export CUDA_MPS_ACTIVE_THREAD_PERCENTAGE=$(_math "100*${sms_allocated}/${NUM_SMS}")
-    export CUDA_MPS_ACTIVE_THREAD_PERCENTAGE=$(get_mps_percentage ${sms_allocated})
+
+    # Try to allocate a single SM on the GPU to each process.
+    sms_allocated=1
+    export CUDA_MPS_ACTIVE_THREAD_PERCENTAGE=$(_get_mps_percentage 1)
+    local sms_allocated=$(_gpu_num_sms)
+
     suffix=".num_sms_${NUM_SMS}.sms_allocated_${sms_allocated}.CUDA_MPS_ACTIVE_THREAD_PERCENTAGE_${CUDA_MPS_ACTIVE_THREAD_PERCENTAGE}"
     _multi_expr
   )
+}
+
+_get_mps_percentage() {
+  local sms="$1"
+  shift 1
+  local num_sms=$(_gpu_num_sms)
+  # _math "math.floor(100*${sms}/${NUM_SMS})"
+  # _math "100*${sms}/${NUM_SMS}"
+  # Based on deviceQuery, CUDA_MPS_ACTIVE_THREAD_PERCENTAGE can be a float, and for RTX 2080 which has 68 SMs,
+  # SMs are always allocated 2 at a time (2, 4, 6, ..., 68).
+  _math "100*${sms}/${num_sms}"
 }
 
 nvidia_smi_expr() {
@@ -456,7 +476,7 @@ _tf_inference_output_dir() {
   )
 }
 
-microbench_inference_expr() {
+microbench_simulator_expr() {
 (
   set -ue
   PYTHONPATH="${PYTHONPATH:-}"
@@ -470,7 +490,7 @@ microbench_inference_expr() {
   local out_dir=$IML_DIR/output/microbench_simulator/env_id_${env_id};
   local expr_file=${out_dir}/mode_microbench_simulator.json
   if [ -e ${expr_file} ]; then
-    echo "> SKIP tf_inference_expr; already exists @ ${expr_file}"
+    echo "> SKIP microbench_simulator_expr; already exists @ ${expr_file}"
     return
   fi
   echo "> RUN: ${expr_file}"
@@ -482,13 +502,10 @@ microbench_inference_expr() {
     --iterations ${iterations}  \
     --directory ${out_dir} \
     --mode microbench_simulator
-
-#  logfile=${out_dir}/rls_analyze.log.txt
-#  _do_with_logfile rls-analyze --mode gpu_hw --iml_directory ${out_dir}
 )
 }
 
-all_microbench_inference_expr() {
+all_microbench_simulator_expr() {
 (
   set -ue
   _make_install
@@ -507,6 +524,207 @@ all_microbench_inference_expr() {
     microbench_inference_expr
   done
 )
+}
+
+
+is_mps() {
+  # NOTE: This only works for detecting MPS within our docker container.
+  [ -e /tmp/nvidia-mps ]
+}
+
+microbench_inference_multiprocess_expr() {
+(
+  set -ue
+  PYTHONPATH="${PYTHONPATH:-}"
+  export PYTHONPATH="$STABLE_BASELINES_DIR:$IML_DIR:$PYTHONPATH"
+
+  algo=${algo:-a2c}
+  env_id=${env_id:-BreakoutNoFrameskip-v4}
+  num_tasks=${num_tasks:-2}
+  batch_size=${batch_size:-1}
+  cpu=${cpu:-no}
+  sm_alloc_strategy=${sm_alloc_strategy:-evenly}
+  # TODO: is there any way to check if we're running with MPS enabled?
+  if is_mps; then
+    echo "> Running WITH CUDA MPS mode"
+    mps=yes
+  else
+    echo "> Running WITHOUT CUDA MPS"
+    mps=no
+  fi
+  n_warmup_batches=10
+  n_measure_batches=100
+  # Make it long enough that we can look for nvidia-smi to change to ensure GPU is used.
+#  n_measure_batches=10000
+  local n_timesteps=$((n_measure_batches + n_warmup_batches))
+  subdir=${subdir:-}
+  if [ "$subdir" != "" ]; then
+    subdir="${subdir}/"
+  fi
+
+  if [ "$cpu" = 'yes' ]; then
+    # Ensure NO GPUS are visible to tensorflow.
+    # Even when doing "with tf.device(CPU)", I see it using the GPU!
+    export CUDA_VISIBLE_DEVICES=
+  else
+    export CUDA_VISIBLE_DEVICES=0
+  fi
+
+  local out_dir="$IML_DIR/output/microbench_inference_multiprocess/${subdir}batch_size_${batch_size}.num_tasks_${num_tasks}.env_id_${env_id}$(_bool_attr mps $mps)$(_bool_attr cpu $cpu)"
+
+  if [ "$mps" = 'yes' ]; then
+    # Divide GPU's resource equally among the parallel inference tasks
+    # (i.e., CUDA_MPS_ACTIVE_THREAD_PERCENTAGE = 1/num_tasks
+    local physical_num_sms=$(_gpu_num_sms)
+
+
+    # MPS documentation recommends NOT to divide SMs evenly among the processes.
+    # Instead, allocate TWICE as much as dividing evenly.
+    #
+    # I guess this means an SM won't go underutilized by the one process
+    # to which it was statically allocated?
+    # But presumably this also means potential for more interference?
+    #
+    #   https://docs.nvidia.com/deploy/mps/index.html#topic_3_3_5_2
+    #   """
+    #   A common provisioning strategy is to divide the available threads equally to each
+    #   MPS client processes (i.e. 100% / n, for n expected MPS client processes). This strategy
+    #   will allocate close to the minimum amount of execution resources, but it could restrict
+    #   performance for clients that could occasionally make use of idle resources. A more
+    #   optimal strategy is to divide the portion by half of the number of expected clients (i.e.
+    #   100% / 0.5n) to give the load balancer more freedom to overlap execution between clients
+    #   when there are idle resources.
+    #   """
+    if [ "${sm_alloc_strategy}" = 'evenly_x2' ]; then
+      export CUDA_MPS_ACTIVE_THREAD_PERCENTAGE=$(_math "min(100, 100*(1/$num_tasks)*2)")
+    elif [ "${sm_alloc_strategy}" = 'evenly' ]; then
+      export CUDA_MPS_ACTIVE_THREAD_PERCENTAGE=$(_math "100*(1/$num_tasks)")
+    else
+      echo "ERROR: not sure what sm_alloc_strategy=${sm_alloc_strategy} means"
+      return 1
+    fi
+
+    # NOTE: deviceQuery tells us how many SMs each process will get now that CUDA_MPS_ACTIVE_THREAD_PERCENTAGE is set.
+    local sms_allocated=$(_gpu_num_sms)
+
+    out_dir="${out_dir}.num_sms_${physical_num_sms}.sms_allocated_${sms_allocated}.sm_alloc_strategy_${sm_alloc_strategy}.CUDA_MPS_ACTIVE_THREAD_PERCENTAGE_${CUDA_MPS_ACTIVE_THREAD_PERCENTAGE}"
+  fi
+
+  local expr_file=${out_dir}/mode_microbench_inference_multiprocess.merged.json
+
+  if [ -e ${expr_file} ]; then
+    echo "> SKIP microbench_inference_multiprocess_expr; already exists @ ${expr_file}"
+    return
+  fi
+  echo "> RUN: ${expr_file}"
+  cd $RL_BASELINES_ZOO_DIR
+  _do mkdir -p ${out_dir}
+  logfile=${out_dir}/log.txt
+  if [ -e $logfile ]; then
+    rm $logfile
+  fi
+  logfile_append=yes
+  logfile_quiet=yes
+  _do_with_logfile echo "===================================="
+  _do_with_logfile echo "> DEVICES:"
+  logfile_quiet=no
+  # NOTE: deviceQuery exits with non-zero exit code for cpu=yes when no GPUs are visible.
+  _do_with_logfile deviceQuery || true
+  logfile_quiet=yes
+  _do_with_logfile echo "===================================="
+  _do_with_logfile echo "> ENVIRONMENT:"
+  logfile_quiet=no
+  _do_with_logfile env
+  logfile_quiet=yes
+  _do_with_logfile echo "===================================="
+  logfile_quiet=no
+  _do_with_logfile python enjoy_trt.py \
+    --algo ${algo} \
+    --env ${env_id} \
+    --folder trained_agents/ \
+    -n ${n_timesteps} \
+    --directory ${out_dir} \
+    --mode microbench_inference_multiprocess \
+    --warmup-iters ${n_warmup_batches} \
+    --batch-size ${batch_size} \
+    --num-tasks ${num_tasks} \
+    $(_bool_opt cpu $cpu)
+  logfile_quiet=no
+  logfile_append=no
+)
+}
+
+INFERENCE_BATCH_SIZES=(1 8 16 32 64 128 256 512)
+#INFERENCE_BATCH_SIZES=(8)
+#INFERENCE_BATCH_SIZES=(256)
+#INFERENCE_BATCH_SIZES=(512)
+all_microbench_inference_multiprocess() {
+(
+  set -ue
+  _make_install
+
+  NUM_TASKS=(1 2 3 4 5 6 7 8)
+#   NUM_TASKS=(1 2)
+#   NUM_TASKS=(1)
+#  NUM_TASKS=(8)
+#  NUM_TASKS=(7)
+
+  USE_CPU=()
+  if ! is_mps; then
+    USE_CPU=(no yes)
+  else
+    USE_CPU=(no)
+  fi
+
+
+#  USE_CPU=(yes)
+
+
+  for cpu in "${USE_CPU[@]}"; do
+
+    SM_ALLOC_STRATEGY=(evenly)
+    if is_mps && [ "$cpu" = 'no' ]; then
+      SM_ALLOC_STRATEGY=(evenly evenly_x2)
+    fi
+
+    for sm_alloc_strategy in "${SM_ALLOC_STRATEGY[@]}"; do
+      for num_tasks in "${NUM_TASKS[@]}"; do
+        for batch_size in "${INFERENCE_BATCH_SIZES[@]}"; do
+
+          # WARNING: for some reason, "if ! microbench_inference_multiprocess_expr; ..."
+          # acts as is "set -e" doesn't exist, causing things to execute without error detection...
+          # workaround: use "set +e"
+          (
+          set +e
+          microbench_inference_multiprocess_expr
+          local ret=$?
+          set -e
+          if [ "$ret" != "0" ]; then
+            echo "> SKIP FAILURE: microbench_inference_multiprocess_expr"
+            echo "  batch_size=${batch_size}"
+            echo "  num_tasks=${num_tasks}"
+            echo "  sm_alloc_strategy=${sm_alloc_strategy}"
+          fi
+          )
+        done
+      done
+    done
+  done
+)
+}
+
+test_microbench_inference_multiprocess() {
+  run_proc() {
+    num_tasks=1
+    batch_size=256
+    microbench_inference_multiprocess_expr
+  }
+  subdir="test_microbench_inference_multiprocess/proc_1"
+  run_proc &
+  sleep 15
+  subdir="test_microbench_inference_multiprocess/proc_2"
+  run_proc &
+  wait
 }
 
 tf_inference_expr() {
@@ -563,7 +781,7 @@ all_tf_inference_expr() {
   set -ue
   _make_install
 
-  BATCH_SIZES=(1 8 16 32 64 128 256 512)
+  # BATCH_SIZES=(1 8 16 32 64 128 256 512)
   XLA_MODES=(no yes)
 
 #  # BATCH_SIZES=(1 8)
@@ -572,7 +790,7 @@ all_tf_inference_expr() {
 #  XLA_MODES=(yes)
 
   for xla in "${XLA_MODES[@]}"; do
-    for batch_size in "${BATCH_SIZES[@]}"; do
+    for batch_size in "${INFERENCE_BATCH_SIZES[@]}"; do
       tf_inference_expr
     done
   done

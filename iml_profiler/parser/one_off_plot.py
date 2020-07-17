@@ -136,7 +136,7 @@ def parse_path_attrs(
     missing_attrs = set(attrs).difference(attr_vals.keys())
     if len(missing_attrs) > 0:
         raise RuntimeError(f"""
-            Couldn't find all requires attributes in {path}.
+            Couldn't find all required attributes in {path}.
               Attributes we are missing = {missing_attrs}
             """)
 
@@ -202,6 +202,7 @@ SM_EFFICIENCY_TITLE = "SM efficiency: percent of SMs\nthat are in use across the
 SM_EFFICIENCY_Y_LABEL = f"SM efficiency (%)\n# SMs = {NUM_SMS}"
 SM_OCCUPANCY_Y_LABEL = "SM occupancy (%)\nmax threads per block = 1024"
 SAMPLE_THROUGHPUT_Y_LABEL = "Throughput (samples/second)"
+SAMPLE_LATENCY_Y_LABEL = "Minibatch latency (ms)"
 CUPTI_METRIC_Y_LABEL = {
     'sm_efficiency': SM_EFFICIENCY_Y_LABEL,
     'achieved_occupancy': SM_OCCUPANCY_Y_LABEL,
@@ -321,6 +322,7 @@ class TrtexecExperiment:
         self._read_trtexec_df()
         self._read_tf_inference_df()
         self._read_simulator_df()
+        self._read_mps_df()
         """
         TODO: merge trtexec_df and tf_inference_df
         trtexec_field               tf_inference_field
@@ -348,6 +350,15 @@ class TrtexecExperiment:
                 title="Throughput with increasing batch size",
                 streams=streams,
                 suffix=suffix)
+            def filter_tensorflow(plot_df):
+                plot_df = plot_df[plot_df['config'] == 'TF']
+                return plot_df
+            self._plot_batch_size_vs_throughput(
+                title="Throughput with increasing batch size",
+                streams=streams,
+                filter_df=filter_tensorflow,
+                suffix=f"{or_empty(suffix)}.just_tensorflow")
+
             self._plot_batch_size_vs_metric(
                 title=SM_EFFICIENCY_TITLE,
                 cupti_metric='sm_efficiency',
@@ -413,10 +424,110 @@ class TrtexecExperiment:
               sm_occupancy
             """
             best_batch_size = self._compute_best_batch_size()
-            _plot_streams_vs(batch_size=best_batch_size, suffix='best_batch_size')
+            _plot_streams_vs(batch_size=best_batch_size, suffix='.best_batch_size')
 
         self._plot_simulator_vs_steptime()
         self._plot_simulator_vs_throughput()
+
+        def _plot_multiprocess_inference(df, throughput_title=None, inference_title=None, filter_df=None, suffix=None):
+            # if throughput_title is None:
+            #     throughput_title = 'Increasing inference throughput when slicing SMs with CUDA MPS processes'
+            # if inference_title is None:
+            #     inference_title = 'Inference latency when slicing SMs with CUDA MPS processes'
+            self._plot_mps_batch_size_vs_metric_by_num_tasks(
+                df=self.mps_df,
+                metric='throughput_qps',
+                title=throughput_title,
+                xlabel=BATCH_SIZE_X_LABEL,
+                ylabel=SAMPLE_THROUGHPUT_Y_LABEL,
+                filter_df=filter_df,
+                suffix=suffix,
+                global_ymax=True,
+            )
+            self._plot_mps_batch_size_vs_metric_by_num_tasks(
+                df=self.mps_raw_df,
+                metric='inference_time_ms',
+                title=inference_title,
+                xlabel=BATCH_SIZE_X_LABEL,
+                ylabel=SAMPLE_LATENCY_Y_LABEL,
+                filter_df=filter_df,
+                suffix=suffix,
+                global_ymax=False,
+            )
+        """
+        3 different graphs for multi-process experiment:
+        - Multi-process (CPU) / config_cpu
+          row['cpu']
+          assert not row['mps']
+        - Multi-process MPS (GPU) / config_mps_gpu_evenly
+          row['mps'] and row['sm_alloc_strategy'] == 'evenly' 
+          assert not row['cpu']
+        - Multi-process MPS (GPU) / config_mps_gpu_evenly_x2
+          row['mps'] and row['sm_alloc_strategy'] == 'evenly_x2' 
+          assert not row['cpu']
+        - Multi-process (GPU, no MPS) / config_gpu
+          not row['mps'] and not row['cpu']
+        """
+
+        def is_config_cpu(row):
+            is_cpu = row['cpu']
+            if is_cpu:
+                assert not row['mps']
+            return is_cpu
+
+        # def is_config_mps_gpu_evenly(row):
+        #     is_mps = row['mps']
+        #     if is_mps:
+        #         assert not row['cpu']
+        #     return is_mps and row['sm_alloc_strategy'] == 'evenly'
+        #
+        # def is_config_mps_gpu_evenly_x2(row):
+        #     is_mps = row['mps']
+        #     if is_mps:
+        #         assert not row['cpu']
+        #     return is_mps and row['sm_alloc_strategy'] == 'evenly_x2'
+
+        def is_config_mps_gpu(row):
+            is_mps = row['mps']
+            if is_mps:
+                assert not row['cpu']
+            return is_mps
+
+        def is_config_gpu(row):
+            return not row['mps'] and not row['cpu']
+
+        def as_row_filter_func(is_config):
+            def row_filter_func(df):
+                df = df[df.apply(is_config, axis=1)]
+                return df
+            return row_filter_func
+
+        # throughput_ymax = self.mps_df['']
+
+        sm_alloc_strategies = self.mps_df[self.mps_df['mps']]['sm_alloc_strategy'].unique().tolist()
+        for sm_alloc_strategy in sm_alloc_strategies:
+            def _is_config(row):
+                return is_config_mps_gpu(row) and row['sm_alloc_strategy'] == sm_alloc_strategy
+            _plot_multiprocess_inference(
+                self.mps_df,
+                throughput_title='Inference throughput:\nmulti-process TF scripts (GPU) + CUDA MPS',
+                inference_title='Inference latency:\nmulti-process TF scripts (GPU) + CUDA MPS',
+                filter_df=as_row_filter_func(_is_config),
+                suffix=f".config_mps_gpu_{sm_alloc_strategy}")
+        # _plot_multiprocess_inference(self.mps_df, filter_df=as_row_filter_func(is_config_mps_gpu_evenly), suffix='.config_mps_gpu_evenly')
+        # _plot_multiprocess_inference(self.mps_df, filter_df=as_row_filter_func(is_config_mps_gpu_evenly_x2), suffix='.config_mps_gpu_evenly_x2')
+        _plot_multiprocess_inference(
+            self.mps_df,
+            throughput_title='Inference throughput:\nmulti-process TF scripts (CPU)',
+            inference_title='Inference latency:\nmulti-process TF scripts (CPU)',
+            filter_df=as_row_filter_func(is_config_cpu),
+            suffix='.config_cpu')
+        _plot_multiprocess_inference(
+            self.mps_df,
+            throughput_title='Inference throughput:\nmulti-process TF scripts (GPU)',
+            inference_title='Inference latency:\nmulti-process TF scripts (GPU)',
+            filter_df=as_row_filter_func(is_config_gpu),
+            suffix='.config_gpu')
 
     def _compute_best_batch_size(self):
         df = self.trtexec_df[self.trtexec_df['streams'] == 1]
@@ -470,8 +581,6 @@ class TrtexecExperiment:
 
         if suffix is None:
             suffix = ""
-        else:
-            suffix = f".{suffix}"
 
         save_plot(df, _j(self.args['trtexec_dir'], f'streams_vs_{cupti_metric}.batch_size_{batch_size}{suffix}.svg'))
 
@@ -531,8 +640,6 @@ class TrtexecExperiment:
 
         if suffix is None:
             suffix = ""
-        else:
-            suffix = f".{suffix}"
 
         save_plot(plot_df, _j(self.args['trtexec_dir'], f'batch_size_vs_{cupti_metric}.streams_{streams}{suffix}.svg'))
 
@@ -606,6 +713,63 @@ class TrtexecExperiment:
 
         save_plot(df, _j(self.args['trtexec_dir'], f'streams_vs_{alias}.batch_size_{batch_size}{ss}.svg'))
 
+    def _plot_mps_batch_size_vs_metric_by_num_tasks(self, df, metric, title=None, xlabel=None, ylabel=None, filter_df=None, suffix=None, global_ymax=False):
+        """
+        Throughput graph:
+            Y-axis = throughput
+            X-axis (major) = batch-size (larger impact on throughput)
+            X-axis (minor) = num_tasks (lesser impact on throughput)
+
+        Latency graph:
+            Y-axis = latency samples (mean/std across all processes)
+            X-axis (major) = batch-size (larger impact on latency)
+            X-axis (minor) = num_tasks (lesser impact on latency)
+        """
+        if df is None:
+            return
+        df = copy.copy(df)
+        assert metric in df
+
+        # df = self._add_config(df, df_type='trtexec')
+
+        global_df = df
+        if filter_df is not None:
+            df = filter_df(df)
+
+        sns.set(style="whitegrid")
+        g = sns.catplot(x="batch_size",
+                        y=metric,
+                        # data=df,
+                        hue="config",
+                        data=df,
+                        # hue="num_threads", data=df,
+                        # hue=col_titles["num_threads"], data=titled_df,
+                        # height=6,
+                        kind="bar",
+                        palette="muted"
+                        )
+        g.despine(left=True)
+        if ylabel is not None:
+            g.set_ylabels(ylabel)
+        if xlabel is not None:
+            g.set_xlabels(xlabel)
+        if title is not None:
+            g.fig.suptitle(title)
+        g.fig.subplots_adjust(top=0.90)
+
+        if global_ymax:
+            new_ymax = global_df[metric].max()
+            ymin, ymax = g.ax.get_ylim()
+            # import ipdb; ipdb.set_trace()
+            g.ax.set_ylim((ymin, max(ymax, new_ymax)))
+
+
+        if suffix is None:
+            suffix = ""
+
+        save_plot(df, _j(self.args['mps_dir'], f'mps_batch_size_vs_{metric}_by_num_tasks{suffix}.svg'))
+
+
     def _plot_streams_vs_throughput(self, title, batch_size, suffix=None):
         if self.trtexec_df is None:
             return
@@ -647,8 +811,6 @@ class TrtexecExperiment:
 
         if suffix is None:
             suffix = ""
-        else:
-            suffix = f".{suffix}"
 
         save_plot(df, _j(self.args['trtexec_dir'], f'streams_vs_throughput.batch_size_{batch_size}{suffix}.svg'))
 
@@ -671,7 +833,7 @@ class TrtexecExperiment:
             raise NotImplementedError()
         return df
 
-    def _plot_batch_size_vs_throughput(self, title, streams, suffix=None):
+    def _plot_batch_size_vs_throughput(self, title, streams, filter_df=None, suffix=None):
         if self.trtexec_df is None:
             return
         """
@@ -700,6 +862,9 @@ class TrtexecExperiment:
 
         plot_df.sort_values(by=['config', 'batch_size'], inplace=True)
 
+        if filter_df is not None:
+            plot_df = filter_df(plot_df)
+
         # df = keep_cupti_metric(df, cupti_metric)
 
         # titled_df = copy.copy(df)
@@ -727,8 +892,6 @@ class TrtexecExperiment:
 
         if suffix is None:
             suffix = ""
-        else:
-            suffix = f".{suffix}"
 
         save_plot(plot_df, _j(self.args['trtexec_dir'], f'batch_size_vs_throughput.streams_{streams}{suffix}.svg'))
 
@@ -909,8 +1072,98 @@ class TrtexecExperiment:
     def debug(self):
         return self.args['debug']
 
+    def _read_mps_df(self):
+        self.mps_df = None
+        self.mps_raw_df = None
+        if self.args['mps_dir'] is None:
+            return
+        """
+        /home/jgleeson/clone/iml/output/microbench_inference_multiprocess/batch_size_128.num_tasks_1.env_id_BreakoutNoFrameskip-v4.num_sms_68.sms_allocated_68.CUDA_MPS_ACTIVE_THREAD_PERCENTAGE_100.0
+        
+        
+        """
+        mps_dflt_attrs = {
+            'num_sms': None,
+            'sms_allocated': None,
+            'sm_alloc_strategy': None,
+            'CUDA_MPS_ACTIVE_THREAD_PERCENTAGE': None,
+        }
+        mps_attr_types = {
+            'mps': yes_as_bool,
+            'cpu': yes_as_bool,
+            'batch_size': maybe_number,
+            'num_tasks': maybe_number,
+            'env_id': str,
+            'num_sms': maybe_number,
+            'sms_allocated': maybe_number,
+            'sm_alloc_strategy': str,
+            'CUDA_MPS_ACTIVE_THREAD_PERCENTAGE': maybe_number,
+        }
+        mps_attrs = set(mps_attr_types.keys())
+
+        dfs = []
+        raw_dfs = []
+        for path in each_file_recursive(self.args['mps_dir']):
+            if not re.search(r'^mode_microbench_inference_multiprocess\.merged\.json$', _b(path)):
+                continue
+
+            js = load_json(path)
+            df = pd.DataFrame(
+                dict((k, [v]) for k, v in js['summary_metrics'].items())
+            )
+            attr_dict = parse_path_attrs(
+                path,
+                mps_attrs,
+                mps_dflt_attrs,
+                mps_attr_types,
+            )
+            for attr_name, attr_value in attr_dict.items():
+                df[attr_name] = attr_value
+            dfs.append(df)
+
+            # Q: Should we discard outliers...?
+            raw_df = pd.DataFrame(data=js['raw_samples'])
+            for attr_name, attr_value in attr_dict.items():
+                raw_df[attr_name] = attr_value
+            raw_dfs.append(raw_df)
+
+        self.mps_df = pd.concat(dfs)
+        self.mps_raw_df = pd.concat(raw_dfs)
+
+        def _add_config(df):
+            def _config(row):
+                if row['mps']:
+                    assert row['CUDA_MPS_ACTIVE_THREAD_PERCENTAGE'] is not None
+                    return multitask_title('process MPS', 'processes', n_tasks=row['num_tasks'], sep=' ')
+                assert row['CUDA_MPS_ACTIVE_THREAD_PERCENTAGE'] is None
+                return multitask_title('process', 'processes', n_tasks=row['num_tasks'], sep=' ')
+            df['config'] = df.apply(_config, axis=1)
+            return df
+
+        def _sort(df):
+            df = df.sort_values(by=['batch_size', 'num_tasks'])
+            return df
+
+        def _prepare_df(df):
+            df = _add_config(df)
+            df = _sort(df)
+            return df
+
+        self.mps_df = _prepare_df(self.mps_df)
+        self.mps_raw_df = _prepare_df(self.mps_raw_df)
+        self.mps_raw_df['inference_time_ms'] = self.mps_raw_df['inference_time_sec'] * 1000
+
+        logger.info("mps dataframe:\n{msg}".format(
+            msg=txt_indent(DataFrame.dataframe_string(self.mps_df), indent=1),
+        ))
+        logger.info("mps_raw dataframe:\n{msg}".format(
+            msg=txt_indent(DataFrame.dataframe_string(self.mps_raw_df), indent=1),
+        ))
+
+
     def _read_simulator_df(self):
         self.simulator_df = None
+        self.simulator_raw_df = None
         if self.args['simulator_dir'] is None:
             return
         """
@@ -1325,19 +1578,10 @@ class GpuUtilExperiment:
         self.multitask_raw_df = multitask_raw_df
 
     def _append_multi_df(self, multitask_df, df, task_type, task_type_plural, debug=False):
-        def _title(task_type, task_type_plural, n_tasks, sep=' '):
-            return sep.join([
-                "Multi-{task}",
-                "($N_{{{tasks}}}$ = {n_tasks})",
-            ]).format(
-                task=task_type,
-                tasks=task_type_plural,
-                n_tasks=n_tasks,
-            )
 
         def _add_title(df, task_type, task_type_plural, n_tasks):
-            df['expr'] = _title(task_type, task_type_plural, n_tasks, sep=' ')
-            df['expr_x'] = _title(task_type, task_type_plural, n_tasks, sep='\n')
+            df['expr'] = multitask_title(task_type, task_type_plural, n_tasks, sep=' ')
+            df['expr_x'] = multitask_title(task_type, task_type_plural, n_tasks, sep='\n')
 
         # def _append(multitask_df, df, task_type, task_type_plural):
         if df is not None:
@@ -1960,6 +2204,7 @@ def main():
             sub_parser.add_argument('--trtexec-dir')
             sub_parser.add_argument('--tf-inference-dir')
             sub_parser.add_argument('--simulator-dir')
+            sub_parser.add_argument('--mps-dir')
             sub_args, sub_argv = sub_parser.parse_known_args(argv)
             logger.info(pprint_msg({'sub_argv': sub_argv}))
 
@@ -2018,6 +2263,20 @@ def keep_cupti_metric(df, cupti_metric_name):
     df['cupti_metric_name'] = cupti_metric_name
     return df
 
+def multitask_title(task_type, task_type_plural, n_tasks, sep=' '):
+    return sep.join([
+        "Multi-{task}",
+        "($N_{{{tasks}}}$ = {n_tasks})",
+    ]).format(
+        task=task_type,
+        tasks=task_type_plural,
+        n_tasks=n_tasks,
+    )
+
+def or_empty(x):
+    if x is None:
+        return ""
+    return x
 
 if __name__ == '__main__':
     main()

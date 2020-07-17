@@ -1168,11 +1168,13 @@ class DecimalEncoder(json.JSONEncoder):
 
 def do_dump_json(data, path, cls=DecimalEncoder):
     os.makedirs(_d(path), exist_ok=True)
-    json.dump(data,
-              codecs.open(path, mode='w', encoding='utf-8'),
-              sort_keys=True, indent=4,
-              skipkeys=False,
-              cls=cls)
+    with open(path, 'w') as f:
+        json.dump(data,
+                  f,
+                  sort_keys=True,
+                  indent=4,
+                  skipkeys=False,
+                  cls=cls)
 
 def store_group(dic, m, types=dict(), store_as=None, replace=False):
     groupdict = m.groupdict()
