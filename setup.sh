@@ -606,7 +606,9 @@ _dov() {
 }
 
 _apt_install() {
-    sudo apt install -y "$@"
+    # To make this as fast as possible, just depend on the user to do this.
+    # sudo apt-get update
+    sudo apt-get install -y "$@"
 }
 
 setup_apt_packages() {

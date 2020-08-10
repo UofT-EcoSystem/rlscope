@@ -27,6 +27,11 @@ BASELINES_CHECKPOINTS=$BASELINES_DIR/checkpoints
 
 GYM_DIR=$CLONE/gym
 
+STABLE_BASELINES_DIR=${STABLE_BASELINES_DIR:-$HOME/clone/stable-baselines}
+IML_DIR=${IML_DIR:-$HOME/clone/iml}
+RL_BASELINES_ZOO_DIR=${RL_BASELINES_ZOO_DIR:-$HOME/clone/rl-baselines-zoo}
+ENJOY_TRT=${ENJOY_TRT:-${RL_BASELINES_ZOO_DIR}/enjoy_trt.py}
+
 _activate_tensorflow() {
     local prev_dir=$PWD
     cd $HOME/clone/tensorflow_cuda9
@@ -422,13 +427,19 @@ all_trtexec_expr() {
   _make_install
   export CUDA_VISIBLE_DEVICES=0
 
-  BATCH_SIZES=(1 8 16 32 64)
-  STREAMS=(1 2 3 4 5 6 7 8)
+#  BATCH_SIZES=(1 8 16 32 64 128 256 512)
+#  STREAMS=(1 2 3 4 5 6 7 8)
 
-  local uff_model_path=$(_uff_model_path)
-  if [ ! -f $uff_model_path ]; then
-    mk_uff_model
-  fi
+  BATCH_SIZES=(1 8 16 32 64 128 256 512)
+#  BATCH_SIZES=(1)
+  STREAMS=(1)
+
+  echo "> Running trtexec7 experiments for: uff_model_path = ${uff_model_path}"
+
+#  local uff_model_path=$(_uff_model_path)
+#  if [ ! -f $uff_model_path ]; then
+#    mk_uff_model
+#  fi
 
   for batch_size in "${BATCH_SIZES[@]}"; do
     local engine_path=$(_engine_path)
@@ -455,14 +466,14 @@ _trtexec_output_dir() {
   echo $IML_DIR/output/trtexec7
 }
 
-_uff_model_path() {
-  # echo $RL_BASELINES_ZOO_DIR/tf_model.uff
-  echo $IML_DIR/output/trtexec7/model/tf_model.uff
-}
+#_uff_model_path() {
+#  # echo $RL_BASELINES_ZOO_DIR/tf_model.uff
+#  echo $IML_DIR/output/trtexec7/model/tf_model.uff
+#}
 _engine_path() {
 (
   set -ue
-  echo $(_tf_model_output_dir)/tf_model.batch_size_${batch_size}.trt
+  echo $(_tf_model_output_dir)/$(_uff_model_name).batch_size_${batch_size}.trt
 )
 }
 
@@ -496,7 +507,7 @@ microbench_simulator_expr() {
   echo "> RUN: ${expr_file}"
   _do mkdir -p ${out_dir}
   logfile=${out_dir}/log.txt
-  _do_with_logfile python enjoy_trt.py \
+  _do_with_logfile python ${ENJOY_TRT} \
     --env ${env_id} \
     --folder trained_agents/ \
     --iterations ${iterations}  \
@@ -544,6 +555,7 @@ microbench_inference_multiprocess_expr() {
   batch_size=${batch_size:-1}
   cpu=${cpu:-no}
   sm_alloc_strategy=${sm_alloc_strategy:-evenly}
+  graph_def_pb=${graph_def_pb:-}
   # TODO: is there any way to check if we're running with MPS enabled?
   if is_mps; then
     echo "> Running WITH CUDA MPS mode"
@@ -610,6 +622,16 @@ microbench_inference_multiprocess_expr() {
     out_dir="${out_dir}.num_sms_${physical_num_sms}.sms_allocated_${sms_allocated}.sm_alloc_strategy_${sm_alloc_strategy}.CUDA_MPS_ACTIVE_THREAD_PERCENTAGE_${CUDA_MPS_ACTIVE_THREAD_PERCENTAGE}"
   fi
 
+
+  local arglist=()
+
+  if [ "${graph_def_pb}" != "" ]; then
+    echo "> RUNNING WITH graph_def_pb=${graph_def_pb}"
+    arglist+=(--graph-def-pb "${graph_def_pb}")
+    out_dir="${out_dir}$(_model_attr_from "${graph_def_pb}")"
+  fi
+
+
   local expr_file=${out_dir}/mode_microbench_inference_multiprocess.merged.json
 
   if [ -e ${expr_file} ]; then
@@ -617,7 +639,7 @@ microbench_inference_multiprocess_expr() {
     return
   fi
   echo "> RUN: ${expr_file}"
-  cd $RL_BASELINES_ZOO_DIR
+#  cd $RL_BASELINES_ZOO_DIR
   _do mkdir -p ${out_dir}
   logfile=${out_dir}/log.txt
   if [ -e $logfile ]; then
@@ -638,17 +660,19 @@ microbench_inference_multiprocess_expr() {
   logfile_quiet=yes
   _do_with_logfile echo "===================================="
   logfile_quiet=no
-  _do_with_logfile python enjoy_trt.py \
-    --algo ${algo} \
-    --env ${env_id} \
-    --folder trained_agents/ \
-    -n ${n_timesteps} \
-    --directory ${out_dir} \
-    --mode microbench_inference_multiprocess \
-    --warmup-iters ${n_warmup_batches} \
-    --batch-size ${batch_size} \
-    --num-tasks ${num_tasks} \
+  arglist+=(
+    --algo ${algo}
+    --env ${env_id}
+    --folder trained_agents/
+    -n ${n_timesteps}
+    --directory ${out_dir}
+    --mode microbench_inference_multiprocess
+    --warmup-iters ${n_warmup_batches}
+    --batch-size ${batch_size}
+    --num-tasks ${num_tasks}
     $(_bool_opt cpu $cpu)
+  )
+  _do_with_logfile python ${ENJOY_TRT} "${arglist[@]}"
   logfile_quiet=no
   logfile_append=no
 )
@@ -661,19 +685,27 @@ INFERENCE_BATCH_SIZES=(1 8 16 32 64 128 256 512)
 all_microbench_inference_multiprocess() {
 (
   set -ue
-  _make_install
+  # Need to run from minigo, cannot compile trtexec7
+#  _make_install
 
-  NUM_TASKS=(1 2 3 4 5 6 7 8)
+#  NUM_TASKS=(1 2 3 4 5 6 7 8)
 #   NUM_TASKS=(1 2)
-#   NUM_TASKS=(1)
+   NUM_TASKS=(1)
 #  NUM_TASKS=(8)
 #  NUM_TASKS=(7)
 
+  gpu_only=${gpu_only:-no}
+
   USE_CPU=()
-  if ! is_mps; then
-    USE_CPU=(no yes)
-  else
+  if [ "${gpu_only}" = 'yes' ]; then
+    echo ">> gpu_only=${gpu_only} : Only run with GPU (e.g., for TensorRT models which otherwise error out)"
     USE_CPU=(no)
+  else
+    if ! is_mps; then
+      USE_CPU=(no yes)
+    else
+      USE_CPU=(no)
+    fi
   fi
 
 
@@ -737,7 +769,7 @@ tf_inference_expr() {
   batch_size=${batch_size:-1}
   xla=${xla:-no}
 
-  cd $RL_BASELINES_ZOO_DIR
+#  cd $RL_BASELINES_ZOO_DIR
   n_warmup_batches=3
   n_measure_batches=20
   local n_timesteps=$((n_measure_batches + n_warmup_batches))
@@ -759,7 +791,7 @@ tf_inference_expr() {
 
   _do mkdir -p ${out_dir}
   logfile=${out_dir}/log.txt
-  _do_with_logfile iml-prof --config ${iml_prof_config} python enjoy_trt.py \
+  _do_with_logfile iml-prof --config ${iml_prof_config} python ${ENJOY_TRT} \
     --algo a2c \
     --env BreakoutNoFrameskip-v4 \
     --folder trained_agents/ \
@@ -797,17 +829,67 @@ all_tf_inference_expr() {
 )
 }
 
+mk_trt_model() {
+(
+  set -ue
+  PYTHONPATH="${PYTHONPATH:-}"
+  export PYTHONPATH="$STABLE_BASELINES_DIR:$IML_DIR:$PYTHONPATH"
+  export CUDA_VISIBLE_DEVICES=0
+#  cd $RL_BASELINES_ZOO_DIR
+
+#    --algo a2c
+#    --env BreakoutNoFrameskip-v4
+#    --folder trained_agents/
+#    -n 5000
+#    --iml-directory output/tensorrt
+
+#  trt_max_batch_size=${trt_max_batch_size:-1}
+#  trt_precision=${trt_precision:-fp16}
+  graph_def_pb=${graph_def_pb:-}
+  saved_model_dir=${saved_model_dir:-}
+
+  local arglist=()
+
+  if [ "${graph_def_pb}" != "" ]; then
+    arglist+=(--graph-def-pb "${graph_def_pb}")
+    logfile=$(dirname ${graph_def_pb})/$(_model_name ${graph_def_pb}).convert_trt.log.txt
+  fi
+
+  if [ "${saved_model_dir}" != "" ]; then
+    arglist+=(--saved-model-dir "${saved_model_dir}")
+    logfile=${saved_model_dir}/convert_trt.log.txt
+  fi
+
+  arglist+=(
+    --mode convert_trt
+    --trt-max-batch-size ${trt_max_batch_size}
+    --trt-precision ${trt_precision}
+  )
+
+  _do mkdir -p $(_tf_model_output_dir)
+  _do_with_logfile python ${ENJOY_TRT} "${arglist[@]}"
+##  _do mv tf_model* $(_tf_model_output_dir) || true
+#  if [ "$DRY_RUN" != 'yes' ]; then
+##    local uff_model_path=$(_uff_model_path)
+#    if [ ! -f $uff_model_path ]; then
+#      echo "INTERNAL ERROR: didn't find tensorrt uff file @ $uff_path after running save_tensorrt..."
+#      exit 1
+#    fi
+#  fi
+)
+}
+
 mk_uff_model() {
 (
   set -ue
   PYTHONPATH="${PYTHONPATH:-}"
   export PYTHONPATH="$STABLE_BASELINES_DIR:$IML_DIR:$PYTHONPATH"
   export CUDA_VISIBLE_DEVICES=0
-  cd $RL_BASELINES_ZOO_DIR
+#  cd $RL_BASELINES_ZOO_DIR
 
   _do mkdir -p $(_tf_model_output_dir)
   logfile=$(_tf_model_output_dir)/mk_uff_model.log.txt
-  _do_with_logfile python enjoy_trt.py \
+  _do_with_logfile python ${ENJOY_TRT} \
     --algo a2c \
     --env BreakoutNoFrameskip-v4 \
     --folder trained_agents/ \
@@ -816,7 +898,7 @@ mk_uff_model() {
     --mode save_tensorrt
   _do mv tf_model* $(_tf_model_output_dir) || true
   if [ "$DRY_RUN" != 'yes' ]; then
-    local uff_model_path=$(_uff_model_path)
+#    local uff_model_path=$(_uff_model_path)
     if [ ! -f $uff_model_path ]; then
       echo "INTERNAL ERROR: didn't find tensorrt uff file @ $uff_path after running save_tensorrt..."
       exit 1
@@ -825,12 +907,20 @@ mk_uff_model() {
 )
 }
 
+
+is_stable_baselines_uff_model() {
+  basename ${uff_model_path} | grep --quiet --perl-regexp 'tf_model'
+}
+is_minigo_uff_model() {
+  basename ${uff_model_path} | grep --quiet --perl-regexp 'minigo'
+}
+
 build_trt_from_uff() {
 (
   set -eu
   batch_size=${batch_size:-32}
 
-  local uff_model_path=$(_uff_model_path)
+#  local uff_model_path=$(_uff_model_path)
   if [ "$DRY_RUN" != 'yes' ]; then
     if [ ! -f $uff_model_path ]; then
       echo "ERROR: didn't find tensorrt uff file @ $uff_model_path; build it using mk_uff_model"
@@ -838,18 +928,41 @@ build_trt_from_uff() {
     fi
   fi
 
+  # TODO: How does fp16 perform?  That's what NVIDIA uses for minigo apparently.
   _make_install
+
   logfile=${uff_model_path}.log.txt
-  _do_with_logfile trtexec7 \
-    --uffNHWC \
-    --uffInput=input/Ob,84,84,4 \
-    --uff=${uff_model_path} \
-    --output=output/Softmax \
-    --batch=${batch_size} \
-    --saveEngine=${engine_path} \
-    --int8 \
-    --buildOnly \
-    --workspace=512
+  local common_args=(
+        --uff=${uff_model_path}
+        --batch=${batch_size}
+        --saveEngine=${engine_path}
+        --buildOnly
+        --workspace=512
+  )
+  _build_trt_stable_baselines() {
+      _do_with_logfile trtexec7 \
+        "${common_args[@]}" \
+        --uffNHWC \
+        --uffInput=input/Ob,84,84,4 \
+        --output=output/Softmax \
+        --int8
+  }
+  _build_trt_minigo() {
+      _do_with_logfile trtexec7 \
+        "${common_args[@]}" \
+        --uffInput=pos_tensor,13,19,19 \
+        --output=policy_output \
+        --output=value_output \
+        --fp16
+  }
+  if is_stable_baselines_uff_model; then
+      _build_trt_stable_baselines
+  elif is_minigo_uff_model; then
+      _build_trt_minigo
+  else
+      echo "ERROR: Not sure how to convert ${uff_model_path} into TensorRT model (need to know its outputs, and input shapes)"
+      exit 1
+  fi
 
   if [ "$DRY_RUN" != 'yes' ]; then
     local engine_path=$(_engine_path)
@@ -860,6 +973,33 @@ build_trt_from_uff() {
   fi
 
 )
+}
+
+_model_name() {
+(
+  set -eu
+  set -o pipefail
+  local model_path="$1"
+  shift 1
+  basename ${model_path} | perl -lape 's/\.(uff|pb)$//; s/\./-/g;'
+  #   | tr -d '\n'
+)
+}
+
+_uff_model_name() {
+(
+  set -eu
+  set -o pipefail
+  _model_name "${uff_model_path}"
+)
+}
+
+_model_attr() {
+  echo ".model_$(_uff_model_name)"
+}
+
+_model_attr_from() {
+  echo ".model_$(_model_name "$@")"
 }
 
 trtexec_expr() {
@@ -888,7 +1028,7 @@ trtexec_expr() {
     fi
   fi
 
-  iml_dir="$(_trtexec_output_dir)/${subdir}batch_size_${batch_size}.streams_${streams}$(_bool_attr threads $threads)$(_bool_attr cuda_graph $cuda_graph)$(_bool_attr hw_counters $hw_counters)"
+  iml_dir="$(_trtexec_output_dir)/${subdir}batch_size_${batch_size}.streams_${streams}$(_bool_attr threads $threads)$(_bool_attr cuda_graph $cuda_graph)$(_bool_attr hw_counters $hw_counters)$(_model_attr)"
 
   if [ -d $iml_dir ] && [ "$DRY_RUN" = 'no' ]; then
     if [ "$FORCE" != 'yes' ]; then
