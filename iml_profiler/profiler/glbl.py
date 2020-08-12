@@ -128,3 +128,15 @@ def handle_iml_args(parser, args, directory=None, reports_progress=False):
         reports_progress=reports_progress,
         args=args,
     )
+
+def handle_gflags_iml_args(FLAGS, directory=None, reports_progress=False):
+    """
+    Build an argument parser,
+    :return:
+
+    :param directory
+        The directory used by the ML-script for saving its own files.
+        If the user doesn't provide --iml-directory (i.e. a separate directory for storing profiling data),
+        we fall back on this.
+    """
+    return handle_iml_args(parser=None, args=FLAGS, directory=directory, reports_progress=reports_progress)

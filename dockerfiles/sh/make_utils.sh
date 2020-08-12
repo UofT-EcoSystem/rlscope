@@ -219,6 +219,11 @@ _check_STABLE_BASELINES_DIR() {
     _check_env_var STABLE_BASELINES_DIR "$description"
 }
 
+_check_TF_AGENTS_DIR() {
+    local description="The root directory of a checkout of the tf-agents repo (https://github.com/tensorflow/agents)"
+    _check_env_var TF_AGENTS_DIR "$description"
+}
+
 _check_RL_BASELINES_ZOO_DIR() {
     local description="The root directory of a checkout of the rl-baselines-zoo repo (https://github.com/araffin/rl-baselines-zoo)"
     _check_env_var RL_BASELINES_ZOO_DIR "$description"

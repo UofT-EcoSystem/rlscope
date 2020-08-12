@@ -108,7 +108,7 @@ REQUIRED_PACKAGES = [
     'seaborn >= 0.9.0',
     'tqdm >= 4.31.1',
     'py-cpuinfo == 4.0.0',
-    'gym == 0.13.0',
+    'gym >= 0.13.0',
 
     # Trying to get nvidia dockerfile to run with assembler.py
     'absl-py>=0.6.1',
@@ -125,6 +125,12 @@ REQUIRED_PACKAGES = [
     'pdbpp >= 0.10.0',
 
     'numba==0.46.0',
+
+    # Needed for TensorRT Python API.
+    'pycuda>=2019.1.2',
+
+    # Coloured logging.
+    'colorlog>=4.2.1'
 ]
 
 # NOTE: dependencies for building docker images are defined in dockerfiles/requirements.txt

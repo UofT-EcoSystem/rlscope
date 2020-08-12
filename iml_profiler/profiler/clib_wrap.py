@@ -612,15 +612,21 @@ def register_detected_libs():
     except ImportError:
         pass
 
-    # TODO: Looks like pywrap_tensorflow shared library object no longer exists in TensorFlow v2...
-    # Figure out where it's gone and wrap it
-    # try:
-    #     import tensorflow
-    #     register_wrap_module(wrap_tensorflow, unwrap_tensorflow)
-    # except ImportError:
-    #     pass
+    try:
+        import tensorflow
+        if is_tensorflow_v2():
+            if py_config.DEBUG_WRAP_CLIB:
+                logger.debug("Detected TensorFlow v2")
+            register_wrap_module(wrap_tensorflow_v2, unwrap_tensorflow_v2)
+        else:
+            if py_config.DEBUG_WRAP_CLIB:
+                logger.debug("Detected TensorFlow v1")
+            register_wrap_module(wrap_tensorflow_v1, unwrap_tensorflow_v1)
+    except ImportError:
+        if py_config.DEBUG_WRAP_CLIB:
+            logger.debug("TensorFlow is NOT installed")
 
-def wrap_tensorflow(category=CATEGORY_TF_API, debug=False):
+def wrap_tensorflow_v1(category=CATEGORY_TF_API, debug=False):
     logger.info("> IML: Wrapping module=tensorflow call with category={category} annotations".format(
         category=category,
     ))
@@ -631,13 +637,40 @@ def wrap_tensorflow(category=CATEGORY_TF_API, debug=False):
         wrapper_args=(category, DEFAULT_PREFIX, debug),
         func_regex='^TF_')
     assert success
-def unwrap_tensorflow():
+def unwrap_tensorflow_v1():
     if py_config.DEBUG_WRAP_CLIB:
         logger.info("> IML: Unwrapping module=tensorflow")
     wrap_util.unwrap_lib(
         CFuncWrapper,
         import_libname='tensorflow',
         wrap_libname='tensorflow.pywrap_tensorflow')
+
+def is_tensorflow_v2():
+    import tensorflow as tf
+    m = re.search(r'(?P<major>\d+)\.(?P<minor>\d+)\.(?P<patch>\d+)', tf.__version__)
+    return int(m.group('major')) >= 2
+
+def wrap_tensorflow_v2(category=CATEGORY_TF_API, debug=False):
+    logger.info("> IML: Wrapping module=tensorflow.python.pywrap_tfe call with category={category} annotations".format(
+        category=category,
+    ))
+    success = wrap_util.wrap_lib(
+        CFuncWrapper,
+        import_libname='tensorflow.python.pywrap_tfe',
+        wrap_libname='tensorflow.python.pywrap_tfe',
+        wrapper_args=(category, DEFAULT_PREFIX, debug),
+        # Q: Should we only wrap TFE_Py_Execute and TFE_Py_FastPathExecute?
+        # func_regex='^TFE_',
+        func_regex='^TFE_Py_(Execute|FastPathExecute)',
+    )
+    assert success
+def unwrap_tensorflow_v2():
+    if py_config.DEBUG_WRAP_CLIB:
+        logger.info("> IML: Unwrapping module=tensorflow.python.pywrap_tfe")
+    wrap_util.unwrap_lib(
+        CFuncWrapper,
+        import_libname='tensorflow.python.pywrap_tfe',
+        wrap_libname='tensorflow.python.pywrap_tfe')
 
 def wrap_atari(category=CATEGORY_ATARI):
     try:

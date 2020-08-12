@@ -21,7 +21,7 @@ seaborn >= 0.9.0
 tqdm >= 4.31.1
 py-cpuinfo == 4.0.0
 
-# pip requirements needed to run the deploy.sh script for deploying the IML docker dev 
+# pip requirements needed to run the deploy.sh script for deploying the IML docker dev
 # environment, described in the github wiki:
 #   https://github.com/UofT-EcoSystem/iml/wiki/Dockerized-development-environment#deploying-the-iml-dev-environment
 #
@@ -44,9 +44,12 @@ luigi==2.8.6
 ipdb >= 0.12
 # Debugger used for pytest
 pdbpp >= 0.10.0
-gym == 0.13.0
+gym >= 0.13.0
 
 numba==0.46.0
 
 # Needed for TensorRT Python API.
 pycuda>=2019.1.2
+
+# Coloured logging.
+colorlog>=4.2.1

@@ -1,5 +1,5 @@
-from iml_profiler.profiler.iml_logging import logger
 import pytest
+import argparse
 import cProfile, pstats, io
 import codecs
 import sys
@@ -146,6 +146,16 @@ def setup(tfprof_enabled, pyprof_enabled, allow_skip=False):
 
     if sample_cuda_api.is_used():
         sample_cuda_api.load_library()
+    else:
+        if tfprof_enabled:
+            logger.error(textwrap.dedent("""\
+            To profile using RLScope, you must re-run your command-line as:
+              $ iml-prof {cmd}
+            If you want to run without RLScope, add --iml-disable to the above command.
+            """).format(
+                cmd=' '.join(shlex.quote(opt) for opt in [sys.executable] + sys.argv),
+            ).rstrip())
+            sys.exit(1)
 
     if not uninstrumented_run:
         # iml_profiler.profiler.session.register_session_active_hook(AddProfileContextHook)
@@ -2827,32 +2837,115 @@ class PythonProfiler:
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.stop()
 
+
+def add_gflags_argument(flags, *args, **kwargs):
+    """
+    Translate add_argument from argparse into gflags DEFINE_* call.
+
+    :param flags:
+        from absl import flags
+                         -----
+    :param args:
+    :param kwargs:
+        ArgumentParser.add_argument(...)
+                                    ---
+    :return:
+    """
+
+    def raise_error():
+        raise NotImplementedError("Not sure how to translate argparse argument into absl.flags argument; add_argument(...) was called with\n{msg}".format(
+            msg=textwrap.indent(pprint.pprint({
+                'args': args,
+                'kwargs': kwargs,
+            }), prefix='  '),
+        ).rstrip())
+
+    def gflags_name(opt):
+        gflags_opt = opt
+        gflags_opt = re.sub('^--', '', gflags_opt)
+        gflags_opt = re.sub('-', '_', gflags_opt)
+        return gflags_opt
+
+    def mark_required(gflags_opt):
+        required = kwargs.get('required', False)
+        if required:
+            flags.mark_flag_as_required(gflags_opt)
+
+    arg_type = kwargs.get('type', None)
+    dflt = kwargs.get('default', None)
+    opt = args[0]
+    gflags_opt = gflags_name(opt)
+    help = kwargs.get('help', None)
+
+    # if gflags_opt == 'iml_disable_gpu_hw':
+    #     import pdb; pdb.set_trace()
+
+    action = kwargs.get('action', None)
+    if action is not None:
+        if action == 'store_true':
+            assert dflt is None
+            dflt = False
+        elif action == 'store_false':
+            assert dflt is None
+            dflt = True
+        else:
+            raise_error()
+        flags.DEFINE_bool(name=gflags_opt, default=dflt, help=help)
+        mark_required(gflags_opt)
+        return
+
+    if arg_type is None:
+        flags.DEFINE_string(name=gflags_opt, default=dflt, help=help)
+        mark_required(gflags_opt)
+        return
+    if arg_type == int:
+        flags.DEFINE_integer(name=gflags_opt, default=dflt, help=help)
+        mark_required(gflags_opt)
+        return
+    elif arg_type == float:
+        flags.DEFINE_float(name=gflags_opt, default=dflt, help=help)
+        mark_required(gflags_opt)
+        return
+    else:
+        pass
+
+    raise_error()
+
+def add_argument(parser, *args, **kwargs):
+    if isinstance(parser, argparse.ArgumentParser) or isinstance(parser, argparse._ArgumentGroup):
+        parser.add_argument(*args, **kwargs)
+    else:
+        add_gflags_argument(parser, *args, **kwargs)
+
 def add_iml_arguments(parser):
-    iml_parser = parser.add_argument_group("IML")
-    iml_parser.add_argument('--iml-nvprof-enabled', action='store_true', help=textwrap.dedent("""
+    if isinstance(parser, argparse.ArgumentParser):
+        iml_parser = parser.add_argument_group("IML")
+    else:
+        iml_parser = parser
+    add_argument(iml_parser, '--iml-nvprof-enabled', action='store_true', help=textwrap.dedent("""
         IML: is nvprof running?
         
         Internal use only; 
         used to determine whether this python script has been invoked using nvprof.
         If it hasn't, the script will re-invoke itself with nvprof.
     """))
-    # iml_parser.add_argument('--iml-tfprof', action='store_true', help=textwrap.dedent("""
+    # add_argument(iml_parser, '--iml-tfprof', action='store_true', help=textwrap.dedent("""
     #     IML: use tfprof TensorFlow profiling utility INSTEAD of nvprof.
     # """))
-    iml_parser.add_argument('--iml-num-calls', type=int, default=1000,
+    add_argument(iml_parser, '--iml-num-calls', type=int, default=1000,
                         help="IML: how many calls should be measured in a single trace?")
-    iml_parser.add_argument('--iml-trace-time-sec', type=float,
+    add_argument(iml_parser, '--iml-trace-time-sec', type=float,
                         help="IML: how long should we profile for, in seconds; "
                              "tracing will stop when either "
                              "we've collected --iml-num-traces OR "
                              "--iml-trace-time-sec has been exceeded")
-    iml_parser.add_argument('--iml-max-timesteps', type=int,
+    add_argument(iml_parser, '--iml-max-timesteps', type=int,
                             help=textwrap.dedent("""
                             IML: how long should we profile for, in timesteps; 
                             timestep progress is reported by calling 
                             iml.prof.report_progress(...)
                             """))
-    iml_parser.add_argument('--iml-max-training-loop-iters', type=int,
+    add_argument(iml_parser, '--iml-max-training-loop-iters', type=int,
                             help=textwrap.dedent("""
                             IML: how long should we profile for, in "training loop iterations"; 
                             a single "training loop iteration" is one call to iml.prof.report_progress. 
@@ -2861,29 +2954,29 @@ def add_iml_arguments(parser):
                             - e.g. DDPG advances 100 timesteps (nb_rollout_steps) before calling iml.prof.report_progress
                             - e.g. DQN advances 1 timestep before calling iml.prof.report_progress
                             """))
-    iml_parser.add_argument('--iml-delay-training-loop-iters', type=int,
+    add_argument(iml_parser, '--iml-delay-training-loop-iters', type=int,
                             help=textwrap.dedent("""
                             IML: Delay trace collection for the first X "training loop iterations"; 
                             see --iml-max-training-loop-iters for a description of training loop iterations.
                             """))
 
-    iml_parser.add_argument('--iml-max-passes', type=int,
+    add_argument(iml_parser, '--iml-max-passes', type=int,
                             help=textwrap.dedent("""
                             IML: how long should we profile for, in "passes" (i.e., calls to iml.prof.report_progress); 
                             a single "pass" is one call to iml.prof.report_progress. 
                             """))
-    iml_parser.add_argument('--iml-delay-passes', type=int,
+    add_argument(iml_parser, '--iml-delay-passes', type=int,
                             help=textwrap.dedent("""
                             IML: Delay trace collection for the first X "passes" (i.e., calls to iml.prof.report_progress).
                             """))
 
-    iml_parser.add_argument('--iml-internal-start-trace-time-sec', type=float,
+    add_argument(iml_parser, '--iml-internal-start-trace-time-sec', type=float,
                         help=textwrap.dedent("""
         IML: (internal use)
         The start time of tracing (in seconds). 
         This gets inherited by child processes.
     """))
-    iml_parser.add_argument('--iml-phase',
+    add_argument(iml_parser, '--iml-phase',
                         help=textwrap.dedent("""
         IML: (internal use)
         The "phase" of training captured by this script. 
@@ -2891,29 +2984,29 @@ def add_iml_arguments(parser):
         E.g. a single script could handle "simulator" and "gradient_update" phases.
         This gets inherited by child processes.
     """))
-    iml_parser.add_argument('--iml-internal-parent-process-name',
+    add_argument(iml_parser, '--iml-internal-parent-process-name',
                         help=textwrap.dedent("""
         IML: (internal use)
         The process name of the parent that launched this child python process.
         i.e. whatever was passed to iml_profiler.api.prof.set_process_name('forker')
         Internally, this is used for tracking "process dependencies".
     """))
-    iml_parser.add_argument('--iml-util-sampler-pid',
+    add_argument(iml_parser, '--iml-util-sampler-pid',
                         help=textwrap.dedent("""
         IML: (internal use)
         The pid of the utilization_sampler.py script that samples CPU/GPU utilization during training.
         We need to keep this so we can terminate it once we are done.
     """))
 
-    iml_parser.add_argument('--iml-num-traces', type=int,
+    add_argument(iml_parser, '--iml-num-traces', type=int,
                         # default=10,
                         help="IML: how many traces should be measured?")
-    iml_parser.add_argument('--iml-keep-traces', action='store_true', help=textwrap.dedent("""
+    add_argument(iml_parser, '--iml-keep-traces', action='store_true', help=textwrap.dedent("""
         IML: DON'T delete any existing trace files; keep them and append to them.
         
         Useful if your ML script launches worker processes repeatedly.
     """))
-    iml_parser.add_argument('--iml-python', action='store_true', help=textwrap.dedent("""
+    add_argument(iml_parser, '--iml-python', action='store_true', help=textwrap.dedent("""
         IML: Collecting python profiler (pyprof) data for profiled operations.
         
         Python profiling data is grouped into per-operation summaries, instead of 
@@ -2921,7 +3014,7 @@ def add_iml_arguments(parser):
         
         This prevent overwhelming the user with too much information.
     """))
-    iml_parser.add_argument('--iml-fuzz', action='store_true', help=textwrap.dedent("""
+    add_argument(iml_parser, '--iml-fuzz', action='store_true', help=textwrap.dedent("""
         IML: \"Fuzz\" the script for calls to TensorFlow API's.
         
         Useful if you have no idea where the training-loop of an ML script is located. 
@@ -2930,73 +3023,73 @@ def add_iml_arguments(parser):
         for e.g. sesssion.run(...) for running the computational graph
         (currently this is the only thing we trace).
     """))
-    iml_parser.add_argument('--iml-disable', action='store_true', help=textwrap.dedent("""
+    add_argument(iml_parser, '--iml-disable', action='store_true', help=textwrap.dedent("""
         IML: Skip any profiling.
     """))
-    iml_parser.add_argument('--iml-calibration', action='store_true', help=textwrap.dedent("""
+    add_argument(iml_parser, '--iml-calibration', action='store_true', help=textwrap.dedent("""
         IML: This is a calibration run. 
         Calibration runs change the semantics of the "iml-prof --config uninstrumented"; 
         in particular, usually "--config uninstrumented" would disable all of IML.
         However, for calibration runs, we use uninstrumented to disable CUPTI/CUDA-API level tracing, BUT 
         still run with python-level stuff (annotations, interceptions) enabled.
     """))
-    iml_parser.add_argument('--iml-disable-pyprof-annotations', action='store_true', help=textwrap.dedent("""
+    add_argument(iml_parser, '--iml-disable-pyprof-annotations', action='store_true', help=textwrap.dedent("""
         IML: Skip recording op-events.
     """))
-    iml_parser.add_argument('--iml-disable-pyprof-interceptions', action='store_true', help=textwrap.dedent("""
+    add_argument(iml_parser, '--iml-disable-pyprof-interceptions', action='store_true', help=textwrap.dedent("""
         IML: Skip recording of pyprof events by intercepting Python -> C-library calls.
         ( used for collecting simulator and TensorFlow C++ API time ).
     """))
-    iml_parser.add_argument('--iml-disable-pyprof', action='store_true', help=textwrap.dedent("""
+    add_argument(iml_parser, '--iml-disable-pyprof', action='store_true', help=textwrap.dedent("""
         IML: Skip any profiling (i.e. trace-collection, trace-dumping) related to python times.
     """))
-    iml_parser.add_argument('--iml-disable-tfprof', action='store_true', help=textwrap.dedent("""
+    add_argument(iml_parser, '--iml-disable-tfprof', action='store_true', help=textwrap.dedent("""
         IML: Skip any profiling (i.e. trace-collection, trace-dumping) related to GPU times.
     """))
-    iml_parser.add_argument('--iml-disable-pyprof-dump', action='store_true', help=textwrap.dedent("""
+    add_argument(iml_parser, '--iml-disable-pyprof-dump', action='store_true', help=textwrap.dedent("""
         IML: Skip pyprof trace-dumping, but NOT trace-collection.
     """))
-    iml_parser.add_argument('--iml-disable-tfprof-dump', action='store_true', help=textwrap.dedent("""
+    add_argument(iml_parser, '--iml-disable-tfprof-dump', action='store_true', help=textwrap.dedent("""
         IML: Skip tfprof trace-dumping, but NOT trace-collection.
     """))
-    iml_parser.add_argument('--iml-disable-pyprof-trace', action='store_true', help=textwrap.dedent("""
+    add_argument(iml_parser, '--iml-disable-pyprof-trace', action='store_true', help=textwrap.dedent("""
         IML: Disable most of pyprof trace-collection (but not entirely).
     """))
-    iml_parser.add_argument('--iml-disable-gpu-hw', action='store_true', help=textwrap.dedent("""
+    add_argument(iml_parser, '--iml-disable-gpu-hw', action='store_true', help=textwrap.dedent("""
         IML: Disable GPU HW sampling trace-collection.
     """))
-    iml_parser.add_argument('--iml-delay', action='store_true', help=textwrap.dedent("""
+    add_argument(iml_parser, '--iml-delay', action='store_true', help=textwrap.dedent("""
         IML: Delay trace collection until your training script has warmed up; 
         you must signal this to IML by calling iml.prof.enable_tracing() when that happens 
         (as is done in the annotated stable-baselines algorithm implementations e.g. DQN).
         
         If you DON'T provide this, then tracing begins immediately starting from "with iml.prof.profiler(...)".
     """))
-    iml_parser.add_argument('--iml-just-sample-util', action='store_true', help=textwrap.dedent("""
+    add_argument(iml_parser, '--iml-just-sample-util', action='store_true', help=textwrap.dedent("""
         IML: collect machine utilization data and output it to --iml-directory.
         
         NOTE: this will NOT collect profiling information.
     """))
-    iml_parser.add_argument('--iml-training-progress', action='store_true', help=textwrap.dedent("""
+    add_argument(iml_parser, '--iml-training-progress', action='store_true', help=textwrap.dedent("""
         IML: collect training progress data and output it to --iml-directory.
         
         NOTE: This is ON by default, except if --iml-disable is given, in which case you must provide this.
     """))
-    iml_parser.add_argument('--iml-unit-test',
+    add_argument(iml_parser, '--iml-unit-test',
                         action='store_true',
                         help=textwrap.dedent("""
     IML: (for unit-testing) Record "actual results" needed for doing basics unit-test checks.
     """))
-    iml_parser.add_argument('--iml-unit-test-name',
+    add_argument(iml_parser, '--iml-unit-test-name',
                         help=textwrap.dedent("""
     IML: (for unit-testing) name to store in IMLUnitTest.test_name.
     """))
-    iml_parser.add_argument('--iml-debug', action='store_true', help=textwrap.dedent("""
+    add_argument(iml_parser, '--iml-debug', action='store_true', help=textwrap.dedent("""
         IML: debug profiler.
     """))
-    iml_parser.add_argument('--iml-start-measuring-call', default=1, type=int,
+    add_argument(iml_parser, '--iml-start-measuring-call', default=1, type=int,
                         help="IML: when should measuring begin?")
-    iml_parser.add_argument('--iml-bench-name',
+    add_argument(iml_parser, '--iml-bench-name',
                         default=NO_BENCH_NAME,
                         help=textwrap.dedent("""
     IML: which code block should we measure?
@@ -3004,11 +3097,11 @@ def add_iml_arguments(parser):
         # Just measure "some_bench", nothing else.
         profiler.profile('some_bench', do_some_bench)
     """))
-    iml_parser.add_argument('--iml-directory',
+    add_argument(iml_parser, '--iml-directory',
                         help=textwrap.dedent("""
     IML: profiling output directory.
     """))
-    parser.add_argument('--iml-skip-rm-traces', action='store_true', help=textwrap.dedent("""
+    add_argument(iml_parser, '--iml-skip-rm-traces', action='store_true', help=textwrap.dedent("""
     DON'T remove traces files from previous runs rooted at --iml-directory.
     Useful if your training script has multiple training scripts that need to be traced with IML.
     """))

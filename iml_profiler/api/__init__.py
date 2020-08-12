@@ -10,7 +10,11 @@ from iml_profiler.profiler.util import \
 prof = None
 from iml_profiler.profiler.glbl import \
   handle_iml_args, \
+  handle_gflags_iml_args, \
   init_session
+
+from iml_profiler.profiler.iml_logging import \
+  logger
 
 from iml_profiler.protobuf.pyprof_pb2 import \
   CategoryEventsProto
