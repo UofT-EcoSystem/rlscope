@@ -45,6 +45,13 @@ _add_LD_LIBRARY_PATH() {
   echo "> INFO: Add to LD_LIBRARY_PATH: $lib_dir"
   export LD_LIBRARY_PATH="$lib_dir:$LD_LIBRARY_PATH"
 }
+_add_PYTHONPATH() {
+  local lib_dir="$1"
+  shift 1
+
+  echo "> INFO: Add to PYTHONPATH: $lib_dir"
+  export PYTHONPATH="$lib_dir:$PYTHONPATH"
+}
 
 (
 IML_INSTALL_PREFIX_DEFINED=no
@@ -62,6 +69,7 @@ echo "> INFO: [defined=${IML_BUILD_PREFIX_DEFINED}] IML_BUILD_PREFIX=${IML_BUILD
 echo "> INFO: Using CMAKE_INSTALL_PREFIX=$(_local_dir)"
 _add_LD_LIBRARY_PATH "$(_local_dir)/lib"
 _add_PATH "$(_local_dir)/bin"
+_add_PYTHONPATH "$(_local_dir)/lib/python3/dist-packages"
 
 unset _add_LD_LIBRARY_PATH
 unset _add_PATH

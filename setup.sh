@@ -9,6 +9,8 @@ set -u
 JOBS=${JOBS:-$(nproc)}
 echo "> Using JOBS=$JOBS"
 
+IML_CUDA_VERSION=${IML_CUDA_VERSION:-10.1}
+
 # Force re-running setup
 FORCE=${FORCE:-no}
 #if [ "$FORCE" = "" ]; then
@@ -659,7 +661,14 @@ main() {
     _do setup_ctpl_cpp_library
     # NOTE: IDEALLY we would install it do a SEPARATE directory... but I'm not 100% sure how to make that work nicely
     # and still have all the "installed" stuff in the same directory.
-    _do setup_project_cuda_10_1
+    if [ "${IML_CUDA_VERSION}" = '10.1' ]; then
+      _do setup_project_cuda_10_1
+    elif [ "${IML_CUDA_VERSION}" = '10.2' ]; then
+      _do setup_project_cuda_10_2
+    else
+      echo "ERROR: Not sure how to build RLScope for IML_CUDA_VERSION=${IML_CUDA_VERSION}; try 10.1 or 10.2 instead." >2
+      exit 1
+    fi
     echo "> Success!"
 }
 

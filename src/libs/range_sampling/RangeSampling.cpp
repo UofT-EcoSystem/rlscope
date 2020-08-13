@@ -1598,6 +1598,54 @@ bool GPUHwCounterSampler::IsProtoFile(const boost::filesystem::path& path) {
   return std::regex_search(path.filename().string(), match, FilenameRegex);
 }
 
+size_t GPUHwCounterSampler::MaxNestingLevels() const {
+  return _range_tree.RecordedStats().max_nesting_levels;
+}
+
+size_t GPUHwCounterSampler::UseMaxNestingLevels() const {
+  return MaxNestingLevels();
+}
+
+size_t GPUHwCounterSampler::MaxUniqueRanges() const {
+  return _range_tree.RecordedStats().max_unique_ranges;
+}
+
+size_t GPUHwCounterSampler::MaxRangeNameLength() const {
+  return _range_tree.RecordedStats().max_range_name_length;
+}
+
+size_t GPUHwCounterSampler::UseMaxRangeNameLength() const {
+  return MaxRangeNameLength();
+}
+
+size_t GPUHwCounterSampler::MaxNumRanges() const {
+  return _range_tree.RecordedStats().max_num_ranges;
+}
+
+size_t GPUHwCounterSampler::UseMaxNumRanges() const {
+// Last annotation is still missing entirely.
+//  size_t use_max_ranges = MaxUniqueRanges() + 1;
+// Causes NaN's in metrics for last annotation recorded.
+//  size_t use_max_ranges = MaxNumRanges() - 1;
+// Causes last annotation to be missing entirely.
+//  size_t use_max_ranges = MaxUniqueRanges();
+  size_t use_max_ranges = MaxNumRanges();
+//  size_t use_max_ranges = 2*MaxNumRanges();
+  if (SHOULD_DEBUG(FEATURE_GPU_HW)) {
+    std::stringstream ss;
+    ss << "GPUHwCounterSampler configuration info: "
+       << std::endl
+       << "  MaxNumRanges() = " << MaxNumRanges()
+       << std::endl
+       << "  MaxUniqueRanges() = " << MaxUniqueRanges()
+       << std::endl
+       << "  use_max_ranges = " << use_max_ranges
+        ;
+    RLS_LOG("GPU_HW", "{}", ss.str());
+  }
+  return use_max_ranges;
+}
+
 const RangeTreeStats& RangeTree::RecordedStats() const {
   // If this fails, we forgot to call RangeTree::EndPass (called from GPUHwCounterSampler::EndPass).
   assert(recorded_stats.initialized);

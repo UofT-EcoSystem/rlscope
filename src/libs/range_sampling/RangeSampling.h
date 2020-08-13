@@ -600,38 +600,15 @@ public:
   // We can keep config in each protobuf file...for now.
   bool IsProtoFile(const boost::filesystem::path &path);
 
-  inline size_t MaxNestingLevels() const {
-    return _range_tree.RecordedStats().max_nesting_levels;
-  }
 
+  size_t MaxNestingLevels() const;
+  size_t UseMaxNestingLevels() const;
+  size_t MaxUniqueRanges() const;
+  size_t MaxRangeNameLength() const;
+  size_t UseMaxRangeNameLength() const;
+  size_t MaxNumRanges() const;
+  size_t UseMaxNumRanges() const;
 
-  inline size_t UseMaxNestingLevels() const {
-    return MaxNestingLevels();
-  }
-
-  // inline size_t MaxUniqueRanges() const {
-  //   return _range_tree.RecordedStats().max_unique_ranges;
-  // }
-
-  // inline size_t UseMaxUniqueRanges() const {
-  //   return MaxUniqueRanges();
-  // }
-
-  inline size_t MaxRangeNameLength() const {
-    return _range_tree.RecordedStats().max_range_name_length;
-  }
-
-  inline size_t UseMaxRangeNameLength() const {
-    return MaxRangeNameLength();
-  }
-
-  inline size_t MaxNumRanges() const {
-    return _range_tree.RecordedStats().max_num_ranges;
-  }
-
-  inline size_t UseMaxNumRanges() const {
-    return MaxNumRanges();
-  }
 
 
 //    bool IsEnabled();

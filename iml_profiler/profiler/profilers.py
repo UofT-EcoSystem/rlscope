@@ -1159,7 +1159,7 @@ class Profiler:
     def _should_enable_tracing(self):
         if py_config.DEBUG and py_config.DEBUG_GPU_HW:
             if not self._tracing_enabled:
-                rls_log('GPU_HW',
+                logger.info(rls_log_msg('GPU_HW',
                         textwrap.dedent(f"""\
                             tracing_enabled = {self._tracing_enabled}
                             has_called_enable_tracing = {self._has_called_enable_tracing}
@@ -1169,7 +1169,7 @@ class Profiler:
                             delay_passes = {self.delay_passes}
                                num_passes =  {self.num_passes}
                                delay_passes =  {self.delay_passes}
-                        """))
+                        """)))
         if self._tracing_enabled:
             return False
         if not self._has_called_enable_tracing:
@@ -1392,14 +1392,14 @@ class Profiler:
     def _start_pass(self):
         assert not self._hw_pass_running
         if py_config.DEBUG and py_config.DEBUG_GPU_HW:
-            rls_log('GPU_HW', f"start_pass")
+            logger.info(rls_log_msg('GPU_HW', f"start_pass"))
         self._hw_pass_running = True
         sample_cuda_api.start_pass()
 
     def _end_pass(self):
         assert self._hw_pass_running
         if py_config.DEBUG and py_config.DEBUG_GPU_HW:
-            rls_log('GPU_HW', f"end_pass")
+            logger.info(rls_log_msg('GPU_HW', f"end_pass"))
         self._hw_pass_running = False
         sample_cuda_api.end_pass()
         self.has_next_pass = self._has_next_pass()
@@ -1407,7 +1407,7 @@ class Profiler:
     def _has_next_pass(self):
         assert not self._hw_pass_running
         if py_config.DEBUG and py_config.DEBUG_GPU_HW:
-            rls_log('GPU_HW', f"has_next_pass")
+            logger.info(rls_log_msg('GPU_HW', f"has_next_pass"))
         return sample_cuda_api.has_next_pass()
 
     @property
@@ -2548,7 +2548,7 @@ class Profiler:
             self._end_pass()
 
         if py_config.DEBUG and py_config.DEBUG_GPU_HW:
-            rls_log('GPU_HW', f"tracing_enabled = {self._tracing_enabled}, percent_complete = {percent_complete}")
+            logger.info(rls_log_msg('GPU_HW', f"tracing_enabled = {self._tracing_enabled}, percent_complete = {percent_complete}"))
         if self._tracing_enabled and percent_complete > 0 and percent_complete < 1.:
             self._start_pass()
 
@@ -3520,5 +3520,5 @@ def get_tensorflow_config():
 
     return conf
 
-def rls_log(flag_name, msg):
-    logger.info(f"[{flag_name}] {msg}")
+def rls_log_msg(flag_name, msg):
+    return f"[{flag_name}] {msg}"
