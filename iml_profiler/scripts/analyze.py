@@ -88,10 +88,10 @@ def main():
 
     luigi_argv.extend(['--workers', str(args.workers)])
 
-    # pprint.pprint({
+    # logger.debug("Luigi arguments:\n{msg}".format(msg=textwrap.indent(pprint.pformat({
     #     'luigi_argv':luigi_argv,
     #     'sys.argv':sys.argv,
-    # })
+    # }), prefix='  ')))
 
     tasks.main(argv=luigi_argv[1:], should_exit=False)
 

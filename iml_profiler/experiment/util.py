@@ -187,18 +187,18 @@ def expr_run_cmd(cmd, to_file,
             failed = False
         except subprocess.CalledProcessError as e:
             if not skip_error:
-                logger.info((
+                logger.error((
                                  "> Command failed: see {path}; exiting early "
                                  "(use --skip-error to ignore individual experiment errors)"
                              ).format(path=to_file))
                 ret = 1
                 if debug:
-                    logger.info("Exiting with ret={ret}\n{stack}".format(
+                    logger.error("Exiting with ret={ret}\n{stack}".format(
                         ret=ret,
                         stack=get_stacktrace(),
                     ))
                 sys.exit(ret)
-            logger.info(
+            logger.error(
                 "> Command failed; see {path}; continuing (--skip-error was set)".format(
                     path=to_file,
                 ))
@@ -206,7 +206,7 @@ def expr_run_cmd(cmd, to_file,
 
         if not failed:
             if not dry_run and proc.returncode != 0:
-                logger.info("BUG: saw returncode = {ret}, expected 0".format(
+                logger.error("BUG: saw returncode = {ret}, expected 0".format(
                     ret=proc.returncode))
                 assert proc.returncode == 0
             if not dry_run:

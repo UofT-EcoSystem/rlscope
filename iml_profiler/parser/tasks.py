@@ -458,9 +458,26 @@ def _mk(kwargs, TaskKlass):
 # $ cd $IML_DIR
 # $ source source_me.sh
 CPP_ANALYZE_BIN = 'rls-analyze'
-class CppAnalyze(IMLTask):
+class RLSAnalyze(IMLTask):
 
     # NOT optional (to ensure we remember to do overhead correction).
+    # iml_directory = luigi.Parameter(description="Location of trace-files")
+    mode = luigi.ChoiceParameter(
+        choices=[
+            'overlap',
+            'gpu_hw',
+        ],
+        default='overlap',
+        description=textwrap.dedent("""\
+        overlap:
+          Calculate the time spent in different parts of the RL software stack, scoped to high-level user operations.
+          i.e.
+          CPU - TensorFlow C++, Simulator, Python
+          GPU - kernel executions
+          
+        gpu_hw:
+          Calculate GPU hardware counters scoped to high-level user operations.
+        """).rstrip())
     cupti_overhead_json = param_cupti_overhead_json
     LD_PRELOAD_overhead_json = param_LD_PRELOAD_overhead_json
     python_annotation_json = param_python_annotation_json
@@ -473,7 +490,7 @@ class CppAnalyze(IMLTask):
         cmd = [CPP_ANALYZE_BIN]
         cmd.extend([
             '--iml_directory', self.iml_directory,
-            '--mode', 'overlap',
+            '--mode', self.mode,
 
             '--cupti_overhead_json', self.cupti_overhead_json,
             '--LD_PRELOAD_overhead_json', self.LD_PRELOAD_overhead_json,
@@ -505,7 +522,7 @@ class All(IMLTask):
         kwargs = self.param_kwargs
 
         return [
-            _mk(kwargs, CppAnalyze),
+            _mk(kwargs, RLSAnalyze),
             _mk(kwargs, HeatScaleTask),
             _mk(kwargs, VennJsPlotTask),
         ]
@@ -535,7 +552,7 @@ class HeatScaleTask(IMLTask):
         kwargs = self.param_kwargs
 
         return [
-            _mk(kwargs, CppAnalyze),
+            _mk(kwargs, RLSAnalyze),
         ]
 
     def iml_run(self):
@@ -569,7 +586,7 @@ class ConvertResourceOverlapToResourceSubplotTask(IMLTask):
     #     kwargs = self.param_kwargs
     #
     #     return [
-    #         _mk(kwargs, CppAnalyze),
+    #         _mk(kwargs, RLSAnalyze),
     #     ]
 
     def iml_run(self):
@@ -1316,7 +1333,7 @@ class VennJsPlotTask(IMLTask):
         kwargs = self.param_kwargs
 
         return [
-            _mk(kwargs, CppAnalyze),
+            _mk(kwargs, RLSAnalyze),
         ]
 
     # def output(self):

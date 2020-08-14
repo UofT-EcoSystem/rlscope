@@ -117,7 +117,7 @@ REQUIRED_PACKAGES = [
     'PyYAML==5.1',
 
     # iml-analyze
-    'psycopg2==2.7.7',
+    # 'psycopg2==2.7.7',
     'luigi==2.8.6',
     # Debugger used for development
     'ipdb >= 0.12',
@@ -157,6 +157,7 @@ CONSOLE_SCRIPTS = [
     'iml-bench = iml_profiler.scripts.bench:main',
     'iml-quick-expr = iml_profiler.scripts.quick_expr:main',
     'iml-prof = iml_profiler.scripts.cuda_api_prof:main',
+    'iml-calibrate = iml_profiler.parser.calibration:main',
     'iml-generate-plot-index = iml_profiler.scripts.generate_iml_profiler_plot_index:main',
 ]
 # pylint: enable=line-too-long

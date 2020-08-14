@@ -38,7 +38,7 @@ docker==4.0.1
 PyYAML==5.1
 
 # iml-analyze
-psycopg2==2.7.7
+# psycopg2==2.7.7
 luigi==2.8.6
 # Debugger used for development
 ipdb >= 0.12

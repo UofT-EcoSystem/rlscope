@@ -98,14 +98,15 @@ WARN_EVERY_SEC = 10
 # STEPS_PER_TRACE = 10
 
 _TF_MODIFIED = False
-def modify_tensorflow(tfprof_enabled, pyprof_enabled):
+def modify_tensorflow(tfprof_enabled, pyprof_enabled, allow_missing_librlscope=False):
     global _TF_MODIFIED
     if _TF_MODIFIED:
         return
 
     uninstrumented_run = not tfprof_enabled and not pyprof_enabled
 
-    setup(tfprof_enabled, pyprof_enabled)
+    setup(tfprof_enabled, pyprof_enabled,
+          allow_missing_librlscope=allow_missing_librlscope)
     if not uninstrumented_run:
         iml_profiler.profiler.session.setup()
         iml_profiler.profiler.estimator.setup()
@@ -125,7 +126,7 @@ PROFILERS = []
 
 
 SETUP_DONE = False
-def setup(tfprof_enabled, pyprof_enabled, allow_skip=False):
+def setup(tfprof_enabled, pyprof_enabled, allow_skip=False, allow_missing_librlscope=False):
     global SETUP_DONE
     if allow_skip and SETUP_DONE:
         return
@@ -147,7 +148,8 @@ def setup(tfprof_enabled, pyprof_enabled, allow_skip=False):
     if sample_cuda_api.is_used():
         sample_cuda_api.load_library()
     else:
-        if tfprof_enabled:
+        if not allow_missing_librlscope:
+            # if tfprof_enabled:
             logger.error(textwrap.dedent("""\
             To profile using RLScope, you must re-run your command-line as:
               $ iml-prof {cmd}
@@ -684,6 +686,8 @@ class Profiler:
                  disable_tfprof=None,
                  disable_pyprof_trace=None,
                  disable_gpu_hw=None,
+                 env=None,
+                 algo=None,
                  delay=None,
                  delay_training_loop_iters=None,
                  max_training_loop_iters=None,
@@ -740,6 +744,18 @@ class Profiler:
                                 allow_none=allow_none, internal=True)
             return argval
 
+        self.algo = algo
+        self.env = env
+
+        self.metadata = dict()
+        add_metadata = dict()
+        if self.algo is not None:
+            add_metadata['algo'] = self.algo
+        if self.env is not None:
+            add_metadata['env'] = self.env
+        if len(add_metadata) > 0:
+            self.set_metadata(add_metadata)
+
         self._failing = False
         self._has_called_enable_tracing = False
         self.num_training_loop_iters = 0
@@ -780,7 +796,6 @@ class Profiler:
         self.just_sample_util = get_argval('just_sample_util', just_sample_util, False)
         self.training_progress = get_argval('training_progress', training_progress, False)
         self._loaded_libcupti = False
-        self.metadata = dict()
 
         tfprof_enabled = not self.disable and not self.disable_tfprof
         # pyprof_enabled = Do we want to enable Python->C++ interception for collecting pyprof events?
@@ -788,10 +803,11 @@ class Profiler:
         modify_tensorflow(
             tfprof_enabled=tfprof_enabled,
             pyprof_enabled=pyprof_enabled,
+            allow_missing_librlscope=self.disable,
         )
         if self.disable:
             logger.info("IML: note that profiling is disabled for this run")
-        if self.disable or self.disable_gpu_hw:
+        if ( self.disable or self.disable_gpu_hw ) and sample_cuda_api.is_used():
             logger.info("(--iml-disable-gpu-hw) Disable GPU HW sampling")
             sample_cuda_api.disable_gpu_hw()
 
@@ -1274,7 +1290,8 @@ class Profiler:
 
         if self.debug:
             logger.info('Start iml-prof libcupti tracing')
-        sample_cuda_api.enable_tracing()
+        if sample_cuda_api.is_used():
+            sample_cuda_api.enable_tracing()
 
         self._iml_prof_enabled = True
 
@@ -1285,9 +1302,8 @@ class Profiler:
         if self.debug:
             logger.info('Stop iml-prof libcupti tracing')
 
-        assert sample_cuda_api.is_used()
-
-        sample_cuda_api.disable_tracing()
+        if sample_cuda_api.is_used():
+            sample_cuda_api.disable_tracing()
 
         self._iml_prof_enabled = False
 
@@ -1382,33 +1398,40 @@ class Profiler:
         assert bench_name not in self._op_stack
         assert bench_name != NO_BENCH_NAME
         self._op_stack.append(bench_name)
-        sample_cuda_api.push_operation(bench_name)
+        if sample_cuda_api.is_used():
+            sample_cuda_api.push_operation(bench_name)
 
     def _pop_operation(self, bench_name):
         assert self._op_stack[-1] == bench_name
         self._op_stack.pop()
-        sample_cuda_api.pop_operation()
+        if sample_cuda_api.is_used():
+            sample_cuda_api.pop_operation()
 
     def _start_pass(self):
         assert not self._hw_pass_running
         if py_config.DEBUG and py_config.DEBUG_GPU_HW:
             logger.info(rls_log_msg('GPU_HW', f"start_pass"))
-        self._hw_pass_running = True
-        sample_cuda_api.start_pass()
+        if sample_cuda_api.is_used():
+            self._hw_pass_running = True
+            sample_cuda_api.start_pass()
 
     def _end_pass(self):
         assert self._hw_pass_running
         if py_config.DEBUG and py_config.DEBUG_GPU_HW:
             logger.info(rls_log_msg('GPU_HW', f"end_pass"))
-        self._hw_pass_running = False
-        sample_cuda_api.end_pass()
-        self.has_next_pass = self._has_next_pass()
+        if sample_cuda_api.is_used():
+            self._hw_pass_running = False
+            sample_cuda_api.end_pass()
+            self.has_next_pass = self._has_next_pass()
 
     def _has_next_pass(self):
         assert not self._hw_pass_running
         if py_config.DEBUG and py_config.DEBUG_GPU_HW:
             logger.info(rls_log_msg('GPU_HW', f"has_next_pass"))
-        return sample_cuda_api.has_next_pass()
+        if sample_cuda_api.is_used():
+            return sample_cuda_api.has_next_pass()
+        else:
+            return False
 
     @property
     def _cur_operation(self):
@@ -1474,6 +1497,7 @@ class Profiler:
         tensorflow_config = get_tensorflow_config()
         attrs['tensorflow_config'] = tensorflow_config
         attrs['env'] = dict(os.environ)
+        attrs['metadata'] = dict(self.metadata)
         if self.debug:
             logger.info("Dump IML configuration information to {path}".format(path=path))
         dump_json(attrs, path)
@@ -2374,7 +2398,7 @@ class Profiler:
         total_trace_time_sec = self._total_trace_time_sec()
         ret = finish_now or (
             (
-                self.disable_gpu_hw or not self.has_next_pass
+                not sample_cuda_api.is_used() or self.disable_gpu_hw or not self.has_next_pass
             ) and (
                 (
                     self.num_traces is not None and
@@ -2860,10 +2884,11 @@ def add_gflags_argument(flags, *args, **kwargs):
             }), prefix='  '),
         ).rstrip())
 
-    def gflags_name(opt):
+    def gflags_name(opt, underscores=False):
         gflags_opt = opt
         gflags_opt = re.sub('^--', '', gflags_opt)
-        gflags_opt = re.sub('-', '_', gflags_opt)
+        if underscores:
+            gflags_opt = re.sub('-', '_', gflags_opt)
         return gflags_opt
 
     def mark_required(gflags_opt):
@@ -2871,45 +2896,55 @@ def add_gflags_argument(flags, *args, **kwargs):
         if required:
             flags.mark_flag_as_required(gflags_opt)
 
-    arg_type = kwargs.get('type', None)
-    dflt = kwargs.get('default', None)
     opt = args[0]
-    gflags_opt = gflags_name(opt)
-    help = kwargs.get('help', None)
+    def _add_argument(gflags_opt):
+        arg_type = kwargs.get('type', None)
+        help = kwargs.get('help', None)
+        dflt = kwargs.get('default', None)
 
-    # if gflags_opt == 'iml_disable_gpu_hw':
-    #     import pdb; pdb.set_trace()
+        action = kwargs.get('action', None)
+        if action is not None:
+            if action == 'store_true':
+                assert dflt is None
+                dflt = False
+            elif action == 'store_false':
+                assert dflt is None
+                dflt = True
+            else:
+                raise_error()
+            flags.DEFINE_bool(name=gflags_opt, default=dflt, help=help)
+            mark_required(gflags_opt)
+            return
 
-    action = kwargs.get('action', None)
-    if action is not None:
-        if action == 'store_true':
-            assert dflt is None
-            dflt = False
-        elif action == 'store_false':
-            assert dflt is None
-            dflt = True
+        if arg_type is None:
+            flags.DEFINE_string(name=gflags_opt, default=dflt, help=help)
+            mark_required(gflags_opt)
+            return
+        if arg_type == int:
+            flags.DEFINE_integer(name=gflags_opt, default=dflt, help=help)
+            mark_required(gflags_opt)
+            return
+        elif arg_type == float:
+            flags.DEFINE_float(name=gflags_opt, default=dflt, help=help)
+            mark_required(gflags_opt)
+            return
         else:
-            raise_error()
-        flags.DEFINE_bool(name=gflags_opt, default=dflt, help=help)
-        mark_required(gflags_opt)
-        return
+            pass
 
-    if arg_type is None:
-        flags.DEFINE_string(name=gflags_opt, default=dflt, help=help)
-        mark_required(gflags_opt)
-        return
-    if arg_type == int:
-        flags.DEFINE_integer(name=gflags_opt, default=dflt, help=help)
-        mark_required(gflags_opt)
-        return
-    elif arg_type == float:
-        flags.DEFINE_float(name=gflags_opt, default=dflt, help=help)
-        mark_required(gflags_opt)
-        return
-    else:
-        pass
+        raise_error()
 
-    raise_error()
+    dashed_gflags_opt = gflags_name(opt)
+    # underscore_gflags_opt = gflags_name(opt, underscores=True)
+
+    _add_argument(dashed_gflags_opt)
+    # _add_argument(underscore_gflags_opt)
+
+def fix_gflags_iml_args(FLAGS):
+    for attr in dir(FLAGS):
+        if re.search(r'^iml-', attr):
+            gflags_opt = re.sub(r'-', '_', attr)
+            if not hasattr(FLAGS, gflags_opt):
+                FLAGS[gflags_opt] = FLAGS[attr]
 
 def add_argument(parser, *args, **kwargs):
     if isinstance(parser, argparse.ArgumentParser) or isinstance(parser, argparse._ArgumentGroup):
@@ -2934,6 +2969,10 @@ def add_iml_arguments(parser):
     # """))
     add_argument(iml_parser, '--iml-num-calls', type=int, default=1000,
                         help="IML: how many calls should be measured in a single trace?")
+    add_argument(iml_parser, '--iml-env',
+                 help="IML: Name of environment")
+    add_argument(iml_parser, '--iml-algo',
+                 help="IML: Name of RL algorithm")
     add_argument(iml_parser, '--iml-trace-time-sec', type=float,
                         help="IML: how long should we profile for, in seconds; "
                              "tracing will stop when either "

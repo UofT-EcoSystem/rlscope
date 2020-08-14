@@ -15,6 +15,8 @@ from iml_profiler.parser.common import *
 
 from iml_profiler.profiler.iml_logging import logger
 
+DEFAULT_CONFIG = 'full'
+
 def main():
 
     iml_prof_argv, cmd_argv = gather_argv(sys.argv[1:])
@@ -92,6 +94,11 @@ def main():
                         
                         Effect: sets "export IML_STREAM_SAMPLING=yes" for librlscope.so.
                         """))
+    parser.add_argument('--calibrate', action='store_true',
+                        help=textwrap.dedent("""
+                        Perform multiple runs in order to calibrate for profiling overhead 
+                        specific to the workload being run.
+                        """))
     parser.add_argument('--config',
                         choices=['interception',
                                  'no-interception',
@@ -99,11 +106,13 @@ def main():
                                  'gpu-activities-api-time',
                                  'no-gpu-activities',
                                  'full',
+                                 'time-breakdown',
                                  'gpu-hw',
                                  'uninstrumented',
                                  ],
+                        # Detect if user provides --config or not.
                         # By default, run with full IML instrumentation.
-                        default='full',
+                        # default=DEFAULT_CONFIG,
                         help=textwrap.dedent("""
                         For measuring LD_PRELOAD CUDA API interception overhead:
                             interception:
@@ -163,38 +172,63 @@ def main():
         if getattr(args, attr) is None:
             setattr(args, attr, value)
 
-    if args.config is not None:
-        add_env['IML_CONFIG'] = args.config
-        if args.config == 'interception':
-            "iml-prof --debug --cuda-api-calls --cuda-api-events"
-            _set_if_none('cuda_api_calls', True)
-            _set_if_none('cuda_api_events', True)
-        elif args.config in ['no-interception', 'uninstrumented']:
-            "iml-prof --debug"
-            pass
-        elif args.config == 'gpu-hw':
-            "$ iml-prof --debug --gpu-hw"
-            _set_if_none('gpu_hw', True)
-        elif args.config == 'no-gpu-activities':
-            "$ iml-prof --debug --cuda-api-calls"
-            _set_if_none('cuda_api_calls', True)
-        elif args.config == 'gpu-activities':
-            "$ iml-prof --debug --cuda-api-calls --cuda-activities"
-            _set_if_none('cuda_api_calls', True)
-            _set_if_none('cuda_activities', True)
-        elif args.config == 'gpu-activities-api-time':
-            "$ iml-prof --debug --cuda-api-calls --cuda-api-events --cuda-activities"
-            _set_if_none('cuda_api_calls', True)
-            _set_if_none('cuda_api_events', True)
-            _set_if_none('cuda_activities', True)
-        elif args.config == 'full':
-            "$ iml-prof --cuda-api-calls --cuda-api-events --cuda-activities"
-            _set_if_none('cuda_api_calls', True)
-            _set_if_none('cuda_api_events', True)
-            _set_if_none('cuda_activities', True)
-            _set_if_none('gpu_hw', True)
-        else:
-            raise NotImplementedError()
+    if args.calibrate:
+        if args.config is not None:
+            logger.error("Only --calibrate or --config should be provided for iml-prof.")
+            parser.exit(1)
+        # Run calibrate.py
+        cmd = ['iml-calibrate']
+        cmd.extend(iml_prof_argv)
+        cmd.extend(cmd_argv)
+        cmd.remove('--calibrate')
+        print_cmd(cmd)
+        try:
+            proc = subprocess.run(cmd, check=False)
+            sys.exit(proc.returncode)
+        except KeyboardInterrupt:
+            logger.info("Saw Ctrl-C during calibration; aborting remaining runs.")
+            sys.exit(1)
+
+    if args.config is None:
+        args.config = DEFAULT_CONFIG
+
+    add_env['IML_CONFIG'] = args.config
+    if args.config == 'interception':
+        "iml-prof --debug --cuda-api-calls --cuda-api-events"
+        _set_if_none('cuda_api_calls', True)
+        _set_if_none('cuda_api_events', True)
+    elif args.config in ['no-interception', 'uninstrumented']:
+        "iml-prof --debug"
+        pass
+    elif args.config == 'gpu-hw':
+        "$ iml-prof --debug --gpu-hw"
+        _set_if_none('cuda_api_calls', False)
+        _set_if_none('cuda_api_events', False)
+        _set_if_none('cuda_activities', False)
+        _set_if_none('gpu_hw', True)
+    elif args.config == 'no-gpu-activities':
+        "$ iml-prof --debug --cuda-api-calls"
+        _set_if_none('cuda_api_calls', True)
+        _set_if_none('gpu_hw', False)
+    elif args.config == 'gpu-activities':
+        "$ iml-prof --debug --cuda-api-calls --cuda-activities"
+        _set_if_none('cuda_api_calls', True)
+        _set_if_none('cuda_activities', True)
+        _set_if_none('gpu_hw', False)
+    elif args.config == 'gpu-activities-api-time':
+        "$ iml-prof --debug --cuda-api-calls --cuda-api-events --cuda-activities"
+        _set_if_none('cuda_api_calls', True)
+        _set_if_none('cuda_api_events', True)
+        _set_if_none('cuda_activities', True)
+        _set_if_none('gpu_hw', False)
+    elif args.config is None or args.config in {'full', 'time-breakdown'}:
+        "$ iml-prof --cuda-api-calls --cuda-api-events --cuda-activities"
+        _set_if_none('cuda_api_calls', True)
+        _set_if_none('cuda_api_events', True)
+        _set_if_none('cuda_activities', True)
+        _set_if_none('gpu_hw', False)
+    else:
+        raise NotImplementedError()
 
     if args.fuzz_cuda_api and args.cuda_api_calls:
         parser.error("Can only run iml-prof with --fuzz-cuda-api or --cuda-api-calls, not both")
@@ -206,32 +240,29 @@ def main():
     # if args.iml_disable:
     #     add_env['IML_DISABLE'] = 'yes'
 
-    if args.cuda_api_calls:
-        add_env['IML_CUDA_API_CALLS'] = 'yes'
+    def set_yes_no(attr, env_var):
+        if getattr(args, attr):
+            add_env[env_var] = 'yes'
+        else:
+            add_env[env_var] = 'no'
 
-    if args.cuda_activities:
-        add_env['IML_CUDA_ACTIVITIES'] = 'yes'
+    set_yes_no('cuda_api_calls', 'IML_CUDA_API_CALLS')
 
-    if args.gpu_hw:
-        add_env['IML_GPU_HW'] = 'yes'
+    set_yes_no('cuda_activities', 'IML_CUDA_ACTIVITIES')
 
-    if args.pc_sampling:
-        add_env['IML_PC_SAMPLING'] = 'yes'
+    set_yes_no('gpu_hw', 'IML_GPU_HW')
 
-    if args.fuzz_cuda_api:
-        add_env['IML_FUZZ_CUDA_API'] = 'yes'
+    set_yes_no('pc_sampling', 'IML_PC_SAMPLING')
 
-    if args.cuda_api_events:
-        add_env['IML_CUDA_API_EVENTS'] = 'yes'
+    set_yes_no('fuzz_cuda_api', 'IML_FUZZ_CUDA_API')
 
-    if args.gpu_hw:
-        add_env['IML_GPU_HW'] = 'yes'
+    set_yes_no('cuda_api_events', 'IML_CUDA_API_EVENTS')
 
-    if args.trace_at_start:
-        add_env['IML_TRACE_AT_START'] = 'yes'
+    set_yes_no('gpu_hw', 'IML_GPU_HW')
 
-    if args.stream_sampling:
-        add_env['IML_STREAM_SAMPLING'] = 'yes'
+    set_yes_no('trace_at_start', 'IML_TRACE_AT_START')
+
+    set_yes_no('stream_sampling', 'IML_STREAM_SAMPLING')
 
     exe_path = shutil.which(cmd_argv[0])
     if exe_path is None:

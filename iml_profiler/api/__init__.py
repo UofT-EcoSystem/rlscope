@@ -1,5 +1,6 @@
 from iml_profiler.profiler.profilers import \
   Profiler, \
+  fix_gflags_iml_args, \
   add_iml_arguments, \
   iml_argv_and_env
 

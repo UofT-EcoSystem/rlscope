@@ -9,9 +9,10 @@ import sys
 import tempfile
 from decimal import Decimal
 import getpass
-import psycopg2
-import psycopg2.extras
-import psycopg2.pool
+psycopg2 = None
+# import psycopg2
+# import psycopg2.extras
+# import psycopg2.pool
 import random
 import string
 import itertools
