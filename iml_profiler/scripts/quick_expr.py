@@ -211,8 +211,8 @@ def main():
         print("> IML: Detected exception:")
         print(e)
         print("> Entering pdb:")
-        import ipdb
-        ipdb.post_mortem()
+        import pdb
+        pdb.post_mortem()
         raise
 
 class ExprSubtractionValidationConfig:

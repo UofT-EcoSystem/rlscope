@@ -1,5 +1,6 @@
 from iml_profiler.profiler.iml_logging import logger
 import argparse
+import subprocess
 import re
 import copy
 import importlib
@@ -29,7 +30,8 @@ from os.path import join as _j, abspath as _a, exists as _e, dirname as _d, base
 from iml_profiler.parser.db import SQLCategoryTimesReader, sql_get_source_files, sql_input_path
 from iml_profiler.parser.plot_index import _DataIndex
 from iml_profiler.parser import plot_index
-from iml_profiler.parser.dataframe import VennData, get_training_durations_df, read_iml_config_metadata, get_total_timesteps, get_end_num_timesteps
+from iml_profiler.parser.dataframe import VennData, get_training_durations_df, read_iml_config_metadata, get_total_timesteps, get_end_num_timesteps, IMLConfig, extrap_total_training_time
+from iml_profiler.parser import dataframe as iml_dataframe
 from iml_profiler.parser.plot import LegendMaker, HATCH_STYLES, HATCH_STYLE_EMPTY
 
 from iml_profiler.parser.common import *
@@ -363,6 +365,7 @@ class OverlapStackedBarPlot:
             return pd.DataFrame({
                 'unins_total_training_time_us': [],
                 'training_duration_us': [],
+                'extrap_total_training_time': [],
                 'algo': [],
                 'env': [],
             })
@@ -371,8 +374,16 @@ class OverlapStackedBarPlot:
             debug=self.debug,
             debug_single_thread=self.debug_single_thread))
         unins_df['unins_total_training_time_us'] = unins_df['training_duration_us']
+        self._add_repetition(unins_df)
         return unins_df
 
+    def _add_repetition(self, df):
+        def _repetition(iml_directory):
+            m = re.search(r'repetition_(?P<repetition>\d+)', os.path.basename(iml_directory))
+            if m:
+                return int(m.group('repetition'))
+            return None
+        df['repetition'] = df['iml_directory'].apply(_repetition)
 
     def _init_directories(self):
         """
@@ -426,7 +437,25 @@ class OverlapStackedBarPlot:
         for iml_dir in self.iml_directories:
             idx = self.data_index[iml_dir]
 
-            algo, env = self._get_algo_env_from_dir(iml_dir)
+            # If iml_config.json is present in 'algo' and 'env' are defined, get them from there.
+            # Else, guess algo/env from directory path: assume iml_dir looks like <algo>/<env>
+
+            iml_config_path = iml_dataframe.get_iml_config_path(iml_dir, allow_none=True)
+            algo = None
+            env = None
+            if iml_config_path is not None:
+                iml_config = IMLConfig(iml_config_path=iml_config_path)
+                # with open(iml_config_path, 'r') as f:
+                #     iml_config = json.load(f)
+                algo = iml_config.algo(allow_none=True)
+                env = iml_config.env(allow_none=True)
+
+            if algo is None or env is None:
+                algo_from_dir, env_from_dir = self._get_algo_env_from_dir(iml_dir)
+                if algo is None:
+                    algo = algo_from_dir
+                if env is None:
+                    env = env_from_dir
 
             # Q: There's only one ResourceOverlap plot...
             # However, there are many OperationOverlap plots; how can we select
@@ -561,6 +590,7 @@ class OverlapStackedBarPlot:
 
             new_stacked_dict = dict((k, as_list(v)) for k, v in new_stacked_dict.items())
             df = pd.DataFrame(new_stacked_dict)
+            df['iml_directory'] = iml_dir
 
             df = self._HACK_remove_process_operation_df(df)
             df = self._remap_df(df, algo, env)
@@ -592,6 +622,7 @@ class OverlapStackedBarPlot:
             path = vd.path
             df['algo'] = algo
             df['env'] = env
+            df['iml_directory'] = iml_dir
             # if 'percent_complete' in md:
             if all(col in iml_metadata['metadata'] for col in {'HACK_unins_end_training_time_us',
                                                                'HACK_unins_start_training_time_us',
@@ -649,8 +680,9 @@ class OverlapStackedBarPlot:
                     percent_complete = md['percent_complete']
                 total_training_time = extrap_total_training_time(total_size, percent_complete)
                 df['extrap_total_training_time'] = total_training_time
-            else:
-                df['extrap_total_training_time'] = np.NAN
+            # Just don't add it?
+            # else:
+            #     df['extrap_total_training_time'] = np.NAN
 
             # if np.isnan(df['extrap_total_training_time'].values[0]):
             #     import ipdb; ipdb.set_trace()
@@ -859,11 +891,18 @@ class OverlapStackedBarPlot:
 
         # Keep (algo, env) even if we don't have total uninstrumented training time for it.
         # Use extrapolated time instead.
-        self.df = self.ins_df.merge(self.unins_df, on=['algo', 'env'], how='left')
+        # TODO: if extrapolated_time is present in bot ins_df and unins_df, it will "conflict" creating
+        # extrapolated_time_x and extrapolated_time_y
+        merge_df = self.ins_df.merge(self.unins_df, on=['algo', 'env', 'repetition'], how='left')
+        self.df = merge_df
+
         def get_total_training_time(row):
             # Prefer actual uninstrumented training time over extrapolated training time.
             # Q: isn't extrapolated time including overheads...?
-            if np.isnan(row['unins_total_training_time_us']):
+            if self.extrapolated_training_time or np.isnan(row['unins_total_training_time_us']):
+                # If this goes off, extrapolated_time is present in bot ins_df and unins_df...
+                # need to handle that still...
+                assert 'extrap_total_training_time' in row
                 return row['extrap_total_training_time']
             return row['unins_total_training_time_us']
         self.df['full_unins_training_time'] = self.df.apply(get_total_training_time, axis=1)
@@ -1001,6 +1040,7 @@ class OverlapStackedBarPlot:
         else:
             df_iter = self.each_df()
         for (algo, env), regions, path, df in df_iter:
+            # iml_dir = _d(path)
             buf = StringIO()
             DataFrame.print_df(df)
             logger.info("({algo}, {env}) @ path={path}:\n{msg}".format(
@@ -1058,12 +1098,14 @@ class OverlapStackedBarPlot:
         if self.detailed:
             # NOTE: must calculate percent within an (algo, env)
             group_dfs = []
-            for group, group_df in ins_df.groupby(['algo', 'env']):
+            for group, group_df in ins_df.groupby(['iml_directory', 'phase', 'algo', 'env']):
                 total_size = group_df['size'].sum()
                 # Q: does this update ins_df...?
                 group_df['percent'] = group_df['size']/total_size
                 group_dfs.append(group_df)
             ins_df = pd.concat(group_dfs)
+
+        self._add_repetition(ins_df)
 
         return ins_df
 
@@ -1245,6 +1287,9 @@ class OverlapStackedBarPlot:
 
             if log_y_scale:
                 stacked_bar_plot.ax2.set_yscale('log', basey=2)
+                # stacked_bar_plot.ax2.minorticks_on()
+                # stacked_bar_plot.ax2.yaxis.set_minor_locator(mpl_ticker.AutoMinorLocator())
+                # stacked_bar_plot.ax2.yaxis.set_tick_params(which='minor', right='off')
 
             if self.rotation is not None:
                 stacked_bar_plot.ax.set_xticklabels(
@@ -1799,6 +1844,9 @@ class StackedBarPlot:
 
 
 class DetailedStackedBarPlot:
+
+    ERRBAR_COLOR = '#969696'
+
     def __init__(self,
                  data, path,
                  x_field,
@@ -2093,8 +2141,12 @@ class DetailedStackedBarPlot:
         DataFrame.print_df(data, file=sys.stdout)
 
         logger.info("Output plot @ {path}".format(path=self.path))
+        # plt.subplots_adjust(top = 1, bottom = 0, right = 1, left = 0,
+        #                     hspace = 0, wspace = 0)
+        # plt.margins(0,0)
         fig.savefig(self.path, bbox_inches="tight", pad_inches=0)
         plt.close(fig)
+        crop_pdf(self.path)
 
         # self._add_lines(operation)
         # self._add_legend(operation)
@@ -2225,19 +2277,73 @@ class DetailedStackedBarPlot:
                         hatch_df = hue_df[hue_df[self.hatch] == hatch]
                         xs = np.vectorize(self._xtick, otypes=[np.float])(hatch_df[self.x_field], hatch_df[self.x_group])
                         ys = hatch_df[self.y_field].values
+
                         assert len(ys) == len(xs)
-                        assert len(ys) == 1
-                        all_xs.append(xs)
-                        all_ys.append(ys)
+                        assert len(set(xs)) == 1
+
                         plot_kwargs = dict(
-                            x=xs, height=ys, bottom=bottom,
+                            # x=xs, height=ys,
+                            bottom=bottom,
                             width=self.bar_width,
                             # Color of hatch pattern.
                             edgecolor='black',
                             color=self.hue_map[hue],
                             hatch=self.hatch_map[hatch]
                         )
-                        ax.bar(**plot_kwargs)
+
+                        # assert len(ys) == 1
+                        if len(ys) == 1:
+                            # No error bars.
+                            plot_xs = xs
+                            plot_ys = ys
+                            all_xs.append(xs)
+                            all_ys.append(ys)
+                            plot_kwargs.update(dict(
+                                x=xs,
+                                height=ys,
+                            ))
+                        else:
+                            # Multiple values; use error bars.
+                            x = xs[0]
+                            y = np.mean(ys)
+                            plot_xs = [x]
+                            plot_ys = [y]
+                            yerr = np.std(ys)
+                            plot_kwargs.update(dict(
+                                # x=[x],
+                                # height=[y],
+                                yerr=[yerr],
+                                capsize=20,
+                                # ecolor='gray',
+                                ecolor=DetailedStackedBarPlot.ERRBAR_COLOR,
+                                # NOTE: I cannot get dashed lines to work with the errorbar style...
+                                # error_kw=dict(
+                                #     # dash_capstyle='projecting',
+                                #     linestyle='-',
+                                #     # dashes=(0.5, 0.5),
+                                #     dashes=(6, 2),
+                                # ),
+                            ))
+                        plot_kwargs.update(dict(
+                            x=plot_xs,
+                            height=plot_ys,
+                        ))
+                        all_xs.append(plot_xs)
+                        all_ys.append(plot_ys)
+
+                        barplot = ax.bar(**plot_kwargs)
+
+                        # if 'yerr' in plot_kwargs:
+                        #     # errline = barplot.errorbar.get_children()[2]
+                        #     # errline = barplot.errorbar.lines[1][0]
+                        #     for errline in barplot.errorbar.get_children():
+                        #         errline.set_linestyle('-')
+                        #         # errline.set_dashes((0.5, 0.5))
+                        #         # errline.set_dashes((0, (6, 2)))
+                        #         # errline.set_dashes('--')
+                        #         # errline.set_dashes((6, 2))
+                        #         # errline.set_dashes((2, 2, 10, 2))
+
                         kw = dict(plot_kwargs)
                         kw.update({
                             'hue_field': hue,
@@ -2247,12 +2353,13 @@ class DetailedStackedBarPlot:
                         })
                         bar_kwargs.append(kw)
                         if bottom is None:
-                            bottom = np.zeros(len(ys))
+                            bottom = np.zeros(len(plot_ys))
                         assert not np.isnan(bottom).any()
                         assert not np.isnan(ys).any()
-                        assert not np.isnan(bottom + ys).any()
-                        assert len(bottom) == len(ys)
-                        bottom = bottom + ys
+                        assert not np.isnan(plot_ys).any()
+                        assert not np.isnan(bottom + plot_ys).any()
+                        assert len(bottom) == len(plot_ys)
+                        bottom = bottom + plot_ys
                         assert not np.isnan(bottom).any()
 
                         last_iter = dict(
@@ -2862,22 +2969,6 @@ class RegionDataFrame:
         # TODO: tuplify string key into a single-element tuple.
         pass
 
-
-def extrap_total_training_time(time_unit, percent_complete):
-    """
-    10 * (1/0.01) => 100
-    #
-    10 seconds in 1%  0.01
-    ->
-    1000 seconds in 100% 1.0
-
-    :param time_unit:
-    :param percent_complete:
-    :return:
-    """
-    assert 0. <= percent_complete <= 1.
-    total_time_unit = time_unit * (1./percent_complete)
-    return total_time_unit
 
 def test_stacked_bar_sns():
     """
@@ -3554,6 +3645,17 @@ def group_numeric_cols(df):
         non_numeric_cols=list(non_numeric_cols),
     )
     return cols
+
+def crop_pdf(path, output=None):
+    if output is None:
+        # output (in-place)
+        output = path
+    # pdfcrop comes from texlive-extra-utils apt package on ubuntu.
+    subprocess.check_call(["pdfcrop",
+                           # input
+                           path,
+                           output,
+                           ])
 
 
 if __name__ == '__main__':

@@ -202,13 +202,13 @@ class GeneratePlotIndex:
         if not self.dry_run:
             src = _j(py_config.ROOT, 'iml_profiler/scripts/iml_profiler_plot_index.py')
             dst = _j(self.out_dir, 'iml_profiler_plot_index.py')
-            logger.info("> cp {src} -> {dst}".format(src=src, dst=dst))
+            logger.info("cp {src} -> {dst}".format(src=src, dst=dst))
             os.makedirs(_d(dst), exist_ok=True)
             shutil.copyfile(src, dst)
 
         os.makedirs(_d(self.plot_index_path), exist_ok=True)
         if _e(self.plot_index_path) and not self.replace:
-            logger.info("WARNING: {path} exists; skipping".format(path=self.plot_index_path))
+            logger.warning("{path} exists; skipping".format(path=self.plot_index_path))
             return
 
         with open(self.plot_index_path, 'w') as f:
@@ -313,8 +313,8 @@ def main():
         print("> IML: Detected exception:")
         print(e)
         print("> Entering pdb:")
-        import ipdb
-        ipdb.post_mortem()
+        import pdb
+        pdb.post_mortem()
         raise
 
 if __name__ == '__main__':

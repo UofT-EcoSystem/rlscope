@@ -64,6 +64,7 @@ class Calibration:
                  skip_error=False,
                  debug=False,
                  debug_single_thread=False,
+                 pdb=False,
                  # Ignore extra stuff
                  **kwargs,
                  ):
@@ -75,6 +76,7 @@ class Calibration:
         self.skip_error = skip_error
         self.debug = debug
         self.debug_single_thread = debug_single_thread
+        self.pdb = pdb
         self._pool = ForkedProcessPool(name='{klass}.pool'.format(
             klass=self.__class__.__name__))
         # 1 min, 2 min, 4 min
@@ -91,6 +93,14 @@ class Calibration:
         task = "CUPTIScalingOverheadTask"
         logfile = _j(
             self.cupti_scaling_overhead_dir(),
+            self._logfile_basename(task),
+        )
+        return logfile
+
+    def compute_time_breakdown_plot_logfile(self):
+        task = "OverlapStackedBarTask"
+        logfile = _j(
+            self.directory,
             self._logfile_basename(task),
         )
         return logfile
@@ -142,52 +152,96 @@ class Calibration:
         json_paths = glob("{direc}/*.json".format(
             direc=direc))
         return json_paths
+    
+    def compute_time_breakdown_plot(self):
+        task = "OverlapStackedBarTask"
+
+        # cmd = [
+        #     'iml-analyze',
+        # ]
+        # cmd.extend([
+        #     '--task', 'OverlapStackedBarTask',
+        # ])
+
+        # TODO: add support for multiple repetitions for time breakdown plot
+        repetitions = None
+        # repetitions = [1]
+
+        if self.dry_run and (
+            self.conf('uninstrumented', calibration=True, dflt=None) is None or
+            self.conf('time_breakdown', calibration=False, dflt=None) ):
+            return
+
+        unins_iml_dirs = self.conf('uninstrumented', calibration=True).iml_directories(repetitions=repetitions)
+        iml_dirs = self.conf('time_breakdown', calibration=False).iml_directories(repetitions=repetitions)
+        if len(iml_dirs) != len(unins_iml_dirs):
+            log_missing_files(self, task=task, files={
+                'iml_dirs': iml_dirs,
+                'unins_iml_dirs': unins_iml_dirs,
+            })
+            return
+
+        # Stick plots in root directory.
+        directory = self.directory
+        if not self.dry_run:
+            os.makedirs(directory, exist_ok=True)
+        overlap_type = 'CategoryOverlap'
+        cmd = ['iml-analyze',
+               '--directory', directory,
+               '--task', task,
+               '--overlap-type', overlap_type,
+
+               '--y-type', 'percent',
+               '--x-type', 'rl-comparison',
+               '--detailed',
+
+               # How to handle remap-df?
+
+               # Should we include this...?
+               '--training-time',
+               '--extrapolated-training-time',
+
+               '--iml-directories', json.dumps(iml_dirs),
+               '--unins-iml-directories', json.dumps(unins_iml_dirs),
+               ]
+        self._add_calibration_opts(cmd)
+        add_iml_analyze_flags(cmd, self)
+        # cmd.extend(self.extra_argv)
+
+        logfile = self.compute_time_breakdown_plot_logfile()
+        expr_run_cmd(
+            cmd=cmd,
+            to_file=logfile,
+            # Always re-run plotting script?
+            # replace=True,
+            dry_run=self.dry_run,
+            skip_error=self.skip_error,
+            debug=self.debug)
+
+    def _add_calibration_opts(self, cmd):
+        cmd.extend([
+            '--cupti-overhead-json', _j(self.cupti_overhead_dir(), 'cupti_overhead.json'),
+            '--LD-PRELOAD-overhead-json', _j(self.LD_PRELOAD_overhead_dir(), 'LD_PRELOAD_overhead.json'),
+            '--python-annotation-json', _j(self.pyprof_overhead_dir(), 'category_events.python_annotation.json'),
+            '--python-clib-interception-tensorflow-json', _j(self.pyprof_overhead_dir(), 'category_events.python_clib_interception.json'),
+            '--python-clib-interception-simulator-json', _j(self.pyprof_overhead_dir(), 'category_events.python_clib_interception.json'),
+        ])
 
     def compute_rls_analyze(self, conf, rep):
         task = "RLSAnalyze"
 
         assert conf.rls_analyze_mode is not None
 
-        # if self.dry_run and (
-        #     self.conf(config_suffix, calibration=calibration, dflt=None) is None
-        # ):
-        #     return
-        # conf = self.conf(config_suffix, calibration=calibration)
-
         directory = conf.out_dir(rep)
 
-        # all_gpu_activities_api_time_directories = []
-        # all_interception_directories = []
-
-        # gpu_activities_api_time_directories = self.conf('gpu_activities_api_time', calibration=True).iml_directories()
-        # interception_directories = self.conf('interception', calibration=True).iml_directories()
-        # if len(gpu_activities_api_time_directories) != len(interception_directories):
-        #     log_missing_files(self, task=task, files={
-        #         'gpu_activities_api_time_directories': gpu_activities_api_time_directories,
-        #         'interception_directories': interception_directories,
-        #     })
-        #     return
-        # all_gpu_activities_api_time_directories.extend(gpu_activities_api_time_directories)
-        # all_interception_directories.extend(interception_directories)
-
-        # directory = self.cupti_scaling_overhead_dir()
-        # if not self.dry_run:
-        #     os.makedirs(directory, exist_ok=True)
         cmd = ['iml-analyze',
                '--task', task,
                '--iml-directory', directory,
                '--mode', conf.rls_analyze_mode,
-
-               '--cupti-overhead-json', _j(self.cupti_overhead_dir(), 'cupti_overhead.json'),
-               '--LD-PRELOAD-overhead-json', _j(self.LD_PRELOAD_overhead_dir(), 'LD_PRELOAD_overhead.json'),
-               '--python-annotation-json', _j(self.pyprof_overhead_dir(), 'category_events.python_annotation.json'),
-               '--python-clib-interception-tensorflow-json', _j(self.pyprof_overhead_dir(), 'category_events.python_clib_interception.json'),
-               '--python-clib-interception-simulator-json', _j(self.pyprof_overhead_dir(), 'category_events.python_clib_interception.json'),
                ]
+        self._add_calibration_opts(cmd)
         add_iml_analyze_flags(cmd, self)
-        # cmd.extend(self.extra_argv)
 
-        # logfile = self.cupti_scaling_overhead_logfile()
         logfile = _j(
             directory,
             self._logfile_basename(task),
@@ -200,7 +254,6 @@ class Calibration:
             dry_run=self.dry_run,
             skip_error=self.skip_error,
             debug=self.debug)
-
 
     def compute_cupti_scaling_overhead(self):
         task = "CUPTIScalingOverheadTask"
@@ -437,6 +490,13 @@ class Calibration:
                         config, rep,
                         sync=self.debug_single_thread,
                     )
+        self._pool.shutdown()
+        # Plotting requires running rls-analyze
+        self._pool.submit(
+            get_func_name(self, 'compute_time_breakdown_plot'),
+            self.compute_time_breakdown_plot,
+            sync=self.debug_single_thread,
+        )
         self._pool.shutdown()
 
     def each_repetition(self):
@@ -732,13 +792,15 @@ class ExprSubtractionValidationConfig:
         logfile = self.logfile(rep)
         return expr_already_ran(logfile, debug=self.expr.debug)
 
-    def iml_directories(self):
+    def iml_directories(self, repetitions=None):
         """
         Return all --iml-directories whose runs are completed.
         """
         iml_directories = []
         # for rep in range(1, self.expr.repetitions+1):
-        for rep in self.expr.each_repetition():
+        if repetitions is None:
+            repetitions = self.expr.each_repetition()
+        for rep in repetitions:
             if not self.already_ran(rep):
                 continue
             iml_directory = self.out_dir(rep)
@@ -846,6 +908,8 @@ def rep_suffix(rep):
 def add_iml_analyze_flags(cmd, args):
     if args.debug:
         cmd.append('--debug')
+    if args.pdb:
+        cmd.append('--pdb')
     # if args.debug_memoize:
     #     cmd.append('--debug-memoize')
     if args.debug_single_thread:

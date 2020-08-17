@@ -550,6 +550,7 @@ class TrainingProgressDataframeReader(BaseDataframeReader):
 
         colnames = [
             # IncrementalTrainingProgress from pyprof.proto
+            # 'iml_directory',
             'process_name',
             'phase',
             'machine_name',
@@ -573,6 +574,7 @@ class TrainingProgressDataframeReader(BaseDataframeReader):
     def add_proto_cols(self, path, data=None):
         training_progress = read_training_progress_file(path)
         self._add_columns(self._colnames, training_progress, data=data)
+        self._add_col_to_data('iml_directory', self.directory, data=data)
         self._maybe_add_fields(path, data=data)
 
     def last_progress(self):
@@ -605,6 +607,20 @@ class TrainingProgressDataframeReader(BaseDataframeReader):
         training_duration_us = training_duration_us.values[0]
         return training_duration_us
 
+    def percent_complete(self):
+        df = self.last_progress()
+        percent_complete = (df['end_num_timesteps'] - df['start_num_timesteps'])/df['total_timesteps']
+        # from_percent = df['end_percent_complete'] - df['start_percent_complete']
+        # assert percent_complete == from_percent
+        assert len(percent_complete) == 1
+        return percent_complete.values[0]
+
+    def extrap_total_training_time_us(self):
+        training_duration_us = self.training_duration_us()
+        percent_complete = self.percent_complete()
+        extrap_total_training_time_us = extrap_total_training_time(training_duration_us, percent_complete)
+        return extrap_total_training_time_us
+
     def training_iterations(self):
         df = self.last_progress()
         training_iterations = df['end_num_timesteps'] - df['start_num_timesteps']
@@ -629,10 +645,13 @@ class TrainingProgressDataframeReader(BaseDataframeReader):
     def training_duration_df(self):
         df = copy.copy(self.last_progress())
         df['training_duration_us'] = df['end_training_time_us'] - df['start_training_time_us']
+        df['extrap_total_training_time'] = self.extrap_total_training_time_us()
         keep_cols = [
             'training_duration_us',
+            'extrap_total_training_time',
             'algo',
             'env',
+            'iml_directory',
         ]
         df = df[keep_cols]
         return df
@@ -1265,7 +1284,7 @@ class DataframeMapper:
         reader = self.readers[0]
         return func(reader)
 
-def get_iml_config_path(directory, allow_many=False):
+def get_iml_config_path(directory, allow_many=False, allow_none=False):
     """
     Add (algo, env) from iml_config.json, if they were set by the training script using iml.prof.set_metadata(...).
 
@@ -1282,6 +1301,9 @@ def get_iml_config_path(directory, allow_many=False):
             len=len(iml_config_paths),
             msg=pprint_msg(iml_config_paths)))
         assert len(iml_config_paths) == 1
+
+    if len(iml_config_paths) == 0 and allow_none:
+        return None
 
     if allow_many:
         return iml_config_paths
@@ -2057,6 +2079,22 @@ def venn_as_overlap_dict(V):
         del O[region]
 
     return O
+
+def extrap_total_training_time(time_unit, percent_complete):
+    """
+    10 * (1/0.01) => 100
+    #
+    10 seconds in 1%  0.01
+    ->
+    1000 seconds in 100% 1.0
+
+    :param time_unit:
+    :param percent_complete:
+    :return:
+    """
+    assert 0. <= percent_complete <= 1.
+    total_time_unit = time_unit * (1./percent_complete)
+    return total_time_unit
 
 def test_venn_as_overlap_dict():
     def check_eq(name, got, expect):

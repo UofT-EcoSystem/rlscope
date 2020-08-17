@@ -2222,8 +2222,8 @@ def main():
         print(f"> Detected exception ({type(e).__name__}):")
         traceback.print_exc()
         print("> Entering pdb:")
-        import ipdb
-        ipdb.post_mortem()
+        import pdb
+        pdb.post_mortem()
         raise
 
 

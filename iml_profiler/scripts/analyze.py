@@ -6,7 +6,7 @@ import subprocess
 import sys
 import os
 import traceback
-import ipdb
+import pdb
 import luigi
 import argparse
 import pprint
@@ -81,7 +81,7 @@ def main():
         args.workers = 1
 
     if args.pdb:
-        logger.info("Registering pdb breakpoint (--pdb)")
+        logger.debug("Registering pdb breakpoint (--pdb)")
         register_pdb_breakpoint()
         # Debugger is useless when multithreaded.
         args.workers = 1
@@ -98,11 +98,11 @@ def main():
 def register_pdb_breakpoint():
 
     def pdb_breakpoint(task, ex):
-        logger.info("> Detected unhandled exception {ex} in {task}; entering pdb".format(
+        logger.error("> Detected unhandled exception {ex} in {task}; entering pdb".format(
             ex=ex.__class__.__name__,
             task=task.__class__.__name__,
         ))
-        ipdb.post_mortem()
+        pdb.post_mortem()
 
     def register_pdb_on(luigi_event):
         register_failure_event = luigi.Task.event_handler(luigi_event)
