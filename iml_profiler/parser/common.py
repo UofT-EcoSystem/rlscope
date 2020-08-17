@@ -346,6 +346,8 @@ def maybe_indent(txt, indents):
     return txt
 
 def txt_indent(txt, indent : typing.Optional[int]):
+    if type(txt) != str:
+        txt = pprint.pformat(txt)
     if indent is None:
         return txt
     return textwrap.indent(txt, prefix='  ')

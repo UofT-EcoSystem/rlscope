@@ -1296,14 +1296,18 @@ def get_iml_config_path(directory, allow_many=False, allow_none=False):
     # There should be exactly one iml_config.json file.
     # Q: Couldn't there be multiple for multi-process scripts like minigo?
     if len(iml_config_paths) != 1 and not allow_many:
-        logger.info("Expected 1 iml_config.json but saw {len} within iml_directory={dir}: {msg}".format(
+        raise NoIMLConfigFound("Expected 1 iml_config.json but saw {len} within iml_directory={dir}: {msg}".format(
             dir=directory,
             len=len(iml_config_paths),
             msg=pprint_msg(iml_config_paths)))
-        assert len(iml_config_paths) == 1
 
     if len(iml_config_paths) == 0 and allow_none:
-        return None
+        if allow_none:
+            return None
+        else:
+            raise NoIMLConfigFound("Didn't find any iml_config.json in iml_directory={dir}".format(
+                dir=directory,
+            ))
 
     if allow_many:
         return iml_config_paths
@@ -1336,6 +1340,9 @@ def read_iml_config_metadata(directory):
                 iml_metadata['env']['CUDA_VISIBLE_DEVICES'] = iml_config['env']['CUDA_VISIBLE_DEVICES']
 
     return iml_metadata
+
+class NoIMLConfigFound(Exception):
+    pass
 
 class IMLConfig:
     def __init__(self, directory=None, iml_config_path=None):

@@ -30,6 +30,7 @@ from iml_profiler.parser.cpu_gpu_util import UtilParser, UtilPlot, GPUUtilOverTi
 from iml_profiler.parser.training_progress import TrainingProgressParser, ProfilingOverheadPlot
 from iml_profiler.parser.extrapolated_training_time import ExtrapolatedTrainingTimeParser
 from iml_profiler.parser.profiling_overhead import CallInterceptionOverheadParser, CUPTIOverheadParser, CUPTIScalingOverheadParser, CorrectedTrainingTimeParser, PyprofOverheadParser, TotalTrainingTimeParser, SQLOverheadEventsParser
+from iml_profiler.parser.one_off_plot import GpuUtilExperiment
 from iml_profiler import py_config
 
 from iml_profiler.parser.common import *
@@ -989,6 +990,28 @@ class OverlapStackedBarTask(luigi.Task):
         kwargs = kwargs_from_task(self)
         self.dumper = OverlapStackedBarPlot(**kwargs)
         self.dumper.run()
+
+class GpuHwPlotTask(IMLTask):
+    iml_directories = luigi.ListParameter(description="Multiple --iml-directory containing GPUHwCounterSampler.csv from running \"iml-prof --config gpu-hw\"")
+    directory = luigi.Parameter(description="Output directory", default=".")
+    debug = param_debug
+    debug_single_thread = param_debug_single_thread
+    debug_perf = param_debug_perf
+
+    skip_output = False
+
+    def output(self):
+        return []
+
+    def run(self):
+        kwargs = kwargs_from_task(self)
+        obj_args = dict()
+        obj_args['rlscope_dir'] = self.iml_directories
+        obj_args['output_directory'] = self.iml_directory
+        obj_args['debug'] = self.debug
+        self.dumper = GpuUtilExperiment(obj_args)
+        self.dumper.run()
+
 
 def forward_kwargs(from_task, ToTaskKlass, ignore_argnames=None):
     kwargs = kwargs_from_task(from_task)

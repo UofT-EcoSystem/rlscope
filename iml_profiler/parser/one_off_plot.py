@@ -25,7 +25,7 @@ import seaborn as sns
 from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, basename as _b
 
 from iml_profiler.parser.stacked_bar_plots import get_x_env, get_x_algo
-from iml_profiler.parser.dataframe import UtilDataframeReader
+from iml_profiler.parser.dataframe import UtilDataframeReader, IMLConfig
 
 from iml_profiler import py_config
 from iml_profiler.parser.common import *
@@ -1455,31 +1455,41 @@ class GpuUtilExperiment:
 
     def _read_rlscope_df(self):
         self.rlscope_df = None
-        if self.args['rlscope_dir'] is None:
+        if self.arg('rlscope_dir') is None:
             return
-        rlscope_dflt_attrs = {
-        }
         rlscope_attrs = {
             'algo',
             'env',
         }
         dfs = []
-        for path in each_file_recursive(self.args['rlscope_dir']):
-            if not re.search(r'^GPUHwCounterSampler.*\.csv$', _b(path)):
-                continue
-            sm_attrs = parse_path_attrs(
-                path,
-                rlscope_attrs,
-                rlscope_dflt_attrs)
-            df = pd.read_csv(path, comment='#')
-            for attr_name, attr_value in sm_attrs.items():
-                assert attr_name not in df
-                df[attr_name] = maybe_number(attr_value)
-            dfs.append(df)
-        self.rlscope_df = pd.concat(dfs)
-        logger.info("rlscope dataframe:\n{msg}".format(
-            msg=txt_indent(DataFrame.dataframe_string(self.rlscope_df), indent=1),
-        ))
+        for rlscope_dir in self.arg('rlscope_dir'):
+            for path in each_file_recursive(rlscope_dir):
+                if not re.search(r'^GPUHwCounterSampler.*\.csv$', _b(path)):
+                    continue
+                rlscope_dflt_attrs = {
+                    # 'algo': None,
+                    # 'env': None,
+                }
+                iml_config = IMLConfig(rlscope_dir)
+                algo = iml_config.algo(allow_none=True)
+                env = iml_config.env(allow_none=True)
+                if algo is not None:
+                    rlscope_dflt_attrs['algo'] = algo
+                if env is not None:
+                    rlscope_dflt_attrs['env'] = env
+                sm_attrs = parse_path_attrs(
+                    path,
+                    rlscope_attrs,
+                    rlscope_dflt_attrs)
+                df = pd.read_csv(path, comment='#')
+                for attr_name, attr_value in sm_attrs.items():
+                    assert attr_name not in df
+                    df[attr_name] = maybe_number(attr_value)
+                dfs.append(df)
+            self.rlscope_df = pd.concat(dfs)
+            logger.info("rlscope dataframe:\n{msg}".format(
+                msg=txt_indent(DataFrame.dataframe_string(self.rlscope_df), indent=1),
+            ))
 
     def gpu_hw_csv_paths(self, root_dir):
         paths = []
@@ -1531,7 +1541,7 @@ class GpuUtilExperiment:
         ax.set_xlabel('Kernel configuration')
         ax.set_title(r'$\mathtt{nvidia-smi}$ utilization')
 
-        save_plot(util_df, _j(self.args['util_dir'], 'util.svg'))
+        save_plot(util_df, _j(self.arg('util_dir'), 'util.svg'))
 
     def _read_multi_df(self, direc):
 
@@ -1570,10 +1580,10 @@ class GpuUtilExperiment:
         # for argname, argval in self.args.items():
             # if re.search(r'^multi\w+_dir$', argname):
             #     multitask_raw_df = self._append_multi_df(multitask_raw_df, self._read_multi_raw_df(self.args[argname]), 'thread', 'threads')
-        multitask_raw_df = self._append_multi_df(multitask_raw_df, self._read_multi_raw_df(self.args['multithread_dir']), 'thread', 'threads')
-        multitask_raw_df = self._append_multi_df(multitask_raw_df, self._read_multi_raw_df(self.args['multiprocess_dir']), 'process', 'processes')
+        multitask_raw_df = self._append_multi_df(multitask_raw_df, self._read_multi_raw_df(self.arg('multithread_dir')), 'thread', 'threads')
+        multitask_raw_df = self._append_multi_df(multitask_raw_df, self._read_multi_raw_df(self.arg('multiprocess_dir')), 'process', 'processes')
         "Multi-process MPS (...)"
-        multitask_raw_df = self._append_multi_df(multitask_raw_df, self._read_multi_raw_df(self.args['multiprocess_mps_dir'], debug=True), 'process MPS', 'processes', debug=True)
+        multitask_raw_df = self._append_multi_df(multitask_raw_df, self._read_multi_raw_df(self.arg('multiprocess_mps_dir'), debug=True), 'process MPS', 'processes', debug=True)
 
         self.multitask_raw_df = multitask_raw_df
 
@@ -1641,31 +1651,31 @@ class GpuUtilExperiment:
 
     def _read_multithread_df(self):
         self.multithread_df = None
-        if self.args['multithread_dir'] is None:
+        if self.arg('multithread_dir') is None:
             return
-        self.multithread_df = self._read_multi_df(self.args['multithread_dir'])
+        self.multithread_df = self._read_multi_df(self.arg('multithread_dir'))
 
     def _read_multiprocess_df(self):
         self.multiprocess_df = None
-        if self.args['multiprocess_dir'] is None:
+        if self.arg('multiprocess_dir') is None:
             return
-        self.multiprocess_df = self._read_multi_df(self.args['multiprocess_dir'])
+        self.multiprocess_df = self._read_multi_df(self.arg('multiprocess_dir'))
 
     def _read_multiprocess_mps_df(self):
         self.multiprocess_mps_df = None
-        if self.args['multiprocess_mps_dir'] is None:
+        if self.arg('multiprocess_mps_dir') is None:
             return
-        self.multiprocess_mps_df = self._read_multi_df(self.args['multiprocess_mps_dir'])
+        self.multiprocess_mps_df = self._read_multi_df(self.arg('multiprocess_mps_dir'))
 
     def _read_util_data(self):
         self.util_data = None
-        if self.args['util_dir'] is None:
+        if self.arg('util_dir') is None:
             return
 
         util_dflt_attrs = None
         util_attrs = GPU_UTIL_EXPERIMENT_ATTRS
 
-        gpu_hw_csv_paths = self.gpu_hw_csv_paths(self.args['util_dir'])
+        gpu_hw_csv_paths = self.gpu_hw_csv_paths(self.arg('util_dir'))
         assert len(gpu_hw_csv_paths) == 1
         gpu_hw_csv_path = gpu_hw_csv_paths[0]
         gpu_hw_df = self.read_csv(
@@ -1682,7 +1692,7 @@ class GpuUtilExperiment:
         thread_block_size = thread_block_size[0]
 
         util_df_reader = UtilDataframeReader(
-            self.args['util_dir'],
+            self.arg('util_dir'),
             debug=self.debug)
         util_df = util_df_reader.read()
         util_df = util_df.sort_values(['machine_name', 'device_name', 'start_time_us'])
@@ -1697,12 +1707,14 @@ class GpuUtilExperiment:
 
     @property
     def debug(self):
-        return self.args['debug']
+        return self.arg('debug')
 
+    def arg(self, name):
+        return self.args.get(name, None)
 
     def _read_sm_efficiency_df(self):
         self.sm_df = None
-        if self.args['sm_efficiency_dir'] is None:
+        if self.arg('sm_efficiency_dir') is None:
             return
         sm_efficiency_dflt_attrs = {
             'num_threads' : 1,
@@ -1713,7 +1725,7 @@ class GpuUtilExperiment:
             'thread_block_size',
         }
         dfs = []
-        for path in each_file_recursive(self.args['sm_efficiency_dir']):
+        for path in each_file_recursive(self.arg('sm_efficiency_dir')):
             if not re.search(r'^GPUHwCounterSampler.*\.csv$', _b(path)):
                 continue
             # sm_attrs = parse_filename_attrs(path, 'GPUHwCounterSampler', 'csv', sm_efficiency_attrs, sm_efficiency_dflt_attrs)
@@ -1733,7 +1745,7 @@ class GpuUtilExperiment:
 
     def _read_achieved_occupancy_df(self):
         self.occupancy_df = None
-        if self.args['achieved_occupancy_dir'] is None:
+        if self.arg('achieved_occupancy_dir') is None:
             return
         achieved_occupancy_dflt_attrs = {
             'num_threads' : 1,
@@ -1744,7 +1756,7 @@ class GpuUtilExperiment:
             'thread_block_size',
         }
         dfs = []
-        for path in each_file_recursive(self.args['achieved_occupancy_dir']):
+        for path in each_file_recursive(self.arg('achieved_occupancy_dir')):
             if not re.search(r'^GPUHwCounterSampler.*\.csv$', _b(path)):
                 continue
             # sm_attrs = parse_filename_attrs(path, 'GPUHwCounterSampler', 'csv', achieved_occupancy_attrs, achieved_occupancy_dflt_attrs)
@@ -1793,10 +1805,16 @@ class GpuUtilExperiment:
         titled_df.rename(columns=col_titles, inplace=True)
 
         sns.set(style="whitegrid")
-        g = sns.catplot(x="algo_env", y="metric_value", hue=col_titles["range_name"], data=titled_df,
-                        kind="bar",
-                        palette="muted"
-                        )
+        def _do_plot(**kwargs):
+            g = sns.catplot(x="algo_env", y="metric_value", hue=col_titles["range_name"], data=titled_df,
+                            kind="bar",
+                            palette="muted",
+                            **kwargs,
+                            )
+            return g
+        g = _do_plot()
+        capsize = self._get_capsize(g)
+        g = _do_plot(capsize=capsize)
         g.despine(left=True)
         g.set_ylabels(SM_EFFICIENCY_Y_LABEL)
         g.set_xlabels(RLSCOPE_X_LABEL)
@@ -1808,7 +1826,7 @@ class GpuUtilExperiment:
             rotation=15,
         )
 
-        save_plot(df, _j(self.args['rlscope_dir'], 'rlscope_sm_efficiency.svg'))
+        save_plot(df, _j(self.rlscope_output_dir(), 'rlscope_sm_efficiency.svg'))
 
     def _add_algo_env(self, df):
         def _algo_env(row):
@@ -1818,6 +1836,14 @@ class GpuUtilExperiment:
             )
         df['algo_env'] = df.apply(_algo_env, axis=1)
         return df
+
+    def _get_capsize(self, g):
+        # num_bars = len(g.ax.patches)
+        bar_width = g.ax.patches[0].get_width()
+        # Sanity check.
+        assert all(patch.get_width() == bar_width for patch in g.ax.patches)
+        # Make error bar width 25% of bar width.
+        return bar_width/4
 
     def _plot_rlscope_achieved_occupancy(self):
         if self.rlscope_df is None:
@@ -1834,10 +1860,18 @@ class GpuUtilExperiment:
         titled_df.rename(columns=col_titles, inplace=True)
 
         sns.set(style="whitegrid")
-        g = sns.catplot(x="algo_env", y="metric_value", hue=col_titles["range_name"], data=titled_df,
-                        kind="bar",
-                        palette="muted"
-                        )
+        def _do_plot(**kwargs):
+            g = sns.catplot(x="algo_env", y="metric_value", hue=col_titles["range_name"], data=titled_df,
+                            kind="bar",
+                            palette="muted",
+                            # capsize=capsize,
+                            **kwargs,
+                            )
+            return g
+        g = _do_plot()
+        capsize = self._get_capsize(g)
+        g = _do_plot(capsize=capsize)
+
         g.despine(left=True)
         g.set_ylabels(SM_OCCUPANCY_Y_LABEL)
         g.set_xlabels(RLSCOPE_X_LABEL)
@@ -1849,7 +1883,18 @@ class GpuUtilExperiment:
             rotation=15,
         )
 
-        save_plot(df, _j(self.args['rlscope_dir'], 'rlscope_achieved_occupancy.svg'))
+        save_plot(df, _j(self.rlscope_output_dir(), 'rlscope_achieved_occupancy.svg'))
+
+    def rlscope_output_dir(self):
+        if self.arg('output_directory') is not None:
+            return self.arg('output_directory')
+        if len(self.arg('rlscope_dir')) == 1:
+            return self.arg('rlscope_dir')[0]
+        raise NotImplementedError("Not sure where to output rlscope plots:\n{msg}".format(
+            msg=txt_indent({
+                'args':self.args,
+            }, indent=1)),
+        )
 
     def _plot_achieved_occupancy(self):
         if self.occupancy_df is None:
@@ -1884,7 +1929,7 @@ class GpuUtilExperiment:
             rotation=45,
         )
 
-        save_plot(df, _j(self.args['achieved_occupancy_dir'], 'achieved_occupancy.svg'))
+        save_plot(df, _j(self.arg('achieved_occupancy_dir'), 'achieved_occupancy.svg'))
 
     def _plot_sm_efficiency(self):
         if self.sm_df is None:
@@ -1919,7 +1964,7 @@ class GpuUtilExperiment:
         g.fig.suptitle(title)
         g.fig.subplots_adjust(top=0.90)
 
-        save_plot(df, _j(self.args['sm_efficiency_dir'], 'sm_efficiency.svg'))
+        save_plot(df, _j(self.arg('sm_efficiency_dir'), 'sm_efficiency.svg'))
 
     def _plot_multitask_kernel_time(self):
         if self.multitask_raw_df is None:
@@ -2129,12 +2174,12 @@ class GpuUtilExperiment:
     # def _plot_multithread_per_sm_efficiency(self):
     #     if self.multithread_df is None:
     #         return
-    #     self._plot_multitask_per_sm_efficiency(self.args['multithread_dir'], self.multithread_df, 'thread')
+    #     self._plot_multitask_per_sm_efficiency(self.arg('multithread_dir'), self.multithread_df, 'thread')
     #
     # def _plot_multiprocess_per_sm_efficiency(self):
     #     if self.multiprocess_df is None:
     #         return
-    #     self._plot_multitask_per_sm_efficiency(self.args['multiprocess_dir'], self.multiprocess_df, 'process')
+    #     self._plot_multitask_per_sm_efficiency(self.arg('multiprocess_dir'), self.multiprocess_df, 'process')
 
 
     def run(self):
@@ -2175,6 +2220,7 @@ def main():
     parser.add_argument('--test-plot-grouped-bar', action='store_true')
     parser.add_argument('--plot-type', choices=['gpu_util_experiment', 'trtexec'])
     parser.add_argument('--debug', action='store_true')
+    parser.add_argument('--output-directory', help="where to output plots")
     args, argv = parser.parse_known_args()
     logger.info(pprint_msg({'argv': argv}))
 
@@ -2188,7 +2234,7 @@ def main():
             sub_parser = argparse.ArgumentParser()
             sub_parser.add_argument('--sm-efficiency-dir')
             sub_parser.add_argument('--achieved-occupancy-dir')
-            sub_parser.add_argument('--rlscope-dir')
+            sub_parser.add_argument('--rlscope-dir', action='append')
             sub_parser.add_argument('--util-dir')
             sub_parser.add_argument('--multithread-dir')
             sub_parser.add_argument('--multiprocess-dir')

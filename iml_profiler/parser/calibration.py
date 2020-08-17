@@ -105,6 +105,14 @@ class Calibration:
         )
         return logfile
 
+    def compute_gpu_hw_plot_logfile(self):
+        task = "GpuHwPlotTask"
+        logfile = _j(
+            self.directory,
+            self._logfile_basename(task),
+        )
+        return logfile
+
     def cupti_overhead_dir(self):
         return _j(
             self.out_dir(),
@@ -152,7 +160,43 @@ class Calibration:
         json_paths = glob("{direc}/*.json".format(
             direc=direc))
         return json_paths
-    
+
+    def compute_gpu_hw_plot(self):
+        task = "GpuHwPlotTask"
+
+        repetitions = None
+        # repetitions = [1]
+
+        if self.dry_run and (
+            self.conf('gpu_hw', calibration=True, dflt=None) is None
+        ):
+            return
+
+        iml_dirs = self.conf('gpu_hw', calibration=False).iml_directories(repetitions=repetitions)
+
+        # Stick plots in root directory.
+        directory = self.directory
+        if not self.dry_run:
+            os.makedirs(directory, exist_ok=True)
+        cmd = ['iml-analyze',
+               '--iml-directory', directory,
+               '--task', task,
+               '--iml-directories', json.dumps(iml_dirs),
+               ]
+        # self._add_calibration_opts(cmd)
+        add_iml_analyze_flags(cmd, self)
+        # cmd.extend(self.extra_argv)
+
+        logfile = self.compute_gpu_hw_plot_logfile()
+        expr_run_cmd(
+            cmd=cmd,
+            to_file=logfile,
+            # Always re-run plotting script?
+            # replace=True,
+            dry_run=self.dry_run,
+            skip_error=self.skip_error,
+            debug=self.debug)
+
     def compute_time_breakdown_plot(self):
         task = "OverlapStackedBarTask"
 
@@ -497,6 +541,11 @@ class Calibration:
             self.compute_time_breakdown_plot,
             sync=self.debug_single_thread,
         )
+        self._pool.submit(
+            get_func_name(self, 'compute_gpu_hw_plot'),
+            self.compute_gpu_hw_plot,
+            sync=self.debug_single_thread,
+        )
         self._pool.shutdown()
 
     def each_repetition(self):
@@ -519,7 +568,7 @@ class Calibration:
         self.configs = []
         self.config_suffix_to_obj = dict()
         self._add_configs()
-        logger.info("Run configuration: {msg}".format(msg=pprint_msg({
+        logger.info("Run configurations: {msg}".format(msg=pprint_msg({
             'configs': self.configs,
         })))
 
@@ -528,7 +577,7 @@ class Calibration:
 
         def add_calibration_config(calibration=True, **common_kwargs):
             config_kwargs = dict(common_kwargs)
-            config = ExprSubtractionValidationConfig(**config_kwargs)
+            config = RLScopeConfig(**config_kwargs)
             if not calibration:
                 self.configs.append(config)
                 return
@@ -539,7 +588,7 @@ class Calibration:
                 # Disable tfprof: CUPTI and LD_PRELOAD.
                 config_suffix=config_suffix,
             ))
-            calibration_config = ExprSubtractionValidationConfig(**calibration_config_kwargs)
+            calibration_config = RLScopeConfig(**calibration_config_kwargs)
             assert calibration_config.is_calibration
             self.configs.append(calibration_config)
 
@@ -596,7 +645,7 @@ class Calibration:
             script_args=['--iml-disable-pyprof'],
         )
         # # CUPTIScalingOverheadTask:
-        # config = ExprSubtractionValidationConfig(
+        # config = RLScopeConfig(
         #     expr=self,
         #     iml_prof_config='gpu-activities-api-time',
         #     config_suffix='gpu_activities_api_time_calibration',
@@ -613,7 +662,7 @@ class Calibration:
         # if self.calibration_mode == 'validation':
         #     # Evaluate: combined tfprof/pyprof overhead correction.
         #     # (i.e. full IML trace-collection).
-        #     config = ExprSubtractionValidationConfig(
+        #     config = RLScopeConfig(
         #         expr=self,
         #         iml_prof_config='full',
         #         # Enable tfprof: CUPTI and LD_PRELOAD.
@@ -626,7 +675,7 @@ class Calibration:
 
         # if self.calibration_mode == 'validation':
         #     # Evaluate: tfprof overhead correction in isolation.
-        #     config = ExprSubtractionValidationConfig(
+        #     config = RLScopeConfig(
         #         expr=self,
         #         iml_prof_config='full',
         #         # Enable tfprof: CUPTI and LD_PRELOAD.
@@ -639,7 +688,7 @@ class Calibration:
 
         # if self.calibration_mode == 'validation':
         #     # Evaluate: pyprof overhead correction in isolation.
-        #     config = ExprSubtractionValidationConfig(
+        #     config = RLScopeConfig(
         #         expr=self,
         #         iml_prof_config='uninstrumented',
         #         # Disable tfprof: CUPTI and LD_PRELOAD.
@@ -708,7 +757,7 @@ class Calibration:
         ))
 
 
-class ExprSubtractionValidationConfig:
+class RLScopeConfig:
     def __init__(self, expr, iml_prof_config, config_suffix, rls_analyze_mode=None, script_args=[]):
         self.expr = expr
         # $ iml-prof --config ${iml_prof_config}
