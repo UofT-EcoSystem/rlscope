@@ -33,12 +33,6 @@ if [ "$DEBUG" = 'yes' ]; then
     set -x
 fi
 
-_do() {
-    echo "> [run_bench] CMD:"
-    echo "  $ $@"
-    "$@"
-}
-
 CALIB_DIR=$IML_DIR/calibration/microbench
 CALIB_OPTS=( \
     --cupti-overhead-json $CALIB_DIR/cupti_overhead.json \
@@ -185,6 +179,28 @@ _run_debug_a2c_full_training() {
 }
 _run_debug_ddpg_full_training() {
     iml-quick-expr "${RUN_DEBUG_ARGS[@]}" --expr total_training_time --repetitions 1 --instrumented --n-timesteps 20000 --algo ddpg --env Walker2DBulletEnv-v0 "$@"
+}
+
+fig_9_simulator_choice_environments() {
+  # echo AirLearningEnv
+  echo AntBulletEnv-v0
+  echo HalfCheetahBulletEnv-v0
+  echo HopperBulletEnv-v0
+  echo PongNoFrameskip-v4
+  echo Walker2DBulletEnv-v0
+}
+fig_9_simulator_choice_algo() {
+  echo ppo2
+}
+
+fig_10_algo_choice_environment() {
+  echo Walker2DBulletEnv-v0
+}
+fig_10_algo_choice_algorithms() {
+  echo a2c
+  echo ddpg
+  echo ppo2
+  echo sac
 }
 
 run_debug_ppo_full_training_instrumented() {
@@ -454,17 +470,28 @@ setup_cmakelists_windows() {
     echo "> Success: wrote $path"
 }
 
-test_tf_agents() {
+run_tf_agents() {
 (
   set -eu
 
   export CUDA_VISIBLE_DEVICES=0
 
+  algo=${algo:-ddpg}
+  env_id=${env_id:-Walker2DBulletEnv-v0}
   just_plot=${just_plot:-no}
   calibrate=${calibrate:-yes}
+  re_calibrate=${re_calibrate:-no}
+  re_plot=${re_plot:-no}
   # Roughly 1 minute when running --config time-breakdown
-  max_passes=2500
-  repetitions=${repetitions:-3}
+  max_passes=${max_passes:-}
+  repetitions=${repetitions:-5}
+  dry_run=${dry_run:-no}
+
+  local py_script=$TF_AGENTS_DIR/tf_agents/agents/${algo}/examples/v2/train_eval.rlscope.py
+  if [ ! -f ${py_script} ]; then
+    echo "ERROR: Couldn't find tf-agents training script @ ${py_script}"
+    return 1
+  fi
 
   args=(iml-prof)
   if [ "${calibrate}" = 'yes' ]; then
@@ -473,13 +500,139 @@ test_tf_agents() {
     )
   fi
   args+=(
-    python $TF_AGENTS_DIR/tf_agents/agents/dqn/examples/v2/train_eval.new.py
+    python ${py_script}
+    --iml-delay
+  )
+  if [ "${max_passes}" != "" ]; then
+    args+=(
+      --iml-max-passes ${max_passes}
+    )
+  fi
+  if [ "${calibrate}" = 'yes' ]; then
+    args+=(
+      --iml-repetitions ${repetitions}
+    )
+  fi
+  if [ "${re_calibrate}" = 'yes' ]; then
+    args+=(
+      --iml-re-calibrate
+    )
+  fi
+  if [ "${re_plot}" = 'yes' ]; then
+    args+=(
+      --iml-re-plot
+    )
+  fi
+  if [ "${dry_run}" = 'yes' ]; then
+    args+=(
+      # iml-calibrate option
+      --iml-dry-run
+    )
+  fi
+
+  gin_params=()
+  set_gin_params() {
+    gin_params=()
+    if [ "${use_tf_functions}" = 'yes' ]; then
+     gin_params+=(--gin_param=train_eval.use_tf_functions=True)
+    else
+     gin_params+=(--gin_param=train_eval.use_tf_functions=False)
+    fi
+    gin_params+=("--gin_param=train_eval.env_name=\"${env_id}\"")
+  }
+
+  get_iml_root_dir() {
+    local iml_root_dir=$IML_DIR/output/tf_agents/examples/dqn/calibration
+    if [ "${max_passes}" != "" ]; then
+      iml_root_dir="${iml_root_dir}.max_passes_${max_passes}"
+    fi
+    iml_root_dir="${iml_root_dir}$(_bool_attr use_tf_functions $use_tf_functions)"
+    echo "${iml_root_dir}"
+  }
+  iml_root_dir="$(get_iml_root_dir)"
+
+
+  use_tf_functions=yes
+
+  if [ "${just_plot}" = "no" ]; then
+    iml_direc=${iml_root_dir}/use_tf_functions
+    _do "${args[@]}" --iml-directory ${iml_direc}
+
+    iml_direc=${iml_root_dir}/nouse_tf_functions
+    _do "${args[@]}" --iml-directory ${iml_direc} --nouse_tf_functions
+  fi
+
+  if [ "${calibrate}" = 'yes' ]; then
+    args=(
+      iml-plot
+        --iml-repetitions ${repetitions}
+        --iml-directories ${iml_root_dir}/*tf_functions
+        --output-directory ${iml_root_dir}/plots
+  #      --debug-single-thread
+  #      --debug
+  #      --pdb
+        --xtick-expression "x_field = regex_match(row['iml_directory'], [[r'nouse_tf_functions', 'Without autograph'], [r'use_tf_functions', 'With autograph']])"
+#        --rotation 15
+        --x-title "Configuration"
+    )
+    if [ "${dry_run}" = 'yes' ]; then
+      args+=(
+        # iml-calibrate option
+        --iml-dry-run
+      )
+    fi
+    # Leave re-calibration to iml-prof.
+    if [ "${re_plot}" = 'yes' ] || [ "${re_calibrate}" = 'yes' ]; then
+      args+=(
+        --iml-re-plot
+      )
+    fi
+    _do "${args[@]}"
+  fi
+
+)
+}
+
+test_tf_agents() {
+(
+  set -eu
+
+  export CUDA_VISIBLE_DEVICES=0
+
+  just_plot=${just_plot:-no}
+  calibrate=${calibrate:-yes}
+  re_calibrate=${re_calibrate:-no}
+  re_plot=${re_plot:-no}
+  # Roughly 1 minute when running --config time-breakdown
+  max_passes=2500
+  repetitions=${repetitions:-3}
+  dry_run=${dry_run:-no}
+
+  args=(iml-prof)
+  if [ "${calibrate}" = 'yes' ]; then
+    args+=(
+      --calibrate
+    )
+  fi
+  args+=(
+    python $TF_AGENTS_DIR/tf_agents/agents/dqn/examples/v2/train_eval.rlscope.py
     --iml-delay
     --iml-max-passes ${max_passes}
   )
   if [ "${calibrate}" = 'yes' ]; then
     args+=(
       --iml-repetitions ${repetitions}
+    )
+  fi
+  if [ "${re_calibrate}" = 'yes' ]; then
+    args+=(
+      --iml-re-calibrate
+    )
+  fi
+  if [ "${dry_run}" = 'yes' ]; then
+    args+=(
+      # iml-calibrate option
+      --iml-dry-run
     )
   fi
 
@@ -503,9 +656,20 @@ test_tf_agents() {
   #      --debug
   #      --pdb
         --xtick-expression "x_field = regex_match(row['iml_directory'], [[r'nouse_tf_functions', 'Without autograph'], [r'use_tf_functions', 'With autograph']])"
-#        --rotation 15
         --x-title "Configuration"
     )
+    if [ "${dry_run}" = 'yes' ]; then
+      args+=(
+        # iml-calibrate option
+        --iml-dry-run
+      )
+    fi
+    # Leave re-calibration to iml-prof.
+    if [ "${re_plot}" = 'yes' ] || [ "${re_calibrate}" = 'yes' ]; then
+      args+=(
+        --iml-re-plot
+      )
+    fi
     _do "${args[@]}"
   fi
 
@@ -519,7 +683,7 @@ _do() {
   if [ "${DRY_RUN}" = 'yes' ]; then
     dry_str=" [dry-run]"
   fi
-  echo "> CMD${dry_str}:"
+  echo "> CMD [run-bench]${dry_str}:"
   echo "  PWD=$PWD"
   echo "  $ $@"
   if [ "${DRY_RUN}" != 'yes' ]; then
@@ -556,6 +720,22 @@ _do_with_logfile() {
   )
 }
 
+_bool_attr() {
+    local opt="$1"
+    local yes_or_no="$2"
+    shift 2
+    echo ".${opt}_${yes_or_no}"
+}
+_bool_opt() {
+    local opt="$1"
+    local yes_or_no="$2"
+    shift 2
+    if [ "$yes_or_no" = 'yes' ]; then
+        echo "--${opt}"
+    fi
+}
+
+
 if [ $# -gt 0 ]; then
     echo "> CMD: $@"
     echo "  $ $@"
@@ -573,3 +753,4 @@ else
     echo "  run_stable_baselines"
     exit 1
 fi
+

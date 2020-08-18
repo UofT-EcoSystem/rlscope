@@ -3243,8 +3243,8 @@ def check_avail_gpus():
     if not( (len(avail_gpus) == 1) or
             (len(avail_gpus) == 0 and len(avail_cpus) == 1) ):
         CUDA_VISIBLE_DEVICES = ENV.get('CUDA_VISIBLE_DEVICES', None)
-        logger.info(textwrap.dedent("""
-        > IML ERROR: Multiple GPUs were found; IML benchmark requires only one GPU to be visible to TensorFlow via (for example) "export CUDA_VISIBLE_DEVICES=0".
+        logger.error(textwrap.dedent("""
+        Multiple GPUs were found; IML benchmark requires only one GPU to be visible to TensorFlow via (for example) "export CUDA_VISIBLE_DEVICES=0".
         Use one of the below available GPUs:
         """))
         pprint.pprint({

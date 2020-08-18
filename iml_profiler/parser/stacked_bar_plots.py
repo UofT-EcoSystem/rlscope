@@ -1895,6 +1895,8 @@ class DetailedStackedBarPlot:
                  bar_width=0.33,
                  func=None,
                  debug=False,
+                 # Debug this class specifically.
+                 verbose_debug=False,
                  ):
 
 
@@ -1918,6 +1920,7 @@ class DetailedStackedBarPlot:
 
         self.func = func
         self.debug = debug
+        self.verbose_debug = verbose_debug
 
         # Either provide both or neither.
         assert ( y2_field is None and data2 is None ) or \
@@ -2443,11 +2446,12 @@ class DetailedStackedBarPlot:
                             bottom=bottom,
                         )
 
-        logger.info("Plot debug:\n{msg}".format(
-            msg=pprint_msg({
-                'bar_kwargs': bar_kwargs,
-            }),
-        ))
+        if self.verbose_debug:
+            logger.debug("Plot debug:\n{msg}".format(
+                msg=pprint_msg({
+                    'bar_kwargs': bar_kwargs,
+                }),
+            ))
 
     def _old_plot_hues_together(self, data, fig, ax):
 

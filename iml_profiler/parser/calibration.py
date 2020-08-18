@@ -60,7 +60,10 @@ class Calibration:
     def __init__(self,
                  repetitions=1,
                  replace=False,
+                 re_calibrate=False,
+                 re_plot=False,
                  dry_run=False,
+                 skip_plot=False,
                  skip_error=False,
                  debug=False,
                  debug_single_thread=False,
@@ -70,7 +73,10 @@ class Calibration:
                  ):
         self.repetitions = repetitions
         self.replace = replace
+        self.re_calibrate = re_calibrate
+        self.re_plot = re_plot
         self.dry_run = dry_run
+        self.skip_plot = skip_plot
         self.skip_error = skip_error
         self.debug = debug
         self.debug_single_thread = debug_single_thread
@@ -281,12 +287,94 @@ class Calibration:
 
     def _add_calibration_opts(self, output_directory, cmd):
         cmd.extend([
-            '--cupti-overhead-json', _j(self.cupti_overhead_dir(output_directory), 'cupti_overhead.json'),
-            '--LD-PRELOAD-overhead-json', _j(self.LD_PRELOAD_overhead_dir(output_directory), 'LD_PRELOAD_overhead.json'),
-            '--python-annotation-json', _j(self.pyprof_overhead_dir(output_directory), 'category_events.python_annotation.json'),
-            '--python-clib-interception-tensorflow-json', _j(self.pyprof_overhead_dir(output_directory), 'category_events.python_clib_interception.json'),
-            '--python-clib-interception-simulator-json', _j(self.pyprof_overhead_dir(output_directory), 'category_events.python_clib_interception.json'),
+            '--cupti-overhead-json', self.cupti_overhead_json(output_directory),
+            '--LD-PRELOAD-overhead-json', self.LD_PRELOAD_overhead_json(output_directory),
+            '--python-annotation-json', self.python_annotation_json(output_directory),
+            '--python-clib-interception-tensorflow-json', self.python_clib_interception_tensorflow_json(output_directory),
+            '--python-clib-interception-simulator-json', self.python_clib_interception_simulator_json(output_directory),
         ])
+
+    def _calibration_paths(self, output_directory):
+        return set([
+            self.cupti_overhead_json(output_directory),
+            self.LD_PRELOAD_overhead_json(output_directory),
+            self.python_annotation_json(output_directory),
+            self.python_clib_interception_tensorflow_json(output_directory),
+            self.python_clib_interception_simulator_json(output_directory),
+        ])
+
+    def _calibration_logfiles(self, output_directory):
+        logfiles = set()
+        json_paths = self._calibration_paths(output_directory)
+        for json_path in json_paths:
+            calibration_dir = _d(json_path)
+            for logfile in glob("{dir}/*.logfile.out".format(dir=calibration_dir)):
+                logfiles.add(logfile)
+        return logfiles
+
+    def cupti_overhead_json(self, output_directory):
+        return _j(self.cupti_overhead_dir(output_directory), 'cupti_overhead.json')
+    def LD_PRELOAD_overhead_json(self, output_directory):
+        return _j(self.LD_PRELOAD_overhead_dir(output_directory), 'LD_PRELOAD_overhead.json')
+    def python_annotation_json(self, output_directory):
+        return _j(self.pyprof_overhead_dir(output_directory), 'category_events.python_annotation.json')
+    def python_clib_interception_tensorflow_json(self, output_directory):
+        return _j(self.pyprof_overhead_dir(output_directory), 'category_events.python_clib_interception.json')
+    def python_clib_interception_simulator_json(self, output_directory):
+        return _j(self.pyprof_overhead_dir(output_directory), 'category_events.python_clib_interception.json')
+
+    def rls_analyze_logfile(self, iml_directory, conf, rep):
+        task = "RLSAnalyze"
+        directory = conf.out_dir(iml_directory, rep)
+        logfile = _j(
+            directory,
+            self._logfile_basename(task),
+        )
+        return logfile
+
+    def rls_analyze_output_paths(self, iml_directory, conf, rep):
+        directory = conf.out_dir(iml_directory, rep)
+        paths = set()
+        # ${directory}/*.venn_js.json
+        # ${directory}/OverlapResult.*
+        # ${directory}/RLSAnalyze.*
+        # ${directory}/iml_profiler_plot_index*
+        # ${directory}/__pycache__
+        def _add_paths(glob_pattern):
+            for path in glob("{dir}/{glob}".format(dir=directory, glob=glob_pattern)):
+                paths.add(path)
+        # --config time-breakdown
+        _add_paths("*.venn_js.json")
+        _add_paths("OverlapResult.*")
+        _add_paths("RLSAnalyze.*")
+        _add_paths("iml_profiler_plot_index*")
+        _add_paths("__pycache__")
+        # --config gpu-hw
+        _add_paths("GPUHwCounterSampler.csv")
+        return paths
+
+    def time_breakdown_plot_paths(self, iml_directory):
+        paths = set()
+        def _add_paths(glob_pattern):
+            for path in glob("{dir}/{glob}".format(dir=iml_directory, glob=glob_pattern)):
+                paths.add(path)
+        # --config time-breakdown
+        _add_paths("OverlapStackedBar*")
+        return paths
+
+    def gpu_hw_plot_paths(self, iml_directory):
+        paths = set()
+        def _add_paths(glob_pattern):
+            for path in glob("{dir}/{glob}".format(dir=iml_directory, glob=glob_pattern)):
+                paths.add(path)
+        # --config gpu-hw
+        _add_paths("GpuHwPlot*")
+        _add_paths("rlscope_*dataframe*")
+        _add_paths("rlscope_*csv")
+        _add_paths("rlscope_*svg")
+        _add_paths("rlscope_*png")
+        _add_paths("rlscope_*pdf")
+        return paths
 
     def compute_rls_analyze(self, iml_directory, output_directory, conf, rep):
         task = "RLSAnalyze"
@@ -303,10 +391,7 @@ class Calibration:
         self._add_calibration_opts(iml_directory, cmd)
         add_iml_analyze_flags(cmd, self)
 
-        logfile = _j(
-            directory,
-            self._logfile_basename(task),
-        )
+        logfile = self.rls_analyze_logfile(iml_directory, conf, rep)
         expr_run_cmd(
             cmd=cmd,
             to_file=logfile,
@@ -515,10 +600,46 @@ class Calibration:
             for config in self.configs:
                 config.run(rep, cmd, output_directory)
 
-        # self.compute_cupti_scaling_overhead()
-        # self.compute_cupti_overhead()
-        # self.compute_LD_PRELOAD_overhead()
-        # self.compute_pyprof_overhead()
+        # Lets save calibration to happen during iml-plot to make it easier to split up "analysis" from
+        # "calibration" time.
+        # unless they give --iml-plot
+        if not self.skip_plot:
+            self.do_calibration(output_directory)
+        else:
+            logger.info("--iml-skip-plot: SKIP processing results into plots; run iml-plot to do this later.")
+
+    def _rm_path(self, path):
+        if _e(path):
+            logger.info("--iml-re-calibrate: RM {path}".format(path=path))
+            if not self.dry_run:
+                if os.path.isdir(path):
+                    shutil.rmtree(path)
+                else:
+                    os.remove(path)
+
+    def clean_plots(self, output_directory):
+
+        for path in self.time_breakdown_plot_paths(output_directory):
+            self._rm_path(path)
+
+        for path in self.gpu_hw_plot_paths(output_directory):
+            self._rm_path(path)
+
+    def clean_analysis(self, output_directory):
+        for path in self._calibration_paths(output_directory):
+            self._rm_path(path)
+        for path in self._calibration_logfiles(output_directory):
+            self._rm_path(path)
+
+        # Need to re-run rls-analyze using new calibration files.
+        for rep in range(1, self.repetitions+1):
+            for config in self.configs:
+                if config.rls_analyze_mode is not None:
+                    for path in self.rls_analyze_output_paths(output_directory, config, rep):
+                        self._rm_path(path)
+
+
+    def do_calibration(self, output_directory, sync=True):
         self._pool.submit(
             get_func_name(self, 'compute_cupti_scaling_overhead'),
             self.compute_cupti_scaling_overhead,
@@ -543,14 +664,17 @@ class Calibration:
             output_directory,
             sync=self.debug_single_thread,
         )
-        self._pool.shutdown()
+        if sync:
+            self._pool.shutdown()
 
     def do_plot(self, directories, output_directory, extra_argv=None, **kwargs):
+        for iml_directory in directories:
+            self.do_calibration(iml_directory, sync=False)
+        self._pool.shutdown()
         # rls-analyze needs the JSON calibration files; wait.
         for iml_directory in directories:
             for rep in self.each_repetition():
                 for config in self.configs:
-                    # config.run(rep, cmd, output_directory)
                     if config.rls_analyze_mode is not None:
                         self._pool.submit(
                             get_func_name(self, 'compute_rls_analyze'),
@@ -750,8 +874,18 @@ class Calibration:
             script_args=['--iml-disable-tfprof', '--iml-disable-pyprof-annotations'],
         )
 
+    def maybe_clean(self, directory, skip_analysis=False):
+        # PROBLEM: is this going to run twice in the iml-plot call?
+        if not skip_analysis and self.re_calibrate:
+            self.clean_analysis(directory)
+        if self.re_calibrate or self.re_plot:
+            self.clean_plots(directory)
+
     def mode_run(self, cmd, directory):
         self.init_configs([directory])
+
+        self.maybe_clean(directory)
+
         self.do_run(cmd, directory)
         self.do_plot(directories=[directory], output_directory=directory)
         logger.info("Success! Calibration files have been generated @ {direc}/*_overhead".format(
@@ -760,6 +894,14 @@ class Calibration:
 
     def mode_plot(self, directories, output_directory, extra_argv=None, **kwargs):
         self.init_configs(directories)
+
+        # Output directory just contains plots; no need to delete analysis files.
+        self.maybe_clean(output_directory, skip_analysis=True)
+        if self.re_calibrate:
+            # Only delete plots from --iml-directories if we're re-calibrating everything.
+            for iml_directory in directories:
+                self.maybe_clean(iml_directory)
+
         # self.do_run(cmd, directory)
         self.do_plot(directories=directories, output_directory=output_directory, extra_argv=extra_argv, **kwargs)
         logger.info("Success! Plots output @ {direc}".format(
@@ -914,10 +1056,20 @@ def _main(argv):
                             help=textwrap.dedent("""
                             Replace
                             """))
-        parser.add_argument("--dry-run",
+        parser.add_argument("--iml-dry-run",
                             action='store_true',
                             help=textwrap.dedent("""
                             Dry run
+                            """))
+        parser.add_argument("--iml-re-calibrate",
+                            action='store_true',
+                            help=textwrap.dedent("""
+                            Remove existing profiling overhead calibration files, and recompute them.
+                            """))
+        parser.add_argument("--iml-re-plot",
+                            action='store_true',
+                            help=textwrap.dedent("""
+                            Remove existing plots and remake them (NOTE: doesn't recompute analysis; see --iml-re-calibrate).
                             """))
         parser.add_argument("--skip-error",
                             action='store_true',
@@ -932,6 +1084,11 @@ def _main(argv):
                             help=textwrap.dedent("""
                         Root directory for output
                         """))
+    parser.add_argument("--iml-skip-plot",
+                        action='store_true',
+                        help=textwrap.dedent("""
+                            After running configurations, DON'T run analysis to output plots for individual workload.
+                            """))
     run_parser.set_defaults(**{'mode': 'run'})
 
     plot_parser = subparsers.add_parser('plot', description="Plot multiple workloads")
@@ -962,8 +1119,16 @@ def _main(argv):
 
     args_dict = dict(vars(args))
     repetitions = args_dict.pop('iml_repetitions')
+    dry_run = args_dict.pop('iml_dry_run')
+    re_calibrate = args_dict.pop('iml_re_calibrate')
+    re_plot = args_dict.pop('iml_re_plot')
+    skip_plot = args_dict.pop('iml_skip_plot')
     obj = Calibration(
         repetitions=repetitions,
+        re_calibrate=re_calibrate,
+        re_plot=re_plot,
+        dry_run=dry_run,
+        skip_plot=skip_plot,
         **args_dict,
     )
 
