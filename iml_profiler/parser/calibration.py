@@ -57,7 +57,7 @@ A: Add --iml-algo and --iml-env and record it in a file somewhere (iml_config.js
 SENTINEL = object()
 
 class Calibration:
-    def __init__(self, directory, cmd,
+    def __init__(self,
                  repetitions=1,
                  replace=False,
                  dry_run=False,
@@ -68,8 +68,6 @@ class Calibration:
                  # Ignore extra stuff
                  **kwargs,
                  ):
-        self.directory = directory
-        self.cmd = cmd
         self.repetitions = repetitions
         self.replace = replace
         self.dry_run = dry_run
@@ -81,73 +79,73 @@ class Calibration:
             klass=self.__class__.__name__))
         # 1 min, 2 min, 4 min
 
-    def out_dir(self):
-        return self.directory
+    # def out_dir(self):
+    #     return self.directory
 
-    def cupti_scaling_overhead_dir(self):
+    def cupti_scaling_overhead_dir(self, output_directory):
         return _j(
-            self.out_dir(),
+            output_directory,
             "cupti_scaling_overhead")
 
-    def cupti_scaling_overhead_logfile(self):
+    def cupti_scaling_overhead_logfile(self, output_directory):
         task = "CUPTIScalingOverheadTask"
         logfile = _j(
-            self.cupti_scaling_overhead_dir(),
+            self.cupti_scaling_overhead_dir(output_directory),
             self._logfile_basename(task),
         )
         return logfile
 
-    def compute_time_breakdown_plot_logfile(self):
+    def compute_time_breakdown_plot_logfile(self, output_directory):
         task = "OverlapStackedBarTask"
         logfile = _j(
-            self.directory,
+            output_directory,
             self._logfile_basename(task),
         )
         return logfile
 
-    def compute_gpu_hw_plot_logfile(self):
+    def compute_gpu_hw_plot_logfile(self, output_directory):
         task = "GpuHwPlotTask"
         logfile = _j(
-            self.directory,
+            output_directory,
             self._logfile_basename(task),
         )
         return logfile
 
-    def cupti_overhead_dir(self):
+    def cupti_overhead_dir(self, output_directory):
         return _j(
-            self.out_dir(),
+            output_directory,
             "cupti_overhead")
 
-    def cupti_overhead_logfile(self):
+    def cupti_overhead_logfile(self, output_directory):
         task = "CUPTIOverheadTask"
         logfile = _j(
-            self.cupti_overhead_dir(),
+            self.cupti_overhead_dir(output_directory),
             self._logfile_basename(task),
         )
         return logfile
 
-    def LD_PRELOAD_overhead_dir(self):
+    def LD_PRELOAD_overhead_dir(self, output_directory):
         return _j(
-            self.out_dir(),
+            output_directory,
             "LD_PRELOAD_overhead")
 
-    def LD_PRELOAD_overhead_logfile(self):
+    def LD_PRELOAD_overhead_logfile(self, output_directory):
         task = "CallInterceptionOverheadTask"
         logfile = _j(
-            self.LD_PRELOAD_overhead_dir(),
+            self.LD_PRELOAD_overhead_dir(output_directory),
             self._logfile_basename(task),
         )
         return logfile
 
-    def pyprof_overhead_dir(self):
+    def pyprof_overhead_dir(self, output_directory):
         return _j(
-            self.out_dir(),
+            output_directory,
             "pyprof_overhead")
 
-    def pyprof_overhead_logfile(self):
+    def pyprof_overhead_logfile(self, output_directory):
         task = "PyprofOverheadTask"
         logfile = _j(
-            self.pyprof_overhead_dir(),
+            self.pyprof_overhead_dir(output_directory),
             self._logfile_basename(task),
         )
         return logfile
@@ -161,33 +159,42 @@ class Calibration:
             direc=direc))
         return json_paths
 
-    def compute_gpu_hw_plot(self):
+    def compute_gpu_hw_plot(self, directories, output_directory, extra_argv=None,
+                            # xtick_expression=None
+                            **kwargs,
+                            ):
         task = "GpuHwPlotTask"
 
         repetitions = None
         # repetitions = [1]
 
-        if self.dry_run and (
-            self.conf('gpu_hw', calibration=True, dflt=None) is None
-        ):
-            return
+        for iml_directory in directories:
+            if self.dry_run and (
+                self.conf(iml_directory, 'gpu_hw', calibration=True, dflt=None) is None
+            ):
+                return
 
-        iml_dirs = self.conf('gpu_hw', calibration=False).iml_directories(repetitions=repetitions)
+        iml_dirs = []
+        for iml_directory in directories:
+            iml_dirs.extend(self.conf(iml_directory, 'gpu_hw', calibration=False).iml_directories(iml_directory, repetitions=repetitions))
 
         # Stick plots in root directory.
-        directory = self.directory
         if not self.dry_run:
-            os.makedirs(directory, exist_ok=True)
+            os.makedirs(output_directory, exist_ok=True)
         cmd = ['iml-analyze',
-               '--iml-directory', directory,
+               '--iml-directory', output_directory,
                '--task', task,
                '--iml-directories', json.dumps(iml_dirs),
                ]
-        # self._add_calibration_opts(cmd)
+        if extra_argv is not None:
+            cmd.extend(extra_argv)
+        # if xtick_expression is not None:
+        #     cmd.extend(['--xtick-expression', xtick_expression])
+        # self._add_calibration_opts(output_directory, cmd)
         add_iml_analyze_flags(cmd, self)
         # cmd.extend(self.extra_argv)
 
-        logfile = self.compute_gpu_hw_plot_logfile()
+        logfile = self.compute_gpu_hw_plot_logfile(output_directory)
         expr_run_cmd(
             cmd=cmd,
             to_file=logfile,
@@ -197,7 +204,10 @@ class Calibration:
             skip_error=self.skip_error,
             debug=self.debug)
 
-    def compute_time_breakdown_plot(self):
+    def compute_time_breakdown_plot(self, directories, output_directory, extra_argv,
+                                    # xtick_expression=None,
+                                    # Ignore
+                                    **kwargs):
         task = "OverlapStackedBarTask"
 
         # cmd = [
@@ -211,27 +221,30 @@ class Calibration:
         repetitions = None
         # repetitions = [1]
 
-        if self.dry_run and (
-            self.conf('uninstrumented', calibration=True, dflt=None) is None or
-            self.conf('time_breakdown', calibration=False, dflt=None) ):
-            return
+        for iml_directory in directories:
+            if self.dry_run and (
+                self.conf(iml_directory, 'uninstrumented', calibration=True, dflt=None) is None or
+                self.conf(iml_directory, 'time_breakdown', calibration=False, dflt=None) ):
+                return
 
-        unins_iml_dirs = self.conf('uninstrumented', calibration=True).iml_directories(repetitions=repetitions)
-        iml_dirs = self.conf('time_breakdown', calibration=False).iml_directories(repetitions=repetitions)
-        if len(iml_dirs) != len(unins_iml_dirs):
-            log_missing_files(self, task=task, files={
-                'iml_dirs': iml_dirs,
-                'unins_iml_dirs': unins_iml_dirs,
-            })
-            return
+        unins_iml_dirs = []
+        iml_dirs = []
+        for iml_directory in directories:
+            unins_iml_dirs.extend(self.conf(iml_directory, 'uninstrumented', calibration=True).iml_directories(iml_directory, repetitions=repetitions))
+            iml_dirs.extend(self.conf(iml_directory, 'time_breakdown', calibration=False).iml_directories(iml_directory, repetitions=repetitions))
+            if len(iml_dirs) != len(unins_iml_dirs):
+                log_missing_files(self, task=task, files={
+                    'iml_dirs': iml_dirs,
+                    'unins_iml_dirs': unins_iml_dirs,
+                })
+                return
 
         # Stick plots in root directory.
-        directory = self.directory
         if not self.dry_run:
-            os.makedirs(directory, exist_ok=True)
+            os.makedirs(output_directory, exist_ok=True)
         overlap_type = 'CategoryOverlap'
         cmd = ['iml-analyze',
-               '--directory', directory,
+               '--directory', output_directory,
                '--task', task,
                '--overlap-type', overlap_type,
 
@@ -248,11 +261,15 @@ class Calibration:
                '--iml-directories', json.dumps(iml_dirs),
                '--unins-iml-directories', json.dumps(unins_iml_dirs),
                ]
-        self._add_calibration_opts(cmd)
+        if extra_argv is not None:
+            cmd.extend(extra_argv)
+        # if xtick_expression is not None:
+        #     cmd.extend(['--xtick-expression', xtick_expression])
+        self._add_calibration_opts(output_directory, cmd)
         add_iml_analyze_flags(cmd, self)
         # cmd.extend(self.extra_argv)
 
-        logfile = self.compute_time_breakdown_plot_logfile()
+        logfile = self.compute_time_breakdown_plot_logfile(output_directory)
         expr_run_cmd(
             cmd=cmd,
             to_file=logfile,
@@ -262,28 +279,28 @@ class Calibration:
             skip_error=self.skip_error,
             debug=self.debug)
 
-    def _add_calibration_opts(self, cmd):
+    def _add_calibration_opts(self, output_directory, cmd):
         cmd.extend([
-            '--cupti-overhead-json', _j(self.cupti_overhead_dir(), 'cupti_overhead.json'),
-            '--LD-PRELOAD-overhead-json', _j(self.LD_PRELOAD_overhead_dir(), 'LD_PRELOAD_overhead.json'),
-            '--python-annotation-json', _j(self.pyprof_overhead_dir(), 'category_events.python_annotation.json'),
-            '--python-clib-interception-tensorflow-json', _j(self.pyprof_overhead_dir(), 'category_events.python_clib_interception.json'),
-            '--python-clib-interception-simulator-json', _j(self.pyprof_overhead_dir(), 'category_events.python_clib_interception.json'),
+            '--cupti-overhead-json', _j(self.cupti_overhead_dir(output_directory), 'cupti_overhead.json'),
+            '--LD-PRELOAD-overhead-json', _j(self.LD_PRELOAD_overhead_dir(output_directory), 'LD_PRELOAD_overhead.json'),
+            '--python-annotation-json', _j(self.pyprof_overhead_dir(output_directory), 'category_events.python_annotation.json'),
+            '--python-clib-interception-tensorflow-json', _j(self.pyprof_overhead_dir(output_directory), 'category_events.python_clib_interception.json'),
+            '--python-clib-interception-simulator-json', _j(self.pyprof_overhead_dir(output_directory), 'category_events.python_clib_interception.json'),
         ])
 
-    def compute_rls_analyze(self, conf, rep):
+    def compute_rls_analyze(self, iml_directory, output_directory, conf, rep):
         task = "RLSAnalyze"
 
         assert conf.rls_analyze_mode is not None
 
-        directory = conf.out_dir(rep)
+        directory = conf.out_dir(iml_directory, rep)
 
         cmd = ['iml-analyze',
                '--task', task,
                '--iml-directory', directory,
                '--mode', conf.rls_analyze_mode,
                ]
-        self._add_calibration_opts(cmd)
+        self._add_calibration_opts(iml_directory, cmd)
         add_iml_analyze_flags(cmd, self)
 
         logfile = _j(
@@ -299,19 +316,19 @@ class Calibration:
             skip_error=self.skip_error,
             debug=self.debug)
 
-    def compute_cupti_scaling_overhead(self):
+    def compute_cupti_scaling_overhead(self, output_directory):
         task = "CUPTIScalingOverheadTask"
 
         if self.dry_run and (
-            self.conf('gpu_activities_api_time', calibration=True, dflt=None) is None or
-            self.conf('interception', calibration=True, dflt=None) ):
+            self.conf(output_directory, 'gpu_activities_api_time', calibration=True, dflt=None) is None or
+            self.conf(output_directory, 'interception', calibration=True, dflt=None) ):
             return
 
         all_gpu_activities_api_time_directories = []
         all_interception_directories = []
 
-        gpu_activities_api_time_directories = self.conf('gpu_activities_api_time', calibration=True).iml_directories()
-        interception_directories = self.conf('interception', calibration=True).iml_directories()
+        gpu_activities_api_time_directories = self.conf(output_directory, 'gpu_activities_api_time', calibration=True).iml_directories(output_directory)
+        interception_directories = self.conf(output_directory, 'interception', calibration=True).iml_directories(output_directory)
         if len(gpu_activities_api_time_directories) != len(interception_directories):
             log_missing_files(self, task=task, files={
                 'gpu_activities_api_time_directories': gpu_activities_api_time_directories,
@@ -321,11 +338,11 @@ class Calibration:
         all_gpu_activities_api_time_directories.extend(gpu_activities_api_time_directories)
         all_interception_directories.extend(interception_directories)
 
-        directory = self.cupti_scaling_overhead_dir()
+        directory = self.cupti_scaling_overhead_dir(output_directory)
         if not self.dry_run:
-            os.makedirs(directory, exist_ok=True)
+            os.makedirs(output_directory, exist_ok=True)
         cmd = ['iml-analyze',
-               '--directory', directory,
+               '--directory', output_directory,
                '--task', task,
                '--gpu-activities-api-time-directory', json.dumps(all_gpu_activities_api_time_directories),
                '--interception-directory', json.dumps(all_interception_directories),
@@ -333,7 +350,7 @@ class Calibration:
         add_iml_analyze_flags(cmd, self)
         # cmd.extend(self.extra_argv)
 
-        logfile = self.cupti_scaling_overhead_logfile()
+        logfile = self.cupti_scaling_overhead_logfile(output_directory)
         expr_run_cmd(
             cmd=cmd,
             to_file=logfile,
@@ -343,16 +360,16 @@ class Calibration:
             skip_error=self.skip_error,
             debug=self.debug)
 
-    def compute_cupti_overhead(self):
+    def compute_cupti_overhead(self, output_directory):
         task = "CUPTIOverheadTask"
 
         if self.dry_run and (
-            self.conf('gpu_activities', calibration=True, dflt=None) is None or
-            self.conf('no_gpu_activities', calibration=True, dflt=None) ):
+            self.conf(output_directory, 'gpu_activities', calibration=True, dflt=None) is None or
+            self.conf(output_directory, 'no_gpu_activities', calibration=True, dflt=None) ):
             return
 
-        gpu_activities_directories = self.conf('gpu_activities', calibration=True).iml_directories()
-        no_gpu_activities_directories = self.conf('no_gpu_activities', calibration=True).iml_directories()
+        gpu_activities_directories = self.conf(output_directory, 'gpu_activities', calibration=True).iml_directories(output_directory)
+        no_gpu_activities_directories = self.conf(output_directory, 'no_gpu_activities', calibration=True).iml_directories(output_directory)
         if self.debug:
             logger.info("log = {msg}".format(
                 msg=pprint_msg({
@@ -367,7 +384,7 @@ class Calibration:
             })
             return
 
-        directory = self.cupti_overhead_dir()
+        directory = self.cupti_overhead_dir(output_directory)
         if not self.dry_run:
             os.makedirs(directory, exist_ok=True)
         cmd = ['iml-analyze',
@@ -378,7 +395,7 @@ class Calibration:
                ]
         add_iml_analyze_flags(cmd, self)
 
-        logfile = self.cupti_overhead_logfile()
+        logfile = self.cupti_overhead_logfile(output_directory)
         expr_run_cmd(
             cmd=cmd,
             to_file=logfile,
@@ -388,16 +405,16 @@ class Calibration:
             skip_error=self.skip_error,
             debug=self.debug)
 
-    def compute_LD_PRELOAD_overhead(self):
+    def compute_LD_PRELOAD_overhead(self, output_directory):
         task = "CallInterceptionOverheadTask"
 
         if self.dry_run and (
-            self.conf('interception', calibration=True, dflt=None) is None or
-            self.conf('uninstrumented', calibration=True, dflt=None) ):
+            self.conf(output_directory, 'interception', calibration=True, dflt=None) is None or
+            self.conf(output_directory, 'uninstrumented', calibration=True, dflt=None) ):
             return
 
-        interception_directories = self.conf('interception', calibration=True).iml_directories()
-        uninstrumented_directories = self.conf('uninstrumented', calibration=True).iml_directories()
+        interception_directories = self.conf(output_directory, 'interception', calibration=True).iml_directories(output_directory)
+        uninstrumented_directories = self.conf(output_directory, 'uninstrumented', calibration=True).iml_directories(output_directory)
         if self.debug:
             logger.info("log = {msg}".format(
                 msg=pprint_msg({
@@ -417,7 +434,7 @@ class Calibration:
             })
             return
 
-        directory = self.LD_PRELOAD_overhead_dir()
+        directory = self.LD_PRELOAD_overhead_dir(output_directory)
         if not self.dry_run:
             os.makedirs(directory, exist_ok=True)
         cmd = ['iml-analyze',
@@ -428,7 +445,7 @@ class Calibration:
                ]
         add_iml_analyze_flags(cmd, self)
 
-        logfile = self.LD_PRELOAD_overhead_logfile()
+        logfile = self.LD_PRELOAD_overhead_logfile(output_directory)
         expr_run_cmd(
             cmd=cmd,
             to_file=logfile,
@@ -438,18 +455,18 @@ class Calibration:
             skip_error=self.skip_error,
             debug=self.debug)
 
-    def compute_pyprof_overhead(self):
+    def compute_pyprof_overhead(self, output_directory):
         task = "PyprofOverheadTask"
 
         if self.dry_run and (
-            self.conf('uninstrumented', calibration=True, dflt=None) is None or
-            self.conf('just_pyprof_interceptions', calibration=True, dflt=None) is None or
-            self.conf('just_pyprof_annotations', calibration=True, dflt=None) ):
+            self.conf(output_directory, 'uninstrumented', calibration=True, dflt=None) is None or
+            self.conf(output_directory, 'just_pyprof_interceptions', calibration=True, dflt=None) is None or
+            self.conf(output_directory, 'just_pyprof_annotations', calibration=True, dflt=None) ):
             return
 
-        uninstrumented_directories = self.conf('uninstrumented', calibration=True).iml_directories()
-        pyprof_annotations_directories = self.conf('just_pyprof_annotations', calibration=True).iml_directories()
-        pyprof_interceptions_directories = self.conf('just_pyprof_interceptions', calibration=True).iml_directories()
+        uninstrumented_directories = self.conf(output_directory, 'uninstrumented', calibration=True).iml_directories(output_directory)
+        pyprof_annotations_directories = self.conf(output_directory, 'just_pyprof_annotations', calibration=True).iml_directories(output_directory)
+        pyprof_interceptions_directories = self.conf(output_directory, 'just_pyprof_interceptions', calibration=True).iml_directories(output_directory)
         if self.debug:
             logger.info("log = {msg}".format(
                 msg=pprint_msg({
@@ -470,7 +487,7 @@ class Calibration:
             })
             return
 
-        directory = self.pyprof_overhead_dir()
+        directory = self.pyprof_overhead_dir(output_directory)
         if not self.dry_run:
             os.makedirs(directory, exist_ok=True)
         cmd = ['iml-analyze',
@@ -482,7 +499,7 @@ class Calibration:
                ]
         add_iml_analyze_flags(cmd, self)
 
-        logfile = self.pyprof_overhead_logfile()
+        logfile = self.pyprof_overhead_logfile(output_directory)
         expr_run_cmd(
             cmd=cmd,
             to_file=logfile,
@@ -492,11 +509,11 @@ class Calibration:
             skip_error=self.skip_error,
             debug=self.debug)
 
-    def do_run(self):
+    def do_run(self, cmd, output_directory):
 
         for rep in range(1, self.repetitions+1):
             for config in self.configs:
-                config.run(rep, self.cmd)
+                config.run(rep, cmd, output_directory)
 
         # self.compute_cupti_scaling_overhead()
         # self.compute_cupti_overhead()
@@ -505,57 +522,69 @@ class Calibration:
         self._pool.submit(
             get_func_name(self, 'compute_cupti_scaling_overhead'),
             self.compute_cupti_scaling_overhead,
+            output_directory,
             sync=self.debug_single_thread,
         )
         self._pool.submit(
             get_func_name(self, 'compute_cupti_overhead'),
             self.compute_cupti_overhead,
+            output_directory,
             sync=self.debug_single_thread,
         )
         self._pool.submit(
             get_func_name(self, 'compute_LD_PRELOAD_overhead'),
             self.compute_LD_PRELOAD_overhead,
+            output_directory,
             sync=self.debug_single_thread,
         )
         self._pool.submit(
             get_func_name(self, 'compute_pyprof_overhead'),
             self.compute_pyprof_overhead,
+            output_directory,
             sync=self.debug_single_thread,
         )
         self._pool.shutdown()
+
+    def do_plot(self, directories, output_directory, extra_argv=None, **kwargs):
         # rls-analyze needs the JSON calibration files; wait.
-        for rep in self.each_repetition():
-            for config in self.configs:
-                config.run(rep, self.cmd)
-                if config.rls_analyze_mode is not None:
-                    self._pool.submit(
-                        get_func_name(self, 'compute_rls_analyze'),
-                        self.compute_rls_analyze,
-                        config, rep,
-                        sync=self.debug_single_thread,
-                    )
+        for iml_directory in directories:
+            for rep in self.each_repetition():
+                for config in self.configs:
+                    # config.run(rep, cmd, output_directory)
+                    if config.rls_analyze_mode is not None:
+                        self._pool.submit(
+                            get_func_name(self, 'compute_rls_analyze'),
+                            self.compute_rls_analyze,
+                            iml_directory, output_directory,
+                            config, rep,
+                            sync=self.debug_single_thread,
+                        )
         self._pool.shutdown()
         # Plotting requires running rls-analyze
         self._pool.submit(
             get_func_name(self, 'compute_time_breakdown_plot'),
             self.compute_time_breakdown_plot,
+            directories, output_directory, extra_argv,
             sync=self.debug_single_thread,
+            **kwargs,
         )
         self._pool.submit(
             get_func_name(self, 'compute_gpu_hw_plot'),
             self.compute_gpu_hw_plot,
+            directories, output_directory, extra_argv,
             sync=self.debug_single_thread,
+            **kwargs,
         )
         self._pool.shutdown()
 
     def each_repetition(self):
         return range(1, self.repetitions+1)
 
-    def conf(self, config_suffix, calibration=False, dflt=SENTINEL):
+    def conf(self, output_dir, config_suffix, calibration=False, dflt=SENTINEL):
         calib_config_suffix = self.calibrated_name(config_suffix, calibration=calibration)
         if dflt is SENTINEL:
-            return self.config_suffix_to_obj[calib_config_suffix]
-        return self.config_suffix_to_obj.get(calib_config_suffix, dflt)
+            return self.config_map[output_dir][calib_config_suffix]
+        return self.config_map[output_dir].get(calib_config_suffix, dflt)
 
     def calibrated_name(self, config_suffix, calibration=False):
         if not calibration:
@@ -564,33 +593,38 @@ class Calibration:
             suffix=config_suffix,
         )
 
-    def init_configs(self):
+    def init_configs(self, directories):
         self.configs = []
-        self.config_suffix_to_obj = dict()
-        self._add_configs()
+        self.config_map = dict()
+        for directory in directories:
+            self._add_configs(directory)
         logger.info("Run configurations: {msg}".format(msg=pprint_msg({
             'configs': self.configs,
         })))
 
 
-    def _add_configs(self):
+    def _add_configs(self, output_dir):
 
         def add_calibration_config(calibration=True, **common_kwargs):
             config_kwargs = dict(common_kwargs)
-            config = RLScopeConfig(**config_kwargs)
+            base_config = RLScopeConfig(**config_kwargs)
             if not calibration:
-                self.configs.append(config)
-                return
+                config = base_config
+            else:
+                config_suffix = self.calibrated_name(base_config.config_suffix, calibration=calibration)
+                calibration_config_kwargs = dict(common_kwargs)
+                calibration_config_kwargs.update(dict(
+                    # Disable tfprof: CUPTI and LD_PRELOAD.
+                    config_suffix=config_suffix,
+                ))
+                config = RLScopeConfig(**calibration_config_kwargs)
+                assert config.is_calibration
 
-            config_suffix = self.calibrated_name(config.config_suffix, calibration=calibration)
-            calibration_config_kwargs = dict(common_kwargs)
-            calibration_config_kwargs.update(dict(
-                # Disable tfprof: CUPTI and LD_PRELOAD.
-                config_suffix=config_suffix,
-            ))
-            calibration_config = RLScopeConfig(**calibration_config_kwargs)
-            assert calibration_config.is_calibration
-            self.configs.append(calibration_config)
+            self.configs.append(config)
+            if output_dir not in self.config_map:
+                self.config_map[output_dir] = dict()
+            assert config.config_suffix not in self.config_map[output_dir]
+            self.config_map[output_dir][config.config_suffix] = config
 
         add_calibration_config(
             expr=self,
@@ -716,45 +750,27 @@ class Calibration:
             script_args=['--iml-disable-tfprof', '--iml-disable-pyprof-annotations'],
         )
 
-        for config in self.configs:
-            assert config.config_suffix not in self.config_suffix_to_obj
-            self.config_suffix_to_obj[config.config_suffix] = config
-
-
-    def run(self):
-        # parser.add_argument(
-        #     '--calibration-mode',
-        #     default='calibration',
-        #     choices=['calibration', 'validation'],
-        #     help=textwrap.dedent("""
-        #     calibration:
-        #         Only run configurations needed to subtract overhead; i.e.
-        #
-        #         PyprofOverheadTask
-        #             uninstrumented
-        #             just_pyprof_annotations
-        #             just_pyprof_interceptions
-        #
-        #         CUPTIOverheadTask
-        #             gpu_activities
-        #             no_gpu_activities
-        #
-        #         CUPTIScalingOverheadTask
-        #             gpu_activities_api_time
-        #             interception
-        #
-        #     validation:
-        #         Run additional configurations for "isolating" bugs in overhead correction.
-        #         For example, run with just python annotations enabled so we can see if correcting for python annotations in isolation works.
-        #     """),
-        # )
-
-        self.init_configs()
-
-        self.do_run()
+    def mode_run(self, cmd, directory):
+        self.init_configs([directory])
+        self.do_run(cmd, directory)
+        self.do_plot(directories=[directory], output_directory=directory)
         logger.info("Success! Calibration files have been generated @ {direc}/*_overhead".format(
-            direc=self.directory,
+            direc=directory,
         ))
+
+    def mode_plot(self, directories, output_directory, extra_argv=None, **kwargs):
+        self.init_configs(directories)
+        # self.do_run(cmd, directory)
+        self.do_plot(directories=directories, output_directory=output_directory, extra_argv=extra_argv, **kwargs)
+        logger.info("Success! Plots output @ {direc}".format(
+            direc=output_directory,
+        ))
+
+    # def run(self):
+    #     self.init_configs()
+    #
+    #     self.do_run()
+    #     self.do_plot()
 
 
 class RLScopeConfig:
@@ -771,9 +787,9 @@ class RLScopeConfig:
     def is_calibration(self):
         return re.search(r'calibration', self.config_suffix)
 
-    def out_dir(self, rep):
+    def out_dir(self, output_directory, rep):
         return _j(
-            self.expr.out_dir(),
+            output_directory,
             "config_{config_suffix}{rep}".format(
                 config_suffix=self.config_suffix,
                 rep=rep_suffix(rep),
@@ -795,11 +811,11 @@ class RLScopeConfig:
     def __repr__(self):
         return self.to_string()
 
-    def logfile(self, rep):
-        logfile = _j(self.out_dir(rep), "logfile.out")
+    def logfile(self, output_directory, rep):
+        logfile = _j(self.out_dir(output_directory, rep), "logfile.out")
         return logfile
 
-    def run(self, rep, cmd):
+    def run(self, rep, cmd, output_directory):
         iml_prof_cmd = [
             'iml-prof',
             '--config', self.iml_prof_config,
@@ -810,24 +826,13 @@ class RLScopeConfig:
             # keep "python interceptions" and "python annotations" enabled, so we can measure their overhead in
             # in isolation!
             '--iml-calibration',
-            '--iml-directory', _a(self.out_dir(rep)),
+            '--iml-directory', _a(self.out_dir(output_directory, rep)),
             '--iml-training-progress',
             '--iml-delay',
         ])
 
-        # [
-        #     # '--iml-training-progress',
-        #     # '--iml-max-timesteps', iters,
-        #     'python', 'train.py',
-        #     '--algo', self.algo,
-        #     '--env', self.env,
-        #     '--log-folder', _j(ENV['RL_BASELINES_ZOO_DIR'], 'output'),
-        #     '--log-interval', '1',
-        # ]
         iml_prof_cmd.extend(self.script_args)
-        logfile = self.logfile(rep)
-        # logger.info("Logging to file {path}".format(
-        #     path=logfile))
+        logfile = self.logfile(output_directory, rep)
         expr_run_cmd(
             cmd=iml_prof_cmd,
             to_file=logfile,
@@ -837,11 +842,11 @@ class RLScopeConfig:
             skip_error=self.expr.skip_error,
             debug=self.expr.debug)
 
-    def already_ran(self, rep):
-        logfile = self.logfile(rep)
+    def already_ran(self, output_directory, rep):
+        logfile = self.logfile(output_directory, rep)
         return expr_already_ran(logfile, debug=self.expr.debug)
 
-    def iml_directories(self, repetitions=None):
+    def iml_directories(self, output_directory, repetitions=None):
         """
         Return all --iml-directories whose runs are completed.
         """
@@ -850,9 +855,9 @@ class RLScopeConfig:
         if repetitions is None:
             repetitions = self.expr.each_repetition()
         for rep in repetitions:
-            if not self.already_ran(rep):
+            if not self.already_ran(output_directory, rep):
                 continue
-            iml_directory = self.out_dir(rep)
+            iml_directory = self.out_dir(output_directory, rep)
             iml_directories.append(iml_directory)
         return iml_directories
 
@@ -863,77 +868,149 @@ def error(msg, parser=None):
     logger.error(msg)
     sys.exit(1)
 
-def main():
-    parser = argparse.ArgumentParser("Calibrate for profiling overhead")
-    parser.add_argument("--iml-directory",
-                        required=True,
-                        help=textwrap.dedent("""
+def main_plot():
+    return _main(['plot'] + sys.argv[1:])
+
+def main_run():
+    return _main(['run'] + sys.argv[1:])
+
+def _main(argv):
+    parser = argparse.ArgumentParser(
+        description="Run RLScope calibrated for profiling overhead, and create plots from multiple workloads",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    subparsers = parser.add_subparsers(
+        title="Subcommands",
+        description="Run RLScope in different modes (run configurations, plot results).",
+    )
+    def add_common_arguments(parser):
+        # parser.add_argument("--output-directory",
+        #                     required=True,
+        #                     help=textwrap.dedent("""
+        #                     Root directory for output
+        #                     """))
+        parser.add_argument("--pdb",
+                            action='store_true',
+                            help=textwrap.dedent("""
+                            Debug
+                            """))
+        parser.add_argument("--debug",
+                            action='store_true',
+                            help=textwrap.dedent("""
+                            Debug
+                            """))
+        parser.add_argument("--debug-single-thread",
+                            action='store_true',
+                            help=textwrap.dedent("""
+                            Debug
+                            """))
+        parser.add_argument('--iml-repetitions',
+                            type=int,
+                            default=1,
+                            help=textwrap.dedent("""
+                            Repetitions
+                            """))
+        parser.add_argument("--replace",
+                            action='store_true',
+                            help=textwrap.dedent("""
+                            Replace
+                            """))
+        parser.add_argument("--dry-run",
+                            action='store_true',
+                            help=textwrap.dedent("""
+                            Dry run
+                            """))
+        parser.add_argument("--skip-error",
+                            action='store_true',
+                            help=textwrap.dedent("""
+                            Skip errors 
+                            """))
+
+    run_parser = subparsers.add_parser('run', description="Run <cmd> with profiling overhead calibration")
+    add_common_arguments(run_parser)
+    run_parser.add_argument("--iml-directory",
+                            required=True,
+                            help=textwrap.dedent("""
                         Root directory for output
                         """))
-    parser.add_argument("--pdb",
-                        action='store_true',
-                        help=textwrap.dedent("""
-                        Debug
-                        """))
-    parser.add_argument("--debug",
-                        action='store_true',
-                        help=textwrap.dedent("""
-                        Debug
-                        """))
-    parser.add_argument("--debug-single-thread",
-                        action='store_true',
-                        help=textwrap.dedent("""
-                        Debug
-                        """))
-    parser.add_argument('--iml-repetitions',
-                        type=int,
-                        default=1,
-                        help=textwrap.dedent("""
-                        Repetitions
-                        """))
-    parser.add_argument("--replace",
-                        action='store_true',
-                        help=textwrap.dedent("""
-                        Replace
-                        """))
-    parser.add_argument("--dry-run",
-                        action='store_true',
-                        help=textwrap.dedent("""
-                        Dry run
-                        """))
-    parser.add_argument("--skip-error",
-                        action='store_true',
-                        help=textwrap.dedent("""
-                        Skip errors 
-                        """))
+    run_parser.set_defaults(**{'mode': 'run'})
 
+    plot_parser = subparsers.add_parser('plot', description="Plot multiple workloads")
+    add_common_arguments(plot_parser)
+    plot_parser.add_argument("--iml-directories",
+                            required=True,
+                            nargs='+',
+                            # default=[],
+                            help=textwrap.dedent("""
+                        Directories to plot results from.
+                        """))
+    plot_parser.add_argument("--output-directory",
+                            required=True,
+                            help=textwrap.dedent("""
+                        Where to output plots.
+                        """))
+    plot_parser.set_defaults(**{'mode': 'plot'})
 
-    args, extra_argv = parser.parse_known_args()
+    # parser.add_argument("--mode",
+    #                     choices=['run', 'plot'],
+    #                     default=default_mode,
+    #                     help=textwrap.dedent("""
+    #                         Debug
+    #                         """))
+
+    args, extra_argv = parser.parse_known_args(argv)
     cmd = extra_argv
 
-    if len(cmd) == 0:
-        error("Expected cmd to run with iml-prof for calibration, but non was provided",
-              parser=parser)
+    args_dict = dict(vars(args))
+    repetitions = args_dict.pop('iml_repetitions')
+    obj = Calibration(
+        repetitions=repetitions,
+        **args_dict,
+    )
 
-    if shutil.which(cmd[0]) is None:
-        error("Couldn't find {exec} on PATH".format(
-            exec=cmd[0]), parser=parser)
+    if args.mode == 'run':
+        assert cmd[0] in ['run', 'plot']
+        cmd = cmd[1:]
 
+        if len(cmd) == 0:
+            error("Expected cmd to run with iml-prof for calibration, but non was provided",
+                  parser=parser)
+
+        if shutil.which(cmd[0]) is None:
+            error("Couldn't find {exec} on PATH".format(
+                exec=cmd[0]), parser=parser)
+
+        def _run():
+            directory = args_dict['iml_directory']
+            obj.mode_run(cmd, directory)
+        run_with_pdb(args, _run)
+    elif args.mode == 'plot':
+        # if len(cmd) != 0:
+        #     error(
+        #         textwrap.dedent("""\
+        #         Not sure how to parse extra arguments for "iml-calibrate plot":
+        #           {cmd}
+        #         Did you intend to run "iml-calibrate run" instead?
+        #         """).format(
+        #             cmd=' '.join(cmd),
+        #         ).rstrip(), parser=parser)
+
+        def _plot():
+            directories = args_dict.pop('iml_directories')
+            output_directory = args_dict.pop('output_directory')
+            obj.mode_plot(
+                directories=directories,
+                output_directory=output_directory,
+                extra_argv=cmd,
+                **args_dict,
+            )
+        run_with_pdb(args, _plot)
+    else:
+        raise NotImplementedError()
+
+
+def run_with_pdb(args, func):
     try:
-        args_dict = dict(vars(args))
-        directory = args_dict.pop('iml_directory')
-        repetitions = args_dict.pop('iml_repetitions')
-        obj = Calibration(
-            directory=directory,
-            cmd=cmd,
-            repetitions=repetitions,
-            **args_dict,
-            # iml_directory=args.iml_directory,
-            # debug=args.debug,
-            # debug_single_thread=args.debug_single_thread,
-            # cmd=cmd,
-        )
-        obj.run()
+        return func()
     except Exception as e:
         if not args.pdb:
             raise
@@ -949,6 +1026,7 @@ def main():
         import pdb
         pdb.post_mortem()
         raise
+
 
 def rep_suffix(rep):
     assert rep is not None
@@ -983,4 +1061,4 @@ def get_func_name(obj, func):
     return name
 
 if __name__ == '__main__':
-    main()
+    main_run()

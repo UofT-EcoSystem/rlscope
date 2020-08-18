@@ -25,6 +25,8 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.gridspec
 
+import os
+import os.path
 from os.path import join as _j, abspath as _a, exists as _e, dirname as _d, basename as _b
 
 from iml_profiler.parser.db import SQLCategoryTimesReader, sql_get_source_files, sql_input_path
@@ -85,10 +87,12 @@ class OverlapStackedBarPlot:
                  extrapolated_training_time=False,
                  detailed=False,
                  remap_df=None,
+                 xtick_expression=None,
                  y2_logscale=False,
                  ignore_inconsistent_overlap_regions=False,
                  skip_plot=False,
                  title=None,
+                 x_title=None,
                  rotation=None,
                  x_type='rl-comparison',
                  y_type='percent',
@@ -148,12 +152,14 @@ class OverlapStackedBarPlot:
         self.operation = operation
         self.y2_logscale = y2_logscale
         self.remap_df = remap_df
+        self.xtick_expression = xtick_expression
         self.ignore_inconsistent_overlap_regions = ignore_inconsistent_overlap_regions
         self.skip_plot = skip_plot
         if self.resource_overlap is not None:
             # Normalize ('GPU', 'CPU') into ('CPU', 'GPU') for equality checks,
             self.resource_overlap = tuple(sorted(self.resource_overlap))
         self.title = title
+        self.x_title = x_title
         self.rotation = rotation
         self.x_type = x_type
         self.y_type = y_type
@@ -243,6 +249,9 @@ class OverlapStackedBarPlot:
 
     @property
     def plot_x_axis_label(self):
+        if self.x_title is not None:
+            return self.x_title
+
         if self.x_type == 'rl-comparison':
             return "(RL algorithm, Simulator)"
         elif self.x_type == 'env-comparison':
@@ -893,7 +902,12 @@ class OverlapStackedBarPlot:
         # Use extrapolated time instead.
         # TODO: if extrapolated_time is present in bot ins_df and unins_df, it will "conflict" creating
         # extrapolated_time_x and extrapolated_time_y
-        merge_df = self.ins_df.merge(self.unins_df, on=['algo', 'env', 'repetition'], how='left')
+
+        # Avoid conflicts.
+        unins_df_copy = copy.copy(self.unins_df)
+        if 'iml_directory' in unins_df_copy:
+            del unins_df_copy['iml_directory']
+        merge_df = self.ins_df.merge(unins_df_copy, on=['algo', 'env', 'repetition'], how='left')
         self.df = merge_df
 
         def get_total_training_time(row):
@@ -940,6 +954,7 @@ class OverlapStackedBarPlot:
         logger.info("reduced df:\n{msg}".format(
             msg=textwrap.indent(buf.getvalue(), prefix='  '),
         ))
+
 
     def _reduce_df(self, df):
 
@@ -1279,13 +1294,14 @@ class OverlapStackedBarPlot:
         #         x_group=x_group))
 
 
-        log_y_scale = True
+        # log_y_scale = True
+        # log_y_scale = False
 
         def ax_func(stacked_bar_plot):
             stacked_bar_plot.ax2.grid(b=True, axis='y')
             stacked_bar_plot.ax2.set_axisbelow(True)
 
-            if log_y_scale:
+            if self.y2_logscale:
                 stacked_bar_plot.ax2.set_yscale('log', basey=2)
                 # stacked_bar_plot.ax2.minorticks_on()
                 # stacked_bar_plot.ax2.yaxis.set_minor_locator(mpl_ticker.AutoMinorLocator())
@@ -1402,11 +1418,13 @@ class OverlapStackedBarPlot:
             If True, make it csv friendly (i.e. don't use newlines in string)
         :return:
         """
-
-        x_fields = []
-        for index, row in df.iterrows():
-            x_field = self.get_x_field(row['algo'], row['env'], human_readable=human_readable)
-            x_fields.append(x_field)
+        if self.xtick_expression is None:
+            x_fields = []
+            for index, row in df.iterrows():
+                x_field = self.get_x_field(row['algo'], row['env'], human_readable=human_readable)
+                x_fields.append(x_field)
+        else:
+            x_fields = xfields_from_xtick_expression(df, self.xtick_expression, debug=self.debug)
         df['x_field'] = x_fields
 
     def group_to_label(self, group):
@@ -3656,6 +3674,44 @@ def crop_pdf(path, output=None):
                            path,
                            output,
                            ])
+
+def regex_match(x, regex_value_pairs, allow_no_match=True):
+    for regex, value in regex_value_pairs:
+        if re.search(regex, x):
+            return value
+    if allow_no_match:
+        return x
+    raise RuntimeError("regex_match failed to match \"{x}\":\n{msg}".format(x=x, msg=txt_indent(regex_value_pairs)))
+
+def xfields_from_xtick_expression(df, xtick_expression, debug=False):
+    x_fields = []
+    orig_df = df
+    df = copy.copy(df)
+    for index, row in df.iterrows():
+        if debug:
+            logger.debug("--xtick-expression:\n{trans}".format(trans=textwrap.indent(xtick_expression, prefix='  ')))
+            logger.debug(txt_indent({
+                'row': row,
+            }, indent=1))
+        x_field = None
+        def errmsg():
+            return "--xtick-expression must be a python expression that defines x_field for each 'row' of dataframe 'df'; available columns in row are:\n{msg}".format(
+                msg=txt_indent({'columns': sorted(df.keys())}, indent=1))
+        try:
+            my_locals = locals()
+            exec(xtick_expression, globals(), my_locals)
+            x_field = my_locals['x_field']
+        except Exception as e:
+            raise RuntimeError("Saw exception in --xtick-expression: {klass}({e}).\n{errmsg}".format(
+                klass=type(e).__name__,
+                e=e,
+                errmsg=errmsg()))
+        if x_field is None:
+            raise RuntimeError("x_field wasn't set in --xtick-expression; {errmsg}".format(
+                errmsg=errmsg()))
+        x_fields.append(x_field)
+    return x_fields
+
 
 
 if __name__ == '__main__':

@@ -177,7 +177,7 @@ def main():
             logger.error("Only --calibrate or --config should be provided for iml-prof.")
             parser.exit(1)
         # Run calibrate.py
-        cmd = ['iml-calibrate']
+        cmd = ['iml-calibrate', 'run']
         cmd.extend(iml_prof_argv)
         cmd.extend(cmd_argv)
         cmd.remove('--calibrate')

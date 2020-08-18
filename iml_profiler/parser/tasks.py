@@ -913,11 +913,14 @@ class GeneratePlotIndexTask(luigi.Task):
         print_cmd(cmd)
         subprocess.check_call(cmd)
 
+param_xtick_expression = luigi.Parameter(description="Python expression to generate xtick labels for plot.  Expression has access to individual 'row' and entire dataframe 'df'", default=None)
 class OverlapStackedBarTask(luigi.Task):
     iml_directories = luigi.ListParameter(description="Multiple --iml-directory entries for finding overlap_type files: *.venn_js.js")
     unins_iml_directories = luigi.ListParameter(description="Multiple --iml-directory entries for finding total uninstrumented training time (NOTE: every iml_directory should have an unins_iml_directory)")
     directory = luigi.Parameter(description="Output directory", default=".")
+    xtick_expression = param_xtick_expression
     title = luigi.Parameter(description="Plot title", default=None)
+    x_title = luigi.Parameter(description="x-axis title", default=None)
     rotation = luigi.FloatParameter(description="x-axis title rotation", default=45.)
     overlap_type = luigi.ChoiceParameter(choices=OverlapStackedBarPlot.SUPPORTED_OVERLAP_TYPES, description="What type of <overlap_type>*.venn_js.js files should we read from?")
     resource_overlap = luigi.ListParameter(description="What resources are we looking at for things like --overlap-type=OperationOverlap? e.g. ['CPU'], ['CPU', 'GPU']", default=None)
@@ -994,6 +997,9 @@ class OverlapStackedBarTask(luigi.Task):
 class GpuHwPlotTask(IMLTask):
     iml_directories = luigi.ListParameter(description="Multiple --iml-directory containing GPUHwCounterSampler.csv from running \"iml-prof --config gpu-hw\"")
     directory = luigi.Parameter(description="Output directory", default=".")
+    xtick_expression = param_xtick_expression
+    x_title = luigi.Parameter(description="x-axis title", default=None)
+    rotation = luigi.FloatParameter(description="x-axis title rotation", default=None)
     debug = param_debug
     debug_single_thread = param_debug_single_thread
     debug_perf = param_debug_perf
@@ -1008,6 +1014,8 @@ class GpuHwPlotTask(IMLTask):
         obj_args = dict()
         obj_args['rlscope_dir'] = self.iml_directories
         obj_args['output_directory'] = self.iml_directory
+        obj_args['xtick_expression'] = self.xtick_expression
+        obj_args['x_title'] = self.x_title
         obj_args['debug'] = self.debug
         self.dumper = GpuUtilExperiment(obj_args)
         self.dumper.run()

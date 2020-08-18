@@ -24,7 +24,7 @@ import seaborn as sns
 
 from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, basename as _b
 
-from iml_profiler.parser.stacked_bar_plots import get_x_env, get_x_algo
+from iml_profiler.parser.stacked_bar_plots import get_x_env, get_x_algo, xfields_from_xtick_expression
 from iml_profiler.parser.dataframe import UtilDataframeReader, IMLConfig
 
 from iml_profiler import py_config
@@ -1253,10 +1253,15 @@ class TrtexecExperiment:
         g.fig.subplots_adjust(top=0.90)
         g.fig.axes[0].set_xticklabels(
             g.fig.axes[0].get_xticklabels(),
-            rotation=15,
+            rotation=self.arg('rotation', 15),
         )
 
         save_plot(plot_df, _j(self.args['simulator_dir'], f'simulator_vs_latency.svg'))
+
+    def arg(self, name, default=None):
+        if name not in self.args or self.args[name] is None:
+            return default
+        return self.args[name]
 
     def _add_simulator(self, df):
         def _simulator(row):
@@ -1485,11 +1490,12 @@ class GpuUtilExperiment:
                 for attr_name, attr_value in sm_attrs.items():
                     assert attr_name not in df
                     df[attr_name] = maybe_number(attr_value)
+                df['iml_directory'] = rlscope_dir
                 dfs.append(df)
-            self.rlscope_df = pd.concat(dfs)
-            logger.info("rlscope dataframe:\n{msg}".format(
-                msg=txt_indent(DataFrame.dataframe_string(self.rlscope_df), indent=1),
-            ))
+        self.rlscope_df = pd.concat(dfs)
+        logger.info("rlscope dataframe:\n{msg}".format(
+            msg=txt_indent(DataFrame.dataframe_string(self.rlscope_df), indent=1),
+        ))
 
     def gpu_hw_csv_paths(self, root_dir):
         paths = []
@@ -1709,8 +1715,10 @@ class GpuUtilExperiment:
     def debug(self):
         return self.arg('debug')
 
-    def arg(self, name):
-        return self.args.get(name, None)
+    def arg(self, name, default=None):
+        if name not in self.args or self.args[name] is None:
+            return default
+        return self.args[name]
 
     def _read_sm_efficiency_df(self):
         self.sm_df = None
@@ -1790,6 +1798,13 @@ class GpuUtilExperiment:
     def _pretty_env(self, env):
         return env.upper()
 
+    def _set_x_field(self, df):
+        if self.arg('xtick_expression') is None:
+            df['x_field'] = df['algo_env']
+            return
+        x_fields = xfields_from_xtick_expression(df, self.arg('xtick_expression'), debug=self.debug)
+        df['x_field'] = x_fields
+
     def _plot_rlscope_sm_efficiency(self):
         if self.rlscope_df is None:
             return
@@ -1797,6 +1812,7 @@ class GpuUtilExperiment:
         df = keep_cupti_metric(df, 'sm_efficiency')
 
         df = self._add_algo_env(df)
+        self._set_x_field(df)
 
         titled_df = copy.copy(df)
         col_titles = {
@@ -1806,7 +1822,7 @@ class GpuUtilExperiment:
 
         sns.set(style="whitegrid")
         def _do_plot(**kwargs):
-            g = sns.catplot(x="algo_env", y="metric_value", hue=col_titles["range_name"], data=titled_df,
+            g = sns.catplot(x="x_field", y="metric_value", hue=col_titles["range_name"], data=titled_df,
                             kind="bar",
                             palette="muted",
                             **kwargs,
@@ -1817,13 +1833,14 @@ class GpuUtilExperiment:
         g = _do_plot(capsize=capsize)
         g.despine(left=True)
         g.set_ylabels(SM_EFFICIENCY_Y_LABEL)
-        g.set_xlabels(RLSCOPE_X_LABEL)
+        x_title = self.arg('x_title', RLSCOPE_X_LABEL)
+        g.set_xlabels(x_title)
         title = SM_EFFICIENCY_TITLE
         g.fig.suptitle(title)
         g.fig.subplots_adjust(top=0.90)
         g.fig.axes[0].set_xticklabels(
             g.fig.axes[0].get_xticklabels(),
-            rotation=15,
+            rotation=self.arg('rotation', 15),
         )
 
         save_plot(df, _j(self.rlscope_output_dir(), 'rlscope_sm_efficiency.svg'))
@@ -1852,6 +1869,7 @@ class GpuUtilExperiment:
         df = keep_cupti_metric(df, 'achieved_occupancy')
 
         df = self._add_algo_env(df)
+        self._set_x_field(df)
 
         titled_df = copy.copy(df)
         col_titles = {
@@ -1861,7 +1879,7 @@ class GpuUtilExperiment:
 
         sns.set(style="whitegrid")
         def _do_plot(**kwargs):
-            g = sns.catplot(x="algo_env", y="metric_value", hue=col_titles["range_name"], data=titled_df,
+            g = sns.catplot(x="x_field", y="metric_value", hue=col_titles["range_name"], data=titled_df,
                             kind="bar",
                             palette="muted",
                             # capsize=capsize,
@@ -1874,13 +1892,14 @@ class GpuUtilExperiment:
 
         g.despine(left=True)
         g.set_ylabels(SM_OCCUPANCY_Y_LABEL)
-        g.set_xlabels(RLSCOPE_X_LABEL)
+        x_title = self.arg('x_title', RLSCOPE_X_LABEL)
+        g.set_xlabels(x_title)
         title = SM_OCCUPANCY_TITLE
         g.fig.suptitle(title)
         g.fig.subplots_adjust(top=0.90)
         g.fig.axes[0].set_xticklabels(
             g.fig.axes[0].get_xticklabels(),
-            rotation=15,
+            rotation=self.arg('rotation', 15),
         )
 
         save_plot(df, _j(self.rlscope_output_dir(), 'rlscope_achieved_occupancy.svg'))
@@ -1926,7 +1945,7 @@ class GpuUtilExperiment:
         g.fig.subplots_adjust(top=0.90)
         g.fig.axes[0].set_xticklabels(
             g.fig.axes[0].get_xticklabels(),
-            rotation=45,
+            rotation=self.arg('rotation', 45),
         )
 
         save_plot(df, _j(self.arg('achieved_occupancy_dir'), 'achieved_occupancy.svg'))
@@ -2220,6 +2239,8 @@ def main():
     parser.add_argument('--test-plot-grouped-bar', action='store_true')
     parser.add_argument('--plot-type', choices=['gpu_util_experiment', 'trtexec'])
     parser.add_argument('--debug', action='store_true')
+    # default=15,
+    parser.add_argument('--rotation', type=int, help='x-axis xtick rotation')
     parser.add_argument('--output-directory', help="where to output plots")
     args, argv = parser.parse_known_args()
     logger.info(pprint_msg({'argv': argv}))

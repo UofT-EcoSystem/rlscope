@@ -21,6 +21,14 @@ set -e
 
 ROOT="$(readlink -f $(dirname "$0"))"
 
+DRY_RUN=${DRY_RUN:-no}
+
+STABLE_BASELINES_DIR=${STABLE_BASELINES_DIR:-$HOME/clone/stable-baselines}
+IML_DIR=${IML_DIR:-$HOME/clone/iml}
+RL_BASELINES_ZOO_DIR=${RL_BASELINES_ZOO_DIR:-$HOME/clone/rl-baselines-zoo}
+TF_AGENTS_DIR=${TF_AGENTS_DIR:-$HOME/clone/agents}
+#ENJOY_TRT=${ENJOY_TRT:-${RL_BASELINES_ZOO_DIR}/enjoy_trt.py}
+
 if [ "$DEBUG" = 'yes' ]; then
     set -x
 fi
@@ -444,6 +452,108 @@ setup_cmakelists_windows() {
     echo "" >> "$path"
 
     echo "> Success: wrote $path"
+}
+
+test_tf_agents() {
+(
+  set -eu
+
+  export CUDA_VISIBLE_DEVICES=0
+
+  just_plot=${just_plot:-no}
+  calibrate=${calibrate:-yes}
+  # Roughly 1 minute when running --config time-breakdown
+  max_passes=2500
+  repetitions=${repetitions:-3}
+
+  args=(iml-prof)
+  if [ "${calibrate}" = 'yes' ]; then
+    args+=(
+      --calibrate
+    )
+  fi
+  args+=(
+    python $TF_AGENTS_DIR/tf_agents/agents/dqn/examples/v2/train_eval.new.py
+    --iml-delay
+    --iml-max-passes ${max_passes}
+  )
+  if [ "${calibrate}" = 'yes' ]; then
+    args+=(
+      --iml-repetitions ${repetitions}
+    )
+  fi
+
+  iml_root_dir=$IML_DIR/output/tf_agents/examples/dqn/calibration.max_passes_${max_passes}
+
+  if [ "${just_plot}" = "no" ]; then
+    iml_direc=${iml_root_dir}/use_tf_functions
+    _do "${args[@]}" --iml-directory ${iml_direc}
+
+    iml_direc=${iml_root_dir}/nouse_tf_functions
+    _do "${args[@]}" --iml-directory ${iml_direc} --nouse_tf_functions
+  fi
+
+  if [ "${calibrate}" = 'yes' ]; then
+    args=(
+      iml-plot
+        --iml-repetitions ${repetitions}
+        --iml-directories ${iml_root_dir}/*tf_functions
+        --output-directory ${iml_root_dir}/plots
+  #      --debug-single-thread
+  #      --debug
+  #      --pdb
+        --xtick-expression "x_field = regex_match(row['iml_directory'], [[r'nouse_tf_functions', 'Without autograph'], [r'use_tf_functions', 'With autograph']])"
+#        --rotation 15
+        --x-title "Configuration"
+    )
+    _do "${args[@]}"
+  fi
+
+)
+}
+
+_do() {
+  (
+  set +x
+  local dry_str=""
+  if [ "${DRY_RUN}" = 'yes' ]; then
+    dry_str=" [dry-run]"
+  fi
+  echo "> CMD${dry_str}:"
+  echo "  PWD=$PWD"
+  echo "  $ $@"
+  if [ "${DRY_RUN}" != 'yes' ]; then
+    "$@"
+  fi
+  )
+}
+_do_with_logfile() {
+  (
+  set +x
+  set -eu
+  # If command we're running fails, propagate it (don't let "tee" mute the error)
+  set -o pipefail
+  local dry_str=""
+  logfile_append=${logfile_append:-no}
+  logfile_quiet=${logfile_quiet:-no}
+  if [ "${DRY_RUN}" = 'yes' ]; then
+    dry_str=" [dry-run]"
+  fi
+  if [ "${logfile_quiet}" != 'yes' ]; then
+    echo "> CMD${dry_str}:"
+    echo "  PWD=$PWD"
+    echo "  $ $@"
+  fi
+  local tee_opts=""
+  if [ "${logfile_append}" = 'yes' ]; then
+    tee_opts="${tee_opts} --append"
+  fi
+  local ret=
+  if [ "${DRY_RUN}" != 'yes' ]; then
+    mkdir -p "$(dirname "$logfile")"
+    "$@" 2>&1 | tee $tee_opts "$logfile"
+  fi
+  )
 }
 
 if [ $# -gt 0 ]; then
