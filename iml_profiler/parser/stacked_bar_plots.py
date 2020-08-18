@@ -164,7 +164,10 @@ class OverlapStackedBarPlot:
         self.x_type = x_type
         self.y_type = y_type
         self.y_lim_scale_factor = y_lim_scale_factor
-        self.show_title = show_title
+        if self.title is not None:
+            self.show_title = True
+        else:
+            self.show_title = show_title
         self.show_legend = show_legend
         self.width = width
         self.height = height
@@ -280,11 +283,11 @@ class OverlapStackedBarPlot:
 
     @property
     def plot_title(self):
-        if self.title is not None:
-            return self.title
-
         if not self.show_title:
             return None
+
+        if self.title is not None:
+            return self.title
 
         if self.x_type == 'rl-comparison':
             title = "Comparing RL workloads"
@@ -383,7 +386,9 @@ class OverlapStackedBarPlot:
             debug=self.debug,
             debug_single_thread=self.debug_single_thread))
         unins_df['unins_total_training_time_us'] = unins_df['training_duration_us']
+
         self._add_repetition(unins_df)
+        self._add_df_fields(unins_df)
         return unins_df
 
     def _add_repetition(self, df):
@@ -892,22 +897,18 @@ class OverlapStackedBarPlot:
             msg=textwrap.indent(buf.getvalue(), prefix='  '),
         ))
 
-        # self.df = self.ins_df.merge(self.unins_df, on=['algo', 'env'])
-        # if not self.detailed:
-        #     self.df['total_training_time'] = self.df['unins_total_training_time_us']
-        # else:
-        #     self.df['total_training_time'] = self.df['unins_total_training_time_us'] * self.df['percent']
 
         # Keep (algo, env) even if we don't have total uninstrumented training time for it.
         # Use extrapolated time instead.
         # TODO: if extrapolated_time is present in bot ins_df and unins_df, it will "conflict" creating
         # extrapolated_time_x and extrapolated_time_y
 
-        # Avoid conflicts.
+        # Avoid conflicts; keep iml_directory of instrumented run.
         unins_df_copy = copy.copy(self.unins_df)
         if 'iml_directory' in unins_df_copy:
             del unins_df_copy['iml_directory']
-        merge_df = self.ins_df.merge(unins_df_copy, on=['algo', 'env', 'repetition'], how='left')
+        # WRONG:
+        merge_df = self.ins_df.merge(unins_df_copy, on=['algo', 'env', 'x_field', 'repetition'], how='left')
         self.df = merge_df
 
         def get_total_training_time(row):
@@ -925,21 +926,6 @@ class OverlapStackedBarPlot:
             self.df['total_training_time'] = self.df['full_unins_training_time']
         else:
             self.df['total_training_time'] = self.df['full_unins_training_time'] * self.df['percent']
-            # Number of (algo, env) combinations is just 1;
-            # Show single training time bar, where total training time is broken down into percent's
-
-            # Number of (algo, env) combinations is more than one;
-            # Show two bars per (algo, env):
-            # - Left bar: percent breakdown with high-level resource (CPU/GPU) (hue) and high-level operation (hatches).
-            # - Right bar: Total training time
-
-
-            # buf = StringIO()
-            # DataFrame.print_df(self.df, file=buf)
-            # logger.info("ins_df:\n{msg}".format(
-            #     msg=textwrap.indent(buf.getvalue(), prefix='  '),
-            #     # msg=pprint_msg(self.df),
-            # ))
 
         buf = StringIO()
         DataFrame.print_df(self.df, file=buf)
@@ -1121,6 +1107,7 @@ class OverlapStackedBarPlot:
             ins_df = pd.concat(group_dfs)
 
         self._add_repetition(ins_df)
+        self._add_df_fields(ins_df)
 
         return ins_df
 
@@ -1182,7 +1169,7 @@ class OverlapStackedBarPlot:
 
         return new_df
 
-    def _normalize_df(self):
+    def _normalize_df(self, df):
         """
         Transform raw venn_js file into appropriate units for plotting
         (i.e. convert us to seconds).
@@ -1217,18 +1204,18 @@ class OverlapStackedBarPlot:
 
             return ret
 
-        if 'total_training_time' in self.df:
-            self.df['total_training_time'] = transform_usec_to_sec(self.df, 'total_training_time')
+        if 'total_training_time' in df:
+            df['total_training_time'] = transform_usec_to_sec(df, 'total_training_time')
 
         if not self.detailed:
 
             if self.y_type == 'seconds':
                 for group in self.regions:
-                    self.df[group] = transform_usec_to_sec(self.df, group)
+                    df[group] = transform_usec_to_sec(df, group)
             elif self.y_type == 'percent':
-                ret = transform_usec_to_percent(self.df)
+                ret = transform_usec_to_percent(df)
                 for group in ret.keys():
-                    self.df[group] = ret[group]
+                    df[group] = ret[group]
             else:
                 raise NotImplementedError
 
@@ -1279,9 +1266,27 @@ class OverlapStackedBarPlot:
         #     y2_field = None
 
 
-        df_training_time = self.df[['x_field', 'algo', 'env', 'total_training_time']]
-        cols = group_numeric_cols(df_training_time)
-        df_training_time = df_training_time.groupby(cols.non_numeric_cols).agg(pd.DataFrame.sum, skipna=False).reset_index()
+        orig_df_training_time = self.df[['x_field', 'algo', 'env', 'iml_directory', 'total_training_time']]
+
+        if self.debug:
+            ss = StringIO()
+            DataFrame.print_df(orig_df_training_time, file=ss)
+            logger.debug(f"orig_df_training_time\n{ss.getvalue()}")
+
+        cols = group_numeric_cols(orig_df_training_time)
+        df_training_time = orig_df_training_time.groupby(cols.non_numeric_cols).agg(pd.DataFrame.sum, skipna=False).reset_index()
+
+        if self.debug:
+            ss = StringIO()
+            DataFrame.print_df(df_training_time, file=ss)
+            logger.debug(f"df_training_time = orig_df_training_time.groupby({cols.non_numeric_cols}).agg(sum)\n{ss.getvalue()}")
+
+        # if self.debug:
+        #     ss = StringIO()
+        #     DataFrame.print_df(self.unins_df, file=ss)
+        #     logger.debug(f"data2 = self.unins_df\n{ss.getvalue()}")
+
+        # import pdb; pdb.set_trace()
 
         # def bar_label_func(i, x_group):
         #     if x_group == 'Backpropagation':
@@ -1361,7 +1366,7 @@ class OverlapStackedBarPlot:
             # xlabel='(RL algorithm, Simulator)',
 
             ylabel='Percent',
-            # title=self.plot_title,
+            title=self.plot_title,
             func=ax_func,
             debug=self.debug,
         )
@@ -1443,8 +1448,8 @@ class OverlapStackedBarPlot:
         self._init_directories()
         # self._check_can_add_training_time()
         self._read_df()
-        self._normalize_df()
-        self._add_df_fields(self.df)
+        self._normalize_df(self.df)
+        self._normalize_df(self.unins_df)
         self.dump_plot_data()
         if self.skip_plot:
             logger.info("Skipping plotting {path} (--skip-plot)".format(path=self._plot_path))
@@ -1864,6 +1869,7 @@ class StackedBarPlot:
 class DetailedStackedBarPlot:
 
     ERRBAR_COLOR = '#969696'
+    ERRBAR_CAPSIZE_POINTS = 20
 
     def __init__(self,
                  data, path,
@@ -2123,7 +2129,10 @@ class DetailedStackedBarPlot:
         if self.xlabel is not None:
             ax.set_xlabel(self.xlabel)
         if self.title is not None:
-            ax.set_title(self.title)
+            if ax2 is not None:
+                ax2.set_title(self.title)
+            else:
+                ax.set_title(self.title)
 
         if self.y2_field is not None:
             self._add_legend(ax2)
@@ -2132,20 +2141,66 @@ class DetailedStackedBarPlot:
         self._add_xgroup_legend(ax, ax2)
 
         if self.y2_field is not None:
+
+            if self.debug:
+                ss = StringIO()
+                DataFrame.print_df(self.data2, file=ss)
+                logger.debug(f"data2\n{ss.getvalue()}")
+
             all_x_fields = np.array(self.x_fields(data))
+            set_all_x_fields = set(all_x_fields)
+
+            keep_data2 = self.data2[
+                self.data2[self.x_field].apply(lambda x_field: x_field in set_all_x_fields)
+            ]
+
+            if self.debug:
+                ss = StringIO()
+                DataFrame.print_df(keep_data2, file=ss)
+                logger.debug(f"data2[{self.x_field} == {all_x_fields}]\n{ss.getvalue()}")
+
+            # TODO: transform into "xs", "ys", and "yerr" ; treat different for multi vs single repetition?
+
+            ys_mean = []
+            ys_std = []
+            has_repetitions = False
+            for x_field in all_x_fields:
+                y_repetitions = keep_data2[keep_data2[self.x_field] == x_field][self.y2_field]
+                if len(y_repetitions) > 1:
+                    has_repetitions = True
+                y_mean = np.mean(y_repetitions)
+                y_std = np.std(y_repetitions)
+                ys_mean.append(y_mean)
+                ys_std.append(y_std)
+
+
             xs = np.arange(len(all_x_fields))
-            ys = self.data2[self.data2[self.x_field] == all_x_fields][self.y2_field].values
             plot_kwargs = dict(
-                x=xs, height=ys,
+                x=xs, height=ys_mean,
                 width=self.bar_width,
                 # Color of hatch pattern.
                 edgecolor='black',
                 color='black',
                 # hatch=self.hatch_map[hatch]
             )
+
+            if has_repetitions:
+                plot_kwargs['yerr'] = ys_std
+                if 'error_kw' not in plot_kwargs:
+                    plot_kwargs['error_kw'] = dict()
+                plot_kwargs['error_kw']['ecolor'] = DetailedStackedBarPlot.ERRBAR_COLOR
+                plot_kwargs['error_kw']['capsize'] = DetailedStackedBarPlot.ERRBAR_CAPSIZE_POINTS
+
             if self.y2label is not None:
                 ax2.set_ylabel(self.y2label)
             ax2.bar(**plot_kwargs)
+
+            # if has_repetitions:
+            #     capsize = get_capsize(ax2)
+            #     if 'error_kw' not in plot_kwargs:
+            #         plot_kwargs['error_kw'] = dict()
+            #     plot_kwargs['error_kw']['capsize'] = capsize
+            #     ax2.bar(**plot_kwargs)
 
         if self.func is not None:
             self.func(self)
@@ -2331,7 +2386,7 @@ class DetailedStackedBarPlot:
                                 # x=[x],
                                 # height=[y],
                                 yerr=[yerr],
-                                capsize=20,
+                                capsize=DetailedStackedBarPlot.ERRBAR_CAPSIZE_POINTS,
                                 # ecolor='gray',
                                 ecolor=DetailedStackedBarPlot.ERRBAR_COLOR,
                                 # NOTE: I cannot get dashed lines to work with the errorbar style...
@@ -3653,6 +3708,14 @@ class ColumnGrouping:
         self.numeric_cols = numeric_cols
         self.non_numeric_cols = non_numeric_cols
 
+    def __repr__(self):
+        return "{klass}(all_cols={all_cols}, numeric_cols={numeric_cols}, non_numeric_cols={non_numeric_cols})".format(
+            klass=self.__class__.__name__,
+            all_cols=self.all_cols,
+            numeric_cols=self.numeric_cols,
+            non_numeric_cols=self.non_numeric_cols,
+        )
+
 def group_numeric_cols(df):
     all_cols = set(df.keys())
     numeric_cols = set([colname for colname in df.keys() if np.issubdtype(df[colname].dtype, np.number)])
@@ -3688,11 +3751,11 @@ def xfields_from_xtick_expression(df, xtick_expression, debug=False):
     orig_df = df
     df = copy.copy(df)
     for index, row in df.iterrows():
-        if debug:
-            logger.debug("--xtick-expression:\n{trans}".format(trans=textwrap.indent(xtick_expression, prefix='  ')))
-            logger.debug(txt_indent({
-                'row': row,
-            }, indent=1))
+        # if debug:
+        #     logger.debug("--xtick-expression:\n{trans}".format(trans=textwrap.indent(xtick_expression, prefix='  ')))
+        #     logger.debug(txt_indent({
+        #         'row': row,
+        #     }, indent=1))
         x_field = None
         def errmsg():
             return "--xtick-expression must be a python expression that defines x_field for each 'row' of dataframe 'df'; available columns in row are:\n{msg}".format(
@@ -3712,7 +3775,13 @@ def xfields_from_xtick_expression(df, xtick_expression, debug=False):
         x_fields.append(x_field)
     return x_fields
 
-
+def get_capsize(ax):
+    # num_bars = len(ax.patches)
+    bar_width = ax.patches[0].get_width()
+    # Sanity check.
+    assert all(patch.get_width() == bar_width for patch in ax.patches)
+    # Make error bar width 25% of bar width.
+    return bar_width/4
 
 if __name__ == '__main__':
     main()

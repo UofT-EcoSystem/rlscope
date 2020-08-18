@@ -921,7 +921,7 @@ class OverlapStackedBarTask(luigi.Task):
     xtick_expression = param_xtick_expression
     title = luigi.Parameter(description="Plot title", default=None)
     x_title = luigi.Parameter(description="x-axis title", default=None)
-    rotation = luigi.FloatParameter(description="x-axis title rotation", default=45.)
+    rotation = luigi.FloatParameter(description="x-axis title rotation", default=15.)
     overlap_type = luigi.ChoiceParameter(choices=OverlapStackedBarPlot.SUPPORTED_OVERLAP_TYPES, description="What type of <overlap_type>*.venn_js.js files should we read from?")
     resource_overlap = luigi.ListParameter(description="What resources are we looking at for things like --overlap-type=OperationOverlap? e.g. ['CPU'], ['CPU', 'GPU']", default=None)
     operation = luigi.Parameter(description="What operation are we looking at for things like --overlap-type=CategoryOverlap? e.g. ['step'], ['sample_action']", default=None)

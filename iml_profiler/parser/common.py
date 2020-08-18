@@ -1429,6 +1429,7 @@ class DataFrame:
     def print_df(df, **kwargs):
         pd.options.display.max_rows = None
         pd.options.display.max_columns = None
+        pd.options.display.max_colwidth = None
         pd.options.display.width = 9999999
         print(df, **kwargs)
         pd.reset_option('all')
