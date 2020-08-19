@@ -24,6 +24,7 @@ import seaborn as sns
 
 from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, basename as _b
 
+from iml_profiler.profiler.util import pprint_msg
 from iml_profiler.parser.stacked_bar_plots import get_x_env, get_x_algo, xfields_from_xtick_expression
 from iml_profiler.parser.dataframe import UtilDataframeReader, IMLConfig
 

@@ -158,6 +158,7 @@ CONSOLE_SCRIPTS = [
     'iml-quick-expr = iml_profiler.scripts.quick_expr:main',
     'iml-prof = iml_profiler.scripts.cuda_api_prof:main',
     'iml-calibrate = iml_profiler.parser.calibration:main_run',
+    'iml-run-expr = iml_profiler.scripts.run_expr:main',
     'iml-plot = iml_profiler.parser.calibration:main_plot',
     'iml-generate-plot-index = iml_profiler.scripts.generate_iml_profiler_plot_index:main',
 ]

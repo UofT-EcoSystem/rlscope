@@ -1,4 +1,5 @@
-from iml_profiler.parser.common import print_cmd, pprint_msg
+from iml_profiler.profiler.util import pprint_msg
+from iml_profiler.profiler.util import print_cmd
 
 from iml_profiler.profiler.iml_logging import logger
 import textwrap

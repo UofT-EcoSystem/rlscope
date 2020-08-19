@@ -19,6 +19,8 @@ import traceback
 from io import StringIO
 from os.path import join as _j, dirname as _d, exists as _e, basename as _b
 
+# print("IMPORT COMMON")
+
 import numpy as np
 import pandas as pd
 import psutil
@@ -1742,39 +1744,6 @@ def is_config_file(path):
 def now_us():
     return time.time()*MICROSECONDS_IN_SECOND
 
-def get_stacktrace(n_skip=1, indent=None):
-    """
-    Return a stacktrace ready for printing; usage:
-
-    # Dump the stack of the current location of this line.
-    '\n'.join(get_stacktrace(0))
-    logger.info("First line before stacktrace\n{stack}".format(
-        stack=get_stacktrace())
-
-    # Outputs to stdout:
-    ID=14751/MainProcess @ finish, profilers.py:1658 :: 2019-07-09 15:52:26,015 INFO: First line before stacktrace
-      File "*.py", line 375, in <module>
-          ...
-      ...
-      File "*.py", line 1658, in finish
-        logger.info("First line before stacktrace\n{stack}".format(
-
-    :param n_skip:
-        Number of stack-levels to skip in the caller.
-        By default we skip the first one, since it's the call to traceback.extrace_stack()
-        inside the get_stacktrace() function.
-
-        If you make n_skip=2, then it will skip you function-call to get_stacktrace() as well.
-
-    :return:
-    """
-    stack = traceback.extract_stack()
-    stack_list = traceback.format_list(stack)
-    stack_list_keep = stack_list[0:len(stack_list)-n_skip]
-    stack_str = ''.join(stack_list_keep)
-    if indent is not None:
-        stack_str = textwrap.indent(stack_str, prefix="  "*indent)
-    return stack_str
 
 def get_category_from_device(device):
     if IsGPUTime(device):
@@ -1936,15 +1905,6 @@ def get_runnable_cpus():
 def get_username():
     return pwd.getpwuid(os.getuid())[0]
 
-def pprint_msg(dic, prefix='  '):
-    """
-    Give logger.info a string for neatly printing a dictionary.
-
-    Usage:
-    logger.info(pprint_msg(arbitrary_object))
-    """
-    return "\n" + textwrap.indent(pprint.pformat(dic), prefix=prefix)
-
 def js_friendly(obj):
     """
     Dict keys in json can only be numbers/strings/booleans/null, they CANNOT be lists/dicts/sets.
@@ -2050,51 +2010,6 @@ def cmd_as_string(cmd):
     else:
         cmd_str = cmd
     return cmd
-
-def cmd_debug_msg(cmd, env=None, dry_run=False):
-    if type(cmd) == list:
-        cmd_str = " ".join([shlex.quote(str(x)) for x in cmd])
-    else:
-        cmd_str = cmd
-
-    lines = []
-    if dry_run:
-        lines.append("> CMD [dry-run]:")
-    else:
-        lines.append("> CMD:")
-    lines.extend([
-        "  $ {cmd}".format(cmd=cmd_str),
-        "  PWD={pwd}".format(pwd=os.getcwd()),
-    ])
-
-    if env is not None and len(env) > 0:
-        env_vars = sorted(env.keys())
-        lines.append("  Environment:")
-        for var in env_vars:
-            lines.append("    {var}={val}".format(
-                var=var,
-                val=env[var]))
-    string = '\n'.join(lines)
-
-    return string
-
-def log_cmd(cmd, env=None, dry_run=False):
-    string = cmd_debug_msg(cmd, env=env, dry_run=dry_run)
-
-    logger.info(string)
-
-def print_cmd(cmd, files=sys.stdout, env=None, dry_run=False):
-    string = cmd_debug_msg(cmd, env=env, dry_run=dry_run)
-
-    if type(files) not in [set, list]:
-        if type(files) in [list]:
-            files = set(files)
-        else:
-            files = set([files])
-
-    for f in files:
-        print(string, file=f)
-        f.flush()
 
 def list_files(direc):
     paths = [_j(direc, filename) for filename in os.listdir(direc)]

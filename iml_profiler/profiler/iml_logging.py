@@ -99,3 +99,9 @@ def setup_logger(debug=False, colors=None, line_numbers=None):
 
 # Default setup: debug mode with colors and line numbers
 setup_logger(debug=True, colors=True, line_numbers=True)
+
+def enable_debug_logging():
+    setup_logger(debug=True, colors=True, line_numbers=True)
+
+def disable_debug_logging():
+    setup_logger(debug=False, colors=True, line_numbers=True)

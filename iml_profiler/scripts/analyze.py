@@ -13,7 +13,6 @@ import pprint
 import textwrap
 import multiprocessing
 from iml_profiler.parser import tasks
-from iml_profiler.parser.common import print_cmd
 from iml_profiler.profiler.iml_logging import logger
 
 def main():

@@ -14,6 +14,7 @@ import seaborn as sns
 
 from matplotlib import pyplot as plt
 
+from iml_profiler.profiler.util import pprint_msg
 from iml_profiler.parser.dataframe import TrainingProgressDataframeReader, CUDAAPIStatsDataframeReader, PyprofDataframeReader, read_iml_config, DataframeMapper, IMLConfig, VennData, map_readers, get_training_durations_df
 from iml_profiler.parser.readers import OpStackReader, CUDAAPIStatsReader
 from iml_profiler.parser.stacked_bar_plots import StackedBarPlot

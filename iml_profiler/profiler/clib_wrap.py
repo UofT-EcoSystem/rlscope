@@ -17,6 +17,7 @@ MICROSECONDS_IN_SECOND = float(1e6)
 
 from iml_profiler.profiler import wrap_util
 from iml_profiler import py_config
+from iml_profiler.profiler.util import get_stacktrace
 
 from iml_profiler.clib import sample_cuda_api
 

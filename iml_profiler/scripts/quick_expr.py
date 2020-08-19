@@ -13,6 +13,7 @@ import functools
 
 from os.path import join as _j, abspath as _a, exists as _e, dirname as _d, basename as _b
 
+from iml_profiler.profiler.util import pprint_msg
 from iml_profiler.parser.common import *
 from iml_profiler.experiment.util import tee, expr_run_cmd, expr_already_ran
 from iml_profiler.profiler.concurrent import ForkedProcessPool

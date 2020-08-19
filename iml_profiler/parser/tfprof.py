@@ -13,6 +13,7 @@ if py_config.USE_NUMBA:
     import numba
     from numba import njit
 
+from iml_profiler.profiler.util import pprint_msg
 from iml_profiler.parser.common import *
 # from tensorflow.core.profiler.tfprof_log_pb2 import ProfileProto
 from iml_profiler.protobuf.pyprof_pb2 import CategoryEventsProto, ProcessMetadata

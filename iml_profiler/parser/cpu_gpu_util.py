@@ -5,6 +5,8 @@ import subprocess
 import argparse
 import csv
 
+
+from iml_profiler.profiler.util import pprint_msg
 from iml_profiler.protobuf.pyprof_pb2 import CategoryEventsProto, MachineUtilization, DeviceUtilization, UtilizationSample
 from iml_profiler.parser.common import *
 from iml_profiler.profiler import experiment

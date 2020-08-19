@@ -14,6 +14,7 @@ from iml_profiler.profiler import concurrent
 
 from os.path import join as _j, abspath as _a, exists as _e, dirname as _d, basename as _b
 
+from iml_profiler.profiler.util import pprint_msg
 from iml_profiler.parser.common import *
 from iml_profiler.protobuf import iml_prof_pb2
 

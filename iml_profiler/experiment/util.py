@@ -2,10 +2,16 @@ import subprocess
 from iml_profiler.profiler.iml_logging import logger
 import contextlib
 
+import shlex
+import pprint
+import re
+import sys
 import os
 from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, basename as _b
 
-from iml_profiler.parser.common import *
+# from iml_profiler.parser.common import *
+from iml_profiler.profiler.util import print_cmd
+
 import tempfile
 
 @contextlib.contextmanager
@@ -21,19 +27,27 @@ def in_directory(directory, allow_none=True):
         if directory is not None:
             os.chdir(original_directory)
 
-def tee(cmd, to_file, cwd=None, append=False, makedirs=True, check=True, dry_run=False, **kwargs):
+def tee(cmd, to_file,
+        cwd=None,
+        append=False,
+        makedirs=True,
+        check=True,
+        dry_run=False,
+        tee_output=True,
+        only_show_env=None,
+        **kwargs):
 
     # In case there are int's or float's in cmd.
     cmd = [str(opt) for opt in cmd]
 
     if dry_run:
         with in_directory(cwd):
-            print_cmd(cmd, files=[sys.stdout], env=kwargs.get('env', None), dry_run=dry_run)
+            print_cmd(cmd, files=[sys.stdout], env=kwargs.get('env', None), dry_run=dry_run, only_show_env=only_show_env)
         return
 
     with ScopedLogFile(to_file, append=append, makedirs=makedirs) as f:
         with in_directory(cwd):
-            print_cmd(cmd, files=[sys.stdout, f], env=kwargs.get('env', None))
+            print_cmd(cmd, files=[sys.stdout, f], env=kwargs.get('env', None), only_show_env=only_show_env)
 
             # NOTE: Regarding the bug mentioned below, using p.communicate() STILL hangs.
             #
@@ -90,10 +104,12 @@ def tee(cmd, to_file, cwd=None, append=False, makedirs=True, check=True, dry_run
 
                     if debug:
                         logger.info("RUN [01]: sys.stdout.write(line)")
-                    sys.stdout.write(line)
+                    if tee_output:
+                        sys.stdout.write(line)
                     if debug:
                         logger.info("RUN [02]: sys.stdout.flush()")
-                    sys.stdout.flush()
+                    if tee_output:
+                        sys.stdout.flush()
 
                     if debug:
                         logger.info("RUN [03]: f.write(line)")
@@ -101,7 +117,8 @@ def tee(cmd, to_file, cwd=None, append=False, makedirs=True, check=True, dry_run
                     if debug:
                         logger.info("RUN [04]: f.flush()")
                     f.flush()
-            sys.stdout.flush()
+            if tee_output:
+                sys.stdout.flush()
             f.flush()
 
             if check and p.returncode != 0:
@@ -153,7 +170,9 @@ def expr_run_cmd(cmd, to_file,
                  replace=False,
                  dry_run=False,
                  skip_error=False,
+                 tee_output=True,
                  # extra_argv=[],
+                 only_show_env=None,
                  debug=False):
     """
     Run an experiment, if it hasn't been run already.
@@ -173,9 +192,13 @@ def expr_run_cmd(cmd, to_file,
         env = dict(os.environ)
 
     proc = None
+    failed = False
     if replace or not expr_already_ran(to_file, debug=debug):
 
         try:
+            tee_kwargs = dict()
+            if skip_error:
+                tee_kwargs['check'] = False
             proc = tee(
                 # cmd=cmd + extra_argv,
                 cmd=cmd,
@@ -183,26 +206,28 @@ def expr_run_cmd(cmd, to_file,
                 cwd=cwd,
                 env=env,
                 dry_run=dry_run,
+                tee_output=tee_output,
+                only_show_env=only_show_env,
+                **tee_kwargs,
             )
-            failed = False
-        except subprocess.CalledProcessError as e:
-            if not skip_error:
-                logger.error((
-                                 "> Command failed: see {path}; exiting early "
-                                 "(use --skip-error to ignore individual experiment errors)"
-                             ).format(path=to_file))
-                ret = 1
-                if debug:
-                    logger.error("Exiting with ret={ret}\n{stack}".format(
-                        ret=ret,
-                        stack=get_stacktrace(),
+            if not dry_run and skip_error and proc.returncode != 0:
+                logger.error(
+                    "> Command failed; see {path}; continuing (--skip-error was set)".format(
+                        path=to_file,
                     ))
-                sys.exit(ret)
-            logger.error(
-                "> Command failed; see {path}; continuing (--skip-error was set)".format(
-                    path=to_file,
+                failed = True
+        except subprocess.CalledProcessError as e:
+            logger.error((
+                             "> Command failed: see {path}; exiting early "
+                             "(use --skip-error to ignore individual experiment errors)"
+                         ).format(path=to_file))
+            ret = 1
+            if debug:
+                logger.error("Exiting with ret={ret}\n{stack}".format(
+                    ret=ret,
+                    stack=get_stacktrace(),
                 ))
-            failed = True
+            sys.exit(ret)
 
         if not failed:
             if not dry_run and proc.returncode != 0:

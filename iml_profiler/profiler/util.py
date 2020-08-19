@@ -1,8 +1,17 @@
 import re
-from iml_profiler.profiler.iml_logging import logger
 import sys
+import traceback
+import subprocess
+import shutil
+import shlex
+import os
+import textwrap
+import pprint
+from os import environ as ENV
 
-from iml_profiler.parser.common import *
+import cpuinfo
+
+from iml_profiler.profiler.iml_logging import logger
 
 def args_to_cmdline(parser, args,
                     argv=None,
@@ -190,3 +199,224 @@ def args_to_cmdline(parser, args,
     opts = parser_cmd_opts + [subcommand] + subparser_cmd_opts
     return opts
 
+
+def run_with_pdb(args, func):
+    try:
+        return func()
+    except Exception as e:
+        if not args.pdb:
+            raise
+        logger.debug("> IML: Detected exception:")
+        logger.error("{Klass}: {msg}".format(
+            Klass=type(e).__name__,
+            msg=str(e),
+        ))
+        logger.debug("> Entering pdb:")
+        # Fails sometimes, not sure why.
+        # import ipdb
+        # ipdb.post_mortem()
+        import pdb
+        pdb.post_mortem()
+        raise
+
+
+def gather_argv(argv, sep='--', ignore_opts=None):
+    """
+
+    $ iml-prof [options]         cmd_exec ...
+               ---------         ------------
+               iml_prof_argv     cmd_argv
+
+    Split sys.argv into:
+    - iml_prof_argv: Arguments that iml-prof should handle.
+    - cmd_argv: Arguments that the profiled script should handle.
+
+    :param argv:
+        sys.argv
+    :return:
+    """
+    iml_prof_argv = []
+    i = 0
+    def is_executable(opt):
+        return shutil.which(opt) is not None
+    has_dashes = any(opt == sep for opt in argv)
+    while i < len(argv):
+
+        if ignore_opts is not None and argv[i] in ignore_opts:
+            pass
+        elif has_dashes:
+            if argv[i] == sep:
+                i += 1
+                break
+        elif is_executable(argv[i]):
+            break
+
+        iml_prof_argv.append(argv[i])
+        i += 1
+    cmd_argv = argv[i:]
+    return iml_prof_argv, cmd_argv
+
+def error(msg, parser=None):
+    if parser is not None:
+        parser.print_usage()
+    logger.error(msg)
+    sys.exit(1)
+
+
+GET_AVAILABLE_CPUS_CPU_INFO = None
+def get_available_cpus():
+    """
+    Report a single [0..1] value representing current system-wide CPU utilization.
+
+    psutil.cpu_percent() returns EXACTLY this.
+    From psutil.cpu_percent docstring:
+        "
+        Return a float representing the current system-wide CPU
+        utilization as a percentage.
+        "
+
+    NOTE: It's also possible to get INDIVIDUAL utilization for each CPU,
+    if we choose to do that in the future.
+    """
+    global GET_AVAILABLE_CPUS_CPU_INFO
+    if GET_AVAILABLE_CPUS_CPU_INFO is None:
+        # Do this lazily to avoid long import times.
+        GET_AVAILABLE_CPUS_CPU_INFO = cpuinfo.get_cpu_info()
+    device_name = GET_AVAILABLE_CPUS_CPU_INFO['brand']
+    return {
+        'device_name':device_name,
+        'device_number':0,
+    }
+
+def get_available_gpus():
+    # $ tensorflow_cuda9 git:(opt-tfprof) ✗ nvidia-smi -L
+    # GPU 0: GeForce RTX 2070 (UUID: GPU-e9c6b1d8-2b80-fee2-b750-08c5adcaac3f)
+    # GPU 1: Quadro K4000 (UUID: GPU-6a547b6a-ae88-2aac-feb9-ae6b7095baaf)
+    proc = subprocess.run(['nvidia-smi', '-L'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+    lines = proc.stdout.decode('utf-8').splitlines()
+    device_dicts = []
+    for line in lines:
+        # if re.search(r'^\s*$', line):
+        #     continue
+        m = re.search(r'^GPU (?P<gpu_id>\d+):\s*(?P<gpu_name>.*)\s+\(UUID: (?P<gpu_uuid>.*)\)\s*', line)
+        if m:
+            device_dicts.append({
+                "device_number":int(m.group('gpu_id')),
+                "device_name":m.group('gpu_name'),
+            })
+    visible_gpu_ids = get_visible_gpu_ids()
+    keep_devices = [gpu for gpu in device_dicts
+                    if visible_gpu_ids is None or gpu['device_number'] in visible_gpu_ids]
+    return keep_devices
+
+    # Don't user TensorFlow to do this since it allocates the GPU when it runs...
+    #
+    # config = tf.ConfigProto()
+    # # Allow multiple users to use the TensorFlow API.
+    # config.gpu_options.allow_growth = True  # <--- even with this, it still user 645 MB!
+    #
+    # logger.info("Before list_local_devices")
+    # local_device_protos = tf_device_lib.list_local_devices(config) # <-- this trigger GPU allocation
+    # device_protos = [x for x in local_device_protos if x.device_type == 'GPU']
+    # device_dicts = [_device_proto_as_dict(device_proto) for device_proto in device_protos]
+    # return device_dicts
+
+def get_visible_gpu_ids():
+    if 'CUDA_VISIBLE_DEVICES' not in ENV:
+        return None
+    gpu_ids = sorted(int(gpu_id) for gpu_id in re.split(r'\s*,\s*', ENV['CUDA_VISIBLE_DEVICES']))
+    return gpu_ids
+
+
+def print_cmd(cmd, files=sys.stdout, env=None, dry_run=False, only_show_env=None):
+    string = cmd_debug_msg(cmd, env=env, dry_run=dry_run, only_show_env=only_show_env)
+
+    if type(files) not in [set, list]:
+        if type(files) in [list]:
+            files = set(files)
+        else:
+            files = set([files])
+
+    for f in files:
+        print(string, file=f)
+        f.flush()
+
+
+def cmd_debug_msg(cmd, env=None, dry_run=False, only_show_env=None):
+    if type(cmd) == list:
+        cmd_str = " ".join([shlex.quote(str(x)) for x in cmd])
+    else:
+        cmd_str = cmd
+
+    lines = []
+    if dry_run:
+        lines.append("> CMD [dry-run]:")
+    else:
+        lines.append("> CMD:")
+    lines.extend([
+        "  $ {cmd}".format(cmd=cmd_str),
+        "  PWD={pwd}".format(pwd=os.getcwd()),
+    ])
+
+    if env is not None and len(env) > 0:
+        show_keys = set(env.keys())
+        if only_show_env is not None:
+            show_keys = show_keys.intersection(set(only_show_env))
+        env_vars = sorted(show_keys)
+        if len(env_vars) > 0:
+            lines.append("  Environment:")
+            for var in env_vars:
+                lines.append("    {var}={val}".format(
+                    var=var,
+                    val=env[var]))
+    string = '\n'.join(lines)
+
+    return string
+
+def log_cmd(cmd, env=None, dry_run=False):
+    string = cmd_debug_msg(cmd, env=env, dry_run=dry_run)
+
+    logger.info(string)
+
+def pprint_msg(dic, prefix='  '):
+    """
+    Give logger.info a string for neatly printing a dictionary.
+
+    Usage:
+    logger.info(pprint_msg(arbitrary_object))
+    """
+    return "\n" + textwrap.indent(pprint.pformat(dic), prefix=prefix)
+
+def get_stacktrace(n_skip=1, indent=None):
+    """
+    Return a stacktrace ready for printing; usage:
+
+    # Dump the stack of the current location of this line.
+    '\n'.join(get_stacktrace(0))
+    logger.info("First line before stacktrace\n{stack}".format(
+        stack=get_stacktrace())
+
+    # Outputs to stdout:
+    ID=14751/MainProcess @ finish, profilers.py:1658 :: 2019-07-09 15:52:26,015 INFO: First line before stacktrace
+      File "*.py", line 375, in <module>
+          ...
+      ...
+      File "*.py", line 1658, in finish
+        logger.info("First line before stacktrace\n{stack}".format(
+
+    :param n_skip:
+        Number of stack-levels to skip in the caller.
+        By default we skip the first one, since it's the call to traceback.extrace_stack()
+        inside the get_stacktrace() function.
+
+        If you make n_skip=2, then it will skip you function-call to get_stacktrace() as well.
+
+    :return:
+    """
+    stack = traceback.extract_stack()
+    stack_list = traceback.format_list(stack)
+    stack_list_keep = stack_list[0:len(stack_list)-n_skip]
+    stack_str = ''.join(stack_list_keep)
+    if indent is not None:
+        stack_str = textwrap.indent(stack_str, prefix="  "*indent)
+    return stack_str

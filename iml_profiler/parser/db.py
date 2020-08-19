@@ -21,6 +21,7 @@ import sqlite3
 
 from os.path import join as _j, dirname as _d, exists as _e
 
+from iml_profiler.profiler.util import pprint_msg
 from iml_profiler.protobuf.pyprof_pb2 import CategoryEventsProto, MachineUtilization
 
 from iml_profiler import py_config

@@ -29,6 +29,7 @@ import os
 import os.path
 from os.path import join as _j, abspath as _a, exists as _e, dirname as _d, basename as _b
 
+from iml_profiler.profiler.util import pprint_msg
 from iml_profiler.parser.db import SQLCategoryTimesReader, sql_get_source_files, sql_input_path
 from iml_profiler.parser.plot_index import _DataIndex
 from iml_profiler.parser import plot_index

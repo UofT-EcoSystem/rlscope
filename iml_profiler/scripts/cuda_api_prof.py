@@ -12,6 +12,7 @@ from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, base
 from iml_profiler import py_config
 
 from iml_profiler.parser.common import *
+from iml_profiler.profiler.util import gather_argv, print_cmd
 
 from iml_profiler.profiler.iml_logging import logger
 
@@ -99,6 +100,32 @@ def main():
                         Perform multiple runs in order to calibrate for profiling overhead 
                         specific to the workload being run.
                         """))
+    parser.add_argument("--re-calibrate",
+                        action='store_true',
+                        help=textwrap.dedent("""
+                            Remove existing profiling overhead calibration files, and recompute them.
+                            """))
+    parser.add_argument("--parallel-runs",
+                        action='store_true',
+                        help=textwrap.dedent("""
+                            Parallelize running configurations across GPUs on this machine (assume no CPU inteference). See --gpus
+                            """))
+    # parser.add_argument("--gpus",
+    #                     action='store_true',
+    #                     help=textwrap.dedent("""
+    #                         Parallelize running configurations across GPUs on this machine (assume no CPU inteference). See --iml-gpus
+    #                         """))
+    parser.add_argument("--gpus",
+                        help=textwrap.dedent("""
+                        # Run on the first GPU only
+                        --gpus 0
+                        # Run on the first 2 GPUs
+                        --gpus 0,1
+                        # Run on all available GPUs
+                        --gpus all
+                        # Don't allow running with any GPUs (CUDA_VISIBLE_DEVICES="")
+                        --gpus none
+                        """))
     parser.add_argument('--config',
                         choices=['interception',
                                  'no-interception',
@@ -178,9 +205,21 @@ def main():
             parser.exit(1)
         # Run calibrate.py
         cmd = ['iml-calibrate', 'run']
+        if args.parallel_runs:
+            cmd.extend(['--parallel-runs'])
+            iml_prof_argv.remove('--parallel-runs')
+
+        # Q: Can't we just pass this through?
+        # if args.re_calibrate:
+        #     cmd.extend(['--re-calibrate'])
+        #     iml_prof_argv.remove('--re-calibrate')
+
+        # if args.gpus is not None:
+        #     cmd.extend(['--gpus', args.gpus])
+        iml_prof_argv.remove('--calibrate')
         cmd.extend(iml_prof_argv)
         cmd.extend(cmd_argv)
-        cmd.remove('--calibrate')
+        # cmd.remove('--calibrate')
         print_cmd(cmd)
         try:
             proc = subprocess.run(cmd, check=False)
@@ -283,40 +322,6 @@ def main():
     os.execve(exe_path, cmd, env)
     # Shouldn't return.
     assert False
-
-def gather_argv(argv, sep='--'):
-    """
-
-    $ iml-prof [options]         cmd_exec ...
-               ---------         ------------
-               iml_prof_argv     cmd_argv
-
-    Split sys.argv into:
-    - iml_prof_argv: Arguments that iml-prof should handle.
-    - cmd_argv: Arguments that the profiled script should handle.
-
-    :param argv:
-        sys.argv
-    :return:
-    """
-    iml_prof_argv = []
-    i = 0
-    def is_executable(opt):
-        return shutil.which(opt) is not None
-    has_dashes = any(opt == sep for opt in argv)
-    while i < len(argv):
-
-        if has_dashes:
-            if argv[i] == sep:
-                i += 1
-                break
-        elif is_executable(argv[i]):
-            break
-
-        iml_prof_argv.append(argv[i])
-        i += 1
-    cmd_argv = argv[i:]
-    return iml_prof_argv, cmd_argv
 
 def is_env_true(var, env=None):
     if env is None:

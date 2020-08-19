@@ -7,6 +7,8 @@
 #include "common_util.h"
 #include "trace_file_parser.h"
 
+#include <algorithm>
+
 #include <Eigen/Dense>
 
 //#include <boost/compute/algorithm/reduce.hpp>
@@ -1265,6 +1267,13 @@ MyStatus RawTraceParser::_AppendOverheadEvents(
   IF_BAD_STATUS_RETURN(status);
   return MyStatus::OK();
 }
+
+// NOTE: sometimes calibration can end up with negative durations for overhead events when overhead is negligible.
+// In that case, just using a duration of zero for the overhead event.
+TimePsec as_overhead_duration_ps(TimePsec overhead_duration_ps) {
+  return std::max(static_cast<TimePsec>(0), overhead_duration_ps);
+}
+
 MyStatus RawTraceParser::_AppendOverhead_CUPTI_and_LD_PRELOAD(
     const Machine& machine,
     const Process& process,
@@ -1307,7 +1316,7 @@ MyStatus RawTraceParser::_AppendOverhead_CUPTI_and_LD_PRELOAD(
       } else {
         auto mean_cupti_overhead_ps = it->second;
         TimePsec start_ps = CUDA_API_events.StartPsec(i);
-        TimePsec end_ps = start_ps + mean_cupti_overhead_ps;
+        TimePsec end_ps = start_ps + as_overhead_duration_ps(mean_cupti_overhead_ps);
         OptionalString name;
         if (CUPTI_events.KeepNames()) {
           name = CUDA_API_events.GetEventName(i);
@@ -1375,8 +1384,8 @@ MyStatus RawTraceParser::_AppendOverhead_PYTHON_INTERCEPTION(
     }
   }
   auto func = [per_python_clib_interception_us, &prof_events] (const EOEvents& events, size_t i) {
-    TimePsec start_ps = events.EndPsec(i) + (per_python_clib_interception_us * PSEC_IN_USEC);
-    TimePsec end_ps = start_ps + (per_python_clib_interception_us * PSEC_IN_USEC);
+    TimePsec start_ps = events.EndPsec(i) + as_overhead_duration_ps((per_python_clib_interception_us * PSEC_IN_USEC));
+    TimePsec end_ps = start_ps + as_overhead_duration_ps((per_python_clib_interception_us * PSEC_IN_USEC));
     OptionalString name;
     if (prof_events.KeepNames()) {
       name = events.GetEventName(i);
@@ -1404,7 +1413,7 @@ MyStatus RawTraceParser::_AppendOverhead_PYTHON_ANNOTATION(
   auto& prof_events = category_times->MutableEvents(category_key);
   for (size_t i = 0; i < ops_events.size(); i++) {
     TimePsec start_ps = ops_events.StartPsec(i);
-    TimePsec end_ps = start_ps + (per_pyprof_annotation_overhead_us * PSEC_IN_USEC);
+    TimePsec end_ps = start_ps + as_overhead_duration_ps((per_pyprof_annotation_overhead_us * PSEC_IN_USEC));
     OptionalString name;
     if (prof_events.KeepNames()) {
       name = ops_events.GetEventName(i);

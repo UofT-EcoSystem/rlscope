@@ -47,6 +47,8 @@ except ImportError:
 
 from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, basename as _b
 
+from iml_profiler.profiler.util import get_stacktrace
+from iml_profiler.profiler.util import pprint_msg
 from iml_profiler.experiment import expr_config
 from iml_profiler.profiler.iml_logging import logger
 from iml_profiler.profiler.concurrent import ForkedProcessPool, FailedProcessException

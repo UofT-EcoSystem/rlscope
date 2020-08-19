@@ -2,6 +2,7 @@ from iml_profiler.profiler.iml_logging import logger
 import argparse
 import pprint
 from glob import glob
+import subprocess
 import textwrap
 import os
 import sys
@@ -13,6 +14,8 @@ import functools
 
 from os.path import join as _j, abspath as _a, exists as _e, dirname as _d, basename as _b
 
+from iml_profiler.profiler.util import print_cmd
+from iml_profiler.profiler.util import run_with_pdb, pprint_msg
 from iml_profiler.parser.common import *
 from iml_profiler.experiment.util import tee, expr_run_cmd, expr_already_ran
 from iml_profiler.profiler.concurrent import ForkedProcessPool
@@ -65,6 +68,8 @@ class Calibration:
                  dry_run=False,
                  skip_plot=False,
                  skip_error=False,
+                 parallel_runs=False,
+                 gpus=None,
                  debug=False,
                  debug_single_thread=False,
                  pdb=False,
@@ -78,6 +83,8 @@ class Calibration:
         self.dry_run = dry_run
         self.skip_plot = skip_plot
         self.skip_error = skip_error
+        self.parallel_runs = parallel_runs
+        self.gpus = gpus
         self.debug = debug
         self.debug_single_thread = debug_single_thread
         self.pdb = pdb
@@ -208,7 +215,8 @@ class Calibration:
             # replace=True,
             dry_run=self.dry_run,
             skip_error=self.skip_error,
-            debug=self.debug)
+            debug=self.debug,
+            only_show_env=self.only_show_env())
 
     def compute_time_breakdown_plot(self, directories, output_directory, extra_argv,
                                     # xtick_expression=None,
@@ -283,7 +291,8 @@ class Calibration:
             # replace=True,
             dry_run=self.dry_run,
             skip_error=self.skip_error,
-            debug=self.debug)
+            debug=self.debug,
+            only_show_env=self.only_show_env())
 
     def _add_calibration_opts(self, output_directory, cmd):
         cmd.extend([
@@ -399,7 +408,15 @@ class Calibration:
             # replace=True,
             dry_run=self.dry_run,
             skip_error=self.skip_error,
-            debug=self.debug)
+            debug=self.debug,
+            only_show_env=self.only_show_env())
+
+    def only_show_env(self):
+        if self.debug:
+            # Show all enviroment variables
+            return None
+        # Show no environments variables
+        return {'CUDA_VISIBLE_DEVICES'}
 
     def compute_cupti_scaling_overhead(self, output_directory):
         task = "CUPTIScalingOverheadTask"
@@ -443,7 +460,8 @@ class Calibration:
             # replace=True,
             dry_run=self.dry_run,
             skip_error=self.skip_error,
-            debug=self.debug)
+            debug=self.debug,
+            only_show_env=self.only_show_env())
 
     def compute_cupti_overhead(self, output_directory):
         task = "CUPTIOverheadTask"
@@ -488,7 +506,8 @@ class Calibration:
             # replace=True,
             dry_run=self.dry_run,
             skip_error=self.skip_error,
-            debug=self.debug)
+            debug=self.debug,
+            only_show_env=self.only_show_env())
 
     def compute_LD_PRELOAD_overhead(self, output_directory):
         task = "CallInterceptionOverheadTask"
@@ -538,7 +557,8 @@ class Calibration:
             # replace=True,
             dry_run=self.dry_run,
             skip_error=self.skip_error,
-            debug=self.debug)
+            debug=self.debug,
+            only_show_env=self.only_show_env())
 
     def compute_pyprof_overhead(self, output_directory):
         task = "PyprofOverheadTask"
@@ -592,13 +612,54 @@ class Calibration:
             # replace=True,
             dry_run=self.dry_run,
             skip_error=self.skip_error,
-            debug=self.debug)
+            debug=self.debug,
+            only_show_env=self.only_show_env())
+
+    def each_config_repetition(self):
+        for rep in range(1, self.repetitions+1):
+            for config in self.configs:
+                yield rep, config
+
+    def run_configs(self, cmd, output_directory):
+        # import pdb; pdb.set_trace()
+        if not self.parallel_runs:
+            # Run configurations serially on which GPU(s) are visible.
+            for rep, config in self.each_config_repetition():
+                config.run(rep, cmd, output_directory)
+            return
+
+        # Parallelize running configurations across GPUs on this machine (assume no CPU interference).
+        # Record commands in run_expr.sh, and run:
+        # $ iml-run-expr --run-sh --sh run_expr.sh
+        run_expr_sh = self._run_expr_sh(output_directory)
+        logger.info(f"Writing configuration shell commands to {run_expr_sh}")
+        with open(run_expr_sh, 'w') as f:
+            for rep, config in self.each_config_repetition():
+                run_cmd = config.run_cmd(rep, cmd, output_directory)
+                full_cmd = run_cmd.cmd + ['--iml-logfile', run_cmd.logfile]
+                quoted_cmd = [shlex.quote(opt) for opt in full_cmd]
+                f.write(' '.join(quoted_cmd))
+                f.write('\n')
+        run_expr_cmd = ['iml-run-expr', '--run-sh', '--sh', run_expr_sh]
+        if self.dry_run:
+            run_expr_cmd.append('--dry-run')
+        if self.debug:
+            run_expr_cmd.append('--debug')
+        # NOTE: don't forward pdb since we cannot interact with parallel processes.
+        print_cmd(run_expr_cmd)
+        proc = subprocess.run(run_expr_cmd, check=False)
+        retcode = proc.returncode
+        if retcode != 0:
+            logger.error("Failed to run configurations in parallel; at least one configuration exited with non-zero exit status.")
+            sys.exit(1)
+
+
+    def _run_expr_sh(self, output_directory):
+        return _j(output_directory, 'run_expr.sh')
 
     def do_run(self, cmd, output_directory):
 
-        for rep in range(1, self.repetitions+1):
-            for config in self.configs:
-                config.run(rep, cmd, output_directory)
+        self.run_configs(cmd, output_directory)
 
         # Lets save calibration to happen during iml-plot to make it easier to split up "analysis" from
         # "calibration" time.
@@ -610,7 +671,7 @@ class Calibration:
 
     def _rm_path(self, path):
         if _e(path):
-            logger.info("--iml-re-calibrate: RM {path}".format(path=path))
+            logger.info("--re-calibrate: RM {path}".format(path=path))
             if not self.dry_run:
                 if os.path.isdir(path):
                     shutil.rmtree(path)
@@ -957,7 +1018,7 @@ class RLScopeConfig:
         logfile = _j(self.out_dir(output_directory, rep), "logfile.out")
         return logfile
 
-    def run(self, rep, cmd, output_directory):
+    def run_cmd(self, rep, cmd, output_directory):
         iml_prof_cmd = [
             'iml-prof',
             '--config', self.iml_prof_config,
@@ -975,14 +1036,20 @@ class RLScopeConfig:
 
         iml_prof_cmd.extend(self.script_args)
         logfile = self.logfile(output_directory, rep)
+        run_cmd = RunCmd(cmd=iml_prof_cmd, output_directory=output_directory, logfile=logfile)
+        return run_cmd
+
+    def run(self, rep, cmd, output_directory):
+        run_cmd = self.run_cmd(rep, cmd, output_directory)
         expr_run_cmd(
-            cmd=iml_prof_cmd,
-            to_file=logfile,
-            cwd=ENV['RL_BASELINES_ZOO_DIR'],
+            cmd=run_cmd.cmd,
+            to_file=run_cmd.logfile,
+            # cwd=ENV['RL_BASELINES_ZOO_DIR'],
             replace=self.expr.replace,
             dry_run=self.expr.dry_run,
             skip_error=self.expr.skip_error,
-            debug=self.expr.debug)
+            debug=self.expr.debug,
+            only_show_env=self.expr.only_show_env())
 
     def already_ran(self, output_directory, rep):
         logfile = self.logfile(output_directory, rep)
@@ -1045,6 +1112,10 @@ def _main(argv):
                             help=textwrap.dedent("""
                             Debug
                             """))
+        # parser.add_argument("--sh",
+        #                     help=textwrap.dedent("""
+        #                     Shell file to append commands to (see --append).
+        #                     """))
         parser.add_argument('--iml-repetitions',
                             type=int,
                             default=1,
@@ -1061,7 +1132,7 @@ def _main(argv):
                             help=textwrap.dedent("""
                             Dry run
                             """))
-        parser.add_argument("--iml-re-calibrate",
+        parser.add_argument("--re-calibrate",
                             action='store_true',
                             help=textwrap.dedent("""
                             Remove existing profiling overhead calibration files, and recompute them.
@@ -1069,7 +1140,7 @@ def _main(argv):
         parser.add_argument("--iml-re-plot",
                             action='store_true',
                             help=textwrap.dedent("""
-                            Remove existing plots and remake them (NOTE: doesn't recompute analysis; see --iml-re-calibrate).
+                            Remove existing plots and remake them (NOTE: doesn't recompute analysis; see --re-calibrate).
                             """))
         parser.add_argument("--skip-error",
                             action='store_true',
@@ -1084,10 +1155,19 @@ def _main(argv):
                             help=textwrap.dedent("""
                         Root directory for output
                         """))
-    parser.add_argument("--iml-skip-plot",
+    run_parser.add_argument("--iml-skip-plot",
                         action='store_true',
                         help=textwrap.dedent("""
                             After running configurations, DON'T run analysis to output plots for individual workload.
+                            """))
+    run_parser.add_argument("--gpus",
+                        help=textwrap.dedent("""
+                            GPUs to run with for --parallel-runs
+                            """))
+    run_parser.add_argument("--parallel-runs",
+                        action='store_true',
+                        help=textwrap.dedent("""
+                            Parallelize running configurations across GPUs on this machine (assume no CPU inteference). See --iml-gpus
                             """))
     run_parser.set_defaults(**{'mode': 'run'})
 
@@ -1120,15 +1200,19 @@ def _main(argv):
     args_dict = dict(vars(args))
     repetitions = args_dict.pop('iml_repetitions')
     dry_run = args_dict.pop('iml_dry_run')
-    re_calibrate = args_dict.pop('iml_re_calibrate')
+    # re_calibrate = args_dict.pop('iml_re_calibrate')
     re_plot = args_dict.pop('iml_re_plot')
     skip_plot = args_dict.pop('iml_skip_plot')
+    # parallel_runs = args_dict.pop('iml_parallel_runs')
+    # gpus = args_dict.pop('iml_gpus')
     obj = Calibration(
         repetitions=repetitions,
-        re_calibrate=re_calibrate,
+        # re_calibrate=re_calibrate,
         re_plot=re_plot,
         dry_run=dry_run,
         skip_plot=skip_plot,
+        # parallel_runs=parallel_runs,
+        # gpus=gpus,
         **args_dict,
     )
 
@@ -1173,26 +1257,6 @@ def _main(argv):
         raise NotImplementedError()
 
 
-def run_with_pdb(args, func):
-    try:
-        return func()
-    except Exception as e:
-        if not args.pdb:
-            raise
-        logger.debug("> IML: Detected exception:")
-        logger.error("{Klass}: {msg}".format(
-            Klass=type(e).__name__,
-            msg=str(e),
-        ))
-        logger.debug("> Entering pdb:")
-        # Fails sometimes, not sure why.
-        # import ipdb
-        # ipdb.post_mortem()
-        import pdb
-        pdb.post_mortem()
-        raise
-
-
 def rep_suffix(rep):
     assert rep is not None
     return "_repetition_{rep:02}".format(rep=rep)
@@ -1224,6 +1288,23 @@ def get_func_name(obj, func):
         klass=obj.__class__.__name__,
         func=func)
     return name
+
+
+class RunCmd:
+    def __init__(self, cmd, output_directory, logfile):
+        self.cmd = cmd
+        self.output_directory = output_directory
+        self.logfile = logfile
+
+    def __repr__(self):
+        return "{klass}(cmd=\"{cmd}\", output_directory={output_directory}, logfile={logfile})".format(
+            klass=self.__class__.__name__,
+            cmd=' '.join(self.cmd),
+            output_directory=self.output_directory,
+            logfile=self.logfile
+        )
+
+
 
 if __name__ == '__main__':
     main_run()

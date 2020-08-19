@@ -21,8 +21,10 @@ from iml_profiler.profiler.concurrent import ForkedProcessPool
 
 import iml_profiler
 
+from iml_profiler.profiler.util import pprint_msg
 from iml_profiler.scripts.utilization_sampler import util_sampler
-from iml_profiler.profiler.util import args_to_cmdline
+from iml_profiler.profiler.util import args_to_cmdline, get_available_gpus, get_available_cpus
+from iml_profiler.profiler.util import get_stacktrace
 
 from iml_profiler.profiler.iml_logging import logger
 
@@ -41,7 +43,7 @@ def cleanup_profiler_excepthook(exctype, value, traceback):
 from tensorflow.python.framework import c_api_util
 
 from iml_profiler.profiler import unit_test_util
-from iml_profiler.parser.common import print_cmd
+from iml_profiler.profiler.util import print_cmd
 
 # from tensorflow.core.profiler.tfprof_log_pb2 import ProfileProto
 from iml_profiler.protobuf.pyprof_pb2 import ProcessMetadata, TrainingProgress, IncrementalTrainingProgress, TP_NO_PROGRESS, TP_HAS_PROGRESS
@@ -785,7 +787,7 @@ class Profiler:
         # Disable OLD tfprof tracing code.  We now use iml-prof to trace stuff.
         self.disable_pyprof_trace = get_argval('disable_pyprof_trace', disable_pyprof_trace, False)
         self.disable_gpu_hw = get_argval('disable_gpu_hw', disable_gpu_hw, False)
-        self.delay = get_argval('delay', delay, False)
+        self.delay = get_argval('delay', delay, None)
 
         self.delay_training_loop_iters = get_argval('delay_training_loop_iters', delay_training_loop_iters, None)
         self.max_training_loop_iters = get_argval('max_training_loop_iters', max_training_loop_iters, None)
@@ -1781,6 +1783,7 @@ class Profiler:
         assert not self._tracing_enabled
         assert not self._has_called_enable_tracing
         self._maybe_set_opt('delay_passes', delay_passes, 'iml.prof.set_delay_passes', skip_if_set)
+        self._maybe_set_opt('delay', True, 'iml.prof.set_delay', skip_if_set)
         self._maybe_dump_iml_config()
 
     def set_delay_training_loop_iters(self, delay_training_loop_iters, skip_if_set):
@@ -3335,66 +3338,6 @@ def list_files(direc):
         return all_files
 
     return _list_files(direc)
-
-GET_AVAILABLE_CPUS_CPU_INFO = cpuinfo.get_cpu_info()
-def get_available_cpus():
-    """
-    Report a single [0..1] value representing current system-wide CPU utilization.
-
-    psutil.cpu_percent() returns EXACTLY this.
-    From psutil.cpu_percent docstring:
-        "
-        Return a float representing the current system-wide CPU
-        utilization as a percentage.
-        "
-
-    NOTE: It's also possible to get INDIVIDUAL utilization for each CPU,
-    if we choose to do that in the future.
-    """
-    device_name = GET_AVAILABLE_CPUS_CPU_INFO['brand']
-    return {
-        'device_name':device_name,
-        'device_number':0,
-    }
-
-def get_visible_gpu_ids():
-    if 'CUDA_VISIBLE_DEVICES' not in ENV:
-        return None
-    gpu_ids = sorted(int(gpu_id) for gpu_id in re.split(r'\s*,\s*', ENV['CUDA_VISIBLE_DEVICES']))
-    return gpu_ids
-
-def get_available_gpus():
-    # $ tensorflow_cuda9 git:(opt-tfprof) ✗ nvidia-smi -L
-    # GPU 0: GeForce RTX 2070 (UUID: GPU-e9c6b1d8-2b80-fee2-b750-08c5adcaac3f)
-    # GPU 1: Quadro K4000 (UUID: GPU-6a547b6a-ae88-2aac-feb9-ae6b7095baaf)
-    proc = subprocess.run(['nvidia-smi', '-L'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
-    lines = proc.stdout.decode('utf-8').splitlines()
-    device_dicts = []
-    for line in lines:
-        # if re.search(r'^\s*$', line):
-        #     continue
-        m = re.search(r'^GPU (?P<gpu_id>\d+):\s*(?P<gpu_name>.*)\s+\(UUID: (?P<gpu_uuid>.*)\)\s*', line)
-        if m:
-            device_dicts.append({
-                "device_number":int(m.group('gpu_id')),
-                "device_name":m.group('gpu_name'),
-            })
-    visible_gpu_ids = get_visible_gpu_ids()
-    keep_devices = [gpu for gpu in device_dicts
-                    if visible_gpu_ids is None or gpu['device_number'] in visible_gpu_ids]
-    return keep_devices
-
-    # Don't user TensorFlow to do this since it allocates the GPU when it runs...
-    #
-    # config = tf.ConfigProto()
-    # # Allow multiple users to use the TensorFlow API.
-    # config.gpu_options.allow_growth = True  # <--- even with this, it still user 645 MB!
-    #
-    # logger.info("Before list_local_devices")
-    # local_device_protos = tf_device_lib.list_local_devices(config) # <-- this trigger GPU allocation
-    # device_protos = [x for x in local_device_protos if x.device_type == 'GPU']
-    # device_dicts = [_device_proto_as_dict(device_proto) for device_proto in device_protos]
-    # return device_dicts
 
 def _device_proto_as_dict(device_proto):
     # For GPU's

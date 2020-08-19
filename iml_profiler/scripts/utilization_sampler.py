@@ -25,6 +25,7 @@ from iml_profiler import py_config
 
 from iml_profiler.protobuf.pyprof_pb2 import CategoryEventsProto, MachineUtilization, DeviceUtilization, UtilizationSample
 
+from iml_profiler.profiler.util import log_cmd, print_cmd
 from iml_profiler.parser.common import *
 
 BYTES_IN_KB = 1 << 10

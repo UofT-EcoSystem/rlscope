@@ -515,7 +515,7 @@ run_tf_agents() {
   fi
   if [ "${re_calibrate}" = 'yes' ]; then
     args+=(
-      --iml-re-calibrate
+      --re-calibrate
     )
   fi
   if [ "${re_plot}" = 'yes' ]; then
@@ -626,7 +626,7 @@ test_tf_agents() {
   fi
   if [ "${re_calibrate}" = 'yes' ]; then
     args+=(
-      --iml-re-calibrate
+      --re-calibrate
     )
   fi
   if [ "${dry_run}" = 'yes' ]; then

@@ -19,13 +19,14 @@ import os
 
 from os.path import join as _j, abspath as _a, exists as _e, dirname as _d, basename as _b
 
+from iml_profiler.profiler.util import pprint_msg
 from iml_profiler.parser.tfprof import TotalTimeParser, TraceEventsParser
 from iml_profiler.parser.pyprof import PythonProfileParser, PythonFlameGraphParser, PythonProfileTotalParser
 from iml_profiler.parser.plot import TimeBreakdownPlot, PlotSummary, CombinedProfileParser, CategoryOverlapPlot, UtilizationPlot, HeatScalePlot, ConvertResourceOverlapToResourceSubplot, VennJsPlotter, SlidingWindowUtilizationPlot, CUDAEventCSVReader
 from iml_profiler.parser.db import SQLParser, sql_input_path, GetConnectionPool
 from iml_profiler.parser import db
 from iml_profiler.parser.stacked_bar_plots import OverlapStackedBarPlot
-from iml_profiler.parser.common import print_cmd
+from iml_profiler.profiler.util import print_cmd
 from iml_profiler.parser.cpu_gpu_util import UtilParser, UtilPlot, GPUUtilOverTimePlot, NvprofKernelHistogram, CrossProcessOverlapHistogram, NvprofTraces
 from iml_profiler.parser.training_progress import TrainingProgressParser, ProfilingOverheadPlot
 from iml_profiler.parser.extrapolated_training_time import ExtrapolatedTrainingTimeParser
