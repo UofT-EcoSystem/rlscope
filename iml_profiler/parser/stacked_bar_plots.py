@@ -1366,6 +1366,9 @@ class OverlapStackedBarPlot:
             xlabel=self.plot_x_axis_label,
             # xlabel='(RL algorithm, Simulator)',
 
+            width=self.width,
+            height=self.height,
+
             ylabel='Percent',
             title=self.plot_title,
             func=ax_func,
@@ -1424,6 +1427,14 @@ class OverlapStackedBarPlot:
             If True, make it csv friendly (i.e. don't use newlines in string)
         :return:
         """
+        df['pretty_algo'] = df['algo'].apply(get_x_algo)
+        df['short_env'] = df['env'].apply(get_x_env)
+        def _algo_env(row):
+            return "({algo}, {env})".format(
+                algo=get_x_algo(row['pretty_algo']),
+                env=get_x_env(row['short_env']),
+            )
+        df['algo_env'] = df.apply(_algo_env, axis=1)
         if self.xtick_expression is None:
             x_fields = []
             for index, row in df.iterrows():
@@ -1893,6 +1904,8 @@ class DetailedStackedBarPlot:
                  ylabel=None,
                  y2label=None,
                  title=None,
+                 width=None,
+                 height=None,
                  bar_width=0.33,
                  func=None,
                  debug=False,
@@ -1940,6 +1953,8 @@ class DetailedStackedBarPlot:
         self.ylabel = ylabel
         self.y2label = y2label
         self.title = title
+        self.width = width
+        self.height = height
 
         self._init_x_offsets()
 
@@ -2069,7 +2084,10 @@ class DetailedStackedBarPlot:
         return color_map
 
     def plot(self):
-        fig = plt.figure()
+        figsize = None
+        if self.width is not None or self.height is not None:
+            figsize = (self.width, self.height)
+        fig = plt.figure(figsize=figsize)
         self.fig = fig
         # Q: What's this affect?
         # ax = plt.add_subplot(111)

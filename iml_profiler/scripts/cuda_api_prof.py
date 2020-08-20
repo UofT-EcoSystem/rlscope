@@ -110,6 +110,11 @@ def main():
                         help=textwrap.dedent("""
                             Parallelize running configurations across GPUs on this machine (assume no CPU inteference). See --gpus
                             """))
+    parser.add_argument("--dry-run",
+                        action='store_true',
+                        help=textwrap.dedent("""
+                            Dry run
+                            """))
     # parser.add_argument("--gpus",
     #                     action='store_true',
     #                     help=textwrap.dedent("""

@@ -1000,7 +1000,12 @@ class GpuHwPlotTask(IMLTask):
     directory = luigi.Parameter(description="Output directory", default=".")
     xtick_expression = param_xtick_expression
     x_title = luigi.Parameter(description="x-axis title", default=None)
+    title = luigi.Parameter(description="title", default=None)
     rotation = luigi.FloatParameter(description="x-axis title rotation", default=None)
+
+    # IGNORED.
+    y2_logscale = luigi.BoolParameter(description="Show training time y-axis in logscale", parsing=luigi.BoolParameter.EXPLICIT_PARSING)
+
     debug = param_debug
     debug_single_thread = param_debug_single_thread
     debug_perf = param_debug_perf
@@ -1017,6 +1022,7 @@ class GpuHwPlotTask(IMLTask):
         obj_args['output_directory'] = self.iml_directory
         obj_args['xtick_expression'] = self.xtick_expression
         obj_args['x_title'] = self.x_title
+        obj_args['title'] = self.title
         obj_args['debug'] = self.debug
         self.dumper = GpuUtilExperiment(obj_args)
         self.dumper.run()

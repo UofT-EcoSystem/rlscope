@@ -17,8 +17,10 @@ Usage:
 import argparse
 import time
 import pprint
+import traceback
 import shlex
 import shutil
+import socket
 import textwrap
 import re
 import os
@@ -32,14 +34,10 @@ from os.path import join as _j, abspath as _a, exists as _e, dirname as _d, base
 from iml_profiler.profiler import iml_logging
 from iml_profiler.profiler.iml_logging import logger
 from iml_profiler.profiler.util import gather_argv, run_with_pdb, error, get_available_cpus, get_available_gpus
-from iml_profiler.experiment.util import tee, expr_run_cmd, expr_already_ran
-
-DEBUG = True
+from iml_profiler.experiment.util import expr_run_cmd, expr_already_ran
 
 # This is slow.
 # from iml_profiler.parser.common import *
-
-SENTINEL = object()
 
 class RunExpr:
     def __init__(self,
@@ -48,6 +46,7 @@ class RunExpr:
                  append=False,
                  iml_directory=None,
                  sh=None,
+                 tee=False,
                  run_sh=False,
                  debug=False,
                  dry_run=False,
@@ -55,6 +54,7 @@ class RunExpr:
                  gpus=None):
         self.cmd = cmd
         self.run = run
+        self.tee = tee
         self.append = append
         self.iml_directory = iml_directory
         self.sh = sh
@@ -82,29 +82,53 @@ class RunExpr:
         except KeyboardInterrupt:
             logger.debug(f"GPU[{gpu}] worker saw Ctrl-C; exiting early")
             return
+        except Exception as e:
+            logger.error(textwrap.dedent("""\
+            BUG: GPU[{gpu}] worker failed with unhandled exception:
+            {error}
+            """).format(
+                gpu=gpu,
+                error=textwrap.indent(traceback.format_exc(), prefix='  '),
+            ).rstrip())
+            sys.exit(1)
 
     def gpu_worker(self, gpu):
+        # :\n{msg}
+        logger.debug("Start GPU[{gpu}] worker; queue contains {len} items".format(
+            len=self.cmd_queue.qsize(),
+            gpu=gpu,
+            # msg=textwrap.indent(pprint.pformat(list(self.cmd_queue)), prefix='  '),
+        ))
         while True:
             run_cmd = None
             try:
-                run_cmd = self.cmd_queue.get(block=False)
+                # run_cmd = self.cmd_queue.get(block=False)
+                logger.debug(f"Get: GPU[{gpu}] worker...")
+                # This hangs forever when timeout isn't provided...
+                # run_cmd = self.cmd_queue.get()
+                run_cmd = self.cmd_queue.get(timeout=1)
             except queue.Empty:
                 logger.debug(f"No more items in queue; exiting GPU[{gpu}] worker")
                 break
+            # except socket.timeout:
+            #     logger.debug(f"Saw timeout; no more items in queue (len={self.cmd_queue.qsize()})? Exiting GPU[{gpu}] worker")
+            #     assert self.cmd_queue.qsize() == 0
+            #     break
 
             logfile = run_cmd.logfile
             logger.debug(
                 textwrap.dedent("""\
-                    GPU[{gpu}] worker running command:
+                    GPU[{gpu}] worker running command (queue size = {len}):
                     > CMD:
                       logfile={logfile}
                       $ {cmd}
                     """).format(
+                    len=self.cmd_queue.qsize(),
                     cmd=' '.join(run_cmd.cmd),
                     gpu=gpu,
                     logfile=logfile,
                 ).rstrip())
-            self.run_cmd(gpu, run_cmd, tee_output=False)
+            self.run_cmd(gpu, run_cmd, tee_output=self.tee, tee_prefix=f"GPU[{gpu}] :: ")
 
             if self.should_stop.is_set() or self.worker_failed.is_set():
                 logger.debug(f"Got exit signal; exiting GPU[{gpu}] worker")
@@ -125,6 +149,9 @@ class RunExpr:
         with open(self.sh, 'r') as f:
             for line in f:
                 line = line.rstrip()
+                if re.search('^\s*$', line):
+                    # Skip empty lines.
+                    continue
                 # Remove comments
                 # PROBLEM: comment may be inside string...
                 # re.sub(r'#.*', line)
@@ -186,7 +213,7 @@ class RunExpr:
     def _logfile_basename(self, task):
         return "{task}.logfile.out".format(task=task)
 
-    def run_cmd(self, gpu, run_cmd, tee_output=False):
+    def run_cmd(self, gpu, run_cmd, tee_output=False, tee_prefix=None):
         cmd = run_cmd.cmd
         # output_directory = run_cmd.output_directory
 
@@ -209,6 +236,7 @@ class RunExpr:
             dry_run=self.dry_run,
             # Only output to logfile to avoid interleaved output from commands.
             tee_output=tee_output,
+            tee_prefix=tee_prefix,
             skip_error=True,
             debug=self.debug,
             only_show_env={
@@ -260,14 +288,42 @@ class RunExpr:
                     logger.error("At least one command failed with non-zero exit status; use --skip-errors to ignore failed commands.")
                     sys.exit(1)
 
-                if all(not worker.is_alive() for worker in self.gpu_workers.values()):
-                    logger.info("All GPU workers have finished")
-                    break
+                alive_workers = 0
+                failed_workers = 0
+                for gpu, worker in self.gpu_workers.items():
+                    if worker.is_alive():
+                        alive_workers += 1
+                        continue
+
+                    if worker.exitcode < 0:
+                        logger.error("GPU[{gpu}] worker failed with exitcode={ret} (unhandled exception)".format(
+                            gpu=gpu,
+                            ret=worker.exitcode,
+                        ))
+                        self.worker_failed.set()
+                        failed_workers += 1
+
+                if failed_workers > 0:
+                    self.stop_workers()
+                    sys.exit(1)
+
+                if alive_workers == 0:
+                    if self.cmd_queue.qsize() > 0:
+                        logger.warning("GPU workers have finished with {len} remaining commands unfinished".format(
+                            len=self.cmd_queue.qsize()
+                        ))
+                        sys.exit(1)
+                    logger.info("GPU workers have finished successfully".format(
+                        len=self.cmd_queue.qsize()
+                    ))
+                    sys.exit(0)
 
                 time.sleep(2)
         except KeyboardInterrupt:
             logger.info("Saw Ctrl-C; waiting for workers to terminate")
             self.stop_workers()
+            logger.warning("{len} remaining commands went unprocessed".format(len=self.cmd_queue.qsize()))
+            sys.exit(1)
 
     def stop_workers(self):
         self.should_stop.set()
@@ -343,6 +399,12 @@ def main():
                         help=textwrap.dedent("""
                         Debug
                         """))
+    parser.add_argument("--tee",
+                        action='store_true',
+                        help=textwrap.dedent("""
+                        (debug)
+                        tee output of parallel processes to stdout (prefix output with worker name)
+                        """))
     parser.add_argument("--pdb",
                         action='store_true',
                         help=textwrap.dedent("""
@@ -379,7 +441,7 @@ def main():
         ignore_opts=ignore_opts)
     args = parser.parse_args(run_expr_argv)
 
-    if DEBUG:
+    if args.debug:
         logger.debug({
             'run_expr_argv': run_expr_argv,
             'cmd': cmd,

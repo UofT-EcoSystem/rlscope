@@ -34,6 +34,7 @@ def tee(cmd, to_file,
         check=True,
         dry_run=False,
         tee_output=True,
+        tee_prefix=None,
         only_show_env=None,
         **kwargs):
 
@@ -105,6 +106,8 @@ def tee(cmd, to_file,
                     if debug:
                         logger.info("RUN [01]: sys.stdout.write(line)")
                     if tee_output:
+                        if tee_prefix is not None:
+                            sys.stdout.write(tee_prefix)
                         sys.stdout.write(line)
                     if debug:
                         logger.info("RUN [02]: sys.stdout.flush()")
@@ -171,6 +174,7 @@ def expr_run_cmd(cmd, to_file,
                  dry_run=False,
                  skip_error=False,
                  tee_output=True,
+                 tee_prefix=None,
                  # extra_argv=[],
                  only_show_env=None,
                  debug=False):
@@ -207,6 +211,7 @@ def expr_run_cmd(cmd, to_file,
                 env=env,
                 dry_run=dry_run,
                 tee_output=tee_output,
+                tee_prefix=tee_prefix,
                 only_show_env=only_show_env,
                 **tee_kwargs,
             )

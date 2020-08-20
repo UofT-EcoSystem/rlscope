@@ -183,10 +183,10 @@ _run_debug_ddpg_full_training() {
 
 fig_9_simulator_choice_environments() {
   # echo AirLearningEnv
+  # echo PongNoFrameskip-v4
   echo AntBulletEnv-v0
   echo HalfCheetahBulletEnv-v0
   echo HopperBulletEnv-v0
-  echo PongNoFrameskip-v4
   echo Walker2DBulletEnv-v0
 }
 fig_9_simulator_choice_algo() {
@@ -202,6 +202,15 @@ fig_10_algo_choice_algorithms() {
   echo ppo2
   echo sac
 }
+tf_agents_fig_9_simulator_choice_algo() {
+  echo ddpg
+}
+tf_agents_fig_10_algo_choice_algos() {
+  echo ddpg
+  echo sac
+  echo td3
+}
+
 
 run_debug_ppo_full_training_instrumented() {
     _run_debug_ppo_full_training "${INSTRUMENTED_ARGS[@]}" "$@"
@@ -470,11 +479,76 @@ setup_cmakelists_windows() {
     echo "> Success: wrote $path"
 }
 
+all_run_tf_agents() {
+(
+  set -eu
+
+  calibrate=${calibrate:-yes}
+  max_passes=${max_passes:-}
+  repetitions=${repetitions:-5}
+  re_calibrate=${re_calibrate:-no}
+  re_plot=${re_plot:-no}
+  dry_run=${dry_run:-no}
+
+  # Fig 10: Algorithm choice
+  # tf-agents
+  #
+  # ppo doesn't work (BUG in tf-agents)
+  for algo in $(tf_agents_fig_10_algo_choice_algos); do
+    env_id="$(fig_10_algo_choice_environment)"
+    run_tf_agents
+  done
+
+  # Fig 9: Simulator choice
+  # tf-agents
+  #
+  # ppo doesn't work (BUG in tf-agents).  Use ddpg instead.
+  for env_id in $(fig_9_simulator_choice_environments); do
+    algo=$(tf_agents_fig_9_simulator_choice_algo)
+    # env_id="$(fig_10_algo_choice_environment)"
+    run_tf_agents
+  done
+
+  plot_tf_agents_fig_10_algo_choice
+  plot_tf_agents_fig_9_simulator_choice
+
+#  plot_tf_agents
+
+#    for env_id in $(fig_10_algo_choice_environment); do
+#    done
+
+)
+
+}
+
+test_run_expr() {
+(
+  set -eu
+
+  test_dir=$IML_DIR/output/run_expr/debug
+  run_expr_sh=${test_dir}/run_expr.sh
+  n_launches=10
+  mkdir -p $test_dir
+  if [ -e $run_expr_sh ]; then
+    rm $run_expr_sh
+  fi
+  # run_expr_args=(--debug --tee --sh ${run_expr_sh})
+  run_expr_args=(--tee --sh ${run_expr_sh})
+  # py_args=(--fail)
+  py_args=()
+  for i in $(seq ${n_launches}); do
+    iml-run-expr "${run_expr_args[@]}" --append \
+      python $IML_DIR/iml_profiler/scripts/madeup_cmd.py --iml-directory ${test_dir}/process_${i} "${py_args[@]}"
+  done
+  iml-run-expr "${run_expr_args[@]}" --run-sh
+)
+}
+
 run_tf_agents() {
 (
   set -eu
 
-  export CUDA_VISIBLE_DEVICES=0
+#  export CUDA_VISIBLE_DEVICES=0
 
   algo=${algo:-ddpg}
   env_id=${env_id:-Walker2DBulletEnv-v0}
@@ -486,6 +560,7 @@ run_tf_agents() {
   max_passes=${max_passes:-}
   repetitions=${repetitions:-5}
   dry_run=${dry_run:-no}
+#  use_tf_functions=${use_tf_functions:-yes}
 
   local py_script=$TF_AGENTS_DIR/tf_agents/agents/${algo}/examples/v2/train_eval.rlscope.py
   if [ ! -f ${py_script} ]; then
@@ -497,11 +572,29 @@ run_tf_agents() {
   if [ "${calibrate}" = 'yes' ]; then
     args+=(
       --calibrate
+      --parallel-runs
+    )
+  fi
+  if [ "${dry_run}" = 'yes' ]; then
+    args+=(
+      # iml-calibrate option
+      --dry-run
+    )
+  fi
+  if [ "${re_calibrate}" = 'yes' ]; then
+    args+=(
+      --re-calibrate
+    )
+  fi
+  if [ "${re_plot}" = 'yes' ]; then
+    args+=(
+      --re-plot
     )
   fi
   args+=(
     python ${py_script}
-    --iml-delay
+    --env_name "${env_id}"
+    # --iml-delay
   )
   if [ "${max_passes}" != "" ]; then
     args+=(
@@ -513,22 +606,6 @@ run_tf_agents() {
       --iml-repetitions ${repetitions}
     )
   fi
-  if [ "${re_calibrate}" = 'yes' ]; then
-    args+=(
-      --re-calibrate
-    )
-  fi
-  if [ "${re_plot}" = 'yes' ]; then
-    args+=(
-      --iml-re-plot
-    )
-  fi
-  if [ "${dry_run}" = 'yes' ]; then
-    args+=(
-      # iml-calibrate option
-      --iml-dry-run
-    )
-  fi
 
   gin_params=()
   set_gin_params() {
@@ -538,59 +615,167 @@ run_tf_agents() {
     else
      gin_params+=(--gin_param=train_eval.use_tf_functions=False)
     fi
-    gin_params+=("--gin_param=train_eval.env_name=\"${env_id}\"")
+#    gin_params+=("--gin_param=train_eval.env_name=\"${env_id}\"")
   }
-
-  get_iml_root_dir() {
-    local iml_root_dir=$IML_DIR/output/tf_agents/examples/dqn/calibration
-    if [ "${max_passes}" != "" ]; then
-      iml_root_dir="${iml_root_dir}.max_passes_${max_passes}"
-    fi
-    iml_root_dir="${iml_root_dir}$(_bool_attr use_tf_functions $use_tf_functions)"
-    echo "${iml_root_dir}"
-  }
-  iml_root_dir="$(get_iml_root_dir)"
-
 
   use_tf_functions=yes
+  set_gin_params
+  iml_direc="$(tf_agents_iml_direc)"
 
   if [ "${just_plot}" = "no" ]; then
-    iml_direc=${iml_root_dir}/use_tf_functions
-    _do "${args[@]}" --iml-directory ${iml_direc}
-
-    iml_direc=${iml_root_dir}/nouse_tf_functions
-    _do "${args[@]}" --iml-directory ${iml_direc} --nouse_tf_functions
+    for use_tf_functions in yes no; do
+      set_gin_params
+      iml_direc="$(tf_agents_iml_direc)"
+      _do "${args[@]}" "${gin_params[@]}" --iml-directory ${iml_direc}
+    done
   fi
 
+)
+}
+
+_tf_agents_root_direc() {
+  echo $IML_DIR/output/tf_agents/calibration.parallel_runs_yes
+}
+
+tf_agents_plots_direc() {
+(
+  set -eu
+  local iml_plots_direc=$(_tf_agents_root_direc)/plots
+  echo "${iml_plots_direc}"
+)
+}
+
+tf_agents_iml_direc() {
+(
+  set -eu
+  local iml_root_dir=$(_tf_agents_root_direc)/algo_${algo}/env_${env_id}
+  if [ "${max_passes}" != "" ]; then
+    iml_direc="${iml_root_dir}.max_passes_${max_passes}"
+  fi
+#  iml_direc="${iml_root_dir}/$(_bool_attr use_tf_functions $use_tf_functions)"
+  iml_direc="${iml_root_dir}/use_tf_functions_$use_tf_functions"
+  echo "${iml_direc}"
+)
+}
+
+plot_tf_agents_fig_10_algo_choice() {
+(
+  set -eu
+
+  # Fig 10: Algorithm choice
+  # tf-agents
+  #
+  # ppo doesn't work (BUG in tf-agents)
+  iml_dirs=()
+  for algo in $(tf_agents_fig_10_algo_choice_algos); do
+    env_id="$(fig_10_algo_choice_environment)"
+    for use_tf_functions in yes no; do
+      iml_dirs+=($(tf_agents_iml_direc))
+    done
+  done
+
+  _plot_tf_agents \
+    --iml-directories "${iml_dirs[@]}" \
+    --output-directory $(tf_agents_plots_direc)/tf_agents_fig_10_algo_choice \
+    --x-title "RL algorithm configuration" \
+    --xtick-expression "$(_fig_10_algo_choice_xtick_expression)" \
+    --title "RL algorithm choice" \
+    --y2-logscale
+)
+}
+plot_tf_agents_fig_9_simulator_choice() {
+(
+  set -eu
+
+  # Fig 9: Simulator choice
+  # tf-agents
+  #
+  # ppo doesn't work (BUG in tf-agents).  Use ddpg instead.
+  iml_dirs=()
+  for env_id in $(fig_9_simulator_choice_environments); do
+    algo=$(tf_agents_fig_9_simulator_choice_algo)
+    for use_tf_functions in yes no; do
+      iml_dirs+=($(tf_agents_iml_direc))
+    done
+  done
+
+  _plot_tf_agents \
+    --iml-directories "${iml_dirs[@]}" \
+    --output-directory $(tf_agents_plots_direc)/tf_agents_fig_9_simulator_choice \
+    --x-title "Simulator configuration" \
+    --xtick-expression "$(_fig_9_simulator_choice_xtick_expression)" \
+    --title "Simulator choice" \
+    --y2-logscale \
+    --OverlapStackedBarTask-width 12 \
+    --OverlapStackedBarTask-height 5
+)
+}
+plot_tf_agents() {
+(
+  set -eu
+
+  plot_tf_agents_fig_9_simulator_choice
+  plot_tf_agents_fig_10_algo_choice
+)
+}
+
+_fig_9_simulator_choice_xtick_expression() {
+  # --xtick-expression "x_field = regex_match(row['iml_directory'], [[r'use_tf_functions_no', f\"{row['algo_env']}\nWithout autograph\"], [r'use_tf_functions_yes', f\"{row['algo_env']}\nWith autograph\"]])"
+#  cat <<EOF
+#  x_field = regex_match(row['iml_directory'], [
+#      [r'use_tf_functions_no',
+#       f"{row['algo_env']}\nWithout autograph"],
+#      [r'use_tf_functions_yes',
+#       f"{row['algo_env']}\nWith autograph"]
+#  ])
+#EOF
+  cat <<EOF
+x_field = regex_match(row['iml_directory'], [
+    [r'use_tf_functions_no',
+     f"{row['short_env']}\nautograph\nOFF"],
+    [r'use_tf_functions_yes',
+     f"{row['short_env']}\nautograph\nON"]
+])
+EOF
+}
+
+_fig_10_algo_choice_xtick_expression() {
+  cat <<EOF
+x_field = regex_match(row['iml_directory'], [
+    [r'use_tf_functions_no',
+     f"{row['pretty_algo']}\nautograph\nOFF"],
+    [r'use_tf_functions_yes',
+     f"{row['pretty_algo']}\nautograph\nON"]
+])
+EOF
+}
+
+_plot_tf_agents() {
+
   if [ "${calibrate}" = 'yes' ]; then
+    iml_plots_direc=$(tf_agents_plots_direc)
     args=(
       iml-plot
         --iml-repetitions ${repetitions}
-        --iml-directories ${iml_root_dir}/*tf_functions
-        --output-directory ${iml_root_dir}/plots
-  #      --debug-single-thread
-  #      --debug
-  #      --pdb
-        --xtick-expression "x_field = regex_match(row['iml_directory'], [[r'nouse_tf_functions', 'Without autograph'], [r'use_tf_functions', 'With autograph']])"
-#        --rotation 15
-        --x-title "Configuration"
+        # --iml-directories $(_tf_agents_root_direc)/*tf_functions
+        --output-directory ${iml_plots_direc}
+        # --xtick-expression "x_field = regex_match(row['iml_directory'], [[r'use_tf_functions_no', f\"{row['algo_env']}\nWithout autograph\"], [r'use_tf_functions_yes', f\"{row['algo_env']}\nWith autograph\"]])"
+        # --x-title "Configuration"
     )
     if [ "${dry_run}" = 'yes' ]; then
       args+=(
         # iml-calibrate option
-        --iml-dry-run
+        --dry-run
       )
     fi
     # Leave re-calibration to iml-prof.
     if [ "${re_plot}" = 'yes' ] || [ "${re_calibrate}" = 'yes' ]; then
       args+=(
-        --iml-re-plot
+        --re-plot
       )
     fi
-    _do "${args[@]}"
+    _do "${args[@]}" "$@"
   fi
-
-)
 }
 
 test_tf_agents() {
@@ -632,7 +817,7 @@ test_tf_agents() {
   if [ "${dry_run}" = 'yes' ]; then
     args+=(
       # iml-calibrate option
-      --iml-dry-run
+      --dry-run
     )
   fi
 
@@ -661,13 +846,13 @@ test_tf_agents() {
     if [ "${dry_run}" = 'yes' ]; then
       args+=(
         # iml-calibrate option
-        --iml-dry-run
+        --dry-run
       )
     fi
     # Leave re-calibration to iml-prof.
     if [ "${re_plot}" = 'yes' ] || [ "${re_calibrate}" = 'yes' ]; then
       args+=(
-        --iml-re-plot
+        --re-plot
       )
     fi
     _do "${args[@]}"
@@ -753,4 +938,5 @@ else
     echo "  run_stable_baselines"
     exit 1
 fi
+
 

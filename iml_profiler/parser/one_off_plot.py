@@ -1472,25 +1472,27 @@ class GpuUtilExperiment:
             for path in each_file_recursive(rlscope_dir):
                 if not re.search(r'^GPUHwCounterSampler.*\.csv$', _b(path)):
                     continue
-                rlscope_dflt_attrs = {
-                    # 'algo': None,
-                    # 'env': None,
-                }
+                # rlscope_dflt_attrs = {
+                #     # 'algo': None,
+                #     # 'env': None,
+                # }
                 iml_config = IMLConfig(rlscope_dir)
                 algo = iml_config.algo(allow_none=True)
                 env = iml_config.env(allow_none=True)
-                if algo is not None:
-                    rlscope_dflt_attrs['algo'] = algo
-                if env is not None:
-                    rlscope_dflt_attrs['env'] = env
-                sm_attrs = parse_path_attrs(
-                    path,
-                    rlscope_attrs,
-                    rlscope_dflt_attrs)
+                # if algo is not None:
+                #     rlscope_dflt_attrs['algo'] = algo
+                # if env is not None:
+                #     rlscope_dflt_attrs['env'] = env
+                # sm_attrs = parse_path_attrs(
+                #     path,
+                #     rlscope_attrs,
+                #     rlscope_dflt_attrs)
                 df = pd.read_csv(path, comment='#')
-                for attr_name, attr_value in sm_attrs.items():
-                    assert attr_name not in df
-                    df[attr_name] = maybe_number(attr_value)
+                df['algo'] = algo
+                df['env'] = env
+                # for attr_name, attr_value in sm_attrs.items():
+                #     assert attr_name not in df
+                #     df[attr_name] = maybe_number(attr_value)
                 df['iml_directory'] = rlscope_dir
                 dfs.append(df)
         self.rlscope_df = pd.concat(dfs)
@@ -1803,6 +1805,8 @@ class GpuUtilExperiment:
         if self.arg('xtick_expression') is None:
             df['x_field'] = df['algo_env']
             return
+        df['pretty_algo'] = df['algo'].apply(get_x_algo)
+        df['short_env'] = df['env'].apply(get_x_env)
         x_fields = xfields_from_xtick_expression(df, self.arg('xtick_expression'), debug=self.debug)
         df['x_field'] = x_fields
 
@@ -1836,7 +1840,7 @@ class GpuUtilExperiment:
         g.set_ylabels(SM_EFFICIENCY_Y_LABEL)
         x_title = self.arg('x_title', RLSCOPE_X_LABEL)
         g.set_xlabels(x_title)
-        title = SM_EFFICIENCY_TITLE
+        title = self.arg('title', SM_EFFICIENCY_TITLE)
         g.fig.suptitle(title)
         g.fig.subplots_adjust(top=0.90)
         g.fig.axes[0].set_xticklabels(
@@ -1895,7 +1899,7 @@ class GpuUtilExperiment:
         g.set_ylabels(SM_OCCUPANCY_Y_LABEL)
         x_title = self.arg('x_title', RLSCOPE_X_LABEL)
         g.set_xlabels(x_title)
-        title = SM_OCCUPANCY_TITLE
+        title = self.arg('title', SM_OCCUPANCY_TITLE)
         g.fig.suptitle(title)
         g.fig.subplots_adjust(top=0.90)
         g.fig.axes[0].set_xticklabels(

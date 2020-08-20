@@ -3,6 +3,7 @@ import argparse
 import pprint
 from glob import glob
 import subprocess
+import multiprocessing
 import textwrap
 import os
 import sys
@@ -68,6 +69,7 @@ class Calibration:
                  dry_run=False,
                  skip_plot=False,
                  skip_error=False,
+                 max_workers=None,
                  parallel_runs=False,
                  gpus=None,
                  debug=False,
@@ -83,17 +85,15 @@ class Calibration:
         self.dry_run = dry_run
         self.skip_plot = skip_plot
         self.skip_error = skip_error
+        self.max_workers = max_workers
         self.parallel_runs = parallel_runs
         self.gpus = gpus
         self.debug = debug
         self.debug_single_thread = debug_single_thread
         self.pdb = pdb
         self._pool = ForkedProcessPool(name='{klass}.pool'.format(
-            klass=self.__class__.__name__))
-        # 1 min, 2 min, 4 min
-
-    # def out_dir(self):
-    #     return self.directory
+            klass=self.__class__.__name__),
+            max_workers=self.max_workers)
 
     def cupti_scaling_overhead_dir(self, output_directory):
         return _j(
@@ -633,6 +633,7 @@ class Calibration:
         # $ iml-run-expr --run-sh --sh run_expr.sh
         run_expr_sh = self._run_expr_sh(output_directory)
         logger.info(f"Writing configuration shell commands to {run_expr_sh}")
+        os.makedirs(_d(run_expr_sh), exist_ok=True)
         with open(run_expr_sh, 'w') as f:
             for rep, config in self.each_config_repetition():
                 run_cmd = config.run_cmd(rep, cmd, output_directory)
@@ -1107,6 +1108,12 @@ def _main(argv):
                             help=textwrap.dedent("""
                             Debug
                             """))
+        parser.add_argument("--max-workers",
+                            default=multiprocessing.cpu_count(),
+                            help=textwrap.dedent("""
+                            Number of parallel rls-analysis jobs to run at one time.
+                            Default: number of CPU cores.
+                            """))
         parser.add_argument("--debug-single-thread",
                             action='store_true',
                             help=textwrap.dedent("""
@@ -1127,7 +1134,7 @@ def _main(argv):
                             help=textwrap.dedent("""
                             Replace
                             """))
-        parser.add_argument("--iml-dry-run",
+        parser.add_argument("--dry-run",
                             action='store_true',
                             help=textwrap.dedent("""
                             Dry run
@@ -1137,7 +1144,7 @@ def _main(argv):
                             help=textwrap.dedent("""
                             Remove existing profiling overhead calibration files, and recompute them.
                             """))
-        parser.add_argument("--iml-re-plot",
+        parser.add_argument("--re-plot",
                             action='store_true',
                             help=textwrap.dedent("""
                             Remove existing plots and remake them (NOTE: doesn't recompute analysis; see --re-calibrate).
@@ -1199,17 +1206,17 @@ def _main(argv):
 
     args_dict = dict(vars(args))
     repetitions = args_dict.pop('iml_repetitions')
-    dry_run = args_dict.pop('iml_dry_run')
+    # dry_run = args_dict.pop('iml_dry_run')
     # re_calibrate = args_dict.pop('iml_re_calibrate')
-    re_plot = args_dict.pop('iml_re_plot')
-    skip_plot = args_dict.pop('iml_skip_plot')
+    # re_plot = args_dict.pop('iml_re_plot')
+    skip_plot = args_dict.pop('iml_skip_plot', False)
     # parallel_runs = args_dict.pop('iml_parallel_runs')
     # gpus = args_dict.pop('iml_gpus')
     obj = Calibration(
         repetitions=repetitions,
         # re_calibrate=re_calibrate,
-        re_plot=re_plot,
-        dry_run=dry_run,
+        # re_plot=re_plot,
+        # dry_run=dry_run,
         skip_plot=skip_plot,
         # parallel_runs=parallel_runs,
         # gpus=gpus,
