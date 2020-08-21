@@ -10,6 +10,7 @@ import os
 from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, basename as _b
 
 # from iml_profiler.parser.common import *
+from iml_profiler.profiler.util import get_stacktrace
 from iml_profiler.profiler.util import print_cmd
 
 import tempfile

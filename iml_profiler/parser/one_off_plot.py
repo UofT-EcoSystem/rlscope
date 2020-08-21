@@ -1825,12 +1825,16 @@ class GpuUtilExperiment:
         }
         titled_df.rename(columns=col_titles, inplace=True)
 
+        plot_kwargs = dict()
+        self._add_plot_kwargs(plot_kwargs)
+
         sns.set(style="whitegrid")
         def _do_plot(**kwargs):
             g = sns.catplot(x="x_field", y="metric_value", hue=col_titles["range_name"], data=titled_df,
                             kind="bar",
                             palette="muted",
                             **kwargs,
+                            **plot_kwargs,
                             )
             return g
         g = _do_plot()
@@ -1867,6 +1871,11 @@ class GpuUtilExperiment:
         # Make error bar width 25% of bar width.
         return bar_width/4
 
+    def _add_plot_kwargs(self, plot_kwargs):
+        if self.arg('width') is not None and self.arg('height') is not None:
+            plot_kwargs['height'] = self.arg('height')
+            plot_kwargs['aspect'] = self.arg('width')/self.arg('height')
+
     def _plot_rlscope_achieved_occupancy(self):
         if self.rlscope_df is None:
             return
@@ -1882,6 +1891,9 @@ class GpuUtilExperiment:
         }
         titled_df.rename(columns=col_titles, inplace=True)
 
+        plot_kwargs = dict()
+        self._add_plot_kwargs(plot_kwargs)
+
         sns.set(style="whitegrid")
         def _do_plot(**kwargs):
             g = sns.catplot(x="x_field", y="metric_value", hue=col_titles["range_name"], data=titled_df,
@@ -1889,6 +1901,7 @@ class GpuUtilExperiment:
                             palette="muted",
                             # capsize=capsize,
                             **kwargs,
+                            **plot_kwargs,
                             )
             return g
         g = _do_plot()

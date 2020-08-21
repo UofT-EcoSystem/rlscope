@@ -1001,6 +1001,8 @@ class GpuHwPlotTask(IMLTask):
     xtick_expression = param_xtick_expression
     x_title = luigi.Parameter(description="x-axis title", default=None)
     title = luigi.Parameter(description="title", default=None)
+    width = luigi.FloatParameter(description="Width of plot in inches", default=None)
+    height = luigi.FloatParameter(description="Height of plot in inches", default=None)
     rotation = luigi.FloatParameter(description="x-axis title rotation", default=None)
 
     # IGNORED.
@@ -1024,6 +1026,9 @@ class GpuHwPlotTask(IMLTask):
         obj_args['x_title'] = self.x_title
         obj_args['title'] = self.title
         obj_args['debug'] = self.debug
+        obj_args['width'] = self.width
+        logger.debug(f'GpuHwPlotTask.width = {self.width}')
+        obj_args['height'] = self.height
         self.dumper = GpuUtilExperiment(obj_args)
         self.dumper.run()
 

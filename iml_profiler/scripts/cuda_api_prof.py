@@ -105,6 +105,11 @@ def main():
                         help=textwrap.dedent("""
                             Remove existing profiling overhead calibration files, and recompute them.
                             """))
+    parser.add_argument("--re-plot",
+                        action='store_true',
+                        help=textwrap.dedent("""
+                            Remove existing plots and remake them (NOTE: doesn't recompute analysis; see --re-calibrate).
+                            """))
     parser.add_argument("--parallel-runs",
                         action='store_true',
                         help=textwrap.dedent("""

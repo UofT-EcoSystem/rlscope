@@ -1,4 +1,5 @@
 from iml_profiler.profiler.iml_logging import logger
+from iml_profiler.profiler import iml_logging
 import argparse
 import pprint
 from glob import glob
@@ -19,7 +20,7 @@ from iml_profiler.profiler.util import print_cmd
 from iml_profiler.profiler.util import run_with_pdb, pprint_msg
 from iml_profiler.parser.common import *
 from iml_profiler.experiment.util import tee, expr_run_cmd, expr_already_ran
-from iml_profiler.profiler.concurrent import ForkedProcessPool
+from iml_profiler.profiler.concurrent import ForkedProcessPool, ProcessPoolExecutorWrapper
 from iml_profiler.scripts import bench
 from iml_profiler.experiment import expr_config
 from iml_profiler.parser.dataframe import IMLConfig
@@ -62,6 +63,7 @@ SENTINEL = object()
 
 class Calibration:
     def __init__(self,
+                 mode=None,
                  repetitions=1,
                  replace=False,
                  re_calibrate=False,
@@ -71,6 +73,7 @@ class Calibration:
                  skip_error=False,
                  max_workers=None,
                  parallel_runs=False,
+                 plots=None,
                  gpus=None,
                  debug=False,
                  debug_single_thread=False,
@@ -78,6 +81,7 @@ class Calibration:
                  # Ignore extra stuff
                  **kwargs,
                  ):
+        self.mode = mode
         self.repetitions = repetitions
         self.replace = replace
         self.re_calibrate = re_calibrate
@@ -88,12 +92,21 @@ class Calibration:
         self.max_workers = max_workers
         self.parallel_runs = parallel_runs
         self.gpus = gpus
+        self.plots = plots
         self.debug = debug
         self.debug_single_thread = debug_single_thread
         self.pdb = pdb
-        self._pool = ForkedProcessPool(name='{klass}.pool'.format(
+        self._pool = ProcessPoolExecutorWrapper(name='{klass}.pool'.format(
             klass=self.__class__.__name__),
             max_workers=self.max_workers)
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        del state['_pool']
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
 
     def cupti_scaling_overhead_dir(self, output_directory):
         return _j(
@@ -670,9 +683,11 @@ class Calibration:
         else:
             logger.info("--iml-skip-plot: SKIP processing results into plots; run iml-plot to do this later.")
 
-    def _rm_path(self, path):
+    def _rm_path(self, path, opt):
         if _e(path):
-            logger.info("--re-calibrate: RM {path}".format(path=path))
+            logger.info("{opt}: RM {path}".format(
+                path=path,
+                opt=opt))
             if not self.dry_run:
                 if os.path.isdir(path):
                     shutil.rmtree(path)
@@ -680,28 +695,39 @@ class Calibration:
                     os.remove(path)
 
     def clean_plots(self, output_directory):
+        opt = '--re-plot'
 
-        for path in self.time_breakdown_plot_paths(output_directory):
-            self._rm_path(path)
+        def should_clean(consider):
+            return self.mode == 'run' or (
+                self.mode == 'plot' and ( self.plots == 'all' or self.plots == consider )
+            )
 
-        for path in self.gpu_hw_plot_paths(output_directory):
-            self._rm_path(path)
+        if should_clean('time-breakdown'):
+            for path in self.time_breakdown_plot_paths(output_directory):
+                self._rm_path(path, opt)
+
+        if should_clean('gpu-hw'):
+            for path in self.gpu_hw_plot_paths(output_directory):
+                self._rm_path(path, opt)
 
     def clean_analysis(self, output_directory):
+        opt = '--re-calibrate'
+
         for path in self._calibration_paths(output_directory):
-            self._rm_path(path)
+            self._rm_path(path, opt)
         for path in self._calibration_logfiles(output_directory):
-            self._rm_path(path)
+            self._rm_path(path, opt)
 
         # Need to re-run rls-analyze using new calibration files.
         for rep in range(1, self.repetitions+1):
             for config in self.configs:
                 if config.rls_analyze_mode is not None:
                     for path in self.rls_analyze_output_paths(output_directory, config, rep):
-                        self._rm_path(path)
+                        self._rm_path(path, opt)
 
 
     def do_calibration(self, output_directory, sync=True):
+        logger.debug("Calibration...")
         self._pool.submit(
             get_func_name(self, 'compute_cupti_scaling_overhead'),
             self.compute_cupti_scaling_overhead,
@@ -733,7 +759,9 @@ class Calibration:
         for iml_directory in directories:
             self.do_calibration(iml_directory, sync=False)
         self._pool.shutdown()
+
         # rls-analyze needs the JSON calibration files; wait.
+        logger.debug("rls-analyze...")
         for iml_directory in directories:
             for rep in self.each_repetition():
                 for config in self.configs:
@@ -747,20 +775,29 @@ class Calibration:
                         )
         self._pool.shutdown()
         # Plotting requires running rls-analyze
-        self._pool.submit(
-            get_func_name(self, 'compute_time_breakdown_plot'),
-            self.compute_time_breakdown_plot,
-            directories, output_directory, extra_argv,
-            sync=self.debug_single_thread,
-            **kwargs,
-        )
-        self._pool.submit(
-            get_func_name(self, 'compute_gpu_hw_plot'),
-            self.compute_gpu_hw_plot,
-            directories, output_directory, extra_argv,
-            sync=self.debug_single_thread,
-            **kwargs,
-        )
+
+        logger.debug("Plot...")
+        def should_plot(consider):
+            return self.mode == 'run' or (
+                self.mode == 'plot' and ( self.plots == 'all' or self.plots == consider )
+            )
+
+        if should_plot('time-breakdown'):
+            self._pool.submit(
+                get_func_name(self, 'compute_time_breakdown_plot'),
+                self.compute_time_breakdown_plot,
+                directories, output_directory, extra_argv,
+                sync=self.debug_single_thread,
+                **kwargs,
+            )
+        if should_plot('gpu-hw'):
+            self._pool.submit(
+                get_func_name(self, 'compute_gpu_hw_plot'),
+                self.compute_gpu_hw_plot,
+                directories, output_directory, extra_argv,
+                sync=self.debug_single_thread,
+                **kwargs,
+            )
         self._pool.shutdown()
 
     def each_repetition(self):
@@ -943,7 +980,7 @@ class Calibration:
         if self.re_calibrate or self.re_plot:
             self.clean_plots(directory)
 
-    def mode_run(self, cmd, directory):
+    def _mode_run(self, cmd, directory):
         self.init_configs([directory])
 
         self.maybe_clean(directory)
@@ -954,7 +991,23 @@ class Calibration:
             direc=directory,
         ))
 
-    def mode_plot(self, directories, output_directory, extra_argv=None, **kwargs):
+    def mode_run(self, *args, **kwargs):
+        self._with_exception_handler(lambda: self._mode_run(*args, **kwargs))
+
+
+    def mode_plot(self, *args, **kwargs):
+        self._with_exception_handler(lambda: self._mode_plot(*args, **kwargs))
+
+    def _with_exception_handler(self, func):
+        try:
+            func()
+        except Exception as e:
+            # DON'T wait for pool... it may cause more exceptions.
+            self._pool.shutdown(ignore_exceptions=True)
+            raise
+        self._pool.shutdown()
+
+    def _mode_plot(self, directories, output_directory, extra_argv=None, **kwargs):
         self.init_configs(directories)
 
         # Output directory just contains plots; no need to delete analysis files.
@@ -1192,6 +1245,12 @@ def _main(argv):
                             help=textwrap.dedent("""
                         Where to output plots.
                         """))
+    plot_parser.add_argument("--plots",
+                             choices=['gpu-hw', 'time-breakdown', 'all'],
+                             default='all',
+                             help=textwrap.dedent("""
+                        Where to output plots.
+                        """))
     plot_parser.set_defaults(**{'mode': 'plot'})
 
     # parser.add_argument("--mode",
@@ -1203,6 +1262,11 @@ def _main(argv):
 
     args, extra_argv = parser.parse_known_args(argv)
     cmd = extra_argv
+
+    if args.debug:
+        iml_logging.enable_debug_logging()
+    else:
+        iml_logging.disable_debug_logging()
 
     args_dict = dict(vars(args))
     repetitions = args_dict.pop('iml_repetitions')

@@ -505,17 +505,11 @@ all_run_tf_agents() {
   # ppo doesn't work (BUG in tf-agents).  Use ddpg instead.
   for env_id in $(fig_9_simulator_choice_environments); do
     algo=$(tf_agents_fig_9_simulator_choice_algo)
-    # env_id="$(fig_10_algo_choice_environment)"
     run_tf_agents
   done
 
   plot_tf_agents_fig_10_algo_choice
   plot_tf_agents_fig_9_simulator_choice
-
-#  plot_tf_agents
-
-#    for env_id in $(fig_10_algo_choice_environment); do
-#    done
 
 )
 
@@ -680,7 +674,11 @@ plot_tf_agents_fig_10_algo_choice() {
     --x-title "RL algorithm configuration" \
     --xtick-expression "$(_fig_10_algo_choice_xtick_expression)" \
     --title "RL algorithm choice" \
-    --y2-logscale
+    --y2-logscale \
+    --GpuHwPlotTask-width 6 \
+    --GpuHwPlotTask-height 5 \
+
+
 )
 }
 plot_tf_agents_fig_9_simulator_choice() {
@@ -707,7 +705,11 @@ plot_tf_agents_fig_9_simulator_choice() {
     --title "Simulator choice" \
     --y2-logscale \
     --OverlapStackedBarTask-width 12 \
-    --OverlapStackedBarTask-height 5
+    --OverlapStackedBarTask-height 5 \
+    --GpuHwPlotTask-width 9 \
+    --GpuHwPlotTask-height 5 \
+
+
 )
 }
 plot_tf_agents() {
@@ -752,6 +754,8 @@ EOF
 
 _plot_tf_agents() {
 
+  plots=${plots:-}
+
   if [ "${calibrate}" = 'yes' ]; then
     iml_plots_direc=$(tf_agents_plots_direc)
     args=(
@@ -772,6 +776,11 @@ _plot_tf_agents() {
     if [ "${re_plot}" = 'yes' ] || [ "${re_calibrate}" = 'yes' ]; then
       args+=(
         --re-plot
+      )
+    fi
+    if [ "${plots}" != "" ]; then
+      args+=(
+        --plots "${plots}"
       )
     fi
     _do "${args[@]}" "$@"

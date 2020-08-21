@@ -9,6 +9,9 @@ import sys
 import time
 import multiprocessing
 
+from concurrent.futures import ProcessPoolExecutor
+import concurrent.futures
+
 from os.path import join as _j, abspath as _a, exists as _e, dirname as _d, basename as _b
 
 from iml_profiler.profiler.iml_logging import logger
@@ -25,6 +28,58 @@ class FailedProcessException(Exception):
         super().__init__(msg)
         self.proc = proc
         self.exitcode = exitcode
+
+class ProcessPoolExecutorWrapper:
+    def __init__(self, name=None, max_workers=None, debug=False, cpu_affinity=None):
+        self._pool = ProcessPoolExecutor(max_workers=max_workers)
+        self.name = name
+        self.debug = debug
+        self.cpu_affinity = cpu_affinity
+        self.pending_results = []
+
+    def submit(self, name, fn, *args, sync=False, **kwargs):
+        if sync:
+            return fn(*args, **kwargs)
+        self._wait_for_workers()
+        fut = self._pool.submit(fn, *args, **kwargs)
+        self.pending_results.append(fut)
+        return fut
+
+    def _wait_for_workers(self, block=False):
+        if block:
+            done, not_done = concurrent.futures.wait(self.pending_results, return_when=concurrent.futures.ALL_COMPLETED)
+            self.pending_results = list(not_done)
+            for result in done:
+                # Might re-raise exception.
+                result.result()
+                # if isinstance(result, Exception):
+                #     raise result
+            return
+
+        i = 0
+        keep = []
+        while i < len(self.pending_results):
+            if self.pending_results[i].done():
+                # Might re-raise exception.
+                self.pending_results[i].result()
+            else:
+                keep.append(self.pending_results[i])
+            i += 1
+        self.pending_results = keep
+
+    def shutdown(self, ignore_exceptions=False):
+        if ignore_exceptions:
+            self._pool.shutdown(wait=True)
+        else:
+            self._wait_for_workers(block=True)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self._wait_for_workers(block=True)
+        return False
+
 
 class ForkedProcessPool:
     """

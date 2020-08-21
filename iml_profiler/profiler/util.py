@@ -200,24 +200,24 @@ def args_to_cmdline(parser, args,
     return opts
 
 
-def run_with_pdb(args, func):
+def run_with_pdb(args, func, handle_exception=True):
     try:
         return func()
     except Exception as e:
-        if not args.pdb:
+        if not args.pdb and not handle_exception:
             raise
-        logger.debug("> IML: Detected exception:")
-        logger.error("{Klass}: {msg}".format(
-            Klass=type(e).__name__,
-            msg=str(e),
+        logger.error("Saw unhandled exception:\n{exception}".format(
+            exception=textwrap.indent(traceback.format_exc(), prefix='  ').rstrip(),
         ))
-        logger.debug("> Entering pdb:")
-        # Fails sometimes, not sure why.
-        # import ipdb
-        # ipdb.post_mortem()
-        import pdb
-        pdb.post_mortem()
-        raise
+        if args.pdb:
+            logger.debug("> Entering pdb:")
+            # Fails sometimes, not sure why.
+            # import ipdb
+            # ipdb.post_mortem()
+            import pdb
+            pdb.post_mortem()
+            # raise
+        sys.exit(1)
 
 
 def gather_argv(argv, sep='--', ignore_opts=None):
