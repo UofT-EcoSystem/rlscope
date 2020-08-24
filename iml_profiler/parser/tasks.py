@@ -929,7 +929,7 @@ class OverlapStackedBarTask(luigi.Task):
     training_time = luigi.BoolParameter(description="Plot a second y-axis with total training time", parsing=luigi.BoolParameter.EXPLICIT_PARSING)
     extrapolated_training_time = luigi.BoolParameter(description="Extrapolate total training time if full uninstrumented run is not present", parsing=luigi.BoolParameter.EXPLICIT_PARSING)
     detailed = luigi.BoolParameter(description="Provide detailed operation/category breakdown in a single view", parsing=luigi.BoolParameter.EXPLICIT_PARSING)
-    remap_df = luigi.ListParameter(description="Transform df pandas.DataFrame object; useful for remapping regions to new ones", default=None)
+    remap_df = luigi.Parameter(description="Transform df pandas.DataFrame object; useful for remapping regions to new ones", default=None)
     y2_logscale = luigi.BoolParameter(description="Show training time y-axis in logscale", parsing=luigi.BoolParameter.EXPLICIT_PARSING)
     # For some reason, (ppo2, MinitaurBulletEnv-v0) only has:
     # - regions: [('sample_action',)]

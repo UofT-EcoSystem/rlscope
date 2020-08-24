@@ -1948,6 +1948,7 @@ public:
       IF_BAD_STATUS_RETURN(status);
 
       reader.MutableEachCategory([n_events, &events, category] (const auto& cat, auto* cat_events) {
+        DBG_BREAKPOINT("negative event duration");
         if (category != cat) {
           return;
         }
@@ -2244,6 +2245,7 @@ public:
         name = ProtoReader::EventName(events[i]);
       }
       if (end_us < start_us) {
+        DBG_BREAKPOINT("negative event duration");
         DBG_LOG("BUG: skip negative duration Event(name=\"{}\", start_us={}, duration_us={} us)",
                 ProtoReader::EventName(events[i]), start_us, end_us - start_us);
         // Just insert a zero-length event since we've already preallocated space for it

@@ -2415,6 +2415,7 @@ MyStatus NvprofTraceFileReader::EachEvent(const Category& category, EachEventFun
 //      OptionalString name;
 //      name = event_row.name;
       if (end_us < start_us) {
+        DBG_BREAKPOINT("negative event duration");
         DBG_LOG("BUG: skip negative duration Event(name=\"{}\", start_us={}, duration_us={} us)",
                 event_row.name, start_us, end_us - start_us);
         // Just insert a zero-length event since we've already preallocated space for it

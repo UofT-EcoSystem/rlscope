@@ -652,6 +652,74 @@ tf_agents_iml_direc() {
 )
 }
 
+test_plot_simulator() {
+(
+  set -eu
+  _remap_df() {
+  cat <<EOF
+def fix_category_regions(row):
+  if row['operation'] == 'step':
+    category_regions = set(row['category_regions']).difference({
+      CATEGORY_CUDA_API_CPU,
+      CATEGORY_TF_API,
+    })
+    return tuple(sorted(category_regions))
+  return row['category_regions']
+
+new_df['category_regions'] = new_df.apply(fix_category_regions, axis=1)
+EOF
+  }
+_remap_df() {
+  cat <<EOF
+def fix_region(row):
+  region = set(row['region'])
+
+  # "CUDA + TensorFlow" => "CUDA"
+  if {CATEGORY_TF_API, CATEGORY_CUDA_API_CPU}.issubset(region):
+    region.remove(CATEGORY_TF_API)
+
+  # "Python + TensorFlow" => "Python"
+  if {CATEGORY_PYTHON, CATEGORY_TF_API}.issubset(region):
+    region.remove(CATEGORY_TF_API)
+
+  # "CUDA + Simulator" => "Simulator"
+  if {CATEGORY_CUDA_API_CPU, CATEGORY_SIMULATOR_CPP}.issubset(region):
+    region.remove(CATEGORY_CUDA_API_CPU)
+
+  # "CUDA + Python" (CPU or GPU) => "Python"
+  if {CATEGORY_CUDA_API_CPU, CATEGORY_PYTHON}.issubset(region):
+    region.remove(CATEGORY_CUDA_API_CPU)
+
+  return tuple(sorted(region))
+
+def fix_operation(operation):
+  if operation == 'step':
+    return 'Simulation'
+  elif operation == 'collect_data':
+    return 'Inference'
+  elif operation == 'train_step':
+    return 'Backpropagation'
+  else:
+    raise NotImplementedError(f"Not sure what legend label to use for operation={operation}")
+
+new_df['region'] = new_df.apply(fix_region, axis=1)
+new_df['operation'] = new_df['operation'].apply(fix_operation)
+EOF
+  }
+  iml_direc=$IML_DIR/output/tf_agents/debug/simulation/calibrate.tf_py_function/algo_ddpg/env_HalfCheetahBulletEnv-v0
+#  --plots time-breakdown
+  args=(
+    --re-plot
+    --iml-directories ${iml_direc}
+    --output-directory ${iml_direc}/plots
+    --OverlapStackedBarTask-remap-df "$(_remap_df)"
+    "$@"
+  )
+  iml-plot "${args[@]}"
+)
+
+}
+
 plot_tf_agents_fig_10_algo_choice() {
 (
   set -eu

@@ -3,6 +3,8 @@ import contextlib
 import sys
 import multiprocessing
 import multiprocessing.managers
+import inspect
+import functools
 
 from iml_profiler.parser.common import *
 
@@ -72,145 +74,6 @@ def register_record_event_hook(hook : RecordEventHook):
 def unregister_record_event_hook(hook : RecordEventHook):
     RECORD_EVENT_HOOKS.remove(hook)
 
-# class PyprofTrace:
-#     def __init__(self):
-#         self.pyprof = CategoryEventsProto()
-#         self._num_events = 0
-#
-#     def finish(self, process_name, phase):
-#         self.pyprof.process_name = process_name
-#         self.pyprof.phase = phase
-#
-#     def get_step(self):
-#         return self._step
-#     def get_num_events(self):
-#         return self._num_events
-#
-#     def set_step(self, step):
-#         if step is None:
-#             return
-#         self._step = step
-#         if step not in self.pyprof.steps:
-#             if py_config.DEBUG:
-#                 logger.info("> ADD PYPROF STEP: {s}".format(s=self._step))
-#
-#             self.pyprof.steps.extend([step])
-#
-#             if py_config.DEBUG:
-#                 pprint.pprint({
-#                     'len(self.pyprof.steps)':len(self.pyprof.steps),
-#                 }, indent=2)
-#
-#     def dump(self, path, process_name, phase):
-#         self.pyprof.process_name = process_name
-#         self.pyprof.phase = phase
-#
-#         with open(path, 'wb') as f:
-#             # logger.info("> dump pyprof.steps:")
-#             # pprint.pprint({
-#             #     'len(pyprof.steps)':len(self.pyprof.steps),
-#             #     'pyprof.process_name':self.pyprof.process_name,
-#             #     'pyprof.phase':self.pyprof.phase,
-#             # }, indent=2)
-#             f.write(self.pyprof.SerializeToString())
-#
-#     def record_event(self, step, category, name, start_us, end_us,
-#                      start_profiling_overhead_us=None,
-#                      duration_profiling_overhead_us=None,
-#                      attrs=None, python_event=False, debug=False):
-#         assert step is not None
-#
-#         if not _PYROF_TRACE_FULLY_ENABLED:
-#             raise RuntimeError(
-#                 "ERROR: I incorrectly measured this code path.  I THOUGHT that I disabled this... "
-#                 "In reality I didn't, which explains why I had a 56% overhead (instead of 6% call interception). "
-#                 "In reality, I was disabling clib_wrap.record_event(...) which is only used for process events.")
-#
-#         event = proto_util.mk_event(
-#             name=name,
-#             start_us=start_us,
-#             end_us=end_us,
-#             start_profiling_overhead_us=start_profiling_overhead_us,
-#             duration_profiling_overhead_us=duration_profiling_overhead_us,
-#             attrs=attrs)
-#
-#         if debug:
-#             logger.info("Record event: name={name}, category={cat}, duration={ms} ms".format(
-#                 name=name,
-#                 cat=category,
-#                 ms=(end_us - start_us)*1e3,
-#             ))
-#
-#         # NOTE: extend() makes a copy of everything we add, but it's more familiar so who cares.
-#         # https://developers.google.com/protocol-buffers/docs/reference/python-generated#repeated-message-fields
-#         if python_event:
-#             self.pyprof.python_events[step].events.extend([event])
-#         else:
-#             self.pyprof.clibs[step].clibs[category].events.extend([event])
-#
-#         self._num_events += 1
-#
-#         # Call any RecordEvent callbacks
-#         # (e.g. you could register a hook to dump this PyprofTrace
-#         # when the number of events exceeds a threshold)
-#         for hook in RECORD_EVENT_HOOKS:
-#             hook.after_record_event(pyprof_trace=self, event=event)
-#
-#     def record_python_event(self, step, name, start_us, end_us, ignore_disable=False,
-#                             start_profiling_overhead_us=None,
-#                             duration_profiling_overhead_us=None,
-#                             ):
-#         """
-#         Useful for recording the last amount of time in between returning
-#         from a call to q_forward, and finishing benchmarking.
-#         This will include time spent in the tensorflow python API
-#         (i.e. not doing C++ calls, just returning back to the benchmarking script).
-#         """
-#         self.record_event(step, CATEGORY_PYTHON, name, start_us, end_us,
-#                           start_profiling_overhead_us=start_profiling_overhead_us,
-#                           duration_profiling_overhead_us=duration_profiling_overhead_us,
-#                           python_event=True)
-
-# class PyprofDumpManager:
-#     """
-#     NOTE: In the future, we could make pyprof_trace a Proxy object itself to avoid serialization
-#     during DumpManager.put.
-#     """
-#     # def __init__(self):
-#     def __init__(self, manager):
-#         # self._manager = multiprocessing.Manager()
-#         # self.pyprof_traces = self._manager.dict()
-#         # self.lock = self._manager.Lock()
-#
-#         self.pyprof_traces = manager.dict()
-#         self.lock = manager.Lock()
-#
-#     def put(self, key, pyprof_trace):
-#         with self.lock:
-#             self.pyprof_traces[key] = pyprof_trace
-#             # self.pyprof_traces.append(pyprof_trace)
-#
-#     def get(self, key):
-#         with self.lock:
-#             pyprof_trace = self.pyprof_traces[key]
-#             del self.pyprof_traces[key]
-#             # if len(self.pyprof_traces) == 0:
-#             #     return None
-#             # pyprof_trace = self.pyprof_traces.get()
-#         return pyprof_trace
-#
-# class MyManager(multiprocessing.managers.BaseManager):
-#     pass
-# MyManager.register('PyprofTrace', PyprofTrace)
-# if USE_PROXY_PYPROF_TRACE:
-#     _manager = MyManager()
-#     _manager.start()
-#
-# def mk_PyprofTrace():
-#     if USE_PROXY_PYPROF_TRACE:
-#         return _manager.PyprofTrace()
-#     else:
-#         return PyprofTrace()
 
 #
 # Module globals.
@@ -220,7 +83,6 @@ def unregister_record_event_hook(hook : RecordEventHook):
 # _process_name = None
 # _phase = None
 # Q: Should we initialize this to now_us()...?
-_python_start_us = None
 # By default tracing is OFF.
 _TRACING_ON = False
 # print("LOADING clib_wrap: _TRACING_ON = {val}".format(val=_TRACING_ON))
@@ -260,48 +122,8 @@ class _ProfilingOverheadTracker:
         self.end_t = 0
         return start_profiling_overhead_us, duration_profiling_overhead_us
 
-    # def record_overhead(self, event):
-    #     event.profiling_overhead_us = event.profiling_overhead_us + self.get_overhead_us()
-
-
 
 ProfilingOverheadTracker = _ProfilingOverheadTracker()
-
-# def clear_pyprof_profiling():
-#     global _pyprof_trace, _python_start_us, _process_name
-#     _pyprof_trace = mk_PyprofTrace()
-#     _pyprof_trace.set_step(_step)
-#     _python_start_us = now_us()
-# def get_pyprof_trace():
-#     global _pyprof_trace, _process_name, _phase
-#     trace = _pyprof_trace
-#     trace.finish(_process_name, _phase)
-#
-#     clear_pyprof_profiling()
-#     return trace
-
-# def num_events_recorded():
-#     global _pyprof_trace
-#     return _pyprof_trace.get_num_events()
-
-# def should_dump_pyprof():
-#     global _pyprof_trace
-#     return _pyprof_trace.get_num_events() >= PROTO_MAX_PYPROF_PY_EVENTS
-
-# def set_step(step, expect_traced=False, ignore_disable=False):
-#     global _pyprof_trace, _step, _python_start_us, _TRACING_ON
-#     _step = step
-#     _python_start_us = now_us()
-#     if _TRACING_ON or ignore_disable:
-#         _pyprof_trace.set_step(step)
-
-# def set_process_name(process_name):
-#     global _process_name
-#     _process_name = process_name
-
-# def set_phase(phase):
-#     global _phase
-#     _phase = phase
 
 class CFuncWrapper:
     def __init__(self, func, category, prefix=DEFAULT_PREFIX, debug=False):
@@ -363,41 +185,10 @@ class CFuncWrapper:
             name=name)
 
     def __call__(self, *args, **kwargs):
-        global _python_start_us, _TRACING_ON
-
-        start_us = now_us()
-        ret = self.call(*args, **kwargs)
-        end_us = now_us()
-
-        if _TRACING_ON:
-            name = self.func.__name__
-
-            # We are about to call from python into a C++ API.
-            # That means we stopping executing python while C++ runs.
-            # So, we must add a python execution and C++ execution event.
-            #
-            # [ last C++ call ][ python call ][ C++ call ]
-            #                 |               |          |
-            #         _python_start_us     start_us   end_us
-
-            # NOTE: if there's not operation active this will fail... should probably allow for that.
-            sample_cuda_api.record_overhead_event(overhead_type='pyprof_interception', num_events=1)
-
-            sample_cuda_api.record_event(
-                category=CATEGORY_PYTHON,
-                start_us=_python_start_us,
-                duration_us=start_us - _python_start_us,
-                name=name)
-
-            sample_cuda_api.record_event(
-                category=self.category,
-                start_us=start_us,
-                duration_us=end_us - start_us,
-                name=name)
-
-        _python_start_us = end_us
-
-        return ret
+        name = self.func.__name__
+        with CallStack.frame(category=self.category, name=name):
+            ret = self.call(*args, **kwargs)
+            return ret
 
     # def old_pyprof_call(self, *args, **kwargs):
     #     global _pyprof_trace, _python_start_us, _step, _TRACING_ON
@@ -422,26 +213,32 @@ class CFuncWrapper:
     #         # [ last C++ call ][ python call ][ C++ call ]
     #         #                 |               |          |
     #         #         _python_start_us     start_us   end_us
-    #
-    #         # TODO: BUG: sometimes, this results in a negative duration_us.
-    #         # HACK: just filter out these rare events when building SQL database.
-    #         # That must mean _python_start_us has been UPDATED after "start_us = now_us()" was called...
-    #         # The only way this can happen is if self.call(...) triggered an update to _python_start_us.
-    #         # This happens when calling "TF_Output"; possibilities:
-    #         # - TF_Output causes a call to another wrapped function (don't think so, its a SWIG entry)
-    #         # - multiple threads updating _python_start_us (e.g. by calling set_step/clear_pyprof_profiling/calling wrapped functions)
-    #         #   ... unlikely since code tends to use fork() via multiprocessing if at all
-    #
-    #         # python_event = Event(
-    #         #     start_time_us=int(_python_start_us),
-    #         #     duration_us=int(start_us - _python_start_us),
-    #         #     thread_id=tid,
-    #         #     name=name)
-    #         # category_event = Event(
-    #         #     start_time_us=int(start_us),
-    #         #     duration_us=int(end_us - start_us),
-    #         #     thread_id=tid,
-    #         #     name=name)
+    #         #
+    #         # BUG: this FAILS when using tf.py_function.
+    #         # That's because C++ calls BACK into Python, whereas we assumed it's always [ Python -> C++ ]
+    #         # Effectively what happens is (NOTE the "!" lines are the unexpected parts of the execution):
+    #         # Calls Python: collect_driver.run() ->
+    #         # Calls C++: TFE_Py_Execute ->
+    #         #   Intercept clib call: python_start_us_before_call = _python_start_us
+    #         # ! Calls Python: tf.py_function callback into "step" ->
+    #         # !  records Python "Finish benchmark" in iml.prof.operation("step"), updating _python_start_us
+    #         # ! Calls Python: tf.py_function callback into "step" ->
+    #         # ! Calls C++ Simulator: PyBullet.step ->
+    #         # ! Return from C++ Simulator: PyBullet.step ->
+    #         # !  Intercept clib return: _python_start_us = now_us()
+    #         # ! Return from Python: tf.py_function callback into "step" ->
+    #         # Return from C++: TFE_Py_Execute ->
+    #         #   assertion failure: _python_start_us != python_start_us_before_call
+    #         #   Intercept clib return: _python_start_us = now_us()
+    #         # Return from Python: collect_driver.run() ->
+    #         #
+    #         # Q: What events do we WANT to record in this scenario?
+    #         # [ Python: before collect_driver.run() ]
+    #         # [ C++: TFE_Py_Execute before step() callback ]
+    #         # [ Python: start step() callback ]
+    #         # [ C++: Simulator ]
+    #         # [ Python: end step() callback ]
+    #         # [ C++: TFE_Py_Execute after step() callback ]
     #
     #         # NOTE: record python-side pyprof-related profiling overhead.
     #         # Profiling overhead being generated now will be recorded by the NEXT python event gets recorded;
@@ -473,19 +270,6 @@ class CFuncWrapper:
     def __getattr__(self, name):
         return getattr(self.func, name)
 
-# def record_event(category, name, start_us, end_us, attrs=None, python_event=False, ignore_disable=False):
-#     global _pyprof_trace
-#
-#     if not _PYROF_TRACE_FULLY_ENABLED:
-#         # Expectation: by skipping recording events we should have minimal performance impact
-#         # ( just the %6 for lib-wrapping ).
-#         return
-#
-#     if _TRACING_ON or ignore_disable:
-#         _pyprof_trace.record_event(
-#             _pyprof_trace.get_step(), category, name, start_us, end_us,
-#             attrs=attrs, python_event=python_event)
-
 def record_python_event(name, end_us, ignore_disable=False):
     """
     Useful for recording the last amount of time in between returning
@@ -493,51 +277,26 @@ def record_python_event(name, end_us, ignore_disable=False):
     This will include time spent in the tensorflow python API
     (i.e. not doing C++ calls, just returning back to the benchmarking script).
     """
-    global _python_start_us
-    # if _TRACING_ON or ignore_disable:
-    # record_event(CATEGORY_PYTHON, name, _python_start_us, end_us,
-    #              python_event=True,
-    #              ignore_disable=ignore_disable)
-    duration_us = end_us - _python_start_us
-    sample_cuda_api.record_event(
-        category=CATEGORY_PYTHON,
-        start_us=_python_start_us,
-        duration_us=duration_us,
+
+    # Record an event for the current active frame, but we don't want to pop it
+    # (it's still active).  We want to specify the name of the event, and adjust the start_us
+    # marker of the active frame.
+    CallStack._record_event(
+        end_us=end_us,
         name=name,
     )
-    _python_start_us = now_us()
-
-# def record_operation(start_us, end_us,
-#                      # attrs
-#                      op_name,
-#                      ignore_disable=False):
-#     """
-#     Useful for recording the last amount of time in between returning
-#     from a call to q_forward, and finishing benchmarking.
-#     This will include time spent in the tensorflow python API
-#     (i.e. not doing C++ calls, just returning back to the benchmarking script).
-#     """
-#     if _TRACING_ON or ignore_disable:
-#         record_event(CATEGORY_OPERATION, op_name, start_us, end_us,
-#                      attrs={
-#                          'op_name': op_name,
-#                      },
-#                      python_event=False,
-#                      ignore_disable=ignore_disable)
-
-# def is_recording():
-#     global _TRACING_ON
-#     return _TRACING_ON
-
-# def should_record(step):
-#     global _TRACING_ON
-#     return _TRACING_ON
 
 def enable_tracing():
     global _TRACING_ON
     _TRACING_ON = True
-    global _python_start_us
-    _python_start_us = now_us()
+    # global _python_start_us
+    # _python_start_us = now_us()
+    start_us = now_us()
+    # if py_config.DEBUG and py_config.DEBUG_RLSCOPE_LIB_CALLS:
+    if py_config.DEBUG:
+        logger.debug(f"iml.enable_tracing(): python_start_us.new = {start_us}")
+    # NOTE: name=None => name of python events inherit the name of the c-library call they are making.
+    CallStack._entry_point(category=CATEGORY_PYTHON, name=None, start_us=start_us)
 
 def disable_tracing():
     global _TRACING_ON
@@ -546,22 +305,7 @@ def disable_tracing():
         logger.info("Disable pyprof tracing: _TRACING_ON={val}\n{stack}".format(
             val=_TRACING_ON,
             stack=get_stacktrace()))
-
-# def disable_pyprof_trace():
-#     global _PYROF_TRACE_FULLY_ENABLED
-#     _PYROF_TRACE_FULLY_ENABLED = False
-#     # if py_config.DEBUG:
-#     logger.info("Disable pyprof tracing (--iml-disable-pyprof-trace): _PYROF_TRACE_FULLY_ENABLED={val}\n{stack}".format(
-#         val=_PYROF_TRACE_FULLY_ENABLED,
-#         stack=get_stacktrace()))
-
-# def enable_pyprof_trace():
-#     global _PYROF_TRACE_FULLY_ENABLED
-#     _PYROF_TRACE_FULLY_ENABLED = True
-#     # if py_config.DEBUG:
-#     logger.info("Enable pyprof tracing (--iml-disable-pyprof-trace): _PYROF_TRACE_FULLY_ENABLED={val}\n{stack}".format(
-#         val=_PYROF_TRACE_FULLY_ENABLED,
-#         stack=get_stacktrace()))
+    CallStack._exit_point()
 
 #
 # Some pre-written C++ library wrappers.
@@ -626,6 +370,14 @@ def register_detected_libs():
     except ImportError:
         if py_config.DEBUG_WRAP_CLIB:
             logger.debug("TensorFlow is NOT installed")
+
+    try:
+        import pybullet
+        register_wrap_module(wrap_pybullet, unwrap_pybullet)
+    except ImportError:
+        if py_config.DEBUG_WRAP_CLIB:
+            logger.debug("PyBullet is NOT installed")
+
 
 def wrap_tensorflow_v1(category=CATEGORY_TF_API, debug=False):
     logger.info("> IML: Wrapping module=tensorflow call with category={category} annotations".format(
@@ -787,3 +539,209 @@ def unwrap_entire_module(import_libname):
             mod=import_libname))
     lib_wrapper = sys.modules[import_libname]
     sys.modules[import_libname] = lib_wrapper.lib
+
+#
+# Wrap PyBullet.
+#
+
+pybullet = None
+try:
+    import pybullet
+    import pybullet_envs.bullet.bullet_client
+    import pybullet_envs.minitaur.envs.bullet_client
+    import pybullet_utils.bullet_client
+except ImportError as e:
+    logger.warning("IML: Failed to import PyBullet ({error}), skip wrapping library".format(
+        error=str(e)))
+    pass
+
+def wrap_pybullet():
+
+    # iml.wrap_entire_module(
+    #     'pybullet',
+    #     category=CATEGORY_SIMULATOR_CPP,
+    #     debug=True)
+    # _wrap_bullet_clients()
+
+    def should_wrap(name, func):
+        return inspect.isbuiltin(func)
+    wrap_module(
+        pybullet, category=CATEGORY_SIMULATOR_CPP,
+        should_wrap=should_wrap,
+        # debug=True,
+    )
+    _wrap_bullet_clients()
+
+def unwrap_pybullet():
+
+    # _unwrap_bullet_clients()
+    # iml.unwrap_entire_module('pybullet')
+
+    _unwrap_bullet_clients()
+    unwrap_module(pybullet)
+
+#
+# IML: pybullet specific work-around!
+#
+# pybullet python library does some weird dynamic stuff when accessing shared-library functions.
+# Basically BulletClient class is checking whether a function that's getting fetched is a built-in.
+# If it is, then an extra physicsClientId argument is being given to it.
+# So, when we manually wrap this library, the inspect.isbuiltin check will FAIL, and physicsClientId WON'T get supplied!
+# So, to work around this, we must also wrap the BulletClient class, and forward physicsClientId.
+
+OldBulletClients = dict()
+# pybullet has 3 different implementations of the BulletClient class that essentially look the same.
+def _wrap_bullet_clients():
+    OldBulletClients['pybullet_envs.bullet.bullet_client.BulletClient'] = pybullet_envs.bullet.bullet_client.BulletClient
+    OldBulletClients['pybullet_envs.minitaur.envs.bullet_client.BulletClient'] = pybullet_envs.minitaur.envs.bullet_client.BulletClient
+    OldBulletClients['pybullet_utils.bullet_client.BulletClient'] = pybullet_utils.bullet_client.BulletClient
+    pybullet_envs.bullet.bullet_client.BulletClient = MyBulletClient
+    pybullet_envs.minitaur.envs.bullet_client.BulletClient = MyBulletClient
+    pybullet_utils.bullet_client.BulletClient = MyBulletClient
+def _unwrap_bullet_clients():
+    pybullet_envs.bullet.bullet_client.BulletClient = OldBulletClients['pybullet_envs.bullet.bullet_client.BulletClient']
+    pybullet_envs.minitaur.envs.bullet_client.BulletClient = OldBulletClients['pybullet_envs.minitaur.envs.bullet_client.BulletClient']
+    pybullet_utils.bullet_client.BulletClient = OldBulletClients['pybullet_utils.bullet_client.BulletClient']
+
+class MyBulletClient(object):
+    """A wrapper for pybullet to manage different clients."""
+
+    def __init__(self, connection_mode=pybullet.DIRECT, options=""):
+        """Create a simulation and connect to it."""
+        self._client = pybullet.connect(pybullet.SHARED_MEMORY)
+        if (self._client < 0):
+            # print("options=", options)
+            self._client = pybullet.connect(connection_mode, options=options)
+        self._shapes = {}
+
+    def __del__(self):
+        """Clean up connection if not already done."""
+        try:
+            pybullet.disconnect(physicsClientId=self._client)
+        except pybullet.error:
+            pass
+
+    def __getattr__(self, name):
+        """Inject the client id into Bullet functions."""
+        attribute = getattr(pybullet, name)
+        if (
+            inspect.isbuiltin(attribute) or
+            ( isinstance(attribute, CFuncWrapper) and inspect.isbuiltin(attribute.func) )
+        ) and name not in [
+            "invertTransform",
+            "multiplyTransforms",
+            "getMatrixFromQuaternion",
+            "getEulerFromQuaternion",
+            "computeViewMatrixFromYawPitchRoll",
+            "computeProjectionMatrixFOV",
+            "getQuaternionFromEuler",
+        ]:  # A temporary hack for now.
+            attribute = functools.partial(attribute, physicsClientId=self._client)
+        return attribute
+
+
+class CallFrame:
+    def __init__(self, category, name, start_us):
+        self.name = name
+        self.category = category
+        self.start_us = start_us
+
+class CallStackEntry:
+    def __init__(self, category, name, start_us=None):
+        self.category = category
+        self.name = name
+        self.start_us = start_us
+
+    def __enter__(self):
+        CallStack._entry_point(category=self.category, name=self.name, start_us=self.start_us)
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        CallStack._exit_point()
+
+
+class _CallStack:
+    """
+    Track Python -> C -> Python -> ... language transitions.
+
+    We maintain a "callstack" of (Category=[Python | C], start_us) entry point stack.
+    When we enter Python->C (Simulator, tensorflow API call), we push to it.
+    When we enter C->Python (tf.numpy_function) we push to it.
+    When we return Python->C we pop from it.
+    Events are recorded during both entry and exit.
+
+    Usage:
+
+    with CallStack.frame(category=CATEGORY_SIMULATOR, name="step"):
+        ...call native library...
+    """
+    def __init__(self):
+        self.frames = []
+
+    def frame(self, category, name, start_us=None):
+        return CallStackEntry(category, name, start_us=start_us)
+
+    def _entry_point(self, category, name, start_us=None):
+        if start_us is None:
+            start_us = now_us()
+        if len(self) > 0:
+            last_frame = self.frames[-1]
+            if last_frame.name is None:
+                record_name = name
+            else:
+                record_name = last_frame.name
+            if _TRACING_ON:
+                sample_cuda_api.record_event(
+                    category=last_frame.category,
+                    start_us=last_frame.start_us,
+                    duration_us=start_us - last_frame.start_us,
+                    name=record_name)
+
+        self.frames.append(CallFrame(category, name, start_us))
+
+    def _exit_point(self):
+        # NOTE: This shouldn't fail; if it does its a BUG (exit-point without an entry-point).
+        assert len(self.frames) > 0
+        last_frame = self.frames.pop()
+        start_us = now_us()
+        if _TRACING_ON:
+            sample_cuda_api.record_event(
+                category=last_frame.category,
+                start_us=last_frame.start_us,
+                duration_us=start_us - last_frame.start_us,
+                name=last_frame.name)
+        if len(self.frames) > 0:
+            self.frames[-1].start_us = start_us
+
+    def _record_event(self, end_us, name=None):
+        """
+        Record an event for the currently active frame, and advance the start_us of the active (last) frame.
+        :param end_us:
+            End time of event to record.
+            end_us must be >= start_us of current active frame.
+        :param name:
+            Name of event to record if active frame is un-named.
+        :return:
+        """
+        assert len(self.frames) > 0
+        last_frame = self.frames[-1]
+        assert last_frame.start_us <= end_us
+        if last_frame.name is None:
+            record_name = name
+        else:
+            record_name = last_frame.name
+        sample_cuda_api.record_event(
+            category=last_frame.category,
+            start_us=last_frame.start_us,
+            duration_us=end_us - last_frame.start_us,
+            name=record_name,
+        )
+
+    def __index__(self, idx):
+        return self.frames[idx]
+
+    def __len__(self):
+        return len(self.frames)
+
+CallStack = _CallStack()
+

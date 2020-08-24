@@ -182,6 +182,13 @@ def record_event(
     if py_config.DEBUG and py_config.DEBUG_RLSCOPE_LIB_CALLS:
         logger.info(_log_api_call_msg('record_event',
                                        category, start_us, duration_us, name))
+    if py_config.DEBUG and duration_us < 0:
+        logger.debug("BUG: recorded event with negative duration: Event(category={category}, name={name}, start_us={start_us}, dur_us={duration_us})".format(
+            category=category,
+            start_us=start_us,
+            duration_us=duration_us,
+            name=name,
+        ))
     ret = _so.record_event(
         _as_c_string(category),
         c_int64(int(start_us)),

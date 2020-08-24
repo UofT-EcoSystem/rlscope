@@ -2,6 +2,7 @@ from iml_profiler.profiler.iml_logging import logger
 import argparse
 import textwrap
 import sys
+import csv
 
 # from tensorflow.core.profiler.tfprof_log_pb2 import ProfileProto
 from iml_profiler.protobuf.pyprof_pb2 import CategoryEventsProto, ProcessMetadata, IncrementalTrainingProgress
@@ -16,14 +17,47 @@ from iml_profiler.protobuf.unit_test_pb2 import \
 
 from iml_profiler.parser.common import *
 
-def dump_proto_txt(path, ProtoKlass, stream):
-    logger.info("> DUMP: {name} @ {path}".format(
+def dump_proto_txt(proto, stream):
+    print(proto, file=stream)
+
+def load_proto(path, ProtoKlass):
+    logger.info("> LOAD: {name} @ {path}".format(
         name=ProtoKlass.__name__,
         path=path))
     with open(path, 'rb') as f:
         proto = ProtoKlass()
         proto.ParseFromString(f.read())
-    print(proto, file=stream)
+    return proto
+    # print(proto, file=stream)
+
+def each_row(proto):
+    if type(proto) == CategoryEventsProto:
+        row = dict()
+        row["process_name"] = proto.process_name
+        row["phase"] = proto.phase
+        row["machine_name"] = proto.machine_name
+        for category_name, event_list in proto.category_events.items():
+            row["category_name"] = category_name
+            for event in event_list.events:
+                row["thread_id"] = event.thread_id
+                row["start_time_us"] = event.start_time_us
+                row["duration_us"] = event.duration_us
+                row["name"] = event.name
+                yield dict(row)
+    else:
+        raise NotImplementedError("Not sure how to output {klass} protobuf as csv.".format(
+            klass=type(proto).__name__))
+
+def dump_csv(proto, stream):
+    header = None
+    writer = None
+    for row in each_row(proto):
+        if header is None:
+            header = sorted(row.keys())
+            # writer = csv.writer(stream)
+            writer = csv.DictWriter(stream, fieldnames=header)
+            writer.writeheader()
+        writer.writerow(row)
 
 from iml_profiler.profiler.iml_logging import logger
 def main():
@@ -33,30 +67,42 @@ def main():
                         help=textwrap.dedent("""
                         Protofile.
                         """))
+    parser.add_argument("--csv",
+                        action='store_true',
+                        help=textwrap.dedent("""
+                        Output CSV (if supported).
+                        """))
     args = parser.parse_args()
 
+    def do_dump(path, ProtoKlass):
+        proto = load_proto(path, ProtoKlass)
+        if args.csv:
+            dump_csv(proto, sys.stdout)
+        else:
+            dump_proto_txt(proto, sys.stdout)
+
     if is_tfprof_file(args.proto):
-        dump_proto_txt(args.proto, ProfileProto, sys.stdout)
+        do_dump(args.proto, ProfileProto)
     elif is_pyprof_file(args.proto) or is_dump_event_file(args.proto):
-        dump_proto_txt(args.proto, CategoryEventsProto, sys.stdout)
+        do_dump(args.proto, CategoryEventsProto)
     elif is_unit_test_once_file(args.proto):
-        dump_proto_txt(args.proto, IMLUnitTestOnce, sys.stdout)
+        do_dump(args.proto, IMLUnitTestOnce)
     elif is_unit_test_multiple_file(args.proto):
-        dump_proto_txt(args.proto, IMLUnitTestMultiple, sys.stdout)
+        do_dump(args.proto, IMLUnitTestMultiple)
     elif is_machine_util_file(args.proto):
-        dump_proto_txt(args.proto, MachineUtilization, sys.stdout)
+        do_dump(args.proto, MachineUtilization)
     elif is_process_metadata_file(args.proto):
-        dump_proto_txt(args.proto, ProcessMetadata, sys.stdout)
+        do_dump(args.proto, ProcessMetadata)
     elif is_training_progress_file(args.proto):
-        dump_proto_txt(args.proto, IncrementalTrainingProgress, sys.stdout)
+        do_dump(args.proto, IncrementalTrainingProgress)
     elif is_cuda_api_stats_file(args.proto) or is_fuzz_cuda_api_stats_file(args.proto):
-        dump_proto_txt(args.proto, CUDAAPIPhaseStatsProto, sys.stdout)
+        do_dump(args.proto, CUDAAPIPhaseStatsProto)
     elif is_cuda_device_events_file(args.proto):
-        dump_proto_txt(args.proto, MachineDevsEventsProto, sys.stdout)
+        do_dump(args.proto, MachineDevsEventsProto)
     elif is_op_stack_file(args.proto):
-        dump_proto_txt(args.proto, OpStackProto, sys.stdout)
+        do_dump(args.proto, OpStackProto)
     elif is_gpu_hw_file(args.proto):
-        dump_proto_txt(args.proto, GPUHwCounterSampleProto, sys.stdout)
+        do_dump(args.proto, GPUHwCounterSampleProto)
     elif is_pyprof_call_times_file(args.proto):
         call_times_data = read_pyprof_call_times_file(args.proto)
         pprint.pprint(call_times_data)

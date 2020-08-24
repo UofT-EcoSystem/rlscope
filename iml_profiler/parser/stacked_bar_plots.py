@@ -613,6 +613,17 @@ class OverlapStackedBarPlot:
             yield (algo, env), self._regions(df), path, df
 
     def new_each_df(self):
+
+        def _add_region_fields(df):
+            # Keeps regions so we can "reduce"
+            df['resource_overlap_regions'] = df['resource_overlap'].apply(tuple)
+            df['region'] = df['region'].apply(tuple)
+
+        def _add_region_plot_fields(df):
+            df['category_regions'] = df['region']
+            df['resource_overlap'] = df['resource_overlap'].apply(join_plus)
+            df['category'] = df['region'].apply(join_plus)
+
         for (algo, env), vd in self.each_vd():
             path = vd.path
             md = vd.metadata()
@@ -623,14 +634,7 @@ class OverlapStackedBarPlot:
             if len(df['operation']) > 0 and type(df['operation'][0]) != str:
                 df['operation'] = df['operation'].apply(join_plus)
 
-            # Keeps regions so we can "reduce"
-            # df['resource_overlap_regions'] = df['resource_overlap']
-            df['resource_overlap_regions'] = df['resource_overlap'].apply(tuple)
-            df['region'] = df['region'].apply(tuple)
-            df['category_regions'] = df['region']
-
-            df['resource_overlap'] = df['resource_overlap'].apply(join_plus)
-            df['category'] = df['region'].apply(join_plus)
+            _add_region_fields(df)
             df['time_sec'] = df['size'] / MICROSECONDS_IN_SECOND
             # stacked_dict = vd.stacked_bar_dict()
             # md = vd.metadata()
@@ -704,6 +708,9 @@ class OverlapStackedBarPlot:
 
             df = self._new_HACK_remove_process_operation_df(df)
             df = self._new_remap_df(df, algo, env)
+            # Re-add region fields, since remap_df may have changed them.
+            _add_region_fields(df)
+            _add_region_plot_fields(df)
 
             yield (algo, env), self._regions(df), path, df
 
@@ -798,13 +805,13 @@ class OverlapStackedBarPlot:
         # algo
         # env
 
-        for df_transformation in self.remap_df:
-            # e.g.
-            # new_df[('other',)] = df[('compute_advantage_estimates',)] +
-            #                      df[('optimize_surrogate',)]
-            if self.debug:
-                logger.info("--remap-df:\n{trans}".format(trans=textwrap.indent(df_transformation, prefix='  ')))
-            exec(df_transformation)
+        df_transformation = self.remap_df
+        # e.g.
+        # new_df[('other',)] = df[('compute_advantage_estimates',)] +
+        #                      df[('optimize_surrogate',)]
+        if self.debug:
+            logger.info("--remap-df:\n{trans}".format(trans=textwrap.indent(df_transformation, prefix='  ')))
+        exec(df_transformation)
         # Make sure they didn't modify df; they SHOULD be modifying new_df
         # (i.e. adding regions to a "fresh" slate)
         # assert np.all(df == orig_df)
@@ -851,13 +858,13 @@ class OverlapStackedBarPlot:
         # algo
         # env
 
-        for df_transformation in self.remap_df:
-            # e.g.
-            # new_df[('other',)] = df[('compute_advantage_estimates',)] +
-            #                      df[('optimize_surrogate',)]
-            if self.debug:
-                logger.info("--remap-df:\n{trans}".format(trans=textwrap.indent(df_transformation, prefix='  ')))
-            exec(df_transformation)
+        df_transformation = self.remap_df
+        # e.g.
+        # new_df[('other',)] = df[('compute_advantage_estimates',)] +
+        #                      df[('optimize_surrogate',)]
+        if self.debug:
+            logger.info("--remap-df:\n{trans}".format(trans=textwrap.indent(df_transformation, prefix='  ')))
+        exec(df_transformation)
 
         # Make sure they didn't modify df; they SHOULD be modifying new_df
         # (i.e. adding regions to a "fresh" slate)

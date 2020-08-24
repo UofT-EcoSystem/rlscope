@@ -594,7 +594,7 @@ class ExperimentGroup(Experiment):
                 '--overlap-type', overlap_type,
 
                 # '--resource-overlap', json.dumps(['CPU']),
-                # '--remap-df', json.dumps([textwrap.dedent("""
+                # '--remap-df', textwrap.dedent("""
                 #         # Replace ppo2 operations with simple (Inference, Simulation, Backpropagation) labels
                 #         # established in Background discussion of typical RL workloads.
                 #         # Sanity check to make sure we don't forget any operations.
@@ -608,14 +608,14 @@ class ExperimentGroup(Experiment):
                 #         new_df[('Simulation',)] = df[('step',)]
                 #         new_df[('Inference',)] = df[('sample_action',)]
                 #         new_df[('Backpropagation',)] = df[('compute_advantage_estimates',)] + df[('optimize_surrogate',)] + df[('training_loop',)]
-                #         """)]),
+                #         """),
                 # '--training-time',
                 # # '--extrapolated-training-time',
 
                 '--y-lim-scale-factor', 1.10,
                 '--detailed',
                 '--rotation', 15,
-                '--remap-df', json.dumps([textwrap.dedent("""
+                '--remap-df', textwrap.dedent("""
                         # Replace ppo2 operations with simple (Inference, Simulation, Backpropagation) labels
                         # established in Background discussion of typical RL workloads.
                         def ppo_pretty_operation(op_name):
@@ -629,7 +629,7 @@ class ExperimentGroup(Experiment):
                                 raise NotImplementedError("Not sure what pretty-name to use for op_name={op_name}".format(
                                     op_name=op_name))
                         new_df['operation'] = new_df['operation'].apply(ppo_pretty_operation)
-                        """)]),
+                        """),
 
                 '--y-type', 'percent',
                 '--x-type', 'env-comparison',
@@ -663,7 +663,7 @@ class ExperimentGroup(Experiment):
             self.stacked_plot([
                 '--detailed',
                 '--overlap-type', overlap_type,
-                '--remap-df', json.dumps([textwrap.dedent("""\
+                '--remap-df', textwrap.dedent("""\
                     # Replace operations with simple (Inference, Simulation, Backpropagation) labels
                     # established in Background discussion of typical RL workloads.
                     def dqn_pretty_operation(op_name):
@@ -677,7 +677,7 @@ class ExperimentGroup(Experiment):
                             raise NotImplementedError("Not sure what pretty-name to use for op_name={op_name}".format(
                                 op_name=op_name))
                     new_df['operation'] = new_df['operation'].apply(dqn_pretty_operation)
-                        """)]),
+                        """),
                 '--y-type', 'percent',
                 '--x-type', 'rl-comparison',
                 # '--training-time',
@@ -720,7 +720,7 @@ class ExperimentGroup(Experiment):
                     '--overlap-type', overlap_type,
 
                     '--detailed',
-                    '--remap-df', json.dumps([textwrap.dedent("""
+                    '--remap-df', textwrap.dedent("""
                     def pretty_operation(algo, op_name):
                         if algo == 'ppo2':
                             if op_name in {'compute_advantage_estimates', 'optimize_surrogate', 'training_loop'}:
@@ -754,11 +754,11 @@ class ExperimentGroup(Experiment):
                             algo=algo,
                             op_name=op_name))
                     new_df['operation'] = np.vectorize(pretty_operation, otypes=[str])(new_df['algo'], new_df['operation'])
-                        """)]),
+                        """),
 
                     # '--resource-overlap', json.dumps(['CPU']),
                     # '--training-time',
-                    # '--remap-df', json.dumps([textwrap.dedent("""
+                    # '--remap-df', textwrap.dedent("""
                     #     # Categorize ALL RL algorithms into simplified categories:
                     #     #   Inference, Simulation, Backpropgation
                     #     import pprint
@@ -826,7 +826,7 @@ class ExperimentGroup(Experiment):
                     #         new_df[('Backpropagation',)] = df[('training_loop',)] + df[('update_actor_and_critic',)] + df[('update_target_network',)]
                     #     else:
                     #         raise NotImplementedError("Not sure how to remap operation labels {labels} into simplified labels=[Inference, Simulation, Backpropgation] for algo={algo}".format(labels=regions, algo=algo))
-                    #     """)]),
+                    #     """),
 
                     '--y-type', 'percent',
                     '--x-type', 'algo-comparison',
@@ -909,7 +909,7 @@ class ExperimentGroup(Experiment):
             #         '--operation', gpu_operation,
             #         # '--selectors', gpu_operation,
             #         '--training-time',
-            #         '--remap-df', json.dumps([textwrap.dedent("""
+            #         '--remap-df', textwrap.dedent("""
             #             keep_regions = [
             #                 ('Python',),
             #                 ('Framework API C',),
@@ -917,10 +917,10 @@ class ExperimentGroup(Experiment):
             #             for r in keep_regions:
             #                 new_df[r] = df[r]
             #             new_df[('CUDA API CPU',)] = df[('CUDA API CPU', 'Framework API C',)]
-            #         """)]),
+            #         """),
             #
             #
-            #         # '--remap-df', json.dumps([textwrap.dedent("""
+            #         # '--remap-df', textwrap.dedent("""
             #         # # Inference:
             #         # #   - operations we would use when deploying the trained model in production
             #         # # TODO:
@@ -933,7 +933,7 @@ class ExperimentGroup(Experiment):
             #         # import ipdb; ipdb.set_trace()
             #         # new_df[('inference',)] = np.sum(df[inference_ops])
             #         # new_df[('other',)] = np.sum(df[other_ops])
-            #         # """)]),
+            #         # """),
             #
             #         '--y-type', 'percent',
             #     ] + rl_workload_dims + common_dims, suffix=plot_log(expr, overlap_type, gpu_operation), algo_env_pairs=algo_env_pairs)

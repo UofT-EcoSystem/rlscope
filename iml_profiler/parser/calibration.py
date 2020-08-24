@@ -634,7 +634,6 @@ class Calibration:
                 yield rep, config
 
     def run_configs(self, cmd, output_directory):
-        # import pdb; pdb.set_trace()
         if not self.parallel_runs:
             # Run configurations serially on which GPU(s) are visible.
             for rep, config in self.each_config_repetition():

@@ -14,6 +14,10 @@ from iml_profiler import py_config
 
 from iml_profiler.profiler.iml_logging import logger
 
+from iml_profiler.profiler import clib_wrap
+
+from iml_profiler.parser.common import CATEGORY_PYTHON
+
 """
 Wrap tf.Session / tf.InteractiveSession.
 """
@@ -23,6 +27,7 @@ def setup():
     assert not SETUP_DONE
 
     setup_wrap_BaseSession()
+    setup_wrap_tf_py_function()
 
     # setup_wrap_Session()
     # setup_wrap_InteractiveSession()
@@ -43,6 +48,30 @@ def setup_wrap_BaseSession():
     BaseSession.__init__ = _wrapped_BaseSession_init
     BaseSession.close = _wrapped_BaseSession_close
     BaseSession.run = _wrapped_BaseSession_run
+
+orig_tf_py_function = None
+orig_tf_numpy_function = None
+def setup_wrap_tf_py_function():
+    global orig_tf_py_function
+    global orig_tf_numpy_function
+
+    orig_tf_py_function = tf.py_function
+    orig_tf_numpy_function = tf.numpy_function
+
+    tf.py_function = tf_py_function
+    tf.numpy_function = tf_numpy_function
+
+def tf_py_function(func, inp, Tout, name=None):
+    def iml_wrapped_func(*args, **kwargs):
+        with clib_wrap.CallStack.frame(category=CATEGORY_PYTHON, name=func.__name__):
+            return func(*args, **kwargs)
+    return orig_tf_py_function(iml_wrapped_func, inp, Tout, name=name)
+
+def tf_numpy_function(func, inp, Tout, name=None):
+    def iml_wrapped_func(*args, **kwargs):
+        with clib_wrap.CallStack.frame(category=CATEGORY_PYTHON, name=func.__name__):
+            return func(*args, **kwargs)
+    return orig_tf_numpy_function(iml_wrapped_func, inp, Tout, name=name)
 
 # old_Session = None
 # def setup_wrap_Session():
