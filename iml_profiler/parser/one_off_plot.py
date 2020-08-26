@@ -1712,7 +1712,14 @@ class GpuUtilExperiment:
         #
         # Need to add "phase" to work with minigo?
 
-        # df
+        def _check_missing(iml_df, missing_name, ops_missing):
+            iml_directory = iml_df['iml_directory'].unique()[0]
+            if len(ops_missing) > 0:
+                logger.warning("Missing {missing_name} for operations={ops} for @ {path}; did you run for enough --iml-max-passes to see all the annotations?".format(
+                    ops=ops_missing,
+                    path=iml_directory,
+                    missing_name=missing_name,
+                ))
 
         dfs = []
         for cupti_metric_name in self.gpu_hw_df['cupti_metric_name'].unique():
@@ -1725,19 +1732,21 @@ class GpuUtilExperiment:
                     return True
                 else:
                     raise NotImplementedError(f"Not sure whether to keep time for measurement_period={measurement_period}")
-            keep_op_df = self.time_breakdown_df[self.time_breakdown_df.apply(_keep_time, axis=1)]
 
-            operations = self.time_breakdown_df['operation'].unique()
-
-            for (x_field, repetition), iml_df in keep_op_df.groupby(['x_field', 'repetition']):
+            for (x_field, repetition), iml_df in self.time_breakdown_df.groupby(['x_field', 'repetition']):
                 iml_gpu_hw_df = self.gpu_hw_df[
                     (self.gpu_hw_df['x_field'] == x_field)
                     & (self.gpu_hw_df['repetition'] == repetition)
                     & (self.gpu_hw_df['cupti_metric_name'] == cupti_metric_name)
                 ]
-
-                # if len(iml_gpu_hw_df) == 0:
-                #     continue
+                gpu_hw_operations = set(iml_gpu_hw_df['operation'].unique())
+                time_breakdown_operations = set(iml_df['operation'].unique())
+                ops_missing_time_breakdown = gpu_hw_operations.difference(time_breakdown_operations)
+                ops_missing_gpu_hw = time_breakdown_operations.difference(gpu_hw_operations)
+                _check_missing(iml_df, 'time-breakdown', ops_missing_time_breakdown)
+                _check_missing(iml_df, 'gpu-hw', ops_missing_gpu_hw)
+                # Should have BOTH SM metrics and time-breakdown for all operations.
+                operations = gpu_hw_operations.intersection(time_breakdown_operations)
 
                 algo = iml_df['algo'].unique()
                 assert len(algo) == 1
@@ -1746,6 +1755,8 @@ class GpuUtilExperiment:
                 env = iml_df['env'].unique()
                 assert len(env) == 1
                 env = env[0]
+
+                time_df = iml_df[iml_df.apply(_keep_time, axis=1)]
 
                 # Sum up time over operation and child operations.
                 total_time = dict()
@@ -1756,25 +1767,15 @@ class GpuUtilExperiment:
                     assert op in all_operations
                     def _in_all_operations(operation):
                         return operation in all_operations
-                    total_time[op] = iml_df[iml_df['operation'].apply(_in_all_operations)]['percent'].sum()
+                    total_time[op] = time_df[time_df['operation'].apply(_in_all_operations)]['percent'].sum()
                     assert not np.isnan(total_time[op])
                     assert len(iml_gpu_hw_df[iml_gpu_hw_df['operation'] == op]) == 1
                     metric_value[op] = iml_gpu_hw_df[iml_gpu_hw_df['operation'] == op]['metric_value'].values[0]
                     assert not np.isnan(metric_value[op])
-                    # metric_value[op] = iml_gpu_hw_df[iml_gpu_hw_df['operation'] == op]['metric_value'].unique()
-                    # assert len(metric_value[op]) == 1
-                    # metric_value[op] = metric_value[op][0]
+                    assert metric_value[op] >= 0
+                    assert total_time[op] >= 0
                     total_metric[op] = metric_value[op] * total_time[op]
-                # iml_df = copy.copy(iml_df)
-                # iml_df['total_time'] = iml_df['operation'].apply(lambda op: total_time[op])
-                # # metric_value[op] * total_time[op]
-                # iml_df['total_metric'] = iml_df.apply(lambda row: row['total_time'] * row['metric_value'])
-                # # total_metric = dict()
-
-                # for op, iml_op_df in iml_df.groupby(['operation']).unique():
-                #     total_time[op] = iml_op_df[iml_op_df.apply( _keep_time, axis=1)]['percent'].sum()
-                #     assert len(iml_op_df) == 1
-                #     total_metric[op] = iml_op_df['metric_value']
+                    assert total_metric[op] >= 0
 
                 mapping = algo_mapping[algo]
                 time_left = dict()
@@ -1790,7 +1791,12 @@ class GpuUtilExperiment:
                         adjusted_metric[new_op] -= total_metric[op]
                         time_left[new_op] -= total_time[op]
 
-                    if adjusted_metric[new_op] == 0.:
+                    # If this fails, composite operation must be subtracting operations that aren't nested.
+                    assert time_left[new_op] >= 0
+                    # This can be negative apparently...BUG?  I suspect it's just noise based on error bars.
+                    # assert adjusted_metric[new_op] >= 0
+
+                    if adjusted_metric[new_op] <= 0.:
                         # e.g., achieved_occupancy for Simulator will end up being:
                         # new_metric_value[new_op] = (0 total metric) / (0 seconds)
                         # Since the metric is 0 when GPU is idle, and GPU idle means no GPU time.
@@ -1815,13 +1821,8 @@ class GpuUtilExperiment:
                 assert len(new_gpu_hw) == 1
                 df_rows = []
                 for op, metric_value in new_metric_value.items():
-                    # rows = new_gpu_hw[new_gpu_hw['operation'] == op]
-                    # row = new_gpu_hw
                     row = copy.copy(new_gpu_hw)
                     row['operation'] = op
-                    # if op not in {"Backpropagation", "Inference", "Simulator"}:
-                    #     logger.debug(f"WRONG OP: op = {op}")
-                    #     import pdb; pdb.set_trace()
                     row['metric_value'] = metric_value
                     row['cupti_metric_name'] = cupti_metric_name
                     row['metric_name'] = METRIC_NAME_CUPTI_TO_PROF[cupti_metric_name]

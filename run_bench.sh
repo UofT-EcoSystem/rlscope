@@ -1193,6 +1193,9 @@ _plot_stable_baselines() {
         --plots "${plots}"
       )
     fi
+    if [ "${DEBUG}" = 'yes' ]; then
+      args+=(--pdb --debug)
+    fi
     _do "${args[@]}" "$@"
   fi
 }

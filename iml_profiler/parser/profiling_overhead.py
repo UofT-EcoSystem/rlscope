@@ -10,6 +10,8 @@ from iml_profiler.parser.common import *
 from iml_profiler.profiler import experiment
 from os.path import join as _j, abspath as _a, exists as _e, dirname as _d, basename as _b
 import pandas as pd
+import matplotlib
+matplotlib.use('agg')
 import seaborn as sns
 
 from matplotlib import pyplot as plt
