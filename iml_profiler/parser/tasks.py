@@ -884,12 +884,12 @@ class GeneratePlotIndexTask(luigi.Task):
     postgres_user = param_postgres_user
     postgres_host = param_postgres_host
 
-    # Needed by mk_SQL_tasks
-    cupti_overhead_json = param_cupti_overhead_json
-    LD_PRELOAD_overhead_json = param_LD_PRELOAD_overhead_json
-    python_annotation_json = param_python_annotation_json
-    python_clib_interception_tensorflow_json = param_python_clib_interception_tensorflow_json
-    python_clib_interception_simulator_json = param_python_clib_interception_simulator_json
+    # # Needed by mk_SQL_tasks
+    # cupti_overhead_json = param_cupti_overhead_json
+    # LD_PRELOAD_overhead_json = param_LD_PRELOAD_overhead_json
+    # python_annotation_json = param_python_annotation_json
+    # python_clib_interception_tensorflow_json = param_python_clib_interception_tensorflow_json
+    # python_clib_interception_simulator_json = param_python_clib_interception_simulator_json
 
     skip_output = False
 
@@ -996,12 +996,14 @@ class OverlapStackedBarTask(luigi.Task):
         self.dumper.run()
 
 class GpuHwPlotTask(IMLTask):
-    iml_directories = luigi.ListParameter(description="Multiple --iml-directory containing GPUHwCounterSampler.csv from running \"iml-prof --config gpu-hw\"")
+    gpu_hw_directories = luigi.ListParameter(description="Multiple --iml-directory containing GPUHwCounterSampler.csv from running \"iml-prof --config gpu-hw\"")
+    time_breakdown_directories = luigi.ListParameter(description="Multiple --iml-directory containing GPUHwCounterSampler.csv from running \"iml-prof --config gpu-hw\"")
     directory = luigi.Parameter(description="Output directory", default=".")
     xtick_expression = param_xtick_expression
     x_title = luigi.Parameter(description="x-axis title", default=None)
     title = luigi.Parameter(description="title", default=None)
     width = luigi.FloatParameter(description="Width of plot in inches", default=None)
+    op_mapping = luigi.Parameter(description="Python expression defining a function mapping(algo) that returns a mapping that defines composite operations from iml.prof.operation annotations in the profiled code", default=None)
     height = luigi.FloatParameter(description="Height of plot in inches", default=None)
     rotation = luigi.FloatParameter(description="x-axis title rotation", default=None)
 
@@ -1014,15 +1016,29 @@ class GpuHwPlotTask(IMLTask):
 
     skip_output = False
 
+    def requires(self):
+        # TODO: we require (exactly 1) <overlap_type>.venn_js.js in each iml_dir.
+        # TODO: we need to sub-select if there are multiple venn_js.js files...need selector arguments
+        requires = []
+        for iml_dir in self.time_breakdown_directories:
+            kwargs = forward_kwargs(from_task=self, ToTaskKlass=GeneratePlotIndexTask)
+            del kwargs['iml_directory']
+            requires.append(GeneratePlotIndexTask(
+                iml_directory=iml_dir,
+                **kwargs))
+        return requires
+
     def output(self):
         return []
 
     def run(self):
         kwargs = kwargs_from_task(self)
         obj_args = dict()
-        obj_args['rlscope_dir'] = self.iml_directories
+        obj_args['rlscope_dir'] = self.gpu_hw_directories
+        obj_args['time_breakdown_dir'] = self.time_breakdown_directories
         obj_args['output_directory'] = self.iml_directory
         obj_args['xtick_expression'] = self.xtick_expression
+        obj_args['op_mapping'] = self.op_mapping
         obj_args['x_title'] = self.x_title
         obj_args['title'] = self.title
         obj_args['debug'] = self.debug

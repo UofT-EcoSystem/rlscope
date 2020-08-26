@@ -417,6 +417,13 @@ def wrap_tensorflow_v2(category=CATEGORY_TF_API, debug=False):
         func_regex='^TFE_Py_(Execute|FastPathExecute)',
     )
     assert success
+    success = wrap_util.wrap_lib(
+        CFuncWrapper,
+        import_libname='tensorflow.python.client.pywrap_tf_session',
+        wrap_libname='tensorflow.python.client.pywrap_tf_session',
+        wrapper_args=(category, DEFAULT_PREFIX, debug),
+        func_regex='^TF_')
+    assert success
 def unwrap_tensorflow_v2():
     if py_config.DEBUG_WRAP_CLIB:
         logger.info("> IML: Unwrapping module=tensorflow.python.pywrap_tfe")
@@ -424,6 +431,10 @@ def unwrap_tensorflow_v2():
         CFuncWrapper,
         import_libname='tensorflow.python.pywrap_tfe',
         wrap_libname='tensorflow.python.pywrap_tfe')
+    wrap_util.unwrap_lib(
+        CFuncWrapper,
+        import_libname='tensorflow.python.client.pywrap_tf_session',
+        wrap_libname='tensorflow.python.client.pywrap_tf_session')
 
 def wrap_atari(category=CATEGORY_ATARI):
     try:

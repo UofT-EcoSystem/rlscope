@@ -25,12 +25,16 @@ import seaborn as sns
 from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, basename as _b
 
 from iml_profiler.profiler.util import pprint_msg
-from iml_profiler.parser.stacked_bar_plots import get_x_env, get_x_algo, xfields_from_xtick_expression
+from iml_profiler.parser.stacked_bar_plots import get_x_env, get_x_algo, xfields_from_xtick_expression, get_capsize, OverlapStackedBarPlot, add_repetition, group_numeric_cols
 from iml_profiler.parser.dataframe import UtilDataframeReader, IMLConfig
 
 from iml_profiler import py_config
 from iml_profiler.parser.common import *
 from typing import *
+
+class IMLInvaidArgument(Exception):
+    pass
+
 
 def maybe_number(x):
     if type(x) != str:
@@ -193,6 +197,7 @@ METRIC_NAME_CUPTI_TO_PROF = {
     #    Category  = CUPTI_EVENT_CATEGORY_INSTRUCTION
     'elapsed_cycles_sm': "sm__cycles_elapsed.sum",
 }
+PROF_TO_METRIC_NAME_CUPTI = dict((v, k) for k, v in METRIC_NAME_CUPTI_TO_PROF.items())
 
 # HACK: number of total SMs on the RTX 2080 GPU on the "eco" cluster machines
 NUM_SMS = 68
@@ -207,6 +212,10 @@ SAMPLE_LATENCY_Y_LABEL = "Minibatch latency (ms)"
 CUPTI_METRIC_Y_LABEL = {
     'sm_efficiency': SM_EFFICIENCY_Y_LABEL,
     'achieved_occupancy': SM_OCCUPANCY_Y_LABEL,
+}
+CUPTI_METRIC_Y_LABEL_SHORT = {
+    'sm_efficiency': "SM efficiency (%)",
+    'achieved_occupancy': "SM occupancy (%)",
 }
 TRT_METRIC_YLABELS = {
     'host_latency_throughput_qps': SAMPLE_THROUGHPUT_Y_LABEL,
@@ -307,6 +316,23 @@ MULTI_TASK_RAW_ATTRS = MULTI_TASK_ATTRS.union(MULTI_TASK_RAW_ATTR_TYPES.keys()).
     'trace_id',
 })
 # suffix=".num_sms_${NUM_SMS}.sms_allocated_${sms_allocated}.CUDA_MPS_ACTIVE_THREAD_PERCENTAGE_${CUDA_MPS_ACTIVE_THREAD_PERCENTAGE}"
+
+# all_cycles:
+#   the metric is computed over all cycles on the GPU, including cycles where the GPU
+#   is idle and not executing any kernels.
+# active_cycles:
+#   the metric is computed over active GPU cycles.
+#   Measurement periods where the GPU is idle result in a metric value of "0".
+MEASUREMENT_PERIOD_ACTIVE_CYCLES = 'active_cycles'
+MEASUREMENT_PERIOD_ALL_CYCLES = 'all_cycles'
+CUPTI_METRIC_MEASUREMENT_PERIOD = {
+    'achieved_occupancy': MEASUREMENT_PERIOD_ACTIVE_CYCLES,
+    'sm_efficiency': MEASUREMENT_PERIOD_ALL_CYCLES,
+    'inst_executed': MEASUREMENT_PERIOD_ACTIVE_CYCLES,
+    'active_cycles': MEASUREMENT_PERIOD_ACTIVE_CYCLES,
+    'active_warps': MEASUREMENT_PERIOD_ACTIVE_CYCLES,
+    'elapsed_cycles_sm': MEASUREMENT_PERIOD_ALL_CYCLES,
+}
 
 FLOAT_RE = r'(?:[-+]?[0-9]*\.?[0-9]+(?:[eE][-+]?[0-9]+)?)'
 UNIT_RE = r'(?:\b(?:ms|s|qps)\b)'
@@ -552,6 +578,7 @@ class TrtexecExperiment:
         df = df[df['batch_size'] == batch_size]
 
         df = keep_cupti_metric(df, cupti_metric)
+        add_gpu_hw_fields(df)
         df = self._add_config(df, df_type='trtexec')
 
         # titled_df = copy.copy(df)
@@ -601,6 +628,7 @@ class TrtexecExperiment:
             df = copy.copy(self.trtexec_gpu_hw_df)
             df = df[df['streams'] == streams]
             df = keep_cupti_metric(df, cupti_metric)
+            add_gpu_hw_fields(df)
             df = self._add_config(df, df_type='trtexec')
             plot_df = plot_df.append(df[plot_df.columns])
 
@@ -608,6 +636,7 @@ class TrtexecExperiment:
             df = copy.copy(self.tf_inference_gpu_hw_df)
             df = df[df['range_name'] == 'inference_loop/inference']
             df = keep_cupti_metric(df, cupti_metric)
+            add_gpu_hw_fields(df)
             df = self._add_config(df, df_type='tf_inference')
             plot_df = plot_df.append(df[plot_df.columns])
 
@@ -1444,6 +1473,21 @@ class TrtexecExperiment:
             msg=txt_indent(DataFrame.dataframe_string(self.trtexec_df), indent=1),
         ))
 
+class CompositeOp:
+    def __init__(self, add, subtract=None):
+        self.add = sorted(set(add))
+        if subtract is None:
+            subtract = []
+        self.subtract = sorted(set(subtract))
+
+    def __repr__(self):
+        return "{klass}(add={add}, subtract={subtract})".format(
+            klass=self.__class__.__name__,
+            add=self.add,
+            subtract=self.subtract,
+        )
+
+
 class GpuUtilExperiment:
     def __init__(self, args):
         self.args = args
@@ -1461,7 +1505,20 @@ class GpuUtilExperiment:
 
     def _read_rlscope_df(self):
         self.rlscope_df = None
-        if self.arg('rlscope_dir') is None:
+
+        overlap_plot = OverlapStackedBarPlot(
+            iml_directories=self.arg('time_breakdown_dir'),
+            unins_iml_directories=None,
+            directory=None,
+            overlap_type='CategoryOverlap',
+            detailed=True,
+            # directory=self.rlscope_output_dir(),
+        )
+        self.time_breakdown_df = overlap_plot.read_ins_df()
+        self.time_breakdown_df = self._add_x_field(self.time_breakdown_df)
+        assert 'repetition' in self.time_breakdown_df
+
+        if self.arg('rlscope_dir') is None or self.arg('time_breakdown_dir') is None:
             return
         rlscope_attrs = {
             'algo',
@@ -1495,10 +1552,288 @@ class GpuUtilExperiment:
                 #     df[attr_name] = maybe_number(attr_value)
                 df['iml_directory'] = rlscope_dir
                 dfs.append(df)
-        self.rlscope_df = pd.concat(dfs)
-        logger.info("rlscope dataframe:\n{msg}".format(
-            msg=txt_indent(DataFrame.dataframe_string(self.rlscope_df), indent=1),
+        self.gpu_hw_df = pd.concat(dfs)
+        add_repetition(self.gpu_hw_df)
+        self.gpu_hw_df = self._add_x_field(self.gpu_hw_df)
+        logger.info("gpu_hw dataframe:\n{msg}".format(
+            msg=txt_indent(DataFrame.dataframe_string(self.gpu_hw_df), indent=1),
         ))
+        add_gpu_hw_fields(self.gpu_hw_df)
+
+        def _operation(range_name):
+            components = re.split(r'/', range_name)
+            return components[-1]
+
+        self.operation_tree = OperationTree(self.gpu_hw_df['range_name'].unique())
+        # operations = self.operation_tree.leaf_operations()
+        # def _get_operations():
+        #     # range_node = RangeNode()
+        #     # for range_name in self.gpu_hw_df['range_name'].unique():
+        #     #     range_node.add(range_name)
+        #     operation_tree = OperationTree(self.gpu_hw_df['range_name'].unique())
+        #     operations = operation_tree.leaf_operations()
+        #     return operations
+        # operations = _get_operations()
+
+        # def _is_operation(range_name):
+        #     operation = _operation(range_name)
+        #     return operation in operations
+        # self.gpu_hw_df = self.gpu_hw_df[self.gpu_hw_df['range_name'].apply(_is_operation)]
+
+        self.gpu_hw_df['operation'] = self.gpu_hw_df['range_name'].apply(_operation)
+
+        # GOAL:
+        # get the "percent of total execution" that an operation makes up.
+        # Group this calculation by "iml_directory".
+        # Join it to self.rlscope_df on ["repetition", ]
+
+        # Get "percent of total execution" that an operation makes up (for a given repetition run).
+
+        # # NOTE: Need to join on x_field since it may be use_tf_functions vs no_use_tf_functions.
+        # bdf = self.time_breakdown_df[['iml_directory', 'repetition', 'algo', 'env', 'x_field', 'operation', 'percent']]
+        # bdf_cols = group_numeric_cols(bdf)
+        # groupby_cols = sorted(set(bdf_cols.non_numeric_cols).union({'repetition'}))
+        # self.op_df = bdf.groupby(groupby_cols).agg(pd.DataFrame.sum, skipna=False).reset_index()
+        #
+        # # Avoid conflicts; keep iml_directory of instrumented run.
+        # op_df_copy = copy.copy(self.op_df)
+        # if 'iml_directory' in op_df_copy:
+        #     del op_df_copy['iml_directory']
+        # join_on = ['algo', 'env', 'x_field', 'operation', 'repetition']
+        # # Time-breakdown and SM metrics should be available for every (iml_directory, operation)
+        # assert len(op_df_copy[join_on].drop_duplicates()) == len(self.gpu_hw_df[join_on].drop_duplicates())
+        # self.rlscope_df = self.gpu_hw_df.merge(op_df_copy, on=join_on)
+
+        self.op_gpu_hw_df = self.get_op_mapping_df()
+
+        # TODO:
+        # - "percent" is missing "evaluate" but it is empty in gpu_hw_df anyways.
+        # - "training_loop" takes up non-zero time, BUT...
+        #   - training_loop in time-breakdown includes time spent NOT in leaves.
+        #   - training_loop in gpu-hw INCLUDES metrics for time spent in leaves.
+        #   - hence, doing a weighted average based on training_loop percent would NOT make sense...
+        #   - we want:
+        #     training_loop.weight_percent = training_loop.percent + [leaf.percent for leaf in leaves(training_loop)]
+
+        # import pdb; pdb.set_trace()
+        # print("HI")
+
+    def _get_algo_mapping(self):
+        assert self.arg('op_mapping') is not None
+
+        mapping = None
+        my_locals = locals()
+        exec(self.arg('op_mapping'), globals(), my_locals)
+        mapping = my_locals['mapping']
+        if mapping is None:
+            raise IMLInvaidArgument("--mapping must be a python expression that defines a callable function mapping(algo) that returns a Dict[OpNameString -> CompositeOp(add=[OpNameString], subtract=[OpNameString])")
+        self.mapping = mapping
+
+        algo_mapping = dict()
+        df = self.time_breakdown_df
+        operations = set(df['operation'].unique())
+        def check_operation(algo, op):
+            if op not in operations:
+                raise IMLInvaidArgument("--mapping is invalid for algo={algo}; no operation \"{op}\" was profiled; choices = {ops}".format(
+                    algo=algo,
+                    op=op,
+                    ops=operations,
+                ))
+        algos = df['algo'].unique()
+        for algo in algos:
+            algo_mapping[algo] = self.mapping(algo)
+            for new_op, composite_op in list(algo_mapping[algo].items()):
+                if type(composite_op) == CompositeOp:
+                    for op in composite_op.add:
+                        check_operation(algo, op)
+                    for op in composite_op.subtract:
+                        check_operation(algo, op)
+                    common_ops = set(composite_op.add).intersection(set(composite_op.subtract))
+                    if len(common_ops) > 0:
+                        raise IMLInvaidArgument("CompositeOp for algo={algo} has overlapping operations in \"add\" and \"subtract\": {intersect}".format(
+                            intersect=common_ops,
+                            algo=algo,
+                        ))
+                elif type(composite_op) == str:
+                    op = composite_op
+                    check_operation(algo, op)
+                    composite_op = CompositeOp(add=[op])
+                    algo_mapping[algo][new_op] = composite_op
+                else:
+                    raise IMLInvaidArgument("mapping(algo) function must return Dict[OpNameString -> CompositeOp], but dict value for op={op} was {type} ({value})".format(
+                        type=type(composite_op).__name__,
+                        value=composite_op,
+                        algo=algo,
+                        op=new_op,
+                    ))
+        return algo_mapping
+
+    def get_op_mapping_df(self):
+        """
+        1. Get total time per operation, which INCLUDES nested operations;
+           if active_cycles: total_time = has GPU (GPU, or CPU+GPU)
+           if all_cycles: total_time = CPU and/or GPU
+                   ○ PROBLEM: nested operations may happen in multiple places… (e.g., MCTS search), but it's wrong to add all MCTS time to the parent annotations…only parent annotations they were launched in.
+                   ○ How can we know what it was launched in?
+                       § For non minigo workloads it's fine.
+                       § Otherwise ASSUME conflicting use of operation belongs to different phases, and that nesting is always the same within a phase.
+        2. Compute total_metric = total_time * metric_value
+        3. For each composite "operation" we wish to plot:
+           for composite_op:
+             time_left[composite_op] = 0
+             adjusted_metric[composite_op] = 0
+             for op in add_op[composite_op]:
+               adjusted_metric[composite_op] += total_metric[op]
+               time_left[composite_op] += total_time[op]
+             for op in minus_op[composite_op]
+               adjusted_metric[composite_op] -= total_metric[op]
+               time_left[composite_op] -= total_time[op]
+             metric_value[composite_op] = adjusted_metric[composite_op] / time_left[composite_op]
+
+        def mapping(algo):
+            if algo == 'ddpg':
+              {
+              "Backpropagation": ComposeOp(add=["training_loop"], subtract=["sample_action", "step"]),
+              "Inference": ComposeOp(add=["sample_action"]) # or just "sample_action"
+              "Simulator": "step",
+              }
+            elif ...:
+
+        :param df:
+        :return:
+        """
+        if self.arg('op_mapping') is None:
+            return None
+
+        algo_mapping = self._get_algo_mapping()
+
+        # PROBLEM: How to represent different "configurations"?
+        # A: 'x_field'...should be captured by iml_directory.
+        #
+        # Need to add "phase" to work with minigo?
+
+        # df
+
+        dfs = []
+        for cupti_metric_name in self.gpu_hw_df['cupti_metric_name'].unique():
+
+            measurement_period = CUPTI_METRIC_MEASUREMENT_PERIOD[cupti_metric_name]
+            def _keep_time(row):
+                if measurement_period == MEASUREMENT_PERIOD_ACTIVE_CYCLES:
+                    return CATEGORY_GPU in row['region']
+                elif measurement_period == MEASUREMENT_PERIOD_ALL_CYCLES:
+                    return True
+                else:
+                    raise NotImplementedError(f"Not sure whether to keep time for measurement_period={measurement_period}")
+            keep_op_df = self.time_breakdown_df[self.time_breakdown_df.apply(_keep_time, axis=1)]
+
+            operations = self.time_breakdown_df['operation'].unique()
+
+            for (x_field, repetition), iml_df in keep_op_df.groupby(['x_field', 'repetition']):
+                iml_gpu_hw_df = self.gpu_hw_df[
+                    (self.gpu_hw_df['x_field'] == x_field)
+                    & (self.gpu_hw_df['repetition'] == repetition)
+                    & (self.gpu_hw_df['cupti_metric_name'] == cupti_metric_name)
+                ]
+
+                # if len(iml_gpu_hw_df) == 0:
+                #     continue
+
+                algo = iml_df['algo'].unique()
+                assert len(algo) == 1
+                algo = algo[0]
+
+                env = iml_df['env'].unique()
+                assert len(env) == 1
+                env = env[0]
+
+                # Sum up time over operation and child operations.
+                total_time = dict()
+                metric_value = dict()
+                total_metric = dict()
+                for op in operations:
+                    all_operations = self.operation_tree.all_operations(op)
+                    assert op in all_operations
+                    def _in_all_operations(operation):
+                        return operation in all_operations
+                    total_time[op] = iml_df[iml_df['operation'].apply(_in_all_operations)]['percent'].sum()
+                    assert not np.isnan(total_time[op])
+                    assert len(iml_gpu_hw_df[iml_gpu_hw_df['operation'] == op]) == 1
+                    metric_value[op] = iml_gpu_hw_df[iml_gpu_hw_df['operation'] == op]['metric_value'].values[0]
+                    assert not np.isnan(metric_value[op])
+                    # metric_value[op] = iml_gpu_hw_df[iml_gpu_hw_df['operation'] == op]['metric_value'].unique()
+                    # assert len(metric_value[op]) == 1
+                    # metric_value[op] = metric_value[op][0]
+                    total_metric[op] = metric_value[op] * total_time[op]
+                # iml_df = copy.copy(iml_df)
+                # iml_df['total_time'] = iml_df['operation'].apply(lambda op: total_time[op])
+                # # metric_value[op] * total_time[op]
+                # iml_df['total_metric'] = iml_df.apply(lambda row: row['total_time'] * row['metric_value'])
+                # # total_metric = dict()
+
+                # for op, iml_op_df in iml_df.groupby(['operation']).unique():
+                #     total_time[op] = iml_op_df[iml_op_df.apply( _keep_time, axis=1)]['percent'].sum()
+                #     assert len(iml_op_df) == 1
+                #     total_metric[op] = iml_op_df['metric_value']
+
+                mapping = algo_mapping[algo]
+                time_left = dict()
+                adjusted_metric = dict()
+                new_metric_value = dict()
+                for new_op, composite_op in mapping.items():
+                    time_left[new_op] = 0.
+                    adjusted_metric[new_op] = 0.
+                    for op in composite_op.add:
+                        adjusted_metric[new_op] += total_metric[op]
+                        time_left[new_op] += total_time[op]
+                    for op in composite_op.subtract:
+                        adjusted_metric[new_op] -= total_metric[op]
+                        time_left[new_op] -= total_time[op]
+
+                    if adjusted_metric[new_op] == 0.:
+                        # e.g., achieved_occupancy for Simulator will end up being:
+                        # new_metric_value[new_op] = (0 total metric) / (0 seconds)
+                        # Since the metric is 0 when GPU is idle, and GPU idle means no GPU time.
+                        # We want new_metric_value[new_op] = 0 for this case.
+                        new_metric_value[new_op] = 0.
+                    else:
+                        assert time_left[new_op] != 0
+                        new_metric_value[new_op] = adjusted_metric[new_op] / time_left[new_op]
+                        assert not np.isnan(new_metric_value[new_op])
+
+                # Keep existing columns from gpu_hw_df that are present in every row,
+                # but use the new operation name and metric_value.
+                keep_cols = sorted(set(self.gpu_hw_df.keys()).difference({
+                    'operation',
+                    'range_name',
+                    'metric_name',
+                    'metric_value',
+                    'cupti_metric_name',
+                }))
+                new_gpu_hw = copy.copy(iml_gpu_hw_df[keep_cols])
+                new_gpu_hw.drop_duplicates(inplace=True)
+                assert len(new_gpu_hw) == 1
+                df_rows = []
+                for op, metric_value in new_metric_value.items():
+                    # rows = new_gpu_hw[new_gpu_hw['operation'] == op]
+                    # row = new_gpu_hw
+                    row = copy.copy(new_gpu_hw)
+                    row['operation'] = op
+                    # if op not in {"Backpropagation", "Inference", "Simulator"}:
+                    #     logger.debug(f"WRONG OP: op = {op}")
+                    #     import pdb; pdb.set_trace()
+                    row['metric_value'] = metric_value
+                    row['cupti_metric_name'] = cupti_metric_name
+                    row['metric_name'] = METRIC_NAME_CUPTI_TO_PROF[cupti_metric_name]
+                    assert set(self.gpu_hw_df.keys()).difference({'range_name'}) == set(row.keys())
+                    df_rows.append(row)
+                new_df = pd.concat(df_rows)
+                dfs.append(new_df)
+
+        op_gpu_hw_df = pd.concat(dfs)
+        return op_gpu_hw_df
+
+
 
     def gpu_hw_csv_paths(self, root_dir):
         paths = []
@@ -1788,8 +2123,10 @@ class GpuUtilExperiment:
     def plot_df(self):
         self._plot_sm_efficiency()
         self._plot_achieved_occupancy()
-        self._plot_rlscope_sm_efficiency()
-        self._plot_rlscope_achieved_occupancy()
+        self._plot_rlscope_sm_metrics(self.gpu_hw_df, 'gpu_hw')
+        self._plot_rlscope_sm_metrics(self.op_gpu_hw_df, 'op_gpu_hw')
+        # self._plot_rlscope_sm_efficiency()
+        # self._plot_rlscope_achieved_occupancy()
         self._plot_util_data()
         self._plot_multitask_sched_info()
         self._plot_multitask_sm_efficiency()
@@ -1802,22 +2139,29 @@ class GpuUtilExperiment:
         return env.upper()
 
     def _set_x_field(self, df):
+        df = copy.copy(df)
         if self.arg('xtick_expression') is None:
             df['x_field'] = df['algo_env']
-            return
+            return df
         df['pretty_algo'] = df['algo'].apply(get_x_algo)
         df['short_env'] = df['env'].apply(get_x_env)
         x_fields = xfields_from_xtick_expression(df, self.arg('xtick_expression'), debug=self.debug)
         df['x_field'] = x_fields
+        return df
+
+    def _add_x_field(self, df):
+        df = self._add_algo_env(df)
+        df = self._set_x_field(df)
+        return df
 
     def _plot_rlscope_sm_efficiency(self):
         if self.rlscope_df is None:
             return
         df = copy.copy(self.rlscope_df)
         df = keep_cupti_metric(df, 'sm_efficiency')
+        add_gpu_hw_fields(df)
 
-        df = self._add_algo_env(df)
-        self._set_x_field(df)
+        df = self._add_x_field(df)
 
         titled_df = copy.copy(df)
         col_titles = {
@@ -1855,6 +2199,7 @@ class GpuUtilExperiment:
         save_plot(df, _j(self.rlscope_output_dir(), 'rlscope_sm_efficiency.svg'))
 
     def _add_algo_env(self, df):
+        df = copy.copy(df)
         def _algo_env(row):
             return "({algo}, {env})".format(
                 algo=get_x_algo(row['algo']),
@@ -1864,17 +2209,246 @@ class GpuUtilExperiment:
         return df
 
     def _get_capsize(self, g):
-        # num_bars = len(g.ax.patches)
-        bar_width = g.ax.patches[0].get_width()
-        # Sanity check.
-        assert all(patch.get_width() == bar_width for patch in g.ax.patches)
-        # Make error bar width 25% of bar width.
-        return bar_width/4
+        if type(g) == sns.FacetGrid:
+            # ASSUME: bar width is the same across all plots (assumes same x-axis and groups).
+            ax = g.axes[0][0]
+        else:
+            ax = g.ax
+        return get_capsize(ax)
+        # # num_bars = len(g.ax.patches)
+        # bar_width = g.ax.patches[0].get_width()
+        # # Sanity check.
+        # assert all(patch.get_width() == bar_width for patch in g.ax.patches)
+        # # Make error bar width 25% of bar width.
+        # return bar_width/4
 
     def _add_plot_kwargs(self, plot_kwargs):
         if self.arg('width') is not None and self.arg('height') is not None:
             plot_kwargs['height'] = self.arg('height')
             plot_kwargs['aspect'] = self.arg('width')/self.arg('height')
+
+    def _remap_df(self, orig_df):
+        if self.arg('remap_df') is None:
+            return orig_df
+
+        # not_regions = [key for key in orig_df.keys() if not self._is_region(key)]
+
+        # eval context:
+        # TODO: limit locals/globals to these? Don't want to limit numpy/pandas access though.
+        df = copy.copy(orig_df)
+        # regions = self._regions(df)
+        # new_df = df[not_regions]
+        new_df = copy.copy(df)
+        # algo
+        # env
+
+        df_transformation = self.arg('remap_df')
+        # e.g.
+        # new_df[('other',)] = df[('compute_advantage_estimates',)] +
+        #                      df[('optimize_surrogate',)]
+        if self.debug:
+            logger.info("--remap-df:\n{trans}".format(trans=textwrap.indent(df_transformation, prefix='  ')))
+        exec(df_transformation)
+
+        # Make sure they didn't modify df; they SHOULD be modifying new_df
+        # (i.e. adding regions to a "fresh" slate)
+        # assert np.all(df == orig_df)
+        # Assume NaN's in the same place => equality.
+        assert df.equals(orig_df)
+
+        if self.debug:
+            buf = StringIO()
+            DataFrame.print_df(orig_df, file=buf)
+            logger.info("Old dataframe:\n{msg}".format(msg=textwrap.indent(buf.getvalue(), prefix='  ')))
+
+            buf = StringIO()
+            DataFrame.print_df(new_df, file=buf)
+            logger.info("New dataframe after --remap-df:\n{msg}".format(msg=textwrap.indent(buf.getvalue(), prefix='  ')))
+
+        return new_df
+
+    def _plot_rlscope_sm_metrics(self, df, suffix):
+        if df is None:
+            return
+        # if self.rlscope_df is None:
+        #     return
+        df = copy.copy(df)
+        achieved_occupancy_df = keep_cupti_metric(df, 'achieved_occupancy')
+        sm_efficiency_df = keep_cupti_metric(df, 'sm_efficiency')
+        df = pd.concat([achieved_occupancy_df, sm_efficiency_df])
+
+        # df = self._add_x_field(df)
+        # df['x_field'] = df['x_field'].astype('category')
+
+        titled_df = copy.copy(df)
+        col_titles = {
+            # 'range_name': 'Operation',
+            'operation': 'Operation',
+        }
+        titled_df.rename(columns=col_titles, inplace=True)
+
+        plot_kwargs = dict()
+        self._add_plot_kwargs(plot_kwargs)
+
+        sns.set(style="whitegrid")
+        logger.debug("Current sns.axes_style\n{msg}".format(
+            msg=pprint_msg(sns.axes_style()),
+        ))
+        # {'axes.axisbelow': True,
+        #  'axes.edgecolor':fig =  '.8',
+        #  'axes.facecolor': 'white',
+        #  'axes.grid': True,
+        #  'axes.labelcolor': '.15',
+        #  'axes.spines.bottom': True,
+        #  'axes.spines.left': True,
+        #  'axes.spines.right': True,
+        #  'axes.spines.top': True,
+        #  'figure.facecolor': 'white',
+        #  'font.family': ['sans-serif'],
+        #  'font.sans-serif': ['Arial',
+        #                      'DejaVu Sans',
+        #                      'Liberation Sans',
+        #                      'Bitstream Vera Sans',
+        #                      'sans-serif'],
+        #  'grid.color': '.8',
+        #  'grid.linestyle': '-',
+        #  'image.cmap': 'rocket',
+        #  'lines.solid_capstyle': 'round',
+        #  'patch.edgecolor': 'w',
+        #  'patch.force_edgecolor': True,
+        #  'text.color': '.15',
+        #  'xtick.bottom': False,
+        #  'xtick.color': '.15',
+        #  'xtick.direction': 'out',
+        #  'xtick.top': False,
+        #  'ytick.color': '.15',
+        #  'ytick.direction': 'out',
+        #  'ytick.left': False,
+        #  'ytick.right': False}
+
+
+        #  'xtick.color': '.15',
+        #  'ytick.color': '.15',
+
+        # plt.rcParams['figure.edgecolor'] = 'black'
+        # plt.rcParams['legend.edgecolor'] = 'black'
+        # plt.rcParams['patch.edgecolor'] = 'black'
+        # plt.rcParams["axes.edgecolor"] = "0.15"
+        # plt.rcParams["axes.linewidth"] = 1.25
+
+        # plt.rcParams["legend.loc"] = 'upper left'
+
+        fig = plt.figure(linewidth=2)
+        def _do_plot(**kwargs):
+            # sns.set(style={
+            #     'figure.edgecolor': 'red',
+            # })
+            # sns.set_style('figure', {
+            #     'figure.edgecolor': 'red',
+            # })
+            # with sns.axes_style({
+            #     # 'axes.facecolor': 'red',
+            #     'axes.edgecolor': 'red',
+            #     # 'grid.color': 'red',
+            #     # 'figure.edgecolor': 'red',
+            # }):
+            g = sns.catplot(x="x_field", y="metric_value", hue=col_titles["operation"], data=titled_df,
+                            row='metric_name',
+                            kind="bar",
+                            palette="muted",
+                            sharey=False,
+                            legend=False,
+                            # capsize=capsize,
+                            # subplot_kws={
+                            #     'figure.edgecolor': 'black',
+                            #     'legend.edgecolor': 'black',
+                            #     'patch.edgecolor': 'black',
+                            #     "axes.edgecolor": "0.15",
+                            #     "axes.linewidth": 1.25,
+                            # },
+                            **kwargs,
+                            **plot_kwargs,
+                            )
+            return g
+        g = _do_plot()
+        capsize = self._get_capsize(g)
+        g = _do_plot(capsize=capsize)
+        # import pdb; pdb.set_trace()
+        # g.add_legend(loc='center left', bbox_to_anchor=(1.25, 0.5), ncol=1)
+
+        # xticks = titled_df['x_field'].unique()
+        # g.set_xticklabels(xticks)
+        # import pdb; pdb.set_trace()
+
+        axes = g.axes.flatten()
+        metric_names = titled_df['metric_name'].unique()
+        cupti_metric_to_ax = dict()
+        for metric_name, ax in zip(metric_names, axes):
+            metric_name = metric_name.rstrip('+')
+            cupti_metric_name = PROF_TO_METRIC_NAME_CUPTI[metric_name]
+            cupti_metric_to_ax[cupti_metric_name] = ax
+
+        for metric_name, ax in zip(metric_names, axes):
+            metric_name = metric_name.rstrip('+')
+            cupti_metric_name = PROF_TO_METRIC_NAME_CUPTI[metric_name]
+            cupti_metric_to_ax[cupti_metric_name] = ax
+            ylabel = CUPTI_METRIC_Y_LABEL_SHORT[cupti_metric_name]
+            ax.set_ylabel(ylabel)
+
+        # legend_ax = cupti_metric_to_ax['sm_efficiency']
+        top_ax = axes[0]
+        legend_ax = top_ax
+
+        handles, labels = legend_ax.get_legend_handles_labels()
+        legend_ax.legend(handles, labels, loc='top right')
+        # import pdb; pdb.set_trace()
+        # handles, labels = top_ax.legend()
+
+        # for ax in axes:
+        #     # import pdb; pdb.set_trace()
+        #     # ax.spines['top'].set_color('0.5')
+        #     # ax.spines['top'].set_linewidth(2)
+        #
+        #     ax.spines['bottom'].set_color('0.5')
+        #     ax.spines['top'].set_color(None)
+        #     ax.spines['right'].set_color('0.5')
+        #     ax.spines['left'].set_color(None)
+        #     # ax.patch.set_facecolor('0.1')
+        #
+        #     # ax.margins(0.5)
+
+        # metric_names = titled_df['metric_name'].unique()
+        # for ax in axes:
+        #     metric_name = metric_name.rstrip('+')
+        #     cupti_metric_name = PROF_TO_METRIC_NAME_CUPTI[metric_name]
+        #     ylabel = CUPTI_METRIC_Y_LABEL_SHORT[cupti_metric_name]
+        #     ax.set_ylabel(ylabel)
+
+        # import pdb; pdb.set_trace()
+
+        g.set_titles("")
+
+        # axes[-1].set_xticklabels()
+
+        g.despine(left=True)
+
+        # g.set_ylabels(SM_OCCUPANCY_Y_LABEL)
+
+        x_title = self.arg('x_title', RLSCOPE_X_LABEL)
+        g.set_xlabels(x_title)
+
+        # title = self.arg('title', SM_OCCUPANCY_TITLE)
+        # if title is not None:
+        #     g.fig.suptitle(title)
+
+        # g.fig.subplots_adjust(top=0.90)
+        # g.fig.axes[0].set_xticklabels(
+        #     g.fig.axes[0].get_xticklabels(),
+        #     rotation=self.arg('rotation', 15),
+        # )
+        rotate_xticks(axes[-1], self.arg('rotation', 15))
+
+        save_plot(df, _j(self.rlscope_output_dir(), f"rlscope_sm_metrics.{suffix}.svg"))
 
     def _plot_rlscope_achieved_occupancy(self):
         if self.rlscope_df is None:
@@ -1882,8 +2456,7 @@ class GpuUtilExperiment:
         df = copy.copy(self.rlscope_df)
         df = keep_cupti_metric(df, 'achieved_occupancy')
 
-        df = self._add_algo_env(df)
-        self._set_x_field(df)
+        df = self._add_x_field(df)
 
         titled_df = copy.copy(df)
         col_titles = {
@@ -2259,6 +2832,7 @@ def main():
     parser.add_argument('--debug', action='store_true')
     # default=15,
     parser.add_argument('--rotation', type=int, help='x-axis xtick rotation')
+    parser.add_argument('--remap-df', help='Transform dataframe')
     parser.add_argument('--output-directory', help="where to output plots")
     args, argv = parser.parse_known_args()
     logger.info(pprint_msg({'argv': argv}))
@@ -2312,7 +2886,9 @@ def main():
         raise
 
 
-def save_plot(df, plot_path, tee=True):
+def save_plot(df, plot_path, tee=True, crop_margin=True, savefig_kwargs=None):
+    if savefig_kwargs is None:
+        savefig_kwargs = dict()
     dataframe_txt_path = re.sub(r'\.\w+$', '.dataframe.txt', plot_path)
     assert dataframe_txt_path != plot_path
 
@@ -2330,11 +2906,22 @@ def save_plot(df, plot_path, tee=True):
     df.to_csv(dataframe_csv_path, index=False)
 
     logger.info("Output plot @ {path}".format(path=plot_path))
-    plt.savefig(
-        plot_path,
-        bbox_inches='tight',
-        pad_inches=0)
+    if crop_margin:
+        plt.savefig(
+            plot_path,
+            bbox_inches='tight',
+            pad_inches=0, **savefig_kwargs)
+    else:
+        plt.savefig(plot_path, **savefig_kwargs)
     plt.close()
+
+def rotate_xticks(ax, rotation):
+    if rotation is None:
+        return
+    ax.set_xticklabels(
+        ax.get_xticklabels(),
+        rotation=rotation,
+    )
 
 def keep_cupti_metric(df, cupti_metric_name):
     prof_metric_name = METRIC_NAME_CUPTI_TO_PROF[cupti_metric_name]
@@ -2345,8 +2932,14 @@ def keep_cupti_metric(df, cupti_metric_name):
         return ret
         # return metric_name == prof_metric_name
     df = df[df['metric_name'].apply(_is_metric)].copy()
-    df['cupti_metric_name'] = cupti_metric_name
+    # df['cupti_metric_name'] = cupti_metric_name
     return df
+
+def add_gpu_hw_fields(df):
+    def _cupti_metric_name(metric_name):
+        metric_name = metric_name.rstrip('+&')
+        return PROF_TO_METRIC_NAME_CUPTI[metric_name]
+    df['cupti_metric_name'] = df['metric_name'].apply(_cupti_metric_name)
 
 def multitask_title(task_type, task_type_plural, n_tasks, sep=' '):
     return sep.join([
@@ -2362,6 +2955,86 @@ def or_empty(x):
     if x is None:
         return ""
     return x
+
+
+class OperationTree:
+    def __init__(self, range_names):
+        self.node = RangeNode()
+        for range_name in range_names:
+            self.node.add(range_name)
+        # memoize.
+        self._all_operations = dict()
+
+    def leaf_operations(self):
+        return set(node.name for node in self.node.leaves())
+
+    def all_operations(self, name):
+        if name in self._all_operations:
+            return self._all_operations[name]
+        nodes = list(self.node.find(name))
+        assert len(nodes) == 1
+        node = nodes[0]
+        all_nodes = list(node.all_nodes())
+        ret = set(node.name for node in all_nodes)
+        self._all_operations[name] = ret
+        return ret
+
+class RangeNode:
+    def __init__(self, name="[ROOT]", parent=None):
+        # self.node =
+        # name -> RangeNode
+        self.name = name
+        self.children = dict()
+        self.parent = parent
+
+    def find(self, name):
+        if self.name == name:
+            yield self
+        for child in self.children.values():
+            for node in child.find(name):
+                yield node
+
+    def all_nodes(self):
+        yield self
+        for child in self.children.values():
+            for node in child.all_nodes():
+                yield node
+
+    def add(self, range_name):
+        components = re.split(r'/', range_name)
+        # self._add_components(components)
+
+        node = self
+        i = 0
+        while i < len(components):
+            if components[i] not in node.children:
+                new_node = RangeNode(name=components[i], parent=node)
+                node.children[components[i]] = new_node
+                node = new_node
+            else:
+                node = node.children[components[i]]
+            i += 1
+
+    @property
+    def is_leaf(self):
+        return len(self.children) == 0
+
+    def leaves(self):
+        for child in self.children.values():
+            if child.is_leaf:
+                yield child
+            for child in child.leaves():
+                yield child
+
+    def _add_components(self, components):
+        if len(components) == 0:
+            return
+        name = components[0]
+        if name not in self.children:
+            self.children[name] = RangeNode()
+        child = self.children[name]
+        child._add_components(components[1:])
+
 
 if __name__ == '__main__':
     main()

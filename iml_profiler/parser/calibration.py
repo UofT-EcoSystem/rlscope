@@ -196,13 +196,17 @@ class Calibration:
 
         for iml_directory in directories:
             if self.dry_run and (
-                self.conf(iml_directory, 'gpu_hw', calibration=True, dflt=None) is None
+                self.conf(iml_directory, 'gpu_hw', calibration=True, dflt=None) is None or
+                self.conf(iml_directory, 'time_breakdown', calibration=True, dflt=None) is None
             ):
                 return
 
         iml_dirs = []
+        time_breakdown_dirs = []
         for iml_directory in directories:
             iml_dirs.extend(self.conf(iml_directory, 'gpu_hw', calibration=False).iml_directories(iml_directory, repetitions=repetitions))
+        for time_breakdown_directory in directories:
+            time_breakdown_dirs.extend(self.conf(time_breakdown_directory, 'time_breakdown', calibration=False).iml_directories(time_breakdown_directory, repetitions=repetitions))
 
         # Stick plots in root directory.
         if not self.dry_run:
@@ -210,7 +214,8 @@ class Calibration:
         cmd = ['iml-analyze',
                '--iml-directory', output_directory,
                '--task', task,
-               '--iml-directories', json.dumps(iml_dirs),
+               '--gpu-hw-directories', json.dumps(iml_dirs),
+               '--time-breakdown-directories', json.dumps(time_breakdown_dirs),
                ]
         if extra_argv is not None:
             cmd.extend(extra_argv)

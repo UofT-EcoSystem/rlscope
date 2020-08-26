@@ -135,6 +135,7 @@ class OverlapStackedBarPlot:
         assert y_type in OverlapStackedBarPlot.SUPPORTED_Y_TYPES
         if len(iml_directories) == 0:
             raise ValueError("OverlapStackedBarPlot expects at least 1 trace-file directory for iml_directories")
+        self._initialized = False
         self.iml_directories = iml_directories
         self.unins_iml_directories = unins_iml_directories
         logger.info("{klass}:\n{msg}".format(
@@ -388,7 +389,7 @@ class OverlapStackedBarPlot:
             debug_single_thread=self.debug_single_thread))
         unins_df['unins_total_training_time_us'] = unins_df['training_duration_us']
 
-        self._add_repetition(unins_df)
+        add_repetition(unins_df)
         self._add_df_fields(unins_df)
         return unins_df
 
@@ -406,6 +407,9 @@ class OverlapStackedBarPlot:
 
         :return:
         """
+        if self._initialized:
+            return
+
         self.data_index = dict()
         # self.sql_readers = dict()
 
@@ -413,6 +417,8 @@ class OverlapStackedBarPlot:
             # self.sql_readers[iml_dir] = SQLCategoryTimesReader(self.db_path(iml_dir), host=self.host, user=self.user, password=self.password)
             index = self.get_index(iml_dir)
             self.data_index[iml_dir] = index
+
+        self._initialized = True
 
     def _add_or_suggest_selector_field(self, idx, selector, field_name, can_ignore=False, allow_many=False):
         """
@@ -1031,6 +1037,7 @@ class OverlapStackedBarPlot:
 
         :return:
         """
+        self._init_directories()
         self.data = {
             'algo':[],
             'env':[],
@@ -1111,10 +1118,11 @@ class OverlapStackedBarPlot:
                 total_size = group_df['size'].sum()
                 # Q: does this update ins_df...?
                 group_df['percent'] = group_df['size']/total_size
+                group_df['percent_y'] = 100*group_df['percent']
                 group_dfs.append(group_df)
             ins_df = pd.concat(group_dfs)
 
-        self._add_repetition(ins_df)
+        add_repetition(ins_df)
         self._add_df_fields(ins_df)
 
         return ins_df
@@ -1345,7 +1353,7 @@ class OverlapStackedBarPlot:
             data=self.df,
             path=self._plot_path('plot_fancy'),
             x_field='x_field',
-            y_field='percent',
+            y_field='percent_y',
             x_group='operation',
 
             y2_field='total_training_time',
@@ -1376,7 +1384,7 @@ class OverlapStackedBarPlot:
             width=self.width,
             height=self.height,
 
-            ylabel='Percent',
+            ylabel='Percent (%)',
             title=self.plot_title,
             func=ax_func,
             debug=self.debug,
@@ -3812,6 +3820,14 @@ def get_capsize(ax):
     assert all(patch.get_width() == bar_width for patch in ax.patches)
     # Make error bar width 25% of bar width.
     return bar_width/4
+
+def add_repetition(df):
+    def _repetition(iml_directory):
+        m = re.search(r'repetition_(?P<repetition>\d+)', os.path.basename(iml_directory))
+        if m:
+            return int(m.group('repetition'))
+        return None
+    df['repetition'] = df['iml_directory'].apply(_repetition)
 
 if __name__ == '__main__':
     main()

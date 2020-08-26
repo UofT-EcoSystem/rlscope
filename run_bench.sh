@@ -47,7 +47,7 @@ _run_bench() {
 
     _do iml-bench --dir $all_dir "$@"
 }
-run_stable_baselines() {
+old_run_stable_baselines() {
     sb_all_reps "$@"
 }
 sb_train() {
@@ -205,10 +205,14 @@ fig_10_algo_choice_algorithms() {
 tf_agents_fig_9_simulator_choice_algo() {
   echo ddpg
 }
-tf_agents_fig_10_algo_choice_algos() {
+stable_baselines_fig_10_algo_choice_algos() {
+  echo a2c
   echo ddpg
+  echo ppo2
   echo sac
-  echo td3
+}
+stable_baselines_fig_9_simulator_choice_algo() {
+  echo ddpg
 }
 
 
@@ -512,7 +516,41 @@ all_run_tf_agents() {
   plot_tf_agents_fig_9_simulator_choice
 
 )
+}
 
+all_run_stable_baselines() {
+(
+  set -eu
+
+  calibrate=${calibrate:-yes}
+  max_passes=${max_passes:-}
+  repetitions=${repetitions:-5}
+  re_calibrate=${re_calibrate:-no}
+  re_plot=${re_plot:-no}
+  dry_run=${dry_run:-no}
+
+  # Fig 10: Algorithm choice
+  # tf-agents
+  #
+  # ppo doesn't work (BUG in tf-agents)
+  for algo in $(stable_baselines_fig_10_algo_choice_algos); do
+    env_id="$(fig_10_algo_choice_environment)"
+    run_stable_baselines
+  done
+
+  # Fig 9: Simulator choice
+  # tf-agents
+  #
+  # ppo doesn't work (BUG in tf-agents).  Use ddpg instead.
+  for env_id in $(fig_9_simulator_choice_environments); do
+    algo=$(stable_baselines_fig_9_simulator_choice_algo)
+    run_stable_baselines
+  done
+
+  plot_stable_baselines_fig_10_algo_choice
+  plot_stable_baselines_fig_9_simulator_choice
+
+)
 }
 
 test_run_expr() {
@@ -627,6 +665,110 @@ run_tf_agents() {
 )
 }
 
+stable_baselines_setup_display() {
+    local display="$1"
+    shift 1
+
+    # Wait for the file to come up
+    local file="/tmp/.X11-unix/X$display"
+
+    if [ -e "$file" ]; then
+        return
+    fi
+
+    # Taken from https://github.com/openai/gym/
+    # Set up display; otherwise rendering will fail
+    sudo Xvfb :1 -screen 0 1024x768x24 &
+
+    sleep 1
+
+    for i in $(seq 1 10); do
+        if [ -e "$file" ]; then
+             break
+        fi
+
+        echo "Waiting for $file to be created (try $i/10)"
+        sleep "$i"
+    done
+    if ! [ -e "$file" ]; then
+        echo "Timing out: $file was not created"
+        exit 1
+    fi
+}
+
+run_stable_baselines() {
+(
+  set -eu
+
+  algo=${algo:-ddpg}
+  env_id=${env_id:-Walker2DBulletEnv-v0}
+  just_plot=${just_plot:-no}
+  calibrate=${calibrate:-yes}
+  re_calibrate=${re_calibrate:-no}
+  re_plot=${re_plot:-no}
+  max_passes=${max_passes:-}
+  repetitions=${repetitions:-5}
+  dry_run=${dry_run:-no}
+
+  display=1
+  _do stable_baselines_setup_display $display
+  export DISPLAY=:$display
+
+  local py_script=$RL_BASELINES_ZOO_DIR/train.py
+  if [ ! -f ${py_script} ]; then
+    echo "ERROR: Couldn't find tf-agents training script @ ${py_script}"
+    return 1
+  fi
+
+  args=(iml-prof)
+  if [ "${calibrate}" = 'yes' ]; then
+    args+=(
+      --calibrate
+      --parallel-runs
+    )
+  fi
+  if [ "${dry_run}" = 'yes' ]; then
+    args+=(
+      # iml-calibrate option
+      --dry-run
+    )
+  fi
+  if [ "${re_calibrate}" = 'yes' ]; then
+    args+=(
+      --re-calibrate
+    )
+  fi
+  if [ "${re_plot}" = 'yes' ]; then
+    args+=(
+      --re-plot
+    )
+  fi
+  args+=(
+    python ${py_script}
+    --algo "${algo}"
+    --env "${env_id}"
+  )
+  if [ "${max_passes}" != "" ]; then
+    args+=(
+      --iml-max-passes ${max_passes}
+    )
+  fi
+  if [ "${calibrate}" = 'yes' ]; then
+    args+=(
+      --iml-repetitions ${repetitions}
+    )
+  fi
+
+  if [ "${just_plot}" = "no" ]; then
+    iml_direc="$(stable_baselines_iml_direc)"
+#    _do "${args[@]}" --iml-directory ${iml_direc}
+    # NOTE: train.py derives iml directory based on --log-folder...
+    _do "${args[@]}" --log-folder ${iml_direc} --iml-directory ${iml_direc}
+  fi
+
+)
+}
+
 _tf_agents_root_direc() {
   echo $IML_DIR/output/tf_agents/calibration.parallel_runs_yes
 }
@@ -652,24 +794,45 @@ tf_agents_iml_direc() {
 )
 }
 
-test_plot_simulator() {
+_stable_baselines_root_direc() {
+  echo $IML_DIR/output/stable_baselines/calibration.parallel_runs_yes
+}
+stable_baselines_iml_direc() {
 (
   set -eu
-  _remap_df() {
-  cat <<EOF
-def fix_category_regions(row):
-  if row['operation'] == 'step':
-    category_regions = set(row['category_regions']).difference({
-      CATEGORY_CUDA_API_CPU,
-      CATEGORY_TF_API,
-    })
-    return tuple(sorted(category_regions))
-  return row['category_regions']
+  local iml_direc=$(_stable_baselines_root_direc)/algo_${algo}/env_${env_id}
+  if [ "${max_passes}" != "" ]; then
+    iml_direc="${iml_direc}.max_passes_${max_passes}"
+  fi
+  echo "${iml_direc}"
+)
+}
+stable_baselines_plots_direc() {
+(
+  set -eu
+  local iml_plots_direc=$(_stable_baselines_root_direc)/plots
+  echo "${iml_plots_direc}"
+)
+}
 
-new_df['category_regions'] = new_df.apply(fix_category_regions, axis=1)
+_tf_agents_remap_df() {
+  cat <<EOF
+$(_common_fix_region_remap_df)
+
+def fix_operation(operation):
+  if operation == 'step':
+    return 'Simulation'
+  elif operation == 'collect_data':
+    return 'Inference'
+  elif operation == 'train_step':
+    return 'Backpropagation'
+  else:
+    raise NotImplementedError(f"Not sure what legend label to use for operation={operation}")
+new_df['operation'] = new_df['operation'].apply(fix_operation)
 EOF
-  }
-_remap_df() {
+}
+
+_common_fix_region_remap_df() {
   cat <<EOF
 def fix_region(row):
   region = set(row['region'])
@@ -691,28 +854,107 @@ def fix_region(row):
     region.remove(CATEGORY_CUDA_API_CPU)
 
   return tuple(sorted(region))
-
-def fix_operation(operation):
-  if operation == 'step':
-    return 'Simulation'
-  elif operation == 'collect_data':
-    return 'Inference'
-  elif operation == 'train_step':
-    return 'Backpropagation'
-  else:
-    raise NotImplementedError(f"Not sure what legend label to use for operation={operation}")
-
 new_df['region'] = new_df.apply(fix_region, axis=1)
-new_df['operation'] = new_df['operation'].apply(fix_operation)
 EOF
-  }
+}
+
+_stable_baselines_remap_df() {
+  cat <<EOF
+$(_common_fix_region_remap_df)
+
+def pretty_operation(algo, op_name):
+    if algo == 'ppo2':
+        if op_name in {'compute_advantage_estimates', 'optimize_surrogate', 'training_loop'}:
+            return "Backpropagation"
+        elif op_name == 'sample_action':
+            return "Inference"
+        elif op_name == 'step':
+            return "Simulation"
+    elif algo == 'ddpg':
+        if op_name in {'evaluate', 'train_step', 'training_loop', 'update_target_network'}:
+            return "Backpropagation"
+        elif op_name == 'sample_action':
+            return "Inference"
+        elif op_name == 'step':
+            return "Simulation"
+    elif algo == 'a2c':
+        if op_name in {'train_step', 'training_loop'}:
+            return "Backpropagation"
+        elif op_name == 'sample_action':
+            return "Inference"
+        elif op_name == 'step':
+            return "Simulation"
+    elif algo == 'sac':
+        if op_name in {'training_loop', 'update_actor_and_critic', 'update_target_network'}:
+            return "Backpropagation"
+        elif op_name == 'sample_action':
+            return "Inference"
+        elif op_name == 'step':
+            return "Simulation"
+    raise NotImplementedError("Not sure what pretty-name to use for algo={algo}, op_name={op_name}".format(
+        algo=algo,
+        op_name=op_name))
+new_df['operation'] = np.vectorize(pretty_operation, otypes=[str])(new_df['algo'], new_df['operation'])
+EOF
+}
+
+_stable_baselines_op_mapping() {
+#    raise NotImplementedError("Not sure what mapping(algo) to use for algo={algo}".format(
+#        algo=algo,
+#    ))
+  cat <<EOF
+def mapping(algo):
+    # All stable-baselines algorithms use the same gpu-hw operation mapping.
+    return {
+      'Backpropagation': CompositeOp(add=['training_loop'], subtract=['sample_action', 'step']),
+      'Inference': 'sample_action',
+      'Simulator': 'step',
+    }
+EOF
+}
+
+#        def mapping(algo):
+#            if algo == 'ddpg':
+#              {
+#              "Backpropagation": ComposeOp(add=["training_loop"], subtract=["sample_action", "step"]),
+#              "Inference": ComposeOp(add=["sample_action"]) # or just "sample_action"
+#              "Simulator": "step",
+#              }
+#            elif ...:
+
+test_plot_simulator() {
+(
+  set -eu
   iml_direc=$IML_DIR/output/tf_agents/debug/simulation/calibrate.tf_py_function/algo_ddpg/env_HalfCheetahBulletEnv-v0
 #  --plots time-breakdown
   args=(
     --re-plot
     --iml-directories ${iml_direc}
     --output-directory ${iml_direc}/plots
-    --OverlapStackedBarTask-remap-df "$(_remap_df)"
+    --OverlapStackedBarTask-remap-df "$(_tf_agents_remap_df)"
+    "$@"
+  )
+  iml-plot "${args[@]}"
+)
+
+}
+
+test_plot_stable_baselines() {
+(
+  set -eu
+
+  repetitions=${repetitions:-3}
+
+  iml_direc=$IML_DIR/output/stable_baselines/calibration.parallel_runs_yes/algo_ddpg/env_Walker2DBulletEnv-v0
+#  --plots time-breakdown
+  args=(
+    --re-plot
+    --iml-directories ${iml_direc}
+    --iml-repetitions ${repetitions}
+    --output-directory ${iml_direc}/plots
+    --OverlapStackedBarTask-remap-df "$(_stable_baselines_remap_df)"
+    --GpuHwPlotTask-op-mapping "$(_stable_baselines_op_mapping)"
+    --plots gpu-hw
     "$@"
   )
   iml-plot "${args[@]}"
@@ -740,7 +982,7 @@ plot_tf_agents_fig_10_algo_choice() {
     --iml-directories "${iml_dirs[@]}" \
     --output-directory $(tf_agents_plots_direc)/tf_agents_fig_10_algo_choice \
     --x-title "RL algorithm configuration" \
-    --xtick-expression "$(_fig_10_algo_choice_xtick_expression)" \
+    --xtick-expression "$(_tf_agents_fig_10_algo_choice_xtick_expression)" \
     --title "RL algorithm choice" \
     --y2-logscale \
     --GpuHwPlotTask-width 6 \
@@ -769,7 +1011,7 @@ plot_tf_agents_fig_9_simulator_choice() {
     --iml-directories "${iml_dirs[@]}" \
     --output-directory $(tf_agents_plots_direc)/tf_agents_fig_9_simulator_choice \
     --x-title "Simulator configuration" \
-    --xtick-expression "$(_fig_9_simulator_choice_xtick_expression)" \
+    --xtick-expression "$(_tf_agents_fig_9_simulator_choice_xtick_expression)" \
     --title "Simulator choice" \
     --y2-logscale \
     --OverlapStackedBarTask-width 12 \
@@ -789,7 +1031,69 @@ plot_tf_agents() {
 )
 }
 
-_fig_9_simulator_choice_xtick_expression() {
+
+plot_stable_baselines_fig_10_algo_choice() {
+(
+  set -eu
+
+  # Fig 10: Algorithm choice
+  # tf-agents
+  #
+  # ppo doesn't work (BUG in tf-agents)
+  iml_dirs=()
+  for algo in $(stable_baselines_fig_10_algo_choice_algos); do
+    env_id="$(fig_10_algo_choice_environment)"
+    iml_dirs+=($(stable_baselines_iml_direc))
+    run_stable_baselines
+  done
+
+  args=(
+    --iml-directories "${iml_dirs[@]}"
+    --output-directory $(stable_baselines_plots_direc)/stable_baselines_fig_10_algo_choice
+    --x-title "RL algorithm configuration"
+    # --xtick-expression "$(_tf_agents_fig_10_algo_choice_xtick_expression)"
+    --title "RL algorithm choice"
+    --y2-logscale
+    --GpuHwPlotTask-width 6
+    --GpuHwPlotTask-height 5
+  )
+  _plot_stable_baselines "${args[@]}"
+
+)
+}
+plot_stable_baselines_fig_9_simulator_choice() {
+(
+  set -eu
+
+  # Fig 9: Simulator choice
+  # tf-agents
+  #
+  # ppo doesn't work (BUG in tf-agents).  Use ddpg instead.
+  iml_dirs=()
+  for env_id in $(fig_9_simulator_choice_environments); do
+    algo=$(stable_baselines_fig_9_simulator_choice_algo)
+    iml_dirs+=($(stable_baselines_iml_direc))
+  done
+
+  args=(
+    --iml-directories "${iml_dirs[@]}"
+    --output-directory $(stable_baselines_plots_direc)/stable_baselines_fig_9_simulator_choice
+    --x-title "Simulator configuration"
+    # --xtick-expression "$(_tf_agents_fig_9_simulator_choice_xtick_expression)"
+    --title "Simulator choice"
+    --y2-logscale
+    --OverlapStackedBarTask-width 12
+    --OverlapStackedBarTask-height 5
+    --GpuHwPlotTask-width 9
+    --GpuHwPlotTask-height 5
+  )
+  _plot_stable_baselines "${args[@]}"
+
+
+)
+}
+
+_tf_agents_fig_9_simulator_choice_xtick_expression() {
   # --xtick-expression "x_field = regex_match(row['iml_directory'], [[r'use_tf_functions_no', f\"{row['algo_env']}\nWithout autograph\"], [r'use_tf_functions_yes', f\"{row['algo_env']}\nWith autograph\"]])"
 #  cat <<EOF
 #  x_field = regex_match(row['iml_directory'], [
@@ -809,7 +1113,7 @@ x_field = regex_match(row['iml_directory'], [
 EOF
 }
 
-_fig_10_algo_choice_xtick_expression() {
+_tf_agents_fig_10_algo_choice_xtick_expression() {
   cat <<EOF
 x_field = regex_match(row['iml_directory'], [
     [r'use_tf_functions_no',
@@ -833,6 +1137,44 @@ _plot_tf_agents() {
         --output-directory ${iml_plots_direc}
         # --xtick-expression "x_field = regex_match(row['iml_directory'], [[r'use_tf_functions_no', f\"{row['algo_env']}\nWithout autograph\"], [r'use_tf_functions_yes', f\"{row['algo_env']}\nWith autograph\"]])"
         # --x-title "Configuration"
+        --OverlapStackedBarTask-remap-df "$(_tf_agents_remap_df)"
+    )
+    if [ "${dry_run}" = 'yes' ]; then
+      args+=(
+        # iml-calibrate option
+        --dry-run
+      )
+    fi
+    # Leave re-calibration to iml-prof.
+    if [ "${re_plot}" = 'yes' ] || [ "${re_calibrate}" = 'yes' ]; then
+      args+=(
+        --re-plot
+      )
+    fi
+    if [ "${plots}" != "" ]; then
+      args+=(
+        --plots "${plots}"
+      )
+    fi
+    _do "${args[@]}" "$@"
+  fi
+}
+
+_plot_stable_baselines() {
+
+  plots=${plots:-}
+
+  if [ "${calibrate}" = 'yes' ]; then
+    iml_plots_direc=$(stable_baselines_plots_direc)
+    args=(
+      iml-plot
+        --iml-repetitions ${repetitions}
+        # --iml-directories $(_stable_baselines_root_direc)/*tf_functions
+        --output-directory ${iml_plots_direc}
+        # --xtick-expression "x_field = regex_match(row['iml_directory'], [[r'use_tf_functions_no', f\"{row['algo_env']}\nWithout autograph\"], [r'use_tf_functions_yes', f\"{row['algo_env']}\nWith autograph\"]])"
+        # --x-title "Configuration"
+        --OverlapStackedBarTask-remap-df "$(_stable_baselines_remap_df)"
+        --GpuHwPlotTask-op-mapping "$(_stable_baselines_op_mapping)"
     )
     if [ "${dry_run}" = 'yes' ]; then
       args+=(
@@ -1012,7 +1354,7 @@ else
     echo "  run_debug_all"
     echo "    run_debug_full_training_instrumented"
     echo "    run_debug_full_training_uninstrumented"
-    echo "  run_stable_baselines"
+    echo "  old_run_stable_baselines"
     exit 1
 fi
 
