@@ -115,6 +115,12 @@ def main():
                         help=textwrap.dedent("""
                             Parallelize running configurations across GPUs on this machine (assume no CPU inteference). See --gpus
                             """))
+    parser.add_argument("--retry",
+                        type=int,
+                        help=textwrap.dedent("""
+                            If a command fails, retry it up to --retry times.
+                            Default: don't retry.
+                            """))
     parser.add_argument("--dry-run",
                         action='store_true',
                         help=textwrap.dedent("""
@@ -218,6 +224,8 @@ def main():
         if args.parallel_runs:
             cmd.extend(['--parallel-runs'])
             iml_prof_argv.remove('--parallel-runs')
+        if args.retry is not None:
+            cmd.extend(['--retry', str(args.retry)])
 
         # Q: Can't we just pass this through?
         # if args.re_calibrate:

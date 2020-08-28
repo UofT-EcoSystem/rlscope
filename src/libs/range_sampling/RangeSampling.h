@@ -78,9 +78,12 @@ struct RangeTree {
   size_t cur_depth;
   size_t cur_range_name_length;
   size_t cur_num_ranges;
+  std::map<std::string, size_t> cur_num_operations;
 
   RangeTreeStats stats;
   RangeTreeStats recorded_stats;
+
+  std::map<std::string, size_t> max_operations;
 
   RangeTree() : root(new RangeNode("[ROOT]")),
                 cur_node(root.get()),
@@ -100,6 +103,7 @@ struct RangeTree {
   void EndPass(bool update_stats);
 
   void _RecordStats();
+  void SetMaxOperations(const std::string &operation, int num_pushes);
 
   RangeTree::Stack CurStack() const;
 
@@ -136,7 +140,7 @@ struct RangeTree {
 
   size_t CurRangeNameLength() const;
 
-  void _UpdateStatsOnPush(bool was_insert);
+  MyStatus _UpdateStatsOnPush(const std::string &operation, bool was_insert);
 
   void _UpdateStatsOnPop();
 };
@@ -613,6 +617,7 @@ public:
 
 //    bool IsEnabled();
   MyStatus Push(const std::string &operation);
+  MyStatus SetMaxOperations(const std::string &operation, int num_pushes);
 
   MyStatus Pop();
 //    MyStatus Start();

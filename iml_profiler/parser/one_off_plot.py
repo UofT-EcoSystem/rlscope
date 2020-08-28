@@ -1560,11 +1560,6 @@ class GpuUtilExperiment:
         ))
         add_gpu_hw_fields(self.gpu_hw_df)
 
-        def _operation(range_name):
-            components = re.split(r'/', range_name)
-            return components[-1]
-
-        self.operation_tree = OperationTree(self.gpu_hw_df['range_name'].unique())
         # operations = self.operation_tree.leaf_operations()
         # def _get_operations():
         #     # range_node = RangeNode()
@@ -1580,6 +1575,9 @@ class GpuUtilExperiment:
         #     return operation in operations
         # self.gpu_hw_df = self.gpu_hw_df[self.gpu_hw_df['range_name'].apply(_is_operation)]
 
+        def _operation(range_name):
+            components = re.split(r'/', range_name)
+            return components[-1]
         self.gpu_hw_df['operation'] = self.gpu_hw_df['range_name'].apply(_operation)
 
         # GOAL:
@@ -1618,7 +1616,7 @@ class GpuUtilExperiment:
         # import pdb; pdb.set_trace()
         # print("HI")
 
-    def _get_algo_mapping(self):
+    def _parse_op_mapping(self):
         assert self.arg('op_mapping') is not None
 
         mapping = None
@@ -1629,9 +1627,8 @@ class GpuUtilExperiment:
             raise IMLInvaidArgument("--mapping must be a python expression that defines a callable function mapping(algo) that returns a Dict[OpNameString -> CompositeOp(add=[OpNameString], subtract=[OpNameString])")
         self.mapping = mapping
 
-        algo_mapping = dict()
-        df = self.time_breakdown_df
-        operations = set(df['operation'].unique())
+    def _get_op_mapping(self, op_kwargs, operations):
+
         def check_operation(algo, op):
             if op not in operations:
                 raise IMLInvaidArgument("--mapping is invalid for algo={algo}; no operation \"{op}\" was profiled; choices = {ops}".format(
@@ -1639,34 +1636,37 @@ class GpuUtilExperiment:
                     op=op,
                     ops=operations,
                 ))
-        algos = df['algo'].unique()
-        for algo in algos:
-            algo_mapping[algo] = self.mapping(algo)
-            for new_op, composite_op in list(algo_mapping[algo].items()):
-                if type(composite_op) == CompositeOp:
-                    for op in composite_op.add:
-                        check_operation(algo, op)
-                    for op in composite_op.subtract:
-                        check_operation(algo, op)
-                    common_ops = set(composite_op.add).intersection(set(composite_op.subtract))
-                    if len(common_ops) > 0:
-                        raise IMLInvaidArgument("CompositeOp for algo={algo} has overlapping operations in \"add\" and \"subtract\": {intersect}".format(
-                            intersect=common_ops,
-                            algo=algo,
-                        ))
-                elif type(composite_op) == str:
-                    op = composite_op
+
+        algo = op_kwargs['algo']
+
+        # algo_mapping = dict()
+        op_mapping = self.mapping(**op_kwargs)
+        # algo_mapping[algo] = self.mapping(algo)
+        for new_op, composite_op in list(op_mapping.items()):
+            if type(composite_op) == CompositeOp:
+                for op in composite_op.add:
                     check_operation(algo, op)
-                    composite_op = CompositeOp(add=[op])
-                    algo_mapping[algo][new_op] = composite_op
-                else:
-                    raise IMLInvaidArgument("mapping(algo) function must return Dict[OpNameString -> CompositeOp], but dict value for op={op} was {type} ({value})".format(
-                        type=type(composite_op).__name__,
-                        value=composite_op,
+                for op in composite_op.subtract:
+                    check_operation(algo, op)
+                common_ops = set(composite_op.add).intersection(set(composite_op.subtract))
+                if len(common_ops) > 0:
+                    raise IMLInvaidArgument("CompositeOp for algo={algo} has overlapping operations in \"add\" and \"subtract\": {intersect}".format(
+                        intersect=common_ops,
                         algo=algo,
-                        op=new_op,
                     ))
-        return algo_mapping
+            elif type(composite_op) == str:
+                op = composite_op
+                check_operation(algo, op)
+                composite_op = CompositeOp(add=[op])
+                op_mapping[new_op] = composite_op
+            else:
+                raise IMLInvaidArgument("mapping(**op_kwargs) function must return Dict[OpNameString -> CompositeOp], but dict value for op={op} was {type} ({value})".format(
+                    type=type(composite_op).__name__,
+                    value=composite_op,
+                    algo=algo,
+                    op=new_op,
+                ))
+        return op_mapping
 
     def get_op_mapping_df(self):
         """
@@ -1705,7 +1705,7 @@ class GpuUtilExperiment:
         if self.arg('op_mapping') is None:
             return None
 
-        algo_mapping = self._get_algo_mapping()
+        self._parse_op_mapping()
 
         # PROBLEM: How to represent different "configurations"?
         # A: 'x_field'...should be captured by iml_directory.
@@ -1748,6 +1748,8 @@ class GpuUtilExperiment:
                 # Should have BOTH SM metrics and time-breakdown for all operations.
                 operations = gpu_hw_operations.intersection(time_breakdown_operations)
 
+                operation_tree = OperationTree(iml_gpu_hw_df['range_name'].unique())
+
                 algo = iml_df['algo'].unique()
                 assert len(algo) == 1
                 algo = algo[0]
@@ -1763,7 +1765,7 @@ class GpuUtilExperiment:
                 metric_value = dict()
                 total_metric = dict()
                 for op in operations:
-                    all_operations = self.operation_tree.all_operations(op)
+                    all_operations = operation_tree.all_operations(op)
                     assert op in all_operations
                     def _in_all_operations(operation):
                         return operation in all_operations
@@ -1777,11 +1779,20 @@ class GpuUtilExperiment:
                     total_metric[op] = metric_value[op] * total_time[op]
                     assert total_metric[op] >= 0
 
-                mapping = algo_mapping[algo]
+                iml_directories = iml_df['iml_directory'].unique()
+                assert len(iml_directories) == 1
+                iml_directory = iml_directories[0]
+
+                op_kwargs = {
+                    'algo': algo,
+                    'iml_directory': iml_directory,
+                    'x_field': x_field,
+                }
+                op_mapping = self._get_op_mapping(op_kwargs, operations)
                 time_left = dict()
                 adjusted_metric = dict()
                 new_metric_value = dict()
-                for new_op, composite_op in mapping.items():
+                for new_op, composite_op in op_mapping.items():
                     time_left[new_op] = 0.
                     adjusted_metric[new_op] = 0.
                     for op in composite_op.add:

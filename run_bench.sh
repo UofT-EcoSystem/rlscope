@@ -22,6 +22,7 @@ set -e
 ROOT="$(readlink -f $(dirname "$0"))"
 
 DRY_RUN=${DRY_RUN:-no}
+DEBUG=${DEBUG:-no}
 
 STABLE_BASELINES_DIR=${STABLE_BASELINES_DIR:-$HOME/clone/stable-baselines}
 IML_DIR=${IML_DIR:-$HOME/clone/iml}
@@ -204,6 +205,12 @@ fig_10_algo_choice_algorithms() {
 }
 tf_agents_fig_9_simulator_choice_algo() {
   echo ddpg
+}
+tf_agents_fig_10_algo_choice_algos() {
+  echo ddpg
+  # Disable until --stable_baselines_hyperparams is supported...
+#  echo sac
+#  echo td3
 }
 stable_baselines_fig_10_algo_choice_algos() {
   echo a2c
@@ -493,6 +500,8 @@ all_run_tf_agents() {
   re_calibrate=${re_calibrate:-no}
   re_plot=${re_plot:-no}
   dry_run=${dry_run:-no}
+  stable_baselines_hyperparams=${stable_baselines_hyperparams:-yes}
+  subdir=${subdir:-}
 
   # Fig 10: Algorithm choice
   # tf-agents
@@ -500,7 +509,9 @@ all_run_tf_agents() {
   # ppo doesn't work (BUG in tf-agents)
   for algo in $(tf_agents_fig_10_algo_choice_algos); do
     env_id="$(fig_10_algo_choice_environment)"
-    run_tf_agents
+    for use_tf_functions in yes no; do
+      run_tf_agents
+    done
   done
 
   # Fig 9: Simulator choice
@@ -509,7 +520,9 @@ all_run_tf_agents() {
   # ppo doesn't work (BUG in tf-agents).  Use ddpg instead.
   for env_id in $(fig_9_simulator_choice_environments); do
     algo=$(tf_agents_fig_9_simulator_choice_algo)
-    run_tf_agents
+    for use_tf_functions in yes no; do
+      run_tf_agents
+    done
   done
 
   plot_tf_agents_fig_10_algo_choice
@@ -553,21 +566,73 @@ all_run_stable_baselines() {
 )
 }
 
+fig_framework_comparison_algos() {
+  echo ddpg
+}
+fig_framework_comparison_envs() {
+  echo Walker2DBulletEnv-v0
+}
+
+plot_framework_comparison() {
+(
+  set -eu
+
+  calibrate=${calibrate:-yes}
+  max_passes=${max_passes:-}
+  repetitions=${repetitions:-3}
+  re_calibrate=${re_calibrate:-no}
+  re_plot=${re_plot:-no}
+  dry_run=${dry_run:-no}
+  stable_baselines_hyperparams=${stable_baselines_hyperparams:-yes}
+
+  # Fig: Framework comparison
+  # WANT: plot:
+  # - (DDPG, Walker)
+  #   - stable-baselines
+  #   - tf-agents: use_tf_functions=yes
+  #   - tf-agents: use_tf_functions=no
+  local iml_dirs=()
+  for algo in $(fig_framework_comparison_algos); do
+    for env_id in $(fig_framework_comparison_envs); do
+      iml_dirs+=($(stable_baselines_iml_direc))
+      for use_tf_functions in yes no; do
+        iml_dirs+=($(tf_agents_iml_direc))
+      done
+    done
+  done
+
+#    --y2-logscale
+
+  local args=(
+    --iml-directories "${iml_dirs[@]}"
+    --output-directory $(framework_comparison_plots_direc)
+    --x-title "Framework configuration"
+    --xtick-expression "$(_framework_comparison_xtick_expression)"
+    --title "Framework choice"
+    --GpuHwPlotTask-width 6
+    --GpuHwPlotTask-height 5
+  )
+  _plot_framework_comparison "${args[@]}"
+
+)
+}
+
 test_run_expr() {
 (
   set -eu
 
   test_dir=$IML_DIR/output/run_expr/debug
   run_expr_sh=${test_dir}/run_expr.sh
-  n_launches=10
+#  n_launches=10
+  n_launches=1
   mkdir -p $test_dir
   if [ -e $run_expr_sh ]; then
     rm $run_expr_sh
   fi
-  # run_expr_args=(--debug --tee --sh ${run_expr_sh})
-  run_expr_args=(--tee --sh ${run_expr_sh})
-  # py_args=(--fail)
-  py_args=()
+   run_expr_args=(--debug --tee --sh ${run_expr_sh} --retry 3)
+   py_args=(--fail)
+#  run_expr_args=(--tee --sh ${run_expr_sh})
+#  py_args=()
   for i in $(seq ${n_launches}); do
     iml-run-expr "${run_expr_args[@]}" --append \
       python $IML_DIR/iml_profiler/scripts/madeup_cmd.py --iml-directory ${test_dir}/process_${i} "${py_args[@]}"
@@ -591,8 +656,13 @@ run_tf_agents() {
   # Roughly 1 minute when running --config time-breakdown
   max_passes=${max_passes:-}
   repetitions=${repetitions:-5}
+  retry=${retry:-}
   dry_run=${dry_run:-no}
-#  use_tf_functions=${use_tf_functions:-yes}
+  stable_baselines_hyperparams=${stable_baselines_hyperparams:-yes}
+  subdir=${subdir:-}
+  use_tf_functions=${use_tf_functions:-yes}
+
+  echo "run_tf_agents: use_tf_functions = ${use_tf_functions}"
 
   local py_script=$TF_AGENTS_DIR/tf_agents/agents/${algo}/examples/v2/train_eval.rlscope.py
   if [ ! -f ${py_script} ]; then
@@ -623,6 +693,11 @@ run_tf_agents() {
       --re-plot
     )
   fi
+  if [ "${retry}" != "" ]; then
+    args+=(
+      --retry ${retry}
+    )
+  fi
   args+=(
     python ${py_script}
     --env_name "${env_id}"
@@ -638,6 +713,12 @@ run_tf_agents() {
       --iml-repetitions ${repetitions}
     )
   fi
+  if [ "${stable_baselines_hyperparams}" = 'yes' ]; then
+    args+=(
+      --stable_baselines_hyperparams
+    )
+  fi
+
 
   gin_params=()
   set_gin_params() {
@@ -650,16 +731,10 @@ run_tf_agents() {
 #    gin_params+=("--gin_param=train_eval.env_name=\"${env_id}\"")
   }
 
-  use_tf_functions=yes
-  set_gin_params
-  iml_direc="$(tf_agents_iml_direc)"
-
   if [ "${just_plot}" = "no" ]; then
-    for use_tf_functions in yes no; do
-      set_gin_params
-      iml_direc="$(tf_agents_iml_direc)"
-      _do "${args[@]}" "${gin_params[@]}" --iml-directory ${iml_direc}
-    done
+    set_gin_params
+    iml_direc="$(tf_agents_iml_direc)"
+    _do "${args[@]}" "${gin_params[@]}" --iml-directory ${iml_direc}
   fi
 
 )
@@ -708,6 +783,7 @@ run_stable_baselines() {
   re_plot=${re_plot:-no}
   max_passes=${max_passes:-}
   repetitions=${repetitions:-5}
+  retry=${retry:-}
   dry_run=${dry_run:-no}
 
   display=1
@@ -743,6 +819,11 @@ run_stable_baselines() {
       --re-plot
     )
   fi
+  if [ "${retry}" != "" ]; then
+    args+=(
+      --retry ${retry}
+    )
+  fi
   args+=(
     python ${py_script}
     --algo "${algo}"
@@ -770,26 +851,48 @@ run_stable_baselines() {
 }
 
 _tf_agents_root_direc() {
-  echo $IML_DIR/output/tf_agents/calibration.parallel_runs_yes
+  local iml_root_dir=$IML_DIR/output/tf_agents/calibration.parallel_runs_yes
+  subdir=${subdir:-}
+  if [ "${subdir}" != "" ]; then
+    iml_root_dir="${iml_root_dir}/${subdir}"
+  fi
+  echo "${iml_root_dir}"
 }
 
 tf_agents_plots_direc() {
 (
   set -eu
   local iml_plots_direc=$(_tf_agents_root_direc)/plots
+  if [ "${stable_baselines_hyperparams}" = 'yes' ]; then
+    iml_plots_direc="${iml_plots_direc}/stable_baselines_hyperparams_yes"
+  else
+    iml_plots_direc="${iml_plots_direc}/stable_baselines_hyperparams_no"
+  fi
   echo "${iml_plots_direc}"
+)
+}
+
+framework_comparison_plots_direc() {
+(
+  set -eu
+  local iml_plots_dir=$IML_DIR/output/plots/framework_comparison
+  echo "${iml_plots_dir}"
 )
 }
 
 tf_agents_iml_direc() {
 (
   set -eu
+  max_passes=${max_passes:-}
   local iml_root_dir=$(_tf_agents_root_direc)/algo_${algo}/env_${env_id}
-  if [ "${max_passes}" != "" ]; then
-    iml_direc="${iml_root_dir}.max_passes_${max_passes}"
-  fi
 #  iml_direc="${iml_root_dir}/$(_bool_attr use_tf_functions $use_tf_functions)"
   iml_direc="${iml_root_dir}/use_tf_functions_$use_tf_functions"
+  if [ "${max_passes}" != "" ]; then
+    iml_direc="${iml_direc}.max_passes_${max_passes}"
+  fi
+  if [ "${stable_baselines_hyperparams}" = 'yes' ]; then
+    iml_direc="${iml_direc}.stable_baselines_hyperparams_${stable_baselines_hyperparams}"
+  fi
   echo "${iml_direc}"
 )
 }
@@ -801,6 +904,7 @@ stable_baselines_iml_direc() {
 (
   set -eu
   local iml_direc=$(_stable_baselines_root_direc)/algo_${algo}/env_${env_id}
+  max_passes=${max_passes:-}
   if [ "${max_passes}" != "" ]; then
     iml_direc="${iml_direc}.max_passes_${max_passes}"
   fi
@@ -815,11 +919,11 @@ stable_baselines_plots_direc() {
 )
 }
 
-_tf_agents_remap_df() {
+_py_tf_agents_fix_operation() {
+  # APPLY:
+  # new_df['operation'] = new_df['operation'].apply(tf_agents_fix_operation)
   cat <<EOF
-$(_common_fix_region_remap_df)
-
-def fix_operation(operation):
+def tf_agents_fix_operation(operation):
   if operation == 'step':
     return 'Simulation'
   elif operation == 'collect_data':
@@ -828,11 +932,46 @@ def fix_operation(operation):
     return 'Backpropagation'
   else:
     raise NotImplementedError(f"Not sure what legend label to use for operation={operation}")
-new_df['operation'] = new_df['operation'].apply(fix_operation)
+EOF
+}
+_tf_agents_remap_df() {
+  cat <<EOF
+$(_py_fix_region)
+$(_py_tf_agents_fix_operation)
+
+new_df['region'] = new_df.apply(fix_region, axis=1)
+new_df['operation'] = new_df['operation'].apply(tf_agents_fix_operation)
 EOF
 }
 
-_common_fix_region_remap_df() {
+_framework_comparison_remap_df() {
+  # ONLY apply tf_agents_fix_operation is its a tf_agents row
+  cat <<EOF
+$(_py_fix_region)
+
+$(_py_tf_agents_fix_operation)
+
+$(_py_stable_baselines_pretty_operation)
+
+def framework_comparison_operation(row):
+  global stable_baselines_pretty_operation
+  global tf_agents_fix_operation
+
+  if re.search(r'/stable_baselines/', row['iml_directory']):
+    return stable_baselines_pretty_operation(row['algo'], row['operation'])
+  elif re.search(r'/tf_agents/', row['iml_directory']):
+    return tf_agents_fix_operation(row['operation'])
+  else:
+    raise NotImplementedError(f"Not sure how to remap framework_comparison operation for iml_directory={row['iml_directory']}")
+
+new_df['region'] = new_df.apply(fix_region, axis=1)
+new_df['operation'] = new_df.apply(framework_comparison_operation, axis=1)
+EOF
+}
+
+_py_fix_region() {
+  # APPLY:
+  # new_df['region'] = new_df.apply(fix_region, axis=1)
   cat <<EOF
 def fix_region(row):
   region = set(row['region'])
@@ -854,56 +993,64 @@ def fix_region(row):
     region.remove(CATEGORY_CUDA_API_CPU)
 
   return tuple(sorted(region))
-new_df['region'] = new_df.apply(fix_region, axis=1)
+EOF
+}
+
+_py_stable_baselines_pretty_operation() {
+  # APPLY:
+  # new_df['operation'] = np.vectorize(stable_baselines_pretty_operation, otypes=[str])(new_df['algo'], new_df['operation'])
+  cat <<EOF
+def stable_baselines_pretty_operation(algo, op_name):
+  if algo == 'ppo2':
+    if op_name in {'compute_advantage_estimates', 'optimize_surrogate', 'training_loop'}:
+      return "Backpropagation"
+    elif op_name == 'sample_action':
+      return "Inference"
+    elif op_name == 'step':
+      return "Simulation"
+  elif algo == 'ddpg':
+    if op_name in {'evaluate', 'train_step', 'training_loop', 'update_target_network'}:
+      return "Backpropagation"
+    elif op_name == 'sample_action':
+      return "Inference"
+    elif op_name == 'step':
+      return "Simulation"
+  elif algo == 'a2c':
+    if op_name in {'train_step', 'training_loop'}:
+      return "Backpropagation"
+    elif op_name == 'sample_action':
+      return "Inference"
+    elif op_name == 'step':
+      return "Simulation"
+  elif algo == 'sac':
+    if op_name in {'training_loop', 'update_actor_and_critic', 'update_target_network'}:
+      return "Backpropagation"
+    elif op_name == 'sample_action':
+      return "Inference"
+    elif op_name == 'step':
+      return "Simulation"
+  raise NotImplementedError("Not sure what pretty-name to use for algo={algo}, op_name={op_name}".format(
+    algo=algo,
+    op_name=op_name))
 EOF
 }
 
 _stable_baselines_remap_df() {
   cat <<EOF
-$(_common_fix_region_remap_df)
+$(_py_fix_region)
+$(_py_stable_baselines_pretty_operation)
 
-def pretty_operation(algo, op_name):
-    if algo == 'ppo2':
-        if op_name in {'compute_advantage_estimates', 'optimize_surrogate', 'training_loop'}:
-            return "Backpropagation"
-        elif op_name == 'sample_action':
-            return "Inference"
-        elif op_name == 'step':
-            return "Simulation"
-    elif algo == 'ddpg':
-        if op_name in {'evaluate', 'train_step', 'training_loop', 'update_target_network'}:
-            return "Backpropagation"
-        elif op_name == 'sample_action':
-            return "Inference"
-        elif op_name == 'step':
-            return "Simulation"
-    elif algo == 'a2c':
-        if op_name in {'train_step', 'training_loop'}:
-            return "Backpropagation"
-        elif op_name == 'sample_action':
-            return "Inference"
-        elif op_name == 'step':
-            return "Simulation"
-    elif algo == 'sac':
-        if op_name in {'training_loop', 'update_actor_and_critic', 'update_target_network'}:
-            return "Backpropagation"
-        elif op_name == 'sample_action':
-            return "Inference"
-        elif op_name == 'step':
-            return "Simulation"
-    raise NotImplementedError("Not sure what pretty-name to use for algo={algo}, op_name={op_name}".format(
-        algo=algo,
-        op_name=op_name))
-new_df['operation'] = np.vectorize(pretty_operation, otypes=[str])(new_df['algo'], new_df['operation'])
+new_df['region'] = new_df.apply(fix_region, axis=1)
+new_df['operation'] = np.vectorize(stable_baselines_pretty_operation, otypes=[str])(new_df['algo'], new_df['operation'])
 EOF
 }
 
-_stable_baselines_op_mapping() {
-#    raise NotImplementedError("Not sure what mapping(algo) to use for algo={algo}".format(
-#        algo=algo,
-#    ))
+_py_stable_baselines_op_mapping() {
+  # APPLY:
+  # def mapping(**op_kwargs):
+  #   return stable_baselines_op_mapping(**op_kwargs)
   cat <<EOF
-def mapping(algo):
+def stable_baselines_op_mapping(algo, iml_directory, x_field):
     # All stable-baselines algorithms use the same gpu-hw operation mapping.
     return {
       'Backpropagation': CompositeOp(add=['training_loop'], subtract=['sample_action', 'step']),
@@ -913,14 +1060,58 @@ def mapping(algo):
 EOF
 }
 
-#        def mapping(algo):
-#            if algo == 'ddpg':
-#              {
-#              "Backpropagation": ComposeOp(add=["training_loop"], subtract=["sample_action", "step"]),
-#              "Inference": ComposeOp(add=["sample_action"]) # or just "sample_action"
-#              "Simulator": "step",
-#              }
-#            elif ...:
+_py_tf_agents_op_mapping() {
+  # APPLY:
+  # def mapping(**op_kwargs):
+  #   return tf_agents_op_mapping(**op_kwargs)
+  cat <<EOF
+def tf_agents_op_mapping(algo, iml_directory, x_field):
+    # All tf-agents algorithms use the same gpu-hw operation mapping.
+    return {
+      'Backpropagation': 'train_step',
+      'Inference': CompositeOp(add=['collect_data'], subtract=['step']),
+      'Simulator': 'step',
+    }
+EOF
+}
+
+_stable_baselines_op_mapping() {
+  cat <<EOF
+$(_py_stable_baselines_op_mapping)
+
+def mapping(**op_kwargs):
+  global stable_baselines_op_mapping
+  return stable_baselines_op_mapping(**op_kwargs)
+EOF
+}
+
+_tf_agents_op_mapping() {
+  cat <<EOF
+$(_py_tf_agents_op_mapping)
+
+def mapping(**op_kwargs):
+  global tf_agents_op_mapping
+  return tf_agents_op_mapping(**op_kwargs)
+EOF
+}
+
+_framework_comparison_op_mapping() {
+  cat <<EOF
+$(_py_tf_agents_op_mapping)
+$(_py_stable_baselines_op_mapping)
+
+def mapping(iml_directory, **op_kwargs):
+  global stable_baselines_op_mapping
+  global tf_agents_op_mapping
+
+  if re.search(r'/stable_baselines/', iml_directory):
+    return stable_baselines_op_mapping(iml_directory=iml_directory, **op_kwargs)
+  elif re.search(r'/tf_agents/', iml_directory):
+    return tf_agents_op_mapping(iml_directory=iml_directory, **op_kwargs)
+  else:
+    raise NotImplementedError(f"Not sure what op_mapping to use for framework_comparison with iml_directory={row['iml_directory']}")
+EOF
+}
 
 test_plot_simulator() {
 (
@@ -962,6 +1153,32 @@ test_plot_stable_baselines() {
 
 }
 
+_framework_comparison_xtick_expression() {
+  cat <<EOF
+def pretty_autograph(iml_directory):
+  if re.search(r'use_tf_functions_no', iml_directory):
+    return "autograph OFF"
+  elif re.search(r'use_tf_functions_yes', iml_directory):
+    return "autograph ON"
+  return None
+
+def pretty_rl_framework(iml_directory):
+  if re.search(r'/stable_baselines/', iml_directory):
+    return "stable-baselines"
+  elif re.search(r'/tf_agents/', iml_directory):
+    return "tf-agents"
+  return None
+
+each_field = [
+  row['algo_env'],
+  pretty_rl_framework(row['iml_directory']),
+  pretty_autograph(row['iml_directory']),
+]
+each_field = [x for x in each_field if x is not None]
+x_field = '\n'.join(each_field)
+EOF
+}
+
 plot_tf_agents_fig_10_algo_choice() {
 (
   set -eu
@@ -982,7 +1199,7 @@ plot_tf_agents_fig_10_algo_choice() {
     --iml-directories "${iml_dirs[@]}" \
     --output-directory $(tf_agents_plots_direc)/tf_agents_fig_10_algo_choice \
     --x-title "RL algorithm configuration" \
-    --xtick-expression "$(_tf_agents_fig_10_algo_choice_xtick_expression)" \
+    --xtick-expression "$(_framework_comparison_xtick_expression)" \
     --title "RL algorithm choice" \
     --y2-logscale \
     --GpuHwPlotTask-width 6 \
@@ -1200,6 +1417,46 @@ _plot_stable_baselines() {
   fi
 }
 
+_plot_framework_comparison() {
+
+  plots=${plots:-}
+
+  if [ "${calibrate}" = 'yes' ]; then
+    # iml_plots_direc=$(framework_comparison_plots_direc)
+    args=(
+      iml-plot
+        --iml-repetitions ${repetitions}
+        # --iml-directories $(_framework_comparison_root_direc)/*tf_functions
+        # --output-directory ${iml_plots_direc}
+        # --xtick-expression "x_field = regex_match(row['iml_directory'], [[r'use_tf_functions_no', f\"{row['algo_env']}\nWithout autograph\"], [r'use_tf_functions_yes', f\"{row['algo_env']}\nWith autograph\"]])"
+        # --x-title "Configuration"
+        --OverlapStackedBarTask-remap-df "$(_framework_comparison_remap_df)"
+        --GpuHwPlotTask-op-mapping "$(_framework_comparison_op_mapping)"
+    )
+    if [ "${dry_run}" = 'yes' ]; then
+      args+=(
+        # iml-calibrate option
+        --dry-run
+      )
+    fi
+    # Leave re-calibration to iml-prof.
+    if [ "${re_plot}" = 'yes' ] || [ "${re_calibrate}" = 'yes' ]; then
+      args+=(
+        --re-plot
+      )
+    fi
+    if [ "${plots}" != "" ]; then
+      args+=(
+        --plots "${plots}"
+      )
+    fi
+    if [ "${DEBUG}" = 'yes' ]; then
+      args+=(--pdb --debug --debug-single-thread)
+    fi
+    _do "${args[@]}" "$@"
+  fi
+}
+
 test_tf_agents() {
 (
   set -eu
@@ -1360,5 +1617,4 @@ else
     echo "  old_run_stable_baselines"
     exit 1
 fi
-
 

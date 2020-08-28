@@ -206,6 +206,12 @@ extern const bool TRACE_CUDA;
 extern const bool TRACE_CUDA_DEFAULT;
 bool get_TRACE_CUDA(boost::optional<bool> user_value);
 
+// TRACE_GPU_HW:
+// If defined, print every GPUHwSampler API call
+extern const bool TRACE_GPU_HW;
+extern const bool TRACE_GPU_HW_DEFAULT;
+bool get_TRACE_GPU_HW(boost::optional<bool> user_value);
+
 std::vector<std::string> StringSplit(const std::string& s, std::string rgx_str);
 
 // using timestamp_us = std::chrono::time_point<std::chrono::system_clock, std::chrono::microseconds>;

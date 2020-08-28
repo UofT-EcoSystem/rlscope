@@ -178,7 +178,8 @@ def expr_run_cmd(cmd, to_file,
                  tee_prefix=None,
                  # extra_argv=[],
                  only_show_env=None,
-                 debug=False):
+                 debug=False,
+                 log_func=None):
     """
     Run an experiment, if it hasn't been run already.
     We check if an experiment as already been run by looking for a log file, and whether that logfile has a success-line in it
@@ -191,6 +192,9 @@ def expr_run_cmd(cmd, to_file,
     :param debug:
     :return:
     """
+
+    if log_func is None:
+        log_func = logger.error
 
     if env is None:
         # Make sure iml-analyze get IML_POSTGRES_HOST
@@ -205,7 +209,6 @@ def expr_run_cmd(cmd, to_file,
             if skip_error:
                 tee_kwargs['check'] = False
             proc = tee(
-                # cmd=cmd + extra_argv,
                 cmd=cmd,
                 to_file=to_file,
                 cwd=cwd,
@@ -217,7 +220,7 @@ def expr_run_cmd(cmd, to_file,
                 **tee_kwargs,
             )
             if not dry_run and skip_error and proc.returncode != 0:
-                logger.error(
+                log_func(
                     "> Command failed; see {path}; continuing (--skip-error was set)".format(
                         path=to_file,
                     ))

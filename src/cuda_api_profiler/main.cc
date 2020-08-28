@@ -280,6 +280,14 @@ RetCode RLSCOPE_EXPORT pop_operation() {
   return status.code();
 }
 
+RetCode RLSCOPE_EXPORT set_max_operations(const char* operation, int num_pushes) {
+  LOG_FUNC_ENTRY();
+  MyStatus status;
+  status = globals.device_tracer->SetMaxOperations(operation, num_pushes);
+  MAYBE_LOG_ERROR(LOG(INFO), __func__, status);
+  return status.code();
+}
+
 }
 
 }

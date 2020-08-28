@@ -13,6 +13,7 @@ SAMPLE_CUDA_API_1.0 {
     record_overhead_event;
     record_overhead_event_for_operation;
     push_operation;
+    set_max_operations;
     pop_operation;
     start_pass;
     end_pass;

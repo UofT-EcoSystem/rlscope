@@ -48,6 +48,7 @@ class RunExpr:
                  sh=None,
                  tee=False,
                  run_sh=False,
+                 retry=None,
                  debug=False,
                  dry_run=False,
                  skip_errors=False,
@@ -59,6 +60,7 @@ class RunExpr:
         self.iml_directory = iml_directory
         self.sh = sh
         self.run_sh = run_sh
+        self.retry = retry
         self.debug = debug
         self.dry_run = dry_run
         self.skip_errors = skip_errors
@@ -128,7 +130,14 @@ class RunExpr:
                     gpu=gpu,
                     logfile=logfile,
                 ).rstrip())
-            self.run_cmd(gpu, run_cmd, tee_output=self.tee, tee_prefix=f"GPU[{gpu}] :: ")
+            if self.retry is None:
+                retries = 1
+            else:
+                retries = self.retry
+            for attempt in range(1, retries+1):
+                proc = self.run_cmd(gpu, run_cmd, tee_output=self.tee, tee_prefix=f"GPU[{gpu}] :: ", attempt=attempt)
+                if self.dry_run or proc is None or proc.returncode == 0:
+                    break
 
             if self.should_stop.is_set() or self.worker_failed.is_set():
                 logger.debug(f"Got exit signal; exiting GPU[{gpu}] worker")
@@ -213,7 +222,7 @@ class RunExpr:
     def _logfile_basename(self, task):
         return "{task}.logfile.out".format(task=task)
 
-    def run_cmd(self, gpu, run_cmd, tee_output=False, tee_prefix=None):
+    def run_cmd(self, gpu, run_cmd, tee_output=False, tee_prefix=None, attempt=None):
         cmd = run_cmd.cmd
         # output_directory = run_cmd.output_directory
 
@@ -227,6 +236,13 @@ class RunExpr:
             env['CUDA_VISIBLE_DEVICES'] = ''
         else:
             env['CUDA_VISIBLE_DEVICES'] = str(gpu)
+        can_retry = self.retry is not None and attempt is not None and attempt < self.retry
+        if can_retry:
+            log_func = logger.warning
+            attempt_str = "[ATTEMPT {attempt}/{retry}] ".format(attempt=attempt, retry=self.retry)
+        else:
+            log_func = logger.error
+            attempt_str = ""
         proc = expr_run_cmd(
             cmd=cmd,
             to_file=logfile,
@@ -237,6 +253,7 @@ class RunExpr:
             # Only output to logfile to avoid interleaved output from commands.
             tee_output=tee_output,
             tee_prefix=tee_prefix,
+            log_func=log_func,
             skip_error=True,
             debug=self.debug,
             only_show_env={
@@ -245,27 +262,30 @@ class RunExpr:
         )
         if not self.dry_run and proc is not None and proc.returncode != 0:
             if not self.skip_errors:
-                logger.error(
+                log_func(
                     textwrap.dedent("""\
-                    Saw failed cmd in GPU[{gpu}] worker; use --skip-errors to ignore failure and continue with other commands.
+                    {attempt_str}Saw failed cmd in GPU[{gpu}] worker; use --skip-errors to ignore failure and continue with other commands.
                     > CMD:
                       logfile={logfile}
                       $ {cmd}
                     """).format(
+                        attempt_str=attempt_str,
                         cmd=' '.join(cmd),
                         gpu=gpu,
                         logfile=logfile,
                     ).rstrip())
-                # Signal stop
-                self.worker_failed.set()
+                if not can_retry:
+                    # Signal stop
+                    self.worker_failed.set()
             else:
-                logger.error(
+                log_func(
                     textwrap.dedent("""\
-                    --skip-errors: SKIP failed cmd in GPU[{gpu}] worker:
+                    {attempt_str}--skip-errors: SKIP failed cmd in GPU[{gpu}] worker:
                     > CMD:
                       logfile={logfile}
                       $ {cmd}
                     """).format(
+                        attempt_str=attempt_str,
                         cmd=' '.join(cmd),
                         gpu=gpu,
                         logfile=logfile,
@@ -399,6 +419,12 @@ def main():
                         help=textwrap.dedent("""
                         Debug
                         """))
+    parser.add_argument("--retry",
+                        type=int,
+                        help=textwrap.dedent("""
+                            If a command fails, retry it up to --retry times.
+                            Default: don't retry.
+                            """))
     parser.add_argument("--tee",
                         action='store_true',
                         help=textwrap.dedent("""

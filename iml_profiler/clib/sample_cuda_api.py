@@ -239,6 +239,17 @@ def push_operation(operation):
         raise IMLProfError(ret)
     return ret
 
+def set_max_operations(operation, num_pushes):
+    if py_config.DEBUG and py_config.DEBUG_RLSCOPE_LIB_CALLS:
+        logger.info(_log_api_call_msg('set_max_operations', operation, num_pushes))
+    ret = _so.set_max_operations(
+        _as_c_string(operation),
+        c_int(num_pushes),
+    )
+    if ret != TF_OK:
+        raise IMLProfError(ret)
+    return ret
+
 def pop_operation():
     if py_config.DEBUG and py_config.DEBUG_RLSCOPE_LIB_CALLS:
         logger.info(_log_api_call_msg('pop_operation'))

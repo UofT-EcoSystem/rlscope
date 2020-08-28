@@ -69,6 +69,7 @@ class Calibration:
                  re_calibrate=False,
                  re_plot=False,
                  dry_run=False,
+                 retry=None,
                  skip_plot=False,
                  skip_error=False,
                  max_workers=None,
@@ -87,6 +88,7 @@ class Calibration:
         self.re_calibrate = re_calibrate
         self.re_plot = re_plot
         self.dry_run = dry_run
+        self.retry = retry
         self.skip_plot = skip_plot
         self.skip_error = skip_error
         self.max_workers = max_workers
@@ -663,6 +665,8 @@ class Calibration:
             run_expr_cmd.append('--dry-run')
         if self.debug:
             run_expr_cmd.append('--debug')
+        if self.retry is not None:
+            run_expr_cmd.extend(['--retry', str(self.retry)])
         # NOTE: don't forward pdb since we cannot interact with parallel processes.
         print_cmd(run_expr_cmd)
         proc = subprocess.run(run_expr_cmd, check=False)
@@ -1232,6 +1236,12 @@ def _main(argv):
                         action='store_true',
                         help=textwrap.dedent("""
                             Parallelize running configurations across GPUs on this machine (assume no CPU inteference). See --iml-gpus
+                            """))
+    run_parser.add_argument("--retry",
+                            type=int,
+                            help=textwrap.dedent("""
+                            If a command fails, retry it up to --retry times.
+                            Default: don't retry.
                             """))
     run_parser.set_defaults(**{'mode': 'run'})
 

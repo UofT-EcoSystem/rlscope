@@ -93,6 +93,7 @@ class DeviceTracer {
       const char* operation,
       int64_t num_events) = 0;
   virtual MyStatus PopOperation() = 0;
+  virtual MyStatus SetMaxOperations(const char* operation, int num_pushes) = 0;
 
   // Collect trace results.  Results are added to the specified
   // StepStatsCollector.  Does not clear any existing stats.

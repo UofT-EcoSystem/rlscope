@@ -790,7 +790,7 @@ MyStatus GetGPUChipName(int device, std::string* chip_name) {
 
 MyStatus GPUHwCounterSampler::Init() {
   // LOG_FUNC_ENTRY();
-  if (SHOULD_DEBUG(FEATURE_GPU_HW_TRACE)) {
+  if (rlscope::TRACE_GPU_HW) {
     std::stringstream ss;
     rlscope::log_func_call_impl(ss, __func__);
     RLS_LOG("GPU_HW_TRACE", "{}", ss.str());
@@ -879,10 +879,26 @@ const char* GPUHwCounterSampler::ModeString(GPUHwCounterSamplerMode mode) {
   }
 }
 
+MyStatus GPUHwCounterSampler::SetMaxOperations(const std::string &operation, int num_pushes) {
+  LOG_FUNC_ENTRY(operation, num_pushes);
+  if (rlscope::TRACE_GPU_HW) {
+    std::stringstream ss;
+    rlscope::log_func_call_impl(ss, __func__, operation, num_pushes);
+    RLS_LOG("GPU_HW_TRACE", "{}", ss.str());
+  }
+  if (_mode == PROFILE) {
+    std::stringstream ss;
+    ss << "You must call iml.prof.set_max_operations(\"" << operation << "\", " << num_pushes << ") BEFORE you begin profiling.";
+    return MyStatus(error::INVALID_ARGUMENT, ss.str());
+  }
+  _range_tree.SetMaxOperations(operation, num_pushes);
+  return MyStatus::OK();
+}
+
 
 MyStatus GPUHwCounterSampler::Push(const std::string &operation) {
   LOG_FUNC_ENTRY(operation);
-  if (SHOULD_DEBUG(FEATURE_GPU_HW_TRACE)) {
+  if (rlscope::TRACE_GPU_HW) {
     std::stringstream ss;
     rlscope::log_func_call_impl(ss, __func__, operation);
     RLS_LOG("GPU_HW_TRACE", "{}", ss.str());
@@ -933,7 +949,7 @@ MyStatus GPUHwCounterSampler::Push(const std::string &operation) {
 
 MyStatus GPUHwCounterSampler::Pop() {
   LOG_FUNC_ENTRY();
-  if (SHOULD_DEBUG(FEATURE_GPU_HW_TRACE)) {
+  if (rlscope::TRACE_GPU_HW) {
     std::stringstream ss;
     rlscope::log_func_call_impl(ss, __func__);
     RLS_LOG("GPU_HW_TRACE", "{}", ss.str());
@@ -962,7 +978,7 @@ MyStatus GPUHwCounterSampler::Pop() {
 
 MyStatus GPUHwCounterSampler::Disable() {
   LOG_FUNC_ENTRY();
-  if (SHOULD_DEBUG(FEATURE_GPU_HW_TRACE)) {
+  if (rlscope::TRACE_GPU_HW) {
     std::stringstream ss;
     rlscope::log_func_call_impl(ss, __func__);
     RLS_LOG("GPU_HW_TRACE", "{}", ss.str());
@@ -984,7 +1000,7 @@ MyStatus GPUHwCounterSampler::_CheckInitialized(const char* file, int lineno, co
 }
 MyStatus GPUHwCounterSampler::StartConfig(const std::vector<std::string>& metrics) {
   LOG_FUNC_ENTRY(metrics);
-  if (SHOULD_DEBUG(FEATURE_GPU_HW_TRACE)) {
+  if (rlscope::TRACE_GPU_HW) {
     std::stringstream ss;
     rlscope::log_func_call_impl(ss, __func__, metrics);
     RLS_LOG("GPU_HW_TRACE", "{}", ss.str());
@@ -1041,7 +1057,7 @@ MyStatus GPUHwCounterSampler::CheckCUPTIProfilingAPISupported() {
 }
 MyStatus GPUHwCounterSampler::StartProfiling() {
   LOG_FUNC_ENTRY();
-  if (SHOULD_DEBUG(FEATURE_GPU_HW_TRACE)) {
+  if (rlscope::TRACE_GPU_HW) {
     std::stringstream ss;
     rlscope::log_func_call_impl(ss, __func__);
     RLS_LOG("GPU_HW_TRACE", "{}", ss.str());
@@ -1200,7 +1216,7 @@ MyStatus GPUHwCounterSampler::_MaybeRecordSample(bool* recorded) {
 
 MyStatus GPUHwCounterSampler::StopProfiling() {
   LOG_FUNC_ENTRY();
-  if (SHOULD_DEBUG(FEATURE_GPU_HW_TRACE)) {
+  if (rlscope::TRACE_GPU_HW) {
     std::stringstream ss;
     rlscope::log_func_call_impl(ss, __func__);
     RLS_LOG("GPU_HW_TRACE", "{}", ss.str());
@@ -1282,7 +1298,7 @@ bool GPUHwCounterSampler::ShouldDump() const {
 }
 MyStatus GPUHwCounterSampler::StartPass() {
   LOG_FUNC_ENTRY();
-  if (SHOULD_DEBUG(FEATURE_GPU_HW_TRACE)) {
+  if (rlscope::TRACE_GPU_HW) {
     std::stringstream ss;
     rlscope::log_func_call_impl(ss, __func__);
     RLS_LOG("GPU_HW_TRACE", "{}", ss.str());
@@ -1311,7 +1327,7 @@ MyStatus GPUHwCounterSampler::StartPass() {
 }
 MyStatus GPUHwCounterSampler::EndPass() {
   LOG_FUNC_ENTRY();
-  if (SHOULD_DEBUG(FEATURE_GPU_HW_TRACE)) {
+  if (rlscope::TRACE_GPU_HW) {
     std::stringstream ss;
     rlscope::log_func_call_impl(ss, __func__);
     RLS_LOG("GPU_HW_TRACE", "{}", ss.str());
@@ -1387,7 +1403,7 @@ MyStatus GPUHwCounterSampler::_DumpSync() {
 }
 MyStatus GPUHwCounterSampler::DumpSync() {
   LOG_FUNC_ENTRY();
-  if (SHOULD_DEBUG(FEATURE_GPU_HW_TRACE)) {
+  if (rlscope::TRACE_GPU_HW) {
     std::stringstream ss;
     rlscope::log_func_call_impl(ss, __func__);
     RLS_LOG("GPU_HW_TRACE", "{}", ss.str());
@@ -1400,7 +1416,7 @@ MyStatus GPUHwCounterSampler::DumpSync() {
 }
 MyStatus GPUHwCounterSampler::DumpAsync() {
   LOG_FUNC_ENTRY();
-  if (SHOULD_DEBUG(FEATURE_GPU_HW_TRACE)) {
+  if (rlscope::TRACE_GPU_HW) {
     std::stringstream ss;
     rlscope::log_func_call_impl(ss, __func__);
     RLS_LOG("GPU_HW_TRACE", "{}", ss.str());
@@ -1468,7 +1484,7 @@ std::unique_ptr<iml::GPUHwCounterSampleProto> GPUHwCounterSamplerProtoState::AsP
 
 MyStatus GPUHwCounterSampler::RecordSample() {
   LOG_FUNC_ENTRY();
-  if (SHOULD_DEBUG(FEATURE_GPU_HW_TRACE)) {
+  if (rlscope::TRACE_GPU_HW) {
     std::stringstream ss;
     rlscope::log_func_call_impl(ss, __func__);
     RLS_LOG("GPU_HW_TRACE", "{}", ss.str());
@@ -1653,9 +1669,15 @@ const RangeTreeStats& RangeTree::RecordedStats() const {
 }
 
 void RangeTree::StartPass(bool update_stats) {
-  // if (update_stats) {
   cur_num_ranges = 0;
-  // }
+  cur_num_operations.clear();
+
+  if (update_stats) {
+    // CONFIG mode: add all the iml.prof.set_max_operation(...) counts.
+    for (const auto& pair : max_operations) {
+      cur_num_ranges += pair.second;
+    }
+  }
 }
 void RangeTree::EndPass(bool update_stats) {
   if (update_stats) {
@@ -1685,17 +1707,20 @@ void RangeTree::EndPass(bool update_stats) {
 MyStatus RangeTree::Push(const std::string& name, bool update_stats) {
   // If there's an existing entry, set cur_node to it.
   // Otherwise create a new node, and set cur_node to it.
+  auto status = MyStatus::OK();
   assert(root != nullptr);
   if (!update_stats) {
     // If this fails, we forgot to call RangeTree::EndPass.
     assert(recorded_stats.initialized);
   }
+
   auto it = cur_node->children.find(name);
   if (it == cur_node->children.end()) {
     if (update_stats) {
       cur_node->children[name].reset(new RangeNode(cur_node, name));
       cur_node = cur_node->children[name].get();
-      _UpdateStatsOnPush(true);
+      status = _UpdateStatsOnPush(name, true);
+      IF_BAD_STATUS_RETURN(status);
       return MyStatus::OK();
     }
     // This Push would result in an insert, but our caller DOESN'T want that (it's not a configuration pass).
@@ -1709,7 +1734,8 @@ MyStatus RangeTree::Push(const std::string& name, bool update_stats) {
     return MyStatus(error::INVALID_ARGUMENT, ss.str());
   }
   cur_node = it->second.get();
-  _UpdateStatsOnPush(false);
+  status = _UpdateStatsOnPush(name, false);
+  IF_BAD_STATUS_RETURN(status);
   if (!update_stats && cur_num_ranges > recorded_stats.max_num_ranges) {
     std::stringstream ss;
     ss << "GPUHwCounterSampler: Tried to push operation=\"" << name << "\", but this will exceed the total number of operations (Push() calls) "
@@ -1779,16 +1805,37 @@ void RangeTree::_RecordStats() {
   recorded_stats.initialized = true;
 }
 
-void RangeTree::_UpdateStatsOnPush(bool was_insert) {
+void RangeTree::SetMaxOperations(const std::string &operation, int num_pushes) {
+  max_operations[operation] = num_pushes;
+}
+
+MyStatus RangeTree::_UpdateStatsOnPush(const std::string &operation, bool was_insert) {
+  cur_num_operations[operation] += 1;
+  auto max_ops_it = max_operations.find(operation);
+  if (max_ops_it != max_operations.end()) {
+    auto max_ops = max_ops_it->second;
+    if (cur_num_operations[operation] > max_ops) {
+      std::stringstream err_ss;
+      err_ss << "Saw Push(operation=\"" << operation << "\") called too many times; expected at most "
+             << max_ops << " based on earlier iml.prof.set_max_operations(...) API call";
+      auto my_status = MyStatus(rlscope::error::INVALID_ARGUMENT, err_ss.str());
+      return my_status;
+    }
+  } else {
+    // ONLY increase num_ranges for operations we haven't set a maximum push-count on via iml.prof.set_max_operations(...),
+    // since we've already counted them in RangeTree::StartPass(update_stats=true) during config pass.
+    cur_num_ranges += 1;
+    stats.max_num_ranges = std::max(cur_num_ranges, stats.max_num_ranges);
+  }
+
   cur_depth += 1;
   cur_range_name_length += cur_node->name.size();
-  cur_num_ranges += 1;
   stats.max_nesting_levels = std::max(cur_depth, stats.max_nesting_levels);
   stats.max_range_name_length = std::max(CurRangeNameLength(), stats.max_range_name_length);
-  stats.max_num_ranges = std::max(cur_num_ranges, stats.max_num_ranges);
   if (was_insert) {
     stats.max_unique_ranges += 1;
   }
+  return MyStatus::OK();
 }
 
 void RangeTree::_UpdateStatsOnPop() {
@@ -1948,7 +1995,7 @@ GPUHwCounterSamplerProtoState GPUHwCounterSampler::AsProtoState() {
 
 MyStatus GPUHwCounterSampler::AwaitDump() {
   LOG_FUNC_ENTRY();
-  if (SHOULD_DEBUG(FEATURE_GPU_HW_TRACE)) {
+  if (rlscope::TRACE_GPU_HW) {
     std::stringstream ss;
     rlscope::log_func_call_impl(ss, __func__);
     RLS_LOG("GPU_HW_TRACE", "{}", ss.str());

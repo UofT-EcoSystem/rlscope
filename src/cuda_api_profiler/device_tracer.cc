@@ -236,6 +236,7 @@ class DeviceTracerImpl : public DeviceTracer {
       const char* operation,
       int64_t num_events) override;
   MyStatus PopOperation() override;
+  MyStatus SetMaxOperations(const char* operation, int num_pushes) override;
 
   void _Register_LD_PRELOAD_Callbacks();
   void _RegisterCUDAAPICallbacks();
@@ -876,6 +877,7 @@ MyStatus DeviceTracerImpl::RecordEvent(
     const char* name) {
   // NOTE: don't grab the lock, don't need to.
   // std::unique_lock<std::mutex> l(mu_);
+  std::unique_lock<std::mutex> l(mu_);
   _event_profiler.RecordEvent(
       category,
       start_us,
@@ -887,6 +889,7 @@ MyStatus DeviceTracerImpl::RecordEvent(
 
 MyStatus DeviceTracerImpl::StartPass() {
   MyStatus status = MyStatus::OK();
+  std::unique_lock<std::mutex> l(mu_);
 
   if (_configure_pass_index < get_IML_GPU_HW_CONFIG_PASSES(boost::none)) {
     if (_configure_pass_index == 0) {
@@ -919,6 +922,7 @@ MyStatus DeviceTracerImpl::StartPass() {
 }
 MyStatus DeviceTracerImpl::EndPass() {
   MyStatus status = MyStatus::OK();
+  std::unique_lock<std::mutex> l(mu_);
 
   // Q: What do we do if we attempt to push an operation we HAVE NOT seen before?
   // For now, just detect and error out if it happens.
@@ -933,12 +937,14 @@ MyStatus DeviceTracerImpl::EndPass() {
   return MyStatus::OK();
 }
 MyStatus DeviceTracerImpl::HasNextPass(bool* has_next_pass) {
+  std::unique_lock<std::mutex> l(mu_);
   *has_next_pass = _hw_profiler.HasNextPass();
   return MyStatus::OK();
 }
 
 MyStatus DeviceTracerImpl::PushOperation(const char* operation) {
   MyStatus status = MyStatus::OK();
+  std::unique_lock<std::mutex> l(mu_);
   _op_stack.PushOperation(operation);
   status = _hw_profiler.Push(operation);
   IF_BAD_STATUS_RETURN(status);
@@ -947,6 +953,7 @@ MyStatus DeviceTracerImpl::PushOperation(const char* operation) {
 MyStatus DeviceTracerImpl::RecordOverheadEvent(
     const char* overhead_type,
     int64_t num_events) {
+  std::unique_lock<std::mutex> l(mu_);
   _op_stack.RecordOverheadEvent(
       overhead_type,
       num_events);
@@ -956,6 +963,7 @@ MyStatus DeviceTracerImpl::RecordOverheadEventForOperation(
     const char* overhead_type,
     const char* operation,
     int64_t num_events) {
+  std::unique_lock<std::mutex> l(mu_);
   _op_stack.RecordOverheadEventForOperation(
       overhead_type,
       operation,
@@ -963,9 +971,14 @@ MyStatus DeviceTracerImpl::RecordOverheadEventForOperation(
   return MyStatus::OK();
 }
 MyStatus DeviceTracerImpl::PopOperation() {
+  std::unique_lock<std::mutex> l(mu_);
   _op_stack.PopOperation();
   _hw_profiler.Pop();
   return MyStatus::OK();
+}
+MyStatus DeviceTracerImpl::SetMaxOperations(const char* operation, int num_pushes) {
+  std::unique_lock<std::mutex> l(mu_);
+  return _hw_profiler.SetMaxOperations(operation, num_pushes);
 }
 
 //MyStatus DeviceTracerImpl::Collect() {

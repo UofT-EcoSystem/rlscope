@@ -27,6 +27,12 @@ bool get_TRACE_CUDA(boost::optional<bool> user_value) {
 }
 const bool TRACE_CUDA = get_TRACE_CUDA(boost::none);
 
+const bool TRACE_GPU_HW_DEFAULT = false;
+bool get_TRACE_GPU_HW(boost::optional<bool> user_value) {
+  return ParseEnvOrDefault("bool", "TRACE_GPU_HW", user_value, TRACE_GPU_HW_DEFAULT);
+}
+const bool TRACE_GPU_HW = get_TRACE_GPU_HW(boost::none);
+
 std::vector<std::string> StringSplit(const std::string& s, std::string rgx_str) {
     std::vector<std::string> elems;
 

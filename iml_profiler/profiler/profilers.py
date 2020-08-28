@@ -1403,6 +1403,12 @@ class Profiler:
         if sample_cuda_api.is_used():
             sample_cuda_api.push_operation(bench_name)
 
+    def set_max_operations(self, operation, num_pushes):
+        if self.disable or self.disable_gpu_hw:
+            return
+        if sample_cuda_api.is_used():
+            sample_cuda_api.set_max_operations(operation, num_pushes)
+
     def _pop_operation(self, bench_name):
         assert self._op_stack[-1] == bench_name
         self._op_stack.pop()

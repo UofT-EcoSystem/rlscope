@@ -3795,7 +3795,7 @@ def xfields_from_xtick_expression(df, xtick_expression, debug=False):
         #         'row': row,
         #     }, indent=1))
         x_field = None
-        def errmsg():
+        def get_errmsg():
             return "--xtick-expression must be a python expression that defines x_field for each 'row' of dataframe 'df'; available columns in row are:\n{msg}".format(
                 msg=txt_indent({'columns': sorted(df.keys())}, indent=1))
         try:
@@ -3803,13 +3803,29 @@ def xfields_from_xtick_expression(df, xtick_expression, debug=False):
             exec(xtick_expression, globals(), my_locals)
             x_field = my_locals['x_field']
         except Exception as e:
+            if type(e) == SyntaxError:
+                lines = xtick_expression.splitlines()
+                ss = StringIO()
+                # 3 => " > "
+                num_spaces = int(np.ceil(np.log10(len(lines))))
+                ss.write(f"Syntax error in --xtick-expression at line {e.lineno}, column {e.offset}: {e.msg}: \"{e.text}\"\n")
+                for lineno, line in enumerate(lines, start=1):
+                    lineno_str = "{lineno: <{fill}}".format(fill=num_spaces, lineno=lineno)
+                    if lineno == e.lineno:
+                        ss.write("{lineno} > {line}\n".format(fill=num_spaces, lineno=lineno_str, line=line))
+                    else:
+                        ss.write("{lineno}   {line}\n".format(fill=num_spaces, lineno=lineno_str, line=line))
+                ss.write(get_errmsg())
+                errmsg = ss.getvalue()
+            else:
+                errmsg = get_errmsg()
             raise RuntimeError("Saw exception in --xtick-expression: {klass}({e}).\n{errmsg}".format(
                 klass=type(e).__name__,
                 e=e,
-                errmsg=errmsg()))
+                errmsg=errmsg))
         if x_field is None:
             raise RuntimeError("x_field wasn't set in --xtick-expression; {errmsg}".format(
-                errmsg=errmsg()))
+                errmsg=get_errmsg()))
         x_fields.append(x_field)
     return x_fields
 
