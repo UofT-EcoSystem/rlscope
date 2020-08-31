@@ -112,7 +112,6 @@ _untar() {
 
 }
 
-CLONE_TAG_PATTERN=
 _clone() {
     local path="$1"
     local name_slash_repo="$2"
@@ -122,11 +121,6 @@ _clone() {
     if [ $# -ge 1 ]; then
         commit="$1"
         shift 1
-    elif [ "$CLONE_TAG_PATTERN" != '' ]; then
-        commit="$(
-            cd $dir
-            _git_latest_tag_like "$CLONE_TAG_PATTERN"
-        )"
     fi
     if [ ! -e "$path" ]; then
         git clone --recursive $repo $path
@@ -139,7 +133,6 @@ _clone() {
     git checkout $commit
     git submodule update --init
     )
-    CLONE_TAG_PATTERN=
 }
 
 _hg_clone() {
@@ -290,6 +283,17 @@ _local_dir() {
       # Assume we're running in host environment.
       echo "$ROOT/local.host"
     fi
+}
+_build_dir() {
+    local build_prefix=
+    if _is_non_empty IML_BUILD_PREFIX; then
+      # Docker container environment.
+      build_prefix="$IML_BUILD_PREFIX"
+    else
+      # Assume we're running in host environment.
+      build_prefix="$ROOT/local.host"
+    fi
+    echo "$build_prefix"
 }
 _add_PATH() {
     local direc="$1"

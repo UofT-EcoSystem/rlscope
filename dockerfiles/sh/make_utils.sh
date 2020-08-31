@@ -6,6 +6,9 @@
 #set -e
 #set -x
 
+IML_DIR=${IML_DIR:-$HOME/clone/iml}
+REAGENT_DIR=${REAGENT_DIR:-$HOME/clone/ReAgent}
+
 _do() {
     echo "> CMD: $@"
     "$@"
@@ -229,6 +232,34 @@ _check_RL_BASELINES_ZOO_DIR() {
     _check_env_var RL_BASELINES_ZOO_DIR "$description"
 }
 
+_check_REAGENT_DIR() {
+    local description="The root directory of a checkout of the ReAgent repo (https://github.com/facebookresearch/ReAgent)"
+    _check_env_var REAGENT_DIR "$description"
+}
+
+_clone() {
+    local path="$1"
+    local repo="$2"
+    shift 2
+    local commit=
+    if [ $# -ge 1 ]; then
+        commit="$1"
+        shift 1
+    fi
+    if [ ! -e "$path" ]; then
+        git clone --recursive $repo $path "$@"
+        echo "> Git clone:"
+        echo "  Repository: $repo"
+        echo "  Directory: $path"
+    fi
+    (
+    cd $path
+    git pull || true
+    git checkout $commit
+    git submodule update --init
+    )
+}
+
 PY_MODULE_INSTALLED_SILENT=no
 py_module_installed() {
     local py_module="$1"
@@ -259,6 +290,58 @@ py_maybe_install() {
     fi
 
 }
+
+_yes_or_no() {
+    if "$@" > /dev/null 2>&1; then
+        echo yes
+    else
+        echo no
+    fi
+}
+_has_sudo() {
+    if [ "$HAS_SUDO" = '' ]; then
+        HAS_SUDO="$(_yes_or_no /usr/bin/sudo -v)"
+    fi
+    echo $HAS_SUDO
+}
+_has_exec() {
+    _yes_or_no which "$@"
+}
+_has_lib() {
+    local lib="$1"
+    shift 1
+    on_ld_path() {
+        ldconfig -p \
+            | grep --quiet "$lib"
+    }
+    in_local_path() {
+        ls $INSTALL_DIR/lib \
+            | grep --quiet "$lib"
+    }
+    __has_lib() {
+        on_ld_path || in_local_path
+    }
+    _yes_or_no __has_lib
+}
+#_install_apt() {
+#    if [ "$(_has_sudo)" = 'no' ]; then
+#        return
+#    fi
+#    if [ "$HAS_APT_GET" = 'no' ]; then
+#        return
+#    fi
+#    sudo apt-get install -y "$@"
+#}
+#_install_pip() {
+#    if [ "$HAS_PIP" = 'no' ]; then
+#        return
+#    fi
+#    if [ "$(_has_sudo)" = 'no' ]; then
+#        pip install "$@"
+#    else
+#        sudo pip install "$@"
+#    fi
+#}
 
 #_check_container_env() {
 #}
