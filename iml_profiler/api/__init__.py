@@ -2,7 +2,8 @@ from iml_profiler.profiler.profilers import \
   Profiler, \
   fix_gflags_iml_args, \
   add_iml_arguments, \
-  iml_argv_and_env
+  iml_argv_and_env, \
+  click_add_arguments
 
 from iml_profiler.profiler.util import \
   args_to_cmdline
@@ -12,6 +13,7 @@ prof = None
 from iml_profiler.profiler.glbl import \
   handle_iml_args, \
   handle_gflags_iml_args, \
+  handle_click_iml_args, \
   init_session
 
 from iml_profiler.profiler.iml_logging import \

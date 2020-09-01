@@ -1,4 +1,7 @@
 import re
+import inspect
+import types
+
 from iml_profiler.profiler.iml_logging import logger
 
 from iml_profiler import py_config
@@ -42,32 +45,53 @@ def unwrap_lib(FuncWrapperKlass, import_libname, wrap_libname):
         return
     unwrap_module(FuncWrapperKlass, lib)
 
-def wrap_module(FuncWrapperKlass, module, wrapper_args,
+def is_builtin(func):
+    return isinstance(func, types.BuiltinFunctionType)
+
+def wrap_module(FuncWrapperKlass, module,
+                wrapper_args=None,
                 func_regex=None, ignore_func_regex="^_", should_wrap=None):
     for name in dir(module):
-        if re.search(ignore_func_regex, name):
-            if py_config.DEBUG_WRAP_CLIB:
-                logger.info("  Skip func={name}".format(name=name))
-            continue
-        func = getattr(module, name)
-        if not re.search(ignore_func_regex, name) and (
-                (
-                        func_regex is None or re.search(func_regex, name)
-                ) or (
-                        should_wrap is not None and should_wrap(name, func)
-                )
-        ):
-            if type(func) == FuncWrapperKlass or not callable(func):
-                continue
-            func_wrapper = FuncWrapperKlass(func, *wrapper_args)
-            setattr(module, name, func_wrapper)
+        wrap_func(FuncWrapperKlass, module, name, wrapper_args,
+                  func_regex=func_regex, ignore_func_regex=ignore_func_regex, should_wrap=should_wrap)
+
+_EMPTY_ARGS = tuple()
+def wrap_func(FuncWrapperKlass, module, name,
+              wrapper_args=None,
+              func_regex=None, ignore_func_regex="^_", should_wrap=None):
+    # for name in dir(module):
+    if wrapper_args is None:
+        wrapper_args = _EMPTY_ARGS
+    if re.search(ignore_func_regex, name):
+        if py_config.DEBUG_WRAP_CLIB:
+            logger.info("  Skip func={name}".format(name=name))
+        return
+    func = getattr(module, name)
+    if type(func) == FuncWrapperKlass or not callable(func):
+        return
+    if func_regex is not None and not re.search(func_regex, name):
+        return
+    if should_wrap is not None and not should_wrap(name, func):
+        return
+    if inspect.isclass(func) or inspect.ismodule(func):
+        logger.warning("Cannot wrap {module}.{name} since it's not a function: {value}".format(
+            module=module.__name__,
+            name=name,
+            value=func,
+        ))
+        return
+
+    func_wrapper = FuncWrapperKlass(func, *wrapper_args)
+    setattr(module, name, func_wrapper)
 
 def unwrap_module(FuncWrapperKlass, module):
     for name in dir(module):
-        # if re.search(func_regex, name):
-        func_wrapper = getattr(module, name)
-        if type(func_wrapper) != FuncWrapperKlass:
-            continue
-        func = func_wrapper.func
-        setattr(module, name, func)
+        unwrap_func(FuncWrapperKlass, module, name)
 
+def unwrap_func(FuncWrapperKlass, module, name):
+    # if re.search(func_regex, name):
+    func_wrapper = getattr(module, name)
+    if type(func_wrapper) != FuncWrapperKlass:
+        return
+    func = func_wrapper.func
+    setattr(module, name, func)

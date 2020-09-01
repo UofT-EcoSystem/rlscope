@@ -1,5 +1,6 @@
 import pytest
 import argparse
+import inspect
 import cProfile, pstats, io
 import codecs
 import sys
@@ -725,9 +726,14 @@ class Profiler:
                 return klass_arg
 
             iml_argname = get_iml_argname(argname, internal=internal)
-
+            
             if hasattr(args, iml_argname) and getattr(args, iml_argname) is not None:
+                # assert isinstance(args, argparse.Namespace)
                 argval = getattr(args, iml_argname)
+                return argval
+            elif iml_argname in args and args[iml_argname] is not None:
+                # assert type(args) == dict
+                argval = args[iml_argname]
                 return argval
 
             if not allow_none and default_arg is None:
@@ -2958,8 +2964,130 @@ def fix_gflags_iml_args(FLAGS):
 def add_argument(parser, *args, **kwargs):
     if isinstance(parser, argparse.ArgumentParser) or isinstance(parser, argparse._ArgumentGroup):
         parser.add_argument(*args, **kwargs)
+    elif isinstance(parser, ClickCtx):
+        add_click_argument(parser, *args, **kwargs)
     else:
         add_gflags_argument(parser, *args, **kwargs)
+
+# decorator
+class ClickCtx:
+    def __init__(self, f):
+        self.f = f
+
+    def add_argument(self, *args, **kwargs):
+        # import click
+        # ArgumentClass = kwargs.pop('cls', click.Argument)
+        # click.decorators._param_memo(self.f, ArgumentClass(args, **kwargs))
+        # return self.f
+        return self._option(*args, **kwargs)
+
+    def _option(self, *param_decls, **attrs):
+        """Attaches an option to the command.  All positional arguments are
+        passed as parameter declarations to :class:`Option`; all keyword
+        arguments are forwarded unchanged (except ``cls``).
+        This is equivalent to creating an :class:`Option` instance manually
+        and attaching it to the :attr:`Command.params` list.
+
+        :param cls: the option class to instantiate.  This defaults to
+                    :class:`Option`.
+        """
+        import click
+        # def decorator(f):
+        # Issue 926, copy attrs, so pre-defined options can re-use the same cls=
+        option_attrs = attrs.copy()
+
+        if 'help' in option_attrs:
+            option_attrs['help'] = inspect.cleandoc(option_attrs['help'])
+        OptionClass = option_attrs.pop('cls', click.Option)
+        click.decorators._param_memo(self.f, OptionClass(param_decls, **option_attrs))
+        return self.f
+        # return decorator
+
+
+def click_add_arguments():
+    def decorator(f):
+        click_ctx = ClickCtx(f)
+        add_iml_arguments(click_ctx)
+        return f
+    return decorator
+
+def add_click_argument(click_ctx : ClickCtx, *args, **kwargs):
+    """
+    Translate add_argument from argparse into click  @click.argument(...) call.
+
+    :param click:
+        import click
+               -----
+    :param args:
+    :param kwargs:
+        ArgumentParser.add_argument(...)
+                                    ---
+    :return:
+    """
+
+    def raise_error():
+        raise NotImplementedError("Not sure how to translate argparse argument into click argument; add_argument(...) was called with\n{msg}".format(
+            msg=textwrap.indent(pprint.pprint({
+                'args': args,
+                'kwargs': kwargs,
+            }), prefix='  '),
+        ).rstrip())
+
+    def click_name(opt, underscores=False):
+        gflags_opt = opt
+        gflags_opt = re.sub('^--', '', gflags_opt)
+        if underscores:
+            gflags_opt = re.sub('-', '_', gflags_opt)
+        return gflags_opt
+
+    def click_opt_name(attr, underscores=False, is_flag=False):
+        name = click_name(attr, underscores=underscores)
+        dashes = re.sub(r'_', '-', attr)
+        if is_flag:
+            return f"--{dashes}/--no-{dashes}"
+        return f"--{dashes}"
+
+        # if is_flag:
+        #     return f"{attr}/no_{attr}"
+        # return attr
+
+    def _add_argument(attr):
+        arg_type = kwargs.get('type', None)
+        # NOTE: click doesn't let us to add help text to each argument; it's supposed to reside in the usage
+        # text...
+        help = kwargs.get('help', None)
+        dflt = kwargs.get('default', None)
+        required = kwargs.get('required', False)
+
+
+        action = kwargs.get('action', None)
+        if action is not None:
+            if action == 'store_true':
+                assert dflt is None
+                dflt = False
+            elif action == 'store_false':
+                assert dflt is None
+                dflt = True
+            else:
+                raise_error()
+            click_opt = click_opt_name(attr, is_flag=True)
+            # import pdb; pdb.set_trace()
+            decorator = click_ctx.add_argument(click_opt, default=dflt, help=help, required=required)
+            return decorator
+
+        click_opt = click_opt_name(attr)
+        decorator = click_ctx.add_argument(click_opt, default=dflt, type=arg_type, help=help, required=required)
+        return decorator
+
+    opt = args[0]
+
+    # underscore_gflags_opt = click_name(opt, underscores=True)
+    # decorator = _add_argument(underscore_gflags_opt)
+
+    dashed_gflags_opt = click_name(opt)
+    decorator = _add_argument(dashed_gflags_opt)
+
+    return decorator
 
 def add_iml_arguments(parser):
     if isinstance(parser, argparse.ArgumentParser):

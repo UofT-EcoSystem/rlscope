@@ -102,7 +102,10 @@ def handle_iml_args(parser, args, directory=None, reports_progress=False):
     if directory is not None:
         iml_directory = directory
     else:
-        iml_directory = args.iml_directory
+        if hasattr(args, 'iml_directory'):
+            iml_directory = args.iml_directory
+        else:
+            iml_directory = args['iml_directory']
 
     # TODO: train.py apparently like to launch separate process all willy-nilly.
     # I'm not sure what it's doing this for, but it's certainly true that python-side IML stuff will do it too.
@@ -140,3 +143,15 @@ def handle_gflags_iml_args(FLAGS, directory=None, reports_progress=False):
         we fall back on this.
     """
     return handle_iml_args(parser=None, args=FLAGS, directory=directory, reports_progress=reports_progress)
+
+def handle_click_iml_args(iml_kwargs, directory=None, reports_progress=False):
+    """
+    Build an argument parser,
+    :return:
+
+    :param directory
+        The directory used by the ML-script for saving its own files.
+        If the user doesn't provide --iml-directory (i.e. a separate directory for storing profiling data),
+        we fall back on this.
+    """
+    return handle_iml_args(parser=None, args=iml_kwargs, directory=directory, reports_progress=reports_progress)

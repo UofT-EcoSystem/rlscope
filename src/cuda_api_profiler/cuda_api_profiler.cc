@@ -50,9 +50,19 @@ CUDAAPIProfiler::~CUDAAPIProfiler() {
 //    this->Print(info, 0);
 //  }
   AwaitDump();
-  DCHECK(!_state.CanDump())
-    << "Looks like you forgot to dump CUDA API profiling state: "
-    << _state._api_stats.size()  << " records";
+  if (_state.CanDump()) {
+    std::stringstream ss;
+    ss << "Looks like you forgot to dump CUDA API profiling state: "
+       << _state._api_stats.size()  << " records:\n";
+    this->Print(ss, 1);
+    LOG(WARNING) << ss.str();
+    // NOTE: This can go off with PyTorch code, since some cudaFree's happen during share library unload.
+    // So, just warn about it, don't fail.
+    // DCHECK(!_state.CanDump()) << ss.str();
+  }
+//  DCHECK(!_state.CanDump())
+//    << "Looks like you forgot to dump CUDA API profiling state: "
+//    << _state._api_stats.size()  << " records";
   if (_state._api_stats.size() > 0 and !_state.CanDump()) {
     LOG(WARNING) << "There were " << _state._api_stats.size() << " CUDA API stats records left over, "
                  << "but we are not able to dump them; did you forget a call to sample_cuda_api.set_metadata(...)?";

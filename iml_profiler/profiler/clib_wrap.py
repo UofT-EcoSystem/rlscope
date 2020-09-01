@@ -315,27 +315,37 @@ class WrappedModule:
     def __init__(self, wrap_module, unwrap_module):
         self.wrap_module = wrap_module
         self.unwrap_module = unwrap_module
+        self.wrapped = False
+
+    def wrap(self):
+        if self.wrapped:
+            return
+        self.wrap_module()
+        self.wrapped = True
+
+    def unwrap(self):
+        if not self.wrapped:
+            return
+        self.wrapped = False
 
 WRAPPED_MODULES = []
 def register_wrap_module(wrap_module, unwrap_module):
+    wrapped_module = WrappedModule(wrap_module, unwrap_module)
+    WRAPPED_MODULES.append(wrapped_module)
     if _LIBS_WRAPPED:
-        raise RuntimeError("IML ERROR: Registering module too late; you must call iml.register_wrap_module(...) right after calling iml.add_iml_arguments(...)")
-    WRAPPED_MODULES.append(WrappedModule(wrap_module, unwrap_module))
+        logger.warning(f"Registering wrapped module late for {wrap_module.__name__}; you will miss recording calls that happpened before this point")
+        wrapped_module.wrap()
 
 _LIBS_WRAPPED = False
 def wrap_libs():
     global _LIBS_WRAPPED
-    if _LIBS_WRAPPED:
-        return
     for wrapped_module in WRAPPED_MODULES:
-        wrapped_module.wrap_module()
+        wrapped_module.wrap()
     _LIBS_WRAPPED = True
 def unwrap_libs():
     global _LIBS_WRAPPED
-    if not _LIBS_WRAPPED:
-        return
     for wrapped_module in reversed(WRAPPED_MODULES):
-        wrapped_module.unwrap_module()
+        wrapped_module.unwrap()
     _LIBS_WRAPPED = False
 
 SETUP_DONE = False
@@ -378,6 +388,16 @@ def register_detected_libs():
         if py_config.DEBUG_WRAP_CLIB:
             logger.debug("PyBullet is NOT installed")
 
+    # NOTE: we delay this to avoid messing up torch.jit.script until we support it better.
+    # register_torch()
+
+def register_torch():
+    try:
+        import torch
+        register_wrap_module(wrap_torch, unwrap_torch)
+    except ImportError:
+        if py_config.DEBUG_WRAP_CLIB:
+            logger.debug("torch is NOT installed")
 
 def wrap_tensorflow_v1(category=CATEGORY_TF_API, debug=False):
     logger.info("> IML: Wrapping module=tensorflow call with category={category} annotations".format(
@@ -650,6 +670,51 @@ class MyBulletClient(object):
             attribute = functools.partial(attribute, physicsClientId=self._client)
         return attribute
 
+
+def wrap_torch():
+    import torch
+
+    # import torch._C
+
+    # FAIL:
+    # assert 'torch' not in sys.modules
+
+    # type_map = dict()
+    # for name in dir(torch._C):
+    #     value = getattr(torch._C, name)
+    #     if str(type(value)) not in type_map:
+    #         type_map[str(type(value))] = []
+    #     type_map[str(type(value))].append({'name': name, 'value': str(value)})
+    #     # logging.info(f"TYPE={type(value)}, name={name}, value={value}")
+    # logger.info(pprint.pformat(type_map))
+
+    # from iml_profiler.profiler import log_stacktrace
+    # from iml_profiler.profiler import wrap_util
+    # from iml_profiler.profiler.log_stacktrace import LoggedStackTraces
+    # import torch._C._nn
+
+    wrap_module(torch._C, category=CATEGORY_TF_API)
+    wrap_module(torch._C._nn, category=CATEGORY_TF_API)
+    def should_wrap(name, func):
+        return wrap_util.is_builtin(func)
+    wrap_module(torch.nn.functional, category=CATEGORY_TF_API, should_wrap=should_wrap)
+
+    # NOTE: This messes up torch.jit.script when we override torch.tensor...
+    wrap_module(torch, category=CATEGORY_TF_API, should_wrap=should_wrap)
+
+    # # Sanity check: we must wrap torch._C._nn BEFORE "import torch"
+    assert type(torch.nn.functional.avg_pool2d) == CFuncWrapper
+    assert type(torch.mean) == CFuncWrapper
+
+    # wrap_util.wrap_func(torch.jit, 'script')
+    # wrap_util.wrap_func(torch.jit, 'trace')
+
+def unwrap_torch():
+    import torch
+    unwrap_module(torch._C)
+    unwrap_module(torch._C._nn)
+    unwrap_module(torch.nn.functional)
+    unwrap_module(torch)
 
 class CallFrame:
     def __init__(self, category, name, start_us):

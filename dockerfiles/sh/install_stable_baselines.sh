@@ -48,11 +48,11 @@ fi
 # box2d-py==2.3.5
 
 # HACK: optuna fails to install with pip >= 19.0
-pip install --upgrade pip==19.0
-pip install optuna==0.12.0
+#pip install --upgrade pip==19.0
+#pip install optuna==0.12.0
 
 # HACK: gym-minigrid fails to install with pip <= 19.0
-pip install --upgrade pip
+#pip install --upgrade pip
 pip install gym-minigrid==0.0.4
 
 pip install \
