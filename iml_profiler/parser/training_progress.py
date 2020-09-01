@@ -62,7 +62,7 @@ class TrainingProgressParser:
                 row
             )
 
-        df['training_time_sec'] = (df['end_training_time_us'] - df['start_training_time_us']) / USEC_IN_SEC
+        df['training_time_sec'] = (df['end_training_time_us'] - df['start_training_time_us']) / constants.USEC_IN_SEC
         df['iters_per_sec'] = df['training_time_sec'] / (df['end_num_timesteps'] - df['start_num_timesteps'])
     """
     def __init__(self,
@@ -243,7 +243,7 @@ class TrainingProgressParser:
         agg_df = raw_df
         agg_df['timesteps_per_sec'] = \
             ( agg_df['end_num_timesteps'] - agg_df['start_num_timesteps'] ) / \
-            (( agg_df['end_training_time_us'] - agg_df['start_training_time_us'] ) / USEC_IN_SEC )
+            (( agg_df['end_training_time_us'] - agg_df['start_training_time_us'] ) / constants.USEC_IN_SEC )
         agg_df['total_trace_time_sec'] = (1. / agg_df['timesteps_per_sec']) * agg_df['total_timesteps']
 
 

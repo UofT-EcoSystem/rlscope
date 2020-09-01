@@ -33,69 +33,9 @@ from tqdm import tqdm as tqdm_progress
 from iml_profiler import py_config
 from iml_profiler.py_config import EnvVars
 
-USEC_IN_SEC = 1e6
-PSEC_IN_USEC = 1e3
+from iml_profiler.parser import constants
 
-OPERATION_PYTHON_PROFILING_OVERHEAD = "Python profiling overhead"
-
-CATEGORY_TF_API = "Framework API C"
-CATEGORY_PYTHON = 'Python'
-CATEGORY_PYTHON_PROFILER = 'Python profiler'
-CATEGORY_CUDA_API_CPU = 'CUDA API CPU'
-CATEGORY_UNKNOWN = 'Unknown'
-CATEGORY_GPU = 'GPU'
-CATEGORY_DUMMY_EVENT = 'Dummy event'
-# Category captures when operations of a given type start/end.
-# That way, if we have a profile with multiple operations in it,
-# we can reduce the scope to just an operation of interest (e.g. Q-forward).
-#
-# NOTE: This operation category should NOT show up in compute_overlap.
-CATEGORY_OPERATION = 'Operation'
-# Category captures when we are executing a TRACE/WARMUP/DUMP phase of profiling.
-# Can be useful for ignoring parts of the execution (e.g. DUMP).
-# CATEGORY_PHASE = 'Phase'
-CATEGORY_SIMULATOR_CPP = "Simulator C"
-CATEGORY_ATARI = CATEGORY_SIMULATOR_CPP
-
-CATEGORY_PROF_CUPTI = 'Profiling: CUPTI'
-CATEGORY_PROF_LD_PRELOAD = 'Profiling: LD_PRELOAD'
-CATEGORY_PROF_PYTHON_ANNOTATION = 'Profiling: Python annotation'
-CATEGORY_PROF_PYTHON_INTERCEPTION = 'Profiling: Python interception'
-CATEGORIES_PROF = {
-    CATEGORY_PROF_CUPTI,
-    CATEGORY_PROF_LD_PRELOAD,
-    CATEGORY_PROF_PYTHON_ANNOTATION,
-    CATEGORY_PROF_PYTHON_INTERCEPTION,
-}
-
-
-# Categories that represent C events during a "Python -> C" interception:
-#                                  T1       T2
-#                                  |        |
-#     [        Python.call        ][ C.call ][       Python.return         ]
-CATEGORIES_C_EVENTS = {
-    CATEGORY_TF_API,
-    CATEGORY_SIMULATOR_CPP,
-}
-
-CATEGORIES_DEPRECATED = {
-    CATEGORY_UNKNOWN,
-    CATEGORY_DUMMY_EVENT,
-    CATEGORY_PYTHON_PROFILER,
-}
-
-CATEGORIES_ALL = {
-    CATEGORY_PYTHON,
-    CATEGORY_CUDA_API_CPU,
-    CATEGORY_GPU,
-    CATEGORY_OPERATION,
-}.union(CATEGORIES_C_EVENTS).union(CATEGORIES_PROF)
-
-DEFAULT_PHASE = 'default_phase'
-
-CUDA_API_ASYNC_CALLS = {'cudaLaunchKernel', 'cudaMemcpyAsync'}
-
-# Record a "special" operation event-name (category=CATEGORY_OPERATION)
+# Record a "special" operation event-name (category=constants.constants.CATEGORY_OPERATION)
 # when the prof.start()/stop() is called.
 #
 # These events are to help debug whether all the code is properly marked.
@@ -106,28 +46,10 @@ def op_process_event_name(process_name):
     return "[{proc}]".format(
         proc=process_name)
 def is_op_process_event(event_name, category):
-    return re.search(r'^\[.*\]$', event_name) and category == CATEGORY_OPERATION
+    return re.search(r'^\[.*\]$', event_name) and category == constants.CATEGORY_OPERATION
 # def match_special_event_name(event_name):
 def match_debug_event_name(event_name):
     return re.search(r'^\[(?P<event_name>.*)\]$', event_name)
-
-CATEGORIES_CPU = set([
-    CATEGORY_TF_API,
-    CATEGORY_PYTHON,
-    CATEGORY_CUDA_API_CPU,
-    CATEGORY_SIMULATOR_CPP,
-    CATEGORY_PYTHON_PROFILER,
-])
-
-CATEGORIES_GPU = set([
-    CATEGORY_GPU,
-])
-
-# Not a category used during tracing;
-# represents a group of categories.
-CATEGORY_CPU = 'CPU'
-
-CATEGORY_TOTAL = 'Total'
 
 PROFILING_DUMP_TRACE = "Dump trace"
 
@@ -216,11 +138,6 @@ NO_PROCESS_NAME = "NoProcessName"
 NO_PHASE_NAME = "NoProcessName"
 NO_DEVICE_NAME = "NoDeviceName"
 NO_IMPL_NAME = "NoImplName"
-
-MICROSECONDS_IN_MS = float(1e3)
-MICROSECONDS_IN_SECOND = float(1e6)
-MILLISECONDS_IN_SECOND = float(1e3)
-NANOSECONDS_IN_SECOND = float(1e9)
 
 # Here's the "API calls" summary output from "nvprof -i file.nvprof" for Forward.
 #
@@ -1741,16 +1658,12 @@ def is_config_file(path):
     ), base)
     return m
 
-def now_us():
-    return time.time()*MICROSECONDS_IN_SECOND
-
-
 def get_category_from_device(device):
     if IsGPUTime(device):
-        return CATEGORY_GPU
+        return constants.CATEGORY_GPU
     elif IsCPUTime(device):
-        return CATEGORY_CUDA_API_CPU
-    return CATEGORY_UNKNOWN
+        return constants.CATEGORY_CUDA_API_CPU
+    return constants.CATEGORY_UNKNOWN
 
 def reversed_iter(xs):
     n = len(xs)
@@ -1766,7 +1679,7 @@ def match_proc_category(category):
 
 def match_cpu_gpu_category(category):
     regex = r'^(?:{regex})$'.format(
-        regex='|'.join([CATEGORY_CPU, CATEGORY_GPU]))
+        regex='|'.join([constants.CATEGORY_CPU, constants.CATEGORY_GPU]))
     m = re.search(regex, category)
     return m
 
@@ -2174,9 +2087,9 @@ def us_from_unit(x, time_unit):
     if time_unit == 'us':
         return x
     elif time_unit == 'ps':
-        return x/PSEC_IN_USEC
+        return x/constants.PSEC_IN_USEC
     elif time_unit == 'sec':
-        return x*USEC_IN_SEC
+        return x*constants.USEC_IN_SEC
     else:
         raise NotImplementedError()
 

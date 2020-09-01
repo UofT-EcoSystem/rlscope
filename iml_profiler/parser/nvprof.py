@@ -114,11 +114,11 @@ class CUDAProfileParser(ProfilerParser):
         if unit == 's':
             return time_as_unit
         elif unit == 'ms':
-            return time_as_unit/MILLISECONDS_IN_SECOND
+            return time_as_unit/constants.MILLISECONDS_IN_SECOND
         elif unit == 'us':
-            return time_as_unit/MICROSECONDS_IN_SECOND
+            return time_as_unit/constants.MICROSECONDS_IN_SECOND
         elif unit == 'ns':
-            return time_as_unit/NANOSECONDS_IN_SECOND
+            return time_as_unit/constants.NANOSECONDS_IN_SECOND
         else:
             raise NotImplementedError()
 

@@ -5,8 +5,13 @@ import multiprocessing
 import multiprocessing.managers
 import inspect
 import functools
+import re
 
-from iml_profiler.parser.common import *
+# from iml_profiler.parser.common import *
+from iml_profiler.parser import constants
+from iml_profiler.profiler import timer as iml_timer
+
+import time
 
 from iml_profiler.protobuf.pyprof_pb2 import CategoryEventsProto, Event
 
@@ -15,13 +20,15 @@ from iml_profiler.profiler import proto_util
 # https://stackoverflow.com/questions/9386636/profiling-a-system-with-extensively-reused-decorators
 import types
 
-MICROSECONDS_IN_SECOND = float(1e6)
+# MICROSECONDS_IN_SECOND = float(1e6)
 
 from iml_profiler.profiler import wrap_util
 from iml_profiler import py_config
 from iml_profiler.profiler.util import get_stacktrace
 
 from iml_profiler.clib import sample_cuda_api
+
+now_us = iml_timer.now_us
 
 DEFAULT_PREFIX = "CLIB__"
 
@@ -293,10 +300,10 @@ def enable_tracing():
     # _python_start_us = now_us()
     start_us = now_us()
     # if py_config.DEBUG and py_config.DEBUG_RLSCOPE_LIB_CALLS:
-    if py_config.DEBUG:
-        logger.debug(f"iml.enable_tracing(): python_start_us.new = {start_us}")
+    # if py_config.DEBUG:
+    #     logger.debug(f"iml.enable_tracing(): python_start_us.new = {start_us}")
     # NOTE: name=None => name of python events inherit the name of the c-library call they are making.
-    CallStack._entry_point(category=CATEGORY_PYTHON, name=None, start_us=start_us)
+    CallStack._entry_point(category=constants.CATEGORY_PYTHON, name=None, start_us=start_us)
 
 def disable_tracing():
     global _TRACING_ON
@@ -326,6 +333,7 @@ class WrappedModule:
     def unwrap(self):
         if not self.wrapped:
             return
+        self.unwrap_module()
         self.wrapped = False
 
 WRAPPED_MODULES = []
@@ -399,7 +407,7 @@ def register_torch():
         if py_config.DEBUG_WRAP_CLIB:
             logger.debug("torch is NOT installed")
 
-def wrap_tensorflow_v1(category=CATEGORY_TF_API, debug=False):
+def wrap_tensorflow_v1(category=constants.CATEGORY_TF_API, debug=False):
     logger.info("> IML: Wrapping module=tensorflow call with category={category} annotations".format(
         category=category,
     ))
@@ -423,7 +431,7 @@ def is_tensorflow_v2():
     m = re.search(r'(?P<major>\d+)\.(?P<minor>\d+)\.(?P<patch>\d+)', tf.__version__)
     return int(m.group('major')) >= 2
 
-def wrap_tensorflow_v2(category=CATEGORY_TF_API, debug=False):
+def wrap_tensorflow_v2(category=constants.CATEGORY_TF_API, debug=False):
     logger.info("> IML: Wrapping module=tensorflow.python.pywrap_tfe call with category={category} annotations".format(
         category=category,
     ))
@@ -456,7 +464,7 @@ def unwrap_tensorflow_v2():
         import_libname='tensorflow.python.client.pywrap_tf_session',
         wrap_libname='tensorflow.python.client.pywrap_tf_session')
 
-def wrap_atari(category=CATEGORY_ATARI):
+def wrap_atari(category=constants.CATEGORY_ATARI):
     try:
         import atari_py
     except ImportError:
@@ -590,14 +598,14 @@ def wrap_pybullet():
 
     # iml.wrap_entire_module(
     #     'pybullet',
-    #     category=CATEGORY_SIMULATOR_CPP,
+    #     category=constants.CATEGORY_SIMULATOR_CPP,
     #     debug=True)
     # _wrap_bullet_clients()
 
     def should_wrap(name, func):
         return inspect.isbuiltin(func)
     wrap_module(
-        pybullet, category=CATEGORY_SIMULATOR_CPP,
+        pybullet, category=constants.CATEGORY_SIMULATOR_CPP,
         should_wrap=should_wrap,
         # debug=True,
     )
@@ -693,14 +701,14 @@ def wrap_torch():
     # from iml_profiler.profiler.log_stacktrace import LoggedStackTraces
     # import torch._C._nn
 
-    wrap_module(torch._C, category=CATEGORY_TF_API)
-    wrap_module(torch._C._nn, category=CATEGORY_TF_API)
+    wrap_module(torch._C, category=constants.CATEGORY_TF_API)
+    wrap_module(torch._C._nn, category=constants.CATEGORY_TF_API)
     def should_wrap(name, func):
         return wrap_util.is_builtin(func)
-    wrap_module(torch.nn.functional, category=CATEGORY_TF_API, should_wrap=should_wrap)
+    wrap_module(torch.nn.functional, category=constants.CATEGORY_TF_API, should_wrap=should_wrap)
 
     # NOTE: This messes up torch.jit.script when we override torch.tensor...
-    wrap_module(torch, category=CATEGORY_TF_API, should_wrap=should_wrap)
+    wrap_module(torch, category=constants.CATEGORY_TF_API, should_wrap=should_wrap)
 
     # # Sanity check: we must wrap torch._C._nn BEFORE "import torch"
     assert type(torch.nn.functional.avg_pool2d) == CFuncWrapper
@@ -748,7 +756,7 @@ class _CallStack:
 
     Usage:
 
-    with CallStack.frame(category=CATEGORY_SIMULATOR, name="step"):
+    with CallStack.frame(category=constants.CATEGORY_SIMULATOR, name="step"):
         ...call native library...
     """
     def __init__(self):
@@ -759,7 +767,11 @@ class _CallStack:
 
     def _entry_point(self, category, name, start_us=None):
         if start_us is None:
+            # iml_timer is None...why?
             start_us = now_us()
+            if start_us is None:
+                print("WARNING: now_us() was None in _CallStack._entry_point")
+                return
         if len(self) > 0:
             last_frame = self.frames[-1]
             if last_frame.name is None:
@@ -777,9 +789,13 @@ class _CallStack:
 
     def _exit_point(self):
         # NOTE: This shouldn't fail; if it does its a BUG (exit-point without an entry-point).
+        start_us = now_us()
+        if start_us is None:
+            print("WARNING: now_us() was None in _CallStack._exit_point")
+            return
         assert len(self.frames) > 0
         last_frame = self.frames.pop()
-        start_us = now_us()
+
         if _TRACING_ON:
             sample_cuda_api.record_event(
                 category=last_frame.category,

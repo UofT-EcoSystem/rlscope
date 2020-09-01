@@ -181,7 +181,7 @@ class ExtrapolatedTrainingTimeParser:
         # Refactor stacked_bar_plots.py code to re-use this.
         Read the OperationOverlap file into a dataframe.
         # Specific to instrumented code.
-        df['trace_time_sec'] = sum(df[col] for col in df.keys() if col != OPERATION_PYTHON_PROFILING_OVERHEAD) / USEC_IN_SEC
+        df['trace_time_sec'] = sum(df[col] for col in df.keys() if col != OPERATION_PYTHON_PROFILING_OVERHEAD) / constants.USEC_IN_SEC
         # extrap_total_training_time(df['trace_time_sec'], md['percent_complete'])
         df['total_training_time_sec'] = df['trace_time_sec'] / md['percent_complete']
 

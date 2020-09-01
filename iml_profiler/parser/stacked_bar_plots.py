@@ -38,6 +38,7 @@ from iml_profiler.parser import dataframe as iml_dataframe
 from iml_profiler.parser.plot import LegendMaker, HATCH_STYLES, HATCH_STYLE_EMPTY
 
 from iml_profiler.parser.common import *
+from iml_profiler.parser import constants
 
 class OverlapStackedBarPlot:
     """
@@ -641,7 +642,7 @@ class OverlapStackedBarPlot:
                 df['operation'] = df['operation'].apply(join_plus)
 
             _add_region_fields(df)
-            df['time_sec'] = df['size'] / MICROSECONDS_IN_SECOND
+            df['time_sec'] = df['size'] / constants.MICROSECONDS_IN_SECOND
             # stacked_dict = vd.stacked_bar_dict()
             # md = vd.metadata()
             path = vd.path
@@ -1008,12 +1009,12 @@ class OverlapStackedBarPlot:
         def shorten_category(df):
 
             def _short_category(category):
-                if category == CATEGORY_SIMULATOR_CPP:
+                if category == constants.CATEGORY_SIMULATOR_CPP:
                     return "Simulator"
-                elif category == CATEGORY_TF_API:
+                elif category == constants.CATEGORY_TF_API:
                     return "TensorFlow"
                     # return "TF"
-                elif category == CATEGORY_CUDA_API_CPU:
+                elif category == constants.CATEGORY_CUDA_API_CPU:
                     return "CUDA"
                 return category
 
@@ -1150,7 +1151,7 @@ class OverlapStackedBarPlot:
         for colname, coldata in df.iteritems():
             if self._is_region(colname):
                 op_name = colname[0]
-                if is_op_process_event(op_name, CATEGORY_OPERATION):
+                if is_op_process_event(op_name, constants.CATEGORY_OPERATION):
                     # logger.info("HACK: remove process_name={proc} from operation dataframe".format(
                     #     proc=op_name,
                     # ))
@@ -1179,7 +1180,7 @@ class OverlapStackedBarPlot:
         :return:
         """
         def is_process_event(op_name):
-            return bool(is_op_process_event(op_name, CATEGORY_OPERATION))
+            return bool(is_op_process_event(op_name, constants.CATEGORY_OPERATION))
         new_df = df[~df['operation'].apply(is_process_event)]
         return new_df
 
@@ -1191,7 +1192,7 @@ class OverlapStackedBarPlot:
         (i.e. convert us to seconds).
         """
         def transform_usec_to_sec(df, group):
-            return df[group]/USEC_IN_SEC
+            return df[group]/constants.USEC_IN_SEC
 
         def transform_usec_to_percent(df):
             """
@@ -1507,8 +1508,8 @@ class OverlapStackedBarPlot:
     #             'plot_type': 'OverlappedStackedBar',
     #             # 'device_id': device.device_id,
     #             # 'device_name': device.device_name,
-    #             # 'start_time_usec': float(start_time_sec)*MICROSECONDS_IN_SECOND,
-    #             # 'step_usec': self.step_sec*MICROSECONDS_IN_SECOND,
+    #             # 'start_time_usec': float(start_time_sec)*constants.MICROSECONDS_IN_SECOND,
+    #             # 'step_usec': self.step_sec*constants.MICROSECONDS_IN_SECOND,
     #             # 'decay': self.decay,
     #         },
     #         'data': {
@@ -3483,7 +3484,7 @@ class VdTree(_DataIndex):
     #
     #         # Python annotations:
     #         total_pyprof_annotation = overhead_event_count_json['pyprof_annotation'][machine_name][process_name][phase_name][operation_name]
-    #         per_pyprof_annotation_sec = pyprof_overhead_json['mean_pyprof_annotation_per_call_us']/USEC_IN_SEC
+    #         per_pyprof_annotation_sec = pyprof_overhead_json['mean_pyprof_annotation_per_call_us']/constants.USEC_IN_SEC
     #         pyprof_annotation_sec = per_pyprof_annotation_sec * total_pyprof_annotation
     #         self.subtract_from_resource(
     #             resource='CPU',
@@ -3492,13 +3493,13 @@ class VdTree(_DataIndex):
     #                 process=process_name,
     #                 phase=phase_name,
     #                 operation=operation_name,
-    #                 category=CATEGORY_PYTHON,
+    #                 category=constants.CATEGORY_PYTHON,
     #             ),
     #             subtract_sec=pyprof_annotation_sec)
     #
     #         # Python -> C-library interception:
     #         total_pyprof_interception = overhead_event_count_json['pyprof_interception'][machine_name][process_name][phase_name][operation_name]
-    #         per_pyprof_interception_sec = pyprof_overhead_json['mean_pyprof_interception_overhead_per_call_us']/USEC_IN_SEC
+    #         per_pyprof_interception_sec = pyprof_overhead_json['mean_pyprof_interception_overhead_per_call_us']/constants.USEC_IN_SEC
     #         pyprof_interception_sec = per_pyprof_interception_sec * total_pyprof_interception
     #         self.subtract_from_resource(
     #             resource='CPU',
@@ -3507,7 +3508,7 @@ class VdTree(_DataIndex):
     #                 process=process_name,
     #                 phase=phase_name,
     #                 operation=operation_name,
-    #                 category=CATEGORY_PYTHON,
+    #                 category=constants.CATEGORY_PYTHON,
     #             ),
     #             subtract_sec=pyprof_interception_sec)
     #
@@ -3518,7 +3519,7 @@ class VdTree(_DataIndex):
     #             if cuda_api_name not in cupti_overhead_json:
     #                 missing_cupti_overhead_cuda_api_calls[cuda_api_name] = missing_cupti_overhead_cuda_api_calls.get(cuda_api_name, 0) + 1
     #             else:
-    #                 per_cuda_api_sec = cupti_overhead_json[cuda_api_name]['mean_cupti_overhead_per_call_us']/USEC_IN_SEC
+    #                 per_cuda_api_sec = cupti_overhead_json[cuda_api_name]['mean_cupti_overhead_per_call_us']/constants.USEC_IN_SEC
     #                 cupti_overhead_sec = per_cuda_api_sec * num_api_calls
     #                 self.subtract_from_resource(
     #                     resource='CPU',
@@ -3527,7 +3528,7 @@ class VdTree(_DataIndex):
     #                         process=process_name,
     #                         phase=phase_name,
     #                         operation=operation_name,
-    #                         category=CATEGORY_CUDA_API_CPU,
+    #                         category=constants.CATEGORY_CUDA_API_CPU,
     #                     ),
     #                     subtract_sec=cupti_overhead_sec)
     #         if len(missing_cupti_overhead_cuda_api_calls) > 0:
@@ -3539,7 +3540,7 @@ class VdTree(_DataIndex):
     #         # CUDA API interception:
     #         total_cuda_api_calls = np.sum([num_api_calls for cuda_api_name, num_api_calls in
     #                                        overhead_event_count_json['cuda_api_call'][machine_name][process_name][phase_name][operation_name].items()])
-    #         per_LD_PRELOAD_sec = pyprof_overhead_json['mean_interception_overhead_per_call_us']/USEC_IN_SEC
+    #         per_LD_PRELOAD_sec = pyprof_overhead_json['mean_interception_overhead_per_call_us']/constants.USEC_IN_SEC
     #         LD_PRELOAD_sec = per_LD_PRELOAD_sec * total_cuda_api_calls
     #         self.subtract_from_resource(
     #             resource='CPU',
@@ -3552,7 +3553,7 @@ class VdTree(_DataIndex):
     #                 # this might not hold once we start measuring other libraries the use the GPU...
     #                 # NOTE: this overhead does NOT come from the CUDA API call itself; the overhead is
     #                 # "around" the CUDA API call.
-    #                 category=CATEGORY_TF_API,
+    #                 category=constants.CATEGORY_TF_API,
     #             ),
     #             subtract_sec=LD_PRELOAD_sec)
     #

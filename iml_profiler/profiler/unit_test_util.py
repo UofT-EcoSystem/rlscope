@@ -8,7 +8,8 @@ from os.path import join as _j
 from iml_profiler.protobuf.unit_test_pb2 import IMLUnitTestOnce, IMLUnitTestMultiple
 
 from iml_profiler.parser.common import *
-from iml_profiler.profiler.clib_wrap import MICROSECONDS_IN_SECOND
+from iml_profiler.profiler import timer as iml_timer
+# from iml_profiler.profiler.clib_wrap import MICROSECONDS_IN_SECOND
 
 from iml_profiler.profiler import proto_util
 
@@ -159,13 +160,13 @@ class ProcessTestData:
 
     @property
     def process_start_time_sec(self):
-        return self.process_start_time_us/MICROSECONDS_IN_SECOND
+        return self.process_start_time_us/constants.MICROSECONDS_IN_SECOND
     @property
     def process_end_time_sec(self):
-        return self.process_end_time_us/MICROSECONDS_IN_SECOND
+        return self.process_end_time_us/constants.MICROSECONDS_IN_SECOND
     @property
     def process_duration_sec(self):
-        return self.process_duration_sec/MICROSECONDS_IN_SECOND
+        return self.process_duration_sec/constants.MICROSECONDS_IN_SECOND
 
     def _phase_event(self, phase):
         phase_events = self.mult.phase_events[phase]
@@ -176,7 +177,7 @@ class ProcessTestData:
     # def phase_duration_sec(self, phase):
     #     assert phase in self.mult.phase_events
     #     phase_event = self.mult.phase_events[phase]
-    #     return phase_event.duration_us/MICROSECONDS_IN_SECOND
+    #     return phase_event.duration_us/constants.MICROSECONDS_IN_SECOND
 
     def phase_start_time_us(self, phase):
         phase_event = self._phase_event(phase)
@@ -189,11 +190,11 @@ class ProcessTestData:
         return phase_event.duration_us
 
     def phase_start_time_sec(self, phase):
-        return self.phase_start_time_us(phase)/MICROSECONDS_IN_SECOND
+        return self.phase_start_time_us(phase)/constants.MICROSECONDS_IN_SECOND
     def phase_end_time_sec(self, phase):
-        return self.phase_end_time_us(phase)/MICROSECONDS_IN_SECOND
+        return self.phase_end_time_us(phase)/constants.MICROSECONDS_IN_SECOND
     def phase_duration_sec(self, phase):
-        return self.phase_duration_sec(phase)/MICROSECONDS_IN_SECOND
+        return self.phase_duration_sec(phase)/constants.MICROSECONDS_IN_SECOND
 
     @property
     def phases(self):
@@ -205,8 +206,8 @@ class ProcessTestData:
 
     def _event_as_printable(self, event):
         return "(start_sec={start_sec}, duration_sec={dur_sec})".format(
-            start_sec=event.start_time_us/MICROSECONDS_IN_SECOND,
-            dur_sec=event.duration_us/MICROSECONDS_IN_SECOND,
+            start_sec=event.start_time_us/constants.MICROSECONDS_IN_SECOND,
+            dur_sec=event.duration_us/constants.MICROSECONDS_IN_SECOND,
         )
 
     def as_printable(self):
@@ -331,7 +332,7 @@ class UnitTestDataDumper:
 
     def start(self):
         assert not self.stopped
-        self.start_t = now_us()
+        self.start_t = iml_timer.now_us()
         # self.unwrapped_prof.start()
         # self.old_start()
 
@@ -341,7 +342,7 @@ class UnitTestDataDumper:
             return
         assert not self.stopped
         # self.unwrapped_prof.stop()
-        time_t = now_us()
+        time_t = iml_timer.now_us()
         # self.old_stop()
         self.stop_t = time_t
         self._add_time(self.phase_end, self.cur_phase, time_t)
@@ -349,7 +350,7 @@ class UnitTestDataDumper:
 
     def set_phase(self, phase):
         assert not self.stopped
-        time_t = now_us()
+        time_t = iml_timer.now_us()
 
         if self.cur_phase is not None:
             # End the previous phase

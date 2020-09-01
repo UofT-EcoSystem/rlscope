@@ -30,6 +30,7 @@ from iml_profiler.parser.dataframe import UtilDataframeReader, IMLConfig
 
 from iml_profiler import py_config
 from iml_profiler.parser.common import *
+from iml_profiler.parser import constants
 from typing import *
 
 class IMLInvaidArgument(Exception):
@@ -1727,7 +1728,7 @@ class GpuUtilExperiment:
             measurement_period = CUPTI_METRIC_MEASUREMENT_PERIOD[cupti_metric_name]
             def _keep_time(row):
                 if measurement_period == MEASUREMENT_PERIOD_ACTIVE_CYCLES:
-                    return CATEGORY_GPU in row['region']
+                    return constants.CATEGORY_GPU in row['region']
                 elif measurement_period == MEASUREMENT_PERIOD_ALL_CYCLES:
                     return True
                 else:
@@ -2052,7 +2053,7 @@ class GpuUtilExperiment:
             debug=self.debug)
         util_df = util_df_reader.read()
         util_df = util_df.sort_values(['machine_name', 'device_name', 'start_time_us'])
-        util_df['start_time_sec'] = util_df['start_time_us']/MICROSECONDS_IN_SECOND
+        util_df['start_time_sec'] = util_df['start_time_us']/constants.MICROSECONDS_IN_SECOND
         util_df['thread_block_size'] = thread_block_size
         util_df['thread_blocks'] = thread_blocks
 

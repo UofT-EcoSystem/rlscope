@@ -282,30 +282,30 @@ class SQLOverheadEventsTask(IMLTaskDB):
         - During ResourceOverlap / ResourceSubplot / OperationOverlap:
           - If making CPU-overhead visible:
             Pre-reduce:
-            - Count CATEGORIES_PROF as CATEGORY_CPU
+            - Count constants.CATEGORIES_PROF as constants.CATEGORY_CPU
           - If making CPU-overhead invisible:
             Pre-reduce:
-            - Keep CATEGORIES_PROF as-is in CategoryKey.non_ops
+            - Keep constants.CATEGORIES_PROF as-is in CategoryKey.non_ops
               ( we cannot remove yet, since we need to know how to subtract overlap )
             Post-reduce:
-            - Remove CATEGORIES_PROF from CategoryKey.non_ops, delete "empty" keys
+            - Remove constants.CATEGORIES_PROF from CategoryKey.non_ops, delete "empty" keys
 
         - During CategoryOverlap:
           - If making CPU-overhead visible:
             Pre-reduce:
-            - Keep category (could be in CATEGORIES_PROF, CATEGORIES_CPU, CATEGORY_GPU)
+            - Keep category (could be in constants.CATEGORIES_PROF, constants.CATEGORIES_CPU, constants.CATEGORY_GPU)
             Post-reduce:
             - Keep category
           - If making CPU-overhead invisible:
             Pre-reduce:
-            - Keep CATEGORIES_PROF as-is in CategoryKey.non_ops
+            - Keep constants.CATEGORIES_PROF as-is in CategoryKey.non_ops
               ( we cannot remove yet, since we need to know how to subtract overlap )
             Post-reduce:
-            - Remove CATEGORIES_PROF from CategoryKey.non_ops, delete "empty" keys
+            - Remove constants.CATEGORIES_PROF from CategoryKey.non_ops, delete "empty" keys
 
          NOTE: only difference of CategoryOverlap with the rest is that we "keep" low-level category.
          CPU-overhead should show up at the CategoryOverlap level (i.e. Python, CUDA API C, ...).
-         CPU-overhead here is one of the CATEGORIES_PROF (e.g. CATEGORY_PROF_CUPTI).
+         CPU-overhead here is one of the constants.CATEGORIES_PROF (e.g. constants.CATEGORY_PROF_CUPTI).
     """
     # NOTE: accept calibration JSON files as parameters instead of as DAG dependencies
     # to allow using calibration files generated from a separate workload.

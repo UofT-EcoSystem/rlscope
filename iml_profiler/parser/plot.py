@@ -25,6 +25,7 @@ from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, base
 from iml_profiler.profiler.util import pprint_msg
 from iml_profiler import py_config
 from iml_profiler.parser.common import *
+from iml_profiler.parser import constants
 from iml_profiler.parser.nvprof import CUDASQLiteParser
 from iml_profiler.parser.pyprof import PythonProfileParser
 from iml_profiler.parser.tfprof import OverlapComputer, overlap_type_to_instance, OverlapJSONToVennConverter
@@ -1317,7 +1318,7 @@ def _category_str(category_combo):
 
     # NOTE: order of category removal matters here.
     # If it comes down to a single category, only the LAST element of the list will be kept.
-    for category in [CATEGORY_OPERATION, CATEGORY_TF_API]:
+    for category in [constants.CATEGORY_OPERATION, constants.CATEGORY_TF_API]:
         _maybe_remove(category)
 
     return " + ".join(sorted(new_category_combo))
@@ -1357,12 +1358,12 @@ class TFProfReader:
         for cat_data in self.json_data['category_combo_times']:
             category_combo = cat_data['category_combo']
             cat_str = _category_str(category_combo)
-            # times_sec = np.array(cat_data['times_usec'])/MICROSECONDS_IN_SECOND
+            # times_sec = np.array(cat_data['times_usec'])/constants.MICROSECONDS_IN_SECOND
             if len(cat_data['times_usec']) > 0:
                 float_type = type(cat_data['times_usec'][0])
             else:
-                float_type = type(MICROSECONDS_IN_SECOND)
-            times_sec = np.array(cat_data['times_usec'])/as_type(MICROSECONDS_IN_SECOND, float_type)
+                float_type = type(constants.MICROSECONDS_IN_SECOND)
+            times_sec = np.array(cat_data['times_usec'])/as_type(constants.MICROSECONDS_IN_SECOND, float_type)
 
             if category == cat_str:
                 # Ignore the first time since it includes libcupti.so load time.
@@ -1412,11 +1413,11 @@ class ProcessTimelineReader:
         for category_combo, time_us in self.json_data.items():
             cat_str = _category_str(category_combo)
             if category == cat_str:
-                return [time_us/as_type(MICROSECONDS_IN_SECOND, type(time_us))]
+                return [time_us/as_type(constants.MICROSECONDS_IN_SECOND, type(time_us))]
         # for cat_data in self.json_data['category_combo_times']:
         #     category_combo = cat_data['category_combo']
         #     cat_str = _category_str(category_combo)
-        #     times_sec = np.array(cat_data['times_usec'])/MICROSECONDS_IN_SECOND
+        #     times_sec = np.array(cat_data['times_usec'])/constants.MICROSECONDS_IN_SECOND
         #     if category == cat_str:
         #         # Ignore the first time since it includes libcupti.so load time.
         #         return times_sec[1:]
@@ -2313,8 +2314,8 @@ class SlidingWindowUtilizationPlot:
         # NOTE: make time_sec 0-based from the beginning of training;
         # start of training is min(time_us) before training starts.
         sld_df['line_label'] = "Sliding window (poll interval = {poll_ms} ms, window size = {window_ms} ms)".format(
-            poll_ms=polling_util.polling_interval_us / MICROSECONDS_IN_MS,
-            window_ms=self.window_size_us / MICROSECONDS_IN_MS,
+            poll_ms=polling_util.polling_interval_us / constants.MICROSECONDS_IN_MS,
+            window_ms=self.window_size_us / constants.MICROSECONDS_IN_MS,
         )
         sld_df['device_name'] = device_name
         sld_df['device_id'] = device_id
@@ -2326,7 +2327,7 @@ class SlidingWindowUtilizationPlot:
         # Nice to have utilization readings next to each other when manually inspecting csv file.
         df = df.sort_values(by=['start_time_us', 'line_label'])
 
-        df['time_sec'] = ( df['start_time_us'] - start_time_us ) / MICROSECONDS_IN_SECOND
+        df['time_sec'] = ( df['start_time_us'] - start_time_us ) / constants.MICROSECONDS_IN_SECOND
 
         return df, polling_util.polling_interval_us
 
@@ -2386,7 +2387,7 @@ class UtilizationPlot:
     """
     DEBUG_MINIGO = False
     # DEBUG_MINIGO = True
-    RESOURCE_TYPES = [CATEGORY_CPU, CATEGORY_GPU]
+    RESOURCE_TYPES = [constants.CATEGORY_CPU, constants.CATEGORY_GPU]
     def __init__(self, directory,
                  host=None,
                  user=None,
@@ -2436,7 +2437,7 @@ class UtilizationPlot:
         :param kwargs:
         """
         if operation_overlap_resource is None:
-            operation_overlap_resource = [CATEGORY_CPU]
+            operation_overlap_resource = [constants.CATEGORY_CPU]
         self.overlap_type = overlap_type
         self.machine_name = machine_name
         self.process_name = process_name
@@ -2616,7 +2617,7 @@ class UtilizationPlot:
         )
 
         # training_progress = self.sql_reader.training_progress(machine_name=machine_name, process_name=process_name, phase_name=phase_name, allow_none=True)
-        # if training_progress is None and phase != DEFAULT_PHASE:
+        # if training_progress is None and phase != constants.DEFAULT_PHASE:
         #     logger.info('TrainingProgress was None for ')
         #     import ipdb; ipdb.set_trace()
 
@@ -3111,7 +3112,7 @@ class VennJsPlotter:
             col_data['x_field'].append(x_field)
 
         df = pd.DataFrame(col_data)
-        df['time_sec'] = df['time_us'] / MICROSECONDS_IN_SECOND
+        df['time_sec'] = df['time_us'] / constants.MICROSECONDS_IN_SECOND
 
         # Total up the time of each region
         total_time_sec = df['time_sec'].sum()
@@ -3252,7 +3253,7 @@ class HeatScalePlot:
             debug=self.debug)
         util_df = util_df_reader.read()
         util_df = util_df.sort_values(['machine_name', 'device_name', 'start_time_us'])
-        util_df['start_time_sec'] = util_df['start_time_us']/MICROSECONDS_IN_SECOND
+        util_df['start_time_sec'] = util_df['start_time_us']/constants.MICROSECONDS_IN_SECOND
 
         overlap_df_reader = OverlapDataframeReader(
             self.directory,
@@ -3302,7 +3303,7 @@ class HeatScalePlot:
         #    CON: time-consuming to implement.
 
         # start_time_sec = self.sql_reader.trace_start_time_sec
-        start_time_sec = overlap_df['start_time_usec'].min() / MICROSECONDS_IN_SECOND
+        start_time_sec = overlap_df['start_time_usec'].min() / constants.MICROSECONDS_IN_SECOND
 
         device_ids = IDSet()
         machine_ids = IDSet()
@@ -3384,8 +3385,8 @@ class HeatScalePlot:
 
         def add_HeatScale_metadata(md):
             md['plot_type'] = 'HeatScale'
-            md['start_time_usec'] = float(start_time_sec)*MICROSECONDS_IN_SECOND
-            md['step_usec'] = self.step_sec*MICROSECONDS_IN_SECOND
+            md['start_time_usec'] = float(start_time_sec)*constants.MICROSECONDS_IN_SECOND
+            md['step_usec'] = self.step_sec*constants.MICROSECONDS_IN_SECOND
             md['decay'] = self.decay
 
         md = dict()

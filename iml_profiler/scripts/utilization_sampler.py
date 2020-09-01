@@ -27,14 +27,15 @@ from iml_profiler.protobuf.pyprof_pb2 import CategoryEventsProto, MachineUtiliza
 
 from iml_profiler.profiler.util import log_cmd, print_cmd
 from iml_profiler.parser.common import *
+from iml_profiler.profiler import timer as iml_timer
 
 BYTES_IN_KB = 1 << 10
 BYTES_IN_MB = 1 << 20
 
 # 100 ms
-MIN_UTIL_SAMPLE_FREQUENCY_SEC = 100/MILLISECONDS_IN_SECOND
+MIN_UTIL_SAMPLE_FREQUENCY_SEC = 100/constants.MILLISECONDS_IN_SECOND
 # 500 ms
-DEFAULT_UTIL_SAMPLE_FREQUENCY_SEC = 500/MILLISECONDS_IN_SECOND
+DEFAULT_UTIL_SAMPLE_FREQUENCY_SEC = 500/constants.MILLISECONDS_IN_SECOND
 def get_util_sampler_parser(add_iml_root_pid=True, only_fwd_arguments=False):
     # iml_root_pid=None,
     """
@@ -160,7 +161,7 @@ class UtilizationSampler:
         else:
             device_util = self.machine_util.device_util[util['device_name']]
 
-        start_time_usec = start_time_sec*MICROSECONDS_IN_SECOND
+        start_time_usec = start_time_sec*constants.MICROSECONDS_IN_SECOND
         # NOTE: When UtilizationSample.util is 0.0 and we print it, it just won't print
         # "util: 0.0" which you may confused with util being None.
         # assert util['util'] is not None
@@ -185,7 +186,7 @@ class UtilizationSampler:
                 logger.info("> {klass}: Dump CPU/GPU utilization after {sec} seconds (# samples = {n}, sampled every {every_ms} ms) @ {path}".format(
                     klass=self.__class__.__name__,
                     sec=self.util_dump_frequency_sec,
-                    every_ms=self.util_sample_frequency_sec*MILLISECONDS_IN_SECOND,
+                    every_ms=self.util_sample_frequency_sec*constants.MILLISECONDS_IN_SECOND,
                     n=self.n_samples,
                     path=get_trace_path(self.directory, trace_id),
                 ))
@@ -239,7 +240,7 @@ class UtilizationSampler:
                 if self.debug:
                     logger.info("> {klass}: Slept for {ms} ms".format(
                         klass=self.__class__.__name__,
-                        ms=one_ms*MILLISECONDS_IN_SECOND,
+                        ms=one_ms*constants.MILLISECONDS_IN_SECOND,
                     ))
 
                 cur_time_sec = time.time()
@@ -441,7 +442,7 @@ class MachineProcessCPUInfo:
     def __init__(self, pid, epoch_time_usec=None, debug=False):
         self.pid = pid
         if epoch_time_usec is None:
-            epoch_time_usec = now_us()
+            epoch_time_usec = iml_timer.now_us()
         self.debug = debug
         self.epoch_time_usec = epoch_time_usec
         self.process_tree = get_process_tree(pid)
@@ -513,7 +514,7 @@ def sample_gpu_utilization(machine_gpu_info, pid, debug=False):
     parsing nvidia-smi on both Windows/Linux for us.
     """
     gpus = machine_gpu_info.gpus()
-    epoch_time_usec = now_us()
+    epoch_time_usec = iml_timer.now_us()
     gpu_utils = []
     # if debug:
     #     logger.info(pprint_msg({'sample_gpu_bytes.gpus': gpus}))

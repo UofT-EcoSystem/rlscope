@@ -3,12 +3,13 @@ from iml_profiler.profiler.iml_logging import logger
 from iml_profiler.protobuf.pyprof_pb2 import CategoryEventsProto
 
 from iml_profiler.parser.common import *
+from iml_profiler.parser import constants
 from iml_profiler.parser.stats import KernelTime, category_times_add_time
 
 from iml_profiler.protobuf import iml_prof_pb2
 
 DEFAULT_group_by_device = False
-DEFAULT_ignore_categories = {CATEGORY_DUMMY_EVENT, CATEGORY_UNKNOWN}
+DEFAULT_ignore_categories = {constants.CATEGORY_DUMMY_EVENT, constants.CATEGORY_UNKNOWN}
 DEFAULT_debug = False
 
 class TFProfCategoryTimesReader:
@@ -120,9 +121,9 @@ class TFProfCategoryTimesReader:
             add_to.append(ktime)
 
         if IsGPUTime(device):
-            _add_time(CATEGORY_GPU, False)
+            _add_time(constants.CATEGORY_GPU, False)
         elif IsCPUTime(device):
-            _add_time(CATEGORY_CUDA_API_CPU, group_by_device)
+            _add_time(constants.CATEGORY_CUDA_API_CPU, group_by_device)
         else:
             raise NotImplementedError("Not sure what category device={dev} falls under.".format(dev=device))
 
@@ -232,12 +233,12 @@ class PyprofCategoryTimesReader:
                 path=self.profile_path))
             return category_times
 
-        category_times[CATEGORY_PYTHON] = []
-        self.add_event_times_to(category_times[CATEGORY_PYTHON], self.proto.python_events[step].events)
+        category_times[constants.CATEGORY_PYTHON] = []
+        self.add_event_times_to(category_times[constants.CATEGORY_PYTHON], self.proto.python_events[step].events)
 
         # clib_times = dict()
         for category, clib_events in self.proto.clibs[step].clibs.items():
-            if category in [CATEGORY_DUMMY_EVENT]:
+            if category in [constants.CATEGORY_DUMMY_EVENT]:
                 continue
             assert category not in category_times
             category_times[category] = []
@@ -311,7 +312,7 @@ class CUDADeviceEventsReader:
                     code=event.cuda_event_type,
                 ))
 
-        category = CATEGORY_GPU
+        category = constants.CATEGORY_GPU
         for device_name, dev_events_proto in self.proto.dev_events.items():
             for event in dev_events_proto.events:
                 name = get_event_name(event)
@@ -347,13 +348,13 @@ class CUDAAPIStatsReader:
         return _num_all_events(self)
 
     def all_events(self, debug=False):
-        category = CATEGORY_CUDA_API_CPU
+        category = constants.CATEGORY_CUDA_API_CPU
         for event in self.proto.events:
             name = event.api_name
             yield category, event.start_time_us, event.duration_us, name
 
     def cuda_api_call_events(self, debug=False):
-        # category = CATEGORY_CUDA_API_CPU
+        # category = constants.CATEGORY_CUDA_API_CPU
         # name = event.api_name
         # yield category, event.start_time_us, event.duration_us, name
         for event in self.proto.events:

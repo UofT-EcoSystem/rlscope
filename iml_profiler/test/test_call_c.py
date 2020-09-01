@@ -19,6 +19,7 @@ from iml_profiler.test import py_interface
 
 from iml_profiler.profiler.profilers import tensorflow_profile_context
 from iml_profiler.profiler.profilers import clib_wrap
+from iml_profiler.profiler import timer as iml_timer
 
 from iml_profiler import py_config
 
@@ -27,7 +28,7 @@ def disable_test_timestamp():
     Make sure pyprof and tfprof timestamps match.
     """
     tfprof_t = tensorflow_profile_context.now_in_usec()
-    pyprof_t = clib_wrap.now_us()
+    pyprof_t = iml_timer.now_us()
     diff_us = math.fabs(tfprof_t - pyprof_t)
     margin_of_error_us = 10
     # Be generous; we expect tfprof/pyprof timestamps to be within 10 us of each other.

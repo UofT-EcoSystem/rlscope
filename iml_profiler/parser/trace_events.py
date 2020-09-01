@@ -2,6 +2,7 @@ from iml_profiler.profiler.iml_logging import logger
 import decimal
 
 from iml_profiler.parser.common import *
+from iml_profiler.parser import constants
 
 def dump_category_times(category_times, json_path, print_log=True, category_as_str=None):
     trace_events_dumper = TraceEventsDumper(category_times, json_path, category_as_str=category_as_str)
@@ -80,11 +81,11 @@ class TraceEventsDumper:
         }
 
         for category, times in category_times.items():
-            # if category == CATEGORY_CUDA_API_CPU and type(category_times[CATEGORY_CUDA_API_CPU]) == dict:
+            # if category == constants.CATEGORY_CUDA_API_CPU and type(category_times[constants.CATEGORY_CUDA_API_CPU]) == dict:
             cat = self._cat(category)
             if type(category_times[category]) == dict:
-                # category_times[CATEGORY_CUDA_API_CPU] : device -> (tid -> times)
-                # assert type(category_times[CATEGORY_CUDA_API_CPU]) == dict
+                # category_times[constants.CATEGORY_CUDA_API_CPU] : device -> (tid -> times)
+                # assert type(category_times[constants.CATEGORY_CUDA_API_CPU]) == dict
                 for device, all_times in category_times[category].items():
                     category_name = "{cat}: {dev}".format(cat=cat, dev=device)
                     self.js_add_section(category_name)
@@ -93,9 +94,9 @@ class TraceEventsDumper:
                         for ktime in times:
                             name = self._ktime_name(ktime)
                             self.js_add_time(name, category_name, ktime, tid)
-            # elif category == CATEGORY_GPU:
+            # elif category == constants.CATEGORY_GPU:
             #     ...
-            elif self.reproduce_tfprof and category in [CATEGORY_PYTHON, CATEGORY_TF_API]:
+            elif self.reproduce_tfprof and category in [constants.CATEGORY_PYTHON, constants.CATEGORY_TF_API]:
                 # Ignore pyprof for now.
                 # We just want to test that we are properly reproducing the tfprof traceEvents json.
                 pass

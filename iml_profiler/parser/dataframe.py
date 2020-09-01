@@ -16,6 +16,7 @@ from os.path import join as _j, abspath as _a, exists as _e, dirname as _d, base
 
 from iml_profiler.profiler.util import pprint_msg
 from iml_profiler.parser.common import *
+from iml_profiler.parser import constants
 from iml_profiler.protobuf import iml_prof_pb2
 
 def Worker_split_map_merge(kwargs):
@@ -425,7 +426,7 @@ class CUDADeviceEventsReader(BaseDataframeReader):
             logger.info("Read CUDADeviceEventsReader from {path}".format(path=path))
 
         proto = read_cuda_device_events_file(path)
-        category = CATEGORY_GPU
+        category = constants.CATEGORY_GPU
         for device_name, dev_events_proto in proto.dev_events.items():
             for event in dev_events_proto.events:
                 event_name = self.get_event_name(event)
@@ -683,12 +684,12 @@ class SplitMapMerge_PyprofDataframeReader__total_intercepted_calls:
 
     def is_intercepted_call_event(self, category):
         # PROBLEM: If we add new categories of events, this will break.
-        # We already DID add new event categories: CATEGORY_PROF_...
-        # All we can really do keep track of a set of "CATEGORIES_C_EVENTS" that represent "Python -> C" interceptions.
+        # We already DID add new event categories: constants.CATEGORY_PROF_...
+        # All we can really do keep track of a set of "constants.CATEGORIES_C_EVENTS" that represent "Python -> C" interceptions.
         # However, if we ever add 'custom categories' in the future, that approach will break.
         # We should check for that somehow...
-        # return category not in {CATEGORY_OPERATION, CATEGORY_PYTHON}
-        return category in CATEGORIES_C_EVENTS
+        # return category not in {constants.CATEGORY_OPERATION, constants.CATEGORY_PYTHON}
+        return category in constants.CATEGORIES_C_EVENTS
 
 class SplitMapMerge_PyprofDataframeReader__total_intercepted_tensorflow_calls:
     def __init__(self, obj):
@@ -704,7 +705,7 @@ class SplitMapMerge_PyprofDataframeReader__total_intercepted_tensorflow_calls:
         return a + b
 
     def is_intercepted_tensorflow_call_event(self, category):
-        return category == CATEGORY_TF_API
+        return category == constants.CATEGORY_TF_API
 
 class SplitMapMerge_PyprofDataframeReader__total_intercepted_simulator_calls:
     def __init__(self, obj):
@@ -720,7 +721,7 @@ class SplitMapMerge_PyprofDataframeReader__total_intercepted_simulator_calls:
         return a + b
 
     def is_intercepted_simulator_call_event(self, category):
-        return category == CATEGORY_SIMULATOR_CPP
+        return category == constants.CATEGORY_SIMULATOR_CPP
 
 class SplitMapMerge_PyprofDataframeReader__total_op_events:
     def __init__(self, obj):
@@ -1052,12 +1053,12 @@ class PyprofDataframeReader(BaseDataframeReader):
     def _total_intercepted_calls(self, name, SplitMapMergeKlass):
         """
         How many times did we perform interception:
-        CATEGORY_PYTHON: Python -> C++
+        constants.CATEGORY_PYTHON: Python -> C++
         <clib category>: C++ -> Python
 
         where <clib category> could be:
-        - CATEGORY_SIMULATOR_CPP
-        - CATEGORY_TF_API
+        - constants.CATEGORY_SIMULATOR_CPP
+        - constants.CATEGORY_TF_API
 
         Everytime we have a C++ call, we record two events:
 
@@ -1074,7 +1075,7 @@ class PyprofDataframeReader(BaseDataframeReader):
 
     @staticmethod
     def is_op_event(event_name, category):
-        return not is_op_process_event(event_name, category) and category == CATEGORY_OPERATION
+        return not is_op_process_event(event_name, category) and category == constants.CATEGORY_OPERATION
 
     def total_annotations(self):
         return self.total_op_events()
@@ -1087,42 +1088,42 @@ class PyprofDataframeReader(BaseDataframeReader):
 
         Here are some of the events that get recorded during pyprof.
         - Op-events:
-          Category: CATEGORY_OPERATION, Event(name='sample_action')
+          Category: constants.CATEGORY_OPERATION, Event(name='sample_action')
           Operation annotation for the duration of the operation.
 
         - Process-events:
-          Category: CATEGORY_OPERATION, Event(name='[process_name]')
+          Category: constants.CATEGORY_OPERATION, Event(name='[process_name]')
           Single operation annotation recorded once at termination that measures
           the total duration of the process.
 
         - Remaining python time at end of operation:
-          Category: CATEGORY_PYTHON, Event(name='Finish python benchmark')
+          Category: constants.CATEGORY_PYTHON, Event(name='Finish python benchmark')
           The amount of time in between returning from the TensorFlow C++ API,
           and finishing an operation annotation.
 
         - Python-events:
-          Category: CATEGORY_PYTHON, Event(name=<CLIB__*>)
+          Category: constants.CATEGORY_PYTHON, Event(name=<CLIB__*>)
           Time spent in python before making a call into a wrapped C library (i.e. simulator, TensorFlow C++).
 
         - C-events:
-          Category: CATEGORY_TF_API/CATEGORY_SIMULATOR_CPP, Event(name=<CLIB__*>)
+          Category: constants.CATEGORY_TF_API/constants.CATEGORY_SIMULATOR_CPP, Event(name=<CLIB__*>)
           Time spent in the simulator / TensorFlow C++ code during an API call.
           NOTE: new categories could be created in the future for other "types" of C-libraries.
           For that reason, we recommend counting C-events by subtracting all other categories of events
-          (i.e. at the time of writing this: CATEGORY_OPERATION, CATEGORY_PYTHON).
+          (i.e. at the time of writing this: constants.CATEGORY_OPERATION, constants.CATEGORY_PYTHON).
 
         def total_op_events(self):
             # PSEUDOCODE:
             If we want to count the number of iml.prof.operation calls, then we wish to count the number of "Op-events":
                 Number of events where:
-                    event.category == CATEGORY_OPERATION and
+                    event.category == constants.CATEGORY_OPERATION and
                     not is_op_process_event(event_name, category)
 
         def total_intercepted_calls(self):
             # PSEUDOCODE:
             If we want to count the number of intercepted Python->C++ calls, then we wish to count the number of "C-events":
                 Number of events where:
-                    event.category not in {CATEGORY_OPERATION, CATEGORY_PYTHON}
+                    event.category not in {constants.CATEGORY_OPERATION, constants.CATEGORY_PYTHON}
 
         :return:
         """
@@ -1185,10 +1186,10 @@ class PyprofDataframeReader(BaseDataframeReader):
     def check_events(self):
         """
         Total category_events recorded:
-        - Each CATEGORY_PYTHON event should have a corresponding C++ event.
+        - Each constants.CATEGORY_PYTHON event should have a corresponding C++ event.
         - Then we have op-events
         - Plus, we may have some "extra" events like the
-          process event Event(category=CATEGORY_OPERATION, name="[<PROC>ppo2_HalfCheetah]")
+          process event Event(category=constants.CATEGORY_OPERATION, name="[<PROC>ppo2_HalfCheetah]")
         """
         len_df = self.len_df()
 
@@ -1293,7 +1294,7 @@ def get_iml_config_path(directory, allow_many=False, allow_none=False):
     """
     iml_config_paths = [
         path for path in each_file_recursive(directory)
-        if is_iml_config_file(path) and _b(_d(path)) != DEFAULT_PHASE]
+        if is_iml_config_file(path) and _b(_d(path)) != constants.DEFAULT_PHASE]
     # There should be exactly one iml_config.json file.
     # Q: Couldn't there be multiple for multi-process scripts like minigo?
     if len(iml_config_paths) != 1 and not allow_many:
@@ -1624,7 +1625,7 @@ class VennData:
             for process in processes(machine, directory):
                 for phase in phases(machine, process, directory):
                     for operation in operations(machine, process, phase, directory):
-                        subtract_sec = (pyprof_overhead_json['mean_pyprof_annotation_per_call_us']/USEC_IN_SEC) *
+                        subtract_sec = (pyprof_overhead_json['mean_pyprof_annotation_per_call_us']/constants.USEC_IN_SEC) *
                                        overhead_event_count_json[pyprof_annotation][process][phase][operation]
                         vd_tree.subtract_from_resource(resource='CPU', machine, process, phase, operation, category='Python',
                             subtract_sec)

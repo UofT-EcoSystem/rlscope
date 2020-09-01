@@ -1738,6 +1738,7 @@ MyStatus RangeTree::Push(const std::string& name, bool update_stats) {
   IF_BAD_STATUS_RETURN(status);
   if (!update_stats && cur_num_ranges > recorded_stats.max_num_ranges) {
     std::stringstream ss;
+
     ss << "GPUHwCounterSampler: Tried to push operation=\"" << name << "\", but this will exceed the total number of operations (Push() calls) "
        << "seen during the configuration pass, which was " << recorded_stats.max_num_ranges << ".  "
        << "Operation stack at time of push was:\n";
@@ -1745,6 +1746,20 @@ MyStatus RangeTree::Push(const std::string& name, bool update_stats) {
     ss << "\n";
     ss << "Stacks seen during configuration passes:\n";
     this->PrintStacks(ss, 1);
+
+    if (cur_num_operations.size() > 0) {
+      ss << "iml.prof.operation(...) call counts:\n";
+      size_t i = 0;
+      for (const auto& pair : cur_num_operations) {
+        i += 1;
+        const auto& operation = pair.first;
+        const auto& num_pushes = pair.second;
+        PrintIndent(ss, 1);
+        ss << "[" << i << "] " << operation << " = " << num_pushes << "\n";
+      }
+    }
+    ss << "Consider using iml.prof.set_max_operations(operation, max_count) to avoid this error\n";
+
     return MyStatus(error::INVALID_ARGUMENT, ss.str());
   }
   // This Push did not result in an insert.

@@ -18,6 +18,7 @@ from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, base
 import progressbar
 
 from iml_profiler.parser.common import *
+from iml_profiler.parser import constants
 from iml_profiler.parser.stats import Stats, KernelTime
 
 from iml_profiler.parser.db import SQLCategoryTimesReader, sql_get_source_files, sql_input_path, process_op_nest_single_thread, each_stack_trace
@@ -47,7 +48,7 @@ class PythonFlameGraphParser:
         # TODO: we only want samples belonging to <bench_name>
         raise NotImplementedError("Need handle process_category_times[proc], and add process_name to process_events(...) call")
         category_times = self.sql_reader.process_events(
-            keep_categories={CATEGORY_PYTHON_PROFILER, CATEGORY_OPERATION},
+            keep_categories={constants.CATEGORY_PYTHON_PROFILER, constants.CATEGORY_OPERATION},
             op_name=op_name,
             debug=self.debug,
             # fetchall=False,
@@ -55,8 +56,8 @@ class PythonFlameGraphParser:
             debug_label='parse_call_times',
         )
 
-        # category_times[CATEGORY_OPERATION] = process_op_nest_single_thread(
-        #     category_times[CATEGORY_OPERATION],
+        # category_times[constants.CATEGORY_OPERATION] = process_op_nest_single_thread(
+        #     category_times[constants.CATEGORY_OPERATION],
         #     debug=self.debug,
         #     show_progress=True,
         #     debug_label='parse_flame_graph',
@@ -71,7 +72,7 @@ class PythonFlameGraphParser:
             time_sec_sum = dict()
 
         for op_stack in each_stack_trace(
-            category_times[CATEGORY_PYTHON_PROFILER],
+            category_times[constants.CATEGORY_PYTHON_PROFILER],
             show_progress=True,
             debug=False,
             debug_label='parse_flame_graph'):
@@ -274,7 +275,7 @@ class PythonProfileParser:
     - NOTE: We want to output a python profile for each operation-type
     - List of KernelTime/Event's with pyprof information included in them (NOT NULL)
       - i.e.
-        events = Query all the events that are subsumed by (op-nested) CATEGORY_PYTHON_PROFILING
+        events = Query all the events that are subsumed by (op-nested) constants.CATEGORY_PYTHON_PROFILING
         (NOTE: this is what UtilizationPlot does)
 
     PROBLEM: How do we select ONLY python call-times specific to a particular operation?
@@ -300,14 +301,14 @@ class PythonProfileParser:
 
     def query_pyprof_call_times(op_name):
         # For each "step"/call to op:
-        events = Query CATEGORY_PYTHON_PROFILING/CATEGORY_OPERATION events
+        events = Query constants.CATEGORY_PYTHON_PROFILING/constants.CATEGORY_OPERATION events
                        across ALL steps
                        across ALL processes
                  # ORDER BY <pyprof_filename, pyprof_line_no, pyprof_function>
                  # NOTE: I don't think there's a nice way to preserve this ORDER BY across process_op_nest...
-        events[CATEGORY_OPERATION] = process_op_nest(events[CATEGORY_OPERATION])
+        events[constants.CATEGORY_OPERATION] = process_op_nest(events[constants.CATEGORY_OPERATION])
         pyprof_interceptions = events.filter {
-            Event.category == CATEGORY_PYTHON_PROFILING and
+            Event.category == constants.CATEGORY_PYTHON_PROFILING and
               Event is SUBSUMED by an event with op_type == op.type              # <-- NOTE: we can us OpStack to compute this.
         }
         pyprof_call_times = {
@@ -385,7 +386,7 @@ class PythonProfileParser:
         #     debug_memoize=self.debug_memoize)
         # assert len(operation_overlap) > 0
 
-        # NOTE: we just want to keep RAW events that overlap with CATEGORY_PYTHON_PROFILING events...
+        # NOTE: we just want to keep RAW events that overlap with constants.CATEGORY_PYTHON_PROFILING events...
         # This isn't QUITE what ComputeOverlap does.
         # ComputeOverlap is incrementally computing the total-sum of time-overlap between category types,
         # but it DISCARDS the raw events when doing this.
@@ -423,7 +424,7 @@ class PythonProfileParser:
 
         raise NotImplementedError("Need handle process_category_times[proc], and add process_name to process_events(...) call")
         category_times = self.sql_reader.process_events(
-            keep_categories={CATEGORY_PYTHON_PROFILER, CATEGORY_OPERATION},
+            keep_categories={constants.CATEGORY_PYTHON_PROFILER, constants.CATEGORY_OPERATION},
             op_name=op_name,
             debug=self.debug,
             # fetchall=False,
@@ -437,14 +438,14 @@ class PythonProfileParser:
             return
 
         # JAMES TODO: process_op_nest(category_times[CATGEORY_OPERATION])
-        # replace call_times below with category_times[CATEGORY_PYTHON_PROFILING]; handle usec
+        # replace call_times below with category_times[constants.CATEGORY_PYTHON_PROFILING]; handle usec
         # call_times = ...
 
         # self.num_calls = min(len(times) for times in category_times.values())
         # for times in category_times.values():
         #     assert self.num_calls == len(times)
 
-        self.num_calls = len(category_times[CATEGORY_OPERATION])
+        self.num_calls = len(category_times[constants.CATEGORY_OPERATION])
 
         # end_parse_call_times = time.time()
         # logger.info("> Parsing call times took: {sec} seconds".format(sec=end_parse_call_times - start_parse_call_times)) # 45 seconds, ~ 6-7 GB
@@ -452,7 +453,7 @@ class PythonProfileParser:
         # logger.info("> Adding call times to pyfunc_stats:") # 249 seconds / 4min 9sec; this takes up a LOT of memory: 34.5 GIG.
         start_add_call_times = time.time()
         progress_label = as_progress_label('parse_call_times', debug_label)
-        for i, ktime in enumerate(progress(category_times[CATEGORY_PYTHON_PROFILER],
+        for i, ktime in enumerate(progress(category_times[constants.CATEGORY_PYTHON_PROFILER],
                                            desc=progress_label,
                                            show_progress=self.debug)):
             # if self.config['clock'] == 'monotonic_clock':

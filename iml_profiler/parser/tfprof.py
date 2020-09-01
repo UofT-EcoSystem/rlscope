@@ -15,6 +15,7 @@ if py_config.USE_NUMBA:
 
 from iml_profiler.profiler.util import pprint_msg
 from iml_profiler.parser.common import *
+from iml_profiler.parser import constants
 # from tensorflow.core.profiler.tfprof_log_pb2 import ProfileProto
 from iml_profiler.protobuf.pyprof_pb2 import CategoryEventsProto, ProcessMetadata
 
@@ -118,7 +119,7 @@ class ComputeOverlap:
     :param overlaps_with
         Only keep times whose category_key contains at least one of these categories.
 
-        Typically overlaps_with = [CATEGORY_OPERATION], so we only keep execution time
+        Typically overlaps_with = [constants.CATEGORY_OPERATION], so we only keep execution time
         that happened during an operation.
     """
     def __init__(self,
@@ -894,7 +895,7 @@ def compute_overlap_single_thread(
             categories_key = frozenset(cur_categories)
 
             # For debugging; useful to check for overlaps we don't expect to occur.
-            # For example, overlap across CATEGORY_OPERATION's within a single process.
+            # For example, overlap across constants.CATEGORY_OPERATION's within a single process.
             if check_key is not None:
                 md = {
                     'curtime':curtime,
@@ -1065,7 +1066,7 @@ class TotalTimeParser(ProfilerParserCommonMixin):
         js = {
             'min_start_us': min_start_us,
             'max_end_us': max_end_us,
-            'total_time_sec': (max_end_us - min_start_us)/MICROSECONDS_IN_SECOND,
+            'total_time_sec': (max_end_us - min_start_us)/constants.MICROSECONDS_IN_SECOND,
         }
         do_dump_json(js, self._profile_json_path)
 
@@ -1231,8 +1232,8 @@ class TraceEventsParser:
 
     def _trace_first_step(self):
         ignore_cats = list(DEFAULT_ignore_categories)
-        if CATEGORY_DUMMY_EVENT in ignore_cats:
-            ignore_cats.remove(CATEGORY_DUMMY_EVENT)
+        if constants.CATEGORY_DUMMY_EVENT in ignore_cats:
+            ignore_cats.remove(constants.CATEGORY_DUMMY_EVENT)
 
         machines = self.sql_reader.machines()
         assert len(machines) == 1
@@ -1372,8 +1373,8 @@ class TraceEventsParser:
         else:
             return None
             # ignore_cats = list(DEFAULT_ignore_categories)
-            # if CATEGORY_DUMMY_EVENT in ignore_cats:
-            #     ignore_cats.remove(CATEGORY_DUMMY_EVENT)
+            # if constants.CATEGORY_DUMMY_EVENT in ignore_cats:
+            #     ignore_cats.remove(constants.CATEGORY_DUMMY_EVENT)
             #
             # for op_name in self.op_names:
             #     for process_name, step, category_times in itertools.islice(
@@ -1408,9 +1409,9 @@ def split_cpu_gpu_categories(category_key):
     cpus = set()
     gpus = set()
     for category in category_key.non_ops:
-        if category in CATEGORIES_CPU:
+        if category in constants.CATEGORIES_CPU:
             cpus.add(category)
-        elif category in CATEGORIES_GPU:
+        elif category in constants.CATEGORIES_GPU:
             gpus.add(category)
         else:
             raise NotImplementedError("Not sure how to categorize category={cat} as CPU vs GPU".format(
@@ -1675,9 +1676,9 @@ class OverlapComputer:
     #     traced_time_sec = NumberType(0.)
     #     traced_op_time_sec = NumberType(0.)
     #     for category_key, time_us in new_overlap_01.items():
-    #         traced_time_sec += time_us/NumberType(MICROSECONDS_IN_SECOND)
+    #         traced_time_sec += time_us/NumberType(constants.MICROSECONDS_IN_SECOND)
     #         if len(category_key.ops) > 0:
-    #             traced_op_time_sec += time_us/NumberType(MICROSECONDS_IN_SECOND)
+    #             traced_op_time_sec += time_us/NumberType(constants.MICROSECONDS_IN_SECOND)
     #
     #     total_trace_time_sec = sql_reader.total_trace_time_sec(debug=self.debug)
     #     missing_traced_time_sec = total_trace_time_sec - as_type(traced_time_sec, type(total_trace_time_sec))
@@ -1834,7 +1835,7 @@ class OverlapComputer:
                 new_overlap_metadata.merge_region(new_key, overlap_metadata.get_region(overlap_key))
 
                 new_key = CategoryKey(ops=frozenset(),
-                                      non_ops=frozenset([CATEGORY_TOTAL]),
+                                      non_ops=frozenset([constants.CATEGORY_TOTAL]),
                                       procs=frozenset())
                 _add_key(new_overlap, new_key, times)
                 new_overlap_metadata.merge_region(new_key, overlap_metadata.get_region(overlap_key))
@@ -2206,13 +2207,13 @@ class OverlapComputer:
                 logger.info("> DEBUG: dump trace events AFTER process_op_nest @ {path}".format(path=json_path))
                 dump_category_times(category_times, json_path, print_log=False)
 
-            for ktime in category_times.get(CATEGORY_OPERATION, []):
+            for ktime in category_times.get(constants.CATEGORY_OPERATION, []):
                 assert ktime.name == bench_name
             # JAMES TODO: We only want to compute overlap of execution time with op-events whose type is bench_name.
             # If it's just execution time without op-type overlap we should discard it.
 
             # JAMES TODO: remove "Operation" from plot labels
-            # compute_overlap = ComputeOverlap(category_times, overlaps_with=[CATEGORY_OPERATION])
+            # compute_overlap = ComputeOverlap(category_times, overlaps_with=[constants.CATEGORY_OPERATION])
 
             # Can take up to 1.2 seconds, often 0.011 seconds, 0.004 seconds for loop_train_eval.
             start_overlap_t = time.time()
@@ -2227,7 +2228,7 @@ class OverlapComputer:
                     step=step,
                     sec=sec_overlap))
             for category_key in list(overlap.keys()):
-                if not( len(category_key) > 1 and CATEGORY_OPERATION in category_key ):
+                if not( len(category_key) > 1 and constants.CATEGORY_OPERATION in category_key ):
                     del overlap[category_key]
 
             overlaps.append(overlap)
@@ -2530,18 +2531,18 @@ class OverlapTypeInterface:
 
         non_ops = set()
         for category in category_key.non_ops:
-            if category in CATEGORIES_CPU or ( visible_overhead and category in CATEGORIES_PROF ):
+            if category in constants.CATEGORIES_CPU or ( visible_overhead and category in constants.CATEGORIES_PROF ):
                 if as_cpu_gpu:
                     # NOTE: profiling types are treated as fine-grained CPU categories.
-                    non_ops.add(CATEGORY_CPU)
+                    non_ops.add(constants.CATEGORY_CPU)
                 else:
                     non_ops.add(category)
-            elif category in CATEGORIES_GPU:
+            elif category in constants.CATEGORIES_GPU:
                 if as_cpu_gpu:
-                    non_ops.add(CATEGORY_GPU)
+                    non_ops.add(constants.CATEGORY_GPU)
                 else:
                     non_ops.add(category)
-            elif ( not visible_overhead ) and category in CATEGORIES_PROF:
+            elif ( not visible_overhead ) and category in constants.CATEGORIES_PROF:
                 # Overhead will get removed during maybe_remove_overhead.
                 # Keep the overhead category so we can "see where it is".
                 non_ops.add(category)
@@ -2577,16 +2578,16 @@ class OverlapTypeInterface:
     #     #     However, if the user DOESN'T provide calibration files, all we do is invisible_overhead.
     #     #     If calibration files are provided, then invisible_overhead ought to be the default.
     #     #
-    #     if category in CATEGORIES_CPU or ( visible_overhead and category in CATEGORIES_PROF ):
-    #         non_ops = frozenset([CATEGORY_CPU])
+    #     if category in constants.CATEGORIES_CPU or ( visible_overhead and category in constants.CATEGORIES_PROF ):
+    #         non_ops = frozenset([constants.CATEGORY_CPU])
     #         ops = frozenset()
-    #     elif ( not visible_overhead ) and category in CATEGORIES_PROF:
+    #     elif ( not visible_overhead ) and category in constants.CATEGORIES_PROF:
     #         non_ops = frozenset([category])
     #         ops = frozenset()
-    #     elif category == CATEGORY_GPU:
-    #         non_ops = frozenset([CATEGORY_GPU])
+    #     elif category == constants.CATEGORY_GPU:
+    #         non_ops = frozenset([constants.CATEGORY_GPU])
     #         ops = frozenset()
-    #     elif category == CATEGORY_OPERATION:
+    #     elif category == constants.CATEGORY_OPERATION:
     #         non_ops = frozenset()
     #         ops = frozenset([event.name])
     #     else:
@@ -2864,20 +2865,20 @@ def maybe_remove_overhead(key, visible_overhead):
     if visible_overhead:
         # Keep the overhead and the CPU category it belongs to.
         return key
-    prof_categories = CATEGORIES_PROF.intersection(key.non_ops)
+    prof_categories = constants.CATEGORIES_PROF.intersection(key.non_ops)
     non_ops = key.non_ops
     if len(prof_categories) > 0:
-        # cpu_categories = CATEGORIES_CPU.intersection(key.non_ops)
+        # cpu_categories = constants.CATEGORIES_CPU.intersection(key.non_ops)
         # if len(cpu_categories) > 0:
         #     # Discard CPU-time that is due to profiling overhead.
-        #     # NOTE: CATEGORY_GPU won't get discarded.
+        #     # NOTE: constants.CATEGORY_GPU won't get discarded.
         #     non_ops = non_ops.difference(cpu_categories)
 
         # Discard CPU-time that is due to profiling overhead.
-        # NOTE: CATEGORY_GPU won't get discarded.
-        non_ops = non_ops.difference(CATEGORIES_CPU)
+        # NOTE: constants.CATEGORY_GPU won't get discarded.
+        non_ops = non_ops.difference(constants.CATEGORIES_CPU)
         # Q: Should we remove the profiling category as well...? I think so yes.
-        non_ops = non_ops.difference(CATEGORIES_PROF)
+        non_ops = non_ops.difference(constants.CATEGORIES_PROF)
     new_key = CategoryKey(
         ops=key.ops,
         non_ops=non_ops,
@@ -2949,12 +2950,12 @@ class ResourceOverlapType(OverlapTypeInterface):
 
     # def pre_reduce(self, category, event, visible_overhead):
     #     """
-    #     Re-map CPU-like categories to CATEGORY_CPU:
+    #     Re-map CPU-like categories to constants.CATEGORY_CPU:
     #         e.g.
-    #         CATEGORY_PYTHON -> CategoryKey(non_ops=[CATEGORY_CPU], procs=event.process_name)
+    #         constants.CATEGORY_PYTHON -> CategoryKey(non_ops=[constants.CATEGORY_CPU], procs=event.process_name)
     #
-    #     Keep CATEGORY_OPERATION events.
-    #         CATEGORY_PYTHON -> CategoryKey(ops=[op], procs=event.process_name)
+    #     Keep constants.CATEGORY_OPERATION events.
+    #         constants.CATEGORY_PYTHON -> CategoryKey(ops=[op], procs=event.process_name)
     #
     #     :param category:
     #     :param event:
@@ -3127,7 +3128,7 @@ class CategoryOverlapType(OverlapTypeInterface):
     #
     #     Pre-reduce: keep categories as-is; filter out GPU stuff.
     #     """
-    #     if category == CATEGORY_OPERATION:
+    #     if category == constants.CATEGORY_OPERATION:
     #         non_ops = frozenset()
     #         ops = frozenset([event.name])
     #     else:
@@ -3269,7 +3270,7 @@ class CategoryOverlapType(OverlapTypeInterface):
                 md.update({
                     # TODO: For now we only are computed category overlap for CPU;
                     # in the future we may have more fine-grained GPU categories.
-                    # 'resource_overlap': sorted([CATEGORY_CPU]),
+                    # 'resource_overlap': sorted([constants.CATEGORY_CPU]),
                     'resource_overlap': resources,
                     'operation': op,
                 })
@@ -3302,9 +3303,9 @@ class CategoryOverlapType(OverlapTypeInterface):
             cpus_gpus = split_cpu_gpu_categories(combo_key)
             resource_key = set()
             if len(cpus_gpus.cpus) > 0:
-                resource_key.add(CATEGORY_CPU)
+                resource_key.add(constants.CATEGORY_CPU)
             if len(cpus_gpus.gpus) > 0:
-                resource_key.add(CATEGORY_GPU)
+                resource_key.add(constants.CATEGORY_GPU)
             resource_key = frozenset(resource_key)
             assert len(combo_key.ops) > 0
             assert len(combo_key.non_ops) > 0
@@ -3357,7 +3358,7 @@ class ResourceSubplotOverlapType(OverlapTypeInterface):
             # Add time to CPU, add time to GPU, add time to Total.
 
             new_key = CategoryKey(ops=frozenset(),
-                                  non_ops=frozenset([CATEGORY_TOTAL]),
+                                  non_ops=frozenset([constants.CATEGORY_TOTAL]),
                                   procs=frozenset())
             _add_key(new_overlap, new_key, times)
             new_overlap_metadata.merge_region(new_key, overlap_metadata.get_region(overlap_key))

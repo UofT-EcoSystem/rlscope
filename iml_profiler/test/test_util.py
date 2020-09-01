@@ -3,11 +3,11 @@ from iml_profiler.parser.common import *
 from iml_profiler.parser.stats import KernelTime
 
 def sec(seconds):
-    return seconds*MICROSECONDS_IN_SECOND
+    return seconds*constants.MICROSECONDS_IN_SECOND
 
 def T(start_sec, end_sec, name=None):
-    return KernelTime(start_usec=start_sec*MICROSECONDS_IN_SECOND,
-                      end_usec=end_sec*MICROSECONDS_IN_SECOND,
+    return KernelTime(start_usec=start_sec*constants.MICROSECONDS_IN_SECOND,
+                      end_usec=end_sec*constants.MICROSECONDS_IN_SECOND,
                       name=name)
 
 def U(start_usec, end_usec=None, name=None, time_usec=None):

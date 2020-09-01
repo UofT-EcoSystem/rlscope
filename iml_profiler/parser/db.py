@@ -36,6 +36,7 @@ from iml_profiler.parser.readers import TFProfCategoryTimesReader, CUDAAPIStatsR
 import contextlib
 
 from iml_profiler.parser.common import *
+from iml_profiler.parser import constants
 
 from iml_profiler.parser.stats import category_times_add_time
 
@@ -264,7 +265,7 @@ class SQLParser:
                                                              op1.end_time_us < op2.end_time_us 
                 )
         )
-        """.format(CATEGORY_OPERATION=CATEGORY_OPERATION)
+        """.format(CATEGORY_OPERATION=constants.CATEGORY_OPERATION)
         sql_exec_query(c, partial_overlap_query, klass=self.__class__, debug=self.debug)
         rows = c.fetchall()
         if len(rows) > 0:
@@ -289,7 +290,7 @@ class SQLParser:
                 op1.end_time_us == op2.end_time_us
             )
         )
-        """.format(CATEGORY_OPERATION=CATEGORY_OPERATION)
+        """.format(CATEGORY_OPERATION=constants.CATEGORY_OPERATION)
         sql_exec_query(c, full_overlap_query, klass=self.__class__, debug=self.debug)
         rows = c.fetchall()
         if len(rows) > 0:
@@ -424,7 +425,7 @@ class SQLParser:
 
         if self.debug:
             logger.info("> Insert categories.")
-        categories = sorted(set(CATEGORIES_ALL))
+        categories = sorted(set(constants.CATEGORIES_ALL))
         for category in categories:
             self.insert_category_name(category)
 
@@ -740,7 +741,7 @@ class SQLParser:
     #
     #     def each_category_events():
     #         for step, python_events in proto.python_events.items():
-    #             yield CATEGORY_PYTHON, python_events.events
+    #             yield constants.CATEGORY_PYTHON, python_events.events
     #
     #         for step, clibs in proto.clibs.items():
     #             for category, clib_events in clibs.clibs.items():
@@ -1253,7 +1254,7 @@ class TraceFileInserter:
 
     def _pyprof_each_category_events(self, pyprof_proto):
         for step, python_events in pyprof_proto.python_events.items():
-            yield CATEGORY_PYTHON, python_events.events
+            yield constants.CATEGORY_PYTHON, python_events.events
 
         for step, clibs in pyprof_proto.clibs.items():
             for category, clib_events in clibs.clibs.items():
@@ -2499,7 +2500,7 @@ class SQLCategoryTimesReader:
             machine_clause=sql_machine_clause(machine_name, 'm', indents=1, allow_none=True),
             process_clause=sql_process_clause(process_name, 'p', indents=1, allow_none=True),
             phase_clause=sql_phase_clause(phase_name, 'ph', indents=1, allow_none=True),
-            CATEGORY_OPERATION=CATEGORY_OPERATION,
+            CATEGORY_OPERATION=constants.CATEGORY_OPERATION,
         )
         sql_exec_query(c, query, debug=debug)
         rows = [Operation.from_row(row) for row in c.fetchall()]
@@ -2535,7 +2536,7 @@ class SQLCategoryTimesReader:
             {debug_ops_clause}
         ORDER BY e.event_name
         """.format(
-            CATEGORY_OPERATION=CATEGORY_OPERATION,
+            CATEGORY_OPERATION=constants.CATEGORY_OPERATION,
             debug_ops_clause=sql_debug_ops_clause(debug_ops, 'e'),
          ))
         bench_names = [row['event_name'] for row in c.fetchall()]
@@ -2642,7 +2643,7 @@ class SQLCategoryTimesReader:
             {machine_clause}
         ORDER BY e1.start_time_us ASC 
         """.format(
-            CATEGORY_OPERATION=CATEGORY_OPERATION,
+            CATEGORY_OPERATION=constants.CATEGORY_OPERATION,
             # PROFILING_DUMP_TRACE=PROFILING_DUMP_TRACE,
             # NOTE: We do NOT want to select any steps of an operation that overlap at all with a DUMP event.
             # indents=3 since {overlap_clause} above has 3 indent-levels in front of it.
@@ -2771,7 +2772,7 @@ class SQLCategoryTimesReader:
         PSEUDOCODE:
         for proc in self.process_names:
             events[proc] = Select all events for <process_name> (i.e. over its min/max time range)
-            events[proc] = process_op_nest(events[proc]) to get the right operations for CATEGORY_OPERATION.
+            events[proc] = process_op_nest(events[proc]) to get the right operations for constants.CATEGORY_OPERATION.
 
         # Replace Python/C++/CUDA-C with CPU category.
         # Keep GPU category.
@@ -2804,7 +2805,7 @@ class SQLCategoryTimesReader:
 
         category_times = dict()
         # operation_types = set()
-        # Categories NOT including the operation-type categories (that replaced CATEGORY_OPERATION)
+        # Categories NOT including the operation-type categories (that replaced constants.CATEGORY_OPERATION)
         # categories = set()
         # proc_types = set()
 
@@ -2833,7 +2834,7 @@ class SQLCategoryTimesReader:
             process_name=process_name,
             phase_name=phase_name,
             machine_name=machine_name,
-            category_name=CATEGORY_OPERATION,
+            category_name=constants.CATEGORY_OPERATION,
             start_time_us=start_time_us,
             end_time_us=end_time_us,
             timer=timer,
@@ -2859,28 +2860,28 @@ class SQLCategoryTimesReader:
         #     timer.end_operation('process_events_split(...)')
         # assert len(proc_events) > 0
         # assert len(proc_category_times) > 0
-        # assert len(proc_category_times[CATEGORY_OPERATION]) > 0
+        # assert len(proc_category_times[constants.CATEGORY_OPERATION]) > 0
 
         for machine_name in op_category_times.keys():
             for proc in op_category_times[machine_name].keys():
 
-                # assert CATEGORY_OPERATION in proc_category_times
-                if CATEGORY_OPERATION in op_category_times[machine_name][proc]:
+                # assert constants.CATEGORY_OPERATION in proc_category_times
+                if constants.CATEGORY_OPERATION in op_category_times[machine_name][proc]:
                     """
-                    Replace proc_category_times[CATEGORY_OPERATION], handle operation nesting.
+                    Replace proc_category_times[constants.CATEGORY_OPERATION], handle operation nesting.
                     We are assuming a single process is single-threaded here, so any operation 
                     nesting is form a single-threaded "call-stack".
                     """
-                    op_category_times[machine_name][proc][CATEGORY_OPERATION] = process_op_nest_single_thread(
-                        op_category_times[machine_name][proc][CATEGORY_OPERATION],
+                    op_category_times[machine_name][proc][constants.CATEGORY_OPERATION] = process_op_nest_single_thread(
+                        op_category_times[machine_name][proc][constants.CATEGORY_OPERATION],
                         show_progress=debug,
                         debug_label=process_label)
                     # Doesn't speed anything up on "test_load"
-                    # proc_category_times[CATEGORY_OPERATION] = process_op_nest_parallel(
-                    #     proc_category_times[CATEGORY_OPERATION],
+                    # proc_category_times[constants.CATEGORY_OPERATION] = process_op_nest_parallel(
+                    #     proc_category_times[constants.CATEGORY_OPERATION],
                     #     show_progress=debug,
                     #     debug_label=process_label)
-                    assert len(op_category_times[machine_name][proc][CATEGORY_OPERATION]) > 0
+                    assert len(op_category_times[machine_name][proc][constants.CATEGORY_OPERATION]) > 0
 
         if timer is not None:
             timer.end_operation('parse_timeline(...): flatten operations')
@@ -2988,7 +2989,7 @@ class SQLCategoryTimesReader:
         row = c.fetchone()
         total_time_us = row['max_us'] - row['min_us']
         NumberType = type(total_time_us)
-        total_time_sec = total_time_us/NumberType(MICROSECONDS_IN_SECOND)
+        total_time_sec = total_time_us/NumberType(constants.MICROSECONDS_IN_SECOND)
         return total_time_sec
 
     def query_trace_period(self,
@@ -3124,7 +3125,7 @@ class SQLCategoryTimesReader:
         # ##
         # category_names = self.categories
         # for category_name in category_names:
-        #     if category_name in {CATEGORY_OPERATION}:
+        #     if category_name in {constants.CATEGORY_OPERATION}:
         #         continue
         #     # NOTE: we can do each of these in parallel.
         #     # Q: Can we share np.array's efficiently between workers...? I don't think so.
@@ -3202,7 +3203,7 @@ class SQLCategoryTimesReader:
             return (row['category_name'],)
         row_iter = rows.each_row(timer=select_timer)
         for (category_name,), category_rows_iter in itertools.groupby(row_iter, key=groupby_key):
-            if category_name == CATEGORY_OPERATION:
+            if category_name == constants.CATEGORY_OPERATION:
                 continue
             category_key = CategoryKey(
                 ops=frozenset(),
@@ -3351,7 +3352,7 @@ class SQLCategoryTimesReader:
             )
             """.format(
                 op_event_subsumes_e1_clause=sql_overlap_clause('op_event', 'e1', overlap_type='subsumes', indents=3),
-                CATEGORY_OPERATION=CATEGORY_OPERATION,
+                CATEGORY_OPERATION=constants.CATEGORY_OPERATION,
                 op=op_name,
             )
         keep_op_clause = op_name is not None
@@ -3645,7 +3646,7 @@ class SQLCategoryTimesReader:
         filter_by_op = None
         if filter_op:
             filter_by_op = bench_name
-        category_times[CATEGORY_OPERATION] = process_op_nest_single_thread(category_times[CATEGORY_OPERATION],
+        category_times[constants.CATEGORY_OPERATION] = process_op_nest_single_thread(category_times[constants.CATEGORY_OPERATION],
                                                              filter_by_op=filter_by_op,
                                                              # Gets in the way of each_op_instance progress bar.
                                                              # show_progress=debug or show_progress,
@@ -3697,13 +3698,13 @@ def bin_category_times_old(
     progress_label = "parse_timeline: process={proc}, category={cat}".format(
         proc=process_name, cat=category)
     for event in progress(events, desc=progress_label, show_progress=debug):
-        if category in CATEGORIES_CPU:
-            cat = CATEGORY_CPU
+        if category in constants.CATEGORIES_CPU:
+            cat = constants.CATEGORY_CPU
             categories.add(cat)
-        elif category == CATEGORY_GPU:
-            cat = CATEGORY_GPU
+        elif category == constants.CATEGORY_GPU:
+            cat = constants.CATEGORY_GPU
             categories.add(cat)
-        elif category == CATEGORY_OPERATION:
+        elif category == constants.CATEGORY_OPERATION:
             cat = event.name
             operation_types.add(cat)
         else:
@@ -3711,7 +3712,7 @@ def bin_category_times_old(
             # We want to KEEP the operation category so we can determine
             # overlap between q_backward/q_forward across processes...
             #
-            # I think all we need to do is replace "CATEGORY_OPERATION" for an event
+            # I think all we need to do is replace "constants.CATEGORY_OPERATION" for an event
             # with event.name (it's operation-type).
             # Then, when we go to plot the category_times data, we "remove" any operation
             # names from the category (forming an operation_key), and group the data
@@ -3753,13 +3754,13 @@ class EventCategoryMapper:
 #
 #     @staticmethod
 #     def as_proc_resource_category(event, old_category, state):
-#         if old_category in CATEGORIES_CPU:
-#             cat = CATEGORY_CPU
+#         if old_category in constants.CATEGORIES_CPU:
+#             cat = constants.CATEGORY_CPU
 #             self.categories.add(cat)
-#         elif old_category == CATEGORY_GPU:
-#             cat = CATEGORY_GPU
+#         elif old_category == constants.CATEGORY_GPU:
+#             cat = constants.CATEGORY_GPU
 #             self.categories.add(cat)
-#         elif old_category == CATEGORY_OPERATION:
+#         elif old_category == constants.CATEGORY_OPERATION:
 #             cat = event.name
 #             # logger.info("> operation_types.add {cat}".format(cat=cat))
 #             self.operation_types.add(cat)
@@ -3768,7 +3769,7 @@ class EventCategoryMapper:
 #             # We want to KEEP the operation category so we can determine
 #             # overlap between q_backward/q_forward across processes...
 #             #
-#             # I think all we need to do is replace "CATEGORY_OPERATION" for an event
+#             # I think all we need to do is replace "constants.CATEGORY_OPERATION" for an event
 #             # with event.name (it's operation-type).
 #             # Then, when we go to plot the category_times data, we "remove" any operation
 #             # names from the category (forming an operation_key), and group the data
@@ -3782,7 +3783,7 @@ class EventCategoryMapper:
 #         new_category = frozenset([cat, proc_category])
 
 # def default_pre_reduce(category, event, process_name):
-#     if category == CATEGORY_OPERATION:
+#     if category == constants.CATEGORY_OPERATION:
 #         new_category = CategoryKey(
 #             ops=frozenset([event.name]),
 #             non_ops=frozenset(),
@@ -3795,7 +3796,7 @@ class EventCategoryMapper:
 #     return new_category
 
 def pre_reduce_op_event(category, event, process_name):
-    assert category == CATEGORY_OPERATION
+    assert category == constants.CATEGORY_OPERATION
     new_category = CategoryKey(
         ops=frozenset([event.name]),
         non_ops=frozenset(),
@@ -3850,13 +3851,13 @@ def bin_category_times(
     #     proc=process_name, cat=category)
     for event in progress(events, desc=progress_label, show_progress=debug):
 
-        # if category in CATEGORIES_CPU:
-        #     cat = CATEGORY_CPU
+        # if category in constants.CATEGORIES_CPU:
+        #     cat = constants.CATEGORY_CPU
         #     categories.add(cat)
-        # elif category == CATEGORY_GPU:
-        #     cat = CATEGORY_GPU
+        # elif category == constants.CATEGORY_GPU:
+        #     cat = constants.CATEGORY_GPU
         #     categories.add(cat)
-        # elif category == CATEGORY_OPERATION:
+        # elif category == constants.CATEGORY_OPERATION:
         #     cat = event.name
         #     # logger.info("> operation_types.add {cat}".format(cat=cat))
         #     operation_types.add(cat)
@@ -3865,7 +3866,7 @@ def bin_category_times(
         #     # We want to KEEP the operation category so we can determine
         #     # overlap between q_backward/q_forward across processes...
         #     #
-        #     # I think all we need to do is replace "CATEGORY_OPERATION" for an event
+        #     # I think all we need to do is replace "constants.CATEGORY_OPERATION" for an event
         #     # with event.name (it's operation-type).
         #     # Then, when we go to plot the category_times data, we "remove" any operation
         #     # names from the category (forming an operation_key), and group the data
@@ -5621,7 +5622,7 @@ def EventsAsEOTimes(events):
     for i, ktime in enumerate(events):
         if psec_in_usec is None:
             TimeType = type(ktime.start_time_usec)
-            psec_in_usec = TimeType(PSEC_IN_USEC)
+            psec_in_usec = TimeType(constants.PSEC_IN_USEC)
         # Convert Decimal(usec) to int64(picosecond);
         # Should keep enough precision for accurate results, while still allow int64.
         # Picosecond decimals come from:
@@ -5648,7 +5649,7 @@ def RowsAsEOTimes(rows, timer):
     for i, row in enumerate(row_iter):
         if psec_in_usec is None:
             TimeType = type(row['start_time_us'])
-            psec_in_usec = TimeType(PSEC_IN_USEC)
+            psec_in_usec = TimeType(constants.PSEC_IN_USEC)
         # Convert Decimal(usec) to int64(picosecond);
         # Should keep enough precision for accurate results, while still allow int64.
         # Picosecond decimals come from:

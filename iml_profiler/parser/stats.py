@@ -3,6 +3,7 @@ from iml_profiler.profiler.iml_logging import logger
 import progressbar
 
 from iml_profiler.parser.common import *
+from iml_profiler.parser import constants
 
 VARIABLE_HEADER = ['Type', 'Time(%)',
                    'Avg', 'Std', 'Std/Avg(%)',
@@ -209,7 +210,7 @@ def category_times_add_time(category_times, device, ktime, group_by_device, cate
         category = get_category_from_device(device)
     assert category is not None
 
-    if category in [CATEGORY_CUDA_API_CPU]:
+    if category in [constants.CATEGORY_CUDA_API_CPU]:
         group_by_device = group_by_device
     else:
         group_by_device = False
@@ -261,7 +262,7 @@ class Stat:
         if self.num_calls == 1:
             # Evenly divide the total time spent calling this function across all num_calls iterations.
             ret = np.empty(total_iterations)
-            fill = (self.sum()/len(ret))/MICROSECONDS_IN_SECOND
+            fill = (self.sum()/len(ret))/constants.MICROSECONDS_IN_SECOND
             ret.fill(fill)
             return ret
 
@@ -422,7 +423,7 @@ class Stat:
     def times_sec(self, call_idx=None):
         # JAMES TODO: This looks wrong with clock_monotonic...when did this make any sense?
         time_usecs = self._times_usec(call_idx)
-        return [usec/MICROSECONDS_IN_SECOND for usec in time_usecs]
+        return [usec/constants.MICROSECONDS_IN_SECOND for usec in time_usecs]
 
     def _times_usec(self, call_idx=None):
         self._check_call_idx(call_idx)
@@ -702,7 +703,7 @@ class Stats:
             )))
 
 
-        return total_times/MICROSECONDS_IN_SECOND
+        return total_times/constants.MICROSECONDS_IN_SECOND
 
     def sum_calls_sec_no_overlap(self, check_overlap=False):
         """

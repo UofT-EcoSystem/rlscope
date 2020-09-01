@@ -58,10 +58,12 @@ from os import environ as ENV
 from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, basename as _b
 
 from iml_profiler.parser.common import *
+from iml_profiler.parser import constants
+from iml_profiler.profiler import timer as iml_timer
 # from iml_profiler.profiler import cudaprofile
 from iml_profiler.clib import sample_cuda_api
 from iml_profiler.profiler import clib_wrap
-from iml_profiler.profiler.clib_wrap import MICROSECONDS_IN_SECOND
+# from iml_profiler.profiler.clib_wrap import MICROSECONDS_IN_SECOND
 from iml_profiler.profiler import tensorflow_profile_context
 
 from iml_profiler.profiler import proto_util
@@ -727,10 +729,11 @@ class Profiler:
 
             iml_argname = get_iml_argname(argname, internal=internal)
             
-            if hasattr(args, iml_argname) and getattr(args, iml_argname) is not None:
-                # assert isinstance(args, argparse.Namespace)
-                argval = getattr(args, iml_argname)
-                return argval
+            if hasattr(args, iml_argname):
+                if getattr(args, iml_argname) is not None:
+                    # assert isinstance(args, argparse.Namespace)
+                    argval = getattr(args, iml_argname)
+                    return argval
             elif iml_argname in args and args[iml_argname] is not None:
                 # assert type(args) == dict
                 argval = args[iml_argname]
@@ -768,6 +771,7 @@ class Profiler:
         self._has_called_enable_tracing = False
         self.num_training_loop_iters = 0
         self.num_passes = 0
+        self.pass_idx = 0
         self.has_next_pass = False
         self.debug = get_argval('debug', debug, False)
         self.calibration = get_argval('calibration', calibration, False)
@@ -897,7 +901,7 @@ class Profiler:
         self.handle_utilization_sampler = False
 
         self.start_trace_time_sec = get_internal_argval('start_trace_time_sec')
-        self.phase = get_internal_argval('phase', DEFAULT_PHASE)
+        self.phase = get_internal_argval('phase', constants.DEFAULT_PHASE)
 
         self.parent_process_name = get_internal_argval('parent_process_name')
 
@@ -1262,7 +1266,7 @@ class Profiler:
         if self.disable:
             return
 
-        self._start_us = now_us()
+        self._start_us = iml_timer.now_us()
 
         if self.unit_test:
             self.ut.start()
@@ -1437,6 +1441,7 @@ class Profiler:
             self._hw_pass_running = False
             sample_cuda_api.end_pass()
             self.has_next_pass = self._has_next_pass()
+        self.pass_idx += 1
 
     def _has_next_pass(self):
         assert not self._hw_pass_running
@@ -1467,12 +1472,12 @@ class Profiler:
 
         self._push_operation(bench_name)
 
-        self.start_call_us[bench_name] = clib_wrap.now_us()
+        self.start_call_us[bench_name] = iml_timer.now_us()
 
     def operation(self, operation, skip=False):
         return Operation(operation, prof=self, skip=skip)
 
-    def profile(self, process_name, phase_name=DEFAULT_PHASE, handle_utilization_sampler=True):
+    def profile(self, process_name, phase_name=constants.DEFAULT_PHASE, handle_utilization_sampler=True):
         """
         with iml.prof.profile('loop_train_eval', phase_name='sgd_updates'):
             ... code to profile ...
@@ -1625,7 +1630,7 @@ class Profiler:
                     b2=bench_name,
                 )))
 
-            self.end_call_us[bench_name] = clib_wrap.now_us()
+            self.end_call_us[bench_name] = iml_timer.now_us()
             # self.disable_profiling(bench_name, num_calls=1)
 
             # Record the last amount of time in between returning
@@ -1633,7 +1638,7 @@ class Profiler:
             # This will include time spent in the tensorflow python API
             if self._pyprof_enabled:
                 clib_wrap.record_python_event('Finish python benchmark', self.end_call_us[bench_name])
-            # time_sec = (self.end_call_us[bench_name] - self.start_call_us[bench_name])/MICROSECONDS_IN_SECOND
+            # time_sec = (self.end_call_us[bench_name] - self.start_call_us[bench_name])/constants.MICROSECONDS_IN_SECOND
             # if clib_wrap.is_recording():
             #     self.profile_sec.append(time_sec)
             # else:
@@ -1641,7 +1646,7 @@ class Profiler:
             op_start_us = self.start_call_us[bench_name]
             op_end_us = self.end_call_us[bench_name]
             sample_cuda_api.record_event(
-                category=CATEGORY_OPERATION,
+                category=constants.CATEGORY_OPERATION,
                 start_us=op_start_us,
                 duration_us=op_end_us - op_start_us,
                 name=bench_name,
@@ -2509,7 +2514,7 @@ class Profiler:
         return now_sec - self.start_trace_time_sec
 
     def _record_process_event(self):
-        self._stop_us = now_us()
+        self._stop_us = iml_timer.now_us()
         # Record a "special" operation event that spans the prof.start()/stop() calls
         # for the currently running process.
         assert self._start_us is not None
@@ -2517,14 +2522,14 @@ class Profiler:
         event_name = op_process_event_name(self.process_name)
         # clib_wrap.set_step(self._pyprof_step,
         #                    ignore_disable=True)
-        # BUG TODO: Should we use our own CATEGORY_PROCESS for process-events?
-        # Otherwise, we may be unable to disambiguate from a CATEGORY_OPERATION of the same name as the process.
+        # BUG TODO: Should we use our own constants.CATEGORY_PROCESS for process-events?
+        # Otherwise, we may be unable to disambiguate from a constants.CATEGORY_OPERATION of the same name as the process.
         # Looks like we recorded it as [PROC:<process-name>] to prevent conflicts.
         # I cannot remember how this is handled downstream during analysis.
-        # clib_wrap.record_event(CATEGORY_OPERATION, event_name, self._start_us, self._stop_us,
+        # clib_wrap.record_event(constants.CATEGORY_OPERATION, event_name, self._start_us, self._stop_us,
         #                        ignore_disable=True)
         sample_cuda_api.record_event(
-            category=CATEGORY_OPERATION,
+            category=constants.CATEGORY_OPERATION,
             start_us=self._start_us,
             duration_us=self._stop_us - self._start_us,
             name=event_name)
@@ -2639,7 +2644,7 @@ class Profiler:
         if not should_finish:
             return
 
-        self._stop_us = now_us()
+        self._stop_us = iml_timer.now_us()
 
         while len(self._op_stack) > 0:
             # Pass skip_finish=True to avoid recursively calling this.
@@ -2746,7 +2751,7 @@ class Operation:
             self.prof.end_operation(self.operation)
 
 class Profile:
-    def __init__(self, prof, process_name, phase_name=DEFAULT_PHASE, handle_utilization_sampler=True):
+    def __init__(self, prof, process_name, phase_name=constants.DEFAULT_PHASE, handle_utilization_sampler=True):
         self.process_name = process_name
         self.phase_name = phase_name
         self.prof = prof
@@ -3559,7 +3564,7 @@ class RecordedIncrementalTrainingProgress:
             self.start_trace_time_sec = start_trace_time_sec
 
         if start_usec is None:
-            start_usec = now_us()
+            start_usec = iml_timer.now_us()
 
         self.end_training_time_us = start_usec
 
@@ -3570,7 +3575,7 @@ class RecordedIncrementalTrainingProgress:
 
         self.start_percent_complete = percent_complete
         self.start_num_timesteps = num_timesteps
-        self.start_training_time_us = now_us()
+        self.start_training_time_us = iml_timer.now_us()
 
         self.report_progress(
             percent_complete, num_timesteps, total_timesteps, start_trace_time_sec,
@@ -3607,13 +3612,13 @@ class RecordedIncrementalTrainingProgress:
         training_progress.start_num_timesteps = self._or(self.start_num_timesteps, 0)
         training_progress.start_training_time_us = int(self._or(
             self.start_training_time_us,
-            self.start_trace_time_sec * USEC_IN_SEC))
+            self.start_trace_time_sec * constants.USEC_IN_SEC))
 
         training_progress.end_percent_complete = self.end_percent_complete
         training_progress.end_training_time_us = int(self.end_training_time_us)
         training_progress.end_num_timesteps = self.end_num_timesteps
 
-        training_progress.start_trace_time_us = int(self.start_trace_time_sec * USEC_IN_SEC)
+        training_progress.start_trace_time_us = int(self.start_trace_time_sec * constants.USEC_IN_SEC)
 
         return training_progress
 

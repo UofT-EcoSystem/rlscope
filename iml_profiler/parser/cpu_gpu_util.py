@@ -9,6 +9,7 @@ import csv
 from iml_profiler.profiler.util import pprint_msg
 from iml_profiler.protobuf.pyprof_pb2 import CategoryEventsProto, MachineUtilization, DeviceUtilization, UtilizationSample
 from iml_profiler.parser.common import *
+from iml_profiler.parser import constants
 from iml_profiler.profiler import experiment
 from os.path import join as _j, abspath as _a, exists as _e, dirname as _d, basename as _b
 import pandas as pd
@@ -583,7 +584,7 @@ class CrossProcessOverlapHistogram:
         for overlap_key, time_sec in overlap_result.items():
             kernels_running = 0
             for category_key in overlap_key:
-                if CATEGORY_GPU in category_key.non_ops:
+                if constants.CATEGORY_GPU in category_key.non_ops:
                     kernels_running += 1
             if kernels_running not in gpu_time_sec:
                 gpu_time_sec[kernels_running] = 0
@@ -611,8 +612,8 @@ class CrossProcessOverlapHistogram:
             
         When 2 kernels are running, that means we have an overlap key that looks like:
           {
-              CategoryKey(procs={1234}, non_ops={CATEGORY_GPU},
-              CategoryKey(procs={4567}, non_ops={CATEGORY_GPU},
+              CategoryKey(procs={1234}, non_ops={constants.CATEGORY_GPU},
+              CategoryKey(procs={4567}, non_ops={constants.CATEGORY_GPU},
           } 
         """
 
@@ -1152,7 +1153,7 @@ class GPUUtilOverTimePlot:
         df = df[
             df['used_by_tensorflow'] &
             (df['device_type'] == 'GPU')]
-        df['time_sec'] = (df['start_time_us'] - df['start_time_us'].min())/MICROSECONDS_IN_SECOND
+        df['time_sec'] = (df['start_time_us'] - df['start_time_us'].min())/constants.MICROSECONDS_IN_SECOND
         df['util_percent'] = df['util'] * 100
         df.sort_values(by=['start_time_us'], inplace=True)
 

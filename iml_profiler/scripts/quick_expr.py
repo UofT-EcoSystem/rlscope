@@ -796,7 +796,7 @@ class ExprMicrobenchmark:
         )
 
         js['iterations_total_num_calls'] = pyprof_overhead_calc.num_calls()
-        js['overhead_per_call_us'] = (js['iterations_total_sec']*USEC_IN_SEC)/js['iterations_total_num_calls']
+        js['overhead_per_call_us'] = (js['iterations_total_sec']*constants.USEC_IN_SEC)/js['iterations_total_num_calls']
         js.dump()
         return True
 
@@ -2273,7 +2273,7 @@ class ExperimentDirectoryWalker:
     def _init(self):
         self.iml_config_paths = [
             path for path in each_file_recursive(self.root_dir)
-            if is_iml_config_file(path) and _b(_d(path)) != DEFAULT_PHASE]
+            if is_iml_config_file(path) and _b(_d(path)) != constants.DEFAULT_PHASE]
         for iml_config_path in self.iml_config_paths:
             _check_has_config_dir(iml_config_path)
             _check_one_config_dir(iml_config_path)
