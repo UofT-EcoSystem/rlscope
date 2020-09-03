@@ -1998,8 +1998,11 @@ class CUPTIScalingOverheadParser:
             assert api_name not in json_data
             json_data[api_name] = dict()
             json_data[api_name]['mean_cupti_overhead_per_call_us'] = np.mean(df_api_name['cupti_overhead_per_call_us'])
+            assert not np.isnan(json_data[api_name]['mean_cupti_overhead_per_call_us'])
             json_data[api_name]['std_cupti_overhead_per_call_us'] = np.std(df_api_name['cupti_overhead_per_call_us'])
+            assert not np.isnan(json_data[api_name]['std_cupti_overhead_per_call_us'])
             json_data[api_name]['num_cupti_overhead_per_call_us'] = len(df_api_name['cupti_overhead_per_call_us'])
+            assert not np.isnan(json_data[api_name]['num_cupti_overhead_per_call_us'])
 
         def pretty_config(config):
             if config == 'gpu-activities-api-time':
@@ -2168,7 +2171,9 @@ def cupti_read_cuda_api_stats(config_directories_pairs,
                 add_col(csv_data, 'env', row['env'])
                 add_col(csv_data, 'total_num_calls', total_num_calls)
                 add_col(csv_data, 'total_api_time_us', total_api_time_us)
+                assert total_num_calls > 0
                 us_per_call = total_api_time_us / float(total_num_calls)
+                assert not np.isnan(us_per_call)
                 add_col(csv_data, 'us_per_call', us_per_call)
                 add_col(csv_data, 'training_iterations', training_iterations)
                 add_col(csv_data, 'training_duration_us', training_duration_us)
@@ -2177,7 +2182,7 @@ def cupti_read_cuda_api_stats(config_directories_pairs,
     df['per_iteration_us'] = df['training_duration_us'] / df['training_iterations']
     return df
 
-def cupti_join_config_rows(df):
+def cupti_join_config_rows(df, debug=False):
     """
     Given (config, directories) data that looks like:
 
@@ -2206,8 +2211,13 @@ def cupti_join_config_rows(df):
         config = group_dict['config']
         return "_{config}".format(config=re.sub('-', '_', config))
 
-    groupby_cols = ['config', 'api_name', 'training_iterations']
+    groupby_cols = ['config', 'api_name']
     non_config_groupby_cols = list(set(groupby_cols).difference({'config'}))
+
+    if debug:
+        logger.debug("dataframe:\n{msg}".format(msg=textwrap.indent(DataFrame.dataframe_string(df), prefix='  ')))
+        logger.debug(f"groupby_cols = {groupby_cols}")
+        logger.debug(f"non_config_groupby_cols = {non_config_groupby_cols}")
 
     groupby = df.groupby(non_config_groupby_cols)
     dfs = []
@@ -2217,8 +2227,12 @@ def cupti_join_config_rows(df):
             join_cols=['algo', 'env'],
             groupby_cols=groupby_cols,
             get_suffix=get_suffix)
+        assert not config_df.isnull().values.any()
         dfs.append(config_df)
     new_df = pd.concat(dfs)
+    # NOTE: If this fails, then it's because the dataframes in concat had different non-overlapping columns.
+    # This could happen if there's only one "config" row in the groupby.
+    assert not new_df.isnull().values.any()
     return new_df
 
 class CUPTIOverheadParser:
@@ -2329,8 +2343,11 @@ class CUPTIOverheadParser:
             assert api_name not in json_data
             json_data[api_name] = dict()
             json_data[api_name]['mean_cupti_overhead_per_call_us'] = np.mean(df_api_name['cupti_overhead_per_call_us'])
+            assert not np.isnan(json_data[api_name]['mean_cupti_overhead_per_call_us'])
             json_data[api_name]['std_cupti_overhead_per_call_us'] = np.std(df_api_name['cupti_overhead_per_call_us'])
+            assert not np.isnan(json_data[api_name]['std_cupti_overhead_per_call_us'])
             json_data[api_name]['num_cupti_overhead_per_call_us'] = len(df_api_name['cupti_overhead_per_call_us'])
+            assert not np.isnan(json_data[api_name]['num_cupti_overhead_per_call_us'])
 
         def pretty_config(config):
             if config == 'gpu-activities':

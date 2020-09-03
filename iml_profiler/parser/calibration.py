@@ -187,6 +187,16 @@ class Calibration:
             direc=direc))
         return json_paths
 
+    def _check_directories_opt(self, task, opt, directories):
+        if not self.dry_run and len(directories) == 0:
+            raise RuntimeError(textwrap.dedent("""\
+            {opt} was empty for \"iml-analyze --task {task} {opt} ...\"; did you forget to run experiments for this configuration? 
+            """).format(
+                opt=opt,
+                task=task,
+                directories=directories,
+            ).rstrip())
+
     def compute_gpu_hw_plot(self, directories, output_directory, extra_argv=None,
                             # xtick_expression=None
                             **kwargs,
@@ -213,6 +223,9 @@ class Calibration:
         # Stick plots in root directory.
         if not self.dry_run:
             os.makedirs(output_directory, exist_ok=True)
+
+        self._check_directories_opt(task, '--gpu-hw-directories', iml_dirs)
+        self._check_directories_opt(task, '--time-breakdown-directories', time_breakdown_dirs)
         cmd = ['iml-analyze',
                '--iml-directory', output_directory,
                '--task', task,
@@ -277,6 +290,8 @@ class Calibration:
         if not self.dry_run:
             os.makedirs(output_directory, exist_ok=True)
         overlap_type = 'CategoryOverlap'
+        self._check_directories_opt(task, '--iml-directories', iml_dirs)
+        self._check_directories_opt(task, '--unins-iml-directories', unins_iml_dirs)
         cmd = ['iml-analyze',
                '--directory', output_directory,
                '--task', task,
@@ -463,6 +478,8 @@ class Calibration:
         directory = self.cupti_scaling_overhead_dir(output_directory)
         if not self.dry_run:
             os.makedirs(output_directory, exist_ok=True)
+        self._check_directories_opt(task, '--gpu-activities-api-time-directory', all_gpu_activities_api_time_directories)
+        self._check_directories_opt(task, '--interception-directory', all_interception_directories)
         cmd = ['iml-analyze',
                '--directory', output_directory,
                '--task', task,
@@ -510,6 +527,8 @@ class Calibration:
         directory = self.cupti_overhead_dir(output_directory)
         if not self.dry_run:
             os.makedirs(directory, exist_ok=True)
+        self._check_directories_opt(task, '--gpu-activities-directory', gpu_activities_directories)
+        self._check_directories_opt(task, '--no-gpu-activities-directory', no_gpu_activities_directories)
         cmd = ['iml-analyze',
                '--directory', directory,
                '--task', task,
@@ -561,6 +580,8 @@ class Calibration:
         directory = self.LD_PRELOAD_overhead_dir(output_directory)
         if not self.dry_run:
             os.makedirs(directory, exist_ok=True)
+        self._check_directories_opt(task, '--interception-directory', interception_directories)
+        self._check_directories_opt(task, '--uninstrumented-directory', uninstrumented_directories)
         cmd = ['iml-analyze',
                '--directory', directory,
                '--task', task,
@@ -615,6 +636,9 @@ class Calibration:
         directory = self.pyprof_overhead_dir(output_directory)
         if not self.dry_run:
             os.makedirs(directory, exist_ok=True)
+        self._check_directories_opt(task, '--uninstrumented-directory', uninstrumented_directories)
+        self._check_directories_opt(task, '--pyprof-annotations-directory', pyprof_annotations_directories)
+        self._check_directories_opt(task, '--pyprof-interceptions-directory', pyprof_interceptions_directories)
         cmd = ['iml-analyze',
                '--directory', directory,
                '--task', task,

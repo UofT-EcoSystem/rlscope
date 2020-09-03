@@ -39,6 +39,8 @@ from iml_profiler.parser.plot import LegendMaker, HATCH_STYLES, HATCH_STYLE_EMPT
 
 from iml_profiler.parser.common import *
 from iml_profiler.parser import constants
+# Make it so exec(...) has CATEGORY_* in-scope for things like --remap-df used in run_bench.sh
+from iml_profiler.parser.constants import *
 
 class OverlapStackedBarPlot:
     """
