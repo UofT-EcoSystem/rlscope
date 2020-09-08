@@ -139,6 +139,14 @@ class Calibration:
         )
         return logfile
 
+    def compute_category_transition_plot_logfile(self, output_directory):
+        task = "CategoryTransitionPlotTask"
+        logfile = _j(
+            output_directory,
+            self._logfile_basename(task),
+        )
+        return logfile
+
     def cupti_overhead_dir(self, output_directory):
         return _j(
             output_directory,
@@ -197,6 +205,57 @@ class Calibration:
                 directories=directories,
             ).rstrip())
 
+    def compute_category_transition_plot(self, directories, output_directory, correct_overhead, extra_argv=None,
+                            # xtick_expression=None
+                            **kwargs,
+                            ):
+        task = "CategoryTransitionPlotTask"
+
+        repetitions = None
+        # repetitions = [1]
+
+        for iml_directory in directories:
+            if self.dry_run and (
+                self.conf(iml_directory, 'time_breakdown', calibration=True, dflt=None) is None
+            ):
+                return
+
+        time_breakdown_dirs = []
+        raw_iml_dirs = []
+        for time_breakdown_directory in directories:
+            time_breakdown_dirs.extend(self.conf(time_breakdown_directory, 'time_breakdown', calibration=False, debug=True).iml_directories(time_breakdown_directory, repetitions=repetitions, correct_overhead=correct_overhead, debug=True))
+            raw_iml_dirs.extend(self.conf(time_breakdown_directory, 'time_breakdown', calibration=False, debug=True).iml_directories(time_breakdown_directory, repetitions=repetitions, correct_overhead=True, debug=True))
+
+        logger.debug(pprint_msg(locals()))
+
+        # Stick plots in root directory.
+        if not self.dry_run:
+            os.makedirs(output_directory, exist_ok=True)
+
+        self._check_directories_opt(task, '--time-breakdown-directories', time_breakdown_dirs)
+        self._check_directories_opt(task, '--iml-directories', raw_iml_dirs)
+        cmd = ['iml-analyze',
+               '--directory', output_directory,
+               '--task', task,
+               '--time-breakdown-directories', json.dumps(time_breakdown_dirs),
+               '--iml-directories', json.dumps(raw_iml_dirs),
+               ]
+        if extra_argv is not None:
+            cmd.extend(extra_argv)
+        # if xtick_expression is not None:
+        #     cmd.extend(['--xtick-expression', xtick_expression])
+        # self._add_calibration_opts(output_directory, cmd)
+        add_iml_analyze_flags(cmd, self)
+
+        logfile = self.compute_category_transition_plot_logfile(output_directory)
+        expr_run_cmd(
+            cmd=cmd,
+            to_file=logfile,
+            dry_run=self.dry_run,
+            skip_error=self.skip_error,
+            debug=self.debug,
+            only_show_env=self.only_show_env())
+
     def compute_gpu_hw_plot(self, directories, output_directory, extra_argv=None,
                             # xtick_expression=None
                             **kwargs,
@@ -251,7 +310,7 @@ class Calibration:
             debug=self.debug,
             only_show_env=self.only_show_env())
 
-    def compute_time_breakdown_plot(self, directories, output_directory, extra_argv,
+    def compute_time_breakdown_plot(self, directories, output_directory, correct_overhead, extra_argv,
                                     # xtick_expression=None,
                                     # Ignore
                                     **kwargs):
@@ -367,17 +426,17 @@ class Calibration:
     def python_clib_interception_simulator_json(self, output_directory):
         return _j(self.pyprof_overhead_dir(output_directory), 'category_events.python_clib_interception.json')
 
-    def rls_analyze_logfile(self, iml_directory, conf, rep):
+    def rls_analyze_logfile(self, iml_directory, conf, rep, correct_overhead):
         task = "RLSAnalyze"
-        directory = conf.out_dir(iml_directory, rep)
+        directory = conf.out_dir(iml_directory, rep, correct_overhead)
         logfile = _j(
             directory,
             self._logfile_basename(task),
         )
         return logfile
 
-    def rls_analyze_output_paths(self, iml_directory, conf, rep):
-        directory = conf.out_dir(iml_directory, rep)
+    def rls_analyze_output_paths(self, iml_directory, conf, rep, correct_overhead):
+        directory = conf.out_dir(iml_directory, rep, correct_overhead)
         paths = set()
         # ${directory}/*.venn_js.json
         # ${directory}/OverlapResult.*
@@ -420,22 +479,25 @@ class Calibration:
         _add_paths("rlscope_*pdf")
         return paths
 
-    def compute_rls_analyze(self, iml_directory, output_directory, conf, rep):
+    def compute_rls_analyze(self, iml_directory, output_directory, conf, rep, correct_overhead):
         task = "RLSAnalyze"
 
         assert conf.rls_analyze_mode is not None
 
-        directory = conf.out_dir(iml_directory, rep)
+        out_dir = conf.out_dir(iml_directory, rep, correct_overhead)
+        iml_dir = conf.iml_dir(iml_directory, rep)
 
         cmd = ['iml-analyze',
                '--task', task,
-               '--iml-directory', directory,
+               '--output-directory', out_dir,
+               '--iml-directory', iml_dir,
                '--mode', conf.rls_analyze_mode,
                ]
-        self._add_calibration_opts(iml_directory, cmd)
+        if correct_overhead:
+            self._add_calibration_opts(iml_directory, cmd)
         add_iml_analyze_flags(cmd, self)
 
-        logfile = self.rls_analyze_logfile(iml_directory, conf, rep)
+        logfile = self.rls_analyze_logfile(iml_directory, conf, rep, correct_overhead)
         expr_run_cmd(
             cmd=cmd,
             to_file=logfile,
@@ -754,8 +816,9 @@ class Calibration:
         for rep in range(1, self.repetitions+1):
             for config in self.configs:
                 if config.rls_analyze_mode is not None:
-                    for path in self.rls_analyze_output_paths(output_directory, config, rep):
-                        self._rm_path(path, opt)
+                    for correct_overhead in [True, False]:
+                        for path in self.rls_analyze_output_paths(output_directory, config, rep, correct_overhead):
+                            self._rm_path(path, opt)
 
 
     def do_calibration(self, output_directory, sync=True):
@@ -798,13 +861,14 @@ class Calibration:
             for rep in self.each_repetition():
                 for config in self.configs:
                     if config.rls_analyze_mode is not None:
-                        self._pool.submit(
-                            get_func_name(self, 'compute_rls_analyze'),
-                            self.compute_rls_analyze,
-                            iml_directory, output_directory,
-                            config, rep,
-                            sync=self.debug_single_thread,
-                        )
+                        for correct_overhead in [True, False]:
+                            self._pool.submit(
+                                get_func_name(self, 'compute_rls_analyze'),
+                                self.compute_rls_analyze,
+                                iml_directory, output_directory,
+                                config, rep, correct_overhead,
+                                sync=self.debug_single_thread,
+                            )
         self._pool.shutdown()
         # Plotting requires running rls-analyze
 
@@ -814,14 +878,15 @@ class Calibration:
                 self.mode == 'plot' and ( self.plots == 'all' or self.plots == consider )
             )
 
-        if should_plot('time-breakdown'):
-            self._pool.submit(
-                get_func_name(self, 'compute_time_breakdown_plot'),
-                self.compute_time_breakdown_plot,
-                directories, output_directory, extra_argv,
-                sync=self.debug_single_thread,
-                **kwargs,
-            )
+        for correct_overhead in [True, False]:
+            if should_plot('time-breakdown'):
+                self._pool.submit(
+                    get_func_name(self, 'compute_time_breakdown_plot'),
+                    self.compute_time_breakdown_plot,
+                    directories, output_directory, correct_overhead, extra_argv,
+                    sync=self.debug_single_thread,
+                    **kwargs,
+                )
         if should_plot('gpu-hw'):
             self._pool.submit(
                 get_func_name(self, 'compute_gpu_hw_plot'),
@@ -830,12 +895,23 @@ class Calibration:
                 sync=self.debug_single_thread,
                 **kwargs,
             )
+        for correct_overhead in [False]:
+            if should_plot('category-transition'):
+                self._pool.submit(
+                    get_func_name(self, 'compute_category_transition_plot'),
+                    self.compute_category_transition_plot,
+                    directories, output_directory, correct_overhead, extra_argv,
+                    sync=self.debug_single_thread,
+                    **kwargs,
+                )
         self._pool.shutdown()
 
     def each_repetition(self):
         return range(1, self.repetitions+1)
 
-    def conf(self, output_dir, config_suffix, calibration=False, dflt=SENTINEL):
+    def conf(self, output_dir, config_suffix, calibration=False, dflt=SENTINEL, debug=False):
+        # if debug:
+        #     import pdb; pdb.set_trace()
         calib_config_suffix = self.calibrated_name(config_suffix, calibration=calibration)
         if dflt is SENTINEL:
             return self.config_map[output_dir][calib_config_suffix]
@@ -1076,7 +1152,16 @@ class RLScopeConfig:
     def is_calibration(self):
         return re.search(r'calibration', self.config_suffix)
 
-    def out_dir(self, output_directory, rep):
+    def out_dir(self, output_directory, rep, correct_overhead=True):
+        return _j(
+            output_directory,
+            "config_{config_suffix}{rep}{corrected}".format(
+                config_suffix=self.config_suffix,
+                rep=rep_suffix(rep),
+                corrected=corrected_suffix(correct_overhead),
+            ))
+
+    def iml_dir(self, output_directory, rep):
         return _j(
             output_directory,
             "config_{config_suffix}{rep}".format(
@@ -1100,8 +1185,10 @@ class RLScopeConfig:
     def __repr__(self):
         return self.to_string()
 
-    def logfile(self, output_directory, rep):
-        logfile = _j(self.out_dir(output_directory, rep), "logfile.out")
+    def logfile(self, output_directory, rep, correct_overhead=True):
+        # logfile = _j(self.out_dir(output_directory, rep, correct_overhead), "logfile.out")
+        # NOTE: ignore correct_overhead for logfile location of running a configuration.
+        logfile = _j(self.out_dir(output_directory, rep, correct_overhead=True), "logfile.out")
         return logfile
 
     def run_cmd(self, rep, cmd, output_directory):
@@ -1137,22 +1224,24 @@ class RLScopeConfig:
             debug=self.expr.debug,
             only_show_env=self.expr.only_show_env())
 
-    def already_ran(self, output_directory, rep):
-        logfile = self.logfile(output_directory, rep)
+    def already_ran(self, output_directory, rep, correct_overhead):
+        logfile = self.logfile(output_directory, rep, correct_overhead)
         return expr_already_ran(logfile, debug=self.expr.debug)
 
-    def iml_directories(self, output_directory, repetitions=None):
+    def iml_directories(self, output_directory, repetitions=None, correct_overhead=True, debug=False):
         """
         Return all --iml-directories whose runs are completed.
         """
+        # if debug:
+        #     import pdb; pdb.set_trace()
         iml_directories = []
         # for rep in range(1, self.expr.repetitions+1):
         if repetitions is None:
             repetitions = self.expr.each_repetition()
         for rep in repetitions:
-            if not self.already_ran(output_directory, rep):
+            if not self.already_ran(output_directory, rep, correct_overhead):
                 continue
-            iml_directory = self.out_dir(output_directory, rep)
+            iml_directory = self.out_dir(output_directory, rep, correct_overhead)
             iml_directories.append(iml_directory)
         return iml_directories
 
@@ -1369,6 +1458,11 @@ def _main(argv):
 def rep_suffix(rep):
     assert rep is not None
     return "_repetition_{rep:02}".format(rep=rep)
+
+def corrected_suffix(correct_overhead):
+    if not correct_overhead:
+        return ".corrected_no"
+    return ""
 
 def add_iml_analyze_flags(cmd, args):
     if args.debug:

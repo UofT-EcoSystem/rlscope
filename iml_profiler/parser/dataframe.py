@@ -1389,6 +1389,9 @@ class IMLConfig:
     def get_bool(self, var, dflt=False):
         return self.iml_config.get(var, dflt)
 
+    def get_int(self, var, dflt=None):
+        return int(self.iml_config.get(var, dflt))
+
     def get_var(self, var, dflt=None):
         return self.iml_config.get(var, dflt)
 

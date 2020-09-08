@@ -528,8 +528,8 @@ all_run() {
   fig=${fig:-all}
 
   all_run_tf_agents
-  all_run_stable_baselines
-  all_run_reagent
+#  all_run_stable_baselines
+#  all_run_reagent
 
 )
 }
@@ -1203,7 +1203,8 @@ _tf_agents_remap_df() {
 $(_py_fix_region)
 $(_py_tf_agents_fix_operation)
 
-new_df['region'] = new_df.apply(fix_region, axis=1)
+if 'region' in new_df:
+  new_df['region'] = new_df.apply(fix_region, axis=1)
 new_df['operation'] = new_df['operation'].apply(tf_agents_fix_operation)
 EOF
 }
@@ -1215,7 +1216,7 @@ _py_reagent_fix_operation() {
 def reagent_fix_operation(operation):
   if operation == 'step':
     return 'Simulation'
-  elif operation == 'sample_action':
+  elif operation in {'sample_action', 'replay_buffer_add'}:
     return 'Inference'
   elif operation in {'train_step', 'training_loop'}:
     return 'Backpropagation'
@@ -1228,7 +1229,8 @@ _reagent_remap_df() {
 $(_py_fix_region)
 $(_py_reagent_fix_operation)
 
-new_df['region'] = new_df.apply(fix_region, axis=1)
+if 'region' in new_df:
+  new_df['region'] = new_df.apply(fix_region, axis=1)
 new_df['operation'] = new_df['operation'].apply(reagent_fix_operation)
 EOF
 }
@@ -1258,7 +1260,8 @@ def framework_choice_operation(row):
   else:
     raise NotImplementedError(f"Not sure how to remap framework_choice operation for iml_directory={row['iml_directory']}")
 
-new_df['region'] = new_df.apply(fix_region, axis=1)
+if 'region' in new_df:
+  new_df['region'] = new_df.apply(fix_region, axis=1)
 new_df['operation'] = new_df.apply(framework_choice_operation, axis=1)
 EOF
 }
@@ -1326,7 +1329,7 @@ def stable_baselines_pretty_operation(algo, op_name):
   elif algo == 'td3':
     if op_name in {'training_loop', 'train_actor_and_critic', 'train_critic', 'evaluate'}:
       return "Backpropagation"
-    elif op_name == 'sample_action':
+    elif op_name in {'sample_action', 'replay_buffer_add'}:
       return "Inference"
     elif op_name == 'step':
       return "Simulation"
@@ -1341,7 +1344,8 @@ _stable_baselines_remap_df() {
 $(_py_fix_region)
 $(_py_stable_baselines_pretty_operation)
 
-new_df['region'] = new_df.apply(fix_region, axis=1)
+if 'region' in new_df:
+  new_df['region'] = new_df.apply(fix_region, axis=1)
 new_df['operation'] = np.vectorize(stable_baselines_pretty_operation, otypes=[str])(new_df['algo'], new_df['operation'])
 EOF
 }
@@ -1350,12 +1354,14 @@ _py_stable_baselines_op_mapping() {
   # APPLY:
   # def mapping(**op_kwargs):
   #   return stable_baselines_op_mapping(**op_kwargs)
+
+  # 'Inference': 'sample_action',
   cat <<EOF
 def stable_baselines_op_mapping(algo, iml_directory, x_field):
     # All stable-baselines algorithms use the same gpu-hw operation mapping.
     return {
       'Backpropagation': CompositeOp(add=['training_loop'], subtract=['sample_action', 'step']),
-      'Inference': 'sample_action',
+      'Inference': CompositeOp(add=['sample_action', 'replay_buffer_add']),
       'Simulator': 'step',
     }
 EOF
@@ -1380,12 +1386,13 @@ _py_reagent_op_mapping() {
   # APPLY:
   # def mapping(**op_kwargs):
   #   return reagent_op_mapping(**op_kwargs)
+  # 'Inference': 'sample_action',
   cat <<EOF
 def reagent_op_mapping(algo, iml_directory, x_field):
     # All ReAgent algorithms use the same gpu-hw operation mapping.
     return {
       'Backpropagation': CompositeOp(add=['training_loop'], subtract=['sample_action', 'step']),
-      'Inference': 'sample_action',
+      'Inference': CompositeOp(add=['sample_action', 'replay_buffer_add']),
       'Simulator': 'step',
     }
 EOF
@@ -1443,6 +1450,7 @@ test_plot_simulator() {
     --iml-directories ${iml_direc}
     --output-directory ${iml_direc}/plots
     --OverlapStackedBarTask-remap-df "$(_tf_agents_remap_df)"
+    --CategoryTransitionPlotTask-remap-df "$(_tf_agents_remap_df)"
     "$@"
   )
   iml-plot "${args[@]}"
@@ -1464,6 +1472,7 @@ test_plot_stable_baselines() {
     --iml-repetitions ${repetitions}
     --output-directory ${iml_direc}/plots
     --OverlapStackedBarTask-remap-df "$(_stable_baselines_remap_df)"
+    --CategoryTransitionPlotTask-remap-df "$(_stable_baselines_remap_df)"
     --GpuHwPlotTask-op-mapping "$(_stable_baselines_op_mapping)"
     --plots gpu-hw
     "$@"
@@ -1706,6 +1715,7 @@ _plot_tf_agents() {
         # --xtick-expression "x_field = regex_match(row['iml_directory'], [[r'use_tf_functions_no', f\"{row['algo_env']}\nWithout autograph\"], [r'use_tf_functions_yes', f\"{row['algo_env']}\nWith autograph\"]])"
         # --x-title "Configuration"
         --OverlapStackedBarTask-remap-df "$(_tf_agents_remap_df)"
+        --CategoryTransitionPlotTask-remap-df "$(_tf_agents_remap_df)"
     )
     if [ "${dry_run}" = 'yes' ]; then
       args+=(
@@ -1742,6 +1752,7 @@ _plot_reagent() {
         # --xtick-expression "x_field = regex_match(row['iml_directory'], [[r'use_tf_functions_no', f\"{row['algo_env']}\nWithout autograph\"], [r'use_tf_functions_yes', f\"{row['algo_env']}\nWith autograph\"]])"
         # --x-title "Configuration"
         --OverlapStackedBarTask-remap-df "$(_reagent_remap_df)"
+        --CategoryTransitionPlotTask-remap-df "$(_reagent_remap_df)"
     )
     if [ "${dry_run}" = 'yes' ]; then
       args+=(
@@ -1781,6 +1792,7 @@ _plot_stable_baselines() {
         # --xtick-expression "x_field = regex_match(row['iml_directory'], [[r'use_tf_functions_no', f\"{row['algo_env']}\nWithout autograph\"], [r'use_tf_functions_yes', f\"{row['algo_env']}\nWith autograph\"]])"
         # --x-title "Configuration"
         --OverlapStackedBarTask-remap-df "$(_stable_baselines_remap_df)"
+        --CategoryTransitionPlotTask-remap-df "$(_stable_baselines_remap_df)"
         --GpuHwPlotTask-op-mapping "$(_stable_baselines_op_mapping)"
     )
     if [ "${dry_run}" = 'yes' ]; then
@@ -1821,6 +1833,7 @@ _plot_framework_choice() {
         # --xtick-expression "x_field = regex_match(row['iml_directory'], [[r'use_tf_functions_no', f\"{row['algo_env']}\nWithout autograph\"], [r'use_tf_functions_yes', f\"{row['algo_env']}\nWith autograph\"]])"
         # --x-title "Configuration"
         --OverlapStackedBarTask-remap-df "$(_framework_choice_remap_df)"
+        --CategoryTransitionPlotTask-remap-df "$(_framework_choice_remap_df)"
         --GpuHwPlotTask-op-mapping "$(_framework_choice_op_mapping)"
     )
     if [ "${dry_run}" = 'yes' ]; then

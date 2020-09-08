@@ -1597,6 +1597,7 @@ OverlapResult OverlapComputer::ComputeOverlap(bool keep_empty_time, bool keep_in
   TimeUsec min_time_value = std::numeric_limits<TimeUsec>::min();
   TimeUsec last_time = min_time_value;
   CategoryKeyBitset cur_cat = CategoryKeyBitset::EmptySet(ctimes.idx_map);
+  CategoryKeyBitset last_cat = cur_cat;
   auto const& all_ops_set = CategoryKeyBitset::Ops(cur_cat);
 
   // If we just STARTED a new event:
@@ -1730,6 +1731,9 @@ OverlapResult OverlapComputer::ComputeOverlap(bool keep_empty_time, bool keep_in
     if (non_zero_time) {
       // NOTE: std::map<Key, Number> defaults to 0 if the key doesn't exist.
       r.overlap[cur_cat] += time_chunk;
+      // Use last_cat where there was non_zero_time, and cur_cat where there is non_zero_time.
+      r.category_trans_counts[std::make_tuple(last_cat, cur_cat)] += 1;
+      last_cat = cur_cat;
 
       if (keep_intervals) {
         auto end_events = (index + 1)/2;
@@ -1805,7 +1809,6 @@ OverlapResult OverlapComputer::ComputeOverlap(bool keep_empty_time, bool keep_in
         }
         r.meta.AddEvent(cur_cat, start_time_usec, end_time_usec);
       }
-
       cur_cat.Remove(min_cat);
     }
 
@@ -2158,6 +2161,29 @@ void OverlapResult::Print(std::ostream& out, int indent) const {
     out << "Overlap[" << i << "]: duration = " << time_sec << " sec";
     out << "\n";
     bitset.Print(out, indent + 3);
+    i += 1;
+  }
+
+  out << "\n";
+  PrintIndent(out, indent + 1);
+  out << "CategoryTransitionCount: size = " << category_trans_counts.size();
+  i = 0;
+  for (const auto& pair : category_trans_counts) {
+    auto const& from_bitset = std::get<0>(pair.first);
+    auto const& to_bitset = std::get<1>(pair.first);
+    auto const& trans_count = pair.second;
+
+    out << "\n";
+    PrintIndent(out, indent + 2);
+    out << "CategoryTransitionCount[" << i << "]: count = " << trans_count;
+    out << "\n";
+    PrintIndent(out, indent + 3);
+    out << "From Category:\n";
+    from_bitset.Print(out, indent + 4);
+    out << "\n";
+    PrintIndent(out, indent + 3);
+    out << "To Category:\n";
+    to_bitset.Print(out, indent + 4);
     i += 1;
   }
 
@@ -2524,6 +2550,20 @@ std::map<std::set<CategoryKey>, TimeUsec> OverlapResult::AsOverlapMap() const {
     overlap_map[keys] = time_us;
   }
   return overlap_map;
+}
+
+std::map<std::tuple<std::set<CategoryKey>, std::set<CategoryKey>>, size_t> OverlapResult::AsCategoryTransCountsMap() const {
+  std::map<std::tuple<std::set<CategoryKey>, std::set<CategoryKey>>, size_t> counts_map;
+
+  for (const auto& pair : category_trans_counts) {
+    auto const& from_bitset = std::get<0>(pair.first);
+    auto const& to_bitset = std::get<1>(pair.first);
+    auto count = pair.second;
+    auto key = std::make_tuple(from_bitset.Keys(), to_bitset.Keys());
+    assert(counts_map.count(key) == 0);
+    counts_map[key] = count;
+  }
+  return counts_map;
 }
 
 bool NvprofFileType::HeaderMatches(const std::vector<std::string>& row) const {

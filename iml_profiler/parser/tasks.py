@@ -25,7 +25,7 @@ from iml_profiler.parser.pyprof import PythonProfileParser, PythonFlameGraphPars
 from iml_profiler.parser.plot import TimeBreakdownPlot, PlotSummary, CombinedProfileParser, CategoryOverlapPlot, UtilizationPlot, HeatScalePlot, ConvertResourceOverlapToResourceSubplot, VennJsPlotter, SlidingWindowUtilizationPlot, CUDAEventCSVReader
 from iml_profiler.parser.db import SQLParser, sql_input_path, GetConnectionPool
 from iml_profiler.parser import db
-from iml_profiler.parser.stacked_bar_plots import OverlapStackedBarPlot
+from iml_profiler.parser.stacked_bar_plots import OverlapStackedBarPlot, CategoryTransitionPlot
 from iml_profiler.profiler.util import print_cmd
 from iml_profiler.parser.cpu_gpu_util import UtilParser, UtilPlot, GPUUtilOverTimePlot, NvprofKernelHistogram, CrossProcessOverlapHistogram, NvprofTraces
 from iml_profiler.parser.training_progress import TrainingProgressParser, ProfilingOverheadPlot
@@ -480,26 +480,72 @@ class RLSAnalyze(IMLTask):
         gpu_hw:
           Calculate GPU hardware counters scoped to high-level user operations.
         """).rstrip())
-    cupti_overhead_json = param_cupti_overhead_json
-    LD_PRELOAD_overhead_json = param_LD_PRELOAD_overhead_json
-    python_annotation_json = param_python_annotation_json
-    python_clib_interception_tensorflow_json = param_python_clib_interception_tensorflow_json
-    python_clib_interception_simulator_json = param_python_clib_interception_simulator_json
+    output_directory = luigi.Parameter(description="Directory to output analysis files; default = --iml-directory", default=None)
+
+    # optional.
+    cupti_overhead_json = param_cupti_overhead_json_optional
+    LD_PRELOAD_overhead_json = param_LD_PRELOAD_overhead_json_optional
+    python_annotation_json = param_python_annotation_json_optional
+    python_clib_interception_tensorflow_json = param_python_clib_interception_tensorflow_json_optional
+    python_clib_interception_simulator_json = param_python_clib_interception_simulator_json_optional
 
     # visible_overhead = param_visible_overhead
+
+    @property
+    def _done_file(self):
+        if self.output_directory is not None:
+            out_dir = self.output_directory
+        else:
+            out_dir = self.iml_directory
+        return "{dir}/{name}.task".format(
+            dir=out_dir, name=self._task_name)
+
+    def overhead_files(self):
+        overhead_files = dict()
+        overhead_files['cupti_overhead_json'] = self.cupti_overhead_json
+        overhead_files['LD_PRELOAD_overhead_json'] = self.LD_PRELOAD_overhead_json
+        overhead_files['python_annotation_json'] = self.python_annotation_json
+        overhead_files['python_clib_interception_tensorflow_json'] = self.python_clib_interception_tensorflow_json
+        overhead_files['python_clib_interception_simulator_json'] = self.python_clib_interception_simulator_json
+        return overhead_files
+
+    def check_overhead_files(self):
+        overhead_files = self.overhead_files()
+        if any(json_path is None for json_path in overhead_files.values()):
+            if not all(json_path is None for json_path in overhead_files.values()):
+                def get_optname(attr):
+                    opt = attr
+                    opt = re.sub('_', '-', opt)
+                    return f"--{opt}"
+                # missing_overhead_opts = dict((get_optname(attr), json_path) for attr, json_path in overhead_files.items() if json_path is None)
+                missing_overhead_opts = sorted(list(get_optname(attr) for attr, json_path in overhead_files.items() if json_path is None))
+                raise RuntimeError(textwrap.dedent("""\
+                You must either provide ALL overhead correction files or NO overhead correction files.
+                Missing overhead correction files:
+                {msg}
+                """.format(msg=textwrap.indent(pprint.pformat(missing_overhead_opts), prefix='  '))))
+            return False
+        return True
 
     def iml_run(self):
         cmd = [CPP_ANALYZE_BIN]
         cmd.extend([
             '--iml_directory', self.iml_directory,
             '--mode', self.mode,
-
-            '--cupti_overhead_json', self.cupti_overhead_json,
-            '--LD_PRELOAD_overhead_json', self.LD_PRELOAD_overhead_json,
-            '--python_annotation_json', self.python_annotation_json,
-            '--python_clib_interception_tensorflow_json', self.python_clib_interception_tensorflow_json,
-            '--python_clib_interception_simulator_json', self.python_clib_interception_simulator_json,
         ])
+        if self.output_directory is not None:
+            cmd.extend([
+                '--output_directory', self.output_directory,
+            ])
+        has_overhead_files = self.check_overhead_files()
+        if has_overhead_files:
+            cmd.extend([
+                '--cupti_overhead_json', self.cupti_overhead_json,
+                '--LD_PRELOAD_overhead_json', self.LD_PRELOAD_overhead_json,
+                '--python_annotation_json', self.python_annotation_json,
+                '--python_clib_interception_tensorflow_json', self.python_clib_interception_tensorflow_json,
+                '--python_clib_interception_simulator_json', self.python_clib_interception_simulator_json,
+            ])
         if self.debug:
             cmd.extend(['--debug'])
         print_cmd(cmd)
@@ -1048,6 +1094,35 @@ class GpuHwPlotTask(IMLTask):
         self.dumper = GpuUtilExperiment(obj_args)
         self.dumper.run()
 
+class CategoryTransitionPlotTask(luigi.Task):
+    time_breakdown_directories = luigi.ListParameter(description="IML directories containing uncorrected processed output of RLSAnalyze")
+    iml_directories = luigi.ListParameter(description="IML directories containing raw IML trace files")
+    category = luigi.Parameter(description="Category", default=None)
+    directory = luigi.Parameter(description="Output directory", default=".")
+
+    xtick_expression = param_xtick_expression
+    remap_df = luigi.Parameter(description="Transform df pandas.DataFrame object; useful for remapping regions to new ones", default=None)
+    title = luigi.Parameter(description="Plot title", default=None)
+    x_title = luigi.Parameter(description="x-axis title", default=None)
+    rotation = luigi.FloatParameter(description="x-axis title rotation", default=15.)
+    width = luigi.FloatParameter(description="Width of plot in inches", default=None)
+    height = luigi.FloatParameter(description="Height of plot in inches", default=None)
+    include_gpu = luigi.BoolParameter(description="Include GPU transitions", parsing=luigi.BoolParameter.EXPLICIT_PARSING)
+    include_python = luigi.BoolParameter(description="Include Python transitions", parsing=luigi.BoolParameter.EXPLICIT_PARSING)
+
+    debug = param_debug
+    debug_single_thread = param_debug_single_thread
+
+    skip_output = False
+
+    def output(self):
+        return []
+
+    def run(self):
+        kwargs = kwargs_from_task(self)
+        self.dumper = CategoryTransitionPlot(**kwargs)
+        self.dumper.run()
+
 
 def forward_kwargs(from_task, ToTaskKlass, ignore_argnames=None):
     kwargs = kwargs_from_task(from_task)
@@ -1148,12 +1223,12 @@ def main(argv=None, should_exit=True):
     retcode = 0
     if ret.status not in [luigi.LuigiStatusCode.SUCCESS, luigi.LuigiStatusCode.SUCCESS_WITH_RETRY]:
         retcode = 1
-        logger.info("luigi.run FAILED with {ret}".format(
+        logger.error("luigi.run FAILED with {ret}".format(
             ret=ret))
         print(textwrap.dedent("""\
         > Debug pro-tip:
           - Look for the last "> CMD:" that was run, and re-run it manually 
-            but with the added "--pdb" flag to break when it fails.
+            but with the added "--pdb --debug" flag to break when it fails.
         """))
     # logger.info("Exiting with ret={ret}".format(
     #     ret=retcode))
@@ -1617,6 +1692,7 @@ IML_TASKS.add(CUDAEventCSVTask)
 IML_TASKS.add(GPUUtilOverTimePlotTask)
 IML_TASKS.add(NvprofKernelHistogramTask)
 IML_TASKS.add(CrossProcessOverlapHistogramTask)
+IML_TASKS.add(CategoryTransitionPlotTask)
 IML_TASKS.add(NvprofTracesTask)
 
 if __name__ == "__main__":

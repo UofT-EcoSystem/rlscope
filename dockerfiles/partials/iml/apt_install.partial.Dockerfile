@@ -14,3 +14,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN apt-get update && apt-get install -y --no-install-recommends \
     texlive-extra-utils \
     ghostscript
+# Convert plots to svg (svg is better for PPT slides)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    pdf2svg

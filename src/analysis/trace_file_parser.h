@@ -699,6 +699,8 @@ public:
   // }
 };
 using Overlap = std::map<CategoryKeyBitset, TimeUsec>;
+// (From: from_category, To: to_category) -> count
+using CategoryTransitionCounts = std::map<std::tuple<CategoryKeyBitset, CategoryKeyBitset>, size_t>;
 
 bool isRLSFileWithType(RLSFileType file_type, const std::string& path);
 bool isRLSFile(const std::string& path);
@@ -3818,6 +3820,7 @@ struct IntervalMeta {
 };
 struct OverlapResult {
   Overlap overlap;
+  CategoryTransitionCounts category_trans_counts;
   OverlapMetadata meta;
   std::shared_ptr<CategoryIdxMap> idx_map;
   const CategoryTimes& ctimes;
@@ -3842,6 +3845,7 @@ struct OverlapResult {
   }
 
   std::map<std::set<CategoryKey>, TimeUsec> AsOverlapMap() const;
+  std::map<std::tuple<std::set<CategoryKey>, std::set<CategoryKey>>, size_t> AsCategoryTransCountsMap() const;
 
   void DumpVennJS(
       const std::string& directory,
@@ -5198,6 +5202,46 @@ inline nlohmann::json ValueAsJson(const std::set<T>& value) {
   return js;
 }
 
+//template <typename T>
+//inline nlohmann::json ValueAsJson(const std::tuple<T>& value) {
+//  nlohmann::json js;
+//
+//  std::vector<nlohmann::json> xs;
+//  xs.reserve(value.size());
+//  for (const auto& x : value) {
+//    xs.push_back(ValueAsJson(x));
+//  }
+//  js = xs;
+//  return js;
+//}
+
+template <typename Tuple, typename F, std::size_t ...Indices>
+void for_each_tuple_impl(Tuple&& tuple, F&& f, std::index_sequence<Indices...>) {
+  using swallow = int[];
+  (void)swallow{1,
+                (f(std::get<Indices>(std::forward<Tuple>(tuple))), void(), int{})...
+  };
+}
+template <typename Tuple, typename F>
+void for_each_tuple(Tuple&& tuple, F&& f) {
+  constexpr std::size_t N = std::tuple_size<std::remove_reference_t<Tuple>>::value;
+  for_each_tuple_impl(std::forward<Tuple>(tuple), std::forward<F>(f),
+                      std::make_index_sequence<N>{});
+}
+
+
+template <typename... Args>
+inline nlohmann::json ValueAsJson(const std::tuple<Args...>& value) {
+  nlohmann::json js;
+
+  std::vector<nlohmann::json> xs;
+  // xs.reserve(2);
+  for_each_tuple(value, [&xs] (auto const& x) {
+    xs.push_back(ValueAsJson(x));
+  });
+  js = xs;
+  return js;
+}
 template <typename T>
 inline nlohmann::json ValueAsJson(const std::list<T>& value) {
   nlohmann::json js;
@@ -5272,9 +5316,23 @@ template <>
 inline nlohmann::json ValueAsJson(const OverlapResult& value) {
   nlohmann::json js;
 
-  std::map<std::set<CategoryKey>, TimeUsec> overlap;
   auto overlap_map = value.AsOverlapMap();
-  js = ValueAsJson(overlap_map);
+  js["overlap"] = ValueAsJson(overlap_map);
+
+//  std::map<std::tuple<int, int, std::string>, int> junk = { { {1, 2, "banana"}, 1 } };
+//  js["junk_js"] = ValueAsJson(std::make_tuple(1, 2, "banana"));
+//  js["junk_js"] = ValueAsJson(junk);
+// FAIL
+//  std::map<std::tuple<std::set<CategoryKey>, std::set<int>>, size_t> junk;
+//  std::map<std::tuple<std::set<CategoryKey>, int>, size_t> junk;
+// PASS
+//  std::tuple<std::set<CategoryKey>> junk;
+//  std::tuple<std::set<CategoryKey>> junk;
+//  std::tuple<std::set<CategoryKey>, int> junk;
+//  js["junk_js"] = ValueAsJson(junk);
+
+  auto category_trans_counts = value.AsCategoryTransCountsMap();
+  js["category_trans_counts"] = ValueAsJson(category_trans_counts);
 
   return js;
 }

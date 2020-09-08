@@ -67,6 +67,7 @@ DEFINE_bool(ignore_memcpy, false, "Ignore CUDA memcpy events when reading cuda_d
 DEFINE_bool(cross_process, false, "Compute CPU/GPU overlap across all processes");
 DEFINE_string(proto, "", "Path to RLS trace-file protobuf file");
 DEFINE_string(iml_directory, "", "Path to --iml-directory used when collecting trace-files");
+DEFINE_string(output_directory, "", "Directory to output results to; default = --iml_directory");
 DEFINE_string(mode, "", mode_flag_help.c_str());
 
 DEFINE_string(cupti_overhead_json, "", "Path to calibration file: mean per-CUDA API CUPTI overhead when GPU activities are recorded (see: CUPTIOverheadTask) ");
@@ -228,6 +229,10 @@ int main(int argc, char** argv) {
   if (FLAGS_proto != "" && !boost::filesystem::is_regular_file(proto_path)) {
     std::cout << "ERROR: --proto_path must be a path to a protobuf trace-file." << std::endl;
     exit(EXIT_FAILURE);
+  }
+
+  if (FLAGS_output_directory == "") {
+    FLAGS_output_directory = FLAGS_iml_directory;
   }
 
   boost::filesystem::path iml_path(FLAGS_iml_directory);
@@ -455,21 +460,21 @@ int main(int argc, char** argv) {
 
       boost::filesystem::path overlap_js_path;
       boost::filesystem::path overlap_txt_path;
-      boost::filesystem::path iml_dir(FLAGS_iml_directory);
+      boost::filesystem::path output_dir(FLAGS_output_directory);
       if (FLAGS_cross_process) {
         std::stringstream base_ss;
         base_ss << "OverlapResult"
                 << ".cross_process";
-        overlap_js_path = iml_dir / (base_ss.str() + ".json");
-        overlap_txt_path = iml_dir / (base_ss.str() + ".txt");
+        overlap_js_path = output_dir / (base_ss.str() + ".json");
+        overlap_txt_path = output_dir / (base_ss.str() + ".txt");
       } else {
         std::stringstream base_ss;
         base_ss << "OverlapResult"
                 << ".machine_" << meta.machine
                 << ".process_" << meta.process
                 << ".phase_" << meta.phase;
-        overlap_js_path = iml_dir / (base_ss.str() + ".json");
-        overlap_txt_path = iml_dir / (base_ss.str() + ".txt");
+        overlap_js_path = output_dir / (base_ss.str() + ".json");
+        overlap_txt_path = output_dir / (base_ss.str() + ".txt");
       }
 
       std::ofstream overlap_txt_file;
@@ -517,7 +522,7 @@ int main(int argc, char** argv) {
 
       if (!FLAGS_cross_process) {
         r.DumpVennJS(
-            FLAGS_iml_directory,
+            FLAGS_output_directory,
             meta.machine, meta.process, meta.phase);
         if (timer) {
           std::stringstream ss;
@@ -537,7 +542,7 @@ int main(int argc, char** argv) {
           base_ss << "Interval"
                   << ".cross_process";
         }
-        auto interval_base = iml_dir / base_ss.str();
+        auto interval_base = output_dir / base_ss.str();
         auto dump_status = r.DumpCSVFiles(interval_base.string());
         if (timer) {
           std::stringstream ss;

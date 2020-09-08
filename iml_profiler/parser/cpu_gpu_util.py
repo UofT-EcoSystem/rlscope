@@ -10,6 +10,7 @@ from iml_profiler.profiler.util import pprint_msg
 from iml_profiler.protobuf.pyprof_pb2 import CategoryEventsProto, MachineUtilization, DeviceUtilization, UtilizationSample
 from iml_profiler.parser.common import *
 from iml_profiler.parser import constants
+from iml_profiler.parser.overlap_result import from_js
 from iml_profiler.profiler import experiment
 from os.path import join as _j, abspath as _a, exists as _e, dirname as _d, basename as _b
 import pandas as pd
@@ -471,85 +472,7 @@ NVPROF_HIST_DEFAULT_FMT = "{y:.2f}"
 def nvprof_fmt_int(y):
     return "{y:d}".format(y=int(np.round(y)))
 
-class CategoryKey:
-    def __init__(self):
-        self.procs = frozenset()
-        self.ops = frozenset()
-        self.non_ops = frozenset()
 
-    @staticmethod
-    def from_js(obj):
-        self = CategoryKey()
-        assert obj['typename'] == 'CategoryKey'
-        self.procs = frozenset(obj['procs'])
-        self.ops = frozenset(obj['ops'])
-        self.non_ops = frozenset(obj['non_ops'])
-        return self
-
-    def __eq__(self, rhs):
-        lhs = self
-        return lhs.procs == rhs.procs and \
-               lhs.ops == rhs.ops and \
-               lhs.non_ops == rhs.non_ops
-
-    def __hash__(self):
-        return hash((self.procs, self.ops, self.non_ops))
-
-    def __str__(self):
-        bldr = ToStringBuilder(obj=self)
-        bldr.add_param('procs', self.procs)
-        bldr.add_param('ops', self.ops)
-        bldr.add_param('non_ops', self.non_ops)
-        return bldr.to_string()
-
-    def __repr__(self):
-        return str(self)
-
-# class OverlapResult:
-#     def __init__(self):
-#         self.procs = frozenset()
-#         self.ops = frozenset()
-#         self.non_ops = frozenset()
-#
-#     @staticmethod
-#     def from_js(obj):
-#         self = OverlapResult()
-#         self.overlap_map = dict()
-#         assert obj['typename'] == 'CategoryKey'
-#         self.procs = frozenset(obj['procs'])
-#         self.ops = frozenset(obj['ops'])
-#         self.non_ops = frozenset(obj['non_ops'])
-#         return self
-
-def from_js(obj):
-    if type(obj) == dict and 'typename' in obj:
-        if obj['typename'] == 'dict':
-            return dict_from_js(obj)
-        elif obj['typename'] in JS_TYPENAME_TO_KLASS:
-            Klass = JS_TYPENAME_TO_KLASS[obj['typename']]
-            parsed = Klass.from_js(obj)
-            return parsed
-        else:
-            raise NotImplementedError("Not sure how to parse js object with typename={typename}".format(typename=obj['typename']))
-    elif type(obj) == list:
-        return [from_js(x) for x in obj]
-    else:
-        return obj
-
-def dict_from_js(obj):
-    assert obj['typename'] == 'dict'
-    d = dict()
-    for key, value in obj['key_value_pairs']:
-        parsed_key = from_js(key)
-        if type(parsed_key) == list:
-            parsed_key = tuple(parsed_key)
-        d[parsed_key] = from_js(value)
-    return d
-
-JS_TYPENAME_TO_KLASS = {
-    'CategoryKey': CategoryKey,
-    # 'OverlapResult': OverlapResult,
-}
 
 class CrossProcessOverlapHistogram:
     def __init__(self,
@@ -572,7 +495,7 @@ class CrossProcessOverlapHistogram:
         js = load_json(self.cross_process_overlap)
         overlap_result_obj = from_js(js)
         overlap_result = dict()
-        for key, value in overlap_result_obj.items():
+        for key, value in overlap_result_obj['overlap'].items():
             overlap_result[frozenset(key)] = value
         return overlap_result
 

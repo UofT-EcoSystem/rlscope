@@ -33,6 +33,7 @@ from iml_profiler.profiler.util import pprint_msg
 from iml_profiler.parser.db import SQLCategoryTimesReader, sql_get_source_files, sql_input_path
 from iml_profiler.parser.plot_index import _DataIndex
 from iml_profiler.parser import plot_index
+from iml_profiler.parser.overlap_result import from_js, CategoryKey as CategoryKeyJS
 from iml_profiler.parser.dataframe import VennData, get_training_durations_df, read_iml_config_metadata, get_total_timesteps, get_end_num_timesteps, IMLConfig, extrap_total_training_time
 from iml_profiler.parser import dataframe as iml_dataframe
 from iml_profiler.parser.plot import LegendMaker, HATCH_STYLES, HATCH_STYLE_EMPTY
@@ -543,9 +544,6 @@ class OverlapStackedBarPlot:
             extrap_dict['env'] = env
             extrap_dict['path'] = path
 
-            # if env == 'AirLearningEnv':
-            #     import ipdb; ipdb.set_trace()
-
             if ( self.extrapolated_training_time or 'HACK_total_timesteps' in iml_metadata['metadata'] ) and 'percent_complete' in md:
                 total_size = vd.total_size()
                 if all(col in iml_metadata['metadata'] for col in {'HACK_unins_end_training_time_us',
@@ -712,9 +710,6 @@ class OverlapStackedBarPlot:
             # else:
             #     df['extrap_total_training_time'] = np.NAN
 
-            # if np.isnan(df['extrap_total_training_time'].values[0]):
-            #     import ipdb; ipdb.set_trace()
-
             df = self._new_HACK_remove_process_operation_df(df)
             df = self._new_remap_df(df, algo, env)
             # Re-add region fields, since remap_df may have changed them.
@@ -853,44 +848,7 @@ class OverlapStackedBarPlot:
         return new_df
 
     def _new_remap_df(self, orig_df, algo, env):
-        if self.remap_df is None:
-            return orig_df
-
-        # not_regions = [key for key in orig_df.keys() if not self._is_region(key)]
-
-        # eval context:
-        # TODO: limit locals/globals to these? Don't want to limit numpy/pandas access though.
-        df = copy.copy(orig_df)
-        # regions = self._regions(df)
-        # new_df = df[not_regions]
-        new_df = copy.copy(df)
-        # algo
-        # env
-
-        df_transformation = self.remap_df
-        # e.g.
-        # new_df[('other',)] = df[('compute_advantage_estimates',)] +
-        #                      df[('optimize_surrogate',)]
-        if self.debug:
-            logger.info("--remap-df:\n{trans}".format(trans=textwrap.indent(df_transformation, prefix='  ')))
-        exec(df_transformation)
-
-        # Make sure they didn't modify df; they SHOULD be modifying new_df
-        # (i.e. adding regions to a "fresh" slate)
-        # assert np.all(df == orig_df)
-        # Assume NaN's in the same place => equality.
-        assert df.equals(orig_df)
-
-        if self.debug:
-            buf = StringIO()
-            DataFrame.print_df(orig_df, file=buf)
-            logger.info("Old dataframe:\n{msg}".format(msg=textwrap.indent(buf.getvalue(), prefix='  ')))
-
-            buf = StringIO()
-            DataFrame.print_df(new_df, file=buf)
-            logger.info("New dataframe after --remap-df:\n{msg}".format(msg=textwrap.indent(buf.getvalue(), prefix='  ')))
-
-        return new_df
+        return apply_remap_df(self.remap_df, orig_df, debug=self.debug)
 
     def _num_algo_env_combos(self):
         return len(self.df[['algo', 'env']].unique())
@@ -1010,18 +968,8 @@ class OverlapStackedBarPlot:
 
         def shorten_category(df):
 
-            def _short_category(category):
-                if category == constants.CATEGORY_SIMULATOR_CPP:
-                    return "Simulator"
-                elif category == constants.CATEGORY_TF_API:
-                    return "TensorFlow"
-                    # return "TF"
-                elif category == constants.CATEGORY_CUDA_API_CPU:
-                    return "CUDA"
-                return category
-
             def _short_category_region(category_region):
-                return tuple(_short_category(category) for category in category_region)
+                return tuple(short_category(category) for category in category_region)
 
             df = copy.copy(df)
             df['category_regions'] = df['category_regions'].apply(_short_category_region)
@@ -1112,7 +1060,6 @@ class OverlapStackedBarPlot:
 
         if self.debug:
             logger.info("ins_df after groupby.sum():\n{msg}".format(msg=pprint_msg(ins_df)))
-            # import ipdb; ipdb.set_trace()
 
         if self.detailed:
             # NOTE: must calculate percent within an (algo, env)
@@ -1133,7 +1080,7 @@ class OverlapStackedBarPlot:
     def _HACK_remove_process_operation_df(self, df):
         """
         HACK: BUG: not sure why, but operation overlap contains an operation that looks like the process_name:
-        e.g. 
+        e.g.
         {
             "label": "[ppo2_Walker2DBulletEnv-v0]",
             "sets": [
@@ -1146,8 +1093,8 @@ class OverlapStackedBarPlot:
         Fix: the time is REALLY small compared to everything else, so we can either:
         1. add it to the largest time (e.g. step)
         2. ignore it (should be safe if its an absolute time...not safe if its a percent already)
-        
-        :return: 
+
+        :return:
         """
         remove_cols = set()
         for colname, coldata in df.iteritems():
@@ -1305,8 +1252,6 @@ class OverlapStackedBarPlot:
         #     DataFrame.print_df(self.unins_df, file=ss)
         #     logger.debug(f"data2 = self.unins_df\n{ss.getvalue()}")
 
-        # import pdb; pdb.set_trace()
-
         # def bar_label_func(i, x_group):
         #     if x_group == 'Backpropagation':
         #         return "BP"
@@ -1322,14 +1267,15 @@ class OverlapStackedBarPlot:
         # log_y_scale = False
 
         def ax_func(stacked_bar_plot):
-            stacked_bar_plot.ax2.grid(b=True, axis='y')
-            stacked_bar_plot.ax2.set_axisbelow(True)
+            if stacked_bar_plot.ax2 is not None:
+                stacked_bar_plot.ax2.grid(b=True, axis='y')
+                stacked_bar_plot.ax2.set_axisbelow(True)
 
-            if self.y2_logscale:
-                stacked_bar_plot.ax2.set_yscale('log', basey=2)
-                # stacked_bar_plot.ax2.minorticks_on()
-                # stacked_bar_plot.ax2.yaxis.set_minor_locator(mpl_ticker.AutoMinorLocator())
-                # stacked_bar_plot.ax2.yaxis.set_tick_params(which='minor', right='off')
+                if self.y2_logscale:
+                    stacked_bar_plot.ax2.set_yscale('log', basey=2)
+                    # stacked_bar_plot.ax2.minorticks_on()
+                    # stacked_bar_plot.ax2.yaxis.set_minor_locator(mpl_ticker.AutoMinorLocator())
+                    # stacked_bar_plot.ax2.yaxis.set_tick_params(which='minor', right='off')
 
             if self.rotation is not None:
                 stacked_bar_plot.ax.set_xticklabels(
@@ -1352,47 +1298,53 @@ class OverlapStackedBarPlot:
         plt.rc('legend', fontsize=FONT_SIZE)    # legend fontsize
         plt.rc('figure', titlesize=FONT_SIZE)  # fontsize of the figure title
 
-        stacked_bar_plot = DetailedStackedBarPlot(
-            data=self.df,
-            path=self._plot_path('plot_fancy'),
-            x_field='x_field',
-            y_field='percent_y',
-            x_group='operation',
+        def mk_plot(y_field, ylabel, path, **kwargs):
+            stacked_bar_plot = DetailedStackedBarPlot(
+                data=self.df,
+                path=path,
+                x_field='x_field',
+                y_field=y_field,
+                x_group='operation',
 
+                y_lim_scale_factor=self.y_lim_scale_factor,
+
+                hues_together=True,
+                hatch='category',
+                hatch_styles=RLS_CATEGORY_HATCH_STYLE,
+                empty_hatch_value="",
+                # bar_label_func=bar_label_func,
+                hue='resource_overlap',
+
+                # hatches_together=True,
+                # hatch='resource_overlap',
+                # hue='category',
+
+                xlabel=self.plot_x_axis_label,
+                # xlabel='(RL algorithm, Simulator)',
+
+                width=self.width,
+                height=self.height,
+
+                ylabel=ylabel,
+                title=self.plot_title,
+                func=ax_func,
+                debug=self.debug,
+                **kwargs,
+            )
+            stacked_bar_plot.plot()
+        mk_plot(
+            y_field='percent_y', ylabel='Percent (%)', path=self._plot_path('percent'),
             y2_field='total_training_time',
-            # y2label='Total training time (sec)',
             y2label='Training time (sec)',
-
             # HACK: adjust y-position of y-label by adding empty-whitespace at the end.
             # NOTE: DOESN'T work... autocrop fails to remove text area it occupies.
             # y2label='Training time (sec)        ',
             data2=df_training_time,
             n_y2_ticks=4,
-
-            y_lim_scale_factor=self.y_lim_scale_factor,
-
-            hues_together=True,
-            hatch='category',
-            empty_hatch_value="",
-            # bar_label_func=bar_label_func,
-            hue='resource_overlap',
-
-            # hatches_together=True,
-            # hatch='resource_overlap',
-            # hue='category',
-
-            xlabel=self.plot_x_axis_label,
-            # xlabel='(RL algorithm, Simulator)',
-
-            width=self.width,
-            height=self.height,
-
-            ylabel='Percent (%)',
-            title=self.plot_title,
-            func=ax_func,
-            debug=self.debug,
         )
-        stacked_bar_plot.plot()
+        # NOTE: showing "Total training time (sec)" on top is redundant.
+        # TODO: add y-grid lines! Do it in a simple isolated test since I had issues before...
+        mk_plot(y_field='total_training_time', ylabel='Training time (seconds)', path=self._plot_path('operation_training_time'))
 
         # stacked_bar_plot = DetailedStackedBarPlot(
         #     data=self.df,
@@ -1445,22 +1397,10 @@ class OverlapStackedBarPlot:
             If True, make it csv friendly (i.e. don't use newlines in string)
         :return:
         """
-        df['pretty_algo'] = df['algo'].apply(get_x_algo)
-        df['short_env'] = df['env'].apply(get_x_env)
-        def _algo_env(row):
-            return "({algo}, {env})".format(
-                algo=get_x_algo(row['pretty_algo']),
-                env=get_x_env(row['short_env']),
-            )
-        df['algo_env'] = df.apply(_algo_env, axis=1)
-        if self.xtick_expression is None:
-            x_fields = []
-            for index, row in df.iterrows():
-                x_field = self.get_x_field(row['algo'], row['env'], human_readable=human_readable)
-                x_fields.append(x_field)
-        else:
-            x_fields = xfields_from_xtick_expression(df, self.xtick_expression, debug=self.debug)
-        df['x_field'] = x_fields
+        def row_func(row):
+            x_field = self.get_x_field(row['algo'], row['env'], human_readable=human_readable)
+            return x_field
+        add_df_xfield(df, xtick_expression=self.xtick_expression, row_func=row_func, debug=self.debug)
 
     def group_to_label(self, group):
         label = ' + '.join(group)
@@ -1752,7 +1692,6 @@ class StackedBarPlot:
 
         if self.y2_field is not None:
             # TODO: we need to group rows and sum them based on matching df[group]...?
-            # import ipdb; ipdb.set_trace()
             # for i, group in enumerate(self.groups):
             y_color = self.colors[-1]
             bar_kwargs = {
@@ -1909,8 +1848,9 @@ class DetailedStackedBarPlot:
                  # operation
                  hatch,
                  # category
-                 hue,
+                 hue=None,
                  hues_together=False,
+                 hatch_styles=None,
                  hatches_together=False,
                  y2_field=None,
                  n_y2_ticks=None,
@@ -1941,6 +1881,7 @@ class DetailedStackedBarPlot:
 
         self.hatch = hatch
         self.hue = hue
+        self.hatch_styles = hatch_styles
         # Must provide at least one of these as true.
         assert ( hues_together or hatches_together )
         # Must provide EXACTLY ON of these as true.
@@ -1958,7 +1899,8 @@ class DetailedStackedBarPlot:
         assert ( y2_field is None and data2 is None ) or \
                ( y2_field is not None and data2 is not None )
         # BOTH data and data2 should contain x_field since they will share an x-axis.
-        assert x_field in data2
+        if data2 is not None:
+            assert x_field in data2
         assert x_field in data
         self.y2_field = y2_field
         self.n_y2_ticks = n_y2_ticks
@@ -1976,8 +1918,13 @@ class DetailedStackedBarPlot:
 
         self._init_x_offsets()
 
-        self.hatch_map = self.as_hatch_map(self.hatches(self.data))
-        self.hue_map = self.as_color_map(self.hues(self.data))
+        self.hatch_map = self.as_hatch_map(self.hatches(self.data), hatch_styles=self.hatch_styles)
+        if self.hue is None:
+            self.hue_map = {
+                None: 'white',
+            }
+        else:
+            self.hue_map = self.as_color_map(self.hues(self.data))
 
     def _init_x_offsets(self):
         x_groups = self.x_groups(self.data)
@@ -2040,46 +1987,41 @@ class DetailedStackedBarPlot:
         return hatches
 
     def hues(self, data):
+        if self.hue is None:
+            return [None]
         hues = sorted(data[self.hue].unique())
         return hues
 
-    def as_hatch_map(self, xs):
+    def as_hatch_map(self, xs, hatch_styles=None):
 
-        # blaz = r"\\\"
-        hatch_styles = [
-            # 7
-            # '//', r'\\', '||', 'xx', 'o', '..', '*',
-            # '////', r"\\\\", '|||', 'xxx', 'oo', '..', '**',
-            '////', r"\\\\", '|||', '...', '**', 'oo', 'xxx',
-
-            # 6
-            '/.', '\\.', '|.', 'x.', 'o.', '*.',
-
-            # 5
-            '/o', '\\o', '|o', 'xo', '*o',
-
-            # '/', '\\', '|', 'x', 'o', '.', '*',
-            # '/', '\\', '|', 'x', 'o', '.', '*',
-            # '/', '\\', '|', 'x', 'o', '.', '*',
-        ]
 
         # Need enough distinct hash-styles to fit categories.
-        # assert len(xs) <= len(hatch_styles)
-        if len(xs) > len(hatch_styles):
+        # assert len(xs) <= len(ALL_HATCH_STYLES)
+        if len(xs) > len(ALL_HATCH_STYLES):
             raise RuntimeError("ERROR: We only have {h} HATCH_STYLES, but there are {x} category-overlap labels".format(
-                h=len(hatch_styles),
+                h=len(ALL_HATCH_STYLES),
                 x=len(xs),
             ))
 
         hatch_map = dict()
+        if hatch_styles is not None:
+            for x in set(xs).intersection(hatch_styles.keys()):
+                hatch_map[x] = hatch_styles[x]
+
         h = 0
         for x in xs:
+            if x in hatch_map:
+                continue
+
             if self.empty_hatch_value is not None and x == self.empty_hatch_value:
                 hatch_map[x] = HATCH_STYLE_EMPTY
             else:
-                hatch_map[x] = hatch_styles[h]
+                while h < len(ALL_HATCH_STYLES) and ALL_HATCH_STYLES[h] in hatch_map.values():
+                    # Find the next available hatch style
+                    h += 1
+                hatch_map[x] = ALL_HATCH_STYLES[h]
                 h += 1
-        # for x, hatch_style in zip(xs, itertools.cycle(hatch_styles)):
+        # for x, hatch_style in zip(xs, itertools.cycle(ALL_HATCH_STYLES)):
         #     if self.empty_hatch_value is not None and x == self.empty_hatch_value:
         #         hatch_map[x] = HATCH_STYLE_EMPTY
         #     else:
@@ -2141,9 +2083,17 @@ class DetailedStackedBarPlot:
 
             # ax2.grid(b=False, axis='x')
             self.ax = ax
-            self.ax2 = ax2
+        self.ax2 = ax2
 
-        data = self.data.sort_values(by=[self.hatch, self.hue, self.x_field])
+
+        sort_by = []
+        if self.hatch is not None:
+            sort_by.append(self.hatch)
+        if self.hue is not None:
+            sort_by.append(self.hue)
+        # if self.x_field is not None:
+        sort_by.append(self.x_field)
+        data = self.data.sort_values(by=sort_by)
 
         # PSEUDOCODE:
         # bottom = zeroes(len(ys))
@@ -2260,6 +2210,7 @@ class DetailedStackedBarPlot:
         fig.savefig(self.path, bbox_inches="tight", pad_inches=0)
         plt.close(fig)
         crop_pdf(self.path)
+        pdf2svg(self.path)
 
         # self._add_lines(operation)
         # self._add_legend(operation)
@@ -2297,7 +2248,10 @@ class DetailedStackedBarPlot:
                 hatch_df = xgroup_df[xgroup_df[self.hatch] == hatch]
                 hues = self.hues(hatch_df)
                 for hue in hues:
-                    hue_df = hatch_df[hatch_df[self.hue] == hue]
+                    if self.hue is not None:
+                        hue_df = hatch_df[hatch_df[self.hue] == hue]
+                    else:
+                        hue_df = hatch_df
                     x_fields = hue_df[self.x_field]
                     x_groups = hue_df[self.x_group]
                     xs = np.vectorize(self._xtick, otypes=[np.float])(hue_df[self.x_field], hue_df[self.x_group])
@@ -2384,7 +2338,10 @@ class DetailedStackedBarPlot:
                 x_group_df = x_field_df[x_field_df[self.x_group] == x_group]
                 hues = self.hues(x_group_df)
                 for hue in hues:
-                    hue_df = x_group_df[x_group_df[self.hue] == hue]
+                    if self.hue is not None:
+                        hue_df = x_group_df[x_group_df[self.hue] == hue]
+                    else:
+                        hue_df = x_group_df
                     hatches = self.hatches(hue_df)
                     for hatch in hatches:
                         hatch_df = hue_df[hue_df[self.hatch] == hatch]
@@ -2394,6 +2351,9 @@ class DetailedStackedBarPlot:
                         assert len(ys) == len(xs)
                         assert len(set(xs)) == 1
 
+                        # color = self.hue_map[hue]
+                        # if self.hue is None:
+                        #     assert color is None
                         plot_kwargs = dict(
                             # x=xs, height=ys,
                             bottom=bottom,
@@ -2784,7 +2744,6 @@ class DetailedStackedBarPlot:
                 txt = "{bar_label} {x_group}".format(
                     bar_label=bar_label,
                     x_group=x_group)
-                # import ipdb; ipdb.set_trace()
                 return txt
             labels = [_get_label(i, x_group) for i, x_group in enumerate(x_groups)]
 
@@ -2891,17 +2850,18 @@ class DetailedStackedBarPlot:
             })
             legend_kwargs.append(kwargs)
 
-        color_legend = LegendMaker(attr_name='facecolor',
-                                   field_to_attr_map=self.hue_map,
-                                   field_order=self.hues(self.data),
-                                   # labels=self.hues(self.data),
-                                   edgecolor='white',
-                                   legend_kwargs={
-                                       # 'handlelength': 3,
-                                       # 'handleheight': 2,
-                                   },
-                                   reversed=reversed_labels)
-        self.legend_makers.append(color_legend)
+        if self.hue is not None:
+            color_legend = LegendMaker(attr_name='facecolor',
+                                       field_to_attr_map=self.hue_map,
+                                       field_order=self.hues(self.data),
+                                       # labels=self.hues(self.data),
+                                       edgecolor='white',
+                                       legend_kwargs={
+                                           # 'handlelength': 3,
+                                           # 'handleheight': 2,
+                                       },
+                                       reversed=reversed_labels)
+            self.legend_makers.append(color_legend)
         if not single_legend:
             kwargs = dict(common_legend_kwargs)
             kwargs.update({
@@ -3779,6 +3739,23 @@ def crop_pdf(path, output=None):
                            output,
                            ])
 
+def pdf2svg(path, output=None, can_skip=False):
+    if output is None:
+        output = re.sub(r'\.pdf$', '.svg', path)
+        # If this fails, then "path" doesn't end with .pdf.
+        assert path != output
+    if not shutil.which('pdf2svg'):
+        if can_skip:
+            logger.warning(f"pdf2svg shell command not found; SKIP: pdf2svg {path} {output}")
+            return
+        else:
+            raise RuntimeError(f"pdf2svg shell command not found for: \"pdf2svg {path} {output}\".  Install with \"sudo apt install pdf2svg\"")
+    subprocess.check_call(['pdf2svg',
+                           # input
+                           path,
+                           output,
+                           ])
+
 def regex_match(x, regex_value_pairs, allow_no_match=True):
     for regex, value in regex_value_pairs:
         if re.search(regex, x):
@@ -3841,12 +3818,466 @@ def get_capsize(ax):
     return bar_width/4
 
 def add_repetition(df):
-    def _repetition(iml_directory):
-        m = re.search(r'repetition_(?P<repetition>\d+)', os.path.basename(iml_directory))
-        if m:
-            return int(m.group('repetition'))
+    df['repetition'] = df['iml_directory'].apply(get_repetition)
+
+def get_repetition(iml_directory):
+    m = re.search(r'repetition_(?P<repetition>\d+)', os.path.basename(iml_directory))
+    if m:
+        return int(m.group('repetition'))
+    return None
+
+class CategoryTransitionPlot:
+    def __init__(self,
+                 time_breakdown_directories,
+                 iml_directories,
+                 directory,
+                 title=None,
+                 x_title=None,
+                 y_title=None,
+                 width=None,
+                 height=None,
+                 rotation=None,
+                 category=None,
+                 xtick_expression=None,
+                 include_gpu=False,
+                 include_python=False,
+                 remap_df=None,
+                 debug=False,
+                 debug_single_thread=False,
+                 # Swallow any excess arguments
+                 **kwargs):
+        self.time_breakdown_directories = time_breakdown_directories
+        self.iml_directories = iml_directories
+        self.directory = directory
+        if len(self.time_breakdown_directories) != len(self.iml_directories):
+            raise RuntimeError("The number of --time-breakdown-directories must match the number of --iml-directories")
+        for time_iml_dir, iml_dir in zip(self.time_breakdown_directories, self.iml_directories):
+            assert get_repetition(time_iml_dir) == get_repetition(iml_dir)
+
+        category_value = None
+        if category is not None and re.search(r'^CATEGORY_'):
+            category_value = eval(category)
+        else:
+            category_value = category
+        self.category = category
+        self.category_value = category_value
+
+        self.debug = debug
+        self.debug_single_thread = debug_single_thread
+        self._parse_js = dict()
+        self._parse_iml_config = dict()
+        self.title = title
+        self.x_title = x_title
+        self.y_title = y_title
+        self.width = width
+        self.height = height
+        self.rotation = rotation
+        self.xtick_expression = xtick_expression
+        self.include_gpu = include_gpu
+        self.include_python = include_python
+        self.remap_df = remap_df
+
+    def category_key_set_as_category_key(self, category_key_set):
+        category_key = CategoryKeyJS()
+        def _union_all(attr):
+            if len(category_key_set) == 0:
+                return frozenset()
+            return frozenset(set.union(*[set(getattr(k, attr)) for k in category_key_set]))
+        category_key.procs = _union_all('procs')
+        category_key.ops = _union_all('ops')
+        assert len(category_key.ops) <= 1
+        category_key.non_ops = _union_all('non_ops')
+        return category_key
+
+    def parse_js(self, json_path):
+        if json_path in self._parse_js:
+            return self._parse_js[json_path]
+        js = load_json(json_path)
+        category_trans_counts = from_js(js['category_trans_counts'])
+        cmap = dict()
+        for pair, value in category_trans_counts.items():
+            assert len(pair) == 2
+            from_category_key = self.category_key_set_as_category_key(pair[0])
+            to_category_key = self.category_key_set_as_category_key(pair[1])
+            cmap[(from_category_key, to_category_key)] = value
+        self._parse_js[json_path] = cmap
+        return cmap
+
+    # def parse_iml_config(self, json_path):
+    def parse_iml_config(self, iml_dir):
+        # iml_dir = _d(json_path)
+        if iml_dir in self._parse_iml_config:
+            return self._parse_iml_config[iml_dir]
+        iml_config_path = iml_dataframe.get_iml_config_path(iml_dir, allow_none=True)
+        if iml_config_path is not None:
+            iml_config = IMLConfig(iml_config_path=iml_config_path)
+        else:
+            iml_config = None
+        self._parse_iml_config[iml_dir] = iml_config
+        return iml_config
+
+    def json_paths(self, iml_dir):
+        for path in each_file_recursive(iml_dir):
+            if is_overlap_result_js_file(path):
+                yield path
+
+    def each_json_path(self):
+        for iml_dir, time_iml_dir in zip(self.iml_directories, self.time_breakdown_directories):
+            for json_path in self.json_paths(time_iml_dir):
+                yield iml_dir, json_path
+
+    def all_read_df(self):
+        dfs = []
+        for iml_dir, json_path in self.each_json_path():
+            df = self.read_df(iml_dir, json_path)
+            dfs.append(df)
+        all_df = pd.concat(dfs)
+        return all_df
+
+    def read_df(self, iml_dir, json_path):
+        # js = load_json(self.cross_process_overlap)
+        category_trans_counts = self.parse_js(json_path)
+        if self.debug:
+            logger.debug("category_trans_counts @ {json_path}:\n{msg}".format(
+                json_path=json_path,
+                msg=pprint_msg(category_trans_counts),
+            ))
+        data = {
+            # 'from_category': [],
+            # 'to_category': [],
+            'iml_directory': [],
+            'algo': [],
+            'env': [],
+            'category': [],
+            'operation': [],
+            'trans_count': [],
+            'max_passes': [],
+        }
+        for key, value in category_trans_counts.items():
+            assert len(key) == 2
+            # CategoryKey
+            from_category = key[0]
+            # CategoryKey
+            to_category = key[1]
+            trans_count = value
+
+            if len(from_category.ops) == 0 or len(to_category.ops) == 0:
+                continue
+
+            # CONCERN: This is going to fail.  New categories will happen when operations change.
+            # Some categories won't have any operations.
+            assert len(from_category.ops) == 1
+            assert len(to_category.ops) == 1
+            if from_category.ops != to_category.ops:
+                # assert from_category.ops == to_category.ops
+                continue
+            operation = next(iter(from_category.ops))
+
+            iml_config = self.parse_iml_config(iml_dir)
+            # iml_dir = _d(json_path)
+            algo = iml_config.algo()
+            env = iml_config.env()
+            # max_passes = iml_config.get_int('max_passes')
+            max_passes = iml_config.get_var('max_passes', dflt=None)
+            if max_passes is None:
+                max_passes = iml_config.get_var('max_training_loop_iters', dflt=None)
+            assert max_passes is not None
+            max_passes = int(max_passes)
+
+            # From: [no has category] -> [has category]
+            # All category where:
+            #   category is in to_category
+            #   category is NOT in from_category
+            # to_category.difference(from_category)
+            categories = to_category.non_ops.difference(from_category.non_ops)
+            if len(categories) > 0:
+                logger.debug(f"categories = {categories}")
+            else:
+                logger.debug(textwrap.dedent("""\
+                no categories:
+                  from_key
+                    procs:   {from_procs}
+                    non_ops: {from_non_ops}
+                    ops:     {from_ops}
+                  to_key
+                    procs:   {to_procs}
+                    non_ops: {to_non_ops}
+                    ops:     {to_ops}
+                    """.format(
+                    from_procs=from_category.procs,
+                    from_non_ops=from_category.non_ops,
+                    from_ops=from_category.ops,
+                    to_procs=to_category.procs,
+                    to_non_ops=to_category.non_ops,
+                    to_ops=to_category.ops,
+                )).rstrip())
+            for category in categories:
+                data['category'].append(category)
+
+                # Useful transitions to count:
+                # Python<->C transitions
+                #   # [no Python] -> [has Python]
+                #   [has Python] -> [no Python]
+                # CUDA API calls:
+                #   [no CUDA] -> [has CUDA]
+                data['operation'].append(operation)
+                # data['from_category'].append(from_category)
+                # data['to_category'].append(to_category)
+                data['trans_count'].append(trans_count)
+                data['iml_directory'].append(iml_dir)
+                data['algo'].append(algo)
+                data['env'].append(env)
+                data['max_passes'].append(max_passes)
+
+        df = pd.DataFrame(data=data)
+        # if self.debug:
+        #     logger.debug("CategoryTransitionPlot.df:\n{msg}".format(msg=textwrap.indent(DataFrame.dataframe_string(df), prefix='  ')))
+
+        add_repetition(df)
+        add_df_xfield(df, xtick_expression=self.xtick_expression, debug=self.debug)
+        df['short_category'] = df['category'].apply(short_category)
+        df = apply_remap_df(self.remap_df, df, debug=self.debug)
+
+        # Not informative
+        if not self.include_gpu:
+            df = df[df['category'] != constants.CATEGORY_GPU]
+        # Redundant: CATEGORY_PYTHON = CATEGORY_SIMULATOR + CATEGORY_FRAMEWORK
+        if not self.include_python:
+            df = df[df['category'] != constants.CATEGORY_PYTHON]
+
+        # cols = group_numeric_cols(df)
+        # groupby_cols = sorted(set(cols.non_numeric_cols).difference({'repetition'}))
+        groupby_cols = sorted(set(df.keys()).difference({
+            'trans_count',
+        }))
+        df = df.groupby(groupby_cols).agg(pd.DataFrame.sum, skipna=False).reset_index()
+
+        if self.debug:
+            logger.debug("CategoryTransitionPlot.df:\n{msg}".format(msg=textwrap.indent(DataFrame.dataframe_string(df), prefix='  ')))
+
+        return df
+
+    def plot(self):
+        self.plot_df = copy.copy(self.df)
+        self.plot_df['trans_count_per_pass'] = self.plot_df['trans_count']/self.plot_df['max_passes']
+
+        if self.category is not None:
+            if self.category not in self.plot_df['category'].unique():
+                raise RuntimeError("Cannot create CategoryTransitionPlot for --category=\"{cat}\" (\"{cat_value}\") since; available categories are: {cats}".format(
+                    cat=self.category,
+                    cat_value=self.category_value,
+                    cats=set(self.plot_df['category'].unique()),
+                ))
+            category_df = self.plot_df[self.plot_df['category'] == self.category]
+            self.category_plot(category_df, self.category)
+        else:
+            for category, category_df in self.plot_df.groupby(['category']):
+                self.category_plot(category_df, category)
+            self.combined_plot(self.plot_df)
+
+    def run(self):
+        self.df = self.all_read_df()
+        self.plot()
+
+    def plot_title(self):
+        if self.title is not None:
+            return self.title
         return None
-    df['repetition'] = df['iml_directory'].apply(_repetition)
+
+    def _path_category(self, category):
+        cat = category.lower()
+        cat = re.sub(' ', '_', cat)
+        cat = re.sub(' ', '_', cat)
+        cat = re.sub(':', '-', cat)
+        return cat
+
+    def plot_path(self, category):
+        return _j(self.directory, "{klass}.category_{category}.pdf".format(
+            klass=self.__class__.__name__,
+            category=self._path_category(category),
+        ))
+
+    def combined_plot_path(self):
+        return _j(self.directory, "{klass}.combined.pdf".format(
+            klass=self.__class__.__name__,
+        ))
+
+    def _get_ylabel(self, category):
+        if self.y_title is not None:
+            return self.y_title
+        return "Transitions per iteration to:\n{category}".format(
+            category=short_category(category),
+        )
+
+    def category_plot(self, df, category, **kwargs):
+        def ax_func(stacked_bar_plot):
+            if self.rotation is not None:
+                stacked_bar_plot.ax.set_xticklabels(
+                    stacked_bar_plot.ax.get_xticklabels(),
+                rotation=self.rotation)
+        stacked_bar_plot = DetailedStackedBarPlot(
+            data=df,
+            path=self.plot_path(category),
+            x_field='x_field',
+            y_field='trans_count_per_pass',
+            x_group='operation',
+
+            # y_lim_scale_factor=self.y_lim_scale_factor,
+
+            hues_together=True,
+            hatch='short_category',
+            hatch_styles=RLS_SHORT_CATEGORY_HATCH_STYLE,
+            empty_hatch_value="",
+            # hue='resource_overlap',
+
+            xlabel=self.x_title,
+
+            width=self.width,
+            height=self.height,
+
+            ylabel=self._get_ylabel(category),
+            title=self.plot_title(),
+            func=ax_func,
+            debug=self.debug,
+            **kwargs,
+        )
+        stacked_bar_plot.plot()
+
+    def combined_plot(self, df, **kwargs):
+        def ax_func(stacked_bar_plot):
+            if self.rotation is not None:
+                stacked_bar_plot.ax.set_xticklabels(
+                    stacked_bar_plot.ax.get_xticklabels(),
+                    rotation=self.rotation)
+        stacked_bar_plot = DetailedStackedBarPlot(
+            data=df,
+            path=self.combined_plot_path(),
+            x_field='x_field',
+            y_field='trans_count_per_pass',
+            x_group='operation',
+
+            # y_lim_scale_factor=self.y_lim_scale_factor,
+
+            hues_together=True,
+            hatch='short_category',
+            hatch_styles=RLS_SHORT_CATEGORY_HATCH_STYLE,
+            empty_hatch_value="",
+            # hue='resource_overlap',
+
+            xlabel=self.x_title,
+
+            width=self.width,
+            height=self.height,
+
+            ylabel="Transitions per iteration",
+            title=self.plot_title(),
+            func=ax_func,
+            debug=self.debug,
+            **kwargs,
+        )
+        stacked_bar_plot.plot()
+
+def apply_remap_df(remap_df, orig_df, debug=False):
+    if remap_df is None:
+        return orig_df
+
+    df = copy.copy(orig_df)
+    new_df = copy.copy(df)
+
+    # e.g.
+    # new_df[('other',)] = df[('compute_advantage_estimates',)] +
+    #                      df[('optimize_surrogate',)]
+    if debug:
+        logger.info("--remap-df:\n{trans}".format(trans=textwrap.indent(remap_df, prefix='  ')))
+    exec(remap_df)
+
+    # Make sure they didn't modify df; they SHOULD be modifying new_df
+    # (i.e. adding regions to a "fresh" slate)
+    # assert np.all(df == orig_df)
+    # Assume NaN's in the same place => equality.
+    assert df.equals(orig_df)
+
+    if debug:
+        buf = StringIO()
+        DataFrame.print_df(orig_df, file=buf)
+        logger.info("Old dataframe:\n{msg}".format(msg=textwrap.indent(buf.getvalue(), prefix='  ')))
+
+        buf = StringIO()
+        DataFrame.print_df(new_df, file=buf)
+        logger.info("New dataframe after --remap-df:\n{msg}".format(msg=textwrap.indent(buf.getvalue(), prefix='  ')))
+
+    return new_df
+
+def add_df_xfield(df, xtick_expression=None, row_func=None, debug=False):
+    """
+    Add any additional fields to the data-frame.
+
+    In particular 'x_field' is a string used for the "x-tick" labels of the plot.
+    :return:
+    """
+    df['pretty_algo'] = df['algo'].apply(get_x_algo)
+    df['short_env'] = df['env'].apply(get_x_env)
+    def _algo_env(row):
+        return "({algo}, {env})".format(
+            algo=get_x_algo(row['pretty_algo']),
+            env=get_x_env(row['short_env']),
+        )
+    df['algo_env'] = df.apply(_algo_env, axis=1)
+    if xtick_expression is None:
+        x_fields = []
+        for index, row in df.iterrows():
+            if row_func is not None:
+                x_field = row_func(row)
+            else:
+                pretty_algo = get_x_algo(row['algo'])
+                short_env = get_x_env(row['env'])
+                x_field = "({algo}, {env})".format(
+                    algo=pretty_algo,
+                    env=short_env,
+                )
+            x_fields.append(x_field)
+    else:
+        x_fields = xfields_from_xtick_expression(df, xtick_expression, debug=debug)
+    df['x_field'] = x_fields
+
+def short_category(category):
+    if category == constants.CATEGORY_SIMULATOR_CPP:
+        return "Simulator"
+    elif category == constants.CATEGORY_TF_API:
+        return "Framework"
+        # return "TensorFlow"
+        # return "TF"
+    elif category == constants.CATEGORY_CUDA_API_CPU:
+        return "CUDA"
+    return category
+
+ALL_HATCH_STYLES = [
+    # 7
+    # '//', r'\\', '||', 'xx', 'o', '..', '*',
+    # '////', r"\\\\", '|||', 'xxx', 'oo', '..', '**',
+    '////', r"\\\\", '|||', '...', '**', 'oo', 'xxx',
+
+    # 6
+    '/.', '\\.', '|.', 'x.', 'o.', '*.',
+
+    # 5
+    '/o', '\\o', '|o', 'xo', '*o',
+
+    # '/', '\\', '|', 'x', 'o', '.', '*',
+    # '/', '\\', '|', 'x', 'o', '.', '*',
+    # '/', '\\', '|', 'x', 'o', '.', '*',
+]
+
+RLS_CATEGORY_HATCH_STYLE = {
+    # '/', '\\', '|', 'x', 'o', '.', '*',
+    # '////', r"\\\\", '|||', '...', '**', 'oo', 'xxx',
+    CATEGORY_TF_API: '...',
+    CATEGORY_SIMULATOR_CPP: '|||',
+    CATEGORY_CUDA_API_CPU: '////',
+    CATEGORY_PYTHON: r'\\\\',
+    CATEGORY_GPU: 'oo',
+}
+RLS_SHORT_CATEGORY_HATCH_STYLE = dict((short_category(category), hatch) for category, hatch in RLS_CATEGORY_HATCH_STYLE.items())
 
 if __name__ == '__main__':
     main()
