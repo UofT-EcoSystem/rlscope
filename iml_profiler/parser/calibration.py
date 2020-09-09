@@ -226,8 +226,6 @@ class Calibration:
             time_breakdown_dirs.extend(self.conf(time_breakdown_directory, 'time_breakdown', calibration=False, debug=True).iml_directories(time_breakdown_directory, repetitions=repetitions, correct_overhead=correct_overhead, debug=True))
             raw_iml_dirs.extend(self.conf(time_breakdown_directory, 'time_breakdown', calibration=False, debug=True).iml_directories(time_breakdown_directory, repetitions=repetitions, correct_overhead=True, debug=True))
 
-        logger.debug(pprint_msg(locals()))
-
         # Stick plots in root directory.
         if not self.dry_run:
             os.makedirs(output_directory, exist_ok=True)

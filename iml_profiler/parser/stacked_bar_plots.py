@@ -94,6 +94,7 @@ class OverlapStackedBarPlot:
                  remap_df=None,
                  xtick_expression=None,
                  y2_logscale=False,
+                 hack_upper_right_legend_bbox_x=None,
                  ignore_inconsistent_overlap_regions=False,
                  skip_plot=False,
                  title=None,
@@ -159,6 +160,7 @@ class OverlapStackedBarPlot:
         self.y2_logscale = y2_logscale
         self.remap_df = remap_df
         self.xtick_expression = xtick_expression
+        self.hack_upper_right_legend_bbox_x = hack_upper_right_legend_bbox_x
         self.ignore_inconsistent_overlap_regions = ignore_inconsistent_overlap_regions
         self.skip_plot = skip_plot
         if self.resource_overlap is not None:
@@ -1282,23 +1284,9 @@ class OverlapStackedBarPlot:
                     stacked_bar_plot.ax.get_xticklabels(),
                     rotation=self.rotation)
 
-        SMALL_SIZE = 8
-        # Default font size for matplotlib (too small for paper).
-        MEDIUM_SIZE = 10
-        BIGGER_SIZE = 12
-
-        FONT_SIZE = BIGGER_SIZE
-
-        # plt.rc('font', size=FONT_SIZE)          # controls default text sizes
-        plt.rc('font', size=MEDIUM_SIZE)          # controls default text sizes
-        plt.rc('axes', titlesize=FONT_SIZE)     # fontsize of the axes title
-        plt.rc('axes', labelsize=FONT_SIZE)    # fontsize of the x and y labels
-        plt.rc('xtick', labelsize=FONT_SIZE)    # fontsize of the tick labels
-        plt.rc('ytick', labelsize=FONT_SIZE)    # fontsize of the tick labels
-        plt.rc('legend', fontsize=FONT_SIZE)    # legend fontsize
-        plt.rc('figure', titlesize=FONT_SIZE)  # fontsize of the figure title
 
         def mk_plot(y_field, ylabel, path, **kwargs):
+            rls_paper_fontsizes()
             stacked_bar_plot = DetailedStackedBarPlot(
                 data=self.df,
                 path=path,
@@ -1310,10 +1298,11 @@ class OverlapStackedBarPlot:
 
                 hues_together=True,
                 hatch='category',
-                hatch_styles=RLS_CATEGORY_HATCH_STYLE,
+                hatch_styles=RLS_SHORT_CATEGORY_HATCH_STYLE,
                 empty_hatch_value="",
                 # bar_label_func=bar_label_func,
                 hue='resource_overlap',
+                hack_upper_right_legend_bbox_x=self.hack_upper_right_legend_bbox_x,
 
                 # hatches_together=True,
                 # hatch='resource_overlap',
@@ -1329,6 +1318,7 @@ class OverlapStackedBarPlot:
                 title=self.plot_title,
                 func=ax_func,
                 debug=self.debug,
+                # pdb=self.debug,
                 **kwargs,
             )
             stacked_bar_plot.plot()
@@ -1858,6 +1848,7 @@ class DetailedStackedBarPlot:
                  empty_hatch_value=None,
                  bar_label_func=None,
                  y_lim_scale_factor=None,
+                 hack_upper_right_legend_bbox_x=None,
                  xlabel=None,
                  ylabel=None,
                  y2label=None,
@@ -1867,6 +1858,7 @@ class DetailedStackedBarPlot:
                  bar_width=0.33,
                  func=None,
                  debug=False,
+                 pdb=False,
                  # Debug this class specifically.
                  verbose_debug=False,
                  ):
@@ -1893,6 +1885,7 @@ class DetailedStackedBarPlot:
 
         self.func = func
         self.debug = debug
+        self.pdb = pdb
         self.verbose_debug = verbose_debug
 
         # Either provide both or neither.
@@ -1909,6 +1902,7 @@ class DetailedStackedBarPlot:
         self.empty_hatch_value = empty_hatch_value
         self.bar_label_func = bar_label_func
         self.y_lim_scale_factor = y_lim_scale_factor
+        self.hack_upper_right_legend_bbox_x = hack_upper_right_legend_bbox_x
         self.xlabel = xlabel
         self.ylabel = ylabel
         self.y2label = y2label
@@ -1919,6 +1913,12 @@ class DetailedStackedBarPlot:
         self._init_x_offsets()
 
         self.hatch_map = self.as_hatch_map(self.hatches(self.data), hatch_styles=self.hatch_styles)
+        # if self.debug:
+        #     logger.debug("hatch_map = {msg}".format(
+        #         msg=pprint_msg(self.hatch_map),
+        #     ))
+        # if self.pdb:
+        #     import pdb; pdb.set_trace()
         if self.hue is None:
             self.hue_map = {
                 None: 'white',
@@ -2021,11 +2021,6 @@ class DetailedStackedBarPlot:
                     h += 1
                 hatch_map[x] = ALL_HATCH_STYLES[h]
                 h += 1
-        # for x, hatch_style in zip(xs, itertools.cycle(ALL_HATCH_STYLES)):
-        #     if self.empty_hatch_value is not None and x == self.empty_hatch_value:
-        #         hatch_map[x] = HATCH_STYLE_EMPTY
-        #     else:
-        #         hatch_map[x] = hatch_style
         return hatch_map
 
     def get_color_map(self):
@@ -2747,6 +2742,8 @@ class DetailedStackedBarPlot:
                 return txt
             labels = [_get_label(i, x_group) for i, x_group in enumerate(x_groups)]
 
+            if self.debug:
+                logger.debug("xgroup legend_kwargs = {msg}".format(msg=pprint_msg(legend_kwargs)))
             legend = legend_ax.legend(handles=patches, labels=labels, **legend_kwargs)
             legend_ax.add_artist(legend)
 
@@ -2780,6 +2777,41 @@ class DetailedStackedBarPlot:
 
 
     def _add_legend(self, axis):
+        """
+        https://matplotlib.org/3.1.1/api/_as_gen/matplotlib.pyplot.legend.html#matplotlib.pyplot.legend
+
+        - loc tells us what part of the legend's bounding box we are positioning.
+          choices:
+          - 9 combinations of: 'upper/lower/""' + 'left/center/right'
+          - 'best'
+            Q: What does "best" refer to?
+            'best' places the legend at the location, among the nine locations defined so far, with the minimum overlap with other drawn artists
+
+        - bbox_to_anchor tells us what position in the axis/figure we are placing the "loc" of the legend.
+          choices:
+          - (x, y)
+          - (x, y, width, height)
+            Q: What do width and height do?
+
+        loc='upper right', bbox_to_anchor=(0.5, 0.5)
+        Place the 'upper right' corner of the legend at x=0.5, y=0.5.
+
+        loc='best', bbox_to_anchor=(0.5, 0., 0.5, 0.5)
+        "best location" at "bottom right quadrant of the axes"
+
+        So, to place legend outside plotting area, at the top:
+            loc='upper left', bbox_to_anchor=(x=1, y=1)
+
+            (Do this for hatches and hues)
+
+        So, to place legend outside plotting area, at the bottom:
+            loc='bottom left', bbox_to_anchor=(x=1, y=0)
+
+            (Do this for xgroup labels)
+
+        :param axis:
+        :return:
+        """
         self.legend_makers = []
 
         reversed_labels = False
@@ -2792,7 +2824,6 @@ class DetailedStackedBarPlot:
         common_legend_kwargs = {
             'fancybox':True,
             # 'shadow':True,
-            'labelspacing': 1.2,
             'handlelength': 3,
             'handleheight': 2,
             # 'borderpad': 0.0,
@@ -2800,9 +2831,14 @@ class DetailedStackedBarPlot:
             'labelspacing': 0.35,
         }
 
-        # legend_spacer = 0.04
         legend_spacer = 0
-        legend_y_spacer = 0.07
+        # For some reason, I need to add this to adjust the x-axis of the upper right legend...no idea why.
+        # legend_spacer = 0.365
+        if self.hack_upper_right_legend_bbox_x is not None:
+            legend_spacer += self.hack_upper_right_legend_bbox_x
+
+        legend_y_spacer = 0.02
+        # legend_y_spacer = 0
 
         # We need two groups of lines:
         #
@@ -2894,8 +2930,10 @@ class DetailedStackedBarPlot:
             kwargs = dict(common_legend_kwargs)
             kwargs.update({
                 'loc':'top left',
-                'bbox_to_anchor':(1 + legend_spacer, 1.0 + legend_y_spacer),
+                'bbox_to_anchor':(1 + legend_spacer, 1 + legend_y_spacer),
             })
+            if self.debug:
+                logger.debug("hue/hatch legend_kwargs = {msg}".format(msg=pprint_msg(kwargs)))
             LegendMaker.add_legends_single(
                 self.legend_makers,
                 axis=axis,
@@ -3699,9 +3737,9 @@ def only_selector_fields(selector):
     return new_selector
 
 def join_plus(xs):
-    # return ' + '.join(sorted(xs))
+    return ' + '.join(sorted(xs))
     # PROBLEM: this messes up the DQN plot for some reason...
-    return " +\n".join(sorted(xs))
+    # return " +\n".join(sorted(xs))
 
 class ColumnGrouping:
     def __init__(self, all_cols, numeric_cols, non_numeric_cols):
@@ -3838,6 +3876,7 @@ class CategoryTransitionPlot:
                  height=None,
                  rotation=None,
                  category=None,
+                 hack_upper_right_legend_bbox_x=None,
                  xtick_expression=None,
                  include_gpu=False,
                  include_python=False,
@@ -3873,6 +3912,7 @@ class CategoryTransitionPlot:
         self.height = height
         self.rotation = rotation
         self.xtick_expression = xtick_expression
+        self.hack_upper_right_legend_bbox_x = hack_upper_right_legend_bbox_x
         self.include_gpu = include_gpu
         self.include_python = include_python
         self.remap_df = remap_df
@@ -4115,6 +4155,7 @@ class CategoryTransitionPlot:
                 stacked_bar_plot.ax.set_xticklabels(
                     stacked_bar_plot.ax.get_xticklabels(),
                 rotation=self.rotation)
+        rls_paper_fontsizes()
         stacked_bar_plot = DetailedStackedBarPlot(
             data=df,
             path=self.plot_path(category),
@@ -4129,6 +4170,7 @@ class CategoryTransitionPlot:
             hatch_styles=RLS_SHORT_CATEGORY_HATCH_STYLE,
             empty_hatch_value="",
             # hue='resource_overlap',
+            hack_upper_right_legend_bbox_x=self.hack_upper_right_legend_bbox_x,
 
             xlabel=self.x_title,
 
@@ -4149,6 +4191,7 @@ class CategoryTransitionPlot:
                 stacked_bar_plot.ax.set_xticklabels(
                     stacked_bar_plot.ax.get_xticklabels(),
                     rotation=self.rotation)
+        rls_paper_fontsizes()
         stacked_bar_plot = DetailedStackedBarPlot(
             data=df,
             path=self.combined_plot_path(),
@@ -4163,6 +4206,7 @@ class CategoryTransitionPlot:
             hatch_styles=RLS_SHORT_CATEGORY_HATCH_STYLE,
             empty_hatch_value="",
             # hue='resource_overlap',
+            hack_upper_right_legend_bbox_x=self.hack_upper_right_legend_bbox_x,
 
             xlabel=self.x_title,
 
@@ -4278,6 +4322,23 @@ RLS_CATEGORY_HATCH_STYLE = {
     CATEGORY_GPU: 'oo',
 }
 RLS_SHORT_CATEGORY_HATCH_STYLE = dict((short_category(category), hatch) for category, hatch in RLS_CATEGORY_HATCH_STYLE.items())
+
+def rls_paper_fontsizes():
+    SMALL_SIZE = 8
+    # Default font size for matplotlib (too small for paper).
+    MEDIUM_SIZE = 10
+    BIGGER_SIZE = 12
+
+    FONT_SIZE = BIGGER_SIZE
+
+    # plt.rc('font', size=FONT_SIZE)          # controls default text sizes
+    plt.rc('font', size=MEDIUM_SIZE)          # controls default text sizes
+    plt.rc('axes', titlesize=FONT_SIZE)     # fontsize of the axes title
+    plt.rc('axes', labelsize=FONT_SIZE)    # fontsize of the x and y labels
+    plt.rc('xtick', labelsize=FONT_SIZE)    # fontsize of the tick labels
+    plt.rc('ytick', labelsize=FONT_SIZE)    # fontsize of the tick labels
+    plt.rc('legend', fontsize=FONT_SIZE)    # legend fontsize
+    plt.rc('figure', titlesize=FONT_SIZE)  # fontsize of the figure title
 
 if __name__ == '__main__':
     main()

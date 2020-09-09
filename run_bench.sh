@@ -734,12 +734,15 @@ plot_framework_choice() {
 
 #    --y2-logscale
 
+  # --title "Framework choice"
   local args=(
     --iml-directories "${iml_dirs[@]}"
     --output-directory $(framework_choice_plots_direc)
     --x-title "Framework configuration"
     --xtick-expression "$(_framework_choice_xtick_expression)"
-    --title "Framework choice"
+    --rotation 0
+    --OverlapStackedBarTask-hack-upper-right-legend-bbox-x 0.365
+    --CategoryTransitionPlotTask-hack-upper-right-legend-bbox-x 0.365
     --GpuHwPlotTask-width 6
     --GpuHwPlotTask-height 5
   )
@@ -1500,13 +1503,57 @@ def pretty_rl_framework(iml_directory):
     return "ReAgent"
   return None
 
-each_field = [
-  row['algo_env'],
-  pretty_rl_framework(row['iml_directory']),
-  pretty_autograph(row['iml_directory']),
-]
-each_field = [x for x in each_field if x is not None]
-x_field = '\n'.join(each_field)
+def xfield_detailed(row):
+  each_field = [
+    row['algo_env'],
+    pretty_rl_framework(row['iml_directory']),
+    pretty_autograph(row['iml_directory']),
+  ]
+  each_field = [x for x in each_field if x is not None]
+  x_field = '\n'.join(each_field)
+  return x_field
+
+def pretty_DL_backend(iml_directory):
+  if re.search(r'/stable_baselines/', iml_directory) or re.search(r'/tf_agents/', iml_directory):
+    return "TensorFlow"
+  elif re.search(r'/reagent/', iml_directory):
+    return "PyTorch"
+  raise NotImplementedError(f"Not sure what DL back-end to use for iml_dir={iml_directory}")
+
+def pretty_exec_model(iml_directory):
+  if re.search(r'/stable_baselines/', iml_directory):
+    return "graph"
+  elif re.search(r'/tf_agents/', iml_directory):
+    if re.search(r'use_tf_functions_no', iml_directory):
+      return "eager"
+    else:
+      assert re.search(r'use_tf_functions_yes', iml_directory), f"iml_dir = {iml_directory}"
+      return "autograph"
+  elif re.search(r'/reagent/', iml_directory):
+    return "eager"
+  raise NotImplementedError(f"Not sure what DL back-end to use for iml_dir={iml_directory}")
+
+def xfield_short(row):
+  """
+  PyTorch eager
+  TensorFlow eager
+  TensorFlow autograph
+  TensorFlow graph
+  """
+  global pretty_DL_backend
+  global pretty_exec_model
+
+  each_field = [
+    pretty_DL_backend(row['iml_directory']),
+    pretty_exec_model(row['iml_directory']),
+  ]
+  each_field = [x for x in each_field if x is not None]
+  x_field = '\n'.join(each_field)
+  return x_field
+
+# x_field = xfield_detailed(row)
+x_field = xfield_short(row)
+
 EOF
 }
 

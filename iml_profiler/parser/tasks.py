@@ -960,6 +960,7 @@ class GeneratePlotIndexTask(luigi.Task):
         print_cmd(cmd)
         subprocess.check_call(cmd)
 
+param_hack_upper_right_legend_bbox_x = luigi.FloatParameter(description="matplotlib hack: add to x-position of upper right legend so it's outside the plot area", default=None)
 param_xtick_expression = luigi.Parameter(description="Python expression to generate xtick labels for plot.  Expression has access to individual 'row' and entire dataframe 'df'", default=None)
 class OverlapStackedBarTask(luigi.Task):
     iml_directories = luigi.ListParameter(description="Multiple --iml-directory entries for finding overlap_type files: *.venn_js.js")
@@ -969,6 +970,8 @@ class OverlapStackedBarTask(luigi.Task):
     title = luigi.Parameter(description="Plot title", default=None)
     x_title = luigi.Parameter(description="x-axis title", default=None)
     rotation = luigi.FloatParameter(description="x-axis title rotation", default=15.)
+    hack_upper_right_legend_bbox_x = param_hack_upper_right_legend_bbox_x
+
     overlap_type = luigi.ChoiceParameter(choices=OverlapStackedBarPlot.SUPPORTED_OVERLAP_TYPES, description="What type of <overlap_type>*.venn_js.js files should we read from?")
     resource_overlap = luigi.ListParameter(description="What resources are we looking at for things like --overlap-type=OperationOverlap? e.g. ['CPU'], ['CPU', 'GPU']", default=None)
     operation = luigi.Parameter(description="What operation are we looking at for things like --overlap-type=CategoryOverlap? e.g. ['step'], ['sample_action']", default=None)
@@ -1099,6 +1102,7 @@ class CategoryTransitionPlotTask(luigi.Task):
     iml_directories = luigi.ListParameter(description="IML directories containing raw IML trace files")
     category = luigi.Parameter(description="Category", default=None)
     directory = luigi.Parameter(description="Output directory", default=".")
+    hack_upper_right_legend_bbox_x = param_hack_upper_right_legend_bbox_x
 
     xtick_expression = param_xtick_expression
     remap_df = luigi.Parameter(description="Transform df pandas.DataFrame object; useful for remapping regions to new ones", default=None)
