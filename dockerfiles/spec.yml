@@ -189,7 +189,7 @@ slice_sets:
           # The root directory of the iml_drill repo checkout.
           - IML_DRILL_DIR=
           # The local path where we should output bazel objects (overrides $HOME/.cache/bazel).
-          - BAZEL_BUILD_DIR=
+          # - BAZEL_BUILD_DIR=
 
     ubuntu-devel-iml-cuda-10-1:
       #
@@ -239,7 +239,7 @@ slice_sets:
           # The root directory of the iml_drill repo checkout.
           - IML_DRILL_DIR=
           # The local path where we should output bazel objects (overrides $HOME/.cache/bazel).
-          - BAZEL_BUILD_DIR=
+          # - BAZEL_BUILD_DIR=
 
     ubuntu-devel-iml-rocm:
         - add_to_name: "devel-iml-gpu-rocm"
@@ -265,7 +265,7 @@ slice_sets:
           - TENSORFLOW_DIR=
           - IML_DIR=
           - IML_DRILL_DIR=
-          - BAZEL_BUILD_DIR=
+          # - BAZEL_BUILD_DIR=
 
     ubuntu-devel-iml-rocm-upstream:
     - add_to_name: "devel-iml-gpu-rocm-upstream"
@@ -295,7 +295,7 @@ slice_sets:
       - TENSORFLOW_DIR=
       - IML_DIR=
       - IML_DRILL_DIR=
-      - BAZEL_BUILD_DIR=
+      # - BAZEL_BUILD_DIR=
 
     rocm:
     - add_to_name: "rocm"
@@ -318,7 +318,7 @@ slice_sets:
       - TENSORFLOW_DIR=
       - IML_DIR=
       - IML_DRILL_DIR=
-      - BAZEL_BUILD_DIR=
+      # - BAZEL_BUILD_DIR=
 
     nightly:
         - add_to_name: "nightly"

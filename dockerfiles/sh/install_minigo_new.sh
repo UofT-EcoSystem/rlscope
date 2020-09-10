@@ -17,6 +17,61 @@ _upgrade_pip
 
 _check_MINIGO_DIR
 
+CUDA=10.1
+
+# What I used for v1.15.0 tensorflow (even though TensorFlow says to use 0.26.1 ...)
+#BAZEL_VERSION=0.24.1
+BAZEL_VERSION=2.0.0
+
+bazel_version() {
+  bazel version | grep --perl-regexp "Build label:" | perl -lape 's/Build label:\s*(.*)/$1/'
+}
+
+install_bazel() {
+  if which bazel >/dev/null; then
+    local cur_bazel_version="$(bazel_version)"
+    if [ "$cur_bazel_version" == "$BAZEL_VERSION" ]; then
+      # Bazel already installed.
+      return
+    fi
+  fi
+  if [ ! -f bazel-${BAZEL_VERSION}-installer-linux-x86_64.sh ]; then
+    wget --quiet https://github.com/bazelbuild/bazel/releases/download/${BAZEL_VERSION}/bazel-${BAZEL_VERSION}-installer-linux-x86_64.sh
+  fi
+  chmod 755 bazel-${BAZEL_VERSION}-installer-linux-x86_64.sh
+  sudo ./bazel-${BAZEL_VERSION}-installer-linux-x86_64.sh
+  local cur_bazel_version="$(bazel_version)"
+  if [ "$cur_bazel_version" != "$BAZEL_VERSION" ]; then
+    echo "ERROR: failed to install bazel version=$BAZEL_VERSION, saw version $cur_bazel_version installed instead." 1>&2
+    return 1
+  fi
+}
+
+install_cuda() {
+#  # Install cuDNN library.
+#  CUDNN=7.6.5.32-1
+#  CUDNN_MAJOR_VERSION=7
+#  apt-get install -y \
+#      libcudnn7=${CUDNN}+cuda${CUDA} \
+#      libcudnn7-dev=${CUDNN}+cuda${CUDA}
+
+  # Install TensorRT
+  NVINFER_VERSION=5.1.5-1
+  NVINFER_MAJOR_VERSION=5
+  sudo apt-get install -y \
+      libnvinfer${NVINFER_MAJOR_VERSION}=${NVINFER_VERSION}+cuda${CUDA}
+
+##  cuda-cublas-dev-${CUDA/./-} \
+##  libcublas-dev=${CUDA/./-} \
+#  sudo apt-get install -y \
+#      cuda-command-line-tools-${CUDA/./-} \
+#      cuda-cufft-dev-${CUDA/./-} \
+#      cuda-curand-dev-${CUDA/./-} \
+#      cuda-cusolver-dev-${CUDA/./-} \
+#      cuda-cusparse-dev-${CUDA/./-}
+
+}
+
 #_check_tensorflow
 #_check_iml
 
@@ -30,6 +85,17 @@ cd $MINIGO_DIR
 #export TF_CUDA_VERSION=10.0
 # Already defined in environment.
 #CUDNN_INSTALL_PATH=/usr/lib/x86_64-linux-gnu
+
+install_bazel
+install_cuda
+
+# Lets hope it can build with 10.1 so we can using CUDA Profiling API...
+
+# Use this as search path for "CUDA libraries and headers"
+# /usr/lib/x86_64-linux-gnu,/usr/include/x86_64-linux-gnu,/usr/include,/home/jgleeson/clone/minigo/cudnn7
+export TF_CUDA_VERSION=${CUDA}
+export CUDNN_INSTALL_PATH=/usr/lib/x86_64-linux-gnu
+export TF_NEED_TENSORRT=y
 ./cc/configure_tensorflow.sh
 
 #if [ "${MLPERF_DIR}" = "" ]; then

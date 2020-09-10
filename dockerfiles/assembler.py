@@ -932,7 +932,7 @@ class Assembler:
         # Run the container.
         args = self.args
         docker_run_env = get_docker_run_env(tag_def, args.env)
-        iml_volumes = get_iml_volumes(docker_run_env, args.volume)
+        iml_volumes = get_iml_volumes(args, docker_run_env, args.volume)
         runtime = get_docker_runtime(tag_def)
         run_kwargs = dict(
             image=image,
@@ -1270,7 +1270,7 @@ class Assembler:
         generator = StackYMLGenerator(self.project_name())
 
         docker_run_env = get_docker_run_env(tag_def, args.env)
-        iml_volumes = get_iml_volumes(docker_run_env, args.volume)
+        iml_volumes = get_iml_volumes(args, docker_run_env, args.volume)
         iml_ports = get_iml_ports(docker_run_env, args.publish)
 
         if not args.pull:
@@ -1560,14 +1560,23 @@ RUN_ARGS_REQUIRED = [
     # The root directory of a 'patched' TensorFlow checkout
     'TENSORFLOW_DIR',
     # The local path where we should output bazel objects (overrides $HOME/.cache/bazel)
-    'BAZEL_BUILD_DIR',
+    # 'BAZEL_BUILD_DIR',
 ]
 
 def is_required_run_arg(var):
     return var in RUN_ARGS_REQUIRED
 
-def get_iml_volumes(run_args, extra_volumes):
+def setup_volume_dir(direc):
+    os.makedirs(direc, exist_ok=True)
+    subprocess.check_call("chown -R {user}:{user} {path}".format(
+        user=get_username(),
+        path=direc,
+    ), shell=True)
+
+def get_iml_volumes(args, run_args, extra_volumes):
     """
+    host_dir -> container_dir
+
     --build-arg USER_ID=$(id -u ${USER})
     --build-arg GROUP_ID=$(id -u ${USER})
     --build-arg USER_NAME=${USER}
@@ -1577,6 +1586,15 @@ def get_iml_volumes(run_args, extra_volumes):
     for arg in RUN_ARGS_REQUIRED:
         direc = run_args[arg]
         volumes[direc] = direc
+    # Store bazel compilation files in bazel folder in repo root directory:
+    #   $HOME/clone/iml/bazel -> $HOME/.cache/bazel
+    host_bazel_dir = _j(py_config.IML_DIR, 'bazel')
+    cont_bazel_dir = _j('/home', get_username(), '.cache', 'bazel')
+    assert host_bazel_dir not in volumes
+    volumes[host_bazel_dir] = cont_bazel_dir
+    setup_volume_dir(host_bazel_dir)
+
+    shutil.chown(host_bazel_dir, get_username(), get_username())
     for i, direc in enumerate(extra_volumes):
         env_name = 'CMDLINE_VOLUME_{i}'.format(i=i)
         assert env_name not in volumes
