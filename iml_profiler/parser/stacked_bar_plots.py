@@ -7,6 +7,7 @@ import importlib
 import sys
 import textwrap
 import copy
+import collections
 import itertools
 
 
@@ -36,7 +37,7 @@ from iml_profiler.parser import plot_index
 from iml_profiler.parser.overlap_result import from_js, CategoryKey as CategoryKeyJS
 from iml_profiler.parser.dataframe import VennData, get_training_durations_df, read_iml_config_metadata, get_total_timesteps, get_end_num_timesteps, IMLConfig, extrap_total_training_time
 from iml_profiler.parser import dataframe as iml_dataframe
-from iml_profiler.parser.plot import LegendMaker, HATCH_STYLES, HATCH_STYLE_EMPTY
+from iml_profiler.parser.plot import LegendMaker, HATCH_STYLES, HATCH_STYLE_EMPTY, Y_LABEL_TRAINING_TIME_SEC
 
 from iml_profiler.parser.common import *
 from iml_profiler.parser import constants
@@ -1317,6 +1318,18 @@ class OverlapStackedBarPlot:
                 ylabel=ylabel,
                 title=self.plot_title,
                 func=ax_func,
+
+                #
+                # y2 data: total training time (black bar on top)
+                #
+                y2_field='total_training_time',
+                y2label=Y_LABEL_TRAINING_TIME_SEC,
+                # HACK: adjust y-position of y-label by adding empty-whitespace at the end.
+                # NOTE: DOESN'T work... autocrop fails to remove text area it occupies.
+                # y2label='Training time (sec)        ',
+                data2=df_training_time,
+                n_y2_ticks=4,
+
                 debug=self.debug,
                 # pdb=self.debug,
                 **kwargs,
@@ -1324,17 +1337,10 @@ class OverlapStackedBarPlot:
             stacked_bar_plot.plot()
         mk_plot(
             y_field='percent_y', ylabel='Percent (%)', path=self._plot_path('percent'),
-            y2_field='total_training_time',
-            y2label='Training time (sec)',
-            # HACK: adjust y-position of y-label by adding empty-whitespace at the end.
-            # NOTE: DOESN'T work... autocrop fails to remove text area it occupies.
-            # y2label='Training time (sec)        ',
-            data2=df_training_time,
-            n_y2_ticks=4,
         )
         # NOTE: showing "Total training time (sec)" on top is redundant.
         # TODO: add y-grid lines! Do it in a simple isolated test since I had issues before...
-        mk_plot(y_field='total_training_time', ylabel='Training time (seconds)', path=self._plot_path('operation_training_time'))
+        mk_plot(y_field='total_training_time', ylabel=Y_LABEL_TRAINING_TIME_SEC, path=self._plot_path('operation_training_time'))
 
         # stacked_bar_plot = DetailedStackedBarPlot(
         #     data=self.df,
@@ -3880,6 +3886,7 @@ class CategoryTransitionPlot:
                  xtick_expression=None,
                  include_gpu=False,
                  include_python=False,
+                 include_simulator=False,
                  remap_df=None,
                  debug=False,
                  debug_single_thread=False,
@@ -3915,6 +3922,7 @@ class CategoryTransitionPlot:
         self.hack_upper_right_legend_bbox_x = hack_upper_right_legend_bbox_x
         self.include_gpu = include_gpu
         self.include_python = include_python
+        self.include_simulator = include_simulator
         self.remap_df = remap_df
 
     def category_key_set_as_category_key(self, category_key_set):
@@ -4084,6 +4092,12 @@ class CategoryTransitionPlot:
         # Redundant: CATEGORY_PYTHON = CATEGORY_SIMULATOR + CATEGORY_FRAMEWORK
         if not self.include_python:
             df = df[df['category'] != constants.CATEGORY_PYTHON]
+        if not self.include_simulator:
+            # Small but non-zero Simulator calls can happen during backpropagation.
+            # This is negligible and can be ignored for graphs.
+            df = df[~(
+                (df['category'] == constants.CATEGORY_SIMULATOR_CPP) &
+                (df['operation'] != 'Simulation'))]
 
         # cols = group_numeric_cols(df)
         # groupby_cols = sorted(set(cols.non_numeric_cols).difference({'repetition'}))
@@ -4339,6 +4353,274 @@ def rls_paper_fontsizes():
     plt.rc('ytick', labelsize=FONT_SIZE)    # fontsize of the tick labels
     plt.rc('legend', fontsize=FONT_SIZE)    # legend fontsize
     plt.rc('figure', titlesize=FONT_SIZE)  # fontsize of the figure title
+
+
+class FrameworkChoiceMetric:
+    def __init__(self, tex_template, tex_label):
+        self.tex_template = tex_template
+        self.tex_label = tex_label
+        self.metrics = dict()
+        # Supporting data.
+        self.df = None
+
+    def tex_generate_defn(self):
+        """
+        Generate latex variables that define values of the metrics for this statement
+
+        :return:
+        """
+        defns = []
+        for metric_name, value in self.metrics.items():
+            varname = self.tex_varname(metric_name)
+            defn = self.tex_defn(varname, value)
+            defns.append(defn)
+        return '\n'.join(defns)
+
+    def tex_varname(self, metric_name):
+        """
+        Variable name format is:
+        <tex_label>__<metric_name>
+
+        find:surp-autograph-inflates-python
+
+        Find__SurpAutographInflatesPython__
+
+        :param metric_name:
+        :return:
+        """
+        components = []
+        components.extend(self._split(self.tex_label))
+        components.extend(self._split(metric_name))
+        varname = self._join(components)
+        return varname
+
+    def _join(self, components):
+        def _camel(x):
+            if re.search('^[a-z]', x):
+                return x.capitalize()
+            # If it doesn't start with a lower-case letter, assume it's already camel-case friendly.
+            return x
+        trans_components = [_camel(x) for x in components]
+        varname = ''.join(trans_components)
+        return varname
+
+    def _split(self, string):
+        split_re = r'[-:]'
+        return re.split(split_re, string)
+
+    def path_friendly_name(self):
+        components = []
+        components.extend(self._split(self.tex_label))
+        name = self._join(components)
+        return name
+
+    def tex_defn(self, varname, value):
+        return textwrap.dedent(r"""
+        \newcommand{{\{varname}}}{{{value}}}
+        """.format(
+            varname=varname,
+            value=value,
+        )).lstrip().rstrip()
+
+    def __setitem__(self, key, value):
+        self.metrics[key] = value
+
+
+class FrameworkChoiceMetrics:
+    def __init__(self,
+                 framework_choice_csv,
+                 framework_choice_ddpg_csv,
+                 directory,
+                 debug=False,
+                 debug_single_thread=False,
+                 # Swallow any excess arguments
+                 **kwargs):
+        self.framework_choice_csv = framework_choice_csv
+        self.framework_choice_ddpg_csv = framework_choice_ddpg_csv
+        self.directory = directory
+        self.debug = debug
+        self.debug_single_thread = debug_single_thread
+        self._register_all_framework_choice_metrics()
+
+    def read_df(self):
+        self.td3_df = pd.read_csv(self.framework_choice_csv)
+        self.ddpg_df = pd.read_csv(self.framework_choice_ddpg_csv)
+        # NOTE: need to use (algo, env) to differentiate among these.
+        self.df = pd.concat([self.td3_df, self.ddpg_df])
+
+    def compute_metrics(self):
+        # Compute metrics
+        for metric in self.FRAMEWORK_CHOICE_METRICS:
+            calc_func = self.get_calc_func(metric)
+            calc_func(metric)
+
+        # Dump metrics
+        tex_path = self.tex_path()
+        with open(tex_path, 'w') as f:
+            for metric in self.FRAMEWORK_CHOICE_METRICS:
+                f.write("% Autogenerated metrics for: \\ref{{{tex_label}}}\n".format(
+                    tex_label=metric.tex_label,
+                ))
+                f.write(metric.tex_generate_defn())
+                f.write('\n')
+                if metric.df is not None:
+                    metric_base_path = self.metric_base_path(metric)
+                    output_csv(metric.df, metric_base_path)
+        logger.info("Output tex @ {path}".format(path=tex_path))
+
+    def run(self):
+        self.read_df()
+        self.compute_metrics()
+
+    def metric_base_path(self, metric):
+        return _j(self.directory, 'FrameworkChoiceMetrics.{name}'.format(
+            name=metric.path_friendly_name()))
+
+    def tex_path(self):
+        return _j(self.directory, 'FrameworkChoiceMetrics.tex')
+
+    def get_calc_func(self, metric):
+        metric_calc_func = re.sub(r'[-:]', '_', metric.tex_label)
+        txt_calc_func = f"calc_{metric_calc_func}"
+        if not hasattr(self, txt_calc_func):
+            raise RuntimeError("Didn't find function {klass}.{calc_func} Not sure how to calculate metric for tex_label={tex_label}, tex_template=\n{tex_template}".format(
+                klass=self.__class__.__name__,
+                calc_func=txt_calc_func,
+                tex_label=metric.tex_label,
+                tex_template=textwrap.indent(metric.tex_template, prefix='  '),
+            ))
+        calc_func = getattr(self, txt_calc_func)
+        return calc_func
+
+    def calc_find_qual_eager_more_trans(self, metric):
+        """
+        \begin{rlscope-finding-qual}{find:qual-eager-more-trans}
+        Eager execution is between $x\times$ and $y\times$ as bad as Graph/Autograph execution, and slowdown is highly correlated with how well a framework implementation is optimized to minimize Framework transitions.
+        \end{rlscope-finding-qual}
+
+        total_eager_time[algo, env, repetition:r] = Compute total training time for eager execution for repetition r
+        df['eager_slowdown', algo, env, repetition=r] = df['total_training_time', algo, env, repetition=r] / total_eager_time[algo, env, r]
+        report df['eager_slowdown'].mean()
+        report df['eager_slowdown'].std()
+        """
+        training_time_field = 'total_training_time'
+        # 'repetition'
+        config_fields = ['algo', 'env', 'x_field', ]
+        value_fields = [training_time_field]
+        Config = collections.namedtuple('Config', config_fields)
+        # Config -> time (sec)
+        # fastest_total_eager_time = dict()
+        # slowest_total_eager_time = dict()
+        df_agg_sum = self.df[config_fields + ['repetition'] + value_fields].groupby(config_fields + ['repetition']).agg(['sum'])
+        df_agg_sum = df_agg_sum.reset_index()
+        df_agg_sum.columns = df_agg_sum.columns.get_level_values(0)
+
+        df_agg_mean = df_agg_sum[config_fields + value_fields].groupby(config_fields).agg(['mean'])
+        df_agg_mean = df_agg_mean.reset_index()
+        df_agg_mean.columns = df_agg_mean.columns.get_level_values(0)
+
+        def config_is_eager(row):
+            return bool(re.search(r'eager', row['x_field'].lower()))
+        df_agg_mean_eager_rows = df_agg_mean[df_agg_mean.apply(config_is_eager, axis=1)]
+        df_agg_mean_non_eager_rows = df_agg_mean[~df_agg_mean.apply(config_is_eager, axis=1)]
+        join_on = ['algo', 'env']
+        df = df_agg_mean_non_eager_rows.set_index(join_on).join(df_agg_mean_eager_rows.set_index(join_on), rsuffix='_eager')
+        df['eager_slowdown'] = df['total_training_time_eager'] / df['total_training_time']
+
+        # This will give us average total training time for each configuration (across repetitions)
+        # df_avg = df_agg_sum.reset_index()[config_fields + value_fields].groupby(config_fields).agg(['min', 'max', 'mean', 'std'])
+
+        metric['MinEagerSlowdown'] = df['eager_slowdown'].min()
+        metric['MaxEagerSlowdown'] = df['eager_slowdown'].max()
+
+        # Supporting csv file.
+        # Tells us which two eager/non-eager configurations are being compared to obtain the min/max slowdowns.
+        # (e.g., max slowdown comes from TensorFlow Eager, min slowdown comes from PyTorch eager).
+        metric.df = df
+
+    def _register_all_framework_choice_metrics(self):
+        self.FRAMEWORK_CHOICE_METRICS = []
+        TEX_STMTS = [textwrap.dedent(stmt).lstrip().rstrip() for stmt in [
+            r"""
+            \begin{rlscope-finding-qual}{find:qual-eager-more-trans}
+            Eager execution is between $x\times$ and $y\times$ as bad as Graph/Autograph execution, and slowdown is highly correlated with how well a framework implementation is optimized to minimize Framework transitions.
+            \end{rlscope-finding-qual}
+            """,
+
+            # r"""
+            # \begin{rlscope-finding-qual}{find:qual-autograph-reduces-python}
+            # By removing Framework transitions, Autograph substantially reduces Python time so that is makes up at most $x\%$ of Inference/Backpropagation time.
+            # \end{rlscope-finding-qual}
+            # """,
+            #
+            # r"""
+            # \begin{rlscope-finding-qual}{find:qual-pytorch-eager-better}
+            # PyTorch eager is $x\times$ faster than TensorFlow eager since it minimizes Framework transitions more effectively in Inference.
+            # \end{rlscope-finding-qual}
+            # """,
+            #
+            # r"""
+            # \begin{rlscope-finding-qual}{find:qual-autograph-graph-similar}
+            # Autograph and Graph execution are on-par with one another, performining within $x\%$ of one another on a given RL algorithm; Autograph does \textit{not} always outperform Graph.
+            # \end{rlscope-finding-qual}
+            # """,
+            #
+            # r"""
+            # \begin{rlscope-finding-surp}{find:surp-exec-model-comparison}
+            # Eager execution vs Graph/Autograph: PyTorch eager is $y\times$ faster than the best Graph/Autograph implementation.
+            # \end{rlscope-finding-surp}
+            # """,
+            #
+            # r"""
+            # \begin{rlscope-finding-surp}{find:surp-total-gpu-time}
+            # Total GPU time is similar across all RL frameworks regardless of DL back-end, and consistently low across all RL frameworks, making up at most $x\%$ of total training time.
+            # \end{rlscope-finding-surp}
+            # """,
+            #
+            # r"""
+            # \begin{rlscope-finding-surp}{find:surp-cuda-api-dominates}
+            # In all RL frameworks, CPU-side CUDA API time dominates total GPU kernel execution time, taking up between $x\times$ and $y\times$ as much time as GPU kernel execution.
+            # \end{rlscope-finding-surp}
+            # """,
+            #
+            # r"""
+            # \begin{rlscope-finding-surp}{find:surp-autograph-no-gpu}
+            # For RL workloads, even though Autograph converts RL training code to in-graph TensorFlow operators, Autograph has no perceivable increase in total GPU training time.
+            # \end{rlscope-finding-surp}
+            # """,
+            #
+            # r"""
+            # \begin{rlscope-finding-surp}{find:surp-autograph-inflates-inference}
+            # Inference time in Autograph is inflated by Framework time ($x\times$ compared to Graph), and this inflation is \textit{not} due to extra Framework transitions, and is instead a performance anomaly within the DL back-end itself.
+            # \end{rlscope-finding-surp}
+            # """,
+            #
+            # r"""
+            # \begin{rlscope-finding-surp}{find:surp-autograph-inflates-python}
+            # Autograph can inflate Python time by as much as $2\times$ during Simulation; training times (not just model performance) are highly sensitive to small differences in hyperparameter choices.
+            # \end{rlscope-finding-surp}
+            # """,
+        ]]
+        for tex_stmt in TEX_STMTS:
+            tex_lines = tex_stmt.splitlines()
+            m = re.search(r'\{(?P<tex_label>find:[^}]+)\}', tex_lines[0])
+            tex_label = m.group('tex_label')
+            self.FRAMEWORK_CHOICE_METRICS.append(FrameworkChoiceMetric(tex_stmt, tex_label))
+
+def output_csv(plot_df, base_path, sort_by=None):
+    if sort_by is not None:
+        plot_df = plot_df.sort_values(sort_by)
+
+    csv_path = f"{base_path}.csv"
+    df_path = f"{base_path}.dataframe.txt"
+
+    logger.info("Output csv @ {path}".format(path=csv_path))
+    plot_df.to_csv(csv_path, index=False)
+
+    logger.info("Output dataframe @ {path}".format(path=df_path))
+    with open(df_path, 'w') as f:
+        DataFrame.print_df(plot_df, file=f)
+    DataFrame.print_df(plot_df, file=sys.stdout)
 
 if __name__ == '__main__':
     main()

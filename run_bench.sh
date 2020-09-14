@@ -528,8 +528,8 @@ all_run() {
   fig=${fig:-all}
 
   all_run_tf_agents
-#  all_run_stable_baselines
-#  all_run_reagent
+  all_run_stable_baselines
+  all_run_reagent
 
 )
 }
@@ -551,6 +551,15 @@ all_run_tf_agents() {
   if [ "$fig" = 'framework_choice' ] || [ "$fig" = 'all' ]; then
     # Fig 11: RL framework choice
     for algo in $(fig_framework_choice_algos); do
+      for env_id in $(fig_framework_choice_envs); do
+        for use_tf_functions in yes no; do
+          run_tf_agents
+        done
+      done
+    done
+
+    # Fig 11(b): RL framework choice DDPG
+    for algo in $(fig_framework_choice_algos_ddpg); do
       for env_id in $(fig_framework_choice_envs); do
         for use_tf_functions in yes no; do
           run_tf_agents
@@ -616,6 +625,8 @@ all_run_reagent() {
         run_reagent
       done
     done
+
+    # NOTE: no Fig 11(b): doesn't implement DDPG.
   fi
 
 #  # Fig 10: Algorithm choice
@@ -662,6 +673,13 @@ all_run_stable_baselines() {
         run_stable_baselines
       done
     done
+
+    # Fig 11(b): RL framework choice DDPG
+    for algo in $(fig_framework_choice_algos_ddpg); do
+      for env_id in $(fig_framework_choice_envs); do
+        run_stable_baselines
+      done
+    done
   fi
 
   if [ "$fig" = 'algo_choice' ] || [ "$fig" = 'all' ]; then
@@ -699,8 +717,37 @@ all_run_stable_baselines() {
 fig_framework_choice_algos() {
   echo td3
 }
+fig_framework_choice_algos_ddpg() {
+  echo ddpg
+}
 fig_framework_choice_envs() {
   echo Walker2DBulletEnv-v0
+}
+
+gen_tex_framework_choice() {
+(
+  set -eu
+
+  dry_run=${dry_run:-no}
+
+  args=(
+    iml-analyze
+    --task FrameworkChoiceMetricsTask
+    --directory $(framework_choice_plots_direc)
+    --framework-choice-csv $(framework_choice_plots_direc)/OverlapStackedBarPlot.*.operation_training_time.csv
+    --framework-choice-ddpg-csv $(framework_choice_plots_ddpg_direc)/OverlapStackedBarPlot.*.operation_training_time.csv
+  )
+  if [ "${dry_run}" = 'yes' ]; then
+    args+=(
+      --dry-run
+    )
+  fi
+  if [ "${DEBUG}" = 'yes' ]; then
+    args+=(--pdb --debug --debug-single-thread)
+  fi
+  _do "${args[@]}" "$@"
+
+)
 }
 
 plot_framework_choice() {
@@ -738,16 +785,52 @@ plot_framework_choice() {
   local args=(
     --iml-directories "${iml_dirs[@]}"
     --output-directory $(framework_choice_plots_direc)
-    --x-title "Framework configuration"
-    --xtick-expression "$(_framework_choice_xtick_expression)"
-    --rotation 0
     --OverlapStackedBarTask-hack-upper-right-legend-bbox-x 0.365
     --CategoryTransitionPlotTask-hack-upper-right-legend-bbox-x 0.365
     --GpuHwPlotTask-width 6
     --GpuHwPlotTask-height 5
   )
   _plot_framework_choice "${args[@]}"
+)
+}
 
+plot_framework_choice_ddpg() {
+(
+  set -eu
+
+  calibrate=${calibrate:-yes}
+  max_passes=${max_passes:-}
+  repetitions=${repetitions:-3}
+  re_calibrate=${re_calibrate:-no}
+  re_plot=${re_plot:-no}
+  dry_run=${dry_run:-no}
+  stable_baselines_hyperparams=${stable_baselines_hyperparams:-yes}
+
+  # Fig 11(b): Framework comparison DDPG
+  local iml_dirs=()
+  for algo in $(fig_framework_choice_algos_ddpg); do
+    for env_id in $(fig_framework_choice_envs); do
+      iml_dirs+=($(stable_baselines_iml_direc))
+      for use_tf_functions in yes no; do
+        iml_dirs+=($(tf_agents_iml_direc))
+      done
+      # NOTE: ReAgent doesn't implement DDPG.
+      # iml_dirs+=($(reagent_iml_direc))
+    done
+  done
+
+#    --y2-logscale
+
+  # --title "Framework choice"
+  local args=(
+    --iml-directories "${iml_dirs[@]}"
+    --output-directory $(framework_choice_plots_ddpg_direc)
+    --OverlapStackedBarTask-hack-upper-right-legend-bbox-x 0.365
+    --CategoryTransitionPlotTask-hack-upper-right-legend-bbox-x 0.365
+    --GpuHwPlotTask-width 6
+    --GpuHwPlotTask-height 5
+  )
+  _plot_framework_choice "${args[@]}"
 )
 }
 
@@ -1119,6 +1202,22 @@ framework_choice_plots_direc() {
 )
 }
 
+framework_choice_metrics_direc() {
+(
+  set -eu
+  local iml_plots_dir=$IML_DIR/output/plots/framework_choice.metrics
+  echo "${iml_plots_dir}"
+)
+}
+
+framework_choice_plots_ddpg_direc() {
+(
+  set -eu
+  local iml_plots_dir=$IML_DIR/output/plots/framework_choice_ddpg
+  echo "${iml_plots_dir}"
+)
+}
+
 tf_agents_iml_direc() {
 (
   set -eu
@@ -1284,7 +1383,7 @@ def fix_region(row):
   if {CATEGORY_PYTHON, CATEGORY_TF_API}.issubset(region):
     region.remove(CATEGORY_TF_API)
 
-  # "CUDA + Simulator" => "Simulator"
+  # "CUDA + Simulation" => "Simulation"
   if {CATEGORY_CUDA_API_CPU, CATEGORY_SIMULATOR_CPP}.issubset(region):
     region.remove(CATEGORY_CUDA_API_CPU)
 
@@ -1362,10 +1461,16 @@ _py_stable_baselines_op_mapping() {
   cat <<EOF
 def stable_baselines_op_mapping(algo, iml_directory, x_field):
     # All stable-baselines algorithms use the same gpu-hw operation mapping.
+    if algo == 'td3':
+      return {
+        'Backpropagation': CompositeOp(add=['training_loop'], subtract=['sample_action', 'step']),
+        'Inference': CompositeOp(add=['sample_action', 'replay_buffer_add']),
+        'Simulation': 'step',
+      }
     return {
       'Backpropagation': CompositeOp(add=['training_loop'], subtract=['sample_action', 'step']),
-      'Inference': CompositeOp(add=['sample_action', 'replay_buffer_add']),
-      'Simulator': 'step',
+      'Inference': CompositeOp(add=['sample_action']),
+      'Simulation': 'step',
     }
 EOF
 }
@@ -1380,7 +1485,7 @@ def tf_agents_op_mapping(algo, iml_directory, x_field):
     return {
       'Backpropagation': 'train_step',
       'Inference': CompositeOp(add=['collect_data'], subtract=['step']),
-      'Simulator': 'step',
+      'Simulation': 'step',
     }
 EOF
 }
@@ -1396,7 +1501,7 @@ def reagent_op_mapping(algo, iml_directory, x_field):
     return {
       'Backpropagation': CompositeOp(add=['training_loop'], subtract=['sample_action', 'step']),
       'Inference': CompositeOp(add=['sample_action', 'replay_buffer_add']),
-      'Simulator': 'step',
+      'Simulation': 'step',
     }
 EOF
 }
@@ -1522,15 +1627,15 @@ def pretty_DL_backend(iml_directory):
 
 def pretty_exec_model(iml_directory):
   if re.search(r'/stable_baselines/', iml_directory):
-    return "graph"
+    return "Graph"
   elif re.search(r'/tf_agents/', iml_directory):
     if re.search(r'use_tf_functions_no', iml_directory):
-      return "eager"
+      return "Eager"
     else:
       assert re.search(r'use_tf_functions_yes', iml_directory), f"iml_dir = {iml_directory}"
-      return "autograph"
+      return "Autograph"
   elif re.search(r'/reagent/', iml_directory):
-    return "eager"
+    return "Eager"
   raise NotImplementedError(f"Not sure what DL back-end to use for iml_dir={iml_directory}")
 
 def xfield_short(row):
@@ -1605,9 +1710,9 @@ plot_tf_agents_fig_9_simulator_choice() {
   _plot_tf_agents \
     --iml-directories "${iml_dirs[@]}" \
     --output-directory $(tf_agents_plots_direc)/tf_agents_fig_9_simulator_choice \
-    --x-title "Simulator configuration" \
+    --x-title "Simulation configuration" \
     --xtick-expression "$(_tf_agents_fig_9_simulator_choice_xtick_expression)" \
-    --title "Simulator choice" \
+    --title "Simulation choice" \
     --y2-logscale \
     --OverlapStackedBarTask-width 12 \
     --OverlapStackedBarTask-height 5 \
@@ -1702,9 +1807,9 @@ plot_stable_baselines_fig_9_simulator_choice() {
   args=(
     --iml-directories "${iml_dirs[@]}"
     --output-directory $(stable_baselines_plots_direc)/stable_baselines_fig_9_simulator_choice
-    --x-title "Simulator configuration"
+    --x-title "Simulation configuration"
     # --xtick-expression "$(_tf_agents_fig_9_simulator_choice_xtick_expression)"
-    --title "Simulator choice"
+    --title "Simulation choice"
     --y2-logscale
     --OverlapStackedBarTask-width 12
     --OverlapStackedBarTask-height 5
@@ -1882,6 +1987,10 @@ _plot_framework_choice() {
         --OverlapStackedBarTask-remap-df "$(_framework_choice_remap_df)"
         --CategoryTransitionPlotTask-remap-df "$(_framework_choice_remap_df)"
         --GpuHwPlotTask-op-mapping "$(_framework_choice_op_mapping)"
+
+        --x-title "Framework configuration"
+        --xtick-expression "$(_framework_choice_xtick_expression)"
+        --rotation 0
     )
     if [ "${dry_run}" = 'yes' ]; then
       args+=(

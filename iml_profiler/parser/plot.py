@@ -33,6 +33,8 @@ from iml_profiler.parser.heatscale import HeatScale, exponential_moving_average
 from iml_profiler.parser.db import SQLCategoryTimesReader, sql_get_source_files, sql_input_path
 from iml_profiler.parser.dataframe import UtilDataframeReader, OverlapDataframeReader, VennData, read_iml_config_metadata, CUDADeviceEventsReader
 
+Y_LABEL_TRAINING_TIME_SEC = 'Training time (sec)'
+
 # figsize (W x H) in inches
 aspect_ratio = 16./9.
 fig_width = 2*7
@@ -2354,7 +2356,7 @@ class SlidingWindowUtilizationPlot:
         ))
 
         ax.set_ylabel(r"GPU utilization (%)")
-        ax.set_xlabel(r"Training time (sec)")
+        ax.set_xlabel(Y_LABEL_TRAINING_TIME_SEC)
         fig.savefig(self._plot_path, bbox_inches="tight", pad_inches=0)
         logger.info('Save figure to {path}'.format(path=self._plot_path))
         plt.close(fig)

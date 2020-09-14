@@ -25,7 +25,7 @@ from iml_profiler.parser.pyprof import PythonProfileParser, PythonFlameGraphPars
 from iml_profiler.parser.plot import TimeBreakdownPlot, PlotSummary, CombinedProfileParser, CategoryOverlapPlot, UtilizationPlot, HeatScalePlot, ConvertResourceOverlapToResourceSubplot, VennJsPlotter, SlidingWindowUtilizationPlot, CUDAEventCSVReader
 from iml_profiler.parser.db import SQLParser, sql_input_path, GetConnectionPool
 from iml_profiler.parser import db
-from iml_profiler.parser.stacked_bar_plots import OverlapStackedBarPlot, CategoryTransitionPlot
+from iml_profiler.parser.stacked_bar_plots import OverlapStackedBarPlot, CategoryTransitionPlot, FrameworkChoiceMetrics
 from iml_profiler.profiler.util import print_cmd
 from iml_profiler.parser.cpu_gpu_util import UtilParser, UtilPlot, GPUUtilOverTimePlot, NvprofKernelHistogram, CrossProcessOverlapHistogram, NvprofTraces
 from iml_profiler.parser.training_progress import TrainingProgressParser, ProfilingOverheadPlot
@@ -1113,6 +1113,7 @@ class CategoryTransitionPlotTask(luigi.Task):
     height = luigi.FloatParameter(description="Height of plot in inches", default=None)
     include_gpu = luigi.BoolParameter(description="Include GPU transitions", parsing=luigi.BoolParameter.EXPLICIT_PARSING)
     include_python = luigi.BoolParameter(description="Include Python transitions", parsing=luigi.BoolParameter.EXPLICIT_PARSING)
+    include_simulator = luigi.BoolParameter(description="Include Simulation during non-Simulator operation", parsing=luigi.BoolParameter.EXPLICIT_PARSING)
 
     debug = param_debug
     debug_single_thread = param_debug_single_thread
@@ -1125,6 +1126,28 @@ class CategoryTransitionPlotTask(luigi.Task):
     def run(self):
         kwargs = kwargs_from_task(self)
         self.dumper = CategoryTransitionPlot(**kwargs)
+        self.dumper.run()
+
+class FrameworkChoiceMetricsTask(luigi.Task):
+    """
+    Generate latex variable definitions for "Quantified intuitive findings" and
+    "Suprising findings" regarding Framework choice RLScope paper.
+    """
+    framework_choice_csv = luigi.Parameter(description="TD3: OverlapStackedBarPlot.overlap_type_CategoryOverlap.operation_training_time.csv")
+    framework_choice_ddpg_csv = luigi.Parameter(description="DDPG: OverlapStackedBarPlot.overlap_type_CategoryOverlap.operation_training_time.csv")
+    directory = luigi.Parameter(description="Output directory", default=".")
+
+    debug = param_debug
+    debug_single_thread = param_debug_single_thread
+
+    skip_output = False
+
+    def output(self):
+        return []
+
+    def run(self):
+        kwargs = kwargs_from_task(self)
+        self.dumper = FrameworkChoiceMetrics(**kwargs)
         self.dumper.run()
 
 
@@ -1698,6 +1721,7 @@ IML_TASKS.add(NvprofKernelHistogramTask)
 IML_TASKS.add(CrossProcessOverlapHistogramTask)
 IML_TASKS.add(CategoryTransitionPlotTask)
 IML_TASKS.add(NvprofTracesTask)
+IML_TASKS.add(FrameworkChoiceMetricsTask)
 
 if __name__ == "__main__":
     main()
