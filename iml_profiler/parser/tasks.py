@@ -1135,6 +1135,8 @@ class FrameworkChoiceMetricsTask(luigi.Task):
     """
     framework_choice_csv = luigi.Parameter(description="TD3: OverlapStackedBarPlot.overlap_type_CategoryOverlap.operation_training_time.csv")
     framework_choice_ddpg_csv = luigi.Parameter(description="DDPG: OverlapStackedBarPlot.overlap_type_CategoryOverlap.operation_training_time.csv")
+    framework_choice_trans_csv = luigi.Parameter(description="TD3: CategoryTransitionPlot.combined.csv")
+    framework_choice_ddpg_trans_csv = luigi.Parameter(description="DDPG: CategoryTransitionPlot.combined.csv")
     directory = luigi.Parameter(description="Output directory", default=".")
 
     debug = param_debug

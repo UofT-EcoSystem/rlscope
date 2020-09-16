@@ -736,6 +736,8 @@ gen_tex_framework_choice() {
     --directory $(framework_choice_plots_direc)
     --framework-choice-csv $(framework_choice_plots_direc)/OverlapStackedBarPlot.*.operation_training_time.csv
     --framework-choice-ddpg-csv $(framework_choice_plots_ddpg_direc)/OverlapStackedBarPlot.*.operation_training_time.csv
+    --framework-choice-trans-csv $(framework_choice_plots_direc)/CategoryTransitionPlot.combined.csv
+    --framework-choice-ddpg-trans-csv $(framework_choice_plots_ddpg_direc)/CategoryTransitionPlot.combined.csv
   )
   if [ "${dry_run}" = 'yes' ]; then
     args+=(
