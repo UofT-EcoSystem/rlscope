@@ -4378,10 +4378,9 @@ class FrameworkChoiceMetric:
         for i, metric_name in enumerate(self.metrics.keys()):
             varname = self.tex_varname(metric_name)
             if template:
-                letter = chr(ord('a') + i)
                 # value = r"\textit{{{letter}}}".format(letter=letter)
                 # Allow user to decide how to format (e.g., \textit{...}, $...$)
-                value = letter
+                value = _texvar(i)
             else:
                 value = self.metrics[metric_name]
             defn = self.tex_defn(varname, value)
@@ -4404,6 +4403,13 @@ class FrameworkChoiceMetric:
         components.extend(self._split(self.tex_label))
         components.extend(self._split(metric_name))
         varname = self._join(components)
+        if re.search(r'[0-9]', metric_name):
+            old_varname = varname
+            varname = re.sub(r'[0-9]', '', varname)
+            logger.warning(r"Latex variable names cannot have numbers; removing numbers from \{old} -> \{new}".format(
+                old=old_varname,
+                new=varname,
+            ))
         return varname
 
     def _join(self, components):
@@ -4708,6 +4714,8 @@ class FrameworkChoiceMetrics:
         """
         df_mean = self.mean_df('total_training_time', groupby_fields=['operation', 'category'])
 
+        metric.df = dict()
+
         def category_percent_op(group_df):
             # Q: Need to make copy?
             group_df['category_percent_op'] = group_df['total_training_time']/group_df['total_training_time'].sum()
@@ -4723,12 +4731,43 @@ class FrameworkChoiceMetrics:
 
         metric['MinAutographPythonPercentOfOp'] = autograph_op_python_percent_df['category_percent_op'].min()
         metric['MaxAutographPythonPercentOfOp'] = autograph_op_python_percent_df['category_percent_op'].max()
-        metric.df = op_python_percent_df
+        metric.df['operation.category.python_percent_of_op'] = op_python_percent_df
 
         # WANT: per-operation (Backprop, Inference) per-algorithm (DDPG, TD3) breakdown of Python reduction.
         # RatioPython{Operation}{Algo}
         # Just compute the Mean/Geomean?
 
+        groupby_fields = ['operation', 'category']
+        df_mean = self.mean_df('total_training_time', df=self.df, groupby_fields=groupby_fields)
+        ratio_field = 'ratio_graph_to_autograph'
+        df_autograph_rows = df_mean[df_mean.apply(self._config_is_autograph, axis=1)]
+        df_graph_rows = df_mean[df_mean.apply(self._config_is_graph, axis=1)]
+        join_on = ['algo', 'env'] + groupby_fields
+        df = df_autograph_rows.set_index(join_on).join(df_graph_rows.set_index(join_on), how='inner', lsuffix='_autograph', rsuffix='_graph').reset_index()
+        df[ratio_field] = df['total_training_time_graph'] / df['total_training_time_autograph']
+        metric.df['operation.category.ratio_python'] = df
+        # NOTE: groupby order determines order of tex statements.
+        for (algo, operation, category), df_group in df.groupby(['algo', 'operation', 'category']):
+            if not self._is_gpu_operation(operation) or \
+                not self._is_python_category(category):
+                continue
+            def get_alias(prefix):
+                return "{Prefix}Ratio{Category}{Operation}{Algo}".format(
+                    Prefix=prefix,
+                    Category=category,
+                    Operation=operation.capitalize(),
+                    Algo=algo.upper(),
+                )
+            self._add_metric_stats(metric, df_group, get_alias, ratio_field)
+
+    def _is_gpu_operation(self, operation):
+        return operation in {'Inference', 'Backpropagation'}
+
+    def _is_python_category(self, category):
+        return re.search(r'python', category.lower())
+
+    def _is_cuda_category(self, category):
+        return re.search(r'cuda', category.lower())
 
     def _config_is_eager(self, row):
         return bool(re.search(r'eager', row['x_field'].lower()))
@@ -5039,14 +5078,150 @@ class FrameworkChoiceMetrics:
 
         metric.df = df
 
-    def _add_metric_stats(self, metric, df, get_alias, field):
+    def calc_find_surp_ddpg_backprop_slow(self, metric):
+        """
+        \begin{rlscope-finding-surp}{find:surp-ddpg-backprop-slow}
+        RLScope's detailed metrics identify subtle performance differences in the DDPG Graph API
+        RL algorithm implementation rooted in inefficient abstractions in high-level code
+        responsible for a $x\times$ inflation in total Graph API Backpropagation time compared
+        to Autograph.
+        \end{rlscope-finding-surp}
+
+        % Description text metrics:
+        DDPG Backpropagation in Autograph is $x\times$ faster than Graph (Figure~\ref{fig:framework_choice_ddpg}),
+        whereas the TD3 Backpropagation in Autograph is only $y\times$ faster than Graph
+        (Figure~\ref{fig:framework_choice}); these inefficiencies in Backpropagation for DDPG Graph
+        are correlated with high CUDA API inflation ($z\times$) and high Python inflation ($a\times$)
+        relative to DDPG Autograph.
+
+        WANT:
+        df['ratio_autograph_to_graph', operation] =
+            df['total_training_time_autograph', operation] /
+            df['total_training_time_graph', operation]
+
+        # Same thing broken down by category for Python and CUDA.
+        df['ratio_autograph_to_graph', operation, category] =
+            df['total_training_time_autograph', operation, category] /
+            df['total_training_time_graph', operation, category]
+        """
+
+        ratio_name = 'RatioAutographToGraph'
+        join_add_metrics_kwargs = dict(
+            ratio_field='ratio_graph_to_autograph',
+            lsuffix='_graph',
+            rsuffix='_autograph',
+            is_lsuffix=self._config_is_graph,
+            is_rsuffix=self._config_is_autograph,
+        )
+
+        def add_operation_metrics():
+            def get_group_alias(prefix, group_dict):
+                return "{Prefix}{Ratio}{Operation}{Algo}".format(
+                    Prefix=prefix,
+                    Ratio=ratio_name,
+                    Operation=group_dict['operation'].capitalize(),
+                    Algo=group_dict['algo'].upper(),
+                )
+            def keep_group(group_dict):
+               return self._is_gpu_operation(group_dict['operation'])
+            self._join_add_metrics(
+                metric=metric,
+                metrics={'Mean'},
+                get_group_alias=get_group_alias,
+                groupby_fields=['operation'],
+                keep_group=keep_group,
+                **join_add_metrics_kwargs,
+            )
+        add_operation_metrics()
+
+        def add_operation_category_metrics():
+            def get_group_alias(prefix, group_dict):
+                return "{Prefix}{Ratio}{Category}{Operation}{Algo}".format(
+                    Prefix=prefix,
+                    Ratio=ratio_name,
+                    Category=group_dict['category'],
+                    Operation=group_dict['operation'].capitalize(),
+                    Algo=group_dict['algo'].upper(),
+                )
+            def keep_group(group_dict):
+                return ( self._is_python_category(group_dict['category']) or \
+                         self._is_cuda_category(group_dict['category']) ) and \
+                       self._is_gpu_operation(group_dict['operation'])
+            self._join_add_metrics(
+                metric=metric,
+                metrics={'Mean'},
+                get_group_alias=get_group_alias,
+                groupby_fields=['operation', 'category'],
+                keep_group=keep_group,
+                **join_add_metrics_kwargs,
+            )
+        add_operation_category_metrics()
+
+    def _join_add_metrics(self,
+                          metric,
+                          ratio_field,
+                          lsuffix, rsuffix,
+                          is_lsuffix, is_rsuffix,
+                          get_group_alias,
+                          df=None,
+                          field='total_training_time',
+                          metrics=None,
+                          groupby_fields=None,
+                          keep_group=None):
+        if df is None:
+            df = self.df
+        if groupby_fields is None:
+            groupby_fields = []
+        lfield = f"{field}{lsuffix}"
+        rfield = f"{field}{rsuffix}"
+        df_mean = self.mean_df(field, df=df, groupby_fields=groupby_fields)
+        df_l = df_mean[df_mean.apply(is_lsuffix, axis=1)]
+        df_r = df_mean[df_mean.apply(is_rsuffix, axis=1)]
+        join_on = ['algo', 'env'] + groupby_fields
+        df = df_l.set_index(join_on).join(df_r.set_index(join_on), how='inner', lsuffix=lsuffix, rsuffix=rsuffix).reset_index()
+        df[ratio_field] = df[lfield] / df[rfield]
+        metric_name = "{groupby}.{ratio_field}".format(
+            groupby='.'.join(groupby_fields),
+            ratio_field=ratio_field,
+        )
+        if metric.df is None:
+            metric.df = dict()
+        metric.df[metric_name] = df
+        # NOTE: groupby order determines order of tex statements.
+        groupby = ['algo'] + groupby_fields
+        for group_tupl, df_group in df.groupby(groupby):
+            group_dict = dict(zip(groupby, group_tupl))
+            if keep_group is not None and not keep_group(group_dict):
+                continue
+            # if not self._is_gpu_operation(operation) or \
+            #     not self._is_python_category(category):
+            #     continue
+            def wrapper_get_alias(prefix):
+                return get_group_alias(prefix, group_dict)
+                # return "{Prefix}Ratio{Category}{Operation}{Algo}".format(
+                #     Prefix=prefix,
+                #     Category=category,
+                #     Operation=operation.capitalize(),
+                #     Algo=algo.upper(),
+                # )
+            self._add_metric_stats(metric, df_group, wrapper_get_alias, ratio_field, metrics=metrics)
+
+    def _add_metric_stats(self, metric, df, get_alias, field, metrics=None):
         from scipy.stats.mstats import gmean
 
-        metric[get_alias('Min')] = df[field].min()
-        metric[get_alias('Max')] = df[field].max()
-        metric[get_alias('Mean')] = df[field].mean()
-        metric[get_alias('Geomean')] = gmean(df[field])
-        metric[get_alias('Std')] = df[field].std()
+        def should_add_metric(prefix):
+            return metrics is None or prefix in metrics
+
+        if should_add_metric('Min'):
+            metric[get_alias('Min')] = df[field].min()
+        if should_add_metric('Max'):
+            metric[get_alias('Max')] = df[field].max()
+        if should_add_metric('Mean'):
+            metric[get_alias('Mean')] = df[field].mean()
+        if should_add_metric('Geomean'):
+            metric[get_alias('Geomean')] = gmean(df[field])
+        if should_add_metric('Std'):
+            metric[get_alias('Std')] = df[field].std()
 
     def _register_all_framework_choice_metrics(self):
         self.FRAMEWORK_CHOICE_METRICS = []
@@ -5061,6 +5236,15 @@ class FrameworkChoiceMetrics:
             \begin{rlscope-finding-qual}{find:qual-autograph-reduces-python}
             By removing Framework transitions, Autograph substantially reduces Python time so that is makes up at most $x\%$ of Inference/Backpropagation time.
             \end{rlscope-finding-qual}
+            """,
+
+            r"""
+            \begin{rlscope-finding-surp}{find:surp-ddpg-backprop-slow}
+            RLScope's detailed metrics identify subtle performance differences in the DDPG Graph API 
+            RL algorithm implementation rooted in inefficient abstractions in high-level code 
+            responsible for a $x\times$ inflation in total Graph API Backpropagation time compared 
+            to Autograph.
+            \end{rlscope-finding-surp}
             """,
 
             r"""
@@ -5141,6 +5325,22 @@ def maybe_suffix(suffix):
     if re.search(r'^\.', suffix):
         return suffix
     return f".{suffix}"
+
+def _texvar(i):
+    alphabet_size = 26*2
+    length = int(np.ceil((i + 1) / alphabet_size))
+    if (i % alphabet_size) < 26:
+        letter = chr(ord('a') + (i % 26))
+    else:
+        # elif (i % alphabet_size) < 26*2:
+        letter = chr(ord('A') + (i % 26))
+    # double-up letters:
+    # a,  b,  c,  ..., z
+    # A,  B,  C,  ..., Z
+    # aa, bb, cc, ..., cc
+    # AA, BB, CC, ..., ZZ
+    # ...
+    return letter * length
 
 if __name__ == '__main__':
     main()
