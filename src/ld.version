@@ -1,24 +1,25 @@
 SAMPLE_CUDA_API_1.0 {
   global:
     /* sample_cuda_api.py python API calls */
-    setup;
-    print;
-    set_metadata;
-    enable_tracing;
-    is_enabled;
-    disable_tracing;
-    async_dump;
-    await_dump;
-    record_event;
-    record_overhead_event;
-    record_overhead_event_for_operation;
-    push_operation;
-    set_max_operations;
-    pop_operation;
-    start_pass;
-    end_pass;
-    has_next_pass;
-    disable_gpu_hw;
+    rlscope_setup;
+    rlscope_print;
+    rlscope_set_metadata;
+    rlscope_enable_tracing;
+    rlscope_is_enabled;
+    rlscope_disable_tracing;
+    rlscope_async_dump;
+    rlscope_await_dump;
+    rlscope_record_event;
+    rlscope_record_overhead_event;
+    rlscope_record_overhead_event_for_operation;
+    rlscope_push_operation;
+    rlscope_set_max_operations;
+    rlscope_pop_operation;
+    rlscope_start_pass;
+    rlscope_end_pass;
+    rlscope_has_next_pass;
+    rlscope_disable_gpu_hw;
+    rlscope_hello_world;
 
     /* CUDA API calls that we intercept */
     cuLaunchKernel;

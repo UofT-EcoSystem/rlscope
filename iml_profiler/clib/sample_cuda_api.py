@@ -81,69 +81,69 @@ def load_library(allow_fail=None):
         logger.info(f"Failed to load {py_config.RLSCOPE_CLIB}")
         return
 
-    _so.setup.argtypes = []
-    _so.setup.restype = c_int
-    _set_api_wrapper('setup')
+    _so.rlscope_setup.argtypes = []
+    _so.rlscope_setup.restype = c_int
+    _set_api_wrapper('rlscope_setup')
 
-    _so.enable_tracing.argtypes = []
-    _so.enable_tracing.restype = c_int
-    _set_api_wrapper('enable_tracing')
+    _so.rlscope_enable_tracing.argtypes = []
+    _so.rlscope_enable_tracing.restype = c_int
+    _set_api_wrapper('rlscope_enable_tracing')
 
-    _so.disable_tracing.argtypes = []
-    _so.disable_tracing.restype = c_int
-    _set_api_wrapper('disable_tracing')
+    _so.rlscope_disable_tracing.argtypes = []
+    _so.rlscope_disable_tracing.restype = c_int
+    _set_api_wrapper('rlscope_disable_tracing')
 
-    _so.print.argtypes = []
-    _so.print.restype = c_int
-    _set_api_wrapper('print')
+    _so.rlscope_print.argtypes = []
+    _so.rlscope_print.restype = c_int
+    _set_api_wrapper('rlscope_print')
 
-    _so.is_enabled.argtypes = [POINTER(c_int)]
-    _so.is_enabled.restype = c_int
-    _set_api_wrapper('is_enabled')
+    _so.rlscope_is_enabled.argtypes = [POINTER(c_int)]
+    _so.rlscope_is_enabled.restype = c_int
+    _set_api_wrapper('rlscope_is_enabled')
 
-    _so.set_metadata.argtypes = [ c_char_p, c_char_p, c_char_p, c_char_p ]
-    _so.set_metadata.restype = c_int
-    # _set_api_wrapper('set_metadata')
+    _so.rlscope_set_metadata.argtypes = [ c_char_p, c_char_p, c_char_p, c_char_p ]
+    _so.rlscope_set_metadata.restype = c_int
+    # _set_api_wrapper('rlscope_set_metadata')
 
-    _so.record_event.argtypes = [ c_char_p, c_int64, c_int64, c_char_p ]
-    _so.record_event.restype = c_int
-    # _set_api_wrapper('record_event')
+    _so.rlscope_record_event.argtypes = [ c_char_p, c_int64, c_int64, c_char_p ]
+    _so.rlscope_record_event.restype = c_int
+    # _set_api_wrapper('rlscope_record_event')
 
-    _so.record_overhead_event.argtypes = [ c_char_p, c_int ]
-    _so.record_overhead_event.restype = c_int
-    # _set_api_wrapper('record_overhead_event')
+    _so.rlscope_record_overhead_event.argtypes = [ c_char_p, c_int ]
+    _so.rlscope_record_overhead_event.restype = c_int
+    # _set_api_wrapper('rlscope_record_overhead_event')
 
-    _so.record_overhead_event_for_operation.argtypes = [ c_char_p, c_char_p, c_int ]
-    _so.record_overhead_event_for_operation.restype = c_int
-    # _set_api_wrapper('record_overhead_event_for_operation')
+    _so.rlscope_record_overhead_event_for_operation.argtypes = [ c_char_p, c_char_p, c_int ]
+    _so.rlscope_record_overhead_event_for_operation.restype = c_int
+    # _set_api_wrapper('rlscope_record_overhead_event_for_operation')
 
-    _so.push_operation.argtypes = [ c_char_p ]
-    _so.push_operation.restype = c_int
-    # _set_api_wrapper('push_operation')
+    _so.rlscope_push_operation.argtypes = [ c_char_p ]
+    _so.rlscope_push_operation.restype = c_int
+    # _set_api_wrapper('rlscope_push_operation')
 
-    _so.pop_operation.argtypes = []
-    _so.pop_operation.restype = c_int
-    # _set_api_wrapper('pop_operation')
+    _so.rlscope_pop_operation.argtypes = []
+    _so.rlscope_pop_operation.restype = c_int
+    # _set_api_wrapper('rlscope_pop_operation')
 
-    _so.start_pass.argtypes = []
-    _so.start_pass.restype = c_int
+    _so.rlscope_start_pass.argtypes = []
+    _so.rlscope_start_pass.restype = c_int
 
-    _so.end_pass.argtypes = []
-    _so.end_pass.restype = c_int
+    _so.rlscope_end_pass.argtypes = []
+    _so.rlscope_end_pass.restype = c_int
 
-    _so.has_next_pass.argtypes = [c_int_p]
-    _so.has_next_pass.restype = c_int
+    _so.rlscope_has_next_pass.argtypes = [c_int_p]
+    _so.rlscope_has_next_pass.restype = c_int
 
-    _so.disable_gpu_hw.argtypes = []
-    _so.disable_gpu_hw.restype = c_int
+    _so.rlscope_disable_gpu_hw.argtypes = []
+    _so.rlscope_disable_gpu_hw.restype = c_int
 
-    _so.await_dump.argtypes = []
-    _so.await_dump.restype = c_int
-    _set_api_wrapper('await_dump')
+    _so.rlscope_await_dump.argtypes = []
+    _so.rlscope_await_dump.restype = c_int
+    _set_api_wrapper('rlscope_await_dump')
 
-    _so.async_dump.argtypes = []
-    _so.async_dump.restype = c_int
-    _set_api_wrapper('async_dump')
+    _so.rlscope_async_dump.argtypes = []
+    _so.rlscope_async_dump.restype = c_int
+    _set_api_wrapper('rlscope_async_dump')
 
     logger.info(f"Loaded symbols from {py_config.RLSCOPE_CLIB}")
 
@@ -164,7 +164,7 @@ def set_metadata(directory, process_name, machine_name, phase):
     if py_config.DEBUG and py_config.DEBUG_RLSCOPE_LIB_CALLS:
         logger.info(_log_api_call_msg('set_metadata',
                                        directory, process_name, machine_name, phase))
-    ret = _so.set_metadata(
+    ret = _so.rlscope_set_metadata(
         _as_c_string(directory),
         _as_c_string(process_name),
         _as_c_string(machine_name),
@@ -189,7 +189,7 @@ def record_event(
             duration_us=duration_us,
             name=name,
         ))
-    ret = _so.record_event(
+    ret = _so.rlscope_record_event(
         _as_c_string(category),
         c_int64(int(start_us)),
         c_int64(int(duration_us)),
@@ -205,7 +205,7 @@ def record_overhead_event(
     if py_config.DEBUG and py_config.DEBUG_RLSCOPE_LIB_CALLS:
         logger.info(_log_api_call_msg('record_overhead_event',
                                        overhead_type, num_events))
-    ret = _so.record_overhead_event(
+    ret = _so.rlscope_record_overhead_event(
         _as_c_string(overhead_type),
         c_int(num_events)
     )
@@ -220,7 +220,7 @@ def record_overhead_event_for_operation(
     if py_config.DEBUG and py_config.DEBUG_RLSCOPE_LIB_CALLS:
         logger.info(_log_api_call_msg('record_overhead_event_for_operation',
                                        overhead_type, operation, num_events))
-    ret = _so.record_overhead_event_for_operation(
+    ret = _so.rlscope_record_overhead_event_for_operation(
         _as_c_string(overhead_type),
         _as_c_string(operation),
         c_int(num_events)
@@ -232,7 +232,7 @@ def record_overhead_event_for_operation(
 def push_operation(operation):
     if py_config.DEBUG and py_config.DEBUG_RLSCOPE_LIB_CALLS:
         logger.info(_log_api_call_msg('push_operation', operation))
-    ret = _so.push_operation(
+    ret = _so.rlscope_push_operation(
         _as_c_string(operation),
     )
     if ret != TF_OK:
@@ -242,7 +242,7 @@ def push_operation(operation):
 def set_max_operations(operation, num_pushes):
     if py_config.DEBUG and py_config.DEBUG_RLSCOPE_LIB_CALLS:
         logger.info(_log_api_call_msg('set_max_operations', operation, num_pushes))
-    ret = _so.set_max_operations(
+    ret = _so.rlscope_set_max_operations(
         _as_c_string(operation),
         c_int(num_pushes),
     )
@@ -253,7 +253,7 @@ def set_max_operations(operation, num_pushes):
 def pop_operation():
     if py_config.DEBUG and py_config.DEBUG_RLSCOPE_LIB_CALLS:
         logger.info(_log_api_call_msg('pop_operation'))
-    ret = _so.pop_operation()
+    ret = _so.rlscope_pop_operation()
     if ret != TF_OK:
         raise IMLProfError(ret)
     return ret
@@ -261,7 +261,7 @@ def pop_operation():
 def start_pass():
     if py_config.DEBUG and py_config.DEBUG_RLSCOPE_LIB_CALLS:
         logger.info(_log_api_call_msg('start_pass'))
-    ret = _so.start_pass()
+    ret = _so.rlscope_start_pass()
     if ret != TF_OK:
         raise IMLProfError(ret)
     return ret
@@ -269,7 +269,7 @@ def start_pass():
 def end_pass():
     if py_config.DEBUG and py_config.DEBUG_RLSCOPE_LIB_CALLS:
         logger.info(_log_api_call_msg('end_pass'))
-    ret = _so.end_pass()
+    ret = _so.rlscope_end_pass()
     if ret != TF_OK:
         raise IMLProfError(ret)
     return ret
@@ -278,7 +278,7 @@ def has_next_pass():
     if py_config.DEBUG and py_config.DEBUG_RLSCOPE_LIB_CALLS:
         logger.info(_log_api_call_msg('has_next_pass'))
     has_next_pass = c_int(0)
-    ret = _so.has_next_pass(ctypes.byref(has_next_pass))
+    ret = _so.rlscope_has_next_pass(ctypes.byref(has_next_pass))
     if ret != TF_OK:
         raise IMLProfError(ret)
     value = bool(has_next_pass.value)
@@ -290,7 +290,7 @@ def has_next_pass():
 def disable_gpu_hw():
     if py_config.DEBUG and py_config.DEBUG_RLSCOPE_LIB_CALLS:
         logger.info(_log_api_call_msg('disable_gpu_hw'))
-    ret = _so.disable_gpu_hw()
+    ret = _so.rlscope_disable_gpu_hw()
     if ret != TF_OK:
         raise IMLProfError(ret)
     return ret

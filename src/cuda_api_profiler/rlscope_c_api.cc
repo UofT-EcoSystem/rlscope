@@ -2,6 +2,8 @@
 // Created by jagle on 8/6/2019.
 //
 
+#include "public_headers/rlscope_c_api.h"
+
 #include <cuda.h>
 #include <cupti_target.h>
 #include <cupti.h>
@@ -32,95 +34,29 @@
 
 //#define LOG_FUNC_ENTRY()
 
-namespace rlscope {
-
-
-
-//#define MAYBE_RETURN(cupti_status) do {
-//    CUptiResult _status = cupti_status;
-//    if (_status != CUPTI_SUCCESS) {
-//        return ERROR;
-//    }
-//} while (0);
-
-// MyStatus initTrace()
-// {
-//   size_t attrValue = 0, attrValueSize = sizeof(size_t);
-//   // Device activity record is created when CUDA initializes, so we
-//   // want to enable it before cuInit() or any CUDA runtime call.
-//   MAYBE_RETURN(CUPTI_CALL(cuptiActivityEnable(CUPTI_ACTIVITY_KIND_DEVICE)));
-//   // Enable all other activity record kinds.
-//   MAYBE_RETURN(CUPTI_CALL(cuptiActivityEnable(CUPTI_ACTIVITY_KIND_CONTEXT));
-//   MAYBE_RETURN(CUPTI_CALL(cuptiActivityEnable(CUPTI_ACTIVITY_KIND_DRIVER));
-//   MAYBE_RETURN(CUPTI_CALL(cuptiActivityEnable(CUPTI_ACTIVITY_KIND_RUNTIME));
-//   MAYBE_RETURN(CUPTI_CALL(cuptiActivityEnable(CUPTI_ACTIVITY_KIND_MEMCPY));
-//   MAYBE_RETURN(CUPTI_CALL(cuptiActivityEnable(CUPTI_ACTIVITY_KIND_MEMSET));
-//   MAYBE_RETURN(CUPTI_CALL(cuptiActivityEnable(CUPTI_ACTIVITY_KIND_NAME));
-//   MAYBE_RETURN(CUPTI_CALL(cuptiActivityEnable(CUPTI_ACTIVITY_KIND_MARKER));
-//   MAYBE_RETURN(CUPTI_CALL(cuptiActivityEnable(CUPTI_ACTIVITY_KIND_KERNEL));
-//   MAYBE_RETURN(CUPTI_CALL(cuptiActivityEnable(CUPTI_ACTIVITY_KIND_OVERHEAD));
-//
-//   // Register callbacks for buffer requests and for buffers completed by CUPTI.
-//   MAYBE_RETURN(CUPTI_CALL(cuptiActivityRegisterCallbacks(bufferRequested, bufferCompleted));
-//
-//   // Get and set activity attributes.
-//   // Attributes can be set by the CUPTI client to change behavior of the activity API.
-//   // Some attributes require to be set before any CUDA context is created to be effective,
-//   // e.g. to be applied to all device buffer allocations (see documentation).
-//   MAYBE_RETURN(CUPTI_CALL(cuptiActivityGetAttribute(CUPTI_ACTIVITY_ATTR_DEVICE_BUFFER_SIZE, &attrValueSize, &attrValue));
-//   printf("%s = %llu\n", "CUPTI_ACTIVITY_ATTR_DEVICE_BUFFER_SIZE", (long long unsigned)attrValue);
-//   attrValue *= 2;
-//   MAYBE_RETURN(CUPTI_CALL(cuptiActivitySetAttribute(CUPTI_ACTIVITY_ATTR_DEVICE_BUFFER_SIZE, &attrValueSize, &attrValue));
-//
-//   MAYBE_RETURN(CUPTI_CALL(cuptiActivityGetAttribute(CUPTI_ACTIVITY_ATTR_DEVICE_BUFFER_POOL_LIMIT, &attrValueSize, &attrValue));
-//   printf("%s = %llu\n", "CUPTI_ACTIVITY_ATTR_DEVICE_BUFFER_POOL_LIMIT", (long long unsigned)attrValue);
-//   attrValue *= 2;
-//   MAYBE_RETURN(CUPTI_CALL(cuptiActivitySetAttribute(CUPTI_ACTIVITY_ATTR_DEVICE_BUFFER_POOL_LIMIT, &attrValueSize, &attrValue));
-//
-//   MAYBE_RETURN(CUPTI_CALL(cuptiGetTimestamp(&startTimestamp));
-// }
-
-using StatusRet = rlscope::error::Code;
+using namespace rlscope;
 
 extern "C" {
 
-typedef enum RLSCOPE_EXPORT TF_Code {
-  TF_OK = 0,
-  TF_CANCELLED = 1,
-  TF_UNKNOWN = 2,
-  TF_INVALID_ARGUMENT = 3,
-  TF_DEADLINE_EXCEEDED = 4,
-  TF_NOT_FOUND = 5,
-  TF_ALREADY_EXISTS = 6,
-  TF_PERMISSION_DENIED = 7,
-  TF_UNAUTHENTICATED = 16,
-  TF_RESOURCE_EXHAUSTED = 8,
-  TF_FAILED_PRECONDITION = 9,
-  TF_ABORTED = 10,
-  TF_OUT_OF_RANGE = 11,
-  TF_UNIMPLEMENTED = 12,
-  TF_INTERNAL = 13,
-  TF_UNAVAILABLE = 14,
-  TF_DATA_LOSS = 15,
-} TF_Code;
+int RLSCOPE_EXPORT rlscope_hello_world() {
+  std::cout << "FROM RLSCOPE: HELLO_WORLD" << std::endl;
+  return rlscope::MyStatus::OK().code();
+}
 
-//using RetCode = TF_Code;
-using RetCode = int;
-
-RetCode RLSCOPE_EXPORT setup() {
+int RLSCOPE_EXPORT rlscope_setup() {
   // Initialize global state.
   LOG_FUNC_ENTRY();
   return rlscope::MyStatus::OK().code();
 }
 
-RetCode RLSCOPE_EXPORT print() {
+int RLSCOPE_EXPORT rlscope_print() {
   LOG_FUNC_ENTRY();
   auto status = globals.device_tracer->Print();
   MAYBE_LOG_ERROR(LOG(INFO), __func__, status);
   return status.code();
 }
 
-RetCode RLSCOPE_EXPORT set_metadata(const char* directory, const char* process_name, const char* machine_name, const char* phase_name) {
+int RLSCOPE_EXPORT rlscope_set_metadata(const char* directory, const char* process_name, const char* machine_name, const char* phase_name) {
   VLOG(1) << __func__
           << ", " << "directory = " << directory
           << ", " << "process_name = " << process_name
@@ -131,7 +67,7 @@ RetCode RLSCOPE_EXPORT set_metadata(const char* directory, const char* process_n
   return status.code();
 }
 
-RetCode RLSCOPE_EXPORT enable_tracing() {
+int RLSCOPE_EXPORT rlscope_enable_tracing() {
   // Enable call-backs.
   LOG_FUNC_ENTRY();
   auto status = globals.device_tracer->Start();
@@ -142,7 +78,7 @@ RetCode RLSCOPE_EXPORT enable_tracing() {
   return status.code();
 }
 
-RetCode RLSCOPE_EXPORT is_enabled(int* retval) {
+int RLSCOPE_EXPORT rlscope_is_enabled(int* retval) {
   LOG_FUNC_ENTRY();
   if (globals.device_tracer->IsEnabled()) {
     *retval = 1;
@@ -152,7 +88,7 @@ RetCode RLSCOPE_EXPORT is_enabled(int* retval) {
   return rlscope::MyStatus::OK().code();
 }
 
-RetCode RLSCOPE_EXPORT disable_tracing() {
+int RLSCOPE_EXPORT rlscope_disable_tracing() {
   // Disable call-backs.
   LOG_FUNC_ENTRY();
   auto status = globals.device_tracer->Stop();
@@ -160,7 +96,7 @@ RetCode RLSCOPE_EXPORT disable_tracing() {
   return status.code();
 }
 
-RetCode RLSCOPE_EXPORT disable_gpu_hw() {
+int RLSCOPE_EXPORT rlscope_disable_gpu_hw() {
   // Disable GPU HW sampler.
   LOG_FUNC_ENTRY();
   auto status = globals.device_tracer->DisableGpuHW();
@@ -168,7 +104,7 @@ RetCode RLSCOPE_EXPORT disable_gpu_hw() {
   return status.code();
 }
 
-RetCode RLSCOPE_EXPORT async_dump() {
+int RLSCOPE_EXPORT rlscope_async_dump() {
   // Dump traces (asynchronously).
   LOG_FUNC_ENTRY();
   MyStatus status;
@@ -177,7 +113,7 @@ RetCode RLSCOPE_EXPORT async_dump() {
   return status.code();
 }
 
-RetCode RLSCOPE_EXPORT await_dump() {
+int RLSCOPE_EXPORT rlscope_await_dump() {
   // Wait for async dump traces to complete.
   LOG_FUNC_ENTRY();
   MyStatus status;
@@ -190,7 +126,7 @@ RetCode RLSCOPE_EXPORT await_dump() {
 }
 
 
-RetCode RLSCOPE_EXPORT record_event(
+int RLSCOPE_EXPORT rlscope_record_event(
     const char* category,
     int64_t start_us,
     int64_t duration_us,
@@ -207,7 +143,7 @@ RetCode RLSCOPE_EXPORT record_event(
   return status.code();
 }
 
-RetCode RLSCOPE_EXPORT record_overhead_event(
+int RLSCOPE_EXPORT rlscope_record_overhead_event(
     const char* overhead_type,
     int num_events) {
   LOG_FUNC_ENTRY();
@@ -219,7 +155,7 @@ RetCode RLSCOPE_EXPORT record_overhead_event(
   return status.code();
 }
 
-RetCode RLSCOPE_EXPORT record_overhead_event_for_operation(
+int RLSCOPE_EXPORT rlscope_record_overhead_event_for_operation(
     const char* overhead_type,
     const char* operation,
     int num_events) {
@@ -233,7 +169,7 @@ RetCode RLSCOPE_EXPORT record_overhead_event_for_operation(
   return status.code();
 }
 
-RetCode RLSCOPE_EXPORT push_operation(
+int RLSCOPE_EXPORT rlscope_push_operation(
     const char* operation) {
   LOG_FUNC_ENTRY();
   MyStatus status;
@@ -243,7 +179,7 @@ RetCode RLSCOPE_EXPORT push_operation(
   return status.code();
 }
 
-RetCode RLSCOPE_EXPORT start_pass() {
+int RLSCOPE_EXPORT rlscope_start_pass() {
   LOG_FUNC_ENTRY();
   MyStatus status;
   status = globals.device_tracer->StartPass();
@@ -251,7 +187,7 @@ RetCode RLSCOPE_EXPORT start_pass() {
   return status.code();
 }
 
-RetCode RLSCOPE_EXPORT end_pass() {
+int RLSCOPE_EXPORT rlscope_end_pass() {
   LOG_FUNC_ENTRY();
   MyStatus status;
   status = globals.device_tracer->EndPass();
@@ -259,7 +195,7 @@ RetCode RLSCOPE_EXPORT end_pass() {
   return status.code();
 }
 
-RetCode RLSCOPE_EXPORT has_next_pass(int* has_next_pass) {
+int RLSCOPE_EXPORT rlscope_has_next_pass(int* has_next_pass) {
   LOG_FUNC_ENTRY();
   MyStatus status;
   bool bool_has_next_pass = false;
@@ -272,7 +208,7 @@ RetCode RLSCOPE_EXPORT has_next_pass(int* has_next_pass) {
   return status.code();
 }
 
-RetCode RLSCOPE_EXPORT pop_operation() {
+int RLSCOPE_EXPORT rlscope_pop_operation() {
   LOG_FUNC_ENTRY();
   MyStatus status;
   status = globals.device_tracer->PopOperation();
@@ -280,7 +216,7 @@ RetCode RLSCOPE_EXPORT pop_operation() {
   return status.code();
 }
 
-RetCode RLSCOPE_EXPORT set_max_operations(const char* operation, int num_pushes) {
+int RLSCOPE_EXPORT rlscope_set_max_operations(const char* operation, int num_pushes) {
   LOG_FUNC_ENTRY();
   MyStatus status;
   status = globals.device_tracer->SetMaxOperations(operation, num_pushes);
@@ -288,6 +224,5 @@ RetCode RLSCOPE_EXPORT set_max_operations(const char* operation, int num_pushes)
   return status.code();
 }
 
-}
+} // extern "C"
 
-}

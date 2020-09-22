@@ -23,6 +23,17 @@ set(CUDA_LINK_LIBRARIES_KEYWORD PRIVATE)
 
 include(LibFindMacros)
 
+if(CLION)
+    SET(ENV{LD_LIBRARY_PATH} "${CMAKE_SOURCE_DIR}/local.host/lib:$ENV{LD_LIBRARY_PATH}")
+    message("Set LD_LIBRARY_PATH = $ENV{LD_LIBRARY_PATH}")
+
+    SET(ENV{PATH} "${CMAKE_SOURCE_DIR}/local.host/bin:$ENV{PATH}")
+    message("Set PATH = $ENV{PATH}")
+
+    SET(CMAKE_INSTALL_PREFIX "${CMAKE_SOURCE_DIR}/local.host")
+    message("Set CMAKE_INSTALL_PREFIX = ${CMAKE_INSTALL_PREFIX}")
+endif()
+
 if(DEFINED ENV{IML_INSTALL_PREFIX})
     message("> Building for docker:")
     set(IML_INSTALL_PREFIX $ENV{IML_INSTALL_PREFIX})
@@ -60,8 +71,14 @@ find_package(CUDAProfilingAPI REQUIRED)
 #list(APPEND CMAKE_INSTALL_RPATH ${BOOST_LIBRARYDIR})
 # NOTE: This isn't enough to keep BOOST_LIBRARYDIR in RUNPATH for some reason.
 # See CMAKE_INSTALL_RPATH related line below.
-# This line does however cause CUDA/CUPTI directories to be kept oddly (which presumably we want...).
-#set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
+
+# Keep CUDA/CUPTI paths in the RUNPATH of librlscope.so so other C/C++ projects can easily linked against it
+# without worrying about it's dependencies.
+#
+# This option is best described here:
+# https://gitlab.kitware.com/cmake/community/-/wikis/doc/cmake/RPATH-handling#always-full-rpath
+# That link does a good job of describing how CMake handles library paths in general.
+set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
 
 # We want to be able to do std::move() for lambda captures (c++11 doesn't have that).
 #set(CMAKE_CXX_STANDARD 14)
@@ -114,7 +131,7 @@ set(PROTOBUF_VERSION 3.9.1)
 #
 # If windows, don't run rest of cmake file.
 #
-if(MINGW OR CYGWIN OR WIN32 OR MSVC OR CLION)
+if(MINGW OR CYGWIN OR WIN32 OR MSVC)
     #    message(FATAL_ERROR "WHY")
     message("> Detected Windows development machine")
     set(IS_WINDOWS ON)
@@ -122,7 +139,7 @@ else()
     message("> Detected Unix setup (build environment)")
     set(IS_WINDOWS OFF)
 endif()
-if(IS_WINDOWS OR CLION)
+if(IS_WINDOWS)
     if(NOT EXISTS "${PROJECT_SOURCE_DIR}/CMakeLists.windows.txt")
         message(FATAL_ERROR "ERROR: expected to find CMakeLists.windows.txt containing files we should index in CLion")
     endif()
@@ -560,7 +577,9 @@ function(AddTensorflowDependencies TARGET INCLUDE_CUDA)
     set(CTPL_INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/third_party/CTPL)
     target_include_directories(${TARGET} PRIVATE ${CTPL_INCLUDE_DIRS})
 
-    target_link_libraries(${TARGET} PRIVATE boost_filesystem)
+    # target_link_libraries(${TARGET} PRIVATE boost_filesystem)
+    # Statically link third-party libraries so librlscope.so is more easily linked against in C/C++ projects.
+    target_link_libraries(${TARGET} PRIVATE libboost_filesystem.a)
 
     target_link_libraries(${TARGET} PRIVATE nsync_includes)
 
@@ -601,7 +620,9 @@ function(AddRLScopeTarget TARGET)
     # by setting each property on the target.
     add_backward(${TARGET})
 
-    target_link_libraries(${TARGET} PRIVATE boost_filesystem)
+    # target_link_libraries(${TARGET} PRIVATE boost_filesystem)
+    # Statically link third-party libraries so librlscope.so is more easily linked against in C/C++ projects.
+    target_link_libraries(${TARGET} PRIVATE libboost_filesystem.a)
 
     target_link_libraries(${TARGET} PRIVATE nlohmann_json::nlohmann_json)
 
@@ -667,6 +688,13 @@ function(AddRLScopeTarget TARGET)
     include(GenerateExportHeader)
     generate_export_header(${TARGET})
 
+    foreach(install_dir include rlscope/include)
+        install(FILES
+                ${PROJECT_BINARY_DIR}/${TARGET}_export.h
+                CONFIGURATIONS Debug Release
+                DESTINATION ${install_dir})
+    endforeach()
+
     if (WITH_CUDA_LD_PRELOAD)
     #    set(BACKTRACE_SYMS_FLAGS "-g")
 
@@ -690,7 +718,6 @@ function(AddRLScopeTarget TARGET)
     # For static libraries we link to, DON'T expose ANY of their symbols.
     set(HIDE_LINKED_LIB_SYMS_FLAGS "-Wl,--exclude-libs,ALL")
     AddFlags(${TARGET} LINK_FLAGS ${HIDE_LINKED_LIB_SYMS_FLAGS})
-
 
     #
     # !!IMPORTANT!!
@@ -811,7 +838,14 @@ if (WITH_CXX_ANALYSIS)
     endif()
 endif()
 AddRLScopeTarget(rlscope)
-list(APPEND BINARIES rlscope)
+list(APPEND LIBRARIES rlscope)
+
+foreach(install_dir include rlscope/include)
+    install(FILES
+            src/public_headers/rlscope_c_api.h
+            CONFIGURATIONS Debug Release
+            DESTINATION ${install_dir})
+endforeach()
 
 #
 # Install targets.
@@ -819,21 +853,22 @@ list(APPEND BINARIES rlscope)
 
 if (BINARIES)
     message("> INSTALL BINARIES: ${BINARIES}")
-    install(TARGETS ${BINARIES}
-            CONFIGURATIONS Debug
-            RUNTIME DESTINATION bin)
-    install(TARGETS ${BINARIES}
-            CONFIGURATIONS Release
-            RUNTIME DESTINATION bin)
+    foreach(install_dir bin rlscope/bin)
+        install(TARGETS ${BINARIES}
+                CONFIGURATIONS Debug
+                RUNTIME DESTINATION ${install_dir})
+        install(TARGETS ${BINARIES}
+                CONFIGURATIONS Release
+                RUNTIME DESTINATION ${install_dir})
+    endforeach()
 endif()
 
 
 if (LIBRARIES)
-    message("> INSTALL LIBRARIES: ${LIBRARIES}")
-    install(TARGETS ${LIBRARIES}
-            CONFIGURATIONS Debug
-            RUNTIME DESTINATION lib)
-    install(TARGETS ${LIBRARIES}
-            CONFIGURATIONS Release
-            RUNTIME DESTINATION lib)
+    foreach(install_dir lib rlscope/lib)
+        message("> INSTALL LIBRARIES @ ${install_dir}: ${LIBRARIES}")
+        install(TARGETS ${LIBRARIES}
+                CONFIGURATIONS Debug Release
+                DESTINATION ${install_dir})
+    endforeach()
 endif()
