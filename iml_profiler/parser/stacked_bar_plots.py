@@ -4704,13 +4704,20 @@ class FrameworkChoiceMetrics:
 
     def calc_find_qual_autograph_reduces_python(self, metric):
         """
-        \begin{rlscope-finding-qual}{find:qual-autograph-reduces-python}
-        By removing Framework transitions, Autograph substantially reduces Python time so that is makes up at most $x\%$ of Inference/Backpropagation time.
-        \end{rlscope-finding-qual}
+        \begin{rlscope-finding}{find:qual-autograph-reduces-python}
+        By removing Framework transitions, \autograph substantially reduces Python time from $x\%$ in Graph
+        to at most \FCAsPercent{\FindQualAutographReducesPythonMaxAutographPythonPercentOfOp}
+        for Inference/Backpropagation.
+        \end{rlscope-finding}
+
+        where x = \FCAsPercent{\FindQualAutographReducesPythonMaxGraphPythonPercentOfOp}
+
 
         for operation in df.operations.unique():
             for each config(algo, env):
-                df['python_percent_of_op'] = df[algo, env, operation, category=CATEGORY_PYTHON]['total_training_time']/df[algo, env, operation]['total_training_time'].sum()
+                df['python_percent_of_op'] =
+                  df[algo, env, operation, category=CATEGORY_PYTHON]['total_training_time']/
+                  df[algo, env, operation]['total_training_time'].sum()
         """
         df_mean = self.mean_df('total_training_time', groupby_fields=['operation', 'category'])
 
@@ -4725,12 +4732,23 @@ class FrameworkChoiceMetrics:
         def is_op(operation):
             return operation in {'Inference', 'Backpropagation'}
         op_python_percent_df = python_percent_df[python_percent_df['operation'].apply(is_op)]
-        def is_autograph(x_field):
-            return bool(re.search(r'autograph', x_field.lower()))
-        autograph_op_python_percent_df = op_python_percent_df[op_python_percent_df['x_field'].apply(is_autograph)]
+        # def is_autograph(x_field):
+        #     return bool(re.search(r'autograph', x_field.lower()))
+        autograph_op_python_percent_df = op_python_percent_df[op_python_percent_df['x_field'].apply(self._xfield_is_autograph)]
+        # def is_graph(x_field):
+        #     self._config_is_graph()
+        #     return bool(re.search(r'graph', x_field.lower()))
+        graph_op_python_percent_df = op_python_percent_df[op_python_percent_df['x_field'].apply(self._xfield_is_graph)]
 
-        metric['MinAutographPythonPercentOfOp'] = autograph_op_python_percent_df['category_percent_op'].min()
-        metric['MaxAutographPythonPercentOfOp'] = autograph_op_python_percent_df['category_percent_op'].max()
+        Config = collections.namedtuple('Config', ['Name', 'df'])
+        configs = [
+            Config(Name='Autograph', df=autograph_op_python_percent_df),
+            Config(Name='Graph', df=graph_op_python_percent_df),
+        ]
+        for config in configs:
+            metric[f"Min{config.Name}PythonPercentOfOp"] = config.df['category_percent_op'].min()
+            metric[f"Max{config.Name}PythonPercentOfOp"] = config.df['category_percent_op'].max()
+
         metric.df['operation.category.python_percent_of_op'] = op_python_percent_df
 
         # WANT: per-operation (Backprop, Inference) per-algorithm (DDPG, TD3) breakdown of Python reduction.
@@ -4769,20 +4787,35 @@ class FrameworkChoiceMetrics:
     def _is_cuda_category(self, category):
         return re.search(r'cuda', category.lower())
 
+    def _xfield_is_eager(self, x_field):
+        return bool(re.search(r'eager', x_field.lower()))
+
+    def _xfield_is_graph(self, x_field):
+        return not self._xfield_is_autograph(x_field) and bool(re.search(r'\s+graph', x_field.lower()))
+
+    def _xfield_is_autograph(self, x_field):
+        return bool(re.search(r'autograph', x_field.lower()))
+
+    def _xfield_is_pytorch(self, x_field):
+        return bool(re.search(r'pytorch', x_field.lower()))
+
+    def _xfield_is_tensorflow(self, x_field):
+        return bool(re.search(r'tensorflow', x_field.lower()))
+
     def _config_is_eager(self, row):
-        return bool(re.search(r'eager', row['x_field'].lower()))
+        return self._xfield_is_eager(row['x_field'])
 
     def _config_is_graph(self, row):
-        return not self._config_is_autograph(row) and bool(re.search(r'\s+graph', row['x_field'].lower()))
+        return self._xfield_is_graph(row['x_field'])
 
     def _config_is_autograph(self, row):
-        return bool(re.search(r'autograph', row['x_field'].lower()))
+        return self._xfield_is_autograph(row['x_field'])
 
     def _config_is_pytorch(self, row):
-        return bool(re.search(r'pytorch', row['x_field'].lower()))
+        return self._xfield_is_pytorch(row['x_field'])
 
     def _config_is_tensorflow(self, row):
-        return bool(re.search(r'tensorflow', row['x_field'].lower()))
+        return self._xfield_is_tensorflow(row['x_field'])
 
     def calc_find_qual_pytorch_eager_better(self, metric):
         """
@@ -4809,7 +4842,9 @@ class FrameworkChoiceMetrics:
     def calc_find_qual_autograph_graph_similar(self, metric):
         """
         \begin{rlscope-finding-qual}{find:qual-autograph-graph-similar}
-        Autograph and Graph execution are on-par with one another, performing within $x\%$ of one another on a given RL algorithm; Autograph does \textit{not} always outperform Graph.
+        \autograph and \graph execution are on-par with one another, performing within
+        \FCAsPercent{\FindQualAutographGraphSimilarMaxSpeedup} of one another on a given
+        RL algorithm; \autograph does \textit{not} always outperform \graph.
         \end{rlscope-finding-qual}
 
         Q: How to get the "within" percent?
@@ -5233,9 +5268,11 @@ class FrameworkChoiceMetrics:
             """,
 
             r"""
-            \begin{rlscope-finding-qual}{find:qual-autograph-reduces-python}
-            By removing Framework transitions, Autograph substantially reduces Python time so that is makes up at most $x\%$ of Inference/Backpropagation time.
-            \end{rlscope-finding-qual}
+            \begin{rlscope-finding}{find:qual-autograph-reduces-python}
+            By removing Framework transitions, \autograph substantially reduces Python time so 
+            that is makes up at most \FCAsPercent{\FindQualAutographReducesPythonMaxAutographPythonPercentOfOp} 
+            of Inference/Backpropagation time.
+            \end{rlscope-finding}
             """,
 
             r"""
@@ -5255,7 +5292,9 @@ class FrameworkChoiceMetrics:
 
             r"""
             \begin{rlscope-finding-qual}{find:qual-autograph-graph-similar}
-            Autograph and Graph execution are on-par with one another, performing within $x\%$ of one another on a given RL algorithm; Autograph does \textit{not} always outperform Graph.
+            \autograph and \graph execution are on-par with one another, performing within 
+            \FCAsPercent{\FindQualAutographGraphSimilarMaxSpeedup} of one another on a given 
+            RL algorithm; \autograph does \textit{not} always outperform \graph.
             \end{rlscope-finding-qual}
             """,
 
