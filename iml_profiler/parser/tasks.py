@@ -25,7 +25,7 @@ from iml_profiler.parser.pyprof import PythonProfileParser, PythonFlameGraphPars
 from iml_profiler.parser.plot import TimeBreakdownPlot, PlotSummary, CombinedProfileParser, CategoryOverlapPlot, UtilizationPlot, HeatScalePlot, ConvertResourceOverlapToResourceSubplot, VennJsPlotter, SlidingWindowUtilizationPlot, CUDAEventCSVReader
 from iml_profiler.parser.db import SQLParser, sql_input_path, GetConnectionPool
 from iml_profiler.parser import db
-from iml_profiler.parser.stacked_bar_plots import OverlapStackedBarPlot, CategoryTransitionPlot, FrameworkChoiceMetrics
+from iml_profiler.parser.stacked_bar_plots import OverlapStackedBarPlot, CategoryTransitionPlot, TexMetrics
 from iml_profiler.profiler.util import print_cmd
 from iml_profiler.parser.cpu_gpu_util import UtilParser, UtilPlot, GPUUtilOverTimePlot, NvprofKernelHistogram, CrossProcessOverlapHistogram, NvprofTraces
 from iml_profiler.parser.training_progress import TrainingProgressParser, ProfilingOverheadPlot
@@ -969,6 +969,7 @@ class OverlapStackedBarTask(luigi.Task):
     xtick_expression = param_xtick_expression
     title = luigi.Parameter(description="Plot title", default=None)
     x_title = luigi.Parameter(description="x-axis title", default=None)
+    x_order_by = luigi.Parameter(description="order x-field by this dataframe field", default=None)
     rotation = luigi.FloatParameter(description="x-axis title rotation", default=15.)
     hack_upper_right_legend_bbox_x = param_hack_upper_right_legend_bbox_x
 
@@ -1128,15 +1129,16 @@ class CategoryTransitionPlotTask(luigi.Task):
         self.dumper = CategoryTransitionPlot(**kwargs)
         self.dumper.run()
 
-class FrameworkChoiceMetricsTask(luigi.Task):
+class TexMetricsTask(luigi.Task):
     """
     Generate latex variable definitions for "Quantified intuitive findings" and
     "Suprising findings" regarding Framework choice RLScope paper.
     """
-    framework_choice_csv = luigi.Parameter(description="TD3: OverlapStackedBarPlot.overlap_type_CategoryOverlap.operation_training_time.csv")
-    framework_choice_ddpg_csv = luigi.Parameter(description="DDPG: OverlapStackedBarPlot.overlap_type_CategoryOverlap.operation_training_time.csv")
-    framework_choice_trans_csv = luigi.Parameter(description="TD3: CategoryTransitionPlot.combined.csv")
-    framework_choice_ddpg_trans_csv = luigi.Parameter(description="DDPG: CategoryTransitionPlot.combined.csv")
+    algo_choice_csv = luigi.Parameter(description="stable_baselines_fig_10_algo_choice/OverlapStackedBarPlot.overlap_type_CategoryOverlap.operation_training_time.csv", default=None)
+    framework_choice_csv = luigi.Parameter(description="TD3: OverlapStackedBarPlot.overlap_type_CategoryOverlap.operation_training_time.csv", default=None)
+    framework_choice_ddpg_csv = luigi.Parameter(description="DDPG: OverlapStackedBarPlot.overlap_type_CategoryOverlap.operation_training_time.csv", default=None)
+    framework_choice_trans_csv = luigi.Parameter(description="TD3: CategoryTransitionPlot.combined.csv", default=None)
+    framework_choice_ddpg_trans_csv = luigi.Parameter(description="DDPG: CategoryTransitionPlot.combined.csv", default=None)
     directory = luigi.Parameter(description="Output directory", default=".")
 
     debug = param_debug
@@ -1149,7 +1151,7 @@ class FrameworkChoiceMetricsTask(luigi.Task):
 
     def run(self):
         kwargs = kwargs_from_task(self)
-        self.dumper = FrameworkChoiceMetrics(**kwargs)
+        self.dumper = TexMetrics(**kwargs)
         self.dumper.run()
 
 
@@ -1723,7 +1725,7 @@ IML_TASKS.add(NvprofKernelHistogramTask)
 IML_TASKS.add(CrossProcessOverlapHistogramTask)
 IML_TASKS.add(CategoryTransitionPlotTask)
 IML_TASKS.add(NvprofTracesTask)
-IML_TASKS.add(FrameworkChoiceMetricsTask)
+IML_TASKS.add(TexMetricsTask)
 
 if __name__ == "__main__":
     main()

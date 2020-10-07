@@ -83,47 +83,47 @@ def load_library(allow_fail=None):
 
     _so.rlscope_setup.argtypes = []
     _so.rlscope_setup.restype = c_int
-    _set_api_wrapper('rlscope_setup')
+    _set_api_wrapper('setup')
 
     _so.rlscope_enable_tracing.argtypes = []
     _so.rlscope_enable_tracing.restype = c_int
-    _set_api_wrapper('rlscope_enable_tracing')
+    _set_api_wrapper('enable_tracing')
 
     _so.rlscope_disable_tracing.argtypes = []
     _so.rlscope_disable_tracing.restype = c_int
-    _set_api_wrapper('rlscope_disable_tracing')
+    _set_api_wrapper('disable_tracing')
 
     _so.rlscope_print.argtypes = []
     _so.rlscope_print.restype = c_int
-    _set_api_wrapper('rlscope_print')
+    _set_api_wrapper('print')
 
     _so.rlscope_is_enabled.argtypes = [POINTER(c_int)]
     _so.rlscope_is_enabled.restype = c_int
-    _set_api_wrapper('rlscope_is_enabled')
+    _set_api_wrapper('is_enabled')
 
     _so.rlscope_set_metadata.argtypes = [ c_char_p, c_char_p, c_char_p, c_char_p ]
     _so.rlscope_set_metadata.restype = c_int
-    # _set_api_wrapper('rlscope_set_metadata')
+    # _set_api_wrapper('set_metadata')
 
     _so.rlscope_record_event.argtypes = [ c_char_p, c_int64, c_int64, c_char_p ]
     _so.rlscope_record_event.restype = c_int
-    # _set_api_wrapper('rlscope_record_event')
+    # _set_api_wrapper('record_event')
 
     _so.rlscope_record_overhead_event.argtypes = [ c_char_p, c_int ]
     _so.rlscope_record_overhead_event.restype = c_int
-    # _set_api_wrapper('rlscope_record_overhead_event')
+    # _set_api_wrapper('record_overhead_event')
 
     _so.rlscope_record_overhead_event_for_operation.argtypes = [ c_char_p, c_char_p, c_int ]
     _so.rlscope_record_overhead_event_for_operation.restype = c_int
-    # _set_api_wrapper('rlscope_record_overhead_event_for_operation')
+    # _set_api_wrapper('record_overhead_event_for_operation')
 
     _so.rlscope_push_operation.argtypes = [ c_char_p ]
     _so.rlscope_push_operation.restype = c_int
-    # _set_api_wrapper('rlscope_push_operation')
+    # _set_api_wrapper('push_operation')
 
     _so.rlscope_pop_operation.argtypes = []
     _so.rlscope_pop_operation.restype = c_int
-    # _set_api_wrapper('rlscope_pop_operation')
+    # _set_api_wrapper('pop_operation')
 
     _so.rlscope_start_pass.argtypes = []
     _so.rlscope_start_pass.restype = c_int
@@ -139,17 +139,21 @@ def load_library(allow_fail=None):
 
     _so.rlscope_await_dump.argtypes = []
     _so.rlscope_await_dump.restype = c_int
-    _set_api_wrapper('rlscope_await_dump')
+    _set_api_wrapper('await_dump')
 
     _so.rlscope_async_dump.argtypes = []
     _so.rlscope_async_dump.restype = c_int
-    _set_api_wrapper('rlscope_async_dump')
+    _set_api_wrapper('async_dump')
 
     logger.info(f"Loaded symbols from {py_config.RLSCOPE_CLIB}")
 
+def _full_api_name(api_name):
+    return f"rlscope_{api_name}"
+
 def _set_api_wrapper(api_name):
+    full_api_name = _full_api_name(api_name)
     from iml_profiler.clib import sample_cuda_api
-    func = getattr(_so, api_name)
+    func = getattr(_so, full_api_name)
     def api_wrapper(*args, **kwargs):
         if py_config.DEBUG and py_config.DEBUG_RLSCOPE_LIB_CALLS:
             logger.info(_log_api_call_msg(api_name,

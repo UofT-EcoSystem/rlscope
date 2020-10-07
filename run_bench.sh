@@ -526,10 +526,17 @@ all_run() {
   stable_baselines_hyperparams=${stable_baselines_hyperparams:-yes}
   subdir=${subdir:-}
   fig=${fig:-all}
+  framework=${framework:-all}
 
-  all_run_tf_agents
-  all_run_stable_baselines
-  all_run_reagent
+  if [ "$framework" = 'tf_agents' ] || [ "$framework" = 'all' ]; then
+    all_run_tf_agents
+  fi
+  if [ "$framework" = 'stable_baselines' ] || [ "$framework" = 'all' ]; then
+    all_run_stable_baselines
+  fi
+  if [ "$framework" = 'reagent' ] || [ "$framework" = 'all' ]; then
+    all_run_reagent
+  fi
 
 )
 }
@@ -682,7 +689,7 @@ all_run_stable_baselines() {
     done
   fi
 
-  if [ "$fig" = 'algo_choice' ] || [ "$fig" = 'all' ]; then
+  if [ "$fig" = 'algo_choice' ] || [ "$fig" = 'all' ] || [ "$fig" = 'algo_env' ]; then
     # Fig 10: Algorithm choice
     # tf-agents
     #
@@ -693,7 +700,7 @@ all_run_stable_baselines() {
     done
   fi
 
-  if [ "$fig" = 'simulator_choice' ] || [ "$fig" = 'all' ]; then
+  if [ "$fig" = 'simulator_choice' ] || [ "$fig" = 'all' ] || [ "$fig" = 'algo_env' ]; then
     # Fig 9: Simulator choice
     # tf-agents
     #
@@ -704,10 +711,10 @@ all_run_stable_baselines() {
     done
   fi
 
-  if [ "$fig" = 'algo_choice' ] || [ "$fig" = 'all' ]; then
+  if [ "$fig" = 'algo_choice' ] || [ "$fig" = 'all' ] || [ "$fig" = 'algo_env' ]; then
     plot_stable_baselines_fig_10_algo_choice
   fi
-  if [ "$fig" = 'simulator_choice' ] || [ "$fig" = 'all' ]; then
+  if [ "$fig" = 'simulator_choice' ] || [ "$fig" = 'all' ] || [ "$fig" = 'algo_env' ]; then
     plot_stable_baselines_fig_9_simulator_choice
   fi
 
@@ -732,12 +739,37 @@ gen_tex_framework_choice() {
 
   args=(
     iml-analyze
-    --task FrameworkChoiceMetricsTask
+    --task TexMetricsTask
     --directory $(framework_choice_plots_direc)
     --framework-choice-csv $(framework_choice_plots_direc)/OverlapStackedBarPlot.*.operation_training_time.csv
     --framework-choice-ddpg-csv $(framework_choice_plots_ddpg_direc)/OverlapStackedBarPlot.*.operation_training_time.csv
     --framework-choice-trans-csv $(framework_choice_plots_direc)/CategoryTransitionPlot.combined.csv
     --framework-choice-ddpg-trans-csv $(framework_choice_plots_ddpg_direc)/CategoryTransitionPlot.combined.csv
+  )
+  if [ "${dry_run}" = 'yes' ]; then
+    args+=(
+      --dry-run
+    )
+  fi
+  if [ "${DEBUG}" = 'yes' ]; then
+    args+=(--pdb --debug --debug-single-thread)
+  fi
+  _do "${args[@]}" "$@"
+
+)
+}
+
+gen_tex_algo_choice() {
+(
+  set -eu
+
+  dry_run=${dry_run:-no}
+
+  args=(
+    iml-analyze
+    --task TexMetricsTask
+    --directory $(stable_baselines_plots_direc)/stable_baselines_fig_10_algo_choice
+    --algo-choice-csv $(stable_baselines_plots_direc)/stable_baselines_fig_10_algo_choice/OverlapStackedBarPlot.*.operation_training_time.csv
   )
   if [ "${dry_run}" = 'yes' ]; then
     args+=(
@@ -1376,24 +1408,47 @@ _py_fix_region() {
   cat <<EOF
 def fix_region(row):
   region = set(row['region'])
+  new_region = set(region)
 
   # "CUDA + TensorFlow" => "CUDA"
-  if {CATEGORY_TF_API, CATEGORY_CUDA_API_CPU}.issubset(region):
-    region.remove(CATEGORY_TF_API)
+  if {CATEGORY_TF_API, CATEGORY_CUDA_API_CPU}.issubset(new_region):
+    new_region.remove(CATEGORY_TF_API)
 
   # "Python + TensorFlow" => "Python"
-  if {CATEGORY_PYTHON, CATEGORY_TF_API}.issubset(region):
-    region.remove(CATEGORY_TF_API)
+  if {CATEGORY_PYTHON, CATEGORY_TF_API}.issubset(new_region):
+    new_region.remove(CATEGORY_TF_API)
 
   # "CUDA + Simulation" => "Simulation"
-  if {CATEGORY_CUDA_API_CPU, CATEGORY_SIMULATOR_CPP}.issubset(region):
-    region.remove(CATEGORY_CUDA_API_CPU)
+  if {CATEGORY_CUDA_API_CPU, CATEGORY_SIMULATOR_CPP}.issubset(new_region):
+    new_region.remove(CATEGORY_CUDA_API_CPU)
 
   # "CUDA + Python" (CPU or GPU) => "Python"
-  if {CATEGORY_CUDA_API_CPU, CATEGORY_PYTHON}.issubset(region):
-    region.remove(CATEGORY_CUDA_API_CPU)
+  if {CATEGORY_CUDA_API_CPU, CATEGORY_PYTHON}.issubset(new_region):
+    new_region.remove(CATEGORY_CUDA_API_CPU)
 
-  return tuple(sorted(region))
+  if len(new_region) == 0:
+    raise RuntimeError("row['region'] = {region} became empty during dataframe processing for iml_directory={iml_directory}; row was:\n{row}".format(
+      region=sorted(region),
+      iml_directory=row['iml_directory'],
+      row=row,
+    ))
+    # import pdb; pdb.set_trace()
+
+  return tuple(sorted(new_region))
+EOF
+}
+
+_py_policy_type() {
+  # APPLY:
+  # new_df['policy_type'] = new_df.apply(get_policy_type, axis=1)
+  cat <<EOF
+def get_policy_type(row):
+  algo = row['algo'].lower()
+  if re.search(r'a2c|ppo', algo):
+    return 'On-policy'
+  elif re.search(r'dqn|ddpg|sac|td3', algo):
+    return 'Off-policy'
+  raise NotImplementedError(f"Not sure whether algo={row['algo']} is on/off-policy for iml_dir={row['iml_directory']}")
 EOF
 }
 
@@ -1447,10 +1502,23 @@ _stable_baselines_remap_df() {
   cat <<EOF
 $(_py_fix_region)
 $(_py_stable_baselines_pretty_operation)
+$(_py_policy_type)
 
+def get_algo_x_order(row):
+  # Put off-policy algos together.
+  return (row['policy_type'], row['algo'])
+
+new_df['policy_type'] = new_df.apply(get_policy_type, axis=1)
+new_df['algo_x_order'] = new_df.apply(get_algo_x_order, axis=1)
 if 'region' in new_df:
   new_df['region'] = new_df.apply(fix_region, axis=1)
 new_df['operation'] = np.vectorize(stable_baselines_pretty_operation, otypes=[str])(new_df['algo'], new_df['operation'])
+
+#def check_category(row):
+#  if row['category'] is None or row['category'] == '':
+#    import pdb; pdb.set_trace()
+#new_df.apply(check_category, axis=1)
+
 EOF
 }
 
@@ -1664,6 +1732,37 @@ x_field = xfield_short(row)
 EOF
 }
 
+_stable_baselines_fig_10_algo_choice_xtick_expression() {
+  cat <<EOF
+def pretty_policy(row):
+  if re.search(r'a2c|ppo', row['algo'].lower()):
+    return 'On-policy'
+  elif re.search(r'dqn|ddpg|sac', row['algo'].lower()):
+    return 'Off-policy'
+  raise NotImplementedError(f"Not sure whether algo={row['algo']} is on/off-policy for iml_dir={row['iml_directory']}")
+
+def xfield_short(row):
+  """
+  PPO2 On-policy
+  A2C On-policy
+  DDPG Off-policy
+  SAC Off-policy
+  """
+  global pretty_policy
+
+  each_field = [
+    row['algo'].upper(),
+    pretty_policy(row),
+  ]
+  each_field = [x for x in each_field if x is not None]
+  x_field = '\n'.join(each_field)
+  return x_field
+
+x_field = xfield_short(row)
+
+EOF
+}
+
 plot_tf_agents_fig_10_algo_choice() {
 (
   set -eu
@@ -1775,18 +1874,21 @@ plot_stable_baselines_fig_10_algo_choice() {
   for algo in $(stable_baselines_fig_10_algo_choice_algos); do
     env_id="$(fig_10_algo_choice_environment)"
     iml_dirs+=($(stable_baselines_iml_direc))
-    run_stable_baselines
   done
 
   args=(
     --iml-directories "${iml_dirs[@]}"
     --output-directory $(stable_baselines_plots_direc)/stable_baselines_fig_10_algo_choice
-    --x-title "RL algorithm configuration"
+    --x-title "RL algorithm"
+    --xtick-expression "$(_stable_baselines_fig_10_algo_choice_xtick_expression)"
+    --OverlapStackedBarTask-x-order-by "algo_x_order"
+    # --xtick-expression "$(_framework_choice_xtick_expression)"
     # --xtick-expression "$(_tf_agents_fig_10_algo_choice_xtick_expression)"
-    --title "RL algorithm choice"
-    --y2-logscale
+    # --title "RL algorithm choice"
+    # --OverlapStackedBarTask-y2-logscale
     --GpuHwPlotTask-width 6
     --GpuHwPlotTask-height 5
+    --rotation 0
   )
   _plot_stable_baselines "${args[@]}"
 
@@ -1806,13 +1908,13 @@ plot_stable_baselines_fig_9_simulator_choice() {
     iml_dirs+=($(stable_baselines_iml_direc))
   done
 
+  # --title "Simulator choice"
   args=(
     --iml-directories "${iml_dirs[@]}"
     --output-directory $(stable_baselines_plots_direc)/stable_baselines_fig_9_simulator_choice
-    --x-title "Simulation configuration"
+    --x-title "Simulator"
     # --xtick-expression "$(_tf_agents_fig_9_simulator_choice_xtick_expression)"
-    --title "Simulation choice"
-    --y2-logscale
+    # --OverlapStackedBarTask-y2-logscale
     --OverlapStackedBarTask-width 12
     --OverlapStackedBarTask-height 5
     --GpuHwPlotTask-width 9
@@ -1825,15 +1927,6 @@ plot_stable_baselines_fig_9_simulator_choice() {
 }
 
 _tf_agents_fig_9_simulator_choice_xtick_expression() {
-  # --xtick-expression "x_field = regex_match(row['iml_directory'], [[r'use_tf_functions_no', f\"{row['algo_env']}\nWithout autograph\"], [r'use_tf_functions_yes', f\"{row['algo_env']}\nWith autograph\"]])"
-#  cat <<EOF
-#  x_field = regex_match(row['iml_directory'], [
-#      [r'use_tf_functions_no',
-#       f"{row['algo_env']}\nWithout autograph"],
-#      [r'use_tf_functions_yes',
-#       f"{row['algo_env']}\nWith autograph"]
-#  ])
-#EOF
   cat <<EOF
 x_field = regex_match(row['iml_directory'], [
     [r'use_tf_functions_no',
@@ -1937,17 +2030,19 @@ _plot_stable_baselines() {
   plots=${plots:-}
 
   if [ "${calibrate}" = 'yes' ]; then
-    iml_plots_direc=$(stable_baselines_plots_direc)
+    # iml_plots_direc=$(stable_baselines_plots_direc)
     args=(
       iml-plot
         --iml-repetitions ${repetitions}
         # --iml-directories $(_stable_baselines_root_direc)/*tf_functions
-        --output-directory ${iml_plots_direc}
+        # --output-directory ${iml_plots_direc}
         # --xtick-expression "x_field = regex_match(row['iml_directory'], [[r'use_tf_functions_no', f\"{row['algo_env']}\nWithout autograph\"], [r'use_tf_functions_yes', f\"{row['algo_env']}\nWith autograph\"]])"
         # --x-title "Configuration"
         --OverlapStackedBarTask-remap-df "$(_stable_baselines_remap_df)"
         --CategoryTransitionPlotTask-remap-df "$(_stable_baselines_remap_df)"
         --GpuHwPlotTask-op-mapping "$(_stable_baselines_op_mapping)"
+
+        # NOTE: x-title depends on whether it is algo or env comparison.
     )
     if [ "${dry_run}" = 'yes' ]; then
       args+=(
@@ -1967,7 +2062,7 @@ _plot_stable_baselines() {
       )
     fi
     if [ "${DEBUG}" = 'yes' ]; then
-      args+=(--pdb --debug)
+      args+=(--pdb --debug --debug-single-thread)
     fi
     _do "${args[@]}" "$@"
   fi

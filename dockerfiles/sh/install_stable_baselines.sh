@@ -76,5 +76,7 @@ if [ "${STABLE_BASELINES_DIR}" = "" ]; then
 else
     # Install from local checkout of repo.
     _do cd "${STABLE_BASELINES_DIR}"
-    _do python setup.py develop
+    # _do python setup.py develop
+    # NOTE: the setup.py extra_requires [mpi] is needed for td3/ddpg.
+    _do pip install -e ./[mpi]
 fi

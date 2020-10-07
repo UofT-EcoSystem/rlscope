@@ -101,6 +101,7 @@ class OverlapStackedBarPlot:
                  skip_plot=False,
                  title=None,
                  x_title=None,
+                 x_order_by=None,
                  rotation=None,
                  x_type='rl-comparison',
                  y_type='percent',
@@ -170,6 +171,7 @@ class OverlapStackedBarPlot:
             self.resource_overlap = tuple(sorted(self.resource_overlap))
         self.title = title
         self.x_title = x_title
+        self.x_order_by = x_order_by
         self.rotation = rotation
         self.x_type = x_type
         self.y_type = y_type
@@ -623,6 +625,20 @@ class OverlapStackedBarPlot:
 
             yield (algo, env), self._regions(df), path, df
 
+    def _category_join_plus(self, categories):
+        return join_plus(
+            categories,
+            # check_non_empty=True,
+        )
+
+    def _join_plus_field(self, df, field):
+        def _join_plus(row):
+            return join_plus(
+                row[field],
+                # check_non_empty=True,
+            )
+        return df.apply(_join_plus, axis=1)
+
     def new_each_df(self):
 
         def _add_region_fields(df):
@@ -632,8 +648,8 @@ class OverlapStackedBarPlot:
 
         def _add_region_plot_fields(df):
             df['category_regions'] = df['region']
-            df['resource_overlap'] = df['resource_overlap'].apply(join_plus)
-            df['category'] = df['region'].apply(join_plus)
+            df['resource_overlap'] = self._join_plus_field(df, 'resource_overlap')
+            df['category'] = self._join_plus_field(df, 'region')
 
         for (algo, env), vd in self.each_vd():
             path = vd.path
@@ -925,43 +941,41 @@ class OverlapStackedBarPlot:
 
         def remove_common_category_resource(df):
             """
-            PSEUDOCODE:
-            Categories = [[r1], [c2], [c2, r2], …]
-            Resources =  [[r1], [r2], [r1, r2]]
-
-            # Mapping from old categories to new categories.
-            Cmap = dict()
-            For c in categories:
-                Cmap[c] = c
-
-            Common_regions = Categories.intersect(resources)
-            For c in categories:
-                For region in common_regions:
-                    If c.issubset(region):
-                        # New_c = region.difference( c )
-                        Cmap[c] = cmap[c].difference(region)
-
-            Df['category_regions'] = df['category_regions'].apply(cmap)
-            Df['category'] = df['category_regions'].apply(plus_join)
+            GOAL: prepare hatch/hue labels in overlap plot; we want 'CPU' and 'GPU' categories to
+            only appear in 'resource_overlap' column, NOT in 'category' column.
+            NOTE: That means if ONLY GPU is running, it's going to show up as category=''.
+            - Turn ["Framework", "GPU"] into ["Framework"].
+            - Turn ["CUDA", "GPU"] into ["CUDA"]
+            - Turn ["GPU"] into ''
+            - Rationale:
+                - hue='resource_overlap' which is "GPU"
+                - hatch='category' which is ""
+                    This is what empty_hatch_value="" is for.
             """
             cmap = dict()
             categories = set()
-            regions = set(frozenset(region) for region in df['resource_overlap_regions'])
-            for c in df['category_regions']:
-                c = frozenset(c)
-                cmap[c] = c
-                categories.add(c)
+            for category_regions in df['category_regions'].unique():
+                category_regions = frozenset(category_regions)
+                cmap[category_regions] = category_regions
+                for category in category_regions:
+                    categories.add(category)
 
-            common_regions = categories.intersection(regions)
-            for c in categories:
-                for region in common_regions:
-                    if region.issubset(c):
-                        logger.info("cmap[c:{c}] - region:{region} = {new_c}".format(
-                            c=c,
-                            region=region,
-                            new_c=cmap[c].difference(region),
-                        ))
-                        cmap[c] = cmap[c].difference(region)
+            resources = set()
+            for resource_overlap_regions in df['resource_overlap_regions'].unique():
+                resource_overlap_regions = frozenset(resource_overlap_regions)
+                for resource in resource_overlap_regions:
+                    resources.add(resource)
+
+            common_resource_category = categories.intersection(resources)
+            for category_regions in list(cmap.keys()):
+                if len(category_regions.intersection(common_resource_category)) > 0:
+                    new_category_regions = cmap[category_regions].difference(common_resource_category)
+                    logger.info("cmap[category_regions:{category_regions}] - categories:{categories} = {new_c}".format(
+                        category_regions=category_regions,
+                        categories=common_resource_category,
+                        new_c=new_category_regions,
+                    ))
+                    cmap[category_regions] = new_category_regions
 
             def _cmap(c):
                 new_c = tuple(sorted(cmap[frozenset(c)]))
@@ -981,7 +995,7 @@ class OverlapStackedBarPlot:
 
         df = remove_common_category_resource(df)
         df = shorten_category(df)
-        df['category'] = df['category_regions'].apply(join_plus)
+        df['category'] = self._join_plus_field(df, 'category_regions')
         return df
 
 
@@ -1295,6 +1309,7 @@ class OverlapStackedBarPlot:
                 x_field='x_field',
                 y_field=y_field,
                 x_group='operation',
+                x_order_by=self.x_order_by,
 
                 y_lim_scale_factor=self.y_lim_scale_factor,
 
@@ -1846,6 +1861,7 @@ class DetailedStackedBarPlot:
                  hatch,
                  # category
                  hue=None,
+                 x_order_by=None,
                  hues_together=False,
                  hatch_styles=None,
                  hatches_together=False,
@@ -1880,6 +1896,9 @@ class DetailedStackedBarPlot:
 
         self.hatch = hatch
         self.hue = hue
+        if x_order_by is None:
+            x_order_by = self.x_field
+        self.x_order_by = x_order_by
         self.hatch_styles = hatch_styles
         # Must provide at least one of these as true.
         assert ( hues_together or hatches_together )
@@ -1982,7 +2001,11 @@ class DetailedStackedBarPlot:
         return ws
 
     def x_fields(self, data):
-        x_fields = sorted(data[self.x_field].unique())
+        if self.x_field == self.x_order_by:
+            x_fields = sorted(data[self.x_field].unique())
+        else:
+            sorted_df = data[[self.x_field, self.x_order_by]].drop_duplicates().sort_values(by=[self.x_order_by])
+            x_fields = sorted_df[self.x_field].unique()
         return x_fields
 
     def x_groups(self, data):
@@ -2094,7 +2117,12 @@ class DetailedStackedBarPlot:
         if self.hue is not None:
             sort_by.append(self.hue)
         # if self.x_field is not None:
-        sort_by.append(self.x_field)
+        if self.x_order_by not in self.data.keys():
+            raise RuntimeError("Didn't find --x-order-by={x_order_by} in dataframe; columns are {cols}".format(
+                x_order_by=self.x_order_by,
+                cols=sorted(self.data.keys()),
+            ))
+        sort_by.append(self.x_order_by)
         data = self.data.sort_values(by=sort_by)
 
         # PSEUDOCODE:
@@ -3743,10 +3771,32 @@ def only_selector_fields(selector):
     new_selector = dict((k, v) for k, v in selector.items())
     return new_selector
 
-def join_plus(xs):
+def join_plus(xs, check_non_empty=False):
+    if check_non_empty:
+        assert len(xs) != 0
     return ' + '.join(sorted(xs))
     # PROBLEM: this messes up the DQN plot for some reason...
     # return " +\n".join(sorted(xs))
+
+def split_plus(string):
+    xs = re.split(r'\s+\+\s+', string)
+    return xs
+
+def _test_join_plus_with(string, xs):
+    assert join_plus(xs) == string
+    assert split_plus(string) == xs
+    assert split_plus(join_plus(xs)) == xs
+    assert join_plus(split_plus(string)) == string
+
+def test_join_plus_01():
+    string = 'CPU + GPU'
+    xs = ['CPU', 'GPU']
+    _test_join_plus_with(string, xs)
+
+def test_join_plus_02():
+    string = 'CPU'
+    xs = ['CPU']
+    _test_join_plus_with(string, xs)
 
 class ColumnGrouping:
     def __init__(self, all_cols, numeric_cols, non_numeric_cols):
@@ -4357,7 +4407,7 @@ def rls_paper_fontsizes():
 
 
 class FrameworkChoiceMetric:
-    def __init__(self, tex_template, tex_label):
+    def __init__(self, tex_template, tex_label, set_once=True):
         self.tex_template = tex_template
         self.tex_label = tex_label
         # I tend to add metrics in the order in which they appear in the statement;
@@ -4365,6 +4415,7 @@ class FrameworkChoiceMetric:
         self.metrics = OrderedDict()
         # Supporting data.
         self.df = None
+        self.set_once = set_once
 
     def tex_generate_defn(self, template=False):
         """
@@ -4441,33 +4492,58 @@ class FrameworkChoiceMetric:
         )).lstrip().rstrip()
 
     def __setitem__(self, key, value):
+        if self.set_once:
+            # Expect metric[key] to only be set once.
+            assert key not in self.metrics
         self.metrics[key] = value
 
     def __getitem__(self, key):
         return self.metrics[key]
 
+    def __contains__(self, key):
+        return key in self.metrics
 
-class FrameworkChoiceMetrics:
+
+class TexMetrics:
     def __init__(self,
-                 framework_choice_csv,
-                 framework_choice_ddpg_csv,
-                 framework_choice_trans_csv,
-                 framework_choice_ddpg_trans_csv,
                  directory,
+                 framework_choice_csv=None,
+                 framework_choice_ddpg_csv=None,
+                 framework_choice_trans_csv=None,
+                 framework_choice_ddpg_trans_csv=None,
+                 algo_choice_csv=None,
                  debug=False,
                  debug_single_thread=False,
                  # Swallow any excess arguments
                  **kwargs):
+
+        def _check_all_or_none(csv_files, opt_string):
+            if any([f is None for f in csv_files]) and not all([f is None for f in csv_files]):
+                raise RuntimeError(f"You must provide all {opt_string} or none.")
+
+        framework_choice_csvs = []
         self.framework_choice_csv = framework_choice_csv
+        framework_choice_csvs.append(self.framework_choice_csv)
         self.framework_choice_ddpg_csv = framework_choice_ddpg_csv
+        framework_choice_csvs.append(self.framework_choice_ddpg_csv)
         self.framework_choice_trans_csv = framework_choice_trans_csv
+        framework_choice_csvs.append(self.framework_choice_trans_csv)
         self.framework_choice_ddpg_trans_csv = framework_choice_ddpg_trans_csv
+        framework_choice_csvs.append(self.framework_choice_ddpg_trans_csv)
+        _check_all_or_none(framework_choice_csvs, '--framework-choice-*-csv')
+
+        algo_choice_csvs = []
+        self.algo_choice_csv = algo_choice_csv
+        algo_choice_csvs.append(self.algo_choice_csv)
+        _check_all_or_none(algo_choice_csvs, '--algo-choice-*-csv')
+
         self.directory = directory
         self.debug = debug
         self.debug_single_thread = debug_single_thread
         self._register_all_framework_choice_metrics()
+        self._register_all_algo_choice_metrics()
 
-    def read_df(self):
+    def read_df(self, csv_files):
         def _mk_category(df):
             for x_field in ['category', 'operation', 'resource_overlap', 'algo', 'env']:
                 if x_field in df.keys():
@@ -4485,17 +4561,27 @@ class FrameworkChoiceMetrics:
             df = _mk_category(df)
             return df
 
-        self.df = _read_csvs([self.framework_choice_csv, self.framework_choice_ddpg_csv])
-        self.df_trans = _read_csvs([self.framework_choice_trans_csv, self.framework_choice_ddpg_trans_csv])
+        df = _read_csvs(csv_files)
+        return df
 
-    def compute_metrics(self):
+    def read_framework_choice_df(self):
+        if self.framework_choice_csv is None:
+            return
+        self.framework_choice_df = self.read_df([self.framework_choice_csv, self.framework_choice_ddpg_csv])
+        self.framework_choice_df_trans = self.read_df([self.framework_choice_trans_csv, self.framework_choice_ddpg_trans_csv])
+
+    def read_algo_choice_df(self):
+        if self.algo_choice_csv is None:
+            return
+        self.algo_choice_df = self.read_df([self.algo_choice_csv])
+
+    def compute_metrics(self, metrics, tex_path):
         # Compute metrics
-        for metric in self.FRAMEWORK_CHOICE_METRICS:
+        for metric in metrics:
             calc_func = self.get_calc_func(metric)
             calc_func(metric)
 
         # Dump metrics
-        tex_path = self.tex_path()
         with open(tex_path, 'w') as f:
             def _write(txt, indent=0):
                 f.write(textwrap.indent(textwrap.dedent(txt).lstrip(), prefix='  '*indent))
@@ -4517,7 +4603,7 @@ class FrameworkChoiceMetrics:
                 flag_var=self._tex_flag_varname,
                 tex=_b(tex_path),
             ))
-            for metric in self.FRAMEWORK_CHOICE_METRICS:
+            for metric in metrics:
                 _write("% Autogenerated template metrics for: \\ref{{{tex_label}}}\n".format(
                     tex_label=metric.tex_label,
                 ), indent=1)
@@ -4531,7 +4617,7 @@ class FrameworkChoiceMetrics:
             """.format(
                 flag_var=self._tex_flag_varname,
             ))
-            for metric in self.FRAMEWORK_CHOICE_METRICS:
+            for metric in metrics:
                 _write("% Autogenerated metrics for: \\ref{{{tex_label}}}\n".format(
                     tex_label=metric.tex_label,
                 ), indent=1)
@@ -4539,11 +4625,11 @@ class FrameworkChoiceMetrics:
                 f.write('\n')
                 if metric.df is not None:
                     if type(metric.df) == pd.DataFrame:
-                        metric_base_path = self.metric_base_path(metric)
+                        metric_base_path = self.metric_base_path(tex_path, metric)
                         output_csv(metric.df, metric_base_path)
                     elif type(metric.df) == dict:
                         for df_name, df in metric.df.items():
-                            metric_base_path = self.metric_base_path(metric, suffix=df_name)
+                            metric_base_path = self.metric_base_path(tex_path, metric, suffix=df_name)
                             output_csv(df, metric_base_path)
                     else:
                         raise NotImplementedError(f"Not sure how to output type(metric.df) == {type(metric.df)}")
@@ -4561,17 +4647,31 @@ class FrameworkChoiceMetrics:
         )
 
     def run(self):
-        self.read_df()
-        self.compute_metrics()
+        self.read_framework_choice_df()
+        self.read_algo_choice_df()
+        if self.framework_choice_csv is not None:
+            self.compute_metrics(
+                metrics=self.FRAMEWORK_CHOICE_METRICS,
+                tex_path=self.framework_choice_tex_path())
+        if self.algo_choice_csv is not None:
+            self.compute_metrics(
+                metrics=self.ALGO_CHOICE_METRICS,
+                tex_path=self.algo_choice_tex_path())
 
-    def metric_base_path(self, metric, suffix=None):
-        return _j(self.directory, 'FrameworkChoiceMetrics.{name}{suffix}'.format(
+    def metric_base_path(self, tex_path, metric, suffix=None):
+        base = re.sub(r'\.tex$', '', tex_path)
+        assert base != tex_path
+        return _j(self.directory, '{base}.{name}{suffix}'.format(
+            base=base,
             name=metric.path_friendly_name(),
             suffix=maybe_suffix(suffix),
         ))
 
-    def tex_path(self):
+    def framework_choice_tex_path(self):
         return _j(self.directory, 'FrameworkChoiceMetrics.tex')
+
+    def algo_choice_tex_path(self):
+        return _j(self.directory, 'AlgoChoiceMetrics.tex')
 
     def get_calc_func(self, metric):
         metric_calc_func = re.sub(r'[-:]', '_', metric.tex_label)
@@ -4587,35 +4687,46 @@ class FrameworkChoiceMetrics:
         return calc_func
 
 
-    def mean_df(self, field, df=None, groupby_fields=None, debug=False):
+    def mean_df(self, field, df, groupby_fields=None, debug=False):
         """
         Compute mean of <field> by aggregating across repetitions.
         :return:
         """
-        if df is None:
-            df = self.df
         config_fields = ['algo', 'env', 'x_field']
         if groupby_fields is not None:
-            config_fields.extend(groupby_fields)
+            list_maybe_extend(config_fields, groupby_fields)
+            # config_fields.extend(groupby_fields)
         value_fields = [field]
         # Config = collections.namedtuple('Config', config_fields)
 
         # PROBLEM: I don't know why, but this is generated NaN's in total_training_time...
         # In particular, for category = "" and resource_overlap="GPU".
         # Q: Make simple unit test to recreates weird behaviour?
-        df_agg_sum = df[config_fields + ['repetition'] + value_fields].groupby(config_fields + ['repetition']).agg(['sum'])
-        # self.df[config_fields + ['repetition'] + value_fields].groupby(config_fields + ['repetition']).agg(pd.DataFrame.sum, skipna=True)
-        df_agg_sum = df_agg_sum.reset_index()
-        # Why do I need to do this?
-        df_agg_sum.columns = df_agg_sum.columns.get_level_values(0)
-        df_agg_sum = df_agg_sum[~df_agg_sum[field].isnull()]
-        # if debug:
-        #     import pdb; pdb.set_trace()
+        cols = list(config_fields)
+        list_maybe_extend(cols, ['repetition'])
+        list_maybe_extend(cols, value_fields)
+        groupby_cols = list(config_fields)
+        list_maybe_extend(groupby_cols, ['repetition'])
 
-        df_agg_mean = df_agg_sum[config_fields + value_fields].groupby(config_fields).agg(['mean'])
-        df_agg_mean = df_agg_mean.reset_index()
-        df_agg_mean.columns = df_agg_mean.columns.get_level_values(0)
-        df_agg_mean = df_agg_mean[~df_agg_mean[field].isnull()]
+        if cols != groupby_cols:
+            df_agg_sum = df[cols].groupby(groupby_cols).agg(['sum'])
+            df_agg_sum = df_agg_sum.reset_index()
+            # Why do I need to do this?
+            df_agg_sum.columns = df_agg_sum.columns.get_level_values(0)
+            df_agg_sum = df_agg_sum[~df_agg_sum[field].isnull()]
+        else:
+            df_agg_sum = df[cols]
+
+        agg_cols = list(config_fields)
+        list_maybe_extend(agg_cols, value_fields)
+
+        if agg_cols != config_fields:
+            df_agg_mean = df_agg_sum[agg_cols].groupby(config_fields).agg(['mean'])
+            df_agg_mean = df_agg_mean.reset_index()
+            df_agg_mean.columns = df_agg_mean.columns.get_level_values(0)
+            df_agg_mean = df_agg_mean[~df_agg_mean[field].isnull()]
+        else:
+            df_agg_mean = df_agg_sum[agg_cols]
 
         return df_agg_mean
 
@@ -4624,6 +4735,12 @@ class FrameworkChoiceMetrics:
 
     def _config_op_backprop(self, row):
         return row['operation'] == 'Backpropagation'
+
+    def _config_op_neural_network(self, row):
+        return row['operation'] in {'Inference', 'Backpropagation'}
+
+    def _config_has_gpu(self, row):
+        return bool(re.search(r'gpu', row['resource_overlap'].lower()))
 
     def calc_find_qual_eager_more_trans(self, metric):
         """
@@ -4636,7 +4753,10 @@ class FrameworkChoiceMetrics:
         report df['eager_slowdown'].mean()
         report df['eager_slowdown'].std()
         """
-        df_mean = self.mean_df('total_training_time')
+        df = self.framework_choice_df
+        df_trans = self.framework_choice_df_trans
+
+        df_mean = self.mean_df('total_training_time', df=df)
 
         df_mean_eager_rows = df_mean[df_mean.apply(self._config_is_eager, axis=1)]
         df_mean_non_eager_rows = df_mean[~df_mean.apply(self._config_is_eager, axis=1)]
@@ -4666,7 +4786,7 @@ class FrameworkChoiceMetrics:
             return bool(re.search(r'framework', category.lower()))
 
         groupby_fields = ['operation', 'short_category']
-        df_trans_mean = self.mean_df('trans_count_per_pass', df=self.df_trans, groupby_fields=groupby_fields)
+        df_trans_mean = self.mean_df('trans_count_per_pass', df=df_trans, groupby_fields=groupby_fields)
         ratio_name = 'TransTFToPyTorch'
         ratio_field = 'ratio_trans_tf_to_pytorch'
         # GOAL: want to know ratio of trans_count_per_pass between identical execution models (PyTorch eager vs TensorFlow eager)
@@ -4682,7 +4802,7 @@ class FrameworkChoiceMetrics:
         metric.df['trans_count'] = df_trans
 
         groupby_fields = ['operation', 'category']
-        df_mean = self.mean_df('total_training_time', df=self.df, groupby_fields=groupby_fields)
+        df_mean = self.mean_df('total_training_time', df=self.framework_choice_df, groupby_fields=groupby_fields)
         ratio_name = 'TFToPyTorch'
         ratio_field = 'ratio_tf_to_pytorch'
         # GOAL: want to know ratio of total_training_time between identical execution models (PyTorch eager vs TensorFlow eager)
@@ -4719,7 +4839,8 @@ class FrameworkChoiceMetrics:
                   df[algo, env, operation, category=CATEGORY_PYTHON]['total_training_time']/
                   df[algo, env, operation]['total_training_time'].sum()
         """
-        df_mean = self.mean_df('total_training_time', groupby_fields=['operation', 'category'])
+        df = self.framework_choice_df
+        df_mean = self.mean_df('total_training_time', df=df, groupby_fields=['operation', 'category'])
 
         metric.df = dict()
 
@@ -4756,7 +4877,7 @@ class FrameworkChoiceMetrics:
         # Just compute the Mean/Geomean?
 
         groupby_fields = ['operation', 'category']
-        df_mean = self.mean_df('total_training_time', df=self.df, groupby_fields=groupby_fields)
+        df_mean = self.mean_df('total_training_time', df=self.framework_choice_df, groupby_fields=groupby_fields)
         ratio_field = 'ratio_graph_to_autograph'
         df_autograph_rows = df_mean[df_mean.apply(self._config_is_autograph, axis=1)]
         df_graph_rows = df_mean[df_mean.apply(self._config_is_graph, axis=1)]
@@ -4811,6 +4932,20 @@ class FrameworkChoiceMetrics:
     def _config_is_autograph(self, row):
         return self._xfield_is_autograph(row['x_field'])
 
+    def _config_is_on_policy(self, row):
+        return self._config_policy_type(row) == 'On-policy'
+
+    def _config_is_off_policy(self, row):
+        return self._config_policy_type(row) == 'Off-policy'
+
+    def _config_policy_type(self, row):
+        algo = row['algo'].lower()
+        if re.search(r'a2c|ppo', algo):
+            return 'On-policy'
+        elif re.search(r'dqn|ddpg|sac|td3', algo):
+            return 'Off-policy'
+        raise NotImplementedError(f"Not sure whether algo={row['algo']} is on/off-policy for iml_dir={row['iml_directory']}")
+
     def _config_is_pytorch(self, row):
         return self._xfield_is_pytorch(row['x_field'])
 
@@ -4826,7 +4961,8 @@ class FrameworkChoiceMetrics:
         We want to compute total training time comparison between PyTorch eager and TensorFlow eager.
         df['total_training_time']
         """
-        df_mean = self.mean_df('total_training_time')
+        df = self.framework_choice_df
+        df_mean = self.mean_df('total_training_time', df=self.framework_choice_df)
 
         df_mean_eager_rows = df_mean[df_mean.apply(self._config_is_eager, axis=1)]
         df_mean_eager_tf_rows = df_mean_eager_rows[df_mean_eager_rows.apply(self._config_is_tensorflow, axis=1)]
@@ -4864,7 +5000,8 @@ class FrameworkChoiceMetrics:
           -------
              A
         """
-        df_mean = self.mean_df('total_training_time')
+        df = self.framework_choice_df
+        df_mean = self.mean_df('total_training_time', df=self.framework_choice_df)
 
         df_mean_autograph_rows = df_mean[df_mean.apply(self._config_is_autograph, axis=1)]
         df_mean_graph_rows = df_mean[df_mean.apply(self._config_is_graph, axis=1)]
@@ -4901,7 +5038,8 @@ class FrameworkChoiceMetrics:
 
         df[pytorch, algo, env] / max(df[autograph, algo, env], df[graph, algo, env])
         """
-        df_mean = self.mean_df('total_training_time')
+        df = self.framework_choice_df
+        df_mean = self.mean_df('total_training_time', self.framework_choice_df)
 
         # JOIN: "PyTorch eager" rows with "autograph or graph" rows.
 
@@ -4928,10 +5066,8 @@ class FrameworkChoiceMetrics:
         df['total_training_time', category=CATEGORY_GPU] / df['total_training_time']
         """
 
-        df = copy.copy(self.df)
-        def config_has_gpu(row):
-            return bool(re.search(r'gpu', row['resource_overlap'].lower()))
-        df['has_gpu'] = df.apply(config_has_gpu, axis=1)
+        df = copy.copy(self.framework_choice_df)
+        df['has_gpu'] = df.apply(self._config_has_gpu, axis=1)
         # 'category',
         df_mean = self.mean_df('total_training_time', df=df, groupby_fields=['has_gpu'], debug=True)
 
@@ -4950,10 +5086,8 @@ class FrameworkChoiceMetrics:
         metric.df = percent_df
 
     def _total_gpu_time_df(self):
-        df = copy.copy(self.df)
-        def config_has_gpu(row):
-            return bool(re.search(r'gpu', row['resource_overlap'].lower()))
-        df['has_gpu'] = df.apply(config_has_gpu, axis=1)
+        df = copy.copy(self.framework_choice_df)
+        df['has_gpu'] = df.apply(self._config_has_gpu, axis=1)
         # 'category',
         df_mean = self.mean_df('total_training_time', df=df, groupby_fields=['has_gpu'])
 
@@ -4978,10 +5112,11 @@ class FrameworkChoiceMetrics:
         df['total_cuda_api_time'] / df['total_gpu_time']
         """
 
+        df = self.framework_choice_df
         total_gpu_df = self._total_gpu_time_df()
         gpu_percent_df = total_gpu_df[total_gpu_df['has_gpu']]
 
-        df_mean = self.mean_df('total_training_time', groupby_fields=['category'])
+        df_mean = self.mean_df('total_training_time', df=self.framework_choice_df, groupby_fields=['category'])
         def category_percent_op(group_df):
             # Q: Need to make copy?
             group_df['category_percent_op'] = group_df['total_training_time']/group_df['total_training_time'].sum()
@@ -5017,6 +5152,7 @@ class FrameworkChoiceMetrics:
             df['total_gpu_time', config=autograph] / max_{config != autograph} df['total_gpu_time']
         """
 
+        df = self.framework_choice_df
         total_gpu_df = self._total_gpu_time_df()
         total_gpu_df = total_gpu_df[total_gpu_df['has_gpu']]
 
@@ -5049,7 +5185,8 @@ class FrameworkChoiceMetrics:
         df[operation='Inference', category='Framework', config=Autograph] / df[operation='Inference', category='Framework', config=Graph]
         """
 
-        df_mean = self.mean_df('total_training_time', groupby_fields=['operation', 'category'])
+        df = self.framework_choice_df
+        df_mean = self.mean_df('total_training_time', df=self.framework_choice_df, groupby_fields=['operation', 'category'])
         autograph_rows = df_mean[df_mean.apply(self._config_is_autograph, axis=1)]
         graph_rows = df_mean[df_mean.apply(self._config_is_graph, axis=1)]
 
@@ -5076,7 +5213,8 @@ class FrameworkChoiceMetrics:
         metric.df = df
 
     def _autograph_vs_graph_operation_category_ratio_df(self):
-        df_mean = self.mean_df('total_training_time', groupby_fields=['operation', 'category'])
+        df = self.framework_choice_df
+        df_mean = self.mean_df('total_training_time', df=self.framework_choice_df, groupby_fields=['operation', 'category'])
         autograph_rows = df_mean[df_mean.apply(self._config_is_autograph, axis=1)]
         graph_rows = df_mean[df_mean.apply(self._config_is_graph, axis=1)]
 
@@ -5140,6 +5278,7 @@ class FrameworkChoiceMetrics:
             df['total_training_time_graph', operation, category]
         """
 
+        df = self.framework_choice_df
         ratio_name = 'RatioAutographToGraph'
         join_add_metrics_kwargs = dict(
             ratio_field='ratio_graph_to_autograph',
@@ -5160,10 +5299,11 @@ class FrameworkChoiceMetrics:
             def keep_group(group_dict):
                return self._is_gpu_operation(group_dict['operation'])
             self._join_add_metrics(
+                df=df,
                 metric=metric,
                 metrics={'Mean'},
                 get_group_alias=get_group_alias,
-                groupby_fields=['operation'],
+                groupby_fields=['algo', 'operation'],
                 keep_group=keep_group,
                 **join_add_metrics_kwargs,
             )
@@ -5183,14 +5323,268 @@ class FrameworkChoiceMetrics:
                          self._is_cuda_category(group_dict['category']) ) and \
                        self._is_gpu_operation(group_dict['operation'])
             self._join_add_metrics(
+                df=df,
                 metric=metric,
                 metrics={'Mean'},
                 get_group_alias=get_group_alias,
-                groupby_fields=['operation', 'category'],
+                groupby_fields=['algo', 'operation', 'category'],
                 keep_group=keep_group,
                 **join_add_metrics_kwargs,
             )
         add_operation_category_metrics()
+
+    #
+    # Algo choice metrics
+    #
+
+    def _as_Resource(self, resource_overlap_regions):
+        """
+        ('CPU', 'GPU') => CpuGpu
+        """
+        return ''.join([x.capitalize() for x in sorted(resource_overlap_regions)])
+
+    def calc_find_algo_choice(self, metric):
+        """
+        add_policy_metrics
+
+            \begin{rlscope-finding}{find:algo-choice}
+            On-policy algorithms are substantially more simulation-bound than off-policy algorithms,
+            spending [on average / at least / up to] [$x\times$ more time in Simulation] than off-policy algorithms.
+            %spending at least \asPercent{0.706128808} in simulation, [compared to at most XX\% for off policy]
+            \end{rlscope-finding}
+
+                df['ratio_on_policy_to_off_policy', operation] =
+                    df['total_training_time_on_policy', operation]['percent'] /
+                    df['total_training_time_off_policy', operation]['percent']
+
+                For: operation = Simulation
+
+        add_operation_metrics
+
+            A2C and PPO spend a majority of their execution in Simulation, with A2C spending \asPercent{0.667435179}
+            and PPO spending \asPercent{0.707735848}.
+            On the other hand, DDPG and SAC spend a majority of their execution in Backpropagation,
+            \textbf{[Mickey: this should talk about Simulation time, not backprop!]}
+            with DDPG spending \asPercent{0.706128808}. and SAC spending \asPercent{0.811856197}.
+
+            # FROM: calc_find_qual_autograph_reduces_python
+
+                for operation in df.operations.unique():
+                    for each config(algo, env):
+                        df['percent_of_op'] =
+                          df[algo, env, operation]['total_training_time']/
+                          df[algo, env, operation]['total_training_time'].sum()
+
+                For: operation = Simulation, Backpropagation (maybe?)
+
+        add_resource_metrics
+
+            Of the surveyed RL algorithms, DDPG has the largest por-tion of time spent GPU-bound, with
+            10.8% of total trainingtime spent executing GPU kernels; conversely, PPO spends
+            the least time on the GPU with only2.8% total training timespent executing GPU kernels.
+
+            for operation in df.operations.unique():
+                for each config(algo, env):
+                    df['percent_of_resource'] =
+                      df[algo, env, resource_overlap]['total_training_time']/
+                      df[algo, env, resource_overlap]['total_training_time'].sum()
+
+
+
+        add_operation_resource_metrics
+
+            However, if we just consider Backpropagation time by itself, at most11.9% percent ofa Backprogation
+            operation is spent executing GPU kernels(for A2C). Similarly, at most14.1% of an Inference oper-ation
+            is spent executing GPU kernels (for SAC).
+
+            for operation in df.operations.unique():
+                for each config(algo, env):
+                    df['percent_of_resource'] =
+                      df[algo, env, operation, resource_overlap]['total_training_time']/
+                      df[algo, env, operation, resource_overlap]['total_training_time'].sum()
+
+        add_category_metrics
+
+            [Of the CPU time spent in training loop across all algorithms,
+            up to XX% is spent in high-level code and simulation,while the rest is in CUDA and framework.]
+
+            # Lets JUST look at pure CPU (it's what people expect me to talk about here...)
+            # or 'CPU + GPU'
+            df_cpu = df[df[resource_overlap]='CPU']
+            for operation in df_cpu.operations.unique():
+                for each config(algo, env):
+                    df_cpu['percent_of_resource'] =
+                      df_cpu[algo, env]['total_training_time']/
+                      df_cpu[algo, env]['total_training_time'].sum()
+
+
+        """
+
+        def add_policy_metrics():
+            df = self.algo_choice_df
+            ratio_name = 'RatioPercentOnPolicyToOffPolicy'
+            join_add_metrics_kwargs = dict(
+                ratio_field='ratio_percent_on_policy_to_off_policy',
+                lsuffix='_on_policy',
+                rsuffix='_off_policy',
+                is_lsuffix=self._config_is_on_policy,
+                is_rsuffix=self._config_is_off_policy,
+            )
+            field = 'percent'
+            def get_group_alias(prefix, group_dict):
+                return "{Prefix}{Ratio}{Operation}".format(
+                    Prefix=prefix,
+                    Ratio=ratio_name,
+                    Operation=group_dict['operation'].capitalize(),
+                    # Algo=group_dict['algo'].upper(),
+                )
+            # Q: What's this for...?
+            # def keep_group(group_dict):
+            #     return self._is_gpu_operation(group_dict['operation'])
+            self._join_add_metrics(
+                df=df,
+                field=field,
+                metric=metric,
+                metrics={'Min', 'Max', 'Mean'},
+                get_group_alias=get_group_alias,
+                # We want to join all pairs of (on-policy, off-policy) with the same environment.
+                join_on=['env'],
+                groupby_fields=['operation'],
+                # keep_group=keep_group,
+                debug=True,
+                **join_add_metrics_kwargs,
+            )
+        add_policy_metrics()
+
+        def add_operation_metrics():
+            field = 'op_percent'
+            df = self.algo_choice_df
+            df_mean = self.mean_df('total_training_time', df=df, groupby_fields=['operation'])
+
+            def category_percent_op(group_df):
+                # Q: Need to make copy?
+                group_df[field] = group_df['total_training_time']/group_df['total_training_time'].sum()
+                return group_df
+            percent_df = df_mean.groupby(['algo', 'env', 'x_field']).apply(category_percent_op)
+
+            # Only one simulator to look at.
+            # DDPGBackpropagationOpPercentMean
+            for (algo, operation), group_percent_df in percent_df.groupby(['algo', 'operation']):
+                # Expect only only env.
+                assert len(group_percent_df['env'].unique()) == 1
+                # Expect only one (algo, env) row.
+                assert len(group_percent_df) == 1
+                metric_name = "{Algo}{Op}OpPercentMean".format(
+                    Algo=algo.upper(),
+                    Op=operation.capitalize(),
+                )
+                assert metric_name not in metric
+                metric[metric_name] = group_percent_df[field].mean()
+            metric.df[f"operation.{field}"] = percent_df
+        add_operation_metrics()
+
+        def has_gpu_as_Resource(has_gpu):
+            if has_gpu:
+                Resource = 'Gpu'
+            else:
+                Resource = 'Cpu'
+            return Resource
+
+        def add_resource_metrics():
+            field = 'resource_percent'
+            df = copy.copy(self.algo_choice_df)
+            df['has_gpu'] = df.apply(self._config_has_gpu, axis=1)
+            df_mean = self.mean_df('total_training_time', df=df, groupby_fields=['has_gpu'])
+
+            def category_percent_op(group_df):
+                # Q: Need to make copy?
+                group_df[field] = group_df['total_training_time']/group_df['total_training_time'].sum()
+                return group_df
+            percent_df = df_mean.groupby(['algo', 'env', 'x_field']).apply(category_percent_op)
+
+            # Only one simulator to look at.
+            # DDPGGpuResourcePercentMean
+            for (algo, has_gpu), group_percent_df in percent_df.groupby(['algo', 'has_gpu']):
+                # resource_overlap_regions = split_plus(resource_overlap)
+                # Resource = self._as_Resource(resource_overlap_regions)
+                # Expect only only env.
+                assert len(group_percent_df['env'].unique()) == 1
+                # Expect only one (algo, env) row.
+                assert len(group_percent_df) == 1
+                Resource = has_gpu_as_Resource(has_gpu)
+                metric_name = "{Algo}{Resource}ResourcePercentMean".format(
+                    Algo=algo.upper(),
+                    Resource=Resource,
+                )
+                assert metric_name not in metric
+                metric[metric_name] = group_percent_df[field].mean()
+            metric.df[f"resource.{field}"] = percent_df
+        add_resource_metrics()
+
+        def add_operation_resource_metrics():
+            field = 'resource_percent'
+            df = copy.copy(self.algo_choice_df)
+            df['has_gpu'] = df.apply(self._config_has_gpu, axis=1)
+            df_mean = self.mean_df('total_training_time', df=df, groupby_fields=['operation', 'has_gpu'])
+
+            def category_percent_op(group_df):
+                # Q: Need to make copy?
+                group_df[field] = group_df['total_training_time']/group_df['total_training_time'].sum()
+                return group_df
+            percent_df = df_mean.groupby(['algo', 'env', 'x_field', 'operation']).apply(category_percent_op)
+
+            # Ignore simulation.
+            percent_df = percent_df[percent_df.apply(self._config_op_neural_network, axis=1)]
+
+            # DDPGBackpropagationGpuResourcePercentMean
+            for (algo, operation, has_gpu), group_percent_df in percent_df.groupby(['algo', 'operation', 'has_gpu']):
+                # resource_overlap_regions = split_plus(resource_overlap)
+                # Resource = self._as_Resource(resource_overlap_regions)
+                # Expect only only env.
+                assert len(group_percent_df['env'].unique()) == 1
+                # Expect only one (algo, env) row.
+                assert len(group_percent_df) == 1
+                Resource = has_gpu_as_Resource(has_gpu)
+                metric_name = "{Algo}{Op}{Resource}ResourcePercentMean".format(
+                    Algo=algo.upper(),
+                    Op=operation.capitalize(),
+                    Resource=Resource,
+                )
+                assert metric_name not in metric
+                metric[metric_name] = group_percent_df[field].mean()
+            metric.df[f"operation.resource.{field}"] = percent_df
+        add_operation_resource_metrics()
+
+        def add_category_metrics():
+            field = 'category_percent'
+            df = copy.copy(self.algo_choice_df)
+            df['has_gpu'] = df.apply(self._config_has_gpu, axis=1)
+            # Only CPU time.
+            df = df[~df['has_gpu']]
+            df_mean = self.mean_df('total_training_time', df=df, groupby_fields=['category'])
+
+            def category_percent_op(group_df):
+                # Q: Need to make copy?
+                group_df[field] = group_df['total_training_time']/group_df['total_training_time'].sum()
+                return group_df
+            percent_df = df_mean.groupby(['algo', 'env', 'x_field']).apply(category_percent_op)
+
+            # DDPGBackpropagationGpuResourcePercentMean
+            for (algo, category), group_percent_df in percent_df.groupby(['algo', 'category']):
+                # resource_overlap_regions = split_plus(resource_overlap)
+                # Resource = self._as_Resource(resource_overlap_regions)
+                # Expect only only env.
+                assert len(group_percent_df['env'].unique()) == 1
+                # Expect only one (algo, env) row.
+                assert len(group_percent_df) == 1
+                metric_name = "{Algo}{Category}CategoryPercentMean".format(
+                    Algo=algo.upper(),
+                    Category=category,
+                )
+                assert metric_name not in metric
+                metric[metric_name] = group_percent_df[field].mean()
+            metric.df[f"category.{field}"] = percent_df
+        add_category_metrics()
 
     def _join_add_metrics(self,
                           metric,
@@ -5198,13 +5592,13 @@ class FrameworkChoiceMetrics:
                           lsuffix, rsuffix,
                           is_lsuffix, is_rsuffix,
                           get_group_alias,
-                          df=None,
+                          df,
                           field='total_training_time',
                           metrics=None,
                           groupby_fields=None,
-                          keep_group=None):
-        if df is None:
-            df = self.df
+                          join_on=None,
+                          keep_group=None,
+                          debug=False):
         if groupby_fields is None:
             groupby_fields = []
         lfield = f"{field}{lsuffix}"
@@ -5212,20 +5606,31 @@ class FrameworkChoiceMetrics:
         df_mean = self.mean_df(field, df=df, groupby_fields=groupby_fields)
         df_l = df_mean[df_mean.apply(is_lsuffix, axis=1)]
         df_r = df_mean[df_mean.apply(is_rsuffix, axis=1)]
-        join_on = ['algo', 'env'] + groupby_fields
-        df = df_l.set_index(join_on).join(df_r.set_index(join_on), how='inner', lsuffix=lsuffix, rsuffix=rsuffix).reset_index()
-        df[ratio_field] = df[lfield] / df[rfield]
+        if join_on is None:
+            join_on = ['algo', 'env']
+        else:
+            join_on = list(join_on)
+        list_maybe_extend(join_on, groupby_fields)
+        df_join = df_l.set_index(join_on).join(df_r.set_index(join_on), how='inner', lsuffix=lsuffix, rsuffix=rsuffix).reset_index()
+        # if debug:
+        #     import pdb; pdb.set_trace()
+        df_join[ratio_field] = df_join[lfield] / df_join[rfield]
         metric_name = "{groupby}.{ratio_field}".format(
             groupby='.'.join(groupby_fields),
             ratio_field=ratio_field,
         )
         if metric.df is None:
             metric.df = dict()
-        metric.df[metric_name] = df
+        metric.df[metric_name] = df_join
         # NOTE: groupby order determines order of tex statements.
-        groupby = ['algo'] + groupby_fields
-        for group_tupl, df_group in df.groupby(groupby):
-            group_dict = dict(zip(groupby, group_tupl))
+        # Q: Why is algo part of the group-by...?
+        # groupby = ['algo'] + groupby_fields
+        for group_tupl, df_group in df_join.groupby(groupby_fields):
+            if len(groupby_fields) == 1:
+                # Pandas API quirk: groupby keys are NOT always a tuple...
+                # In particular, if only one groupby field, it is a scalar.
+                group_tupl = (group_tupl,)
+            group_dict = dict(zip(groupby_fields, group_tupl))
             if keep_group is not None and not keep_group(group_dict):
                 continue
             # if not self._is_gpu_operation(operation) or \
@@ -5258,9 +5663,38 @@ class FrameworkChoiceMetrics:
         if should_add_metric('Std'):
             metric[get_alias('Std')] = df[field].std()
 
+    def _register_all_algo_choice_metrics(self):
+        tex_stmts = self._dedent_tex_stmts([
+            # r"""
+            # \begin{rlscope-finding}{find:software-overhead}
+            # Most of the training time is spent in CPU, executing the software stack -- CUDA API calls, framework code, high-level code -- suggesting it is poorly optimized for the RL use case.
+            # Even Inference and Backpropagation, which are GPU-heavy in SL workloads, spend at most \asPercent{0.141163009} executing GPU kernels.
+            # \end{rlscope-finding}
+            # """,
+
+            r"""
+            \begin{rlscope-finding}{find:algo-choice}
+            On-policy algorithms are substantially more simulation-bound than off-policy algorithms, spending [$\times$????? more time in Simulation] than off-policy algorithms.
+            %spending at least \asPercent{0.706128808} in simulation, [compared to at most XX\% for off policy]
+            \end{rlscope-finding}
+            """,
+        ])
+        self.ALGO_CHOICE_METRICS = self._register_metrics(tex_stmts)
+
+    def _dedent_tex_stmts(self, tex_stmts):
+        return [textwrap.dedent(stmt).lstrip().rstrip() for stmt in tex_stmts]
+
+    def _register_metrics(self, tex_stmts):
+        metrics = []
+        for tex_stmt in tex_stmts:
+            tex_lines = tex_stmt.splitlines()
+            m = re.search(r'\{(?P<tex_label>find:[^}]+)\}', tex_lines[0])
+            tex_label = m.group('tex_label')
+            metrics.append(FrameworkChoiceMetric(tex_stmt, tex_label))
+        return metrics
+
     def _register_all_framework_choice_metrics(self):
-        self.FRAMEWORK_CHOICE_METRICS = []
-        TEX_STMTS = [textwrap.dedent(stmt).lstrip().rstrip() for stmt in [
+        tex_stmts = self._dedent_tex_stmts([
             r"""
             \begin{rlscope-finding-qual}{find:qual-eager-more-trans}
             Eager execution is between $x\times$ and $y\times$ as bad as Graph/Autograph execution, and slowdown is highly correlated with how well a framework implementation is optimized to minimize Framework transitions.
@@ -5333,12 +5767,8 @@ class FrameworkChoiceMetrics:
             Autograph can inflate Python time by as much as $2\times$ during Simulation; training times (not just model performance) are highly sensitive to small differences in hyperparameter choices.
             \end{rlscope-finding-surp}
             """,
-        ]]
-        for tex_stmt in TEX_STMTS:
-            tex_lines = tex_stmt.splitlines()
-            m = re.search(r'\{(?P<tex_label>find:[^}]+)\}', tex_lines[0])
-            tex_label = m.group('tex_label')
-            self.FRAMEWORK_CHOICE_METRICS.append(FrameworkChoiceMetric(tex_stmt, tex_label))
+        ])
+        self.FRAMEWORK_CHOICE_METRICS = self._register_metrics(tex_stmts)
 
 def output_csv(plot_df, base_path, sort_by=None):
     if type(plot_df.index) == pd.MultiIndex:
@@ -5380,6 +5810,11 @@ def _texvar(i):
     # AA, BB, CC, ..., ZZ
     # ...
     return letter * length
+
+def list_maybe_extend(lst, append_lst):
+    for elem in append_lst:
+        if elem not in lst:
+            lst.append(elem)
 
 if __name__ == '__main__':
     main()
