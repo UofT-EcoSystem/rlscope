@@ -1203,6 +1203,7 @@ class CallInterceptionOverheadParser:
             'num_interception_overhead_per_call_us': len(df),
         }
         do_dump_json(data, self._raw_json_path)
+        check_calibration(data, 'mean_interception_overhead_per_call_us', self._raw_json_path)
 
         if self.width is not None and self.height is not None:
             figsize = (self.width, self.height)
@@ -1231,13 +1232,19 @@ class CallInterceptionOverheadParser:
 
 
 class PyprofOverheadCalculation:
-    def __init__(self, df, json, num_field):
+    def __init__(self, df, json, num_field,
+                 mean_per_call_field=None,
+                 std_per_call_field=None,
+                 num_per_call_field=None):
         self.df = df
         self.json = json
         self.num_field = num_field
+        self.mean_per_call_field = mean_per_call_field
+        self.std_per_call_field = std_per_call_field
+        self.num_per_call_field = num_per_call_field
 
-    def num_calls(self):
-        return self.df[self.num_field]
+        def num_calls(self):
+            return self.df[self.num_field]
 
 class MicrobenchmarkOverheadJSON:
     def __init__(self, path):
@@ -1442,7 +1449,13 @@ class PyprofOverheadParser:
         # mean_pyprof_interception_overhead_per_call_us
         # mean_pyprof_annotation_overhead_per_call_us
 
-        calc = PyprofOverheadCalculation(df, json, num_field=num_field)
+        calc = PyprofOverheadCalculation(
+            df, json,
+            num_field=num_field,
+            mean_per_call_field=mean_per_call_colname(name),
+            std_per_call_field=std_per_call_colname(name),
+            num_per_call_field=num_per_call_colname(name),
+        )
         return calc
 
     @staticmethod
@@ -1602,12 +1615,14 @@ class PyprofOverheadParser:
             path = self._python_annotation_json_path
             logger.info("Output json @ {path}".format(path=path))
             do_dump_json(pyprof_annotations_calc.json, path)
+            check_calibration(pyprof_annotations_calc.json, pyprof_annotations_calc.mean_per_call_field, path)
 
         if has_files(self.pyprof_interceptions_directory):
             pyprof_interceptions_calc = self.run_interceptions()
             jsons.append(pyprof_interceptions_calc.json)
 
             path = self._clib_interception_json_path
+            check_calibration(pyprof_interceptions_calc.json, pyprof_interceptions_calc.mean_per_call_field, path)
             logger.info("Output json @ {path}".format(path=path))
             do_dump_json(pyprof_interceptions_calc.json, path)
 
@@ -1787,7 +1802,13 @@ class TotalTrainingTimeParser:
         # mean_pyprof_interception_overhead_per_call_us
         # mean_pyprof_annotation_overhead_per_call_us
 
-        calc = PyprofOverheadCalculation(df, json, num_field=num_field)
+        calc = PyprofOverheadCalculation(
+            df, json,
+            num_field=num_field,
+            mean_per_call_field=mean_per_call_colname(name),
+            std_per_call_field=std_per_call_colname(name),
+            num_per_call_field=num_per_call_colname(name),
+        )
         return calc
 
     def run(self):
@@ -2018,6 +2039,8 @@ class CUPTIScalingOverheadParser:
 
         logger.info("Output json @ {path}".format(path=self._raw_json_path))
         do_dump_json(json_data, self._raw_json_path)
+        for api_name, df_api_name in joined_df.groupby('api_name'):
+            check_calibration(json_data[api_name], 'mean_cupti_overhead_per_call_us', self._raw_json_path)
 
         return df, joined_df
 
@@ -2343,6 +2366,7 @@ class CUPTIOverheadParser:
             assert api_name not in json_data
             json_data[api_name] = dict()
             json_data[api_name]['mean_cupti_overhead_per_call_us'] = np.mean(df_api_name['cupti_overhead_per_call_us'])
+            check_calibration(json_data[api_name], 'mean_cupti_overhead_per_call_us', self._raw_json_path)
             assert not np.isnan(json_data[api_name]['mean_cupti_overhead_per_call_us'])
             json_data[api_name]['std_cupti_overhead_per_call_us'] = np.std(df_api_name['cupti_overhead_per_call_us'])
             assert not np.isnan(json_data[api_name]['std_cupti_overhead_per_call_us'])
@@ -3535,3 +3559,15 @@ class SQLOverheadEventsParser:
         )
         sql_exec_query(c, delete_query, klass=self.__class__, debug=self.debug)
 
+
+def check_calibration(js, field, path):
+    if js[field] < 0:
+        # raise RuntimeError(textwrap.dedent("""
+        logger.warning(textwrap.dedent("""
+            Saw negative overhead calibration for \"{field}\" = {value} @ {path}
+              To fix this, run additional repetitions in your experiments.
+            """).format(
+            field=field,
+            value=js[field],
+            path=path,
+        ))

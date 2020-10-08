@@ -949,16 +949,46 @@ MyStatus RawTraceParser::Init() {
   );
 
   if (_has_calibration_files) {
+    auto _check_overhead_field = [] (const nlohmann::json& js, const std::string& path, const std::string& field) -> MyStatus {
+      if (js[field] < 0) {
+        std::stringstream ss;
+        ss << "Saw negative overhead calibration (" << js[field] << ") for \"" << field << "\" @ path=" << path << "\n";
+        ss << "  To fix this, run additional repetitions in your experiments.";
+        DBG_WARN("{}", ss.str());
+        // return MyStatus(error::INVALID_ARGUMENT, ss.str());
+      }
+      return MyStatus::OK();
+    };
+
     status = ReadJson(args.FLAGS_cupti_overhead_json.value(), &_cupti_overhead_json);
     IF_BAD_STATUS_RETURN(status);
+    for (auto const& pair : _cupti_overhead_json.items()) {
+      auto const& cuda_api_name = pair.key();
+      auto const& js = pair.value();
+      status = _check_overhead_field(js, args.FLAGS_cupti_overhead_json.value(), "mean_cupti_overhead_per_call_us");
+      IF_BAD_STATUS_RETURN(status);
+    }
+
     status = ReadJson(args.FLAGS_LD_PRELOAD_overhead_json.value(), &_LD_PRELOAD_overhead_json);
     IF_BAD_STATUS_RETURN(status);
+    status = _check_overhead_field(_LD_PRELOAD_overhead_json, args.FLAGS_LD_PRELOAD_overhead_json.value(), "mean_interception_overhead_per_call_us");
+    IF_BAD_STATUS_RETURN(status);
+
     status = ReadJson(args.FLAGS_python_annotation_json.value(), &_python_annotation_json);
     IF_BAD_STATUS_RETURN(status);
+    status = _check_overhead_field(_python_annotation_json, args.FLAGS_python_annotation_json.value(), "mean_pyprof_annotation_overhead_per_call_us");
+    IF_BAD_STATUS_RETURN(status);
+
     status = ReadJson(args.FLAGS_python_clib_interception_tensorflow_json.value(), &_python_clib_interception_tensorflow_json);
     IF_BAD_STATUS_RETURN(status);
+    status = _check_overhead_field(_python_clib_interception_tensorflow_json, args.FLAGS_python_clib_interception_tensorflow_json.value(), "mean_pyprof_interception_overhead_per_call_us");
+    IF_BAD_STATUS_RETURN(status);
+
     status = ReadJson(args.FLAGS_python_clib_interception_simulator_json.value(), &_python_clib_interception_simulator_json);
     IF_BAD_STATUS_RETURN(status);
+    status = _check_overhead_field(_python_clib_interception_simulator_json, args.FLAGS_python_clib_interception_simulator_json.value(), "mean_pyprof_interception_overhead_per_call_us");
+    IF_BAD_STATUS_RETURN(status);
+
   }
 
   status = _walker.Init();
@@ -1334,7 +1364,7 @@ MyStatus RawTraceParser::_AppendOverhead_CUPTI_and_LD_PRELOAD(
 //            per_LD_PRELOAD_interception_us);
 //      }
       TimePsec start_ps = CUDA_API_events.EndPsec(i);
-      TimePsec end_ps = start_ps + (per_LD_PRELOAD_interception_us * PSEC_IN_USEC);
+      TimePsec end_ps = start_ps + as_overhead_duration_ps(per_LD_PRELOAD_interception_us * PSEC_IN_USEC);
       OptionalString name;
       if (LD_PRELOAD_events.KeepNames()) {
         name = CUDA_API_events.GetEventName(i);

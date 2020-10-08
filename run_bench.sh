@@ -556,9 +556,11 @@ all_run_tf_agents() {
   fig=${fig:-all}
 
   if [ "$fig" = 'framework_choice' ] || [ "$fig" = 'all' ]; then
+
     # Fig 11: RL framework choice
     for algo in $(fig_framework_choice_algos); do
       for env_id in $(fig_framework_choice_envs); do
+        # for use_tf_functions in no; do
         for use_tf_functions in yes no; do
           run_tf_agents
         done
@@ -568,6 +570,7 @@ all_run_tf_agents() {
     # Fig 11(b): RL framework choice DDPG
     for algo in $(fig_framework_choice_algos_ddpg); do
       for env_id in $(fig_framework_choice_envs); do
+        # for use_tf_functions in no; do
         for use_tf_functions in yes no; do
           run_tf_agents
         done
@@ -575,38 +578,40 @@ all_run_tf_agents() {
     done
   fi
 
-  if [ "$fig" = 'algo_choice' ] || [ "$fig" = 'all' ]; then
-    # Fig 10: Algorithm choice
-    # tf-agents
-    #
-    # ppo doesn't work (BUG in tf-agents)
-    for algo in $(tf_agents_fig_10_algo_choice_algos); do
-      env_id="$(fig_10_algo_choice_environment)"
-      for use_tf_functions in yes no; do
-        run_tf_agents
-      done
-    done
-  fi
+  # NOTE: we generate algo and simulator choice using stable-baselines.
 
-  if [ "$fig" = 'simulator_choice' ] || [ "$fig" = 'all' ]; then
-    # Fig 9: Simulator choice
-    # tf-agents
-    #
-    # ppo doesn't work (BUG in tf-agents).  Use ddpg instead.
-    for env_id in $(fig_9_simulator_choice_environments); do
-      algo=$(tf_agents_fig_9_simulator_choice_algo)
-      for use_tf_functions in yes no; do
-        run_tf_agents
-      done
-    done
-  fi
+#  if [ "$fig" = 'algo_choice' ] || [ "$fig" = 'all' ]; then
+#    # Fig 10: Algorithm choice
+#    # tf-agents
+#    #
+#    # ppo doesn't work (BUG in tf-agents)
+#    for algo in $(tf_agents_fig_10_algo_choice_algos); do
+#      env_id="$(fig_10_algo_choice_environment)"
+#      for use_tf_functions in yes no; do
+#        run_tf_agents
+#      done
+#    done
+#  fi
+#
+#  if [ "$fig" = 'simulator_choice' ] || [ "$fig" = 'all' ]; then
+#    # Fig 9: Simulator choice
+#    # tf-agents
+#    #
+#    # ppo doesn't work (BUG in tf-agents).  Use ddpg instead.
+#    for env_id in $(fig_9_simulator_choice_environments); do
+#      algo=$(tf_agents_fig_9_simulator_choice_algo)
+#      for use_tf_functions in yes no; do
+#        run_tf_agents
+#      done
+#    done
+#  fi
 
-  if [ "$fig" = 'algo_choice' ] || [ "$fig" = 'all' ]; then
-    plot_tf_agents_fig_10_algo_choice
-  fi
-  if [ "$fig" = 'simulator_choice' ] || [ "$fig" = 'all' ]; then
-    plot_tf_agents_fig_9_simulator_choice
-  fi
+#  if [ "$fig" = 'algo_choice' ] || [ "$fig" = 'all' ]; then
+#    plot_tf_agents_fig_10_algo_choice
+#  fi
+#  if [ "$fig" = 'simulator_choice' ] || [ "$fig" = 'all' ]; then
+#    plot_tf_agents_fig_9_simulator_choice
+#  fi
 
 )
 }
@@ -644,7 +649,7 @@ all_run_reagent() {
 #    env_id="$(fig_10_algo_choice_environment)"
 #    run_reagent
 #  done
-
+#
 #  # Fig 9: Simulator choice
 #  # tf-agents
 #  #
@@ -711,12 +716,12 @@ all_run_stable_baselines() {
     done
   fi
 
-  if [ "$fig" = 'algo_choice' ] || [ "$fig" = 'all' ] || [ "$fig" = 'algo_env' ]; then
-    plot_stable_baselines_fig_10_algo_choice
-  fi
-  if [ "$fig" = 'simulator_choice' ] || [ "$fig" = 'all' ] || [ "$fig" = 'algo_env' ]; then
-    plot_stable_baselines_fig_9_simulator_choice
-  fi
+#  if [ "$fig" = 'algo_choice' ] || [ "$fig" = 'all' ] || [ "$fig" = 'algo_env' ]; then
+#    plot_stable_baselines_fig_10_algo_choice
+#  fi
+#  if [ "$fig" = 'simulator_choice' ] || [ "$fig" = 'all' ] || [ "$fig" = 'algo_env' ]; then
+#    plot_stable_baselines_fig_9_simulator_choice
+#  fi
 
 )
 }
