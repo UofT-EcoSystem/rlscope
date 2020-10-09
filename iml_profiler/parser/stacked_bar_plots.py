@@ -1351,12 +1351,21 @@ class OverlapStackedBarPlot:
                 **kwargs,
             )
             stacked_bar_plot.plot()
-        mk_plot(
-            y_field='percent_y', ylabel='Percent (%)', path=self._plot_path('percent'),
-        )
-        # NOTE: showing "Total training time (sec)" on top is redundant.
-        # TODO: add y-grid lines! Do it in a simple isolated test since I had issues before...
-        mk_plot(y_field='total_training_time', ylabel=Y_LABEL_TRAINING_TIME_SEC, path=self._plot_path('operation_training_time'))
+        def _suffix(suffix, yerr):
+            if yerr:
+                suffix += '.yerr'
+            return suffix
+        for yerr in [True, False]:
+            percent_suffix = _suffix('percent', yerr)
+            mk_plot(
+                y_field='percent_y', ylabel='Percent (%)', path=self._plot_path(percent_suffix), yerr=yerr,
+            )
+            # NOTE: showing "Total training time (sec)" on top is redundant.
+            # TODO: add y-grid lines! Do it in a simple isolated test since I had issues before...
+            time_suffix = _suffix('operation_training_time', yerr)
+            mk_plot(
+                y_field='total_training_time', ylabel=Y_LABEL_TRAINING_TIME_SEC, path=self._plot_path(time_suffix), yerr=yerr,
+            )
 
         # stacked_bar_plot = DetailedStackedBarPlot(
         #     data=self.df,
@@ -1860,6 +1869,8 @@ class DetailedStackedBarPlot:
                  # operation
                  hatch,
                  # category
+                 # If True AND > 1 repetitions, draw error bars.
+                 yerr=False,
                  hue=None,
                  x_order_by=None,
                  hues_together=False,
@@ -1894,6 +1905,7 @@ class DetailedStackedBarPlot:
         self.y_field = y_field
         self.x_group = x_group
 
+        self.yerr = yerr
         self.hatch = hatch
         self.hue = hue
         if x_order_by is None:
@@ -1952,6 +1964,9 @@ class DetailedStackedBarPlot:
         else:
             self.hue_map = self.as_color_map(self.hues(self.data))
 
+        # Perform pre-computation of plot data aggregated into mean value
+        self._agg_data = self._compute_agg_data()
+
     def _init_x_offsets(self):
         x_groups = self.x_groups(self.data)
 
@@ -1977,6 +1992,61 @@ class DetailedStackedBarPlot:
 
     def _xtick(self, x_field, x_group):
         return self.x_field_offset[x_field] + self.x_group_offset[x_group]
+
+    @property
+    def _plot_fields(self):
+        """
+        All the fields used in the plot (including y_field and y2_field).
+        """
+        fields = self._label_fields
+        fields.append(self.y_field)
+        if self.y2_field is not None and self.y2_field != self.y_field:
+            fields.append(self.y2_field)
+        return fields
+
+    @property
+    def _label_fields(self):
+        """
+        All the fields used in the plot except y_field and y2_field.
+        """
+        fields = []
+        if self.hatch is not None:
+            fields.append(self.hatch)
+        if self.hue is not None:
+            fields.append(self.hue)
+        fields.append(self.x_field)
+        fields.append(self.x_group)
+        return fields
+
+    def _compute_agg_data(self):
+        fields = self._plot_fields
+        label_fields = self._label_fields
+        df = self.data[fields]
+        # Find the mean of each "slice" of each "bar" in the plot across the repetitions.
+        mean_df = df.groupby(label_fields).agg('mean').reset_index()
+        # Aggregate within each x_field and x_group to find the height of each "bar"
+        agg_df = mean_df.groupby([self.x_field, self.x_group]).agg('sum').reset_index()
+        return agg_df
+
+    def _bar_height(self, x_field, x_group):
+        # Select a specific "bar"
+        agg_df = self._agg_data
+        row = agg_df[
+            (agg_df[self.x_field] == x_field) &
+            (agg_df[self.x_group] == x_group)
+        ]
+        # Get the height of the "bar"
+        ys = row[self.y_field].values
+        if ys.shape == (0,):
+            # This can happen when adding bar labels.
+            # If we cannot find a particular (x_field, x_group), default to zero.
+            # NOTE: if we re-use this for filling in plot data, we should probably
+            # change the behaviour for plot data to "error out"
+            height = 0
+            return height
+        assert ys.shape == (1,)
+        height = ys[0]
+        return height
 
     @staticmethod
     def _calc_bar_xloc(n, w):
@@ -2204,7 +2274,7 @@ class DetailedStackedBarPlot:
                 # hatch=self.hatch_map[hatch]
             )
 
-            if has_repetitions:
+            if has_repetitions and self.yerr:
                 plot_kwargs['yerr'] = ys_std
                 if 'error_kw' not in plot_kwargs:
                     plot_kwargs['error_kw'] = dict()
@@ -2411,22 +2481,23 @@ class DetailedStackedBarPlot:
                             y = np.mean(ys)
                             plot_xs = [x]
                             plot_ys = [y]
-                            yerr = np.std(ys)
-                            plot_kwargs.update(dict(
-                                # x=[x],
-                                # height=[y],
-                                yerr=[yerr],
-                                capsize=DetailedStackedBarPlot.ERRBAR_CAPSIZE_POINTS,
-                                # ecolor='gray',
-                                ecolor=DetailedStackedBarPlot.ERRBAR_COLOR,
-                                # NOTE: I cannot get dashed lines to work with the errorbar style...
-                                # error_kw=dict(
-                                #     # dash_capstyle='projecting',
-                                #     linestyle='-',
-                                #     # dashes=(0.5, 0.5),
-                                #     dashes=(6, 2),
-                                # ),
-                            ))
+                            if self.yerr:
+                                yerr = np.std(ys)
+                                plot_kwargs.update(dict(
+                                    # x=[x],
+                                    # height=[y],
+                                    yerr=[yerr],
+                                    capsize=DetailedStackedBarPlot.ERRBAR_CAPSIZE_POINTS,
+                                    # ecolor='gray',
+                                    ecolor=DetailedStackedBarPlot.ERRBAR_COLOR,
+                                    # NOTE: I cannot get dashed lines to work with the errorbar style...
+                                    # error_kw=dict(
+                                    #     # dash_capstyle='projecting',
+                                    #     linestyle='-',
+                                    #     # dashes=(0.5, 0.5),
+                                    #     dashes=(6, 2),
+                                    # ),
+                                ))
                         plot_kwargs.update(dict(
                             x=plot_xs,
                             height=plot_ys,
@@ -2716,10 +2787,7 @@ class DetailedStackedBarPlot:
             xy_offset = (x_offset, y_offset)
             for i, x_group in enumerate(x_groups):
                 x = self._xtick(x_field, x_group)
-                sub_df = df[
-                    (df[self.x_field] == x_field) &
-                    (df[self.x_group] == x_group)]
-                height = sub_df[self.y_field].sum()
+                height = self._bar_height(x_field, x_group)
                 logger.info("Add bar-label:\n{msg}".format(msg=pprint_msg({
                     'x_field': x_field,
                     'x_group': x_group,
@@ -4983,24 +5051,28 @@ class TexMetrics:
         RL algorithm; \autograph does \textit{not} always outperform \graph.
         \end{rlscope-finding-qual}
 
-        Q: How to get the "within" percent?
-        percent_diff =
-             abs(A - B)
-             ----------
-             max(A, B)
+            Q: How to get the "within" percent?
+            percent_diff =
+                 abs(A - B)
+                 ----------
+                 max(A, B)
 
-        ===
+            ===
 
-        if A < B:
-          (B - A)
-          -------
-             B
-        else:
-          (A - B)
-          -------
-             A
+            if A < B:
+              (B - A)
+              -------
+                 B
+            else:
+              (A - B)
+              -------
+                 A
+
+        Moreover, even \autograph does not always outperform the older \graph API.
+        In particular, for TD3 (Figure~\ref{fig:framework_choice}) \autograph is \asPercent{0.088176968037688} faster than \graph;
+        conversely, for DDPG (Figure~\ref{fig:framework_choice_ddpg}) \graph is \asPercent{0.164893055987829} faster than \autograph.
+
         """
-        df = self.framework_choice_df
         df_mean = self.mean_df('total_training_time', df=self.framework_choice_df)
 
         df_mean_autograph_rows = df_mean[df_mean.apply(self._config_is_autograph, axis=1)]
@@ -5212,17 +5284,17 @@ class TexMetrics:
 
         metric.df = df
 
-    def _autograph_vs_graph_operation_category_ratio_df(self):
-        df = self.framework_choice_df
+    def _autograph_vs_eager_operation_category_ratio_df(self):
         df_mean = self.mean_df('total_training_time', df=self.framework_choice_df, groupby_fields=['operation', 'category'])
         autograph_rows = df_mean[df_mean.apply(self._config_is_autograph, axis=1)]
-        graph_rows = df_mean[df_mean.apply(self._config_is_graph, axis=1)]
+        eager_rows = df_mean[df_mean.apply(self._config_is_eager, axis=1)]
+        tf_eager_rows = eager_rows[eager_rows.apply(self._config_is_tensorflow, axis=1)]
 
         join_on = ['algo', 'env', 'operation', 'category']
-        df = autograph_rows.set_index(join_on).join(graph_rows.set_index(join_on), how='inner', lsuffix='_autograph', rsuffix='_graph')
+        df = autograph_rows.set_index(join_on).join(tf_eager_rows.set_index(join_on), how='inner', lsuffix='_autograph', rsuffix='_eager')
         df = df.reset_index()
-        ratio_field = 'ratio_autograph_to_graph'
-        df[ratio_field] = df['total_training_time_autograph'] / df['total_training_time_graph']
+        ratio_field = 'ratio_autograph_to_eager'
+        df[ratio_field] = df['total_training_time_autograph'] / df['total_training_time_eager']
         return df
 
     def calc_find_surp_autograph_inflates_python(self, metric):
@@ -5232,8 +5304,8 @@ class TexMetrics:
         \end{rlscope-finding-surp}
         """
 
-        df = self._autograph_vs_graph_operation_category_ratio_df()
-        ratio_field = 'ratio_autograph_to_graph'
+        df = self._autograph_vs_eager_operation_category_ratio_df()
+        ratio_field = 'ratio_autograph_to_eager'
 
         df_filter = df
 
@@ -5246,8 +5318,16 @@ class TexMetrics:
         df_filter = df_filter[df_filter['category'].apply(is_category)]
 
         def get_alias(prefix):
-            return f"{prefix}RatioSimulationPythonAutographToGraph"
-        self._add_metric_stats(metric, df_filter, get_alias, ratio_field)
+            return f"{prefix}RatioSimulationPythonAutographToEager"
+        self._add_metric_stats(metric, df_filter, get_alias, ratio_field, metrics={'Max'})
+
+        for algo, df_algo in df_filter.groupby(['algo']):
+            def algo_get_alias(prefix):
+                return "{Prefix}RatioSimulationPythonAutographToEager{Algo}".format(
+                    Prefix=prefix,
+                    Algo=algo.upper(),
+                )
+            self._add_metric_stats(metric, df_algo, algo_get_alias, ratio_field, metrics={'Mean'})
 
         metric.df = df
 
