@@ -944,7 +944,7 @@ class OverlapStackedBarPlot:
             GOAL: prepare hatch/hue labels in overlap plot; we want 'CPU' and 'GPU' categories to
             only appear in 'resource_overlap' column, NOT in 'category' column.
             NOTE: That means if ONLY GPU is running, it's going to show up as category=''.
-            - Turn ["Framework", "GPU"] into ["Framework"].
+            - Turn ["Backend", "GPU"] into ["Backend"].
             - Turn ["CUDA", "GPU"] into ["CUDA"]
             - Turn ["GPU"] into ''
             - Rationale:
@@ -4421,7 +4421,8 @@ def short_category(category):
     if category == constants.CATEGORY_SIMULATOR_CPP:
         return "Simulator"
     elif category == constants.CATEGORY_TF_API:
-        return "Framework"
+        return "Backend"
+        # return "Framework"
         # return "TensorFlow"
         # return "TF"
     elif category == constants.CATEGORY_CUDA_API_CPU:
@@ -4810,6 +4811,20 @@ class TexMetrics:
     def _config_has_gpu(self, row):
         return bool(re.search(r'gpu', row['resource_overlap'].lower()))
 
+    def _config_algo_ddpg(self, row):
+        return re.search(r'ddpg', row['algo'].lower())
+
+    def _config_algo_td3(self, row):
+        return re.search(r'td3', row['algo'].lower())
+
+    def _config_category_framework(self, row):
+        if 'short_category' in row:
+            category = row['short_category']
+        else:
+            category = row['category']
+        # return bool(re.search(r'framework', category.lower()))
+        return bool(re.search(r'backend', category.lower()))
+
     def calc_find_qual_eager_more_trans(self, metric):
         """
         \begin{rlscope-finding-qual}{find:qual-eager-more-trans}
@@ -4846,12 +4861,6 @@ class TexMetrics:
             def get_alias(prefix):
                 return f"{prefix}Ratio{op_name}{category_name}{ratio_name}"
             self._add_metric_stats(metric, df_op_category, get_alias, ratio_field)
-        def _config_category_framework(row):
-            if 'short_category' in row:
-                category = row['short_category']
-            else:
-                category = row['category']
-            return bool(re.search(r'framework', category.lower()))
 
         groupby_fields = ['operation', 'short_category']
         df_trans_mean = self.mean_df('trans_count_per_pass', df=df_trans, groupby_fields=groupby_fields)
@@ -4865,8 +4874,8 @@ class TexMetrics:
         df_trans = df_trans_tf_eager_rows.set_index(join_on).join(df_trans_pytorch_eager_rows.set_index(join_on), how='inner', lsuffix='_tf', rsuffix='_pytorch').reset_index()
         df_trans[ratio_field] = df_trans['trans_count_per_pass_tf'] / df_trans['trans_count_per_pass_pytorch']
         # df_trans['ratio_trans_pytorch_to_tf'] = df_trans['trans_count_per_pass_pytorch'] / df_trans['trans_count_per_pass_tf']
-        _add_pytorch_to_tf_ratio_metrics(df_trans, 'Inference', self._config_op_inference, 'Framework', _config_category_framework, ratio_field, ratio_name)
-        _add_pytorch_to_tf_ratio_metrics(df_trans, 'Backpropagation', self._config_op_backprop, 'Framework', _config_category_framework, ratio_field, ratio_name)
+        _add_pytorch_to_tf_ratio_metrics(df_trans, 'Inference', self._config_op_inference, 'Framework', self._config_category_framework, ratio_field, ratio_name)
+        _add_pytorch_to_tf_ratio_metrics(df_trans, 'Backpropagation', self._config_op_backprop, 'Framework', self._config_category_framework, ratio_field, ratio_name)
         metric.df['trans_count'] = df_trans
 
         groupby_fields = ['operation', 'category']
@@ -4881,8 +4890,8 @@ class TexMetrics:
         df = df_tf_eager_rows.set_index(join_on).join(df_pytorch_eager_rows.set_index(join_on), how='inner', lsuffix='_tf', rsuffix='_pytorch').reset_index()
         df[ratio_field] = df['total_training_time_tf'] / df['total_training_time_pytorch']
         # df['ratio_pytorch_to_tf'] = df['total_training_time_pytorch'] / df['total_training_time_tf']
-        _add_pytorch_to_tf_ratio_metrics(df, 'Inference', self._config_op_inference, 'Framework', _config_category_framework, ratio_field, ratio_name)
-        _add_pytorch_to_tf_ratio_metrics(df, 'Backpropagation', self._config_op_backprop, 'Framework', _config_category_framework, ratio_field, ratio_name)
+        _add_pytorch_to_tf_ratio_metrics(df, 'Inference', self._config_op_inference, 'Framework', self._config_category_framework, ratio_field, ratio_name)
+        _add_pytorch_to_tf_ratio_metrics(df, 'Backpropagation', self._config_op_backprop, 'Framework', self._config_category_framework, ratio_field, ratio_name)
         metric.df['operation.category.training_time'] = df
 
         # Supporting csv file.
@@ -5078,24 +5087,29 @@ class TexMetrics:
         df_mean_autograph_rows = df_mean[df_mean.apply(self._config_is_autograph, axis=1)]
         df_mean_graph_rows = df_mean[df_mean.apply(self._config_is_graph, axis=1)]
         join_on = ['algo', 'env']
-        df = df_mean_autograph_rows.set_index(join_on).join(df_mean_graph_rows.set_index(join_on), how='inner', rsuffix='_graph')
-        A = 'total_training_time'
-        B = 'total_training_time_graph'
-        def abs_percent_diff(row):
-            return abs(row[A] - row[B]) / max(row[A], row[B])
+        df = df_mean_autograph_rows.set_index(join_on).join(
+            df_mean_graph_rows.set_index(join_on),
+            how='inner',
+            lsuffix='_autograph',
+            rsuffix='_graph')
+        autograph = 'total_training_time_autograph'
+        graph = 'total_training_time_graph'
+        # def abs_percent_diff(row):
+        #     return abs(row[autograph] - row[graph]) / max(row[autograph], row[graph])
         def autograph_percent_speedup(row):
-            return (row[A] - row[B]) / row[A]
+            return (row[graph] - row[autograph]) / row[autograph]
         def graph_percent_speedup(row):
-            return (row[B] - row[A]) / row[B]
-        df['abs_percent_diff'] = df.apply(abs_percent_diff, axis=1)
+            return (row[autograph] - row[graph]) / row[graph]
+        # df['abs_percent_diff'] = df.apply(abs_percent_diff, axis=1)
         df['autograph_percent_speedup'] = df.apply(autograph_percent_speedup, axis=1)
         df['graph_percent_speedup'] = df.apply(graph_percent_speedup, axis=1)
 
-        metric['MinSpeedup'] = df['abs_percent_diff'].min()
-        metric['MaxSpeedup'] = df['abs_percent_diff'].max()
+        # metric['MinSpeedup'] = df['abs_percent_diff'].min()
+        # metric['MaxSpeedup'] = df['abs_percent_diff'].max()
 
         metric['MaxAutographSpeedup'] = df['autograph_percent_speedup'].max()
         metric['MaxGraphSpeedup'] = df['graph_percent_speedup'].max()
+        metric['MaxSpeedup'] = max(metric['MaxAutographSpeedup'], metric['MaxGraphSpeedup'])
 
         metric.df = df
 
@@ -5274,13 +5288,29 @@ class TexMetrics:
             return operation == 'Inference'
         df_filter = df_filter[df_filter['operation'].apply(is_op)]
 
-        def is_category(category):
-            return bool(re.search('framework', category.lower()))
-        df_filter = df_filter[df_filter['category'].apply(is_category)]
+        # def is_category(category):
+        #     return bool(re.search('framework', category.lower()))
+        # df_filter = df_filter[df_filter['category'].apply(is_category)]
+        df_filter = df_filter[df_filter.apply(self._config_category_framework, axis=1)]
 
         def get_alias(prefix):
             return f"{prefix}RatioInferenceFrameworkAutographToGraph"
         self._add_metric_stats(metric, df_filter, get_alias, ratio_field)
+
+        # WANT:
+        # FindSurpAutographInflatesInferenceMeanRatioInferenceFrameworkDDPGAutographToGraph
+        #   Specific value of ratio_autograph_to_graph where algo == 'DDPG'
+        # FindSurpAutographInflatesInferenceMeanRatioInferenceFrameworkTDAutographToGraph
+        #   Specific value of ratio_autograph_to_graph where algo == 'TD3'
+        for algo, algo_df in df_filter.groupby(['algo']):
+            def get_algo_alias(prefix):
+                return "{Prefix}RatioInferenceFramework{Algo}AutographToGraph".format(
+                    Prefix=prefix,
+                    Algo=algo.upper(),
+                )
+            # One row for this algo.
+            assert len(algo_df) == 1
+            self._add_metric_stats(metric, algo_df, get_algo_alias, ratio_field, metrics={'Mean'})
 
         metric.df = df
 

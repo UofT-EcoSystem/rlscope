@@ -1871,6 +1871,14 @@ plot_stable_baselines_fig_10_algo_choice() {
 (
   set -eu
 
+  calibrate=${calibrate:-yes}
+  # max_passes=${max_passes:-}
+  repetitions=${repetitions:-5}
+  re_calibrate=${re_calibrate:-no}
+  re_plot=${re_plot:-no}
+  dry_run=${dry_run:-no}
+  # fig=${fig:-all}
+
   # Fig 10: Algorithm choice
   # tf-agents
   #
