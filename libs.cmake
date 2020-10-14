@@ -1,3 +1,26 @@
+#
+# Enable/disable building different libraries/executables.
+#
+option(RLS_DEBUG_ENABLE_GPU_UTIL_EXPERIMENT
+        "Build gpu_util_experiment experiment for investigating GPU utilization varies with multiple processes/threadsfor building tests"
+        OFF)
+option(RLS_DEBUG_ENABLE_ACHIEVED_OCCUPANCY_EXPERIMENT
+        "Build achieved_occupancy_range_profiling* experiment for trying out new CUDA Profiling API for collecting GPU hardware metrics"
+        OFF)
+option(RLS_DEBUG_ENABLE_DEVICE_QUERY
+        "Build deviceQuery CUDA sample program"
+        OFF)
+option(RLS_DEBUG_ENABLE_TENSORRT_EXPERIMENT
+        "Build trtexec7 experiment for trying out CUDA TensorRT to measure throughput/latency of using TensorRT with different numbers of threads"
+        OFF)
+option(RLS_DEBUG_ENABLE_LEGACY_DQN_CPP
+        "[Deprecated] build legacy DQN implementation in C++ (was exploring how it might compare to pure-Python implementation"
+        OFF)
+option(RLS_DEBUG_ENABLE_CUPTI_API_EXPERIMENT
+        "Build CUDA CUPTI sample program for using CUPTI API to collect GPU kernel execution times"
+        OFF)
+
+
 # Recursively gather source files in current directory.
 macro(GlobProtobufSources VAR)
     #    message("GlobProtobufSources: VAR = ${VAR}")

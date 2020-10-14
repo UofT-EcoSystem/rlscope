@@ -14,6 +14,13 @@ cmake_minimum_required(VERSION 3.15 FATAL_ERROR)
 set(LANGUAGES CXX CUDA)
 project(iml LANGUAGES ${LANGUAGES})
 
+#
+# Enable/disable building different libraries/executables.
+#
+option(RLS_ENABLE_TESTS
+        "Build rls-test program for running C++ unit-tests that cover offline analysis component of RL-Scope"
+        OFF)
+
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
 #message("> CMAKE_MODULE_PATH = ${CMAKE_MODULE_PATH}")
 
@@ -210,17 +217,23 @@ add_library(nsync_includes INTERFACE)
 target_include_directories(nsync_includes INTERFACE third_party/nsync/public)
 set(NSYNC_ENABLE_TESTS OFF)
 #set(BUILD_SHARED_LIBS ON)
-add_subdirectory(third_party/nsync)
+add_subdirectory(third_party/nsync
+        # DON'T include nsync's install(...) files in CPack package (e.g., include/nsync*.h)
+        EXCLUDE_FROM_ALL)
 
 # Third party: abseil-cpp
 # https://github.com/abseil/abseil-cpp/blob/master/CMake/README.md
 set(ABSL_RUN_TESTS OFF)
 set(BUILD_TESTING OFF)
-add_subdirectory(third_party/abseil-cpp)
+add_subdirectory(third_party/abseil-cpp
+        # DON'T include abseil-cpp's install(...) files in CPack package (e.g., include/nsync*.h)
+        EXCLUDE_FROM_ALL)
 unset(BUILD_TESTING)
 
 # Third party: backward-cpp
-add_subdirectory(third_party/backward-cpp)
+add_subdirectory(third_party/backward-cpp
+        # DON'T include backward-cpp's install(...) files in CPack package (e.g., include/nsync*.h)
+        EXCLUDE_FROM_ALL)
 
 # Third party: eigen
 find_package(Eigen3 REQUIRED)
@@ -688,12 +701,11 @@ function(AddRLScopeTarget TARGET)
     include(GenerateExportHeader)
     generate_export_header(${TARGET})
 
-    foreach(install_dir include rlscope/include)
-        install(FILES
-                ${PROJECT_BINARY_DIR}/${TARGET}_export.h
-                CONFIGURATIONS Debug Release
-                DESTINATION ${install_dir})
-    endforeach()
+    RLS_INSTALL(
+            FILES ${PROJECT_BINARY_DIR}/${TARGET}_export.h
+            LOCAL_INSTALL_DIR include
+            RLSCOPE_INSTALL_DIR rlscope/include)
+
 
     if (WITH_CUDA_LD_PRELOAD)
     #    set(BACKTRACE_SYMS_FLAGS "-g")
@@ -798,6 +810,45 @@ function(AddRLSAnalyzeTarget TARGET)
     AddCommonRLSDeps(${TARGET})
 endfunction()
 
+set(RLS_INSTALL_CONFIGURATIONS Debug Release)
+function(RLS_INSTALL)
+    set(options)
+    set(oneValueArgs LOCAL_INSTALL_DIR RLSCOPE_INSTALL_DIR)
+    set(multiValueArgs)
+    cmake_parse_arguments(RLS_INSTALL "${options}" "${oneValueArgs}"
+            "${multiValueArgs}" ${ARGN} )
+    if (RLS_INSTALL_KEYWORDS_MISSING_VALUES)
+        message(FATAL_ERROR
+                "RLS_INSTALL missing keyword arguments: ${RLS_INSTALL_KEYWORDS_MISSING_VALUES}")
+    endif()
+    # INSTALL_FILE:
+    #   Path to file we're install(..)-ing
+    # LOCAL_INSTALL_DIR:
+    #   "include" for header files, "lib" for library files, "bin" for executables
+    # RLSCOPE_INSTALL_DIR:
+    #   rlscope/include for header files, rlscope/lib for library files, rlscope/bin for executables
+    install(
+            # [FILES|TARGET] ...
+            ${RLS_INSTALL_UNPARSED_ARGUMENTS}
+            CONFIGURATIONS ${RLS_INSTALL_CONFIGURATIONS}
+            COMPONENT "rlscope"
+            DESTINATION ${RLS_INSTALL_LOCAL_INSTALL_DIR}
+            )
+
+    # NOTE: I used to install rlscope files into a separate rlscope directory, but it's not needed
+    # since I now statically link librlscope.so and avoid third party install(...) rules
+    # (see EXCLUDE_FROM_ALL in add_subdirectory calls)
+    #
+    # install(
+    #         # [FILES|TARGET] ...
+    #         ${RLS_INSTALL_UNPARSED_ARGUMENTS}
+    #         CONFIGURATIONS ${RLS_INSTALL_CONFIGURATIONS}
+    #         COMPONENT "rlscope-dir"
+    #         DESTINATION ${RLS_INSTALL_RLSCOPE_INSTALL_DIR}
+    #         )
+
+endfunction()
+
 #
 # Library targets: ./src/libs
 # e.g., common_util, range_sampling
@@ -832,20 +883,20 @@ set(LIBRARIES)
 if (WITH_CXX_ANALYSIS)
     AddRLSAnalyzeTarget(rls-analyze)
     list(APPEND BINARIES rls-analyze)
-    if (TEST_ANALYSIS_SOURCES)
-        AddTestAnalysisTarget(rls-test)
-        list(APPEND BINARIES rls-test)
+    if (CMAKE_BUILD_TYPE STREQUAL "Debug")
+        if (TEST_ANALYSIS_SOURCES)
+            AddTestAnalysisTarget(rls-test)
+            list(APPEND BINARIES rls-test)
+        endif()
     endif()
 endif()
 AddRLScopeTarget(rlscope)
 list(APPEND LIBRARIES rlscope)
 
-foreach(install_dir include rlscope/include)
-    install(FILES
-            src/public_headers/rlscope_c_api.h
-            CONFIGURATIONS Debug Release
-            DESTINATION ${install_dir})
-endforeach()
+RLS_INSTALL(
+        FILES src/public_headers/rlscope_c_api.h
+        LOCAL_INSTALL_DIR include
+        RLSCOPE_INSTALL_DIR rlscope/include)
 
 #
 # Install targets.
@@ -853,22 +904,35 @@ endforeach()
 
 if (BINARIES)
     message("> INSTALL BINARIES: ${BINARIES}")
-    foreach(install_dir bin rlscope/bin)
-        install(TARGETS ${BINARIES}
-                CONFIGURATIONS Debug
-                RUNTIME DESTINATION ${install_dir})
-        install(TARGETS ${BINARIES}
-                CONFIGURATIONS Release
-                RUNTIME DESTINATION ${install_dir})
-    endforeach()
+    RLS_INSTALL(
+            TARGETS ${BINARIES}
+            LOCAL_INSTALL_DIR bin
+            RLSCOPE_INSTALL_DIR rlscope/bin)
 endif()
 
 
 if (LIBRARIES)
-    foreach(install_dir lib rlscope/lib)
-        message("> INSTALL LIBRARIES @ ${install_dir}: ${LIBRARIES}")
-        install(TARGETS ${LIBRARIES}
-                CONFIGURATIONS Debug Release
-                DESTINATION ${install_dir})
-    endforeach()
+    RLS_INSTALL(
+            TARGETS ${LIBRARIES}
+            LOCAL_INSTALL_DIR lib
+            RLSCOPE_INSTALL_DIR rlscope/lib)
 endif()
+
+set(CPACK_GENERATOR "TGZ")
+set(CPACK_DEBIAN_PACKAGE_MAINTAINER "James Gleeson") # required
+set(CPACK_COMPONENTS_ALL "rlscope-dir")
+#cpack_add_component("rlscope-dir"
+#        DISPLAY_NAME "RL-Scope system libraries/binaries/includes"
+#        DESCRIPTION "RL-Scope install files in the standard platform-specific /usr/{lib,bin,include} directories"
+#        #        [HIDDEN | REQUIRED | DISABLED ]
+#        #        [GROUP group]
+#        #        [DEPENDS comp1 comp2 ... ]
+#        #        [INSTALL_TYPES type1 type2 ... ]
+#        #        [DOWNLOADED]
+#        #        [ARCHIVE_FILE filename]
+#        )
+# TODO: derive this from the git tag (e.g., v1.0.0) from which it was built?
+set(CPACK_PACKAGE_VERSION_MAJOR "1")
+set(CPACK_PACKAGE_VERSION_MINOR "0")
+set(CPACK_PACKAGE_VERSION_PATCH "0")
+include(CPack)
