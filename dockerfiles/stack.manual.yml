@@ -10,14 +10,14 @@ services:
     environment:
       # Use the current user as postgres user (default when using psql)
       POSTGRES_USER: ${USER}
-      # Don't user a password (current default for iml).
+      # Don't user a password (current default for rlscope).
 #      POSTGRES_PASSWORD: postgres
     ports:
       # NOTE:
 #      - 7123:5432
       - 5432:5432
     networks:
-      - iml_network
+      - rlscope_network
 
   adminer:
     image: adminer
@@ -47,21 +47,21 @@ services:
   #     -e IML_TEST_DIR=/mnt/data/james/clone/iml/test_results
   #     -e BASELINES_DIR=/home/james/clone/baselines
   #     --log-driver journald
-  #     tensorflow:devel-iml-gpu-cuda
+  #     tensorflow:devel-rlscope-gpu-cuda
   bash:
     #
     # NOTE:
     # - "docker stack deploy" does NOT support 'build:', so this container must be
     #   built separately via "docker build ..."
     #
-    # build: ./dockerfiles/devel-iml-gpu-cuda.Dockerfile
+    # build: ./dockerfiles/devel-rlscope-gpu-cuda.Dockerfile
 
-    image: tensorflow:devel-iml-gpu-cuda
+    image: tensorflow:devel-rlscope-gpu-cuda
     depends_on:
       - db
     restart: always
     networks:
-    - iml_network
+    - rlscope_network
     # Fails, not supported yet: instead for now just manually edit /etc/docker/daemon.json
     # as described below:
     # https://github.com/NVIDIA/k8s-device-plugin#preparing-your-gpu-nodes
@@ -96,4 +96,4 @@ services:
     entrypoint: /bin/bash
 
 networks:
-  iml_network:
+  rlscope_network:

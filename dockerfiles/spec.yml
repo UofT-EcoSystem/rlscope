@@ -37,23 +37,23 @@ header: |
 # Releases are all treated differently by TensorFlow's CI systems.
 releases:
     # IML
-    iml:
+    rlscope:
         is_dockerfiles: true
         upload_images: false
         tag_specs:
-            - "{ubuntu-devel-iml}"
+            - "{ubuntu-devel-rlscope}"
 
-    iml-cuda-10-1:
+    rlscope-cuda-10-1:
       is_dockerfiles: true
       upload_images: false
       tag_specs:
-        - "{ubuntu-devel-iml-cuda-10-1}"
+        - "{ubuntu-devel-rlscope-cuda-10-1}"
 
-    iml-rocm:
+    rlscope-rocm:
         is_dockerfiles: true
         upload_images: false
         tag_specs:
-            - "{ubuntu-devel-iml-rocm}"
+            - "{ubuntu-devel-rlscope-rocm}"
 
     v1.3.1:
       is_dockerfiles: true
@@ -61,11 +61,11 @@ releases:
       tag_specs:
       - "{ubuntu-devel-v1.3.1}"
 
-    iml-rocm-upstream:
+    rlscope-rocm-upstream:
       is_dockerfiles: true
       upload_images: false
       tag_specs:
-      - "{ubuntu-devel-iml-rocm-upstream}"
+      - "{ubuntu-devel-rlscope-rocm-upstream}"
 
     rocm:
       is_dockerfiles: true
@@ -139,13 +139,13 @@ slice_sets:
           args:
               - CHECKOUT_TF_SRC=1
 
-    ubuntu-devel-iml:
+    ubuntu-devel-rlscope:
         #
         # IML profiler:
         # Build "patched" tensorflow, then run end-to-end Pong training test.
         #
-        - add_to_name: "devel-iml-gpu-cuda"
-          dockerfile_exclusive_name: "devel-iml-gpu-cuda"
+        - add_to_name: "devel-rlscope-gpu-cuda"
+          dockerfile_exclusive_name: "devel-rlscope-gpu-cuda"
           partials:
           - ubuntu/version
           - ubuntu/devel-nvidia
@@ -165,11 +165,11 @@ slice_sets:
           # - ubuntu/bazelisk
           - ubuntu/bash
           - ubuntu/tensorrt
-          - iml/env
-          - iml/apt_install
+          - rlscope/env
+          - rlscope/apt_install
           - ubuntu/pip_install_tf
-          - iml/pip_dependencies
-          - iml/user_custom
+          - rlscope/pip_dependencies
+          - rlscope/user_custom
           - shell
           - ubuntu/entrypoint
           test_runtime: nvidia
@@ -184,20 +184,20 @@ slice_sets:
           #
           # The root directory of a 'patched' TensorFlow checkout.
           - TENSORFLOW_DIR=
-          # The root directory of the iml_profiler repo checkout.
+          # The root directory of the rlscope_profiler repo checkout.
           - IML_DIR=
-          # The root directory of the iml_drill repo checkout.
+          # The root directory of the rlscope_drill repo checkout.
           - IML_DRILL_DIR=
           # The local path where we should output bazel objects (overrides $HOME/.cache/bazel).
           # - BAZEL_BUILD_DIR=
 
-    ubuntu-devel-iml-cuda-10-1:
+    ubuntu-devel-rlscope-cuda-10-1:
       #
       # IML profiler:
       # Build "patched" tensorflow, then run end-to-end Pong training test.
       #
-      - add_to_name: "devel-iml-gpu-cuda-10-1"
-        dockerfile_exclusive_name: "devel-iml-gpu-cuda-10-1"
+      - add_to_name: "devel-rlscope-gpu-cuda-10-1"
+        dockerfile_exclusive_name: "devel-rlscope-gpu-cuda-10-1"
         partials:
 #          - ubuntu/version
           - ubuntu/devel-nvidia-cuda-10-1
@@ -214,11 +214,11 @@ slice_sets:
           - ubuntu/pip_dependencies
           - ubuntu/protobuf_from_src
           - ubuntu/cmake_from_src
-          - iml/env
-          - iml/apt_install
-          - iml/pip_dependencies
+          - rlscope/env
+          - rlscope/apt_install
+          - rlscope/pip_dependencies
           - shell
-          - iml/user_custom
+          - rlscope/user_custom
           - ubuntu/cublas-workaround-cuda-10-1
           - ubuntu/bazelisk
           - ubuntu/entrypoint
@@ -234,16 +234,16 @@ slice_sets:
           #
           # The root directory of a 'patched' TensorFlow checkout.
           - TENSORFLOW_DIR=
-          # The root directory of the iml_profiler repo checkout.
+          # The root directory of the rlscope_profiler repo checkout.
           - IML_DIR=
-          # The root directory of the iml_drill repo checkout.
+          # The root directory of the rlscope_drill repo checkout.
           - IML_DRILL_DIR=
           # The local path where we should output bazel objects (overrides $HOME/.cache/bazel).
           # - BAZEL_BUILD_DIR=
 
-    ubuntu-devel-iml-rocm:
-        - add_to_name: "devel-iml-gpu-rocm"
-          dockerfile_exclusive_name: "devel-iml-gpu-rocm"
+    ubuntu-devel-rlscope-rocm:
+        - add_to_name: "devel-rlscope-gpu-rocm"
+          dockerfile_exclusive_name: "devel-rlscope-gpu-rocm"
           partials:
           - ubuntu/version
           - ubuntu/devel-rocm
@@ -267,9 +267,9 @@ slice_sets:
           - IML_DRILL_DIR=
           # - BAZEL_BUILD_DIR=
 
-    ubuntu-devel-iml-rocm-upstream:
-    - add_to_name: "devel-iml-gpu-rocm-upstream"
-      dockerfile_exclusive_name: "devel-iml-gpu-rocm-upstream"
+    ubuntu-devel-rlscope-rocm-upstream:
+    - add_to_name: "devel-rlscope-gpu-rocm-upstream"
+      dockerfile_exclusive_name: "devel-rlscope-gpu-rocm-upstream"
       partials:
       - ubuntu/version
       - ubuntu/devel-rocm

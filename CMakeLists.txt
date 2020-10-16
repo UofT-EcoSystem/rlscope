@@ -12,7 +12,7 @@
 
 cmake_minimum_required(VERSION 3.15 FATAL_ERROR)
 set(LANGUAGES CXX CUDA)
-project(iml LANGUAGES ${LANGUAGES})
+project(rlscope LANGUAGES ${LANGUAGES})
 
 #
 # Enable/disable building different libraries/executables.
@@ -403,19 +403,19 @@ endif()
 # With PROTOBUF_GENERATE_CPP_APPEND_PATH=OFF
 #     In CMake 3.5.1 (Ubuntu 16.04) this makes the
 #     generated protobuf .pb.cc and .pb.h maintain their original directory structure:
-#       iml/build/tensorflow/core/lib/core/error_codes.pb.h
-#     Without this, cmake's FindProtobuf module will still all generated files in the iml/build directory:
-#       iml/build/error_codes.pb.h
+#       rlscope/build/tensorflow/core/lib/core/error_codes.pb.h
+#     Without this, cmake's FindProtobuf module will still all generated files in the rlscope/build directory:
+#       rlscope/build/error_codes.pb.h
 # HOWEVER; this no longer works in CMake 3.14.5 (Ubuntu 18.04)
 #       The directory structure for generated files becomes:
-#         iml/build/CMakeFiles/tensorflow/core/lib/core/error_codes.pb.h
+#         rlscope/build/CMakeFiles/tensorflow/core/lib/core/error_codes.pb.h
 #       BUT, IML_PROTO_SRCS still matches this directory structure (non-existent files):
-#         iml/build/error_codes.pb.h
-# TLDR: Oh well, just generate cpp files in iml/build/*.pb.cpp
+#         rlscope/build/error_codes.pb.h
+# TLDR: Oh well, just generate cpp files in rlscope/build/*.pb.cpp
 # set(PROTOBUF_GENERATE_CPP_APPEND_PATH OFF)
 protobuf_generate_cpp(IML_PROTO_SRCS IML_PROTO_HDRS
-        iml_profiler/protobuf/iml_prof.proto
-        iml_profiler/protobuf/pyprof.proto
+        rlscope/protobuf/rlscope_prof.proto
+        rlscope/protobuf/pyprof.proto
         )
 set(SAMPLE_CUDA_API_SOURCES
 
