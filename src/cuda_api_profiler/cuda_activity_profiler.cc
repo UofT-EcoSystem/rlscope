@@ -4,8 +4,8 @@
 
 #include "cuda_api_profiler/cuda_activity_profiler.h"
 #include "cuda_api_profiler/get_env_var.h"
-//#include "rlscope/protobuf/iml_prof.pb.h"
-#include "iml_prof.pb.h"
+//#include "rlscope/protobuf/rlscope_prof.pb.h"
+#include "rlscope_prof.pb.h"
 #include "common/util.h"
 #include "cuda_api_profiler/cupti_logging.h"
 
@@ -106,8 +106,8 @@ CUDAActivityProfilerState CUDAActivityProfilerState::DumpState() {
 template <class RecordType>
 static void _AddEvent(
     CUDAActivityProfilerState& self,
-    iml::CudaEventType cuda_event_type,
-    iml::MachineDevsEventsProto* proto,
+    rlscope::CudaEventType cuda_event_type,
+    rlscope::MachineDevsEventsProto* proto,
     const std::string& device_name, const RecordType& rec) {
   bool has_dev_events = proto->dev_events().find(device_name) != proto->dev_events().end();
   auto &dev_events = (*proto->mutable_dev_events())[device_name];
@@ -128,8 +128,8 @@ static void _AddEvent(
   event->set_duration_us(duration_us);
 }
 
-std::unique_ptr<iml::MachineDevsEventsProto> CUDAActivityProfilerState::AsProto() {
-  std::unique_ptr<iml::MachineDevsEventsProto> proto(new iml::MachineDevsEventsProto);
+std::unique_ptr<rlscope::MachineDevsEventsProto> CUDAActivityProfilerState::AsProto() {
+  std::unique_ptr<rlscope::MachineDevsEventsProto> proto(new rlscope::MachineDevsEventsProto);
 
   proto->set_process_name(_process_name);
   proto->set_machine_name(_machine_name);
@@ -146,13 +146,13 @@ std::unique_ptr<iml::MachineDevsEventsProto> CUDAActivityProfilerState::AsProto(
   for (auto const& rec : kernel_records_) {
     auto device_name = rlscope::StrCat(stream_device, "all");
     // TODO: TF also saves this under "${stream_device}:${rec.stream_id}"
-    _AddEvent<KernelRecord>(*this, iml::CudaEventType::KERNEL, proto.get(), device_name, rec);
+    _AddEvent<KernelRecord>(*this, rlscope::CudaEventType::KERNEL, proto.get(), device_name, rec);
   }
 
   for (auto const& rec : memcpy_records_) {
     auto device_name = rlscope::StrCat(stream_device, "all");
     // TODO: TF also saves this under "${stream_device}:${rec.stream_id}"
-    _AddEvent<MemcpyRecord>(*this, iml::CudaEventType::MEMCPY, proto.get(), memcpy_device, rec);
+    _AddEvent<MemcpyRecord>(*this, rlscope::CudaEventType::MEMCPY, proto.get(), memcpy_device, rec);
   }
 
   return proto;

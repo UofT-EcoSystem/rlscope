@@ -10,7 +10,7 @@ fi
 PYTHONPATH=${PYTHONPATH:-}
 
 # From setup.sh
-_iml_build_suffix() {
+_rlscope_build_suffix() {
   local cuda_version="$1"
   shift 1
   # e.g. IML_BUILD_SUFFIX="_cuda_10_2"
@@ -115,8 +115,8 @@ _add_pyenv() {
 (
 
 IML_CUDA_VERSION=${IML_CUDA_VERSION:-10.1}
-# Only add "_cuda_10_1" suffix to iml build directory.
-IML_BUILD_SUFFIX="$(_iml_build_suffix ${IML_CUDA_VERSION})"
+# Only add "_cuda_10_1" suffix to rlscope build directory.
+IML_BUILD_SUFFIX="$(_rlscope_build_suffix ${IML_CUDA_VERSION})"
 IML_BUILD_DIR="$(cmake_build_dir "$ROOT")"
 unset IML_BUILD_SUFFIX
 

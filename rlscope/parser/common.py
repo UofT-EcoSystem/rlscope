@@ -7,7 +7,7 @@ import shlex
 import csv
 import decimal
 import json
-from rlscope.profiler.iml_logging import logger
+from rlscope.profiler.rlscope_logging import logger
 import os
 import pickle
 import pprint
@@ -27,7 +27,7 @@ import psutil
 import pwd
 from rlscope.protobuf.pyprof_pb2 import CategoryEventsProto, MachineUtilization, ProcessMetadata, IncrementalTrainingProgress
 from rlscope.protobuf.unit_test_pb2 import IMLUnitTestOnce, IMLUnitTestMultiple
-from rlscope.protobuf.iml_prof_pb2 import CUDAAPIPhaseStatsProto, MachineDevsEventsProto, OpStackProto
+from rlscope.protobuf.rlscope_prof_pb2 import CUDAAPIPhaseStatsProto, MachineDevsEventsProto, OpStackProto
 from tqdm import tqdm as tqdm_progress
 
 from rlscope import py_config
@@ -1250,15 +1250,15 @@ def get_unit_test_multiple_path(directory, trace_id, bench_name):
     ))
     return ret
 
-def get_iml_config_path(out_dir, bench_name=None):
-    ret = _j(out_dir, "iml_config{bench}.json".format(
+def get_rlscope_config_path(out_dir, bench_name=None):
+    ret = _j(out_dir, "rlscope_config{bench}.json".format(
         bench=bench_suffix(bench_name),
     ))
     return ret
 
-def is_iml_config_file(path):
+def is_rlscope_config_file(path):
     base = _b(path)
-    m = re.search(r'iml_config{bench}.json$'.format(
+    m = re.search(r'rlscope_config{bench}.json$'.format(
         bench=BENCH_SUFFIX_RE,
     ), base)
     return m

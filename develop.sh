@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
-# Run this script to install a "development" version of iml.
-# Do this to allow frequent modification of iml repo without reinstalling the .whl.
+# Run this script to install a "development" version of rlscope.
+# Do this to allow frequent modification of rlscope repo without reinstalling the .whl.
 #
 set -e
 set -x

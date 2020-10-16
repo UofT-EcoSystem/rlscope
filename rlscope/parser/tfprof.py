@@ -1,4 +1,4 @@
-from rlscope.profiler.iml_logging import logger
+from rlscope.profiler.rlscope_logging import logger
 import itertools
 from collections import namedtuple
 import functools
@@ -2520,10 +2520,10 @@ class OverlapTypeInterface:
         #
         #     Whether to "subtract" overhead or not.
         #     visible_overhead:
-        #       make profiling overhead visible during iml-drill.
+        #       make profiling overhead visible during rlscope-drill.
         #       Don't subtract; count overhead as extra CPU time.
         #     invisible_overhead:
-        #       If false (and calibration files are given), then subtract overhead making it 'invisible' in iml-drill.
+        #       If false (and calibration files are given), then subtract overhead making it 'invisible' in rlscope-drill.
         #       Subtract; remove CPU-time that is due to CPU overhead.
         #
         #     visible_overhead is determined by a rls-run flag.
@@ -3734,7 +3734,7 @@ Environment variables that effect unit-tests:
             
 Common usage:
 
-    # cd to root directory of iml repo checkout.
+    # cd to root directory of rlscope repo checkout.
     $ cd ~/clone/iml
 
     # To run numbaified code with JIT compilation enabled:

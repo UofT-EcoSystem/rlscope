@@ -221,7 +221,7 @@ TimeUsec StartOperationTimeUsec(const TraceFileMeta& meta) {
 //    _event_flattener.ProcessUntilFinish(events, add_op, skip_func);
 //  }
 //
-////  EventFlattener<iml::Event>::EachOpEvent(
+////  EventFlattener<rlscope::Event>::EachOpEvent(
 ////      events,
 ////      [&process, count] (const Operation& op, TimeUsec start_us, TimeUsec end_us) {
 ////        auto category_key = CategoryKey::FromOpEvent(process, op);
@@ -352,8 +352,8 @@ MyStatus CategoryEventsParser::_AppendCategoryOperation(
 
 
 
-MyStatus FindRLSFiles(const std::string& iml_directory, std::list<std::string>* paths) {
-  return RecursiveFindFiles(paths, iml_directory, [] (const boost::filesystem::path& bpath) {
+MyStatus FindRLSFiles(const std::string& rlscope_directory, std::list<std::string>* paths) {
+  return RecursiveFindFiles(paths, rlscope_directory, [] (const boost::filesystem::path& bpath) {
     if (!boost::filesystem::is_regular_file(bpath)) {
       return false;
     }
@@ -915,7 +915,7 @@ MyStatus TraceFileWalker::TraceMetas(RLSFileType file_type, const Machine& machi
 MyStatus TraceFileWalker::Init() {
   MyStatus status = MyStatus::OK();
   std::list<std::string> paths;
-  status = FindRLSFiles(_iml_directory, &paths);
+  status = FindRLSFiles(_rlscope_directory, &paths);
   IF_BAD_STATUS_RETURN(status);
   for (auto const& path : paths) {
     if (SHOULD_DEBUG(FEATURE_LOAD_DATA)) {

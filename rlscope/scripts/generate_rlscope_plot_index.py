@@ -1,4 +1,4 @@
-from rlscope.profiler.iml_logging import logger
+from rlscope.profiler.rlscope_logging import logger
 import signal
 import time
 import subprocess
@@ -249,10 +249,10 @@ def mkds(dic, *keys):
         dic = mkd(dic, key)
     return dic
 
-from rlscope.profiler.iml_logging import logger
+from rlscope.profiler.rlscope_logging import logger
 def main():
     parser = argparse.ArgumentParser("Generate index of *.venn_js.json files.")
-    parser.add_argument('--iml-directory',
+    parser.add_argument('--rlscope-directory',
                         required=True,
                         help=textwrap.dedent("""
     Look for *.venn_js.json rooted at this directory.
@@ -292,12 +292,12 @@ def main():
     args = parser.parse_args()
 
     if args.out_dir is None:
-        args.out_dir = args.iml_directory
+        args.out_dir = args.rlscope_directory
 
 
     try:
         obj = GeneratePlotIndex(
-            directory=args.iml_directory,
+            directory=args.rlscope_directory,
             out_dir=args.out_dir,
             basename=args.basename,
             debug=args.debug,

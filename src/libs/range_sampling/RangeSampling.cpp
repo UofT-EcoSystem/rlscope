@@ -540,8 +540,8 @@ MyStatus ConfigData::_InitConfigImage()
   return MyStatus::OK();
 }
 
-std::unique_ptr<iml::ConfigDataProto> ConfigData::AsProto() {
-  std::unique_ptr<iml::ConfigDataProto> proto(new iml::ConfigDataProto);
+std::unique_ptr<rlscope::ConfigDataProto> ConfigData::AsProto() {
+  std::unique_ptr<rlscope::ConfigDataProto> proto(new rlscope::ConfigDataProto);
   proto->set_data(configImage.data(), configImage.size());
   return proto;
 }
@@ -702,8 +702,8 @@ bool GPUHwCounterSamplerState::CanDump() const {
 //               _directory != ""
 }
 
-std::unique_ptr<iml::CounterDataProto> GPUHwCounterSamplerState::AsProto() {
-  std::unique_ptr<iml::CounterDataProto> proto(new iml::CounterDataProto);
+std::unique_ptr<rlscope::CounterDataProto> GPUHwCounterSamplerState::AsProto() {
+  std::unique_ptr<rlscope::CounterDataProto> proto(new rlscope::CounterDataProto);
   proto->set_data(counter_data.counterDataImage.data(), counter_data.counterDataImage.size());
   proto->set_start_time_us(start_profiling_t.time_since_epoch().count());
   assert(start_profiling_t <= stop_profiling_t);
@@ -888,7 +888,7 @@ MyStatus GPUHwCounterSampler::SetMaxOperations(const std::string &operation, int
   }
   if (_mode == PROFILE) {
     std::stringstream ss;
-    ss << "You must call iml.prof.set_max_operations(\"" << operation << "\", " << num_pushes << ") BEFORE you begin profiling.";
+    ss << "You must call rlscope.prof.set_max_operations(\"" << operation << "\", " << num_pushes << ") BEFORE you begin profiling.";
     return MyStatus(error::INVALID_ARGUMENT, ss.str());
   }
   _range_tree.SetMaxOperations(operation, num_pushes);
@@ -1451,8 +1451,8 @@ MyStatus GPUHwCounterSampler::_Dump(bool sync) {
   return MyStatus::OK();
 }
 
-std::unique_ptr<iml::GPUHwCounterSampleProto> GPUHwCounterSamplerProtoState::AsProto() {
-  std::unique_ptr<iml::GPUHwCounterSampleProto> proto(new iml::GPUHwCounterSampleProto);
+std::unique_ptr<rlscope::GPUHwCounterSampleProto> GPUHwCounterSamplerProtoState::AsProto() {
+  std::unique_ptr<rlscope::GPUHwCounterSampleProto> proto(new rlscope::GPUHwCounterSampleProto);
 
   auto* config_data_proto = proto->mutable_config_data();
   {
@@ -1526,7 +1526,7 @@ MyStatus GPUHwCounterSampler::RecordSample() {
   return MyStatus::OK();
 }
 
-MyStatus GPUHwCounterSampler::PrintCSV(std::ostream &out, const iml::GPUHwCounterSampleProto& proto, bool& printed_header) {
+MyStatus GPUHwCounterSampler::PrintCSV(std::ostream &out, const rlscope::GPUHwCounterSampleProto& proto, bool& printed_header) {
   MyStatus ret = MyStatus::OK();
   size_t sample_idx = 0;
   const std::vector<std::string> extra_headers{"start_time_us", "duration_us", "num_passes"};
@@ -1590,7 +1590,7 @@ MyStatus GPUHwCounterSampler::PrintCSV(std::ostream &out, bool& printed_header) 
   }
 
   for (const auto& path : paths) {
-    iml::GPUHwCounterSampleProto proto;
+    rlscope::GPUHwCounterSampleProto proto;
     {
       std::fstream input(path, std::ios::in | std::ios::binary);
       if (!proto.ParseFromIstream(&input)) {
@@ -1673,7 +1673,7 @@ void RangeTree::StartPass(bool update_stats) {
   cur_num_operations.clear();
 
   if (update_stats) {
-    // CONFIG mode: add all the iml.prof.set_max_operation(...) counts.
+    // CONFIG mode: add all the rlscope.prof.set_max_operation(...) counts.
     for (const auto& pair : max_operations) {
       cur_num_ranges += pair.second;
     }
@@ -1748,7 +1748,7 @@ MyStatus RangeTree::Push(const std::string& name, bool update_stats) {
     this->PrintStacks(ss, 1);
 
     if (cur_num_operations.size() > 0) {
-      ss << "iml.prof.operation(...) call counts:\n";
+      ss << "rlscope.prof.operation(...) call counts:\n";
       size_t i = 0;
       for (const auto& pair : cur_num_operations) {
         i += 1;
@@ -1758,7 +1758,7 @@ MyStatus RangeTree::Push(const std::string& name, bool update_stats) {
         ss << "[" << i << "] " << operation << " = " << num_pushes << "\n";
       }
     }
-    ss << "Consider using iml.prof.set_max_operations(operation, max_count) to avoid this error\n";
+    ss << "Consider using rlscope.prof.set_max_operations(operation, max_count) to avoid this error\n";
 
     return MyStatus(error::INVALID_ARGUMENT, ss.str());
   }
@@ -1832,12 +1832,12 @@ MyStatus RangeTree::_UpdateStatsOnPush(const std::string &operation, bool was_in
     if (cur_num_operations[operation] > max_ops) {
       std::stringstream err_ss;
       err_ss << "Saw Push(operation=\"" << operation << "\") called too many times; expected at most "
-             << max_ops << " based on earlier iml.prof.set_max_operations(...) API call";
+             << max_ops << " based on earlier rlscope.prof.set_max_operations(...) API call";
       auto my_status = MyStatus(rlscope::error::INVALID_ARGUMENT, err_ss.str());
       return my_status;
     }
   } else {
-    // ONLY increase num_ranges for operations we haven't set a maximum push-count on via iml.prof.set_max_operations(...),
+    // ONLY increase num_ranges for operations we haven't set a maximum push-count on via rlscope.prof.set_max_operations(...),
     // since we've already counted them in RangeTree::StartPass(update_stats=true) during config pass.
     cur_num_ranges += 1;
     stats.max_num_ranges = std::max(cur_num_ranges, stats.max_num_ranges);

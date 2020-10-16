@@ -30,8 +30,8 @@ fi
 
 ROOT="$(readlink -f $(dirname "$0"))"
 
-## Only add "_cuda_10_1" suffix to iml build directory.
-#IML_BUILD_SUFFIX="$(_iml_build_suffix ${IML_CUDA_VERSION})"
+## Only add "_cuda_10_1" suffix to rlscope build directory.
+#IML_BUILD_SUFFIX="$(_rlscope_build_suffix ${IML_CUDA_VERSION})"
 #IML_BUILD_DIR="$(cmake_build_dir "$ROOT")"
 #unset IML_BUILD_SUFFIX
 
@@ -692,9 +692,9 @@ setup_pip_package() {
   local build_dir=$(cmake_build_dir "$ROOT")
   if [ "$SKIP_CPACK" != 'yes' ]; then
     cmake_make "$ROOT" package
-    local cpp_pkg=$(ls $build_dir/iml*.tar.gz)
+    local cpp_pkg=$(ls $build_dir/rlscope*.tar.gz)
     if [ "$cpp_pkg" = "" ]; then
-      echo "ERROR: setup_pip_package failed; couldn't find CPack archive at $build_dir/iml*.tar.gz"
+      echo "ERROR: setup_pip_package failed; couldn't find CPack archive at $build_dir/rlscope*.tar.gz"
       return 1
     fi
     # Cleanup anything from previously built packages.
@@ -750,7 +750,7 @@ setup_project_cuda_10_1() {
   )
 }
 
-_iml_build_suffix() {
+_rlscope_build_suffix() {
   local cuda_version="$1"
   shift 1
   # e.g. IML_BUILD_SUFFIX="_cuda_10_2"
@@ -760,7 +760,7 @@ _iml_build_suffix() {
 _setup_project_with_cuda() {
   (
   set -u
-  IML_BUILD_SUFFIX="$(_iml_build_suffix ${cuda_version})"
+  IML_BUILD_SUFFIX="$(_rlscope_build_suffix ${cuda_version})"
   CUDA_TOOLKIT_ROOT_DIR=/usr/local/cuda-${cuda_version}
   CMAKE_OPTS=(-DCMAKE_BUILD_TYPE=Debug -DCUDA_TOOLKIT_ROOT_DIR=${CUDA_TOOLKIT_ROOT_DIR})
   CMAKE_VERBOSE=yes

@@ -11,7 +11,7 @@ from os import environ as ENV
 
 import cpuinfo
 
-from rlscope.profiler.iml_logging import logger
+from rlscope.profiler.rlscope_logging import logger
 
 def args_to_cmdline(parser, args,
                     argv=None,
@@ -87,12 +87,12 @@ def args_to_cmdline(parser, args,
         if py_script_idx is None:
             # No python executable; looks more like this:
             #
-            # ['iml-test',
+            # ['rlscope-test',
             #      '--train-script',
             #      'run_baselines.sh',
             #      '--test-name',
             #      'PongNoFrameskip-v4/docker',
-            #      '--iml-directory',
+            #      '--rlscope-directory',
             #      '/home/james/clone/baselines/output']
             py_script_idx = 0
 
@@ -225,17 +225,17 @@ def gather_argv(argv, sep='--', ignore_opts=None):
 
     $ rls-prof [options]         cmd_exec ...
                ---------         ------------
-               iml_prof_argv     cmd_argv
+               rlscope_prof_argv     cmd_argv
 
     Split sys.argv into:
-    - iml_prof_argv: Arguments that rls-prof should handle.
+    - rlscope_prof_argv: Arguments that rls-prof should handle.
     - cmd_argv: Arguments that the profiled script should handle.
 
     :param argv:
         sys.argv
     :return:
     """
-    iml_prof_argv = []
+    rlscope_prof_argv = []
     i = 0
     def is_executable(opt):
         return shutil.which(opt) is not None
@@ -251,10 +251,10 @@ def gather_argv(argv, sep='--', ignore_opts=None):
         elif is_executable(argv[i]):
             break
 
-        iml_prof_argv.append(argv[i])
+        rlscope_prof_argv.append(argv[i])
         i += 1
     cmd_argv = argv[i:]
-    return iml_prof_argv, cmd_argv
+    return rlscope_prof_argv, cmd_argv
 
 def error(msg, parser=None):
     if parser is not None:

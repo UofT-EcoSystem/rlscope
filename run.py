@@ -17,12 +17,12 @@ import getpass
 import os
 
 import logging
-from rlscope.profiler import iml_logging
+from rlscope.profiler import rlscope_logging
 
 from rlscope.parser.common import *
 
 def main():
-    iml_logging.setup_logging()
+    rlscope_logging.setup_logging()
     parser = argparse.ArgumentParser(textwrap.dedent("""
     Test profiling scripts to make sure we correctly measure time spent in Python/C++/GPU.
     """))

@@ -1,4 +1,4 @@
-from rlscope.profiler.iml_logging import logger
+from rlscope.profiler.rlscope_logging import logger
 import copy
 import itertools
 import argparse
@@ -18,7 +18,7 @@ from rlscope.profiler.util import pprint_msg
 from rlscope.parser import stacked_bar_plots
 from rlscope.parser.db import SQLCategoryTimesReader, sql_input_path
 
-from rlscope.profiler.iml_logging import logger
+from rlscope.profiler.rlscope_logging import logger
 
 class TrainingProgressParser:
     """
@@ -51,7 +51,7 @@ class TrainingProgressParser:
             ]
 
         #
-        # Keep the very last call to iml.prof.report_progress(...).
+        # Keep the very last call to rlscope.prof.report_progress(...).
         # We will use this to compare "iterations-per-second".
         #
         keep_rows = []
@@ -67,7 +67,7 @@ class TrainingProgressParser:
     """
     def __init__(self,
                  directory,
-                 iml_directories,
+                 rlscope_directories,
                  ignore_phase=False,
                  algo_env_from_dir=False,
                  baseline_config=None,
@@ -79,7 +79,7 @@ class TrainingProgressParser:
         :param debug:
         """
         self.directory = directory
-        self.iml_directories = iml_directories
+        self.rlscope_directories = rlscope_directories
         self.ignore_phase = ignore_phase
         self.algo_env_from_dir = algo_env_from_dir
         self.baseline_config = baseline_config
@@ -121,11 +121,11 @@ class TrainingProgressParser:
     def maybe_add_algo_env(self, path):
         assert is_training_progress_file(path)
 
-        iml_directory = _d(path)
+        rlscope_directory = _d(path)
 
         if self.algo_env_from_dir:
             return self.add_config_algo_env_from_dir(path)
-        if not _e(experiment.experiment_config_path(iml_directory)):
+        if not _e(experiment.experiment_config_path(rlscope_directory)):
             return self.add_experiment_config(path)
 
         # Not sure what (algo, env) is; don't add those columns.
@@ -133,14 +133,14 @@ class TrainingProgressParser:
 
     def add_config_algo_env_from_dir(self, path):
         assert is_training_progress_file(path)
-        iml_dir = _d(path)
+        rlscope_dir = _d(path)
         # Path looks like:
-        # '$HOME/clone/iml/output/iml_bench/all.debug/config_uninstrumented/a2c/PongNoFrameskip-v4/process/a2c_PongNoFrameskip-v4/phase/default_phase/training_progress.trace_3.proto'
+        # '$HOME/clone/iml/output/rlscope_bench/all.debug/config_uninstrumented/a2c/PongNoFrameskip-v4/process/a2c_PongNoFrameskip-v4/phase/default_phase/training_progress.trace_3.proto'
         #  - $HOME
         #  - clone
-        #  - iml
+        #  - rlscope
         #  - output
-        #  - iml_bench
+        #  - rlscope_bench
         #  - all.debug
         # -7 - config_uninstrumented
         # -6 - a2c
@@ -150,7 +150,7 @@ class TrainingProgressParser:
         # -2 - phase
         # -1 - default_phase
 
-        norm_path = os.path.normpath(iml_dir)
+        norm_path = os.path.normpath(rlscope_dir)
         components = norm_path.split(os.sep)
         env_id = components[-5]
         algo = components[-6]
@@ -189,7 +189,7 @@ class TrainingProgressParser:
 
     def run(self):
         dfs = []
-        for directory in self.iml_directories:
+        for directory in self.rlscope_directories:
             df_reader = TrainingProgressDataframeReader(
                 directory,
                 add_fields=self.maybe_add_algo_env,

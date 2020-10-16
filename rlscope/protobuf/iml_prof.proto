@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-package iml;
+package rlscope;
 
 enum CudaEventType {
     UNKNOWN = 0;

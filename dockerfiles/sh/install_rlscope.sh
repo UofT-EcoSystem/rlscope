@@ -17,7 +17,7 @@ _upgrade_pip
 
 if [ "${IML_DIR}" = "" ]; then
     # Install directly from git repo.
-    _do pip install git+https://github.com/UofT-EcoSystem/iml.git
+    _do pip install git+https://github.com/UofT-EcoSystem/rlscope.git
 else
     # Install from local checkout of repo.
     _do cd "${IML_DIR}"
@@ -26,7 +26,7 @@ fi
 
 if [ "${IML_DRILL_DIR}" = "" ]; then
     # Install directly from git repo.
-    _do pip install git+https://github.com/jagleeso/iml-drill.git
+    _do pip install git+https://github.com/jagleeso/rlscope-drill.git
 else
     # Install from local checkout of repo.
     _do cd "${IML_DRILL_DIR}"

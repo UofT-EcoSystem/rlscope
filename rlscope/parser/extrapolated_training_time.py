@@ -1,4 +1,4 @@
-from rlscope.profiler.iml_logging import logger
+from rlscope.profiler.rlscope_logging import logger
 import copy
 import itertools
 import argparse
@@ -18,7 +18,7 @@ from rlscope.parser.dataframe import TrainingProgressDataframeReader
 from rlscope.parser import stacked_bar_plots
 from rlscope.parser.db import SQLCategoryTimesReader, sql_input_path
 
-from rlscope.profiler.iml_logging import logger
+from rlscope.profiler.rlscope_logging import logger
 
 class ExtrapolatedTrainingTimeParser:
     def __init__(self,

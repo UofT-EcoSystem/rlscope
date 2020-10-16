@@ -82,11 +82,11 @@ Globals::Globals() {
 }
 
 std::string Globals::IMLConfigPath() const {
-  auto iml_config_path = boost::filesystem::path(_directory) /
+  auto rlscope_config_path = boost::filesystem::path(_directory) /
               "process" / _process_name /
               "phase" / _phase_name /
-              "iml_config.json";
-  return iml_config_path.string();
+              "rlscope_config.json";
+  return rlscope_config_path.string();
 }
 
 bool is_machine_util_file(const boost::filesystem::path& path) {
@@ -211,7 +211,7 @@ void Globals::StartUtilSampler() {
   bp::ipstream pipe_stream;
   auto util_sampler_exe = bp::search_path("rls-util-sampler");
   if (util_sampler_exe == "") {
-    LOG(INFO) << "Couldn't find path to rls-util-sampler on $PATH; have you installed the iml python package and activated your environment?";
+    LOG(INFO) << "Couldn't find path to rls-util-sampler on $PATH; have you installed the rlscope python package and activated your environment?";
     exit(EXIT_FAILURE);
   }
   auto pid = getpid();
@@ -219,19 +219,19 @@ void Globals::StartUtilSampler() {
 //    child c("gcc --version", env, std_out > pipe_stream);
   std::vector<std::string> cmd_list{
       util_sampler_exe.string(),
-      "--iml-root-pid", pid_str,
-      "--iml-directory", _directory,
+      "--rlscope-root-pid", pid_str,
+      "--rlscope-directory", _directory,
   };
   if (env_is_yes("IML_DEBUG")) {
-    cmd_list.push_back("--iml-debug");
+    cmd_list.push_back("--rlscope-debug");
   }
   auto cmd_str = boost::algorithm::join(cmd_list, " ");
 
   _util_sampler = bp::child(
       cmd_list,
 //      util_sampler_exe,
-//      "--iml-root-pid", pid_str,
-//      "--iml-directory", _directory,
+//      "--rlscope-root-pid", pid_str,
+//      "--rlscope-directory", _directory,
       env);
   LOG(INFO) << "Start GPU utilization sampler " << util_sampler_exe << " @ pid=" << pid;
   LOG(INFO) << "  $ " << cmd_str;

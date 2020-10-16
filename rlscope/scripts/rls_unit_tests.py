@@ -10,7 +10,7 @@ import contextlib
 
 from os.path import join as _j, abspath as _a, exists as _e, dirname as _d, basename as _b
 
-from rlscope.profiler.iml_logging import logger
+from rlscope.profiler.rlscope_logging import logger
 from rlscope.profiler.util import print_cmd
 
 from rlscope import py_config

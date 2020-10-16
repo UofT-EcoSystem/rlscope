@@ -28,7 +28,7 @@
 
 namespace rlscope {
 
-using namespace iml;
+using namespace rlscope;
 
 //#define VECTOR_FOR_EACH_SAMPLE(data, list_member)
 //    data->list_member.resize(list_member.size());

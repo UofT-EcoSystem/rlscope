@@ -24,7 +24,7 @@ _check_STABLE_BASELINES_DIR
 _check_RL_BASELINES_ZOO_DIR
 
 _check_tensorflow
-_check_iml
+_check_rlscope
 
 setup_display() {
     local display="$1"
@@ -83,9 +83,9 @@ echo "> Training ALGO = $ALGO, ENV_ID = $ENV_ID, OUTPUT_DIR = $OUTPUT_DIR"
 cd $RL_BASELINES_ZOO_DIR
 
 # For real results:
-#    --iml-trace-time-sec $((2*60))
+#    --rlscope-trace-time-sec $((2*60))
 # For quick debugging:
-#    --iml-trace-time-sec $((40))
+#    --rlscope-trace-time-sec $((40))
 
 #if [ "$DEBUG" == 'yes' ]; then
 ##    IML_TRACE_TIME_SEC=$((40))
@@ -93,7 +93,7 @@ cd $RL_BASELINES_ZOO_DIR
 #elif [ "$IML_TRACE_TIME_SEC" == "" ]; then
 #    IML_TRACE_TIME_SEC=$((2*60))
 #fi
-#    --iml-trace-time-sec $IML_TRACE_TIME_SEC \
+#    --rlscope-trace-time-sec $IML_TRACE_TIME_SEC \
 
 if [ "$DEBUG" == 'yes' ]; then
     PYTHON=(python -m ipdb)
@@ -128,8 +128,8 @@ _do $VALGRIND $IML_PROF "${NVPROF[@]}" "${PYTHON[@]}" $RL_BASELINES_ZOO_DIR/trai
     --env $ENV_ID \
     --log-folder $OUTPUT_DIR \
     --log-interval 1 \
-    --iml-delay \
-    --iml-training-progress \
+    --rlscope-delay \
+    --rlscope-training-progress \
     "$@"
 # Sanity check that train.py has exited,
 # for those weird runs where rls-bench hangs unexpectedly during p.stdout.readline().

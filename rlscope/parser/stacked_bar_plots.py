@@ -1,4 +1,4 @@
-from rlscope.profiler.iml_logging import logger
+from rlscope.profiler.rlscope_logging import logger
 import argparse
 import subprocess
 import re
@@ -36,8 +36,8 @@ from rlscope.parser.db import SQLCategoryTimesReader, sql_get_source_files, sql_
 from rlscope.parser.plot_index import _DataIndex
 from rlscope.parser import plot_index
 from rlscope.parser.overlap_result import from_js, CategoryKey as CategoryKeyJS
-from rlscope.parser.dataframe import VennData, get_training_durations_df, read_iml_config_metadata, get_total_timesteps, get_end_num_timesteps, IMLConfig, extrap_total_training_time
-from rlscope.parser import dataframe as iml_dataframe
+from rlscope.parser.dataframe import VennData, get_training_durations_df, read_rlscope_config_metadata, get_total_timesteps, get_end_num_timesteps, IMLConfig, extrap_total_training_time
+from rlscope.parser import dataframe as rlscope_dataframe
 from rlscope.parser.plot import LegendMaker, HATCH_STYLES, HATCH_STYLE_EMPTY, Y_LABEL_TRAINING_TIME_SEC
 
 from rlscope.parser.common import *
@@ -84,8 +84,8 @@ class OverlapStackedBarPlot:
     SUPPORTED_Y_TYPES = ['percent', 'seconds']
 
     def __init__(self,
-                 iml_directories,
-                 unins_iml_directories,
+                 rlscope_directories,
+                 unins_rlscope_directories,
                  directory,
                  overlap_type,
                  resource_overlap=None,
@@ -141,16 +141,16 @@ class OverlapStackedBarPlot:
         assert overlap_type in OverlapStackedBarPlot.SUPPORTED_OVERLAP_TYPES
         assert x_type in OverlapStackedBarPlot.SUPPORTED_X_TYPES
         assert y_type in OverlapStackedBarPlot.SUPPORTED_Y_TYPES
-        if len(iml_directories) == 0:
-            raise ValueError("OverlapStackedBarPlot expects at least 1 trace-file directory for iml_directories")
+        if len(rlscope_directories) == 0:
+            raise ValueError("OverlapStackedBarPlot expects at least 1 trace-file directory for rlscope_directories")
         self._initialized = False
-        self.iml_directories = iml_directories
-        self.unins_iml_directories = unins_iml_directories
+        self.rlscope_directories = rlscope_directories
+        self.unins_rlscope_directories = unins_rlscope_directories
         logger.info("{klass}:\n{msg}".format(
             klass=self.__class__.__name__,
             msg=pprint_msg({
-                'iml_directories': self.iml_directories,
-                'unins_iml_directories': self.unins_iml_directories,
+                'rlscope_directories': self.rlscope_directories,
+                'unins_rlscope_directories': self.unins_rlscope_directories,
             })))
         self.training_time = training_time
         self.extrapolated_training_time = extrapolated_training_time
@@ -227,8 +227,8 @@ class OverlapStackedBarPlot:
     def _get_algo_or_env(self, algo_or_env):
         assert algo_or_env in {'env', 'algo'}
 
-        def _get_value(iml_dir):
-            algo, env = self._get_algo_env_from_dir(iml_dir)
+        def _get_value(rlscope_dir):
+            algo, env = self._get_algo_env_from_dir(rlscope_dir)
             if algo_or_env == 'algo':
                 value = algo
             else:
@@ -241,14 +241,14 @@ class OverlapStackedBarPlot:
             field = 'environment'
 
         values = set()
-        for iml_dir in self.iml_directories:
-            value = _get_value(iml_dir)
+        for rlscope_dir in self.rlscope_directories:
+            value = _get_value(rlscope_dir)
             if len(values) == 1 and value not in values:
-                raise RuntimeError("Expected {field}={expect} but saw {field}={saw} for --iml-directory {dir}".format(
+                raise RuntimeError("Expected {field}={expect} but saw {field}={saw} for --rlscope-directory {dir}".format(
                     field=field,
                     expect=list(values)[0],
                     saw=value,
-                    dir=iml_dir,
+                    dir=rlscope_dir,
                 ))
             values.add(value)
         assert len(values) == 1
@@ -312,8 +312,8 @@ class OverlapStackedBarPlot:
 
         return title
 
-    # def _get_algo_env_id(self, iml_dir):
-    #     sql_reader = self.sql_readers[iml_dir]
+    # def _get_algo_env_id(self, rlscope_dir):
+    #     sql_reader = self.sql_readers[rlscope_dir]
     #     procs = sql_reader.process_names()
     #     assert len(procs) == 1
     #     proc = procs[0]
@@ -323,9 +323,9 @@ class OverlapStackedBarPlot:
     #     env_id = self._reduce_env(env_id)
     #     return (algo, env_id)
 
-    def _get_algo_env_from_dir(self, iml_dir):
+    def _get_algo_env_from_dir(self, rlscope_dir):
         # .../<algo>/<env_id>
-        path = os.path.normpath(iml_dir)
+        path = os.path.normpath(rlscope_dir)
         components = path.split(os.sep)
         env_id = components[-1]
         algo = components[-2]
@@ -348,7 +348,7 @@ class OverlapStackedBarPlot:
         new_env = re.sub(r'MountainCarContinuous-v0', 'MountainCar-v0', new_env)
         return new_env
 
-    def get_index(self, iml_dir):
+    def get_index(self, rlscope_dir):
 
         def _del_module(import_path):
             if import_path in sys.modules:
@@ -361,7 +361,7 @@ class OverlapStackedBarPlot:
 
         _del_index_module()
 
-        sys.path.insert(0, iml_dir)
+        sys.path.insert(0, rlscope_dir)
         rlscope_plot_index = importlib.import_module("rlscope_plot_index")
         index = rlscope_plot_index.DataIndex
         del sys.path[0]
@@ -370,22 +370,22 @@ class OverlapStackedBarPlot:
 
         # Check that env_id's match; otherwise, warn the user.
         # This can happen when generating trace files on one machine, and changing the directory structure on another.
-        if _b(iml_dir) != _b(index.directory):
-            logger.warning("iml_dir={iml_dir} != index.directory={index_dir}; make sure these paths use the same (algo, env)!".format(
-                iml_dir=iml_dir,
+        if _b(rlscope_dir) != _b(index.directory):
+            logger.warning("rlscope_dir={rlscope_dir} != index.directory={index_dir}; make sure these paths use the same (algo, env)!".format(
+                rlscope_dir=rlscope_dir,
                 index_dir=index.directory,
             ))
 
         # return index
 
         # NOTE: if trace-files were processed on a different machine, the _DataIndex.directory will be different;
-        # handle this by re-creating the _DataIndex with iml_dir.
-        # my_index = _DataIndex(index.index, iml_dir, debug=self.debug)
-        my_index = _DataIndex(index.index, iml_dir)
+        # handle this by re-creating the _DataIndex with rlscope_dir.
+        # my_index = _DataIndex(index.index, rlscope_dir, debug=self.debug)
+        my_index = _DataIndex(index.index, rlscope_dir)
         return my_index
 
     def read_unins_df(self):
-        if len(self.unins_iml_directories) == 0:
+        if len(self.unins_rlscope_directories) == 0:
             return pd.DataFrame({
                 'unins_total_training_time_us': [],
                 'training_duration_us': [],
@@ -394,7 +394,7 @@ class OverlapStackedBarPlot:
                 'env': [],
             })
         unins_df = pd.concat(get_training_durations_df(
-            self.unins_iml_directories,
+            self.unins_rlscope_directories,
             debug=self.debug,
             debug_single_thread=self.debug_single_thread))
         unins_df['unins_total_training_time_us'] = unins_df['training_duration_us']
@@ -404,16 +404,16 @@ class OverlapStackedBarPlot:
         return unins_df
 
     def _add_repetition(self, df):
-        def _repetition(iml_directory):
-            m = re.search(r'repetition_(?P<repetition>\d+)', os.path.basename(iml_directory))
+        def _repetition(rlscope_directory):
+            m = re.search(r'repetition_(?P<repetition>\d+)', os.path.basename(rlscope_directory))
             if m:
                 return int(m.group('repetition'))
             return None
-        df['repetition'] = df['iml_directory'].apply(_repetition)
+        df['repetition'] = df['rlscope_directory'].apply(_repetition)
 
     def _init_directories(self):
         """
-        Initialize SQL / DataIndex needed for reading plot-data from rls-run'd --iml-directory's.
+        Initialize SQL / DataIndex needed for reading plot-data from rls-run'd --rlscope-directory's.
 
         :return:
         """
@@ -423,10 +423,10 @@ class OverlapStackedBarPlot:
         self.data_index = dict()
         # self.sql_readers = dict()
 
-        for iml_dir in self.iml_directories:
-            # self.sql_readers[iml_dir] = SQLCategoryTimesReader(self.db_path(iml_dir), host=self.host, user=self.user, password=self.password)
-            index = self.get_index(iml_dir)
-            self.data_index[iml_dir] = index
+        for rlscope_dir in self.rlscope_directories:
+            # self.sql_readers[rlscope_dir] = SQLCategoryTimesReader(self.db_path(rlscope_dir), host=self.host, user=self.user, password=self.password)
+            index = self.get_index(rlscope_dir)
+            self.data_index[rlscope_dir] = index
 
         self._initialized = True
 
@@ -465,24 +465,24 @@ class OverlapStackedBarPlot:
             # selector[field_name] = choices[0]
 
     def each_vd(self):
-        for iml_dir in self.iml_directories:
-            idx = self.data_index[iml_dir]
+        for rlscope_dir in self.rlscope_directories:
+            idx = self.data_index[rlscope_dir]
 
-            # If iml_config.json is present in 'algo' and 'env' are defined, get them from there.
-            # Else, guess algo/env from directory path: assume iml_dir looks like <algo>/<env>
+            # If rlscope_config.json is present in 'algo' and 'env' are defined, get them from there.
+            # Else, guess algo/env from directory path: assume rlscope_dir looks like <algo>/<env>
 
-            iml_config_path = iml_dataframe.get_iml_config_path(iml_dir, allow_none=True)
+            rlscope_config_path = rlscope_dataframe.get_rlscope_config_path(rlscope_dir, allow_none=True)
             algo = None
             env = None
-            if iml_config_path is not None:
-                iml_config = IMLConfig(iml_config_path=iml_config_path)
-                # with open(iml_config_path, 'r') as f:
-                #     iml_config = json.load(f)
-                algo = iml_config.algo(allow_none=True)
-                env = iml_config.env(allow_none=True)
+            if rlscope_config_path is not None:
+                rlscope_config = IMLConfig(rlscope_config_path=rlscope_config_path)
+                # with open(rlscope_config_path, 'r') as f:
+                #     rlscope_config = json.load(f)
+                algo = rlscope_config.algo(allow_none=True)
+                env = rlscope_config.env(allow_none=True)
 
             if algo is None or env is None:
-                algo_from_dir, env_from_dir = self._get_algo_env_from_dir(iml_dir)
+                algo_from_dir, env_from_dir = self._get_algo_env_from_dir(rlscope_dir)
                 if algo is None:
                     algo = algo_from_dir
                 if env is None:
@@ -521,9 +521,9 @@ class OverlapStackedBarPlot:
             stacked_dict = vd.stacked_bar_dict()
             md = vd.metadata()
             path = vd.path
-            iml_dir = _d(path)
+            rlscope_dir = _d(path)
 
-            iml_metadata = read_iml_config_metadata(_d(path))
+            rlscope_metadata = read_rlscope_config_metadata(_d(path))
 
             def as_list(v):
                 if type(v) == list:
@@ -533,7 +533,7 @@ class OverlapStackedBarPlot:
             new_stacked_dict['algo'] = algo
             new_stacked_dict['env'] = env
 
-            # if self.training_time or 'HACK_total_timesteps' in iml_metadata['metadata']:
+            # if self.training_time or 'HACK_total_timesteps' in rlscope_metadata['metadata']:
             #     if 'percent_complete' in md:
             #         # Q: Will this handle scaling phases?  I think so... basically, each phase-file will just have a
             #         # different 'percent_complete'. However, I think we need to make OverlapStackedBarPlot have a phase argument,
@@ -550,9 +550,9 @@ class OverlapStackedBarPlot:
             extrap_dict['env'] = env
             extrap_dict['path'] = path
 
-            if ( self.extrapolated_training_time or 'HACK_total_timesteps' in iml_metadata['metadata'] ) and 'percent_complete' in md:
+            if ( self.extrapolated_training_time or 'HACK_total_timesteps' in rlscope_metadata['metadata'] ) and 'percent_complete' in md:
                 total_size = vd.total_size()
-                if all(col in iml_metadata['metadata'] for col in {'HACK_unins_end_training_time_us',
+                if all(col in rlscope_metadata['metadata'] for col in {'HACK_unins_end_training_time_us',
                                                                    'HACK_unins_start_training_time_us',
                                                                    'HACK_unins_end_num_timesteps',
                                                                    'HACK_unins_start_num_timesteps',
@@ -567,8 +567,8 @@ class OverlapStackedBarPlot:
                     """
                     PID=24865/MainProcess @ dump_proto_txt, dump_proto.py:19 :: 2020-01-12 19:55:38,607 INFO: > DUMP: IncrementalTrainingProgress @ training_progress.trace_61.proto
                     content_code: TP_HAS_PROGRESS
-                    process_name: "airlearning-iml"
-                    phase: "airlearning-iml"
+                    process_name: "airlearning-rlscope"
+                    phase: "airlearning-rlscope"
                     machine_name: "eco-15"
                     total_timesteps: 3000
                     start_trace_time_us: 1578618824694440
@@ -580,9 +580,9 @@ class OverlapStackedBarPlot:
                     end_num_timesteps: 2997
                     """
 
-                    unins_train_time_us = iml_metadata['metadata']['HACK_unins_end_training_time_us'] - iml_metadata['metadata']['HACK_unins_start_training_time_us']
-                    unins_timesteps = iml_metadata['metadata']['HACK_unins_end_num_timesteps'] - iml_metadata['metadata']['HACK_unins_start_num_timesteps']
-                    total_timesteps = iml_metadata['metadata']['HACK_total_timesteps']
+                    unins_train_time_us = rlscope_metadata['metadata']['HACK_unins_end_training_time_us'] - rlscope_metadata['metadata']['HACK_unins_start_training_time_us']
+                    unins_timesteps = rlscope_metadata['metadata']['HACK_unins_end_num_timesteps'] - rlscope_metadata['metadata']['HACK_unins_start_num_timesteps']
+                    total_timesteps = rlscope_metadata['metadata']['HACK_total_timesteps']
                     total_training_time = (unins_train_time_us / unins_timesteps) * total_timesteps
                     new_stacked_dict['extrap_total_training_time'] = total_training_time
 
@@ -590,20 +590,20 @@ class OverlapStackedBarPlot:
                     extrap_dict['unins_timesteps'] = unins_timesteps
                     extrap_dict['total_timesteps'] = total_timesteps
                     extrap_dict['total_training_time'] = total_training_time
-                elif 'HACK_total_timesteps' in iml_metadata['metadata']:
+                elif 'HACK_total_timesteps' in rlscope_metadata['metadata']:
                     # Extrapolate the total training time using percent_complete
                     logger.info("HACK: ({algo}, {env}) @ {path} -- Override total number of training timesteps to be {t}".format(
                         algo=algo,
                         env=env,
                         path=path,
-                        t=iml_metadata['metadata']['HACK_total_timesteps'],
+                        t=rlscope_metadata['metadata']['HACK_total_timesteps'],
                     ))
-                    end_time_timesteps = get_end_num_timesteps(iml_dir)
-                    percent_complete = end_time_timesteps / iml_metadata['metadata']['HACK_total_timesteps']
+                    end_time_timesteps = get_end_num_timesteps(rlscope_dir)
+                    percent_complete = end_time_timesteps / rlscope_metadata['metadata']['HACK_total_timesteps']
                     total_training_time = extrap_total_training_time(total_size, percent_complete)
                     new_stacked_dict['extrap_total_training_time'] = total_training_time
                     extrap_dict['end_time_timesteps'] = end_time_timesteps
-                    extrap_dict['HACK_total_timesteps'] = iml_metadata['metadata']['HACK_total_timesteps']
+                    extrap_dict['HACK_total_timesteps'] = rlscope_metadata['metadata']['HACK_total_timesteps']
                 else:
                     percent_complete = md['percent_complete']
                     total_training_time = extrap_total_training_time(total_size, percent_complete)
@@ -618,7 +618,7 @@ class OverlapStackedBarPlot:
 
             new_stacked_dict = dict((k, as_list(v)) for k, v in new_stacked_dict.items())
             df = pd.DataFrame(new_stacked_dict)
-            df['iml_directory'] = iml_dir
+            df['rlscope_directory'] = rlscope_dir
 
             df = self._HACK_remove_process_operation_df(df)
             df = self._remap_df(df, algo, env)
@@ -654,9 +654,9 @@ class OverlapStackedBarPlot:
         for (algo, env), vd in self.each_vd():
             path = vd.path
             md = vd.metadata()
-            iml_dir = _d(path)
+            rlscope_dir = _d(path)
 
-            iml_metadata = read_iml_config_metadata(iml_dir)
+            rlscope_metadata = read_rlscope_config_metadata(rlscope_dir)
             df = vd.as_df(keep_metadata_fields=['machine', 'process', 'phase', 'operation', 'resource_overlap'])
             if len(df['operation']) > 0 and type(df['operation'][0]) != str:
                 df['operation'] = df['operation'].apply(join_plus)
@@ -668,9 +668,9 @@ class OverlapStackedBarPlot:
             path = vd.path
             df['algo'] = algo
             df['env'] = env
-            df['iml_directory'] = iml_dir
+            df['rlscope_directory'] = rlscope_dir
             # if 'percent_complete' in md:
-            if all(col in iml_metadata['metadata'] for col in {'HACK_unins_end_training_time_us',
+            if all(col in rlscope_metadata['metadata'] for col in {'HACK_unins_end_training_time_us',
                                                                'HACK_unins_start_training_time_us',
                                                                'HACK_unins_end_num_timesteps',
                                                                'HACK_unins_start_num_timesteps',
@@ -685,8 +685,8 @@ class OverlapStackedBarPlot:
                 """
                 PID=24865/MainProcess @ dump_proto_txt, dump_proto.py:19 :: 2020-01-12 19:55:38,607 INFO: > DUMP: IncrementalTrainingProgress @ training_progress.trace_61.proto
                 content_code: TP_HAS_PROGRESS
-                process_name: "airlearning-iml"
-                phase: "airlearning-iml"
+                process_name: "airlearning-rlscope"
+                phase: "airlearning-rlscope"
                 machine_name: "eco-15"
                 total_timesteps: 3000
                 start_trace_time_us: 1578618824694440
@@ -698,9 +698,9 @@ class OverlapStackedBarPlot:
                 end_num_timesteps: 2997
                 """
 
-                unins_train_time_us = iml_metadata['metadata']['HACK_unins_end_training_time_us'] - iml_metadata['metadata']['HACK_unins_start_training_time_us']
-                unins_timesteps = iml_metadata['metadata']['HACK_unins_end_num_timesteps'] - iml_metadata['metadata']['HACK_unins_start_num_timesteps']
-                total_timesteps = iml_metadata['metadata']['HACK_total_timesteps']
+                unins_train_time_us = rlscope_metadata['metadata']['HACK_unins_end_training_time_us'] - rlscope_metadata['metadata']['HACK_unins_start_training_time_us']
+                unins_timesteps = rlscope_metadata['metadata']['HACK_unins_end_num_timesteps'] - rlscope_metadata['metadata']['HACK_unins_start_num_timesteps']
+                total_timesteps = rlscope_metadata['metadata']['HACK_total_timesteps']
                 total_training_time = (unins_train_time_us / unins_timesteps) * total_timesteps
                 # new_stacked_dict['extrap_total_training_time'] = total_training_time
                 df['extrap_total_training_time'] = total_training_time
@@ -710,18 +710,18 @@ class OverlapStackedBarPlot:
                 # extrap_dict['unins_timesteps'] = unins_timesteps
                 # extrap_dict['total_timesteps'] = total_timesteps
                 # extrap_dict['total_training_time'] = total_training_time
-            elif ( self.extrapolated_training_time or 'HACK_total_timesteps' in iml_metadata['metadata'] ) and 'percent_complete' in md:
+            elif ( self.extrapolated_training_time or 'HACK_total_timesteps' in rlscope_metadata['metadata'] ) and 'percent_complete' in md:
                 total_size = vd.total_size()
                 # Extrapolate the total training time using percent_complete
-                if 'HACK_total_timesteps' in iml_metadata['metadata']:
+                if 'HACK_total_timesteps' in rlscope_metadata['metadata']:
                     logger.info("HACK: ({algo}, {env}) @ {path} -- Override total number of training timesteps to be {t}".format(
                         algo=algo,
                         env=env,
                         path=path,
-                        t=iml_metadata['metadata']['HACK_total_timesteps'],
+                        t=rlscope_metadata['metadata']['HACK_total_timesteps'],
                     ))
-                    end_time_timesteps = get_end_num_timesteps(iml_dir)
-                    percent_complete = end_time_timesteps / iml_metadata['metadata']['HACK_total_timesteps']
+                    end_time_timesteps = get_end_num_timesteps(rlscope_dir)
+                    percent_complete = end_time_timesteps / rlscope_metadata['metadata']['HACK_total_timesteps']
                 else:
                     percent_complete = md['percent_complete']
                 total_training_time = extrap_total_training_time(total_size, percent_complete)
@@ -898,10 +898,10 @@ class OverlapStackedBarPlot:
         # TODO: if extrapolated_time is present in bot ins_df and unins_df, it will "conflict" creating
         # extrapolated_time_x and extrapolated_time_y
 
-        # Avoid conflicts; keep iml_directory of instrumented run.
+        # Avoid conflicts; keep rlscope_directory of instrumented run.
         unins_df_copy = copy.copy(self.unins_df)
-        if 'iml_directory' in unins_df_copy:
-            del unins_df_copy['iml_directory']
+        if 'rlscope_directory' in unins_df_copy:
+            del unins_df_copy['rlscope_directory']
         # WRONG:
         merge_df = self.ins_df.merge(unins_df_copy, on=['algo', 'env', 'x_field', 'repetition'], how='left')
         self.df = merge_df
@@ -1002,7 +1002,7 @@ class OverlapStackedBarPlot:
 
     def read_ins_df(self):
         """
-        Read venn_js data of several --iml-directory's into a single data-frame.
+        Read venn_js data of several --rlscope-directory's into a single data-frame.
 
         :return:
         """
@@ -1025,7 +1025,7 @@ class OverlapStackedBarPlot:
         else:
             df_iter = self.each_df()
         for (algo, env), regions, path, df in df_iter:
-            # iml_dir = _d(path)
+            # rlscope_dir = _d(path)
             buf = StringIO()
             DataFrame.print_df(df)
             logger.info("({algo}, {env}) @ path={path}:\n{msg}".format(
@@ -1082,7 +1082,7 @@ class OverlapStackedBarPlot:
         if self.detailed:
             # NOTE: must calculate percent within an (algo, env)
             group_dfs = []
-            for group, group_df in ins_df.groupby(['iml_directory', 'phase', 'algo', 'env']):
+            for group, group_df in ins_df.groupby(['rlscope_directory', 'phase', 'algo', 'env']):
                 total_size = group_df['size'].sum()
                 # Q: does this update ins_df...?
                 group_df['percent'] = group_df['size']/total_size
@@ -1250,7 +1250,7 @@ class OverlapStackedBarPlot:
         #     y2_field = None
 
 
-        orig_df_training_time = self.df[['x_field', 'algo', 'env', 'iml_directory', 'total_training_time']]
+        orig_df_training_time = self.df[['x_field', 'algo', 'env', 'rlscope_directory', 'total_training_time']]
 
         if self.debug:
             ss = StringIO()
@@ -1429,11 +1429,11 @@ class OverlapStackedBarPlot:
 
     def run(self):
         if self.debug:
-            algo_env_pairs = [self._get_algo_env_from_dir(iml_dir) for iml_dir in self.iml_directories]
+            algo_env_pairs = [self._get_algo_env_from_dir(rlscope_dir) for rlscope_dir in self.rlscope_directories]
             logger.info("{klass}: {msg}".format(
                 klass=self.__class__.__name__,
                 msg=pprint_msg({
-                    'iml_directories': self.iml_directories,
+                    'rlscope_directories': self.rlscope_directories,
                     'algo_env_pairs': algo_env_pairs,
                 })))
         self._init_directories()
@@ -1520,8 +1520,8 @@ class OverlapStackedBarPlot:
             del human_df[group]
         return human_df
 
-    def db_path(self, iml_dir):
-        return sql_input_path(iml_dir)
+    def db_path(self, rlscope_dir):
+        return sql_input_path(rlscope_dir)
 
 
 def attempt_stacked_bar():
@@ -3981,10 +3981,10 @@ def get_capsize(ax):
     return bar_width/4
 
 def add_repetition(df):
-    df['repetition'] = df['iml_directory'].apply(get_repetition)
+    df['repetition'] = df['rlscope_directory'].apply(get_repetition)
 
-def get_repetition(iml_directory):
-    m = re.search(r'repetition_(?P<repetition>\d+)', os.path.basename(iml_directory))
+def get_repetition(rlscope_directory):
+    m = re.search(r'repetition_(?P<repetition>\d+)', os.path.basename(rlscope_directory))
     if m:
         return int(m.group('repetition'))
     return None
@@ -3992,7 +3992,7 @@ def get_repetition(iml_directory):
 class CategoryTransitionPlot:
     def __init__(self,
                  time_breakdown_directories,
-                 iml_directories,
+                 rlscope_directories,
                  directory,
                  title=None,
                  x_title=None,
@@ -4012,12 +4012,12 @@ class CategoryTransitionPlot:
                  # Swallow any excess arguments
                  **kwargs):
         self.time_breakdown_directories = time_breakdown_directories
-        self.iml_directories = iml_directories
+        self.rlscope_directories = rlscope_directories
         self.directory = directory
-        if len(self.time_breakdown_directories) != len(self.iml_directories):
-            raise RuntimeError("The number of --time-breakdown-directories must match the number of --iml-directories")
-        for time_iml_dir, iml_dir in zip(self.time_breakdown_directories, self.iml_directories):
-            assert get_repetition(time_iml_dir) == get_repetition(iml_dir)
+        if len(self.time_breakdown_directories) != len(self.rlscope_directories):
+            raise RuntimeError("The number of --time-breakdown-directories must match the number of --rlscope-directories")
+        for time_rlscope_dir, rlscope_dir in zip(self.time_breakdown_directories, self.rlscope_directories):
+            assert get_repetition(time_rlscope_dir) == get_repetition(rlscope_dir)
 
         category_value = None
         if category is not None and re.search(r'^CATEGORY_'):
@@ -4030,7 +4030,7 @@ class CategoryTransitionPlot:
         self.debug = debug
         self.debug_single_thread = debug_single_thread
         self._parse_js = dict()
-        self._parse_iml_config = dict()
+        self._parse_rlscope_config = dict()
         self.title = title
         self.x_title = x_title
         self.y_title = y_title
@@ -4070,38 +4070,38 @@ class CategoryTransitionPlot:
         self._parse_js[json_path] = cmap
         return cmap
 
-    # def parse_iml_config(self, json_path):
-    def parse_iml_config(self, iml_dir):
-        # iml_dir = _d(json_path)
-        if iml_dir in self._parse_iml_config:
-            return self._parse_iml_config[iml_dir]
-        iml_config_path = iml_dataframe.get_iml_config_path(iml_dir, allow_none=True)
-        if iml_config_path is not None:
-            iml_config = IMLConfig(iml_config_path=iml_config_path)
+    # def parse_rlscope_config(self, json_path):
+    def parse_rlscope_config(self, rlscope_dir):
+        # rlscope_dir = _d(json_path)
+        if rlscope_dir in self._parse_rlscope_config:
+            return self._parse_rlscope_config[rlscope_dir]
+        rlscope_config_path = rlscope_dataframe.get_rlscope_config_path(rlscope_dir, allow_none=True)
+        if rlscope_config_path is not None:
+            rlscope_config = IMLConfig(rlscope_config_path=rlscope_config_path)
         else:
-            iml_config = None
-        self._parse_iml_config[iml_dir] = iml_config
-        return iml_config
+            rlscope_config = None
+        self._parse_rlscope_config[rlscope_dir] = rlscope_config
+        return rlscope_config
 
-    def json_paths(self, iml_dir):
-        for path in each_file_recursive(iml_dir):
+    def json_paths(self, rlscope_dir):
+        for path in each_file_recursive(rlscope_dir):
             if is_overlap_result_js_file(path):
                 yield path
 
     def each_json_path(self):
-        for iml_dir, time_iml_dir in zip(self.iml_directories, self.time_breakdown_directories):
-            for json_path in self.json_paths(time_iml_dir):
-                yield iml_dir, json_path
+        for rlscope_dir, time_rlscope_dir in zip(self.rlscope_directories, self.time_breakdown_directories):
+            for json_path in self.json_paths(time_rlscope_dir):
+                yield rlscope_dir, json_path
 
     def all_read_df(self):
         dfs = []
-        for iml_dir, json_path in self.each_json_path():
-            df = self.read_df(iml_dir, json_path)
+        for rlscope_dir, json_path in self.each_json_path():
+            df = self.read_df(rlscope_dir, json_path)
             dfs.append(df)
         all_df = pd.concat(dfs)
         return all_df
 
-    def read_df(self, iml_dir, json_path):
+    def read_df(self, rlscope_dir, json_path):
         # js = load_json(self.cross_process_overlap)
         category_trans_counts = self.parse_js(json_path)
         if self.debug:
@@ -4112,7 +4112,7 @@ class CategoryTransitionPlot:
         data = {
             # 'from_category': [],
             # 'to_category': [],
-            'iml_directory': [],
+            'rlscope_directory': [],
             'algo': [],
             'env': [],
             'category': [],
@@ -4140,14 +4140,14 @@ class CategoryTransitionPlot:
                 continue
             operation = next(iter(from_category.ops))
 
-            iml_config = self.parse_iml_config(iml_dir)
-            # iml_dir = _d(json_path)
-            algo = iml_config.algo()
-            env = iml_config.env()
-            # max_passes = iml_config.get_int('max_passes')
-            max_passes = iml_config.get_var('max_passes', dflt=None)
+            rlscope_config = self.parse_rlscope_config(rlscope_dir)
+            # rlscope_dir = _d(json_path)
+            algo = rlscope_config.algo()
+            env = rlscope_config.env()
+            # max_passes = rlscope_config.get_int('max_passes')
+            max_passes = rlscope_config.get_var('max_passes', dflt=None)
             if max_passes is None:
-                max_passes = iml_config.get_var('max_training_loop_iters', dflt=None)
+                max_passes = rlscope_config.get_var('max_training_loop_iters', dflt=None)
             assert max_passes is not None
             max_passes = int(max_passes)
 
@@ -4191,7 +4191,7 @@ class CategoryTransitionPlot:
                 # data['from_category'].append(from_category)
                 # data['to_category'].append(to_category)
                 data['trans_count'].append(trans_count)
-                data['iml_directory'].append(iml_dir)
+                data['rlscope_directory'].append(rlscope_dir)
                 data['algo'].append(algo)
                 data['env'].append(env)
                 data['max_passes'].append(max_passes)
@@ -5021,7 +5021,7 @@ class TexMetrics:
             return 'On-policy'
         elif re.search(r'dqn|ddpg|sac|td3', algo):
             return 'Off-policy'
-        raise NotImplementedError(f"Not sure whether algo={row['algo']} is on/off-policy for iml_dir={row['iml_directory']}")
+        raise NotImplementedError(f"Not sure whether algo={row['algo']} is on/off-policy for rlscope_dir={row['rlscope_directory']}")
 
     def _config_is_pytorch(self, row):
         return self._xfield_is_pytorch(row['x_field'])

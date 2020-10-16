@@ -6,7 +6,7 @@ https://luigi.readthedocs.io/en/stable/index.html
 """
 import luigi
 
-from rlscope.profiler.iml_logging import logger
+from rlscope.profiler.rlscope_logging import logger
 import subprocess
 import multiprocessing
 import re
@@ -60,20 +60,20 @@ def get_NOT_RUNNABLE_TASKS():
 
 def get_IML_TASKS():
     global NOT_RUNNABLE_TASKS
-    iml_tasks = set()
+    rlscope_tasks = set()
     for name, cls in globals().items():
         if isinstance(cls, type) and issubclass(cls, IMLTask) and cls not in NOT_RUNNABLE_TASKS:
-            iml_tasks.add(cls)
-    return iml_tasks
+            rlscope_tasks.add(cls)
+    return rlscope_tasks
 
 def get_username():
     return pwd.getpwuid(os.getuid())[0]
 
 param_visible_overhead = luigi.BoolParameter(
     description=textwrap.dedent("""\
-        If true, make profiling overhead visible during iml-drill.  
+        If true, make profiling overhead visible during rlscope-drill.  
         If false (and calibration files are given), then subtract overhead 
-        making it 'invisible' in iml-drill"""),
+        making it 'invisible' in rlscope-drill"""),
     default=False,
     parsing=luigi.BoolParameter.EXPLICIT_PARSING)
 
@@ -145,7 +145,7 @@ param_python_clib_interception_simulator_json = get_param_python_clib_intercepti
 param_python_clib_interception_simulator_json_optional = get_param_python_clib_interception_overhead_json(clib='Simulator', default=None)
 
 class IMLTask(luigi.Task):
-    iml_directory = luigi.Parameter(description="Location of trace-files")
+    rlscope_directory = luigi.Parameter(description="Location of trace-files")
     debug_memoize = luigi.BoolParameter(description="If true, memoize partial results for quicker runs", default=False, parsing=luigi.BoolParameter.EXPLICIT_PARSING)
     debug = param_debug
     debug_single_thread = param_debug_single_thread
@@ -161,10 +161,10 @@ class IMLTask(luigi.Task):
         """
         e.g.
 
-        <--iml-directory>/SQLParserTask.task
+        <--rlscope-directory>/SQLParserTask.task
         """
         return "{dir}/{name}.task".format(
-            dir=self.iml_directory, name=self._task_name)
+            dir=self.rlscope_directory, name=self._task_name)
 
     @property
     def _task_name(self):
@@ -196,13 +196,13 @@ class IMLTask(luigi.Task):
                 sec=seconds,
             )), file=f)
 
-    def iml_run(self):
-        raise NotImplementedError("{klass} must override iml_run()".format(
+    def rlscope_run(self):
+        raise NotImplementedError("{klass} must override rlscope_run()".format(
             klass=self.__class__.__name__))
 
     def _run_with_timer(self):
         start_t = datetime.datetime.now()
-        self.iml_run()
+        self.rlscope_run()
         end_t = datetime.datetime.now()
 
         self.mark_done(start_t, end_t)
@@ -218,7 +218,7 @@ class IMLTaskDB(IMLTask):
 
     @property
     def db_path(self):
-        return sql_input_path(self.iml_directory)
+        return sql_input_path(self.rlscope_directory)
 
     @property
     def maxconn(self):
@@ -250,9 +250,9 @@ class SQLParserTask(IMLTaskDB):
     def requires(self):
         return []
 
-    def iml_run(self):
+    def rlscope_run(self):
         self.sql_parser = SQLParser(
-            directory=self.iml_directory,
+            directory=self.rlscope_directory,
             host=self.postgres_host,
             user=self.postgres_user,
             password=self.postgres_password,
@@ -321,11 +321,11 @@ class SQLOverheadEventsTask(IMLTaskDB):
             mk_SQLParserTask(self),
         ]
 
-    def iml_run(self):
+    def rlscope_run(self):
         # TODO: implement SQLOverheadEventsParser to insert overhead events.
         raise NotImplementedError("Use cpp code, not old python implementation... (not maintained anymore)")
         self.sql_overhead_events_parser = SQLOverheadEventsParser(
-            directory=self.iml_directory,
+            directory=self.rlscope_directory,
             cupti_overhead_json=self.cupti_overhead_json,
             LD_PRELOAD_overhead_json=self.LD_PRELOAD_overhead_json,
             # pyprof_overhead_json=self.pyprof_overhead_json,
@@ -405,7 +405,7 @@ class _UtilizationPlotTask(IMLTaskDB):
             mk_SQL_tasks(self),
         ]
 
-    def iml_run(self):
+    def rlscope_run(self):
         # If calibration files aren't provided, then overhead will be visible.
         # If calibration files are provided, we can subtract it:
         #   Use whatever they want based on --visible-overhead
@@ -421,7 +421,7 @@ class _UtilizationPlotTask(IMLTaskDB):
 
         self.sql_parser = UtilizationPlot(
             overlap_type=self.overlap_type,
-            directory=self.iml_directory,
+            directory=self.rlscope_directory,
             host=self.postgres_host,
             user=self.postgres_user,
             visible_overhead=visible_overhead,
@@ -463,7 +463,7 @@ CPP_ANALYZE_BIN = 'rls-analyze'
 class RLSAnalyze(IMLTask):
 
     # NOT optional (to ensure we remember to do overhead correction).
-    # iml_directory = luigi.Parameter(description="Location of trace-files")
+    # rlscope_directory = luigi.Parameter(description="Location of trace-files")
     mode = luigi.ChoiceParameter(
         choices=[
             'overlap',
@@ -480,7 +480,7 @@ class RLSAnalyze(IMLTask):
         gpu_hw:
           Calculate GPU hardware counters scoped to high-level user operations.
         """).rstrip())
-    output_directory = luigi.Parameter(description="Directory to output analysis files; default = --iml-directory", default=None)
+    output_directory = luigi.Parameter(description="Directory to output analysis files; default = --rlscope-directory", default=None)
 
     # optional.
     cupti_overhead_json = param_cupti_overhead_json_optional
@@ -496,7 +496,7 @@ class RLSAnalyze(IMLTask):
         if self.output_directory is not None:
             out_dir = self.output_directory
         else:
-            out_dir = self.iml_directory
+            out_dir = self.rlscope_directory
         return "{dir}/{name}.task".format(
             dir=out_dir, name=self._task_name)
 
@@ -527,10 +527,10 @@ class RLSAnalyze(IMLTask):
             return False
         return True
 
-    def iml_run(self):
+    def rlscope_run(self):
         cmd = [CPP_ANALYZE_BIN]
         cmd.extend([
-            '--iml_directory', self.iml_directory,
+            '--rlscope_directory', self.rlscope_directory,
             '--mode', self.mode,
         ])
         if self.output_directory is not None:
@@ -575,7 +575,7 @@ class All(IMLTask):
             _mk(kwargs, VennJsPlotTask),
         ]
 
-    def iml_run(self):
+    def rlscope_run(self):
         pass
 
 
@@ -603,9 +603,9 @@ class HeatScaleTask(IMLTask):
             _mk(kwargs, RLSAnalyze),
         ]
 
-    def iml_run(self):
+    def rlscope_run(self):
         self.heat_scale = HeatScalePlot(
-            directory=self.iml_directory,
+            directory=self.rlscope_directory,
             # host=self.postgres_host,
             # user=self.postgres_user,
             # password=self.postgres_password,
@@ -637,15 +637,15 @@ class ConvertResourceOverlapToResourceSubplotTask(IMLTask):
     #         _mk(kwargs, RLSAnalyze),
     #     ]
 
-    def iml_run(self):
+    def rlscope_run(self):
         self.converter = ConvertResourceOverlapToResourceSubplot(
-            directory=self.iml_directory,
+            directory=self.rlscope_directory,
             debug=self.debug,
         )
         self.converter.run()
 
 class TraceEventsTask(luigi.Task):
-    iml_directory = luigi.Parameter(description="Location of trace-files")
+    rlscope_directory = luigi.Parameter(description="Location of trace-files")
     debug = param_debug
     debug_single_thread = param_debug_single_thread
     debug_perf = param_debug_perf
@@ -681,7 +681,7 @@ class TraceEventsTask(luigi.Task):
 
     def run(self):
         self.dumper = TraceEventsParser(
-            directory=self.iml_directory,
+            directory=self.rlscope_directory,
             host=self.postgres_host,
             user=self.postgres_user,
             password=self.postgres_password,
@@ -759,13 +759,13 @@ param_x_type = luigi.ChoiceParameter(choices=OverlapStackedBarPlot.SUPPORTED_X_T
 
 
 class UtilTask(luigi.Task):
-    iml_directories = luigi.ListParameter(description="Multiple --iml-directory entries for finding overlap_type files: *.venn_js.js")
+    rlscope_directories = luigi.ListParameter(description="Multiple --rlscope-directory entries for finding overlap_type files: *.venn_js.js")
     directory = luigi.Parameter(description="Output directory", default=".")
     suffix = luigi.Parameter(description="Add suffix to output files: MachineGPUUtil.{suffix}.{ext}", default=None)
     debug = param_debug
     debug_single_thread = param_debug_single_thread
     debug_perf = param_debug_perf
-    algo_env_from_dir = luigi.BoolParameter(description="Add algo/env columns based on directory structure of --iml-directories <algo>/<env>/iml_dir", default=True, parsing=luigi.BoolParameter.EXPLICIT_PARSING)
+    algo_env_from_dir = luigi.BoolParameter(description="Add algo/env columns based on directory structure of --rlscope-directories <algo>/<env>/rlscope_dir", default=True, parsing=luigi.BoolParameter.EXPLICIT_PARSING)
 
     # optional.
     cupti_overhead_json = param_cupti_overhead_json_optional
@@ -809,7 +809,7 @@ class UtilPlotTask(luigi.Task):
     debug = param_debug
     debug_single_thread = param_debug_single_thread
     debug_perf = param_debug_perf
-    # algo_env_from_dir = luigi.BoolParameter(description="Add algo/env columns based on directory structure of --iml-directories <algo>/<env>/iml_dir", default=True, parsing=luigi.BoolParameter.EXPLICIT_PARSING)
+    # algo_env_from_dir = luigi.BoolParameter(description="Add algo/env columns based on directory structure of --rlscope-directories <algo>/<env>/rlscope_dir", default=True, parsing=luigi.BoolParameter.EXPLICIT_PARSING)
 
     skip_output = False
 
@@ -825,13 +825,13 @@ class UtilPlotTask(luigi.Task):
         self.dumper.run()
 
 class TrainingProgressTask(luigi.Task):
-    iml_directories = luigi.ListParameter(description="Multiple --iml-directory entries for finding overlap_type files: *.venn_js.js")
+    rlscope_directories = luigi.ListParameter(description="Multiple --rlscope-directory entries for finding overlap_type files: *.venn_js.js")
     directory = luigi.Parameter(description="Output directory", default=".")
     # suffix = luigi.Parameter(description="Add suffix to output files: TrainingProgress.{suffix}.{ext}", default=None)
     debug = param_debug
     debug_single_thread = param_debug_single_thread
     debug_perf = param_debug_perf
-    algo_env_from_dir = luigi.BoolParameter(description="Add algo/env columns based on directory structure of --iml-directories <algo>/<env>/iml_dir", default=True, parsing=luigi.BoolParameter.EXPLICIT_PARSING)
+    algo_env_from_dir = luigi.BoolParameter(description="Add algo/env columns based on directory structure of --rlscope-directories <algo>/<env>/rlscope_dir", default=True, parsing=luigi.BoolParameter.EXPLICIT_PARSING)
     baseline_config = luigi.Parameter(description="The baseline configuration to compare all others against; default: config_uninstrumented", default=None)
     ignore_phase = luigi.BoolParameter(description="Bug workaround: for training progress files that didn't record phase, just ignore it.", default=False, parsing=luigi.BoolParameter.EXPLICIT_PARSING)
 
@@ -865,7 +865,7 @@ class ProfilingOverheadPlotTask(luigi.Task):
     debug = param_debug
     debug_single_thread = param_debug_single_thread
     debug_perf = param_debug_perf
-    # algo_env_from_dir = luigi.BoolParameter(description="Add algo/env columns based on directory structure of --iml-directories <algo>/<env>/iml_dir", default=True, parsing=luigi.BoolParameter.EXPLICIT_PARSING)
+    # algo_env_from_dir = luigi.BoolParameter(description="Add algo/env columns based on directory structure of --rlscope-directories <algo>/<env>/rlscope_dir", default=True, parsing=luigi.BoolParameter.EXPLICIT_PARSING)
 
     skip_output = False
 
@@ -882,7 +882,7 @@ class ProfilingOverheadPlotTask(luigi.Task):
 
 class ExtrapolatedTrainingTimeTask(IMLTaskDB):
     dependency = luigi.Parameter(description="JSON file containing Hard-coded computational dependencies A.phase -> B.phase", default=None)
-    algo_env_from_dir = luigi.BoolParameter(description="Add algo/env columns based on directory structure of --iml-directories <algo>/<env>/iml_dir", default=True, parsing=luigi.BoolParameter.EXPLICIT_PARSING)
+    algo_env_from_dir = luigi.BoolParameter(description="Add algo/env columns based on directory structure of --rlscope-directories <algo>/<env>/rlscope_dir", default=True, parsing=luigi.BoolParameter.EXPLICIT_PARSING)
 
     # x_type = param_x_type
     # y_title = luigi.Parameter(description="y-axis title", default='Total training time (seconds)')
@@ -895,7 +895,7 @@ class ExtrapolatedTrainingTimeTask(IMLTaskDB):
     # width = luigi.FloatParameter(description="Width of plot in inches", default=None)
     # height = luigi.FloatParameter(description="Height of plot in inches", default=None)
 
-    # algo_env_from_dir = luigi.BoolParameter(description="Add algo/env columns based on directory structure of --iml-directories <algo>/<env>/iml_dir", default=True, parsing=luigi.BoolParameter.EXPLICIT_PARSING)
+    # algo_env_from_dir = luigi.BoolParameter(description="Add algo/env columns based on directory structure of --rlscope-directories <algo>/<env>/rlscope_dir", default=True, parsing=luigi.BoolParameter.EXPLICIT_PARSING)
 
     # Needed by mk_SQL_tasks
     cupti_overhead_json = param_cupti_overhead_json
@@ -909,17 +909,17 @@ class ExtrapolatedTrainingTimeTask(IMLTaskDB):
             mk_SQL_tasks(self),
         ]
 
-    def iml_run(self):
+    def rlscope_run(self):
         kwargs = kwargs_from_task(self)
         assert 'directory' not in kwargs
-        kwargs['directory'] = kwargs['iml_directory']
-        del kwargs['iml_directory']
+        kwargs['directory'] = kwargs['rlscope_directory']
+        del kwargs['rlscope_directory']
         # logger.info(pprint_msg({'kwargs': kwargs}))
         self.dumper = ExtrapolatedTrainingTimeParser(**kwargs)
         self.dumper.run()
 
 class GeneratePlotIndexTask(luigi.Task):
-    iml_directory = luigi.Parameter(description="Location of trace-files")
+    rlscope_directory = luigi.Parameter(description="Location of trace-files")
     # out_dir = luigi.Parameter(description="Location of trace-files", default=None)
     # replace = luigi.BoolParameter(description="debug", parsing=luigi.BoolParameter.EXPLICIT_PARSING)
     debug = param_debug
@@ -949,12 +949,12 @@ class GeneratePlotIndexTask(luigi.Task):
     def output(self):
         # Q: What about --replace?  Conditionally include this output...?
         return [
-            luigi.LocalTarget(_j(self.iml_directory, 'rlscope_plot_index_data.py')),
+            luigi.LocalTarget(_j(self.rlscope_directory, 'rlscope_plot_index_data.py')),
         ]
 
     def run(self):
         cmd = ['rls-generate-plot-index']
-        cmd.extend(['--iml-directory', self.iml_directory])
+        cmd.extend(['--rlscope-directory', self.rlscope_directory])
         if self.debug:
             cmd.extend(['--debug'])
         print_cmd(cmd)
@@ -963,8 +963,8 @@ class GeneratePlotIndexTask(luigi.Task):
 param_hack_upper_right_legend_bbox_x = luigi.FloatParameter(description="matplotlib hack: add to x-position of upper right legend so it's outside the plot area", default=None)
 param_xtick_expression = luigi.Parameter(description="Python expression to generate xtick labels for plot.  Expression has access to individual 'row' and entire dataframe 'df'", default=None)
 class OverlapStackedBarTask(luigi.Task):
-    iml_directories = luigi.ListParameter(description="Multiple --iml-directory entries for finding overlap_type files: *.venn_js.js")
-    unins_iml_directories = luigi.ListParameter(description="Multiple --iml-directory entries for finding total uninstrumented training time (NOTE: every iml_directory should have an unins_iml_directory)")
+    rlscope_directories = luigi.ListParameter(description="Multiple --rlscope-directory entries for finding overlap_type files: *.venn_js.js")
+    unins_rlscope_directories = luigi.ListParameter(description="Multiple --rlscope-directory entries for finding total uninstrumented training time (NOTE: every rlscope_directory should have an unins_rlscope_directory)")
     directory = luigi.Parameter(description="Output directory", default=".")
     xtick_expression = param_xtick_expression
     title = luigi.Parameter(description="Plot title", default=None)
@@ -1027,13 +1027,13 @@ class OverlapStackedBarTask(luigi.Task):
     skip_output = False
 
     def requires(self):
-        # TODO: we require (exactly 1) <overlap_type>.venn_js.js in each iml_dir.
+        # TODO: we require (exactly 1) <overlap_type>.venn_js.js in each rlscope_dir.
         # TODO: we need to sub-select if there are multiple venn_js.js files...need selector arguments
         requires = []
-        for iml_dir in self.iml_directories:
+        for rlscope_dir in self.rlscope_directories:
             kwargs = forward_kwargs(from_task=self, ToTaskKlass=GeneratePlotIndexTask)
             requires.append(GeneratePlotIndexTask(
-                iml_directory=iml_dir,
+                rlscope_directory=rlscope_dir,
                 **kwargs))
         return requires
 
@@ -1046,14 +1046,14 @@ class OverlapStackedBarTask(luigi.Task):
         self.dumper.run()
 
 class GpuHwPlotTask(IMLTask):
-    gpu_hw_directories = luigi.ListParameter(description="Multiple --iml-directory containing GPUHwCounterSampler.csv from running \"rls-prof --config gpu-hw\"")
-    time_breakdown_directories = luigi.ListParameter(description="Multiple --iml-directory containing GPUHwCounterSampler.csv from running \"rls-prof --config gpu-hw\"")
+    gpu_hw_directories = luigi.ListParameter(description="Multiple --rlscope-directory containing GPUHwCounterSampler.csv from running \"rls-prof --config gpu-hw\"")
+    time_breakdown_directories = luigi.ListParameter(description="Multiple --rlscope-directory containing GPUHwCounterSampler.csv from running \"rls-prof --config gpu-hw\"")
     directory = luigi.Parameter(description="Output directory", default=".")
     xtick_expression = param_xtick_expression
     x_title = luigi.Parameter(description="x-axis title", default=None)
     title = luigi.Parameter(description="title", default=None)
     width = luigi.FloatParameter(description="Width of plot in inches", default=None)
-    op_mapping = luigi.Parameter(description="Python expression defining a function mapping(algo) that returns a mapping that defines composite operations from iml.prof.operation annotations in the profiled code", default=None)
+    op_mapping = luigi.Parameter(description="Python expression defining a function mapping(algo) that returns a mapping that defines composite operations from rlscope.prof.operation annotations in the profiled code", default=None)
     height = luigi.FloatParameter(description="Height of plot in inches", default=None)
     rotation = luigi.FloatParameter(description="x-axis title rotation", default=None)
 
@@ -1067,14 +1067,14 @@ class GpuHwPlotTask(IMLTask):
     skip_output = False
 
     def requires(self):
-        # TODO: we require (exactly 1) <overlap_type>.venn_js.js in each iml_dir.
+        # TODO: we require (exactly 1) <overlap_type>.venn_js.js in each rlscope_dir.
         # TODO: we need to sub-select if there are multiple venn_js.js files...need selector arguments
         requires = []
-        for iml_dir in self.time_breakdown_directories:
+        for rlscope_dir in self.time_breakdown_directories:
             kwargs = forward_kwargs(from_task=self, ToTaskKlass=GeneratePlotIndexTask)
-            del kwargs['iml_directory']
+            del kwargs['rlscope_directory']
             requires.append(GeneratePlotIndexTask(
-                iml_directory=iml_dir,
+                rlscope_directory=rlscope_dir,
                 **kwargs))
         return requires
 
@@ -1086,7 +1086,7 @@ class GpuHwPlotTask(IMLTask):
         obj_args = dict()
         obj_args['rlscope_dir'] = self.gpu_hw_directories
         obj_args['time_breakdown_dir'] = self.time_breakdown_directories
-        obj_args['output_directory'] = self.iml_directory
+        obj_args['output_directory'] = self.rlscope_directory
         obj_args['xtick_expression'] = self.xtick_expression
         obj_args['op_mapping'] = self.op_mapping
         obj_args['x_title'] = self.x_title
@@ -1100,7 +1100,7 @@ class GpuHwPlotTask(IMLTask):
 
 class CategoryTransitionPlotTask(luigi.Task):
     time_breakdown_directories = luigi.ListParameter(description="IML directories containing uncorrected processed output of RLSAnalyze")
-    iml_directories = luigi.ListParameter(description="IML directories containing raw IML trace files")
+    rlscope_directories = luigi.ListParameter(description="IML directories containing raw IML trace files")
     category = luigi.Parameter(description="Category", default=None)
     directory = luigi.Parameter(description="Output directory", default=".")
     hack_upper_right_legend_bbox_x = param_hack_upper_right_legend_bbox_x
@@ -1188,7 +1188,7 @@ def keep_task_kwargs(kwargs, TaskKlass):
     return keep_kwargs
 
 def mk_SQLParserTask(task):
-    return SQLParserTask(iml_directory=task.iml_directory, debug=task.debug, debug_single_thread=task.debug_single_thread,
+    return SQLParserTask(rlscope_directory=task.rlscope_directory, debug=task.debug, debug_single_thread=task.debug_single_thread,
                          postgres_host=task.postgres_host, postgres_user=task.postgres_user, postgres_password=task.postgres_password)
 
 def mk_SQL_tasks(task):
@@ -1222,7 +1222,7 @@ def mk_SQL_tasks(task):
 
     # Add SQLParser args.
     sql_kwargs = dict(
-        iml_directory=task.iml_directory,
+        rlscope_directory=task.rlscope_directory,
         debug=task.debug,
         debug_single_thread=task.debug_single_thread,
         postgres_host=task.postgres_host,
@@ -1246,7 +1246,7 @@ def mk_SQL_tasks(task):
     #     msg=pprint_msg(kwargs)))
     return SQLOverheadEventsTask(**kwargs)
 
-from rlscope.profiler.iml_logging import logger
+from rlscope.profiler.rlscope_logging import logger
 def main(argv=None, should_exit=True):
     if argv is None:
         argv = list(sys.argv[1:])
@@ -1282,7 +1282,7 @@ class CallInterceptionOverheadTask(luigi.Task):
     debug = param_debug
     debug_single_thread = param_debug_single_thread
     debug_perf = param_debug_perf
-    # algo_env_from_dir = luigi.BoolParameter(description="Add algo/env columns based on directory structure of --iml-directories <algo>/<env>/iml_dir", default=True, parsing=luigi.BoolParameter.EXPLICIT_PARSING)
+    # algo_env_from_dir = luigi.BoolParameter(description="Add algo/env columns based on directory structure of --rlscope-directories <algo>/<env>/rlscope_dir", default=True, parsing=luigi.BoolParameter.EXPLICIT_PARSING)
 
     skip_output = False
 
@@ -1310,7 +1310,7 @@ class CUPTIOverheadTask(luigi.Task):
     debug = param_debug
     debug_single_thread = param_debug_single_thread
     debug_perf = param_debug_perf
-    # algo_env_from_dir = luigi.BoolParameter(description="Add algo/env columns based on directory structure of --iml-directories <algo>/<env>/iml_dir", default=True, parsing=luigi.BoolParameter.EXPLICIT_PARSING)
+    # algo_env_from_dir = luigi.BoolParameter(description="Add algo/env columns based on directory structure of --rlscope-directories <algo>/<env>/rlscope_dir", default=True, parsing=luigi.BoolParameter.EXPLICIT_PARSING)
 
     skip_output = False
 
@@ -1340,7 +1340,7 @@ class CUPTIScalingOverheadTask(luigi.Task):
     debug_memoize = param_debug_memoize
     debug_single_thread = param_debug_single_thread
     debug_perf = param_debug_perf
-    # algo_env_from_dir = luigi.BoolParameter(description="Add algo/env columns based on directory structure of --iml-directories <algo>/<env>/iml_dir", default=True, parsing=luigi.BoolParameter.EXPLICIT_PARSING)
+    # algo_env_from_dir = luigi.BoolParameter(description="Add algo/env columns based on directory structure of --rlscope-directories <algo>/<env>/rlscope_dir", default=True, parsing=luigi.BoolParameter.EXPLICIT_PARSING)
 
     skip_output = False
 
@@ -1361,11 +1361,11 @@ class CorrectedTrainingTimeTask(luigi.Task):
     python_annotation_json = param_python_annotation_json
     python_clib_interception_tensorflow_json = param_python_clib_interception_tensorflow_json
     python_clib_interception_simulator_json = param_python_clib_interception_simulator_json
-    iml_directories = luigi.ListParameter(description="IML directory that ran with full tracing enabled")
+    rlscope_directories = luigi.ListParameter(description="IML directory that ran with full tracing enabled")
     uninstrumented_directories = luigi.ListParameter(description="IML directories for uninstrumented runs (rls-prof --config uninstrumented)")
     directory = luigi.Parameter(description="Output directory", default=".")
-    # iml_prof_config = luigi.ChoiceParameter(description=textwrap.dedent("""
-    iml_prof_config = luigi.Parameter(description=textwrap.dedent("""
+    # rlscope_prof_config = luigi.ChoiceParameter(description=textwrap.dedent("""
+    rlscope_prof_config = luigi.Parameter(description=textwrap.dedent("""
     What option did you pass to \"rls-prof --config\"? 
     We use this to determine what overheads to subtract:
     
@@ -1394,7 +1394,7 @@ class CorrectedTrainingTimeTask(luigi.Task):
     debug_memoize = param_debug_memoize
     debug_single_thread = param_debug_single_thread
     debug_perf = param_debug_perf
-    # algo_env_from_dir = luigi.BoolParameter(description="Add algo/env columns based on directory structure of --iml-directories <algo>/<env>/iml_dir", default=True, parsing=luigi.BoolParameter.EXPLICIT_PARSING)
+    # algo_env_from_dir = luigi.BoolParameter(description="Add algo/env columns based on directory structure of --rlscope-directories <algo>/<env>/rlscope_dir", default=True, parsing=luigi.BoolParameter.EXPLICIT_PARSING)
 
     skip_output = False
 
@@ -1410,12 +1410,12 @@ class CorrectedTrainingTimeTask(luigi.Task):
         self.dumper.run()
 
 class PyprofOverheadTask(luigi.Task):
-    uninstrumented_directory = luigi.ListParameter(description="IML directory that ran with 'rls-prof --config uninstrumented train.py --iml-disable --iml-training-progress'")
-    # pyprof_annotations_directory = luigi.ListParameter(description="IML directory that ran with 'rls-prof --config uninstrumented train.py --iml-disable-tfprof --iml-disable-pyprof-interceptions --iml-training-progress'")
-    # pyprof_interceptions_directory = luigi.ListParameter(description="IML directory that ran with 'rls-prof --config uninstrumented train.py --iml-disable-tfprof --iml-disable-pyprof-annotations --iml-training-progress'")
+    uninstrumented_directory = luigi.ListParameter(description="IML directory that ran with 'rls-prof --config uninstrumented train.py --rlscope-disable --rlscope-training-progress'")
+    # pyprof_annotations_directory = luigi.ListParameter(description="IML directory that ran with 'rls-prof --config uninstrumented train.py --rlscope-disable-tfprof --rlscope-disable-pyprof-interceptions --rlscope-training-progress'")
+    # pyprof_interceptions_directory = luigi.ListParameter(description="IML directory that ran with 'rls-prof --config uninstrumented train.py --rlscope-disable-tfprof --rlscope-disable-pyprof-annotations --rlscope-training-progress'")
 
-    pyprof_annotations_directory = luigi.ListParameter(description="IML directory that ran with 'rls-prof --config uninstrumented train.py --iml-disable-tfprof --iml-disable-pyprof-interceptions --iml-training-progress'", default=None)
-    pyprof_interceptions_directory = luigi.ListParameter(description="IML directory that ran with 'rls-prof --config uninstrumented train.py --iml-disable-tfprof --iml-disable-pyprof-annotations --iml-training-progress'", default=None)
+    pyprof_annotations_directory = luigi.ListParameter(description="IML directory that ran with 'rls-prof --config uninstrumented train.py --rlscope-disable-tfprof --rlscope-disable-pyprof-interceptions --rlscope-training-progress'", default=None)
+    pyprof_interceptions_directory = luigi.ListParameter(description="IML directory that ran with 'rls-prof --config uninstrumented train.py --rlscope-disable-tfprof --rlscope-disable-pyprof-annotations --rlscope-training-progress'", default=None)
 
     directory = luigi.Parameter(description="Output directory", default=".")
 
@@ -1427,7 +1427,7 @@ class PyprofOverheadTask(luigi.Task):
     debug = param_debug
     debug_single_thread = param_debug_single_thread
     debug_perf = param_debug_perf
-    # algo_env_from_dir = luigi.BoolParameter(description="Add algo/env columns based on directory structure of --iml-directories <algo>/<env>/iml_dir", default=True, parsing=luigi.BoolParameter.EXPLICIT_PARSING)
+    # algo_env_from_dir = luigi.BoolParameter(description="Add algo/env columns based on directory structure of --rlscope-directories <algo>/<env>/rlscope_dir", default=True, parsing=luigi.BoolParameter.EXPLICIT_PARSING)
 
     skip_output = False
 
@@ -1443,7 +1443,7 @@ class PyprofOverheadTask(luigi.Task):
         self.dumper.run()
 
 class TotalTrainingTimeTask(luigi.Task):
-    uninstrumented_directory = luigi.ListParameter(description="IML directory that ran with 'rls-prof --config uninstrumented train.py --iml-disable --iml-training-progress'")
+    uninstrumented_directory = luigi.ListParameter(description="IML directory that ran with 'rls-prof --config uninstrumented train.py --rlscope-disable --rlscope-training-progress'")
     directory = luigi.Parameter(description="Output directory", default=".")
 
     # Plot attrs
@@ -1504,9 +1504,9 @@ class VennJsPlotTask(IMLTask):
     # def output(self):
     #     return []
 
-    def iml_run(self):
+    def rlscope_run(self):
         venn_js_paths = []
-        for path in each_file_recursive(self.iml_directory):
+        for path in each_file_recursive(self.rlscope_directory):
             if not is_venn_js_file(path):
                 continue
             venn_js_paths.append(path)
@@ -1566,11 +1566,11 @@ class SlidingWindowUtilizationPlotTask(IMLTask):
     def requires(self):
         return []
 
-    def iml_run(self):
+    def rlscope_run(self):
         kwargs = kwargs_from_task(self)
         assert 'directory' not in kwargs
-        kwargs['directory'] = kwargs['iml_directory']
-        del kwargs['iml_directory']
+        kwargs['directory'] = kwargs['rlscope_directory']
+        del kwargs['rlscope_directory']
         plotter = SlidingWindowUtilizationPlot(**kwargs)
         plotter.run()
 
@@ -1586,11 +1586,11 @@ class CUDAEventCSVTask(IMLTask):
     def requires(self):
         return []
 
-    def iml_run(self):
+    def rlscope_run(self):
         kwargs = kwargs_from_task(self)
         assert 'directory' not in kwargs
-        kwargs['directory'] = kwargs['iml_directory']
-        del kwargs['iml_directory']
+        kwargs['directory'] = kwargs['rlscope_directory']
+        del kwargs['rlscope_directory']
         dumper = CUDAEventCSVReader(**kwargs)
         dumper.run()
 
@@ -1605,7 +1605,7 @@ class GPUUtilOverTimePlotTask(IMLTask):
     debug_single_thread = param_debug_single_thread
     debug_perf = param_debug_perf
 
-    iml_directories = luigi.ListParameter(description="Multiple --iml-directory entries for finding overlap_type files: *.venn_js.js")
+    rlscope_directories = luigi.ListParameter(description="Multiple --rlscope-directory entries for finding overlap_type files: *.venn_js.js")
     show_std = luigi.BoolParameter(description="If true, show stdev for kernel delay and duration", default=False, parsing=luigi.BoolParameter.EXPLICIT_PARSING)
 
     skip_output = False
@@ -1613,11 +1613,11 @@ class GPUUtilOverTimePlotTask(IMLTask):
     def requires(self):
         return []
 
-    def iml_run(self):
+    def rlscope_run(self):
         kwargs = kwargs_from_task(self)
         assert 'directory' not in kwargs
-        kwargs['directory'] = kwargs['iml_directory']
-        del kwargs['iml_directory']
+        kwargs['directory'] = kwargs['rlscope_directory']
+        del kwargs['rlscope_directory']
         dumper = GPUUtilOverTimePlot(**kwargs)
         dumper.run()
 
@@ -1678,7 +1678,7 @@ class NvprofTracesTask(luigi.Task):
     debug_single_thread = param_debug_single_thread
     debug_perf = param_debug_perf
 
-    iml_directory = luigi.Parameter(description="Location of trace-files")
+    rlscope_directory = luigi.Parameter(description="Location of trace-files")
 
     n_workers = luigi.IntParameter(
         description="How many threads to simultaneously run",
@@ -1695,8 +1695,8 @@ class NvprofTracesTask(luigi.Task):
     def run(self):
         kwargs = kwargs_from_task(self)
         assert 'directory' not in kwargs
-        kwargs['directory'] = kwargs['iml_directory']
-        del kwargs['iml_directory']
+        kwargs['directory'] = kwargs['rlscope_directory']
+        del kwargs['rlscope_directory']
         dumper = NvprofTraces(**kwargs)
         dumper.run()
 

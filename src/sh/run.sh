@@ -40,7 +40,7 @@ _activate_tensorflow() {
     cd $prev_dir
 }
 
-_activate_iml() {
+_activate_rlscope() {
     export PYTHONPATH="$PYTHONPATH:\
 $ROOT/python\
 "
@@ -63,8 +63,8 @@ _train_minigo() {
     mkdir -p $BASE_DIR
 
     cd $MLPERF_DIR/reinforcement/tensorflow
-#    ./run_and_time.sh $SEED --iml-keep-traces --iml-disable 2>&1 | tee --ignore-interrupts ${BASE_DIR}/benchmark.txt
-    ./run_and_time.sh $SEED --iml-keep-traces 2>&1 | tee --ignore-interrupts ${BASE_DIR}/benchmark.txt
+#    ./run_and_time.sh $SEED --rlscope-keep-traces --rlscope-disable 2>&1 | tee --ignore-interrupts ${BASE_DIR}/benchmark.txt
+    ./run_and_time.sh $SEED --rlscope-keep-traces 2>&1 | tee --ignore-interrupts ${BASE_DIR}/benchmark.txt
 )
 }
 
@@ -110,19 +110,19 @@ _train_pong() {
     (
     _activate_tensorflow
     _activate_baselines
-    _activate_iml
+    _activate_rlscope
     echo $PYTHONPATH
     export TF_PRINT_TIMESTAMP=yes
     mkdir -p $chkpt_path
     export CUDA_VISIBLE_DEVICES="1"
     python3 $BASELINES_DIR/baselines/deepq/experiments/run_atari.py \
         --env PongNoFrameskip-v4 \
-        --iml-start-measuring-call 1 \
+        --rlscope-start-measuring-call 1 \
         --checkpoint-path $chkpt_path \
-        --iml-num-calls=100 \
-        --iml-num-traces 2 \
-        --iml-trace-time-sec 40 \
-        --iml-python
+        --rlscope-num-calls=100 \
+        --rlscope-num-traces 2 \
+        --rlscope-trace-time-sec 40 \
+        --rlscope-python
     )
 }
 
@@ -347,24 +347,24 @@ _multi_expr() {
   n_launches=1
   mps=${mps:-no}
   suffix=${suffix:-}
-  iml_dir="$ROOT/output/gpu_util_experiment/${subdir}/thread_blocks_${thread_blocks}.thread_block_size_${thread_block_size}.n_launches_${n_launches}.iterations_${iterations}.num_threads_${num_threads}.iterations_per_sched_sample_${iterations_per_sched_sample}$(_bool_attr processes $processes)$(_bool_attr hw_counters $hw_counters)$(_bool_attr mps $mps)${suffix}"
+  rlscope_dir="$ROOT/output/gpu_util_experiment/${subdir}/thread_blocks_${thread_blocks}.thread_block_size_${thread_block_size}.n_launches_${n_launches}.iterations_${iterations}.num_threads_${num_threads}.iterations_per_sched_sample_${iterations_per_sched_sample}$(_bool_attr processes $processes)$(_bool_attr hw_counters $hw_counters)$(_bool_attr mps $mps)${suffix}"
   _already_ran() {
-    if [ ! -d ${iml_dir} ]; then
+    if [ ! -d ${rlscope_dir} ]; then
       return 1
     fi
-    find ${iml_dir} -type f \
+    find ${rlscope_dir} -type f \
       | grep --perl-regexp '/GPUComputeSchedInfoKernel[^/]*\.json$' >/dev/null
   }
   if _already_ran; then
-    echo "> SKIP gpu_util_experiment; already exists @ ${iml_dir}"
+    echo "> SKIP gpu_util_experiment; already exists @ ${rlscope_dir}"
     return
   fi
-  _do mkdir -p ${iml_dir}
-  logfile=${iml_dir}/gpu_util_experiment.log.txt
-  _do_with_logfile rls-util-sampler --iml-directory ${iml_dir} -- \
+  _do mkdir -p ${rlscope_dir}
+  logfile=${rlscope_dir}/gpu_util_experiment.log.txt
+  _do_with_logfile rls-util-sampler --rlscope-directory ${rlscope_dir} -- \
     gpu_util_experiment \
     --mode run_kernels \
-    --iml_directory ${iml_dir} \
+    --rlscope_directory ${rlscope_dir} \
     --gpu_clock_freq_json $IML_DIR/calibration/gpu_clock_freq/gpu_clock_freq.json \
     --kernel compute_kernel_sched_info \
     --kern_arg_iterations ${iterations} \
@@ -398,14 +398,14 @@ nvidia_smi_expr() {
   hw_counters='no'
   num_threads=1
   n_launches=1
-  iml_dir="$ROOT/output/gpu_util_experiment/nvidia_smi/thread_blocks_${thread_blocks}.thread_block_size_${thread_block_size}.n_launches_${n_launches}.iterations_${iterations}.num_threads_${num_threads}$(_bool_attr processes $processes)$(_bool_attr hw_counters $hw_counters)"
-  _do mkdir -p ${iml_dir}
+  rlscope_dir="$ROOT/output/gpu_util_experiment/nvidia_smi/thread_blocks_${thread_blocks}.thread_block_size_${thread_block_size}.n_launches_${n_launches}.iterations_${iterations}.num_threads_${num_threads}$(_bool_attr processes $processes)$(_bool_attr hw_counters $hw_counters)"
+  _do mkdir -p ${rlscope_dir}
     #  --kernel_duration_us ${kernel_duration_us}
     #    --kernel_delay_us ${kernel_delay_us}
-  _do rls-util-sampler --iml-directory ${iml_dir} -- \
+  _do rls-util-sampler --rlscope-directory ${rlscope_dir} -- \
     gpu_util_experiment \
     --mode run_kernels \
-    --iml_directory ${iml_dir} \
+    --rlscope_directory ${rlscope_dir} \
     --gpu_clock_freq_json $IML_DIR/calibration/gpu_clock_freq/gpu_clock_freq.json \
     --kernel compute_kernel_sched_info \
     --kern_arg_iterations ${iterations} \
@@ -415,9 +415,9 @@ nvidia_smi_expr() {
     --n_launches ${n_launches} \
     $(_bool_opt processes $processes) \
     $(_bool_opt hw_counters $hw_counters) \
-    2>&1 | tee ${iml_dir}/gpu_util_experiment.log.txt
-#  _do rls-analyze --mode gpu_hw --iml_directory ${iml_dir} | \
-#    2>&1 | tee ${iml_dir}/rls_analyze.log.txt
+    2>&1 | tee ${rlscope_dir}/gpu_util_experiment.log.txt
+#  _do rls-analyze --mode gpu_hw --rlscope_directory ${rlscope_dir} | \
+#    2>&1 | tee ${rlscope_dir}/rls_analyze.log.txt
 )
 }
 
@@ -773,7 +773,7 @@ tf_inference_expr() {
   n_warmup_batches=3
   n_measure_batches=20
   local n_timesteps=$((n_measure_batches + n_warmup_batches))
-  iml_prof_config="gpu-hw"
+  rlscope_prof_config="gpu-hw"
   local out_dir=$(_tf_inference_output_dir)
   if [ -e ${out_dir}/mode_microbench_inference.json ]; then
     echo "> SKIP tf_inference_expr; already exists @ ${out_dir}/mode_microbench_inference.json"
@@ -791,20 +791,20 @@ tf_inference_expr() {
 
   _do mkdir -p ${out_dir}
   logfile=${out_dir}/log.txt
-  _do_with_logfile rls-prof --config ${iml_prof_config} python ${ENJOY_TRT} \
+  _do_with_logfile rls-prof --config ${rlscope_prof_config} python ${ENJOY_TRT} \
     --algo a2c \
     --env BreakoutNoFrameskip-v4 \
     --folder trained_agents/ \
     -n ${n_timesteps} \
-    --iml-directory ${out_dir} \
-    --iml-delay \
-    --iml-debug \
+    --rlscope-directory ${out_dir} \
+    --rlscope-delay \
+    --rlscope-debug \
     --mode microbench_inference \
     --warmup-iters ${n_warmup_batches} \
     --batch-size ${batch_size}
 
   logfile=${out_dir}/rls_analyze.log.txt
-  _do_with_logfile rls-analyze --mode gpu_hw --iml_directory ${out_dir}
+  _do_with_logfile rls-analyze --mode gpu_hw --rlscope_directory ${out_dir}
 )
 }
 
@@ -841,7 +841,7 @@ mk_trt_model() {
 #    --env BreakoutNoFrameskip-v4
 #    --folder trained_agents/
 #    -n 5000
-#    --iml-directory output/tensorrt
+#    --rlscope-directory output/tensorrt
 
 #  trt_max_batch_size=${trt_max_batch_size:-1}
 #  trt_precision=${trt_precision:-fp16}
@@ -894,7 +894,7 @@ mk_uff_model() {
     --env BreakoutNoFrameskip-v4 \
     --folder trained_agents/ \
     -n 5000 \
-    --iml-directory output/tensorrt \
+    --rlscope-directory output/tensorrt \
     --mode save_tensorrt
   _do mv tf_model* $(_tf_model_output_dir) || true
   if [ "$DRY_RUN" != 'yes' ]; then
@@ -1028,33 +1028,33 @@ trtexec_expr() {
     fi
   fi
 
-  iml_dir="$(_trtexec_output_dir)/${subdir}batch_size_${batch_size}.streams_${streams}$(_bool_attr threads $threads)$(_bool_attr cuda_graph $cuda_graph)$(_bool_attr hw_counters $hw_counters)$(_model_attr)"
+  rlscope_dir="$(_trtexec_output_dir)/${subdir}batch_size_${batch_size}.streams_${streams}$(_bool_attr threads $threads)$(_bool_attr cuda_graph $cuda_graph)$(_bool_attr hw_counters $hw_counters)$(_model_attr)"
 
-  if [ -d $iml_dir ] && [ "$DRY_RUN" = 'no' ]; then
+  if [ -d $rlscope_dir ] && [ "$DRY_RUN" = 'no' ]; then
     if [ "$FORCE" != 'yes' ]; then
-      echo "> SKIP: $iml_dir"
+      echo "> SKIP: $rlscope_dir"
       return
     else
-      echo "> FORCE: $iml_dir"
+      echo "> FORCE: $rlscope_dir"
     fi
   fi
 
   _make_install
   export CUDA_VISIBLE_DEVICES=0
 
-  _do mkdir -p ${iml_dir}
-  logfile=${iml_dir}/trtexec.log.txt
+  _do mkdir -p ${rlscope_dir}
+  logfile=${rlscope_dir}/trtexec.log.txt
   _do_with_logfile trtexec7 \
     --loadEngine=${engine_path} \
-    --profile-dir=${iml_dir} \
+    --profile-dir=${rlscope_dir} \
     --batch=${batch_size} \
     --streams=${streams} \
-    --exportTimes=${iml_dir}/times.json \
+    --exportTimes=${rlscope_dir}/times.json \
     $(_bool_opt threads $threads) \
     $(_bool_opt hw-counters $hw_counters) \
     $(_bool_opt useCudaGraph $cuda_graph)
 
-  _do python $IML_DIR/src/libs/trtexec7/tracer.py ${iml_dir}/times.json
+  _do python $IML_DIR/src/libs/trtexec7/tracer.py ${rlscope_dir}/times.json
 )
 }
 

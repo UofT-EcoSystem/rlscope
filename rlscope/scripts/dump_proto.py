@@ -1,4 +1,4 @@
-from rlscope.profiler.iml_logging import logger
+from rlscope.profiler.rlscope_logging import logger
 import argparse
 import textwrap
 import sys
@@ -6,8 +6,8 @@ import csv
 
 # from tensorflow.core.profiler.tfprof_log_pb2 import ProfileProto
 from rlscope.protobuf.pyprof_pb2 import CategoryEventsProto, ProcessMetadata, IncrementalTrainingProgress
-from rlscope.protobuf.iml_prof_pb2 import CUDAAPIPhaseStatsProto, MachineDevsEventsProto, OpStackProto
-# from rlscope.protobuf.iml_prof_pb2 import CUDAAPIPhaseStatsProto, MachineDevsEventsProto, OpStackProto
+from rlscope.protobuf.rlscope_prof_pb2 import CUDAAPIPhaseStatsProto, MachineDevsEventsProto, OpStackProto
+# from rlscope.protobuf.rlscope_prof_pb2 import CUDAAPIPhaseStatsProto, MachineDevsEventsProto, OpStackProto
 # src/libs/range_sampling/range_sampling.proto
 try:
     from range_sampling.range_sampling_pb2 import GPUHwCounterSampleProto
@@ -62,7 +62,7 @@ def dump_csv(proto, stream):
             writer.writeheader()
         writer.writerow(row)
 
-from rlscope.profiler.iml_logging import logger
+from rlscope.profiler.rlscope_logging import logger
 def main():
     parser = argparse.ArgumentParser("Dump protobuf files to txt")
     parser.add_argument("--proto",

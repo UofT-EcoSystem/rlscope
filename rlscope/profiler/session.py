@@ -5,14 +5,14 @@ These are the sessions we need to check for trace-data during the DUMP phase of 
 
 See SessionWrapper for details.
 """
-from rlscope.profiler.iml_logging import logger
+from rlscope.profiler.rlscope_logging import logger
 # NOTE: avoid importing tensorflow at top-level for pytest test discovery.
 import threading
 import pprint
 
 from rlscope import py_config
 
-from rlscope.profiler.iml_logging import logger
+from rlscope.profiler.rlscope_logging import logger
 
 from rlscope.profiler import clib_wrap
 
@@ -65,16 +65,16 @@ def setup_wrap_tf_py_function():
     tf.numpy_function = tf_numpy_function
 
 def tf_py_function(func, inp, Tout, name=None):
-    def iml_wrapped_func(*args, **kwargs):
+    def rlscope_wrapped_func(*args, **kwargs):
         with clib_wrap.CallStack.frame(category=constants.CATEGORY_PYTHON, name=func.__name__):
             return func(*args, **kwargs)
-    return orig_tf_py_function(iml_wrapped_func, inp, Tout, name=name)
+    return orig_tf_py_function(rlscope_wrapped_func, inp, Tout, name=name)
 
 def tf_numpy_function(func, inp, Tout, name=None):
-    def iml_wrapped_func(*args, **kwargs):
+    def rlscope_wrapped_func(*args, **kwargs):
         with clib_wrap.CallStack.frame(category=constants.CATEGORY_PYTHON, name=func.__name__):
             return func(*args, **kwargs)
-    return orig_tf_numpy_function(iml_wrapped_func, inp, Tout, name=name)
+    return orig_tf_numpy_function(rlscope_wrapped_func, inp, Tout, name=name)
 
 # old_Session = None
 # def setup_wrap_Session():

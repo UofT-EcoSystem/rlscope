@@ -4,7 +4,7 @@ import copy
 import os
 import pprint
 import progressbar
-from rlscope.profiler.iml_logging import logger
+from rlscope.profiler.rlscope_logging import logger
 import functools
 import multiprocessing
 
@@ -17,7 +17,7 @@ from os.path import join as _j, abspath as _a, exists as _e, dirname as _d, base
 from rlscope.profiler.util import pprint_msg
 from rlscope.parser.common import *
 from rlscope.parser import constants
-from rlscope.protobuf import iml_prof_pb2
+from rlscope.protobuf import rlscope_prof_pb2
 
 def Worker_split_map_merge(kwargs):
     kwargs = dict(kwargs)
@@ -52,7 +52,7 @@ class BaseDataframeReader:
         # column-name -> [values]
         # self.data = None
         self.df = None
-        # add_fields(iml_directory) -> dict of fields to add to data-frame
+        # add_fields(rlscope_directory) -> dict of fields to add to data-frame
         self.add_fields = add_fields
         if colnames is not None:
             colnames = set(colnames)
@@ -60,9 +60,9 @@ class BaseDataframeReader:
         self.added_fields = set()
         self.debug = debug
         self.debug_single_thread = debug_single_thread
-        # self.iml_config = read_iml_config(self.directory, allow_union=True)
-        self.iml_metadata = read_iml_config_metadata(self.directory)
-        self.iml_columns = self._get_iml_columns()
+        # self.rlscope_config = read_rlscope_config(self.directory, allow_union=True)
+        self.rlscope_metadata = read_rlscope_config_metadata(self.directory)
+        self.rlscope_columns = self._get_rlscope_columns()
         self.colnames = self._get_colnames()
 
     def split_map_merge(self, name, map_fn, merge_fn,
@@ -131,20 +131,20 @@ class BaseDataframeReader:
         return result
 
     def _get_colnames(self):
-        return self._colnames.union(set(self.iml_columns))
+        return self._colnames.union(set(self.rlscope_columns))
 
-    def _add_iml_config_columns(self, data=None, skip_fields=None):
+    def _add_rlscope_config_columns(self, data=None, skip_fields=None):
         assert data is not None
         def _get_meta(col):
-            if col not in self.iml_metadata['metadata'] or \
+            if col not in self.rlscope_metadata['metadata'] or \
                 (skip_fields is not None and col in skip_fields):
                 return
-            self._add_col(col, self.iml_metadata['metadata'][col], data=data)
+            self._add_col(col, self.rlscope_metadata['metadata'][col], data=data)
         # Q: should we just set ALL the metadata?
         _get_meta('algo')
         _get_meta('env')
-        if 'env' in self.iml_metadata and 'CUDA_VISIBLE_DEVICES' in self.iml_metadata['env']:
-            devs = self.iml_metadata['env']['CUDA_VISIBLE_DEVICES']
+        if 'env' in self.rlscope_metadata and 'CUDA_VISIBLE_DEVICES' in self.rlscope_metadata['env']:
+            devs = self.rlscope_metadata['env']['CUDA_VISIBLE_DEVICES']
             if type(devs) == int:
                 dev_ids = frozenset([devs])
             elif type(devs) == str:
@@ -152,17 +152,17 @@ class BaseDataframeReader:
             else:
                 raise NotImplementedError(
                     ("Not sure how to parse "
-                     "iml_config['env']['CUDA_VISIBLE_DEVICES'] = {obj}, "
+                     "rlscope_config['env']['CUDA_VISIBLE_DEVICES'] = {obj}, "
                      "type={type}").format(
                         obj=devs,
                         type=type(devs)))
             self._add_col('CUDA_VISIBLE_DEVICES', dev_ids, data=data)
 
-    def _has_iml_columns(self):
-        return 'algo' in self.iml_metadata['metadata'] and 'env' in self.iml_metadata['metadata']
+    def _has_rlscope_columns(self):
+        return 'algo' in self.rlscope_metadata['metadata'] and 'env' in self.rlscope_metadata['metadata']
 
-    def _get_iml_columns(self):
-        if not self._has_iml_columns():
+    def _get_rlscope_columns(self):
+        if not self._has_rlscope_columns():
             return []
         return ['algo', 'env']
 
@@ -230,7 +230,7 @@ class BaseDataframeReader:
         data = dict()
         for colname in zero_colnames:
             data[colname] = [0]
-        self._add_iml_config_columns(data=data)
+        self._add_rlscope_config_columns(data=data)
         df = pd.DataFrame(data)
         return df
 
@@ -249,7 +249,7 @@ class BaseDataframeReader:
             # Avoid adding same columns twice.
             skip_fields.update(extra_fields.keys())
 
-        self._add_iml_config_columns(data=data, skip_fields=skip_fields)
+        self._add_rlscope_config_columns(data=data, skip_fields=skip_fields)
         self._check_cols(data=data)
 
     @property
@@ -408,13 +408,13 @@ class CUDADeviceEventsReader(BaseDataframeReader):
             return event.name
 
     def get_event_type(self, event):
-        if event.cuda_event_type == iml_prof_pb2.UNKNOWN:
+        if event.cuda_event_type == rlscope_prof_pb2.UNKNOWN:
             return "UNKNOWN"
-        elif event.cuda_event_type == iml_prof_pb2.KERNEL:
+        elif event.cuda_event_type == rlscope_prof_pb2.KERNEL:
             return "KERNEL"
-        elif event.cuda_event_type == iml_prof_pb2.MEMCPY:
+        elif event.cuda_event_type == rlscope_prof_pb2.MEMCPY:
             return "MEMCPY"
-        elif event.cuda_event_type == iml_prof_pb2.MEMSET:
+        elif event.cuda_event_type == rlscope_prof_pb2.MEMSET:
             return "MEMSET"
         else:
             raise NotImplementedError("Not sure what Event.name to use for event.cuda_event_type == {code}".format(
@@ -514,7 +514,7 @@ class UtilDataframeReader(BaseDataframeReader):
             device_id = 0
             # TODO: once we verify this works, limit output devices to CUDA_VISIBLE_DEVICES
             for sample in device_utilization.samples:
-                # HACK: iml-sample-util will record 1 sample at the same timestamp for each GPU, regardless
+                # HACK: rlscope-sample-util will record 1 sample at the same timestamp for each GPU, regardless
                 # of CUDA_VISIBLE_DEVICES.
                 # Often a machine has multiple GPUs with the same device_name.
                 # To ensure we don't incorrectly group multiple samples into the same device,
@@ -552,7 +552,7 @@ class TrainingProgressDataframeReader(BaseDataframeReader):
 
         colnames = [
             # IncrementalTrainingProgress from pyprof.proto
-            # 'iml_directory',
+            # 'rlscope_directory',
             'process_name',
             'phase',
             'machine_name',
@@ -576,7 +576,7 @@ class TrainingProgressDataframeReader(BaseDataframeReader):
     def add_proto_cols(self, path, data=None):
         training_progress = read_training_progress_file(path)
         self._add_columns(self._colnames, training_progress, data=data)
-        self._add_col_to_data('iml_directory', self.directory, data=data)
+        self._add_col_to_data('rlscope_directory', self.directory, data=data)
         self._maybe_add_fields(path, data=data)
 
     def last_progress(self):
@@ -653,7 +653,7 @@ class TrainingProgressDataframeReader(BaseDataframeReader):
             'extrap_total_training_time',
             'algo',
             'env',
-            'iml_directory',
+            'rlscope_directory',
         ]
         df = df[keep_cols]
         return df
@@ -777,7 +777,7 @@ class SplitMapMerge_PyprofDataframeReader__total_pyprof_overhead_df:
         self.obj = obj
 
     def map_fn(self, df):
-        groupby_cols = self.obj.iml_columns
+        groupby_cols = self.obj.rlscope_columns
         agg_cols = ['duration_profiling_overhead_us']
         keep_cols = sorted(set(groupby_cols + agg_cols))
         df_keep = df[keep_cols]
@@ -818,12 +818,12 @@ class CUDAAPIStatsDataframeReader(BaseDataframeReader):
     def __init__(self, directory, add_fields=None, debug=False, debug_single_thread=False):
 
         colnames = [
-            # CUDAAPIPhaseStatsProto from iml_prof.proto
+            # CUDAAPIPhaseStatsProto from rlscope_prof.proto
             'process_name',
             'machine_name',
             'phase_name',
 
-            # CUDAAPIThreadStatsProto from iml_prof.proto
+            # CUDAAPIThreadStatsProto from rlscope_prof.proto
             'tid',
             'api_name',
             'total_time_us',
@@ -907,7 +907,7 @@ class CUDAAPIStatsDataframeReader(BaseDataframeReader):
         #     per_api_stats_df = merge(per_api_stats_df, df_sum)
 
     def _groupby_cols(self):
-        groupby_cols = ['api_name'] + self.iml_columns
+        groupby_cols = ['api_name'] + self.rlscope_columns
         return groupby_cols
 
     def _agg_cols(self):
@@ -945,7 +945,7 @@ class CUDAAPIStatsDataframeReader(BaseDataframeReader):
         :return:
         """
         # df = self.read()
-        # groupby_cols = ['api_name'] + self.iml_columns
+        # groupby_cols = ['api_name'] + self.rlscope_columns
         # agg_cols = ['total_time_us', 'num_calls']
         # keep_cols = sorted(set(groupby_cols + agg_cols))
 
@@ -1082,7 +1082,7 @@ class PyprofDataframeReader(BaseDataframeReader):
 
     def total_op_events(self):
         """
-        How many times did we record op-events using "with iml.prof.operation(...)"?
+        How many times did we record op-events using "with rlscope.prof.operation(...)"?
 
         Every time we execute this annotation, we record the following pyprof events:
 
@@ -1114,7 +1114,7 @@ class PyprofDataframeReader(BaseDataframeReader):
 
         def total_op_events(self):
             # PSEUDOCODE:
-            If we want to count the number of iml.prof.operation calls, then we wish to count the number of "Op-events":
+            If we want to count the number of rlscope.prof.operation calls, then we wish to count the number of "Op-events":
                 Number of events where:
                     event.category == constants.CATEGORY_OPERATION and
                     not is_op_process_event(event_name, category)
@@ -1225,7 +1225,7 @@ class PyprofDataframeReader(BaseDataframeReader):
         #
         # # Filter for events that have profiling overhead recorded.
         # # df = df[df['start_profiling_overhead_us'] != 0]
-        # groupby_cols = self.iml_columns
+        # groupby_cols = self.rlscope_columns
         # agg_cols = ['duration_profiling_overhead_us']
         # keep_cols = sorted(set(groupby_cols + agg_cols))
         # df_keep = df[keep_cols]
@@ -1286,80 +1286,80 @@ class DataframeMapper:
         reader = self.readers[0]
         return func(reader)
 
-def get_iml_config_path(directory, allow_many=False, allow_none=False):
+def get_rlscope_config_path(directory, allow_many=False, allow_none=False):
     """
-    Add (algo, env) from iml_config.json, if they were set by the training script using iml.prof.set_metadata(...).
+    Add (algo, env) from rlscope_config.json, if they were set by the training script using rlscope.prof.set_metadata(...).
 
     :return:
     """
-    iml_config_paths = [
+    rlscope_config_paths = [
         path for path in each_file_recursive(directory)
-        if is_iml_config_file(path) and _b(_d(path)) != constants.DEFAULT_PHASE]
-    # There should be exactly one iml_config.json file.
+        if is_rlscope_config_file(path) and _b(_d(path)) != constants.DEFAULT_PHASE]
+    # There should be exactly one rlscope_config.json file.
     # Q: Couldn't there be multiple for multi-process scripts like minigo?
-    if len(iml_config_paths) != 1 and not allow_many:
-        raise NoIMLConfigFound("Expected 1 iml_config.json but saw {len} within iml_directory={dir}: {msg}".format(
+    if len(rlscope_config_paths) != 1 and not allow_many:
+        raise NoIMLConfigFound("Expected 1 rlscope_config.json but saw {len} within rlscope_directory={dir}: {msg}".format(
             dir=directory,
-            len=len(iml_config_paths),
-            msg=pprint_msg(iml_config_paths)))
+            len=len(rlscope_config_paths),
+            msg=pprint_msg(rlscope_config_paths)))
 
-    if len(iml_config_paths) == 0 and allow_none:
+    if len(rlscope_config_paths) == 0 and allow_none:
         if allow_none:
             return None
         else:
-            raise NoIMLConfigFound("Didn't find any iml_config.json in iml_directory={dir}".format(
+            raise NoIMLConfigFound("Didn't find any rlscope_config.json in rlscope_directory={dir}".format(
                 dir=directory,
             ))
 
     if allow_many:
-        return iml_config_paths
+        return rlscope_config_paths
 
-    iml_config_path = iml_config_paths[0]
-    return iml_config_path
+    rlscope_config_path = rlscope_config_paths[0]
+    return rlscope_config_path
 
-def read_iml_config(directory):
-    iml_config_path = get_iml_config_path(directory)
-    iml_config = load_json(iml_config_path)
-    return iml_config
+def read_rlscope_config(directory):
+    rlscope_config_path = get_rlscope_config_path(directory)
+    rlscope_config = load_json(rlscope_config_path)
+    return rlscope_config
 
-def read_iml_config_metadata(directory):
-    iml_metadata = {
+def read_rlscope_config_metadata(directory):
+    rlscope_metadata = {
         'metadata': dict()
     }
-    iml_config_paths = get_iml_config_path(directory, allow_many=True)
-    for iml_config_path in iml_config_paths:
-        iml_config = load_json(iml_config_path)
-        if 'metadata' in iml_config:
-            iml_metadata['metadata'].update(iml_config['metadata'])
+    rlscope_config_paths = get_rlscope_config_path(directory, allow_many=True)
+    for rlscope_config_path in rlscope_config_paths:
+        rlscope_config = load_json(rlscope_config_path)
+        if 'metadata' in rlscope_config:
+            rlscope_metadata['metadata'].update(rlscope_config['metadata'])
 
-        if 'env' in iml_config and 'CUDA_VISIBLE_DEVICES' in iml_config['env']:
-            if 'env' not in iml_metadata:
-                iml_metadata['env'] = dict()
+        if 'env' in rlscope_config and 'CUDA_VISIBLE_DEVICES' in rlscope_config['env']:
+            if 'env' not in rlscope_metadata:
+                rlscope_metadata['env'] = dict()
 
-            if 'CUDA_VISIBLE_DEVICES' in iml_metadata['env']:
-                assert iml_metadata['env']['CUDA_VISIBLE_DEVICES'] == iml_config['env']['CUDA_VISIBLE_DEVICES']
+            if 'CUDA_VISIBLE_DEVICES' in rlscope_metadata['env']:
+                assert rlscope_metadata['env']['CUDA_VISIBLE_DEVICES'] == rlscope_config['env']['CUDA_VISIBLE_DEVICES']
             else:
-                iml_metadata['env']['CUDA_VISIBLE_DEVICES'] = iml_config['env']['CUDA_VISIBLE_DEVICES']
+                rlscope_metadata['env']['CUDA_VISIBLE_DEVICES'] = rlscope_config['env']['CUDA_VISIBLE_DEVICES']
 
-    return iml_metadata
+    return rlscope_metadata
 
 class NoIMLConfigFound(Exception):
     pass
 
 class IMLConfig:
-    def __init__(self, directory=None, iml_config_path=None):
-        assert directory is not None or iml_config_path is not None
+    def __init__(self, directory=None, rlscope_config_path=None):
+        assert directory is not None or rlscope_config_path is not None
         self.directory = directory
-        if iml_config_path is not None:
-            self.iml_config_path = iml_config_path
+        if rlscope_config_path is not None:
+            self.rlscope_config_path = rlscope_config_path
         else:
-            self.iml_config_path = get_iml_config_path(directory)
-        self.iml_config = load_json(self.iml_config_path)
-        self.init_iml_prof_args()
+            self.rlscope_config_path = get_rlscope_config_path(directory)
+        self.rlscope_config = load_json(self.rlscope_config_path)
+        self.init_rlscope_prof_args()
 
     def _get_metadata(self, var, allow_none=False):
-        if 'metadata' in self.iml_config and var in self.iml_config['metadata']:
-            return self.iml_config['metadata'][var]
+        if 'metadata' in self.rlscope_config and var in self.rlscope_config['metadata']:
+            return self.rlscope_config['metadata'][var]
         assert allow_none
         return None
 
@@ -1369,45 +1369,45 @@ class IMLConfig:
     def env(self, allow_none=False):
         return self._get_metadata('env', allow_none=allow_none)
 
-    def init_iml_prof_args(self):
-        self.iml_prof_args = dict()
-        if 'env' in self.iml_config:
-            for var, value in self.iml_config['env'].items():
-                if not is_iml_prof_env(var):
+    def init_rlscope_prof_args(self):
+        self.rlscope_prof_args = dict()
+        if 'env' in self.rlscope_config:
+            for var, value in self.rlscope_config['env'].items():
+                if not is_rlscope_prof_env(var):
                     continue
-                self.iml_prof_args[iml_prof_varname(var)] = iml_prof_value(var, value)
+                self.rlscope_prof_args[rlscope_prof_varname(var)] = rlscope_prof_value(var, value)
 
     def get_env_bool(self, var, dflt=False):
-        return self.iml_prof_args.get(var, dflt)
+        return self.rlscope_prof_args.get(var, dflt)
 
     def get_env_var(self, var, dflt=None):
-        return self.iml_prof_args.get(var, dflt)
+        return self.rlscope_prof_args.get(var, dflt)
 
     def must_get_env(self, var):
-        return self.iml_prof_args.get[var]
+        return self.rlscope_prof_args.get[var]
 
     def get_bool(self, var, dflt=False):
-        return self.iml_config.get(var, dflt)
+        return self.rlscope_config.get(var, dflt)
 
     def get_int(self, var, dflt=None):
-        return int(self.iml_config.get(var, dflt))
+        return int(self.rlscope_config.get(var, dflt))
 
     def get_var(self, var, dflt=None):
-        return self.iml_config.get(var, dflt)
+        return self.rlscope_config.get(var, dflt)
 
     def must_get(self, var):
-        return self.iml_config[var]
+        return self.rlscope_config[var]
 
-def is_iml_prof_env(var):
+def is_rlscope_prof_env(var):
     return re.search(r'^IML_', var)
 
-def iml_prof_varname(env_var):
+def rlscope_prof_varname(env_var):
     var = env_var
     var = re.sub(r'^IML_', '', var)
     var = var.lower()
     return var
 
-def iml_prof_value(var, value):
+def rlscope_prof_value(var, value):
     if value == 'yes':
         return True
     if value == 'no':
@@ -2189,7 +2189,7 @@ class TestVennAsOverlapDict:
         self.check_from_venn("test_venn_as_overlap_dict_03", V, expect_O)
 
     # def test_venn_as_overlap_dict_04(self):
-    #     # FROM : /mnt/data/james/clone/iml/output/iml_bench/all/config_instrumented_repetition_01/ppo2/Walker2DBulletEnv-v0/CategoryOverlap.machine_2420f5fc91b8.process_ppo2_Walker2DBulletEnv-v0.phase_ppo2_Walker2DBulletEnv-v0.ops_sample_action.resources_CPU_GPU.venn_js.json
+    #     # FROM : /mnt/data/james/clone/iml/output/rlscope_bench/all/config_instrumented_repetition_01/ppo2/Walker2DBulletEnv-v0/CategoryOverlap.machine_2420f5fc91b8.process_ppo2_Walker2DBulletEnv-v0.phase_ppo2_Walker2DBulletEnv-v0.ops_sample_action.resources_CPU_GPU.venn_js.json
     #     # Generated using old SQL code.
     #     # "venn": [
     #     #     {

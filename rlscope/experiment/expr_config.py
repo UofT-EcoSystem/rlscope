@@ -4,7 +4,7 @@ import traceback
 # $ pip install 'gym >= 0.13.0'
 import gym
 import re
-from rlscope.profiler.iml_logging import logger
+from rlscope.profiler.rlscope_logging import logger
 
 ALGO_ENV_GROUP_CHOICES = [
     'on_vs_off_policy',

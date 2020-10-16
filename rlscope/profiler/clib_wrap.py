@@ -1,4 +1,4 @@
-from rlscope.profiler.iml_logging import logger
+from rlscope.profiler.rlscope_logging import logger
 import contextlib
 import sys
 import multiprocessing
@@ -9,7 +9,7 @@ import re
 
 # from rlscope.parser.common import *
 from rlscope.parser import constants
-from rlscope.profiler import timer as iml_timer
+from rlscope.profiler import timer as rlscope_timer
 
 import time
 
@@ -28,7 +28,7 @@ from rlscope.profiler.util import get_stacktrace
 
 from rlscope.clib import rlscope_api
 
-now_us = iml_timer.now_us
+now_us = rlscope_timer.now_us
 
 DEFAULT_PREFIX = "CLIB__"
 
@@ -228,7 +228,7 @@ class CFuncWrapper:
     #         # Calls C++: TFE_Py_Execute ->
     #         #   Intercept clib call: python_start_us_before_call = _python_start_us
     #         # ! Calls Python: tf.py_function callback into "step" ->
-    #         # !  records Python "Finish benchmark" in iml.prof.operation("step"), updating _python_start_us
+    #         # !  records Python "Finish benchmark" in rlscope.prof.operation("step"), updating _python_start_us
     #         # ! Calls Python: tf.py_function callback into "step" ->
     #         # ! Calls C++ Simulator: PyBullet.step ->
     #         # ! Return from C++ Simulator: PyBullet.step ->
@@ -301,7 +301,7 @@ def enable_tracing():
     start_us = now_us()
     # if py_config.DEBUG and py_config.DEBUG_RLSCOPE_LIB_CALLS:
     # if py_config.DEBUG:
-    #     logger.debug(f"iml.enable_tracing(): python_start_us.new = {start_us}")
+    #     logger.debug(f"rlscope.enable_tracing(): python_start_us.new = {start_us}")
     # NOTE: name=None => name of python events inherit the name of the c-library call they are making.
     CallStack._entry_point(category=constants.CATEGORY_PYTHON, name=None, start_us=start_us)
 
@@ -503,7 +503,7 @@ class LibWrapper:
     Instead modifying the .so module object (wrap_module), we replace the entire py-module object
     with a wrapper.
 
-    NOTE: Don't use this class directly, use iml.wrap_entire_module instead.
+    NOTE: Don't use this class directly, use rlscope.wrap_entire_module instead.
 
     Details:
 
@@ -596,7 +596,7 @@ except ImportError as e:
 
 def wrap_pybullet():
 
-    # iml.wrap_entire_module(
+    # rlscope.wrap_entire_module(
     #     'pybullet',
     #     category=constants.CATEGORY_SIMULATOR_CPP,
     #     debug=True)
@@ -614,7 +614,7 @@ def wrap_pybullet():
 def unwrap_pybullet():
 
     # _unwrap_bullet_clients()
-    # iml.unwrap_entire_module('pybullet')
+    # rlscope.unwrap_entire_module('pybullet')
 
     _unwrap_bullet_clients()
     unwrap_module(pybullet)
@@ -769,7 +769,7 @@ class _CallStack:
 
     def _entry_point(self, category, name, start_us=None):
         if start_us is None:
-            # iml_timer is None...why?
+            # rlscope_timer is None...why?
             start_us = now_us()
             if start_us is None:
                 print("WARNING: now_us() was None in _CallStack._entry_point")

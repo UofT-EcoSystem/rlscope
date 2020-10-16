@@ -1,4 +1,4 @@
-from rlscope.profiler.iml_logging import logger
+from rlscope.profiler.rlscope_logging import logger
 import argparse
 import copy
 import re
@@ -31,7 +31,7 @@ from rlscope.parser.pyprof import PythonProfileParser
 from rlscope.parser.tfprof import OverlapComputer, overlap_type_to_instance, OverlapJSONToVennConverter
 from rlscope.parser.heatscale import HeatScale, exponential_moving_average
 from rlscope.parser.db import SQLCategoryTimesReader, sql_get_source_files, sql_input_path
-from rlscope.parser.dataframe import UtilDataframeReader, OverlapDataframeReader, VennData, read_iml_config_metadata, CUDADeviceEventsReader
+from rlscope.parser.dataframe import UtilDataframeReader, OverlapDataframeReader, VennData, read_rlscope_config_metadata, CUDADeviceEventsReader
 
 Y_LABEL_TRAINING_TIME_SEC = 'Training time (sec)'
 
@@ -2261,11 +2261,11 @@ class SlidingWindowUtilizationPlot:
     # def maybe_add_algo_env(self, machine_util_path):
     #     assert is_machine_util_file(machine_util_path)
     #
-    #     iml_directory = _d(machine_util_path)
+    #     rlscope_directory = _d(machine_util_path)
     #
     #     if self.algo_env_from_dir:
     #         return self.add_algo_env_from_dir(machine_util_path)
-    #     if not _e(experiment.experiment_config_path(iml_directory)):
+    #     if not _e(experiment.experiment_config_path(rlscope_directory)):
     #         return self.add_experiment_config(machine_util_path)
     #
     #     # Not sure what (algo, env) is; don't add those columns.
@@ -2274,7 +2274,7 @@ class SlidingWindowUtilizationPlot:
     def read_nvidia_smi(self):
         gpu_util_df_reader = UtilDataframeReader(
             self.directory,
-            # Q: use --algo and --env?  Or just don't add them at all since its a per iml-directory plot anyways.
+            # Q: use --algo and --env?  Or just don't add them at all since its a per rlscope-directory plot anyways.
             # add_fields=self.maybe_add_algo_env,
             debug=self.debug)
         gpu_util_df = gpu_util_df_reader.read()
@@ -2767,7 +2767,7 @@ class UtilizationPlot:
         self.plotter.plot(bench_name=None)
 
         # Plot the "CPU/GPU Utilization" plot.
-        # Other overlap_type's will JUST output the overlap data (to be consumed by iml-drill).
+        # Other overlap_type's will JUST output the overlap data (to be consumed by rlscope-drill).
 
     def _dump_process_timeline_json(self, operation_overlap):
         path = self._process_timeline_json_path()
@@ -3071,8 +3071,8 @@ class VennJsPlotter:
             ]
         }
         """
-        iml_dir = _d(venn_path)
-        iml_metadata = read_iml_config_metadata(iml_dir)
+        rlscope_dir = _d(venn_path)
+        rlscope_metadata = read_rlscope_config_metadata(rlscope_dir)
         venn_data = VennData(venn_path)
         overlap = venn_data.as_overlap_dict()
         def region_tuple_as_label(region_tuple):
@@ -3091,8 +3091,8 @@ class VennJsPlotter:
         def get_algo_env(opt):
             if getattr(self, opt) is not None:
                 value = getattr(self, opt)
-            elif opt in iml_metadata['metadata']:
-                value = iml_metadata['metadata'][opt]
+            elif opt in rlscope_metadata['metadata']:
+                value = rlscope_metadata['metadata'][opt]
             else:
                 value = ''
             return value
@@ -3930,7 +3930,7 @@ def fix_seaborn_legend(ax, legend_kwargs=dict()):
         **legend_kwargs,
     )
 
-from rlscope.profiler.iml_logging import logger
+from rlscope.profiler.rlscope_logging import logger
 def main():
     p = argparse.ArgumentParser()
     p.add_argument('--test-stacked-bar', action='store_true')

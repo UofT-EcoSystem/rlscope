@@ -19,7 +19,7 @@ _check_STABLE_BASELINES_DIR
 _check_RL_BASELINES_ZOO_DIR
 
 _check_tensorflow
-_check_iml
+_check_rlscope
 
 # Dependencies taken from:
 # rl-baselines-zoo/docker/Dockerfile.gpu
@@ -72,7 +72,7 @@ pip install \
 
 if [ "${STABLE_BASELINES_DIR}" = "" ]; then
     # Install directly from git repo.
-    _do pip install git+https://github.com/jagleeso/stable-baselines.git@iml
+    _do pip install git+https://github.com/jagleeso/stable-baselines.git@rlscope
 else
     # Install from local checkout of repo.
     _do cd "${STABLE_BASELINES_DIR}"

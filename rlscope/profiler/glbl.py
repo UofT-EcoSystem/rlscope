@@ -2,13 +2,13 @@
 Manage a singleton instance to a Profiler object.
 """
 
-from rlscope.profiler.iml_logging import logger
+from rlscope.profiler.rlscope_logging import logger
 import sys
 import os
 import re
 import platform
 
-from rlscope.profiler.iml_logging import logger
+from rlscope.profiler.rlscope_logging import logger
 from rlscope.profiler import profilers
 from rlscope.profiler import nvidia_gpu_query
 from rlscope.clib import rlscope_api
@@ -19,7 +19,7 @@ from rlscope.parser.common import *
 from os.path import join as _j, abspath as _a, exists as _e, dirname as _d, basename as _b
 
 import rlscope
-from rlscope.profiler.iml_logging import logger
+from rlscope.profiler.rlscope_logging import logger
 
 # prof = None
 session = None
@@ -85,28 +85,28 @@ def patch_environ():
         "  LD_PRELOAD={LD_PRELOAD}").format(
         LD_PRELOAD=os.environ['LD_PRELOAD']))
 
-def handle_iml_args(parser, args, directory=None, reports_progress=False):
+def handle_rlscope_args(parser, args, directory=None, reports_progress=False):
     """
     Build an argument parser,
     :return:
 
     :param directory
         The directory used by the ML-script for saving its own files.
-        If the user doesn't provide --iml-directory (i.e. a separate directory for storing profiling data),
+        If the user doesn't provide --rlscope-directory (i.e. a separate directory for storing profiling data),
         we fall back on this.
     """
-    # if args.iml_directory is not None:
-    #     iml_directory = args.iml_directory
+    # if args.rlscope_directory is not None:
+    #     rlscope_directory = args.rlscope_directory
     # else:
-    #     iml_directory = directory
+    #     rlscope_directory = directory
 
     if directory is not None:
-        iml_directory = directory
+        rlscope_directory = directory
     else:
-        if hasattr(args, 'iml_directory'):
-            iml_directory = args.iml_directory
+        if hasattr(args, 'rlscope_directory'):
+            rlscope_directory = args.rlscope_directory
         else:
-            iml_directory = args['iml_directory']
+            rlscope_directory = args['rlscope_directory']
 
     # TODO: train.py apparently like to launch separate process all willy-nilly.
     # I'm not sure what it's doing this for, but it's certainly true that python-side IML stuff will do it too.
@@ -118,8 +118,8 @@ def handle_iml_args(parser, args, directory=None, reports_progress=False):
     # launch new training scripts.
     patch_environ()
 
-    if iml_directory is None:
-        raise RuntimeError("IML: you must provide a location to store trace files: --iml-directory <dir>")
+    if rlscope_directory is None:
+        raise RuntimeError("IML: you must provide a location to store trace files: --rlscope-directory <dir>")
 
     success = profilers.check_avail_gpus()
     if not success:
@@ -128,31 +128,31 @@ def handle_iml_args(parser, args, directory=None, reports_progress=False):
     nvidia_gpu_query.check_nvidia_smi()
 
     init_profiler(
-        directory=iml_directory,
+        directory=rlscope_directory,
         reports_progress=reports_progress,
         args=args,
     )
 
-def handle_gflags_iml_args(FLAGS, directory=None, reports_progress=False):
+def handle_gflags_rlscope_args(FLAGS, directory=None, reports_progress=False):
     """
     Build an argument parser,
     :return:
 
     :param directory
         The directory used by the ML-script for saving its own files.
-        If the user doesn't provide --iml-directory (i.e. a separate directory for storing profiling data),
+        If the user doesn't provide --rlscope-directory (i.e. a separate directory for storing profiling data),
         we fall back on this.
     """
-    return handle_iml_args(parser=None, args=FLAGS, directory=directory, reports_progress=reports_progress)
+    return handle_rlscope_args(parser=None, args=FLAGS, directory=directory, reports_progress=reports_progress)
 
-def handle_click_iml_args(iml_kwargs, directory=None, reports_progress=False):
+def handle_click_rlscope_args(rlscope_kwargs, directory=None, reports_progress=False):
     """
     Build an argument parser,
     :return:
 
     :param directory
         The directory used by the ML-script for saving its own files.
-        If the user doesn't provide --iml-directory (i.e. a separate directory for storing profiling data),
+        If the user doesn't provide --rlscope-directory (i.e. a separate directory for storing profiling data),
         we fall back on this.
     """
-    return handle_iml_args(parser=None, args=iml_kwargs, directory=directory, reports_progress=reports_progress)
+    return handle_rlscope_args(parser=None, args=rlscope_kwargs, directory=directory, reports_progress=reports_progress)

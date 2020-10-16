@@ -31,7 +31,7 @@ _activate_virtualenv_cuda9
 _activate_cuda9
 _add_python_path
 
-iml_gen_protobufs() {
+rlscope_gen_protobufs() {
 (
     set -e
     set -x

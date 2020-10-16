@@ -2,7 +2,7 @@
 Python wrapper for running C++ rls-analyze binary
 distributed with RL-Scope python wheel.
 """
-from rlscope.profiler.iml_logging import logger
+from rlscope.profiler.rlscope_logging import logger
 import sys
 import textwrap
 import os

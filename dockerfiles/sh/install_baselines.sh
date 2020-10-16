@@ -18,11 +18,11 @@ _upgrade_pip
 _check_BASELINES_DIR
 
 _check_tensorflow
-_check_iml
+_check_rlscope
 
 # mpi4py
 # Install OpenMPI from source.
-# For details, see https://github.com/UofT-EcoSystem/iml/wiki/Issues-and-TODOs
+# For details, see https://github.com/UofT-EcoSystem/rlscope/wiki/Issues-and-TODOs
 #
 # sudo apt-get -y install libopenmpi-dev
 

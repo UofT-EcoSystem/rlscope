@@ -13,7 +13,7 @@ source $SH_DIR/make_utils.sh
 check_tensorflow_build
 
 cd $TENSORFLOW_DIR
-install_dir=$HOME/iml_tensorflow
+install_dir=$HOME/rlscope_tensorflow
 if [ ! -d $install_dir ]; then
     mkdir -p $install_dir
     cd $install_dir

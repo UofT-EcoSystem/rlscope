@@ -7,7 +7,7 @@ import shlex
 from glob import glob
 import copy
 from glob import glob
-from rlscope.profiler.iml_logging import logger
+from rlscope.profiler.rlscope_logging import logger
 import subprocess
 import sys
 import os
@@ -27,7 +27,7 @@ from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, base
 from rlscope.profiler.util import get_stacktrace
 from rlscope.profiler.util import pprint_msg
 from rlscope.experiment import expr_config
-from rlscope.profiler.iml_logging import logger
+from rlscope.profiler.rlscope_logging import logger
 from rlscope.profiler.concurrent import ForkedProcessPool, FailedProcessException
 from rlscope.experiment.util import tee
 
@@ -63,7 +63,7 @@ def add_config_options(pars):
         #     # Just measure small aspects of pyprof trace-collection overhead.
         #     'instrumented_no_tfprof_no_pydump_no_pytrace',
         #
-        #     # Sanity check: try --iml-disable-tfprof and --iml-disable-pyprof...performance SHOULD match --iml-disable…
+        #     # Sanity check: try --rlscope-disable-tfprof and --rlscope-disable-pyprof...performance SHOULD match --rlscope-disable…
         #     # RESULT: holds true... Really though...pyprof is THAT BAD?
         #     # TODO: disable pyprof dumping, JUST do collection
         #     'instrumented_no_tfprof_no_pyprof',
@@ -78,14 +78,14 @@ def add_config_options(pars):
         #     'uninstrumented_full'],
         help=textwrap.dedent("""
         instrumented:
-            Run the script with IML enabled for the entire duration of training (if --iml-trace-time-sec), 
+            Run the script with IML enabled for the entire duration of training (if --rlscope-trace-time-sec), 
             record start/end timestamps.
-            $ train.py --iml-directory ...
-            # NOTE: don't use --iml-trace-time-sec here, we want to collect traces for the whole run
+            $ train.py --rlscope-directory ...
+            # NOTE: don't use --rlscope-trace-time-sec here, we want to collect traces for the whole run
             
         uninstrumented:
             Run the script with IML disabled, record start/end timestamp at start/end of training script
-            $ train.py --iml-disable
+            $ train.py --rlscope-disable
             
         instrumented_full:
             Run for the ENTIRE training duration (don't stop early)
@@ -165,7 +165,7 @@ def main():
         '--debug',
         action='store_true')
     parser.add_argument(
-        '--iml-debug',
+        '--rlscope-debug',
         action='store_true')
     # Don't support --pdb for rls-bench since I haven't figured out how to
     # both (1) log stdout/stderr of a command, (2) allow pdb debugger prompt
@@ -231,7 +231,7 @@ def main():
     )
     parser.add_argument(
         '--dir',
-        default='./output/iml_bench/all',
+        default='./output/rlscope_bench/all',
         help=textwrap.dedent("""\
         Directory to store stuff in for the subcommand.
         
@@ -253,7 +253,7 @@ def main():
         type=int,
         help=textwrap.dedent("""\
         e.g. for --repetition 1, --config instrumented
-        $IML_DIR/output/iml_bench/all/config_instrumented_repetition_01
+        $IML_DIR/output/rlscope_bench/all/config_instrumented_repetition_01
         """.rstrip()))
 
     parser.add_argument('--algo-env-group',
@@ -452,20 +452,20 @@ class ExperimentGroup(Experiment):
     def __init__(self, args, extra_argv):
         self.args = args
         self.extra_argv = extra_argv
-        # self.pool = ForkedProcessPool(name="iml_analyze_pool", max_workers=args.workers, debug=self.args.debug)
+        # self.pool = ForkedProcessPool(name="rlscope_analyze_pool", max_workers=args.workers, debug=self.args.debug)
 
     def should_run_algo_env_group(self, algo_env_group):
         return self.args.algo_env_group is None or algo_env_group == self.args.algo_env_group
 
     @property
-    def root_iml_directory(self):
+    def root_rlscope_directory(self):
         args = self.args
-        root_iml_directory = get_root_iml_directory(args.config, args.dir, args.repetition)
-        return root_iml_directory
+        root_rlscope_directory = get_root_rlscope_directory(args.config, args.dir, args.repetition)
+        return root_rlscope_directory
 
     def stable_baselines(self, parser):
         """
-        To avoid running everything more than once, we will stick ALL (algo, env_id) pairs inside of $IML_DIR/output/iml_bench/all.
+        To avoid running everything more than once, we will stick ALL (algo, env_id) pairs inside of $IML_DIR/output/rlscope_bench/all.
 
         (1) On vs off policy:
         Run Atari Pong on all environments that support it (that we have annotated):
@@ -486,7 +486,7 @@ class ExperimentGroup(Experiment):
 
         args = self.args
 
-        os.makedirs(self.root_iml_directory, exist_ok=True)
+        os.makedirs(self.root_rlscope_directory, exist_ok=True)
 
         subparser = self.args.subparser
         # Not multiprocessing friendly (cannot pickle)
@@ -536,7 +536,7 @@ class ExperimentGroup(Experiment):
             self.will_plot = True
 
         # def _run(expr, train_stable_baselines_opts, stacked_args):
-        #     self.iml_bench(parser, subparser, 'train_stable_baselines.sh', train_stable_baselines_opts, suffix=bench_log(expr))
+        #     self.rlscope_bench(parser, subparser, 'train_stable_baselines.sh', train_stable_baselines_opts, suffix=bench_log(expr))
         #     self.stacked_plot(stacked_args, train_stable_baselines_opts, suffix=plot_log(expr))
 
 
@@ -554,7 +554,7 @@ class ExperimentGroup(Experiment):
         opts = ['--env-id', env, '--algo', algo]
         if self.should_run_algo_env_group(expr):
             logger.info(rl_workloads_msg(expr, algo_env_pairs))
-            self.iml_bench(parser, subparser, 'train_stable_baselines.sh', opts, suffix=bench_log(expr), debug=True)
+            self.rlscope_bench(parser, subparser, 'train_stable_baselines.sh', opts, suffix=bench_log(expr), debug=True)
             overlap_type = 'ResourceOverlap'
             self.stacked_plot([
                 '--overlap-type', overlap_type,
@@ -570,7 +570,7 @@ class ExperimentGroup(Experiment):
         opts = ['--env-id', env]
         if self.should_run_algo_env_group(expr):
             logger.info(rl_workloads_msg(expr, algo_env_pairs))
-            self.iml_bench(parser, subparser, 'train_stable_baselines.sh', opts, suffix=bench_log(expr))
+            self.rlscope_bench(parser, subparser, 'train_stable_baselines.sh', opts, suffix=bench_log(expr))
             overlap_type = 'ResourceOverlap'
             self.stacked_plot([
                 '--overlap-type', overlap_type,
@@ -586,7 +586,7 @@ class ExperimentGroup(Experiment):
         opts = []
         if self.should_run_algo_env_group(expr):
             logger.info(rl_workloads_msg(expr, algo_env_pairs))
-            self.iml_bench(parser, subparser, 'train_stable_baselines.sh', opts, suffix=bench_log(expr))
+            self.rlscope_bench(parser, subparser, 'train_stable_baselines.sh', opts, suffix=bench_log(expr))
             # overlap_type = 'OperationOverlap'
             overlap_type = 'CategoryOverlap'
             # NOTE: gather across ALL ppo directories, including environment we cannot run like AirLearning.
@@ -660,7 +660,7 @@ class ExperimentGroup(Experiment):
 
         if self.should_run_algo_env_group(expr):
             logger.info(rl_workloads_msg(expr, algo_env_pairs))
-            self.iml_bench(parser, subparser, 'train_stable_baselines.sh', opts, suffix=bench_log(expr))
+            self.rlscope_bench(parser, subparser, 'train_stable_baselines.sh', opts, suffix=bench_log(expr))
             overlap_type = 'CategoryOverlap'
             self.stacked_plot([
                 '--detailed',
@@ -840,7 +840,7 @@ class ExperimentGroup(Experiment):
         opts = []
         if self.should_run_algo_env_group(expr):
             logger.info(rl_workloads_msg(expr, algo_env_pairs))
-            self.iml_bench(parser, subparser, 'train_stable_baselines.sh', opts, suffix=bench_log(expr))
+            self.rlscope_bench(parser, subparser, 'train_stable_baselines.sh', opts, suffix=bench_log(expr))
         plot_expr_algorithm_choice(expr=expr, algo_env_pairs=algo_env_pairs)
 
         expr = 'algorithm_choice_1b_low_complexity'
@@ -848,7 +848,7 @@ class ExperimentGroup(Experiment):
         opts = []
         if self.should_run_algo_env_group(expr):
             logger.info(rl_workloads_msg(expr, algo_env_pairs))
-            self.iml_bench(parser, subparser, 'train_stable_baselines.sh', opts, suffix=bench_log(expr))
+            self.rlscope_bench(parser, subparser, 'train_stable_baselines.sh', opts, suffix=bench_log(expr))
         plot_expr_algorithm_choice(expr=expr, algo_env_pairs=algo_env_pairs)
 
         # (4) Compare all RL workloads:
@@ -865,7 +865,7 @@ class ExperimentGroup(Experiment):
         ]
         if self.should_run_algo_env_group(expr):
             logger.info(rl_workloads_msg(expr, algo_env_pairs))
-            # self.iml_bench(parser, subparser, 'train_stable_baselines.sh', opts, suffix=bench_log(expr))
+            # self.rlscope_bench(parser, subparser, 'train_stable_baselines.sh', opts, suffix=bench_log(expr))
             # # - Statement: GPU utilization is low across all workloads.
             # # - Plot: ResourceOverlap that compares [CPU] vs [CPU + GPU] breakdown
             # # Need 2 plots
@@ -957,15 +957,15 @@ class ExperimentGroup(Experiment):
         # # (5) Different RL algorithms on the industrial-scale simulator: AirLearning environment:
         # expr = 'beefy_simulator'
         # # opts = ['--bullet', '--algo', 'ppo2']
-        # # self.iml_bench(parser, subparser, 'train_stable_baselines.sh', opts, suffix=bench_log(expr))
+        # # self.rlscope_bench(parser, subparser, 'train_stable_baselines.sh', opts, suffix=bench_log(expr))
         # overlap_type = 'OperationOverlap'
-        # iml_dirs  = self.iml_dirs_air_learning()
+        # rlscope_dirs  = self.rlscope_dirs_air_learning()
         # self.stacked_plot([
         #     '--overlap-type', overlap_type,
         #     '--resource-overlap', json.dumps(['CPU']),
         #     '--y-type', 'percent',
         #     '--x-type', 'algo-comparison',
-        # ], suffix=plot_log(expr, overlap_type), iml_dirs=iml_dirs)
+        # ], suffix=plot_log(expr, overlap_type), rlscope_dirs=rlscope_dirs)
 
     def algos(self):
         return set(algo for algo, env in self.algo_env_pairs())
@@ -973,20 +973,20 @@ class ExperimentGroup(Experiment):
     def envs(self):
         return set(env for algo, env in self.algo_env_pairs())
 
-    def iml_directory(self, algo, env_id):
+    def rlscope_directory(self, algo, env_id):
         args = self.args
-        iml_directory = get_iml_directory(args.config, args.dir, algo, env_id, args.repetition)
-        return iml_directory
+        rlscope_directory = get_rlscope_directory(args.config, args.dir, algo, env_id, args.repetition)
+        return rlscope_directory
 
-    def unins_iml_directory(self, algo, env_id):
+    def unins_rlscope_directory(self, algo, env_id):
         args = self.args
         config = 'uninstrumented'
         repetition = 1
-        iml_directory = _j(args.unins_dir, algo, env_id, 'config_{config}_repetition_{r:02}'.format(
+        rlscope_directory = _j(args.unins_dir, algo, env_id, 'config_{config}_repetition_{r:02}'.format(
             config=config,
             r=repetition,
         ))
-        return iml_directory
+        return rlscope_directory
 
     def algo_env_pairs(self, include_minigo=False, debug=False):
         gather = GatherAlgoEnv(self.args, include_minigo=include_minigo)
@@ -995,14 +995,14 @@ class ExperimentGroup(Experiment):
     def _is_air_learning_env(self, env):
         return re.search(r'AirLearning', env)
 
-    def iml_dirs_air_learning(self, debug=False):
+    def rlscope_dirs_air_learning(self, debug=False):
         algo_env_pairs = [(algo, env) for algo, env in self.algo_env_pairs() \
                           if self._is_air_learning_env(env)]
         logger.info(pprint_msg({
             'self.algo_env_pairs()': self.algo_env_pairs(),
             'algo_env_pairs': algo_env_pairs}))
-        iml_dirs = [self.iml_directory(algo, env) for algo, env in algo_env_pairs]
-        return iml_dirs
+        rlscope_dirs = [self.rlscope_directory(algo, env) for algo, env in algo_env_pairs]
+        return rlscope_dirs
 
     def stacked_plot(self, stacked_args, suffix, algo_env_pairs=None, debug=False):
         if not self.will_plot:
@@ -1025,9 +1025,9 @@ class ExperimentGroup(Experiment):
         algo_env_pairs = list(algo_env_pairs)
 
         # if algo_env_pairs is None:
-        #     raise NotImplementedError("Not sure what to use for --iml-directories")
+        #     raise NotImplementedError("Not sure what to use for --rlscope-directories")
         if len(algo_env_pairs) == 0 and not self.args.dry_run:
-            raise NotImplementedError("Need at least one directory for --iml-directories but saw 0.")
+            raise NotImplementedError("Need at least one directory for --rlscope-directories but saw 0.")
         def sort_key(algo_env):
             """
             Show bar graphs order by algo first, then environment.
@@ -1037,28 +1037,28 @@ class ExperimentGroup(Experiment):
         # Remove duplicates.
         algo_env_pairs = list(set(algo_env_pairs))
         algo_env_pairs.sort(key=sort_key)
-        iml_dirs = [self.iml_directory(algo, env_id) for algo, env_id in algo_env_pairs]
-        unins_iml_dirs = []
+        rlscope_dirs = [self.rlscope_directory(algo, env_id) for algo, env_id in algo_env_pairs]
+        unins_rlscope_dirs = []
         for algo, env_id in algo_env_pairs:
-            unins_iml_dir = self.unins_iml_directory(algo, env_id)
-            if os.path.isdir(unins_iml_dir):
-                unins_iml_dirs.append(unins_iml_dir)
+            unins_rlscope_dir = self.unins_rlscope_directory(algo, env_id)
+            if os.path.isdir(unins_rlscope_dir):
+                unins_rlscope_dirs.append(unins_rlscope_dir)
             else:
-                logger.info("OverlapStackedBarTask.SKIP unins_iml_dir = {path}".format(
-                    path=unins_iml_dir))
+                logger.info("OverlapStackedBarTask.SKIP unins_rlscope_dir = {path}".format(
+                    path=unins_rlscope_dir))
         logger.info("OverlapStackedBarTask.args =\n{msg}".format(
             msg=pprint_msg({
                 'algo_env_pairs': algo_env_pairs,
-                'unins_iml_dirs': unins_iml_dirs,
+                'unins_rlscope_dirs': unins_rlscope_dirs,
             })))
         cmd.extend([
-            '--iml-directories', json.dumps(iml_dirs),
-            '--unins-iml-directories', json.dumps(unins_iml_dirs),
+            '--rlscope-directories', json.dumps(rlscope_dirs),
+            '--unins-rlscope-directories', json.dumps(unins_rlscope_dirs),
         ])
 
         cmd.extend([
             # Output directory for the png plots.
-            '--directory', self.root_iml_directory,
+            '--directory', self.root_rlscope_directory,
             # Add expr-name to png.
             '--suffix', suffix,
         ])
@@ -1093,7 +1093,7 @@ class ExperimentGroup(Experiment):
             algo_env_pairs = list(algo_env_pairs)
 
             if len(algo_env_pairs) == 0 and not self.args.dry_run:
-                raise NotImplementedError("Need at least one directory for --iml-directories but saw 0.")
+                raise NotImplementedError("Need at least one directory for --rlscope-directories but saw 0.")
             def sort_key(algo_env):
                 """
                 Show bar graphs order by algo first, then environment.
@@ -1103,14 +1103,14 @@ class ExperimentGroup(Experiment):
             # Remove duplicates.
             algo_env_pairs = list(set(algo_env_pairs))
             algo_env_pairs.sort(key=sort_key)
-            iml_dirs = [self.iml_directory(algo, env_id) for algo, env_id in algo_env_pairs]
+            rlscope_dirs = [self.rlscope_directory(algo, env_id) for algo, env_id in algo_env_pairs]
             util_task_cmd.extend([
-                '--iml-directories', json.dumps(iml_dirs),
+                '--rlscope-directories', json.dumps(rlscope_dirs),
             ])
 
             util_task_cmd.extend([
                 # Output directory for the png plots.
-                '--directory', self.root_iml_directory,
+                '--directory', self.root_rlscope_directory,
                 # Add expr-name to png.
                 '--suffix', suffix,
             ])
@@ -1130,11 +1130,11 @@ class ExperimentGroup(Experiment):
             ]
             if args.debug:
                 util_plot_cmd.append('--debug')
-            util_csv = _j(self.root_iml_directory, "overall_machine_util.raw.csv")
+            util_csv = _j(self.root_rlscope_directory, "overall_machine_util.raw.csv")
             util_plot_cmd.extend([
                 '--csv', util_csv,
                 # Output directory for the png plots.
-                '--directory', self.root_iml_directory,
+                '--directory', self.root_rlscope_directory,
                 # Add expr-name to png.
                 '--suffix', suffix,
             ])
@@ -1149,7 +1149,7 @@ class ExperimentGroup(Experiment):
         _util_csv(algo_env_pairs)
         _util_plot()
 
-    def iml_bench(self, parser, subparser, subcommand, subcmd_args, suffix='log', env=None, debug=False):
+    def rlscope_bench(self, parser, subparser, subcommand, subcmd_args, suffix='log', env=None, debug=False):
         args = self.args
         if not self.will_run:
             return
@@ -1182,7 +1182,7 @@ class ExperimentGroup(Experiment):
     def _get_logfile(self, suffix='log'):
         args = self.args
 
-        to_file = _j(self.root_iml_directory, '{sub}.{suffix}'.format(
+        to_file = _j(self.root_rlscope_directory, '{sub}.{suffix}'.format(
             sub=self._sub_cmd,
             suffix=suffix,
         ))
@@ -1199,15 +1199,15 @@ class StableBaselines(Experiment):
         # self.parser = parser
         self.args = args
         self.extra_argv = extra_argv
-        self.pool = ForkedProcessPool(name="iml_analyze_pool", max_workers=args.workers,
+        self.pool = ForkedProcessPool(name="rlscope_analyze_pool", max_workers=args.workers,
                                       # debug=self.args.debug,
                                       )
 
     def _analyze(self, algo, env_id):
         args = self.args
 
-        iml_directory = self.iml_directory(algo, env_id)
-        cmd = ['rls-run', "--iml-directory", iml_directory]
+        rlscope_directory = self.rlscope_directory(algo, env_id)
+        cmd = ['rls-run', "--rlscope-directory", rlscope_directory]
 
         to_file = self._get_logfile(algo, env_id, suffix='analyze.log')
         logger.info("Analyze logfile = {path}".format(path=to_file))
@@ -1222,7 +1222,7 @@ class StableBaselines(Experiment):
         else:
             cmd = ['ls', "-l"]
 
-        to_file = _j(self.root_iml_directory, 'error.txt')
+        to_file = _j(self.root_rlscope_directory, 'error.txt')
 
         self._run_cmd(cmd=cmd, to_file=to_file)
 
@@ -1232,13 +1232,13 @@ class StableBaselines(Experiment):
         opts = []
 
         # if not config_is_full(args.config):
-        #     # If we DON'T want to run for the full training duration add --iml-trace-time-sec
+        #     # If we DON'T want to run for the full training duration add --rlscope-trace-time-sec
         #     pass
 
         # "Instrumented, no tfprof"
         # "Instrumented, no pyprof"
 
-        # TODO: I suspect this config-dir names will get overloaded fast...need to use iml_config.json file that stores
+        # TODO: I suspect this config-dir names will get overloaded fast...need to use rlscope_config.json file that stores
         # Profiler.attrs instead.  Technically, we should store this in the process directory...
         # {
         #   'disable_tfprof'
@@ -1247,30 +1247,30 @@ class StableBaselines(Experiment):
         # 'config_instrumented_no_pyprof'
 
         if config_is_uninstrumented(args.config):
-            # If we want to run uninstrumented, add --iml-disable, but still record training progress
-            opts.extend(['--iml-disable', '--iml-training-progress'])
+            # If we want to run uninstrumented, add --rlscope-disable, but still record training progress
+            opts.extend(['--rlscope-disable', '--rlscope-training-progress'])
 
         if config_is_no_tfprof(args.config):
-            opts.extend(['--iml-disable-tfprof'])
+            opts.extend(['--rlscope-disable-tfprof'])
 
         if config_is_no_pyprof(args.config):
-            opts.extend(['--iml-disable-pyprof'])
+            opts.extend(['--rlscope-disable-pyprof'])
 
         if config_is_no_pydump(args.config):
-            opts.extend(['--iml-disable-pyprof-dump'])
+            opts.extend(['--rlscope-disable-pyprof-dump'])
 
         if config_is_no_pytrace(args.config):
-            opts.extend(['--iml-disable-pyprof-trace'])
+            opts.extend(['--rlscope-disable-pyprof-trace'])
 
         if config_is_no_tfdump(args.config):
-            opts.extend(['--iml-disable-tfprof-dump'])
+            opts.extend(['--rlscope-disable-tfprof-dump'])
 
         return opts
 
     def _get_logfile(self, algo, env_id, suffix='log'):
         args = self.args
 
-        to_file = _j(self.root_iml_directory, '{sub}.algo_{algo}.env_id_{env_id}.{suffix}'.format(
+        to_file = _j(self.root_rlscope_directory, '{sub}.algo_{algo}.env_id_{env_id}.{suffix}'.format(
             sub=self._sub_cmd,
             algo=algo,
             env_id=env_id,
@@ -1279,15 +1279,15 @@ class StableBaselines(Experiment):
         return to_file
 
     @property
-    def root_iml_directory(self):
+    def root_rlscope_directory(self):
         args = self.args
-        root_iml_directory = get_root_iml_directory(args.config, args.dir, args.repetition)
-        return root_iml_directory
+        root_rlscope_directory = get_root_rlscope_directory(args.config, args.dir, args.repetition)
+        return root_rlscope_directory
 
-    def iml_directory(self, algo, env_id):
+    def rlscope_directory(self, algo, env_id):
         args = self.args
-        iml_directory = get_iml_directory(args.config, args.dir, algo, env_id, args.repetition)
-        return iml_directory
+        rlscope_directory = get_rlscope_directory(args.config, args.dir, algo, env_id, args.repetition)
+        return rlscope_directory
 
     def _sh_env(self, algo, env_id):
         args = self.args
@@ -1299,21 +1299,21 @@ class StableBaselines(Experiment):
             env['DEBUG'] = 'yes'
             env['IML_DEBUG'] = 'yes'
 
-        if args.iml_prof:
-            env['IML_PROF'] = args.iml_prof
+        if args.rlscope_prof:
+            env['IML_PROF'] = args.rlscope_prof
 
         return env
 
     def _run(self, algo, env_id):
         args = self.args
 
-        # NOTE: We use absolute path of iml-directory
+        # NOTE: We use absolute path of rlscope-directory
         # since some training scripts change cd to a
         # different directory before they run.
-        iml_directory = _a(self.iml_directory(algo, env_id))
-        cmd = [args.subcommand, "--iml-directory", iml_directory]
-        if args.iml_debug:
-            cmd.append('--iml-debug')
+        rlscope_directory = _a(self.rlscope_directory(algo, env_id))
+        cmd = [args.subcommand, "--rlscope-directory", rlscope_directory]
+        if args.rlscope_debug:
+            cmd.append('--rlscope-debug')
         config_opts = self._config_opts()
         cmd.extend(config_opts)
 
@@ -1327,7 +1327,7 @@ class StableBaselines(Experiment):
     def run(self, parser):
         args = self.args
 
-        os.makedirs(self.root_iml_directory, exist_ok=True)
+        os.makedirs(self.root_rlscope_directory, exist_ok=True)
 
         subparser = self.args.subparser
         # Not multiprocessing friendly (cannot pickle)
@@ -1365,7 +1365,7 @@ class StableBaselines(Experiment):
             for algo, env_id in algo_env_pairs:
                 # self._analyze(algo, env_id)
                 self.pool.submit(
-                    'rls-run --iml-directory {iml}'.format(iml=self.iml_directory(algo, env_id)),
+                    'rls-run --rlscope-directory {rlscope}'.format(rlscope=self.rlscope_directory(algo, env_id)),
                     self._analyze,
                     algo, env_id,
                     sync=self.args.debug_single_thread)
@@ -1379,7 +1379,7 @@ class StableBaselines(Experiment):
                 sys.exit(e.exitcode)
         else:
             # Gather (algo, env) pairs whose environments we can run.
-            # (GatherAlgoEnv only looks at existing runs in output/all/iml_bench)
+            # (GatherAlgoEnv only looks at existing runs in output/all/rlscope_bench)
             algo_env_pairs = self._gather_algo_env_pairs(
                 algo=args.algo,
                 env_id=args.env_id,
@@ -1404,16 +1404,16 @@ class StableBaselines(Experiment):
                 self._run(algo, env_id)
 
 
-def get_root_iml_directory(config, direc, repetition):
+def get_root_rlscope_directory(config, direc, repetition):
     # if config == 'instrumented':
     #     # The default run --config.
     #     # Run IML for 2 minutes and collect full traces.
-    #     iml_directory = direc
+    #     rlscope_directory = direc
     # else:
     #     # Either 'instrumented' or 'uninstrumented'.
     #     # Add a --config sub-directory.
     #     config_dir = "config_{config}".format(config=config)
-    #     iml_directory = _j(direc, config_dir)
+    #     rlscope_directory = _j(direc, config_dir)
     if repetition is not None:
         config_dir = "config_{config}_repetition_{r:02}".format(
             config=config,
@@ -1421,13 +1421,13 @@ def get_root_iml_directory(config, direc, repetition):
     else:
         config_dir = "config_{config}".format(
             config=config)
-    iml_directory = _j(direc, config_dir)
-    return iml_directory
+    rlscope_directory = _j(direc, config_dir)
+    return rlscope_directory
 
-def get_iml_directory(config, direc, algo, env_id, repetition):
-    root_iml_directory = get_root_iml_directory(config, direc, repetition)
-    iml_directory = _j(root_iml_directory, algo, env_id)
-    return iml_directory
+def get_rlscope_directory(config, direc, algo, env_id, repetition):
+    root_rlscope_directory = get_root_rlscope_directory(config, direc, repetition)
+    rlscope_directory = _j(root_rlscope_directory, algo, env_id)
+    return rlscope_directory
 
 class GatherAlgoEnv:
     def __init__(self, args, include_minigo=False):
@@ -1460,7 +1460,7 @@ class GatherAlgoEnv:
         algo_env_pairs = []
         # if debug:
         #     import ipdb; ipdb.set_trace()
-        algo_paths = glob(_j(self.root_iml_directory, '*'))
+        algo_paths = glob(_j(self.root_rlscope_directory, '*'))
         for algo_path in algo_paths:
             if is_config_dir(algo_path):
                 continue
@@ -1536,14 +1536,14 @@ class GatherAlgoEnv:
     #     return self.pairs_by_func(expr_config.is_paper_env)
 
     @property
-    def root_iml_directory(self):
+    def root_rlscope_directory(self):
         args = self.args
-        root_iml_directory = get_root_iml_directory(args.config, args.dir, args.repetition)
-        return root_iml_directory
+        root_rlscope_directory = get_root_rlscope_directory(args.config, args.dir, args.repetition)
+        return root_rlscope_directory
 
     def machine_util_files(self, algo, env):
-        iml_directory = self.iml_directory(algo, env)
-        return [path for path in list_files(iml_directory) if is_machine_util_file(path)]
+        rlscope_directory = self.rlscope_directory(algo, env)
+        return [path for path in list_files(rlscope_directory) if is_machine_util_file(path)]
 
     def has_machine_util(self, algo, env):
         machine_util_files = self.machine_util_files(algo, env)

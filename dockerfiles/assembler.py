@@ -60,7 +60,7 @@ from rlscope import py_config
 
 NVIDIA_VISIBLE_DEVICES = [0]
 assert len(NVIDIA_VISIBLE_DEVICES) > 0
-PROJECT_NAME = 'iml'
+PROJECT_NAME = 'rlscope'
 IML_BASH_SERVICE_NAME = 'bash'
 
 # TENSORFLOW_VERSION = "1.15.0"
@@ -71,16 +71,16 @@ DEFAULT_POSTGRES_PORT = 5432
 DEFAULT_IML_DRILL_PORT = 8129
 # Default storage location for postgres database
 # (postgres is used for loading raw trace-data and analyzing it).
-DEFAULT_POSTGRES_PGDATA_DIR = _j(HOME, 'iml', 'pgdata')
+DEFAULT_POSTGRES_PGDATA_DIR = _j(HOME, 'rlscope', 'pgdata')
 # The tag used for a locally built "bash" IML dev environment
-LOCAL_IML_IMAGE_TAG = 'tensorflow:devel-iml-gpu-cuda'
-DEFAULT_REMOTE_IML_IMAGE_TAG = 'jagleeso/iml:1.0.0'
+LOCAL_IML_IMAGE_TAG = 'tensorflow:devel-rlscope-gpu-cuda'
+DEFAULT_REMOTE_IML_IMAGE_TAG = 'jagleeso/rlscope:1.0.0'
 
 RELEASE_TO_LOCAL_IMG_TAG = dict()
-RELEASE_TO_LOCAL_IMG_TAG['iml'] = 'tensorflow:devel-iml-gpu-cuda'
-RELEASE_TO_LOCAL_IMG_TAG['iml-cuda-10-1'] = 'tensorflow:devel-iml-gpu-cuda-10-1'
+RELEASE_TO_LOCAL_IMG_TAG['rlscope'] = 'tensorflow:devel-rlscope-gpu-cuda'
+RELEASE_TO_LOCAL_IMG_TAG['rlscope-cuda-10-1'] = 'tensorflow:devel-rlscope-gpu-cuda-10-1'
 
-# How long should we wait for /bin/bash (iml_bash)
+# How long should we wait for /bin/bash (rlscope_bash)
 # to appear after running "docker stack deploy"?
 DOCKER_DEPLOY_TIMEOUT_SEC = 10
 
@@ -638,17 +638,17 @@ def main():
                         using "docker pull <pull_img>"
                         """))
 
-    parser.add_argument('--deploy-iml-drill-port',
+    parser.add_argument('--deploy-rlscope-drill-port',
                         default=DEFAULT_IML_DRILL_PORT,
                         type=int,
-                        help=('What port to run iml-drill web server on '
-                              '(when running "docker stack deploy -c stack.yml iml")'))
+                        help=('What port to run rlscope-drill web server on '
+                              '(when running "docker stack deploy -c stack.yml rlscope")'))
 
     parser.add_argument('--deploy-postgres-port',
                         default=DEFAULT_POSTGRES_PORT,
                         type=int,
                         help=('What port to run postgres on '
-                              '(when running "docker stack deploy -c stack.yml iml")'))
+                              '(when running "docker stack deploy -c stack.yml rlscope")'))
 
     parser.add_argument('--deploy-postgres-pgdata-dir',
                         default=DEFAULT_POSTGRES_PGDATA_DIR,
@@ -735,20 +735,20 @@ def main():
         help=
         textwrap.dedent("""\
         Deploy the IML development environment using 
-        "docker stack deploy -c stack.yml iml".
+        "docker stack deploy -c stack.yml rlscope".
         
         In particular:
-        - iml: 
+        - rlscope: 
           The python library that collects profiling info.
           
         - tensorflow.patched: 
-          tensorflow patched with C++ modifications to support iml tracing.
+          tensorflow patched with C++ modifications to support rlscope tracing.
           
-        - iml-drill: 
+        - rlscope-drill: 
           The web server for visualizing collected data.
           
         - postgres: 
-          Used by iml for storing/analyzing trace-data.
+          Used by rlscope for storing/analyzing trace-data.
           
         The development environment takes care of installing dependencies needed 
         for building tensorflow.patched.
@@ -842,7 +842,7 @@ def main():
         '--output_stack_yml',
         default='./stack.yml',
         help='Path to the generated YAML "Docker Compose" file for '
-             'use with "docker stack deploy -c stack.yml iml"',
+             'use with "docker stack deploy -c stack.yml rlscope"',
     )
 
     argv = list(sys.argv)
@@ -932,7 +932,7 @@ class Assembler:
         # Run the container.
         args = self.args
         docker_run_env = get_docker_run_env(tag_def, args.env)
-        iml_volumes = get_iml_volumes(args, docker_run_env, args.volume)
+        rlscope_volumes = get_rlscope_volumes(args, docker_run_env, args.volume)
         runtime = get_docker_runtime(tag_def)
         run_kwargs = dict(
             image=image,
@@ -943,7 +943,7 @@ class Assembler:
             stderr=True,
             stdout=True,
             environment=docker_run_env,
-            volumes=iml_volumes,
+            volumes=rlscope_volumes,
             # volumes={
             #     args.run_tests_path: {
             #         'bind': '/tests',
@@ -954,7 +954,7 @@ class Assembler:
             cap_add=['SYS_PTRACE'],
             security_opt=['seccomp=unconfined'],
             runtime=runtime,
-            name="iml",
+            name="rlscope",
         )
         if tag_def['test_runtime'] == 'rocm':
             def device_opt(path):
@@ -974,12 +974,12 @@ class Assembler:
         subprocess.run(cmd, stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr)
         # Q: Save output?
 
-    # def _is_iml_deployed(self):
-    #     self.docker_ps_iml_bash() is not
+    # def _is_rlscope_deployed(self):
+    #     self.docker_ps_rlscope_bash() is not
 
-    def docker_ps_iml_bash(self):
+    def docker_ps_rlscope_bash(self):
         # logging.info("(1) run docker ps")
-        p = subprocess.run("docker ps | grep iml_bash",
+        p = subprocess.run("docker ps | grep rlscope_bash",
                            shell=True,
                            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                            # check=True,
@@ -989,14 +989,14 @@ class Assembler:
         if p.returncode != 0:
             return None
         # logging.info("(2) run docker ps")
-        # p = subprocess.run("docker ps | grep iml_bash",
+        # p = subprocess.run("docker ps | grep rlscope_bash",
         #                    shell=True,
         #                    stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         #                    check=True,
         #                    )
         lines = p.stdout.decode('utf-8').splitlines()
         for line in lines:
-            if re.search(r'iml_bash', line):
+            if re.search(r'rlscope_bash', line):
                 fields = re.split(r'\s+', line)
                 container_id = fields[0]
                 return container_id
@@ -1007,19 +1007,19 @@ class Assembler:
         now_sec = time.time()
         while now_sec < timeout_sec:
 
-            # services = self.dock_cli.services(filters={'name':'iml_bash'})
+            # services = self.dock_cli.services(filters={'name':'rlscope_bash'})
             # if len(services) > 0:
-            #     info = self.dock_cli.inspect_service('iml_bash')
+            #     info = self.dock_cli.inspect_service('rlscope_bash')
             #     return info
 
-            # containers = self.dock.containers.list(filters={'name': 'iml_bash'})
+            # containers = self.dock.containers.list(filters={'name': 'rlscope_bash'})
             containers = self.dock.containers.list(filters={'name': container_filter})
             if len(containers) > 0:
                 # containers.name
                 assert len(containers) == 1
                 return containers[0]
 
-            # container_id = self.docker_ps_iml_bash()
+            # container_id = self.docker_ps_rlscope_bash()
             # if container_id is not None:
             #     return container_id
 
@@ -1027,14 +1027,14 @@ class Assembler:
             now_sec = time.time()
 
         print(textwrap.dedent("""
-        > FAILURE: Waited for /bin/bash (iml_bash) container to appear, but it didn't after {sec} seconds.
+        > FAILURE: Waited for /bin/bash (rlscope_bash) container to appear, but it didn't after {sec} seconds.
           To figure out what went wrong, try the following:
 
             # Look at docker logs:
             $ sudo journalctl -u docker.service
 
             # Look at service logs:
-            $ docker service logs --raw iml_bash
+            $ docker service logs --raw rlscope_bash
             
             # See what's actually running
             $ docker ps
@@ -1043,41 +1043,41 @@ class Assembler:
         )))
         sys.exit(1)
 
-    def _wait_for_iml_to_stop(self):
+    def _wait_for_rlscope_to_stop(self):
         """
-        Wait until all services/processes belonging to the iml dev environment have stopped.
+        Wait until all services/processes belonging to the rlscope dev environment have stopped.
 
-        Currently 'docker stack rm iml' returns immediately even though the container hasn't terminated yet,
-        leading to race conditions when re-creating iml (causes errors when creating iml_default network).
+        Currently 'docker stack rm rlscope' returns immediately even though the container hasn't terminated yet,
+        leading to race conditions when re-creating rlscope (causes errors when creating rlscope_default network).
 
         :param self:
         :return:
         """
         while True:
-            iml_services = self.dock_cli.services(filters={'name': 'iml'})
-            pprint.pprint({'iml_services': iml_services})
-            if len(iml_services) == 0:
+            rlscope_services = self.dock_cli.services(filters={'name': 'rlscope'})
+            pprint.pprint({'rlscope_services': rlscope_services})
+            if len(rlscope_services) == 0:
                 return
             time.sleep(0.1)
 
     def docker_stack_rm(self):
         # NOTE: DON'T remove the container...just stop it (unless --rm)
         # This will make starting in mps/non-mps mode less annoying.
-        services = self.dock.services.list(filters={'name': 'iml'})
+        services = self.dock.services.list(filters={'name': 'rlscope'})
         if len(services) == 0:
             # IML dev environment not running yet.
             return
         print("> Detected old IML dev environment; removing it first")
         for srv in services:
             srv.remove()
-        after = self.dock.services.list(filters={'name': 'iml'})
+        after = self.dock.services.list(filters={'name': 'rlscope'})
         assert len(after) == 0
 
         # IMPORTANT: apparently, removing the services above does NOT immediately remove the containers.
         # So, instead we busy wait until they dissapear.
         # We need this to avoid errors when calling 'docker stack deploy'.
         while True:
-            containers = self.dock.containers.list(filters={'name': 'iml'})
+            containers = self.dock.containers.list(filters={'name': 'rlscope'})
             if len(containers) == 0:
                 break
             time.sleep(0.1)
@@ -1098,9 +1098,9 @@ class Assembler:
         # cmd.extend([
         #     '--compose-file', 'stack.yml',
         #     # Name of the created stack.
-        #     'iml',
+        #     'rlscope',
         # ])
-        # container_filter = "iml_bash"
+        # container_filter = "rlscope_bash"
 
         cmd = ['docker-compose']
         cmd.extend([
@@ -1111,7 +1111,7 @@ class Assembler:
             'stop',
         ])
         cmd.extend(extra_argv)
-        container_filter = "iml"
+        container_filter = "rlscope"
 
         eprint(get_cmd_string(cmd))
         subprocess.check_call(cmd, stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr)
@@ -1124,8 +1124,8 @@ class Assembler:
 
     def docker_deploy(self, extra_argv, reload):
         """
-        $ docker stack deploy {extra_args} --compose-file stack.yml iml
-        $ docker attach <iml_bash /bin/bash container>
+        $ docker stack deploy {extra_args} --compose-file stack.yml rlscope
+        $ docker attach <rlscope_bash /bin/bash container>
 
         :param extra_argv:
             Extra arguments to pass to "stack deploy"
@@ -1141,9 +1141,9 @@ class Assembler:
         # cmd.extend([
         #     '--compose-file', 'stack.yml',
         #     # Name of the created stack.
-        #     'iml',
+        #     'rlscope',
         # ])
-        # container_filter = "iml_bash"
+        # container_filter = "rlscope_bash"
 
         if args.mps:
             # Set "compute mode" of the GPUs to "exclusive" to make sure GPU apps
@@ -1167,7 +1167,7 @@ class Assembler:
             # '--remove-orphans'
 
             # Name of the created stack.
-            # 'iml',
+            # 'rlscope',
         ])
         if reload:
             cmd.append('--force-recreate')
@@ -1178,15 +1178,15 @@ class Assembler:
 
         eprint(get_cmd_string(cmd))
         subprocess.check_call(cmd, stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr)
-        iml_bash_container = self._wait_for_bash(container_filter)
+        rlscope_bash_container = self._wait_for_bash(container_filter)
 
         ps_cmd = ['docker', 'ps']
         eprint(get_cmd_string(ps_cmd))
         subprocess.check_call(ps_cmd, stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr)
         print("> Deployed IML development environment")
         print("> Attaching to /bin/bash in the dev environment:")
-        # Login to existing container using a new /bin/bash shell so we are greeted with the _iml_banner
-        exec_cmd = ['docker', 'exec', '-i', '-t', iml_bash_container.name, '/bin/bash']
+        # Login to existing container using a new /bin/bash shell so we are greeted with the _rlscope_banner
+        exec_cmd = ['docker', 'exec', '-i', '-t', rlscope_bash_container.name, '/bin/bash']
         eprint(get_cmd_string(exec_cmd))
         subprocess.run(exec_cmd, stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr)
 
@@ -1270,8 +1270,8 @@ class Assembler:
         generator = StackYMLGenerator(self.project_name())
 
         docker_run_env = get_docker_run_env(tag_def, args.env)
-        iml_volumes = get_iml_volumes(args, docker_run_env, args.volume)
-        iml_ports = get_iml_ports(docker_run_env, args.publish)
+        rlscope_volumes = get_rlscope_volumes(args, docker_run_env, args.volume)
+        rlscope_ports = get_rlscope_ports(docker_run_env, args.publish)
 
         if not args.pull:
             if args.release not in RELEASE_TO_LOCAL_IMG_TAG:
@@ -1279,19 +1279,19 @@ class Assembler:
                 sys.exit(1)
 
         if args.pull:
-            iml_image = args.pull_image
+            rlscope_image = args.pull_image
         else:
-            iml_image = RELEASE_TO_LOCAL_IMG_TAG[args.release]
+            rlscope_image = RELEASE_TO_LOCAL_IMG_TAG[args.release]
 
         yml = generator.generate(
             assembler_cmd=self.argv,
             env=docker_run_env,
-            volumes=iml_volumes,
-            ports=iml_ports,
-            iml_drill_port=args.deploy_iml_drill_port,
+            volumes=rlscope_volumes,
+            ports=rlscope_ports,
+            rlscope_drill_port=args.deploy_rlscope_drill_port,
             postgres_pgdata_dir=args.deploy_postgres_pgdata_dir,
             postgres_port=args.deploy_postgres_port,
-            iml_image=iml_image,
+            rlscope_image=rlscope_image,
             use_mps=args.mps,
         )
         print("> Write 'docker stack deploy' stack.yml file to {path}".format(path=args.output_stack_yml))
@@ -1573,7 +1573,7 @@ def setup_volume_dir(direc):
         path=direc,
     ), shell=True)
 
-def get_iml_volumes(args, run_args, extra_volumes):
+def get_rlscope_volumes(args, run_args, extra_volumes):
     """
     host_dir -> container_dir
 
@@ -1604,7 +1604,7 @@ def get_iml_volumes(args, run_args, extra_volumes):
         volumes[direc] = direc
     return volumes
 
-def get_iml_ports(run_args, extra_ports):
+def get_rlscope_ports(run_args, extra_ports):
     return extra_ports
 
 class DockerError(Exception):
@@ -1817,10 +1817,10 @@ class StackYMLGenerator:
             # MPS: launch container AFTER mps daemon is running to ensure all GPU apps use the daemon.
             #
             depends_on:
-              # - iml-mps-daemon
+              # - rlscope-mps-daemon
               - mps-daemon
             # Share the IPC namespace with the MPS control daemon.
-            # ipc: container:iml-mps-daemon
+            # ipc: container:rlscope-mps-daemon
             # HACK: as of docker-compose version 3.7, IPC doesn't (yet) support services.
             # Instead, we must provide a container name and use "ipc: container:<container_name>".
             # https://docs.docker.com/engine/reference/run/#ipc-settings---ipc
@@ -1874,7 +1874,7 @@ class StackYMLGenerator:
         # that only a single MPS server is using the GPU, which provides additional
         # insurance that the MPS server is the single point of arbitration between
         # all CUDA processes for that GPU.
-        # iml-exclusive-mode:
+        # rlscope-exclusive-mode:
         # exclusive-mode:
         #     image: debian:stretch-slim
         #     command: nvidia-smi -c EXCLUSIVE_PROCESS
@@ -1892,7 +1892,7 @@ class StackYMLGenerator:
         #     cap_add:
         #       - SYS_ADMIN
 
-        # iml-mps-daemon:
+        # rlscope-mps-daemon:
         mps-daemon:
             image: nvidia/mps
             container_name: {IML_MPS_DAEMON_CONTAINER_NAME}
@@ -1904,7 +1904,7 @@ class StackYMLGenerator:
             # of the CUDA application will fail to initialize since MPS will not be
             # the single point of arbitration for GPU access.
             # depends_on:
-            #   # - iml-exclusive-mode
+            #   # - rlscope-exclusive-mode
             #   - exclusive-mode
             environment:
               - "NVIDIA_VISIBLE_DEVICES={NVIDIA_VISIBLE_DEVICES}"
@@ -1951,11 +1951,11 @@ class StackYMLGenerator:
         #
         # "Bash" development environment.
         #
-        image: {iml_image}
+        image: {rlscope_image}
         
         ports:
-            # Expose port that the iml-drill web server runs on.
-            - {iml_drill_port}:{DEFAULT_IML_DRILL_PORT}
+            # Expose port that the rlscope-drill web server runs on.
+            - {rlscope_drill_port}:{DEFAULT_IML_DRILL_PORT}
             {port_list}
         
         volumes:
@@ -2000,10 +2000,10 @@ class StackYMLGenerator:
 
     def generate(self,
                  assembler_cmd, env, volumes, ports,
-                 iml_drill_port=DEFAULT_IML_DRILL_PORT,
+                 rlscope_drill_port=DEFAULT_IML_DRILL_PORT,
                  postgres_port=DEFAULT_POSTGRES_PORT,
                  postgres_pgdata_dir=DEFAULT_POSTGRES_PGDATA_DIR,
-                 iml_image=LOCAL_IML_IMAGE_TAG,
+                 rlscope_image=LOCAL_IML_IMAGE_TAG,
                  use_mps=False):
 
         # +1 for "service: ..."
@@ -2027,8 +2027,8 @@ class StackYMLGenerator:
             assembler_cmd=' '.join(assembler_cmd),
             PWD=os.getcwd(),
             DEFAULT_IML_DRILL_PORT=DEFAULT_IML_DRILL_PORT,
-            iml_drill_port=iml_drill_port,
-            iml_image=iml_image,
+            rlscope_drill_port=rlscope_drill_port,
+            rlscope_image=rlscope_image,
             IML_MPS_DAEMON_CONTAINER_NAME=self._mps_daemon_container_name(),
             IML_BASH_SERVICE_NAME=IML_BASH_SERVICE_NAME,
             NVIDIA_VISIBLE_DEVICES=','.join([str(dev) for dev in NVIDIA_VISIBLE_DEVICES]),

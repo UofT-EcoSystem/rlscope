@@ -312,7 +312,7 @@ struct ConfigData {
     return configImage.size() * sizeof(configImage[0]);
   }
 
-  std::unique_ptr<iml::ConfigDataProto> AsProto();
+  std::unique_ptr<rlscope::ConfigDataProto> AsProto();
 
   MyStatus Init();
 
@@ -441,7 +441,7 @@ struct GPUHwCounterSamplerState {
 
   bool CanDump() const;
 
-  std::unique_ptr<iml::CounterDataProto> AsProto();
+  std::unique_ptr<rlscope::CounterDataProto> AsProto();
 
   size_t size_bytes() const {
     return config_data.size_bytes() + counter_data.size_bytes();
@@ -476,7 +476,7 @@ struct GPUHwCounterSamplerProtoState {
       _config_data(config_data), _samples(std::move(samples)), _num_passes(num_passes) {
   }
 
-  std::unique_ptr<iml::GPUHwCounterSampleProto> AsProto();
+  std::unique_ptr<rlscope::GPUHwCounterSampleProto> AsProto();
 
   std::string DumpPath() const;
 
@@ -659,7 +659,7 @@ public:
 
   MyStatus PrintCSV(std::ostream &out, bool &printed_header);
 
-  MyStatus PrintCSV(std::ostream &out, const iml::GPUHwCounterSampleProto &proto, bool &printed_header);
+  MyStatus PrintCSV(std::ostream &out, const rlscope::GPUHwCounterSampleProto &proto, bool &printed_header);
 
   MyStatus
   PrintCSV(std::ostream &out, const std::string &chipName, const uint8_t *counterDataImage,

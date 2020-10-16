@@ -14,4 +14,4 @@ _upgrade_pip
 
 install_tensorflow_v1.3.1.sh
 install_stable_baselines.sh
-install_iml.sh
+install_rlscope.sh

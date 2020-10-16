@@ -5,7 +5,7 @@
 #ifndef IML_TRACE_FILE_PARSER_H
 #define IML_TRACE_FILE_PARSER_H
 
-#include "iml_prof.pb.h"
+#include "rlscope_prof.pb.h"
 #include "pyprof.pb.h"
 
 #include <future>
@@ -728,7 +728,7 @@ MyStatus RecursiveFindFiles(std::list<std::string>* paths, const std::string& ro
   return MyStatus::OK();
 }
 
-MyStatus FindRLSFiles(const std::string& iml_directory, std::list<std::string>* paths);
+MyStatus FindRLSFiles(const std::string& rlscope_directory, std::list<std::string>* paths);
 
 //enum RawTraceSplitLocationType {
 //  START = 0
@@ -1401,7 +1401,7 @@ public:
 //  CategoryTimes _category_times;
 //};
 
-// Navigate trace-files for a particular (machine, process, phase) in the --iml-directory in time-stamp order.
+// Navigate trace-files for a particular (machine, process, phase) in the --rlscope-directory in time-stamp order.
 // Used by RawTraceParser for reading events into eo_times in the correct order.
 struct EntireTraceMeta {
   Machine machine;
@@ -1591,11 +1591,11 @@ public:
   std::map<RLSFileType,
   std::map<TraceID, TraceFileMeta>>>>> _meta;
 
-  std::string _iml_directory;
+  std::string _rlscope_directory;
 
   TraceFileWalker(RLSAnalyzeArgs args) :
       args(args)
-      , _iml_directory(args.FLAGS_iml_directory.value())
+      , _rlscope_directory(args.FLAGS_rlscope_directory.value())
   {
   }
 
@@ -1635,7 +1635,7 @@ class RawTraceParser {
 public:
   RLSAnalyzeArgs args;
   std::shared_ptr<SimpleTimer> timer;
-  std::string _iml_directory;
+  std::string _rlscope_directory;
   TraceFileWalker _walker;
 
   nlohmann::json _cupti_overhead_json;
@@ -1648,7 +1648,7 @@ public:
 
   RawTraceParser(RLSAnalyzeArgs args) :
       args(args),
-      _iml_directory(args.FLAGS_iml_directory.value()),
+      _rlscope_directory(args.FLAGS_rlscope_directory.value()),
       _walker(args),
       _has_calibration_files(false)
   {
@@ -1809,12 +1809,12 @@ public:
       const Phase& phase,
       CategoryTimes *category_times);
 
-//  CategoryTimes RawTraceParser::ReadEntireTrace(const std::string& iml_directory) {
+//  CategoryTimes RawTraceParser::ReadEntireTrace(const std::string& rlscope_directory) {
 //  }
 //  // E = each split should have <= E events across all categories.
-//  std::list<TraceSplit> FindSplits(const std::string& iml_directory, size_t E);
+//  std::list<TraceSplit> FindSplits(const std::string& rlscope_directory, size_t E);
 //  // Read CategoryTimes belonging to this split.
-//  CategoryTimes ReadSplit(const std::string& iml_directory, const TraceSplit& split);
+//  CategoryTimes ReadSplit(const std::string& rlscope_directory, const TraceSplit& split);
 
 };
 
@@ -2978,12 +2978,12 @@ MyStatus GenericReadTraceFileMeta(ProtoReader* reader, TraceFileMeta* meta) {
     return GenericReadTraceFileMeta(this, meta); \
   }
 
-class CategoryEventsProtoReader : public ITraceFileProtoReader<iml::CategoryEventsProto, CategoryEventsProtoReader> {
+class CategoryEventsProtoReader : public ITraceFileProtoReader<rlscope::CategoryEventsProto, CategoryEventsProtoReader> {
 public:
   static const RLSFileType FILE_TYPE = RLSFileType::CATEGORY_EVENTS_FILE;
 
-  using ProtoKlass = iml::CategoryEventsProto;
-  using EventKlass = iml::Event;
+  using ProtoKlass = rlscope::CategoryEventsProto;
+  using EventKlass = rlscope::Event;
   using ProtoReader = CategoryEventsProtoReader;
 
   // Need to know:
@@ -3099,14 +3099,14 @@ public:
   }
 
 };
-class CategoryEventsParser : public IEventFileProtoParser<iml::CategoryEventsProto, CategoryEventsProtoReader> {
+class CategoryEventsParser : public IEventFileProtoParser<rlscope::CategoryEventsProto, CategoryEventsProtoReader> {
 public:
   static const RLSFileType FILE_TYPE = RLSFileType::CATEGORY_EVENTS_FILE;
 
-  using ProtoKlass = iml::CategoryEventsProto;
+  using ProtoKlass = rlscope::CategoryEventsProto;
   using ProtoReader = CategoryEventsProtoReader;
 
-  EventFlattener<iml::Event> _event_flattener;
+  EventFlattener<rlscope::Event> _event_flattener;
 
   virtual ~CategoryEventsParser() = default;
 
@@ -3201,12 +3201,12 @@ public:
   // - our "ReadCategory" function should instead become "AppendCategory", and we should return an error or Assert if its too big.
 };
 
-class CUDAAPIStatsProtoReader : public ITraceFileProtoReader<iml::CUDAAPIPhaseStatsProto, CUDAAPIStatsProtoReader> {
+class CUDAAPIStatsProtoReader : public ITraceFileProtoReader<rlscope::CUDAAPIPhaseStatsProto, CUDAAPIStatsProtoReader> {
 public:
   static const RLSFileType FILE_TYPE = RLSFileType::CUDA_API_STATS_FILE;
 
-  using ProtoKlass = iml::CUDAAPIPhaseStatsProto;
-  using EventKlass = iml::CUDAAPIEvent;
+  using ProtoKlass = rlscope::CUDAAPIPhaseStatsProto;
+  using EventKlass = rlscope::CUDAAPIEvent;
   using ProtoReader = CUDAAPIStatsProtoReader;
 
   virtual ~CUDAAPIStatsProtoReader() = default;
@@ -3255,11 +3255,11 @@ public:
   }
 
 };
-class CUDAAPIStatsParser : public ISimpleProtoParser<iml::CUDAAPIPhaseStatsProto, CUDAAPIStatsProtoReader> {
+class CUDAAPIStatsParser : public ISimpleProtoParser<rlscope::CUDAAPIPhaseStatsProto, CUDAAPIStatsProtoReader> {
 public:
   static const RLSFileType FILE_TYPE = RLSFileType::CUDA_API_STATS_FILE;
 
-  using ProtoKlass = iml::CUDAAPIPhaseStatsProto;
+  using ProtoKlass = rlscope::CUDAAPIPhaseStatsProto;
   using ProtoReader = CUDAAPIStatsProtoReader;
 
   virtual ~CUDAAPIStatsParser() = default;
@@ -3329,12 +3329,12 @@ public:
 
 };
 
-class CUDADeviceEventsProtoReader : public ITraceFileProtoReader<iml::MachineDevsEventsProto, CUDADeviceEventsProtoReader> {
+class CUDADeviceEventsProtoReader : public ITraceFileProtoReader<rlscope::MachineDevsEventsProto, CUDADeviceEventsProtoReader> {
 public:
   static const RLSFileType FILE_TYPE = RLSFileType::CUDA_DEVICE_EVENTS_FILE;
 
-  using ProtoKlass = iml::MachineDevsEventsProto;
-  using EventKlass = iml::CUDAEventProto;
+  using ProtoKlass = rlscope::MachineDevsEventsProto;
+  using EventKlass = rlscope::CUDAEventProto;
   using ProtoReader = CUDADeviceEventsProtoReader;
 
   virtual ~CUDADeviceEventsProtoReader() = default;
@@ -3389,11 +3389,11 @@ public:
   }
 
 };
-class CUDADeviceEventsParser : public ISimpleProtoParser<iml::MachineDevsEventsProto, CUDADeviceEventsProtoReader> {
+class CUDADeviceEventsParser : public ISimpleProtoParser<rlscope::MachineDevsEventsProto, CUDADeviceEventsProtoReader> {
 public:
   static const RLSFileType FILE_TYPE = RLSFileType::CUDA_DEVICE_EVENTS_FILE;
 
-  using ProtoKlass = iml::MachineDevsEventsProto;
+  using ProtoKlass = rlscope::MachineDevsEventsProto;
   using ProtoReader = CUDADeviceEventsProtoReader;
 
   EntireTraceSelector _selector;

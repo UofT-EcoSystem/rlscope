@@ -141,7 +141,7 @@ nlohmann::json PollingUtil::Compute() const {
 }
 
 std::string PollingUtil::JSPath() const {
-  boost::filesystem::path direc(_iml_directory);
+  boost::filesystem::path direc(_rlscope_directory);
   boost::filesystem::path base = JSBasename();
   return (direc / base).string();
 }

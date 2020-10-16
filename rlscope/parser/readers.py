@@ -1,4 +1,4 @@
-from rlscope.profiler.iml_logging import logger
+from rlscope.profiler.rlscope_logging import logger
 # from tensorflow.core.profiler.tfprof_log_pb2 import ProfileProto
 from rlscope.protobuf.pyprof_pb2 import CategoryEventsProto
 
@@ -6,7 +6,7 @@ from rlscope.parser.common import *
 from rlscope.parser import constants
 from rlscope.parser.stats import KernelTime, category_times_add_time
 
-from rlscope.protobuf import iml_prof_pb2
+from rlscope.protobuf import rlscope_prof_pb2
 
 DEFAULT_group_by_device = False
 DEFAULT_ignore_categories = {constants.CATEGORY_DUMMY_EVENT, constants.CATEGORY_UNKNOWN}
@@ -299,13 +299,13 @@ class CUDADeviceEventsReader:
             if event.name != "" and event.name is not None:
                 return event.name
 
-            if event.cuda_event_type == iml_prof_pb2.UNKNOWN:
+            if event.cuda_event_type == rlscope_prof_pb2.UNKNOWN:
                 return "Unknown"
-            elif event.cuda_event_type == iml_prof_pb2.KERNEL:
+            elif event.cuda_event_type == rlscope_prof_pb2.KERNEL:
                 return "Kernel"
-            elif event.cuda_event_type == iml_prof_pb2.MEMCPY:
+            elif event.cuda_event_type == rlscope_prof_pb2.MEMCPY:
                 return "Memcpy"
-            elif event.cuda_event_type == iml_prof_pb2.MEMSET:
+            elif event.cuda_event_type == rlscope_prof_pb2.MEMSET:
                 return "Memset"
             else:
                 raise NotImplementedError("Not sure what Event.name to use for event.cuda_event_type == {code}".format(

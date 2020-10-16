@@ -31,8 +31,8 @@ import queue
 
 from os.path import join as _j, abspath as _a, exists as _e, dirname as _d, basename as _b
 
-from rlscope.profiler import iml_logging
-from rlscope.profiler.iml_logging import logger
+from rlscope.profiler import rlscope_logging
+from rlscope.profiler.rlscope_logging import logger
 from rlscope.profiler.util import gather_argv, run_with_pdb, error, get_available_cpus, get_available_gpus
 from rlscope.experiment.util import expr_run_cmd, expr_already_ran
 
@@ -44,7 +44,7 @@ class RunExpr:
                  cmd=None,
                  run=False,
                  append=False,
-                 iml_directory=None,
+                 rlscope_directory=None,
                  sh=None,
                  tee=False,
                  run_sh=False,
@@ -57,7 +57,7 @@ class RunExpr:
         self.run = run
         self.tee = tee
         self.append = append
-        self.iml_directory = iml_directory
+        self.rlscope_directory = rlscope_directory
         self.sh = sh
         self.run_sh = run_sh
         self.retry = retry
@@ -149,7 +149,7 @@ class RunExpr:
             assert output_directory is not None
         if logfile is None:
             logfile = self.cmd_logfile(cmd, output_directory)
-        # Strip --iml-logfile if present
+        # Strip --rlscope-logfile if present
         keep_cmd = self.cmd_keep_args(cmd)
         run_cmd = RunCmd(keep_cmd, output_directory, logfile)
         return run_cmd
@@ -176,41 +176,41 @@ class RunExpr:
         parser = argparse.ArgumentParser(
             description="Run RLScope calibrated for profiling overhead, and create plots from multiple workloads",
             formatter_class=argparse.RawTextHelpFormatter)
-        parser.add_argument('--iml-directory',
+        parser.add_argument('--rlscope-directory',
                             help=textwrap.dedent("""
                             The output directory of the command being run.
                             This is where logfile.out will be output.
                             """))
         args, _ = parser.parse_known_args(cmd)
-        if args.iml_directory is None:
+        if args.rlscope_directory is None:
             return os.getcwd()
-        return args.iml_directory
+        return args.rlscope_directory
 
     def cmd_keep_args(self, cmd):
         parser = argparse.ArgumentParser(
             description="Run RLScope calibrated for profiling overhead, and create plots from multiple workloads",
             formatter_class=argparse.RawTextHelpFormatter)
-        parser.add_argument('--iml-logfile',
+        parser.add_argument('--rlscope-logfile',
                             help=textwrap.dedent("""
                             Where to output stdout/stderr of running cmd.
                             """))
         args, keep_args = parser.parse_known_args(cmd)
-        # if args.iml_directory is None:
+        # if args.rlscope_directory is None:
         #     return os.getcwd()
-        # return args.iml_directory
+        # return args.rlscope_directory
         return keep_args
 
     def cmd_logfile(self, cmd, output_directory):
         parser = argparse.ArgumentParser(
             description="Run RLScope calibrated for profiling overhead, and create plots from multiple workloads",
             formatter_class=argparse.RawTextHelpFormatter)
-        parser.add_argument('--iml-logfile',
+        parser.add_argument('--rlscope-logfile',
                             help=textwrap.dedent("""
                             Where to output stdout/stderr of running cmd.
                             """))
         args, _ = parser.parse_known_args(cmd)
-        if args.iml_logfile is not None:
-            return args.iml_logfile
+        if args.rlscope_logfile is not None:
+            return args.rlscope_logfile
 
         task = "RunExpr"
         logfile = _j(
@@ -363,7 +363,7 @@ class RunExpr:
                 f.write('\n')
 
         if self.run:
-            run_cmd = self.as_run_cmd(self.cmd, output_directory=self.iml_directory)
+            run_cmd = self.as_run_cmd(self.cmd, output_directory=self.rlscope_directory)
             proc = self.run_cmd(self.gpus[0], run_cmd, tee_output=True)
             if not self.dry_run and proc is not None and proc.returncode != 0:
                 sys.exit(proc.returncode)
@@ -409,7 +409,7 @@ def main():
                         help=textwrap.dedent("""
                         Run all the commands in --sh on the available --gpus
                         """))
-    parser.add_argument('--iml-directory',
+    parser.add_argument('--rlscope-directory',
                         help=textwrap.dedent("""
                         The output directory of the command being run.
                         This is where logfile.out will be output.
@@ -474,9 +474,9 @@ def main():
         })
 
     if args.debug:
-        iml_logging.enable_debug_logging()
+        rlscope_logging.enable_debug_logging()
     else:
-        iml_logging.disable_debug_logging()
+        rlscope_logging.disable_debug_logging()
 
 
     if args.sh is None and ( args.run_sh or args.append ):
@@ -507,21 +507,21 @@ def main():
             error("Couldn't find {exec} on PATH".format(
                 exec=cmd[0]), parser=parser)
 
-    if all_args.iml_directory is None:
-        # No --iml-directory argument; just use current directory?
-        args.iml_directory = os.getcwd()
+    if all_args.rlscope_directory is None:
+        # No --rlscope-directory argument; just use current directory?
+        args.rlscope_directory = os.getcwd()
     else:
-        args.iml_directory = all_args.iml_directory
+        args.rlscope_directory = all_args.rlscope_directory
     # # error("\n  {cmd}".format(cmd=' '.join(cmd)))
     # error(textwrap.dedent("""\
-    # --iml-directory must be provided so we know where to output logfile.out for cmd:
+    # --rlscope-directory must be provided so we know where to output logfile.out for cmd:
     #   > CMD:
     #     $ {cmd}
     #   """).format(
     #   cmd=' '.join(cmd),
     # ).rstrip())
-    # # "Copy" --iml-directory argument from cmd.
-    # args.iml_directory = all_args.iml_directory
+    # # "Copy" --rlscope-directory argument from cmd.
+    # args.rlscope_directory = all_args.rlscope_directory
 
     args_dict = dict(vars(args))
     args_dict.pop('gpus')

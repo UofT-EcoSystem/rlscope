@@ -9,8 +9,8 @@
 #include <cupti_target.h>
 #include <cupti.h>
 
-//#include "rlscope/protobuf/iml_prof.pb.h"
-#include "iml_prof.pb.h"
+//#include "rlscope/protobuf/rlscope_prof.pb.h"
+#include "rlscope_prof.pb.h"
 
 #include "cuda_api_profiler/op_stack.h"
 #include "cuda_api_profiler/event_handler.h"
@@ -81,7 +81,7 @@ struct CUDAAPIProfilerState {
   bool ShouldDump();
   std::string DumpPath(int trace_id);
   CUDAAPIProfilerState DumpState();
-  std::unique_ptr<iml::CUDAAPIPhaseStatsProto> AsProto();
+  std::unique_ptr<rlscope::CUDAAPIPhaseStatsProto> AsProto();
   std::tuple<pid_t, const char*> _GetTidApiName(APIKey api_key);
 
 };

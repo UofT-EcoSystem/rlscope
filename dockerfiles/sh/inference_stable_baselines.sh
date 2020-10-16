@@ -22,7 +22,7 @@ _check_STABLE_BASELINES_DIR
 _check_RL_BASELINES_ZOO_DIR
 
 _check_tensorflow
-_check_iml
+_check_rlscope
 
 setup_display() {
     local display="$1"
@@ -80,9 +80,9 @@ echo "> Inference ALGO = $ALGO, ENV_ID = $ENV_ID"
 cd $RL_BASELINES_ZOO_DIR
 
 # For real results:
-#    --iml-trace-time-sec $((2*60))
+#    --rlscope-trace-time-sec $((2*60))
 # For quick debugging:
-#    --iml-trace-time-sec $((40))
+#    --rlscope-trace-time-sec $((40))
 
 #if [ "$DEBUG" == 'yes' ]; then
 #    IML_TRACE_TIME_SEC=$((40))
@@ -104,7 +104,7 @@ PYTHON=(python)
 _do "${PYTHON[@]}" $RL_BASELINES_ZOO_DIR/enjoy.py \
     --algo $ALGO \
     --env $ENV_ID \
-    --iml-start-measuring-call 1 \
-    --iml-trace-time-sec $IML_TRACE_TIME_SEC \
+    --rlscope-start-measuring-call 1 \
+    --rlscope-trace-time-sec $IML_TRACE_TIME_SEC \
     --no-render \
     "$@"

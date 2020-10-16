@@ -15,12 +15,12 @@ class PollingUtil {
 public:
   const CategoryTimes &category_times;
   TimeUsec _polling_interval_us;
-  std::string _iml_directory;
+  std::string _rlscope_directory;
 
-  PollingUtil(const CategoryTimes &category_times, TimeUsec polling_interval_us, const std::string& iml_directory) :
+  PollingUtil(const CategoryTimes &category_times, TimeUsec polling_interval_us, const std::string& rlscope_directory) :
       category_times(category_times),
       _polling_interval_us(polling_interval_us),
-      _iml_directory(iml_directory) {
+      _rlscope_directory(rlscope_directory) {
   }
 
   std::string JSPath() const;

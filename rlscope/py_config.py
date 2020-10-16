@@ -7,7 +7,7 @@ import sys
 import os
 import textwrap
 
-from rlscope.profiler.iml_logging import logger
+from rlscope.profiler.rlscope_logging import logger
 import rlscope
 
 INSTALL_ROOT = _d(os.path.realpath(rlscope.__file__))
@@ -40,7 +40,7 @@ assert SQL_IMPL in {'psql', 'sqlite'}
 ANALYSIS_PY = _j(ROOT, "python/scripts", "analyze.py")
 GENERATE_INDEX_PY = _j(ROOT, "python/scripts", "generate_rlscope_plot_index.py")
 
-# If true, when you provide --iml-debug, log messages when:
+# If true, when you provide --rlscope-debug, log messages when:
 # - A session is created by calling tf.Session()
 # - A session is used by calling sess.run()
 # - IML trace-data belonging to a session is dumped
@@ -57,9 +57,9 @@ DEBUG_RLSCOPE_LIB_CALLS = False
 DEBUG_UTIL_SAMPLER = False
 
 # If true, dump stack when we initially start recording progress
-# for a phase during iml.prof.report_progress(...)
+# for a phase during rlscope.prof.report_progress(...)
 DEBUG_REPORT_PROGRESS = False
-# If true, dump stack for ALL calls to iml.prof.report_progress(...) that update progress
+# If true, dump stack for ALL calls to rlscope.prof.report_progress(...) that update progress
 # (not just the first call for a phase)
 DEBUG_REPORT_PROGRESS_ALL = False
 

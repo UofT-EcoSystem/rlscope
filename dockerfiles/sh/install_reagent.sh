@@ -26,7 +26,7 @@ _upgrade_pip
 _check_REAGENT_DIR
 
 #_check_tensorflow
-_check_iml
+_check_rlscope
 
 # Dependencies taken from:
 # rl-baselines-zoo/docker/Dockerfile.gpu

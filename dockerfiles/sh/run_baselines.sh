@@ -29,4 +29,4 @@ mkdir -p $OUTPUT_DIR
 _do python $BASELINES_DIR/baselines/deepq/experiments/run_atari.py \
     --env PongNoFrameskip-v4 \
     --checkpoint-path $OUTPUT_DIR \
-    --iml-trace-time-sec 60
+    --rlscope-trace-time-sec 60

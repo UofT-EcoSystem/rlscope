@@ -5,10 +5,10 @@
 #ifndef IML_EVENT_PROFILER_H
 #define IML_EVENT_PROFILER_H
 
-//#include "rlscope/protobuf/iml_prof.pb.h"
+//#include "rlscope/protobuf/rlscope_prof.pb.h"
 //#include "rlscope/protobuf/pyprof.pb.h"
 
-#include "iml_prof.pb.h"
+#include "rlscope_prof.pb.h"
 #include "pyprof.pb.h"
 
 #include "cuda_api_profiler/event_handler.h"
@@ -55,7 +55,7 @@ struct EventProfilerState {
   bool CanDump();
   std::string DumpPath(int trace_id);
   EventProfilerState DumpState();
-  std::unique_ptr<iml::CategoryEventsProto> AsProto();
+  std::unique_ptr<rlscope::CategoryEventsProto> AsProto();
   size_t size() const;
   // std::tuple<pid_t, const char*> _GetTidApiName(APIKey api_key);
 

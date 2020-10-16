@@ -1,4 +1,4 @@
-from rlscope.profiler.iml_logging import logger
+from rlscope.profiler.rlscope_logging import logger
 import shutil
 import subprocess
 import argparse
@@ -15,23 +15,23 @@ from rlscope.parser.common import *
 from rlscope.profiler.util import gather_argv, print_cmd
 
 from rlscope.clib import rlscope_api
-from rlscope.profiler.iml_logging import logger
+from rlscope.profiler.rlscope_logging import logger
 
 DEFAULT_CONFIG = 'full'
 
 def main():
 
-    iml_prof_argv, cmd_argv = gather_argv(sys.argv[1:])
+    rlscope_prof_argv, cmd_argv = gather_argv(sys.argv[1:])
 
     parser = argparse.ArgumentParser("Sample time spent in CUDA API calls, and call counts.")
     parser.add_argument('--debug', action='store_true')
-    parser.add_argument('--iml-debug', action='store_true')
-    parser.add_argument('--iml-rm-traces-from', help=textwrap.dedent("""
-    Delete traces rooted at this --iml-directory. 
-    Useful if your training script has multiple training scripts, and you need to use --iml-skip-rm-traces 
+    parser.add_argument('--rlscope-debug', action='store_true')
+    parser.add_argument('--rlscope-rm-traces-from', help=textwrap.dedent("""
+    Delete traces rooted at this --rlscope-directory. 
+    Useful if your training script has multiple training scripts, and you need to use --rlscope-skip-rm-traces 
     when launching the other scripts.
     """))
-    # parser.add_argument('--iml-disable', action='store_true', help=textwrap.dedent("""
+    # parser.add_argument('--rlscope-disable', action='store_true', help=textwrap.dedent("""
     #     IML: Skip any profiling. Used for uninstrumented runs.
     #     Useful for ensuring minimal libcupti registration when we run --cuda-api-calls during config_uninstrumented.
     #
@@ -130,7 +130,7 @@ def main():
     # parser.add_argument("--gpus",
     #                     action='store_true',
     #                     help=textwrap.dedent("""
-    #                         Parallelize running configurations across GPUs on this machine (assume no CPU inteference). See --iml-gpus
+    #                         Parallelize running configurations across GPUs on this machine (assume no CPU inteference). See --rlscope-gpus
     #                         """))
     parser.add_argument("--gpus",
                         help=textwrap.dedent("""
@@ -161,46 +161,46 @@ def main():
                         For measuring LD_PRELOAD CUDA API interception overhead:
                             interception:
                                 Enable LD_PRELOAD CUDA API interception.
-                                $ rls-prof --debug --cuda-api-calls --cuda-api-events --iml-disable
+                                $ rls-prof --debug --cuda-api-calls --cuda-api-events --rlscope-disable
                             no-interception:
                                 Disable LD_PRELOAD CUDA API interception.
-                                $ rls-prof --debug --iml-disable
+                                $ rls-prof --debug --rlscope-disable
                                 
                         For measuring CUPTI GPU activity gathering overhead on a per CUDA API call basis.
                             gpu-activities:
                                 Enable CUPTI GPU activity recording.
-                                $ rls-prof --debug --cuda-api-calls --cuda-activities --iml-disable
+                                $ rls-prof --debug --cuda-api-calls --cuda-activities --rlscope-disable
                             no-gpu-activities:
                                 Disable CUPTI GPU activity recording.
-                                $ rls-prof --debug --cuda-api-calls --iml-disable
+                                $ rls-prof --debug --cuda-api-calls --rlscope-disable
                                 
                         Expect (for the above configurations):
                         You should run train.py with these arguments set
                         
                             # We are comparing total training time across each configuration 
-                            --iml-training-progress
+                            --rlscope-training-progress
                         
                             # Since we are comparing total training time, 
                             # run each configuration with the same number of training loop steps.
-                            --iml-max-timesteps $N
+                            --rlscope-max-timesteps $N
                             
                             # Disable any pyprof or old tfprof tracing code.
-                            --iml-disable
+                            --rlscope-disable
                                 
-                        For collecting full IML traces for using with rls-run / iml-drill:
+                        For collecting full IML traces for using with rls-run / rlscope-drill:
                             full:
                                 Enable all of tfprof and pyprof collection.
-                                $ rls-prof --cuda-api-calls --cuda-api-events --cuda-activities --iml-disable
-                                NOTE: we still use --iml-disable to prevent "old" tfprof collection.
+                                $ rls-prof --cuda-api-calls --cuda-api-events --cuda-activities --rlscope-disable
+                                NOTE: we still use --rlscope-disable to prevent "old" tfprof collection.
                                 
                         gpu-hw:
                           ONLY collect GPU hardware counters
                         """))
-    args = parser.parse_args(iml_prof_argv)
+    args = parser.parse_args(rlscope_prof_argv)
 
-    if args.iml_rm_traces_from is not None:
-        logger.info("rls-prof: Delete trace-files rooted at --iml-directory = {dir}".format(
-            dir=args.iml_rm_traces_from))
+    if args.rlscope_rm_traces_from is not None:
+        logger.info("rls-prof: Delete trace-files rooted at --rlscope-directory = {dir}".format(
+            dir=args.rlscope_rm_traces_from))
         return
 
     rlscope_api.find_librlscope()
@@ -229,19 +229,19 @@ def main():
         cmd = ['rls-calibrate', 'run']
         if args.parallel_runs:
             cmd.extend(['--parallel-runs'])
-            iml_prof_argv.remove('--parallel-runs')
+            rlscope_prof_argv.remove('--parallel-runs')
         if args.retry is not None:
             cmd.extend(['--retry', str(args.retry)])
 
         # Q: Can't we just pass this through?
         # if args.re_calibrate:
         #     cmd.extend(['--re-calibrate'])
-        #     iml_prof_argv.remove('--re-calibrate')
+        #     rlscope_prof_argv.remove('--re-calibrate')
 
         # if args.gpus is not None:
         #     cmd.extend(['--gpus', args.gpus])
-        iml_prof_argv.remove('--calibrate')
-        cmd.extend(iml_prof_argv)
+        rlscope_prof_argv.remove('--calibrate')
+        cmd.extend(rlscope_prof_argv)
         cmd.extend(cmd_argv)
         # cmd.remove('--calibrate')
         print_cmd(cmd)
@@ -296,11 +296,11 @@ def main():
     if args.fuzz_cuda_api and args.cuda_api_calls:
         parser.error("Can only run rls-prof with --fuzz-cuda-api or --cuda-api-calls, not both")
 
-    if args.debug or args.iml_debug or is_env_true('IML_DEBUG'):
+    if args.debug or args.rlscope_debug or is_env_true('IML_DEBUG'):
         logger.info("Detected debug mode; enabling C++ logging statements (export IML_CPP_MIN_VLOG_LEVEL=1)")
         add_env['IML_CPP_MIN_VLOG_LEVEL'] = 1
 
-    # if args.iml_disable:
+    # if args.rlscope_disable:
     #     add_env['IML_DISABLE'] = 'yes'
 
     def set_yes_no(attr, env_var):

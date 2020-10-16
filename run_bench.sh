@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -e
 
-# To avoid running everything more than once, we will stick ALL (algo, env_id) pairs inside of $IML_DIR/output/iml_bench/all.
+# To avoid running everything more than once, we will stick ALL (algo, env_id) pairs inside of $IML_DIR/output/rlscope_bench/all.
 #
 # (1) On vs off policy:
 # Run Atari Pong on all environments that support it (that we have annotated):
@@ -45,7 +45,7 @@ CALIB_OPTS=( \
     )
 
 _run_bench() {
-    local all_dir=$IML_DIR/output/iml_bench/all
+    local all_dir=$IML_DIR/output/rlscope_bench/all
 
     _do rls-bench --dir $all_dir "$@"
 }
@@ -56,7 +56,7 @@ sb_train() {
     _run_bench "$@" stable-baselines
 }
 
-iml_analyze() {
+rlscope_analyze() {
     rls-run "${CALIB_OPTS[@]}" "$@"
 }
 
@@ -441,11 +441,11 @@ run_all() {
 }
 
 run_perf_debug() {
-    _do rls-run --iml-directory $IML_DIR/output/perf_debug "${CALIB_OPTS[@]}"
+    _do rls-run --rlscope-directory $IML_DIR/output/perf_debug "${CALIB_OPTS[@]}"
 }
 
 run_perf_debug_short() {
-    _do rls-run --iml-directory $IML_DIR/output/perf_debug_short "${CALIB_OPTS[@]}"
+    _do rls-run --rlscope-directory $IML_DIR/output/perf_debug_short "${CALIB_OPTS[@]}"
 }
 
 _find_extension() {
@@ -486,7 +486,7 @@ setup_cmakelists_windows() {
 #
 #    cat <<EOF >> "$path"
 #cmake_minimum_required(VERSION 3.8 FATAL_ERROR)
-#project(iml)
+#project(rlscope)
 ##https://github.com/robertmaynard/code-samples/blob/master/posts/cmake/CMakeLists.txt
 #
 ## We want to be able to do std::move() for lambda captures (c++11 doesn't have that).
@@ -807,14 +807,14 @@ plot_framework_choice() {
   #   - stable-baselines
   #   - tf-agents: use_tf_functions=yes
   #   - tf-agents: use_tf_functions=no
-  local iml_dirs=()
+  local rlscope_dirs=()
   for algo in $(fig_framework_choice_algos); do
     for env_id in $(fig_framework_choice_envs); do
-      iml_dirs+=($(stable_baselines_iml_direc))
+      rlscope_dirs+=($(stable_baselines_rlscope_direc))
       for use_tf_functions in yes no; do
-        iml_dirs+=($(tf_agents_iml_direc))
+        rlscope_dirs+=($(tf_agents_rlscope_direc))
       done
-      iml_dirs+=($(reagent_iml_direc))
+      rlscope_dirs+=($(reagent_rlscope_direc))
     done
   done
 
@@ -822,7 +822,7 @@ plot_framework_choice() {
 
   # --title "Framework choice"
   local args=(
-    --iml-directories "${iml_dirs[@]}"
+    --rlscope-directories "${rlscope_dirs[@]}"
     --output-directory $(framework_choice_plots_direc)
     --OverlapStackedBarTask-hack-upper-right-legend-bbox-x 0.365
     --CategoryTransitionPlotTask-hack-upper-right-legend-bbox-x 0.365
@@ -846,15 +846,15 @@ plot_framework_choice_ddpg() {
   stable_baselines_hyperparams=${stable_baselines_hyperparams:-yes}
 
   # Fig 11(b): Framework comparison DDPG
-  local iml_dirs=()
+  local rlscope_dirs=()
   for algo in $(fig_framework_choice_algos_ddpg); do
     for env_id in $(fig_framework_choice_envs); do
-      iml_dirs+=($(stable_baselines_iml_direc))
+      rlscope_dirs+=($(stable_baselines_rlscope_direc))
       for use_tf_functions in yes no; do
-        iml_dirs+=($(tf_agents_iml_direc))
+        rlscope_dirs+=($(tf_agents_rlscope_direc))
       done
       # NOTE: ReAgent doesn't implement DDPG.
-      # iml_dirs+=($(reagent_iml_direc))
+      # rlscope_dirs+=($(reagent_rlscope_direc))
     done
   done
 
@@ -862,7 +862,7 @@ plot_framework_choice_ddpg() {
 
   # --title "Framework choice"
   local args=(
-    --iml-directories "${iml_dirs[@]}"
+    --rlscope-directories "${rlscope_dirs[@]}"
     --output-directory $(framework_choice_plots_ddpg_direc)
     --OverlapStackedBarTask-hack-upper-right-legend-bbox-x 0.365
     --CategoryTransitionPlotTask-hack-upper-right-legend-bbox-x 0.365
@@ -891,7 +891,7 @@ test_run_expr() {
 #  py_args=()
   for i in $(seq ${n_launches}); do
     rls-run-expr "${run_expr_args[@]}" --append \
-      python $IML_DIR/rlscope/scripts/madeup_cmd.py --iml-directory ${test_dir}/process_${i} "${py_args[@]}"
+      python $IML_DIR/rlscope/scripts/madeup_cmd.py --rlscope-directory ${test_dir}/process_${i} "${py_args[@]}"
   done
   rls-run-expr "${run_expr_args[@]}" --run-sh
 )
@@ -957,16 +957,16 @@ run_tf_agents() {
   args+=(
     python ${py_script}
     --env_name "${env_id}"
-    # --iml-delay
+    # --rlscope-delay
   )
   if [ "${max_passes}" != "" ]; then
     args+=(
-      --iml-max-passes ${max_passes}
+      --rlscope-max-passes ${max_passes}
     )
   fi
   if [ "${calibrate}" = 'yes' ]; then
     args+=(
-      --iml-repetitions ${repetitions}
+      --rlscope-repetitions ${repetitions}
     )
   fi
   if [ "${stable_baselines_hyperparams}" = 'yes' ]; then
@@ -989,8 +989,8 @@ run_tf_agents() {
 
   if [ "${just_plot}" = "no" ]; then
     set_gin_params
-    iml_direc="$(tf_agents_iml_direc)"
-    _do "${args[@]}" "${gin_params[@]}" --iml-directory ${iml_direc}
+    rlscope_direc="$(tf_agents_rlscope_direc)"
+    _do "${args[@]}" "${gin_params[@]}" --rlscope-directory ${rlscope_direc}
   fi
 
 )
@@ -1062,18 +1062,18 @@ run_reagent() {
   )
   if [ "${max_passes}" != "" ]; then
     args+=(
-      --iml-max-passes ${max_passes}
+      --rlscope-max-passes ${max_passes}
     )
   fi
   if [ "${calibrate}" = 'yes' ]; then
     args+=(
-      --iml-repetitions ${repetitions}
+      --rlscope-repetitions ${repetitions}
     )
   fi
 
   if [ "${just_plot}" = "no" ]; then
-    iml_direc="$(reagent_iml_direc)"
-    _do "${args[@]}" --iml-directory ${iml_direc}
+    rlscope_direc="$(reagent_rlscope_direc)"
+    _do "${args[@]}" --rlscope-directory ${rlscope_direc}
   fi
 
 )
@@ -1170,157 +1170,157 @@ run_stable_baselines() {
   )
   if [ "${max_passes}" != "" ]; then
     args+=(
-      --iml-max-passes ${max_passes}
+      --rlscope-max-passes ${max_passes}
     )
   fi
   if [ "${calibrate}" = 'yes' ]; then
     args+=(
-      --iml-repetitions ${repetitions}
+      --rlscope-repetitions ${repetitions}
     )
   fi
 
   if [ "${just_plot}" = "no" ]; then
-    iml_direc="$(stable_baselines_iml_direc)"
-#    _do "${args[@]}" --iml-directory ${iml_direc}
-    # NOTE: train.py derives iml directory based on --log-folder...
-    _do "${args[@]}" --log-folder ${iml_direc} --iml-directory ${iml_direc}
+    rlscope_direc="$(stable_baselines_rlscope_direc)"
+#    _do "${args[@]}" --rlscope-directory ${rlscope_direc}
+    # NOTE: train.py derives rlscope directory based on --log-folder...
+    _do "${args[@]}" --log-folder ${rlscope_direc} --rlscope-directory ${rlscope_direc}
   fi
 
 )
 }
 
 _tf_agents_root_direc() {
-  local iml_root_dir=$IML_DIR/output/tf_agents/calibration.parallel_runs_yes
+  local rlscope_root_dir=$IML_DIR/output/tf_agents/calibration.parallel_runs_yes
   subdir=${subdir:-}
   if [ "${subdir}" != "" ]; then
-    iml_root_dir="${iml_root_dir}/${subdir}"
+    rlscope_root_dir="${rlscope_root_dir}/${subdir}"
   fi
-  echo "${iml_root_dir}"
+  echo "${rlscope_root_dir}"
 }
 
 tf_agents_plots_direc() {
 (
   set -eu
-  local iml_plots_direc=$(_tf_agents_root_direc)/plots
+  local rlscope_plots_direc=$(_tf_agents_root_direc)/plots
   if [ "${stable_baselines_hyperparams}" = 'yes' ]; then
-    iml_plots_direc="${iml_plots_direc}/stable_baselines_hyperparams_yes"
+    rlscope_plots_direc="${rlscope_plots_direc}/stable_baselines_hyperparams_yes"
   else
-    iml_plots_direc="${iml_plots_direc}/stable_baselines_hyperparams_no"
+    rlscope_plots_direc="${rlscope_plots_direc}/stable_baselines_hyperparams_no"
   fi
-  echo "${iml_plots_direc}"
+  echo "${rlscope_plots_direc}"
 )
 }
 
 _reagent_root_direc() {
-  local iml_root_dir=$IML_DIR/output/reagent/calibration.parallel_runs_yes
+  local rlscope_root_dir=$IML_DIR/output/reagent/calibration.parallel_runs_yes
   subdir=${subdir:-}
   if [ "${subdir}" != "" ]; then
-    iml_root_dir="${iml_root_dir}/${subdir}"
+    rlscope_root_dir="${rlscope_root_dir}/${subdir}"
   fi
-  echo "${iml_root_dir}"
+  echo "${rlscope_root_dir}"
 }
 
 reagent_plots_direc() {
 (
   set -eu
-  local iml_plots_direc=$(_reagent_root_direc)/plots
+  local rlscope_plots_direc=$(_reagent_root_direc)/plots
   if [ "${stable_baselines_hyperparams}" = 'yes' ]; then
-    iml_plots_direc="${iml_plots_direc}/stable_baselines_hyperparams_yes"
+    rlscope_plots_direc="${rlscope_plots_direc}/stable_baselines_hyperparams_yes"
   else
-    iml_plots_direc="${iml_plots_direc}/stable_baselines_hyperparams_no"
+    rlscope_plots_direc="${rlscope_plots_direc}/stable_baselines_hyperparams_no"
   fi
-  echo "${iml_plots_direc}"
+  echo "${rlscope_plots_direc}"
 )
 }
 
 framework_choice_plots_direc() {
 (
   set -eu
-  local iml_plots_dir=$IML_DIR/output/plots/framework_choice
-  echo "${iml_plots_dir}"
+  local rlscope_plots_dir=$IML_DIR/output/plots/framework_choice
+  echo "${rlscope_plots_dir}"
 )
 }
 
 framework_choice_metrics_direc() {
 (
   set -eu
-  local iml_plots_dir=$IML_DIR/output/plots/framework_choice.metrics
-  echo "${iml_plots_dir}"
+  local rlscope_plots_dir=$IML_DIR/output/plots/framework_choice.metrics
+  echo "${rlscope_plots_dir}"
 )
 }
 
 framework_choice_plots_ddpg_direc() {
 (
   set -eu
-  local iml_plots_dir=$IML_DIR/output/plots/framework_choice_ddpg
-  echo "${iml_plots_dir}"
+  local rlscope_plots_dir=$IML_DIR/output/plots/framework_choice_ddpg
+  echo "${rlscope_plots_dir}"
 )
 }
 
-tf_agents_iml_direc() {
+tf_agents_rlscope_direc() {
 (
   set -eu
   max_passes=${max_passes:-}
-  local iml_root_dir=$(_tf_agents_root_direc)/algo_${algo}/env_${env_id}
-#  iml_direc="${iml_root_dir}/$(_bool_attr use_tf_functions $use_tf_functions)"
-  iml_direc="${iml_root_dir}/use_tf_functions_$use_tf_functions"
+  local rlscope_root_dir=$(_tf_agents_root_direc)/algo_${algo}/env_${env_id}
+#  rlscope_direc="${rlscope_root_dir}/$(_bool_attr use_tf_functions $use_tf_functions)"
+  rlscope_direc="${rlscope_root_dir}/use_tf_functions_$use_tf_functions"
   if [ "${max_passes}" != "" ]; then
-    iml_direc="${iml_direc}.max_passes_${max_passes}"
+    rlscope_direc="${rlscope_direc}.max_passes_${max_passes}"
   fi
   if [ "${stable_baselines_hyperparams}" = 'yes' ]; then
-    iml_direc="${iml_direc}.stable_baselines_hyperparams_${stable_baselines_hyperparams}"
+    rlscope_direc="${rlscope_direc}.stable_baselines_hyperparams_${stable_baselines_hyperparams}"
   fi
-  echo "${iml_direc}"
+  echo "${rlscope_direc}"
 )
 }
 
-reagent_iml_direc() {
+reagent_rlscope_direc() {
 (
   set -eu
   max_passes=${max_passes:-}
-  local iml_root_dir=$(_reagent_root_direc)/algo_${algo}/env_${env_id}
-  local iml_subdir=""
+  local rlscope_root_dir=$(_reagent_root_direc)/algo_${algo}/env_${env_id}
+  local rlscope_subdir=""
   if [ "${max_passes}" != "" ]; then
-    if [ "${iml_subdir}" != "" ]; then
-      iml_subdir="${iml_subdir}."
+    if [ "${rlscope_subdir}" != "" ]; then
+      rlscope_subdir="${rlscope_subdir}."
     fi
-    iml_subdir="${iml_subdir}max_passes_${max_passes}"
+    rlscope_subdir="${rlscope_subdir}max_passes_${max_passes}"
   fi
   if [ "${stable_baselines_hyperparams}" = 'yes' ]; then
-    if [ "${iml_subdir}" != "" ]; then
-      iml_subdir="${iml_subdir}."
+    if [ "${rlscope_subdir}" != "" ]; then
+      rlscope_subdir="${rlscope_subdir}."
     fi
-    iml_subdir="${iml_subdir}stable_baselines_hyperparams_${stable_baselines_hyperparams}"
+    rlscope_subdir="${rlscope_subdir}stable_baselines_hyperparams_${stable_baselines_hyperparams}"
   fi
-  local iml_direc=
-  if [ "${iml_subdir}" != "" ]; then
-    iml_direc="${iml_root_dir}/${iml_subdir}"
+  local rlscope_direc=
+  if [ "${rlscope_subdir}" != "" ]; then
+    rlscope_direc="${rlscope_root_dir}/${rlscope_subdir}"
   else
-    iml_direc="${iml_root_dir}"
+    rlscope_direc="${rlscope_root_dir}"
   fi
-  echo "${iml_direc}"
+  echo "${rlscope_direc}"
 )
 }
 
 _stable_baselines_root_direc() {
   echo $IML_DIR/output/stable_baselines/calibration.parallel_runs_yes
 }
-stable_baselines_iml_direc() {
+stable_baselines_rlscope_direc() {
 (
   set -eu
-  local iml_direc=$(_stable_baselines_root_direc)/algo_${algo}/env_${env_id}
+  local rlscope_direc=$(_stable_baselines_root_direc)/algo_${algo}/env_${env_id}
   max_passes=${max_passes:-}
   if [ "${max_passes}" != "" ]; then
-    iml_direc="${iml_direc}.max_passes_${max_passes}"
+    rlscope_direc="${rlscope_direc}.max_passes_${max_passes}"
   fi
-  echo "${iml_direc}"
+  echo "${rlscope_direc}"
 )
 }
 stable_baselines_plots_direc() {
 (
   set -eu
-  local iml_plots_direc=$(_stable_baselines_root_direc)/plots
-  echo "${iml_plots_direc}"
+  local rlscope_plots_direc=$(_stable_baselines_root_direc)/plots
+  echo "${rlscope_plots_direc}"
 )
 }
 
@@ -1392,14 +1392,14 @@ def framework_choice_operation(row):
   global tf_agents_fix_operation
   global reagent_fix_operation
 
-  if re.search(r'/stable_baselines/', row['iml_directory']):
+  if re.search(r'/stable_baselines/', row['rlscope_directory']):
     return stable_baselines_pretty_operation(row['algo'], row['operation'])
-  elif re.search(r'/tf_agents/', row['iml_directory']):
+  elif re.search(r'/tf_agents/', row['rlscope_directory']):
     return tf_agents_fix_operation(row['operation'])
-  elif re.search(r'/reagent/', row['iml_directory']):
+  elif re.search(r'/reagent/', row['rlscope_directory']):
     return reagent_fix_operation(row['operation'])
   else:
-    raise NotImplementedError(f"Not sure how to remap framework_choice operation for iml_directory={row['iml_directory']}")
+    raise NotImplementedError(f"Not sure how to remap framework_choice operation for rlscope_directory={row['rlscope_directory']}")
 
 if 'region' in new_df:
   new_df['region'] = new_df.apply(fix_region, axis=1)
@@ -1432,9 +1432,9 @@ def fix_region(row):
     new_region.remove(CATEGORY_CUDA_API_CPU)
 
   if len(new_region) == 0:
-    raise RuntimeError("row['region'] = {region} became empty during dataframe processing for iml_directory={iml_directory}; row was:\n{row}".format(
+    raise RuntimeError("row['region'] = {region} became empty during dataframe processing for rlscope_directory={rlscope_directory}; row was:\n{row}".format(
       region=sorted(region),
-      iml_directory=row['iml_directory'],
+      rlscope_directory=row['rlscope_directory'],
       row=row,
     ))
     # import pdb; pdb.set_trace()
@@ -1453,7 +1453,7 @@ def get_policy_type(row):
     return 'On-policy'
   elif re.search(r'dqn|ddpg|sac|td3', algo):
     return 'Off-policy'
-  raise NotImplementedError(f"Not sure whether algo={row['algo']} is on/off-policy for iml_dir={row['iml_directory']}")
+  raise NotImplementedError(f"Not sure whether algo={row['algo']} is on/off-policy for rlscope_dir={row['rlscope_directory']}")
 EOF
 }
 
@@ -1534,7 +1534,7 @@ _py_stable_baselines_op_mapping() {
 
   # 'Inference': 'sample_action',
   cat <<EOF
-def stable_baselines_op_mapping(algo, iml_directory, x_field):
+def stable_baselines_op_mapping(algo, rlscope_directory, x_field):
     # All stable-baselines algorithms use the same gpu-hw operation mapping.
     if algo == 'td3':
       return {
@@ -1555,7 +1555,7 @@ _py_tf_agents_op_mapping() {
   # def mapping(**op_kwargs):
   #   return tf_agents_op_mapping(**op_kwargs)
   cat <<EOF
-def tf_agents_op_mapping(algo, iml_directory, x_field):
+def tf_agents_op_mapping(algo, rlscope_directory, x_field):
     # All tf-agents algorithms use the same gpu-hw operation mapping.
     return {
       'Backpropagation': 'train_step',
@@ -1571,7 +1571,7 @@ _py_reagent_op_mapping() {
   #   return reagent_op_mapping(**op_kwargs)
   # 'Inference': 'sample_action',
   cat <<EOF
-def reagent_op_mapping(algo, iml_directory, x_field):
+def reagent_op_mapping(algo, rlscope_directory, x_field):
     # All ReAgent algorithms use the same gpu-hw operation mapping.
     return {
       'Backpropagation': CompositeOp(add=['training_loop'], subtract=['sample_action', 'step']),
@@ -1607,31 +1607,31 @@ $(_py_tf_agents_op_mapping)
 $(_py_stable_baselines_op_mapping)
 $(_py_reagent_op_mapping)
 
-def mapping(iml_directory, **op_kwargs):
+def mapping(rlscope_directory, **op_kwargs):
   global stable_baselines_op_mapping
   global tf_agents_op_mapping
   global reagent_op_mapping
 
-  if re.search(r'/stable_baselines/', iml_directory):
-    return stable_baselines_op_mapping(iml_directory=iml_directory, **op_kwargs)
-  elif re.search(r'/tf_agents/', iml_directory):
-    return tf_agents_op_mapping(iml_directory=iml_directory, **op_kwargs)
-  elif re.search(r'/reagent/', iml_directory):
-    return reagent_op_mapping(iml_directory=iml_directory, **op_kwargs)
+  if re.search(r'/stable_baselines/', rlscope_directory):
+    return stable_baselines_op_mapping(rlscope_directory=rlscope_directory, **op_kwargs)
+  elif re.search(r'/tf_agents/', rlscope_directory):
+    return tf_agents_op_mapping(rlscope_directory=rlscope_directory, **op_kwargs)
+  elif re.search(r'/reagent/', rlscope_directory):
+    return reagent_op_mapping(rlscope_directory=rlscope_directory, **op_kwargs)
   else:
-    raise NotImplementedError(f"Not sure what op_mapping to use for framework_choice with iml_directory={iml_directory}")
+    raise NotImplementedError(f"Not sure what op_mapping to use for framework_choice with rlscope_directory={rlscope_directory}")
 EOF
 }
 
 test_plot_simulator() {
 (
   set -eu
-  iml_direc=$IML_DIR/output/tf_agents/debug/simulation/calibrate.tf_py_function/algo_ddpg/env_HalfCheetahBulletEnv-v0
+  rlscope_direc=$IML_DIR/output/tf_agents/debug/simulation/calibrate.tf_py_function/algo_ddpg/env_HalfCheetahBulletEnv-v0
 #  --plots time-breakdown
   args=(
     --re-plot
-    --iml-directories ${iml_direc}
-    --output-directory ${iml_direc}/plots
+    --rlscope-directories ${rlscope_direc}
+    --output-directory ${rlscope_direc}/plots
     --OverlapStackedBarTask-remap-df "$(_tf_agents_remap_df)"
     --CategoryTransitionPlotTask-remap-df "$(_tf_agents_remap_df)"
     "$@"
@@ -1647,13 +1647,13 @@ test_plot_stable_baselines() {
 
   repetitions=${repetitions:-3}
 
-  iml_direc=$IML_DIR/output/stable_baselines/calibration.parallel_runs_yes/algo_ddpg/env_Walker2DBulletEnv-v0
+  rlscope_direc=$IML_DIR/output/stable_baselines/calibration.parallel_runs_yes/algo_ddpg/env_Walker2DBulletEnv-v0
 #  --plots time-breakdown
   args=(
     --re-plot
-    --iml-directories ${iml_direc}
-    --iml-repetitions ${repetitions}
-    --output-directory ${iml_direc}/plots
+    --rlscope-directories ${rlscope_direc}
+    --rlscope-repetitions ${repetitions}
+    --output-directory ${rlscope_direc}/plots
     --OverlapStackedBarTask-remap-df "$(_stable_baselines_remap_df)"
     --CategoryTransitionPlotTask-remap-df "$(_stable_baselines_remap_df)"
     --GpuHwPlotTask-op-mapping "$(_stable_baselines_op_mapping)"
@@ -1667,51 +1667,51 @@ test_plot_stable_baselines() {
 
 _framework_choice_xtick_expression() {
   cat <<EOF
-def pretty_autograph(iml_directory):
-  if re.search(r'use_tf_functions_no', iml_directory):
+def pretty_autograph(rlscope_directory):
+  if re.search(r'use_tf_functions_no', rlscope_directory):
     return "autograph OFF"
-  elif re.search(r'use_tf_functions_yes', iml_directory):
+  elif re.search(r'use_tf_functions_yes', rlscope_directory):
     return "autograph ON"
   return None
 
-def pretty_rl_framework(iml_directory):
-  if re.search(r'/stable_baselines/', iml_directory):
+def pretty_rl_framework(rlscope_directory):
+  if re.search(r'/stable_baselines/', rlscope_directory):
     return "stable-baselines"
-  elif re.search(r'/tf_agents/', iml_directory):
+  elif re.search(r'/tf_agents/', rlscope_directory):
     return "tf-agents"
-  elif re.search(r'/reagent/', iml_directory):
+  elif re.search(r'/reagent/', rlscope_directory):
     return "ReAgent"
   return None
 
 def xfield_detailed(row):
   each_field = [
     row['algo_env'],
-    pretty_rl_framework(row['iml_directory']),
-    pretty_autograph(row['iml_directory']),
+    pretty_rl_framework(row['rlscope_directory']),
+    pretty_autograph(row['rlscope_directory']),
   ]
   each_field = [x for x in each_field if x is not None]
   x_field = '\n'.join(each_field)
   return x_field
 
-def pretty_DL_backend(iml_directory):
-  if re.search(r'/stable_baselines/', iml_directory) or re.search(r'/tf_agents/', iml_directory):
+def pretty_DL_backend(rlscope_directory):
+  if re.search(r'/stable_baselines/', rlscope_directory) or re.search(r'/tf_agents/', rlscope_directory):
     return "TensorFlow"
-  elif re.search(r'/reagent/', iml_directory):
+  elif re.search(r'/reagent/', rlscope_directory):
     return "PyTorch"
-  raise NotImplementedError(f"Not sure what DL back-end to use for iml_dir={iml_directory}")
+  raise NotImplementedError(f"Not sure what DL back-end to use for rlscope_dir={rlscope_directory}")
 
-def pretty_exec_model(iml_directory):
-  if re.search(r'/stable_baselines/', iml_directory):
+def pretty_exec_model(rlscope_directory):
+  if re.search(r'/stable_baselines/', rlscope_directory):
     return "Graph"
-  elif re.search(r'/tf_agents/', iml_directory):
-    if re.search(r'use_tf_functions_no', iml_directory):
+  elif re.search(r'/tf_agents/', rlscope_directory):
+    if re.search(r'use_tf_functions_no', rlscope_directory):
       return "Eager"
     else:
-      assert re.search(r'use_tf_functions_yes', iml_directory), f"iml_dir = {iml_directory}"
+      assert re.search(r'use_tf_functions_yes', rlscope_directory), f"rlscope_dir = {rlscope_directory}"
       return "Autograph"
-  elif re.search(r'/reagent/', iml_directory):
+  elif re.search(r'/reagent/', rlscope_directory):
     return "Eager"
-  raise NotImplementedError(f"Not sure what DL back-end to use for iml_dir={iml_directory}")
+  raise NotImplementedError(f"Not sure what DL back-end to use for rlscope_dir={rlscope_directory}")
 
 def xfield_short(row):
   """
@@ -1724,8 +1724,8 @@ def xfield_short(row):
   global pretty_exec_model
 
   each_field = [
-    pretty_DL_backend(row['iml_directory']),
-    pretty_exec_model(row['iml_directory']),
+    pretty_DL_backend(row['rlscope_directory']),
+    pretty_exec_model(row['rlscope_directory']),
   ]
   each_field = [x for x in each_field if x is not None]
   x_field = '\n'.join(each_field)
@@ -1744,7 +1744,7 @@ def pretty_policy(row):
     return 'On-policy'
   elif re.search(r'dqn|ddpg|sac', row['algo'].lower()):
     return 'Off-policy'
-  raise NotImplementedError(f"Not sure whether algo={row['algo']} is on/off-policy for iml_dir={row['iml_directory']}")
+  raise NotImplementedError(f"Not sure whether algo={row['algo']} is on/off-policy for rlscope_dir={row['rlscope_directory']}")
 
 def xfield_short(row):
   """
@@ -1776,16 +1776,16 @@ plot_tf_agents_fig_10_algo_choice() {
   # tf-agents
   #
   # ppo doesn't work (BUG in tf-agents)
-  iml_dirs=()
+  rlscope_dirs=()
   for algo in $(tf_agents_fig_10_algo_choice_algos); do
     env_id="$(fig_10_algo_choice_environment)"
     for use_tf_functions in yes no; do
-      iml_dirs+=($(tf_agents_iml_direc))
+      rlscope_dirs+=($(tf_agents_rlscope_direc))
     done
   done
 
   _plot_tf_agents \
-    --iml-directories "${iml_dirs[@]}" \
+    --rlscope-directories "${rlscope_dirs[@]}" \
     --output-directory $(tf_agents_plots_direc)/tf_agents_fig_10_algo_choice \
     --x-title "RL algorithm configuration" \
     --xtick-expression "$(_framework_choice_xtick_expression)" \
@@ -1805,16 +1805,16 @@ plot_tf_agents_fig_9_simulator_choice() {
   # tf-agents
   #
   # ppo doesn't work (BUG in tf-agents).  Use ddpg instead.
-  iml_dirs=()
+  rlscope_dirs=()
   for env_id in $(fig_9_simulator_choice_environments); do
     algo=$(tf_agents_fig_9_simulator_choice_algo)
     for use_tf_functions in yes no; do
-      iml_dirs+=($(tf_agents_iml_direc))
+      rlscope_dirs+=($(tf_agents_rlscope_direc))
     done
   done
 
   _plot_tf_agents \
-    --iml-directories "${iml_dirs[@]}" \
+    --rlscope-directories "${rlscope_dirs[@]}" \
     --output-directory $(tf_agents_plots_direc)/tf_agents_fig_9_simulator_choice \
     --x-title "Simulation configuration" \
     --xtick-expression "$(_tf_agents_fig_9_simulator_choice_xtick_expression)" \
@@ -1842,15 +1842,15 @@ plot_reagent() {
   set -eu
 
   # Fig 11: RL framework choice
-  iml_dirs=()
+  rlscope_dirs=()
   for algo in $(fig_framework_choice_algos); do
     for env_id in $(fig_framework_choice_envs); do
-      iml_dirs+=($(reagent_iml_direc))
+      rlscope_dirs+=($(reagent_rlscope_direc))
     done
   done
 
   local args=(
-    --iml-directories "${iml_dirs[@]}"
+    --rlscope-directories "${rlscope_dirs[@]}"
     --output-directory $(reagent_plots_direc)/reagent_fig_11_rl_framework_choice
     --x-title "RL algorithm configuration"
     # --xtick-expression "$(_reagent_fig_10_algo_choice_xtick_expression)"
@@ -1883,14 +1883,14 @@ plot_stable_baselines_fig_10_algo_choice() {
   # tf-agents
   #
   # ppo doesn't work (BUG in tf-agents)
-  iml_dirs=()
+  rlscope_dirs=()
   for algo in $(stable_baselines_fig_10_algo_choice_algos); do
     env_id="$(fig_10_algo_choice_environment)"
-    iml_dirs+=($(stable_baselines_iml_direc))
+    rlscope_dirs+=($(stable_baselines_rlscope_direc))
   done
 
   args=(
-    --iml-directories "${iml_dirs[@]}"
+    --rlscope-directories "${rlscope_dirs[@]}"
     --output-directory $(stable_baselines_plots_direc)/stable_baselines_fig_10_algo_choice
     --x-title "RL algorithm"
     --xtick-expression "$(_stable_baselines_fig_10_algo_choice_xtick_expression)"
@@ -1915,15 +1915,15 @@ plot_stable_baselines_fig_9_simulator_choice() {
   # tf-agents
   #
   # ppo doesn't work (BUG in tf-agents).  Use ddpg instead.
-  iml_dirs=()
+  rlscope_dirs=()
   for env_id in $(fig_9_simulator_choice_environments); do
     algo=$(stable_baselines_fig_9_simulator_choice_algo)
-    iml_dirs+=($(stable_baselines_iml_direc))
+    rlscope_dirs+=($(stable_baselines_rlscope_direc))
   done
 
   # --title "Simulator choice"
   args=(
-    --iml-directories "${iml_dirs[@]}"
+    --rlscope-directories "${rlscope_dirs[@]}"
     --output-directory $(stable_baselines_plots_direc)/stable_baselines_fig_9_simulator_choice
     --x-title "Simulator"
     # --xtick-expression "$(_tf_agents_fig_9_simulator_choice_xtick_expression)"
@@ -1941,7 +1941,7 @@ plot_stable_baselines_fig_9_simulator_choice() {
 
 _tf_agents_fig_9_simulator_choice_xtick_expression() {
   cat <<EOF
-x_field = regex_match(row['iml_directory'], [
+x_field = regex_match(row['rlscope_directory'], [
     [r'use_tf_functions_no',
      f"{row['short_env']}\nautograph\nOFF"],
     [r'use_tf_functions_yes',
@@ -1952,7 +1952,7 @@ EOF
 
 _tf_agents_fig_10_algo_choice_xtick_expression() {
   cat <<EOF
-x_field = regex_match(row['iml_directory'], [
+x_field = regex_match(row['rlscope_directory'], [
     [r'use_tf_functions_no',
      f"{row['pretty_algo']}\nautograph\nOFF"],
     [r'use_tf_functions_yes',
@@ -1966,13 +1966,13 @@ _plot_tf_agents() {
   plots=${plots:-}
 
   if [ "${calibrate}" = 'yes' ]; then
-    iml_plots_direc=$(tf_agents_plots_direc)
+    rlscope_plots_direc=$(tf_agents_plots_direc)
     args=(
       rls-plot
-        --iml-repetitions ${repetitions}
-        # --iml-directories $(_tf_agents_root_direc)/*tf_functions
-        --output-directory ${iml_plots_direc}
-        # --xtick-expression "x_field = regex_match(row['iml_directory'], [[r'use_tf_functions_no', f\"{row['algo_env']}\nWithout autograph\"], [r'use_tf_functions_yes', f\"{row['algo_env']}\nWith autograph\"]])"
+        --rlscope-repetitions ${repetitions}
+        # --rlscope-directories $(_tf_agents_root_direc)/*tf_functions
+        --output-directory ${rlscope_plots_direc}
+        # --xtick-expression "x_field = regex_match(row['rlscope_directory'], [[r'use_tf_functions_no', f\"{row['algo_env']}\nWithout autograph\"], [r'use_tf_functions_yes', f\"{row['algo_env']}\nWith autograph\"]])"
         # --x-title "Configuration"
         --OverlapStackedBarTask-remap-df "$(_tf_agents_remap_df)"
         --CategoryTransitionPlotTask-remap-df "$(_tf_agents_remap_df)"
@@ -2003,13 +2003,13 @@ _plot_reagent() {
   plots=${plots:-}
 
   if [ "${calibrate}" = 'yes' ]; then
-    iml_plots_direc=$(reagent_plots_direc)
+    rlscope_plots_direc=$(reagent_plots_direc)
     args=(
       rls-plot
-        --iml-repetitions ${repetitions}
-        # --iml-directories $(_reagent_root_direc)/*tf_functions
-        --output-directory ${iml_plots_direc}
-        # --xtick-expression "x_field = regex_match(row['iml_directory'], [[r'use_tf_functions_no', f\"{row['algo_env']}\nWithout autograph\"], [r'use_tf_functions_yes', f\"{row['algo_env']}\nWith autograph\"]])"
+        --rlscope-repetitions ${repetitions}
+        # --rlscope-directories $(_reagent_root_direc)/*tf_functions
+        --output-directory ${rlscope_plots_direc}
+        # --xtick-expression "x_field = regex_match(row['rlscope_directory'], [[r'use_tf_functions_no', f\"{row['algo_env']}\nWithout autograph\"], [r'use_tf_functions_yes', f\"{row['algo_env']}\nWith autograph\"]])"
         # --x-title "Configuration"
         --OverlapStackedBarTask-remap-df "$(_reagent_remap_df)"
         --CategoryTransitionPlotTask-remap-df "$(_reagent_remap_df)"
@@ -2043,13 +2043,13 @@ _plot_stable_baselines() {
   plots=${plots:-}
 
   if [ "${calibrate}" = 'yes' ]; then
-    # iml_plots_direc=$(stable_baselines_plots_direc)
+    # rlscope_plots_direc=$(stable_baselines_plots_direc)
     args=(
       rls-plot
-        --iml-repetitions ${repetitions}
-        # --iml-directories $(_stable_baselines_root_direc)/*tf_functions
-        # --output-directory ${iml_plots_direc}
-        # --xtick-expression "x_field = regex_match(row['iml_directory'], [[r'use_tf_functions_no', f\"{row['algo_env']}\nWithout autograph\"], [r'use_tf_functions_yes', f\"{row['algo_env']}\nWith autograph\"]])"
+        --rlscope-repetitions ${repetitions}
+        # --rlscope-directories $(_stable_baselines_root_direc)/*tf_functions
+        # --output-directory ${rlscope_plots_direc}
+        # --xtick-expression "x_field = regex_match(row['rlscope_directory'], [[r'use_tf_functions_no', f\"{row['algo_env']}\nWithout autograph\"], [r'use_tf_functions_yes', f\"{row['algo_env']}\nWith autograph\"]])"
         # --x-title "Configuration"
         --OverlapStackedBarTask-remap-df "$(_stable_baselines_remap_df)"
         --CategoryTransitionPlotTask-remap-df "$(_stable_baselines_remap_df)"
@@ -2086,13 +2086,13 @@ _plot_framework_choice() {
   plots=${plots:-}
 
   if [ "${calibrate}" = 'yes' ]; then
-    # iml_plots_direc=$(framework_choice_plots_direc)
+    # rlscope_plots_direc=$(framework_choice_plots_direc)
     args=(
       rls-plot
-        --iml-repetitions ${repetitions}
-        # --iml-directories $(_framework_choice_root_direc)/*tf_functions
-        # --output-directory ${iml_plots_direc}
-        # --xtick-expression "x_field = regex_match(row['iml_directory'], [[r'use_tf_functions_no', f\"{row['algo_env']}\nWithout autograph\"], [r'use_tf_functions_yes', f\"{row['algo_env']}\nWith autograph\"]])"
+        --rlscope-repetitions ${repetitions}
+        # --rlscope-directories $(_framework_choice_root_direc)/*tf_functions
+        # --output-directory ${rlscope_plots_direc}
+        # --xtick-expression "x_field = regex_match(row['rlscope_directory'], [[r'use_tf_functions_no', f\"{row['algo_env']}\nWithout autograph\"], [r'use_tf_functions_yes', f\"{row['algo_env']}\nWith autograph\"]])"
         # --x-title "Configuration"
         --OverlapStackedBarTask-remap-df "$(_framework_choice_remap_df)"
         --CategoryTransitionPlotTask-remap-df "$(_framework_choice_remap_df)"
@@ -2149,12 +2149,12 @@ test_tf_agents() {
   fi
   args+=(
     python $TF_AGENTS_DIR/tf_agents/agents/dqn/examples/v2/train_eval.rlscope.py
-    --iml-delay
-    --iml-max-passes ${max_passes}
+    --rlscope-delay
+    --rlscope-max-passes ${max_passes}
   )
   if [ "${calibrate}" = 'yes' ]; then
     args+=(
-      --iml-repetitions ${repetitions}
+      --rlscope-repetitions ${repetitions}
     )
   fi
   if [ "${re_calibrate}" = 'yes' ]; then
@@ -2169,26 +2169,26 @@ test_tf_agents() {
     )
   fi
 
-  iml_root_dir=$IML_DIR/output/tf_agents/examples/dqn/calibration.max_passes_${max_passes}
+  rlscope_root_dir=$IML_DIR/output/tf_agents/examples/dqn/calibration.max_passes_${max_passes}
 
   if [ "${just_plot}" = "no" ]; then
-    iml_direc=${iml_root_dir}/use_tf_functions
-    _do "${args[@]}" --iml-directory ${iml_direc}
+    rlscope_direc=${rlscope_root_dir}/use_tf_functions
+    _do "${args[@]}" --rlscope-directory ${rlscope_direc}
 
-    iml_direc=${iml_root_dir}/nouse_tf_functions
-    _do "${args[@]}" --iml-directory ${iml_direc} --nouse_tf_functions
+    rlscope_direc=${rlscope_root_dir}/nouse_tf_functions
+    _do "${args[@]}" --rlscope-directory ${rlscope_direc} --nouse_tf_functions
   fi
 
   if [ "${calibrate}" = 'yes' ]; then
     args=(
       rls-plot
-        --iml-repetitions ${repetitions}
-        --iml-directories ${iml_root_dir}/*tf_functions
-        --output-directory ${iml_root_dir}/plots
+        --rlscope-repetitions ${repetitions}
+        --rlscope-directories ${rlscope_root_dir}/*tf_functions
+        --output-directory ${rlscope_root_dir}/plots
   #      --debug-single-thread
   #      --debug
   #      --pdb
-        --xtick-expression "x_field = regex_match(row['iml_directory'], [[r'nouse_tf_functions', 'Without autograph'], [r'use_tf_functions', 'With autograph']])"
+        --xtick-expression "x_field = regex_match(row['rlscope_directory'], [[r'nouse_tf_functions', 'Without autograph'], [r'use_tf_functions', 'With autograph']])"
         --x-title "Configuration"
     )
     if [ "${dry_run}" = 'yes' ]; then

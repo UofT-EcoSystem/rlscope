@@ -66,8 +66,8 @@ DEFINE_bool(output_csv, false, "Output interval csv files: Interval.*Intervals.c
 DEFINE_bool(ignore_memcpy, false, "Ignore CUDA memcpy events when reading cuda_device_events*.proto");
 DEFINE_bool(cross_process, false, "Compute CPU/GPU overlap across all processes");
 DEFINE_string(proto, "", "Path to RLS trace-file protobuf file");
-DEFINE_string(iml_directory, "", "Path to --iml-directory used when collecting trace-files");
-DEFINE_string(output_directory, "", "Directory to output results to; default = --iml_directory");
+DEFINE_string(rlscope_directory, "", "Path to --rlscope-directory used when collecting trace-files");
+DEFINE_string(output_directory, "", "Directory to output results to; default = --rlscope_directory");
 DEFINE_string(mode, "", mode_flag_help.c_str());
 
 DEFINE_string(cupti_overhead_json, "", "Path to calibration file: mean per-CUDA API CUPTI overhead when GPU activities are recorded (see: CUPTIOverheadTask) ");
@@ -116,7 +116,7 @@ namespace rlscope {
   SET_FLAG(FLAGS_output_csv);
   SET_FLAG(FLAGS_cross_process);
   SET_NONEMPTY_STRING_FLAG(FLAGS_proto);
-  SET_NONEMPTY_STRING_FLAG(FLAGS_iml_directory);
+  SET_NONEMPTY_STRING_FLAG(FLAGS_rlscope_directory);
   SET_NONEMPTY_STRING_FLAG(FLAGS_mode);
   SET_NONEMPTY_STRING_FLAG(FLAGS_cupti_overhead_json);
   SET_NONEMPTY_STRING_FLAG(FLAGS_LD_PRELOAD_overhead_json);
@@ -151,10 +151,10 @@ void Usage() {
   std::cout << "  $ rls-analyze [--mode proto] --proto path/to/trace_file.proto" << std::endl;
   std::cout << std::endl;
   std::cout << "  # ls trace-files" << std::endl;
-  std::cout << "  $ rls-analyze --mode ls --iml_directory path/to/iml_directory" << std::endl;
+  std::cout << "  $ rls-analyze --mode ls --rlscope_directory path/to/rlscope_directory" << std::endl;
   std::cout << std::endl;
   std::cout << "  # read eo_times for entire trace and dump statistics for each category" << std::endl;
-  std::cout << "  $ rls-analyze --mode stats --iml_directory path/to/iml_directory" << std::endl;
+  std::cout << "  $ rls-analyze --mode stats --rlscope_directory path/to/rlscope_directory" << std::endl;
 }
 void UsageAndExit(const std::string& msg) {
   Usage();
@@ -232,12 +232,12 @@ int main(int argc, char** argv) {
   }
 
   if (FLAGS_output_directory == "") {
-    FLAGS_output_directory = FLAGS_iml_directory;
+    FLAGS_output_directory = FLAGS_rlscope_directory;
   }
 
-  boost::filesystem::path iml_path(FLAGS_iml_directory);
-  if (FLAGS_iml_directory != "" && !boost::filesystem::is_directory(iml_path)) {
-    std::cout << "ERROR: --iml_directory must be a path to a root --iml-directory given when collecting traces" << std::endl;
+  boost::filesystem::path rlscope_path(FLAGS_rlscope_directory);
+  if (FLAGS_rlscope_directory != "" && !boost::filesystem::is_directory(rlscope_path)) {
+    std::cout << "ERROR: --rlscope_directory must be a path to a root --rlscope-directory given when collecting traces" << std::endl;
     exit(EXIT_FAILURE);
   }
 
@@ -282,32 +282,32 @@ int main(int argc, char** argv) {
   }
 
   if (mode == Mode::MODE_LS_FILES) {
-    if (FLAGS_iml_directory == "") {
-      UsageAndExit("--iml-directory is required for --mode=ls");
+    if (FLAGS_rlscope_directory == "") {
+      UsageAndExit("--rlscope-directory is required for --mode=ls");
     }
   }
 
   if (mode == Mode::MODE_STATS) {
-    if (FLAGS_iml_directory == "") {
-      UsageAndExit("--iml-directory is required for --mode=stats");
+    if (FLAGS_rlscope_directory == "") {
+      UsageAndExit("--rlscope-directory is required for --mode=stats");
     }
   }
 
   if (mode == Mode::MODE_READ_FILES) {
-    if (FLAGS_iml_directory == "") {
-      UsageAndExit("--iml-directory is required for --mode=read");
+    if (FLAGS_rlscope_directory == "") {
+      UsageAndExit("--rlscope-directory is required for --mode=read");
     }
   }
 
   if (mode == Mode::MODE_OVERLAP) {
-    if (FLAGS_iml_directory == "") {
-      UsageAndExit("--iml-directory is required for --mode=overlap");
+    if (FLAGS_rlscope_directory == "") {
+      UsageAndExit("--rlscope-directory is required for --mode=overlap");
     }
   }
 
   if (mode == Mode::MODE_POLLING_UTIL) {
-    if (FLAGS_iml_directory == "") {
-      UsageAndExit("--iml-directory is required for --mode=polling_util");
+    if (FLAGS_rlscope_directory == "") {
+      UsageAndExit("--rlscope-directory is required for --mode=polling_util");
     }
 
     if (FLAGS_polling_interval_us == 0) {
@@ -330,14 +330,14 @@ int main(int argc, char** argv) {
   }
 
   if (mode == Mode::MODE_GPU_KERNELS) {
-    if (FLAGS_iml_directory == "") {
-      UsageAndExit("--iml-directory is required for --mode=gpu_kernels");
+    if (FLAGS_rlscope_directory == "") {
+      UsageAndExit("--rlscope-directory is required for --mode=gpu_kernels");
     }
   }
 
   if (mode == Mode::MODE_GPU_KERNELS) {
-    if (FLAGS_iml_directory == "") {
-      UsageAndExit("--iml-directory is required for --mode=gpu_hw");
+    if (FLAGS_rlscope_directory == "") {
+      UsageAndExit("--rlscope-directory is required for --mode=gpu_hw");
     }
   }
 
@@ -367,8 +367,8 @@ int main(int argc, char** argv) {
 
   if (mode == Mode::MODE_LS_FILES) {
     std::list<std::string> paths;
-    status = FindRLSFiles(FLAGS_iml_directory, &paths);
-    IF_BAD_STATUS_EXIT("Failed to ls trace-files in --iml_directory", status);
+    status = FindRLSFiles(FLAGS_rlscope_directory, &paths);
+    IF_BAD_STATUS_EXIT("Failed to ls trace-files in --rlscope_directory", status);
     for (const auto& path : paths) {
       std::cout << path << std::endl;
     }
@@ -390,7 +390,7 @@ int main(int argc, char** argv) {
     parser.SetTimer(timer);
 
     status = parser.Init();
-    IF_BAD_STATUS_EXIT("Failed to collect stats for --iml_directory", status);
+    IF_BAD_STATUS_EXIT("Failed to collect stats for --rlscope_directory", status);
     return parser;
   };
 
@@ -409,8 +409,8 @@ int main(int argc, char** argv) {
   if (mode == Mode::MODE_READ_FILES) {
     auto timer = mk_timer();
     std::list<std::string> paths;
-    status = FindRLSFiles(FLAGS_iml_directory, &paths);
-    IF_BAD_STATUS_EXIT("Failed to ls trace-files in --iml_directory", status);
+    status = FindRLSFiles(FLAGS_rlscope_directory, &paths);
+    IF_BAD_STATUS_EXIT("Failed to ls trace-files in --rlscope_directory", status);
     for (const auto& path : paths) {
       std::cout << path << std::endl;
       {
@@ -668,7 +668,7 @@ int main(int argc, char** argv) {
       std::cout << std::endl;
     }
 
-    PollingUtil polling_util(merged, FLAGS_polling_interval_us, FLAGS_iml_directory);
+    PollingUtil polling_util(merged, FLAGS_polling_interval_us, FLAGS_rlscope_directory);
     auto polling_util_js = polling_util.Compute();
     auto polling_util_js_path = polling_util.JSPath();
     status = WriteJson(polling_util_js_path, polling_util_js);
@@ -692,12 +692,12 @@ int main(int argc, char** argv) {
 
   if (mode == Mode::MODE_GPU_HW) {
     MyStatus ret = MyStatus::OK();
-    rlscope::GPUHwCounterSampler sampler(0, FLAGS_iml_directory, "");
+    rlscope::GPUHwCounterSampler sampler(0, FLAGS_rlscope_directory, "");
 
     ret = sampler.Init();
     IF_BAD_STATUS_EXIT("Failed to initialize GPUHwCounterSampler", ret);
 
-    boost::filesystem::path dir_path(FLAGS_iml_directory);
+    boost::filesystem::path dir_path(FLAGS_rlscope_directory);
     auto csv_path = dir_path / "GPUHwCounterSampler.csv";
     bool printed_header = false;
     std::ofstream csv_f(csv_path.string(), std::ios::out | std::ios::trunc);

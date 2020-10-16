@@ -1,4 +1,4 @@
-from rlscope.profiler.iml_logging import logger
+from rlscope.profiler.rlscope_logging import logger
 import signal
 import time
 import subprocess
@@ -24,7 +24,7 @@ from rlscope.protobuf.pyprof_pb2 import CategoryEventsProto, MachineUtilization,
 
 from rlscope.profiler.util import log_cmd, print_cmd
 from rlscope.parser.common import *
-from rlscope.profiler import timer as iml_timer
+from rlscope.profiler import timer as rlscope_timer
 
 BYTES_IN_KB = 1 << 10
 BYTES_IN_MB = 1 << 20
@@ -33,20 +33,20 @@ BYTES_IN_MB = 1 << 20
 MIN_UTIL_SAMPLE_FREQUENCY_SEC = 100/constants.MILLISECONDS_IN_SECOND
 # 500 ms
 DEFAULT_UTIL_SAMPLE_FREQUENCY_SEC = 500/constants.MILLISECONDS_IN_SECOND
-def get_util_sampler_parser(add_iml_root_pid=True, only_fwd_arguments=False):
-    # iml_root_pid=None,
+def get_util_sampler_parser(add_rlscope_root_pid=True, only_fwd_arguments=False):
+    # rlscope_root_pid=None,
     """
     :param fwd_arguments:
         Only add arguments that should be forwarded to utilization_sampler.py from ML scripts.
     :return:
     """
     parser = argparse.ArgumentParser("Sample GPU/CPU utilization over the course of training")
-    parser.add_argument('--iml-directory',
+    parser.add_argument('--rlscope-directory',
                         # required=True,
                         help=textwrap.dedent("""
     IML: profiling output directory.
     """))
-    parser.add_argument('--iml-debug',
+    parser.add_argument('--rlscope-debug',
                         action='store_true',
                         help=textwrap.dedent("""
     IML: debug profiler.
@@ -54,15 +54,15 @@ def get_util_sampler_parser(add_iml_root_pid=True, only_fwd_arguments=False):
     if only_fwd_arguments:
         return parser
 
-    parser.add_argument('--iml-util-sample-frequency-sec',
+    parser.add_argument('--rlscope-util-sample-frequency-sec',
                         type=float,
                         default=DEFAULT_UTIL_SAMPLE_FREQUENCY_SEC,
                         help=textwrap.dedent("""
     IML: How frequently (in seconds) should we sample GPU/CPU utilization?
     default: sample every 500 ms.
     """))
-    if add_iml_root_pid:
-        parser.add_argument('--iml-root-pid',
+    if add_rlscope_root_pid:
+        parser.add_argument('--rlscope-root-pid',
                             required=True, type=int,
                             help=textwrap.dedent("""
         IML: (internal use)
@@ -70,14 +70,14 @@ def get_util_sampler_parser(add_iml_root_pid=True, only_fwd_arguments=False):
         When sampling memory usage, we sample total memory usage of this 
         process and its entire process tree (i.e. to support multi-process training).
         """))
-    parser.add_argument('--iml-util-dump-frequency-sec',
+    parser.add_argument('--rlscope-util-dump-frequency-sec',
                         type=float,
                         default=10.,
                         help=textwrap.dedent("""
     IML: How frequently (in seconds) should we sample GPU/CPU utilization?
     default: dump every 10 seconds.
     """))
-    parser.add_argument('--iml-debug-single-thread',
+    parser.add_argument('--rlscope-debug-single-thread',
                         action='store_true',
                         help=textwrap.dedent("""
     IML: debug with single thread.
@@ -86,7 +86,7 @@ def get_util_sampler_parser(add_iml_root_pid=True, only_fwd_arguments=False):
     parser.add_argument('--measure-samples-per-sec',
                         action='store_true',
                         help=textwrap.dedent("""
-    Determines reasonable values for --iml-util-sample-frequency-sec.
+    Determines reasonable values for --rlscope-util-sample-frequency-sec.
     
     How fast can we call nvidia-smi (to sample GPU utilization)?  
     How fast can we gather CPU utilization?
@@ -439,7 +439,7 @@ class MachineProcessCPUInfo:
     def __init__(self, pid, epoch_time_usec=None, debug=False):
         self.pid = pid
         if epoch_time_usec is None:
-            epoch_time_usec = iml_timer.now_us()
+            epoch_time_usec = rlscope_timer.now_us()
         self.debug = debug
         self.epoch_time_usec = epoch_time_usec
         self.process_tree = get_process_tree(pid)
@@ -507,7 +507,7 @@ def sample_gpu_utilization(machine_gpu_info, pid, debug=False):
     Report a separate value for EACH GPU in the system.
     """
     gpus = machine_gpu_info.gpus()
-    epoch_time_usec = iml_timer.now_us()
+    epoch_time_usec = rlscope_timer.now_us()
     gpu_utils = []
     # if debug:
     #     logger.info(pprint_msg({'sample_gpu_bytes.gpus': gpus}))
@@ -707,18 +707,18 @@ def disable_test_sample_gpu_util():
         gpu_runner.join(timeout=2)
         gpu_runner.terminate()
 
-from rlscope.profiler.iml_logging import logger
+from rlscope.profiler.rlscope_logging import logger
 def main():
-    iml_util_argv, cmd_argv = split_argv_on(sys.argv[1:])
-    parser = get_util_sampler_parser(add_iml_root_pid=len(cmd_argv) == 0)
-    args = parser.parse_args(iml_util_argv)
+    rlscope_util_argv, cmd_argv = split_argv_on(sys.argv[1:])
+    parser = get_util_sampler_parser(add_rlscope_root_pid=len(cmd_argv) == 0)
+    args = parser.parse_args(rlscope_util_argv)
 
     # To make it easy to launch utilization sampler manually in certain code bases,
-    # allow ignoring all the --iml-* arguments:
+    # allow ignoring all the --rlscope-* arguments:
     #
     # e.g. in minigo's loop_main.sh shell script we do
-    #   python3 -m scripts.utilization_sampler "$@" --iml-directory $BASE_DIR &
-    # where $@ contains all the --iml-* args.
+    #   python3 -m scripts.utilization_sampler "$@" --rlscope-directory $BASE_DIR &
+    # where $@ contains all the --rlscope-* args.
     args, extra_argv = parser.parse_known_args()
     # args = parser.parse_args()
 
@@ -743,12 +743,12 @@ def main():
                 pass
         sys.exit(0)
 
-    if args.iml_directory is None:
-        logger.info("--iml-directory is required: directory where trace-files are saved")
+    if args.rlscope_directory is None:
+        logger.info("--rlscope-directory is required: directory where trace-files are saved")
         parser.print_help()
         sys.exit(1)
 
-    os.makedirs(args.iml_directory, exist_ok=True)
+    os.makedirs(args.rlscope_directory, exist_ok=True)
 
     # proc = psutil.Process(pid=os.getpid())
     # dump_cpus = get_dump_cpus()
@@ -761,14 +761,14 @@ def main():
         measure_samples_per_sec()
         return
 
-    if args.iml_util_sample_frequency_sec < MIN_UTIL_SAMPLE_FREQUENCY_SEC:
-        parser.error("Need --iml-util-sample-frequency-sec={val} to be larger than minimum sample frequency ({min} sec)".format(
-            val=args.iml_util_sample_frequency_sec,
+    if args.rlscope_util_sample_frequency_sec < MIN_UTIL_SAMPLE_FREQUENCY_SEC:
+        parser.error("Need --rlscope-util-sample-frequency-sec={val} to be larger than minimum sample frequency ({min} sec)".format(
+            val=args.rlscope_util_sample_frequency_sec,
             min=MIN_UTIL_SAMPLE_FREQUENCY_SEC,
         ))
 
 
-    iml_root_pid = None
+    rlscope_root_pid = None
     cmd_proc = None
     if len(cmd_argv) != 0:
         exe_path = shutil.which(cmd_argv[0])
@@ -783,38 +783,38 @@ def main():
         sys.stdout.flush()
         sys.stderr.flush()
         cmd_proc = subprocess.Popen(cmd)
-        iml_root_pid = cmd_proc.pid
+        rlscope_root_pid = cmd_proc.pid
     else:
-        iml_root_pid = args.iml_root_pid
+        rlscope_root_pid = args.rlscope_root_pid
 
     # NOTE: usually, we have rls-prof program signal us to terminate.
     # However if they provide a cmd, we would like to terminate sampler when cmd finishes, and return cmd's exit status.
     util_sampler = UtilizationSampler(
-        directory=args.iml_directory,
-        pid=iml_root_pid,
+        directory=args.rlscope_directory,
+        pid=rlscope_root_pid,
         async_process=cmd_proc,
-        util_dump_frequency_sec=args.iml_util_dump_frequency_sec,
-        util_sample_frequency_sec=args.iml_util_sample_frequency_sec,
-        debug=args.iml_debug,
-        debug_single_thread=args.iml_debug_single_thread,
+        util_dump_frequency_sec=args.rlscope_util_dump_frequency_sec,
+        util_sample_frequency_sec=args.rlscope_util_sample_frequency_sec,
+        debug=args.rlscope_debug,
+        debug_single_thread=args.rlscope_debug_single_thread,
     )
     util_sampler.run()
     sys.exit(util_sampler.exit_status)
 
 class UtilSamplerProcess:
-    def __init__(self, iml_directory, debug=False):
-        self.iml_directory = iml_directory
+    def __init__(self, rlscope_directory, debug=False):
+        self.rlscope_directory = rlscope_directory
         self.debug = debug
         self.proc = None
         self.proc_pid = None
 
     def _launch_utilization_sampler(self):
         util_cmdline = ['rls-util-sampler']
-        util_cmdline.extend(['--iml-directory', self.iml_directory])
+        util_cmdline.extend(['--rlscope-directory', self.rlscope_directory])
         # Sample memory-usage of the entire process tree rooted at ths process.
-        util_cmdline.extend(['--iml-root-pid', str(os.getpid())])
+        util_cmdline.extend(['--rlscope-root-pid', str(os.getpid())])
         if self.debug:
-            util_cmdline.append('--iml-debug')
+            util_cmdline.append('--rlscope-debug')
         # We make sure nvidia-smi runs fast at the VERY START of training
         # (to avoid false alarms when training is busy with the CPU/GPU).
         # util_cmdline.append('--skip-smi-check')
@@ -859,13 +859,13 @@ class UtilSamplerProcess:
 
 def util_sampler(*args, **kwargs):
     """
-    Sample machine CPU/GPU utilization, and output trace-files to <iml_directory>.
+    Sample machine CPU/GPU utilization, and output trace-files to <rlscope_directory>.
 
     NOTE:
-    - This is meant to be used WITHOUT iml profiling active
+    - This is meant to be used WITHOUT rlscope profiling active
     - You should be running vanilla tensorflow (not IML modified tensorflow)
 
-    :param iml_directory:
+    :param rlscope_directory:
         Where to store trace-files containing CPU/GPU utilization info.
     :param debug:
         Extra logger.
@@ -877,10 +877,10 @@ def util_sampler(*args, **kwargs):
     # if rlscope.api.prof is not None:
     #     raise RuntimeError(textwrap.dedent("""\
     #         IML ERROR:
-    #         When using iml.util_sampler(...) to collect CPU/GPU utilization information,
+    #         When using rlscope.util_sampler(...) to collect CPU/GPU utilization information,
     #         you should not be doing any other profiling with IML.
     #
-    #         In particular, you should NOT call iml.handle_iml_args(...).
+    #         In particular, you should NOT call rlscope.handle_rlscope_args(...).
     #         """))
     return UtilSamplerProcess(*args, **kwargs)
 

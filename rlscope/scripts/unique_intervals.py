@@ -13,7 +13,7 @@ import pprint
 
 from rlscope.parser.common import *
 
-from rlscope.profiler.iml_logging import logger
+from rlscope.profiler.rlscope_logging import logger
 
 from rlscope import py_config
 if py_config.USE_NUMBA:

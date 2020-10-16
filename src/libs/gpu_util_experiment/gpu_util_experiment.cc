@@ -34,7 +34,7 @@ static const std::vector<std::string> DEFAULT_METRICS = rlscope::get_DEFAULT_MET
 static const std::string DEFAULT_METRICS_STR = rlscope::get_DEFAULT_METRICS_STR();
 
 DEFINE_bool(debug, false, "Debug: give additional verbose output");
-DEFINE_string(iml_directory, "", "Path to --iml-directory used when collecting trace-files");
+DEFINE_string(rlscope_directory, "", "Path to --rlscope-directory used when collecting trace-files");
 DEFINE_string(gpu_clock_freq_json, "",
               "--mode=run_kernels: Path to JSON file containing GPU clock frequency measurements (from --mode=gpu_clock_freq)");
 DEFINE_string(mode, "", "One of: [gpu_clock_freq, run_kernels]");
@@ -166,7 +166,7 @@ static std::string BINARY_PATH;
 //  args.FLAGS_debug = ::FLAGS_debug;
 
     SET_FLAG(FLAGS_debug);
-    SET_FLAG(FLAGS_iml_directory);
+    SET_FLAG(FLAGS_rlscope_directory);
     SET_FLAG(FLAGS_gpu_clock_freq_json);
     SET_FLAG(FLAGS_mode);
     SET_FLAG(FLAGS_hw_counters);
@@ -214,7 +214,7 @@ boost::process::child ReinvokeProcess(const GPUUtilExperimentArgs &overwrite_arg
   AppendCmdArg(&cmdline, flag_opt, overwrite_args.FLAGS_var);
 
     APPEND_CMD_ARG("debug", FLAGS_debug);
-    APPEND_CMD_ARG("iml_directory", FLAGS_iml_directory);
+    APPEND_CMD_ARG("rlscope_directory", FLAGS_rlscope_directory);
     APPEND_CMD_ARG("gpu_clock_freq_json", FLAGS_gpu_clock_freq_json);
     APPEND_CMD_ARG("mode", FLAGS_mode);
     APPEND_CMD_ARG("hw_counters", FLAGS_hw_counters);
@@ -320,14 +320,14 @@ int main(int argc, char **argv) {
 
     MyStatus status = MyStatus::OK();
 
-    boost::filesystem::path iml_path(FLAGS_iml_directory);
-    if (FLAGS_iml_directory != "" && !boost::filesystem::is_directory(iml_path)) {
-        bool success = boost::filesystem::create_directories(iml_path);
+    boost::filesystem::path rlscope_path(FLAGS_rlscope_directory);
+    if (FLAGS_rlscope_directory != "" && !boost::filesystem::is_directory(rlscope_path)) {
+        bool success = boost::filesystem::create_directories(rlscope_path);
         if (!success) {
-            std::cout << "ERROR: failed to create --iml_directory = " << iml_path << std::endl;
+            std::cout << "ERROR: failed to create --rlscope_directory = " << rlscope_path << std::endl;
             exit(EXIT_FAILURE);
         }
-//    std::cout << "ERROR: --iml_directory must be a path to a root --iml-directory given when collecting traces" << std::endl;
+//    std::cout << "ERROR: --rlscope_directory must be a path to a root --rlscope-directory given when collecting traces" << std::endl;
 //    exit(EXIT_FAILURE);
     }
 
@@ -344,9 +344,9 @@ int main(int argc, char **argv) {
     }
 
     if (mode == Mode::MODE_GPU_CLOCK_FREQ || mode == Mode::MODE_RUN_KERNELS) {
-        if (FLAGS_iml_directory == "") {
+        if (FLAGS_rlscope_directory == "") {
             std::stringstream ss;
-            ss << "--iml-directory is required for --mode=" << FLAGS_mode;
+            ss << "--rlscope-directory is required for --mode=" << FLAGS_mode;
             UsageAndExit(ss.str());
         }
     }

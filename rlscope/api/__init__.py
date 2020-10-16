@@ -1,8 +1,8 @@
 from rlscope.profiler.profilers import \
   Profiler, \
-  fix_gflags_iml_args, \
-  add_iml_arguments, \
-  iml_argv_and_env, \
+  fix_gflags_rlscope_args, \
+  add_rlscope_arguments, \
+  rlscope_argv_and_env, \
   click_add_arguments
 
 from rlscope.profiler.util import \
@@ -11,12 +11,12 @@ from rlscope.profiler.util import \
 # Managed by rlscope.profiler.glbl
 prof = None
 from rlscope.profiler.glbl import \
-  handle_iml_args, \
-  handle_gflags_iml_args, \
-  handle_click_iml_args, \
+  handle_rlscope_args, \
+  handle_gflags_rlscope_args, \
+  handle_click_rlscope_args, \
   init_session
 
-from rlscope.profiler.iml_logging import \
+from rlscope.profiler.rlscope_logging import \
   logger
 
 from rlscope.protobuf.pyprof_pb2 import \

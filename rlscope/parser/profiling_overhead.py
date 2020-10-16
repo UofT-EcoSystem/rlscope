@@ -1,4 +1,4 @@
-from rlscope.profiler.iml_logging import logger
+from rlscope.profiler.rlscope_logging import logger
 import copy
 import numpy as np
 import itertools
@@ -18,7 +18,7 @@ import seaborn as sns
 from matplotlib import pyplot as plt
 
 from rlscope.profiler.util import pprint_msg
-from rlscope.parser.dataframe import TrainingProgressDataframeReader, CUDAAPIStatsDataframeReader, PyprofDataframeReader, read_iml_config, DataframeMapper, IMLConfig, VennData, map_readers, get_training_durations_df
+from rlscope.parser.dataframe import TrainingProgressDataframeReader, CUDAAPIStatsDataframeReader, PyprofDataframeReader, read_rlscope_config, DataframeMapper, IMLConfig, VennData, map_readers, get_training_durations_df
 from rlscope.parser.readers import OpStackReader, CUDAAPIStatsReader
 from rlscope.parser.stacked_bar_plots import StackedBarPlot
 from rlscope.parser import stacked_bar_plots
@@ -39,7 +39,7 @@ from rlscope.parser.db import SQLCategoryTimesReader, CSVInserter, \
 
 from rlscope.parser.stats import KernelTime
 
-from rlscope.profiler.iml_logging import logger
+from rlscope.profiler.rlscope_logging import logger
 from rlscope.parser.plot import get_sns_kwargs, get_plt_kwargs, add_grouped_stacked_bars, add_bar_labels
 
 class CalibrationJSON:
@@ -146,10 +146,10 @@ class CorrectedTrainingTimeParser:
                  python_annotation_json,
                  python_clib_interception_tensorflow_json,
                  python_clib_interception_simulator_json,
-                 iml_directories,
+                 rlscope_directories,
                  uninstrumented_directories,
                  directory,
-                 iml_prof_config,
+                 rlscope_prof_config,
                  width=None,
                  height=None,
                  debug=False,
@@ -172,10 +172,10 @@ class CorrectedTrainingTimeParser:
 
         # NOTE: we don't need "should_subtract_pyprof"
 
-        self.iml_directories = iml_directories
+        self.rlscope_directories = rlscope_directories
         self.uninstrumented_directories = uninstrumented_directories
         self.directory = directory
-        self.iml_prof_config = iml_prof_config
+        self.rlscope_prof_config = rlscope_prof_config
 
         self.width = width
         self.height = height
@@ -183,36 +183,36 @@ class CorrectedTrainingTimeParser:
         self.debug_single_thread = debug_single_thread
         self.debug_memoize = debug_memoize
 
-        iml_config = IMLConfig(self.iml_directories[0])
+        rlscope_config = IMLConfig(self.rlscope_directories[0])
         if self.debug:
-            logger.info("IMLConfig.iml_prof_args: {msg}".format(
+            logger.info("IMLConfig.rlscope_prof_args: {msg}".format(
                 msg=pprint_msg({
-                    'iml_config.iml_prof_args': iml_config.iml_prof_args,
-                    # 'iml_config.iml_config': iml_config.iml_config,
+                    'rlscope_config.rlscope_prof_args': rlscope_config.rlscope_prof_args,
+                    # 'rlscope_config.rlscope_config': rlscope_config.rlscope_config,
                 })))
 
         def check_all_true(var):
-            for directory in self.iml_directories:
-                iml_config = IMLConfig(directory)
-                assert iml_config.get_env_bool(var)
+            for directory in self.rlscope_directories:
+                rlscope_config = IMLConfig(directory)
+                assert rlscope_config.get_env_bool(var)
 
         self.should_subtract_cupti = False
         self.should_subtract_LD_PRELOAD = False
         self.should_subtract_pyprof_annotation = False
         self.should_subtract_pyprof_interception = False
 
-        if iml_config.get_env_bool('cuda_activities'):
+        if rlscope_config.get_env_bool('cuda_activities'):
             # $ rls-prof --cuda-activities
             check_all_true('cuda_activities')
             self.should_subtract_cupti = True
 
-        if iml_config.get_env_bool('cuda_api_calls') and iml_config.get_env_bool('cuda_api_events'):
+        if rlscope_config.get_env_bool('cuda_api_calls') and rlscope_config.get_env_bool('cuda_api_events'):
             # $ rls-prof --cuda-api-calls --cuda-api-events
             check_all_true('cuda_api_calls')
             check_all_true('cuda_api_events')
             self.should_subtract_LD_PRELOAD = True
 
-        if iml_config.get_env_bool('cuda_api_calls') and not iml_config.get_env_bool('cuda_api_events'):
+        if rlscope_config.get_env_bool('cuda_api_calls') and not rlscope_config.get_env_bool('cuda_api_events'):
 
             # $ rls-prof --config gpu-activities --cuda-api-calls --cuda-api-events
             # ===
@@ -224,14 +224,14 @@ class CorrectedTrainingTimeParser:
                 we currently dont ever just measure "--cuda-api-calls".
                 """))
 
-        if not iml_config.get_bool('disable') and \
-            not iml_config.get_bool('disable_pyprof') and \
-            not iml_config.get_bool('disable_pyprof_annotations'):
+        if not rlscope_config.get_bool('disable') and \
+            not rlscope_config.get_bool('disable_pyprof') and \
+            not rlscope_config.get_bool('disable_pyprof_annotations'):
             self.should_subtract_pyprof_annotation = True
 
-        if not iml_config.get_bool('disable') and \
-            not iml_config.get_bool('disable_pyprof') and \
-            not iml_config.get_bool('disable_pyprof_interceptions'):
+        if not rlscope_config.get_bool('disable') and \
+            not rlscope_config.get_bool('disable_pyprof') and \
+            not rlscope_config.get_bool('disable_pyprof_interceptions'):
             self.should_subtract_pyprof_interception = True
 
         should_subtract_attrs = dict((attr, val) for attr, val in self.__dict__.items() \
@@ -314,7 +314,7 @@ class CorrectedTrainingTimeParser:
         }
 
         output directory:
-            --iml-directory containing profiling data.
+            --rlscope-directory containing profiling data.
         """
 
         # capsize = 5
@@ -358,8 +358,8 @@ class CorrectedTrainingTimeParser:
             df['x_field'] = np.vectorize(_x_field, otypes=[str])(df['plot_group'], df['algo'], df['env'])
             # return df
 
-        def add_fields(df, iml_config):
-            add_iml_config(df, iml_config)
+        def add_fields(df, rlscope_config):
+            add_rlscope_config(df, rlscope_config)
 
         def load_dfs():
             memoize_path = _j(self.directory, "{klass}.load_dfs.pickle".format(
@@ -390,21 +390,21 @@ class CorrectedTrainingTimeParser:
             if self.debug:
                 logger.info("load_dfs: {msg}".format(
                     msg=pprint_msg({
-                        'iml_directories':self.iml_directories,
+                        'rlscope_directories':self.rlscope_directories,
                     })
                 ))
 
-            # for directory in self.iml_directories:
-            for directory in progress(self.iml_directories,
-                                 desc="load_dfs.iml_directories",
+            # for directory in self.rlscope_directories:
+            for directory in progress(self.rlscope_directories,
+                                 desc="load_dfs.rlscope_directories",
                                  show_progress=self.debug):
 
                 if self.debug:
-                    logger.info("iml_directory = {dir}".format(
+                    logger.info("rlscope_directory = {dir}".format(
                         dir=directory,
                     ))
 
-                iml_config = read_iml_config(directory)
+                rlscope_config = read_rlscope_config(directory)
 
                 total_training_duration_us = get_training_durations(directory, debug=self.debug, debug_single_thread=self.debug_single_thread)
 
@@ -426,7 +426,7 @@ class CorrectedTrainingTimeParser:
                 else:
                     per_api_df['total_interception_overhead_us'] = 0
                     logger.info("SKIP LD_PRELOAD overhead (total_interception_overhead_us = 0)")
-                add_fields(per_api_df, iml_config)
+                add_fields(per_api_df, rlscope_config)
 
                 # per_api_df = pd.DataFrame({
                 #     'api_name': per_api_stats_df['api_name'],
@@ -505,7 +505,7 @@ class CorrectedTrainingTimeParser:
                     'total_training_duration_us': [total_training_duration_us],
                 }
                 total_df = pd.DataFrame(total_overhead_data)
-                add_fields(total_df, iml_config)
+                add_fields(total_df, rlscope_config)
 
                 # WARNING: protect against bug where we create more than one row unintentionally.
                 # If we mix scalars/lists, pd.DataFrame will "duplicate" the scalars to match the list length.
@@ -986,7 +986,7 @@ class CorrectedTrainingTimeParser:
 
         training_duration_df = pd.concat([unins_df, ins_df, corrected_df])
         training_duration_df['pretty_config'] = training_duration_df['config'].apply(pretty_config)
-        # add_fields(training_duration_df, iml_config)
+        # add_fields(training_duration_df, rlscope_config)
         add_x_field(training_duration_df)
 
         def get_training_duration_plot_data(training_duration_df):
@@ -1079,13 +1079,13 @@ class CallInterceptionOverheadParser:
     """
     config_interception
     Run with interception enabled.
-    $ rls-prof --config interception python train.py --iml-disable-pyprof
+    $ rls-prof --config interception python train.py --rlscope-disable-pyprof
     # --config interception: --cuda-api-calls --cuda-api-events
     # We want to know how much time is spent just intercepting API calls (NOT GPU activities)
 
     config_uninstrumented
     Run with interception disabled, and pyprof disabled (uninstrumented).
-    $ rls-prof --config uninstrumented python train.py --iml-disable-pyprof
+    $ rls-prof --config uninstrumented python train.py --rlscope-disable-pyprof
     # Time spent without ANY interception / profiling overhead at all.
 
     config_pyprof
@@ -1115,7 +1115,7 @@ class CallInterceptionOverheadParser:
         self.directory = directory
         self.width = width
         self.height = height
-        # self.iml_directories = iml_directories
+        # self.rlscope_directories = rlscope_directories
         # self.ignore_phase = ignore_phase
         # self.algo_env_from_dir = algo_env_from_dir
         # self.baseline_config = baseline_config
@@ -1321,17 +1321,17 @@ class PyprofOverheadParser:
     TODO: We should have
 
     # Run with tfprof disabled, pyprof disabled, AND op-events disabled;
-    # NOTE: we should make --iml-disable do THIS by default.
+    # NOTE: we should make --rlscope-disable do THIS by default.
     uninstrumented_directory
-    $ rls-prof train.py --iml-disable --iml-disable-ops
+    $ rls-prof train.py --rlscope-disable --rlscope-disable-ops
 
     # Run with ONLY pyprof events enabled (nothing else).
     # i.e. intercept C++ methods and record Python/C++ events.
     pyprof_interceptions_directory
-    $ rls-prof train.py --iml-disable-tfprof --iml-disable-ops
+    $ rls-prof train.py --rlscope-disable-tfprof --rlscope-disable-ops
 
     # Run with ONLY op-events enabled (nothing else).
-    # i.e. only iml.prof.operation(...) calls are added code.
+    # i.e. only rlscope.prof.operation(...) calls are added code.
     pyprof_annotations_directory
 
     """
@@ -1422,8 +1422,8 @@ class PyprofOverheadParser:
             })
             ins_df['config'] = config
 
-            iml_config = read_iml_config(directory)
-            add_iml_config(ins_df, iml_config)
+            rlscope_config = read_rlscope_config(directory)
+            add_rlscope_config(ins_df, rlscope_config)
 
             assert len(ins_df) == 1
             ins_dfs.append(ins_df)
@@ -1688,17 +1688,17 @@ class TotalTrainingTimeParser:
     Plot total training time of uninstrumented run.
 
     # Run with tfprof disabled, pyprof disabled, AND op-events disabled;
-    # NOTE: we should make --iml-disable do THIS by default.
+    # NOTE: we should make --rlscope-disable do THIS by default.
     uninstrumented_directory
-    $ rls-prof train.py --iml-disable --iml-disable-ops
+    $ rls-prof train.py --rlscope-disable --rlscope-disable-ops
 
     # Run with ONLY pyprof events enabled (nothing else).
     # i.e. intercept C++ methods and record Python/C++ events.
     pyprof_interceptions_directory
-    $ rls-prof train.py --iml-disable-tfprof --iml-disable-ops
+    $ rls-prof train.py --rlscope-disable-tfprof --rlscope-disable-ops
 
     # Run with ONLY op-events enabled (nothing else).
-    # i.e. only iml.prof.operation(...) calls are added code.
+    # i.e. only rlscope.prof.operation(...) calls are added code.
     pyprof_annotations_directory
 
     """
@@ -1775,8 +1775,8 @@ class TotalTrainingTimeParser:
             })
             ins_df['config'] = config
 
-            iml_config = read_iml_config(directory)
-            add_iml_config(ins_df, iml_config)
+            rlscope_config = read_rlscope_config(directory)
+            add_rlscope_config(ins_df, rlscope_config)
 
             assert len(ins_df) == 1
             ins_dfs.append(ins_df)
@@ -2167,7 +2167,7 @@ def cupti_read_cuda_api_stats(config_directories_pairs,
       algo, env, config, api_name, total_num_calls, total_api_time_us, us_per_call
 
     :param config_directories_pairs:
-            [('config_name', [iml-directories])]
+            [('config_name', [rlscope-directories])]
     :return:
     """
     csv_data = dict()
@@ -2281,7 +2281,7 @@ class CUPTIOverheadParser:
         self.directory = directory
         self.width = width
         self.height = height
-        # self.iml_directories = iml_directories
+        # self.rlscope_directories = rlscope_directories
         # self.ignore_phase = ignore_phase
         # self.algo_env_from_dir = algo_env_from_dir
         # self.baseline_config = baseline_config
@@ -2596,11 +2596,11 @@ def add_x_field(df):
 
     df['x_field'] = np.vectorize(get_x_field, otypes=[str])(df['algo'], df['env'])
 
-def add_iml_config(df, iml_config):
-    if 'metadata' not in iml_config:
+def add_rlscope_config(df, rlscope_config):
+    if 'metadata' not in rlscope_config:
         return
     def _add(col):
-        df[col] = iml_config['metadata'].get(col, '')
+        df[col] = rlscope_config['metadata'].get(col, '')
     # Q: should we just set ALL the metadata?
     _add('algo')
     _add('env')

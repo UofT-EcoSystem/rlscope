@@ -17,8 +17,8 @@
 #include <sys/syscall.h>
 #define gettid() syscall(SYS_gettid)
 
-//#include "rlscope/protobuf/iml_prof.pb.h"
-#include "iml_prof.pb.h"
+//#include "rlscope/protobuf/rlscope_prof.pb.h"
+#include "rlscope_prof.pb.h"
 
 #include "cuda_api_profiler/op_stack.h"
 #include "cuda_api_profiler/get_env_var.h"
@@ -67,8 +67,8 @@ OpStackState OpStackState::DumpState() {
 }
 
 
-std::unique_ptr<iml::OpStackProto> OpStackState::AsProto() {
-  std::unique_ptr<iml::OpStackProto> proto(new iml::OpStackProto);
+std::unique_ptr<rlscope::OpStackProto> OpStackState::AsProto() {
+  std::unique_ptr<rlscope::OpStackProto> proto(new rlscope::OpStackProto);
   proto->set_process_name(_process_name);
   proto->set_machine_name(_machine_name);
   proto->set_phase(_phase_name);
@@ -82,7 +82,7 @@ std::unique_ptr<iml::OpStackProto> OpStackState::AsProto() {
         auto const& operation = op_pair.first;
         auto const& overhead_event = op_pair.second;
 
-        iml::OperationOverheadEvents& overhead_events_proto = (*(*proto->mutable_overhead_events())[overhead_type].mutable_phase_overhead_events())[phase_name];
+        rlscope::OperationOverheadEvents& overhead_events_proto = (*(*proto->mutable_overhead_events())[overhead_type].mutable_phase_overhead_events())[phase_name];
         overhead_events_proto.set_operation_name(operation);
         overhead_events_proto.set_num_overhead_events(overhead_event.num_events);
       }

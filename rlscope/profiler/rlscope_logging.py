@@ -16,7 +16,7 @@ import colorlog
 #     luigi_logger.setLevel(logging.INFO)
 
 def get_logger():
-    logger = logging.getLogger('iml')
+    logger = logging.getLogger('rlscope')
     return logger
 
 _handler = None

@@ -18,7 +18,7 @@ _upgrade_pip
 _check_BASELINES_DIR
 
 _check_tensorflow
-_check_iml
+_check_rlscope
 
 py_maybe_install 'baselines' install_baselines.sh
 
@@ -31,6 +31,6 @@ mkdir -p $OUTPUT_DIR
 
 _do python $BASELINES_DIR/baselines/deepq/experiments/run_atari.py \
     --env PongNoFrameskip-v4 \
-    --iml-start-measuring-call 1 \
+    --rlscope-start-measuring-call 1 \
     --checkpoint-path $OUTPUT_DIR \
-    --iml-trace-time-sec $((2*60))
+    --rlscope-trace-time-sec $((2*60))

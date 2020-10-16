@@ -21,7 +21,7 @@ struct RLSAnalyzeArgs {
   boost::optional<bool> FLAGS_output_csv;
   boost::optional<bool> FLAGS_cross_process;
   boost::optional<std::string> FLAGS_proto;
-  boost::optional<std::string> FLAGS_iml_directory;
+  boost::optional<std::string> FLAGS_rlscope_directory;
   boost::optional<std::string> FLAGS_mode;
 
   boost::optional<std::string> FLAGS_cupti_overhead_json;
@@ -64,7 +64,7 @@ struct RLSAnalyzeArgs {
     PRINT_FLAG(FLAGS_output_csv);
     PRINT_FLAG(FLAGS_cross_process);
     PRINT_FLAG(FLAGS_proto);
-    PRINT_FLAG(FLAGS_iml_directory);
+    PRINT_FLAG(FLAGS_rlscope_directory);
     PRINT_FLAG(FLAGS_mode);
     PRINT_FLAG(FLAGS_cupti_overhead_json);
     PRINT_FLAG(FLAGS_LD_PRELOAD_overhead_json);

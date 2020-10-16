@@ -1,4 +1,4 @@
-from rlscope.profiler.iml_logging import logger
+from rlscope.profiler.rlscope_logging import logger
 import copy
 import itertools
 import subprocess
@@ -23,7 +23,7 @@ import matplotlib.gridspec
 
 from rlscope.parser import stacked_bar_plots
 
-from rlscope.profiler.iml_logging import logger
+from rlscope.profiler.rlscope_logging import logger
 
 from rlscope.experiment import expr_config
 from rlscope.parser.plot import CUDAEventCSVReader, fix_seaborn_legend
@@ -111,7 +111,7 @@ class UtilParser:
     """
     def __init__(self,
                  directory,
-                 iml_directories,
+                 rlscope_directories,
                  algo_env_from_dir=False,
                  debug=False,
                  # Swallow any excess arguments
@@ -121,7 +121,7 @@ class UtilParser:
         :param debug:
         """
         self.directory = directory
-        self.iml_directories = iml_directories
+        self.rlscope_directories = rlscope_directories
         self.algo_env_from_dir = algo_env_from_dir
         self.debug = debug
 
@@ -172,11 +172,11 @@ class UtilParser:
     def maybe_add_algo_env(self, machine_util_path):
         assert is_machine_util_file(machine_util_path)
 
-        iml_directory = _d(machine_util_path)
+        rlscope_directory = _d(machine_util_path)
 
         if self.algo_env_from_dir:
             return self.add_algo_env_from_dir(machine_util_path)
-        if not _e(experiment.experiment_config_path(iml_directory)):
+        if not _e(experiment.experiment_config_path(rlscope_directory)):
             return self.add_experiment_config(machine_util_path)
 
         # Not sure what (algo, env) is; don't add those columns.
@@ -184,9 +184,9 @@ class UtilParser:
 
     def add_algo_env_from_dir(self, machine_util_path):
         assert is_machine_util_file(machine_util_path)
-        iml_dir = _d(machine_util_path)
+        rlscope_dir = _d(machine_util_path)
 
-        path = os.path.normpath(iml_dir)
+        path = os.path.normpath(rlscope_dir)
         components = path.split(os.sep)
         env_id = components[-1]
         algo = components[-2]
@@ -220,7 +220,7 @@ class UtilParser:
 
     def run(self):
         dfs = []
-        for directory in self.iml_directories:
+        for directory in self.rlscope_directories:
             df_reader = UtilDataframeReader(
                 directory,
                 add_fields=self.maybe_add_algo_env,
@@ -1032,14 +1032,14 @@ class GPUUtilOverTimePlot:
     """
     def __init__(self,
                  directory,
-                 iml_directories,
+                 rlscope_directories,
                  show_std=False,
                  debug=False,
                  debug_single_thread=False,
                  # Swallow any excess arguments
                  **kwargs):
         self.directory = directory
-        self.iml_directories = iml_directories
+        self.rlscope_directories = rlscope_directories
         self.show_std = show_std
         self.debug = debug
         self.debug_single_thread = debug_single_thread
@@ -1067,9 +1067,9 @@ class GPUUtilOverTimePlot:
             unit=unit,
         )
 
-    def read_data(self, iml_directory):
+    def read_data(self, rlscope_directory):
         df_reader = UtilDataframeReader(
-            iml_directory,
+            rlscope_directory,
             # add_fields=self.maybe_add_algo_env,
             debug=self.debug)
         df = df_reader.read()
@@ -1080,7 +1080,7 @@ class GPUUtilOverTimePlot:
         df['util_percent'] = df['util'] * 100
         df.sort_values(by=['start_time_us'], inplace=True)
 
-        event_reader = CUDAEventCSVReader(iml_directory, debug=self.debug)
+        event_reader = CUDAEventCSVReader(rlscope_directory, debug=self.debug)
         event_df = event_reader.read_df()
         # WANT:
         #   k[1].delay = k[1].start - k[0].end
@@ -1137,7 +1137,7 @@ class GPUUtilOverTimePlot:
             'std_delay_neg_us': std_delay_neg_us,
             'num_overlapped': num_overlapped,
 
-            'directory': iml_directory,
+            'directory': rlscope_directory,
             'num_delay_us': num_delay_us,
             'mean_delay_us': mean_delay_us,
             'std_delay_us': std_delay_us,
@@ -1176,40 +1176,40 @@ class GPUUtilOverTimePlot:
         # for var, value in kwargs.items():
         #     locals()[var] = value
         self = kwargs['self']
-        iml_directory = kwargs['iml_directory']
-        data = self.read_data(iml_directory)
-        return iml_directory, data
+        rlscope_directory = kwargs['rlscope_directory']
+        data = self.read_data(rlscope_directory)
+        return rlscope_directory, data
 
     def run(self):
         dir_to_data = dict()
 
-        # for iml_directory in self.iml_directories:
-        #     dir_to_data[iml_directory] = self.read_data(iml_directory)
+        # for rlscope_directory in self.rlscope_directories:
+        #     dir_to_data[rlscope_directory] = self.read_data(rlscope_directory)
 
         if self.debug_single_thread:
             n_workers = 1
         else:
             n_workers = multiprocessing.cpu_count()
-        def Args_GPUUtilOverTimePlot_read_data(iml_directory):
+        def Args_GPUUtilOverTimePlot_read_data(rlscope_directory):
             return dict(
                 self=self,
-                iml_directory=iml_directory,
+                rlscope_directory=rlscope_directory,
             )
 
         with ProcessPoolExecutor(n_workers) as pool:
             # splits = split_list(proto_paths, n_workers)
-            kwargs_list = [Args_GPUUtilOverTimePlot_read_data(iml_directory) for iml_directory in self.iml_directories]
+            kwargs_list = [Args_GPUUtilOverTimePlot_read_data(rlscope_directory) for rlscope_directory in self.rlscope_directories]
             data_list = map_pool(
                 pool, GPUUtilOverTimePlot.Worker_GPUUtilOverTimePlot_read_data, kwargs_list,
                 desc="GPUUtilOverTimePlot.read_data",
                 show_progress=True,
                 sync=self.debug_single_thread)
-            for iml_directory, data in data_list:
-                dir_to_data[iml_directory] = data
+            for rlscope_directory, data in data_list:
+                dir_to_data[rlscope_directory] = data
 
         df = pd.concat([
-            dir_to_data[iml_directory]['df']
-            for iml_directory in self.iml_directories], sort=True)
+            dir_to_data[rlscope_directory]['df']
+            for rlscope_directory in self.rlscope_directories], sort=True)
 
         fig, ax = plt.subplots()
         # df = pd.DataFrame({'A':26, 'B':20}, index=['N'])
@@ -1228,11 +1228,11 @@ class GPUUtilOverTimePlot:
         json_path = self._get_path('json')
 
         metadata_js = dict()
-        for iml_directory in self.iml_directories:
-            metadata_js[iml_directory] = dict()
-            for k, v in dir_to_data[iml_directory].items():
+        for rlscope_directory in self.rlscope_directories:
+            metadata_js[rlscope_directory] = dict()
+            for k, v in dir_to_data[rlscope_directory].items():
                 if k != 'df':
-                    metadata_js[iml_directory][k] = v
+                    metadata_js[rlscope_directory][k] = v
         # logger.info('Dump metadata js to {path}'.format(path=json_path))
         do_dump_json(metadata_js, json_path)
 

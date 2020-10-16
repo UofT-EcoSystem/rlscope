@@ -15,7 +15,7 @@ NOTE: We don't bother to wrap export_saved_model, simply because it doesn't expo
 but we COULD wrap it (minigo doesn't use it).
 """
 
-from rlscope.profiler.iml_logging import logger
+from rlscope.profiler.rlscope_logging import logger
 from rlscope import py_config
 
 SKIP_MODULE = False

@@ -118,9 +118,9 @@ _check_env() {
         exit 1
     fi
 
-    if ! which install_iml.sh; then
+    if ! which install_rlscope.sh; then
         export PATH="$IML_DIR/dockerfiles/sh:$PATH"
-        if ! which install_iml.sh; then
+        if ! which install_rlscope.sh; then
             echo "ERROR: failed trying to push $IML_DIR/dockerfiles/sh on \$PATH."
             exit 1
         fi
@@ -167,13 +167,13 @@ _upgrade_pip() {
     pip install --upgrade pip
 }
 
-_check_iml() {
+_check_rlscope() {
     if ! py_module_installed "rlscope"; then
-        install_iml.sh
+        install_rlscope.sh
         if ! py_module_installed "rlscope"; then
             echo "ERROR: tried to install rlscope but failed:"
             echo "> CMD:"
-            echo "  $ install_iml.sh"
+            echo "  $ install_rlscope.sh"
             exit 1
         fi
     fi

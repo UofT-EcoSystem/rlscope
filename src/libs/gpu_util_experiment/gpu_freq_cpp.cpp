@@ -173,7 +173,7 @@ MyStatus GPUComputeSchedInfoKernel::DumpKernelInfo(int thread_id, CudaStream str
     js["warp_id"] = vectors.warp_id;
     js["lane_id"] = vectors.lane_id;
     js["globaltimer_ns"] = vectors.globaltimer_ns;
-    boost::filesystem::path iml_dir(args.FLAGS_iml_directory.get());
+    boost::filesystem::path rlscope_dir(args.FLAGS_rlscope_directory.get());
     std::stringstream base_ss;
     base_ss << "GPUComputeSchedInfoKernel"
             << ".thread_id_" << thread_id
@@ -181,7 +181,7 @@ MyStatus GPUComputeSchedInfoKernel::DumpKernelInfo(int thread_id, CudaStream str
             << ".trace_id_" << trace_id
             << ".json";
     trace_id += 1;
-    auto path = iml_dir / base_ss.str();
+    auto path = rlscope_dir / base_ss.str();
     status = WriteJson(path.string(), js);
     IF_BAD_STATUS_RETURN(status);
     RLS_LOG("GPU_UTIL", "Dumped kernel info to {}", path.string());
@@ -352,7 +352,7 @@ std::string GPUClockFreq::json_basename() const {
 }
 
 std::string GPUClockFreq::json_path() const {
-    boost::filesystem::path direc(args.FLAGS_iml_directory.get());
+    boost::filesystem::path direc(args.FLAGS_rlscope_directory.get());
     boost::filesystem::path base = json_basename();
     return (direc / base).string();
 }
@@ -492,10 +492,10 @@ MyStatus ThreadedGPUKernelRunner::DumpJson(std::list<PassStats>& passes) {
   }
   js["raw_samples"]["total_kernel_run_time_sec"] = kernel_time_secs;
 
-  boost::filesystem::path iml_dir(args.FLAGS_iml_directory.get());
+  boost::filesystem::path rlscope_dir(args.FLAGS_rlscope_directory.get());
   std::stringstream base_ss;
   base_ss << "gpu_util_experiment.json";
-  auto path = iml_dir / base_ss.str();
+  auto path = rlscope_dir / base_ss.str();
   status = WriteJson(path.string(), js);
   IF_BAD_STATUS_RETURN(status);
   RLS_LOG("GPU_UTIL", "Dumped {}", path.string());
@@ -532,7 +532,7 @@ void ThreadedGPUKernelRunner::run_parent() {
 //    assert(cuContext != nullptr);
 
     MyStatus ret = MyStatus::OK();
-    rlscope::GPUHwCounterSampler sampler(args.FLAGS_device.get(), args.FLAGS_iml_directory.get(), "");
+    rlscope::GPUHwCounterSampler sampler(args.FLAGS_device.get(), args.FLAGS_rlscope_directory.get(), "");
 
     if (!args.FLAGS_hw_counters.get() || args.FLAGS_processes.get()) {
         ret = sampler.Disable();
@@ -1001,7 +1001,7 @@ void GPUKernelRunner::run_child_process() {
     std::stringstream suffix_ss;
     suffix_ss << ".process_" << args.FLAGS_internal_thread_id.get();
 
-    rlscope::GPUHwCounterSampler sampler(args.FLAGS_device.get(), args.FLAGS_iml_directory.get(), suffix_ss.str());
+    rlscope::GPUHwCounterSampler sampler(args.FLAGS_device.get(), args.FLAGS_rlscope_directory.get(), suffix_ss.str());
     assert(args.FLAGS_processes.get());
     if (!args.FLAGS_hw_counters.get()) {
         ret = sampler.Disable();

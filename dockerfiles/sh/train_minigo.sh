@@ -18,7 +18,7 @@ _upgrade_pip
 _check_MLPERF_DIR
 
 _check_tensorflow
-_check_iml
+_check_rlscope
 
 #py_maybe_install 'baselines' install_baselines.sh
 
@@ -50,4 +50,4 @@ export IML_DIRECTORY=$OUTPUT_DIR
 mkdir -p $IML_DIRECTORY
 
 cd $MLPERF_DIR/reinforcement/tensorflow
-_do ./run_and_time.sh $SEED --iml-keep-traces
+_do ./run_and_time.sh $SEED --rlscope-keep-traces

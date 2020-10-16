@@ -2,13 +2,13 @@
 # Utilities for recording data for unit-tests, and for reading in data for checking unit-test success/failure.
 #
 
-from rlscope.profiler.iml_logging import logger
+from rlscope.profiler.rlscope_logging import logger
 from os.path import join as _j
 
 from rlscope.protobuf.unit_test_pb2 import IMLUnitTestOnce, IMLUnitTestMultiple
 
 from rlscope.parser.common import *
-from rlscope.profiler import timer as iml_timer
+from rlscope.profiler import timer as rlscope_timer
 # from rlscope.profiler.clib_wrap import MICROSECONDS_IN_SECOND
 
 from rlscope.profiler import proto_util
@@ -332,7 +332,7 @@ class UnitTestDataDumper:
 
     def start(self):
         assert not self.stopped
-        self.start_t = iml_timer.now_us()
+        self.start_t = rlscope_timer.now_us()
         # self.unwrapped_prof.start()
         # self.old_start()
 
@@ -342,7 +342,7 @@ class UnitTestDataDumper:
             return
         assert not self.stopped
         # self.unwrapped_prof.stop()
-        time_t = iml_timer.now_us()
+        time_t = rlscope_timer.now_us()
         # self.old_stop()
         self.stop_t = time_t
         self._add_time(self.phase_end, self.cur_phase, time_t)
@@ -350,7 +350,7 @@ class UnitTestDataDumper:
 
     def set_phase(self, phase):
         assert not self.stopped
-        time_t = iml_timer.now_us()
+        time_t = rlscope_timer.now_us()
 
         if self.cur_phase is not None:
             # End the previous phase

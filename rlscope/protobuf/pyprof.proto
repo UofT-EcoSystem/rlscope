@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-package iml;
+package rlscope;
 
 // Q: This is the single binary-file output format.
 // In reality, we only need to keep a single "step" in memory when profiling.
@@ -59,11 +59,11 @@ message IncrementalTrainingProgress {
 
     int64 start_trace_time_us = 6;
 
-    // Time of the first call to iml.prof.report_progress(...).
+    // Time of the first call to rlscope.prof.report_progress(...).
     float start_percent_complete = 7;
     int64 start_num_timesteps = 8;
     int64 start_training_time_us = 9;
-    // The latest call to iml.prof.report_progress(...) for timestep=<num_timesteps>.
+    // The latest call to rlscope.prof.report_progress(...) for timestep=<num_timesteps>.
     float end_percent_complete = 10;
     int64 end_training_time_us = 11;
     int64 end_num_timesteps = 12;
@@ -104,10 +104,10 @@ message ProcessMetadata {
     //   # Training loop of ML script.
     //   for t in range(total_training_timesteps):
     //
-    //       # IML checks if --iml-trace-time-sec has expired.
-    //       # If it has, then the NEXT call to iml.prof.report_progress will
+    //       # IML checks if --rlscope-trace-time-sec has expired.
+    //       # If it has, then the NEXT call to rlscope.prof.report_progress will
     //       # terminate profiling.
-    //       iml.prof.report_progress(t/total_training_timesteps)
+    //       rlscope.prof.report_progress(t/total_training_timesteps)
     TrainingProgress training_progress = 5;
 }
 

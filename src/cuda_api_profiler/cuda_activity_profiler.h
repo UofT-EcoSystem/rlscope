@@ -22,8 +22,8 @@
 
 #include <mutex>
 
-//#include "rlscope/protobuf/iml_prof.pb.h"
-#include "iml_prof.pb.h"
+//#include "rlscope/protobuf/rlscope_prof.pb.h"
+#include "rlscope_prof.pb.h"
 
 #include "cuda_api_profiler/cupti_manager.h"
 #include "cuda_api_profiler/thread_pool_wrapper.h"
@@ -127,7 +127,7 @@ struct CUDAActivityProfilerState {
   bool CanDump();
   std::string DumpPath(int trace_id);
   CUDAActivityProfilerState DumpState();
-  std::unique_ptr<iml::MachineDevsEventsProto> AsProto();
+  std::unique_ptr<rlscope::MachineDevsEventsProto> AsProto();
 
   void RecordActivityBuffers();
 };

@@ -1,5 +1,5 @@
 # pip install progressbar2
-from rlscope.profiler.iml_logging import logger
+from rlscope.profiler.rlscope_logging import logger
 import progressbar
 
 from rlscope.parser.common import *

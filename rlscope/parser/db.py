@@ -1,4 +1,4 @@
-from rlscope.profiler.iml_logging import logger
+from rlscope.profiler.rlscope_logging import logger
 import psutil
 import os
 import multiprocessing
@@ -122,7 +122,7 @@ class SQLParser:
 
     def get_source_files(self, should_keep, allow_empty=False, description='tfprof/pyprof'):
         """
-        Visit every file in iml trace directory, and see whether we
+        Visit every file in rlscope trace directory, and see whether we
         should insert in to the SQL database.
 
         :param allow_empty:
@@ -2357,7 +2357,7 @@ class SQLCategoryTimesReader:
 
     def training_progress(self, *args, allow_none=False, **kwargs):
         training_progresses = self.training_progresses(*args, **kwargs)
-        # Return the last call to iml.prof.report_progress(...)
+        # Return the last call to rlscope.prof.report_progress(...)
         def by_end_training_time_us(training_progress):
             return training_progress.end_training_time_us
         training_progresses.sort(key=by_end_training_time_us)

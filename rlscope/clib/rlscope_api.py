@@ -3,7 +3,7 @@ import ctypes
 from os import environ as ENV
 
 from io import StringIO
-from rlscope.profiler.iml_logging import logger
+from rlscope.profiler.rlscope_logging import logger
 from rlscope.parser.common import *
 
 import ctypes
@@ -14,7 +14,7 @@ c_int_p = ctypes.POINTER(ctypes.c_int)
 
 from rlscope import py_config
 
-from rlscope.profiler.iml_logging import logger
+from rlscope.profiler.rlscope_logging import logger
 from rlscope import py_config
 
 

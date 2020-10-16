@@ -1,4 +1,4 @@
-from rlscope.profiler.iml_logging import logger
+from rlscope.profiler.rlscope_logging import logger
 import os
 from progressbar import progressbar
 import shutil
@@ -13,7 +13,7 @@ import concurrent.futures
 
 from os.path import join as _j, abspath as _a, exists as _e, dirname as _d, basename as _b
 
-from rlscope.profiler.iml_logging import logger
+from rlscope.profiler.rlscope_logging import logger
 
 from rlscope.parser.common import *
 
@@ -335,7 +335,7 @@ class TestForkedProcessPool:
 
         :return:
         """
-        TEST_DIR = './iml_test_data.test_03_mkdir'
+        TEST_DIR = './rlscope_test_data.test_03_mkdir'
         logger.info("TEST_DIR = {path}".format(path=_a(TEST_DIR)))
 
         def get_dir_path(i):

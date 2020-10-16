@@ -5,8 +5,8 @@
 #ifndef DNN_TENSORFLOW_CPP_OP_STACK_H
 #define DNN_TENSORFLOW_CPP_OP_STACK_H
 
-//#include "rlscope/protobuf/iml_prof.pb.h"
-#include "iml_prof.pb.h"
+//#include "rlscope/protobuf/rlscope_prof.pb.h"
+#include "rlscope_prof.pb.h"
 
 #include "cuda_api_profiler/event_handler.h"
 #include "cuda_api_profiler/thread_pool_wrapper.h"
@@ -61,7 +61,7 @@ struct OpStackState {
   bool CanDump();
   std::string DumpPath(int trace_id);
   OpStackState DumpState();
-  std::unique_ptr<iml::OpStackProto> AsProto();
+  std::unique_ptr<rlscope::OpStackProto> AsProto();
 
 };
 

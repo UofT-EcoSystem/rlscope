@@ -22,7 +22,7 @@ _check_STABLE_BASELINES_DIR
 _check_RL_BASELINES_ZOO_DIR
 
 _check_tensorflow
-_check_iml
+_check_rlscope
 
 setup_display() {
     local display="$1"
@@ -87,6 +87,6 @@ _do "${PYTHON[@]}" $RL_BASELINES_ZOO_DIR/train.py \
     --env $ENV_ID \
     --log-folder $OUTPUT_DIR \
     --log-interval 1 \
-    --iml-start-measuring-call 1 \
-    --iml-trace-time-sec $IML_TRACE_TIME_SEC \
+    --rlscope-start-measuring-call 1 \
+    --rlscope-trace-time-sec $IML_TRACE_TIME_SEC \
     "$@"

@@ -26,7 +26,7 @@ from rlscope.scripts.utilization_sampler import util_sampler
 from rlscope.profiler.util import args_to_cmdline, get_available_gpus, get_available_cpus
 from rlscope.profiler.util import get_stacktrace
 
-from rlscope.profiler.iml_logging import logger
+from rlscope.profiler.rlscope_logging import logger
 
 ORIG_EXCEPT_HOOK = sys.excepthook
 def cleanup_profiler_excepthook(exctype, value, traceback):
@@ -56,7 +56,7 @@ from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, base
 
 from rlscope.parser.common import *
 from rlscope.parser import constants
-from rlscope.profiler import timer as iml_timer
+from rlscope.profiler import timer as rlscope_timer
 # from rlscope.profiler import cudaprofile
 from rlscope.clib import rlscope_api
 from rlscope.profiler import clib_wrap
@@ -80,7 +80,7 @@ TF_PRINT_TIMESTAMP = ENV.get('TF_PRINT_TIMESTAMP', 'no') == 'yes'
 UTILIZATION_SAMPLER_PY = _j(py_config.ROOT, 'python', 'scripts', 'utilization_sampler.py')
 PYTHON_BIN = 'python3'
 
-# Warn about forgetting to call iml.prof.report_progress(...) every 30 seconds.
+# Warn about forgetting to call rlscope.prof.report_progress(...) every 30 seconds.
 REPORT_PROGRESS_WARN_EVERY_SEC = 10.
 
 # Dump training_progress.*.proto files every 10 seconds.
@@ -147,7 +147,7 @@ def setup(tfprof_enabled, pyprof_enabled, allow_skip=False, allow_missing_librls
             logger.error(textwrap.dedent("""\
             To profile using RLScope, you must re-run your command-line as:
               $ rls-prof {cmd}
-            If you want to run without RLScope, add --iml-disable to the above command.
+            If you want to run without RLScope, add --rlscope-disable to the above command.
             """).format(
                 cmd=' '.join(shlex.quote(opt) for opt in [sys.executable] + sys.argv),
             ).rstrip())
@@ -279,10 +279,10 @@ class Profiler:
     :param reports_progress
         Whether or not the current process will call:
 
-            iml.prof.report_progress(percent_complete)
+            rlscope.prof.report_progress(percent_complete)
 
-        If this is true, then if --iml-trace-time-sec expires, we will WAIT
-        until iml.prof.report_progress is called prior to exiting, and we will warn
+        If this is true, then if --rlscope-trace-time-sec expires, we will WAIT
+        until rlscope.prof.report_progress is called prior to exiting, and we will warn
         if it hasn't been called.
 
         Q: Can't we imply this from whether it ever calls report_progress?
@@ -318,7 +318,7 @@ class Profiler:
                  python=None,
                  # WARNING: MAKE SURE to use None as the default for boolean flags!
                  # Otherwise, if you set this to False by default, get_argval will ALWAYS return
-                 # False (even if --iml-calibration is set!)
+                 # False (even if --rlscope-calibration is set!)
                  calibration=None,
                  disable=None,
                  disable_pyprof_annotations=None,
@@ -339,21 +339,21 @@ class Profiler:
                  skip_rm_traces=None,
                  args=None):
 
-        def get_iml_argname(argname, internal=False):
+        def get_rlscope_argname(argname, internal=False):
             name = argname
             # name = re.sub('_', '-', name)
             if internal:
-                name = "iml_internal_{name}".format(name=name)
+                name = "rlscope_internal_{name}".format(name=name)
             else:
-                name = "iml_{name}".format(name=name)
+                name = "rlscope_{name}".format(name=name)
             return name
 
         def get_argval(argname, klass_arg, default_arg, allow_none=True, internal=False):
             """
-            Extract --iml-* args added by add_iml_arguments, unless provided with arguments to the constructor.
+            Extract --rlscope-* args added by add_rlscope_arguments, unless provided with arguments to the constructor.
 
             :param argname:
-                Name of argument (without iml prefix).
+                Name of argument (without rlscope prefix).
             :param klass_arg:
                 Value provided to constructor.
             :param default_arg:
@@ -363,28 +363,28 @@ class Profiler:
             if args is None or klass_arg is not None:
                 return klass_arg
 
-            iml_argname = get_iml_argname(argname, internal=internal)
+            rlscope_argname = get_rlscope_argname(argname, internal=internal)
             
-            if hasattr(args, iml_argname):
-                if getattr(args, iml_argname) is not None:
+            if hasattr(args, rlscope_argname):
+                if getattr(args, rlscope_argname) is not None:
                     # assert isinstance(args, argparse.Namespace)
-                    argval = getattr(args, iml_argname)
+                    argval = getattr(args, rlscope_argname)
                     return argval
-            elif iml_argname in args and args[iml_argname] is not None:
+            elif rlscope_argname in args and args[rlscope_argname] is not None:
                 # assert type(args) == dict
-                argval = args[iml_argname]
+                argval = args[rlscope_argname]
                 return argval
 
             if not allow_none and default_arg is None:
                 self._failing = True
                 raise RuntimeError("IML: you must provide a value for --{arg}".format(
-                    arg=re.sub('_', '-', iml_argname)))
+                    arg=re.sub('_', '-', rlscope_argname)))
 
             return default_arg
 
         def get_internal_argval(argname, default_arg=None, allow_none=True):
             """
-            Extract --iml-internal-* args added by add_iml_arguments, unless provided with arguments to the constructor.
+            Extract --rlscope-internal-* args added by add_rlscope_arguments, unless provided with arguments to the constructor.
             """
             klass_arg = None
             argval = get_argval(argname, klass_arg, default_arg,
@@ -416,14 +416,14 @@ class Profiler:
         self.directory = get_argval('directory', directory, None, allow_none=False)
         self.disable = get_argval('disable', disable, False)
         if 'IML_CONFIG' in os.environ:
-            self.iml_config = os.environ['IML_CONFIG']
-            if not self.calibration and self.iml_config == 'uninstrumented':
-                # WARNING: We do NOT do this for --iml-calibration runs, as it will cause a BUG!
+            self.rlscope_config = os.environ['IML_CONFIG']
+            if not self.calibration and self.rlscope_config == 'uninstrumented':
+                # WARNING: We do NOT do this for --rlscope-calibration runs, as it will cause a BUG!
                 # In order for calibration to work properly, we need to be able to enable each book-keeping feature in isolation!
-                # Q: What code depends on "--config uninstrumented" (without --iml-calibration) implying --iml-disable?
+                # Q: What code depends on "--config uninstrumented" (without --rlscope-calibration) implying --rlscope-disable?
                 # A: minigo code.
                 logger.warning("DISABLE ALL IML FEATURES for --config={config} run".format(
-                    config=self.iml_config))
+                    config=self.rlscope_config))
                 self.disable = True
         self.disable_pyprof_annotations = get_argval('disable_pyprof_annotations', disable_pyprof_annotations, False)
         self.disable_pyprof_interceptions = get_argval('disable_pyprof_interceptions', disable_pyprof_interceptions, False)
@@ -456,7 +456,7 @@ class Profiler:
         if self.disable:
             logger.info("IML: note that profiling is disabled for this run")
         if ( self.disable or self.disable_gpu_hw ) and rlscope_api.is_used():
-            logger.info("(--iml-disable-gpu-hw) Disable GPU HW sampling")
+            logger.info("(--rlscope-disable-gpu-hw) Disable GPU HW sampling")
             rlscope_api.disable_gpu_hw()
 
         # self.manager = multiprocessing.Manager()
@@ -468,7 +468,7 @@ class Profiler:
         global _prof_singleton
         if _prof_singleton is not None:
             self._failing = True
-            raise RuntimeError("IML: Only a single profiler.Profiler object can be created; use iml.handle_iml_args + iml.prof instead.")
+            raise RuntimeError("IML: Only a single profiler.Profiler object can be created; use rlscope.handle_rlscope_args + rlscope.prof instead.")
         _prof_singleton = self
 
         self.machine_name = get_machine_name()
@@ -494,7 +494,7 @@ class Profiler:
         self.util_sampler = None
         if self.just_sample_util:
             self.util_sampler = util_sampler(
-                iml_directory=self.directory,
+                rlscope_directory=self.directory,
                 debug=self.debug,
             )
 
@@ -512,7 +512,7 @@ class Profiler:
         # self.init_trace_id()
         self._tfprof_enabled = False
         self._pyprof_enabled = False
-        self._iml_prof_enabled = False
+        self._rlscope_prof_enabled = False
         self.total_profile_time_sec = 0
 
         self.python = get_argval('python', python, False)
@@ -588,7 +588,7 @@ class Profiler:
         """
         os.makedirs(self.directory, exist_ok=True)
         if self.skip_rm_traces:
-            logger.info("IML: SKIP deleting trace-files rooted at {dir} (--iml-skip-rm-traces)")
+            logger.info("IML: SKIP deleting trace-files rooted at {dir} (--rlscope-skip-rm-traces)")
             return
         recursive_delete_trace_files(self.directory)
 
@@ -615,7 +615,7 @@ class Profiler:
 
         assert self.next_trace_id is None
 
-        # See --iml-keep-traces
+        # See --rlscope-keep-traces
         if self.keep_traces:
             self._init_trace_id_from_traces()
         else:
@@ -787,7 +787,7 @@ class Profiler:
     def _check_no_annotations(self, caller_name):
         if len(self._op_stack) > 0:
             self._failing = True
-            raise RuntimeError(self._iml_err_msg(
+            raise RuntimeError(self._rlscope_err_msg(
                 "You cannot call {caller} while annotations are active since you'll end up losing tfprof/pyprof event data.".format(
                     caller=caller_name,
                 ),
@@ -796,7 +796,7 @@ class Profiler:
     def _enable_tracing(self):
         logger.info("IML: enable tracing")
 
-        self._check_no_annotations(caller_name='iml.prof.enable_tracing()')
+        self._check_no_annotations(caller_name='rlscope.prof.enable_tracing()')
 
         self._init_trace_time()
 
@@ -805,10 +805,10 @@ class Profiler:
             self._start_tfprof()
 
         if not self.disable or self.training_progress:
-            # Q: is setting --iml-training-progress going to result in us recording events during uninstrumented runs...?
+            # Q: is setting --rlscope-training-progress going to result in us recording events during uninstrumented runs...?
             # A: No, the --config option we give to rls-prof ensures various events aren't recorded.
             # NOTE: We want to collect CUDA API call stats for uninstrumented runs also!
-            self._start_iml_prof()
+            self._start_rlscope_prof()
 
         if self.just_sample_util:
             self._init_trace_time()
@@ -860,7 +860,7 @@ class Profiler:
             return
 
         if self.reports_progress:
-            # Wait for iml.prof.report_progress() to get called until we enable tracing.
+            # Wait for rlscope.prof.report_progress() to get called until we enable tracing.
             # This ensures that we measure the delta in percent_complete'd over the
             # same interval of time we do tracing for.
             self._has_called_enable_tracing = True
@@ -875,10 +875,10 @@ class Profiler:
         logger.info("IML: disable tracing")
         self._stop_pyprof()
         self._stop_tfprof()
-        self._stop_iml_prof()
+        self._stop_rlscope_prof()
         self._tracing_enabled = False
 
-    # # Calling iml.prof.enable()/disable() repeatedly wouldn't currently support percent_complete tracking...
+    # # Calling rlscope.prof.enable()/disable() repeatedly wouldn't currently support percent_complete tracking...
     # # So let's just not allow disable() for now.
     # def disable_tracing(self):
     #     """
@@ -902,12 +902,12 @@ class Profiler:
         if self.disable:
             return
 
-        self._start_us = iml_timer.now_us()
+        self._start_us = rlscope_timer.now_us()
 
         if self.unit_test:
             self.ut.start()
 
-        # If --iml-delay, delay collecting traces until they explicitly call iml.prof.enable().
+        # If --rlscope-delay, delay collecting traces until they explicitly call rlscope.prof.enable().
         if not self.delay:
             self.enable_tracing()
 
@@ -932,8 +932,8 @@ class Profiler:
         self._maybe_end_operations()
         self._maybe_finish(finish_now=True, should_exit=False)
 
-    def _start_iml_prof(self):
-        if self._iml_prof_enabled or not rlscope_api.is_used():
+    def _start_rlscope_prof(self):
+        if self._rlscope_prof_enabled or not rlscope_api.is_used():
             return
 
         if self.debug:
@@ -941,10 +941,10 @@ class Profiler:
         if rlscope_api.is_used():
             rlscope_api.enable_tracing()
 
-        self._iml_prof_enabled = True
+        self._rlscope_prof_enabled = True
 
-    def _stop_iml_prof(self):
-        if not self._iml_prof_enabled:
+    def _stop_rlscope_prof(self):
+        if not self._rlscope_prof_enabled:
             return
 
         if self.debug:
@@ -953,9 +953,9 @@ class Profiler:
         if rlscope_api.is_used():
             rlscope_api.disable_tracing()
 
-        self._iml_prof_enabled = False
+        self._rlscope_prof_enabled = False
 
-    def _dump_iml_prof(self):
+    def _dump_rlscope_prof(self):
         raise NotImplementedError("TODO: call C++ function that dumps CUDA API stats to protobuf file (rlscope_api.collect())")
 
     def _start_tfprof(self, skip_init_trace_time=False):
@@ -975,7 +975,7 @@ class Profiler:
 
         if self._tfprof_enabled or self.disable_tfprof:
             if self.disable_tfprof:
-                logger.info("Skipping tfprof profiling (--iml-disable-tfprof)")
+                logger.info("Skipping tfprof profiling (--rlscope-disable-tfprof)")
             return
 
         # if self.step_start_tracing is None:
@@ -1108,14 +1108,14 @@ class Profiler:
 
         self._push_operation(bench_name)
 
-        self.start_call_us[bench_name] = iml_timer.now_us()
+        self.start_call_us[bench_name] = rlscope_timer.now_us()
 
     def operation(self, operation, skip=False):
         return Operation(operation, prof=self, skip=skip)
 
     def profile(self, process_name, phase_name=constants.DEFAULT_PHASE, handle_utilization_sampler=True):
         """
-        with iml.prof.profile('loop_train_eval', phase_name='sgd_updates'):
+        with rlscope.prof.profile('loop_train_eval', phase_name='sgd_updates'):
             ... code to profile ...
 
         :param process_name:
@@ -1141,8 +1141,8 @@ class Profiler:
             handle_utilization_sampler=handle_utilization_sampler,
         )
 
-    def _dump_iml_config(self):
-        path = self._iml_config_path
+    def _dump_rlscope_config(self):
+        path = self._rlscope_config_path
         attrs = dict(self.__dict__)
         def should_keep(attr):
             return type(attrs[attr]) in {dict, list, str, int, float, bool, type(None)}
@@ -1169,7 +1169,7 @@ class Profiler:
     def _start_pyprof(self):
         if self._pyprof_enabled or self.disable_pyprof:
             if self.disable_pyprof:
-                logger.info("Skipping pyprof profiling (--iml-disable-pyprof)")
+                logger.info("Skipping pyprof profiling (--rlscope-disable-pyprof)")
             return
         if self.debug:
             logger.info("Start pyprof\n{stack}".format(stack=get_stacktrace()))
@@ -1253,7 +1253,7 @@ class Profiler:
                     b2=bench_name,
                 )))
 
-            self.end_call_us[bench_name] = iml_timer.now_us()
+            self.end_call_us[bench_name] = rlscope_timer.now_us()
             # self.disable_profiling(bench_name, num_calls=1)
 
             # Record the last amount of time in between returning
@@ -1302,31 +1302,31 @@ class Profiler:
         if not skip_finish and not self.reports_progress:
             # Regarding self.reports_progress:
             # - If this process reports training progress (self.reports_progress),
-            #   exit AFTER --iml-trace-time-sec is up AND iml.prof.report_progress has JUST been called.
-            # - If this process does NOT report training progress, just exit once --iml-trace-time-sec is up.
+            #   exit AFTER --rlscope-trace-time-sec is up AND rlscope.prof.report_progress has JUST been called.
+            # - If this process does NOT report training progress, just exit once --rlscope-trace-time-sec is up.
             self._maybe_finish(debug=self.debug)
 
     def set_metadata(self, variables):
         """
         e.g.
 
-        iml.prof.set_metadata({
+        rlscope.prof.set_metadata({
             'algo': algo,
             'env': env,
         })
 
         :param variables:
-            Dictionary of key/value pairs to record in iml_config.json file.
+            Dictionary of key/value pairs to record in rlscope_config.json file.
             This is for convenience when running experiments, call this API isn't neccessary.
         :return:
         """
         self.metadata.update(variables)
 
-        self._maybe_dump_iml_config()
+        self._maybe_dump_rlscope_config()
 
-    def _maybe_dump_iml_config(self):
+    def _maybe_dump_rlscope_config(self):
         if self.process_name is not None and self.phase is not None:
-            self._dump_iml_config()
+            self._dump_rlscope_config()
 
     def _is_term_opt_set(self):
         return self.max_timesteps is not None or \
@@ -1347,7 +1347,7 @@ class Profiler:
         Only set self.opt if another termination opt isn't already set.
         """
         term_opts = self._term_opts()
-        # Should be one of --iml-trace-time-sec, --iml-max-timesteps, --iml-max-training-loop-iters
+        # Should be one of --rlscope-trace-time-sec, --rlscope-max-timesteps, --rlscope-max-training-loop-iters
         assert opt in term_opts
         if skip_if_set and self._is_term_opt_set():
             logger.info(("IML: SKIP {func}({opt}={value}) "
@@ -1358,7 +1358,7 @@ class Profiler:
                 opts=pprint_msg(self._term_opts()),
             ))
             return
-        logger.info("IML: Setting iml.prof.{var} = {val}".format(
+        logger.info("IML: Setting rlscope.prof.{var} = {val}".format(
             var=opt,
             val=value,
         ))
@@ -1371,7 +1371,7 @@ class Profiler:
         if skip_if_set and getattr(self, opt) is not None:
             logger.info(("IML: SKIP {func}({opt}={value}) "
                           "since {opt} is already set: {opts}").format(
-                # e.g., 'iml.prof.set_delay_passes',
+                # e.g., 'rlscope.prof.set_delay_passes',
                 func=funcname,
                 opt=opt,
                 value=value,
@@ -1380,7 +1380,7 @@ class Profiler:
                 },
             ))
             return
-        logger.info("IML: Setting iml.prof.{var} = {val}".format(
+        logger.info("IML: Setting rlscope.prof.{var} = {val}".format(
             var=opt,
             val=value,
         ))
@@ -1393,38 +1393,38 @@ class Profiler:
         :param: skip_if_set : bool
             If True, then ONLY set max_training_loop_iters if the following trace-termination-options have not been
             provided already via cmdline:
-                --iml-max-timesteps
-                --iml-max-training-loop-iters
-                --iml-trace-time-sec
+                --rlscope-max-timesteps
+                --rlscope-max-training-loop-iters
+                --rlscope-trace-time-sec
 
-            If False, set max_training_loop_iters (possibly overriding  --iml-max-training-loop-iters)
+            If False, set max_training_loop_iters (possibly overriding  --rlscope-max-training-loop-iters)
 
         :return:
         """
         assert not self._tracing_enabled
         assert not self._has_called_enable_tracing
-        self._set_term_opt('iml.prof.set_max_training_loop_iters',
+        self._set_term_opt('rlscope.prof.set_max_training_loop_iters',
                            'max_training_loop_iters', max_training_loop_iters,
                            skip_if_set)
-        self._maybe_dump_iml_config()
+        self._maybe_dump_rlscope_config()
 
     def set_max_passes(self, max_passes, skip_if_set):
         assert not self._tracing_enabled
         assert not self._has_called_enable_tracing
-        self._set_term_opt('iml.prof.set_max_passes',
+        self._set_term_opt('rlscope.prof.set_max_passes',
                            'max_passes', max_passes,
                            skip_if_set)
-        self._maybe_dump_iml_config()
+        self._maybe_dump_rlscope_config()
 
     def set_delay_passes(self, delay_passes, skip_if_set):
         """
-        Set the delay in "passes" (calls to iml.prof.report_progress) before trace collection begins.
+        Set the delay in "passes" (calls to rlscope.prof.report_progress) before trace collection begins.
         """
         assert not self._tracing_enabled
         assert not self._has_called_enable_tracing
-        self._maybe_set_opt('delay_passes', delay_passes, 'iml.prof.set_delay_passes', skip_if_set)
-        self._maybe_set_opt('delay', True, 'iml.prof.set_delay', skip_if_set)
-        self._maybe_dump_iml_config()
+        self._maybe_set_opt('delay_passes', delay_passes, 'rlscope.prof.set_delay_passes', skip_if_set)
+        self._maybe_set_opt('delay', True, 'rlscope.prof.set_delay', skip_if_set)
+        self._maybe_dump_rlscope_config()
 
     def set_delay_training_loop_iters(self, delay_training_loop_iters, skip_if_set):
         """
@@ -1433,16 +1433,16 @@ class Profiler:
         :param: skip_if_set : bool
             If True, then ONLY set delay_training_loop_iters if the following have not been
             provided already via cmdline:
-                --iml-delay-training-loop-iters
+                --rlscope-delay-training-loop-iters
 
-            If False, set delay_training_loop_iters (possibly overriding --iml-delay-training-loop-iters)
+            If False, set delay_training_loop_iters (possibly overriding --rlscope-delay-training-loop-iters)
 
         :return:
         """
         assert not self._tracing_enabled
         assert not self._has_called_enable_tracing
-        self._maybe_set_opt('delay_training_loop_iters', delay_training_loop_iters, 'iml.prof.set_delay_training_loop_iters', skip_if_set)
-        self._maybe_dump_iml_config()
+        self._maybe_set_opt('delay_training_loop_iters', delay_training_loop_iters, 'rlscope.prof.set_delay_training_loop_iters', skip_if_set)
+        self._maybe_dump_rlscope_config()
 
     def set_process_name(self, process_name):
         if process_name == '':
@@ -1457,7 +1457,7 @@ class Profiler:
         # if self.process_name is not None and self.phase is not None:
         #     self._force_load_libcupti()
 
-        self._maybe_dump_iml_config()
+        self._maybe_dump_rlscope_config()
 
     def _maybe_set_metadata(self):
         if rlscope_api.is_used() and \
@@ -1487,11 +1487,11 @@ class Profiler:
             return
 
         util_cmdline = ['rls-util-sampler']
-        util_cmdline.extend(['--iml-directory', _a(self.directory)])
+        util_cmdline.extend(['--rlscope-directory', _a(self.directory)])
         # Sample memory-usage of the entire process tree rooted at ths process.
-        util_cmdline.extend(['--iml-root-pid', str(os.getpid())])
+        util_cmdline.extend(['--rlscope-root-pid', str(os.getpid())])
         if py_config.DEBUG_UTIL_SAMPLER and self.debug:
-            util_cmdline.append('--iml-debug')
+            util_cmdline.append('--rlscope-debug')
         # We make sure nvidia-smi runs fast at the VERY START of training
         # (to avoid false alarms when training is busy with the CPU/GPU).
         util_cmdline.append('--skip-smi-check')
@@ -1527,7 +1527,7 @@ class Profiler:
         # if self.process_name is not None and self.phase is not None:
         #     self._force_load_libcupti()
 
-        self._maybe_dump_iml_config()
+        self._maybe_dump_rlscope_config()
 
         if self.disable:
             return
@@ -1554,10 +1554,10 @@ class Profiler:
             #
             # Multiple calls happen to this function since users write their code like this:
             #
-            #   with iml.prof.profiler(...):          # -> This registers a iml.prof.stop() handler to be called on exit
-            #     iml.prof.report_progress(...)       # -> This calls sys.exit(0) during Profiler.finish()
-            #                                         # -> We exit the with block; iml.prof.stop() is called
-            #                                         #    and calls into iml.prof.finish()
+            #   with rlscope.prof.profiler(...):          # -> This registers a rlscope.prof.stop() handler to be called on exit
+            #     rlscope.prof.report_progress(...)       # -> This calls sys.exit(0) during Profiler.finish()
+            #                                         # -> We exit the with block; rlscope.prof.stop() is called
+            #                                         #    and calls into rlscope.prof.finish()
             return
         if should_exit:
             self._is_finishing = True
@@ -1658,8 +1658,8 @@ class Profiler:
     #     if self.disable_tfprof_dump:
     #         should_skip_dump = True
     #
-    #     if hasattr(session, 'iml_skip_dump') and session.iml_skip_dump:
-    #         logger.info('session.iml_skip_dump was set; skipping dumping tfprof for session={s}'.format(
+    #     if hasattr(session, 'rlscope_skip_dump') and session.rlscope_skip_dump:
+    #         logger.info('session.rlscope_skip_dump was set; skipping dumping tfprof for session={s}'.format(
     #             s=session,
     #         ))
     #         should_skip_dump = True
@@ -1670,8 +1670,8 @@ class Profiler:
     #     self.next_trace_id += 1
     #     tfprof_path = self.tfprof_path(session.session_id, trace_id)
     #
-    #     if pctx.iml_traced_calls == 0:
-    #         # Silently skip dumping this pctx since it contains no trace-data (unless --iml-debug).
+    #     if pctx.rlscope_traced_calls == 0:
+    #         # Silently skip dumping this pctx since it contains no trace-data (unless --rlscope-debug).
     #         if pctx.phase is None and debug:
     #             logger.info("Skip dumping tfprof @ {path}: your training script creates a tf.Session() object that never gets used so it has 0 traced-calls.".format(path=tfprof_path))
     #         elif debug:
@@ -1795,7 +1795,7 @@ class Profiler:
         trace_id = self.next_trace_id
 
         # Some training scripts (e.g. minigo) have a more complex training loop that makes it difficult for us to
-        # record training progress; in particular iml.prof.report_progress calls technically needs to happen
+        # record training progress; in particular rlscope.prof.report_progress calls technically needs to happen
         # "across processes".  Currently we don't support that.
         # if dump_always:
         #     assert self.phase in self._incremental_training_progress
@@ -1869,7 +1869,7 @@ class Profiler:
         # Q: multiple processes reporting training progress...consider that an error?
         # if self.reports_progress and self.percent_complete is None:
         #     self._failing = True
-        #     raise RuntimeError("IML ERROR: profiler was created with iml.handle_iml_args(..., reports_progress=True), but process NEVER called iml.prof.report_progress(...)")
+        #     raise RuntimeError("IML ERROR: profiler was created with rlscope.handle_rlscope_args(..., reports_progress=True), but process NEVER called rlscope.prof.report_progress(...)")
 
         # This should be prevented from self.report_progress(...)
         assert not(not self.reports_progress and self.percent_complete is not None)
@@ -1932,8 +1932,8 @@ class Profiler:
         return ret
 
     @property
-    def _iml_config_path(self):
-        return get_iml_config_path(self.out_dir, self.bench_name)
+    def _rlscope_config_path(self):
+        return get_rlscope_config_path(self.out_dir, self.bench_name)
 
     def _fixup_tfprof(self, path):
         """
@@ -1953,7 +1953,7 @@ class Profiler:
 
     def _maybe_warn_live_annotations(self):
         """
-        If we've exceed tracing time-limit (--iml-trace-time-sec), but there are still live annotations,
+        If we've exceed tracing time-limit (--rlscope-trace-time-sec), but there are still live annotations,
         warn the user.
         """
         total_trace_time_sec = self._total_trace_time_sec()
@@ -1962,7 +1962,7 @@ class Profiler:
                 len(self._op_stack) > 0 and \
                 ( self._last_warned_trace_time_sec is None or time.time() - self._last_warned_trace_time_sec >= WARN_EVERY_SEC ):
             logger.warning(textwrap.dedent("""\
-            IML: Warning; tracing time (sec) has exceeded limit (--iml-trace-time-sec {limit_sec}), 
+            IML: Warning; tracing time (sec) has exceeded limit (--rlscope-trace-time-sec {limit_sec}), 
             but annotations are still active:
               process_name = {proc}
               phase_name = {phase}
@@ -1982,9 +1982,9 @@ class Profiler:
 
     def _maybe_warn_report_progress(self):
         """
-        If the process is responsible for calling iml.prof.report_progress(...) and we have been
+        If the process is responsible for calling rlscope.prof.report_progress(...) and we have been
         collecting trace-data for much longer than we intended, they may have forgotten to call
-        iml.prof.report_progress(...).
+        rlscope.prof.report_progress(...).
 
         Warn them every 30 seconds in that case.
         """
@@ -1999,8 +1999,8 @@ class Profiler:
             )
         ):
             logger.warning(textwrap.dedent("""\
-            IML: Warning; tracing time so far ({sec} sec) has exceeded tracing time-limit (--iml-trace-time-sec {limit_sec}), but process={proc} 
-            hasn't called iml.prof.report_progress(...); did you forget to call this in that process?
+            IML: Warning; tracing time so far ({sec} sec) has exceeded tracing time-limit (--rlscope-trace-time-sec {limit_sec}), but process={proc} 
+            hasn't called rlscope.prof.report_progress(...); did you forget to call this in that process?
               process_name = {proc}
               phase_name = {phase}
               Active annotations:
@@ -2017,7 +2017,7 @@ class Profiler:
             ))
             self._last_warned_report_progress_idx = warn_idx
 
-    def _iml_err_msg(self, msg, stack=None, msg_type='Warning'):
+    def _rlscope_err_msg(self, msg, stack=None, msg_type='Warning'):
         if stack is None:
             stack = get_stacktrace()
         return textwrap.dedent("""\
@@ -2137,7 +2137,7 @@ class Profiler:
         return now_sec - self.start_trace_time_sec
 
     def _record_process_event(self):
-        self._stop_us = iml_timer.now_us()
+        self._stop_us = rlscope_timer.now_us()
         # Record a "special" operation event that spans the prof.start()/stop() calls
         # for the currently running process.
         assert self._start_us is not None
@@ -2178,8 +2178,8 @@ class Profiler:
             self._failing = True
             raise RuntimeError(
                 textwrap.dedent("""\
-                IML ERROR: profiler was created with iml.handle_iml_args(..., reports_progress=False), but process made unexpected call to iml.prof.report_progress(...).
-                If you wish to have process_name={proc} record training progress, call iml.handle_iml_args(..., reports_progress=True), 
+                IML ERROR: profiler was created with rlscope.handle_rlscope_args(..., reports_progress=False), but process made unexpected call to rlscope.prof.report_progress(...).
+                If you wish to have process_name={proc} record training progress, call rlscope.handle_rlscope_args(..., reports_progress=True), 
                 and make sure its the ONLY process that does so.
                 """).format(proc=self.process_name))
 
@@ -2187,7 +2187,7 @@ class Profiler:
             self._failing = True
             raise RuntimeError(
                 textwrap.dedent("""\
-                IML ERROR: iml.prof.report_progress(percent_complete=...) expects:
+                IML ERROR: rlscope.prof.report_progress(percent_complete=...) expects:
                   0 <= percent_complete <= 1
                 But saw percent_complete={perc}
                   
@@ -2195,13 +2195,13 @@ class Profiler:
                 
                   # The training loop of your ML script:
                   for t in range(total_timesteps):
-                      iml.prof.report_progress(percent_complete=t/float(total_timesteps))
+                      rlscope.prof.report_progress(percent_complete=t/float(total_timesteps))
                 """).format(
                     perc=percent_complete,
                 ))
 
         if self._should_enable_tracing():
-            self._check_no_annotations(caller_name='iml.prof.report_progress()')
+            self._check_no_annotations(caller_name='rlscope.prof.report_progress()')
             self._enable_tracing()
             # percent_complete when tracing begins.
             self._start_percent_complete = percent_complete
@@ -2221,7 +2221,7 @@ class Profiler:
 
         if self.max_timesteps is not None and num_timesteps is None:
             self._failing = True
-            raise RuntimeError("IML ERROR: if you use --iml-max-timesteps, you must call iml.prof.report_progress(num_timesteps=NUMBER)")
+            raise RuntimeError("IML ERROR: if you use --rlscope-max-timesteps, you must call rlscope.prof.report_progress(num_timesteps=NUMBER)")
 
         if num_timesteps is not None:
             self.num_timesteps = num_timesteps
@@ -2244,19 +2244,19 @@ class Profiler:
         dump_always = (percent_complete == 1)
         if dump_always:
             # If this fails, then your training loop executed zero iterations,
-            # so iml.prof.report_progress was NEVER called.
+            # so rlscope.prof.report_progress was NEVER called.
             #
             # Q: Should we allow this by making the phase basically 0 seconds...?
             if not self.tracing_enabled:
                 self._failing = True
-                raise RuntimeError("IML ERROR: profiler was created with iml.handle_iml_args(..., reports_progress=True), but process NEVER called iml.prof.report_progress(...)")
+                raise RuntimeError("IML ERROR: profiler was created with rlscope.handle_rlscope_args(..., reports_progress=True), but process NEVER called rlscope.prof.report_progress(...)")
             # assert self.tracing_enabled
         self._dump_training_progress(debug=self.debug, dump_always=dump_always)
 
         self._maybe_finish(debug=self.debug)
 
         if self._has_called_enable_tracing:
-            # They've called iml.prof.enable_tracing() since their algorithm has "warmed up";
+            # They've called rlscope.prof.enable_tracing() since their algorithm has "warmed up";
             # start counting training loop iterations.
             self.num_training_loop_iters += 1
             self.num_passes += 1
@@ -2267,7 +2267,7 @@ class Profiler:
         if not should_finish:
             return
 
-        self._stop_us = iml_timer.now_us()
+        self._stop_us = rlscope_timer.now_us()
 
         while len(self._op_stack) > 0:
             # Pass skip_finish=True to avoid recursively calling this.
@@ -2308,7 +2308,7 @@ class Profiler:
     #     graph = tf.Graph()
     #     sess = tf.Session(graph=graph, config=config)
     #     # We don't want to keep any of the collected traces from this.
-    #     sess.iml_skip_dump = True
+    #     sess.rlscope_skip_dump = True
     #
     #     # NOTE: we aren't actually beginning tracing for the problem, hence skip_init_trace_time=True.
     #     self._start_tfprof(skip_init_trace_time=True)
@@ -2582,9 +2582,9 @@ def add_gflags_argument(flags, *args, **kwargs):
     _add_argument(dashed_gflags_opt)
     # _add_argument(underscore_gflags_opt)
 
-def fix_gflags_iml_args(FLAGS):
+def fix_gflags_rlscope_args(FLAGS):
     for attr in dir(FLAGS):
-        if re.search(r'^iml-', attr):
+        if re.search(r'^rlscope-', attr):
             gflags_opt = re.sub(r'-', '_', attr)
             if not hasattr(FLAGS, gflags_opt):
                 FLAGS[gflags_opt] = FLAGS[attr]
@@ -2635,7 +2635,7 @@ class ClickCtx:
 def click_add_arguments():
     def decorator(f):
         click_ctx = ClickCtx(f)
-        add_iml_arguments(click_ctx)
+        add_rlscope_arguments(click_ctx)
         return f
     return decorator
 
@@ -2717,70 +2717,70 @@ def add_click_argument(click_ctx : ClickCtx, *args, **kwargs):
 
     return decorator
 
-def add_iml_arguments(parser):
+def add_rlscope_arguments(parser):
     if isinstance(parser, argparse.ArgumentParser):
-        iml_parser = parser.add_argument_group("IML")
+        rlscope_parser = parser.add_argument_group("IML")
     else:
-        iml_parser = parser
-    add_argument(iml_parser, '--iml-nvprof-enabled', action='store_true', help=textwrap.dedent("""
+        rlscope_parser = parser
+    add_argument(rlscope_parser, '--rlscope-nvprof-enabled', action='store_true', help=textwrap.dedent("""
         IML: is nvprof running?
         
         Internal use only; 
         used to determine whether this python script has been invoked using nvprof.
         If it hasn't, the script will re-invoke itself with nvprof.
     """))
-    # add_argument(iml_parser, '--iml-tfprof', action='store_true', help=textwrap.dedent("""
+    # add_argument(rlscope_parser, '--rlscope-tfprof', action='store_true', help=textwrap.dedent("""
     #     IML: use tfprof TensorFlow profiling utility INSTEAD of nvprof.
     # """))
-    add_argument(iml_parser, '--iml-num-calls', type=int, default=1000,
+    add_argument(rlscope_parser, '--rlscope-num-calls', type=int, default=1000,
                         help="IML: how many calls should be measured in a single trace?")
-    add_argument(iml_parser, '--iml-env',
+    add_argument(rlscope_parser, '--rlscope-env',
                  help="IML: Name of environment")
-    add_argument(iml_parser, '--iml-algo',
+    add_argument(rlscope_parser, '--rlscope-algo',
                  help="IML: Name of RL algorithm")
-    add_argument(iml_parser, '--iml-trace-time-sec', type=float,
+    add_argument(rlscope_parser, '--rlscope-trace-time-sec', type=float,
                         help="IML: how long should we profile for, in seconds; "
                              "tracing will stop when either "
-                             "we've collected --iml-num-traces OR "
-                             "--iml-trace-time-sec has been exceeded")
-    add_argument(iml_parser, '--iml-max-timesteps', type=int,
+                             "we've collected --rlscope-num-traces OR "
+                             "--rlscope-trace-time-sec has been exceeded")
+    add_argument(rlscope_parser, '--rlscope-max-timesteps', type=int,
                             help=textwrap.dedent("""
                             IML: how long should we profile for, in timesteps; 
                             timestep progress is reported by calling 
-                            iml.prof.report_progress(...)
+                            rlscope.prof.report_progress(...)
                             """))
-    add_argument(iml_parser, '--iml-max-training-loop-iters', type=int,
+    add_argument(rlscope_parser, '--rlscope-max-training-loop-iters', type=int,
                             help=textwrap.dedent("""
                             IML: how long should we profile for, in "training loop iterations"; 
-                            a single "training loop iteration" is one call to iml.prof.report_progress. 
+                            a single "training loop iteration" is one call to rlscope.prof.report_progress. 
                             NOTE: a training loop iteration is the same as a timestep, if every time an algorithm 
-                            call iml.prof.report_progress, it advances the timestep by one.
-                            - e.g. DDPG advances 100 timesteps (nb_rollout_steps) before calling iml.prof.report_progress
-                            - e.g. DQN advances 1 timestep before calling iml.prof.report_progress
+                            call rlscope.prof.report_progress, it advances the timestep by one.
+                            - e.g. DDPG advances 100 timesteps (nb_rollout_steps) before calling rlscope.prof.report_progress
+                            - e.g. DQN advances 1 timestep before calling rlscope.prof.report_progress
                             """))
-    add_argument(iml_parser, '--iml-delay-training-loop-iters', type=int,
+    add_argument(rlscope_parser, '--rlscope-delay-training-loop-iters', type=int,
                             help=textwrap.dedent("""
                             IML: Delay trace collection for the first X "training loop iterations"; 
-                            see --iml-max-training-loop-iters for a description of training loop iterations.
+                            see --rlscope-max-training-loop-iters for a description of training loop iterations.
                             """))
 
-    add_argument(iml_parser, '--iml-max-passes', type=int,
+    add_argument(rlscope_parser, '--rlscope-max-passes', type=int,
                             help=textwrap.dedent("""
-                            IML: how long should we profile for, in "passes" (i.e., calls to iml.prof.report_progress); 
-                            a single "pass" is one call to iml.prof.report_progress. 
+                            IML: how long should we profile for, in "passes" (i.e., calls to rlscope.prof.report_progress); 
+                            a single "pass" is one call to rlscope.prof.report_progress. 
                             """))
-    add_argument(iml_parser, '--iml-delay-passes', type=int,
+    add_argument(rlscope_parser, '--rlscope-delay-passes', type=int,
                             help=textwrap.dedent("""
-                            IML: Delay trace collection for the first X "passes" (i.e., calls to iml.prof.report_progress).
+                            IML: Delay trace collection for the first X "passes" (i.e., calls to rlscope.prof.report_progress).
                             """))
 
-    add_argument(iml_parser, '--iml-internal-start-trace-time-sec', type=float,
+    add_argument(rlscope_parser, '--rlscope-internal-start-trace-time-sec', type=float,
                         help=textwrap.dedent("""
         IML: (internal use)
         The start time of tracing (in seconds). 
         This gets inherited by child processes.
     """))
-    add_argument(iml_parser, '--iml-phase',
+    add_argument(rlscope_parser, '--rlscope-phase',
                         help=textwrap.dedent("""
         IML: (internal use)
         The "phase" of training captured by this script. 
@@ -2788,29 +2788,29 @@ def add_iml_arguments(parser):
         E.g. a single script could handle "simulator" and "gradient_update" phases.
         This gets inherited by child processes.
     """))
-    add_argument(iml_parser, '--iml-internal-parent-process-name',
+    add_argument(rlscope_parser, '--rlscope-internal-parent-process-name',
                         help=textwrap.dedent("""
         IML: (internal use)
         The process name of the parent that launched this child python process.
         i.e. whatever was passed to rlscope.api.prof.set_process_name('forker')
         Internally, this is used for tracking "process dependencies".
     """))
-    add_argument(iml_parser, '--rls-util-sampler-pid',
+    add_argument(rlscope_parser, '--rls-util-sampler-pid',
                         help=textwrap.dedent("""
         IML: (internal use)
         The pid of the utilization_sampler.py script that samples CPU/GPU utilization during training.
         We need to keep this so we can terminate it once we are done.
     """))
 
-    add_argument(iml_parser, '--iml-num-traces', type=int,
+    add_argument(rlscope_parser, '--rlscope-num-traces', type=int,
                         # default=10,
                         help="IML: how many traces should be measured?")
-    add_argument(iml_parser, '--iml-keep-traces', action='store_true', help=textwrap.dedent("""
+    add_argument(rlscope_parser, '--rlscope-keep-traces', action='store_true', help=textwrap.dedent("""
         IML: DON'T delete any existing trace files; keep them and append to them.
         
         Useful if your ML script launches worker processes repeatedly.
     """))
-    add_argument(iml_parser, '--iml-python', action='store_true', help=textwrap.dedent("""
+    add_argument(rlscope_parser, '--rlscope-python', action='store_true', help=textwrap.dedent("""
         IML: Collecting python profiler (pyprof) data for profiled operations.
         
         Python profiling data is grouped into per-operation summaries, instead of 
@@ -2818,7 +2818,7 @@ def add_iml_arguments(parser):
         
         This prevent overwhelming the user with too much information.
     """))
-    add_argument(iml_parser, '--iml-fuzz', action='store_true', help=textwrap.dedent("""
+    add_argument(rlscope_parser, '--rlscope-fuzz', action='store_true', help=textwrap.dedent("""
         IML: \"Fuzz\" the script for calls to TensorFlow API's.
         
         Useful if you have no idea where the training-loop of an ML script is located. 
@@ -2827,73 +2827,73 @@ def add_iml_arguments(parser):
         for e.g. sesssion.run(...) for running the computational graph
         (currently this is the only thing we trace).
     """))
-    add_argument(iml_parser, '--iml-disable', action='store_true', help=textwrap.dedent("""
+    add_argument(rlscope_parser, '--rlscope-disable', action='store_true', help=textwrap.dedent("""
         IML: Skip any profiling.
     """))
-    add_argument(iml_parser, '--iml-calibration', action='store_true', help=textwrap.dedent("""
+    add_argument(rlscope_parser, '--rlscope-calibration', action='store_true', help=textwrap.dedent("""
         IML: This is a calibration run. 
         Calibration runs change the semantics of the "rls-prof --config uninstrumented"; 
         in particular, usually "--config uninstrumented" would disable all of IML.
         However, for calibration runs, we use uninstrumented to disable CUPTI/CUDA-API level tracing, BUT 
         still run with python-level stuff (annotations, interceptions) enabled.
     """))
-    add_argument(iml_parser, '--iml-disable-pyprof-annotations', action='store_true', help=textwrap.dedent("""
+    add_argument(rlscope_parser, '--rlscope-disable-pyprof-annotations', action='store_true', help=textwrap.dedent("""
         IML: Skip recording op-events.
     """))
-    add_argument(iml_parser, '--iml-disable-pyprof-interceptions', action='store_true', help=textwrap.dedent("""
+    add_argument(rlscope_parser, '--rlscope-disable-pyprof-interceptions', action='store_true', help=textwrap.dedent("""
         IML: Skip recording of pyprof events by intercepting Python -> C-library calls.
         ( used for collecting simulator and TensorFlow C++ API time ).
     """))
-    add_argument(iml_parser, '--iml-disable-pyprof', action='store_true', help=textwrap.dedent("""
+    add_argument(rlscope_parser, '--rlscope-disable-pyprof', action='store_true', help=textwrap.dedent("""
         IML: Skip any profiling (i.e. trace-collection, trace-dumping) related to python times.
     """))
-    add_argument(iml_parser, '--iml-disable-tfprof', action='store_true', help=textwrap.dedent("""
+    add_argument(rlscope_parser, '--rlscope-disable-tfprof', action='store_true', help=textwrap.dedent("""
         IML: Skip any profiling (i.e. trace-collection, trace-dumping) related to GPU times.
     """))
-    add_argument(iml_parser, '--iml-disable-pyprof-dump', action='store_true', help=textwrap.dedent("""
+    add_argument(rlscope_parser, '--rlscope-disable-pyprof-dump', action='store_true', help=textwrap.dedent("""
         IML: Skip pyprof trace-dumping, but NOT trace-collection.
     """))
-    add_argument(iml_parser, '--iml-disable-tfprof-dump', action='store_true', help=textwrap.dedent("""
+    add_argument(rlscope_parser, '--rlscope-disable-tfprof-dump', action='store_true', help=textwrap.dedent("""
         IML: Skip tfprof trace-dumping, but NOT trace-collection.
     """))
-    add_argument(iml_parser, '--iml-disable-pyprof-trace', action='store_true', help=textwrap.dedent("""
+    add_argument(rlscope_parser, '--rlscope-disable-pyprof-trace', action='store_true', help=textwrap.dedent("""
         IML: Disable most of pyprof trace-collection (but not entirely).
     """))
-    add_argument(iml_parser, '--iml-disable-gpu-hw', action='store_true', help=textwrap.dedent("""
+    add_argument(rlscope_parser, '--rlscope-disable-gpu-hw', action='store_true', help=textwrap.dedent("""
         IML: Disable GPU HW sampling trace-collection.
     """))
-    add_argument(iml_parser, '--iml-delay', action='store_true', help=textwrap.dedent("""
+    add_argument(rlscope_parser, '--rlscope-delay', action='store_true', help=textwrap.dedent("""
         IML: Delay trace collection until your training script has warmed up; 
-        you must signal this to IML by calling iml.prof.enable_tracing() when that happens 
+        you must signal this to IML by calling rlscope.prof.enable_tracing() when that happens 
         (as is done in the annotated stable-baselines algorithm implementations e.g. DQN).
         
-        If you DON'T provide this, then tracing begins immediately starting from "with iml.prof.profiler(...)".
+        If you DON'T provide this, then tracing begins immediately starting from "with rlscope.prof.profiler(...)".
     """))
-    add_argument(iml_parser, '--iml-just-sample-util', action='store_true', help=textwrap.dedent("""
-        IML: collect machine utilization data and output it to --iml-directory.
+    add_argument(rlscope_parser, '--rlscope-just-sample-util', action='store_true', help=textwrap.dedent("""
+        IML: collect machine utilization data and output it to --rlscope-directory.
         
         NOTE: this will NOT collect profiling information.
     """))
-    add_argument(iml_parser, '--iml-training-progress', action='store_true', help=textwrap.dedent("""
-        IML: collect training progress data and output it to --iml-directory.
+    add_argument(rlscope_parser, '--rlscope-training-progress', action='store_true', help=textwrap.dedent("""
+        IML: collect training progress data and output it to --rlscope-directory.
         
-        NOTE: This is ON by default, except if --iml-disable is given, in which case you must provide this.
+        NOTE: This is ON by default, except if --rlscope-disable is given, in which case you must provide this.
     """))
-    add_argument(iml_parser, '--iml-unit-test',
+    add_argument(rlscope_parser, '--rlscope-unit-test',
                         action='store_true',
                         help=textwrap.dedent("""
     IML: (for unit-testing) Record "actual results" needed for doing basics unit-test checks.
     """))
-    add_argument(iml_parser, '--iml-unit-test-name',
+    add_argument(rlscope_parser, '--rlscope-unit-test-name',
                         help=textwrap.dedent("""
     IML: (for unit-testing) name to store in IMLUnitTest.test_name.
     """))
-    add_argument(iml_parser, '--iml-debug', action='store_true', help=textwrap.dedent("""
+    add_argument(rlscope_parser, '--rlscope-debug', action='store_true', help=textwrap.dedent("""
         IML: debug profiler.
     """))
-    add_argument(iml_parser, '--iml-start-measuring-call', default=1, type=int,
+    add_argument(rlscope_parser, '--rlscope-start-measuring-call', default=1, type=int,
                         help="IML: when should measuring begin?")
-    add_argument(iml_parser, '--rls-bench-name',
+    add_argument(rlscope_parser, '--rls-bench-name',
                         default=NO_BENCH_NAME,
                         help=textwrap.dedent("""
     IML: which code block should we measure?
@@ -2901,12 +2901,12 @@ def add_iml_arguments(parser):
         # Just measure "some_bench", nothing else.
         profiler.profile('some_bench', do_some_bench)
     """))
-    add_argument(iml_parser, '--iml-directory',
+    add_argument(rlscope_parser, '--rlscope-directory',
                         help=textwrap.dedent("""
     IML: profiling output directory.
     """))
-    add_argument(iml_parser, '--iml-skip-rm-traces', action='store_true', help=textwrap.dedent("""
-    DON'T remove traces files from previous runs rooted at --iml-directory.
+    add_argument(rlscope_parser, '--rlscope-skip-rm-traces', action='store_true', help=textwrap.dedent("""
+    DON'T remove traces files from previous runs rooted at --rlscope-directory.
     Useful if your training script has multiple training scripts that need to be traced with IML.
     """))
 
@@ -2914,19 +2914,19 @@ def add_iml_arguments(parser):
 PYPROF_REGEX = r'(?:python_profile.*|microbenchmark\.json|config.*\.json)'
 # Match input/output to CUDASQLiteParser
 NVPROF_REGEX = r'(?:nvidia.*\.nvprof|microbenchmark\.json|config.*\.json|nvidia.*\.pretty\.txt)'
-def is_iml_file(path):
+def is_rlscope_file(path):
     base = _b(path)
     return re.search(r'{pyprof}|{nvprof}'.format(
         pyprof=PYPROF_REGEX,
         nvprof=NVPROF_REGEX),
         base)
 
-def iml_argv_and_env(prof : Profiler, keep_executable=False, keep_non_iml_args=False, env=None):
-    iml_argv = _iml_argv(prof, keep_executable=keep_executable, keep_non_iml_args=keep_non_iml_args)
-    iml_env = _iml_env(prof, keep_executable=keep_executable, keep_non_iml_args=keep_non_iml_args, env=env)
-    return iml_argv, iml_env
+def rlscope_argv_and_env(prof : Profiler, keep_executable=False, keep_non_rlscope_args=False, env=None):
+    rlscope_argv = _rlscope_argv(prof, keep_executable=keep_executable, keep_non_rlscope_args=keep_non_rlscope_args)
+    rlscope_env = _rlscope_env(prof, keep_executable=keep_executable, keep_non_rlscope_args=keep_non_rlscope_args, env=env)
+    return rlscope_argv, rlscope_env
 
-def _iml_env(prof : Profiler, keep_executable=False, keep_non_iml_args=False, env=None):
+def _rlscope_env(prof : Profiler, keep_executable=False, keep_non_rlscope_args=False, env=None):
     if env is None:
         env = dict(os.environ)
 
@@ -2941,32 +2941,32 @@ def _iml_env(prof : Profiler, keep_executable=False, keep_non_iml_args=False, en
 
     return env
 
-def _iml_argv(prof : Profiler, keep_executable=False, keep_non_iml_args=False):
+def _rlscope_argv(prof : Profiler, keep_executable=False, keep_non_rlscope_args=False):
     """
     Return a list of string arguments related to IML that were passed to the current running python process.
 
     Useful for forwarding IML arguments to python child processes instrumented with IML.
     """
-    # If this fails and your using profiler.glbl, make sure you call iml.handle_iml_args(...)
+    # If this fails and your using profiler.glbl, make sure you call rlscope.handle_rlscope_args(...)
     # before spawning child processes.
     assert prof is not None
     # JAMES TODO: forward set_phase to children.
     parser = argparse.ArgumentParser()
-    add_iml_arguments(parser)
+    add_rlscope_arguments(parser)
     logger.info("> argv: {argv}".format(argv=' '.join(sys.argv)))
     # NOTE: sys.argv[0] is the python script name.
     args, extra_argv = parser.parse_known_args(sys.argv[1:])
     logger.info("> extra_argv: {argv}".format(argv=' '.join(extra_argv)))
     # Inherit arguments in our fork-ed children.
-    args.iml_internal_start_trace_time_sec = prof.get_start_trace_time_sec()
-    args.iml_phase = prof.phase
+    args.rlscope_internal_start_trace_time_sec = prof.get_start_trace_time_sec()
+    args.rlscope_phase = prof.phase
     if prof.process_name is None:
         prof._failing = True
         raise RuntimeError("IML: You must call rlscope.api.prof.set_process_name('some_name') before forking children!")
-    args.iml_internal_parent_process_name = prof.process_name
-    args.iml_util_sampler_pid = prof.util_sampler_pid
+    args.rlscope_internal_parent_process_name = prof.process_name
+    args.rlscope_util_sampler_pid = prof.util_sampler_pid
     argv = args_to_cmdline(parser, args, keep_executable=keep_executable, use_pdb=False)
-    if keep_non_iml_args:
+    if keep_non_rlscope_args:
         return argv + extra_argv
     return argv
 
@@ -2991,7 +2991,7 @@ def run_with_nvprof(directory, parser, args,
                    "--profile-from-start", "off"]
     cmdline = args_to_cmdline(parser, args)
     argv_exec = nvprof_args + cmdline + [
-        "--iml-nvprof-enabled",
+        "--rlscope-nvprof-enabled",
     ]
     if bench_name != NO_BENCH_NAME:
         argv_exec.extend(["--rls-bench-name", bench_name])
@@ -3155,9 +3155,9 @@ class RecordedIncrementalTrainingProgress:
         #   start_num_timesteps = 0
         #   start_percent_complete = 0
         #   start_training_time_us =
-        #     (very start of program ideally, since iml.prof.report_progress won't be getting called.)
+        #     (very start of program ideally, since rlscope.prof.report_progress won't be getting called.)
         #     Alternatively, we can use the earliest known start time of trace-collection:
-        #     iml.prof.start_trace_time_sec
+        #     rlscope.prof.start_trace_time_sec
         self.start_num_timesteps = None
         self.start_percent_complete = None
         self.start_training_time_us = None
@@ -3174,7 +3174,7 @@ class RecordedIncrementalTrainingProgress:
             # Wait until report_start_of_progress has been called.
             return self.start_percent_complete is not None and self.start_trace_time_sec is not None
         # Assume that tracing starts from the very beginning the ML script starts;
-        # i.e. we don't delay until iml.prof.report_progress() is called.
+        # i.e. we don't delay until rlscope.prof.report_progress() is called.
         if expect_true:
             assert self.start_trace_time_sec is not None
         return self.start_trace_time_sec is not None
@@ -3187,7 +3187,7 @@ class RecordedIncrementalTrainingProgress:
             self.start_trace_time_sec = start_trace_time_sec
 
         if start_usec is None:
-            start_usec = iml_timer.now_us()
+            start_usec = rlscope_timer.now_us()
 
         self.end_training_time_us = start_usec
 
@@ -3198,7 +3198,7 @@ class RecordedIncrementalTrainingProgress:
 
         self.start_percent_complete = percent_complete
         self.start_num_timesteps = num_timesteps
-        self.start_training_time_us = iml_timer.now_us()
+        self.start_training_time_us = rlscope_timer.now_us()
 
         self.report_progress(
             percent_complete, num_timesteps, total_timesteps, start_trace_time_sec,

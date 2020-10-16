@@ -1,4 +1,4 @@
-from rlscope.profiler.iml_logging import logger
+from rlscope.profiler.rlscope_logging import logger
 import argparse
 import traceback
 import bdb
@@ -1505,8 +1505,8 @@ class GpuUtilExperiment:
         self.rlscope_df = None
 
         overlap_plot = OverlapStackedBarPlot(
-            iml_directories=self.arg('time_breakdown_dir'),
-            unins_iml_directories=None,
+            rlscope_directories=self.arg('time_breakdown_dir'),
+            unins_rlscope_directories=None,
             directory=None,
             overlap_type='CategoryOverlap',
             detailed=True,
@@ -1531,9 +1531,9 @@ class GpuUtilExperiment:
                 #     # 'algo': None,
                 #     # 'env': None,
                 # }
-                iml_config = IMLConfig(rlscope_dir)
-                algo = iml_config.algo(allow_none=True)
-                env = iml_config.env(allow_none=True)
+                rlscope_config = IMLConfig(rlscope_dir)
+                algo = rlscope_config.algo(allow_none=True)
+                env = rlscope_config.env(allow_none=True)
                 # if algo is not None:
                 #     rlscope_dflt_attrs['algo'] = algo
                 # if env is not None:
@@ -1548,7 +1548,7 @@ class GpuUtilExperiment:
                 # for attr_name, attr_value in sm_attrs.items():
                 #     assert attr_name not in df
                 #     df[attr_name] = maybe_number(attr_value)
-                df['iml_directory'] = rlscope_dir
+                df['rlscope_directory'] = rlscope_dir
                 dfs.append(df)
         self.gpu_hw_df = pd.concat(dfs)
         add_repetition(self.gpu_hw_df)
@@ -1580,23 +1580,23 @@ class GpuUtilExperiment:
 
         # GOAL:
         # get the "percent of total execution" that an operation makes up.
-        # Group this calculation by "iml_directory".
+        # Group this calculation by "rlscope_directory".
         # Join it to self.rlscope_df on ["repetition", ]
 
         # Get "percent of total execution" that an operation makes up (for a given repetition run).
 
         # # NOTE: Need to join on x_field since it may be use_tf_functions vs no_use_tf_functions.
-        # bdf = self.time_breakdown_df[['iml_directory', 'repetition', 'algo', 'env', 'x_field', 'operation', 'percent']]
+        # bdf = self.time_breakdown_df[['rlscope_directory', 'repetition', 'algo', 'env', 'x_field', 'operation', 'percent']]
         # bdf_cols = group_numeric_cols(bdf)
         # groupby_cols = sorted(set(bdf_cols.non_numeric_cols).union({'repetition'}))
         # self.op_df = bdf.groupby(groupby_cols).agg(pd.DataFrame.sum, skipna=False).reset_index()
         #
-        # # Avoid conflicts; keep iml_directory of instrumented run.
+        # # Avoid conflicts; keep rlscope_directory of instrumented run.
         # op_df_copy = copy.copy(self.op_df)
-        # if 'iml_directory' in op_df_copy:
-        #     del op_df_copy['iml_directory']
+        # if 'rlscope_directory' in op_df_copy:
+        #     del op_df_copy['rlscope_directory']
         # join_on = ['algo', 'env', 'x_field', 'operation', 'repetition']
-        # # Time-breakdown and SM metrics should be available for every (iml_directory, operation)
+        # # Time-breakdown and SM metrics should be available for every (rlscope_directory, operation)
         # assert len(op_df_copy[join_on].drop_duplicates()) == len(self.gpu_hw_df[join_on].drop_duplicates())
         # self.rlscope_df = self.gpu_hw_df.merge(op_df_copy, on=join_on)
 
@@ -1706,16 +1706,16 @@ class GpuUtilExperiment:
         self._parse_op_mapping()
 
         # PROBLEM: How to represent different "configurations"?
-        # A: 'x_field'...should be captured by iml_directory.
+        # A: 'x_field'...should be captured by rlscope_directory.
         #
         # Need to add "phase" to work with minigo?
 
-        def _check_missing(iml_df, missing_name, ops_missing):
-            iml_directory = iml_df['iml_directory'].unique()[0]
+        def _check_missing(rlscope_df, missing_name, ops_missing):
+            rlscope_directory = rlscope_df['rlscope_directory'].unique()[0]
             if len(ops_missing) > 0:
-                logger.warning("Missing {missing_name} for operations={ops} for @ {path}; did you run for enough --iml-max-passes to see all the annotations?".format(
+                logger.warning("Missing {missing_name} for operations={ops} for @ {path}; did you run for enough --rlscope-max-passes to see all the annotations?".format(
                     ops=ops_missing,
-                    path=iml_directory,
+                    path=rlscope_directory,
                     missing_name=missing_name,
                 ))
 
@@ -1731,32 +1731,32 @@ class GpuUtilExperiment:
                 else:
                     raise NotImplementedError(f"Not sure whether to keep time for measurement_period={measurement_period}")
 
-            for (x_field, repetition), iml_df in self.time_breakdown_df.groupby(['x_field', 'repetition']):
-                iml_gpu_hw_df = self.gpu_hw_df[
+            for (x_field, repetition), rlscope_df in self.time_breakdown_df.groupby(['x_field', 'repetition']):
+                rlscope_gpu_hw_df = self.gpu_hw_df[
                     (self.gpu_hw_df['x_field'] == x_field)
                     & (self.gpu_hw_df['repetition'] == repetition)
                     & (self.gpu_hw_df['cupti_metric_name'] == cupti_metric_name)
                 ]
-                gpu_hw_operations = set(iml_gpu_hw_df['operation'].unique())
-                time_breakdown_operations = set(iml_df['operation'].unique())
+                gpu_hw_operations = set(rlscope_gpu_hw_df['operation'].unique())
+                time_breakdown_operations = set(rlscope_df['operation'].unique())
                 ops_missing_time_breakdown = gpu_hw_operations.difference(time_breakdown_operations)
                 ops_missing_gpu_hw = time_breakdown_operations.difference(gpu_hw_operations)
-                _check_missing(iml_df, 'time-breakdown', ops_missing_time_breakdown)
-                _check_missing(iml_df, 'gpu-hw', ops_missing_gpu_hw)
+                _check_missing(rlscope_df, 'time-breakdown', ops_missing_time_breakdown)
+                _check_missing(rlscope_df, 'gpu-hw', ops_missing_gpu_hw)
                 # Should have BOTH SM metrics and time-breakdown for all operations.
                 operations = gpu_hw_operations.intersection(time_breakdown_operations)
 
-                operation_tree = OperationTree(iml_gpu_hw_df['range_name'].unique())
+                operation_tree = OperationTree(rlscope_gpu_hw_df['range_name'].unique())
 
-                algo = iml_df['algo'].unique()
+                algo = rlscope_df['algo'].unique()
                 assert len(algo) == 1
                 algo = algo[0]
 
-                env = iml_df['env'].unique()
+                env = rlscope_df['env'].unique()
                 assert len(env) == 1
                 env = env[0]
 
-                time_df = iml_df[iml_df.apply(_keep_time, axis=1)]
+                time_df = rlscope_df[rlscope_df.apply(_keep_time, axis=1)]
 
                 # Sum up time over operation and child operations.
                 total_time = dict()
@@ -1769,21 +1769,21 @@ class GpuUtilExperiment:
                         return operation in all_operations
                     total_time[op] = time_df[time_df['operation'].apply(_in_all_operations)]['percent'].sum()
                     assert not np.isnan(total_time[op])
-                    assert len(iml_gpu_hw_df[iml_gpu_hw_df['operation'] == op]) == 1
-                    metric_value[op] = iml_gpu_hw_df[iml_gpu_hw_df['operation'] == op]['metric_value'].values[0]
+                    assert len(rlscope_gpu_hw_df[rlscope_gpu_hw_df['operation'] == op]) == 1
+                    metric_value[op] = rlscope_gpu_hw_df[rlscope_gpu_hw_df['operation'] == op]['metric_value'].values[0]
                     assert not np.isnan(metric_value[op])
                     assert metric_value[op] >= 0
                     assert total_time[op] >= 0
                     total_metric[op] = metric_value[op] * total_time[op]
                     assert total_metric[op] >= 0
 
-                iml_directories = iml_df['iml_directory'].unique()
-                assert len(iml_directories) == 1
-                iml_directory = iml_directories[0]
+                rlscope_directories = rlscope_df['rlscope_directory'].unique()
+                assert len(rlscope_directories) == 1
+                rlscope_directory = rlscope_directories[0]
 
                 op_kwargs = {
                     'algo': algo,
-                    'iml_directory': iml_directory,
+                    'rlscope_directory': rlscope_directory,
                     'x_field': x_field,
                 }
                 op_mapping = self._get_op_mapping(op_kwargs, operations)
@@ -1825,7 +1825,7 @@ class GpuUtilExperiment:
                     'metric_value',
                     'cupti_metric_name',
                 }))
-                new_gpu_hw = copy.copy(iml_gpu_hw_df[keep_cols])
+                new_gpu_hw = copy.copy(rlscope_gpu_hw_df[keep_cols])
                 new_gpu_hw.drop_duplicates(inplace=True)
                 assert len(new_gpu_hw) == 1
                 df_rows = []
@@ -2834,7 +2834,7 @@ def plot_grouped_bar():
     _plot('./test_plot_grouped_bar.01.svg')
     _plot('./test_plot_grouped_bar.02.svg')
 
-from rlscope.profiler.iml_logging import logger
+from rlscope.profiler.rlscope_logging import logger
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--test-plot-grouped-bar', action='store_true')

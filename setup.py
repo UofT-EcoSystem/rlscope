@@ -27,8 +27,8 @@ ROOT = _d(os.path.realpath(__file__))
 
 # HACK: Make it so we can import logging stuff.
 sys.path.insert(0, ROOT)
-from rlscope.profiler.iml_logging import logger
-from rlscope.profiler import iml_logging
+from rlscope.profiler.rlscope_logging import logger
+from rlscope.profiler import rlscope_logging
 from rlscope import py_config
 
 def pprint_msg(dic, prefix='  '):
@@ -281,9 +281,9 @@ def main():
     sys.argv = setup_argv
 
     if args.debug:
-        iml_logging.enable_debug_logging()
+        rlscope_logging.enable_debug_logging()
     else:
-        iml_logging.disable_debug_logging()
+        rlscope_logging.disable_debug_logging()
 
     logger.debug("setup_argv = {argv}".format(argv=sys.argv))
 
@@ -301,7 +301,7 @@ def main():
     if args.setup_cmd is not None:
         generate_proto(_proto('pyprof.proto'), regenerate=True)
         generate_proto(_proto('unit_test.proto'), regenerate=True)
-        generate_proto(_proto('iml_prof.proto'), regenerate=True)
+        generate_proto(_proto('rlscope_prof.proto'), regenerate=True)
 
     rlscope_ext = get_files_by_ext('rlscope', rm_prefix='rlscope')
 

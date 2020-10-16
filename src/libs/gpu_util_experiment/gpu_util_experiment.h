@@ -18,7 +18,7 @@ struct GPUUtilExperimentArgs {
 
     // Flags
     boost::optional<bool> FLAGS_debug;
-    boost::optional<std::string> FLAGS_iml_directory;
+    boost::optional<std::string> FLAGS_rlscope_directory;
     boost::optional<std::string> FLAGS_gpu_clock_freq_json;
     boost::optional<std::string> FLAGS_mode;
     boost::optional<bool> FLAGS_hw_counters;
@@ -76,7 +76,7 @@ struct GPUUtilExperimentArgs {
     _PrintFlag(out, indent, #FLAGS_var, FLAGS_var);
 
         PRINT_FLAG(FLAGS_debug);
-        PRINT_FLAG(FLAGS_iml_directory);
+        PRINT_FLAG(FLAGS_rlscope_directory);
         PRINT_FLAG(FLAGS_gpu_clock_freq_json);
         PRINT_FLAG(FLAGS_mode);
         PRINT_FLAG(FLAGS_hw_counters);

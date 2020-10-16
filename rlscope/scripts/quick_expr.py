@@ -1,4 +1,4 @@
-from rlscope.profiler.iml_logging import logger
+from rlscope.profiler.rlscope_logging import logger
 import argparse
 import pprint
 from glob import glob
@@ -217,14 +217,14 @@ def main():
         raise
 
 class ExprSubtractionValidationConfig:
-    def __init__(self, expr, algo, env, iml_prof_config, config_suffix, script_args=[], long_run=False):
+    def __init__(self, expr, algo, env, rlscope_prof_config, config_suffix, script_args=[], long_run=False):
         self.expr = expr
         self.algo = algo
         self.env = env
         self.quick_expr = self.expr.quick_expr
-        # $ rls-prof --config ${iml_prof_config}
-        self.iml_prof_config = iml_prof_config
-        # $ python train.py --iml-directory config_${config_suffix}
+        # $ rls-prof --config ${rlscope_prof_config}
+        self.rlscope_prof_config = rlscope_prof_config
+        # $ python train.py --rlscope-directory config_${config_suffix}
         self.config_suffix = config_suffix
         self.script_args = script_args
         self.long_run = long_run
@@ -244,13 +244,13 @@ class ExprSubtractionValidationConfig:
 
     def to_string(self):
         return ("{klass}("
-                "iml_prof_config='{iml_prof_config}'"
+                "rlscope_prof_config='{rlscope_prof_config}'"
                 "config_suffix='{config_suffix}'"
                 ", algo='{algo}'"
                 ", env='{env}'"
                 ")").format(
             klass=self.__class__.__name__,
-            iml_prof_config=self.iml_prof_config,
+            rlscope_prof_config=self.rlscope_prof_config,
             config_suffix=self.config_suffix,
             algo=self.algo,
             env=self.env,
@@ -271,24 +271,24 @@ class ExprSubtractionValidationConfig:
 
     def run(self, rep, iters):
         cmd = ['rls-prof',
-               '--config', self.iml_prof_config,
+               '--config', self.rlscope_prof_config,
                'python', 'train.py',
 
                # IMPORTANT: When we run with "--config uninstrumented" during calibrations runs, we STILL want to
                # keep "python interceptions" and "python annotations" enabled, so we can measure their overhead in
                # in isolation!
-               '--iml-calibration',
+               '--rlscope-calibration',
 
-               '--iml-directory', _a(self.out_dir(rep, iters)),
-               '--iml-max-timesteps', iters,
-               '--iml-training-progress',
+               '--rlscope-directory', _a(self.out_dir(rep, iters)),
+               '--rlscope-max-timesteps', iters,
+               '--rlscope-training-progress',
 
                '--algo', self.algo,
                '--env', self.env,
 
                '--log-folder', _j(ENV['RL_BASELINES_ZOO_DIR'], 'output'),
                '--log-interval', '1',
-               '--iml-delay',
+               '--rlscope-delay',
                ]
         cmd.extend(self.script_args)
         logfile = self.logfile(rep, iters)
@@ -307,27 +307,27 @@ class ExprSubtractionValidationConfig:
         logfile = self.logfile(rep, iters)
         return expr_already_ran(logfile, debug=self.quick_expr.args.debug)
 
-    def iml_directories(self, iters):
+    def rlscope_directories(self, iters):
         """
-        Return all --iml-directories whose runs are completed.
+        Return all --rlscope-directories whose runs are completed.
         """
-        iml_directories = []
+        rlscope_directories = []
         for rep in range(1, self.expr.args.repetitions+1):
             if not self.already_ran(rep, iters):
                 continue
-            iml_directory = self.out_dir(rep, iters)
-            iml_directories.append(iml_directory)
-        return iml_directories
+            rlscope_directory = self.out_dir(rep, iters)
+            rlscope_directories.append(rlscope_directory)
+        return rlscope_directories
 
 class ExprTotalTrainingTimeConfig:
-    def __init__(self, expr, algo, env, iml_prof_config='uninstrumented', script_args=[]):
+    def __init__(self, expr, algo, env, rlscope_prof_config='uninstrumented', script_args=[]):
         self.expr = expr
         self.quick_expr = self.expr.quick_expr
-        # $ rls-prof --config ${iml_prof_config}
+        # $ rls-prof --config ${rlscope_prof_config}
         # NOTE: we want to run with IML disabled; we just want to know the total training time WITHOUT IML.
-        self.iml_prof_config = iml_prof_config
-        # $ python train.py --iml-directory config_${config_suffix}
-        self.config_suffix = self.iml_prof_config
+        self.rlscope_prof_config = rlscope_prof_config
+        # $ python train.py --rlscope-directory config_${config_suffix}
+        self.config_suffix = self.rlscope_prof_config
         self.script_args = script_args
         self.algo = algo
         self.env = env
@@ -364,24 +364,24 @@ class ExprTotalTrainingTimeConfig:
 
     def _get_cmd(self, rep, extra_argv=[]):
         cmd = ['rls-prof',
-               '--config', self.iml_prof_config,
+               '--config', self.rlscope_prof_config,
                'python', 'train.py',
 
-               '--iml-directory', _a(self.out_dir(rep)),
-               # '--iml-max-timesteps', iters,
-               '--iml-training-progress',
+               '--rlscope-directory', _a(self.out_dir(rep)),
+               # '--rlscope-max-timesteps', iters,
+               '--rlscope-training-progress',
 
                '--algo', self.algo,
                '--env', self.env,
 
                '--log-folder', _j(ENV['RL_BASELINES_ZOO_DIR'], 'output'),
                '--log-interval', '1',
-               '--iml-delay',
+               '--rlscope-delay',
                ]
-        if self.iml_prof_config == 'uninstrumented':
+        if self.rlscope_prof_config == 'uninstrumented':
             cmd.extend([
                 # NOTE: we want to run with IML disabled; we just want to know the total training time WITHOUT IML.
-                '--iml-disable',
+                '--rlscope-disable',
             ])
         cmd.extend(self.script_args)
         cmd.extend(extra_argv)
@@ -408,31 +408,31 @@ class ExprTotalTrainingTimeConfig:
         logfile = self.logfile(rep)
         return expr_already_ran(logfile, debug=self.quick_expr.args.debug)
 
-    def iml_directories(self):
+    def rlscope_directories(self):
         """
-        Return all --iml-directories whose runs are completed.
+        Return all --rlscope-directories whose runs are completed.
         """
-        iml_directories = []
+        rlscope_directories = []
         for rep in range(1, self.expr.args.repetitions+1):
             if not self.already_ran(rep):
                 continue
-            iml_directory = self.out_dir(rep)
-            iml_directories.append(iml_directory)
-        return iml_directories
+            rlscope_directory = self.out_dir(rep)
+            rlscope_directories.append(rlscope_directory)
+        return rlscope_directories
 
 class ExprMicrobenchmarkConfig:
-    def __init__(self, expr, algo, env, mode, config, iml_prof_config='uninstrumented', config_suffix=None, script_args=[]):
+    def __init__(self, expr, algo, env, mode, config, rlscope_prof_config='uninstrumented', config_suffix=None, script_args=[]):
         self.mode = mode
         self.expr = expr
         self.config = config
         self.quick_expr = self.expr.quick_expr
-        # $ rls-prof --config ${iml_prof_config}
+        # $ rls-prof --config ${rlscope_prof_config}
         # NOTE: we want to run with IML disabled; we just want to know the total training time WITHOUT IML.
-        self.iml_prof_config = iml_prof_config
+        self.rlscope_prof_config = rlscope_prof_config
         assert config_suffix is not None
         self.config_suffix = config_suffix
-        # $ python train.py --iml-directory config_${config_suffix}
-        # self.config_suffix = self.iml_prof_config
+        # $ python train.py --rlscope-directory config_${config_suffix}
+        # self.config_suffix = self.rlscope_prof_config
         self.script_args = script_args
         self.algo = algo
         self.env = env
@@ -473,18 +473,18 @@ class ExprMicrobenchmarkConfig:
 
     def _get_cmd(self, rep, extra_argv=[]):
         cmd = ['rls-prof',
-               '--config', self.iml_prof_config,
+               '--config', self.rlscope_prof_config,
                'python', 'enjoy.py',
 
                # IMPORTANT: When we run with "--config uninstrumented" during calibrations runs, we STILL want to
                # keep "python interceptions" and "python annotations" enabled, so we can measure their overhead in
                # in isolation!
-               '--iml-calibration',
-               # '--iml-directory', _a(self.out_dir(rep)),
-               '--iml-directory', _a(self.out_dir()),
-               # '--iml-max-timesteps', iters,
-               '--iml-training-progress',
-               '--iml-delay',
+               '--rlscope-calibration',
+               # '--rlscope-directory', _a(self.out_dir(rep)),
+               '--rlscope-directory', _a(self.out_dir()),
+               # '--rlscope-max-timesteps', iters,
+               '--rlscope-training-progress',
+               '--rlscope-delay',
 
                '--mode', self.mode,
 
@@ -496,12 +496,12 @@ class ExprMicrobenchmarkConfig:
 
                # '--log-folder', _j(ENV['RL_BASELINES_ZOO_DIR'], 'output'),
                # '--log-interval', '1',
-               # '--iml-delay',
+               # '--rlscope-delay',
                ]
         # if self.config == 'uninstrumented':
         #     cmd.extend([
         #         # NOTE: we want to run with IML disabled; we just want to know the total training time WITHOUT IML.
-        #         '--iml-disable',
+        #         '--rlscope-disable',
         #     ])
         cmd.extend(self.script_args)
         cmd.extend(extra_argv)
@@ -533,8 +533,8 @@ class ExprMicrobenchmarkConfig:
         # expr_microbenchmark/
         # ppo2/
         # HalfCheetahBulletEnv-v0/
-        # config_mode_microbench_iml_clib_interception_simulator.config_just_pyprof_interceptions/
-        # microbench_iml_clib_interception_simulator/
+        # config_mode_microbench_rlscope_clib_interception_simulator.config_just_pyprof_interceptions/
+        # microbench_rlscope_clib_interception_simulator/
         # repetition_01
 
         # self.quick_expr.out_dir,
@@ -553,9 +553,9 @@ class ExprMicrobenchmarkConfig:
         # expr_microbenchmark/
         # ppo2/
         # HalfCheetahBulletEnv-v0/
-        # mode_microbench_iml_python_annotation.uninstrumented/
-        # microbench_iml_python_annotation/
-        # microbench_iml_python_annotation.json
+        # mode_microbench_rlscope_python_annotation.uninstrumented/
+        # microbench_rlscope_python_annotation/
+        # microbench_rlscope_python_annotation.json
 
         # self.quick_expr.out_dir,
         # self.algo,
@@ -567,17 +567,17 @@ class ExprMicrobenchmarkConfig:
             "{mode}.json".format(mode=self.mode),
         )
 
-    def iml_directories(self):
+    def rlscope_directories(self):
         """
-        Return all --iml-directories whose runs are completed.
+        Return all --rlscope-directories whose runs are completed.
         """
-        iml_directories = []
+        rlscope_directories = []
         for rep in range(1, self.expr.args.repetitions+1):
             if not self.already_ran(rep):
                 continue
-            iml_directory = self.repetition_out_dir(rep)
-            iml_directories.append(iml_directory)
-        return iml_directories
+            rlscope_directory = self.repetition_out_dir(rep)
+            rlscope_directories.append(rlscope_directory)
+        return rlscope_directories
 
 class ExprMicrobenchmark:
     def __init__(self, quick_expr, argv):
@@ -619,9 +619,9 @@ class ExprMicrobenchmark:
         # parser.add_argument('--mode', help='mode of execution for rl-baselines-zoo enjoy.py microbenchmark mode',
         #                     choices=[
         #                         # 'default',
-        #                         'microbench_iml_python_annotation',
-        #                         'microbench_iml_clib_interception_simulator',
-        #                         'microbench_iml_clib_interception_tensorflow',
+        #                         'microbench_rlscope_python_annotation',
+        #                         'microbench_rlscope_clib_interception_simulator',
+        #                         'microbench_rlscope_clib_interception_tensorflow',
         #                     ])
         parser.add_argument(
             '--repetitions',
@@ -676,8 +676,8 @@ class ExprMicrobenchmark:
     def do_plot(self):
         """
         Create bar graph of total training time for each experiment we run:
-        iml_dirs = find_iml_dirs(self.root_dir)
-        $ rls-run --task TotalTrainingTimePlot --iml-directories iml-dirs
+        rlscope_dirs = find_rlscope_dirs(self.root_dir)
+        $ rls-run --task TotalTrainingTimePlot --rlscope-directories rlscope-dirs
         Read data-frame like:
           algo, env,         x_field, total_training_time_sec
           ppo2, HalfCheetah, ...,     ...
@@ -693,14 +693,14 @@ class ExprMicrobenchmark:
 
         task = 'TotalTrainingTimeTask'
 
-        iml_directories = []
+        rlscope_directories = []
         for config in self.configs:
-            config_dirs = config.iml_directories()
-            iml_directories.extend(config_dirs)
+            config_dirs = config.rlscope_directories()
+            rlscope_directories.extend(config_dirs)
 
-        if len(iml_directories) == 0:
+        if len(rlscope_directories) == 0:
             log_missing_files(self, task, files={
-                'iml_directories': iml_directories,
+                'rlscope_directories': rlscope_directories,
             })
             return
 
@@ -710,9 +710,9 @@ class ExprMicrobenchmark:
         cmd = ['rls-run',
                '--directory', plot_dir,
                '--task', task,
-               '--uninstrumented-directory', json.dumps(iml_directories),
+               '--uninstrumented-directory', json.dumps(rlscope_directories),
                ]
-        add_iml_analyze_flags(cmd, self.quick_expr.args)
+        add_rlscope_analyze_flags(cmd, self.quick_expr.args)
         cmd.extend(self.extra_argv)
 
         logfile = self.plot_logfile
@@ -779,8 +779,8 @@ class ExprMicrobenchmark:
 
         # uninstrumented_json_path = self.conf(algo, env, mode, 'uninstrumented').microbench_json_path()
 
-        instrumented_iml_dirs = self.conf(algo, env, mode, config).iml_directories()
-        uninstrumented_iml_dirs = self.conf(algo, env, mode, 'uninstrumented').iml_directories()
+        instrumented_rlscope_dirs = self.conf(algo, env, mode, config).rlscope_directories()
+        uninstrumented_rlscope_dirs = self.conf(algo, env, mode, 'uninstrumented').rlscope_directories()
 
         if self.is_interception_config(config):
             compute_overhead_func = PyprofOverheadParser.compute_interception_overhead
@@ -789,8 +789,8 @@ class ExprMicrobenchmark:
         else:
             raise NotImplementedError()
         pyprof_overhead_calc = compute_overhead_func(
-            uninstrumented_iml_dirs,
-            instrumented_iml_dirs,
+            uninstrumented_rlscope_dirs,
+            instrumented_rlscope_dirs,
             debug=self.quick_expr.args.debug,
             debug_single_thread=self.quick_expr.args.debug_single_thread,
         )
@@ -854,18 +854,18 @@ class ExprMicrobenchmark:
         #         })))
 
         # for iters in self.iterations:
-        # uninstrumented_directories = self.conf(algo, env, mode, 'uninstrumented_calibration').iml_directories()
-        # pyprof_annotations_directories = self.conf(algo, env, mode, 'just_pyprof_annotations_calibration').iml_directories()
-        # pyprof_interceptions_directories = self.conf(algo, env, mode, 'just_pyprof_interceptions_calibration').iml_directories()
-        uninstrumented_directories = self.conf(algo, env, mode, 'uninstrumented').iml_directories()
-        # pyprof_annotations_directories = self.conf(algo, env, mode, 'just_pyprof_annotations').iml_directories()
+        # uninstrumented_directories = self.conf(algo, env, mode, 'uninstrumented_calibration').rlscope_directories()
+        # pyprof_annotations_directories = self.conf(algo, env, mode, 'just_pyprof_annotations_calibration').rlscope_directories()
+        # pyprof_interceptions_directories = self.conf(algo, env, mode, 'just_pyprof_interceptions_calibration').rlscope_directories()
+        uninstrumented_directories = self.conf(algo, env, mode, 'uninstrumented').rlscope_directories()
+        # pyprof_annotations_directories = self.conf(algo, env, mode, 'just_pyprof_annotations').rlscope_directories()
         # FAIL: cannot find key:
-        # 'mode_microbench_iml_python_annotation.config_just_pyprof_interceptions'
+        # 'mode_microbench_rlscope_python_annotation.config_just_pyprof_interceptions'
         # NOTE: we need to make PyprofOverheadTask JUST output annotation overhead WITHOUT requiring interceptions runs for the same config.
         # Q: any reason to output them at the same time...?
-        # pyprof_interceptions_directories = self.conf(algo, env, mode, 'just_pyprof_interceptions').iml_directories()
+        # pyprof_interceptions_directories = self.conf(algo, env, mode, 'just_pyprof_interceptions').rlscope_directories()
 
-        pyprof_overhead_directories = self.conf(algo, env, mode, config).iml_directories()
+        pyprof_overhead_directories = self.conf(algo, env, mode, config).rlscope_directories()
         if self.quick_expr.args.debug:
             logger.info("log = {msg}".format(
                 msg=pprint_msg({
@@ -908,7 +908,7 @@ class ExprMicrobenchmark:
             ])
         else:
             raise NotImplementedError()
-        add_iml_analyze_flags(cmd, self.quick_expr.args)
+        add_rlscope_analyze_flags(cmd, self.quick_expr.args)
         cmd.extend(self.extra_argv)
 
         logfile = self.pyprof_overhead_logfile(algo, env, mode)
@@ -943,9 +943,9 @@ class ExprMicrobenchmark:
 
         # MODES = [
         #     'default',
-        #     'microbench_iml_python_annotation',
-        #     'microbench_iml_clib_interception_simulator',
-        #     'microbench_iml_clib_interception_tensorflow',
+        #     'microbench_rlscope_python_annotation',
+        #     'microbench_rlscope_clib_interception_simulator',
+        #     'microbench_rlscope_clib_interception_tensorflow',
         # ]
 
         # algo_env_configs = []
@@ -989,9 +989,9 @@ class ExprMicrobenchmark:
             # category_events.python_annotation.json
             # category_events.python_clib_interception.json
 
-            # microbench_iml_clib_interception_simulator.json
-            # microbench_iml_clib_interception_tensorflow.json
-            # microbench_iml_python_annotation.json
+            # microbench_rlscope_clib_interception_simulator.json
+            # microbench_rlscope_clib_interception_tensorflow.json
+            # microbench_rlscope_python_annotation.json
 
             'just_pyprof_annotations': 'category_events.python_annotation.json',
             'just_pyprof_interceptions': 'category_events.python_clib_interception.json',
@@ -1006,10 +1006,10 @@ class ExprMicrobenchmark:
                 env=env,
                 mode=mode,
                 config=config,
-                iml_prof_config='uninstrumented',
+                rlscope_prof_config='uninstrumented',
                 config_suffix=self.get_config_suffix(mode=mode, config=config),
                 # Disable ALL pyprof/tfprof stuff.
-                script_args=['--iml-disable'],
+                script_args=['--rlscope-disable'],
             )
         def mk_config_just_pyprof_annotations(algo, env, mode):
 
@@ -1021,10 +1021,10 @@ class ExprMicrobenchmark:
                 env=env,
                 mode=mode,
                 config=config,
-                iml_prof_config='uninstrumented',
+                rlscope_prof_config='uninstrumented',
                 config_suffix=self.get_config_suffix(mode=mode, config=config),
                 # Only enable GPU/C-lib event collection, not operation annotations.
-                script_args=['--iml-disable-tfprof', '--iml-disable-pyprof-interceptions'],
+                script_args=['--rlscope-disable-tfprof', '--rlscope-disable-pyprof-interceptions'],
             )
         def mk_config_just_pyprof_interceptions(algo, env, mode):
             config = 'just_pyprof_interceptions'
@@ -1034,30 +1034,30 @@ class ExprMicrobenchmark:
                 env=env,
                 mode=mode,
                 config=config,
-                iml_prof_config='uninstrumented',
+                rlscope_prof_config='uninstrumented',
                 config_suffix=self.get_config_suffix(mode=mode, config=config),
                 # Only enable operation annotations, not GPU/C-lib event collection.
-                script_args=['--iml-disable-tfprof', '--iml-disable-pyprof-annotations'],
+                script_args=['--rlscope-disable-tfprof', '--rlscope-disable-pyprof-annotations'],
             )
         # add_calibration_config(
         #     expr=self,
         #     algo=algo,
         #     env=env,
-        #     iml_prof_config='uninstrumented',
+        #     rlscope_prof_config='uninstrumented',
         #     # Disable tfprof: CUPTI and LD_PRELOAD.
         #     config_suffix='just_pyprof_annotations',
         #     # Only enable GPU/C-lib event collection, not operation annotations.
-        #     script_args=['--iml-disable-tfprof', '--iml-disable-pyprof-interceptions'],
+        #     script_args=['--rlscope-disable-tfprof', '--rlscope-disable-pyprof-interceptions'],
         # )
         # add_calibration_config(
         #     expr=self,
         #     algo=algo,
         #     env=env,
-        #     iml_prof_config='uninstrumented',
+        #     rlscope_prof_config='uninstrumented',
         #     # Disable tfprof: CUPTI and LD_PRELOAD.
         #     config_suffix='just_pyprof_interceptions',
         #     # Only enable operation annotations, not GPU/C-lib event collection.
-        #     script_args=['--iml-disable-tfprof', '--iml-disable-pyprof-annotations'],
+        #     script_args=['--rlscope-disable-tfprof', '--rlscope-disable-pyprof-annotations'],
         # )
         # # Entirely uninstrumented configuration; we use this in many of the overhead calculations to determine
         # # how much training time is attributable to the enabled "feature" (e.g. CUPTI activities).
@@ -1065,10 +1065,10 @@ class ExprMicrobenchmark:
         #     expr=self,
         #     algo=algo,
         #     env=env,
-        #     iml_prof_config='uninstrumented',
+        #     rlscope_prof_config='uninstrumented',
         #     config_suffix='uninstrumented',
         #     # Disable ALL pyprof/tfprof stuff.
-        #     script_args=['--iml-disable'],
+        #     script_args=['--rlscope-disable'],
         # )
 
         config_suffix_to_mk_config = {
@@ -1077,15 +1077,15 @@ class ExprMicrobenchmark:
             'uninstrumented': mk_config_uninstrumented,
         }
         mode_to_config_suffix = {
-            'microbench_iml_python_annotation': [
+            'microbench_rlscope_python_annotation': [
                 'just_pyprof_annotations',
                 'uninstrumented',
             ],
-            'microbench_iml_clib_interception_simulator': [
+            'microbench_rlscope_clib_interception_simulator': [
                 'just_pyprof_interceptions',
                 'uninstrumented',
             ],
-            'microbench_iml_clib_interception_tensorflow': [
+            'microbench_rlscope_clib_interception_tensorflow': [
                 'just_pyprof_interceptions',
                 'uninstrumented',
             ],
@@ -1113,17 +1113,17 @@ class ExprMicrobenchmark:
 
         # for mode in MODES:
         #     for algo, env in self.stable_baselines_algo_env:
-        #         iml_prof_config = 'full'
+        #         rlscope_prof_config = 'full'
         #         # if self.args.instrumented:
-        #         #     iml_prof_config = 'full'
+        #         #     rlscope_prof_config = 'full'
         #         # else:
-        #         #     iml_prof_config = 'uninstrumented'
+        #         #     rlscope_prof_config = 'uninstrumented'
         #         config = ExprMicrobenchmarkConfig(
         #             expr=self,
         #             algo=algo,
         #             env=env,
         #             mode=mode,
-        #             iml_prof_config=iml_prof_config,
+        #             rlscope_prof_config=rlscope_prof_config,
         #         )
         #         self.configs.append(config)
 
@@ -1264,8 +1264,8 @@ class ExprTotalTrainingTime:
     def do_plot(self):
         """
         Create bar graph of total training time for each experiment we run:
-        iml_dirs = find_iml_dirs(self.root_dir)
-        $ rls-run --task TotalTrainingTimePlot --iml-directories iml-dirs
+        rlscope_dirs = find_rlscope_dirs(self.root_dir)
+        $ rls-run --task TotalTrainingTimePlot --rlscope-directories rlscope-dirs
         Read data-frame like:
           algo, env,         x_field, total_training_time_sec
           ppo2, HalfCheetah, ...,     ...
@@ -1274,14 +1274,14 @@ class ExprTotalTrainingTime:
 
         task = 'TotalTrainingTimeTask'
 
-        iml_directories = []
+        rlscope_directories = []
         for config in self.configs:
-            config_dirs = config.iml_directories()
-            iml_directories.extend(config_dirs)
+            config_dirs = config.rlscope_directories()
+            rlscope_directories.extend(config_dirs)
 
-        if len(iml_directories) == 0:
+        if len(rlscope_directories) == 0:
             log_missing_files(self, task, files={
-                'iml_directories': iml_directories,
+                'rlscope_directories': rlscope_directories,
             })
             return
 
@@ -1291,9 +1291,9 @@ class ExprTotalTrainingTime:
         cmd = ['rls-run',
                '--directory', plot_dir,
                '--task', task,
-               '--uninstrumented-directory', json.dumps(iml_directories),
+               '--uninstrumented-directory', json.dumps(rlscope_directories),
                ]
-        add_iml_analyze_flags(cmd, self.quick_expr.args)
+        add_rlscope_analyze_flags(cmd, self.quick_expr.args)
         cmd.extend(self.extra_argv)
 
         logfile = self.plot_logfile
@@ -1318,14 +1318,14 @@ class ExprTotalTrainingTime:
         )
         for algo, env in self.stable_baselines_algo_env:
             if self.args.instrumented:
-                iml_prof_config = 'full'
+                rlscope_prof_config = 'full'
             else:
-                iml_prof_config = 'uninstrumented'
+                rlscope_prof_config = 'uninstrumented'
             config = ExprTotalTrainingTimeConfig(
                 expr=self,
                 algo=algo,
                 env=env,
-                iml_prof_config=iml_prof_config,
+                rlscope_prof_config=rlscope_prof_config,
             )
             self.configs.append(config)
         logger.info("configs: " + pprint_msg(self.configs))
@@ -1475,8 +1475,8 @@ class ExprSubtractionValidation:
                 })))
 
         for iters in iterations:
-            gpu_activities_api_time_directories = self.conf(algo, env, 'gpu_activities_api_time_calibration').iml_directories(iters)
-            interception_directories = self.conf(algo, env, 'interception_calibration').iml_directories(iters)
+            gpu_activities_api_time_directories = self.conf(algo, env, 'gpu_activities_api_time_calibration').rlscope_directories(iters)
+            interception_directories = self.conf(algo, env, 'interception_calibration').rlscope_directories(iters)
             if len(gpu_activities_api_time_directories) != len(interception_directories):
                 log_missing_files(self, task=task, files={
                     'gpu_activities_api_time_directories': gpu_activities_api_time_directories,
@@ -1495,7 +1495,7 @@ class ExprSubtractionValidation:
                '--gpu-activities-api-time-directory', json.dumps(all_gpu_activities_api_time_directories),
                '--interception-directory', json.dumps(all_interception_directories),
                ]
-        add_iml_analyze_flags(cmd, self.quick_expr.args)
+        add_rlscope_analyze_flags(cmd, self.quick_expr.args)
         cmd.extend(self.extra_argv)
 
         logfile = self.cupti_scaling_overhead_logfile(algo, env)
@@ -1521,8 +1521,8 @@ class ExprSubtractionValidation:
 
         for iters in iterations:
 
-            gpu_activities_directories = self.conf(algo, env, 'gpu_activities_calibration').iml_directories(iters)
-            no_gpu_activities_directories = self.conf(algo, env, 'no_gpu_activities_calibration').iml_directories(iters)
+            gpu_activities_directories = self.conf(algo, env, 'gpu_activities_calibration').rlscope_directories(iters)
+            no_gpu_activities_directories = self.conf(algo, env, 'no_gpu_activities_calibration').rlscope_directories(iters)
             if self.quick_expr.args.debug:
                 logger.info("log = {msg}".format(
                     msg=pprint_msg({
@@ -1547,7 +1547,7 @@ class ExprSubtractionValidation:
                    '--gpu-activities-directory', json.dumps(gpu_activities_directories),
                    '--no-gpu-activities-directory', json.dumps(no_gpu_activities_directories),
                    ]
-            add_iml_analyze_flags(cmd, self.quick_expr.args)
+            add_rlscope_analyze_flags(cmd, self.quick_expr.args)
             cmd.extend(self.extra_argv)
 
             logfile = self.cupti_overhead_logfile(algo, env, iters)
@@ -1570,8 +1570,8 @@ class ExprSubtractionValidation:
                 })))
 
         for iters in self.iterations:
-            interception_directories = self.conf(algo, env, 'interception_calibration').iml_directories(iters)
-            uninstrumented_directories = self.conf(algo, env, 'uninstrumented_calibration').iml_directories(iters)
+            interception_directories = self.conf(algo, env, 'interception_calibration').rlscope_directories(iters)
+            uninstrumented_directories = self.conf(algo, env, 'uninstrumented_calibration').rlscope_directories(iters)
             if self.quick_expr.args.debug:
                 logger.info("log = {msg}".format(
                     msg=pprint_msg({
@@ -1602,7 +1602,7 @@ class ExprSubtractionValidation:
                    '--interception-directory', json.dumps(interception_directories),
                    '--uninstrumented-directory', json.dumps(uninstrumented_directories),
                    ]
-            add_iml_analyze_flags(cmd, self.quick_expr.args)
+            add_rlscope_analyze_flags(cmd, self.quick_expr.args)
             cmd.extend(self.extra_argv)
 
             logfile = self.LD_PRELOAD_overhead_logfile(algo, env, iters)
@@ -1625,9 +1625,9 @@ class ExprSubtractionValidation:
                 })))
 
         for iters in self.iterations:
-            uninstrumented_directories = self.conf(algo, env, 'uninstrumented_calibration').iml_directories(iters)
-            pyprof_annotations_directories = self.conf(algo, env, 'just_pyprof_annotations_calibration').iml_directories(iters)
-            pyprof_interceptions_directories = self.conf(algo, env, 'just_pyprof_interceptions_calibration').iml_directories(iters)
+            uninstrumented_directories = self.conf(algo, env, 'uninstrumented_calibration').rlscope_directories(iters)
+            pyprof_annotations_directories = self.conf(algo, env, 'just_pyprof_annotations_calibration').rlscope_directories(iters)
+            pyprof_interceptions_directories = self.conf(algo, env, 'just_pyprof_interceptions_calibration').rlscope_directories(iters)
             if self.quick_expr.args.debug:
                 logger.info("log = {msg}".format(
                     msg=pprint_msg({
@@ -1659,7 +1659,7 @@ class ExprSubtractionValidation:
                    '--pyprof-annotations-directory', json.dumps(pyprof_annotations_directories),
                    '--pyprof-interceptions-directory', json.dumps(pyprof_interceptions_directories),
                    ]
-            add_iml_analyze_flags(cmd, self.quick_expr.args)
+            add_rlscope_analyze_flags(cmd, self.quick_expr.args)
             cmd.extend(self.extra_argv)
 
             logfile = self.pyprof_overhead_logfile(algo, env, iters)
@@ -1674,7 +1674,7 @@ class ExprSubtractionValidation:
 
     def plot_config(self, algo, env, config):
         # PROBLEM: we only want to call plot if there are "enough" files to plot a "configuration";
-        # - skip plot if 0 --iml-directories
+        # - skip plot if 0 --rlscope-directories
         # - skip plot if 0 --uninstrumented-directories
         assert config != self.conf(algo, env, 'uninstrumented')
         task = 'CorrectedTrainingTimeTask'
@@ -1709,15 +1709,15 @@ class ExprSubtractionValidation:
             })))
 
         for iters in iterations:
-            iml_directories = config.iml_directories(iters)
-            uninstrumented_directories = config_uninstrumented.iml_directories(iters)
+            rlscope_directories = config.rlscope_directories(iters)
+            uninstrumented_directories = config_uninstrumented.rlscope_directories(iters)
 
-            if ( len({len(iml_directories), len(uninstrumented_directories)}) != 1 ) or \
+            if ( len({len(rlscope_directories), len(uninstrumented_directories)}) != 1 ) or \
                 len(pyprof_overhead_jsons) == 0 or \
                 len(cupti_overhead_jsons) == 0 or \
                 len(LD_PRELOAD_overhead_jsons) == 0:
                 log_missing_files(self, task, files={
-                    'iml_directories': iml_directories,
+                    'rlscope_directories': rlscope_directories,
                     'uninstrumented_directories': uninstrumented_directories,
                     'pyprof_overhead_jsons': pyprof_overhead_jsons,
                     'cupti_overhead_jsons': cupti_overhead_jsons,
@@ -1725,7 +1725,7 @@ class ExprSubtractionValidation:
                 })
                 logger.info((
                     "{klass}: SKIP plotting iterations={iters}, config={config}, "
-                    "since --iml-directories and --uninstrumented-directories haven't been generated yet.").format(
+                    "since --rlscope-directories and --uninstrumented-directories haven't been generated yet.").format(
                     iters=iters,
                     config=config.to_string(),
                     klass=self.__class__.__name__
@@ -1736,10 +1736,10 @@ class ExprSubtractionValidation:
             # rls-run
             # --task CorrectedTrainingTimeTask
             # --directory $direc
-            # --iml-directories "$(js_list.py output/iml_bench/debug_prof_overhead/config_${config_dir}_*/ppo2/HalfCheetahBulletEnv-v0)"
-            # --uninstrumented-directories "$(js_list.py output/iml_bench/debug_prof_overhead/config_no_interception_*/ppo2/HalfCheetahBulletEnv-v0)"
-            # --cupti-overhead-json output/iml_bench/debug_prof_overhead/results.config_full/cupti_overhead.json
-            # --call-interception-overhead-json output/iml_bench/debug_prof_overhead/results.config_full/LD_PRELOAD_overhead.json
+            # --rlscope-directories "$(js_list.py output/rlscope_bench/debug_prof_overhead/config_${config_dir}_*/ppo2/HalfCheetahBulletEnv-v0)"
+            # --uninstrumented-directories "$(js_list.py output/rlscope_bench/debug_prof_overhead/config_no_interception_*/ppo2/HalfCheetahBulletEnv-v0)"
+            # --cupti-overhead-json output/rlscope_bench/debug_prof_overhead/results.config_full/cupti_overhead.json
+            # --call-interception-overhead-json output/rlscope_bench/debug_prof_overhead/results.config_full/LD_PRELOAD_overhead.json
             # --debug
             # --pdb
             # --debug-memoize
@@ -1762,20 +1762,20 @@ class ExprSubtractionValidation:
                    '--cupti-overhead-json', cupti_overhead_jsons[0],
                    '--LD-PRELOAD-overhead-json', LD_PRELOAD_overhead_jsons[0],
 
-                   '--iml-directories', json.dumps(iml_directories),
+                   '--rlscope-directories', json.dumps(rlscope_directories),
                    '--uninstrumented-directories', json.dumps(uninstrumented_directories),
 
-                   '--rls-prof-config', config.iml_prof_config,
+                   '--rls-prof-config', config.rlscope_prof_config,
                    ]
             # cmd.extend(calibration_jsons.argv())
-            add_iml_analyze_flags(cmd, self.quick_expr.args)
+            add_rlscope_analyze_flags(cmd, self.quick_expr.args)
             cmd.extend(self.extra_argv)
 
             # get these args from forwarding extra_argv
             # --cupti-overhead-json
-            # output/iml_bench/debug_prof_overhead/results.config_full/cupti_overhead.json
+            # output/rlscope_bench/debug_prof_overhead/results.config_full/cupti_overhead.json
             # --call-interception-overhead-json
-            # output/iml_bench/debug_prof_overhead/results.config_full/LD_PRELOAD_overhead.json
+            # output/rlscope_bench/debug_prof_overhead/results.config_full/LD_PRELOAD_overhead.json
             # --directory
             # $direc
             # --debug
@@ -1918,10 +1918,10 @@ class ExprSubtractionValidation:
             expr=self,
             algo=algo,
             env=env,
-            iml_prof_config='uninstrumented',
+            rlscope_prof_config='uninstrumented',
             config_suffix='uninstrumented',
             # Disable ALL pyprof/tfprof stuff.
-            script_args=['--iml-disable'],
+            script_args=['--rlscope-disable'],
         )
         # Entirely uninstrumented configuration (CALIBRATION runs);
         # NOTE: we need to re-run the uninstrumented configuration for the calibration runs, so that we can
@@ -1932,9 +1932,9 @@ class ExprSubtractionValidation:
             expr=self,
             algo=algo,
             env=env,
-            iml_prof_config='interception',
+            rlscope_prof_config='interception',
             config_suffix='interception',
-            script_args=['--iml-disable-pyprof'],
+            script_args=['--rlscope-disable-pyprof'],
         )
 
         # CUPTIOverheadTask: CUPTI, and CUDA API stat-tracking overhead correction.
@@ -1942,26 +1942,26 @@ class ExprSubtractionValidation:
             expr=self,
             algo=algo,
             env=env,
-            iml_prof_config='gpu-activities',
+            rlscope_prof_config='gpu-activities',
             config_suffix='gpu_activities',
-            script_args=['--iml-disable-pyprof'],
+            script_args=['--rlscope-disable-pyprof'],
         )
         add_calibration_config(
             expr=self,
             algo=algo,
             env=env,
-            iml_prof_config='no-gpu-activities',
+            rlscope_prof_config='no-gpu-activities',
             config_suffix='no_gpu_activities',
-            script_args=['--iml-disable-pyprof'],
+            script_args=['--rlscope-disable-pyprof'],
         )
         # CUPTIScalingOverheadTask:
         config = ExprSubtractionValidationConfig(
             expr=self,
             algo=algo,
             env=env,
-            iml_prof_config='gpu-activities-api-time',
+            rlscope_prof_config='gpu-activities-api-time',
             config_suffix='gpu_activities_api_time_calibration',
-            script_args=['--iml-disable-pyprof'],
+            script_args=['--rlscope-disable-pyprof'],
             long_run=True,
         )
         algo_env_configs.append(config)
@@ -1973,7 +1973,7 @@ class ExprSubtractionValidation:
                 expr=self,
                 algo=algo,
                 env=env,
-                iml_prof_config='full',
+                rlscope_prof_config='full',
                 # Enable tfprof: CUPTI and LD_PRELOAD.
                 config_suffix='full',
                 # Enable pyprof.
@@ -1988,11 +1988,11 @@ class ExprSubtractionValidation:
                 expr=self,
                 algo=algo,
                 env=env,
-                iml_prof_config='full',
+                rlscope_prof_config='full',
                 # Enable tfprof: CUPTI and LD_PRELOAD.
                 config_suffix='just_tfprof',
                 # DON'T enable pyprof.
-                script_args=['--iml-disable-pyprof'],
+                script_args=['--rlscope-disable-pyprof'],
                 long_run=True,
             )
             algo_env_configs.append(config)
@@ -2003,11 +2003,11 @@ class ExprSubtractionValidation:
                 expr=self,
                 algo=algo,
                 env=env,
-                iml_prof_config='uninstrumented',
+                rlscope_prof_config='uninstrumented',
                 # Disable tfprof: CUPTI and LD_PRELOAD.
                 config_suffix='just_pyprof',
                 # Enable pyprof.
-                script_args=['--iml-disable-tfprof'],
+                script_args=['--rlscope-disable-tfprof'],
             )
             algo_env_configs.append(config)
 
@@ -2016,21 +2016,21 @@ class ExprSubtractionValidation:
             expr=self,
             algo=algo,
             env=env,
-            iml_prof_config='uninstrumented',
+            rlscope_prof_config='uninstrumented',
             # Disable tfprof: CUPTI and LD_PRELOAD.
             config_suffix='just_pyprof_annotations',
             # Only enable GPU/C-lib event collection, not operation annotations.
-            script_args=['--iml-disable-tfprof', '--iml-disable-pyprof-interceptions'],
+            script_args=['--rlscope-disable-tfprof', '--rlscope-disable-pyprof-interceptions'],
         )
         add_calibration_config(
             expr=self,
             algo=algo,
             env=env,
-            iml_prof_config='uninstrumented',
+            rlscope_prof_config='uninstrumented',
             # Disable tfprof: CUPTI and LD_PRELOAD.
             config_suffix='just_pyprof_interceptions',
             # Only enable operation annotations, not GPU/C-lib event collection.
-            script_args=['--iml-disable-tfprof', '--iml-disable-pyprof-annotations'],
+            script_args=['--rlscope-disable-tfprof', '--rlscope-disable-pyprof-annotations'],
         )
 
         # for config in algo_env_configs:
@@ -2163,9 +2163,9 @@ class ExprSubtractionValidation:
             self.do_run()
 
 class IMLConfigDir:
-    def __init__(self, iml_config_path):
-        self.iml_config = IMLConfig(iml_config_path=iml_config_path)
-        self.config_dir = self._as_config_dir(iml_config_path)
+    def __init__(self, rlscope_config_path):
+        self.rlscope_config = IMLConfig(rlscope_config_path=rlscope_config_path)
+        self.config_dir = self._as_config_dir(rlscope_config_path)
 
     def _as_config_dir(self, path):
         m = re.search(r'(?P<config_dir>.*/{CONFIG_RE})'.format(
@@ -2178,11 +2178,11 @@ class IMLConfigDir:
 
     @property
     def algo(self):
-        return self.iml_config.algo()
+        return self.rlscope_config.algo()
 
     @property
     def env(self):
-        return self.iml_config.env()
+        return self.rlscope_config.env()
 
     def repetition(self, allow_none=False, dflt=None):
         return self._repetition_from_config_dir(self.config_dir, allow_none=allow_none, dflt=dflt)
@@ -2267,26 +2267,26 @@ class ExperimentDirectoryWalker:
         assert max_r is not None
         return max_r
 
-    def get_iml_config_dir(self, config, algo, env, r):
-        return self._iml_config_dir_dict[(config, algo, env, r)]
+    def get_rlscope_config_dir(self, config, algo, env, r):
+        return self._rlscope_config_dir_dict[(config, algo, env, r)]
 
     def _init(self):
-        self.iml_config_paths = [
+        self.rlscope_config_paths = [
             path for path in each_file_recursive(self.root_dir)
-            if is_iml_config_file(path) and _b(_d(path)) != constants.DEFAULT_PHASE]
-        for iml_config_path in self.iml_config_paths:
-            _check_has_config_dir(iml_config_path)
-            _check_one_config_dir(iml_config_path)
+            if is_rlscope_config_file(path) and _b(_d(path)) != constants.DEFAULT_PHASE]
+        for rlscope_config_path in self.rlscope_config_paths:
+            _check_has_config_dir(rlscope_config_path)
+            _check_one_config_dir(rlscope_config_path)
 
         self.algo_env_pairs = dict()
-        self._iml_config_dir_dict = dict()
-        for iml_config_path in self.iml_config_paths:
-            iml_config_dir = IMLConfigDir(iml_config_path)
-            config = iml_config_dir.config
-            r = iml_config_dir.repetition(allow_none=True, dflt=0)
-            algo = iml_config_dir.algo
-            env = iml_config_dir.env
-            self._iml_config_dir_dict[(config, algo, env, r)] = iml_config_dir
+        self._rlscope_config_dir_dict = dict()
+        for rlscope_config_path in self.rlscope_config_paths:
+            rlscope_config_dir = IMLConfigDir(rlscope_config_path)
+            config = rlscope_config_dir.config
+            r = rlscope_config_dir.repetition(allow_none=True, dflt=0)
+            algo = rlscope_config_dir.algo
+            env = rlscope_config_dir.env
+            self._rlscope_config_dir_dict[(config, algo, env, r)] = rlscope_config_dir
             algo_env = (algo, env)
             if r not in self.algo_env_pairs:
                 self.algo_env_pairs[r] = dict()
@@ -2350,10 +2350,10 @@ class ExperimentDirectoryWalker:
         for algo, env in algo_env_pairs_keep:
             for r in reps:
                 for config in configs:
-                    iml_config_dir = self.get_iml_config_dir(config, algo, env, r)
+                    rlscope_config_dir = self.get_rlscope_config_dir(config, algo, env, r)
                     if config not in config_dict:
                         config_dict[config] = []
-                    config_dict[config].append(iml_config_dir.config_dir)
+                    config_dict[config].append(rlscope_config_dir.config_dir)
         return config_dict
 
     def is_config_dir(self, path):
@@ -2418,7 +2418,7 @@ class ExprPlotFig:
 
         parser.add_argument(
             '--root-dir',
-            help="Root directory that contains ALL the iml-directories and config-dirs as children; we walk this recursively.",
+            help="Root directory that contains ALL the rlscope-directories and config-dirs as children; we walk this recursively.",
             required=True)
 
         parser.add_argument(
@@ -2443,7 +2443,7 @@ class ExprPlotFig:
         logfile = _j(self.plot_dir(fig), "logfile.out")
         return logfile
 
-    def iml_analyze_cmdline(self, task, argv):
+    def rlscope_analyze_cmdline(self, task, argv):
         plot_dir = self.plot_dir(self.args.fig)
         calibration_jsons = CalibrationJSONs.from_obj(self.args)
         cmd = ['rls-run',
@@ -2457,7 +2457,7 @@ class ExprPlotFig:
                ]
         cmd.extend(calibration_jsons.argv())
         cmd.extend(argv)
-        add_iml_analyze_flags(cmd, self.quick_expr.args)
+        add_rlscope_analyze_flags(cmd, self.quick_expr.args)
         cmd.extend(self.extra_argv)
         return cmd
 
@@ -2472,14 +2472,14 @@ class ExprPlotFig:
             configs = walker.get_configs(configs=['config_uninstrumented', 'config_full'])
             argv = [
                 '--rls-prof-config', 'full',
-                '--iml-directories', json.dumps(configs['config_full']),
+                '--rlscope-directories', json.dumps(configs['config_full']),
                 '--uninstrumented-directories', json.dumps(configs['config_uninstrumented']),
             ]
             task = 'CorrectedTrainingTimeTask'
         else:
             raise NotImplementedError()
 
-        cmd = self.iml_analyze_cmdline(task=task, argv=argv)
+        cmd = self.rlscope_analyze_cmdline(task=task, argv=argv)
 
         logfile = self.plot_logfile(self.args.fig)
         if self.quick_expr.args.debug:
@@ -2499,7 +2499,7 @@ def rep_suffix(rep):
     assert rep is not None
     return "_repetition_{rep:02}".format(rep=rep)
 
-def add_iml_analyze_flags(cmd, args):
+def add_rlscope_analyze_flags(cmd, args):
     if args.debug:
         cmd.append('--debug')
     if args.debug_memoize:

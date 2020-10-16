@@ -132,8 +132,8 @@ EventProfilerState EventProfilerState::DumpState() {
 }
 
 
-std::unique_ptr<iml::CategoryEventsProto> EventProfilerState::AsProto() {
-  std::unique_ptr<iml::CategoryEventsProto> proto(new iml::CategoryEventsProto);
+std::unique_ptr<rlscope::CategoryEventsProto> EventProfilerState::AsProto() {
+  std::unique_ptr<rlscope::CategoryEventsProto> proto(new rlscope::CategoryEventsProto);
   proto->set_process_name(_process_name);
   proto->set_machine_name(_machine_name);
   proto->set_phase(_phase_name);

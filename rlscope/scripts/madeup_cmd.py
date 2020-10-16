@@ -4,14 +4,14 @@ import time
 
 import os
 
-from rlscope.profiler.iml_logging import logger
+from rlscope.profiler.rlscope_logging import logger
 
 def main():
     parser = argparse.ArgumentParser(
         description="Test: rls-run-expr",
         # formatter_class=argparse.ArgumentDefaultsHelpFormatter)
         formatter_class=argparse.RawTextHelpFormatter)
-    parser.add_argument('--iml-directory',
+    parser.add_argument('--rlscope-directory',
                         help=textwrap.dedent("""
                         The output directory of the command being run.
                         This is where logfile.out will be output.
@@ -41,7 +41,7 @@ def main():
     end_t = start_t + args.wait_sec
     now_sec = time.time()
     while now_sec <= end_t:
-        logger.info(f"--iml-directory={args.iml_directory}, CUDA_VISIBLE_DEVICES={CUDA_VISIBLE_DEVICES}")
+        logger.info(f"--rlscope-directory={args.rlscope_directory}, CUDA_VISIBLE_DEVICES={CUDA_VISIBLE_DEVICES}")
         time.sleep(min(end_t - now_sec, args.print_every_sec))
         now_sec = time.time()
 

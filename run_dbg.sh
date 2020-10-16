@@ -17,4 +17,4 @@ BUILD_DIR="Debug"
 #python ./run.py bash -c "cd $BUILD_DIR && make -j1"
 python ./run.py bash -c "cd $BUILD_DIR && make -j8"
 python ./run.py "$@"
-# $BUILD_DIR/cpp_dump_proto --mode overlap --iml_directory output/perf_debug
+# $BUILD_DIR/cpp_dump_proto --mode overlap --rlscope_directory output/perf_debug

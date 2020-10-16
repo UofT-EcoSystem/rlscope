@@ -2,7 +2,7 @@
 // Protobuf's used for recording data used for unit-testing.
 //
 syntax = "proto3";
-package iml;
+package rlscope;
 
 import "rlscope/protobuf/pyprof.proto";
 

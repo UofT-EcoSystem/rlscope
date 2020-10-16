@@ -1,7 +1,7 @@
 """
 rls-run script for processing trace-data produced from an ML script.
 """
-from rlscope.profiler.iml_logging import logger
+from rlscope.profiler.rlscope_logging import logger
 import subprocess
 import sys
 import os
@@ -13,7 +13,7 @@ import pprint
 import textwrap
 import multiprocessing
 from rlscope.parser import tasks
-from rlscope.profiler.iml_logging import logger
+from rlscope.profiler.rlscope_logging import logger
 
 def main():
     parser = argparse.ArgumentParser(
@@ -56,7 +56,7 @@ def main():
 
     if args.task is None and not args.help:
         # If they just run this:
-        # $ rls-run --iml-directory <dir>
+        # $ rls-run --rlscope-directory <dir>
         # Then run all the targets.
         args.task = 'All'
 

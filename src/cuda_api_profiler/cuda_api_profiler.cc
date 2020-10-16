@@ -113,8 +113,8 @@ std::tuple<pid_t, const char*> CUDAAPIProfilerState::_GetTidApiName(APIKey api_k
   return std::make_tuple(tid, name);
 }
 
-std::unique_ptr<iml::CUDAAPIPhaseStatsProto> CUDAAPIProfilerState::AsProto() {
-  std::unique_ptr<iml::CUDAAPIPhaseStatsProto> proto(new iml::CUDAAPIPhaseStatsProto);
+std::unique_ptr<rlscope::CUDAAPIPhaseStatsProto> CUDAAPIProfilerState::AsProto() {
+  std::unique_ptr<rlscope::CUDAAPIPhaseStatsProto> proto(new rlscope::CUDAAPIPhaseStatsProto);
   proto->set_process_name(_process_name);
   proto->set_machine_name(_machine_name);
   proto->set_phase(_phase_name);

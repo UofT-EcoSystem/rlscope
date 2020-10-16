@@ -18,7 +18,7 @@ _upgrade_pip
 _check_MLPERF_DIR
 
 _check_tensorflow
-_check_iml
+_check_rlscope
 
 # mpi4py
 #sudo apt-get -y install libopenmpi-dev
