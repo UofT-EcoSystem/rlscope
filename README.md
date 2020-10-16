@@ -1,7 +1,5 @@
-# IML: "irregular" machine learning benchmarking toolkit
+# RL-Scope: Cross-Stack Profiling for Deep Reinforcement Learning Workloads
 
-"Toolkit" of benchmark tools for measuring "irregular" machine learning workloads e.g. Reinforcement Learning (RL).
-
-The current focus is on RL workloads, but these scripts are applicable to any ML TensorFlow script.
+RL-Scope collects cross-stack profiling information (CUDA API time, GPU kernel time, ML backend time, etc.), and provides a breakdown of CPU/GPU execution time.
 
 For documentation, see the [github wiki](https://github.com/UofT-EcoSystem/iml/wiki).
