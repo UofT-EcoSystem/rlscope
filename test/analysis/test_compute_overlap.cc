@@ -43,24 +43,24 @@ void PrintIfFail(bool success, const T& got, const T& expect) {
   std::cout << "\n";
 }
 
-struct Event {
+struct TestEvent {
   TimeUsec start_us;
   TimeUsec end_us;
-  Event(TimeUsec start_us_, TimeUsec end_us_) :
+  TestEvent(TimeUsec start_us_, TimeUsec end_us_) :
       start_us(start_us_)
       , end_us(end_us_)
   {
   }
 };
-using EventData = std::map<std::string, std::vector<Event>>;
+using TestEventData = std::map<std::string, std::vector<TestEvent>>;
 using OverlapData = std::map<std::set<std::string>, TimeUsec>;
-using RegionData = std::map<std::set<std::string>, Event>;
-//using T = Event;
+using RegionData = std::map<std::set<std::string>, TestEvent>;
+//using T = TestEvent;
 
-Event T(int64_t start_sec, int64_t end_sec) {
+TestEvent T(int64_t start_sec, int64_t end_sec) {
   auto start_us = start_sec*USEC_IN_SEC;
   auto end_us = end_sec*USEC_IN_SEC;
-  return Event(start_us, end_us);
+  return TestEvent(start_us, end_us);
 }
 
 TimeUsec sec(int64_t seconds) {
@@ -76,7 +76,7 @@ CategoryKey AsCategoryKey(const std::string& key) {
   return category_key;
 }
 
-CategoryTimesCount CountCategoryTimes(const EventData& event_data) {
+CategoryTimesCount CountCategoryTimes(const TestEventData& event_data) {
   CategoryTimesCount count;
   for (const auto& pair : event_data) {
     const auto& category_key = AsCategoryKey(pair.first);
@@ -86,7 +86,7 @@ CategoryTimesCount CountCategoryTimes(const EventData& event_data) {
   return count;
 }
 
-CategoryTimes CategoryTimesFrom(const EventData& event_data) {
+CategoryTimes CategoryTimesFrom(const TestEventData& event_data) {
   auto count = CountCategoryTimes(event_data);
   CategoryTimes category_times(process, count);
 
@@ -155,7 +155,7 @@ TEST(TextIdxMap, Test_BitsetAdd) {
 }
 
 TEST(TextIdxMap, Test_OverlapData) {
-  EventData event_data = {
+  TestEventData event_data = {
       {"c1", {T(3, 7), T(8, 10)}},
       {"c2", {T(1, 4), T(6, 9)}},
       {"c3", {T(2, 5), T(7, 8), T(11, 12)}},
@@ -198,7 +198,7 @@ TEST(TestIdxMap, Test_01) {
 }
 
 TEST(TestComputeOverlap, Test_01_Complete) {
-  EventData event_data = {
+  TestEventData event_data = {
       {"A", {T(3, 7), T(8, 10)}},
       {"B", {T(1, 4), T(6, 9)}},
       {"C", {T(2, 5), T(7, 8), T(11, 12)}},
