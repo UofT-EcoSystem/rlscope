@@ -15,7 +15,7 @@ namespace rlscope {
 
 // Sleep for at MOST 0.5 seconds.
 // We need to be able to terminate quickly, so this sleep time affects that.
-// In particular, in the worst case, the call to sample_cuda_api.disable_tracing()
+// In particular, in the worst case, the call to rlscope_api.disable_tracing()
 // during Profiler.finish() will stall for this time.
 #define MAX_SLEEP_FOR_USEC 5e6
 

@@ -1928,7 +1928,7 @@ def list_files(direc):
     paths = [_j(direc, filename) for filename in os.listdir(direc)]
     return paths
 
-def is_sample_cuda_api_lib(path):
+def is_rlscope_api_lib(path):
     return _b(path) == 'librlscope.so'
 
 def zero_if_none(x):

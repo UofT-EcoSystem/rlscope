@@ -266,8 +266,9 @@ def expr_already_ran(to_file, debug=False):
                 return True
     return False
 
-def test_tee():
-    def test_tee_01():
+class TestTee:
+
+    def test_tee_01(self):
         tmp_fd, tmp_path = tempfile.mkstemp(prefix="test_tee_")
         tmp_f = os.fdopen(tmp_fd, "w")
         tmp_f.close()
@@ -284,9 +285,7 @@ def test_tee():
         finally:
             if _e(tmp_path):
                 os.remove(tmp_path)
-    test_tee_01()
 
-    def test_tee_02():
+    def test_tee_02(self):
         for i in range(100):
-            test_tee_01()
-    test_tee_02()
+            self.test_tee_01()

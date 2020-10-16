@@ -703,8 +703,7 @@ function(AddRLScopeTarget TARGET)
 
     RLS_INSTALL(
             FILES ${PROJECT_BINARY_DIR}/${TARGET}_export.h
-            LOCAL_INSTALL_DIR include
-            RLSCOPE_INSTALL_DIR rlscope/include)
+            LOCAL_INSTALL_DIR include)
 
 
     if (WITH_CUDA_LD_PRELOAD)
@@ -796,9 +795,13 @@ function(AddCommonRLSDeps TARGET)
 endfunction()
 
 function(AddGFlagsDeps TARGET)
-    find_package(GFlags REQUIRED)
-    # message("> GFLAGS_LIBRARIES = ${GFLAGS_LIBRARIES}")
-    # message("> GFLAGS_INCLUDE_DIRS = ${GFLAGS_INCLUDE_DIRS}")
+    find_package(
+            gflags REQUIRED
+            # GFlags REQUIRED
+            # Static linkage to make installing rlscope libs/bins more portable.
+            COMPONENTS static)
+    message("> GFLAGS_LIBRARIES = ${GFLAGS_LIBRARIES}")
+    message("> GFLAGS_INCLUDE_DIRS = ${GFLAGS_INCLUDE_DIRS}")
     target_link_libraries(${TARGET} PUBLIC ${GFLAGS_LIBRARIES})
 endfunction()
 
@@ -813,14 +816,27 @@ endfunction()
 set(RLS_INSTALL_CONFIGURATIONS Debug Release)
 function(RLS_INSTALL)
     set(options)
-    set(oneValueArgs LOCAL_INSTALL_DIR RLSCOPE_INSTALL_DIR)
+    # RLSCOPE_INSTALL_DIR
+    set(oneValueArgs COMPONENT LOCAL_INSTALL_DIR)
     set(multiValueArgs)
     cmake_parse_arguments(RLS_INSTALL "${options}" "${oneValueArgs}"
             "${multiValueArgs}" ${ARGN} )
-    if (RLS_INSTALL_KEYWORDS_MISSING_VALUES)
-        message(FATAL_ERROR
-                "RLS_INSTALL missing keyword arguments: ${RLS_INSTALL_KEYWORDS_MISSING_VALUES}")
+
+    string(FIND "${RLS_INSTALL_KEYWORDS_MISSING_VALUES}" COMPONENT HAS_COMPONENT)
+    if (NOT HAS_COMPONENT)
+        set(RLS_INSTALL_COMPONENT "rlscope")
     endif()
+
+    if (NOT RLS_INSTALL_LOCAL_INSTALL_DIR)
+        message(FATAL_ERROR
+                "RLS_INSTALL missing keyword arguments: RLS_INSTALL_LOCAL_INSTALL_DIR")
+    endif()
+
+    # if (RLS_INSTALL_KEYWORDS_MISSING_VALUES)
+    #     message(FATAL_ERROR
+    #             "RLS_INSTALL missing keyword arguments: ${RLS_INSTALL_KEYWORDS_MISSING_VALUES}")
+    # endif()
+
     # INSTALL_FILE:
     #   Path to file we're install(..)-ing
     # LOCAL_INSTALL_DIR:
@@ -831,9 +847,10 @@ function(RLS_INSTALL)
             # [FILES|TARGET] ...
             ${RLS_INSTALL_UNPARSED_ARGUMENTS}
             CONFIGURATIONS ${RLS_INSTALL_CONFIGURATIONS}
-            COMPONENT "rlscope"
+            COMPONENT ${COMPONENT}
             DESTINATION ${RLS_INSTALL_LOCAL_INSTALL_DIR}
             )
+
 
     # NOTE: I used to install rlscope files into a separate rlscope directory, but it's not needed
     # since I now statically link librlscope.so and avoid third party install(...) rules
@@ -884,9 +901,15 @@ if (WITH_CXX_ANALYSIS)
     AddRLSAnalyzeTarget(rls-analyze)
     list(APPEND BINARIES rls-analyze)
     if (CMAKE_BUILD_TYPE STREQUAL "Debug")
+        # In debug mode, include 'rls-test' unit tests as part of the binary archive (i.e., CPack package).
         if (TEST_ANALYSIS_SOURCES)
             AddTestAnalysisTarget(rls-test)
-            list(APPEND BINARIES rls-test)
+            RLS_INSTALL(
+                    TARGETS rls-test
+                    LOCAL_INSTALL_DIR bin
+                    # COMPONENT "rlscope-test"
+            )
+            # list(APPEND BINARIES rls-test)
         endif()
     endif()
 endif()
@@ -895,8 +918,7 @@ list(APPEND LIBRARIES rlscope)
 
 RLS_INSTALL(
         FILES src/public_headers/rlscope_c_api.h
-        LOCAL_INSTALL_DIR include
-        RLSCOPE_INSTALL_DIR rlscope/include)
+        LOCAL_INSTALL_DIR include)
 
 #
 # Install targets.
@@ -906,21 +928,20 @@ if (BINARIES)
     message("> INSTALL BINARIES: ${BINARIES}")
     RLS_INSTALL(
             TARGETS ${BINARIES}
-            LOCAL_INSTALL_DIR bin
-            RLSCOPE_INSTALL_DIR rlscope/bin)
+            LOCAL_INSTALL_DIR bin)
 endif()
 
 
 if (LIBRARIES)
     RLS_INSTALL(
             TARGETS ${LIBRARIES}
-            LOCAL_INSTALL_DIR lib
-            RLSCOPE_INSTALL_DIR rlscope/lib)
+            LOCAL_INSTALL_DIR lib)
 endif()
 
 set(CPACK_GENERATOR "TGZ")
 set(CPACK_DEBIAN_PACKAGE_MAINTAINER "James Gleeson") # required
-set(CPACK_COMPONENTS_ALL "rlscope-dir")
+set(CPACK_PACKAGE_VENDOR "James Gleeson") # required
+set(CPACK_COMPONENTS_ALL "rlscope")
 #cpack_add_component("rlscope-dir"
 #        DISPLAY_NAME "RL-Scope system libraries/binaries/includes"
 #        DESCRIPTION "RL-Scope install files in the standard platform-specific /usr/{lib,bin,include} directories"

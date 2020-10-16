@@ -714,23 +714,25 @@ def Timing(n=10**5, k=12, iterations=5, repeats=5):
         speedup=speedup,
         UNICODE_TIMES=UNICODE_TIMES))
 
-def test_bitset_01_empty_set():
-    empty_set = bitset_empty_set()
-    indices = bitset_indices(empty_set)
-    assert indices == []
+if py_config.USE_NUMBA:
+    class TestBitset:
+        def test_bitset_01_empty_set(self):
+            empty_set = bitset_empty_set()
+            indices = bitset_indices(empty_set)
+            assert indices == []
 
-def test_bitset_02_one_elem_set():
-    empty_set = bitset_empty_set()
-    one_elem_set = bitset_add(empty_set, 0)
-    indices = bitset_indices(one_elem_set)
-    assert indices == [0]
+        def test_bitset_02_one_elem_set(self):
+            empty_set = bitset_empty_set()
+            one_elem_set = bitset_add(empty_set, 0)
+            indices = bitset_indices(one_elem_set)
+            assert indices == [0]
 
-def test_bitset_03_two_elem_set():
-    empty_set = bitset_empty_set()
-    one_elem_set = bitset_add(empty_set, 0)
-    two_elem_set = bitset_add(one_elem_set, 2)
-    indices = bitset_indices(two_elem_set)
-    assert indices == [0, 2]
+        def test_bitset_03_two_elem_set(self):
+            empty_set = bitset_empty_set()
+            one_elem_set = bitset_add(empty_set, 0)
+            two_elem_set = bitset_add(one_elem_set, 2)
+            indices = bitset_indices(two_elem_set)
+            assert indices == [0, 2]
 
 if __name__ == '__main__':
     np.random.seed(475)

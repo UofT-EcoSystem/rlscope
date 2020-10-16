@@ -9,6 +9,12 @@ set -u
 JOBS=${JOBS:-$(nproc)}
 echo "> Using JOBS=$JOBS"
 
+# If BUILD_PIP=yes, then build a python wheel.
+BUILD_PIP=${BUILD_PIP:-no}
+# If SKIP_CPACK=yes, then skip calling "make package" to create a cmake binary archive (*.tar.gz)
+# from rlscope binaries/libraries.
+SKIP_CPACK=${SKIP_CPACK:-no}
+
 IML_CUDA_VERSION=${IML_CUDA_VERSION:-10.1}
 
 # Force re-running setup
@@ -23,6 +29,11 @@ if [ "$DEBUG" = 'yes' ]; then
 fi
 
 ROOT="$(readlink -f $(dirname "$0"))"
+
+## Only add "_cuda_10_1" suffix to iml build directory.
+#IML_BUILD_SUFFIX="$(_iml_build_suffix ${IML_CUDA_VERSION})"
+#IML_BUILD_DIR="$(cmake_build_dir "$ROOT")"
+#unset IML_BUILD_SUFFIX
 
 #NCPU=$(grep -c ^processor /proc/cpuinfo)
 
@@ -598,14 +609,14 @@ _maybe() {
 #}
 
 _do() {
-    echo "> CMD: $@"
+    echo "> CMD [setup.sh]: $@"
     echo "  $ $@"
     "$@"
 }
 DO_VERBOSE=
 _dov() {
   if [ "$DO_VERBOSE" = 'yes' ]; then
-    echo "> CMD: $@"
+    echo "> CMD [setup.sh]: $@"
     echo "  $ $@"
   fi
   "$@"
@@ -676,6 +687,27 @@ main() {
     echo "> Success!"
 }
 
+setup_pip_package() {
+  # Build a python wheel package.
+  local build_dir=$(cmake_build_dir "$ROOT")
+  if [ "$SKIP_CPACK" != 'yes' ]; then
+    cmake_make "$ROOT" package
+    local cpp_pkg=$(ls $build_dir/iml*.tar.gz)
+    if [ "$cpp_pkg" = "" ]; then
+      echo "ERROR: setup_pip_package failed; couldn't find CPack archive at $build_dir/iml*.tar.gz"
+      return 1
+    fi
+    # Cleanup anything from previously built packages.
+    rm -rf $ROOT/iml_profiler/cpp/bin
+    rm -rf $ROOT/iml_profiler/cpp/lib
+    rm -rf $ROOT/iml_profiler/cpp/include
+    # Extract newly built package into python tree.
+    _do tar xf $cpp_pkg -C $ROOT/iml_profiler/cpp --strip-components=1
+  fi
+
+  _do python setup.py bdist_wheel
+}
+
 _setup_project() {
   # cmake will use whatever nvcc is on PATH, even if its outside of CUDA_TOOLKIT_ROOT_DIR
   export PATH=$CUDA_TOOLKIT_ROOT_DIR/bin:$PATH
@@ -690,7 +722,11 @@ _setup_project() {
 
   cmake_install "$ROOT"
 
-  echo "To re-build RLScope library when you change source files, do:"
+  if [ "$BUILD_PIP" = 'yes' ]; then
+    _do setup_pip_package
+  fi
+
+  echo "To re-build RL-Scope library when you change source files, do:"
   echo "  $ cd $(cmake_build_dir "$ROOT")"
   echo "  $ make -j\$(nproc) install"
 }
@@ -709,11 +745,17 @@ setup_project_cuda_10_1() {
   )
 }
 
+_iml_build_suffix() {
+  local cuda_version="$1"
+  shift 1
+  # e.g. IML_BUILD_SUFFIX="_cuda_10_2"
+  echo "_cuda_${cuda_version}" | sed 's/[\.]/_/g'
+}
+
 _setup_project_with_cuda() {
   (
   set -u
-  # e.g. IML_BUILD_SUFFIX=".cuda_10_2"
-  IML_BUILD_SUFFIX=$(echo ".cuda_${cuda_version}" | sed 's/[\.]/_/g')
+  IML_BUILD_SUFFIX="$(_iml_build_suffix ${cuda_version})"
   CUDA_TOOLKIT_ROOT_DIR=/usr/local/cuda-${cuda_version}
   CMAKE_OPTS=(-DCMAKE_BUILD_TYPE=Debug -DCUDA_TOOLKIT_ROOT_DIR=${CUDA_TOOLKIT_ROOT_DIR})
   CMAKE_VERBOSE=yes

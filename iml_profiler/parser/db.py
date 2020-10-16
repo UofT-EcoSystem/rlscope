@@ -5843,25 +5843,29 @@ class RowIterator:
         return self.count()
 
 def test_merge_sorted():
+    # xs:         5 6 7 8
+    # ys: 1 2 3 4 5       9 10 11
+    xs = [            5, 6, 7, 8,          ]
+    ys = [1, 2, 3, 4, 5,          9, 10, 11]
+    expect = [1, 2, 3, 4, 5, 5, 6, 7, 8, 9, 10, 11]
+    actual = merge_sorted(xs, ys)
 
-    def test_01():
+    assert actual == expect
 
-        # xs:         5 6 7 8
-        # ys: 1 2 3 4 5       9 10 11
-        xs = [            5, 6, 7, 8,          ]
-        ys = [1, 2, 3, 4, 5,          9, 10, 11]
-        expect = [1, 2, 3, 4, 5, 5, 6, 7, 8, 9, 10, 11]
-        actual = merge_sorted(xs, ys)
+from iml_profiler.test import test_util
+# import sec, T, U
+class TestProcessOpNest:
 
-        assert actual == expect
-    test_01()
+    def T(self, start_sec, end_sec, name=None, **kwargs):
+        return test_util.T(start_sec, end_sec, name, process_name="process", **kwargs)
 
-def test_process_op_nest():
-    from test.test_util import sec, T, U
+    def U(self, start_usec, end_usec=None, name=None, time_usec=None, **kwargs):
+        return test_util.U(start_usec, end_usec, name, time_usec, process_name="process", **kwargs)
 
-    process_op_nest = process_op_nest_single_thread
-
-    def test_01_1_stack():
+    def test_01_1_stack(self):
+        T = self.T
+        U = self.U
+        process_op_nest = process_op_nest_single_thread
         #           [   op3   ]
         #       [       op2       ]
         # [             op1             ]
@@ -5911,9 +5915,11 @@ def test_process_op_nest():
             T(2, 3, 'op3'),
         ]
         assert actual == expect
-    test_01_1_stack()
 
-    def test_02_2_stacks():
+    def test_02_2_stacks(self):
+        T = self.T
+        U = self.U
+        process_op_nest = process_op_nest_single_thread
         op_events = [
             # Stack 1
             T(0, 5, 'op1'),
@@ -5939,10 +5945,14 @@ def test_process_op_nest():
             T(7, 8, 'op4'),
         ]
         assert actual == expect
-    test_02_2_stacks()
 
     # # Invalid input test
-    # def test_03_complete_overlap():
+    # def test_03_complete_overlap(self):
+    #     import pytest
+    #
+    #     T = self.T
+    #     U = self.U
+    #     process_op_nest = process_op_nest_single_thread
     #     op_events = [
     #         T(0, 1, 'op1'),
     #         T(0, 1, 'op2'),
@@ -5955,9 +5965,11 @@ def test_process_op_nest():
     #     #     T(0, 1, 'op2'),
     #     # ]
     #     # assert actual == expect
-    # test_03_complete_overlap()
 
-    def test_04_multiple_sub_events():
+    def test_04_multiple_sub_events(self):
+        T = self.T
+        U = self.U
+        process_op_nest = process_op_nest_single_thread
         op_events = [
             T(0, 5, 'op1'),
             T(1, 2, 'op2'),
@@ -5997,9 +6009,8 @@ def test_process_op_nest():
             T(3, 4, 'op3'),
         ]
         assert actual == expect
-    test_04_multiple_sub_events()
 
-    def test_05_wild_data_01():
+    def test_05_wild_data_01(self):
         """
         Saw this data happen 'in the wild' from a collected trace.
         For some reason, process_op_nest failed.
@@ -6031,6 +6042,9 @@ def test_process_op_nest():
 
         :return:
         """
+        T = self.T
+        U = self.U
+        process_op_nest = process_op_nest_single_thread
         from decimal import Decimal as dec
 
         # [       train_loop      ]
@@ -6084,4 +6098,3 @@ def test_process_op_nest():
         #     T(3, 4, 'op3'),
         # ]
         # assert actual == expect
-    test_05_wild_data_01()

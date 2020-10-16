@@ -1,10 +1,13 @@
 # Wrapper around librlscope.so LD_PRELOAD library.
 import ctypes
+from os import environ as ENV
 
 from io import StringIO
 from iml_profiler.profiler.iml_logging import logger
 from iml_profiler.parser.common import *
 
+import ctypes
+import ctypes.util
 from ctypes import *
 
 c_int_p = ctypes.POINTER(ctypes.c_int)
@@ -13,6 +16,84 @@ from iml_profiler import py_config
 
 from iml_profiler.profiler.iml_logging import logger
 from iml_profiler import py_config
+
+
+RLSCOPE_LIBNAME = 'rlscope'
+RLSCOPE_CLIB = None
+def find_librlscope():
+    global RLSCOPE_CLIB
+    if RLSCOPE_CLIB is not None:
+        return
+
+    # Older version of python (<=3.6) need 'LIBRARY_PATH' to be defined for find_library to work.
+    assert 'LIBRARY_PATH' not in ENV or ENV['LIBRARY_PATH'] == ENV['LD_LIBRARY_PATH']
+
+    # First, try to find librlscope.so using our current LD_LIBRARY_PATH.
+    #
+    # NOTE: This will succeed in development mode (i.e., "python setup.py develop")
+    # since we set LD_LIBRARY_PATH in source_me.sh.
+    # In "pip install iml_profiler" distribution mode, this will fail, since
+    # librlscope.lib is packaged inside:
+    #   iml_profiler/cpp/lib/librlscope.so
+    ENV['LIBRARY_PATH'] = ENV['LD_LIBRARY_PATH']
+    RLSCOPE_CLIB = ctypes.util.find_library(RLSCOPE_LIBNAME)
+
+    if RLSCOPE_CLIB is None:
+        orig_LD_LIBRARY_PATH = ENV['LD_LIBRARY_PATH']
+        # Locations to search for librlscope.so
+        # Currently, we just search for iml_profiler/cpp/lib/librlscope.so
+        rlscope_lib_dirs = [py_config.CPP_LIB]
+        for path in rlscope_lib_dirs:
+            if not os.path.isdir(path):
+                continue
+            ENV['LD_LIBRARY_PATH'] = "{LD_LIBRARY_PATH}:{path}".format(
+                path=path,
+                LD_LIBRARY_PATH=ENV['LD_LIBRARY_PATH'],
+            )
+            ENV['LIBRARY_PATH'] = ENV['LD_LIBRARY_PATH']
+            RLSCOPE_CLIB = ctypes.util.find_library(RLSCOPE_LIBNAME)
+            if RLSCOPE_CLIB is not None:
+                break
+            ENV['LD_LIBRARY_PATH'] = orig_LD_LIBRARY_PATH
+            ENV['LIBRARY_PATH'] = ENV['LD_LIBRARY_PATH']
+
+    if RLSCOPE_CLIB is None:
+        if py_config.is_development_mode():
+            """
+            RL-Scope has been installed using "python setup.py develop", and is being 
+            run from a github repo checkout.
+            
+            Provide instructions on how to build librlscope.so from scratch, and add it to 
+            the user's LD_LIBRARY_PATH so we can find it.
+            """
+            logger.error(textwrap.dedent("""\
+            IML ERROR: couldn't find RL-Scope library (lib{name}.so); to build it, do:
+              $ cd {root}
+              $ bash ./setup.sh
+              # To modify your LD_LIBRARY_PATH to include lib{name}.so, run:
+              $ source source_me.sh
+            """.format(
+                name=RLSCOPE_LIBNAME,
+                root=py_config.ROOT,
+            )).rstrip())
+        else:
+            """
+            RL-Scope has been installed using "pip install iml_profiler".
+            
+            librlscope.so SHOULD be bundled with the install python package; 
+            if it isn't then this is a BUG.
+            """
+            logger.error(textwrap.dedent("""\
+            IML ERROR: couldn't find RL-Scope library (lib{name}.so) inside {lib_dir}.
+            This looks like a BUG in RL-Scope; please report it at:
+              https://github.com/UofT-EcoSystem/iml/issues
+            """.format(
+                lib_dir=py_config.CPP_LIB,
+                name=RLSCOPE_LIBNAME,
+            )).rstrip())
+        sys.exit(1)
+
+
 TF_OK = 0
 TF_CANCELLED = 1
 TF_UNKNOWN = 2
@@ -57,7 +138,7 @@ def is_used():
     global _IS_USED
     if _IS_USED is None:
         _IS_USED = any(
-            is_sample_cuda_api_lib(path)
+            is_rlscope_api_lib(path)
             for path in re.split(r':', os.environ.get('LD_PRELOAD', '')))
     return _IS_USED
 
@@ -69,7 +150,7 @@ def load_library(allow_fail=None):
 
     # except OSError as e:
     try:
-        _so = ctypes.cdll.LoadLibrary(py_config.RLSCOPE_CLIB)
+        _so = ctypes.cdll.LoadLibrary(RLSCOPE_CLIB)
         # os.error
     except OSError as e:
         if not allow_fail or not re.search(r'no such file', str(e), re.IGNORECASE):
@@ -78,7 +159,7 @@ def load_library(allow_fail=None):
         #     'e.__dict__':e.__dict__,
         #     'e.errno':e.errno,
         # })
-        logger.info(f"Failed to load {py_config.RLSCOPE_CLIB}")
+        logger.info(f"Failed to load {RLSCOPE_CLIB}")
         return
 
     _so.rlscope_setup.argtypes = []
@@ -145,14 +226,14 @@ def load_library(allow_fail=None):
     _so.rlscope_async_dump.restype = c_int
     _set_api_wrapper('async_dump')
 
-    logger.info(f"Loaded symbols from {py_config.RLSCOPE_CLIB}")
+    logger.info(f"Loaded symbols from {RLSCOPE_CLIB}")
 
 def _full_api_name(api_name):
     return f"rlscope_{api_name}"
 
 def _set_api_wrapper(api_name):
     full_api_name = _full_api_name(api_name)
-    from iml_profiler.clib import sample_cuda_api
+    from iml_profiler.clib import rlscope_api
     func = getattr(_so, full_api_name)
     def api_wrapper(*args, **kwargs):
         if py_config.DEBUG and py_config.DEBUG_RLSCOPE_LIB_CALLS:
@@ -162,7 +243,7 @@ def _set_api_wrapper(api_name):
         if ret != TF_OK:
             raise IMLProfError(ret)
         return ret
-    setattr(sample_cuda_api, api_name, api_wrapper)
+    setattr(rlscope_api, api_name, api_wrapper)
 
 def set_metadata(directory, process_name, machine_name, phase):
     if py_config.DEBUG and py_config.DEBUG_RLSCOPE_LIB_CALLS:

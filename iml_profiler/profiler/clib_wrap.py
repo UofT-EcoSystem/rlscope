@@ -26,7 +26,7 @@ from iml_profiler.profiler import wrap_util
 from iml_profiler import py_config
 from iml_profiler.profiler.util import get_stacktrace
 
-from iml_profiler.clib import sample_cuda_api
+from iml_profiler.clib import rlscope_api
 
 now_us = iml_timer.now_us
 
@@ -779,7 +779,7 @@ class _CallStack:
             else:
                 record_name = last_frame.name
             if _TRACING_ON:
-                sample_cuda_api.record_event(
+                rlscope_api.record_event(
                     category=last_frame.category,
                     start_us=last_frame.start_us,
                     duration_us=start_us - last_frame.start_us,
@@ -797,7 +797,7 @@ class _CallStack:
         last_frame = self.frames.pop()
 
         if _TRACING_ON:
-            sample_cuda_api.record_event(
+            rlscope_api.record_event(
                 category=last_frame.category,
                 start_us=last_frame.start_us,
                 duration_us=start_us - last_frame.start_us,
@@ -822,7 +822,7 @@ class _CallStack:
             record_name = name
         else:
             record_name = last_frame.name
-        sample_cuda_api.record_event(
+        rlscope_api.record_event(
             category=last_frame.category,
             start_us=last_frame.start_us,
             duration_us=end_us - last_frame.start_us,

@@ -14,6 +14,7 @@ from iml_profiler import py_config
 from iml_profiler.parser.common import *
 from iml_profiler.profiler.util import gather_argv, print_cmd
 
+from iml_profiler.clib import rlscope_api
 from iml_profiler.profiler.iml_logging import logger
 
 DEFAULT_CONFIG = 'full'
@@ -202,14 +203,19 @@ def main():
             dir=args.iml_rm_traces_from))
         return
 
-    env = dict(os.environ)
-    py_config.find_librlscope()
-    so_path = py_config.RLSCOPE_CLIB
+    rlscope_api.find_librlscope()
+    so_path = rlscope_api.RLSCOPE_CLIB
     assert so_path is not None
+    env = dict(os.environ)
     add_env = dict()
     add_env['LD_PRELOAD'] = "{ld}:{so_path}".format(
         ld=env.get('LD_PRELOAD', ''),
         so_path=so_path)
+    # Q: I just want LD_LIBRARY_PATH to get printed...
+    if 'LD_LIBRARY_PATH' in env:
+        add_env['LD_LIBRARY_PATH'] = env['LD_LIBRARY_PATH']
+    # if 'LD_LIBRARY_PATH' in env:
+    #     add_env['LD_LIBRARY_PATH'] = env['LD_LIBRARY_PATH']
 
     def _set_if_none(attr, value):
         if getattr(args, attr) is None:
@@ -338,7 +344,7 @@ def main():
     sys.stdout.flush()
     sys.stderr.flush()
     os.execve(exe_path, cmd, env)
-    # Shouldn't return.
+    # os.execve shouldn't return.
     assert False
 
 def is_env_true(var, env=None):

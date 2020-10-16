@@ -65,7 +65,7 @@ CUDAAPIProfiler::~CUDAAPIProfiler() {
 //    << _state._api_stats.size()  << " records";
   if (_state._api_stats.size() > 0 and !_state.CanDump()) {
     LOG(WARNING) << "There were " << _state._api_stats.size() << " CUDA API stats records left over, "
-                 << "but we are not able to dump them; did you forget a call to sample_cuda_api.set_metadata(...)?";
+                 << "but we are not able to dump them; did you forget a call to rlscope_api.set_metadata(...)?";
   }
 }
 

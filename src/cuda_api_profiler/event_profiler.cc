@@ -244,7 +244,7 @@ EventProfiler::~EventProfiler() {
   }
   if (_state._events.size() > 0 and !_state.CanDump()) {
     LOG(WARNING) << "There were " << _state.size() << " Event records left over, "
-                 << "but we are not able to dump them; did you forget a call to sample_cuda_api.set_metadata(...)?";
+                 << "but we are not able to dump them; did you forget a call to rlscope_api.set_metadata(...)?";
   }
 }
 

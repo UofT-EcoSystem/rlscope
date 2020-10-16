@@ -358,7 +358,7 @@ Globals::~Globals() {
 
   if (device_tracer && device_tracer->IsEnabled()) {
     VLOG(FATAL) << "Looks like DeviceTracer was still running... "
-                << "please call sample_cuda_api.disable_tracing() in python BEFORE exiting to avoid stranger behavior in C++ destructors during library unload.";
+                << "please call rlscope_api.disable_tracing() in python BEFORE exiting to avoid stranger behavior in C++ destructors during library unload.";
   }
 
 //#define MAYBE_RETURN_ERROR(status)

@@ -2810,7 +2810,7 @@ class GpuUtilExperiment:
         self.plot_df()
 
 
-def test_plot_grouped_bar():
+def plot_grouped_bar():
     # https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.DataFrame.plot.bar.html
     # if self.width is not None and self.height is not None:
     #     figsize = (self.width, self.height)
@@ -2853,7 +2853,7 @@ def main():
     all_args = copy.deepcopy(vars(args))
     def _main():
         if args.test_plot_grouped_bar:
-            test_plot_grouped_bar()
+            plot_grouped_bar()
             return
 
         if args.plot_type == 'gpu_util_experiment':

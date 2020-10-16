@@ -1577,15 +1577,6 @@ class UtilPlot:
 
 # https://stackoverflow.com/questions/19184484/how-to-add-group-labels-for-bar-charts-in-matplotlib
 
-def test_table():
-    data_table = pd.DataFrame({'Room':['Room A']*4 + ['Room B']*4,
-                               'Shelf':(['Shelf 1']*2 + ['Shelf 2']*2)*2,
-                               'Staple':['Milk','Water','Sugar','Honey','Wheat','Corn','Chicken','Cow'],
-                               'Quantity':[10,20,5,6,4,7,2,1],
-                               'Ordered':np.random.randint(0,10,8)
-                               })
-    return data_table
-
 
 def add_line(ax, xpos, ypos):
     line = plt.Line2D([xpos, xpos], [ypos + .1, ypos],
@@ -1635,9 +1626,19 @@ def my_label_group_bar_table(ax, label_df, df, groupby_cols):
         ypos -= .1
 
 
-def test_grouped_xlabel():
+def attempt_grouped_xlabel():
     # https://stackoverflow.com/questions/19184484/how-to-add-group-labels-for-bar-charts-in-matplotlib
-    sample_df = test_table()
+
+    def get_table():
+        data_table = pd.DataFrame({'Room':['Room A']*4 + ['Room B']*4,
+                                   'Shelf':(['Shelf 1']*2 + ['Shelf 2']*2)*2,
+                                   'Staple':['Milk','Water','Sugar','Honey','Wheat','Corn','Chicken','Cow'],
+                                   'Quantity':[10,20,5,6,4,7,2,1],
+                                   'Ordered':np.random.randint(0,10,8)
+                                   })
+        return data_table
+
+    sample_df = get_table()
     g = sample_df.groupby(['Room', 'Shelf', 'Staple'])
     df = g.sum()
     logger.info(pprint_msg(df))
@@ -1694,7 +1695,7 @@ def main():
     args = parser.parse_args()
 
     if args.test_grouped_xlabel:
-        test_grouped_xlabel()
+        attempt_grouped_xlabel()
 
 if __name__ == '__main__':
     main()

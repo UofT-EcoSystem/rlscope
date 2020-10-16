@@ -10,6 +10,30 @@ fi
 PYTHONPATH=${PYTHONPATH:-}
 
 # From setup.sh
+_iml_build_suffix() {
+  local cuda_version="$1"
+  shift 1
+  # e.g. IML_BUILD_SUFFIX="_cuda_10_2"
+  echo "_cuda_${cuda_version}" | sed 's/[\.]/_/g'
+}
+cmake_build_dir() {
+    local third_party_dir="$1"
+    shift 1
+
+    local build_prefix=
+    if _is_non_empty IML_BUILD_PREFIX; then
+      # Docker container environment.
+      build_prefix="$IML_BUILD_PREFIX"
+    else
+      # Assume we're running in host environment.
+      build_prefix="$ROOT/local.host"
+    fi
+    local build_dir="$build_prefix/$(basename "$third_party_dir")"
+    if _is_non_empty IML_BUILD_SUFFIX; then
+      local build_dir="${build_dir}${IML_BUILD_SUFFIX}"
+    fi
+    echo "$build_dir"
+}
 _is_non_empty() {
   # Check if an environment variable is defined and not equal to empty string
   (
@@ -89,6 +113,13 @@ _add_pyenv() {
 }
 
 (
+
+IML_CUDA_VERSION=${IML_CUDA_VERSION:-10.1}
+# Only add "_cuda_10_1" suffix to iml build directory.
+IML_BUILD_SUFFIX="$(_iml_build_suffix ${IML_CUDA_VERSION})"
+IML_BUILD_DIR="$(cmake_build_dir "$ROOT")"
+unset IML_BUILD_SUFFIX
+
 IML_INSTALL_PREFIX_DEFINED=no
 if _is_non_empty IML_INSTALL_PREFIX; then
   IML_INSTALL_PREFIX_DEFINED=yes

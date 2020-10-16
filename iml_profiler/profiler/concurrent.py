@@ -286,12 +286,15 @@ def _sys_exit_1():
     logger.info("Running child in ForkedProcessPool that exits with sys.exit(1)")
     sys.exit(1)
 
+class TestForkedProcessException(Exception):
+    pass
+
 def _exception():
     """
     For unit-testing.
     """
     logger.info("Running child in ForkedProcessPool that raises an exception")
-    raise RuntimeError("Child process exception")
+    raise TestForkedProcessException("Child process exception")
 
 def _do_nothing():
     pass
@@ -301,33 +304,31 @@ def _check_dir_exists(path):
         print("FAIL: path={path} doesn't exist".format(path=path))
     assert os.path.isdir(path)
 
-def test_forked_process_pool():
+class TestForkedProcessPool:
 
-    def test_01_sys_exit_1():
+    def test_01_sys_exit_1(self):
         """
         Check that processes that exit with sys.exit(1) are detected.
 
         :return:
         """
-        pool = ForkedProcessPool(name=test_01_sys_exit_1.__name__)
+        pool = ForkedProcessPool(name=self.test_01_sys_exit_1.__name__)
         with pytest.raises(FailedProcessException, match=ForkedProcessPool.NONZERO_EXIT_STATUS_ERROR_REGEX) as exec_info:
             pool.submit(_sys_exit_1.__name__, _sys_exit_1)
             pool.shutdown()
-    test_01_sys_exit_1()
 
-    def test_02_exception():
+    def test_02_exception(self):
         """
         Check that processes that exit with sys.exit(1) are detected.
 
         :return:
         """
-        pool = ForkedProcessPool(name=test_02_exception.__name__)
-        with pytest.raises(FailedProcessException, match="Child process exception") as exec_info:
+        pool = ForkedProcessPool(name=self.test_02_exception.__name__)
+        with pytest.raises(TestForkedProcessException, match="Child process exception") as exec_info:
             pool.submit(_exception.__name__, _exception)
             pool.shutdown()
-    test_02_exception()
 
-    def test_03_mkdir():
+    def test_03_mkdir(self):
         """
         Test that directory created in parent process is seen in child process.
 
@@ -344,40 +345,41 @@ def test_forked_process_pool():
             shutil.rmtree(TEST_DIR)
         # debug = True
         debug = False
-        pool = ForkedProcessPool(name=test_03_mkdir.__name__, debug=debug)
+        pool = ForkedProcessPool(name=self.test_03_mkdir.__name__, debug=debug)
         for i in range(num_dirs):
             path = get_dir_path(i)
             os.makedirs(path, exist_ok=True)
-            name = "{func}(i={i})".format(func=test_03_mkdir.__name__, i=i)
+            name = "{func}(i={i})".format(func=self.test_03_mkdir.__name__, i=i)
             pool.submit(name, _check_dir_exists, path)
         pool.shutdown()
         shutil.rmtree(TEST_DIR)
-    test_03_mkdir()
 
-    try:
-        # resource module not supported on Windows
-        import resource
-        run_test_04_file_limit = True
-    except ImportError:
-        run_test_04_file_limit = False
-    def test_04_file_limit():
-        """
-        Test MyProcess doesn't induce open-file limit by creating
-        multiprocessing.Pipe() objects.
-
-        :return:
-        """
-        import resource
-        test_name = test_04_file_limit.__name__
-        logger.info("Running {test}; this may take a minute...".format(
-            test=test_name))
-        soft_file_limit, hard_file_limit = resource.getrlimit(resource.RLIMIT_OFILE)
-        # debug = True
-        debug = False
-        pool = ForkedProcessPool(name=test_name, debug=debug)
-        for i in progressbar(range(soft_file_limit + 10), prefix=test_name):
-            pool.submit(_do_nothing.__name__, _do_nothing)
-        pool.shutdown()
-        # We reached here, test passed.
-    if run_test_04_file_limit:
-        test_04_file_limit()
+    # This test takes a while...
+    #
+    # try:
+    #     # resource module not supported on Windows
+    #     import resource
+    #     run_test_04_file_limit = True
+    # except ImportError:
+    #     run_test_04_file_limit = False
+    # def test_04_file_limit(self):
+    #     """
+    #     Test MyProcess doesn't induce open-file limit by creating
+    #     multiprocessing.Pipe() objects.
+    #
+    #     :return:
+    #     """
+    #     import resource
+    #     test_name = test_04_file_limit.__name__
+    #     logger.info("Running {test}; this may take a minute...".format(
+    #         test=test_name))
+    #     soft_file_limit, hard_file_limit = resource.getrlimit(resource.RLIMIT_OFILE)
+    #     # debug = True
+    #     debug = False
+    #     pool = ForkedProcessPool(name=test_name, debug=debug)
+    #     for i in progressbar(range(soft_file_limit + 10), prefix=test_name):
+    #         pool.submit(_do_nothing.__name__, _do_nothing)
+    #     pool.shutdown()
+    #     # We reached here, test passed.
+    # if run_test_04_file_limit:
+    #     test_04_file_limit()

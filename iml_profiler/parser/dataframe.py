@@ -2108,8 +2108,9 @@ def extrap_total_training_time(time_unit, percent_complete):
     total_time_unit = time_unit * (1./percent_complete)
     return total_time_unit
 
-def test_venn_as_overlap_dict():
-    def check_eq(name, got, expect):
+class TestVennAsOverlapDict:
+
+    def check_eq(self, name, got, expect):
         result = (got == expect)
         if not result:
             logger.info(pprint_msg({
@@ -2119,24 +2120,24 @@ def test_venn_as_overlap_dict():
             }))
         assert got == expect
 
-    def check_from_venn(name, V, expect_O):
+    def check_from_venn(self, name, V, expect_O):
         got_O = venn_as_overlap_dict(V)
-        check_eq("{name}.venn_as_overlap_dict".format(name=name), got_O, expect_O)
+        self.check_eq("{name}.venn_as_overlap_dict".format(name=name), got_O, expect_O)
         got_V = overlap_as_venn_dict(expect_O)
         expect_V = V
-        check_eq("{name}.overlap_as_venn_dict".format(name=name), got_V, expect_V)
+        self.check_eq("{name}.overlap_as_venn_dict".format(name=name), got_V, expect_V)
 
-    def check_from_overlap(name, O, expect_V):
+    def check_from_overlap(self, name, O, expect_V):
         got_V = overlap_as_venn_dict(O)
-        check_eq("{name}.overlap_as_venn_dict".format(name=name), got_V, expect_V)
+        self.check_eq("{name}.overlap_as_venn_dict".format(name=name), got_V, expect_V)
 
         V = expect_V
         expect_O = O
         got_O = venn_as_overlap_dict(V)
-        check_eq("{name}.test_venn_as_overlap_dict_06.overlap_as_venn_dict".format(name=name), got_O, expect_O)
+        self.check_eq("{name}.test_venn_as_overlap_dict_06.overlap_as_venn_dict".format(name=name), got_O, expect_O)
 
 
-    def test_venn_as_overlap_dict_01():
+    def test_venn_as_overlap_dict_01(self):
         V = {
             (0,): 6,
             (1,): 6,
@@ -2155,10 +2156,9 @@ def test_venn_as_overlap_dict():
             (1,2): 1,
             (0,1,2): 1,
         }
-        check_from_venn("test_venn_as_overlap_dict_01", V, expect_O)
-    test_venn_as_overlap_dict_01()
+        self.check_from_venn("test_venn_as_overlap_dict_01", V, expect_O)
 
-    def test_venn_as_overlap_dict_02():
+    def test_venn_as_overlap_dict_02(self):
         V = {
             (0,): 5,
             (1,): 5,
@@ -2169,10 +2169,9 @@ def test_venn_as_overlap_dict():
             (1,): 3,
             (0,1): 2,
         }
-        check_from_venn("test_venn_as_overlap_dict_02", V, expect_O)
-    test_venn_as_overlap_dict_02()
+        self.check_from_venn("test_venn_as_overlap_dict_02", V, expect_O)
 
-    def test_venn_as_overlap_dict_03():
+    def test_venn_as_overlap_dict_03(self):
         V = {
             (0,): 3,
             (1,): 3,
@@ -2187,10 +2186,9 @@ def test_venn_as_overlap_dict():
             (0,1): 1,
             (0,2): 1,
         }
-        check_from_venn("test_venn_as_overlap_dict_03", V, expect_O)
-    test_venn_as_overlap_dict_03()
+        self.check_from_venn("test_venn_as_overlap_dict_03", V, expect_O)
 
-    # def test_venn_as_overlap_dict_04():
+    # def test_venn_as_overlap_dict_04(self):
     #     # FROM : /mnt/data/james/clone/iml/output/iml_bench/all/config_instrumented_repetition_01/ppo2/Walker2DBulletEnv-v0/CategoryOverlap.machine_2420f5fc91b8.process_ppo2_Walker2DBulletEnv-v0.phase_ppo2_Walker2DBulletEnv-v0.ops_sample_action.resources_CPU_GPU.venn_js.json
     #     # Generated using old SQL code.
     #     # "venn": [
@@ -2257,7 +2255,7 @@ def test_venn_as_overlap_dict():
     #     check_from_venn("test_venn_as_overlap_dict_04", V, expect_O)
     # test_venn_as_overlap_dict_04()
 
-    def test_venn_as_overlap_dict_05():
+    def test_venn_as_overlap_dict_05(self):
         O = {
             (0,): 5,
             (0,1): 5,
@@ -2268,10 +2266,9 @@ def test_venn_as_overlap_dict():
             (0,1): 5,
         }
         got_V = overlap_as_venn_dict(O)
-        check_eq("test_venn_as_overlap_dict_05.overlap_as_venn_dict", got_V, expect_V)
-    test_venn_as_overlap_dict_05()
+        self.check_eq("test_venn_as_overlap_dict_05.overlap_as_venn_dict", got_V, expect_V)
 
-    def test_venn_as_overlap_dict_06():
+    def test_venn_as_overlap_dict_06(self):
         O = {
             (0,1): 5,
         }
@@ -2280,7 +2277,7 @@ def test_venn_as_overlap_dict():
             (1,): 5,
             (0,1): 5,
         }
-        check_from_overlap("test_venn_as_overlap_dict_06", O, expect_V)
+        self.check_from_overlap("test_venn_as_overlap_dict_06", O, expect_V)
 
         # got_V = overlap_as_venn_dict(O)
         # check_eq("test_venn_as_overlap_dict_06.overlap_as_venn_dict", got_V, expect_V)
@@ -2289,4 +2286,3 @@ def test_venn_as_overlap_dict():
         # expect_O = O
         # got_O = venn_as_overlap_dict(V)
         # check_eq("test_venn_as_overlap_dict_06.overlap_as_venn_dict", got_O, expect_O)
-    test_venn_as_overlap_dict_06()

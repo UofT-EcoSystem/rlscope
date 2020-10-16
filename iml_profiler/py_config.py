@@ -1,11 +1,19 @@
 from os.path import join as _j, abspath as _a, exists as _e, dirname as _d, basename as _b
 from os import environ as ENV
+import shutil
 import numpy as np
 import ctypes.util
 import sys
+import os
 import textwrap
 
+import iml_profiler
 
+INSTALL_ROOT = _d(os.path.realpath(iml_profiler.__file__))
+
+CPP_LIB = _j(INSTALL_ROOT, 'cpp', 'lib')
+CPP_BIN = _j(INSTALL_ROOT, 'cpp', 'bin')
+CPP_INCLUDE = _j(INSTALL_ROOT, 'cpp', 'include')
 
 USE_NUMBA = False
 nb = None
@@ -20,32 +28,6 @@ IML_TEST_DIR = _j(IML_DIR, 'test_results')
 
 DEBUG = False
 
-RLSCOPE_LIBNAME = 'rlscope'
-RLSCOPE_CLIB = None
-def find_librlscope():
-  global RLSCOPE_CLIB
-  if RLSCOPE_CLIB is not None:
-    return
-  # Older version of python (<=3.6) need 'LIBRARY_PATH' to be defined for find_library to work.
-  assert 'LIBRARY_PATH' not in ENV or ENV['LIBRARY_PATH'] == ENV['LD_LIBRARY_PATH']
-  ENV['LIBRARY_PATH'] = ENV['LD_LIBRARY_PATH']
-  RLSCOPE_CLIB = ctypes.util.find_library(RLSCOPE_LIBNAME)
-  # RLSCOPE_CLIB = 'lib{name}.so'.format(
-  #   name=RLSCOPE_LIBNAME)
-
-  # if not _e(so_path):
-  if RLSCOPE_CLIB is None:
-    sys.stderr.write(textwrap.dedent("""
-        IML ERROR: couldn't find RLScope library (lib{name}.so); to build it, do:
-          $ cd {root}
-          $ bash ./setup.sh
-          # To modify your LD_LIBRARY_PATH to include lib{name}.so, run:
-          $ source source_me.sh
-        """.format(
-      name=RLSCOPE_LIBNAME,
-      root=ROOT,
-    )))
-    sys.exit(1)
 
 CLONE = _j(ENV['HOME'], 'clone')
 BASELINES_ROOT = _j(CLONE, 'baselines')
@@ -245,3 +227,9 @@ if USE_NUMBA:
 
   NUMPY_CATEGORY_KEY_TYPE = np.int64
   NUMBA_CATEGORY_KEY_TYPE = nb.int64
+
+def is_development_mode():
+  return not is_production_mode()
+
+def is_production_mode():
+  return shutil.which('rlscope-pip-installed') is not None

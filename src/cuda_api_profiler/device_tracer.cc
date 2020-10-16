@@ -80,7 +80,7 @@ limitations under the License.
 //#define mutex std::mutex
 //#define mutex_lock std::lock_guard<std::mutex>
 
-// Print time of operations that occur during sample_cuda_api.disable_tracing() / DeviceTracerImpl::Stop()
+// Print time of operations that occur during rlscope_api.disable_tracing() / DeviceTracerImpl::Stop()
 // that are on the critical-path of the script exiting during Profiler.finish().
 //#define DEBUG_CRITICAL_PATH
 

@@ -323,6 +323,8 @@ def _sel_all(selector, sel_order, level, md, subtree, skip_missing_fields=False,
 
     :return:
     """
+    if debug:
+        logger.debug(f"level = {level}")
     while True:
         if level == len(sel_order):
             yield dict(md), subtree
@@ -335,17 +337,24 @@ def _sel_all(selector, sel_order, level, md, subtree, skip_missing_fields=False,
             level += 1
         elif field in subtree:
             break
+        else:
+            raise RuntimeError("Didn't find field={field} in selector; options are {fields}".format(
+                field=field,
+                fields=sorted(subtree.keys()),
+            ))
 
     for value, next_subtree in _sel(selector, subtree[field], field, skip_missing_fields=skip_missing_fields, debug=debug):
         md[field] = value
         for md, entry in _sel_all(selector, sel_order, level + 1, md, next_subtree, skip_missing_fields=skip_missing_fields, debug=debug):
             yield md, entry
 
-def test_sel():
 
-    def test_sel_01():
+class TestSel:
+
+    def test_sel_01(self):
         INDEX = {
-            'ResourceSubplot': {'process': {'loop_init': {'phase': {'bootstrap': {'venn_js_path': 'ResourceSubplot.process_loop_init.phase_bootstrap.venn_js.json'},
+            'ResourceSubplot':
+                {'process': {'loop_init': {'phase': {'bootstrap': {'venn_js_path': 'ResourceSubplot.process_loop_init.phase_bootstrap.venn_js.json'},
                                                                     'default_phase': {'venn_js_path': 'ResourceSubplot.process_loop_init.phase_default_phase.venn_js.json'}}},
                                             'loop_selfplay': {'phase': {'default_phase': {'venn_js_path': 'ResourceSubplot.process_loop_selfplay.phase_default_phase.venn_js.json'},
                                                                         'selfplay_workers': {'venn_js_path': 'ResourceSubplot.process_loop_selfplay.phase_selfplay_workers.venn_js.json'}}},
@@ -360,7 +369,6 @@ def test_sel():
         }
 
         for i, (value, subtree) in enumerate(_sel({'overlap_type':'ResourceSubplot'}, INDEX, 'overlap_type')):
-            logger.info(" HI1 ")
             assert i == 0
             assert subtree == INDEX['ResourceSubplot']
 
@@ -368,7 +376,6 @@ def test_sel():
                 {'overlap_type':'ResourceSubplot', 'process':'loop_train_eval'},
                 INDEX['ResourceSubplot']['process'],
                 'process')):
-            logger.info(" HI2 ")
             assert i == 0
             assert subtree == INDEX['ResourceSubplot']['process']['loop_train_eval']
 
@@ -384,30 +391,33 @@ def test_sel():
         # {'overlap_type':'ResourceSubplot', 'process':'loop_train_eval', 'phase':'evaluate'},
         for i, (md, entry) in enumerate(_sel_all(
                 {'overlap_type':'ResourceSubplot', 'process':'loop_train_eval'},
-                SEL_ORDER['ResourceSubplot'],
+                # SEL_ORDER['ResourceSubplot'],
+                ['process', 'phase'],
                 0,
                 md,
                 INDEX['ResourceSubplot'])):
             actual_entries.append(entry)
             actual_mds.append(md)
+
         # actual_entries.sort()
         # actual_mds.sort()
         for expected_entry in expected_entries:
             assert expected_entry in actual_entries
-    test_sel_01()
 
-    def test_sel_02():
+    def test_sel_02(self):
         INDEX = {
             'OperationOverlap': {
-                'process': {'dqn_PongNoFrameskip-v4': {
-                    'phase': {
-                        'dqn_PongNoFrameskip-v4': {
-                            'resource_overlap': {
-                                ('CPU',): {
-                                    'venn_js_path': 'OperationOverlap.process_dqn_PongNoFrameskip-v4.phase_dqn_PongNoFrameskip-v4.resources_CPU.venn_js.json'},
-                                ('CPU', 'GPU'): {
-                                    'venn_js_path': 'OperationOverlap.process_dqn_PongNoFrameskip-v4.phase_dqn_PongNoFrameskip-v4.resources_CPU_GPU.venn_js.json'}}}}}}},
-        }
+                'machine':
+                    {'eco11': {
+                        'process': {'dqn_PongNoFrameskip-v4': {
+                            'phase': {
+                                'dqn_PongNoFrameskip-v4': {
+                                    'resource_overlap': {
+                                        ('CPU',): {
+                                            'venn_js_path': 'OperationOverlap.process_dqn_PongNoFrameskip-v4.phase_dqn_PongNoFrameskip-v4.resources_CPU.venn_js.json'},
+                                        ('CPU', 'GPU'): {
+                                            'venn_js_path': 'OperationOverlap.process_dqn_PongNoFrameskip-v4.phase_dqn_PongNoFrameskip-v4.resources_CPU_GPU.venn_js.json'}
+                                    }}}}}}}}}
         data_index = _DataIndex(INDEX, "madeup_dir")
         selector = {
             'overlap_type':'OperationOverlap',
@@ -432,4 +442,3 @@ def test_sel():
         assert foreach_resource_overlap_types == expect_resource_overlap_types
 
         assert list_resource_overlap_types == foreach_resource_overlap_types
-    test_sel_02()

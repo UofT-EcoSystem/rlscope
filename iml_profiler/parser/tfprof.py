@@ -248,25 +248,25 @@ class ComputeOverlap:
         return new_times
 
     def _compute_overlap(self, eo_times_dict):
-        # if py_config.IML_USE_NUMBA:
-        overlap, overlap_metadata = compute_overlap_single_thread_numba(
-            # category_times,
-            eo_times_dict,
-            self.overlaps_with,
-            self.check_key,
-            self.debug,
-            self.show_progress,
-            timer=self.timer,
-        )
-        # else:
-        #     overlap, overlap_metadata = compute_overlap_single_thread(
-        #         category_times,
-        #         self.overlaps_with,
-        #         self.check_key,
-        #         self.debug,
-        #         self.show_progress,
-        #         timer=self.timer,
-        #     )
+        if py_config.USE_NUMBA:
+            overlap, overlap_metadata = compute_overlap_single_thread_numba(
+                # category_times,
+                eo_times_dict,
+                self.overlaps_with,
+                self.check_key,
+                self.debug,
+                self.show_progress,
+                timer=self.timer,
+            )
+        else:
+            overlap, overlap_metadata = compute_overlap_single_thread(
+                eo_times_dict,
+                self.overlaps_with,
+                self.check_key,
+                self.debug,
+                self.show_progress,
+                timer=self.timer,
+            )
 
         if self.overlaps_with is not None:
             del_keys = []
@@ -844,10 +844,12 @@ def compute_overlap_single_thread(
             cur_events[category] = event
     def pop_end(category):
         by_end.pop_time(category)
-        if category not in cur_categories:
-            # Q: Under what circumstances might this occur?  What information do we need to backtrack?
-            import ipdb; ipdb.set_trace()
-        cur_categories.remove(category)
+        if category in cur_categories:
+            cur_categories.remove(category)
+        else:
+            # # Q: Under what circumstances might this occur?  What information do we need to backtrack?
+            # import ipdb; ipdb.set_trace()
+            pass
         if check_key:
             assert category in cur_events
             del cur_events[category]
@@ -3699,7 +3701,7 @@ def merge_dicts(dict1, dict2, merge_func):
 
 def test_merge_adjacent_events():
 
-    from test.test_util import sec, T, flatten_category_times as flat
+    from iml_profiler.test.test_util import sec, T, flatten_category_times as flat
 
     def test_01_merge_adj_events():
         events = [T(1, 6), T(2, 6), T(3, 7), T(4, 6)]
@@ -3747,302 +3749,337 @@ Common usage:
 
 """
 
-def test_01_complete():
-    from test.test_util import sec, T, flatten_category_times as flat
-    # Q: Any way to automate this by checking if a pytest is running...?
-    py_config.IS_UNIT_TEST = True
-    category_times = {
-        'c1':[
-            [
-                T(3, 4), T(8, 10),
-            ],
-            [
-                T(3.5, 7),
-            ],
-        ],
-        'c2':[
-            [
-                T(1, 4), T(6, 9),
-            ],
-        ],
-        'c3':[
-            [
-                T(2, 3), T(4, 5), T(7, 8),
-            ],
-            [
-                T(3, 4), T(11, 12),
-            ],
-        ],
-    }
-    compute_overlap = ComputeOverlap(flat(category_times), debug=py_config.IML_DEBUG_UNIT_TESTS)
-    compute_overlap.compute_merge()
-    got = compute_overlap.get_merged_categories()
-    expect = {
-        'c1':[
-            T(3, 7), T(8, 10),
-        ],
-        'c2':[
-            T(1, 4), T(6, 9),
-        ],
-        'c3':[
-            T(2, 5), T(7, 8), T(11, 12),
-        ],
-    }
-    assert got == expect
+if py_config.USE_NUMBA:
 
-    # compute_overlap.compute()
-    compute_overlap.compute_times()
-    got = compute_overlap.get_category_times()
-    expect = {
-        frozenset({'c1'}):sec(2),
-        frozenset({'c2'}):sec(1),
-        frozenset({'c3'}):sec(1),
-        frozenset({'c1', 'c2'}):sec(2),
-        frozenset({'c1', 'c3'}):sec(1),
-        frozenset({'c2', 'c3'}):sec(2),
-        frozenset({'c1', 'c2', 'c3'}):sec(1),
-    }
-    assert got == expect
+    from iml_profiler.test import test_util
+    class TestOverlap:
 
-def test_02_overlaps_with():
-    from test.test_util import sec, T, flatten_category_times as flat
-    py_config.IS_UNIT_TEST = True
-    category_times = {
-        'c1':[
-            [
-                T(3, 4), T(8, 10),
-            ],
-            [
-                T(3.5, 7),
-            ],
-        ],
-        'c2':[
-            [
-                T(1, 4), T(6, 9),
-            ],
-        ],
-        'c3':[
-            [
-                T(2, 3), T(4, 5), T(7, 8),
-            ],
-            [
-                T(3, 4), T(11, 12),
-            ],
-        ],
-    }
-    compute_overlap = ComputeOverlap(flat(category_times), overlaps_with=['c1'], debug=py_config.IML_DEBUG_UNIT_TESTS)
+        def T(self, *args, **kwargs):
+            return test_util.T(*args, **kwargs)
 
-    compute_overlap.compute()
-    got = compute_overlap.get_category_times()
-    expect = {
-        frozenset({'c1'}):sec(2),
-        frozenset({'c1', 'c2'}):sec(2),
-        frozenset({'c1', 'c3'}):sec(1),
-        frozenset({'c1', 'c2', 'c3'}):sec(1),
-    }
-    assert got == expect
+        def flat(self, *args, **kwargs):
+            return test_util.flatten_category_times(*args, **kwargs)
 
-def test_03_error_partial_overlap():
-    from test.test_util import sec, T, flatten_category_times as flat
-    py_config.IS_UNIT_TEST = True
-    category_times = {
-        'c1':[
-            [
-                T(3, 5), T(4, 6),
-            ],
-        ],
-    }
-    compute_overlap = ComputeOverlap(flat(category_times), debug=py_config.IML_DEBUG_UNIT_TESTS)
+        def sec(self, *args, **kwargs):
+            return test_util.sec(*args, **kwargs)
 
-    compute_overlap.compute()
-    got = compute_overlap.get_category_times()
-    expect = {
-        frozenset({'c1'}):sec(3),
-        # frozenset({'c1', 'c2'}):sec(2),
-        # frozenset({'c1', 'c3'}):sec(1),
-        # frozenset({'c1', 'c2', 'c3'}):sec(1),
-    }
-    # expect = {
-    #     frozenset({'c1'}):sec(2),
-    #     frozenset({'c1', 'c2'}):sec(2),
-    #     frozenset({'c1', 'c3'}):sec(1),
-    #     frozenset({'c1', 'c2', 'c3'}):sec(1),
-    # }
-    assert got == expect
+        def test_01_complete(self):
+            T = self.T
+            flat = self.flat
+            sec = self.sec
+            # Q: Any way to automate this by checking if a pytest is running...?
+            py_config.IS_UNIT_TEST = True
+            category_times = {
+                'c1':[
+                    [
+                        T(3, 4), T(8, 10),
+                    ],
+                    [
+                        T(3.5, 7),
+                    ],
+                ],
+                'c2':[
+                    [
+                        T(1, 4), T(6, 9),
+                    ],
+                ],
+                'c3':[
+                    [
+                        T(2, 3), T(4, 5), T(7, 8),
+                    ],
+                    [
+                        T(3, 4), T(11, 12),
+                    ],
+                ],
+            }
+            compute_overlap = ComputeOverlap(flat(category_times), debug=py_config.IML_DEBUG_UNIT_TESTS)
 
-def test_04_error_full_overlap():
-    from test.test_util import sec, T, flatten_category_times as flat
-    py_config.IS_UNIT_TEST = True
-    category_times = {
-        'c1':[
-            [
-                T(3, 6), T(4, 5),
-            ],
-        ],
-    }
-    compute_overlap = ComputeOverlap(flat(category_times), debug=py_config.IML_DEBUG_UNIT_TESTS)
+            compute_overlap.compute()
+            got = compute_overlap.get_category_times()
+            # overlap = compute_overlap.get_category_times()
+            # overlap_metadata = compute_overlap.get_overlap_metadata()
 
-    compute_overlap.compute()
-    got = compute_overlap.get_category_times()
-    # expect = {
-    #     frozenset({'c1'}):sec(2),
-    #     frozenset({'c1', 'c2'}):sec(2),
-    #     frozenset({'c1', 'c3'}):sec(1),
-    #     frozenset({'c1', 'c2', 'c3'}):sec(1),
-    # }
-    # assert got == expect
+            # compute_overlap.compute_merge()
+            # got = compute_overlap.get_merged_categories()
 
-def test_05_error_duplicate_overlap():
-    from test.test_util import sec, T, flatten_category_times as flat
-    py_config.IS_UNIT_TEST = True
-    category_times = {
-        'c1':[
-            [
-                T(3, 6), T(3, 6),
-            ],
-        ],
-    }
-    compute_overlap = ComputeOverlap(flat(category_times), debug=py_config.IML_DEBUG_UNIT_TESTS)
+            expect = {
+                'c1':[
+                    T(3, 7), T(8, 10),
+                ],
+                'c2':[
+                    T(1, 4), T(6, 9),
+                ],
+                'c3':[
+                    T(2, 5), T(7, 8), T(11, 12),
+                ],
+            }
+            assert got == expect
 
-    compute_overlap.compute()
-    got = compute_overlap.get_category_times()
-    # expect = {
-    #     frozenset({'c1'}):sec(2),
-    #     frozenset({'c1', 'c2'}):sec(2),
-    #     frozenset({'c1', 'c3'}):sec(1),
-    #     frozenset({'c1', 'c2', 'c3'}):sec(1),
-    # }
-    # assert got == expect
+            # compute_overlap.compute()
+            compute_overlap.compute_times()
+            got = compute_overlap.get_category_times()
+            expect = {
+                frozenset({'c1'}):sec(2),
+                frozenset({'c2'}):sec(1),
+                frozenset({'c3'}):sec(1),
+                frozenset({'c1', 'c2'}):sec(2),
+                frozenset({'c1', 'c3'}):sec(1),
+                frozenset({'c2', 'c3'}):sec(2),
+                frozenset({'c1', 'c2', 'c3'}):sec(1),
+            }
+            assert got == expect
 
-def test_06_error_not_sorted_by_end_time():
-    from test.test_util import sec, T, flatten_category_times as flat
-    py_config.IS_UNIT_TEST = True
-    category_times = {
-        'c1':[
-            [
-                # T(3, 6), T(3, 5),
-                # T(3, 5), T(3, 6),
-                # T(2, 5), T(3, 6),
-                T(3, 6), T(2, 5),
-            ],
-        ],
-    }
-    compute_overlap = ComputeOverlap(flat(category_times), debug=py_config.IML_DEBUG_UNIT_TESTS)
+        def test_02_overlaps_with(self):
+            T = self.T
+            flat = self.flat
+            sec = self.sec
+            py_config.IS_UNIT_TEST = True
+            category_times = {
+                'c1':[
+                    [
+                        T(3, 4), T(8, 10),
+                    ],
+                    [
+                        T(3.5, 7),
+                    ],
+                ],
+                'c2':[
+                    [
+                        T(1, 4), T(6, 9),
+                    ],
+                ],
+                'c3':[
+                    [
+                        T(2, 3), T(4, 5), T(7, 8),
+                    ],
+                    [
+                        T(3, 4), T(11, 12),
+                    ],
+                ],
+            }
+            compute_overlap = ComputeOverlap(flat(category_times), overlaps_with=['c1'], debug=py_config.IML_DEBUG_UNIT_TESTS)
 
-    compute_overlap.compute()
-    got = compute_overlap.get_category_times()
-    # expect = {
-    #     frozenset({'c1'}):sec(2),
-    #     frozenset({'c1', 'c2'}):sec(2),
-    #     frozenset({'c1', 'c3'}):sec(1),
-    #     frozenset({'c1', 'c2', 'c3'}):sec(1),
-    # }
-    # assert got == expect
+            compute_overlap.compute()
+            got = compute_overlap.get_category_times()
+            expect = {
+                frozenset({'c1'}):sec(2),
+                frozenset({'c1', 'c2'}):sec(2),
+                frozenset({'c1', 'c3'}):sec(1),
+                frozenset({'c1', 'c2', 'c3'}):sec(1),
+            }
+            assert got == expect
 
-def test_07_overlapping_sorted_events():
-    from test.test_util import sec, T, flatten_category_times as flat
-    py_config.IS_UNIT_TEST = True
+        def test_03_error_partial_overlap(self):
+            T = self.T
+            flat = self.flat
+            sec = self.sec
+            py_config.IS_UNIT_TEST = True
+            category_times = {
+                'c1':[
+                    [
+                        T(3, 5), T(4, 6),
+                    ],
+                ],
+            }
+            compute_overlap = ComputeOverlap(flat(category_times), debug=py_config.IML_DEBUG_UNIT_TESTS)
 
-    category_times = {
-        'c1':[
-            [
-                # [1..7]
-                T(1, 6), T(2, 6), T(3, 7), T(4, 6)
-            ],
-        ],
-        'c2':[
-            [
-                T(4, 5),
-            ],
-        ],
-    }
-    compute_overlap = ComputeOverlap(flat(category_times), debug=py_config.IML_DEBUG_UNIT_TESTS)
+            compute_overlap.compute()
+            got = compute_overlap.get_category_times()
+            expect = {
+                frozenset({'c1'}):sec(3),
+                # frozenset({'c1', 'c2'}):sec(2),
+                # frozenset({'c1', 'c3'}):sec(1),
+                # frozenset({'c1', 'c2', 'c3'}):sec(1),
+            }
+            # expect = {
+            #     frozenset({'c1'}):sec(2),
+            #     frozenset({'c1', 'c2'}):sec(2),
+            #     frozenset({'c1', 'c3'}):sec(1),
+            #     frozenset({'c1', 'c2', 'c3'}):sec(1),
+            # }
+            assert got == expect
 
-    compute_overlap.compute()
-    got = compute_overlap.get_category_times()
-    expect = {
-        frozenset({'c1'}):sec(5),
-        frozenset({'c1', 'c2'}):sec(1),
-    }
-    assert got == expect
+        def test_04_error_full_overlap(self):
+            T = self.T
+            flat = self.flat
+            sec = self.sec
+            py_config.IS_UNIT_TEST = True
+            category_times = {
+                'c1':[
+                    [
+                        T(3, 6), T(4, 5),
+                    ],
+                ],
+            }
+            compute_overlap = ComputeOverlap(flat(category_times), debug=py_config.IML_DEBUG_UNIT_TESTS)
 
-# def test_08_overlapping_sorted_events():
-#     """
-#     This test has events within a single category that overlap.
-#
-#     For example, c1:
-#             1  2  3  4  5  6  7  8  9  10
-#             |  |  |  |  |  |  |  |  |  |
-#
-#             [              ]
-#      c1        [           ]
-#                   [           ]
-#                      [     ]
-#
-#                      [][]
-#      c2                 [           ]
-#                         [        ]
-#
-#      c3                 [           ]
-#
-#     Ideally, the algorithm would process the event trace as if the event-trace has no overlaps:
-#
-#             1  2  3  4  5  6  7  8  9  10
-#             |  |  |  |  |  |  |  |  |  |
-#
-#      c1     [                 ]
-#
-#      c2              [              ]
-#
-#      c3                 [           ]
-#
-#      Technically we can prevent this type of scenario in the input by pre-processing events
-#      to eliminate self-overlap.
-#
-#     :return:
-#     """
-#     from test.test_util import sec, T, flatten_category_times as flat
-#     py_config.IS_UNIT_TEST = True
-#     # Q: What if start times match but end times are unordered?
-#     # Q: WHY would this EVER happen in our data though...?
-#     #    It CAN if concurrent events get "shuffled" into the same category (for some reason).
-#     #    Perhaps this could happen with CPU/GPU?
-#
-#     category_times = {
-#         'c1':[
-#             [
-#                 # [1..7] 6
-#                 T(1, 6), T(2, 6), T(3, 7), T(4, 6)
-#             ],
-#         ],
-#         'c2':[
-#             [
-#                 # [4..9] 5
-#                 T(4, 4.5), T(4.5, 5), T(5, 9), T(5, 8)
-#             ],
-#         ],
-#         'c3':[
-#             [
-#                 # [5..9] 4
-#                 T(5, 9),
-#             ],
-#         ],
-#     }
-#     compute_overlap = ComputeOverlap(flat(category_times), debug=py_config.IML_DEBUG_UNIT_TESTS)
-#
-#     compute_overlap.compute()
-#     got = compute_overlap.get_category_times()
-#     expect = {
-#         # [1..4]
-#         frozenset({'c1'}):sec(3),
-#         # [4..5]
-#         frozenset({'c1', 'c2'}):sec(1),
-#         # [5..7]
-#         frozenset({'c1', 'c2', 'c3'}):sec(2),
-#         # [7..9]
-#         frozenset({'c2', 'c3'}):sec(2),
-#     }
-#     assert got == expect
+            compute_overlap.compute()
+            got = compute_overlap.get_category_times()
+            # expect = {
+            #     frozenset({'c1'}):sec(2),
+            #     frozenset({'c1', 'c2'}):sec(2),
+            #     frozenset({'c1', 'c3'}):sec(1),
+            #     frozenset({'c1', 'c2', 'c3'}):sec(1),
+            # }
+            # assert got == expect
+
+        def test_05_error_duplicate_overlap(self):
+            T = self.T
+            flat = self.flat
+            sec = self.sec
+            py_config.IS_UNIT_TEST = True
+            category_times = {
+                'c1':[
+                    [
+                        T(3, 6), T(3, 6),
+                    ],
+                ],
+            }
+            compute_overlap = ComputeOverlap(flat(category_times), debug=py_config.IML_DEBUG_UNIT_TESTS)
+
+            compute_overlap.compute()
+            got = compute_overlap.get_category_times()
+            # expect = {
+            #     frozenset({'c1'}):sec(2),
+            #     frozenset({'c1', 'c2'}):sec(2),
+            #     frozenset({'c1', 'c3'}):sec(1),
+            #     frozenset({'c1', 'c2', 'c3'}):sec(1),
+            # }
+            # assert got == expect
+
+        def test_06_error_not_sorted_by_end_time(self):
+            T = self.T
+            flat = self.flat
+            sec = self.sec
+            py_config.IS_UNIT_TEST = True
+            category_times = {
+                'c1':[
+                    [
+                        # T(3, 6), T(3, 5),
+                        # T(3, 5), T(3, 6),
+                        # T(2, 5), T(3, 6),
+                        T(3, 6), T(2, 5),
+                    ],
+                ],
+            }
+            compute_overlap = ComputeOverlap(flat(category_times), debug=py_config.IML_DEBUG_UNIT_TESTS)
+
+            compute_overlap.compute()
+            got = compute_overlap.get_category_times()
+            # expect = {
+            #     frozenset({'c1'}):sec(2),
+            #     frozenset({'c1', 'c2'}):sec(2),
+            #     frozenset({'c1', 'c3'}):sec(1),
+            #     frozenset({'c1', 'c2', 'c3'}):sec(1),
+            # }
+            # assert got == expect
+
+        def test_07_overlapping_sorted_events(self):
+            T = self.T
+            flat = self.flat
+            sec = self.sec
+            py_config.IS_UNIT_TEST = True
+
+            category_times = {
+                'c1':[
+                    [
+                        # [1..7]
+                        T(1, 6), T(2, 6), T(3, 7), T(4, 6)
+                    ],
+                ],
+                'c2':[
+                    [
+                        T(4, 5),
+                    ],
+                ],
+            }
+            compute_overlap = ComputeOverlap(flat(category_times), debug=py_config.IML_DEBUG_UNIT_TESTS)
+
+            compute_overlap.compute()
+            got = compute_overlap.get_category_times()
+            expect = {
+                frozenset({'c1'}):sec(5),
+                frozenset({'c1', 'c2'}):sec(1),
+            }
+            assert got == expect
+
+        # def test_08_overlapping_sorted_events(self):
+        #     """
+        #     This test has events within a single category that overlap.
+        #
+        #     For example, c1:
+        #             1  2  3  4  5  6  7  8  9  10
+        #             |  |  |  |  |  |  |  |  |  |
+        #
+        #             [              ]
+        #      c1        [           ]
+        #                   [           ]
+        #                      [     ]
+        #
+        #                      [][]
+        #      c2                 [           ]
+        #                         [        ]
+        #
+        #      c3                 [           ]
+        #
+        #     Ideally, the algorithm would process the event trace as if the event-trace has no overlaps:
+        #
+        #             1  2  3  4  5  6  7  8  9  10
+        #             |  |  |  |  |  |  |  |  |  |
+        #
+        #      c1     [                 ]
+        #
+        #      c2              [              ]
+        #
+        #      c3                 [           ]
+        #
+        #      Technically we can prevent this type of scenario in the input by pre-processing events
+        #      to eliminate self-overlap.
+        #
+        #     :return:
+        #     """
+        #     from iml_profiler.test.test_util import sec, T, flatten_category_times as flat
+        #     py_config.IS_UNIT_TEST = True
+        #     # Q: What if start times match but end times are unordered?
+        #     # Q: WHY would this EVER happen in our data though...?
+        #     #    It CAN if concurrent events get "shuffled" into the same category (for some reason).
+        #     #    Perhaps this could happen with CPU/GPU?
+        #
+        #     category_times = {
+        #         'c1':[
+        #             [
+        #                 # [1..7] 6
+        #                 T(1, 6), T(2, 6), T(3, 7), T(4, 6)
+        #             ],
+        #         ],
+        #         'c2':[
+        #             [
+        #                 # [4..9] 5
+        #                 T(4, 4.5), T(4.5, 5), T(5, 9), T(5, 8)
+        #             ],
+        #         ],
+        #         'c3':[
+        #             [
+        #                 # [5..9] 4
+        #                 T(5, 9),
+        #             ],
+        #         ],
+        #     }
+        #     compute_overlap = ComputeOverlap(flat(category_times), debug=py_config.IML_DEBUG_UNIT_TESTS)
+        #
+        #     compute_overlap.compute()
+        #     got = compute_overlap.get_category_times()
+        #     expect = {
+        #         # [1..4]
+        #         frozenset({'c1'}):sec(3),
+        #         # [4..5]
+        #         frozenset({'c1', 'c2'}):sec(1),
+        #         # [5..7]
+        #         frozenset({'c1', 'c2', 'c3'}):sec(2),
+        #         # [7..9]
+        #         frozenset({'c2', 'c3'}):sec(2),
+        #     }
+        #     assert got == expect
 
 def test_split():
 

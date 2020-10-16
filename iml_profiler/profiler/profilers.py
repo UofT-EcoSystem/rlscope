@@ -61,7 +61,7 @@ from iml_profiler.parser.common import *
 from iml_profiler.parser import constants
 from iml_profiler.profiler import timer as iml_timer
 # from iml_profiler.profiler import cudaprofile
-from iml_profiler.clib import sample_cuda_api
+from iml_profiler.clib import rlscope_api
 from iml_profiler.profiler import clib_wrap
 # from iml_profiler.profiler.clib_wrap import MICROSECONDS_IN_SECOND
 from iml_profiler.profiler import tensorflow_profile_context
@@ -137,7 +137,7 @@ def setup(tfprof_enabled, pyprof_enabled, allow_skip=False, allow_missing_librls
         return
     assert not SETUP_DONE
 
-    py_config.find_librlscope()
+    rlscope_api.find_librlscope()
 
     uninstrumented_run = not tfprof_enabled and not pyprof_enabled
 
@@ -150,8 +150,8 @@ def setup(tfprof_enabled, pyprof_enabled, allow_skip=False, allow_missing_librls
 
     # setup_wrap_BaseSession_as_default()
 
-    if sample_cuda_api.is_used():
-        sample_cuda_api.load_library()
+    if rlscope_api.is_used():
+        rlscope_api.load_library()
     else:
         if not allow_missing_librlscope:
             # if tfprof_enabled:
@@ -792,7 +792,7 @@ class Profiler:
         self.disable_pyprof_annotations = get_argval('disable_pyprof_annotations', disable_pyprof_annotations, False)
         self.disable_pyprof_interceptions = get_argval('disable_pyprof_interceptions', disable_pyprof_interceptions, False)
         self.disable_pyprof = get_argval('disable_pyprof', disable_pyprof, False)
-        # NOTE: currently has no effect since tfprof is entirely implemented in LD_PRELOAD lib_sample_cuda.so library.
+        # NOTE: currently has no effect since tfprof is entirely implemented in LD_PRELOAD librlscope.so library.
         self.disable_tfprof = get_argval('disable_tfprof', disable_tfprof, False)
         # Disable OLD tfprof tracing code.  We now use iml-prof to trace stuff.
         self.disable_pyprof_trace = get_argval('disable_pyprof_trace', disable_pyprof_trace, False)
@@ -819,9 +819,9 @@ class Profiler:
         )
         if self.disable:
             logger.info("IML: note that profiling is disabled for this run")
-        if ( self.disable or self.disable_gpu_hw ) and sample_cuda_api.is_used():
+        if ( self.disable or self.disable_gpu_hw ) and rlscope_api.is_used():
             logger.info("(--iml-disable-gpu-hw) Disable GPU HW sampling")
-            sample_cuda_api.disable_gpu_hw()
+            rlscope_api.disable_gpu_hw()
 
         # self.manager = multiprocessing.Manager()
         # self.pyprof_dump_manager = clib_wrap.PyprofDumpManager(self.manager)
@@ -1297,13 +1297,13 @@ class Profiler:
         self._maybe_finish(finish_now=True, should_exit=False)
 
     def _start_iml_prof(self):
-        if self._iml_prof_enabled or not sample_cuda_api.is_used():
+        if self._iml_prof_enabled or not rlscope_api.is_used():
             return
 
         if self.debug:
             logger.info('Start iml-prof libcupti tracing')
-        if sample_cuda_api.is_used():
-            sample_cuda_api.enable_tracing()
+        if rlscope_api.is_used():
+            rlscope_api.enable_tracing()
 
         self._iml_prof_enabled = True
 
@@ -1314,13 +1314,13 @@ class Profiler:
         if self.debug:
             logger.info('Stop iml-prof libcupti tracing')
 
-        if sample_cuda_api.is_used():
-            sample_cuda_api.disable_tracing()
+        if rlscope_api.is_used():
+            rlscope_api.disable_tracing()
 
         self._iml_prof_enabled = False
 
     def _dump_iml_prof(self):
-        raise NotImplementedError("TODO: call C++ function that dumps CUDA API stats to protobuf file (sample_cuda_api.collect())")
+        raise NotImplementedError("TODO: call C++ function that dumps CUDA API stats to protobuf file (rlscope_api.collect())")
 
     def _start_tfprof(self, skip_init_trace_time=False):
         """
@@ -1410,36 +1410,36 @@ class Profiler:
         assert bench_name not in self._op_stack
         assert bench_name != NO_BENCH_NAME
         self._op_stack.append(bench_name)
-        if sample_cuda_api.is_used():
-            sample_cuda_api.push_operation(bench_name)
+        if rlscope_api.is_used():
+            rlscope_api.push_operation(bench_name)
 
     def set_max_operations(self, operation, num_pushes):
         if self.disable or self.disable_gpu_hw:
             return
-        if sample_cuda_api.is_used():
-            sample_cuda_api.set_max_operations(operation, num_pushes)
+        if rlscope_api.is_used():
+            rlscope_api.set_max_operations(operation, num_pushes)
 
     def _pop_operation(self, bench_name):
         assert self._op_stack[-1] == bench_name
         self._op_stack.pop()
-        if sample_cuda_api.is_used():
-            sample_cuda_api.pop_operation()
+        if rlscope_api.is_used():
+            rlscope_api.pop_operation()
 
     def _start_pass(self):
         assert not self._hw_pass_running
         if py_config.DEBUG and py_config.DEBUG_GPU_HW:
             logger.info(rls_log_msg('GPU_HW', f"start_pass"))
-        if sample_cuda_api.is_used():
+        if rlscope_api.is_used():
             self._hw_pass_running = True
-            sample_cuda_api.start_pass()
+            rlscope_api.start_pass()
 
     def _end_pass(self):
         assert self._hw_pass_running
         if py_config.DEBUG and py_config.DEBUG_GPU_HW:
             logger.info(rls_log_msg('GPU_HW', f"end_pass"))
-        if sample_cuda_api.is_used():
+        if rlscope_api.is_used():
             self._hw_pass_running = False
-            sample_cuda_api.end_pass()
+            rlscope_api.end_pass()
             self.has_next_pass = self._has_next_pass()
         self.pass_idx += 1
 
@@ -1447,8 +1447,8 @@ class Profiler:
         assert not self._hw_pass_running
         if py_config.DEBUG and py_config.DEBUG_GPU_HW:
             logger.info(rls_log_msg('GPU_HW', f"has_next_pass"))
-        if sample_cuda_api.is_used():
-            return sample_cuda_api.has_next_pass()
+        if rlscope_api.is_used():
+            return rlscope_api.has_next_pass()
         else:
             return False
 
@@ -1645,7 +1645,7 @@ class Profiler:
             #     self.no_profile_sec.append(time_sec)
             op_start_us = self.start_call_us[bench_name]
             op_end_us = self.end_call_us[bench_name]
-            sample_cuda_api.record_event(
+            rlscope_api.record_event(
                 category=constants.CATEGORY_OPERATION,
                 start_us=op_start_us,
                 duration_us=op_end_us - op_start_us,
@@ -1657,13 +1657,13 @@ class Profiler:
             self._pop_operation(bench_name)
             # Attribute overhead event to the parent operation (most operations are occuring)
             # NOTE: if no operation is still running, where should we attribute it to?
-            # sample_cuda_api.record_overhead_event(overhead_type='pyprof_annotation', num_events=1)
+            # rlscope_api.record_overhead_event(overhead_type='pyprof_annotation', num_events=1)
             if len(self._op_stack) == 0:
                 # Attribute annotation overhead to the operation we just finished
-                sample_cuda_api.record_overhead_event_for_operation(overhead_type='pyprof_annotation', operation=bench_name, num_events=1)
+                rlscope_api.record_overhead_event_for_operation(overhead_type='pyprof_annotation', operation=bench_name, num_events=1)
             else:
                 # Attribute annotation overhead to the parent operation (NOT the one that just finished)
-                sample_cuda_api.record_overhead_event(overhead_type='pyprof_annotation', num_events=1)
+                rlscope_api.record_overhead_event(overhead_type='pyprof_annotation', num_events=1)
 
             # We terminate annotations if they're been going for too long.
             # if not self.reports_progress:
@@ -1837,12 +1837,12 @@ class Profiler:
         self._maybe_dump_iml_config()
 
     def _maybe_set_metadata(self):
-        if sample_cuda_api.is_used() and \
+        if rlscope_api.is_used() and \
             ( self.directory is not None and \
               self.process_name is not None and \
               self.machine_name is not None and \
               self.phase is not None ):
-            sample_cuda_api.set_metadata(
+            rlscope_api.set_metadata(
                 self.directory,
                 self.process_name,
                 self.machine_name,
@@ -1959,13 +1959,13 @@ class Profiler:
         if not ( self.disable or self.disable_pyprof_interceptions or self.disable_pyprof ):
             self._record_process_event()
 
-        if sample_cuda_api.is_used():
+        if rlscope_api.is_used():
             # Print sampling results.
-            sample_cuda_api.print()
-            timer.end_operation('sample_cuda_api.print')
+            rlscope_api.print()
+            timer.end_operation('rlscope_api.print')
             # NOTE: ideally, we should run async_dump() for everything, then wait on everything to finish.
-            sample_cuda_api.await_dump()
-            timer.end_operation('sample_cuda_api.await_dump')
+            rlscope_api.await_dump()
+            timer.end_operation('rlscope_api.await_dump')
         # NOTE: don't record any events past this point since they will be lost;
         # we will get an abort() error from C++ if that happens.
 
@@ -2005,7 +2005,7 @@ class Profiler:
         # logger.info("> IML: Wait for tfprof trace-file dumps in TensorFlow C++ to finish.")
         # c_api_util.await_trace_data_dumps()
 
-        # TODO: sample_cuda_api.await_trace_dumps()
+        # TODO: rlscope_api.await_trace_dumps()
 
         # logger.info("> IML: Done")
 
@@ -2418,7 +2418,7 @@ class Profiler:
         total_trace_time_sec = self._total_trace_time_sec()
         ret = finish_now or (
             (
-                not sample_cuda_api.is_used() or self.disable_gpu_hw or not self.has_next_pass
+                not rlscope_api.is_used() or self.disable_gpu_hw or not self.has_next_pass
             ) and (
                 (
                     self.num_traces is not None and
@@ -2528,7 +2528,7 @@ class Profiler:
         # I cannot remember how this is handled downstream during analysis.
         # clib_wrap.record_event(constants.CATEGORY_OPERATION, event_name, self._start_us, self._stop_us,
         #                        ignore_disable=True)
-        sample_cuda_api.record_event(
+        rlscope_api.record_event(
             category=constants.CATEGORY_OPERATION,
             start_us=self._start_us,
             duration_us=self._stop_us - self._start_us,
@@ -3313,7 +3313,7 @@ def _iml_env(prof : Profiler, keep_executable=False, keep_non_iml_args=False, en
         ld_preloads = []
         if 'LD_PRELOAD' in env:
             ld_preloads.append(env['LD_PRELOAD'])
-        ld_preloads.append(py_config.RLSCOPE_CLIB)
+        ld_preloads.append(rlscope_api.RLSCOPE_CLIB)
         env['LD_PRELOAD'] = ':'.join(ld_preloads)
 
     return env

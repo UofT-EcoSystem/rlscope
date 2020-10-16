@@ -379,17 +379,15 @@ def gpus(debug=False):
 
 RUN_STRESS_TEST = False
 
-def test_stress_nvidia_smi():
+if RUN_STRESS_TEST:
+    def test_stress_nvidia_smi():
+        # Seems fine.
+        def _test_stress_nvidia_smi():
+            check_nvidia_smi()
 
-    # Seems fine.
-    def _test_stress_nvidia_smi():
-        check_nvidia_smi()
-
-        num_samples = 10000
-        from progressbar import progressbar
-        for i in progressbar(range(num_samples)):
-            gpu_info = MachineGPUInfo()
-
-    if RUN_STRESS_TEST:
+            num_samples = 10000
+            from progressbar import progressbar
+            for i in progressbar(range(num_samples)):
+                gpu_info = MachineGPUInfo()
         _test_stress_nvidia_smi()
 

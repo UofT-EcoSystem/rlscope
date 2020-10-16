@@ -6,11 +6,14 @@
 from os.path import join as _j, abspath as _a, exists as _e, dirname as _d, basename as _b
 
 import fnmatch
+import argparse
+from glob import glob
 import shlex
 import os
 import re
 import subprocess
 import pprint
+import textwrap
 import sys
 
 from setuptools import find_packages
@@ -20,8 +23,45 @@ from setuptools import setup
 # from distutils.command.clean import clean as _clean
 from distutils.spawn import find_executable
 
-# DEBUG = False
-DEBUG = True
+ROOT = _d(os.path.realpath(__file__))
+
+# HACK: Make it so we can import logging stuff.
+sys.path.insert(0, ROOT)
+from iml_profiler.profiler.iml_logging import logger
+from iml_profiler.profiler import iml_logging
+from iml_profiler import py_config
+
+def pprint_msg(dic, prefix='  '):
+    """
+    Give logger.info a string for neatly printing a dictionary.
+
+    Usage:
+    logger.info(pprint_msg(arbitrary_object))
+    """
+    return "\n" + textwrap.indent(pprint.pformat(dic), prefix=prefix)
+
+def get_files_by_ext(root):
+    files_by_ext = dict()
+    for path in each_file_recursive(root):
+        ext = file_extension(path)
+        if ext not in files_by_ext:
+            files_by_ext[ext] = []
+        files_by_ext[ext].append(path)
+    return files_by_ext
+
+def file_extension(path):
+    m = re.search(r'\.(?P<ext>[^.]+)$', path)
+    if not m:
+        return None
+    return m.group('ext')
+
+def each_file_recursive(root_dir):
+    if not os.path.isdir(root_dir):
+        raise ValueError("No such directory {root_dir}".format(root_dir=root_dir))
+    for dirpath, dirnames, filenames in os.walk(root_dir):
+        for base in filenames:
+            path = _j(dirpath, base)
+            yield path
 
 def cmd_debug_msg(cmd, env=None, dry_run=False):
     if type(cmd) == list:
@@ -161,8 +201,18 @@ CONSOLE_SCRIPTS = [
     'iml-run-expr = iml_profiler.scripts.run_expr:main',
     'iml-plot = iml_profiler.parser.calibration:main_plot',
     'iml-generate-plot-index = iml_profiler.scripts.generate_iml_profiler_plot_index:main',
+    'rls-unit-tests = iml_profiler.scripts.rls_unit_tests:main',
 ]
 # pylint: enable=line-too-long
+
+CPP_WRAPPER_SCRIPTS = [
+    'rls-analyze = iml_profiler.scripts.cpp.cpp_binary_wrapper:rls_analyze',
+    'rls-test = iml_profiler.scripts.cpp.cpp_binary_wrapper:rls_test',
+]
+
+PRODUCTION_DUMMY_SCRIPTS = [
+    'rlscope-pip-installed = iml_profiler.scripts.cpp.cpp_binary_wrapper:rlscope_pip_installed',
+]
 
 TEST_PACKAGES = [
     'pytest >= 4.4.1',
@@ -188,7 +238,7 @@ def generate_proto(source, require=True, regenerate=False):
           not os.path.exists(output) or
           (os.path.exists(source) and
            os.path.getmtime(source) > os.path.getmtime(output))):
-      print("Generating %s..." % output)
+      logger.info("Generating %s..." % output)
 
       if not os.path.exists(source):
           sys.stderr.write("Can't find required file: %s\n" % source)
@@ -233,17 +283,28 @@ def main():
     #
     # Parse command line arguments.
     #
-    global DEBUG
-    DEBUG = False
-    if "--debug" in sys.argv:
-        sys.argv.remove("--debug")
-        DEBUG = True
+    parser = argparse.ArgumentParser("Install RL-Scope python module")
+    parser.add_argument('setup_cmd', help="setup.py command (e.g., develop, install, bdist_wheel, etc.)")
+    parser.add_argument('--debug', action='store_true')
+    args, extra_argv = parser.parse_known_args()
 
-    print("> Using protoc = {protoc}".format(protoc=protoc))
+    # Remove any arguments that were parsed using argparse.
+    # e.g.,
+    # ['setup.py', 'bdist_wheel', '--debug'] =>
+    # ['setup.py', 'bdist_wheel']
+    setup_argv = [sys.argv[0], args.setup_cmd] + extra_argv
+    sys.argv = setup_argv
 
-    if DEBUG:
-        pprint.pprint({'proto_files':proto_files})
-        pprint.pprint({'PACKAGE_DIRS':PACKAGE_DIRS})
+    if args.debug:
+        iml_logging.enable_debug_logging()
+    else:
+        iml_logging.disable_debug_logging()
+
+    logger.debug("> Using protoc = {protoc}".format(protoc=protoc))
+    logger.debug(pprint.pformat({
+        'proto_files': proto_files,
+        'PACKAGE_DIRS': PACKAGE_DIRS,
+    }))
 
     with open("README.md", "r") as fh:
         long_description = fh.read()
@@ -253,6 +314,65 @@ def main():
     generate_proto(_proto('pyprof.proto'), regenerate=True)
     generate_proto(_proto('unit_test.proto'), regenerate=True)
     generate_proto(_proto('iml_prof.proto'), regenerate=True)
+
+    iml_profiler_ext = get_files_by_ext('iml_profiler')
+
+    logger.debug("iml_profiler_ext = {msg}".format(
+        msg=pprint_msg(iml_profiler_ext),
+    ))
+    package_data = {
+        'iml_profiler': [
+            # NOTE: we avoid using glob(..) patterns like "**/*.py" here since
+            # we need to make one for each directory level...
+            # we really just want to glob for "all python files",
+            # which we do using each_file_recursive(...).
+        ],
+    }
+    keep_ext = {'py', 'proto'}
+    for ext in set(iml_profiler_ext.keys()).intersection(keep_ext):
+        package_data['iml_profiler'].extend(iml_profiler_ext[ext])
+
+    if args.setup_cmd != 'develop':
+        # If there exist files in iml_profiler/cpp/**/*
+        # assume that we wish to package these into the wheel.
+        cpp_files = glob(_j(ROOT, 'iml_profiler', 'cpp', '**', '*'))
+
+        # Keep all iml_profiler/cpp/**/* files regardless of extension.
+        cpp_ext = get_files_by_ext('iml_profiler/cpp')
+        logger.debug("cpp_ext = \n{msg}".format(
+            msg=pprint_msg(cpp_ext),
+        ))
+
+        if len(cpp_files) == 0:
+            logger.error(textwrap.dedent("""\
+                Looks like you're trying to build a python wheel for RL-Scope, but you haven't built the C++ components yet (i.e., librlscope.so, rls-analyze).
+                To build a python wheel, run this:
+                  $ cd {root}
+                  $ BUILD_PIP=yes bash ./setup.sh
+                """.format(
+                root=py_config.ROOT,
+            ).rstrip()))
+            sys.exit(1)
+
+        for ext, paths in cpp_ext.items():
+            package_data['iml_profiler'].extend(paths)
+
+        # package_data['iml_profiler'].append(
+        #     _j('cpp', '**', '*'),
+        # )
+        # logger.debug("cpp_files = \n{msg}".format(
+        #     msg=pprint_msg(cpp_files),
+        # ))
+
+    logger.debug("package_data = \n{msg}".format(
+        msg=pprint_msg(package_data),
+    ))
+
+    console_scripts = []
+    console_scripts.extend(CONSOLE_SCRIPTS)
+    if args.setup_cmd != 'develop':
+        console_scripts.extend(CPP_WRAPPER_SCRIPTS)
+        console_scripts.extend(PRODUCTION_DUMMY_SCRIPTS)
 
     setup(
         name=project_name,
@@ -266,7 +386,7 @@ def main():
         # Contained modules and scripts.
         packages=PACKAGE_DIRS,
         entry_points={
-            'console_scripts': CONSOLE_SCRIPTS,
+            'console_scripts': console_scripts,
         },
         install_requires=REQUIRED_PACKAGES + TEST_PACKAGES,
         # tests_require=REQUIRED_PACKAGES + TEST_PACKAGES,
@@ -279,19 +399,7 @@ def main():
         # extras_require={
         #     'docker': DOCKER_PACKAGES,
         # },
-        package_data={
-            'iml_profiler': ['**/*.py', '*.py'],
-            # PROTOBUF_DIR: ['*.proto'],
-            # POSTGRES_SQL_DIR: ['*.sql'],
-            # THIRD_PARTY_DIR: [
-            #     'FlameGraph/flamegraph.pl',
-            # ],
-            '': [
-                _j(PROTOBUF_DIR, '*.proto'),
-                _j(POSTGRES_SQL_DIR, '*.sql'),
-                _j(THIRD_PARTY_DIR, 'FlameGraph/flamegraph.pl'),
-            ],
-        },
+        package_data=package_data,
         classifiers=[
             'Intended Audience :: Developers',
             'Intended Audience :: Education',
@@ -306,7 +414,7 @@ def main():
             'Topic :: Software Development :: Libraries :: Python Modules',
         ],
         # TODO: Add license!
-        keywords='iml ml profiling tensorflow machine learning',
+        keywords='rlscope ml profiling tensorflow machine learning reinforcement learning',
     )
 
 if __name__ == '__main__':

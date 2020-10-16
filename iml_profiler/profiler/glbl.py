@@ -11,7 +11,7 @@ import platform
 from iml_profiler.profiler.iml_logging import logger
 from iml_profiler.profiler import profilers
 from iml_profiler.profiler import nvidia_gpu_query
-from iml_profiler.clib import sample_cuda_api
+from iml_profiler.clib import rlscope_api
 
 from iml_profiler.parser.common import *
 
@@ -69,13 +69,13 @@ def patch_environ():
         raise RuntimeError("IML: currently, IML only support Linux for handling LD_PRELOAD hackery (need to add support for Mac/Windows)")
 
     # We need to compute this BEFORE we modify LD_PRELOAD.
-    is_used = sample_cuda_api.is_used()
+    is_used = rlscope_api.is_used()
 
     ld_preloads = re.split(r':', os.environ['LD_PRELOAD'])
     keep_ld_preloads = []
 
     for ld_preload in ld_preloads:
-        if not is_sample_cuda_api_lib(ld_preload):
+        if not is_rlscope_api_lib(ld_preload):
             keep_ld_preloads.append(ld_preload)
 
     os.environ['LD_PRELOAD'] = ':'.join(keep_ld_preloads)

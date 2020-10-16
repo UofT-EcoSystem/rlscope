@@ -1035,17 +1035,6 @@ class ProfilingOverheadPlot:
             return "RL algorithm"
         raise NotImplementedError
 
-# https://stackoverflow.com/questions/19184484/how-to-add-group-labels-for-bar-charts-in-matplotlib
-
-def test_table():
-    data_table = pd.DataFrame({'Room':['Room A']*4 + ['Room B']*4,
-                               'Shelf':(['Shelf 1']*2 + ['Shelf 2']*2)*2,
-                               'Staple':['Milk','Water','Sugar','Honey','Wheat','Corn','Chicken','Cow'],
-                               'Quantity':[10,20,5,6,4,7,2,1],
-                               'Ordered':np.random.randint(0,10,8)
-                               })
-    return data_table
-
 def add_line(ax, xpos, ypos):
     line = plt.Line2D([xpos, xpos], [ypos + .1, ypos],
                       transform=ax.transAxes, color='black')

@@ -1524,7 +1524,7 @@ class OverlapStackedBarPlot:
         return sql_input_path(iml_dir)
 
 
-def test_stacked_bar():
+def attempt_stacked_bar():
     df = pd.DataFrame(dict(
         A=[1, 2, 3, 4],
         B=[2, 3, 4, 5],
@@ -3185,7 +3185,7 @@ class RegionDataFrame:
         pass
 
 
-def test_stacked_bar_sns():
+def attempt_stacked_bar_sns():
     """
     https://randyzwitch.com/creating-stacked-bar-chart-seaborn/
 
@@ -3291,7 +3291,7 @@ def test_stacked_bar_sns():
     )
     stacked_bar_plot.plot()
 
-def test_stacked_bar_sns_old():
+def attempt_stacked_bar_sns_old():
     """
     https://randyzwitch.com/creating-stacked-bar-chart-seaborn/
 
@@ -3403,7 +3403,7 @@ def test_stacked_bar_sns_old():
     logger.info('Save figure to {path}'.format(path=path))
     plt.savefig(path)
 
-def test_double_yaxis():
+def attempt_double_yaxis():
 
     # # http://kitchingroup.cheme.cmu.edu/blog/2013/09/13/Plotting-two-datasets-with-very-different-scales/#sec-3
     # x = np.linspace(0, 2*np.pi)
@@ -3826,13 +3826,13 @@ def main():
     args = parser.parse_args()
 
     if args.test_stacked_bar:
-        test_stacked_bar()
+        attempt_stacked_bar()
     elif args.test_stacked_bar_sns:
-        test_stacked_bar_sns()
+        attempt_stacked_bar_sns()
     elif args.test_stacked_bar_sns_old:
-        test_stacked_bar_sns_old()
+        attempt_stacked_bar_sns_old()
     elif args.test_double_yaxis:
-        test_double_yaxis()
+        attempt_double_yaxis()
 
 def only_selector_fields(selector):
     assert 'plot_type' in selector
@@ -4826,7 +4826,7 @@ class TexMetrics:
         return bool(re.search(r'backend', category.lower()))
 
     def calc_find_qual_eager_more_trans(self, metric):
-        """
+        r"""
         \begin{rlscope-finding-qual}{find:qual-eager-more-trans}
         Eager execution is between $x\times$ and $y\times$ as bad as Graph/Autograph execution, and slowdown is highly correlated with how well a framework implementation is optimized to minimize Framework transitions.
         \end{rlscope-finding-qual}
@@ -4900,7 +4900,7 @@ class TexMetrics:
         # metric.df = df
 
     def calc_find_qual_autograph_reduces_python(self, metric):
-        """
+        r"""
         \begin{rlscope-finding}{find:qual-autograph-reduces-python}
         By removing Framework transitions, \autograph substantially reduces Python time from $x\%$ in Graph
         to at most \FCAsPercent{\FindQualAutographReducesPythonMaxAutographPythonPercentOfOp}
@@ -5030,7 +5030,7 @@ class TexMetrics:
         return self._xfield_is_tensorflow(row['x_field'])
 
     def calc_find_qual_pytorch_eager_better(self, metric):
-        """
+        r"""
         \begin{rlscope-finding-qual}{find:qual-pytorch-eager-better}
         PyTorch eager is $x\times$ faster than TensorFlow eager since it minimizes Framework transitions more effectively in Inference.
         \end{rlscope-finding-qual}
@@ -5053,7 +5053,7 @@ class TexMetrics:
         metric.df = df
 
     def calc_find_qual_autograph_graph_similar(self, metric):
-        """
+        r"""
         \begin{rlscope-finding-qual}{find:qual-autograph-graph-similar}
         \autograph and \graph execution are on-par with one another, performing within
         \FCAsPercent{\FindQualAutographGraphSimilarMaxSpeedup} of one another on a given
@@ -5115,7 +5115,7 @@ class TexMetrics:
 
 
     def calc_find_surp_exec_model_comparison(self, metric):
-        """
+        r"""
         \begin{rlscope-finding-surp}{find:surp-exec-model-comparison}
         Eager execution vs Graph/Autograph: the best Graph/Autograph implementation is $y\times$ faster than PyTorch eager.
             OR
@@ -5144,7 +5144,7 @@ class TexMetrics:
         metric.df = df
 
     def calc_find_surp_total_gpu_time(self, metric):
-        """
+        r"""
         \begin{rlscope-finding-surp}{find:surp-total-gpu-time}
         Total GPU time is similar across all RL frameworks regardless of DL back-end, and consistently low across all RL frameworks, making up at most $x\%$ of total training time.
         \end{rlscope-finding-surp}
@@ -5190,7 +5190,7 @@ class TexMetrics:
 
 
     def calc_find_surp_cuda_api_dominates(self, metric):
-        """
+        r"""
         \begin{rlscope-finding-surp}{find:surp-cuda-api-dominates}
         In all RL frameworks, CPU-side CUDA API time dominates total GPU kernel execution time, taking up between $x\times$ and $y\times$ as much time as GPU kernel execution.
         \end{rlscope-finding-surp}
@@ -5229,7 +5229,7 @@ class TexMetrics:
         metric.df = df
 
     def calc_find_surp_autograph_no_gpu(self, metric):
-        """
+        r"""
         \begin{rlscope-finding-surp}{find:surp-autograph-no-gpu}
         For RL workloads, even though Autograph converts RL training code to in-graph TensorFlow operators, Autograph has no perceivable increase in total GPU training time.
         \end{rlscope-finding-surp}
@@ -5263,7 +5263,7 @@ class TexMetrics:
         metric.df = df
 
     def calc_find_surp_autograph_inflates_inference(self, metric):
-        """
+        r"""
         \begin{rlscope-finding-surp}{find:surp-autograph-inflates-inference}
         Inference time in Autograph is inflated by Framework time ($x\times$ compared to Graph), and this inflation is \textit{not} due to extra Framework transitions, and is instead a performance anomaly within the DL back-end itself.
         \end{rlscope-finding-surp}
@@ -5328,7 +5328,7 @@ class TexMetrics:
         return df
 
     def calc_find_surp_autograph_inflates_python(self, metric):
-        """
+        r"""
         \begin{rlscope-finding-surp}{find:surp-autograph-inflates-python}
         Autograph can inflate Python time by as much as $2\times$ during Simulation; training times (not just model performance) are highly sensitive to small differences in hyperparameter choices.
         \end{rlscope-finding-surp}
@@ -5362,7 +5362,7 @@ class TexMetrics:
         metric.df = df
 
     def calc_find_surp_ddpg_backprop_slow(self, metric):
-        """
+        r"""
         \begin{rlscope-finding-surp}{find:surp-ddpg-backprop-slow}
         RLScope's detailed metrics identify subtle performance differences in the DDPG Graph API
         RL algorithm implementation rooted in inefficient abstractions in high-level code
@@ -5454,7 +5454,7 @@ class TexMetrics:
         return ''.join([x.capitalize() for x in sorted(resource_overlap_regions)])
 
     def calc_find_algo_choice(self, metric):
-        """
+        r"""
         add_policy_metrics
 
             \begin{rlscope-finding}{find:algo-choice}
