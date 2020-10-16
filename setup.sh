@@ -698,11 +698,11 @@ setup_pip_package() {
       return 1
     fi
     # Cleanup anything from previously built packages.
-    rm -rf $ROOT/iml_profiler/cpp/bin
-    rm -rf $ROOT/iml_profiler/cpp/lib
-    rm -rf $ROOT/iml_profiler/cpp/include
+    rm -rf $ROOT/rlscope/cpp/bin
+    rm -rf $ROOT/rlscope/cpp/lib
+    rm -rf $ROOT/rlscope/cpp/include
     # Extract newly built package into python tree.
-    _do tar xf $cpp_pkg -C $ROOT/iml_profiler/cpp --strip-components=1
+    _do tar xf $cpp_pkg -C $ROOT/rlscope/cpp --strip-components=1
   fi
 
   # NOTE: I include "clean --all" since I've seen weird behaviour from setup.py where

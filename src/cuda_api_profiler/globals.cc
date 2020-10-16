@@ -41,7 +41,7 @@ using json = nlohmann::json;
 
 #define MAYBE_RETURN_ERROR(status) \
   if (status.code() != MyStatus::OK().code()) { \
-    VLOG(INFO) << "iml-prof C++ API @ " << __func__ << " failed with " << status.ToString(); \
+    VLOG(INFO) << "rls-prof C++ API @ " << __func__ << " failed with " << status.ToString(); \
     return; \
   }
 
@@ -209,9 +209,9 @@ void Globals::StartUtilSampler() {
   }
   bp::environment env = PatchedEnviron();
   bp::ipstream pipe_stream;
-  auto util_sampler_exe = bp::search_path("iml-util-sampler");
+  auto util_sampler_exe = bp::search_path("rls-util-sampler");
   if (util_sampler_exe == "") {
-    LOG(INFO) << "Couldn't find path to iml-util-sampler on $PATH; have you installed the iml python package and activated your environment?";
+    LOG(INFO) << "Couldn't find path to rls-util-sampler on $PATH; have you installed the iml python package and activated your environment?";
     exit(EXIT_FAILURE);
   }
   auto pid = getpid();
@@ -363,7 +363,7 @@ Globals::~Globals() {
 
 //#define MAYBE_RETURN_ERROR(status)
 //  if (status.code() != MyStatus::OK().code()) {
-//    DBG_LOG("iml-prof C++ API @ {} failed with {}", __func__, status.ToString());
+//    DBG_LOG("rls-prof C++ API @ {} failed with {}", __func__, status.ToString());
 //    return;
 //  }
 

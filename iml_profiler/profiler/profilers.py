@@ -17,16 +17,16 @@ import contextlib
 import multiprocessing
 from concurrent.futures.process import ProcessPoolExecutor
 
-from iml_profiler.profiler.concurrent import ForkedProcessPool
+from rlscope.profiler.concurrent import ForkedProcessPool
 
-import iml_profiler
+import rlscope
 
-from iml_profiler.profiler.util import pprint_msg
-from iml_profiler.scripts.utilization_sampler import util_sampler
-from iml_profiler.profiler.util import args_to_cmdline, get_available_gpus, get_available_cpus
-from iml_profiler.profiler.util import get_stacktrace
+from rlscope.profiler.util import pprint_msg
+from rlscope.scripts.utilization_sampler import util_sampler
+from rlscope.profiler.util import args_to_cmdline, get_available_gpus, get_available_cpus
+from rlscope.profiler.util import get_stacktrace
 
-from iml_profiler.profiler.iml_logging import logger
+from rlscope.profiler.iml_logging import logger
 
 ORIG_EXCEPT_HOOK = sys.excepthook
 def cleanup_profiler_excepthook(exctype, value, traceback):
@@ -35,16 +35,16 @@ def cleanup_profiler_excepthook(exctype, value, traceback):
     # NOTE: If we crash unexpectedly, make sure to terminate the utilization_sampler.py process.
     # This is important when running unit-tests; otherwise the "train" portion of the unit-test will hang!
     # It's also important to prevent zombie utilization_sampler.py from accumulating.
-    if iml_profiler.api.prof is not None:
-        iml_profiler.api.prof.maybe_terminate_utilization_sampler(warn_terminated=True)
+    if rlscope.api.prof is not None:
+        rlscope.api.prof.maybe_terminate_utilization_sampler(warn_terminated=True)
     return ORIG_EXCEPT_HOOK(exctype, value, traceback)
 
 
-from iml_profiler.profiler import unit_test_util
-from iml_profiler.profiler.util import print_cmd
+from rlscope.profiler import unit_test_util
+from rlscope.profiler.util import print_cmd
 
 # from tensorflow.core.profiler.tfprof_log_pb2 import ProfileProto
-from iml_profiler.protobuf.pyprof_pb2 import ProcessMetadata, TrainingProgress, IncrementalTrainingProgress, TP_NO_PROGRESS, TP_HAS_PROGRESS
+from rlscope.protobuf.pyprof_pb2 import ProcessMetadata, TrainingProgress, IncrementalTrainingProgress, TP_NO_PROGRESS, TP_HAS_PROGRESS
 
 # pip install py-cpuinfo
 import cpuinfo
@@ -54,17 +54,17 @@ from os import environ as ENV
 
 from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, basename as _b
 
-from iml_profiler.parser.common import *
-from iml_profiler.parser import constants
-from iml_profiler.profiler import timer as iml_timer
-# from iml_profiler.profiler import cudaprofile
-from iml_profiler.clib import rlscope_api
-from iml_profiler.profiler import clib_wrap
-# from iml_profiler.profiler.clib_wrap import MICROSECONDS_IN_SECOND
+from rlscope.parser.common import *
+from rlscope.parser import constants
+from rlscope.profiler import timer as iml_timer
+# from rlscope.profiler import cudaprofile
+from rlscope.clib import rlscope_api
+from rlscope.profiler import clib_wrap
+# from rlscope.profiler.clib_wrap import MICROSECONDS_IN_SECOND
 
-from iml_profiler.profiler import proto_util
+from rlscope.profiler import proto_util
 
-from iml_profiler import py_config
+from rlscope import py_config
 
 # DEBUG_OP_STACK = True
 DEBUG_OP_STACK = False
@@ -102,16 +102,16 @@ def modify_tensorflow(tfprof_enabled, pyprof_enabled, allow_missing_librlscope=F
     if _TF_MODIFIED:
         return
 
-    import iml_profiler.profiler.session
-    import iml_profiler.profiler.estimator
+    import rlscope.profiler.session
+    import rlscope.profiler.estimator
 
     uninstrumented_run = not tfprof_enabled and not pyprof_enabled
 
     setup(tfprof_enabled, pyprof_enabled,
           allow_missing_librlscope=allow_missing_librlscope)
     if not uninstrumented_run:
-        iml_profiler.profiler.session.setup()
-        iml_profiler.profiler.estimator.setup()
+        rlscope.profiler.session.setup()
+        rlscope.profiler.estimator.setup()
 
     if pyprof_enabled:
         clib_wrap.setup()
@@ -146,7 +146,7 @@ def setup(tfprof_enabled, pyprof_enabled, allow_skip=False, allow_missing_librls
             # if tfprof_enabled:
             logger.error(textwrap.dedent("""\
             To profile using RLScope, you must re-run your command-line as:
-              $ iml-prof {cmd}
+              $ rls-prof {cmd}
             If you want to run without RLScope, add --iml-disable to the above command.
             """).format(
                 cmd=' '.join(shlex.quote(opt) for opt in [sys.executable] + sys.argv),
@@ -154,9 +154,9 @@ def setup(tfprof_enabled, pyprof_enabled, allow_skip=False, allow_missing_librls
             sys.exit(1)
 
     if not uninstrumented_run:
-        # iml_profiler.profiler.session.register_session_active_hook(AddProfileContextHook)
-        # iml_profiler.profiler.session.register_session_inactive_hook(RemoveProfileContextHook)
-        # iml_profiler.profiler.session.register_session_run_hook(MaybeDumperTfprofContextHook)
+        # rlscope.profiler.session.register_session_active_hook(AddProfileContextHook)
+        # rlscope.profiler.session.register_session_inactive_hook(RemoveProfileContextHook)
+        # rlscope.profiler.session.register_session_run_hook(MaybeDumperTfprofContextHook)
         # clib_wrap.register_record_event_hook(DumpPyprofTraceHook)
 
         sys.excepthook = cleanup_profiler_excepthook
@@ -430,7 +430,7 @@ class Profiler:
         self.disable_pyprof = get_argval('disable_pyprof', disable_pyprof, False)
         # NOTE: currently has no effect since tfprof is entirely implemented in LD_PRELOAD librlscope.so library.
         self.disable_tfprof = get_argval('disable_tfprof', disable_tfprof, False)
-        # Disable OLD tfprof tracing code.  We now use iml-prof to trace stuff.
+        # Disable OLD tfprof tracing code.  We now use rls-prof to trace stuff.
         self.disable_pyprof_trace = get_argval('disable_pyprof_trace', disable_pyprof_trace, False)
         self.disable_gpu_hw = get_argval('disable_gpu_hw', disable_gpu_hw, False)
         self.delay = get_argval('delay', delay, None)
@@ -806,7 +806,7 @@ class Profiler:
 
         if not self.disable or self.training_progress:
             # Q: is setting --iml-training-progress going to result in us recording events during uninstrumented runs...?
-            # A: No, the --config option we give to iml-prof ensures various events aren't recorded.
+            # A: No, the --config option we give to rls-prof ensures various events aren't recorded.
             # NOTE: We want to collect CUDA API call stats for uninstrumented runs also!
             self._start_iml_prof()
 
@@ -937,7 +937,7 @@ class Profiler:
             return
 
         if self.debug:
-            logger.info('Start iml-prof libcupti tracing')
+            logger.info('Start rls-prof libcupti tracing')
         if rlscope_api.is_used():
             rlscope_api.enable_tracing()
 
@@ -948,7 +948,7 @@ class Profiler:
             return
 
         if self.debug:
-            logger.info('Stop iml-prof libcupti tracing')
+            logger.info('Stop rls-prof libcupti tracing')
 
         if rlscope_api.is_used():
             rlscope_api.disable_tracing()
@@ -1000,12 +1000,12 @@ class Profiler:
         self._tfprof_enabled = True
 
     # def _tfprof_enable_tracing(self):
-    #     for session in iml_profiler.profiler.session.ACTIVE_SESSIONS:
+    #     for session in rlscope.profiler.session.ACTIVE_SESSIONS:
     #         pctx = ProfileContextManager.get_profile_context(session)
     #         pctx.enable_tracing()
 
     # def _tfprof_disable_tracing(self):
-    #     for session in iml_profiler.profiler.session.ACTIVE_SESSIONS:
+    #     for session in rlscope.profiler.session.ACTIVE_SESSIONS:
     #         pctx = ProfileContextManager.get_profile_context(session)
     #         pctx.disable_tracing()
 
@@ -1121,17 +1121,17 @@ class Profiler:
         :param process_name:
         :param phase_name:
         :param handle_utilization_sampler:
-            If True, handle start/stopping iml-util-sampler.
+            If True, handle start/stopping rls-util-sampler.
             i.e.
-            - when profilng start, launch iml-util-sampler.
-            - when profilng stops, send SIGTERM to iml-util-sampler.
+            - when profilng start, launch rls-util-sampler.
+            - when profilng stops, send SIGTERM to rls-util-sampler.
 
             handle_utilization_sampler=True makes sense if your training code is contained
             within a single python script and process.
 
             handle_utilization_sampler=False makes sense for minigo,
             since there are multiple scripts, we make an outer bash script handle
-            starting/stopping iml-util-sampler.
+            starting/stopping rls-util-sampler.
         :return:
         """
         return Profile(
@@ -1486,7 +1486,7 @@ class Profiler:
             logger.info("IML: Warning; you're already running utilization sampler @ pid={pid}".format(pid=self.util_sampler_pid))
             return
 
-        util_cmdline = ['iml-util-sampler']
+        util_cmdline = ['rls-util-sampler']
         util_cmdline.extend(['--iml-directory', _a(self.directory)])
         # Sample memory-usage of the entire process tree rooted at ths process.
         util_cmdline.extend(['--iml-root-pid', str(os.getpid())])
@@ -1596,7 +1596,7 @@ class Profiler:
         # for sess in ACTIVE_SESSIONS:
         #   self.dump_tfprof(sess)
         # logger.info("> IML: Schedule any remaining traces to be dumped.")
-        # for sess in iml_profiler.profiler.session.ACTIVE_SESSIONS:
+        # for sess in rlscope.profiler.session.ACTIVE_SESSIONS:
         #     self._dump_tfprof(sess, debug=self.debug)
         # At the very least, make sure to dump the [PROC:<process_name>] we recorded above.
         # Q: How frequently should we dump pyprof data?
@@ -2792,10 +2792,10 @@ def add_iml_arguments(parser):
                         help=textwrap.dedent("""
         IML: (internal use)
         The process name of the parent that launched this child python process.
-        i.e. whatever was passed to iml_profiler.api.prof.set_process_name('forker')
+        i.e. whatever was passed to rlscope.api.prof.set_process_name('forker')
         Internally, this is used for tracking "process dependencies".
     """))
-    add_argument(iml_parser, '--iml-util-sampler-pid',
+    add_argument(iml_parser, '--rls-util-sampler-pid',
                         help=textwrap.dedent("""
         IML: (internal use)
         The pid of the utilization_sampler.py script that samples CPU/GPU utilization during training.
@@ -2832,7 +2832,7 @@ def add_iml_arguments(parser):
     """))
     add_argument(iml_parser, '--iml-calibration', action='store_true', help=textwrap.dedent("""
         IML: This is a calibration run. 
-        Calibration runs change the semantics of the "iml-prof --config uninstrumented"; 
+        Calibration runs change the semantics of the "rls-prof --config uninstrumented"; 
         in particular, usually "--config uninstrumented" would disable all of IML.
         However, for calibration runs, we use uninstrumented to disable CUPTI/CUDA-API level tracing, BUT 
         still run with python-level stuff (annotations, interceptions) enabled.
@@ -2893,11 +2893,11 @@ def add_iml_arguments(parser):
     """))
     add_argument(iml_parser, '--iml-start-measuring-call', default=1, type=int,
                         help="IML: when should measuring begin?")
-    add_argument(iml_parser, '--iml-bench-name',
+    add_argument(iml_parser, '--rls-bench-name',
                         default=NO_BENCH_NAME,
                         help=textwrap.dedent("""
     IML: which code block should we measure?
-    i.e. --iml-bench-name=some_bench
+    i.e. --rls-bench-name=some_bench
         # Just measure "some_bench", nothing else.
         profiler.profile('some_bench', do_some_bench)
     """))
@@ -2962,7 +2962,7 @@ def _iml_argv(prof : Profiler, keep_executable=False, keep_non_iml_args=False):
     args.iml_phase = prof.phase
     if prof.process_name is None:
         prof._failing = True
-        raise RuntimeError("IML: You must call iml_profiler.api.prof.set_process_name('some_name') before forking children!")
+        raise RuntimeError("IML: You must call rlscope.api.prof.set_process_name('some_name') before forking children!")
     args.iml_internal_parent_process_name = prof.process_name
     args.iml_util_sampler_pid = prof.util_sampler_pid
     argv = args_to_cmdline(parser, args, keep_executable=keep_executable, use_pdb=False)
@@ -2994,7 +2994,7 @@ def run_with_nvprof(directory, parser, args,
         "--iml-nvprof-enabled",
     ]
     if bench_name != NO_BENCH_NAME:
-        argv_exec.extend(["--iml-bench-name", bench_name])
+        argv_exec.extend(["--rls-bench-name", bench_name])
 
     print_cmd(argv_exec)
     subprocess.run(argv_exec, stdout=sys.stdout, stderr=sys.stderr, check=True)

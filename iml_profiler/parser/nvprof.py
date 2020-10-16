@@ -1,4 +1,4 @@
-from iml_profiler.profiler.iml_logging import logger
+from rlscope.profiler.iml_logging import logger
 import re
 import sys
 import os
@@ -10,8 +10,8 @@ import json
 import codecs
 from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, basename as _b
 
-from iml_profiler.parser.common import *
-from iml_profiler.parser.stats import Stats
+from rlscope.parser.common import *
+from rlscope.parser.stats import Stats
 
 cxxfilt = None
 try:

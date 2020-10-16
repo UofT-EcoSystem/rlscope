@@ -1,7 +1,7 @@
 import os
 import shutil
 from os.path import join as _j, abspath as _a, exists as _e, dirname as _d, basename as _b
-from iml_profiler.parser.common import *
+from rlscope.parser.common import *
 
 def experiment_config_path(directory):
     path = _j(directory, 'experiment_config.json')

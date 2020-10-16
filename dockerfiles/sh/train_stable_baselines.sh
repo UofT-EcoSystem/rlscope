@@ -107,7 +107,7 @@ NVPROF=()
 #    NVPROF=(nvprof --source-level-analysis)
 #fi
 
-IML_PROF="${IML_PROF:-iml-prof}"
+IML_PROF="${IML_PROF:-rls-prof}"
 
 
 #IML_PROF_ARGS=()
@@ -117,7 +117,7 @@ IML_PROF="${IML_PROF:-iml-prof}"
 #  )
 #fi
 
-# NOTE: IML_PROF, if defined, will be a command (iml-prof) that wraps the training script
+# NOTE: IML_PROF, if defined, will be a command (rls-prof) that wraps the training script
 # using LD_PRELOAD=librlscope.so in order to sample CUDA API calls during
 # training.  This should be used for uninstrumented runs.
 # Instrumented runs should instead use the profiler built-in to tensorflow to avoid libcupti
@@ -132,5 +132,5 @@ _do $VALGRIND $IML_PROF "${NVPROF[@]}" "${PYTHON[@]}" $RL_BASELINES_ZOO_DIR/trai
     --iml-training-progress \
     "$@"
 # Sanity check that train.py has exited,
-# for those weird runs where iml-bench hangs unexpectedly during p.stdout.readline().
+# for those weird runs where rls-bench hangs unexpectedly during p.stdout.readline().
 echo "> train.py has exited"

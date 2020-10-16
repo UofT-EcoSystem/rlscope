@@ -1,4 +1,4 @@
-from iml_profiler.profiler.iml_logging import logger
+from rlscope.profiler.iml_logging import logger
 import itertools
 from collections import namedtuple
 import functools
@@ -7,44 +7,44 @@ import copy
 
 import types
 
-from iml_profiler import py_config
+from rlscope import py_config
 
 if py_config.USE_NUMBA:
     import numba
     from numba import njit
 
-from iml_profiler.profiler.util import pprint_msg
-from iml_profiler.parser.common import *
-from iml_profiler.parser import constants
+from rlscope.profiler.util import pprint_msg
+from rlscope.parser.common import *
+from rlscope.parser import constants
 # from tensorflow.core.profiler.tfprof_log_pb2 import ProfileProto
-from iml_profiler.protobuf.pyprof_pb2 import CategoryEventsProto, ProcessMetadata
+from rlscope.protobuf.pyprof_pb2 import CategoryEventsProto, ProcessMetadata
 
-from iml_profiler.profiler import proto_util
+from rlscope.profiler import proto_util
 
-from iml_profiler.parser.stats import KernelTime
+from rlscope.parser.stats import KernelTime
 
-from iml_profiler.parser.trace_events import TraceEventsDumper, dump_category_times
-from iml_profiler.profiler.concurrent import ForkedProcessPool, FailedProcessException
+from rlscope.parser.trace_events import TraceEventsDumper, dump_category_times
+from rlscope.profiler.concurrent import ForkedProcessPool, FailedProcessException
 
-from iml_profiler.parser.dataframe import venn_as_overlap_dict, overlap_as_venn_dict
+from rlscope.parser.dataframe import venn_as_overlap_dict, overlap_as_venn_dict
 
-from iml_profiler.profiler import concurrent
+from rlscope.profiler import concurrent
 
 from concurrent.futures import ProcessPoolExecutor
 
-from iml_profiler.parser.db import SQLCategoryTimesReader, sql_input_path, sql_get_source_files, \
+from rlscope.parser.db import SQLCategoryTimesReader, sql_input_path, sql_get_source_files, \
     Machine, Process, Phase, EventSplit, \
     GetConnectionPool, \
     EventsAsEOTimes, AsNumbaEOTimes, category_to_idx_maps
 
-from iml_profiler.parser.readers import TFProfCategoryTimesReader, \
+from rlscope.parser.readers import TFProfCategoryTimesReader, \
    DEFAULT_group_by_device, \
    DEFAULT_ignore_categories, \
    DEFAULT_debug
 
 
 if py_config.USE_NUMBA:
-    from iml_profiler.scripts.unique_intervals import UniqueSplits, PlotOutput, ShowOrSave, \
+    from rlscope.scripts.unique_intervals import UniqueSplits, PlotOutput, ShowOrSave, \
         bitset_add, \
         bitset_contains, \
         bitset_empty_set, \
@@ -1294,7 +1294,7 @@ class TraceEventsParser:
         :return:
         """
         if self.td is None:
-            from iml_profiler.profiler.profilers import unit_test_util
+            from rlscope.profiler.profilers import unit_test_util
             self.td = unit_test_util.TestData(debug=self.debug)
             self.td.read_directory(self.directory)
 
@@ -2526,7 +2526,7 @@ class OverlapTypeInterface:
         #       If false (and calibration files are given), then subtract overhead making it 'invisible' in iml-drill.
         #       Subtract; remove CPU-time that is due to CPU overhead.
         #
-        #     visible_overhead is determined by a iml-analyze flag.
+        #     visible_overhead is determined by a rls-run flag.
         #     However, if the user DOESN'T provide calibration files, all we do is invisible_overhead.
         #     If calibration files are provided, then invisible_overhead ought to be the default.
         #
@@ -2576,7 +2576,7 @@ class OverlapTypeInterface:
     #     #     visible_overhead   = don't subtract; count overhead as extra CPU time.
     #     #     invisible_overhead = subtract; remove CPU-time that is due to CPU overhead.
     #     #
-    #     #     visible_overhead is determined by a iml-analyze flag.
+    #     #     visible_overhead is determined by a rls-run flag.
     #     #     However, if the user DOESN'T provide calibration files, all we do is invisible_overhead.
     #     #     If calibration files are provided, then invisible_overhead ought to be the default.
     #     #
@@ -3701,7 +3701,7 @@ def merge_dicts(dict1, dict2, merge_func):
 
 def test_merge_adjacent_events():
 
-    from iml_profiler.test.test_util import sec, T, flatten_category_times as flat
+    from rlscope.test.test_util import sec, T, flatten_category_times as flat
 
     def test_01_merge_adj_events():
         events = [T(1, 6), T(2, 6), T(3, 7), T(4, 6)]
@@ -3738,20 +3738,20 @@ Common usage:
     $ cd ~/clone/iml
 
     # To run numbaified code with JIT compilation enabled:
-    $ IML_USE_NUMBA=1 pytest -vv -s --pdb iml_profiler/parser/tfprof.py
+    $ IML_USE_NUMBA=1 pytest -vv -s --pdb rlscope/parser/tfprof.py
 
     # To run numbaified code WITHOUT JIT enabled (e.g. if you segfault and don't know why):
-    $ IML_USE_NUMBA=1 NUMBA_DISABLE_JIT=1 pytest -vv -s --pdb iml_profiler/parser/tfprof.py
+    $ IML_USE_NUMBA=1 NUMBA_DISABLE_JIT=1 pytest -vv -s --pdb rlscope/parser/tfprof.py
     
     # To run un-numbafied code:
-    $ pytest -vv -s --pdb iml_profiler/parser/tfprof.py
+    $ pytest -vv -s --pdb rlscope/parser/tfprof.py
 
 
 """
 
 if py_config.USE_NUMBA:
 
-    from iml_profiler.test import test_util
+    from rlscope.test import test_util
     class TestOverlap:
 
         def T(self, *args, **kwargs):
@@ -4038,7 +4038,7 @@ if py_config.USE_NUMBA:
         #
         #     :return:
         #     """
-        #     from iml_profiler.test.test_util import sec, T, flatten_category_times as flat
+        #     from rlscope.test.test_util import sec, T, flatten_category_times as flat
         #     py_config.IS_UNIT_TEST = True
         #     # Q: What if start times match but end times are unordered?
         #     # Q: WHY would this EVER happen in our data though...?

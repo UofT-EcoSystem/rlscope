@@ -1,4 +1,4 @@
-from iml_profiler.profiler.iml_logging import logger
+from rlscope.profiler.iml_logging import logger
 import signal
 import time
 import subprocess
@@ -16,15 +16,15 @@ from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 
 from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, basename as _b
 
-from iml_profiler.profiler import nvidia_gpu_query
+from rlscope.profiler import nvidia_gpu_query
 
-from iml_profiler import py_config
+from rlscope import py_config
 
-from iml_profiler.protobuf.pyprof_pb2 import CategoryEventsProto, MachineUtilization, DeviceUtilization, UtilizationSample
+from rlscope.protobuf.pyprof_pb2 import CategoryEventsProto, MachineUtilization, DeviceUtilization, UtilizationSample
 
-from iml_profiler.profiler.util import log_cmd, print_cmd
-from iml_profiler.parser.common import *
-from iml_profiler.profiler import timer as iml_timer
+from rlscope.profiler.util import log_cmd, print_cmd
+from rlscope.parser.common import *
+from rlscope.profiler import timer as iml_timer
 
 BYTES_IN_KB = 1 << 10
 BYTES_IN_MB = 1 << 20
@@ -281,7 +281,7 @@ class UtilizationSampler:
                     machine_gpu_info = nvidia_gpu_query.MachineGPUInfo(debug=self.debug)
                     gpu_utils = sample_gpu_utilization(machine_gpu_info, self.pid, debug=self.debug)
                 except psutil.NoSuchProcess as e:
-                    logger.info("Exiting iml-util-sampler since pid={pid} no longer exists".format(pid=e.pid))
+                    logger.info("Exiting rls-util-sampler since pid={pid} no longer exists".format(pid=e.pid))
                     should_stop = True
                     continue
 
@@ -707,7 +707,7 @@ def disable_test_sample_gpu_util():
         gpu_runner.join(timeout=2)
         gpu_runner.terminate()
 
-from iml_profiler.profiler.iml_logging import logger
+from rlscope.profiler.iml_logging import logger
 def main():
     iml_util_argv, cmd_argv = split_argv_on(sys.argv[1:])
     parser = get_util_sampler_parser(add_iml_root_pid=len(cmd_argv) == 0)
@@ -735,8 +735,8 @@ def main():
             # cmdline = proc.cmdline()
             try:
                 logger.info(pinfo['cmdline'])
-                if re.search(r'iml-util-sampler', ' '.join(pinfo['cmdline'])) and pinfo['pid'] != os.getpid():
-                    logger.info("> Kill iml-util-sampler: {proc}".format(
+                if re.search(r'rls-util-sampler', ' '.join(pinfo['cmdline'])) and pinfo['pid'] != os.getpid():
+                    logger.info("> Kill rls-util-sampler: {proc}".format(
                         proc=proc))
                     proc.kill()
             except psutil.NoSuchProcess:
@@ -753,7 +753,7 @@ def main():
     # proc = psutil.Process(pid=os.getpid())
     # dump_cpus = get_dump_cpus()
     # proc.cpu_affinity(dump_cpus)
-    # logger.info("> Set CPU affinity of iml-util-sampler to: {cpus}".format(
+    # logger.info("> Set CPU affinity of rls-util-sampler to: {cpus}".format(
     #     cpus=dump_cpus,
     # ))
 
@@ -787,7 +787,7 @@ def main():
     else:
         iml_root_pid = args.iml_root_pid
 
-    # NOTE: usually, we have iml-prof program signal us to terminate.
+    # NOTE: usually, we have rls-prof program signal us to terminate.
     # However if they provide a cmd, we would like to terminate sampler when cmd finishes, and return cmd's exit status.
     util_sampler = UtilizationSampler(
         directory=args.iml_directory,
@@ -809,7 +809,7 @@ class UtilSamplerProcess:
         self.proc_pid = None
 
     def _launch_utilization_sampler(self):
-        util_cmdline = ['iml-util-sampler']
+        util_cmdline = ['rls-util-sampler']
         util_cmdline.extend(['--iml-directory', self.iml_directory])
         # Sample memory-usage of the entire process tree rooted at ths process.
         util_cmdline.extend(['--iml-root-pid', str(os.getpid())])
@@ -870,11 +870,11 @@ def util_sampler(*args, **kwargs):
     :param debug:
         Extra logger.
     """
-    import iml_profiler.api
-    if iml_profiler.api.prof is not None:
-        assert iml_profiler.api.prof.disabled
-    # import iml_profiler.api
-    # if iml_profiler.api.prof is not None:
+    import rlscope.api
+    if rlscope.api.prof is not None:
+        assert rlscope.api.prof.disabled
+    # import rlscope.api
+    # if rlscope.api.prof is not None:
     #     raise RuntimeError(textwrap.dedent("""\
     #         IML ERROR:
     #         When using iml.util_sampler(...) to collect CPU/GPU utilization information,

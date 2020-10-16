@@ -30,7 +30,7 @@ limitations under the License.
 #include "cuda_api_profiler/registered_handle.h"
 #endif
 
-//#include "iml_profiler/protobuf/iml_prof.pb.h"
+//#include "rlscope/protobuf/iml_prof.pb.h"
 #include "iml_prof.pb.h"
 
 #include "cuda_api_profiler/cuda_activity_profiler.h"
@@ -609,7 +609,7 @@ MyStatus DeviceTracerImpl::Start() {
       DCHECK(!(
           is_yes("IML_FUZZ_CUDA_API", false) &&
           is_yes("IML_CUDA_API_CALLS", false) ))
-        << "Can only run iml-prof with --fuzz-cuda-api or --cuda-api-calls, not both";
+        << "Can only run rls-prof with --fuzz-cuda-api or --cuda-api-calls, not both";
 
       if (is_yes("IML_CUDA_API_CALLS", false)) {
 #ifdef WITH_CUDA_LD_PRELOAD

@@ -5,8 +5,8 @@
 #ifndef IML_EVENT_PROFILER_H
 #define IML_EVENT_PROFILER_H
 
-//#include "iml_profiler/protobuf/iml_prof.pb.h"
-//#include "iml_profiler/protobuf/pyprof.pb.h"
+//#include "rlscope/protobuf/iml_prof.pb.h"
+//#include "rlscope/protobuf/pyprof.pb.h"
 
 #include "iml_prof.pb.h"
 #include "pyprof.pb.h"

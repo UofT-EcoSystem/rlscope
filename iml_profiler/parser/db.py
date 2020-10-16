@@ -1,4 +1,4 @@
-from iml_profiler.profiler.iml_logging import logger
+from rlscope.profiler.iml_logging import logger
 import psutil
 import os
 import multiprocessing
@@ -21,30 +21,30 @@ import sqlite3
 
 from os.path import join as _j, dirname as _d, exists as _e
 
-from iml_profiler.profiler.util import pprint_msg
-from iml_profiler.protobuf.pyprof_pb2 import CategoryEventsProto, MachineUtilization
+from rlscope.profiler.util import pprint_msg
+from rlscope.protobuf.pyprof_pb2 import CategoryEventsProto, MachineUtilization
 
-from iml_profiler import py_config
+from rlscope import py_config
 
-from iml_profiler.parser.trace_events import dump_category_times
+from rlscope.parser.trace_events import dump_category_times
 
-from iml_profiler.parser.readers import TFProfCategoryTimesReader, CUDAAPIStatsReader, CategoryEventsReader, CUDADeviceEventsReader, \
+from rlscope.parser.readers import TFProfCategoryTimesReader, CUDAAPIStatsReader, CategoryEventsReader, CUDADeviceEventsReader, \
     DEFAULT_group_by_device, \
     DEFAULT_ignore_categories, \
     DEFAULT_debug \
 
 import contextlib
 
-from iml_profiler.parser.common import *
-from iml_profiler.parser import constants
+from rlscope.parser.common import *
+from rlscope.parser import constants
 
-from iml_profiler.parser.stats import category_times_add_time
+from rlscope.parser.stats import category_times_add_time
 
-from iml_profiler.parser.stats import KernelTime
+from rlscope.parser.stats import KernelTime
 
-from iml_profiler.protobuf.pyprof_pb2 import CategoryEventsProto, MachineUtilization, ProcessMetadata, TP_HAS_PROGRESS, TP_NO_PROGRESS
+from rlscope.protobuf.pyprof_pb2 import CategoryEventsProto, MachineUtilization, ProcessMetadata, TP_HAS_PROGRESS, TP_NO_PROGRESS
 
-from iml_profiler.parser.dataframe import TrainingProgressDataframeReader
+from rlscope.parser.dataframe import TrainingProgressDataframeReader
 
 SQLITE_TABLE_SQL = _j(py_config.ROOT, "sqlite", "tables.sql")
 SQLITE_INDICES_SQL = _j(py_config.ROOT, "sqlite", "indices.sql")
@@ -53,7 +53,7 @@ PSQL_TABLE_SQL = _j(py_config.ROOT, "postgres", "tables.sql")
 PSQL_INDICES_SQL = _j(py_config.ROOT, "postgres", "indices.sql")
 PSQL_CONSTRAINTS_SQL = _j(py_config.ROOT, "postgres", "constraints.sql")
 
-# If true, then Tasks run with iml-analyze will be forcefully limited to a maximum of
+# If true, then Tasks run with rls-run will be forcefully limited to a maximum of
 # 1 Postgres SQL connection per python-process.
 #
 # Ideally, we'd use this to prevent connection leak bugs.
@@ -5852,7 +5852,7 @@ def test_merge_sorted():
 
     assert actual == expect
 
-from iml_profiler.test import test_util
+from rlscope.test import test_util
 # import sec, T, U
 class TestProcessOpNest:
 

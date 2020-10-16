@@ -361,7 +361,7 @@ _multi_expr() {
   fi
   _do mkdir -p ${iml_dir}
   logfile=${iml_dir}/gpu_util_experiment.log.txt
-  _do_with_logfile iml-util-sampler --iml-directory ${iml_dir} -- \
+  _do_with_logfile rls-util-sampler --iml-directory ${iml_dir} -- \
     gpu_util_experiment \
     --mode run_kernels \
     --iml_directory ${iml_dir} \
@@ -402,7 +402,7 @@ nvidia_smi_expr() {
   _do mkdir -p ${iml_dir}
     #  --kernel_duration_us ${kernel_duration_us}
     #    --kernel_delay_us ${kernel_delay_us}
-  _do iml-util-sampler --iml-directory ${iml_dir} -- \
+  _do rls-util-sampler --iml-directory ${iml_dir} -- \
     gpu_util_experiment \
     --mode run_kernels \
     --iml_directory ${iml_dir} \
@@ -791,7 +791,7 @@ tf_inference_expr() {
 
   _do mkdir -p ${out_dir}
   logfile=${out_dir}/log.txt
-  _do_with_logfile iml-prof --config ${iml_prof_config} python ${ENJOY_TRT} \
+  _do_with_logfile rls-prof --config ${iml_prof_config} python ${ENJOY_TRT} \
     --algo a2c \
     --env BreakoutNoFrameskip-v4 \
     --folder trained_agents/ \

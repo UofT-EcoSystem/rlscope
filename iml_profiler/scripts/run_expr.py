@@ -3,16 +3,16 @@ Run shell commands across the available GPUs on this machine.
 
 Usage:
   # --append: append the shell command to run_expr.sh.  If logfile.out already exists and is done, SKIP it.
-  $ iml-run-expr --append --sh run_expr.sh iml-prof ...
+  $ rls-run-expr --append --sh run_expr.sh rls-prof ...
 
   # --run: run the shell command as-is (not  --sh is optional and ignored)
-  $ iml-run-expr --run --sh run_expr.sh iml-prof ...
+  $ rls-run-expr --run --sh run_expr.sh rls-prof ...
 
   # --append --run: append the shell command to run_expr.sh, then run the command as-is
-  $ iml-run-expr --append --run --sh run_expr.sh iml-prof ...
+  $ rls-run-expr --append --run --sh run_expr.sh rls-prof ...
 
   # Run all the experiments in run_expr.sh
-  $ iml-run-expr --run-sh --sh run_expr.sh
+  $ rls-run-expr --run-sh --sh run_expr.sh
 """
 import argparse
 import time
@@ -31,13 +31,13 @@ import queue
 
 from os.path import join as _j, abspath as _a, exists as _e, dirname as _d, basename as _b
 
-from iml_profiler.profiler import iml_logging
-from iml_profiler.profiler.iml_logging import logger
-from iml_profiler.profiler.util import gather_argv, run_with_pdb, error, get_available_cpus, get_available_gpus
-from iml_profiler.experiment.util import expr_run_cmd, expr_already_ran
+from rlscope.profiler import iml_logging
+from rlscope.profiler.iml_logging import logger
+from rlscope.profiler.util import gather_argv, run_with_pdb, error, get_available_cpus, get_available_gpus
+from rlscope.experiment.util import expr_run_cmd, expr_already_ran
 
 # This is slow.
-# from iml_profiler.parser.common import *
+# from rlscope.parser.common import *
 
 class RunExpr:
     def __init__(self,
@@ -226,7 +226,7 @@ class RunExpr:
         cmd = run_cmd.cmd
         # output_directory = run_cmd.output_directory
 
-        # NOTE: iml-prof will output its own logfile.out...?
+        # NOTE: rls-prof will output its own logfile.out...?
         # logfile = self.cmd_logfile(output_directory)
         logfile = run_cmd.logfile
         # Only use one gpu.

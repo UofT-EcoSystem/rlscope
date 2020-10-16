@@ -38,7 +38,7 @@
 
 #define MAYBE_LOG_ERROR(out, func, status) \
   if (status.code() != MyStatus::OK().code()) { \
-    out << "iml-prof C++ API '" << func << "' failed with: " << status; \
+    out << "rls-prof C++ API '" << func << "' failed with: " << status; \
   }
 
 namespace rlscope {
@@ -50,7 +50,7 @@ void printActivity(const CUpti_Activity *record);
 
 //inline static void MAYBE_LOG_ERROR(std::ostream&& out, const char* func, const MyStatus& status) {
 //  if (status.code() != MyStatus::OK().code()) {
-//    out << "iml-prof C++ API '" << func << "' failed with: " << status;
+//    out << "rls-prof C++ API '" << func << "' failed with: " << status;
 //  }
 //}
 

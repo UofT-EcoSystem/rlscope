@@ -1,14 +1,14 @@
-from iml_profiler.profiler.iml_logging import logger
+from rlscope.profiler.iml_logging import logger
 import copy
 import numpy as np
 import itertools
 import argparse
 from decimal import Decimal
 
-from iml_profiler.protobuf.pyprof_pb2 import CategoryEventsProto, MachineUtilization, DeviceUtilization, UtilizationSample
-from iml_profiler.parser.common import *
-from iml_profiler.parser import constants
-from iml_profiler.profiler import experiment
+from rlscope.protobuf.pyprof_pb2 import CategoryEventsProto, MachineUtilization, DeviceUtilization, UtilizationSample
+from rlscope.parser.common import *
+from rlscope.parser import constants
+from rlscope.profiler import experiment
 from os.path import join as _j, abspath as _a, exists as _e, dirname as _d, basename as _b
 import pandas as pd
 import matplotlib
@@ -17,16 +17,16 @@ import seaborn as sns
 
 from matplotlib import pyplot as plt
 
-from iml_profiler.profiler.util import pprint_msg
-from iml_profiler.parser.dataframe import TrainingProgressDataframeReader, CUDAAPIStatsDataframeReader, PyprofDataframeReader, read_iml_config, DataframeMapper, IMLConfig, VennData, map_readers, get_training_durations_df
-from iml_profiler.parser.readers import OpStackReader, CUDAAPIStatsReader
-from iml_profiler.parser.stacked_bar_plots import StackedBarPlot
-from iml_profiler.parser import stacked_bar_plots
+from rlscope.profiler.util import pprint_msg
+from rlscope.parser.dataframe import TrainingProgressDataframeReader, CUDAAPIStatsDataframeReader, PyprofDataframeReader, read_iml_config, DataframeMapper, IMLConfig, VennData, map_readers, get_training_durations_df
+from rlscope.parser.readers import OpStackReader, CUDAAPIStatsReader
+from rlscope.parser.stacked_bar_plots import StackedBarPlot
+from rlscope.parser import stacked_bar_plots
 
-from iml_profiler.experiment import expr_config
+from rlscope.experiment import expr_config
 
-from iml_profiler.parser import stacked_bar_plots
-from iml_profiler.parser.db import SQLCategoryTimesReader, CSVInserter, \
+from rlscope.parser import stacked_bar_plots
+from rlscope.parser.db import SQLCategoryTimesReader, CSVInserter, \
     sql_input_path, \
     sql_create_connection, \
     sql_exec_query, \
@@ -37,10 +37,10 @@ from iml_profiler.parser.db import SQLCategoryTimesReader, CSVInserter, \
     get_sql_connection, \
     RowIterator
 
-from iml_profiler.parser.stats import KernelTime
+from rlscope.parser.stats import KernelTime
 
-from iml_profiler.profiler.iml_logging import logger
-from iml_profiler.parser.plot import get_sns_kwargs, get_plt_kwargs, add_grouped_stacked_bars, add_bar_labels
+from rlscope.profiler.iml_logging import logger
+from rlscope.parser.plot import get_sns_kwargs, get_plt_kwargs, add_grouped_stacked_bars, add_bar_labels
 
 class CalibrationJSON:
     def __init__(self, path, as_df=None):
@@ -202,24 +202,24 @@ class CorrectedTrainingTimeParser:
         self.should_subtract_pyprof_interception = False
 
         if iml_config.get_env_bool('cuda_activities'):
-            # $ iml-prof --cuda-activities
+            # $ rls-prof --cuda-activities
             check_all_true('cuda_activities')
             self.should_subtract_cupti = True
 
         if iml_config.get_env_bool('cuda_api_calls') and iml_config.get_env_bool('cuda_api_events'):
-            # $ iml-prof --cuda-api-calls --cuda-api-events
+            # $ rls-prof --cuda-api-calls --cuda-api-events
             check_all_true('cuda_api_calls')
             check_all_true('cuda_api_events')
             self.should_subtract_LD_PRELOAD = True
 
         if iml_config.get_env_bool('cuda_api_calls') and not iml_config.get_env_bool('cuda_api_events'):
 
-            # $ iml-prof --config gpu-activities --cuda-api-calls --cuda-api-events
+            # $ rls-prof --config gpu-activities --cuda-api-calls --cuda-api-events
             # ===
-            # $ iml-prof --cuda-api-calls --cuda-activities
+            # $ rls-prof --cuda-api-calls --cuda-activities
             logger.info(textwrap.dedent("""\
                 WARNING: we cannot correct for runs like this, so there will be positive overhead (%):
-                    $ iml-prof --cuda-api-calls --cuda-activities
+                    $ rls-prof --cuda-api-calls --cuda-activities
                 In particular, LD_PRELOAD overhead is measured using "--cuda-api-calls --cuda-api-events", but 
                 we currently dont ever just measure "--cuda-api-calls".
                 """))
@@ -1079,18 +1079,18 @@ class CallInterceptionOverheadParser:
     """
     config_interception
     Run with interception enabled.
-    $ iml-prof --config interception python train.py --iml-disable-pyprof
+    $ rls-prof --config interception python train.py --iml-disable-pyprof
     # --config interception: --cuda-api-calls --cuda-api-events
     # We want to know how much time is spent just intercepting API calls (NOT GPU activities)
 
     config_uninstrumented
     Run with interception disabled, and pyprof disabled (uninstrumented).
-    $ iml-prof --config uninstrumented python train.py --iml-disable-pyprof
+    $ rls-prof --config uninstrumented python train.py --iml-disable-pyprof
     # Time spent without ANY interception / profiling overhead at all.
 
     config_pyprof
     Run with pyprof enabled (but interception disabled).
-    $ iml-prof uninstrumented ... python train.py
+    $ rls-prof uninstrumented ... python train.py
     # Time spent without ANY interception / profiling overhead at all.
     """
     def __init__(self,
@@ -1323,12 +1323,12 @@ class PyprofOverheadParser:
     # Run with tfprof disabled, pyprof disabled, AND op-events disabled;
     # NOTE: we should make --iml-disable do THIS by default.
     uninstrumented_directory
-    $ iml-prof train.py --iml-disable --iml-disable-ops
+    $ rls-prof train.py --iml-disable --iml-disable-ops
 
     # Run with ONLY pyprof events enabled (nothing else).
     # i.e. intercept C++ methods and record Python/C++ events.
     pyprof_interceptions_directory
-    $ iml-prof train.py --iml-disable-tfprof --iml-disable-ops
+    $ rls-prof train.py --iml-disable-tfprof --iml-disable-ops
 
     # Run with ONLY op-events enabled (nothing else).
     # i.e. only iml.prof.operation(...) calls are added code.
@@ -1690,12 +1690,12 @@ class TotalTrainingTimeParser:
     # Run with tfprof disabled, pyprof disabled, AND op-events disabled;
     # NOTE: we should make --iml-disable do THIS by default.
     uninstrumented_directory
-    $ iml-prof train.py --iml-disable --iml-disable-ops
+    $ rls-prof train.py --iml-disable --iml-disable-ops
 
     # Run with ONLY pyprof events enabled (nothing else).
     # i.e. intercept C++ methods and record Python/C++ events.
     pyprof_interceptions_directory
-    $ iml-prof train.py --iml-disable-tfprof --iml-disable-ops
+    $ rls-prof train.py --iml-disable-tfprof --iml-disable-ops
 
     # Run with ONLY op-events enabled (nothing else).
     # i.e. only iml.prof.operation(...) calls are added code.
@@ -2794,7 +2794,7 @@ def dataframe_add_suffix(df, suffix, cols):
 
 class OverheadEventCountParser:
     """
-    Compute the data needed to subtract from the venn.js files generated by iml-analyze.
+    Compute the data needed to subtract from the venn.js files generated by rls-run.
     In particular:
 
     CUDA API interception:

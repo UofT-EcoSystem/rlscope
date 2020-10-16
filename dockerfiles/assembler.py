@@ -56,7 +56,7 @@ from io import BytesIO
 from docker import APIClient
 from pathlib import Path
 
-from iml_profiler import py_config
+from rlscope import py_config
 
 NVIDIA_VISIBLE_DEVICES = [0]
 assert len(NVIDIA_VISIBLE_DEVICES) > 0

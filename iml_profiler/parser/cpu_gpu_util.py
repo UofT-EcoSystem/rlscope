@@ -1,4 +1,4 @@
-from iml_profiler.profiler.iml_logging import logger
+from rlscope.profiler.iml_logging import logger
 import copy
 import itertools
 import subprocess
@@ -6,30 +6,30 @@ import argparse
 import csv
 
 
-from iml_profiler.profiler.util import pprint_msg
-from iml_profiler.protobuf.pyprof_pb2 import CategoryEventsProto, MachineUtilization, DeviceUtilization, UtilizationSample
-from iml_profiler.parser.common import *
-from iml_profiler.parser import constants
-from iml_profiler.parser.overlap_result import from_js
-from iml_profiler.profiler import experiment
+from rlscope.profiler.util import pprint_msg
+from rlscope.protobuf.pyprof_pb2 import CategoryEventsProto, MachineUtilization, DeviceUtilization, UtilizationSample
+from rlscope.parser.common import *
+from rlscope.parser import constants
+from rlscope.parser.overlap_result import from_js
+from rlscope.profiler import experiment
 from os.path import join as _j, abspath as _a, exists as _e, dirname as _d, basename as _b
 import pandas as pd
 import seaborn as sns
 
-from iml_profiler.parser.dataframe import UtilDataframeReader
+from rlscope.parser.dataframe import UtilDataframeReader
 
 from matplotlib import pyplot as plt
 import matplotlib.gridspec
 
-from iml_profiler.parser import stacked_bar_plots
+from rlscope.parser import stacked_bar_plots
 
-from iml_profiler.profiler.iml_logging import logger
+from rlscope.profiler.iml_logging import logger
 
-from iml_profiler.experiment import expr_config
-from iml_profiler.parser.plot import CUDAEventCSVReader, fix_seaborn_legend
+from rlscope.experiment import expr_config
+from rlscope.parser.plot import CUDAEventCSVReader, fix_seaborn_legend
 
 import multiprocessing
-from iml_profiler.profiler.concurrent import map_pool
+from rlscope.profiler.concurrent import map_pool
 from concurrent.futures import ProcessPoolExecutor
 
 FLOAT_RE = r'(?:[-+]?[0-9]*\.?[0-9]+(?:[eE][-+]?[0-9]+)?)'

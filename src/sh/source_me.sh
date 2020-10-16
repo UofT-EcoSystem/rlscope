@@ -66,7 +66,7 @@ _process_minigo() {
     for overlap_type in ResourceOverlap ResourceSubplot CategoryOverlap OperationOverlap; do
         (
         echo "> overlap_type = $overlap_type"
-        _do python3 $IML/iml_profiler/scripts/analyze.py \
+        _do python3 $IML/rlscope/scripts/analyze.py \
             --directories $DIR \
             --rules UtilizationPlot \
             --overlap-type $overlap_type \
@@ -78,7 +78,7 @@ _process_minigo() {
     local plot_type="HeatScale"
     (
     echo "> plot_type = $plot_type"
-    _do python3 $IML/iml_profiler/scripts/analyze.py \
+    _do python3 $IML/rlscope/scripts/analyze.py \
       --directories $DIR \
       --rules HeatScalePlot
     echo "> DONE"

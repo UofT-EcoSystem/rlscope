@@ -2341,7 +2341,7 @@ MyStatus NvprofTraceFileReader::_ReadCSVMeta() {
 // 4643.346000,1.536000,,,,,,,,,,0.125000,0.077610,"Pinned","Device","GeForce RTX 2080 Ti (0)","1","22","[CUDA memcpy HtoD]",316
 #endif
 
-  // NOTE: we assume csv files have been read ahead-of-time by iml-analyze.
+  // NOTE: we assume csv files have been read ahead-of-time by rls-run.
   // Parse _header and _units.
   {
     std::ifstream infile(_path);

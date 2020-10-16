@@ -1,4 +1,4 @@
-from iml_profiler.parser.common import *
+from rlscope.parser.common import *
 
 class CategoryKey:
     def __init__(self):

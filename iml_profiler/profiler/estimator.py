@@ -15,8 +15,8 @@ NOTE: We don't bother to wrap export_saved_model, simply because it doesn't expo
 but we COULD wrap it (minigo doesn't use it).
 """
 
-from iml_profiler.profiler.iml_logging import logger
-from iml_profiler import py_config
+from rlscope.profiler.iml_logging import logger
+from rlscope import py_config
 
 SKIP_MODULE = False
 if py_config.is_running_unit_tests():
@@ -33,7 +33,7 @@ if py_config.is_running_unit_tests():
 if not SKIP_MODULE:
     import tensorflow as tf
 
-    import iml_profiler
+    import rlscope
 
     from tensorflow.python.training.training import CheckpointSaverListener
 
@@ -74,11 +74,11 @@ if not SKIP_MODULE:
 
             if hooks is None:
                 hooks = []
-            hooks = hooks + [TrainEstimatorHook(iml_profiler.api.prof)]
+            hooks = hooks + [TrainEstimatorHook(rlscope.api.prof)]
 
             if saving_listeners is None:
                 saving_listeners = []
-            saving_listeners = saving_listeners + [SaveModelEstimatorHook(iml_profiler.api.prof)]
+            saving_listeners = saving_listeners + [SaveModelEstimatorHook(rlscope.api.prof)]
 
             return self.estimator.train(
                 input_fn,
@@ -97,7 +97,7 @@ if not SKIP_MODULE:
 
             if hooks is None:
                 hooks = []
-            hooks = hooks + [PredictEstimatorHook(iml_profiler.api.prof)]
+            hooks = hooks + [PredictEstimatorHook(rlscope.api.prof)]
 
             return self.estimator.predict(
                 input_fn,
@@ -111,7 +111,7 @@ if not SKIP_MODULE:
 
             if hooks is None:
                 hooks = []
-            hooks = hooks + [EvaluateEstimatorHook(iml_profiler.api.prof)]
+            hooks = hooks + [EvaluateEstimatorHook(rlscope.api.prof)]
 
             return self.estimator.evaluate(
                 input_fn,
@@ -149,7 +149,7 @@ if not SKIP_MODULE:
             self.is_running = False
             self.operation = operation
             if prof is None:
-                self.prof = iml_profiler.api.prof
+                self.prof = rlscope.api.prof
             else:
                 self.prof = prof
             assert self.prof is not None
@@ -184,7 +184,7 @@ if not SKIP_MODULE:
         def __init__(self, prof=None):
             self.operation = 'estimator_save_model'
             if prof is None:
-                self.prof = iml_profiler.api.prof
+                self.prof = rlscope.api.prof
             else:
                 self.prof = prof
             assert self.prof is not None

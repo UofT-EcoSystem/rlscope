@@ -7,7 +7,7 @@ import shlex
 import csv
 import decimal
 import json
-from iml_profiler.profiler.iml_logging import logger
+from rlscope.profiler.iml_logging import logger
 import os
 import pickle
 import pprint
@@ -25,15 +25,15 @@ import numpy as np
 import pandas as pd
 import psutil
 import pwd
-from iml_profiler.protobuf.pyprof_pb2 import CategoryEventsProto, MachineUtilization, ProcessMetadata, IncrementalTrainingProgress
-from iml_profiler.protobuf.unit_test_pb2 import IMLUnitTestOnce, IMLUnitTestMultiple
-from iml_profiler.protobuf.iml_prof_pb2 import CUDAAPIPhaseStatsProto, MachineDevsEventsProto, OpStackProto
+from rlscope.protobuf.pyprof_pb2 import CategoryEventsProto, MachineUtilization, ProcessMetadata, IncrementalTrainingProgress
+from rlscope.protobuf.unit_test_pb2 import IMLUnitTestOnce, IMLUnitTestMultiple
+from rlscope.protobuf.iml_prof_pb2 import CUDAAPIPhaseStatsProto, MachineDevsEventsProto, OpStackProto
 from tqdm import tqdm as tqdm_progress
 
-from iml_profiler import py_config
-from iml_profiler.py_config import EnvVars
+from rlscope import py_config
+from rlscope.py_config import EnvVars
 
-from iml_profiler.parser import constants
+from rlscope.parser import constants
 
 # Record a "special" operation event-name (category=constants.constants.CATEGORY_OPERATION)
 # when the prof.start()/stop() is called.

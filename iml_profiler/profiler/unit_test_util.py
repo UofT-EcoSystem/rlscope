@@ -2,16 +2,16 @@
 # Utilities for recording data for unit-tests, and for reading in data for checking unit-test success/failure.
 #
 
-from iml_profiler.profiler.iml_logging import logger
+from rlscope.profiler.iml_logging import logger
 from os.path import join as _j
 
-from iml_profiler.protobuf.unit_test_pb2 import IMLUnitTestOnce, IMLUnitTestMultiple
+from rlscope.protobuf.unit_test_pb2 import IMLUnitTestOnce, IMLUnitTestMultiple
 
-from iml_profiler.parser.common import *
-from iml_profiler.profiler import timer as iml_timer
-# from iml_profiler.profiler.clib_wrap import MICROSECONDS_IN_SECOND
+from rlscope.parser.common import *
+from rlscope.profiler import timer as iml_timer
+# from rlscope.profiler.clib_wrap import MICROSECONDS_IN_SECOND
 
-from iml_profiler.profiler import proto_util
+from rlscope.profiler import proto_util
 
 
 #

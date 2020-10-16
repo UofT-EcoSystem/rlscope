@@ -1,5 +1,5 @@
 """
-iml-bench script for running lots of different experiments/benchmarks.
+rls-bench script for running lots of different experiments/benchmarks.
 """
 import re
 import json
@@ -7,7 +7,7 @@ import shlex
 from glob import glob
 import copy
 from glob import glob
-from iml_profiler.profiler.iml_logging import logger
+from rlscope.profiler.iml_logging import logger
 import subprocess
 import sys
 import os
@@ -24,16 +24,16 @@ import gym
 
 from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, basename as _b
 
-from iml_profiler.profiler.util import get_stacktrace
-from iml_profiler.profiler.util import pprint_msg
-from iml_profiler.experiment import expr_config
-from iml_profiler.profiler.iml_logging import logger
-from iml_profiler.profiler.concurrent import ForkedProcessPool, FailedProcessException
-from iml_profiler.experiment.util import tee
+from rlscope.profiler.util import get_stacktrace
+from rlscope.profiler.util import pprint_msg
+from rlscope.experiment import expr_config
+from rlscope.profiler.iml_logging import logger
+from rlscope.profiler.concurrent import ForkedProcessPool, FailedProcessException
+from rlscope.experiment.util import tee
 
-from iml_profiler.profiler.util import args_to_cmdline
+from rlscope.profiler.util import args_to_cmdline
 
-from iml_profiler.parser.common import *
+from rlscope.parser.common import *
 
 # DEFAULT_IML_TRACE_TIME_SEC = 60*2
 # DEFAULT_DEBUG_IML_TRACE_TIME_SEC = 20
@@ -119,15 +119,15 @@ def add_stable_baselines_options(pars):
 def main():
     # TODO: remove hard dependency on pybullet_envs;
     # i.e. we need it for:
-    #   $ iml-bench stable-baselines --mode [run|all]
+    #   $ rls-bench stable-baselines --mode [run|all]
     # but we don't need pybullet for:
-    #   $ iml-bench stable-baselines --mode plot
+    #   $ rls-bench stable-baselines --mode plot
     # (assuming all the data is there...)
     try:
         import pybullet_envs
     except ImportError:
         print(textwrap.dedent("""\
-        ERROR: You need to use pip to install pybullet to run iml-bench:
+        ERROR: You need to use pip to install pybullet to run rls-bench:
         $ pip install pybullet==2.5.1
         """.rstrip()))
         pybullet_envs = None
@@ -137,7 +137,7 @@ def main():
         import atari_py
     except ImportError:
         print(textwrap.dedent("""\
-        ERROR: You need to use pip to install atari-py to run iml-bench:
+        ERROR: You need to use pip to install atari-py to run rls-bench:
         $ pip install git+https://github.com/openai/atari-py.git@0.2.0
         """.rstrip()))
         sys.exit(1)
@@ -167,7 +167,7 @@ def main():
     parser.add_argument(
         '--iml-debug',
         action='store_true')
-    # Don't support --pdb for iml-bench since I haven't figured out how to
+    # Don't support --pdb for rls-bench since I haven't figured out how to
     # both (1) log stdout/stderr of a command, (2) allow pdb debugger prompt
     # to be fully functional.
     # Even if we could...you probably don't want to log your pdb session
@@ -181,14 +181,14 @@ def main():
     Debug with single thread.
     """))
     parser.add_argument(
-        '--iml-prof',
-        default='iml-prof',
+        '--rls-prof',
+        default='rls-prof',
         help=textwrap.dedent("""
-        Run train.py inside of iml-prof (for uninstrumented runs only)
-          $ iml-prof python train.py
-        This is done by setting IML_PROF=<--iml-prof> inside the train_stable_baselines.sh training script.
+        Run train.py inside of rls-prof (for uninstrumented runs only)
+          $ rls-prof python train.py
+        This is done by setting IML_PROF=<--rls-prof> inside the train_stable_baselines.sh training script.
         
-        If for some reason you didn't want to run with iml-prof, you could set this to --iml-prof="".
+        If for some reason you didn't want to run with rls-prof, you could set this to --rls-prof="".
         """))
     parser.add_argument(
         '--replace',
@@ -209,14 +209,14 @@ def main():
     parser.add_argument(
         '--workers',
         type=int,
-        help="Number of simultaneous iml-analyze jobs; memory is the limitation here, not CPUs",
+        help="Number of simultaneous rls-run jobs; memory is the limitation here, not CPUs",
         # For some reason, I'm getting this error when selecting sql_reader.processes:
         #
         # psycopg2.OperationalError: server closed the connection unexpectedly
         # This probably means the server terminated abnormally
         # before or while processing the request.
         #
-        # When restarting iml-analyze the problem doesn't re-appear.
+        # When restarting rls-run the problem doesn't re-appear.
         # I suspect this is related to running multiple jobs but it's hard to know for sure.
         # Until we figure it out, run 1 job at time.
         #
@@ -304,12 +304,12 @@ def main():
     parser_stable_baselines = subparsers.add_parser(
         'stable-baselines',
         help=textwrap.dedent("""
-        iml-bench group: 
+        rls-bench group: 
         
         Run ALL the stable-baselines experiments.
         
         If you just want to plot stuff, you can use: 
-        $ iml-bench stable-baselines --mode plot
+        $ rls-bench stable-baselines --mode plot
         
         See --mode for more.
         """))
@@ -399,7 +399,7 @@ class Experiment:
         args = self.args
 
         if env is None:
-            # Make sure iml-analyze get IML_POSTGRES_HOST
+            # Make sure rls-run get IML_POSTGRES_HOST
             env = dict(os.environ)
 
         proc = None
@@ -1009,7 +1009,7 @@ class ExperimentGroup(Experiment):
             return
         args = self.args
         cmd = [
-            'iml-analyze',
+            'rls-run',
         ]
         cmd.extend([
             '--task', 'OverlapStackedBarTask',
@@ -1079,7 +1079,7 @@ class ExperimentGroup(Experiment):
 
         def _util_csv(algo_env_pairs):
             util_task_cmd = [
-                'iml-analyze',
+                'rls-run',
             ]
             util_task_cmd.extend([
                 '--task', 'UtilTask',
@@ -1125,7 +1125,7 @@ class ExperimentGroup(Experiment):
 
         def _util_plot():
             util_plot_cmd = [
-                'iml-analyze',
+                'rls-run',
                 '--task', 'UtilPlotTask',
             ]
             if args.debug:
@@ -1156,7 +1156,7 @@ class ExperimentGroup(Experiment):
         main_cmd = self._get_main_cmd(parser, subparser, subcommand)
         cmd = main_cmd + subcmd_args
         to_file = self._get_logfile(suffix=suffix)
-        logger.info("Logging iml-bench to file {path}".format(path=to_file))
+        logger.info("Logging rls-bench to file {path}".format(path=to_file))
         self._run_cmd(cmd=cmd, to_file=to_file, env=env, debug=debug)
 
     def _get_main_cmd(self, parser, subparser, subcommand):
@@ -1207,7 +1207,7 @@ class StableBaselines(Experiment):
         args = self.args
 
         iml_directory = self.iml_directory(algo, env_id)
-        cmd = ['iml-analyze', "--iml-directory", iml_directory]
+        cmd = ['rls-run', "--iml-directory", iml_directory]
 
         to_file = self._get_logfile(algo, env_id, suffix='analyze.log')
         logger.info("Analyze logfile = {path}".format(path=to_file))
@@ -1346,7 +1346,7 @@ class StableBaselines(Experiment):
             sys.exit(1)
 
         if args.analyze and config_is_uninstrumented(args.config):
-            logger.info(("Cannot run iml-analyze on --config={config}; config must be instrumented "
+            logger.info(("Cannot run rls-run on --config={config}; config must be instrumented "
                           "(e.g. --config instrumented), otherwise there are no IML traces to process.").format(
                 config=args.config,
             ))
@@ -1365,7 +1365,7 @@ class StableBaselines(Experiment):
             for algo, env_id in algo_env_pairs:
                 # self._analyze(algo, env_id)
                 self.pool.submit(
-                    'iml-analyze --iml-directory {iml}'.format(iml=self.iml_directory(algo, env_id)),
+                    'rls-run --iml-directory {iml}'.format(iml=self.iml_directory(algo, env_id)),
                     self._analyze,
                     algo, env_id,
                     sync=self.args.debug_single_thread)

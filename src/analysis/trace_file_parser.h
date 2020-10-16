@@ -117,7 +117,7 @@ extern const std::set<RLSFileType> RLS_FILE_TYPES;
 //}
 
 
-// Copied from: iml_profiler/parser/common.py
+// Copied from: rlscope/parser/common.py
 #define CATEGORY_TF_API "Framework API C"
 #define CATEGORY_PYTHON "Python"
 #define CATEGORY_PYTHON_PROFILER "Python profiler"

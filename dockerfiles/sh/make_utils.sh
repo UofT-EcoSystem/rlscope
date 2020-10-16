@@ -114,7 +114,7 @@ _check_env() {
     sudo apt update
 
     if [ "$IML_DIR" = "" ] || [ ! -d "$IML_DIR" ]; then
-        echo "ERROR: environment variable IML_DIR should be set to: The root directory of the iml_profiler repo checkout."
+        echo "ERROR: environment variable IML_DIR should be set to: The root directory of the rlscope repo checkout."
         exit 1
     fi
 
@@ -168,10 +168,10 @@ _upgrade_pip() {
 }
 
 _check_iml() {
-    if ! py_module_installed "iml_profiler"; then
+    if ! py_module_installed "rlscope"; then
         install_iml.sh
-        if ! py_module_installed "iml_profiler"; then
-            echo "ERROR: tried to install iml_profiler but failed:"
+        if ! py_module_installed "rlscope"; then
+            echo "ERROR: tried to install rlscope but failed:"
             echo "> CMD:"
             echo "  $ install_iml.sh"
             exit 1

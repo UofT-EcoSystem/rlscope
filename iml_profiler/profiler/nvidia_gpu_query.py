@@ -1,7 +1,7 @@
-from iml_profiler.profiler.util import pprint_msg
-from iml_profiler.profiler.util import print_cmd
+from rlscope.profiler.util import pprint_msg
+from rlscope.profiler.util import print_cmd
 
-from iml_profiler.profiler.iml_logging import logger
+from rlscope.profiler.iml_logging import logger
 import textwrap
 import sys
 import time

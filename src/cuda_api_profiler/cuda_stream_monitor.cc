@@ -75,7 +75,7 @@ CudaStreamMonitor::~CudaStreamMonitor() {
 // Basically, if we want to run with --iml-disable, we need to be careful not to call this.
 // PROBLEM: it's entirely possible TensorFlow internally creates Stream's during import before
 // python has a chance to parse --iml-disable.
-// SOLUTION: --iml-disable runs simply shouldn't run with iml-prof.
+// SOLUTION: --iml-disable runs simply shouldn't run with rls-prof.
 static std::shared_ptr<CudaStreamMonitor> _cuda_stream_monitor;
 /* static */ std::shared_ptr<CudaStreamMonitor> CudaStreamMonitor::GetCudaStreamMonitor() {
   if (!_cuda_stream_monitor) {

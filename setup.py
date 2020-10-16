@@ -27,9 +27,9 @@ ROOT = _d(os.path.realpath(__file__))
 
 # HACK: Make it so we can import logging stuff.
 sys.path.insert(0, ROOT)
-from iml_profiler.profiler.iml_logging import logger
-from iml_profiler.profiler import iml_logging
-from iml_profiler import py_config
+from rlscope.profiler.iml_logging import logger
+from rlscope.profiler import iml_logging
+from rlscope import py_config
 
 def pprint_msg(dic, prefix='  '):
     """
@@ -154,7 +154,7 @@ REQUIRED_PACKAGES = read_requirements(REQUIREMENTS_TXT)
 #     'docker >= 3.7.2',
 # ]
 
-project_name = 'iml_profiler'
+project_name = 'rlscope'
 
 # python3 requires wheel 0.26
 if sys.version_info.major == 3:
@@ -164,30 +164,30 @@ else:
 
 # pylint: disable=line-too-long
 CONSOLE_SCRIPTS = [
-    'iml-analyze = iml_profiler.scripts.analyze:main',
-    'iml-util-sampler = iml_profiler.scripts.utilization_sampler:main',
-    'iml-dump-proto = iml_profiler.scripts.dump_proto:main',
-    'iml-bench = iml_profiler.scripts.bench:main',
-    'iml-quick-expr = iml_profiler.scripts.quick_expr:main',
-    'iml-prof = iml_profiler.scripts.cuda_api_prof:main',
-    'iml-calibrate = iml_profiler.parser.calibration:main_run',
-    'iml-run-expr = iml_profiler.scripts.run_expr:main',
-    'iml-plot = iml_profiler.parser.calibration:main_plot',
-    'iml-generate-plot-index = iml_profiler.scripts.generate_iml_profiler_plot_index:main',
-    'rls-unit-tests = iml_profiler.scripts.rls_unit_tests:main',
+    'rls-run = rlscope.scripts.analyze:main',
+    'rls-util-sampler = rlscope.scripts.utilization_sampler:main',
+    'rls-dump-proto = rlscope.scripts.dump_proto:main',
+    'rls-bench = rlscope.scripts.bench:main',
+    'rls-quick-expr = rlscope.scripts.quick_expr:main',
+    'rls-prof = rlscope.scripts.cuda_api_prof:main',
+    'rls-calibrate = rlscope.parser.calibration:main_run',
+    'rls-run-expr = rlscope.scripts.run_expr:main',
+    'rls-plot = rlscope.parser.calibration:main_plot',
+    'rls-generate-plot-index = rlscope.scripts.generate_rlscope_plot_index:main',
+    'rls-unit-tests = rlscope.scripts.rls_unit_tests:main',
 ]
 # pylint: enable=line-too-long
 
 CPP_WRAPPER_SCRIPTS = [
-    'rls-analyze = iml_profiler.scripts.cpp.cpp_binary_wrapper:rls_analyze',
-    'rls-test = iml_profiler.scripts.cpp.cpp_binary_wrapper:rls_test',
+    'rls-analyze = rlscope.scripts.cpp.cpp_binary_wrapper:rls_analyze',
+    'rls-test = rlscope.scripts.cpp.cpp_binary_wrapper:rls_test',
 ]
 
 # DEVELOPMENT_SCRIPTS = [
 # ]
 
 PRODUCTION_SCRIPTS = [
-    'rlscope-pip-installed = iml_profiler.scripts.cpp.cpp_binary_wrapper:rlscope_pip_installed',
+    'rlscope-pip-installed = rlscope.scripts.cpp.cpp_binary_wrapper:rlscope_pip_installed',
 ]
 
 def find_files(pattern, root):
@@ -229,7 +229,7 @@ def generate_proto(source, require=True, regenerate=False):
       if subprocess.call(protoc_command) != 0:
           sys.exit(-1)
 
-PROTOBUF_DIR = 'iml_profiler/protobuf'
+PROTOBUF_DIR = 'rlscope/protobuf'
 proto_files = list(find_files('*.proto', PROTOBUF_DIR))
 
 POSTGRES_SQL_DIR = 'postgres'
@@ -240,7 +240,7 @@ THIRD_PARTY_DIR = 'third_party'
 #         for direc in find_packages(where=PYTHON_SRC_DIR)]
 
 PYTHON_PACKAGE_DIRS = [
-    'iml_profiler',
+    'rlscope',
 ]
 PACKAGE_DIRS = PYTHON_PACKAGE_DIRS
 # PACKAGE_DIRS = PYTHON_PACKAGE_DIRS + \
@@ -303,13 +303,13 @@ def main():
         generate_proto(_proto('unit_test.proto'), regenerate=True)
         generate_proto(_proto('iml_prof.proto'), regenerate=True)
 
-    iml_profiler_ext = get_files_by_ext('iml_profiler', rm_prefix='iml_profiler')
+    rlscope_ext = get_files_by_ext('rlscope', rm_prefix='rlscope')
 
-    logger.debug("iml_profiler_ext = {msg}".format(
-        msg=pprint_msg(iml_profiler_ext),
+    logger.debug("rlscope_ext = {msg}".format(
+        msg=pprint_msg(rlscope_ext),
     ))
     package_data = {
-        'iml_profiler': [
+        'rlscope': [
             # NOTE: we avoid using glob(..) patterns like "**/*.py" here since
             # we need to make one for each directory level...
             # we really just want to glob for "all python files",
@@ -317,16 +317,16 @@ def main():
         ],
     }
     keep_ext = {'cfg', 'ini', 'py', 'proto'}
-    for ext in set(iml_profiler_ext.keys()).intersection(keep_ext):
-        package_data['iml_profiler'].extend(iml_profiler_ext[ext])
+    for ext in set(rlscope_ext.keys()).intersection(keep_ext):
+        package_data['rlscope'].extend(rlscope_ext[ext])
 
     if is_production_mode() and not args.debug_skip_cpp:
-        # If there exist files in iml_profiler/cpp/**/*
+        # If there exist files in rlscope/cpp/**/*
         # assume that we wish to package these into the wheel.
-        cpp_files = glob(_j(ROOT, 'iml_profiler', 'cpp', '**', '*'))
+        cpp_files = glob(_j(ROOT, 'rlscope', 'cpp', '**', '*'))
 
-        # Keep all iml_profiler/cpp/**/* files regardless of extension.
-        cpp_ext = get_files_by_ext('iml_profiler/cpp', rm_prefix='iml_profiler')
+        # Keep all rlscope/cpp/**/* files regardless of extension.
+        cpp_ext = get_files_by_ext('rlscope/cpp', rm_prefix='rlscope')
         logger.debug("cpp_ext = \n{msg}".format(
             msg=pprint_msg(cpp_ext),
         ))
@@ -343,7 +343,7 @@ def main():
             sys.exit(1)
 
         for ext, paths in cpp_ext.items():
-            package_data['iml_profiler'].extend(paths)
+            package_data['rlscope'].extend(paths)
 
     logger.debug("package_data = \n{msg}".format(
         msg=pprint_msg(package_data),
@@ -379,7 +379,7 @@ def main():
         # # https://setuptools.readthedocs.io/en/latest/setuptools.html#declaring-extras-optional-features-with-their-own-dependencies
         # # These requirements are only installed if these features are enabled when installing the pip package.
         # #
-        # # $ pip install 'iml_profiler[docker]'
+        # # $ pip install 'rlscope[docker]'
         # #
         # # Q: Does this work with .whl files?
         # extras_require={

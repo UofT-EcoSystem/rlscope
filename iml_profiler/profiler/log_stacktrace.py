@@ -7,8 +7,8 @@ import typing
 
 # import tensorflow as tf
 
-from iml_profiler.profiler.iml_logging import logger
-from iml_profiler.profiler import wrap_util
+from rlscope.profiler.iml_logging import logger
+from rlscope.profiler import wrap_util
 
 # Intercept tf.Session.run(...) calls to see when calls to TensorFlow graph computations are made.
 #

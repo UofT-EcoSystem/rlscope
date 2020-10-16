@@ -5,18 +5,18 @@ These are the sessions we need to check for trace-data during the DUMP phase of 
 
 See SessionWrapper for details.
 """
-from iml_profiler.profiler.iml_logging import logger
+from rlscope.profiler.iml_logging import logger
 # NOTE: avoid importing tensorflow at top-level for pytest test discovery.
 import threading
 import pprint
 
-from iml_profiler import py_config
+from rlscope import py_config
 
-from iml_profiler.profiler.iml_logging import logger
+from rlscope.profiler.iml_logging import logger
 
-from iml_profiler.profiler import clib_wrap
+from rlscope.profiler import clib_wrap
 
-from iml_profiler.parser import constants
+from rlscope.parser import constants
 
 """
 Wrap tf.Session / tf.InteractiveSession.

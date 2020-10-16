@@ -1,6 +1,6 @@
 import time
 
-from iml_profiler.parser import constants
+from rlscope.parser import constants
 
 # NOTE: This is to avoid a weird bug in tensorflow where a wrapped tensorflow API
 # (tensorflow.python.framework.c_api_util.ScopedTFGraph) is called during __del__,

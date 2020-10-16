@@ -1,6 +1,6 @@
 import ctypes
 
-from iml_profiler.parser.common import *
+from rlscope.parser.common import *
 
 from ctypes import *
 # _cudart = ctypes.CDLL('libcudart.so')

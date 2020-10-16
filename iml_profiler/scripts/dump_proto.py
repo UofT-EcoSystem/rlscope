@@ -1,24 +1,24 @@
-from iml_profiler.profiler.iml_logging import logger
+from rlscope.profiler.iml_logging import logger
 import argparse
 import textwrap
 import sys
 import csv
 
 # from tensorflow.core.profiler.tfprof_log_pb2 import ProfileProto
-from iml_profiler.protobuf.pyprof_pb2 import CategoryEventsProto, ProcessMetadata, IncrementalTrainingProgress
-from iml_profiler.protobuf.iml_prof_pb2 import CUDAAPIPhaseStatsProto, MachineDevsEventsProto, OpStackProto
-# from iml_profiler.protobuf.iml_prof_pb2 import CUDAAPIPhaseStatsProto, MachineDevsEventsProto, OpStackProto
+from rlscope.protobuf.pyprof_pb2 import CategoryEventsProto, ProcessMetadata, IncrementalTrainingProgress
+from rlscope.protobuf.iml_prof_pb2 import CUDAAPIPhaseStatsProto, MachineDevsEventsProto, OpStackProto
+# from rlscope.protobuf.iml_prof_pb2 import CUDAAPIPhaseStatsProto, MachineDevsEventsProto, OpStackProto
 # src/libs/range_sampling/range_sampling.proto
 try:
     from range_sampling.range_sampling_pb2 import GPUHwCounterSampleProto
 except ImportError:
     GPUHwCounterSampleProto = None
 
-from iml_profiler.protobuf.unit_test_pb2 import \
+from rlscope.protobuf.unit_test_pb2 import \
     IMLUnitTestOnce, \
     IMLUnitTestMultiple
 
-from iml_profiler.parser.common import *
+from rlscope.parser.common import *
 
 def dump_proto_txt(proto, stream):
     print(proto, file=stream)
@@ -62,7 +62,7 @@ def dump_csv(proto, stream):
             writer.writeheader()
         writer.writerow(row)
 
-from iml_profiler.profiler.iml_logging import logger
+from rlscope.profiler.iml_logging import logger
 def main():
     parser = argparse.ArgumentParser("Dump protobuf files to txt")
     parser.add_argument("--proto",

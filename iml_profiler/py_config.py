@@ -7,10 +7,10 @@ import sys
 import os
 import textwrap
 
-from iml_profiler.profiler.iml_logging import logger
-import iml_profiler
+from rlscope.profiler.iml_logging import logger
+import rlscope
 
-INSTALL_ROOT = _d(os.path.realpath(iml_profiler.__file__))
+INSTALL_ROOT = _d(os.path.realpath(rlscope.__file__))
 
 CPP_LIB = _j(INSTALL_ROOT, 'cpp', 'lib')
 CPP_BIN = _j(INSTALL_ROOT, 'cpp', 'bin')
@@ -38,7 +38,7 @@ SQL_IMPL = 'psql'
 assert SQL_IMPL in {'psql', 'sqlite'}
 
 ANALYSIS_PY = _j(ROOT, "python/scripts", "analyze.py")
-GENERATE_INDEX_PY = _j(ROOT, "python/scripts", "generate_iml_profiler_plot_index.py")
+GENERATE_INDEX_PY = _j(ROOT, "python/scripts", "generate_rlscope_plot_index.py")
 
 # If true, when you provide --iml-debug, log messages when:
 # - A session is created by calling tf.Session()
@@ -52,7 +52,7 @@ DEBUG_OPERATIONS = False
 # Verbose debugging: Print calls to librlscope.so
 DEBUG_RLSCOPE_LIB_CALLS = False
 
-# If true, have iml-util-sampler log to stdout the GPU/CPU info it queries.
+# If true, have rls-util-sampler log to stdout the GPU/CPU info it queries.
 # This can be noisy.
 DEBUG_UTIL_SAMPLER = False
 

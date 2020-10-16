@@ -1,4 +1,4 @@
-from iml_profiler.profiler.iml_logging import logger
+from rlscope.profiler.iml_logging import logger
 import signal
 import time
 import subprocess
@@ -11,13 +11,13 @@ import platform
 import cpuinfo
 import concurrent.futures
 
-from iml_profiler.parser.plot_index import SEL_ORDER, TITLE_ORDER
+from rlscope.parser.plot_index import SEL_ORDER, TITLE_ORDER
 
 from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, basename as _b
 
-from iml_profiler import py_config
+from rlscope import py_config
 
-from iml_profiler.parser.common import *
+from rlscope.parser.common import *
 
 class GeneratePlotIndex:
     def __init__(self, directory, out_dir,
@@ -198,8 +198,8 @@ class GeneratePlotIndex:
         cmd = sys.argv
 
         if not self.dry_run:
-            src = _j(py_config.ROOT, 'iml_profiler/scripts/iml_profiler_plot_index.py')
-            dst = _j(self.out_dir, 'iml_profiler_plot_index.py')
+            src = _j(py_config.ROOT, 'rlscope/scripts/rlscope_plot_index.py')
+            dst = _j(self.out_dir, 'rlscope_plot_index.py')
             logger.info("cp {src} -> {dst}".format(src=src, dst=dst))
             os.makedirs(_d(dst), exist_ok=True)
             shutil.copyfile(src, dst)
@@ -249,19 +249,19 @@ def mkds(dic, *keys):
         dic = mkd(dic, key)
     return dic
 
-from iml_profiler.profiler.iml_logging import logger
+from rlscope.profiler.iml_logging import logger
 def main():
     parser = argparse.ArgumentParser("Generate index of *.venn_js.json files.")
     parser.add_argument('--iml-directory',
                         required=True,
                         help=textwrap.dedent("""
     Look for *.venn_js.json rooted at this directory.
-    The output file will be <directory>/iml_profiler_plot_index_data.py.
+    The output file will be <directory>/rlscope_plot_index_data.py.
     All the venn_js_path's in the index will be relative to --directory.
     """))
     parser.add_argument('--out-dir',
                         help=textwrap.dedent("""
-    The output file will be <out-dir>/iml_profiler_plot_index_data.py.
+    The output file will be <out-dir>/rlscope_plot_index_data.py.
     Default: --directory
     """))
     parser.add_argument('--debug',
@@ -275,7 +275,7 @@ def main():
     Don't write file.
     """))
     parser.add_argument('--basename',
-                        default='iml_profiler_plot_index_data.py',
+                        default='rlscope_plot_index_data.py',
                         help=textwrap.dedent("""
     Name of python file to generate.
     """))

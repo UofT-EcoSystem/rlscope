@@ -11,11 +11,11 @@ import numpy as np
 import matplotlib.pyplot as plt
 import pprint
 
-from iml_profiler.parser.common import *
+from rlscope.parser.common import *
 
-from iml_profiler.profiler.iml_logging import logger
+from rlscope.profiler.iml_logging import logger
 
-from iml_profiler import py_config
+from rlscope import py_config
 if py_config.USE_NUMBA:
     import numba
     import numba as nb

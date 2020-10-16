@@ -72,7 +72,7 @@ int RLSCOPE_EXPORT rlscope_enable_tracing() {
   LOG_FUNC_ENTRY();
   auto status = globals.device_tracer->Start();
 //  if (status.code() != MyStatus::OK()) {
-//    VLOG(0) << "iml-prof C++ API " << __func__ << " failed with: " << status;
+//    VLOG(0) << "rls-prof C++ API " << __func__ << " failed with: " << status;
 //  }
   MAYBE_LOG_ERROR(LOG(INFO), __func__, status);
   return status.code();

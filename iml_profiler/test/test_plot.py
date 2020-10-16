@@ -11,8 +11,8 @@ import codecs
 import matplotlib.pyplot as plt
 from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, basename as _b
 
-from iml_profiler.parser.common import *
-from iml_profiler.parser.plot import TimeBreakdownPlot
+from rlscope.parser.common import *
+from rlscope.parser.plot import TimeBreakdownPlot
 
 def disable_test_grouped_stacked_bar_plot(parser, args):
     # Stacked barplot:

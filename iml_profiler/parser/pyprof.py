@@ -1,4 +1,4 @@
-from iml_profiler.profiler.iml_logging import logger
+from rlscope.profiler.iml_logging import logger
 import re
 import numpy as np
 import csv
@@ -17,13 +17,13 @@ from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, base
 # pip install progressbar2
 import progressbar
 
-from iml_profiler.parser.common import *
-from iml_profiler.parser import constants
-from iml_profiler.parser.stats import Stats, KernelTime
+from rlscope.parser.common import *
+from rlscope.parser import constants
+from rlscope.parser.stats import Stats, KernelTime
 
-from iml_profiler.parser.db import SQLCategoryTimesReader, sql_get_source_files, sql_input_path, process_op_nest_single_thread, each_stack_trace
+from rlscope.parser.db import SQLCategoryTimesReader, sql_get_source_files, sql_input_path, process_op_nest_single_thread, each_stack_trace
 
-from iml_profiler import py_config
+from rlscope import py_config
 
 FLAME_GRAPH_PERL = _j(py_config.ROOT, 'third_party', 'FlameGraph', 'flamegraph.pl')
 

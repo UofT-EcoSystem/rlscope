@@ -2,24 +2,24 @@
 Manage a singleton instance to a Profiler object.
 """
 
-from iml_profiler.profiler.iml_logging import logger
+from rlscope.profiler.iml_logging import logger
 import sys
 import os
 import re
 import platform
 
-from iml_profiler.profiler.iml_logging import logger
-from iml_profiler.profiler import profilers
-from iml_profiler.profiler import nvidia_gpu_query
-from iml_profiler.clib import rlscope_api
+from rlscope.profiler.iml_logging import logger
+from rlscope.profiler import profilers
+from rlscope.profiler import nvidia_gpu_query
+from rlscope.clib import rlscope_api
 
-from iml_profiler.parser.common import *
+from rlscope.parser.common import *
 
 
 from os.path import join as _j, abspath as _a, exists as _e, dirname as _d, basename as _b
 
-import iml_profiler
-from iml_profiler.profiler.iml_logging import logger
+import rlscope
+from rlscope.profiler.iml_logging import logger
 
 # prof = None
 session = None
@@ -28,13 +28,13 @@ session = None
 #     # global prof
 #     # if prof is None:
 #     #     prof = profilers.Profiler(*args, **kwargs)
-#     return iml_profiler.api.prof
+#     return rlscope.api.prof
 
 def init_profiler(*args, **kwargs):
     # global prof
-    assert iml_profiler.api.prof is None
-    iml_profiler.api.prof = profilers.Profiler(*args, **kwargs)
-    return iml_profiler.api.prof
+    assert rlscope.api.prof is None
+    rlscope.api.prof = profilers.Profiler(*args, **kwargs)
+    return rlscope.api.prof
 
 def init_session(**kwargs):
     global session
@@ -110,7 +110,7 @@ def handle_iml_args(parser, args, directory=None, reports_progress=False):
 
     # TODO: train.py apparently like to launch separate process all willy-nilly.
     # I'm not sure what it's doing this for, but it's certainly true that python-side IML stuff will do it too.
-    # We do NOT want to wrap those separate processes with iml-prof.
+    # We do NOT want to wrap those separate processes with rls-prof.
     # We only want to wrap the "main" training script processes;
     # i.e. the processes we already explicitly handle via the python-api.
     #

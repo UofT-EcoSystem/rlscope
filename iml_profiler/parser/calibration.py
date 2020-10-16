@@ -1,5 +1,5 @@
-from iml_profiler.profiler.iml_logging import logger
-from iml_profiler.profiler import iml_logging
+from rlscope.profiler.iml_logging import logger
+from rlscope.profiler import iml_logging
 import argparse
 import pprint
 from glob import glob
@@ -16,15 +16,15 @@ import functools
 
 from os.path import join as _j, abspath as _a, exists as _e, dirname as _d, basename as _b
 
-from iml_profiler.profiler.util import print_cmd
-from iml_profiler.profiler.util import run_with_pdb, pprint_msg
-from iml_profiler.parser.common import *
-from iml_profiler.experiment.util import tee, expr_run_cmd, expr_already_ran
-from iml_profiler.profiler.concurrent import ForkedProcessPool, ProcessPoolExecutorWrapper
-from iml_profiler.scripts import bench
-from iml_profiler.experiment import expr_config
-from iml_profiler.parser.dataframe import IMLConfig
-from iml_profiler.parser.profiling_overhead import \
+from rlscope.profiler.util import print_cmd
+from rlscope.profiler.util import run_with_pdb, pprint_msg
+from rlscope.parser.common import *
+from rlscope.experiment.util import tee, expr_run_cmd, expr_already_ran
+from rlscope.profiler.concurrent import ForkedProcessPool, ProcessPoolExecutorWrapper
+from rlscope.scripts import bench
+from rlscope.experiment import expr_config
+from rlscope.parser.dataframe import IMLConfig
+from rlscope.parser.profiling_overhead import \
     parse_microbench_overhead_js, \
     DataframeMapper, \
     PyprofDataframeReader, \
@@ -52,7 +52,7 @@ NOTE:
 (2) then, run "rls-analyze" in parallel for each configuration.
     Run "--mode=overlap" for all configuration except config_gpu_hw.
     Run "--mode=gpu_hw" for config_gpu_hw.
-(3) Run the iml-analyze program that computes configuration json files; 
+(3) Run the rls-run program that computes configuration json files; 
     output them to the root directory.
 
 Q: What's the best way to detect algo and env...?
@@ -198,7 +198,7 @@ class Calibration:
     def _check_directories_opt(self, task, opt, directories):
         if not self.dry_run and len(directories) == 0:
             raise RuntimeError(textwrap.dedent("""\
-            {opt} was empty for \"iml-analyze --task {task} {opt} ...\"; did you forget to run experiments for this configuration? 
+            {opt} was empty for \"rls-run --task {task} {opt} ...\"; did you forget to run experiments for this configuration? 
             """).format(
                 opt=opt,
                 task=task,
@@ -232,7 +232,7 @@ class Calibration:
 
         self._check_directories_opt(task, '--time-breakdown-directories', time_breakdown_dirs)
         self._check_directories_opt(task, '--iml-directories', raw_iml_dirs)
-        cmd = ['iml-analyze',
+        cmd = ['rls-run',
                '--directory', output_directory,
                '--task', task,
                '--time-breakdown-directories', json.dumps(time_breakdown_dirs),
@@ -283,7 +283,7 @@ class Calibration:
 
         self._check_directories_opt(task, '--gpu-hw-directories', iml_dirs)
         self._check_directories_opt(task, '--time-breakdown-directories', time_breakdown_dirs)
-        cmd = ['iml-analyze',
+        cmd = ['rls-run',
                '--iml-directory', output_directory,
                '--task', task,
                '--gpu-hw-directories', json.dumps(iml_dirs),
@@ -315,7 +315,7 @@ class Calibration:
         task = "OverlapStackedBarTask"
 
         # cmd = [
-        #     'iml-analyze',
+        #     'rls-run',
         # ]
         # cmd.extend([
         #     '--task', 'OverlapStackedBarTask',
@@ -349,7 +349,7 @@ class Calibration:
         overlap_type = 'CategoryOverlap'
         self._check_directories_opt(task, '--iml-directories', iml_dirs)
         self._check_directories_opt(task, '--unins-iml-directories', unins_iml_dirs)
-        cmd = ['iml-analyze',
+        cmd = ['rls-run',
                '--directory', output_directory,
                '--task', task,
                '--overlap-type', overlap_type,
@@ -439,7 +439,7 @@ class Calibration:
         # ${directory}/*.venn_js.json
         # ${directory}/OverlapResult.*
         # ${directory}/RLSAnalyze.*
-        # ${directory}/iml_profiler_plot_index*
+        # ${directory}/rlscope_plot_index*
         # ${directory}/__pycache__
         def _add_paths(glob_pattern):
             for path in glob("{dir}/{glob}".format(dir=directory, glob=glob_pattern)):
@@ -448,7 +448,7 @@ class Calibration:
         _add_paths("*.venn_js.json")
         _add_paths("OverlapResult.*")
         _add_paths("RLSAnalyze.*")
-        _add_paths("iml_profiler_plot_index*")
+        _add_paths("rlscope_plot_index*")
         _add_paths("__pycache__")
         # --config gpu-hw
         _add_paths("GPUHwCounterSampler.csv")
@@ -485,7 +485,7 @@ class Calibration:
         out_dir = conf.out_dir(iml_directory, rep, correct_overhead)
         iml_dir = conf.iml_dir(iml_directory, rep)
 
-        cmd = ['iml-analyze',
+        cmd = ['rls-run',
                '--task', task,
                '--output-directory', out_dir,
                '--iml-directory', iml_dir,
@@ -540,7 +540,7 @@ class Calibration:
             os.makedirs(output_directory, exist_ok=True)
         self._check_directories_opt(task, '--gpu-activities-api-time-directory', all_gpu_activities_api_time_directories)
         self._check_directories_opt(task, '--interception-directory', all_interception_directories)
-        cmd = ['iml-analyze',
+        cmd = ['rls-run',
                '--directory', output_directory,
                '--task', task,
                '--gpu-activities-api-time-directory', json.dumps(all_gpu_activities_api_time_directories),
@@ -589,7 +589,7 @@ class Calibration:
             os.makedirs(directory, exist_ok=True)
         self._check_directories_opt(task, '--gpu-activities-directory', gpu_activities_directories)
         self._check_directories_opt(task, '--no-gpu-activities-directory', no_gpu_activities_directories)
-        cmd = ['iml-analyze',
+        cmd = ['rls-run',
                '--directory', directory,
                '--task', task,
                '--gpu-activities-directory', json.dumps(gpu_activities_directories),
@@ -642,7 +642,7 @@ class Calibration:
             os.makedirs(directory, exist_ok=True)
         self._check_directories_opt(task, '--interception-directory', interception_directories)
         self._check_directories_opt(task, '--uninstrumented-directory', uninstrumented_directories)
-        cmd = ['iml-analyze',
+        cmd = ['rls-run',
                '--directory', directory,
                '--task', task,
                '--interception-directory', json.dumps(interception_directories),
@@ -699,7 +699,7 @@ class Calibration:
         self._check_directories_opt(task, '--uninstrumented-directory', uninstrumented_directories)
         self._check_directories_opt(task, '--pyprof-annotations-directory', pyprof_annotations_directories)
         self._check_directories_opt(task, '--pyprof-interceptions-directory', pyprof_interceptions_directories)
-        cmd = ['iml-analyze',
+        cmd = ['rls-run',
                '--directory', directory,
                '--task', task,
                '--uninstrumented-directory', json.dumps(uninstrumented_directories),
@@ -733,7 +733,7 @@ class Calibration:
 
         # Parallelize running configurations across GPUs on this machine (assume no CPU interference).
         # Record commands in run_expr.sh, and run:
-        # $ iml-run-expr --run-sh --sh run_expr.sh
+        # $ rls-run-expr --run-sh --sh run_expr.sh
         run_expr_sh = self._run_expr_sh(output_directory)
         logger.info(f"Writing configuration shell commands to {run_expr_sh}")
         os.makedirs(_d(run_expr_sh), exist_ok=True)
@@ -744,7 +744,7 @@ class Calibration:
                 quoted_cmd = [shlex.quote(opt) for opt in full_cmd]
                 f.write(' '.join(quoted_cmd))
                 f.write('\n')
-        run_expr_cmd = ['iml-run-expr', '--run-sh', '--sh', run_expr_sh]
+        run_expr_cmd = ['rls-run-expr', '--run-sh', '--sh', run_expr_sh]
         if self.dry_run:
             run_expr_cmd.append('--dry-run')
         if self.debug:
@@ -767,13 +767,13 @@ class Calibration:
 
         self.run_configs(cmd, output_directory)
 
-        # Lets save calibration to happen during iml-plot to make it easier to split up "analysis" from
+        # Lets save calibration to happen during rls-plot to make it easier to split up "analysis" from
         # "calibration" time.
-        # unless they give --iml-plot
+        # unless they give --rls-plot
         if not self.skip_plot:
             self.do_calibration(output_directory)
         else:
-            logger.info("--iml-skip-plot: SKIP processing results into plots; run iml-plot to do this later.")
+            logger.info("--iml-skip-plot: SKIP processing results into plots; run rls-plot to do this later.")
 
     def _rm_path(self, path, opt):
         if _e(path):
@@ -1080,7 +1080,7 @@ class Calibration:
         )
 
     def maybe_clean(self, directory, skip_analysis=False):
-        # PROBLEM: is this going to run twice in the iml-plot call?
+        # PROBLEM: is this going to run twice in the rls-plot call?
         if not skip_analysis and self.re_calibrate:
             self.clean_analysis(directory)
         if self.re_calibrate or self.re_plot:
@@ -1139,7 +1139,7 @@ class Calibration:
 class RLScopeConfig:
     def __init__(self, expr, iml_prof_config, config_suffix, rls_analyze_mode=None, script_args=[]):
         self.expr = expr
-        # $ iml-prof --config ${iml_prof_config}
+        # $ rls-prof --config ${iml_prof_config}
         self.iml_prof_config = iml_prof_config
         # $ python train.py --iml-directory config_${config_suffix}
         self.config_suffix = config_suffix
@@ -1191,7 +1191,7 @@ class RLScopeConfig:
 
     def run_cmd(self, rep, cmd, output_directory):
         iml_prof_cmd = [
-            'iml-prof',
+            'rls-prof',
             '--config', self.iml_prof_config,
         ]
         iml_prof_cmd.extend(cmd)
@@ -1417,7 +1417,7 @@ def _main(argv):
         cmd = cmd[1:]
 
         if len(cmd) == 0:
-            error("Expected cmd to run with iml-prof for calibration, but non was provided",
+            error("Expected cmd to run with rls-prof for calibration, but non was provided",
                   parser=parser)
 
         if shutil.which(cmd[0]) is None:
@@ -1432,9 +1432,9 @@ def _main(argv):
         # if len(cmd) != 0:
         #     error(
         #         textwrap.dedent("""\
-        #         Not sure how to parse extra arguments for "iml-calibrate plot":
+        #         Not sure how to parse extra arguments for "rls-calibrate plot":
         #           {cmd}
-        #         Did you intend to run "iml-calibrate run" instead?
+        #         Did you intend to run "rls-calibrate run" instead?
         #         """).format(
         #             cmd=' '.join(cmd),
         #         ).rstrip(), parser=parser)
@@ -1474,8 +1474,8 @@ def add_iml_analyze_flags(cmd, args):
 
 def log_missing_files(self, task, files):
     logger.info(textwrap.dedent("""
-            {klass}: SKIP iml-analyze --task={task}; still need you to collect 
-            some additional runs using "iml-quick-expr".
+            {klass}: SKIP rls-run --task={task}; still need you to collect 
+            some additional runs using "rls-quick-expr".
             Files present so far:
             {files}
             """).format(

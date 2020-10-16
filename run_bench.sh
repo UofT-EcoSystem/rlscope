@@ -47,7 +47,7 @@ CALIB_OPTS=( \
 _run_bench() {
     local all_dir=$IML_DIR/output/iml_bench/all
 
-    _do iml-bench --dir $all_dir "$@"
+    _do rls-bench --dir $all_dir "$@"
 }
 old_run_stable_baselines() {
     sb_all_reps "$@"
@@ -57,11 +57,11 @@ sb_train() {
 }
 
 iml_analyze() {
-    iml-analyze "${CALIB_OPTS[@]}" "$@"
+    rls-run "${CALIB_OPTS[@]}" "$@"
 }
 
 run_total_training_time_plot() {
-    _do iml-quick-expr --expr plot_fig --fig fig_13_overhead_correction \
+    _do rls-quick-expr --expr plot_fig --fig fig_13_overhead_correction \
         "${CALIB_OPTS[@]}" \
         --root-dir $IML_DATA_DIR/iml/output/expr_total_training_time \
         --debug-memoize "$@"
@@ -154,7 +154,7 @@ run_stable_baselines_all() {
     run_fig_algorithm_choice_1a_med_complexity "$@"
     run_fig_environment_choice "$@"
     run_fig_algorithm_choice_1b_low_complexity "$@"
-    # SKIP: until we can avoid runnning iml-analyze on all (algo, env) pairs.
+    # SKIP: until we can avoid runnning rls-run on all (algo, env) pairs.
 #    run_fig_all_rl_workloads "$@"
 }
 #run_fig_on_vs_off_policy() {
@@ -168,19 +168,19 @@ _run_debug_ppo_full_training() {
     local num_training_loop_iterations=1
     local n_envs=8
     local n_steps=2048
-    iml-quick-expr "${RUN_DEBUG_ARGS[@]}" --expr total_training_time --repetitions 1 --bullet --instrumented --n-timesteps $((n_envs*n_steps*num_training_loop_iterations)) --algo ppo2 --env MinitaurBulletEnv-v0 "$@"
+    rls-quick-expr "${RUN_DEBUG_ARGS[@]}" --expr total_training_time --repetitions 1 --bullet --instrumented --n-timesteps $((n_envs*n_steps*num_training_loop_iterations)) --algo ppo2 --env MinitaurBulletEnv-v0 "$@"
 }
 _run_debug_dqn_full_training() {
-    iml-quick-expr "${RUN_DEBUG_ARGS[@]}" --expr total_training_time --repetitions 1 --instrumented --n-timesteps 20000 --algo dqn --env PongNoFrameskip-v4 "$@"
+    rls-quick-expr "${RUN_DEBUG_ARGS[@]}" --expr total_training_time --repetitions 1 --instrumented --n-timesteps 20000 --algo dqn --env PongNoFrameskip-v4 "$@"
 }
 _run_debug_sac_full_training() {
-    iml-quick-expr "${RUN_DEBUG_ARGS[@]}" --expr total_training_time --repetitions 1 --instrumented --n-timesteps 20000 --algo sac --env AntBulletEnv-v0 "$@"
+    rls-quick-expr "${RUN_DEBUG_ARGS[@]}" --expr total_training_time --repetitions 1 --instrumented --n-timesteps 20000 --algo sac --env AntBulletEnv-v0 "$@"
 }
 _run_debug_a2c_full_training() {
-    iml-quick-expr "${RUN_DEBUG_ARGS[@]}" --expr total_training_time --repetitions 1 --instrumented --n-timesteps 20000 --algo a2c --env HopperBulletEnv-v0 "$@"
+    rls-quick-expr "${RUN_DEBUG_ARGS[@]}" --expr total_training_time --repetitions 1 --instrumented --n-timesteps 20000 --algo a2c --env HopperBulletEnv-v0 "$@"
 }
 _run_debug_ddpg_full_training() {
-    iml-quick-expr "${RUN_DEBUG_ARGS[@]}" --expr total_training_time --repetitions 1 --instrumented --n-timesteps 20000 --algo ddpg --env Walker2DBulletEnv-v0 "$@"
+    rls-quick-expr "${RUN_DEBUG_ARGS[@]}" --expr total_training_time --repetitions 1 --instrumented --n-timesteps 20000 --algo ddpg --env Walker2DBulletEnv-v0 "$@"
 }
 
 fig_9_simulator_choice_environments() {
@@ -295,10 +295,10 @@ run_debug_full_training_uninstrumented() {
 }
 
 run_full_training_instrumented() {
-    iml-quick-expr --expr total_training_time --instrumented "$@"
+    rls-quick-expr --expr total_training_time --instrumented "$@"
 }
 run_full_training_uninstrumented() {
-    iml-quick-expr --expr total_training_time "$@"
+    rls-quick-expr --expr total_training_time "$@"
 }
 
 run_calibration_all() {
@@ -318,22 +318,22 @@ run_subtraction_validation() {
     local environ="$2"
     shift 2
     _cmd() {
-        _do iml-quick-expr "${RUN_DEBUG_ARGS[@]}" --expr subtraction_validation --calibration-mode validation --repetitions $NUM_REPS --only-runs 2 --env "$environ" --algo "$algo" "$@"
+        _do rls-quick-expr "${RUN_DEBUG_ARGS[@]}" --expr subtraction_validation --calibration-mode validation --repetitions $NUM_REPS --only-runs 2 --env "$environ" --algo "$algo" "$@"
     }
     _cmd "$@"
     _cmd "$@" --plot
 }
 
 run_pyprof_calibration_fig_algorithm_choice_1a_med_complexity() {
-    iml-quick-expr --expr microbenchmark --algo-env-group algorithm_choice_1a_med_complexity "$@"
+    rls-quick-expr --expr microbenchmark --algo-env-group algorithm_choice_1a_med_complexity "$@"
 }
 
 run_pyprof_calibration_fig_environment_choice() {
-    iml-quick-expr --expr microbenchmark --algo-env-group environment_choice "$@"
+    rls-quick-expr --expr microbenchmark --algo-env-group environment_choice "$@"
 }
 
 run_pyprof_calibration_iterations_20000() {
-    iml-quick-expr --expr microbenchmark --env HalfCheetahBulletEnv-v0 --algo ppo2 --iterations $((2*10**4)) "$@"
+    rls-quick-expr --expr microbenchmark --env HalfCheetahBulletEnv-v0 --algo ppo2 --iterations $((2*10**4)) "$@"
 }
 
 run_pyprof_calibration_all() {
@@ -362,7 +362,7 @@ run_subtraction_calibration() {
     fi
 
     _cmd() {
-        _do iml-quick-expr "${RUN_DEBUG_ARGS[@]}" --expr subtraction_validation --calibration-mode calibration --repetitions $NUM_REPS --only-runs 2 "$@"
+        _do rls-quick-expr "${RUN_DEBUG_ARGS[@]}" --expr subtraction_validation --calibration-mode calibration --repetitions $NUM_REPS --only-runs 2 "$@"
     }
     _cmd "$@"
     _cmd "$@" --plot
@@ -370,7 +370,7 @@ run_subtraction_calibration() {
 
 run_subtraction_validation_long() {
     _cmd() {
-        _do iml-quick-expr "${RUN_DEBUG_ARGS[@]}" --expr subtraction_validation --calibration-mode validation --repetitions $NUM_REPS --env HalfCheetahBulletEnv-v0 --algo ppo2 "$@"
+        _do rls-quick-expr "${RUN_DEBUG_ARGS[@]}" --expr subtraction_validation --calibration-mode validation --repetitions $NUM_REPS --env HalfCheetahBulletEnv-v0 --algo ppo2 "$@"
     }
     # - Run using long iterations (most important...)
     # - Re-plot stuff.
@@ -394,22 +394,22 @@ run_debug_all() {
 fig_1a_all_algo() {
     # (1a) All algorithms (low complexity): LunarLander
     # GOAL: 3 repetitions
-    iml-quick-expr --lunar "$@"
+    rls-quick-expr --lunar "$@"
 }
 fig_1b_all_algo() {
     # (1b) Mostly all algorithms (except dqn) (medium complexity): Walker2D
     # GOAL: 3 repetitions
-    iml-quick-expr --env Walker2DBulletEnv-v0 "$@"
+    rls-quick-expr --env Walker2DBulletEnv-v0 "$@"
 }
 fig_2_all_env() {
     # (2) All environments (low and medium complexity): ppo2
     # GOAL: 3 repetitions
-    iml-quick-expr --lunar --atari --bullet --algo ppo2 "$@"
+    rls-quick-expr --lunar --atari --bullet --algo ppo2 "$@"
 }
 fig_3_all_algo_env()  {
     # (3) All (algo, env) combos
     # GOAL: 1 repetition
-    iml-quick-expr --lunar --atari --bullet "$@"
+    rls-quick-expr --lunar --atari --bullet "$@"
 }
 fig_all() {
     fig_1a_all_algo "$@"
@@ -441,11 +441,11 @@ run_all() {
 }
 
 run_perf_debug() {
-    _do iml-analyze --iml-directory $IML_DIR/output/perf_debug "${CALIB_OPTS[@]}"
+    _do rls-run --iml-directory $IML_DIR/output/perf_debug "${CALIB_OPTS[@]}"
 }
 
 run_perf_debug_short() {
-    _do iml-analyze --iml-directory $IML_DIR/output/perf_debug_short "${CALIB_OPTS[@]}"
+    _do rls-run --iml-directory $IML_DIR/output/perf_debug_short "${CALIB_OPTS[@]}"
 }
 
 _find_extension() {
@@ -743,7 +743,7 @@ gen_tex_framework_choice() {
   dry_run=${dry_run:-no}
 
   args=(
-    iml-analyze
+    rls-run
     --task TexMetricsTask
     --directory $(framework_choice_plots_direc)
     --framework-choice-csv $(framework_choice_plots_direc)/OverlapStackedBarPlot.*.operation_training_time.csv
@@ -771,7 +771,7 @@ gen_tex_algo_choice() {
   dry_run=${dry_run:-no}
 
   args=(
-    iml-analyze
+    rls-run
     --task TexMetricsTask
     --directory $(stable_baselines_plots_direc)/stable_baselines_fig_10_algo_choice
     --algo-choice-csv $(stable_baselines_plots_direc)/stable_baselines_fig_10_algo_choice/OverlapStackedBarPlot.*.operation_training_time.csv
@@ -890,10 +890,10 @@ test_run_expr() {
 #  run_expr_args=(--tee --sh ${run_expr_sh})
 #  py_args=()
   for i in $(seq ${n_launches}); do
-    iml-run-expr "${run_expr_args[@]}" --append \
-      python $IML_DIR/iml_profiler/scripts/madeup_cmd.py --iml-directory ${test_dir}/process_${i} "${py_args[@]}"
+    rls-run-expr "${run_expr_args[@]}" --append \
+      python $IML_DIR/rlscope/scripts/madeup_cmd.py --iml-directory ${test_dir}/process_${i} "${py_args[@]}"
   done
-  iml-run-expr "${run_expr_args[@]}" --run-sh
+  rls-run-expr "${run_expr_args[@]}" --run-sh
 )
 }
 
@@ -926,7 +926,7 @@ run_tf_agents() {
     return 1
   fi
 
-  args=(iml-prof)
+  args=(rls-prof)
   if [ "${calibrate}" = 'yes' ]; then
     args+=(
       --calibrate
@@ -935,7 +935,7 @@ run_tf_agents() {
   fi
   if [ "${dry_run}" = 'yes' ]; then
     args+=(
-      # iml-calibrate option
+      # rls-calibrate option
       --dry-run
     )
   fi
@@ -1023,7 +1023,7 @@ run_reagent() {
     return 1
   fi
 
-  local args=(iml-prof)
+  local args=(rls-prof)
   if [ "${calibrate}" = 'yes' ]; then
     args+=(
       --calibrate
@@ -1032,7 +1032,7 @@ run_reagent() {
   fi
   if [ "${dry_run}" = 'yes' ]; then
     args+=(
-      # iml-calibrate option
+      # rls-calibrate option
       --dry-run
     )
   fi
@@ -1135,7 +1135,7 @@ run_stable_baselines() {
     return 1
   fi
 
-  args=(iml-prof)
+  args=(rls-prof)
   if [ "${calibrate}" = 'yes' ]; then
     args+=(
       --calibrate
@@ -1144,7 +1144,7 @@ run_stable_baselines() {
   fi
   if [ "${dry_run}" = 'yes' ]; then
     args+=(
-      # iml-calibrate option
+      # rls-calibrate option
       --dry-run
     )
   fi
@@ -1636,7 +1636,7 @@ test_plot_simulator() {
     --CategoryTransitionPlotTask-remap-df "$(_tf_agents_remap_df)"
     "$@"
   )
-  iml-plot "${args[@]}"
+  rls-plot "${args[@]}"
 )
 
 }
@@ -1660,7 +1660,7 @@ test_plot_stable_baselines() {
     --plots gpu-hw
     "$@"
   )
-  iml-plot "${args[@]}"
+  rls-plot "${args[@]}"
 )
 
 }
@@ -1968,7 +1968,7 @@ _plot_tf_agents() {
   if [ "${calibrate}" = 'yes' ]; then
     iml_plots_direc=$(tf_agents_plots_direc)
     args=(
-      iml-plot
+      rls-plot
         --iml-repetitions ${repetitions}
         # --iml-directories $(_tf_agents_root_direc)/*tf_functions
         --output-directory ${iml_plots_direc}
@@ -1979,11 +1979,11 @@ _plot_tf_agents() {
     )
     if [ "${dry_run}" = 'yes' ]; then
       args+=(
-        # iml-calibrate option
+        # rls-calibrate option
         --dry-run
       )
     fi
-    # Leave re-calibration to iml-prof.
+    # Leave re-calibration to rls-prof.
     if [ "${re_plot}" = 'yes' ] || [ "${re_calibrate}" = 'yes' ]; then
       args+=(
         --re-plot
@@ -2005,7 +2005,7 @@ _plot_reagent() {
   if [ "${calibrate}" = 'yes' ]; then
     iml_plots_direc=$(reagent_plots_direc)
     args=(
-      iml-plot
+      rls-plot
         --iml-repetitions ${repetitions}
         # --iml-directories $(_reagent_root_direc)/*tf_functions
         --output-directory ${iml_plots_direc}
@@ -2016,11 +2016,11 @@ _plot_reagent() {
     )
     if [ "${dry_run}" = 'yes' ]; then
       args+=(
-        # iml-calibrate option
+        # rls-calibrate option
         --dry-run
       )
     fi
-    # Leave re-calibration to iml-prof.
+    # Leave re-calibration to rls-prof.
     if [ "${re_plot}" = 'yes' ] || [ "${re_calibrate}" = 'yes' ]; then
       args+=(
         --re-plot
@@ -2045,7 +2045,7 @@ _plot_stable_baselines() {
   if [ "${calibrate}" = 'yes' ]; then
     # iml_plots_direc=$(stable_baselines_plots_direc)
     args=(
-      iml-plot
+      rls-plot
         --iml-repetitions ${repetitions}
         # --iml-directories $(_stable_baselines_root_direc)/*tf_functions
         # --output-directory ${iml_plots_direc}
@@ -2059,11 +2059,11 @@ _plot_stable_baselines() {
     )
     if [ "${dry_run}" = 'yes' ]; then
       args+=(
-        # iml-calibrate option
+        # rls-calibrate option
         --dry-run
       )
     fi
-    # Leave re-calibration to iml-prof.
+    # Leave re-calibration to rls-prof.
     if [ "${re_plot}" = 'yes' ] || [ "${re_calibrate}" = 'yes' ]; then
       args+=(
         --re-plot
@@ -2088,7 +2088,7 @@ _plot_framework_choice() {
   if [ "${calibrate}" = 'yes' ]; then
     # iml_plots_direc=$(framework_choice_plots_direc)
     args=(
-      iml-plot
+      rls-plot
         --iml-repetitions ${repetitions}
         # --iml-directories $(_framework_choice_root_direc)/*tf_functions
         # --output-directory ${iml_plots_direc}
@@ -2104,11 +2104,11 @@ _plot_framework_choice() {
     )
     if [ "${dry_run}" = 'yes' ]; then
       args+=(
-        # iml-calibrate option
+        # rls-calibrate option
         --dry-run
       )
     fi
-    # Leave re-calibration to iml-prof.
+    # Leave re-calibration to rls-prof.
     if [ "${re_plot}" = 'yes' ] || [ "${re_calibrate}" = 'yes' ]; then
       args+=(
         --re-plot
@@ -2141,7 +2141,7 @@ test_tf_agents() {
   repetitions=${repetitions:-3}
   dry_run=${dry_run:-no}
 
-  args=(iml-prof)
+  args=(rls-prof)
   if [ "${calibrate}" = 'yes' ]; then
     args+=(
       --calibrate
@@ -2164,7 +2164,7 @@ test_tf_agents() {
   fi
   if [ "${dry_run}" = 'yes' ]; then
     args+=(
-      # iml-calibrate option
+      # rls-calibrate option
       --dry-run
     )
   fi
@@ -2181,7 +2181,7 @@ test_tf_agents() {
 
   if [ "${calibrate}" = 'yes' ]; then
     args=(
-      iml-plot
+      rls-plot
         --iml-repetitions ${repetitions}
         --iml-directories ${iml_root_dir}/*tf_functions
         --output-directory ${iml_root_dir}/plots
@@ -2193,11 +2193,11 @@ test_tf_agents() {
     )
     if [ "${dry_run}" = 'yes' ]; then
       args+=(
-        # iml-calibrate option
+        # rls-calibrate option
         --dry-run
       )
     fi
-    # Leave re-calibration to iml-prof.
+    # Leave re-calibration to rls-prof.
     if [ "${re_plot}" = 'yes' ] || [ "${re_calibrate}" = 'yes' ]; then
       args+=(
         --re-plot

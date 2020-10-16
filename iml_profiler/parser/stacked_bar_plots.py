@@ -1,4 +1,4 @@
-from iml_profiler.profiler.iml_logging import logger
+from rlscope.profiler.iml_logging import logger
 import argparse
 import subprocess
 import re
@@ -31,19 +31,19 @@ import os
 import os.path
 from os.path import join as _j, abspath as _a, exists as _e, dirname as _d, basename as _b
 
-from iml_profiler.profiler.util import pprint_msg
-from iml_profiler.parser.db import SQLCategoryTimesReader, sql_get_source_files, sql_input_path
-from iml_profiler.parser.plot_index import _DataIndex
-from iml_profiler.parser import plot_index
-from iml_profiler.parser.overlap_result import from_js, CategoryKey as CategoryKeyJS
-from iml_profiler.parser.dataframe import VennData, get_training_durations_df, read_iml_config_metadata, get_total_timesteps, get_end_num_timesteps, IMLConfig, extrap_total_training_time
-from iml_profiler.parser import dataframe as iml_dataframe
-from iml_profiler.parser.plot import LegendMaker, HATCH_STYLES, HATCH_STYLE_EMPTY, Y_LABEL_TRAINING_TIME_SEC
+from rlscope.profiler.util import pprint_msg
+from rlscope.parser.db import SQLCategoryTimesReader, sql_get_source_files, sql_input_path
+from rlscope.parser.plot_index import _DataIndex
+from rlscope.parser import plot_index
+from rlscope.parser.overlap_result import from_js, CategoryKey as CategoryKeyJS
+from rlscope.parser.dataframe import VennData, get_training_durations_df, read_iml_config_metadata, get_total_timesteps, get_end_num_timesteps, IMLConfig, extrap_total_training_time
+from rlscope.parser import dataframe as iml_dataframe
+from rlscope.parser.plot import LegendMaker, HATCH_STYLES, HATCH_STYLE_EMPTY, Y_LABEL_TRAINING_TIME_SEC
 
-from iml_profiler.parser.common import *
-from iml_profiler.parser import constants
+from rlscope.parser.common import *
+from rlscope.parser import constants
 # Make it so exec(...) has CATEGORY_* in-scope for things like --remap-df used in run_bench.sh
-from iml_profiler.parser.constants import *
+from rlscope.parser.constants import *
 
 class OverlapStackedBarPlot:
     """
@@ -355,15 +355,15 @@ class OverlapStackedBarPlot:
                 del sys.modules[import_path]
 
         def _del_index_module():
-            _del_module('iml_profiler_plot_index')
-            _del_module('iml_profiler_plot_index_data')
+            _del_module('rlscope_plot_index')
+            _del_module('rlscope_plot_index_data')
 
 
         _del_index_module()
 
         sys.path.insert(0, iml_dir)
-        iml_profiler_plot_index = importlib.import_module("iml_profiler_plot_index")
-        index = iml_profiler_plot_index.DataIndex
+        rlscope_plot_index = importlib.import_module("rlscope_plot_index")
+        index = rlscope_plot_index.DataIndex
         del sys.path[0]
 
         _del_index_module()
@@ -413,7 +413,7 @@ class OverlapStackedBarPlot:
 
     def _init_directories(self):
         """
-        Initialize SQL / DataIndex needed for reading plot-data from iml-analyze'd --iml-directory's.
+        Initialize SQL / DataIndex needed for reading plot-data from rls-run'd --iml-directory's.
 
         :return:
         """

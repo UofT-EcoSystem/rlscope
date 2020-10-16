@@ -1,4 +1,4 @@
-from iml_profiler.profiler.iml_logging import logger
+from rlscope.profiler.iml_logging import logger
 import argparse
 import pprint
 from glob import glob
@@ -13,14 +13,14 @@ import functools
 
 from os.path import join as _j, abspath as _a, exists as _e, dirname as _d, basename as _b
 
-from iml_profiler.profiler.util import pprint_msg
-from iml_profiler.parser.common import *
-from iml_profiler.experiment.util import tee, expr_run_cmd, expr_already_ran
-from iml_profiler.profiler.concurrent import ForkedProcessPool
-from iml_profiler.scripts import bench
-from iml_profiler.experiment import expr_config
-from iml_profiler.parser.dataframe import IMLConfig
-from iml_profiler.parser.profiling_overhead import \
+from rlscope.profiler.util import pprint_msg
+from rlscope.parser.common import *
+from rlscope.experiment.util import tee, expr_run_cmd, expr_already_ran
+from rlscope.profiler.concurrent import ForkedProcessPool
+from rlscope.scripts import bench
+from rlscope.experiment import expr_config
+from rlscope.parser.dataframe import IMLConfig
+from rlscope.parser.profiling_overhead import \
     parse_microbench_overhead_js, \
     DataframeMapper, \
     PyprofDataframeReader, \
@@ -29,11 +29,11 @@ from iml_profiler.parser.profiling_overhead import \
     CalibrationJSONs
 
 
-# ( set -e; set -x; iml-quick-expr --expr total_training_time --repetitions 3 --bullet; )
-# ( set -e; set -x; iml-quick-expr --expr total_training_time --repetitions 3 --bullet --plot; )
+# ( set -e; set -x; rls-quick-expr --expr total_training_time --repetitions 3 --bullet; )
+# ( set -e; set -x; rls-quick-expr --expr total_training_time --repetitions 3 --bullet --plot; )
 
-# ( set -e; set -x; iml-quick-expr --expr total_training_time --repetitions 3 ---bullet --instrumented; )
-# ( set -e; set -x; iml-quick-expr --expr total_training_time --repetitions 3 --bullet --instrumented --plot; )
+# ( set -e; set -x; rls-quick-expr --expr total_training_time --repetitions 3 ---bullet --instrumented; )
+# ( set -e; set -x; rls-quick-expr --expr total_training_time --repetitions 3 --bullet --instrumented --plot; )
 
 
 # algo_envs = [
@@ -41,14 +41,14 @@ from iml_profiler.parser.profiling_overhead import \
 #     {'algo': 'HopperBulletEnv-v0', 'env': 'a2c'},
 #     {'algo': 'PongNoFrameskip-v4', 'env': 'dqn'},
 # ]
-# ( set -e; set -x; iml-quick-expr --expr subtraction_validation --repetitions 3 --env Walker2DBulletEnv-v0 --algo ddpg; )
-# ( set -e; set -x; iml-quick-expr --expr subtraction_validation --repetitions 3 --env HopperBulletEnv-v0 --algo a2c; )
-# ( set -e; set -x; iml-quick-expr --expr subtraction_validation --repetitions 3 --env PongNoFrameskip-v4 --algo dqn; )
-# ( set -e; set -x; iml-quick-expr --expr subtraction_validation --repetitions 3 --bullet; )
+# ( set -e; set -x; rls-quick-expr --expr subtraction_validation --repetitions 3 --env Walker2DBulletEnv-v0 --algo ddpg; )
+# ( set -e; set -x; rls-quick-expr --expr subtraction_validation --repetitions 3 --env HopperBulletEnv-v0 --algo a2c; )
+# ( set -e; set -x; rls-quick-expr --expr subtraction_validation --repetitions 3 --env PongNoFrameskip-v4 --algo dqn; )
+# ( set -e; set -x; rls-quick-expr --expr subtraction_validation --repetitions 3 --bullet; )
 
-# ( set -e; set -x; iml-quick-expr --expr subtraction_validation --repetitions 3 --bullet --plot; )
+# ( set -e; set -x; rls-quick-expr --expr subtraction_validation --repetitions 3 --bullet --plot; )
 
-# ( set -e; set -x; timesteps=20000; iml-quick-expr --expr total_training_time --repetitions 3 --env HalfCheetahBulletEnv-v0 --subdir debug_n_timesteps_${timesteps} --plot; )
+# ( set -e; set -x; timesteps=20000; rls-quick-expr --expr total_training_time --repetitions 3 --env HalfCheetahBulletEnv-v0 --subdir debug_n_timesteps_${timesteps} --plot; )
 
 # Experiments to run:
 # - Generalization of calibration:
@@ -70,7 +70,7 @@ class QuickExpr:
 
     Then you can run it with:
 
-        $ iml-quick-expr --expr my_expr
+        $ rls-quick-expr --expr my_expr
     """
     def __init__(self, args, extra_argv):
         self.args = args
@@ -145,7 +145,7 @@ def main():
         total_training_time:
             Run the entire ML training script to measure how long the total training time is.
         """))
-    # Don't support --pdb for iml-bench since I haven't figured out how to
+    # Don't support --pdb for rls-bench since I haven't figured out how to
     # both (1) log stdout/stderr of a command, (2) allow pdb debugger prompt
     # to be fully functional.
     # Even if we could...you probably don't want to log your pdb session
@@ -222,7 +222,7 @@ class ExprSubtractionValidationConfig:
         self.algo = algo
         self.env = env
         self.quick_expr = self.expr.quick_expr
-        # $ iml-prof --config ${iml_prof_config}
+        # $ rls-prof --config ${iml_prof_config}
         self.iml_prof_config = iml_prof_config
         # $ python train.py --iml-directory config_${config_suffix}
         self.config_suffix = config_suffix
@@ -270,7 +270,7 @@ class ExprSubtractionValidationConfig:
         return 2**self.expr.args.long_run_exponent
 
     def run(self, rep, iters):
-        cmd = ['iml-prof',
+        cmd = ['rls-prof',
                '--config', self.iml_prof_config,
                'python', 'train.py',
 
@@ -323,7 +323,7 @@ class ExprTotalTrainingTimeConfig:
     def __init__(self, expr, algo, env, iml_prof_config='uninstrumented', script_args=[]):
         self.expr = expr
         self.quick_expr = self.expr.quick_expr
-        # $ iml-prof --config ${iml_prof_config}
+        # $ rls-prof --config ${iml_prof_config}
         # NOTE: we want to run with IML disabled; we just want to know the total training time WITHOUT IML.
         self.iml_prof_config = iml_prof_config
         # $ python train.py --iml-directory config_${config_suffix}
@@ -363,7 +363,7 @@ class ExprTotalTrainingTimeConfig:
         return logfile
 
     def _get_cmd(self, rep, extra_argv=[]):
-        cmd = ['iml-prof',
+        cmd = ['rls-prof',
                '--config', self.iml_prof_config,
                'python', 'train.py',
 
@@ -426,7 +426,7 @@ class ExprMicrobenchmarkConfig:
         self.expr = expr
         self.config = config
         self.quick_expr = self.expr.quick_expr
-        # $ iml-prof --config ${iml_prof_config}
+        # $ rls-prof --config ${iml_prof_config}
         # NOTE: we want to run with IML disabled; we just want to know the total training time WITHOUT IML.
         self.iml_prof_config = iml_prof_config
         assert config_suffix is not None
@@ -472,7 +472,7 @@ class ExprMicrobenchmarkConfig:
         return logfile
 
     def _get_cmd(self, rep, extra_argv=[]):
-        cmd = ['iml-prof',
+        cmd = ['rls-prof',
                '--config', self.iml_prof_config,
                'python', 'enjoy.py',
 
@@ -677,7 +677,7 @@ class ExprMicrobenchmark:
         """
         Create bar graph of total training time for each experiment we run:
         iml_dirs = find_iml_dirs(self.root_dir)
-        $ iml-analyze --task TotalTrainingTimePlot --iml-directories iml-dirs
+        $ rls-run --task TotalTrainingTimePlot --iml-directories iml-dirs
         Read data-frame like:
           algo, env,         x_field, total_training_time_sec
           ppo2, HalfCheetah, ...,     ...
@@ -707,7 +707,7 @@ class ExprMicrobenchmark:
         plot_dir = self.plot_dir
         if not self.quick_expr.args.dry_run:
             os.makedirs(plot_dir, exist_ok=True)
-        cmd = ['iml-analyze',
+        cmd = ['rls-run',
                '--directory', plot_dir,
                '--task', task,
                '--uninstrumented-directory', json.dumps(iml_directories),
@@ -891,7 +891,7 @@ class ExprMicrobenchmark:
         directory = self.pyprof_overhead_dir(algo, env, mode)
         if not self.quick_expr.args.dry_run:
             os.makedirs(directory, exist_ok=True)
-        cmd = ['iml-analyze',
+        cmd = ['rls-run',
                '--directory', directory,
                '--task', task,
                '--uninstrumented-directory', json.dumps(uninstrumented_directories),
@@ -1265,7 +1265,7 @@ class ExprTotalTrainingTime:
         """
         Create bar graph of total training time for each experiment we run:
         iml_dirs = find_iml_dirs(self.root_dir)
-        $ iml-analyze --task TotalTrainingTimePlot --iml-directories iml-dirs
+        $ rls-run --task TotalTrainingTimePlot --iml-directories iml-dirs
         Read data-frame like:
           algo, env,         x_field, total_training_time_sec
           ppo2, HalfCheetah, ...,     ...
@@ -1288,7 +1288,7 @@ class ExprTotalTrainingTime:
         plot_dir = self.plot_dir
         if not self.quick_expr.args.dry_run:
             os.makedirs(plot_dir, exist_ok=True)
-        cmd = ['iml-analyze',
+        cmd = ['rls-run',
                '--directory', plot_dir,
                '--task', task,
                '--uninstrumented-directory', json.dumps(iml_directories),
@@ -1489,7 +1489,7 @@ class ExprSubtractionValidation:
         directory = self.cupti_scaling_overhead_dir(algo, env)
         if not self.quick_expr.args.dry_run:
             os.makedirs(directory, exist_ok=True)
-        cmd = ['iml-analyze',
+        cmd = ['rls-run',
                '--directory', directory,
                '--task', task,
                '--gpu-activities-api-time-directory', json.dumps(all_gpu_activities_api_time_directories),
@@ -1541,7 +1541,7 @@ class ExprSubtractionValidation:
             directory = self.cupti_overhead_dir(algo, env, iters)
             if not self.quick_expr.args.dry_run:
                 os.makedirs(directory, exist_ok=True)
-            cmd = ['iml-analyze',
+            cmd = ['rls-run',
                    '--directory', directory,
                    '--task', task,
                    '--gpu-activities-directory', json.dumps(gpu_activities_directories),
@@ -1596,7 +1596,7 @@ class ExprSubtractionValidation:
             directory = self.LD_PRELOAD_overhead_dir(algo, env, iters)
             if not self.quick_expr.args.dry_run:
                 os.makedirs(directory, exist_ok=True)
-            cmd = ['iml-analyze',
+            cmd = ['rls-run',
                    '--directory', directory,
                    '--task', task,
                    '--interception-directory', json.dumps(interception_directories),
@@ -1652,7 +1652,7 @@ class ExprSubtractionValidation:
             directory = self.pyprof_overhead_dir(algo, env, iters)
             if not self.quick_expr.args.dry_run:
                 os.makedirs(directory, exist_ok=True)
-            cmd = ['iml-analyze',
+            cmd = ['rls-run',
                    '--directory', directory,
                    '--task', task,
                    '--uninstrumented-directory', json.dumps(uninstrumented_directories),
@@ -1733,7 +1733,7 @@ class ExprSubtractionValidation:
                 # import ipdb; ipdb.set_trace()
                 continue
 
-            # iml-analyze
+            # rls-run
             # --task CorrectedTrainingTimeTask
             # --directory $direc
             # --iml-directories "$(js_list.py output/iml_bench/debug_prof_overhead/config_${config_dir}_*/ppo2/HalfCheetahBulletEnv-v0)"
@@ -1754,7 +1754,7 @@ class ExprSubtractionValidation:
             #     # python_clib_interception_tensorflow_json=None,
             #     # python_clib_interception_simulator_json=None,
             # )
-            cmd = ['iml-analyze',
+            cmd = ['rls-run',
                    '--directory', plot_dir,
                    '--task', task,
 
@@ -1765,7 +1765,7 @@ class ExprSubtractionValidation:
                    '--iml-directories', json.dumps(iml_directories),
                    '--uninstrumented-directories', json.dumps(uninstrumented_directories),
 
-                   '--iml-prof-config', config.iml_prof_config,
+                   '--rls-prof-config', config.iml_prof_config,
                    ]
             # cmd.extend(calibration_jsons.argv())
             add_iml_analyze_flags(cmd, self.quick_expr.args)
@@ -2150,7 +2150,7 @@ class ExprSubtractionValidation:
             '--plot',
             action='store_true')
         # parser.add_argument(
-        #     '--iml-prof-config',
+        #     '--rls-prof-config',
         #     choices=['instrumented', 'full'],
         #     default='full')
         self.args, self.extra_argv = parser.parse_known_args(self.argv)
@@ -2446,7 +2446,7 @@ class ExprPlotFig:
     def iml_analyze_cmdline(self, task, argv):
         plot_dir = self.plot_dir(self.args.fig)
         calibration_jsons = CalibrationJSONs.from_obj(self.args)
-        cmd = ['iml-analyze',
+        cmd = ['rls-run',
                '--directory', plot_dir,
                '--task', task,
 
@@ -2471,7 +2471,7 @@ class ExprPlotFig:
         if self.args.fig == 'fig_13_overhead_correction':
             configs = walker.get_configs(configs=['config_uninstrumented', 'config_full'])
             argv = [
-                '--iml-prof-config', 'full',
+                '--rls-prof-config', 'full',
                 '--iml-directories', json.dumps(configs['config_full']),
                 '--uninstrumented-directories', json.dumps(configs['config_uninstrumented']),
             ]
@@ -2509,8 +2509,8 @@ def add_iml_analyze_flags(cmd, args):
 
 def log_missing_files(self, task, files):
     logger.info(textwrap.dedent("""
-            {klass}: SKIP iml-analyze --task={task}; still need you to collect 
-            some additional runs using "iml-quick-expr".
+            {klass}: SKIP rls-run --task={task}; still need you to collect 
+            some additional runs using "rls-quick-expr".
             Files present so far:
             {files}
             """).format(

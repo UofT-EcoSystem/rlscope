@@ -5,7 +5,7 @@
 #ifndef DNN_TENSORFLOW_CPP_OP_STACK_H
 #define DNN_TENSORFLOW_CPP_OP_STACK_H
 
-//#include "iml_profiler/protobuf/iml_prof.pb.h"
+//#include "rlscope/protobuf/iml_prof.pb.h"
 #include "iml_prof.pb.h"
 
 #include "cuda_api_profiler/event_handler.h"

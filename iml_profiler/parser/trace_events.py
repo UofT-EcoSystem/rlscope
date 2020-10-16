@@ -1,8 +1,8 @@
-from iml_profiler.profiler.iml_logging import logger
+from rlscope.profiler.iml_logging import logger
 import decimal
 
-from iml_profiler.parser.common import *
-from iml_profiler.parser import constants
+from rlscope.parser.common import *
+from rlscope.parser import constants
 
 def dump_category_times(category_times, json_path, print_log=True, category_as_str=None):
     trace_events_dumper = TraceEventsDumper(category_times, json_path, category_as_str=category_as_str)

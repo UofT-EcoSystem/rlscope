@@ -1,7 +1,7 @@
 """
-iml-analyze script for processing trace-data produced from an ML script.
+rls-run script for processing trace-data produced from an ML script.
 """
-from iml_profiler.profiler.iml_logging import logger
+from rlscope.profiler.iml_logging import logger
 import subprocess
 import sys
 import os
@@ -12,8 +12,8 @@ import argparse
 import pprint
 import textwrap
 import multiprocessing
-from iml_profiler.parser import tasks
-from iml_profiler.profiler.iml_logging import logger
+from rlscope.parser import tasks
+from rlscope.profiler.iml_logging import logger
 
 def main():
     parser = argparse.ArgumentParser(
@@ -21,7 +21,7 @@ def main():
         Process trace-files collected from running an ML script with the IML profiler.
         
         For task-specific help, provided task-name and --help, e.g.:
-        $ iml-analyze --task SQLParserTask --help
+        $ rls-run --task SQLParserTask --help
         
         NOTE: 
         - This script is a thin usage/debugging wrapper around a "luigi" DAG execution script. 
@@ -35,7 +35,7 @@ def main():
                         help="Break into pdb when an exception occurs")
     parser.add_argument('--task',
                         choices=[klass.__name__ for klass in tasks.IML_TASKS],
-                        help="Name of a runnable IMLTask defined in iml_profiler.parser.tasks")
+                        help="Name of a runnable IMLTask defined in rlscope.parser.tasks")
     parser.add_argument('--workers',
                         type=int,
                         # DISABLE --workers for now to prevent opening to many postgres connections by accident;
@@ -56,12 +56,12 @@ def main():
 
     if args.task is None and not args.help:
         # If they just run this:
-        # $ iml-analyze --iml-directory <dir>
+        # $ rls-run --iml-directory <dir>
         # Then run all the targets.
         args.task = 'All'
 
     extra_argv = [
-        '--module', 'iml_profiler.parser.tasks',
+        '--module', 'rlscope.parser.tasks',
         '--local-scheduler',
         # Default log-level from luigi is DEBUG which is too noisy.
         # Make the default level INFO instead.
@@ -69,7 +69,7 @@ def main():
     ]
     luigi_argv.extend(extra_argv)
     if args.task:
-        # Task needs to be the first argument after iml-analyze.
+        # Task needs to be the first argument after rls-run.
         luigi_argv.insert(1, args.task)
 
     if args.help:

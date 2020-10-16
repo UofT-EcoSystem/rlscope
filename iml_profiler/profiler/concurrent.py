@@ -1,4 +1,4 @@
-from iml_profiler.profiler.iml_logging import logger
+from rlscope.profiler.iml_logging import logger
 import os
 from progressbar import progressbar
 import shutil
@@ -13,9 +13,9 @@ import concurrent.futures
 
 from os.path import join as _j, abspath as _a, exists as _e, dirname as _d, basename as _b
 
-from iml_profiler.profiler.iml_logging import logger
+from rlscope.profiler.iml_logging import logger
 
-from iml_profiler.parser.common import *
+from rlscope.parser.common import *
 
 MP_SPAWN_CTX = multiprocessing.get_context('spawn')
 MP_FORK_CTX = multiprocessing.get_context('fork')

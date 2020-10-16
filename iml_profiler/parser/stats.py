@@ -1,9 +1,9 @@
 # pip install progressbar2
-from iml_profiler.profiler.iml_logging import logger
+from rlscope.profiler.iml_logging import logger
 import progressbar
 
-from iml_profiler.parser.common import *
-from iml_profiler.parser import constants
+from rlscope.parser.common import *
+from rlscope.parser import constants
 
 VARIABLE_HEADER = ['Type', 'Time(%)',
                    'Avg', 'Std', 'Std/Avg(%)',

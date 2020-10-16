@@ -1,4 +1,4 @@
-from iml_profiler.protobuf.pyprof_pb2 import CategoryEventsProto, Event
+from rlscope.protobuf.pyprof_pb2 import CategoryEventsProto, Event
 
 import threading
 

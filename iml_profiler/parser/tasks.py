@@ -6,7 +6,7 @@ https://luigi.readthedocs.io/en/stable/index.html
 """
 import luigi
 
-from iml_profiler.profiler.iml_logging import logger
+from rlscope.profiler.iml_logging import logger
 import subprocess
 import multiprocessing
 import re
@@ -19,38 +19,38 @@ import os
 
 from os.path import join as _j, abspath as _a, exists as _e, dirname as _d, basename as _b
 
-from iml_profiler.profiler.util import pprint_msg
-from iml_profiler.parser.tfprof import TotalTimeParser, TraceEventsParser
-from iml_profiler.parser.pyprof import PythonProfileParser, PythonFlameGraphParser, PythonProfileTotalParser
-from iml_profiler.parser.plot import TimeBreakdownPlot, PlotSummary, CombinedProfileParser, CategoryOverlapPlot, UtilizationPlot, HeatScalePlot, ConvertResourceOverlapToResourceSubplot, VennJsPlotter, SlidingWindowUtilizationPlot, CUDAEventCSVReader
-from iml_profiler.parser.db import SQLParser, sql_input_path, GetConnectionPool
-from iml_profiler.parser import db
-from iml_profiler.parser.stacked_bar_plots import OverlapStackedBarPlot, CategoryTransitionPlot, TexMetrics
-from iml_profiler.profiler.util import print_cmd
-from iml_profiler.parser.cpu_gpu_util import UtilParser, UtilPlot, GPUUtilOverTimePlot, NvprofKernelHistogram, CrossProcessOverlapHistogram, NvprofTraces
-from iml_profiler.parser.training_progress import TrainingProgressParser, ProfilingOverheadPlot
-from iml_profiler.parser.extrapolated_training_time import ExtrapolatedTrainingTimeParser
-from iml_profiler.parser.profiling_overhead import CallInterceptionOverheadParser, CUPTIOverheadParser, CUPTIScalingOverheadParser, CorrectedTrainingTimeParser, PyprofOverheadParser, TotalTrainingTimeParser, SQLOverheadEventsParser
-from iml_profiler.parser.one_off_plot import GpuUtilExperiment
-from iml_profiler import py_config
+from rlscope.profiler.util import pprint_msg
+from rlscope.parser.tfprof import TotalTimeParser, TraceEventsParser
+from rlscope.parser.pyprof import PythonProfileParser, PythonFlameGraphParser, PythonProfileTotalParser
+from rlscope.parser.plot import TimeBreakdownPlot, PlotSummary, CombinedProfileParser, CategoryOverlapPlot, UtilizationPlot, HeatScalePlot, ConvertResourceOverlapToResourceSubplot, VennJsPlotter, SlidingWindowUtilizationPlot, CUDAEventCSVReader
+from rlscope.parser.db import SQLParser, sql_input_path, GetConnectionPool
+from rlscope.parser import db
+from rlscope.parser.stacked_bar_plots import OverlapStackedBarPlot, CategoryTransitionPlot, TexMetrics
+from rlscope.profiler.util import print_cmd
+from rlscope.parser.cpu_gpu_util import UtilParser, UtilPlot, GPUUtilOverTimePlot, NvprofKernelHistogram, CrossProcessOverlapHistogram, NvprofTraces
+from rlscope.parser.training_progress import TrainingProgressParser, ProfilingOverheadPlot
+from rlscope.parser.extrapolated_training_time import ExtrapolatedTrainingTimeParser
+from rlscope.parser.profiling_overhead import CallInterceptionOverheadParser, CUPTIOverheadParser, CUPTIScalingOverheadParser, CorrectedTrainingTimeParser, PyprofOverheadParser, TotalTrainingTimeParser, SQLOverheadEventsParser
+from rlscope.parser.one_off_plot import GpuUtilExperiment
+from rlscope import py_config
 
-from iml_profiler.parser.common import *
+from rlscope.parser.common import *
 
 PARSER_KLASSES = [PythonProfileParser, PythonFlameGraphParser, PlotSummary, TimeBreakdownPlot, CategoryOverlapPlot, UtilizationPlot, HeatScalePlot, TotalTimeParser, TraceEventsParser, SQLParser]
 PARSER_NAME_TO_KLASS = dict((ParserKlass.__name__, ParserKlass) \
                             for ParserKlass in PARSER_KLASSES)
 
 # Make this pipeline:
-# - iml-analyze --directories ~/clone/baselines/output/PongNoFrameskip-v4/docker --rules SQLParser
-# |-> iml-analyze --directories ~/clone/baselines/output/PongNoFrameskip-v4/docker --rules UtilizationPlot --overlap-type CategoryOverlap
-# |-> iml-analyze --directories ~/clone/baselines/output/PongNoFrameskip-v4/docker --rules UtilizationPlot --overlap-type ResourceOverlap
-# |-> iml-analyze --directories ~/clone/baselines/output/PongNoFrameskip-v4/docker --rules UtilizationPlot --overlap-type OperationOverlap
-# |-> iml-analyze --directories ~/clone/baselines/output/PongNoFrameskip-v4/docker --rules UtilizationPlot --overlap-type ResourceSubPlot
+# - rls-run --directories ~/clone/baselines/output/PongNoFrameskip-v4/docker --rules SQLParser
+# |-> rls-run --directories ~/clone/baselines/output/PongNoFrameskip-v4/docker --rules UtilizationPlot --overlap-type CategoryOverlap
+# |-> rls-run --directories ~/clone/baselines/output/PongNoFrameskip-v4/docker --rules UtilizationPlot --overlap-type ResourceOverlap
+# |-> rls-run --directories ~/clone/baselines/output/PongNoFrameskip-v4/docker --rules UtilizationPlot --overlap-type OperationOverlap
+# |-> rls-run --directories ~/clone/baselines/output/PongNoFrameskip-v4/docker --rules UtilizationPlot --overlap-type ResourceSubPlot
 #
 # Wrap running all the existing classes with a class that outputs a "done" marker file.
 # That way, we don't need to modify the classes to use luigi's "with self.output().open('w') as outfile:".
 
-# List of runnable tasks for iml-analyze.
+# List of runnable tasks for rls-run.
 # Used for generating command-line usage help.
 
 # IML_TASKS = ...
@@ -949,11 +949,11 @@ class GeneratePlotIndexTask(luigi.Task):
     def output(self):
         # Q: What about --replace?  Conditionally include this output...?
         return [
-            luigi.LocalTarget(_j(self.iml_directory, 'iml_profiler_plot_index_data.py')),
+            luigi.LocalTarget(_j(self.iml_directory, 'rlscope_plot_index_data.py')),
         ]
 
     def run(self):
-        cmd = ['iml-generate-plot-index']
+        cmd = ['rls-generate-plot-index']
         cmd.extend(['--iml-directory', self.iml_directory])
         if self.debug:
             cmd.extend(['--debug'])
@@ -1046,8 +1046,8 @@ class OverlapStackedBarTask(luigi.Task):
         self.dumper.run()
 
 class GpuHwPlotTask(IMLTask):
-    gpu_hw_directories = luigi.ListParameter(description="Multiple --iml-directory containing GPUHwCounterSampler.csv from running \"iml-prof --config gpu-hw\"")
-    time_breakdown_directories = luigi.ListParameter(description="Multiple --iml-directory containing GPUHwCounterSampler.csv from running \"iml-prof --config gpu-hw\"")
+    gpu_hw_directories = luigi.ListParameter(description="Multiple --iml-directory containing GPUHwCounterSampler.csv from running \"rls-prof --config gpu-hw\"")
+    time_breakdown_directories = luigi.ListParameter(description="Multiple --iml-directory containing GPUHwCounterSampler.csv from running \"rls-prof --config gpu-hw\"")
     directory = luigi.Parameter(description="Output directory", default=".")
     xtick_expression = param_xtick_expression
     x_title = luigi.Parameter(description="x-axis title", default=None)
@@ -1246,7 +1246,7 @@ def mk_SQL_tasks(task):
     #     msg=pprint_msg(kwargs)))
     return SQLOverheadEventsTask(**kwargs)
 
-from iml_profiler.profiler.iml_logging import logger
+from rlscope.profiler.iml_logging import logger
 def main(argv=None, should_exit=True):
     if argv is None:
         argv = list(sys.argv[1:])
@@ -1267,12 +1267,12 @@ def main(argv=None, should_exit=True):
 
 class CallInterceptionOverheadTask(luigi.Task):
     # csv = luigi.Parameter(description="Path to overall_machine_util.raw.csv [output from UtilTask]")
-    interception_directory = luigi.ListParameter(description="IML directory that ran with 'iml-prof --config interception'")
-    uninstrumented_directory = luigi.ListParameter(description="IML directory that ran with 'iml-prof --config interception'")
+    interception_directory = luigi.ListParameter(description="IML directory that ran with 'rls-prof --config interception'")
+    uninstrumented_directory = luigi.ListParameter(description="IML directory that ran with 'rls-prof --config interception'")
     directory = luigi.Parameter(description="Output directory", default=".")
 
-    # interception_directories = luigi.ListParameter(description="IML directory that ran with 'iml-prof --config interception'", default=".")
-    # no_interception_directories = luigi.ListParameter(description="IML directory that ran with 'iml-prof --config interception'", default=".")
+    # interception_directories = luigi.ListParameter(description="IML directory that ran with 'rls-prof --config interception'", default=".")
+    # no_interception_directories = luigi.ListParameter(description="IML directory that ran with 'rls-prof --config interception'", default=".")
 
     # Plot attrs
     # rotation = luigi.FloatParameter(description="x-axis title rotation", default=45.)
@@ -1298,8 +1298,8 @@ class CallInterceptionOverheadTask(luigi.Task):
         self.dumper.run()
 
 class CUPTIOverheadTask(luigi.Task):
-    gpu_activities_directory = luigi.ListParameter(description="IML directory that ran with 'iml-prof --config gpu-activities'")
-    no_gpu_activities_directory = luigi.ListParameter(description="IML directory that ran with 'iml-prof --config no-gpu-activities'")
+    gpu_activities_directory = luigi.ListParameter(description="IML directory that ran with 'rls-prof --config gpu-activities'")
+    no_gpu_activities_directory = luigi.ListParameter(description="IML directory that ran with 'rls-prof --config no-gpu-activities'")
     directory = luigi.Parameter(description="Output directory", default=".")
 
     # Plot attrs
@@ -1326,8 +1326,8 @@ class CUPTIOverheadTask(luigi.Task):
         self.dumper.run()
 
 class CUPTIScalingOverheadTask(luigi.Task):
-    gpu_activities_api_time_directory = luigi.ListParameter(description="IML directory that ran with 'iml-prof --config gpu-activities-api-time'")
-    interception_directory = luigi.ListParameter(description="IML directory that ran with 'iml-prof --config interception'")
+    gpu_activities_api_time_directory = luigi.ListParameter(description="IML directory that ran with 'rls-prof --config gpu-activities-api-time'")
+    interception_directory = luigi.ListParameter(description="IML directory that ran with 'rls-prof --config interception'")
 
     directory = luigi.Parameter(description="Output directory", default=".")
 
@@ -1362,11 +1362,11 @@ class CorrectedTrainingTimeTask(luigi.Task):
     python_clib_interception_tensorflow_json = param_python_clib_interception_tensorflow_json
     python_clib_interception_simulator_json = param_python_clib_interception_simulator_json
     iml_directories = luigi.ListParameter(description="IML directory that ran with full tracing enabled")
-    uninstrumented_directories = luigi.ListParameter(description="IML directories for uninstrumented runs (iml-prof --config uninstrumented)")
+    uninstrumented_directories = luigi.ListParameter(description="IML directories for uninstrumented runs (rls-prof --config uninstrumented)")
     directory = luigi.Parameter(description="Output directory", default=".")
     # iml_prof_config = luigi.ChoiceParameter(description=textwrap.dedent("""
     iml_prof_config = luigi.Parameter(description=textwrap.dedent("""
-    What option did you pass to \"iml-prof --config\"? 
+    What option did you pass to \"rls-prof --config\"? 
     We use this to determine what overheads to subtract:
     
     instrumented: 
@@ -1410,12 +1410,12 @@ class CorrectedTrainingTimeTask(luigi.Task):
         self.dumper.run()
 
 class PyprofOverheadTask(luigi.Task):
-    uninstrumented_directory = luigi.ListParameter(description="IML directory that ran with 'iml-prof --config uninstrumented train.py --iml-disable --iml-training-progress'")
-    # pyprof_annotations_directory = luigi.ListParameter(description="IML directory that ran with 'iml-prof --config uninstrumented train.py --iml-disable-tfprof --iml-disable-pyprof-interceptions --iml-training-progress'")
-    # pyprof_interceptions_directory = luigi.ListParameter(description="IML directory that ran with 'iml-prof --config uninstrumented train.py --iml-disable-tfprof --iml-disable-pyprof-annotations --iml-training-progress'")
+    uninstrumented_directory = luigi.ListParameter(description="IML directory that ran with 'rls-prof --config uninstrumented train.py --iml-disable --iml-training-progress'")
+    # pyprof_annotations_directory = luigi.ListParameter(description="IML directory that ran with 'rls-prof --config uninstrumented train.py --iml-disable-tfprof --iml-disable-pyprof-interceptions --iml-training-progress'")
+    # pyprof_interceptions_directory = luigi.ListParameter(description="IML directory that ran with 'rls-prof --config uninstrumented train.py --iml-disable-tfprof --iml-disable-pyprof-annotations --iml-training-progress'")
 
-    pyprof_annotations_directory = luigi.ListParameter(description="IML directory that ran with 'iml-prof --config uninstrumented train.py --iml-disable-tfprof --iml-disable-pyprof-interceptions --iml-training-progress'", default=None)
-    pyprof_interceptions_directory = luigi.ListParameter(description="IML directory that ran with 'iml-prof --config uninstrumented train.py --iml-disable-tfprof --iml-disable-pyprof-annotations --iml-training-progress'", default=None)
+    pyprof_annotations_directory = luigi.ListParameter(description="IML directory that ran with 'rls-prof --config uninstrumented train.py --iml-disable-tfprof --iml-disable-pyprof-interceptions --iml-training-progress'", default=None)
+    pyprof_interceptions_directory = luigi.ListParameter(description="IML directory that ran with 'rls-prof --config uninstrumented train.py --iml-disable-tfprof --iml-disable-pyprof-annotations --iml-training-progress'", default=None)
 
     directory = luigi.Parameter(description="Output directory", default=".")
 
@@ -1443,7 +1443,7 @@ class PyprofOverheadTask(luigi.Task):
         self.dumper.run()
 
 class TotalTrainingTimeTask(luigi.Task):
-    uninstrumented_directory = luigi.ListParameter(description="IML directory that ran with 'iml-prof --config uninstrumented train.py --iml-disable --iml-training-progress'")
+    uninstrumented_directory = luigi.ListParameter(description="IML directory that ran with 'rls-prof --config uninstrumented train.py --iml-disable --iml-training-progress'")
     directory = luigi.Parameter(description="Output directory", default=".")
 
     # Plot attrs

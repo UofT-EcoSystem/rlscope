@@ -1,5 +1,5 @@
 import subprocess
-from iml_profiler.profiler.iml_logging import logger
+from rlscope.profiler.iml_logging import logger
 import contextlib
 
 import shlex
@@ -9,9 +9,9 @@ import sys
 import os
 from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, basename as _b
 
-# from iml_profiler.parser.common import *
-from iml_profiler.profiler.util import get_stacktrace
-from iml_profiler.profiler.util import print_cmd
+# from rlscope.parser.common import *
+from rlscope.profiler.util import get_stacktrace
+from rlscope.profiler.util import print_cmd
 
 import tempfile
 
@@ -197,7 +197,7 @@ def expr_run_cmd(cmd, to_file,
         log_func = logger.error
 
     if env is None:
-        # Make sure iml-analyze get IML_POSTGRES_HOST
+        # Make sure rls-run get IML_POSTGRES_HOST
         env = dict(os.environ)
 
     proc = None

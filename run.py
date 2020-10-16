@@ -17,9 +17,9 @@ import getpass
 import os
 
 import logging
-from iml_profiler.profiler import iml_logging
+from rlscope.profiler import iml_logging
 
-from iml_profiler.parser.common import *
+from rlscope.parser.common import *
 
 def main():
     iml_logging.setup_logging()

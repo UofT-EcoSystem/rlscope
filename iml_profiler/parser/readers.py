@@ -1,12 +1,12 @@
-from iml_profiler.profiler.iml_logging import logger
+from rlscope.profiler.iml_logging import logger
 # from tensorflow.core.profiler.tfprof_log_pb2 import ProfileProto
-from iml_profiler.protobuf.pyprof_pb2 import CategoryEventsProto
+from rlscope.protobuf.pyprof_pb2 import CategoryEventsProto
 
-from iml_profiler.parser.common import *
-from iml_profiler.parser import constants
-from iml_profiler.parser.stats import KernelTime, category_times_add_time
+from rlscope.parser.common import *
+from rlscope.parser import constants
+from rlscope.parser.stats import KernelTime, category_times_add_time
 
-from iml_profiler.protobuf import iml_prof_pb2
+from rlscope.protobuf import iml_prof_pb2
 
 DEFAULT_group_by_device = False
 DEFAULT_ignore_categories = {constants.CATEGORY_DUMMY_EVENT, constants.CATEGORY_UNKNOWN}

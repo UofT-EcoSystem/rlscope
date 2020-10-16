@@ -1,4 +1,4 @@
-from iml_profiler.profiler.iml_logging import logger
+from rlscope.profiler.iml_logging import logger
 import argparse
 import copy
 import re
@@ -22,16 +22,16 @@ import seaborn as sns
 
 from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, basename as _b
 
-from iml_profiler.profiler.util import pprint_msg
-from iml_profiler import py_config
-from iml_profiler.parser.common import *
-from iml_profiler.parser import constants
-from iml_profiler.parser.nvprof import CUDASQLiteParser
-from iml_profiler.parser.pyprof import PythonProfileParser
-from iml_profiler.parser.tfprof import OverlapComputer, overlap_type_to_instance, OverlapJSONToVennConverter
-from iml_profiler.parser.heatscale import HeatScale, exponential_moving_average
-from iml_profiler.parser.db import SQLCategoryTimesReader, sql_get_source_files, sql_input_path
-from iml_profiler.parser.dataframe import UtilDataframeReader, OverlapDataframeReader, VennData, read_iml_config_metadata, CUDADeviceEventsReader
+from rlscope.profiler.util import pprint_msg
+from rlscope import py_config
+from rlscope.parser.common import *
+from rlscope.parser import constants
+from rlscope.parser.nvprof import CUDASQLiteParser
+from rlscope.parser.pyprof import PythonProfileParser
+from rlscope.parser.tfprof import OverlapComputer, overlap_type_to_instance, OverlapJSONToVennConverter
+from rlscope.parser.heatscale import HeatScale, exponential_moving_average
+from rlscope.parser.db import SQLCategoryTimesReader, sql_get_source_files, sql_input_path
+from rlscope.parser.dataframe import UtilDataframeReader, OverlapDataframeReader, VennData, read_iml_config_metadata, CUDADeviceEventsReader
 
 Y_LABEL_TRAINING_TIME_SEC = 'Training time (sec)'
 
@@ -3930,7 +3930,7 @@ def fix_seaborn_legend(ax, legend_kwargs=dict()):
         **legend_kwargs,
     )
 
-from iml_profiler.profiler.iml_logging import logger
+from rlscope.profiler.iml_logging import logger
 def main():
     p = argparse.ArgumentParser()
     p.add_argument('--test-stacked-bar', action='store_true')

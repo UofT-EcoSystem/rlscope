@@ -1,6 +1,6 @@
-from iml_profiler.parser.common import *
+from rlscope.parser.common import *
 
-from iml_profiler.parser.stats import KernelTime
+from rlscope.parser.stats import KernelTime
 
 def sec(seconds):
     return seconds*constants.MICROSECONDS_IN_SECOND

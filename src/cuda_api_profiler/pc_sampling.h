@@ -14,7 +14,7 @@
 
 #include "cuda_api_profiler/get_env_var.h"
 
-//#include "iml_profiler/protobuf/iml_prof.pb.h"
+//#include "rlscope/protobuf/iml_prof.pb.h"
 #include "iml_prof.pb.h"
 
 #define THREAD_ID_UNSET (-1)

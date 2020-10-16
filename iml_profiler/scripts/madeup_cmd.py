@@ -4,11 +4,11 @@ import time
 
 import os
 
-from iml_profiler.profiler.iml_logging import logger
+from rlscope.profiler.iml_logging import logger
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Test: iml-run-expr",
+        description="Test: rls-run-expr",
         # formatter_class=argparse.ArgumentDefaultsHelpFormatter)
         formatter_class=argparse.RawTextHelpFormatter)
     parser.add_argument('--iml-directory',

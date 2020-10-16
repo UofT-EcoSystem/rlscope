@@ -2,19 +2,19 @@
 Python wrapper for running C++ rls-analyze binary
 distributed with RL-Scope python wheel.
 """
-from iml_profiler.profiler.iml_logging import logger
+from rlscope.profiler.iml_logging import logger
 import sys
 import textwrap
 import os
 
 from os.path import join as _j, abspath as _a, exists as _e, dirname as _d, basename as _b
 
-from iml_profiler.profiler.util import print_cmd
-import iml_profiler
+from rlscope.profiler.util import print_cmd
+import rlscope
 
 DEBUG = False
 
-INSTALL_ROOT = _d(os.path.realpath(iml_profiler.__file__))
+INSTALL_ROOT = _d(os.path.realpath(rlscope.__file__))
 CPP_LIB = _j(INSTALL_ROOT, 'cpp', 'lib')
 CPP_BIN = _j(INSTALL_ROOT, 'cpp', 'bin')
 CPP_INCLUDE = _j(INSTALL_ROOT, 'cpp', 'include')
@@ -52,7 +52,7 @@ def rlscope_pip_installed():
     logger.info( textwrap.dedent("""\
     NOTE: this is a 'dummy' executable that tells us whether RL-Scope was installed in 
     development mode (i.e., "python setup.py develop")
-    or production mode (i.e., "pip install iml_profiler")
+    or production mode (i.e., "pip install rlscope")
     """.rstrip()))
 
 # NOTE: This file should only be called from entrypoints registered via setup.py

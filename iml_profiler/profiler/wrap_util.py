@@ -2,9 +2,9 @@ import re
 import inspect
 import types
 
-from iml_profiler.profiler.iml_logging import logger
+from rlscope.profiler.iml_logging import logger
 
-from iml_profiler import py_config
+from rlscope import py_config
 
 def wrap_lib(FuncWrapperKlass, import_libname, wrapper_args=tuple(), func_regex=None, wrap_libname=None):
     # wrapper_args = (category, prefix)

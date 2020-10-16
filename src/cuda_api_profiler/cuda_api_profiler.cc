@@ -301,10 +301,10 @@ std::string CUDAAPIProfilerState::DumpPath(int trace_id) {
   ss << "phase" << path_separator() << _phase_name << path_separator();
 
   if (_fuzzing) {
-    // $ iml-prof --fuzz-cuda-api
+    // $ rls-prof --fuzz-cuda-api
     ss << "fuzz_cuda_api_stats";
   } else {
-    // $ iml-prof --cuda-api-calls
+    // $ rls-prof --cuda-api-calls
     ss << "cuda_api_stats";
   }
 

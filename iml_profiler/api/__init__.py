@@ -1,35 +1,35 @@
-from iml_profiler.profiler.profilers import \
+from rlscope.profiler.profilers import \
   Profiler, \
   fix_gflags_iml_args, \
   add_iml_arguments, \
   iml_argv_and_env, \
   click_add_arguments
 
-from iml_profiler.profiler.util import \
+from rlscope.profiler.util import \
   args_to_cmdline
 
-# Managed by iml_profiler.profiler.glbl
+# Managed by rlscope.profiler.glbl
 prof = None
-from iml_profiler.profiler.glbl import \
+from rlscope.profiler.glbl import \
   handle_iml_args, \
   handle_gflags_iml_args, \
   handle_click_iml_args, \
   init_session
 
-from iml_profiler.profiler.iml_logging import \
+from rlscope.profiler.iml_logging import \
   logger
 
-from iml_profiler.protobuf.pyprof_pb2 import \
+from rlscope.protobuf.pyprof_pb2 import \
   CategoryEventsProto
 
-from iml_profiler.protobuf.unit_test_pb2 import \
+from rlscope.protobuf.unit_test_pb2 import \
   IMLUnitTestOnce, \
   IMLUnitTestMultiple
 
-from iml_profiler.profiler.clib_wrap import \
+from rlscope.profiler.clib_wrap import \
   wrap_module, unwrap_module, \
   register_wrap_module, \
   wrap_entire_module, unwrap_entire_module
 
-from iml_profiler.scripts.utilization_sampler import \
+from rlscope.scripts.utilization_sampler import \
   util_sampler

@@ -4,20 +4,20 @@ import copy
 import os
 import pprint
 import progressbar
-from iml_profiler.profiler.iml_logging import logger
+from rlscope.profiler.iml_logging import logger
 import functools
 import multiprocessing
 
 from concurrent.futures import ProcessPoolExecutor
 
-from iml_profiler.profiler import concurrent
+from rlscope.profiler import concurrent
 
 from os.path import join as _j, abspath as _a, exists as _e, dirname as _d, basename as _b
 
-from iml_profiler.profiler.util import pprint_msg
-from iml_profiler.parser.common import *
-from iml_profiler.parser import constants
-from iml_profiler.protobuf import iml_prof_pb2
+from rlscope.profiler.util import pprint_msg
+from rlscope.parser.common import *
+from rlscope.parser import constants
+from rlscope.protobuf import iml_prof_pb2
 
 def Worker_split_map_merge(kwargs):
     kwargs = dict(kwargs)

@@ -1,4 +1,4 @@
-from iml_profiler.profiler.iml_logging import logger
+from rlscope.profiler.iml_logging import logger
 import shutil
 import subprocess
 import argparse
@@ -9,13 +9,13 @@ import numpy as np
 
 from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, basename as _b
 
-from iml_profiler import py_config
+from rlscope import py_config
 
-from iml_profiler.parser.common import *
-from iml_profiler.profiler.util import gather_argv, print_cmd
+from rlscope.parser.common import *
+from rlscope.profiler.util import gather_argv, print_cmd
 
-from iml_profiler.clib import rlscope_api
-from iml_profiler.profiler.iml_logging import logger
+from rlscope.clib import rlscope_api
+from rlscope.profiler.iml_logging import logger
 
 DEFAULT_CONFIG = 'full'
 
@@ -161,18 +161,18 @@ def main():
                         For measuring LD_PRELOAD CUDA API interception overhead:
                             interception:
                                 Enable LD_PRELOAD CUDA API interception.
-                                $ iml-prof --debug --cuda-api-calls --cuda-api-events --iml-disable
+                                $ rls-prof --debug --cuda-api-calls --cuda-api-events --iml-disable
                             no-interception:
                                 Disable LD_PRELOAD CUDA API interception.
-                                $ iml-prof --debug --iml-disable
+                                $ rls-prof --debug --iml-disable
                                 
                         For measuring CUPTI GPU activity gathering overhead on a per CUDA API call basis.
                             gpu-activities:
                                 Enable CUPTI GPU activity recording.
-                                $ iml-prof --debug --cuda-api-calls --cuda-activities --iml-disable
+                                $ rls-prof --debug --cuda-api-calls --cuda-activities --iml-disable
                             no-gpu-activities:
                                 Disable CUPTI GPU activity recording.
-                                $ iml-prof --debug --cuda-api-calls --iml-disable
+                                $ rls-prof --debug --cuda-api-calls --iml-disable
                                 
                         Expect (for the above configurations):
                         You should run train.py with these arguments set
@@ -187,10 +187,10 @@ def main():
                             # Disable any pyprof or old tfprof tracing code.
                             --iml-disable
                                 
-                        For collecting full IML traces for using with iml-analyze / iml-drill:
+                        For collecting full IML traces for using with rls-run / iml-drill:
                             full:
                                 Enable all of tfprof and pyprof collection.
-                                $ iml-prof --cuda-api-calls --cuda-api-events --cuda-activities --iml-disable
+                                $ rls-prof --cuda-api-calls --cuda-api-events --cuda-activities --iml-disable
                                 NOTE: we still use --iml-disable to prevent "old" tfprof collection.
                                 
                         gpu-hw:
@@ -199,7 +199,7 @@ def main():
     args = parser.parse_args(iml_prof_argv)
 
     if args.iml_rm_traces_from is not None:
-        logger.info("iml-prof: Delete trace-files rooted at --iml-directory = {dir}".format(
+        logger.info("rls-prof: Delete trace-files rooted at --iml-directory = {dir}".format(
             dir=args.iml_rm_traces_from))
         return
 
@@ -223,10 +223,10 @@ def main():
 
     if args.calibrate:
         if args.config is not None:
-            logger.error("Only --calibrate or --config should be provided for iml-prof.")
+            logger.error("Only --calibrate or --config should be provided for rls-prof.")
             parser.exit(1)
         # Run calibrate.py
-        cmd = ['iml-calibrate', 'run']
+        cmd = ['rls-calibrate', 'run']
         if args.parallel_runs:
             cmd.extend(['--parallel-runs'])
             iml_prof_argv.remove('--parallel-runs')
@@ -257,35 +257,35 @@ def main():
 
     add_env['IML_CONFIG'] = args.config
     if args.config == 'interception':
-        "iml-prof --debug --cuda-api-calls --cuda-api-events"
+        "rls-prof --debug --cuda-api-calls --cuda-api-events"
         _set_if_none('cuda_api_calls', True)
         _set_if_none('cuda_api_events', True)
     elif args.config in ['no-interception', 'uninstrumented']:
-        "iml-prof --debug"
+        "rls-prof --debug"
         pass
     elif args.config == 'gpu-hw':
-        "$ iml-prof --debug --gpu-hw"
+        "$ rls-prof --debug --gpu-hw"
         _set_if_none('cuda_api_calls', False)
         _set_if_none('cuda_api_events', False)
         _set_if_none('cuda_activities', False)
         _set_if_none('gpu_hw', True)
     elif args.config == 'no-gpu-activities':
-        "$ iml-prof --debug --cuda-api-calls"
+        "$ rls-prof --debug --cuda-api-calls"
         _set_if_none('cuda_api_calls', True)
         _set_if_none('gpu_hw', False)
     elif args.config == 'gpu-activities':
-        "$ iml-prof --debug --cuda-api-calls --cuda-activities"
+        "$ rls-prof --debug --cuda-api-calls --cuda-activities"
         _set_if_none('cuda_api_calls', True)
         _set_if_none('cuda_activities', True)
         _set_if_none('gpu_hw', False)
     elif args.config == 'gpu-activities-api-time':
-        "$ iml-prof --debug --cuda-api-calls --cuda-api-events --cuda-activities"
+        "$ rls-prof --debug --cuda-api-calls --cuda-api-events --cuda-activities"
         _set_if_none('cuda_api_calls', True)
         _set_if_none('cuda_api_events', True)
         _set_if_none('cuda_activities', True)
         _set_if_none('gpu_hw', False)
     elif args.config is None or args.config in {'full', 'time-breakdown'}:
-        "$ iml-prof --cuda-api-calls --cuda-api-events --cuda-activities"
+        "$ rls-prof --cuda-api-calls --cuda-api-events --cuda-activities"
         _set_if_none('cuda_api_calls', True)
         _set_if_none('cuda_api_events', True)
         _set_if_none('cuda_activities', True)
@@ -294,7 +294,7 @@ def main():
         raise NotImplementedError()
 
     if args.fuzz_cuda_api and args.cuda_api_calls:
-        parser.error("Can only run iml-prof with --fuzz-cuda-api or --cuda-api-calls, not both")
+        parser.error("Can only run rls-prof with --fuzz-cuda-api or --cuda-api-calls, not both")
 
     if args.debug or args.iml_debug or is_env_true('IML_DEBUG'):
         logger.info("Detected debug mode; enabling C++ logging statements (export IML_CPP_MIN_VLOG_LEVEL=1)")

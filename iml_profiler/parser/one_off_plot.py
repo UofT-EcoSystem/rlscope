@@ -1,4 +1,4 @@
-from iml_profiler.profiler.iml_logging import logger
+from rlscope.profiler.iml_logging import logger
 import argparse
 import traceback
 import bdb
@@ -24,14 +24,14 @@ import seaborn as sns
 
 from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, basename as _b
 
-from iml_profiler.profiler.util import pprint_msg
-from iml_profiler.parser.stacked_bar_plots import get_x_env, get_x_algo, xfields_from_xtick_expression, get_capsize, OverlapStackedBarPlot, add_repetition, group_numeric_cols
-from iml_profiler.parser.dataframe import UtilDataframeReader, IMLConfig
+from rlscope.profiler.util import pprint_msg
+from rlscope.parser.stacked_bar_plots import get_x_env, get_x_algo, xfields_from_xtick_expression, get_capsize, OverlapStackedBarPlot, add_repetition, group_numeric_cols
+from rlscope.parser.dataframe import UtilDataframeReader, IMLConfig
 
-from iml_profiler import py_config
-from iml_profiler.parser.common import *
-from iml_profiler.parser import constants
-from iml_profiler.py_config import yes_as_bool
+from rlscope import py_config
+from rlscope.parser.common import *
+from rlscope.parser import constants
+from rlscope.py_config import yes_as_bool
 
 from typing import *
 
@@ -2834,7 +2834,7 @@ def plot_grouped_bar():
     _plot('./test_plot_grouped_bar.01.svg')
     _plot('./test_plot_grouped_bar.02.svg')
 
-from iml_profiler.profiler.iml_logging import logger
+from rlscope.profiler.iml_logging import logger
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--test-plot-grouped-bar', action='store_true')

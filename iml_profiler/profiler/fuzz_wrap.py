@@ -1,9 +1,9 @@
-from iml_profiler.profiler.iml_logging import logger
+from rlscope.profiler.iml_logging import logger
 import traceback
 import textwrap
 
-# from iml_profiler.parser.common import *
-from iml_profiler.profiler.util import get_stacktrace
+# from rlscope.parser.common import *
+from rlscope.profiler.util import get_stacktrace
 
 class FuzzFuncWrapper:
     """

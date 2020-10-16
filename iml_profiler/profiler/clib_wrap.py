@@ -1,4 +1,4 @@
-from iml_profiler.profiler.iml_logging import logger
+from rlscope.profiler.iml_logging import logger
 import contextlib
 import sys
 import multiprocessing
@@ -7,26 +7,26 @@ import inspect
 import functools
 import re
 
-# from iml_profiler.parser.common import *
-from iml_profiler.parser import constants
-from iml_profiler.profiler import timer as iml_timer
+# from rlscope.parser.common import *
+from rlscope.parser import constants
+from rlscope.profiler import timer as iml_timer
 
 import time
 
-from iml_profiler.protobuf.pyprof_pb2 import CategoryEventsProto, Event
+from rlscope.protobuf.pyprof_pb2 import CategoryEventsProto, Event
 
-from iml_profiler.profiler import proto_util
+from rlscope.profiler import proto_util
 
 # https://stackoverflow.com/questions/9386636/profiling-a-system-with-extensively-reused-decorators
 import types
 
 # MICROSECONDS_IN_SECOND = float(1e6)
 
-from iml_profiler.profiler import wrap_util
-from iml_profiler import py_config
-from iml_profiler.profiler.util import get_stacktrace
+from rlscope.profiler import wrap_util
+from rlscope import py_config
+from rlscope.profiler.util import get_stacktrace
 
-from iml_profiler.clib import rlscope_api
+from rlscope.clib import rlscope_api
 
 now_us = iml_timer.now_us
 
@@ -698,9 +698,9 @@ def wrap_torch():
     #     # logging.info(f"TYPE={type(value)}, name={name}, value={value}")
     # logger.info(pprint.pformat(type_map))
 
-    # from iml_profiler.profiler import log_stacktrace
-    # from iml_profiler.profiler import wrap_util
-    # from iml_profiler.profiler.log_stacktrace import LoggedStackTraces
+    # from rlscope.profiler import log_stacktrace
+    # from rlscope.profiler import wrap_util
+    # from rlscope.profiler.log_stacktrace import LoggedStackTraces
     # import torch._C._nn
 
     wrap_module(torch._C, category=constants.CATEGORY_TF_API)

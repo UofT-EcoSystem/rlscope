@@ -11,7 +11,7 @@ from os import environ as ENV
 
 import cpuinfo
 
-from iml_profiler.profiler.iml_logging import logger
+from rlscope.profiler.iml_logging import logger
 
 def args_to_cmdline(parser, args,
                     argv=None,
@@ -223,12 +223,12 @@ def run_with_pdb(args, func, handle_exception=True):
 def gather_argv(argv, sep='--', ignore_opts=None):
     """
 
-    $ iml-prof [options]         cmd_exec ...
+    $ rls-prof [options]         cmd_exec ...
                ---------         ------------
                iml_prof_argv     cmd_argv
 
     Split sys.argv into:
-    - iml_prof_argv: Arguments that iml-prof should handle.
+    - iml_prof_argv: Arguments that rls-prof should handle.
     - cmd_argv: Arguments that the profiled script should handle.
 
     :param argv:

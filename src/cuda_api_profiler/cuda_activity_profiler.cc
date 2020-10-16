@@ -4,7 +4,7 @@
 
 #include "cuda_api_profiler/cuda_activity_profiler.h"
 #include "cuda_api_profiler/get_env_var.h"
-//#include "iml_profiler/protobuf/iml_prof.pb.h"
+//#include "rlscope/protobuf/iml_prof.pb.h"
 #include "iml_prof.pb.h"
 #include "common/util.h"
 #include "cuda_api_profiler/cupti_logging.h"

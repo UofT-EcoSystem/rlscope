@@ -3,8 +3,8 @@ import ctypes
 from os import environ as ENV
 
 from io import StringIO
-from iml_profiler.profiler.iml_logging import logger
-from iml_profiler.parser.common import *
+from rlscope.profiler.iml_logging import logger
+from rlscope.parser.common import *
 
 import ctypes
 import ctypes.util
@@ -12,10 +12,10 @@ from ctypes import *
 
 c_int_p = ctypes.POINTER(ctypes.c_int)
 
-from iml_profiler import py_config
+from rlscope import py_config
 
-from iml_profiler.profiler.iml_logging import logger
-from iml_profiler import py_config
+from rlscope.profiler.iml_logging import logger
+from rlscope import py_config
 
 
 RLSCOPE_LIBNAME = 'rlscope'
@@ -32,16 +32,16 @@ def find_librlscope():
     #
     # NOTE: This will succeed in development mode (i.e., "python setup.py develop")
     # since we set LD_LIBRARY_PATH in source_me.sh.
-    # In "pip install iml_profiler" distribution mode, this will fail, since
+    # In "pip install rlscope" distribution mode, this will fail, since
     # librlscope.lib is packaged inside:
-    #   iml_profiler/cpp/lib/librlscope.so
+    #   rlscope/cpp/lib/librlscope.so
     ENV['LIBRARY_PATH'] = ENV['LD_LIBRARY_PATH']
     RLSCOPE_CLIB = ctypes.util.find_library(RLSCOPE_LIBNAME)
 
     if RLSCOPE_CLIB is None:
         orig_LD_LIBRARY_PATH = ENV['LD_LIBRARY_PATH']
         # Locations to search for librlscope.so
-        # Currently, we just search for iml_profiler/cpp/lib/librlscope.so
+        # Currently, we just search for rlscope/cpp/lib/librlscope.so
         rlscope_lib_dirs = [py_config.CPP_LIB]
         for path in rlscope_lib_dirs:
             if not os.path.isdir(path):
@@ -78,7 +78,7 @@ def find_librlscope():
             )).rstrip())
         else:
             """
-            RL-Scope has been installed using "pip install iml_profiler".
+            RL-Scope has been installed using "pip install rlscope".
             
             librlscope.so SHOULD be bundled with the install python package; 
             if it isn't then this is a BUG.
@@ -233,7 +233,7 @@ def _full_api_name(api_name):
 
 def _set_api_wrapper(api_name):
     full_api_name = _full_api_name(api_name)
-    from iml_profiler.clib import rlscope_api
+    from rlscope.clib import rlscope_api
     func = getattr(_so, full_api_name)
     def api_wrapper(*args, **kwargs):
         if py_config.DEBUG and py_config.DEBUG_RLSCOPE_LIB_CALLS:
