@@ -286,7 +286,7 @@ def _sys_exit_1():
     logger.info("Running child in ForkedProcessPool that exits with sys.exit(1)")
     sys.exit(1)
 
-class TestForkedProcessException(Exception):
+class MadeupForkedProcessException(Exception):
     pass
 
 def _exception():
@@ -294,7 +294,7 @@ def _exception():
     For unit-testing.
     """
     logger.info("Running child in ForkedProcessPool that raises an exception")
-    raise TestForkedProcessException("Child process exception")
+    raise MadeupForkedProcessException("Child process exception")
 
 def _do_nothing():
     pass
@@ -324,7 +324,7 @@ class TestForkedProcessPool:
         :return:
         """
         pool = ForkedProcessPool(name=self.test_02_exception.__name__)
-        with pytest.raises(TestForkedProcessException, match="Child process exception") as exec_info:
+        with pytest.raises(MadeupForkedProcessException, match="Child process exception") as exec_info:
             pool.submit(_exception.__name__, _exception)
             pool.shutdown()
 

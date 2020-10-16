@@ -15,8 +15,6 @@ from iml_profiler.parser.plot_index import SEL_ORDER, TITLE_ORDER
 
 from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, basename as _b
 
-# import GPUtil
-
 from iml_profiler import py_config
 
 from iml_profiler.parser.common import *

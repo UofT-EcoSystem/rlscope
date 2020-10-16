@@ -590,8 +590,8 @@ try:
     import pybullet_envs.minitaur.envs.bullet_client
     import pybullet_utils.bullet_client
 except ImportError as e:
-    logger.warning("IML: Failed to import PyBullet ({error}), skip wrapping library".format(
-        error=str(e)))
+    # logger.warning("IML: Failed to import PyBullet ({error}), skip wrapping library".format(
+    #     error=str(e)))
     pass
 
 def wrap_pybullet():

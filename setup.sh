@@ -609,14 +609,14 @@ _maybe() {
 #}
 
 _do() {
-    echo "> CMD [setup.sh]: $@"
+    echo "> CMD [setup.sh]:"
     echo "  $ $@"
     "$@"
 }
 DO_VERBOSE=
 _dov() {
   if [ "$DO_VERBOSE" = 'yes' ]; then
-    echo "> CMD [setup.sh]: $@"
+    echo "> CMD [setup.sh]:"
     echo "  $ $@"
   fi
   "$@"

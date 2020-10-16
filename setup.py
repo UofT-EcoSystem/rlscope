@@ -40,12 +40,14 @@ def pprint_msg(dic, prefix='  '):
     """
     return "\n" + textwrap.indent(pprint.pformat(dic), prefix=prefix)
 
-def get_files_by_ext(root):
+def get_files_by_ext(root, rm_prefix=None):
     files_by_ext = dict()
     for path in each_file_recursive(root):
         ext = file_extension(path)
         if ext not in files_by_ext:
             files_by_ext[ext] = []
+        if rm_prefix is not None:
+            path = re.sub(r'^{prefix}/'.format(prefix=rm_prefix), '', path)
         files_by_ext[ext].append(path)
     return files_by_ext
 
@@ -71,9 +73,9 @@ def cmd_debug_msg(cmd, env=None, dry_run=False):
 
     lines = []
     if dry_run:
-        lines.append("> CMD [dry-run]:")
+        lines.append("> CMD [setup.py] [dry-run]:")
     else:
-        lines.append("> CMD:")
+        lines.append("> CMD [setup.py]:")
     lines.extend([
         "  $ {cmd}".format(cmd=cmd_str),
         "  PWD={pwd}".format(pwd=os.getcwd()),
@@ -125,53 +127,24 @@ DOCLINES = __doc__.split('\n')
 # result for pip.
 _VERSION = '1.0.0'
 
+REQUIREMENTS_TXT = _j(py_config.ROOT, "requirements.txt")
+
+def read_requirements(requirements_txt):
+    requires = []
+    with open(requirements_txt) as f:
+        for line in f:
+            line = line.rstrip()
+            line = re.sub(r'#.*', '', line)
+            if re.search(r'^\s*$', line):
+                continue
+            requires.append(line)
+    return requires
+
 #
 # NOTE: this is identical to requirements found in requirements.txt.
 # (please keep in sync)
 #
-REQUIRED_PACKAGES = [
-    'protobuf >= 3.6.1',
-    'numpy >= 1.13.3',
-    #
-    # NOTE: DON'T explicitly depend on tensorflow, since we need a modified tensorflow library to run.
-    # Instead, EXPECT that it will get installed externally.
-    #
-    # 'tensorflow >= 1.3.1',
-    'psutil >= 5.6.2',
-    'GPUtil >= 1.4.0',
-    # 'matplotlib >= 3.0.3',
-    # Python 3.6 is required for matplotlib >= 3.1
-    'matplotlib < 3.1',
-    'pandas >= 0.24.2',
-    'progressbar2>=3.39.2',
-    'scipy >= 1.2.1',
-    'seaborn >= 0.9.0',
-    'tqdm >= 4.31.1',
-    'py-cpuinfo == 4.0.0',
-    'gym >= 0.13.0',
-
-    # Trying to get nvidia dockerfile to run with assembler.py
-    'absl-py>=0.6.1',
-    'Cerberus==1.3.1',
-    'docker==4.0.1',
-    'PyYAML==5.1',
-
-    # iml-analyze
-    # 'psycopg2==2.7.7',
-    'luigi==2.8.6',
-    # Debugger used for development
-    'ipdb >= 0.12',
-    # Debugger used for pytest
-    'pdbpp >= 0.10.0',
-
-    'numba==0.46.0',
-
-    # Needed for TensorRT Python API.
-    'pycuda>=2019.1.2',
-
-    # Coloured logging.
-    'colorlog>=4.2.1'
-]
+REQUIRED_PACKAGES = read_requirements(REQUIREMENTS_TXT)
 
 # NOTE: dependencies for building docker images are defined in dockerfiles/requirements.txt
 # DOCKER_PACKAGES = [
@@ -210,13 +183,11 @@ CPP_WRAPPER_SCRIPTS = [
     'rls-test = iml_profiler.scripts.cpp.cpp_binary_wrapper:rls_test',
 ]
 
-PRODUCTION_DUMMY_SCRIPTS = [
-    'rlscope-pip-installed = iml_profiler.scripts.cpp.cpp_binary_wrapper:rlscope_pip_installed',
-]
+# DEVELOPMENT_SCRIPTS = [
+# ]
 
-TEST_PACKAGES = [
-    'pytest >= 4.4.1',
-    # 'scipy >= 0.15.1',
+PRODUCTION_SCRIPTS = [
+    'rlscope-pip-installed = iml_profiler.scripts.cpp.cpp_binary_wrapper:rlscope_pip_installed',
 ]
 
 def find_files(pattern, root):
@@ -288,6 +259,12 @@ def main():
     parser.add_argument('--debug', action='store_true')
     args, extra_argv = parser.parse_known_args()
 
+    def is_development_mode():
+        return args.setup_cmd == 'develop'
+
+    def is_production_mode():
+        return not is_development_mode()
+
     # Remove any arguments that were parsed using argparse.
     # e.g.,
     # ['setup.py', 'bdist_wheel', '--debug'] =>
@@ -315,7 +292,7 @@ def main():
     generate_proto(_proto('unit_test.proto'), regenerate=True)
     generate_proto(_proto('iml_prof.proto'), regenerate=True)
 
-    iml_profiler_ext = get_files_by_ext('iml_profiler')
+    iml_profiler_ext = get_files_by_ext('iml_profiler', rm_prefix='iml_profiler')
 
     logger.debug("iml_profiler_ext = {msg}".format(
         msg=pprint_msg(iml_profiler_ext),
@@ -328,17 +305,17 @@ def main():
             # which we do using each_file_recursive(...).
         ],
     }
-    keep_ext = {'py', 'proto'}
+    keep_ext = {'ini', 'py', 'proto'}
     for ext in set(iml_profiler_ext.keys()).intersection(keep_ext):
         package_data['iml_profiler'].extend(iml_profiler_ext[ext])
 
-    if args.setup_cmd != 'develop':
+    if is_production_mode():
         # If there exist files in iml_profiler/cpp/**/*
         # assume that we wish to package these into the wheel.
         cpp_files = glob(_j(ROOT, 'iml_profiler', 'cpp', '**', '*'))
 
         # Keep all iml_profiler/cpp/**/* files regardless of extension.
-        cpp_ext = get_files_by_ext('iml_profiler/cpp')
+        cpp_ext = get_files_by_ext('iml_profiler/cpp', rm_prefix='iml_profiler')
         logger.debug("cpp_ext = \n{msg}".format(
             msg=pprint_msg(cpp_ext),
         ))
@@ -357,22 +334,17 @@ def main():
         for ext, paths in cpp_ext.items():
             package_data['iml_profiler'].extend(paths)
 
-        # package_data['iml_profiler'].append(
-        #     _j('cpp', '**', '*'),
-        # )
-        # logger.debug("cpp_files = \n{msg}".format(
-        #     msg=pprint_msg(cpp_files),
-        # ))
-
     logger.debug("package_data = \n{msg}".format(
         msg=pprint_msg(package_data),
     ))
 
     console_scripts = []
     console_scripts.extend(CONSOLE_SCRIPTS)
-    if args.setup_cmd != 'develop':
+    if is_production_mode():
         console_scripts.extend(CPP_WRAPPER_SCRIPTS)
-        console_scripts.extend(PRODUCTION_DUMMY_SCRIPTS)
+        console_scripts.extend(PRODUCTION_SCRIPTS)
+    # else:
+    #     console_scripts.extend(DEVELOPMENT_SCRIPTS)
 
     setup(
         name=project_name,
@@ -388,7 +360,7 @@ def main():
         entry_points={
             'console_scripts': console_scripts,
         },
-        install_requires=REQUIRED_PACKAGES + TEST_PACKAGES,
+        install_requires=REQUIRED_PACKAGES,
         # tests_require=REQUIRED_PACKAGES + TEST_PACKAGES,
         # # https://setuptools.readthedocs.io/en/latest/setuptools.html#declaring-extras-optional-features-with-their-own-dependencies
         # # These requirements are only installed if these features are enabled when installing the pip package.

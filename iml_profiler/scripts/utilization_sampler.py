@@ -16,9 +16,6 @@ from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 
 from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, basename as _b
 
-# import GPUtil
-
-# For some reason GPUtil contains nothing if I do this...
 from iml_profiler.profiler import nvidia_gpu_query
 
 from iml_profiler import py_config
@@ -508,10 +505,6 @@ def sample_gpu_utilization(machine_gpu_info, pid, debug=False):
     """
     Report a single [0..1] value representing current GPU utilization.
     Report a separate value for EACH GPU in the system.
-
-    We use GPUtil for querying nvidia GPU utilization.
-    The module looks kinda meh, but it does the job of
-    parsing nvidia-smi on both Windows/Linux for us.
     """
     gpus = machine_gpu_info.gpus()
     epoch_time_usec = iml_timer.now_us()

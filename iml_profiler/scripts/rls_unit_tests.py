@@ -6,11 +6,14 @@ import subprocess
 import sys
 import textwrap
 import os
+import contextlib
 
 from os.path import join as _j, abspath as _a, exists as _e, dirname as _d, basename as _b
 
 from iml_profiler.profiler.iml_logging import logger
 from iml_profiler.profiler.util import print_cmd
+
+from iml_profiler import py_config
 
 def main():
     parser = argparse.ArgumentParser(
@@ -47,14 +50,16 @@ class RLSUnitTests:
         # TODO: run pytest with appropriate cmdline options.
         # Q: record output?
         args = self.args
-        cmd = ['pytest']
-        if args.debug:
-            cmd.append(['--pdb', '-s'])
-        print_cmd(cmd)
-        proc = subprocess.run(cmd)
-        if proc.returncode != 0:
-            logger.error("RL-Scope python unit tests failed")
-            sys.exit(proc.returncode)
+        with with_chdir(py_config.INSTALL_ROOT):
+            cmd = ['pytest']
+            if args.debug:
+                cmd.append(['--pdb', '-s'])
+            print_cmd(cmd)
+            proc = subprocess.run(cmd)
+            if proc.returncode != 0:
+                logger.error("RL-Scope python unit tests failed")
+                sys.exit(proc.returncode)
+        logger.info("RL-Scope python unit tests PASSED")
 
     def run_cpp(self):
         args = self.args
@@ -66,6 +71,7 @@ class RLSUnitTests:
         if proc.returncode != 0:
             logger.error("RL-Scope C++ unit tests failed")
             sys.exit(proc.returncode)
+        logger.info("RL-Scope C++ unit tests PASSED")
 
     def run(self):
         args = self.args
@@ -76,6 +82,14 @@ class RLSUnitTests:
         if args.tests in ['cpp', 'all']:
             self.run_cpp()
 
+@contextlib.contextmanager
+def with_chdir(directory):
+    cur_directory = os.getcwd()
+    try:
+        os.chdir(directory)
+        yield
+    finally:
+        os.chdir(cur_directory)
 
 if __name__ == '__main__':
     main()

@@ -41,8 +41,6 @@ def cleanup_profiler_excepthook(exctype, value, traceback):
     return ORIG_EXCEPT_HOOK(exctype, value, traceback)
 
 
-from tensorflow.python.framework import c_api_util
-
 from iml_profiler.profiler import unit_test_util
 from iml_profiler.profiler.util import print_cmd
 

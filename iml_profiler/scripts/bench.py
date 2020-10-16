@@ -19,6 +19,7 @@ import pprint
 import textwrap
 import multiprocessing
 import importlib
+# $ pip install 'gym >= 0.13.0'
 import gym
 # TODO: remove hard dependency on pybullet_envs;
 # i.e. we need it for:
@@ -1448,7 +1449,7 @@ class GatherAlgoEnv:
         return False
 
     def _is_env_dir(self, path):
-        return os.path.isdir(path) and re.search('Env|-v\d+$', path)
+        return os.path.isdir(path) and re.search(r'Env|-v\d+$', path)
 
     def _is_algo_dir(self, path):
         return os.path.isdir(path)

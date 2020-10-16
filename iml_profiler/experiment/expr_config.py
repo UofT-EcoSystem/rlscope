@@ -1,6 +1,7 @@
 # Query available experiments to run
 # i.e. available (algo, env) combinatinos for stable-baselines
 import traceback
+# $ pip install 'gym >= 0.13.0'
 import gym
 import re
 from iml_profiler.profiler.iml_logging import logger
