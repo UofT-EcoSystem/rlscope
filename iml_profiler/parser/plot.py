@@ -408,7 +408,7 @@ class PlotSummary(ProfilerParserCommonMixin):
         return subtitle
 
     def is_time_sec_field(self, field):
-        return re.search('TimeSec$', field)
+        return re.search(r'TimeSec$', field)
 
 
     def _get_min_length(self, fields, device):

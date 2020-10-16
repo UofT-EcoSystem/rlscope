@@ -31,6 +31,8 @@ from iml_profiler.parser.dataframe import UtilDataframeReader, IMLConfig
 from iml_profiler import py_config
 from iml_profiler.parser.common import *
 from iml_profiler.parser import constants
+from iml_profiler.py_config import yes_as_bool
+
 from typing import *
 
 class IMLInvaidArgument(Exception):
@@ -88,11 +90,6 @@ def parse_filename_attrs(
             """)
         attr_vals[m.group('attr_name')] = m.group('attr_value')
     return attr_vals
-
-def yes_as_bool(yes_or_no):
-    if yes_or_no.lower() in {'yes', 'y', 'on', '1'}:
-        return True
-    return False
 
 def parse_path_attrs(
     path : str,

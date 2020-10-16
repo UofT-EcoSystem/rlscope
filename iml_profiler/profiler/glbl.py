@@ -15,7 +15,6 @@ from iml_profiler.clib import rlscope_api
 
 from iml_profiler.parser.common import *
 
-import tensorflow as tf
 
 from os.path import join as _j, abspath as _a, exists as _e, dirname as _d, basename as _b
 
@@ -40,6 +39,8 @@ def init_profiler(*args, **kwargs):
 def init_session(**kwargs):
     global session
     assert session is None
+
+    import tensorflow as tf
 
     if 'config' not in kwargs:
         config = tf.ConfigProto()

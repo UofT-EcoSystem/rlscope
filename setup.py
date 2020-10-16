@@ -254,9 +254,12 @@ def main():
     #
     # Parse command line arguments.
     #
-    parser = argparse.ArgumentParser("Install RL-Scope python module")
-    parser.add_argument('setup_cmd', help="setup.py command (e.g., develop, install, bdist_wheel, etc.)")
+    parser = argparse.ArgumentParser("Install RL-Scope python module", add_help=False)
+    parser.add_argument('setup_cmd', nargs='?', default=None, help="setup.py command (e.g., develop, install, bdist_wheel, etc.)")
     parser.add_argument('--debug', action='store_true')
+    parser.add_argument('--help', '-h', action='store_true')
+    parser.add_argument('--debug-skip-cpp', action='store_true',
+                        help="(Internal debugging) Don't include librlscope.so")
     args, extra_argv = parser.parse_known_args()
 
     def is_development_mode():
@@ -269,13 +272,20 @@ def main():
     # e.g.,
     # ['setup.py', 'bdist_wheel', '--debug'] =>
     # ['setup.py', 'bdist_wheel']
-    setup_argv = [sys.argv[0], args.setup_cmd] + extra_argv
+    setup_argv = [sys.argv[0]]
+    if args.setup_cmd is not None:
+        setup_argv.append(args.setup_cmd)
+    if args.help:
+        setup_argv.append('--help')
+    setup_argv.extend(extra_argv)
     sys.argv = setup_argv
 
     if args.debug:
         iml_logging.enable_debug_logging()
     else:
         iml_logging.disable_debug_logging()
+
+    logger.debug("setup_argv = {argv}".format(argv=sys.argv))
 
     logger.debug("> Using protoc = {protoc}".format(protoc=protoc))
     logger.debug(pprint.pformat({
@@ -288,9 +298,10 @@ def main():
 
     def _proto(base):
         return _j(PROTOBUF_DIR, base)
-    generate_proto(_proto('pyprof.proto'), regenerate=True)
-    generate_proto(_proto('unit_test.proto'), regenerate=True)
-    generate_proto(_proto('iml_prof.proto'), regenerate=True)
+    if args.setup_cmd is not None:
+        generate_proto(_proto('pyprof.proto'), regenerate=True)
+        generate_proto(_proto('unit_test.proto'), regenerate=True)
+        generate_proto(_proto('iml_prof.proto'), regenerate=True)
 
     iml_profiler_ext = get_files_by_ext('iml_profiler', rm_prefix='iml_profiler')
 
@@ -305,11 +316,11 @@ def main():
             # which we do using each_file_recursive(...).
         ],
     }
-    keep_ext = {'ini', 'py', 'proto'}
+    keep_ext = {'cfg', 'ini', 'py', 'proto'}
     for ext in set(iml_profiler_ext.keys()).intersection(keep_ext):
         package_data['iml_profiler'].extend(iml_profiler_ext[ext])
 
-    if is_production_mode():
+    if is_production_mode() and not args.debug_skip_cpp:
         # If there exist files in iml_profiler/cpp/**/*
         # assume that we wish to package these into the wheel.
         cpp_files = glob(_j(ROOT, 'iml_profiler', 'cpp', '**', '*'))
@@ -346,6 +357,9 @@ def main():
     # else:
     #     console_scripts.extend(DEVELOPMENT_SCRIPTS)
 
+    if args.help:
+        # Print both argparse usage AND setuptools setup.py usage info.
+        parser.print_help()
     setup(
         name=project_name,
         version=_VERSION.replace('-', ''),

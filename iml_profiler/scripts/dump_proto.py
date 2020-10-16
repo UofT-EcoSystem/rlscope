@@ -9,7 +9,10 @@ from iml_profiler.protobuf.pyprof_pb2 import CategoryEventsProto, ProcessMetadat
 from iml_profiler.protobuf.iml_prof_pb2 import CUDAAPIPhaseStatsProto, MachineDevsEventsProto, OpStackProto
 # from iml_profiler.protobuf.iml_prof_pb2 import CUDAAPIPhaseStatsProto, MachineDevsEventsProto, OpStackProto
 # src/libs/range_sampling/range_sampling.proto
-from range_sampling.range_sampling_pb2 import GPUHwCounterSampleProto
+try:
+    from range_sampling.range_sampling_pb2 import GPUHwCounterSampleProto
+except ImportError:
+    GPUHwCounterSampleProto = None
 
 from iml_profiler.protobuf.unit_test_pb2 import \
     IMLUnitTestOnce, \
@@ -101,7 +104,7 @@ def main():
         do_dump(args.proto, MachineDevsEventsProto)
     elif is_op_stack_file(args.proto):
         do_dump(args.proto, OpStackProto)
-    elif is_gpu_hw_file(args.proto):
+    elif GPUHwCounterSampleProto is not None and is_gpu_hw_file(args.proto):
         do_dump(args.proto, GPUHwCounterSampleProto)
     elif is_pyprof_call_times_file(args.proto):
         call_times_data = read_pyprof_call_times_file(args.proto)

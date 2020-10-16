@@ -305,7 +305,7 @@ def _parse_entity(cmd_opts, csv_fields, post_process_entity=None, debug=False):
     lines = run_cmd(cmd)
     entities = []
     for line in lines:
-        if re.search('^\s*$', line):
+        if re.search(r'^\s*$', line):
             continue
         fields = line.split(', ')
         if len(fields) != len(csv_fields):

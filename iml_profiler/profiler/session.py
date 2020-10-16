@@ -6,7 +6,7 @@ These are the sessions we need to check for trace-data during the DUMP phase of 
 See SessionWrapper for details.
 """
 from iml_profiler.profiler.iml_logging import logger
-import tensorflow as tf
+# NOTE: avoid importing tensorflow at top-level for pytest test discovery.
 import threading
 import pprint
 
@@ -34,12 +34,13 @@ def setup():
 
     SETUP_DONE = True
 
-from tensorflow.python.client.session import BaseSession
 _original_BaseSession_init = None
 def setup_wrap_BaseSession():
     global _original_BaseSession_init
     global _original_BaseSession_close
     global _original_BaseSession_run
+
+    from tensorflow.python.client.session import BaseSession
 
     _original_BaseSession_init = BaseSession.__init__
     _original_BaseSession_close = BaseSession.close
@@ -54,6 +55,8 @@ orig_tf_numpy_function = None
 def setup_wrap_tf_py_function():
     global orig_tf_py_function
     global orig_tf_numpy_function
+
+    import tensorflow as tf
 
     orig_tf_py_function = tf.py_function
     orig_tf_numpy_function = tf.numpy_function
@@ -208,6 +211,8 @@ def _wrapped_BaseSession_init(self, *args, **kwargs):
     # logger.info("> Wrapped: {name}".format(
     #     name=_wrapped_BaseSession_init.__name__,
     # ))
+    import tensorflow as tf
+
     self.session_id = _get_next_session_id()
     _before_active_hooks(session=self)
     _make_active(session=self)

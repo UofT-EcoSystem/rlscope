@@ -7,6 +7,7 @@ import sys
 import os
 import textwrap
 
+from iml_profiler.profiler.iml_logging import logger
 import iml_profiler
 
 INSTALL_ROOT = _d(os.path.realpath(iml_profiler.__file__))
@@ -233,3 +234,25 @@ def is_development_mode():
 
 def is_production_mode():
   return shutil.which('rlscope-pip-installed') is not None
+
+def yes_as_bool(yes_or_no):
+  if yes_or_no.lower() in {'yes', 'y', 'on', '1'}:
+    return True
+  return False
+
+def is_running_unit_tests():
+  return yes_as_bool(os.environ.get('RLS_RUNNING_UNIT_TESTS', 'no'))
+
+if 'pytest' in sys.modules and 'RLS_RUNNING_UNIT_TESTS' not in os.environ:
+  # Prevent users from running with "pytest" so we can detect in-code if we're running with pytest.
+  # Useful for avoiding loading modules where optional imports may be used (e.g., "import tensorflow").
+  logger.error(textwrap.dedent("""\
+  Don't run \"pytest\" directly; instead:
+  
+    # Run Python unit tests using pytest:
+    $ rls-unit-tests --tests py
+    
+    # Or, run Python and C++ unit tests:
+    $ rls-unit-tests
+  """))
+  sys.exit(1)

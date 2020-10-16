@@ -1169,11 +1169,11 @@ def kwargs_from_task(task):
     for key, value in task.__dict__.items():
         name = key
 
-        m = re.search('^_', key)
+        m = re.search(r'^_', key)
         if m:
             continue
 
-        m = re.search('^postgres_(?P<name>.*)', key)
+        m = re.search(r'^postgres_(?P<name>.*)', key)
         if m:
             name = m.group('name')
 

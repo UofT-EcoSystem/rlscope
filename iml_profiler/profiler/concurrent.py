@@ -4,7 +4,6 @@ from progressbar import progressbar
 import shutil
 import traceback
 import re
-import pytest
 import sys
 import time
 import multiprocessing
@@ -313,6 +312,7 @@ class TestForkedProcessPool:
         :return:
         """
         pool = ForkedProcessPool(name=self.test_01_sys_exit_1.__name__)
+        import pytest
         with pytest.raises(FailedProcessException, match=ForkedProcessPool.NONZERO_EXIT_STATUS_ERROR_REGEX) as exec_info:
             pool.submit(_sys_exit_1.__name__, _sys_exit_1)
             pool.shutdown()
@@ -324,6 +324,7 @@ class TestForkedProcessPool:
         :return:
         """
         pool = ForkedProcessPool(name=self.test_02_exception.__name__)
+        import pytest
         with pytest.raises(MadeupForkedProcessException, match="Child process exception") as exec_info:
             pool.submit(_exception.__name__, _exception)
             pool.shutdown()

@@ -21,30 +21,6 @@ import multiprocessing
 import importlib
 # $ pip install 'gym >= 0.13.0'
 import gym
-# TODO: remove hard dependency on pybullet_envs;
-# i.e. we need it for:
-#   $ iml-bench stable-baselines --mode [run|all]
-# but we don't need pybullet for:
-#   $ iml-bench stable-baselines --mode plot
-# (assuming all the data is there...)
-try:
-    import pybullet_envs
-except ImportError:
-    print(textwrap.dedent("""\
-    ERROR: You need to use pip to install pybullet to run iml-bench:
-    $ pip install pybullet==2.5.1
-    """.rstrip()))
-    sys.exit(1)
-    pybullet_envs = None
-
-try:
-    import atari_py
-except ImportError:
-    print(textwrap.dedent("""\
-    ERROR: You need to use pip to install atari-py to run iml-bench:
-    $ pip install git+https://github.com/openai/atari-py.git@0.2.0
-    """.rstrip()))
-    sys.exit(1)
 
 from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, basename as _b
 
@@ -141,6 +117,31 @@ def add_stable_baselines_options(pars):
         help='Limit environments to LunarLander environments (i.e. LunarLanderContinuous-v2, LunarLander-v2)')
 
 def main():
+    # TODO: remove hard dependency on pybullet_envs;
+    # i.e. we need it for:
+    #   $ iml-bench stable-baselines --mode [run|all]
+    # but we don't need pybullet for:
+    #   $ iml-bench stable-baselines --mode plot
+    # (assuming all the data is there...)
+    try:
+        import pybullet_envs
+    except ImportError:
+        print(textwrap.dedent("""\
+        ERROR: You need to use pip to install pybullet to run iml-bench:
+        $ pip install pybullet==2.5.1
+        """.rstrip()))
+        pybullet_envs = None
+        sys.exit(1)
+
+    try:
+        import atari_py
+    except ImportError:
+        print(textwrap.dedent("""\
+        ERROR: You need to use pip to install atari-py to run iml-bench:
+        $ pip install git+https://github.com/openai/atari-py.git@0.2.0
+        """.rstrip()))
+        sys.exit(1)
+
     parser = argparse.ArgumentParser(
         textwrap.dedent("""\
         Run a bunch of experiments for a paper.
@@ -590,7 +591,7 @@ class ExperimentGroup(Experiment):
             overlap_type = 'CategoryOverlap'
             # NOTE: gather across ALL ppo directories, including environment we cannot run like AirLearning.
             algo_env_pairs = gather.pairs_by_algo('ppo2')
-            # algo_env_pairs = [(algo, env) for algo, env in algo_env_pairs if re.search('AirLearning', env)]
+            # algo_env_pairs = [(algo, env) for algo, env in algo_env_pairs if re.search(r'AirLearning', env)]
             self.stacked_plot([
                 '--overlap-type', overlap_type,
 
@@ -1436,7 +1437,7 @@ class GatherAlgoEnv:
     def should_skip_env(self, env):
         # For some reason, the simulation time for Humanoid is huge when trained with sac.
         # Until we figure out WHY, let's just leave it out of all the plots.
-        # return re.search('Humanoid', env)
+        # return re.search(r'Humanoid', env)
         return False
 
     def should_skip_algo_env(self, algo, env):
@@ -1445,7 +1446,7 @@ class GatherAlgoEnv:
     def should_skip_algo(self, algo):
         # For some reason, AirLearningEnv is missing annotations from the sac algorthim.
         # I suspect sac is the "cuplrit" for various issues.
-        # return re.search('sac', algo)
+        # return re.search(r'sac', algo)
         return False
 
     def _is_env_dir(self, path):

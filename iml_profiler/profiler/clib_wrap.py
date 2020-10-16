@@ -645,8 +645,10 @@ def _unwrap_bullet_clients():
 class MyBulletClient(object):
     """A wrapper for pybullet to manage different clients."""
 
-    def __init__(self, connection_mode=pybullet.DIRECT, options=""):
+    def __init__(self, connection_mode=None, options=""):
         """Create a simulation and connect to it."""
+        if connection_mode is None:
+            connection_mode = pybullet.DIRECT
         self._client = pybullet.connect(pybullet.SHARED_MEMORY)
         if (self._client < 0):
             # print("options=", options)

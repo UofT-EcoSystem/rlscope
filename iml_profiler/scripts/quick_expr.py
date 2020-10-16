@@ -751,10 +751,10 @@ class ExprMicrobenchmark:
         return "{task}.logfile.out".format(task=task)
 
     def is_interception_config(self, config):
-        return re.search('interception', config)
+        return re.search(r'interception', config)
 
     def is_annotation_config(self, config):
-        return re.search('annotation', config)
+        return re.search(r'annotation', config)
 
     def microbench_add_per_call_us(self, algo, env, mode, config):
         assert config != 'uninstrumented'

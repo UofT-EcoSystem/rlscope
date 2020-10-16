@@ -705,7 +705,12 @@ setup_pip_package() {
     _do tar xf $cpp_pkg -C $ROOT/iml_profiler/cpp --strip-components=1
   fi
 
-  _do python setup.py bdist_wheel
+  # NOTE: I include "clean --all" since I've seen weird behaviour from setup.py where
+  # if try to remove files from the wheel (e.g., with --debug-skip-cpp), they still get added.
+  #
+  # This has been observed elsewhere also...
+  # https://github.com/pypa/wheel/issues/147
+  _do python setup.py clean --all bdist_wheel
 }
 
 _setup_project() {

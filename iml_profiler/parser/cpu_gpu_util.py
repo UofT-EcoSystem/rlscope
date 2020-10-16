@@ -407,10 +407,10 @@ class NvprofCSVParser:
             num_other_lines = 0
             for lineno, line in enumerate(f):
                 line = line.rstrip()
-                m = re.search('^=+\s+(?P<msg>.*)', line)
+                m = re.search(r'^=+\s+(?P<msg>.*)', line)
                 if m:
                     msg = m.group('msg')
-                    if re.search('Warning', msg, flags=re.IGNORECASE):
+                    if re.search(r'Warning', msg, flags=re.IGNORECASE):
                         logger.warning("Saw WARNING in {path} at line {lineno}:\n{warning}".format(
                             path=self.csv_file,
                             lineno=lineno,
@@ -711,21 +711,21 @@ class NvprofKernelHistogram:
 
 
     def plot_binned_gpu_kernels(self, binned_df, suffix, fmt=NVPROF_HIST_DEFAULT_FMT):
-        xlabel = "Kernel duration ($\mu s$)"
+        xlabel = r"Kernel duration ($\mu s$)"
         self.plot_binned_df(binned_df, y='total_sec', xlabel=xlabel, ylabel="Total GPU time (sec)", img_path=self.get_img_path(suffix, "total_sec"), fmt=fmt)
         self.plot_binned_df(binned_df, y='percent_time', xlabel=xlabel, ylabel="Percent total GPU time (%)", img_path=self.get_img_path(suffix, "percent_time"), fmt=fmt)
         self.plot_binned_df(binned_df, y='total_invocations', xlabel=xlabel, ylabel="Kernel invocations", img_path=self.get_img_path(suffix, "total_invocations"), fmt=nvprof_fmt_int)
         self.plot_binned_df(binned_df, y='percent_invocations', xlabel=xlabel, ylabel="Percent total kernel invocations (%)", img_path=self.get_img_path(suffix, "percent_invocations"), fmt=fmt)
 
     def plot_binned_cudaLaunchKernel(self, binned_df, suffix, fmt=NVPROF_HIST_DEFAULT_FMT):
-        xlabel = "Duration of cudaLaunchKernel calls ($\mu s$)"
+        xlabel = r"Duration of cudaLaunchKernel calls ($\mu s$)"
         self.plot_binned_df(binned_df, y='total_sec', xlabel=xlabel, ylabel="Total GPU time (sec)", img_path=self.get_img_path(suffix, "total_sec"), fmt=fmt)
         self.plot_binned_df(binned_df, y='percent_time', xlabel=xlabel, ylabel="Percent total GPU time (%)", img_path=self.get_img_path(suffix, "percent_time"), fmt=fmt)
         self.plot_binned_df(binned_df, y='total_invocations', xlabel=xlabel, ylabel="Kernel invocations", img_path=self.get_img_path(suffix, "total_invocations"), fmt=nvprof_fmt_int)
         self.plot_binned_df(binned_df, y='percent_invocations', xlabel=xlabel, ylabel="Percent total kernel invocations (%)", img_path=self.get_img_path(suffix, "percent_invocations"), fmt=fmt)
 
     def plot_binned_delay(self, binned_df, suffix, fmt=NVPROF_HIST_DEFAULT_FMT):
-        xlabel = "Delay between cudaLaunchKernel calls ($\mu s$)"
+        xlabel = r"Delay between cudaLaunchKernel calls ($\mu s$)"
         self.plot_binned_df(binned_df, y='total_sec', xlabel=xlabel, ylabel="Total CUDA API time (sec)", img_path=self.get_img_path(suffix, "total_sec"), fmt=fmt)
         self.plot_binned_df(binned_df, y='percent_time', xlabel=xlabel, ylabel="Percent total CUDA API time (%)", img_path=self.get_img_path(suffix, "percent_time"), fmt=fmt)
         self.plot_binned_df(binned_df, y='total_invocations', xlabel=xlabel, ylabel="cudaLaunchKernel invocations", img_path=self.get_img_path(suffix, "total_invocations"), fmt=nvprof_fmt_int)

@@ -26,6 +26,11 @@ def main():
                         help=textwrap.dedent("""
                         Debug unit tests.
                         """))
+    parser.add_argument("--Werror",
+                        action='store_true',
+                        help=textwrap.dedent("""
+                        Treat warnings as errors (pytest)
+                        """))
     parser.add_argument("--tests",
                         choices=['py', 'cpp', 'all'],
                         default='all',
@@ -51,9 +56,19 @@ class RLSUnitTests:
         # Q: record output?
         args = self.args
         with with_chdir(py_config.INSTALL_ROOT):
-            cmd = ['pytest']
+
+            # 'python'
+            cmd = [sys.executable]
+            if args.Werror:
+                cmd.append('-Werror')
+            # '-Wignore:::_pytest.assertion.rewrite' Suppresses deprecation warnings
+            # in pytest (up to at least version 6.1.1)
+            #
+            # https://github.com/pytest-dev/pytest/issues/1403#issuecomment-443533232
+            cmd.extend(['-Wignore:::_pytest.assertion.rewrite', '-m', 'pytest'])
             if args.debug:
                 cmd.append(['--pdb', '-s'])
+
             print_cmd(cmd)
             proc = subprocess.run(cmd)
             if proc.returncode != 0:
@@ -75,6 +90,8 @@ class RLSUnitTests:
 
     def run(self):
         args = self.args
+
+        os.environ['RLS_RUNNING_UNIT_TESTS'] = 'yes'
 
         if args.tests in ['py', 'all']:
             self.run_py()

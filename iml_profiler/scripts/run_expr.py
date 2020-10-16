@@ -158,7 +158,7 @@ class RunExpr:
         with open(self.sh, 'r') as f:
             for line in f:
                 line = line.rstrip()
-                if re.search('^\s*$', line):
+                if re.search(r'^\s*$', line):
                     # Skip empty lines.
                     continue
                 # Remove comments

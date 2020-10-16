@@ -261,7 +261,7 @@ def maybe_indent(txt, indents):
     indent = get_indent(indents)
     txt = textwrap.indent(txt, prefix=indent)
     # DON'T indent the first line (typically manually indented in code.
-    txt = re.sub('^\s*', '', txt, count=1)
+    txt = re.sub(r'^\s*', '', txt, count=1)
     return txt
 
 def txt_indent(txt, indent : typing.Optional[int]):
@@ -1375,7 +1375,7 @@ class MissingInputFiles(ParserException):
     pass
 
 def IsGPUTime(device):
-    return re.search('stream:all', device)
+    return re.search(r'stream:all', device)
 
 def IsCPUTime(device):
     # NOTE: do NOT use re.search or re.match here!

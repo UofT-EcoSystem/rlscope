@@ -142,8 +142,8 @@ class CUDAProfileParser(ProfilerParser):
         return as_value(x)
 
     def parse_other(self, line, it):
-        self.no_cuda_calls_expected |= bool(re.search("|".join([r'^==.*== Generated result file',
-                                                                r'No kernels were profiled']),
+        self.no_cuda_calls_expected |= bool(re.search(r"|".join([r'^==.*== Generated result file',
+                                                                 r'No kernels were profiled']),
                                                       line))
         self.has_error |= bool(re.search(r'^=+\s*Error:.*Application', line))
         return False

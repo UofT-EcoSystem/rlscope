@@ -4534,7 +4534,7 @@ class FrameworkChoiceMetric:
 
     def _join(self, components):
         def _camel(x):
-            if re.search('^[a-z]', x):
+            if re.search(r'^[a-z]', x):
                 return x.capitalize()
             # If it doesn't start with a lower-case letter, assume it's already camel-case friendly.
             return x
@@ -5289,7 +5289,7 @@ class TexMetrics:
         df_filter = df_filter[df_filter['operation'].apply(is_op)]
 
         # def is_category(category):
-        #     return bool(re.search('framework', category.lower()))
+        #     return bool(re.search(r'framework', category.lower()))
         # df_filter = df_filter[df_filter['category'].apply(is_category)]
         df_filter = df_filter[df_filter.apply(self._config_category_framework, axis=1)]
 
@@ -5344,7 +5344,7 @@ class TexMetrics:
         df_filter = df_filter[df_filter['operation'].apply(is_op)]
 
         def is_category(category):
-            return bool(re.search('python', category.lower()))
+            return bool(re.search(r'python', category.lower()))
         df_filter = df_filter[df_filter['category'].apply(is_category)]
 
         def get_alias(prefix):
