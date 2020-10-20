@@ -26,6 +26,7 @@ ssh_config*
 /local/
 /local*
 /build/
+/build.docs/
 /local.host/
 /local.docker/
 /build.host/
@@ -50,3 +51,12 @@ ssh_config*
 /iml_profiler/protobuf/pyprof_pb2.py
 /iml_profiler/protobuf/unit_test_pb2.py
 /iml_profiler.egg-info
+
+# Protobuf
+*_pb2.py
+# Python wheel
+*.whl
+*.so
+
+# Don't accidentally commmit C++ shared libraries / binaries / headers
+/rlscope/cpp/**/*

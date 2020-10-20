@@ -52,3 +52,8 @@ colorlog>=4.2.1
 
 # Unit tests:
 pytest >= 4.4.1
+
+# TODO: Make this a optional component during installation
+# Documentation:
+sphinx >= 3.2.1
+sphinx-rtd-theme >= 0.5.0
