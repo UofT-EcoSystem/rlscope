@@ -1,3 +1,7 @@
+"""Testing module docstring.
+
+Longer description.
+"""
 from rlscope.profiler.rlscope_logging import logger
 import contextlib
 import sys
