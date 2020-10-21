@@ -4,7 +4,6 @@ import textwrap
 import sys
 import csv
 
-# from tensorflow.core.profiler.tfprof_log_pb2 import ProfileProto
 from rlscope.protobuf.pyprof_pb2 import CategoryEventsProto, ProcessMetadata, IncrementalTrainingProgress
 from rlscope.protobuf.rlscope_prof_pb2 import CUDAAPIPhaseStatsProto, MachineDevsEventsProto, OpStackProto
 # from rlscope.protobuf.rlscope_prof_pb2 import CUDAAPIPhaseStatsProto, MachineDevsEventsProto, OpStackProto

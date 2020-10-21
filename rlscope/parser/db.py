@@ -528,14 +528,6 @@ class SQLParser:
             pool.close()
             pool.join()
 
-        # for path in src_files:
-        #     if is_tfprof_file(path):
-        #         self.insert_tfprof_file(path)
-        #     elif is_pyprof_file(path) or is_dump_event_file(path):
-        #         self.insert_pyprof_file(path)
-        #     else:
-        #         raise NotImplementedError
-
         # Create indices at the end to reduce per-insert overhead.
         self.create_indices()
         self.create_constraints()
@@ -1171,9 +1163,7 @@ class TraceFileInserter:
             self.insert_file(self.path)
 
     def insert_file(self, path):
-        if is_tfprof_file(path):
-            self.insert_tfprof_file(path)
-        elif is_category_events_file(path):
+        if is_category_events_file(path):
             self.insert_category_events_file(path)
         elif is_training_progress_file(path):
             self.insert_training_progress_file(path)
@@ -1232,21 +1222,6 @@ class TraceFileInserter:
 
         for i, event in enumerate(reader.all_events(debug=True)):
             device, category, start_time_us, duration_us, name = event
-            device_id = self.lookup_device_id(path, device)
-            self.csv_inserter.insert_event(
-                device_id, process_id, phase_id,
-                category, start_time_us, duration_us, name)
-
-    def insert_tfprof_file(self, path):
-        reader = TFProfCategoryTimesReader(path)
-
-        logger.info("> Insert tfprof file: {p}".format(p=path))
-
-        process_id = self.csv_inserter.process_to_id[reader.process_name]
-        phase_id = self.csv_inserter.phase_to_id[reader.phase_name]
-
-        for i, (device, event) in enumerate(reader.all_events(debug=True)):
-            category, start_time_us, duration_us, name = event
             device_id = self.lookup_device_id(path, device)
             self.csv_inserter.insert_event(
                 device_id, process_id, phase_id,
@@ -5448,15 +5423,7 @@ def get_process_trace_metadata(path):
     # /mnt/data/james/clone/dnn_tensorflow_cpp/checkpoints/minigo/vector_multiple_workers_k4000/process/loop_train_eval/phase/sgd_updates/profile.trace_2.session_1.proto
     # NOTE: we need to fix large file handling (more frequent dumps!).
 
-    if is_tfprof_file(path):
-        proto = read_tfprof_file(path)
-        meta = {
-            'process_name':proto.process_name,
-            'phase_name':proto.phase,
-            'machine_name':proto.machine_name,
-        }
-        return meta
-    elif is_pyprof_file(path) or is_dump_event_file(path):
+    if is_pyprof_file(path) or is_dump_event_file(path):
         proto = read_pyprof_file(path)
         meta = {
             'process_name':proto.process_name,
@@ -5855,6 +5822,9 @@ def test_merge_sorted():
 from rlscope.test import test_util
 # import sec, T, U
 class TestProcessOpNest:
+    """
+    Test event overlap.
+    """
 
     def T(self, start_sec, end_sec, name=None, **kwargs):
         return test_util.T(start_sec, end_sec, name, process_name="process", **kwargs)

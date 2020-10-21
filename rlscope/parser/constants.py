@@ -1,3 +1,33 @@
+"""
+Constants used in collected trace files.
+
+WARNING: if you change the values of these (e.g., CATEGORY_*),
+future analysis and plot generation will fail...so don't do that!
+
+Attributes
+----------
+CATEGORY_PYTHON : str
+  Python time.
+CATEGORY_CUDA_API_CPU  : str
+  CUDA API time.
+CATEGORY_GPU  : str
+  GPU kernel and memcpy time.
+CATEGORY_SIMULATOR_CPP : str
+  Simulator native library time.
+CATEGORY_TF_API : str
+  DL backend native library time.
+CATEGORY_OPERATION : str
+  User annotation (i.e., :py:func:`rlscope.api.Profiler.operation`)
+CATEGORY_PROF_CUPTI : str
+  Profiling overhead: closed-source inflation within CUDA API calls
+  (e.g., ``cudaLaunchKernel``, ``cudaMemcpyAsync``) when CUPTI is enabled
+CATEGORY_PROF_LD_PRELOAD : str
+  Profiling overhead: overhead from intercepting CUDA API using CUPTI library.
+CATEGORY_PROF_PYTHON_ANNOTATION : str
+  Profiling overhead: overhead from user-level annotations.
+CATEGORY_PROF_PYTHON_INTERCEPTION : str
+  Profiling overhead: overhead from intercepting Python :math:`\leftrightarrow` C library calls.
+"""
 USEC_IN_SEC = 1e6
 PSEC_IN_USEC = 1e3
 

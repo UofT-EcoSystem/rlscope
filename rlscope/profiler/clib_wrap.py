@@ -1,6 +1,10 @@
-"""Testing module docstring.
+"""
+Functions for wrapping native libraries we call from Python
+(e.g., DL backends like TensorFlow, simulators like pybullet).
 
-Longer description.
+We transparently intercept Python :math:`\leftrightarrow` C calls/returns
+so that we can start/end timestamps of when we are in Python,
+and when we are in a C library.
 """
 from rlscope.profiler.rlscope_logging import logger
 import contextlib
@@ -137,6 +141,18 @@ class _ProfilingOverheadTracker:
 ProfilingOverheadTracker = _ProfilingOverheadTracker()
 
 class CFuncWrapper:
+    """
+    Wrapper around a native library function.
+
+    Attributes
+    ----------
+    func
+        Original function object from native library object.
+
+    category
+        | What type of native library this is
+        | e.g. :const:`rlscope.parser.constants.CATEGORY_TF_API` for DL backends.
+    """
     def __init__(self, func, category, prefix=DEFAULT_PREFIX, debug=False):
         # NOTE: to be as compatible as possible with intercepting existing code,
         # we forward setattr/getattr on this object back to the func we are wrapping
@@ -200,80 +216,6 @@ class CFuncWrapper:
         with CallStack.frame(category=self.category, name=name):
             ret = self.call(*args, **kwargs)
             return ret
-
-    # def old_pyprof_call(self, *args, **kwargs):
-    #     global _pyprof_trace, _python_start_us, _step, _TRACING_ON
-    #
-    #     start_us = now_us()
-    #     ret = self.call(*args, **kwargs)
-    #     end_us = now_us()
-    #     start_profiling_overhead_us, duration_profiling_overhead_us = ProfilingOverheadTracker.get_overhead_us()
-    #     ProfilingOverheadTracker.start(start_t=end_us)
-    #
-    #     # NOTE: profiling overhead.
-    #     # Doing "extra stuff" in function-call wrappers for TensorFlow C++ API / Simulators is causing huge overheads
-    #     # during pyprof tracing.
-    #     # Even if the record_event() callbacks are just no-op function calls, we still experience the large overheads!
-    #     if _PYROF_TRACE_FULLY_ENABLED and _TRACING_ON:
-    #         name = self.func.__name__
-    #
-    #         # We are about to call from python into a C++ API.
-    #         # That means we stopping executing python while C++ runs.
-    #         # So, we must add a python execution and C++ execution event.
-    #         #
-    #         # [ last C++ call ][ python call ][ C++ call ]
-    #         #                 |               |          |
-    #         #         _python_start_us     start_us   end_us
-    #         #
-    #         # BUG: this FAILS when using tf.py_function.
-    #         # That's because C++ calls BACK into Python, whereas we assumed it's always [ Python -> C++ ]
-    #         # Effectively what happens is (NOTE the "!" lines are the unexpected parts of the execution):
-    #         # Calls Python: collect_driver.run() ->
-    #         # Calls C++: TFE_Py_Execute ->
-    #         #   Intercept clib call: python_start_us_before_call = _python_start_us
-    #         # ! Calls Python: tf.py_function callback into "step" ->
-    #         # !  records Python "Finish benchmark" in rlscope.prof.operation("step"), updating _python_start_us
-    #         # ! Calls Python: tf.py_function callback into "step" ->
-    #         # ! Calls C++ Simulator: PyBullet.step ->
-    #         # ! Return from C++ Simulator: PyBullet.step ->
-    #         # !  Intercept clib return: _python_start_us = now_us()
-    #         # ! Return from Python: tf.py_function callback into "step" ->
-    #         # Return from C++: TFE_Py_Execute ->
-    #         #   assertion failure: _python_start_us != python_start_us_before_call
-    #         #   Intercept clib return: _python_start_us = now_us()
-    #         # Return from Python: collect_driver.run() ->
-    #         #
-    #         # Q: What events do we WANT to record in this scenario?
-    #         # [ Python: before collect_driver.run() ]
-    #         # [ C++: TFE_Py_Execute before step() callback ]
-    #         # [ Python: start step() callback ]
-    #         # [ C++: Simulator ]
-    #         # [ Python: end step() callback ]
-    #         # [ C++: TFE_Py_Execute after step() callback ]
-    #
-    #         # NOTE: record python-side pyprof-related profiling overhead.
-    #         # Profiling overhead being generated now will be recorded by the NEXT python event gets recorded;
-    #         # We record profiling overhead for the event before this (profiling_overhead_us).
-    #         #
-    #         # NOTE: ProfilingOverheadTracker will ALSO end up capturing async dumping overhead,
-    #         # since register dumping "hooks" get called at the end of PyprofTrace.record_event.
-    #         _pyprof_trace.record_python_event(
-    #             _pyprof_trace.get_step(), name,
-    #             start_us=_python_start_us,
-    #             end_us=start_us,
-    #             start_profiling_overhead_us=start_profiling_overhead_us,
-    #             duration_profiling_overhead_us=duration_profiling_overhead_us,
-    #         )
-    #         _pyprof_trace.record_event(
-    #             _pyprof_trace.get_step(), self.category, name,
-    #             start_us=start_us,
-    #             end_us=end_us,
-    #             debug=self.debug)
-    #
-    #     ProfilingOverheadTracker.end()
-    #     _python_start_us = end_us
-    #
-    #     return ret
 
     def __setattr__(self, name, value):
         return setattr(self.func, name, value)

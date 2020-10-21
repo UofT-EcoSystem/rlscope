@@ -1,7 +1,14 @@
 """
-Define IML DAG execution graph using "luigi" DAG execution framework.
+Define ``--task`` arguments for the ``rls-run`` command.
 
-For luigi documetation, see:
+RL-Scope uses the luigi DAG execution framework internally for
+running scripts for processing trace files and creating plots.
+This allows us to have a single command (``rls-run``) for various tasks,
+and allows specifying task specific command line arguments
+(e.g., ``--OverlapStackedBarTask-rotation 15``)
+Every class name ending in "Task" can be used as a ``--task`` argument.
+
+For luigi documetation (e.g., to add your own task), see:
 https://luigi.readthedocs.io/en/stable/index.html
 """
 import luigi
@@ -20,7 +27,7 @@ import os
 from os.path import join as _j, abspath as _a, exists as _e, dirname as _d, basename as _b
 
 from rlscope.profiler.util import pprint_msg
-from rlscope.parser.tfprof import TotalTimeParser, TraceEventsParser
+from rlscope.parser.tfprof import TraceEventsParser
 from rlscope.parser.pyprof import PythonProfileParser, PythonFlameGraphParser, PythonProfileTotalParser
 from rlscope.parser.plot import TimeBreakdownPlot, PlotSummary, CombinedProfileParser, CategoryOverlapPlot, UtilizationPlot, HeatScalePlot, ConvertResourceOverlapToResourceSubplot, VennJsPlotter, SlidingWindowUtilizationPlot, CUDAEventCSVReader
 from rlscope.parser.db import SQLParser, sql_input_path, GetConnectionPool
@@ -36,7 +43,7 @@ from rlscope import py_config
 
 from rlscope.parser.common import *
 
-PARSER_KLASSES = [PythonProfileParser, PythonFlameGraphParser, PlotSummary, TimeBreakdownPlot, CategoryOverlapPlot, UtilizationPlot, HeatScalePlot, TotalTimeParser, TraceEventsParser, SQLParser]
+PARSER_KLASSES = [PythonProfileParser, PythonFlameGraphParser, PlotSummary, TimeBreakdownPlot, CategoryOverlapPlot, UtilizationPlot, HeatScalePlot, TraceEventsParser, SQLParser]
 PARSER_NAME_TO_KLASS = dict((ParserKlass.__name__, ParserKlass) \
                             for ParserKlass in PARSER_KLASSES)
 

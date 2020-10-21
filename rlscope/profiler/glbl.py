@@ -1,5 +1,11 @@
 """
-Manage a singleton instance to a Profiler object.
+Functions for initializing a global singleton RL-Scope Profiler
+object from ``--rlscope-*`` command-line arguments.
+
+We provide command-line argument handling for popular argument
+parsing libraries (i.e., argparse, click, gflags).
+
+NOTE: the singleton :py:class:`rlscope.api.Profiler` object is stored in :py:obj:`rlscope.api.prof`.
 """
 
 from rlscope.profiler.rlscope_logging import logger
@@ -21,14 +27,7 @@ from os.path import join as _j, abspath as _a, exists as _e, dirname as _d, base
 import rlscope
 from rlscope.profiler.rlscope_logging import logger
 
-# prof = None
 session = None
-
-# def get_profiler():
-#     # global prof
-#     # if prof is None:
-#     #     prof = profilers.Profiler(*args, **kwargs)
-#     return rlscope.api.prof
 
 def init_profiler(*args, **kwargs):
     # global prof
@@ -87,13 +86,18 @@ def patch_environ():
 
 def handle_rlscope_args(parser, args, directory=None, reports_progress=False):
     """
-    Build an argument parser,
-    :return:
+    Initialize the RL-Scope profiler (:py:obj:`rlscope.api.prof`) using :py:obj:`sys.argv`.
 
-    :param directory
-        The directory used by the ML-script for saving its own files.
-        If the user doesn't provide --rlscope-directory (i.e. a separate directory for storing profiling data),
-        we fall back on this.
+    Arguments
+    ---------
+    parser : argparse.ArgumentParser
+        The training script's argparse parser, *with* RL-Scope specific arguments added
+        (i.e., you should call :py:func:`rlscope.api.add_rlscope_args` on parser before calling this function).
+
+    directory : str
+        The directory used by the training script for saving its own files (e.g., weight checkpoints).
+        If the user doesn't provide ``--rlscope-directory``
+        (i.e. a separate directory for storing profiling data), we fall back on this.
     """
     # if args.rlscope_directory is not None:
     #     rlscope_directory = args.rlscope_directory

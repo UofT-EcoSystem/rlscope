@@ -1,3 +1,36 @@
+"""
+RL-Scope log message configuration.
+
+RL-Scope uses different colours to mark different log messages:
+
+* INFO: green
+* WARNING: yellow
+* ERROR: red
+* DEBUG: white
+
+DEBUG messages are enabled by default, and must be disabled using
+:py:func:`rlscope.profiler.rlscope_logging.disable_debug_logging`.
+
+Examples
+--------
+>>> from rlscope.profiler.rlscope_logging import logger
+... from rlscope.profiler import rlscope_logging
+...
+... # e.g., print a informational message in green
+... logger.info("This info message is seen")
+...
+... # e.g., disable rlscope debug messages
+... rlscope_logging.disable_debug_logging()
+... logger.debug("This debug message is NOT seen")
+...
+... # e.g., print an error message in red
+... logger.error("This is an error")
+
+Attributes
+----------
+logger : logging.Logger
+    Singleton Logger object used throughout rlscope module for logging coloured info/debug/errors messages with line numbers.
+"""
 import sys
 import logging
 import re

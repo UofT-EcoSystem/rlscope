@@ -43,7 +43,6 @@ def cleanup_profiler_excepthook(exctype, value, traceback):
 from rlscope.profiler import unit_test_util
 from rlscope.profiler.util import print_cmd
 
-# from tensorflow.core.profiler.tfprof_log_pb2 import ProfileProto
 from rlscope.protobuf.pyprof_pb2 import ProcessMetadata, TrainingProgress, IncrementalTrainingProgress, TP_NO_PROGRESS, TP_HAS_PROGRESS
 
 # pip install py-cpuinfo
@@ -1935,22 +1934,6 @@ class Profiler:
     def _rlscope_config_path(self):
         return get_rlscope_config_path(self.out_dir, self.bench_name)
 
-    def _fixup_tfprof(self, path):
-        """
-        Add profiler specific data to ProfileProto tfprof protobuf file.
-
-        In particular:
-        - process_name
-        - phase
-        """
-        with open(path, 'rb') as f:
-            proto = ProfileProto()
-            proto.ParseFromString(f.read())
-        proto.process_name = self.process_name
-        proto.phase = self.phase
-        with open(path, 'wb') as f:
-            f.write(proto.SerializeToString())
-
     def _maybe_warn_live_annotations(self):
         """
         If we've exceed tracing time-limit (--rlscope-trace-time-sec), but there are still live annotations,
@@ -2718,6 +2701,18 @@ def add_click_argument(click_ctx : ClickCtx, *args, **kwargs):
     return decorator
 
 def add_rlscope_arguments(parser):
+    """
+    Add RL-Scope specific arguments to the argparse parser needed for initializing the RL-Scope profiler
+    (:py:obj:`rlscope.api.prof`).
+
+    Arguments
+    ---------
+    parser : argparse.ArgumentParser
+        The training script's argparse parser.
+        All the RL-Scope arguments we add begin with ``--rlscope-*`` to prevent conflicts.
+
+    :return:
+    """
     if isinstance(parser, argparse.ArgumentParser):
         rlscope_parser = parser.add_argument_group("IML")
     else:

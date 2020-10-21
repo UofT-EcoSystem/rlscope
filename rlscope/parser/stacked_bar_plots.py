@@ -3840,6 +3840,26 @@ def only_selector_fields(selector):
     return new_selector
 
 def join_plus(xs, check_non_empty=False):
+    """
+    Concatenate strings with '+' to form legend label.
+
+    Parameters
+    ----------
+    xs : list
+      List of strings
+    check_non_empty : bool
+      If True, assert that len(xs) > 0
+
+    Returns
+    -------
+    str
+        Concatenation of xs (e.g., "CPU + GPU")
+
+    Examples
+    --------
+    >>> join_plus(["CPU", "GPU"])
+    "CPU + GPU"
+    """
     if check_non_empty:
         assert len(xs) != 0
     return ' + '.join(sorted(xs))

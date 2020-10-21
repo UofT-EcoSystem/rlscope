@@ -1388,10 +1388,6 @@ def read_proto(ProtoKlass, path):
         proto.ParseFromString(f.read())
     return proto
 
-def read_tfprof_file(path):
-    from tensorflow.core.profiler.tfprof_log_pb2 import ProfileProto
-    return read_proto(ProfileProto, path)
-
 def read_machine_util_file(path):
     return read_proto(MachineUtilization, path)
 
