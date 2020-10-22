@@ -8,6 +8,7 @@ Subpackages
    :maxdepth: 4
 
    rlscope.api
+   rlscope.clib
    rlscope.cpp
    rlscope.examples
    rlscope.parser
@@ -24,7 +25,6 @@ rlscope.py\_config module
 
 .. automodule:: rlscope.py_config
    :members:
-   :undoc-members:
    :show-inheritance:
 
 Module contents
@@ -32,5 +32,4 @@ Module contents
 
 .. automodule:: rlscope
    :members:
-   :undoc-members:
    :show-inheritance:
