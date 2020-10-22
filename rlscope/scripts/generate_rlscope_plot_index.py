@@ -1,3 +1,6 @@
+"""
+Generate index of ``*.venn_js.json`` files (for multi-process visualization).
+"""
 from rlscope.profiler.rlscope_logging import logger
 import signal
 import time

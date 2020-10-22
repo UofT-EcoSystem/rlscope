@@ -1,3 +1,15 @@
+"""
+``rls-prof`` command used run RL-Scope on training scripts.
+When running, RL-Scope will collect profiling information.
+``rls-prof --calibrate`` calibrates for profiling overhead
+so it can be corrected during offline analysis.
+
+See also
+--------
+rlscope.api : RL-Scope user API for annotating python training script with *operations*.
+rlscope.parser.profiling_overhead : compute average book-keeping duration needed to correct for profiling overhead.
+rlscope.parser.calibration : handles running multiple configurations, optionally in parallel across the GPUs on a machine.
+"""
 from rlscope.profiler.rlscope_logging import logger
 import shutil
 import subprocess

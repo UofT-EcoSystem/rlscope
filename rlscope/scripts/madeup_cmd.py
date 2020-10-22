@@ -1,3 +1,7 @@
+"""
+Used for testing ``rls-run-expr`` program which parallelizes running
+multiple training script configurations across available GPUs.
+"""
 import argparse
 import textwrap
 import time

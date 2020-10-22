@@ -1,3 +1,31 @@
+"""
+``rls-calibrate`` command that automates running training script multiple
+times to perform profiling overhead calibration.
+
+This script gets run internally when you invoke ``rls-prof python train.py ...``
+on your training script.  RL-Scope calibrates for the average duration of book-keeping 
+code paths and substracts this time at the precise point when it occurs.  RL-Scope 
+calibrates for several sources of overhead:
+
+1. Python :math:`\leftrightarrow` C interception.
+2. CUDA API interception.
+3. User's operation annotations.
+4. Inflation of cudaLaunchKernel and cudaMemcpyAsync CUDA API calls due to enabling CUPTI.
+
+For (1) and (2), the overhead of RL-Scope
+book-keeping code only depends on the type of intercepted event. For example, the extra 
+CPU time incurred in (1) by RL-Scope intercepting Python :math:`\leftrightarrow` C/C++ 
+transitions is the same regardless of which part of the code it occurs in. Similarly, the 
+overhead in (2) of our interception of CUDA API calls does not depend on which CUDA API 
+was used, and (3) tracking algorithmic annotations does not depend on which operation was 
+annotated. For these cases, we find RL-Scope’s overhead by dividing the increase in total 
+runtime when enabling profiling by the number of times the book-keeping code was called.
+
+For (4), this overhead is incurred by internal closed-source profiling code inside the 
+CUDA library. This code inflates runtime by different amounts, depending on which CUDA API 
+is called. Since profiling cannot be enabled separately for different APIs, accounting for 
+it requires tracking the number and duration of each individual API call separately.
+"""
 from rlscope.profiler.rlscope_logging import logger
 from rlscope.profiler import rlscope_logging
 import argparse
@@ -32,36 +60,21 @@ from rlscope.parser.profiling_overhead import \
     MicrobenchmarkOverheadJSON, \
     CalibrationJSONs
 
-"""
-cmd: command to run
-rlscope_directory: directory to output results of calibration runs, AND regular run.
-
-Run each configuration needed to calibrate for overhead correction.
-Output results to:
---rlscope_directory/
-  config_calibration_{short_name}/
-    Various calibration runs for computing overhead corrections for 
-    the config_time_breakdown run. 
-  config_time_breakdown/
-    Time breakdown run for collecting the CPU/GPU time.
-  config_gpu_hw/
-    GPU HW run for collecting GPU HW counters.
-    
-NOTE: 
-(1) first, run each configuration sequentially
-(2) then, run "rls-analyze" in parallel for each configuration.
-    Run "--mode=overlap" for all configuration except config_gpu_hw.
-    Run "--mode=gpu_hw" for config_gpu_hw.
-(3) Run the rls-run program that computes configuration json files; 
-    output them to the root directory.
-
-Q: What's the best way to detect algo and env...?
-A: Add --rlscope-algo and --rlscope-env and record it in a file somewhere (rlscope_config.json).
-"""
-
 SENTINEL = object()
 
 class Calibration:
+    """
+    Coordinates running training script multiple times (each with multiple repetitions),
+    computing average book-keeping duration ("calibration"),
+    running ``rls-analyze`` to analyze event overlap with (and without) overhead correction,
+    and creating a time breakdown plot.
+    Takes care of only re-running configurations if necessary
+    (e.g., didn't complete in prior runs).
+    Allows parallelizing multiple training script runs across available GPUs (assumes 1 GPU per training script).
+    Also parallelizes offline plotting and analysis.
+
+    See ``rls-calibrate --help`` for documentation on class attributes.
+    """
     def __init__(self,
                  mode=None,
                  repetitions=1,
@@ -209,6 +222,15 @@ class Calibration:
                             # xtick_expression=None
                             **kwargs,
                             ):
+        """
+        Plot language transition plot showing the number of transitions between:
+
+        * Python :math:`\rightarrow` ML Backend
+        * Python :math:`\rightarrow` Simulator
+        * ML Backend :math:`\rightarrow` CUDA API calls
+
+        Plotted by running ``rls-run --task CategoryTransitionPlotTask ...``.
+        """
         task = "CategoryTransitionPlotTask"
 
         repetitions = None
@@ -258,6 +280,10 @@ class Calibration:
                             # xtick_expression=None
                             **kwargs,
                             ):
+        """
+        Plot GPU hardware metrics (e.g., SM occupancy, SM efficiency) scoped to user operations.
+        Plotted by running ``rls-run --task GpuHwPlotTask ...``.
+        """
         task = "GpuHwPlotTask"
 
         repetitions = None
@@ -312,6 +338,10 @@ class Calibration:
                                     # xtick_expression=None,
                                     # Ignore
                                     **kwargs):
+        """
+        Plot CPU/GPU training time breakdown plot with (or without) profilng overhead correction.
+        Plotted by running ``rls-run --task OverlapStackedBarTask ...``.
+        """
         task = "OverlapStackedBarTask"
 
         # cmd = [
@@ -478,6 +508,10 @@ class Calibration:
         return paths
 
     def compute_rls_analyze(self, rlscope_directory, output_directory, conf, rep, correct_overhead):
+        """
+        Compute cross-stack event overlap with (or without) profiling overhead correction.
+        Plotted by running ``rls-run --task RLSAnalyze ...``.
+        """
         task = "RLSAnalyze"
 
         assert conf.rls_analyze_mode is not None
@@ -514,6 +548,10 @@ class Calibration:
         return {'CUDA_VISIBLE_DEVICES'}
 
     def compute_cupti_scaling_overhead(self, output_directory):
+        """
+        Plot CUPTI per-api-call time varies as we scale the number of traced training-loop iterations.
+        Plotted by running ``rls-run --task CUPTIScalingOverheadTask ...``.
+        """
         task = "CUPTIScalingOverheadTask"
 
         if self.dry_run and (
@@ -561,6 +599,10 @@ class Calibration:
             only_show_env=self.only_show_env())
 
     def compute_cupti_overhead(self, output_directory):
+        """
+        Compute "4. Inflation of cudaLaunchKernel and cudaMemcpyAsync CUDA API calls due to enabling CUPTI"
+        by running ``rls-run --task CUPTIOverheadTask ...``.
+        """
         task = "CUPTIOverheadTask"
 
         if self.dry_run and (
@@ -609,6 +651,9 @@ class Calibration:
             only_show_env=self.only_show_env())
 
     def compute_LD_PRELOAD_overhead(self, output_directory):
+        """
+        Compute "(2) CUDA API interception" by running ``rls-run --task CallInterceptionOverheadTask ...``.
+        """
         task = "CallInterceptionOverheadTask"
 
         if self.dry_run and (
@@ -662,6 +707,9 @@ class Calibration:
             only_show_env=self.only_show_env())
 
     def compute_pyprof_overhead(self, output_directory):
+        """
+        Compute "(3) User's operation annotations" by running ``rls-run --task PyprofOverheadTask ...``.
+        """
         task = "PyprofOverheadTask"
 
         if self.dry_run and (
@@ -1098,6 +1146,26 @@ class Calibration:
         ))
 
     def mode_run(self, *args, **kwargs):
+        """
+        Run each configuration needed to calibrate for overhead correction.
+        Output results to:
+        --rlscope_directory/
+          config_calibration_{short_name}/
+            Various calibration runs for computing overhead corrections for
+            the config_time_breakdown run.
+          config_time_breakdown/
+            Time breakdown run for collecting the CPU/GPU time.
+          config_gpu_hw/
+            GPU HW run for collecting GPU HW counters.
+
+        --rlscope-directory: directory to output results of calibration runs, AND regular run.
+        (1) First, run each configuration sequentially
+        (2) Then, run "rls-analyze" in parallel for each configuration.
+            Run "--mode=overlap" for all configuration except config_gpu_hw.
+            Run "--mode=gpu_hw" for config_gpu_hw.
+        (3) Run the rls-run program that computes configuration json files;
+            output them to the root directory.
+        """
         self._with_exception_handler(lambda: self._mode_run(*args, **kwargs))
 
 
@@ -1346,7 +1414,7 @@ def _main(argv):
     run_parser.add_argument("--parallel-runs",
                         action='store_true',
                         help=textwrap.dedent("""
-                            Parallelize running configurations across GPUs on this machine (assume no CPU inteference). See --rlscope-gpus
+                            Parallelize running configurations across GPUs on this machine (assume no CPU interference). See --rlscope-gpus
                             """))
     run_parser.add_argument("--retry",
                             type=int,

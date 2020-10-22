@@ -1,3 +1,7 @@
+"""
+Miscellaneous command-line utility functions for parsing arguments,
+checking available CPUs/GPUs, and logging.
+"""
 import re
 import sys
 import traceback

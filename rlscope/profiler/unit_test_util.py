@@ -1,5 +1,10 @@
+"""
+Utilities for recording data for unit-tests, and for reading in data for checking unit-test success/failure.
+
+.. deprecated:: 1.0.0
+    We never used this; instead we use pytest for unit testing.
+"""
 #
-# Utilities for recording data for unit-tests, and for reading in data for checking unit-test success/failure.
 #
 
 from rlscope.profiler.rlscope_logging import logger

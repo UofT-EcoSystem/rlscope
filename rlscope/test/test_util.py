@@ -1,3 +1,6 @@
+"""
+Unit-test helper code for Python event overlap implementation.
+"""
 from rlscope.parser.common import *
 
 from rlscope.parser.stats import KernelTime

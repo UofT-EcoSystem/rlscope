@@ -1,3 +1,9 @@
+"""
+Read RL-Scope trace files into SQL database (PostgreSQL).
+
+.. deprecated:: 1.0.0
+    We now read from files directly since it's faster.
+"""
 from rlscope.profiler.rlscope_logging import logger
 import copy
 import itertools

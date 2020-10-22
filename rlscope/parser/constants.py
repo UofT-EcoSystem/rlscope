@@ -17,7 +17,7 @@ CATEGORY_SIMULATOR_CPP : str
 CATEGORY_TF_API : str
   DL backend native library time.
 CATEGORY_OPERATION : str
-  User annotation (i.e., :py:func:`rlscope.api.Profiler.operation`)
+  User annotation (i.e., :py:meth:`rlscope.api.Profiler.operation`)
 CATEGORY_PROF_CUPTI : str
   Profiling overhead: closed-source inflation within CUDA API calls
   (e.g., ``cudaLaunchKernel``, ``cudaMemcpyAsync``) when CUPTI is enabled

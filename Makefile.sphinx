@@ -3,28 +3,53 @@
 
 # You can set these variables from the command line, and also
 # from the environment for the first two.
-SPHINXOPTS    ?=
-SPHINXBUILD   ?= sphinx-build
-SPHINXAPIDOC   ?= sphinx-apidoc
-SOURCEDIR     = docs
-BUILDDIR      = build.docs
-PACKAGEDIR      = rlscope
+SPHINXOPTS ?=
+SPHINXBUILD ?= sphinx-build
+SPHINXAPIDOC ?= sphinx-apidoc
+SOURCEDIR = docs
+BUILDDIR = build.docs
+PACKAGEDIR = rlscope
+MAKEFILE = Makefile.sphinx
 
-# Put it first so that "make" without argument is like "make help".
-help:
-	@$(SPHINXBUILD) -M help "$(SOURCEDIR)" "$(BUILDDIR)" $(SPHINXOPTS) $(O)
-
+# File output by "sphinx-apidoc"; used to detect changes and re-run apidoc.
+#APIDOC_TARGET = $(SOURCEDIR)/rlscope.rst
 
 APIDOC_IGNORE_FILES = \
 	rlscope/scripts/rlscope_plot_index.py \
 	"**/*_pb2.py"
 
-apidoc:
-	$(SPHINXAPIDOC) -f -o "$(SOURCEDIR)" "$(PACKAGEDIR)" $(SPHINXOPTS) $(O) $(APIDOC_IGNORE_FILES)
+# https://www.sphinx-doc.org/en/master/man/sphinx-apidoc.html#environment
+#SPHINX_APIDOC_OPTIONS ?=  members,undoc-members,show-inheritance
+SPHINX_APIDOC_OPTIONS ?=  members,show-inheritance
+export SPHINX_APIDOC_OPTIONS
 
-.PHONY: help Makefile.sphinx
+# Put it first so that "make" without argument is like "make help".
+help:
+	@echo "To build RL-Scope documentation:"
+	@echo "  $$ make -f $(MAKEFILE) docs"
+	@echo
+	@echo "To run specific \"sphinx-build <cmd>\" command:"
+	@echo "  $$ make -f $(MAKEFILE) <cmd>"
+	@echo
+	@echo "\"sphinx-build <cmd>\" usage:"
+	@$(SPHINXBUILD) -M help "$(SOURCEDIR)" "$(BUILDDIR)" $(SPHINXOPTS) $(O)
+
+MK_APIDOC = $(SPHINXAPIDOC) -f -o "$(SOURCEDIR)" "$(PACKAGEDIR)" $(SPHINXOPTS) $(O) $(APIDOC_IGNORE_FILES)
+apidoc: $(MAKEFILE)
+	$(MK_APIDOC)
+
+# $(1) = sphinx-build command (e.g., html)
+define SPHINX_CMD
+	$(SPHINXBUILD) -M $(1) "$(SOURCEDIR)" "$(BUILDDIR)" $(SPHINXOPTS) $(O) -j auto
+endef
+
+docs:
+	$(MK_APIDOC)
+	$(call SPHINX_CMD,html)
 
 # Catch-all target: route all unknown targets to Sphinx using the new
 # "make mode" option.  $(O) is meant as a shortcut for $(SPHINXOPTS).
-%: Makefile.sphinx
-	$(SPHINXBUILD) -M $@ "$(SOURCEDIR)" "$(BUILDDIR)" $(SPHINXOPTS) $(O) -j auto
+%: $(MAKEFILE) $(APIDOC_TARGET)
+	$(call SPHINX_CMD,html)
+
+.PHONY: help $(MAKEFILE) apidoc docs

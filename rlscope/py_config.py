@@ -1,3 +1,9 @@
+"""
+RL-Scope configuration settings.
+
+``DEBUG_*`` are useful for enabling certain debug logging statements.
+:py:class:`_EnvVars` is for reading environment variables.
+"""
 from os.path import join as _j, abspath as _a, exists as _e, dirname as _d, basename as _b
 from os import environ as ENV
 import shutil

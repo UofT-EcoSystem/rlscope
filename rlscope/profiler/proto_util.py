@@ -1,3 +1,7 @@
+"""
+.. deprecated:: 1.0.0
+    Old code for unit-testing / tfprof
+"""
 from rlscope.protobuf.pyprof_pb2 import CategoryEventsProto, Event
 
 import threading

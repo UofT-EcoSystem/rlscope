@@ -1,3 +1,6 @@
+"""
+Reading overlap results from ``rls-analyze``.
+"""
 from rlscope.parser.common import *
 
 class CategoryKey:

@@ -1,3 +1,9 @@
+"""
+Read (old) RL-Scope trace files.
+
+.. deprecated:: 1.0.0
+    Old TensorFlow-specific profiling data.
+"""
 from rlscope.profiler.rlscope_logging import logger
 # from tensorflow.core.profiler.tfprof_log_pb2 import ProfileProto
 from rlscope.protobuf.pyprof_pb2 import CategoryEventsProto

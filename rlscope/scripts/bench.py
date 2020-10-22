@@ -1,5 +1,7 @@
 """
-rls-bench script for running lots of different experiments/benchmarks.
+``rls-bench`` script for running lots of different experiments/benchmarks.
+.. deprecated:: 1.0.0
+    Replaced by :py:mod:`rlscope.scripts.calibration` (``rls-run --calibrate``).
 """
 import re
 import json

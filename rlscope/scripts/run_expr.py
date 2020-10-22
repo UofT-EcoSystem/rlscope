@@ -1,11 +1,14 @@
 """
-Run shell commands across the available GPUs on this machine.
+``rls-run-expr`` command for running shell commands across the
+available GPUs on this machine.
+Used by ``rls-prof --calibrate --parallel-runs`` to run multiple training
+script configurations in parallel.
 
 Usage:
   # --append: append the shell command to run_expr.sh.  If logfile.out already exists and is done, SKIP it.
   $ rls-run-expr --append --sh run_expr.sh rls-prof ...
 
-  # --run: run the shell command as-is (not  --sh is optional and ignored)
+  # --run: run the shell command as-is (note: --sh is optional and ignored)
   $ rls-run-expr --run --sh run_expr.sh rls-prof ...
 
   # --append --run: append the shell command to run_expr.sh, then run the command as-is

@@ -1,3 +1,12 @@
+"""
+Functions for iterating over symbols in Python native library objects,
+and wrapping/unwrapping them with a callable class.
+
+See also
+---------
+rlscope.clib_wrap.CFuncWrapper : callable wrapper class around native functions for recording start/end timestamps.
+rlscope.clib_wrap : uses wrap_util functions to wrap TensorFlow, PyTorch, and simulator native libraries.
+"""
 import re
 import inspect
 import types

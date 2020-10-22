@@ -1,3 +1,6 @@
+"""
+Indexing output files from ``rls-analyze`` to make it easier to select *.venn_js.json files.
+"""
 from rlscope.profiler.rlscope_logging import logger
 import re
 import copy

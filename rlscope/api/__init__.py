@@ -4,6 +4,9 @@ RL-Scope user API.
 Users of RL-Scope should only interact with symbols in this module,
 and should avoid using symbols elsewhere since they are subject to change.
 
+.. todo::
+  Provide documentation of typical usage.
+
 Attributes
 ----------
 prof

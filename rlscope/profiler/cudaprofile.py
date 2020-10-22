@@ -1,3 +1,9 @@
+"""
+Wrappers around libcudart.so symbols for starting/stopping nvprof profiling.
+
+.. deprecated:: 1.0.0
+    We don't use nvprof anymore.
+"""
 import ctypes
 
 from rlscope.parser.common import *

@@ -1,3 +1,6 @@
+"""
+Plotting code for creating the CPU/GPU utilization "heat map" in the multi-process visualization.
+"""
 import argparse
 import textwrap
 import re

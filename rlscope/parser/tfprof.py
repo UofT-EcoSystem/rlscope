@@ -1,3 +1,11 @@
+"""
+Python / numba implementation of event overlap computation needed for
+scoping CPU/GPU time to high-level user operation annotations.
+
+.. deprecated:: 1.0.0
+    We no longer compute event overlap in Python/numba.
+    Instead, we implement event overlap in C++ for performance.
+"""
 from rlscope.profiler.rlscope_logging import logger
 import itertools
 from collections import namedtuple

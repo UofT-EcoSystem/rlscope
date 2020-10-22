@@ -1,3 +1,8 @@
+"""
+Using output of Python profiler to create a flame-graph visualization from call-stack data.
+.. deprecated:: 1.0.0
+    We don't use the Python profiler anymore.
+"""
 from rlscope.profiler.rlscope_logging import logger
 import re
 import numpy as np

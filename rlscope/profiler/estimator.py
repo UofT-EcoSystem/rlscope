@@ -1,12 +1,13 @@
 """
-Wrap the tf.estimator.Estimator API.
-That way, we can add separate profiling annotations to session.run(...) calls for:
-- train(..., hooks=..., saving_listeners=...): A call to train_op that performs a forward pass + gradient update.
-- predict(..., hooks=...): A forward pass / inference.
-- evaluate(..., hooks=...): A call for computing validation metrics.
-- export_saved_model(...): A call for saving a model(?)
+Wrap the tf.estimator.Estimator API to add high-level operation annotations.
 
-IMPLEMENTATION:
+That way, we can add separate profiling annotations to session.run(...) calls for:
+* train(..., hooks=..., saving_listeners=...): A call to train_op that performs a forward pass + gradient update.
+* predict(..., hooks=...): A forward pass / inference.
+* evaluate(..., hooks=...): A call for computing validation metrics.
+* export_saved_model(...): A call for saving a model(?)
+
+Implementation:
 In order to wrap these session.run(...) calls, we use the "hooks" callback API for train/predict/evaluate,
 and the "saving_listeners" for model-checkpointing.
 In particular, the train/predict/evaluate methods simply append our wrapper to the end of the hooks/saving_listeners arguments.

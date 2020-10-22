@@ -1,3 +1,7 @@
+"""
+Calibrating for average book-keeping durations needed to
+correct for RL-Scope profiling overhead.
+"""
 from rlscope.profiler.rlscope_logging import logger
 import copy
 import numpy as np

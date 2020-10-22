@@ -1,5 +1,5 @@
 """
-Python wrapper for running C++ rls-analyze binary
+Python wrapper for locating and running C++ ``rls-analyze`` binary
 distributed with RL-Scope python wheel.
 """
 from rlscope.profiler.rlscope_logging import logger

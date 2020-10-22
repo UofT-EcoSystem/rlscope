@@ -1,3 +1,6 @@
+"""
+Debugging code; try out different matplotlib plotting options.
+"""
 import re
 import itertools
 import sys

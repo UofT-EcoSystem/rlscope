@@ -1,5 +1,7 @@
 """
-Run RL-Scope unit tests.
+``rls-tests`` command for running RL-Scope unit tests.
+
+This script runs both Python and C++ unit tests.
 """
 import argparse
 import subprocess

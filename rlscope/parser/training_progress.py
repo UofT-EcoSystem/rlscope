@@ -1,3 +1,6 @@
+"""
+Plotting RL-Scope total end-to-end profiling overhead and correction.
+"""
 from rlscope.profiler.rlscope_logging import logger
 import copy
 import itertools

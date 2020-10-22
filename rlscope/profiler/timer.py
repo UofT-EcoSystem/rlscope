@@ -1,3 +1,6 @@
+"""
+Get the current timestamp with microsecond resolution.
+"""
 import time
 
 from rlscope.parser import constants

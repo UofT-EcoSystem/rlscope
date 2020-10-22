@@ -1,3 +1,7 @@
+"""
+Determine if CUDA version and TensorFlow version are compatiable.
+e.g., GPU hardware metrics require CUDA 10.1+, which requires TensorFlow v2.1.0+.
+"""
 #!/usr/bin/env python3
 from rlscope.profiler.rlscope_logging import logger
 import re

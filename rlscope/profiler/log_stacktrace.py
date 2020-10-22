@@ -1,3 +1,10 @@
+"""
+Code for recording and logging stack traces of training scripts to help determine
+how Python interfaces with native C libraries.
+
+This code was useful for determining how Python calls into PyTorch; PyTorch
+has multiple native shared libraries it calls into.
+"""
 import textwrap
 import traceback
 import contextlib

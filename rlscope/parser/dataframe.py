@@ -1,3 +1,9 @@
+"""
+Read RL-Scope data into pandas dataframes.
+
+This modules defines various ``*Reader`` classes that can read RL-Scope trace files into a single dataframe.
+These readers are used by plotting scripts.
+"""
 import pandas as pd
 import decimal
 import copy
@@ -42,10 +48,8 @@ def Worker_split_map_merge(kwargs):
 
 class BaseDataframeReader:
     """
-    Read training_progress.trace_*.proto files into data-frame.
-
-    Q: How should read experiment_config.json?
-       Can we add something that read additional dict-attributes for each directory?
+    Base functionality shared by readers, including parallelizing reading of trace files,
+    and walking the directory tree to find matching trace files.
     """
     def __init__(self, directory, add_fields=None, colnames=None, debug=False, debug_single_thread=False):
         self.directory = directory
@@ -70,18 +74,26 @@ class BaseDataframeReader:
                         debug=False,
                         debug_single_thread=False):
         """
-        :param name:
-        :param n_workers:
-        :param map_fn:
+        Maps map_fn across each trace file.
+        map_fn should produce a dataframe.
+        merge_fn is run pair-wise on all the results using functools.reduce().
+
+        Arguments
+        ---------
+        name: str
+            For debugging output.
+        n_workers: int
+            Parallelism of "map" stage.
+        map_fn: func
             Given a proto_path, run a function on it that produces (most likely) a dataframe, or
             some computation that reduces a dataframe.
-        :param merge_fn:
+        merge_fn: func
             Given two inputs A and B, where A and/or B are one of:
             - a result from map_fn
             - a result from merge_fn
             Return the result of "merging" A and B.
-        :param debug_single_thread:
-        :return:
+        debug_single_thread: bool
+            Allow debugging with pdb.
         """
         if n_workers is None:
             n_workers = multiprocessing.cpu_count()
@@ -317,6 +329,9 @@ class BaseDataframeReader:
 
 
 class OverlapDataframeReader(BaseDataframeReader):
+    """
+    Read *.venn_js.json CPU/GPU time breakdown files output by ``rls-analyze``.
+    """
 
     def __init__(self, directory, add_fields=None, debug=False, debug_single_thread=False):
 
@@ -372,6 +387,10 @@ class OverlapDataframeReader(BaseDataframeReader):
             self._maybe_add_fields(path, data=data)
 
 class CUDADeviceEventsReader(BaseDataframeReader):
+    """
+    .. deprecated:: 1.0.0
+       Old TensorFlow-specific profiling code.
+    """
 
     def __init__(self, directory, add_fields=None, debug=False, debug_single_thread=False):
 
@@ -452,6 +471,9 @@ class CUDADeviceEventsReader(BaseDataframeReader):
 
 
 class UtilDataframeReader(BaseDataframeReader):
+    """
+    Read ``nvidia-smi`` GPU utilization into dataframe.
+    """
 
     def __init__(self, directory, add_fields=None, debug=False, debug_single_thread=False):
 
@@ -547,6 +569,9 @@ class UtilDataframeReader(BaseDataframeReader):
                 last_start_time_us = sample.start_time_us
 
 class TrainingProgressDataframeReader(BaseDataframeReader):
+    """
+    Read training progress (training_progress*.proto) into dataframe.
+    """
 
     def __init__(self, directory, add_fields=None, debug=False, debug_single_thread=False, add_algo_env=False):
 
@@ -814,6 +839,10 @@ class SplitMapMerge_CUDAAPIStatsDataframeReader__n_total_calls:
         return a + b
 
 class CUDAAPIStatsDataframeReader(BaseDataframeReader):
+    """
+    Read CUDA API call count and duration (cuda_api_stats*.proto) into dataframe.
+    Used for measuring CUPTI profiling overhead.
+    """
 
     def __init__(self, directory, add_fields=None, debug=False, debug_single_thread=False):
 
@@ -963,6 +992,10 @@ class CUDAAPIStatsDataframeReader(BaseDataframeReader):
         return df_sum
 
 class PyprofDataframeReader(BaseDataframeReader):
+    """
+    Read start/end timestamps for various event types (e.g., user operation annotations)
+    from category_events*.proto into dataframe.
+    """
 
     def __init__(self, directory, add_fields=None, debug=False, debug_single_thread=False):
 
@@ -1344,9 +1377,20 @@ def read_rlscope_config_metadata(directory):
     return rlscope_metadata
 
 class NoIMLConfigFound(Exception):
+    """
+    Raised if we cannot locate a rlscope_config.json file
+
+    See also
+    ---------
+    IMLConfig : reading RL-Scope configuration files.
+    """
     pass
 
 class IMLConfig:
+    """
+    Read rlscope_config.json file, which contains RL-Scope profiler configuration information that the training script
+    was run with (e.g., `--rlscope-*` command-line options, algo, env)
+    """
     def __init__(self, directory=None, rlscope_config_path=None):
         assert directory is not None or rlscope_config_path is not None
         self.directory = directory
@@ -1492,7 +1536,7 @@ class LinearRegressionReader:
 
 class VennData:
     """
-    Regarding venn_js format.
+    Read *.venn_js.json files.
 
     The "size" of each "circle" in the venn diagram is specified in a list of regions:
     # ppo2/HumanoidBulletEnv-v0/ResourceOverlap.process_ppo2_HumanoidBulletEnv-v0.phase_ppo2_HumanoidBulletEnv-v0.venn_js.json
@@ -1743,69 +1787,12 @@ class VennData:
             d[labels] = size_us
         return d
 
-    # # def as_overlap_dict(self):
-    # def old_as_overlap_dict(self):
-    #     """
-    #     NOTE: This returns "overlap" sizes.
-    #     i.e.
-    #     ('CPU',) contains the exclusive size of the CPU region, NOT INCLUDING possible overlap with GPU.
-    #     ('CPU', 'GPU',) contains only the overlap across CPU and GPU.
-    #
-    #     {
-    #         ('CPU',): 132010993,
-    #         ('GPU',): 0,
-    #         ('CPU', 'GPU'): 3230025.0,
-    #     }
-    #
-    #
-    #     PSEUDOCODE:
-    #     overlap = dict()
-    #     for region, size_us in venn_sizes.keys():
-    #         if len(region) == 1:
-    #             overlap[region] += size_us
-    #         else:
-    #             overlap[region] = size_us
-    #             for r in region:
-    #                 overlap[(r,)] -= size_us
-    #     """
-    #     venn_sizes = self.as_dict()
-    #     overlap = dict()
-    #     def mk_region(region):
-    #         if region not in overlap:
-    #             overlap[region] = 0.
-    #     for region, size_us in venn_sizes.items():
-    #         if len(region) == 1:
-    #             mk_region(region)
-    #             overlap[region] += size_us
-    #         else:
-    #             mk_region(region)
-    #             overlap[region] = size_us
-    #             for r in region:
-    #                 mk_region((r,))
-    #                 overlap[(r,)] -= size_us
-    #
-    #     for region, size_us in overlap.items():
-    #         assert size_us >= 0
-    #
-    #     # NOTE: if a region only exists in overlap with another region
-    #     # (e.g. CUDA API CPU + Framework API C),
-    #     # we DON'T want to have a legend-label for it.
-    #     del_regions = set()
-    #     for region, size_us in overlap.items():
-    #         if size_us == 0:
-    #             del_regions.add(region)
-    #     for region in del_regions:
-    #         del overlap[region]
-    #
-    #     return overlap
-
     def as_overlap_dict(self):
         if self._is_vennbug_version():
             return self._old_vennbug_as_overlap_dict()
         return self._new_as_overlap_dict()
 
 
-    # def new_as_overlap_dict(self):
     def _new_as_overlap_dict(self):
         """
         ##

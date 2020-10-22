@@ -1,3 +1,14 @@
+"""
+Collect GPU metrics from ``nvidia-smi``.
+
+Uses the ``--csv`` option to provide additional info not provided
+by the plain-old ``nvidia-smi`` command.
+Used to collect GPU utilization info.
+
+See also
+---------
+rlscope.parser.cpu_gpu_util : Plotting GPU utilization.
+"""
 from rlscope.profiler.util import pprint_msg
 from rlscope.profiler.util import print_cmd
 

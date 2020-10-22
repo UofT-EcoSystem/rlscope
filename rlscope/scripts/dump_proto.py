@@ -1,3 +1,7 @@
+"""
+``rls-dump-proto`` command for inspecting contents of RL-Scope
+trace files (binary protobuf files).
+"""
 from rlscope.profiler.rlscope_logging import logger
 import argparse
 import textwrap
@@ -83,9 +87,10 @@ def main():
         else:
             dump_proto_txt(proto, sys.stdout)
 
-    if is_tfprof_file(args.proto):
-        do_dump(args.proto, ProfileProto)
-    elif is_pyprof_file(args.proto) or is_dump_event_file(args.proto):
+    # if is_tfprof_file(args.proto):
+    #     from tensorflow.core.profiler.tfprof_log_pb2 import ProfileProto
+    #     do_dump(args.proto, ProfileProto)
+    if is_pyprof_file(args.proto) or is_dump_event_file(args.proto):
         do_dump(args.proto, CategoryEventsProto)
     elif is_unit_test_once_file(args.proto):
         do_dump(args.proto, IMLUnitTestOnce)

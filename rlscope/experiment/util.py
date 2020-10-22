@@ -1,3 +1,6 @@
+"""
+Utility functions for running commands at most once, and capturing their logs to a file.
+"""
 import subprocess
 from rlscope.profiler.rlscope_logging import logger
 import contextlib
@@ -38,6 +41,26 @@ def tee(cmd, to_file,
         tee_prefix=None,
         only_show_env=None,
         **kwargs):
+    """
+    Run shell *cmd*, outputting its results to *to_file*, and echo-ing the output to ``sys.stdout``.
+
+    Arguments
+    ---------
+    cmd: List[str]
+        Shell command.
+    to_file: str
+        Save *cmd* output to this file.
+    cwd: str
+        Directory to run command from.
+    append: bool
+        Append to *to_file*.
+    makedirs: bool
+    check: bool
+    dry_run: bool
+    tee_output: bool
+    tee_prefix: str
+    only_show_env: Set[str]
+    """
 
     # In case there are int's or float's in cmd.
     cmd = [str(opt) for opt in cmd]

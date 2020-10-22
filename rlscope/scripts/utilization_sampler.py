@@ -1,3 +1,7 @@
+"""
+``rls-util-sampler`` script for collecting GPU (and CPU) utilization
+using ``nvidia-smi`` every 0.5 second over the course of training.
+"""
 from rlscope.profiler.rlscope_logging import logger
 import signal
 import time

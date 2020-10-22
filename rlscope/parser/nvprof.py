@@ -1,3 +1,9 @@
+"""
+Collecting profiling data using ``nvprof``.
+
+.. deprecated:: 1.0.0
+    We use CUPTI to collect GPU profiling data.
+"""
 from rlscope.profiler.rlscope_logging import logger
 import re
 import sys

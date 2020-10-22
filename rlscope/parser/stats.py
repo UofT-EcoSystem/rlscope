@@ -1,3 +1,6 @@
+"""
+Plain-old-data classes for representing start/end timestamps.
+"""
 # pip install progressbar2
 from rlscope.profiler.rlscope_logging import logger
 import progressbar

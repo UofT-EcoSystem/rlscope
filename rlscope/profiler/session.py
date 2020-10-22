@@ -1,7 +1,10 @@
 """
-profiler.session.ACTIVE_SESSIONS keeps track of "currently active sessions".
+Wrappers around TensorFlow v1 session objects to keep
+track of "currently active sessions".
 
-These are the sessions we need to check for trace-data during the DUMP phase of profiling.
+:py:obj:`ACTIVE_SESSIONS` keeps track of "currently active sessions".
+These are the sessions we need to check for trace-data during the
+DUMP phase of profiling.
 
 See SessionWrapper for details.
 """

@@ -1251,14 +1251,23 @@ def get_unit_test_multiple_path(directory, trace_id, bench_name):
     return ret
 
 def get_rlscope_config_path(out_dir, bench_name=None):
-    ret = _j(out_dir, "rlscope_config{bench}.json".format(
-        bench=bench_suffix(bench_name),
-    ))
-    return ret
+    def _path(prefix):
+        path = _j(out_dir, "{prefix}_config{bench}.json".format(
+            prefix=prefix,
+            bench=bench_suffix(bench_name),
+        ))
+        return path
+    rlscope_path = _path('rlscope')
+    if _e(rlscope_path):
+        return rlscope_path
+    iml_path = _path('iml')
+    if _e(iml_path):
+        return iml_path
+    return rlscope_path
 
 def is_rlscope_config_file(path):
     base = _b(path)
-    m = re.search(r'rlscope_config{bench}.json$'.format(
+    m = re.search(r'(rlscope|iml)_config{bench}.json$'.format(
         bench=BENCH_SUFFIX_RE,
     ), base)
     return m

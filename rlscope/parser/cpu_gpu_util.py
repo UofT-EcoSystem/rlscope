@@ -1,3 +1,6 @@
+"""
+Plotting GPU utilization over time.
+"""
 from rlscope.profiler.rlscope_logging import logger
 import copy
 import itertools

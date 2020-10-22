@@ -1,3 +1,6 @@
+"""
+matplotlib plotting code for various RL-Scope plots (e.g., time breakdown plot).
+"""
 from rlscope.profiler.rlscope_logging import logger
 import argparse
 import copy

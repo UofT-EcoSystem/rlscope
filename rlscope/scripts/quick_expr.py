@@ -1,3 +1,8 @@
+"""
+``rls-quick-expr`` script for running lots of different experiments/benchmarks.
+.. deprecated:: 1.0.0
+    Replaced by :py:mod:`rlscope.scripts.calibration` (``rls-run --calibrate``).
+"""
 from rlscope.profiler.rlscope_logging import logger
 import argparse
 import pprint

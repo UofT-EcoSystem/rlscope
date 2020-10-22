@@ -1,3 +1,10 @@
+"""
+Helper code for plotting GPU utilization over time.
+
+See also
+---------
+rlscope.profiler.cpu_gpu_util
+"""
 import os
 import shutil
 from os.path import join as _j, abspath as _a, exists as _e, dirname as _d, basename as _b

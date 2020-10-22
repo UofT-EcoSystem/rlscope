@@ -1,3 +1,7 @@
+"""
+Process pool implementations that are easy to debug in single-threaded mode,
+and have friendlier behaviour during exceptions in child processes.
+"""
 from rlscope.profiler.rlscope_logging import logger
 import os
 from progressbar import progressbar

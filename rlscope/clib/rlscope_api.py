@@ -1,4 +1,20 @@
-# Wrapper around librlscope.so LD_PRELOAD library.
+r"""
+Python wrapper around the ``librlscope.so`` ``LD_PRELOAD`` library.
+We offload most profiling work to the C++ library.
+In particular:
+
+#. Every :py:meth:`rlscope.profiler.profilers.Profiler.operation` calls into
+   :py:func:`push_operation` upon entering the ``with`` block and
+   :py:func:`pop_operation` upon exiting the ``with`` block.
+   This records operation start/end timestamps.
+#. Every :py:meth:`rlscope.profiler.profilers.Profiler.report_progress`
+   call at the start of a training loop iteration calls
+   :py:func:`.end_pass` then :py:func:`.start_pass`.
+   This is used to start/stop collection of GPU hardware metrics.
+#. Trace files are dumped asynchronously in ``librlscope.so``
+   once collected traces exceed :math:`\approx` 20MB.
+
+"""
 import ctypes
 from os import environ as ENV
 
@@ -241,7 +257,7 @@ def _set_api_wrapper(api_name):
                                            *args, **kwargs))
         ret = func(*args, **kwargs)
         if ret != TF_OK:
-            raise IMLProfError(ret)
+            raise RLScopeLibraryError(ret)
         return ret
     setattr(rlscope_api, api_name, api_wrapper)
 
@@ -256,7 +272,7 @@ def set_metadata(directory, process_name, machine_name, phase):
         _as_c_string(phase),
     )
     if ret != TF_OK:
-        raise IMLProfError(ret)
+        raise RLScopeLibraryError(ret)
     return ret
 
 def record_event(
@@ -281,7 +297,7 @@ def record_event(
         _as_c_string(name),
     )
     if ret != TF_OK:
-        raise IMLProfError(ret)
+        raise RLScopeLibraryError(ret)
     return ret
 
 def record_overhead_event(
@@ -295,7 +311,7 @@ def record_overhead_event(
         c_int(num_events)
     )
     if ret != TF_OK:
-        raise IMLProfError(ret)
+        raise RLScopeLibraryError(ret)
     return ret
 
 def record_overhead_event_for_operation(
@@ -311,7 +327,7 @@ def record_overhead_event_for_operation(
         c_int(num_events)
     )
     if ret != TF_OK:
-        raise IMLProfError(ret)
+        raise RLScopeLibraryError(ret)
     return ret
 
 def push_operation(operation):
@@ -321,7 +337,7 @@ def push_operation(operation):
         _as_c_string(operation),
     )
     if ret != TF_OK:
-        raise IMLProfError(ret)
+        raise RLScopeLibraryError(ret)
     return ret
 
 def set_max_operations(operation, num_pushes):
@@ -332,7 +348,7 @@ def set_max_operations(operation, num_pushes):
         c_int(num_pushes),
     )
     if ret != TF_OK:
-        raise IMLProfError(ret)
+        raise RLScopeLibraryError(ret)
     return ret
 
 def pop_operation():
@@ -340,7 +356,7 @@ def pop_operation():
         logger.info(_log_api_call_msg('pop_operation'))
     ret = _so.rlscope_pop_operation()
     if ret != TF_OK:
-        raise IMLProfError(ret)
+        raise RLScopeLibraryError(ret)
     return ret
 
 def start_pass():
@@ -348,7 +364,7 @@ def start_pass():
         logger.info(_log_api_call_msg('start_pass'))
     ret = _so.rlscope_start_pass()
     if ret != TF_OK:
-        raise IMLProfError(ret)
+        raise RLScopeLibraryError(ret)
     return ret
 
 def end_pass():
@@ -356,7 +372,7 @@ def end_pass():
         logger.info(_log_api_call_msg('end_pass'))
     ret = _so.rlscope_end_pass()
     if ret != TF_OK:
-        raise IMLProfError(ret)
+        raise RLScopeLibraryError(ret)
     return ret
 
 def has_next_pass():
@@ -365,7 +381,7 @@ def has_next_pass():
     has_next_pass = c_int(0)
     ret = _so.rlscope_has_next_pass(ctypes.byref(has_next_pass))
     if ret != TF_OK:
-        raise IMLProfError(ret)
+        raise RLScopeLibraryError(ret)
     value = bool(has_next_pass.value)
     if py_config.DEBUG and py_config.DEBUG_RLSCOPE_LIB_CALLS:
         if value:
@@ -377,21 +393,24 @@ def disable_gpu_hw():
         logger.info(_log_api_call_msg('disable_gpu_hw'))
     ret = _so.rlscope_disable_gpu_hw()
     if ret != TF_OK:
-        raise IMLProfError(ret)
+        raise RLScopeLibraryError(ret)
     return ret
 
 #
 # API wrapper helpers.
 #
 
-class IMLProfError(Exception):
+class RLScopeLibraryError(Exception):
+    """
+    Error raised when an error is returned by a ``librlscope.so`` API call.
+    """
     def __init__(self, errcode):
         self.errcode = errcode
         super().__init__(self._gen_msg())
 
     def _gen_msg(self):
         msg = textwrap.dedent("""\
-        IML API Error-code = {err} (see logs above for detailed C++ error messages)
+        RL-Scope API Error-code = {err} (see logs above for detailed C++ error messages)
         """.format(err=error_string(self.errcode)))
         return msg
 

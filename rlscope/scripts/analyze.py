@@ -1,5 +1,6 @@
 """
-rls-run script for processing trace-data produced from an ML script.
+``rls-run`` script for processing trace files (e.g., cross-stack event overlap)
+produced from a training script.
 """
 from rlscope.profiler.rlscope_logging import logger
 import subprocess
@@ -21,7 +22,7 @@ def main():
         Process trace-files collected from running an ML script with the IML profiler.
         
         For task-specific help, provided task-name and --help, e.g.:
-        $ rls-run --task SQLParserTask --help
+        $ rls-run --task OverlapStackedBarTask --help
         
         NOTE: 
         - This script is a thin usage/debugging wrapper around a "luigi" DAG execution script. 

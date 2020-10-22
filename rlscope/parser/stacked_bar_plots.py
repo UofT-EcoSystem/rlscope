@@ -1,3 +1,7 @@
+"""
+matplotlib code for creating the "stacked bar plot" figure used for CPU/GPU time breakdowns.
+Also contains code for generating LaTeX macros for cited metrics in RL-Scope paper.
+"""
 from rlscope.profiler.rlscope_logging import logger
 import argparse
 import subprocess

@@ -1,3 +1,7 @@
+"""
+Plotting code for GPU hardware metrics (i.e., SM occupancy, SM efficiency),
+and miscellaneous experiments with GPU utilization.
+"""
 from rlscope.profiler.rlscope_logging import logger
 import argparse
 import traceback

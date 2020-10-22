@@ -52,7 +52,12 @@ extensions = [
     # https://www.sphinx-doc.org/en/master/usage/extensions/napoleon.html#configuration
     'sphinx.ext.napoleon',
     'sphinx.ext.viewcode',
+    'sphinx.ext.todo',
 ]
+
+# If this is True, todo and todolist produce output, else they produce nothing.
+# The default is False.
+todo_include_todos = True
 
 # I prefer the numpy style.
 napoleon_google_docstring = False

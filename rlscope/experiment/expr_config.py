@@ -1,3 +1,9 @@
+"""
+Define which RL algorithms and environments (simulators) to run for experiments.
+
+.. deprecated:: 1.0.0
+    We run experiments from bash using ``run_bench.sh``.
+"""
 # Query available experiments to run
 # i.e. available (algo, env) combinatinos for stable-baselines
 import traceback
