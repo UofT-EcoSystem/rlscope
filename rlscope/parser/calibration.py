@@ -51,7 +51,7 @@ from rlscope.experiment.util import tee, expr_run_cmd, expr_already_ran
 from rlscope.profiler.concurrent import ForkedProcessPool, ProcessPoolExecutorWrapper
 from rlscope.scripts import bench
 from rlscope.experiment import expr_config
-from rlscope.parser.dataframe import IMLConfig
+from rlscope.parser.dataframe import RLScopeConfig
 from rlscope.parser.profiling_overhead import \
     parse_microbench_overhead_js, \
     DataframeMapper, \
@@ -363,14 +363,28 @@ class Calibration:
 
         unins_rlscope_dirs = []
         rlscope_dirs = []
+        rlscope_config_dirs = []
         for rlscope_directory in directories:
-            unins_rlscope_dirs.extend(self.conf(rlscope_directory, 'uninstrumented', calibration=True).rlscope_directories(rlscope_directory, repetitions=repetitions))
-            rlscope_dirs.extend(self.conf(rlscope_directory, 'time_breakdown', calibration=False).rlscope_directories(rlscope_directory, repetitions=repetitions))
-            if len(rlscope_dirs) != len(unins_rlscope_dirs):
-                log_missing_files(self, task=task, files={
+            if correct_overhead:
+                # Use total training time from uninstrumented run.
+                training_time_config_suffix = 'uninstrumented'
+                unins_rlscope_dirs.extend(self.conf(rlscope_directory, training_time_config_suffix, calibration=True).rlscope_directories(rlscope_directory, repetitions=repetitions))
+            else:
+                # Use total training time from instrumented run.
+                training_time_config_suffix = 'time_breakdown'
+                unins_rlscope_dirs.extend(self.conf(rlscope_directory, training_time_config_suffix, calibration=False).rlscope_directories(rlscope_directory, repetitions=repetitions))
+            rlscope_dirs.extend(self.conf(rlscope_directory, 'time_breakdown', calibration=False).rlscope_directories(rlscope_directory, repetitions=repetitions, correct_overhead=correct_overhead))
+            if not correct_overhead:
+                rlscope_config_dirs.extend(self.conf(rlscope_directory, 'time_breakdown', calibration=False).rlscope_directories(rlscope_directory, repetitions=repetitions, correct_overhead=True))
+            if len(rlscope_dirs) != len(unins_rlscope_dirs) or \
+                (not correct_overhead and len(rlscope_dirs) != len(rlscope_config_dirs)):
+                missing_files = {
                     'rlscope_dirs': rlscope_dirs,
                     'unins_rlscope_dirs': unins_rlscope_dirs,
-                })
+                }
+                if not correct_overhead:
+                    missing_files['rlscope_config_dirs'] = rlscope_config_dirs
+                log_missing_files(self, task=task, files=missing_files)
                 return
 
         # Stick plots in root directory.
@@ -397,6 +411,10 @@ class Calibration:
                '--rlscope-directories', json.dumps(rlscope_dirs),
                '--unins-rlscope-directories', json.dumps(unins_rlscope_dirs),
                ]
+        if not correct_overhead:
+            cmd.extend([
+                '--rlscope-config-directories', json.dumps(rlscope_config_dirs),
+            ])
         if extra_argv is not None:
             cmd.extend(extra_argv)
         # if xtick_expression is not None:
@@ -896,6 +914,13 @@ class Calibration:
         if sync:
             self._pool.shutdown()
 
+    def _get_plot_dir(self, output_directory, correct_overhead):
+        if correct_overhead:
+            plot_dir = output_directory
+        else:
+            plot_dir = _j(output_directory, corrected_suffix(correct_overhead, skip_dot=True))
+        return plot_dir
+
     def do_plot(self, directories, output_directory, extra_argv=None, **kwargs):
         for rlscope_directory in directories:
             self.do_calibration(rlscope_directory, sync=False)
@@ -926,10 +951,11 @@ class Calibration:
 
         for correct_overhead in [True, False]:
             if should_plot('time-breakdown'):
+                plot_dir = self._get_plot_dir(output_directory, correct_overhead)
                 self._pool.submit(
                     get_func_name(self, 'compute_time_breakdown_plot'),
                     self.compute_time_breakdown_plot,
-                    directories, output_directory, correct_overhead, extra_argv,
+                    directories, plot_dir, correct_overhead, extra_argv,
                     sync=self.debug_single_thread,
                     **kwargs,
                 )
@@ -941,6 +967,7 @@ class Calibration:
                 sync=self.debug_single_thread,
                 **kwargs,
             )
+        # NOTE: there's no such thing as a "uncorrected transition graph"
         for correct_overhead in [False]:
             if should_plot('category-transition'):
                 self._pool.submit(
@@ -984,7 +1011,7 @@ class Calibration:
 
         def add_calibration_config(calibration=True, **common_kwargs):
             config_kwargs = dict(common_kwargs)
-            base_config = RLScopeConfig(**config_kwargs)
+            base_config = RLScopeRunConfig(**config_kwargs)
             if not calibration:
                 config = base_config
             else:
@@ -994,7 +1021,7 @@ class Calibration:
                     # Disable tfprof: CUPTI and LD_PRELOAD.
                     config_suffix=config_suffix,
                 ))
-                config = RLScopeConfig(**calibration_config_kwargs)
+                config = RLScopeRunConfig(**calibration_config_kwargs)
                 assert config.is_calibration
 
             self.configs.append(config)
@@ -1056,7 +1083,7 @@ class Calibration:
             script_args=['--rlscope-disable-pyprof'],
         )
         # # CUPTIScalingOverheadTask:
-        # config = RLScopeConfig(
+        # config = RLScopeRunConfig(
         #     expr=self,
         #     rlscope_prof_config='gpu-activities-api-time',
         #     config_suffix='gpu_activities_api_time_calibration',
@@ -1073,7 +1100,7 @@ class Calibration:
         # if self.calibration_mode == 'validation':
         #     # Evaluate: combined tfprof/pyprof overhead correction.
         #     # (i.e. full IML trace-collection).
-        #     config = RLScopeConfig(
+        #     config = RLScopeRunConfig(
         #         expr=self,
         #         rlscope_prof_config='full',
         #         # Enable tfprof: CUPTI and LD_PRELOAD.
@@ -1086,7 +1113,7 @@ class Calibration:
 
         # if self.calibration_mode == 'validation':
         #     # Evaluate: tfprof overhead correction in isolation.
-        #     config = RLScopeConfig(
+        #     config = RLScopeRunConfig(
         #         expr=self,
         #         rlscope_prof_config='full',
         #         # Enable tfprof: CUPTI and LD_PRELOAD.
@@ -1099,7 +1126,7 @@ class Calibration:
 
         # if self.calibration_mode == 'validation':
         #     # Evaluate: pyprof overhead correction in isolation.
-        #     config = RLScopeConfig(
+        #     config = RLScopeRunConfig(
         #         expr=self,
         #         rlscope_prof_config='uninstrumented',
         #         # Disable tfprof: CUPTI and LD_PRELOAD.
@@ -1204,7 +1231,7 @@ class Calibration:
     #     self.do_plot()
 
 
-class RLScopeConfig:
+class RLScopeRunConfig:
     def __init__(self, expr, rlscope_prof_config, config_suffix, rls_analyze_mode=None, script_args=[]):
         self.expr = expr
         # $ rls-prof --config ${rlscope_prof_config}
@@ -1525,10 +1552,13 @@ def rep_suffix(rep):
     assert rep is not None
     return "_repetition_{rep:02}".format(rep=rep)
 
-def corrected_suffix(correct_overhead):
+def corrected_suffix(correct_overhead, skip_dot=False):
+    ss = StringIO()
     if not correct_overhead:
-        return ".corrected_no"
-    return ""
+        if not skip_dot:
+            ss.write('.')
+        ss.write('corrected_no')
+    return ss.getvalue()
 
 def add_rlscope_analyze_flags(cmd, args):
     if args.debug:

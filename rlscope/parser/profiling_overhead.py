@@ -22,7 +22,7 @@ import seaborn as sns
 from matplotlib import pyplot as plt
 
 from rlscope.profiler.util import pprint_msg
-from rlscope.parser.dataframe import TrainingProgressDataframeReader, CUDAAPIStatsDataframeReader, PyprofDataframeReader, read_rlscope_config, DataframeMapper, IMLConfig, VennData, map_readers, get_training_durations_df
+from rlscope.parser.dataframe import TrainingProgressDataframeReader, CUDAAPIStatsDataframeReader, PyprofDataframeReader, read_rlscope_config, DataframeMapper, RLScopeConfig, VennData, map_readers, get_training_durations_df
 from rlscope.parser.readers import OpStackReader, CUDAAPIStatsReader
 from rlscope.parser.stacked_bar_plots import StackedBarPlot
 from rlscope.parser import stacked_bar_plots
@@ -187,9 +187,9 @@ class CorrectedTrainingTimeParser:
         self.debug_single_thread = debug_single_thread
         self.debug_memoize = debug_memoize
 
-        rlscope_config = IMLConfig(self.rlscope_directories[0])
+        rlscope_config = RLScopeConfig(self.rlscope_directories[0])
         if self.debug:
-            logger.info("IMLConfig.rlscope_prof_args: {msg}".format(
+            logger.info("RLScopeConfig.rlscope_prof_args: {msg}".format(
                 msg=pprint_msg({
                     'rlscope_config.rlscope_prof_args': rlscope_config.rlscope_prof_args,
                     # 'rlscope_config.rlscope_config': rlscope_config.rlscope_config,
@@ -197,7 +197,7 @@ class CorrectedTrainingTimeParser:
 
         def check_all_true(var):
             for directory in self.rlscope_directories:
-                rlscope_config = IMLConfig(directory)
+                rlscope_config = RLScopeConfig(directory)
                 assert rlscope_config.get_env_bool(var)
 
         self.should_subtract_cupti = False

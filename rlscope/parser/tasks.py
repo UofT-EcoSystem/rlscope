@@ -971,6 +971,7 @@ param_hack_upper_right_legend_bbox_x = luigi.FloatParameter(description="matplot
 param_xtick_expression = luigi.Parameter(description="Python expression to generate xtick labels for plot.  Expression has access to individual 'row' and entire dataframe 'df'", default=None)
 class OverlapStackedBarTask(luigi.Task):
     rlscope_directories = luigi.ListParameter(description="Multiple --rlscope-directory entries for finding overlap_type files: *.venn_js.js")
+    rlscope_config_directories = luigi.ListParameter(description="Multiple --rlscope-directory entries for finding rlscope_config.json files (needed for making uncorrected plots)", default=None)
     unins_rlscope_directories = luigi.ListParameter(description="Multiple --rlscope-directory entries for finding total uninstrumented training time (NOTE: every rlscope_directory should have an unins_rlscope_directory)")
     directory = luigi.Parameter(description="Output directory", default=".")
     xtick_expression = param_xtick_expression
@@ -1142,11 +1143,19 @@ class TexMetricsTask(luigi.Task):
     "Suprising findings" regarding Framework choice RLScope paper.
     """
     algo_choice_csv = luigi.Parameter(description="stable_baselines_fig_10_algo_choice/OverlapStackedBarPlot.overlap_type_CategoryOverlap.operation_training_time.csv", default=None)
+
     framework_choice_csv = luigi.Parameter(description="TD3: OverlapStackedBarPlot.overlap_type_CategoryOverlap.operation_training_time.csv", default=None)
     framework_choice_ddpg_csv = luigi.Parameter(description="DDPG: OverlapStackedBarPlot.overlap_type_CategoryOverlap.operation_training_time.csv", default=None)
+
+    framework_choice_uncorrected_csv = luigi.Parameter(description="TD3: OverlapStackedBarPlot.overlap_type_CategoryOverlap.operation_training_time.csv", default=None)
+    framework_choice_ddpg_uncorrected_csv = luigi.Parameter(description="DDPG: OverlapStackedBarPlot.overlap_type_CategoryOverlap.operation_training_time.csv", default=None)
+
     framework_choice_trans_csv = luigi.Parameter(description="TD3: CategoryTransitionPlot.combined.csv", default=None)
     framework_choice_ddpg_trans_csv = luigi.Parameter(description="DDPG: CategoryTransitionPlot.combined.csv", default=None)
+
     directory = luigi.Parameter(description="Output directory", default=".")
+    file_suffix = luigi.Parameter(description="Generated LaTeX file will contain *.<file_suffix>.tex", default=None)
+    tex_variable_prefix = luigi.Parameter(description=r"Prefix \newcommand LaTeX variables with --tex-variable-prefix (NOTE: prefix will be camel cased)", default=None)
 
     debug = param_debug
     debug_single_thread = param_debug_single_thread

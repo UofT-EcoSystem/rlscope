@@ -666,6 +666,20 @@ all_run_reagent() {
 )
 }
 
+_should_skip_algo() {
+  local algo="$1"
+  local only_algo="$2"
+  shift 2
+  [ "$only_algo" != "" ] && [ "$only_algo" != "$algo" ]
+}
+
+_should_skip_env() {
+  local env_id="$1"
+  local only_env_id="$2"
+  shift 2
+  [ "$only_env_id" != "" ] && [ "$only_env_id" != "$env_id" ]
+}
+
 all_run_stable_baselines() {
 (
   set -eu
@@ -674,6 +688,10 @@ all_run_stable_baselines() {
   max_passes=${max_passes:-}
   repetitions=${repetitions:-5}
   re_calibrate=${re_calibrate:-no}
+  # For debugging; only run $algo
+  only_algo=${algo:-}
+  # For debugging; only run $env
+  only_env_id=${env:-}
   re_plot=${re_plot:-no}
   dry_run=${dry_run:-no}
   fig=${fig:-all}
@@ -681,14 +699,26 @@ all_run_stable_baselines() {
   if [ "$fig" = 'framework_choice' ] || [ "$fig" = 'all' ]; then
     # Fig 11: RL framework choice
     for algo in $(fig_framework_choice_algos); do
+      if _should_skip_algo "$algo" "$only_algo"; then
+        continue
+      fi
       for env_id in $(fig_framework_choice_envs); do
+        if _should_skip_env "$env_id" "$only_env_id"; then
+          continue
+        fi
         run_stable_baselines
       done
     done
 
     # Fig 11(b): RL framework choice DDPG
     for algo in $(fig_framework_choice_algos_ddpg); do
+      if _should_skip_algo "$algo" "$only_algo"; then
+        continue
+      fi
       for env_id in $(fig_framework_choice_envs); do
+        if _should_skip_env "$env_id" "$only_env_id"; then
+          continue
+        fi
         run_stable_baselines
       done
     done
@@ -736,20 +766,107 @@ fig_framework_choice_envs() {
   echo Walker2DBulletEnv-v0
 }
 
+all_gen_tex() {
+(
+  set -eu
+  gen_tex_framework_choice
+  gen_tex_framework_choice_uncorrected
+)
+}
+
 gen_tex_framework_choice() {
 (
   set -eu
 
-  dry_run=${dry_run:-no}
-
-  args=(
-    rls-run
-    --task TexMetricsTask
+  local args=(
     --directory $(framework_choice_plots_direc)
     --framework-choice-csv $(framework_choice_plots_direc)/OverlapStackedBarPlot.*.operation_training_time.csv
     --framework-choice-ddpg-csv $(framework_choice_plots_ddpg_direc)/OverlapStackedBarPlot.*.operation_training_time.csv
     --framework-choice-trans-csv $(framework_choice_plots_direc)/CategoryTransitionPlot.combined.csv
     --framework-choice-ddpg-trans-csv $(framework_choice_plots_ddpg_direc)/CategoryTransitionPlot.combined.csv
+  )
+  _gen_tex_framework_choice "${args[@]}"
+)
+}
+gen_tex_framework_choice_uncorrected() {
+(
+  set -eu
+
+  # NOTE: we generate two tex files:
+  # (1) corrected_no/*.tex
+  # (2) corrected_no/*.uncorrected.tex
+  #     Use "Uncorrected" prefix in \newcommand variable definition.
+  # (3) FrameworkChoiceUncorrected.tex
+  #     Metrics computed by comparing values in corrected runs to those in uncorrected runs.
+  #     (e.g. training time inflation).
+
+  _gen_tex() {
+    local args=(
+      --directory $(framework_choice_plots_uncorrected_direc)
+      --framework-choice-csv $(framework_choice_plots_uncorrected_direc)/OverlapStackedBarPlot.*.operation_training_time.csv
+      --framework-choice-ddpg-csv $(framework_choice_plots_ddpg_uncorrected_direc)/OverlapStackedBarPlot.*.operation_training_time.csv
+      --framework-choice-trans-csv $(framework_choice_plots_direc)/CategoryTransitionPlot.combined.csv
+      --framework-choice-ddpg-trans-csv $(framework_choice_plots_ddpg_direc)/CategoryTransitionPlot.combined.csv
+    )
+    _gen_tex_framework_choice "${args[@]}" "$@"
+  }
+
+#  # (1) corrected_no/*.tex
+#  _gen_tex "${args[@]}" "$@"
+#
+#  # (2) corrected_no/*.uncorrected.tex
+#  local args=(
+#      --file-suffix ".uncorrected"
+#      --tex-variable-prefix "Uncorrected"
+#  )
+#  _gen_tex "${args[@]}" "$@"
+
+  # (3) FrameworkChoiceUncorrected.tex
+  local args=(
+      --directory $(framework_choice_plots_direc)
+      --framework-choice-csv $(framework_choice_plots_direc)/OverlapStackedBarPlot.*.operation_training_time.csv
+      --framework-choice-ddpg-csv $(framework_choice_plots_ddpg_direc)/OverlapStackedBarPlot.*.operation_training_time.csv
+      --framework-choice-uncorrected-csv $(framework_choice_plots_uncorrected_direc)/OverlapStackedBarPlot.*.operation_training_time.csv
+      --framework-choice-ddpg-uncorrected-csv $(framework_choice_plots_ddpg_uncorrected_direc)/OverlapStackedBarPlot.*.operation_training_time.csv
+  )
+  _gen_tex_framework_choice "${args[@]}" "$@"
+
+)
+}
+_gen_tex_framework_choice() {
+(
+  set -eu
+
+  dry_run=${dry_run:-no}
+
+  local args=(
+    rls-run
+    --task TexMetricsTask
+  )
+  if [ "${dry_run}" = 'yes' ]; then
+    args+=(
+      --dry-run
+    )
+  fi
+  if [ "${DEBUG}" = 'yes' ]; then
+    args+=(--pdb --debug --debug-single-thread)
+  fi
+  _do "${args[@]}" "$@"
+
+)
+}
+
+_gen_tex_algo_choice() {
+(
+  set -eu
+
+  dry_run=${dry_run:-no}
+
+  local args=(
+    rls-run
+    --task TexMetricsTask
+#    --directory $(stable_baselines_plots_direc)/stable_baselines_fig_10_algo_choice
+#    --algo-choice-csv $(stable_baselines_plots_direc)/stable_baselines_fig_10_algo_choice/OverlapStackedBarPlot.*.operation_training_time.csv
   )
   if [ "${dry_run}" = 'yes' ]; then
     args+=(
@@ -770,21 +887,43 @@ gen_tex_algo_choice() {
 
   dry_run=${dry_run:-no}
 
-  args=(
-    rls-run
-    --task TexMetricsTask
+  local args=(
     --directory $(stable_baselines_plots_direc)/stable_baselines_fig_10_algo_choice
     --algo-choice-csv $(stable_baselines_plots_direc)/stable_baselines_fig_10_algo_choice/OverlapStackedBarPlot.*.operation_training_time.csv
   )
-  if [ "${dry_run}" = 'yes' ]; then
-    args+=(
-      --dry-run
+  _do _gen_tex_algo_choice "${args[@]}" "$@"
+
+)
+}
+
+gen_tex_algo_choice_uncorrected() {
+(
+  set -eu
+
+  dry_run=${dry_run:-no}
+
+  # NOTE: we generate two tex files:
+  # (1) corrected_no/*.tex
+  # (2) corrected_no/*.uncorrected.tex
+  #     Use "Uncorrected" prefix in \newcommand variable definition.
+
+  _gen_tex() {
+    local args=(
+      --directory $(stable_baselines_plots_direc)/stable_baselines_fig_10_algo_choice/corrected_no
+      --algo-choice-csv $(stable_baselines_plots_direc)/stable_baselines_fig_10_algo_choice/corrected_no/OverlapStackedBarPlot.*.operation_training_time.csv
     )
-  fi
-  if [ "${DEBUG}" = 'yes' ]; then
-    args+=(--pdb --debug --debug-single-thread)
-  fi
-  _do "${args[@]}" "$@"
+    _do _gen_tex_algo_choice "${args[@]}" "$@"
+  }
+
+  # (1) corrected_no/*.tex
+  _gen_tex "${args[@]}" "$@"
+
+  # (2) corrected_no/*.uncorrected.tex
+  local args=(
+      --file-suffix ".uncorrected"
+      --tex-variable-prefix "Uncorrected"
+  )
+  _gen_tex "${args[@]}" "$@"
 
 )
 }
@@ -1240,6 +1379,13 @@ framework_choice_plots_direc() {
   echo "${rlscope_plots_dir}"
 )
 }
+framework_choice_plots_uncorrected_direc() {
+(
+  set -eu
+  local rlscope_plots_dir=$IML_DIR/output/plots/framework_choice/corrected_no
+  echo "${rlscope_plots_dir}"
+)
+}
 
 framework_choice_metrics_direc() {
 (
@@ -1253,6 +1399,13 @@ framework_choice_plots_ddpg_direc() {
 (
   set -eu
   local rlscope_plots_dir=$IML_DIR/output/plots/framework_choice_ddpg
+  echo "${rlscope_plots_dir}"
+)
+}
+framework_choice_plots_ddpg_uncorrected_direc() {
+(
+  set -eu
+  local rlscope_plots_dir=$IML_DIR/output/plots/framework_choice_ddpg/corrected_no
   echo "${rlscope_plots_dir}"
 )
 }
@@ -1911,6 +2064,14 @@ plot_stable_baselines_fig_9_simulator_choice() {
 (
   set -eu
 
+  calibrate=${calibrate:-yes}
+  # max_passes=${max_passes:-}
+  repetitions=${repetitions:-5}
+  re_calibrate=${re_calibrate:-no}
+  re_plot=${re_plot:-no}
+  dry_run=${dry_run:-no}
+  # fig=${fig:-all}
+
   # Fig 9: Simulator choice
   # tf-agents
   #
@@ -2295,4 +2456,5 @@ else
     echo "  old_run_stable_baselines"
     exit 1
 fi
+
 

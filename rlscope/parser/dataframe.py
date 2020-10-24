@@ -1331,7 +1331,7 @@ def get_rlscope_config_path(directory, allow_many=False, allow_none=False):
     # There should be exactly one rlscope_config.json file.
     # Q: Couldn't there be multiple for multi-process scripts like minigo?
     if len(rlscope_config_paths) != 1 and not allow_many:
-        raise NoIMLConfigFound("Expected 1 rlscope_config.json but saw {len} within rlscope_directory={dir}: {msg}".format(
+        raise NoRLScopeConfigFound("Expected 1 rlscope_config.json but saw {len} within rlscope_directory={dir}: {msg}".format(
             dir=directory,
             len=len(rlscope_config_paths),
             msg=pprint_msg(rlscope_config_paths)))
@@ -1340,7 +1340,7 @@ def get_rlscope_config_path(directory, allow_many=False, allow_none=False):
         if allow_none:
             return None
         else:
-            raise NoIMLConfigFound("Didn't find any rlscope_config.json in rlscope_directory={dir}".format(
+            raise NoRLScopeConfigFound("Didn't find any rlscope_config.json in rlscope_directory={dir}".format(
                 dir=directory,
             ))
 
@@ -1376,17 +1376,17 @@ def read_rlscope_config_metadata(directory):
 
     return rlscope_metadata
 
-class NoIMLConfigFound(Exception):
+class NoRLScopeConfigFound(Exception):
     """
     Raised if we cannot locate a rlscope_config.json file
 
     See also
     ---------
-    IMLConfig : reading RL-Scope configuration files.
+    RLScopeConfig : reading RL-Scope configuration files.
     """
     pass
 
-class IMLConfig:
+class RLScopeConfig:
     """
     Read rlscope_config.json file, which contains RL-Scope profiler configuration information that the training script
     was run with (e.g., `--rlscope-*` command-line options, algo, env)

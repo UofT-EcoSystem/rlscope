@@ -17,3 +17,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Convert plots to svg (svg is better for PPT slides)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     pdf2svg
+# Convert pdf to png using pdftoppm command-line.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    poppler-utils

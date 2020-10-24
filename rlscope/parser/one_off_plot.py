@@ -30,7 +30,7 @@ from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, base
 
 from rlscope.profiler.util import pprint_msg
 from rlscope.parser.stacked_bar_plots import get_x_env, get_x_algo, xfields_from_xtick_expression, get_capsize, OverlapStackedBarPlot, add_repetition, group_numeric_cols
-from rlscope.parser.dataframe import UtilDataframeReader, IMLConfig
+from rlscope.parser.dataframe import UtilDataframeReader, RLScopeConfig
 
 from rlscope import py_config
 from rlscope.parser.common import *
@@ -1535,7 +1535,7 @@ class GpuUtilExperiment:
                 #     # 'algo': None,
                 #     # 'env': None,
                 # }
-                rlscope_config = IMLConfig(rlscope_dir)
+                rlscope_config = RLScopeConfig(rlscope_dir)
                 algo = rlscope_config.algo(allow_none=True)
                 env = rlscope_config.env(allow_none=True)
                 # if algo is not None:

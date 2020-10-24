@@ -24,7 +24,7 @@ from rlscope.experiment.util import tee, expr_run_cmd, expr_already_ran
 from rlscope.profiler.concurrent import ForkedProcessPool
 from rlscope.scripts import bench
 from rlscope.experiment import expr_config
-from rlscope.parser.dataframe import IMLConfig
+from rlscope.parser.dataframe import RLScopeConfig
 from rlscope.parser.profiling_overhead import \
     parse_microbench_overhead_js, \
     DataframeMapper, \
@@ -2169,7 +2169,7 @@ class ExprSubtractionValidation:
 
 class IMLConfigDir:
     def __init__(self, rlscope_config_path):
-        self.rlscope_config = IMLConfig(rlscope_config_path=rlscope_config_path)
+        self.rlscope_config = RLScopeConfig(rlscope_config_path=rlscope_config_path)
         self.config_dir = self._as_config_dir(rlscope_config_path)
 
     def _as_config_dir(self, path):

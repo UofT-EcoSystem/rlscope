@@ -40,7 +40,7 @@ from rlscope.parser.db import SQLCategoryTimesReader, sql_get_source_files, sql_
 from rlscope.parser.plot_index import _DataIndex
 from rlscope.parser import plot_index
 from rlscope.parser.overlap_result import from_js, CategoryKey as CategoryKeyJS
-from rlscope.parser.dataframe import VennData, get_training_durations_df, read_rlscope_config_metadata, get_total_timesteps, get_end_num_timesteps, IMLConfig, extrap_total_training_time
+from rlscope.parser.dataframe import VennData, get_training_durations_df, read_rlscope_config_metadata, get_total_timesteps, get_end_num_timesteps, RLScopeConfig, extrap_total_training_time
 from rlscope.parser import dataframe as rlscope_dataframe
 from rlscope.parser.plot import LegendMaker, HATCH_STYLES, HATCH_STYLE_EMPTY, Y_LABEL_TRAINING_TIME_SEC
 
@@ -92,6 +92,7 @@ class OverlapStackedBarPlot:
                  unins_rlscope_directories,
                  directory,
                  overlap_type,
+                 rlscope_config_directories=None,
                  resource_overlap=None,
                  operation=None,
                  training_time=False,
@@ -150,6 +151,9 @@ class OverlapStackedBarPlot:
         self._initialized = False
         self.rlscope_directories = rlscope_directories
         self.unins_rlscope_directories = unins_rlscope_directories
+        if rlscope_config_directories is None:
+            rlscope_config_directories = []
+        self.rlscope_config_directories = rlscope_config_directories
         logger.info("{klass}:\n{msg}".format(
             klass=self.__class__.__name__,
             msg=pprint_msg({
@@ -469,17 +473,21 @@ class OverlapStackedBarPlot:
             # selector[field_name] = choices[0]
 
     def each_vd(self):
-        for rlscope_dir in self.rlscope_directories:
+
+        for rlscope_dir, rlscope_config_dir in itertools.zip_longest(self.rlscope_directories, self.rlscope_config_directories):
+            if rlscope_config_dir is None:
+                rlscope_config_dir = rlscope_dir
+
             idx = self.data_index[rlscope_dir]
 
             # If rlscope_config.json is present in 'algo' and 'env' are defined, get them from there.
             # Else, guess algo/env from directory path: assume rlscope_dir looks like <algo>/<env>
 
-            rlscope_config_path = rlscope_dataframe.get_rlscope_config_path(rlscope_dir, allow_none=True)
+            rlscope_config_path = rlscope_dataframe.get_rlscope_config_path(rlscope_config_dir, allow_none=True)
             algo = None
             env = None
             if rlscope_config_path is not None:
-                rlscope_config = IMLConfig(rlscope_config_path=rlscope_config_path)
+                rlscope_config = RLScopeConfig(rlscope_config_path=rlscope_config_path)
                 # with open(rlscope_config_path, 'r') as f:
                 #     rlscope_config = json.load(f)
                 algo = rlscope_config.algo(allow_none=True)
@@ -2314,7 +2322,9 @@ class DetailedStackedBarPlot:
         fig.savefig(self.path, bbox_inches="tight", pad_inches=0)
         plt.close(fig)
         crop_pdf(self.path)
-        pdf2svg(self.path)
+        # NOTE: svg files are MB's in size (not sure why)... PNG is KB in size and resolution is fine.
+        # pdf2svg(self.path)
+        pdf2png(self.path)
 
         # self._add_lines(operation)
         # self._add_legend(operation)
@@ -3943,6 +3953,29 @@ def pdf2svg(path, output=None, can_skip=False):
                            output,
                            ])
 
+def pdf2png(path, output=None, can_skip=False):
+    if output is None:
+        output = re.sub(r'\.pdf$', '.png', path)
+        # If this fails, then "path" doesn't end with .pdf.
+        assert path != output
+    if not shutil.which('pdftoppm'):
+        if can_skip:
+            logger.warning(f"pdftoppm shell command not found; SKIP: pdftoppm {path} {output}")
+            return
+        else:
+            raise RuntimeError(f"pdftoppm shell command not found for: \"pdftoppm {path} {output}\".  Install with \"sudo apt install poppler-utils\"")
+    with open(output, 'wb') as f:
+        subprocess.check_call([
+            'pdftoppm',
+            # input
+            path,
+            '-png',
+            # first page
+            '-f', '1',
+            # single page pdf
+            '-singlefile',
+        ], stdout=f)
+
 def regex_match(x, regex_value_pairs, allow_no_match=True):
     for regex, value in regex_value_pairs:
         if re.search(regex, x):
@@ -4094,14 +4127,13 @@ class CategoryTransitionPlot:
         self._parse_js[json_path] = cmap
         return cmap
 
-    # def parse_rlscope_config(self, json_path):
     def parse_rlscope_config(self, rlscope_dir):
         # rlscope_dir = _d(json_path)
         if rlscope_dir in self._parse_rlscope_config:
             return self._parse_rlscope_config[rlscope_dir]
         rlscope_config_path = rlscope_dataframe.get_rlscope_config_path(rlscope_dir, allow_none=True)
         if rlscope_config_path is not None:
-            rlscope_config = IMLConfig(rlscope_config_path=rlscope_config_path)
+            rlscope_config = RLScopeConfig(rlscope_config_path=rlscope_config_path)
         else:
             rlscope_config = None
         self._parse_rlscope_config[rlscope_dir] = rlscope_config
@@ -4499,8 +4531,8 @@ def rls_paper_fontsizes():
     plt.rc('figure', titlesize=FONT_SIZE)  # fontsize of the figure title
 
 
-class FrameworkChoiceMetric:
-    def __init__(self, tex_template, tex_label, set_once=True):
+class TexMetric:
+    def __init__(self, tex_template, tex_label, set_once=True, tex_variable_prefix=None):
         self.tex_template = tex_template
         self.tex_label = tex_label
         # I tend to add metrics in the order in which they appear in the statement;
@@ -4509,6 +4541,7 @@ class FrameworkChoiceMetric:
         # Supporting data.
         self.df = None
         self.set_once = set_once
+        self.tex_variable_prefix = tex_variable_prefix
 
     def tex_generate_defn(self, template=False):
         """
@@ -4517,8 +4550,6 @@ class FrameworkChoiceMetric:
         :return:
         """
         defns = []
-        # metric_names = sorted(self.metrics.keys())
-        # for i, metric_name in enumerate(metric_names):
         for i, metric_name in enumerate(self.metrics.keys()):
             varname = self.tex_varname(metric_name)
             if template:
@@ -4530,6 +4561,13 @@ class FrameworkChoiceMetric:
             defn = self.tex_defn(varname, value)
             defns.append(defn)
         return '\n'.join(defns)
+
+    def add_json(self, js):
+        for metric_name, value in self.metrics.values():
+            varname = self.tex_varname(metric_name)
+            value = self.metrics[metric_name]
+            assert varname not in js
+            js[varname] = value
 
     def tex_varname(self, metric_name):
         """
@@ -4544,6 +4582,8 @@ class FrameworkChoiceMetric:
         :return:
         """
         components = []
+        if self.tex_variable_prefix is not None:
+            components.append(self.tex_variable_prefix)
         components.extend(self._split(self.tex_label))
         components.extend(self._split(metric_name))
         varname = self._join(components)
@@ -4604,7 +4644,11 @@ class TexMetrics:
                  framework_choice_ddpg_csv=None,
                  framework_choice_trans_csv=None,
                  framework_choice_ddpg_trans_csv=None,
+                 framework_choice_uncorrected_csv=None,
+                 framework_choice_ddpg_uncorrected_csv=None,
                  algo_choice_csv=None,
+                 file_suffix=None,
+                 tex_variable_prefix=None,
                  debug=False,
                  debug_single_thread=False,
                  # Swallow any excess arguments
@@ -4614,26 +4658,60 @@ class TexMetrics:
             if any([f is None for f in csv_files]) and not all([f is None for f in csv_files]):
                 raise RuntimeError(f"You must provide all {opt_string} or none.")
 
-        framework_choice_csvs = []
+        def _has_any(csv_files):
+            return any([f is not None for f in csv_files])
+
+
+        framework_choice_trans_csvs = []
+        # framework_choice_csvs = []
+        framework_choice_no_trans_csvs = []
         self.framework_choice_csv = framework_choice_csv
-        framework_choice_csvs.append(self.framework_choice_csv)
+        # framework_choice_csvs.append(self.framework_choice_csv)
+        framework_choice_no_trans_csvs.append(self.framework_choice_csv)
         self.framework_choice_ddpg_csv = framework_choice_ddpg_csv
-        framework_choice_csvs.append(self.framework_choice_ddpg_csv)
+        # framework_choice_csvs.append(self.framework_choice_ddpg_csv)
+        framework_choice_no_trans_csvs.append(self.framework_choice_ddpg_csv)
+
         self.framework_choice_trans_csv = framework_choice_trans_csv
-        framework_choice_csvs.append(self.framework_choice_trans_csv)
+        # framework_choice_csvs.append(self.framework_choice_trans_csv)
+        framework_choice_trans_csvs.append(self.framework_choice_trans_csv)
         self.framework_choice_ddpg_trans_csv = framework_choice_ddpg_trans_csv
-        framework_choice_csvs.append(self.framework_choice_ddpg_trans_csv)
-        _check_all_or_none(framework_choice_csvs, '--framework-choice-*-csv')
+        framework_choice_trans_csvs.append(self.framework_choice_ddpg_trans_csv)
+
+        _check_all_or_none(
+            framework_choice_no_trans_csvs,
+            '--framework-choice-*-csv')
+
+        # _check_all_or_none(framework_choice_csvs, '--framework-choice-*-csv')
+        if _has_any(framework_choice_trans_csvs):
+            _check_all_or_none(
+                framework_choice_no_trans_csvs + framework_choice_trans_csvs,
+                '--framework-choice-*-csv and --framework-choice-*-trans-csv')
+
+        framework_choice_uncorrected_csvs = []
+        self.framework_choice_uncorrected_csv = framework_choice_uncorrected_csv
+        framework_choice_uncorrected_csvs.append(self.framework_choice_uncorrected_csv)
+        self.framework_choice_ddpg_uncorrected_csv = framework_choice_ddpg_uncorrected_csv
+        framework_choice_uncorrected_csvs.append(self.framework_choice_ddpg_uncorrected_csv)
+
+        if _has_any(framework_choice_uncorrected_csvs):
+            _check_all_or_none(
+                framework_choice_no_trans_csvs + framework_choice_uncorrected_csvs,
+                '--framework-choice-*-csv and --framework-choice-*-uncorrected-csv')
 
         algo_choice_csvs = []
         self.algo_choice_csv = algo_choice_csv
         algo_choice_csvs.append(self.algo_choice_csv)
         _check_all_or_none(algo_choice_csvs, '--algo-choice-*-csv')
 
+        self.file_suffix = file_suffix
+        self.tex_variable_prefix = tex_variable_prefix
+
         self.directory = directory
         self.debug = debug
         self.debug_single_thread = debug_single_thread
         self._register_all_framework_choice_metrics()
+        self._register_all_framework_choice_uncorrected_metrics()
         self._register_all_algo_choice_metrics()
 
     def read_df(self, csv_files):
@@ -4661,12 +4739,24 @@ class TexMetrics:
         if self.framework_choice_csv is None:
             return
         self.framework_choice_df = self.read_df([self.framework_choice_csv, self.framework_choice_ddpg_csv])
+        if self.framework_choice_trans_csv is None:
+            return
         self.framework_choice_df_trans = self.read_df([self.framework_choice_trans_csv, self.framework_choice_ddpg_trans_csv])
+
+    def read_framework_choice_uncorrected_df(self):
+        if self.framework_choice_uncorrected_csv is None:
+            return
+        self.framework_choice_uncorrected_df = self.read_df([self.framework_choice_uncorrected_csv, self.framework_choice_ddpg_uncorrected_csv])
 
     def read_algo_choice_df(self):
         if self.algo_choice_csv is None:
             return
         self.algo_choice_df = self.read_df([self.algo_choice_csv])
+
+    def read_algo_choice_uncorrected_df(self):
+        if self.algo_choice_uncorrected_csv is None:
+            return
+        self.algo_choice_uncorrected_df = self.read_df([self.algo_choice_uncorrected_csv])
 
     def compute_metrics(self, metrics, tex_path):
         # Compute metrics
@@ -4674,64 +4764,76 @@ class TexMetrics:
             calc_func = self.get_calc_func(metric)
             calc_func(metric)
 
-        # Dump metrics
-        with open(tex_path, 'w') as f:
-            def _write(txt, indent=0):
-                f.write(textwrap.indent(textwrap.dedent(txt).lstrip(), prefix='  '*indent))
-            _write(r"""
-            %%% AUTOGENERATED - DO NOT MODIFY! %%
-            %
-            % Usage:
-            %   To enable raw numbers:
-            %     \def\{flag_var}{{1}}
-            %     \input{{{tex}}}
-            %
-            %   To enable placeholders:
-            %     % Comment out or delete any definition of {flag_var}
-            %     \input{{{tex}}}
-            %
-            
-            \ifx\{flag_var}\undefined
-            """.format(
-                flag_var=self._tex_flag_varname,
-                tex=_b(tex_path),
-            ))
-            for metric in metrics:
-                _write("% Autogenerated template metrics for: \\ref{{{tex_label}}}\n".format(
-                    tex_label=metric.tex_label,
-                ), indent=1)
-                _write(metric.tex_generate_defn(template=True), indent=1)
-                f.write('\n')
-                # if metric.df is not None:
-                #     metric_base_path = self.metric_base_path(metric)
-                #     output_csv(metric.df, metric_base_path)
-            _write(r"""
-            \else
-            """.format(
-                flag_var=self._tex_flag_varname,
-            ))
-            for metric in metrics:
-                _write("% Autogenerated metrics for: \\ref{{{tex_label}}}\n".format(
-                    tex_label=metric.tex_label,
-                ), indent=1)
-                _write(metric.tex_generate_defn(), indent=1)
-                f.write('\n')
-                if metric.df is not None:
-                    if type(metric.df) == pd.DataFrame:
-                        metric_base_path = self.metric_base_path(tex_path, metric)
-                        output_csv(metric.df, metric_base_path)
-                    elif type(metric.df) == dict:
-                        for df_name, df in metric.df.items():
-                            metric_base_path = self.metric_base_path(tex_path, metric, suffix=df_name)
-                            output_csv(df, metric_base_path)
-                    else:
-                        raise NotImplementedError(f"Not sure how to output type(metric.df) == {type(metric.df)}")
-            _write(r"""
-            \fi
-            """.format(
-                flag_var=self._tex_flag_varname,
-            ))
+        def _dump_tex():
+            # Dump metrics
+            with open(tex_path, 'w') as f:
+                def _write(txt, indent=0):
+                    f.write(textwrap.indent(textwrap.dedent(txt).lstrip(), prefix='  '*indent))
+                _write(r"""
+                %%% AUTOGENERATED - DO NOT MODIFY! %%
+                %
+                % Usage:
+                %   To enable raw numbers:
+                %     \def\{flag_var}{{1}}
+                %     \input{{{tex}}}
+                %
+                %   To enable placeholders:
+                %     % Comment out or delete any definition of {flag_var}
+                %     \input{{{tex}}}
+                %
+                
+                \ifx\{flag_var}\undefined
+                """.format(
+                    flag_var=self._tex_flag_varname,
+                    tex=_b(tex_path),
+                ))
+                for metric in metrics:
+                    _write("% Autogenerated template metrics for: \\ref{{{tex_label}}}\n".format(
+                        tex_label=metric.tex_label,
+                    ), indent=1)
+                    _write(metric.tex_generate_defn(template=True), indent=1)
+                    f.write('\n')
+                    # if metric.df is not None:
+                    #     metric_base_path = self.metric_base_path(metric)
+                    #     output_csv(metric.df, metric_base_path)
+                _write(r"""
+                \else
+                """.format(
+                    flag_var=self._tex_flag_varname,
+                ))
+                for metric in metrics:
+                    _write("% Autogenerated metrics for: \\ref{{{tex_label}}}\n".format(
+                        tex_label=metric.tex_label,
+                    ), indent=1)
+                    _write(metric.tex_generate_defn(), indent=1)
+                    f.write('\n')
+                    if metric.df is not None:
+                        if type(metric.df) == pd.DataFrame:
+                            metric_base_path = self.metric_base_path(tex_path, metric)
+                            output_csv(metric.df, metric_base_path)
+                        elif type(metric.df) == dict:
+                            for df_name, df in metric.df.items():
+                                metric_base_path = self.metric_base_path(tex_path, metric, suffix=df_name)
+                                output_csv(df, metric_base_path)
+                        else:
+                            raise NotImplementedError(f"Not sure how to output type(metric.df) == {type(metric.df)}")
+                _write(r"""
+                \fi
+                """.format(
+                    flag_var=self._tex_flag_varname,
+                ))
+
+        # def _dump_json():
+        #     js = dict()
+        #     for metric in metrics:
+        #         metric.add_json(js)
+        #     do_dump_json(js, json_path)
+
+        _dump_tex()
         logger.info("Output tex @ {path}".format(path=tex_path))
+
+        # _dump_json()
+        # logger.info("Output json @ {path}".format(path=json_path))
 
     @property
     def _tex_flag_varname(self):
@@ -4741,8 +4843,9 @@ class TexMetrics:
 
     def run(self):
         self.read_framework_choice_df()
+        self.read_framework_choice_uncorrected_df()
         self.read_algo_choice_df()
-        if self.framework_choice_csv is not None:
+        if self.framework_choice_csv is not None and self.framework_choice_trans_csv is not None:
             self.compute_metrics(
                 metrics=self.FRAMEWORK_CHOICE_METRICS,
                 tex_path=self.framework_choice_tex_path())
@@ -4750,6 +4853,10 @@ class TexMetrics:
             self.compute_metrics(
                 metrics=self.ALGO_CHOICE_METRICS,
                 tex_path=self.algo_choice_tex_path())
+        if self.framework_choice_uncorrected_csv is not None:
+            self.compute_metrics(
+                metrics=self.FRAMEWORK_CHOICE_UNCORRECTED_METRICS,
+                tex_path=self.framework_choice_uncorrected_tex_path())
 
     def metric_base_path(self, tex_path, metric, suffix=None):
         base = re.sub(r'\.tex$', '', tex_path)
@@ -4761,10 +4868,45 @@ class TexMetrics:
         ))
 
     def framework_choice_tex_path(self):
-        return _j(self.directory, 'FrameworkChoiceMetrics.tex')
+        return self._framework_choice_path('tex')
+
+    def framework_choice_json_path(self):
+        return self._framework_choice_path('json')
+
+    def _framework_choice_path(self, ext):
+        path = _j(self.directory, "FrameworkChoiceMetrics{suffix}.{ext}".format(
+            suffix=maybe_suffix(self.file_suffix),
+            ext=ext,
+        ))
+        if re.search(r'\.\.', path):
+            import pdb; pdb.set_trace()
+        return path
 
     def algo_choice_tex_path(self):
-        return _j(self.directory, 'AlgoChoiceMetrics.tex')
+        return self._algo_choice_path('tex')
+
+    def algo_choice_json_path(self):
+        return self._algo_choice_path('json')
+
+    def _algo_choice_path(self, ext):
+        path = _j(self.directory, "AlgoChoiceMetrics{suffix}.{ext}".format(
+            suffix=maybe_suffix(self.file_suffix),
+            ext=ext,
+        ))
+        return path
+
+    def framework_choice_uncorrected_tex_path(self):
+        return self._framework_choice_uncorrected_path('tex')
+
+    def _framework_choice_uncorrected_path(self, ext):
+        path = _j(self.directory, "FrameworkChoiceMetricsUncorrected{suffix}.{ext}".format(
+            suffix=maybe_suffix(self.file_suffix),
+            ext=ext,
+        ))
+        if re.search(r'\.\.', path):
+            import pdb; pdb.set_trace()
+        return path
+
 
     def get_calc_func(self, metric):
         metric_calc_func = re.sub(r'[-:]', '_', metric.tex_label)
@@ -5824,7 +5966,7 @@ class TexMetrics:
             tex_lines = tex_stmt.splitlines()
             m = re.search(r'\{(?P<tex_label>find:[^}]+)\}', tex_lines[0])
             tex_label = m.group('tex_label')
-            metrics.append(FrameworkChoiceMetric(tex_stmt, tex_label))
+            metrics.append(TexMetric(tex_stmt, tex_label, tex_variable_prefix=self.tex_variable_prefix))
         return metrics
 
     def _register_all_framework_choice_metrics(self):
@@ -5903,6 +6045,45 @@ class TexMetrics:
             """,
         ])
         self.FRAMEWORK_CHOICE_METRICS = self._register_metrics(tex_stmts)
+
+    def _register_all_framework_choice_uncorrected_metrics(self):
+        tex_stmts = self._dedent_tex_stmts([
+            r"""
+            \begin{rlscope-finding}{find:uncorrected-training-time-inflation}
+            Total training time of the workloads we measured becomes inflated 
+            from $x \times$ up to $y \times$, and $z \times$ on average.
+            \end{rlscope-finding}
+            """,
+        ])
+        self.FRAMEWORK_CHOICE_UNCORRECTED_METRICS = self._register_metrics(tex_stmts)
+
+    def calc_find_uncorrected_training_time_inflation(self, metric):
+        r"""
+        \begin{rlscope-finding}{find:uncorrected-training-time-inflation}
+        Total training time of the workloads we measured becomes inflated
+        from $x \times$ up to $y \times$, and $z \times$ on average.
+        \end{rlscope-finding}
+
+        ratio_corrected_to_uncorrected =
+            df['total_training_time', algo, env, x_field] /
+            df_uncorrected['total_training_time', algo, env, x_field]
+        """
+        df = self.framework_choice_df
+        field = 'total_training_time'
+        df_mean = self.mean_df(field, df=self.framework_choice_df)
+        df_uncorrected_mean = self.mean_df(field, df=self.framework_choice_uncorrected_df)
+
+        # Join on the exact same (algo, env, DL backend).
+        join_on = ['algo', 'env', 'x_field']
+        df = df_mean.set_index(join_on).join(df_uncorrected_mean.set_index(join_on), how='inner',
+                                             # lsuffix='',
+                                             rsuffix='_uncorrected')
+        df['ratio'] = df['total_training_time_uncorrected'] / df['total_training_time']
+
+        metric['MinRatio'] = df['ratio'].min()
+        metric['MaxRatio'] = df['ratio'].max()
+        metric['MeanRatio'] = df['ratio'].mean()
+        metric.df = df
 
 def output_csv(plot_df, base_path, sort_by=None):
     if type(plot_df.index) == pd.MultiIndex:
