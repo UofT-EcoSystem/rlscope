@@ -5,6 +5,8 @@
 #
 
 RUN pip install ipdb
+
+USER root
 RUN apt-get update && apt-get install -y --no-install-recommends \
     htop \
     tree \
@@ -15,3 +17,4 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     bash-completion \
     silversearcher-ag \
     vim
+USER ${IML_USER}

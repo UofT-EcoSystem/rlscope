@@ -1,10 +1,11 @@
-#
-# Install apt dependencies for iml-drill.
-# In particular, postgres client (psql).
-#
+USER root
+
+# rlscope-banner requirements.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    postgresql-client \
-    figlet \
+    figlet
+
+# setup.sh requirements.
+RUN apt-get update && apt-get install -y --no-install-recommends \
     mercurial
 
 # Needed for pdfcrop shell command, which removes whitespace in a graph pdf
@@ -20,3 +21,5 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Convert pdf to png using pdftoppm command-line.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     poppler-utils
+
+USER ${IML_USER}

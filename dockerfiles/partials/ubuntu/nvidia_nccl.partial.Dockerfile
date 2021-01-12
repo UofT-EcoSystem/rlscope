@@ -22,6 +22,7 @@
 
 #libnccl2=2.2.13-1+cuda10.0
 #libnccl-dev=2.2.13-1+cuda10.0
+USER root
 
 # Link NCCL libray and header where the build script expects them.
 RUN mkdir -p /usr/local/cuda-${CUDA}/lib &&  \
@@ -40,3 +41,5 @@ RUN mkdir -p /usr/local/cuda-${CUDA}/lib &&  \
 # NOTE: in newever versions I think they are including CUDA headers in the tensorflow
 # source tree (e.g. third_party/gpus/cuda/include/cublas_v2.h).
 RUN ln -s -T /usr/local/cuda /usr/include/cuda
+
+USER ${IML_USER}

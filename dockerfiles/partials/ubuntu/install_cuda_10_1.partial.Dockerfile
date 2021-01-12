@@ -1,21 +1,7 @@
-ARG CUDA=10.1
-#FROM nvidia/cuda:10.0-base-ubuntu${UBUNTU_VERSION} as base
-FROM nvidia/cuda:${CUDA}-base-ubuntu${UBUNTU_VERSION} as base
-# ARCH and CUDA are specified again because the FROM directive resets ARGs
-# (but their default value is retained if set previously)
-ARG CUDA
-#ARG CUDNN=7.4.1.5-1
-#ARG CUDNN=7.6.0.64-1
-#ARG CUDNN_MAJOR_VERSION=7
-
-
-# Needed for string substitution
-SHELL ["/bin/bash", "-c"]
-
-RUN apt-get update
-
 # >= CUDA 10.0
 # https://forums.developer.nvidia.com/t/cublas-for-10-1-is-missing/71015
+USER root
+
 ARG CUBLAS_VERSION=10.1.0.105-1
 RUN apt-get install -y --no-install-recommends \
     libcublas10=${CUBLAS_VERSION} \
@@ -118,3 +104,5 @@ RUN { \
 # Check out TensorFlow source code if --build_arg CHECKOUT_TENSORFLOW=1
 ARG CHECKOUT_TF_SRC=0
 RUN test "${CHECKOUT_TF_SRC}" -eq 1 && git clone https://github.com/tensorflow/tensorflow.git /tensorflow_src || true
+
+USER ${IML_USER}

@@ -1,3 +1,4 @@
+USER root
 ARG USE_PYTHON_3_NOT_2
 ARG _PY_SUFFIX=${USE_PYTHON_3_NOT_2:+3}
 ARG PYTHON=python${_PY_SUFFIX}
@@ -20,4 +21,5 @@ RUN ${PIP} --no-cache-dir install --upgrade \
 # We do this for the TensorFlow repo as well as IML.
 
 # Some TF tools expect a "python" binary
-RUN ln -s $(which ${PYTHON}) /usr/local/bin/python
+# RUN ln -s $(which ${PYTHON}) /usr/local/bin/python
+USER ${IML_USER}

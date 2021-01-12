@@ -43,35 +43,35 @@ releases:
         tag_specs:
             - "{ubuntu-devel-rlscope}"
 
-    rlscope-cuda-10-1:
-      is_dockerfiles: true
-      upload_images: false
-      tag_specs:
-        - "{ubuntu-devel-rlscope-cuda-10-1}"
+#    rlscope-cuda-10-1:
+#      is_dockerfiles: true
+#      upload_images: false
+#      tag_specs:
+#        - "{ubuntu-devel-rlscope-cuda-10-1}"
 
-    rlscope-rocm:
-        is_dockerfiles: true
-        upload_images: false
-        tag_specs:
-            - "{ubuntu-devel-rlscope-rocm}"
+#    rlscope-rocm:
+#        is_dockerfiles: true
+#        upload_images: false
+#        tag_specs:
+#            - "{ubuntu-devel-rlscope-rocm}"
 
-    v1.3.1:
-      is_dockerfiles: true
-      upload_images: false
-      tag_specs:
-      - "{ubuntu-devel-v1.3.1}"
+#    v1.3.1:
+#      is_dockerfiles: true
+#      upload_images: false
+#      tag_specs:
+#      - "{ubuntu-devel-v1.3.1}"
 
-    rlscope-rocm-upstream:
-      is_dockerfiles: true
-      upload_images: false
-      tag_specs:
-      - "{ubuntu-devel-rlscope-rocm-upstream}"
+#    rlscope-rocm-upstream:
+#      is_dockerfiles: true
+#      upload_images: false
+#      tag_specs:
+#      - "{ubuntu-devel-rlscope-rocm-upstream}"
 
-    rocm:
-      is_dockerfiles: true
-      upload_images: false
-      tag_specs:
-      - "{rocm}"
+#    rocm:
+#      is_dockerfiles: true
+#      upload_images: false
+#      tag_specs:
+#      - "{rocm}"
 
 slice_sets:
 
@@ -112,66 +112,66 @@ slice_sets:
               - import-gpu.sh
           test_runtime: nvidia
 
-    ubuntu-devel:
-        - add_to_name: "devel"
-          dockerfile_exclusive_name: "devel-cpu"
-          partials:
-              - ubuntu/version
-              - ubuntu/devel-cpu
-              - ubuntu/python
-              - ubuntu/bazel
-              - shell
-          tests:
-              - build-cpu.sh
-          args:
-              - CHECKOUT_TF_SRC=1
-        - add_to_name: "devel-gpu"
-          dockerfile_exclusive_name: "devel-gpu"
-          partials:
-              - ubuntu/version
-              - ubuntu/devel-nvidia
-              - ubuntu/python
-              - ubuntu/bazel
-              - shell
-          tests:
-              - build-gpu.sh
-          test_runtime: nvidia
-          args:
-              - CHECKOUT_TF_SRC=1
+#    ubuntu-devel:
+#        - add_to_name: "devel"
+#          dockerfile_exclusive_name: "devel-cpu"
+#          partials:
+#              - ubuntu/version
+#              - ubuntu/devel-cpu
+#              - ubuntu/python
+#              - ubuntu/bazel
+#              - shell
+#          tests:
+#              - build-cpu.sh
+#          args:
+#              - CHECKOUT_TF_SRC=1
+#        - add_to_name: "devel-gpu"
+#          dockerfile_exclusive_name: "devel-gpu"
+#          partials:
+#              - ubuntu/version
+#              - ubuntu/devel-nvidia
+#              - ubuntu/python
+#              - ubuntu/bazel
+#              - shell
+#          tests:
+#              - build-gpu.sh
+#          test_runtime: nvidia
+#          args:
+#              - CHECKOUT_TF_SRC=1
 
     ubuntu-devel-rlscope:
         #
-        # IML profiler:
-        # Build "patched" tensorflow, then run end-to-end Pong training test.
+        # Container environment for building RL-Scope and running experiments.
         #
         - add_to_name: "devel-rlscope-gpu-cuda"
           dockerfile_exclusive_name: "devel-rlscope-gpu-cuda"
           partials:
-          - ubuntu/version
-          - ubuntu/devel-nvidia
-          - ubuntu/python
-          - ubuntu/bazel
-          - ubuntu/nvidia_nccl
-          - ubuntu/nvidia_rtx_2070_env
-          - ubuntu/add_user
-          # - ubuntu/pip_download_tf
-          # - ubuntu/openmpi_from_src
-          - ubuntu/nodejs
-          # - ubuntu/python36_from_src
-          - ubuntu/virtualenv
-          - ubuntu/pip_dependencies
-          - ubuntu/protobuf_from_src
-          - ubuntu/cmake_from_src
-          # - ubuntu/bazelisk
-          - ubuntu/bash
-          - ubuntu/tensorrt
-          - rlscope/env
-          - rlscope/apt_install
-          - ubuntu/pip_install_tf
-          - rlscope/pip_dependencies
-          - rlscope/user_custom
-          - shell
-          - ubuntu/entrypoint
+            - ubuntu/version
+            - ubuntu/from_cuda_10_1
+            - rlscope/env
+            - ubuntu/add_user
+            - ubuntu/python
+            - ubuntu/virtualenv
+            - ubuntu/install_cuda_10_1
+            # - ubuntu/bazel
+            - ubuntu/nvidia_nccl
+            - ubuntu/nvidia_rtx_2070_env
+            # - ubuntu/nodejs
+            - ubuntu/pip_dependencies
+            - ubuntu/protobuf_from_src
+            - ubuntu/cmake_from_src
+            - ubuntu/openmpi_from_src
+            # - ubuntu/bazelisk
+            - ubuntu/bash
+            # - ubuntu/tensorrt
+            - rlscope/apt_install
+            - ubuntu/pip_install_tf
+            - rlscope/pip_dependencies
+            - rlscope/user_custom
+            - shell
+            - rlscope/source_sh
+            - ubuntu/entrypoint
+
           test_runtime: nvidia
           args:
           # NOTE: must be provided at assembler.py command line
@@ -191,156 +191,156 @@ slice_sets:
           # The local path where we should output bazel objects (overrides $HOME/.cache/bazel).
           # - BAZEL_BUILD_DIR=
 
-    ubuntu-devel-rlscope-cuda-10-1:
-      #
-      # IML profiler:
-      # Build "patched" tensorflow, then run end-to-end Pong training test.
-      #
-      - add_to_name: "devel-rlscope-gpu-cuda-10-1"
-        dockerfile_exclusive_name: "devel-rlscope-gpu-cuda-10-1"
-        partials:
+#    ubuntu-devel-rlscope-cuda-10-1:
+#      #
+#      # IML profiler:
+#      # Build "patched" tensorflow, then run end-to-end Pong training test.
+#      #
+#      - add_to_name: "devel-rlscope-gpu-cuda-10-1"
+#        dockerfile_exclusive_name: "devel-rlscope-gpu-cuda-10-1"
+#        partials:
+##          - ubuntu/version
+#          - ubuntu/devel-nvidia-cuda-10-1
+#          - ubuntu/python
+#          - ubuntu/bazel
+#          - ubuntu/nvidia_nccl
+#          - ubuntu/nvidia_rtx_2070_env
+#          - ubuntu/add_user
+#          - ubuntu/pip_download_tf
+#          - ubuntu/openmpi_from_src
+#          - ubuntu/nodejs
+#          - ubuntu/python36_from_src
+#          - ubuntu/virtualenv
+#          - ubuntu/pip_dependencies
+#          - ubuntu/protobuf_from_src
+#          - ubuntu/cmake_from_src
+#          - rlscope/env
+#          - rlscope/apt_install
+#          - rlscope/pip_dependencies
+#          - shell
+#          - rlscope/user_custom
+#          - ubuntu/cublas-workaround-cuda-10-1
+#          - ubuntu/bazelisk
+#          - ubuntu/entrypoint
+#        test_runtime: nvidia
+#        args:
+#          # NOTE: must be provided at assembler.py command line
+#          - CHECKOUT_TF_SRC=0
+#          - USE_PYTHON_3_NOT_2=1
+#        run_args:
+#          # NOTE: To make it so we can run the same scripts inside/outside containers:
+#          # - Outside containers: we define these environment variables in a source_me.sh
+#          # - Inside containers: we require these to be defined when calling assembler.py (docker run)
+#          #
+#          # The root directory of a 'patched' TensorFlow checkout.
+#          - TENSORFLOW_DIR=
+#          # The root directory of the rlscope_profiler repo checkout.
+#          - IML_DIR=
+#          # The root directory of the rlscope_drill repo checkout.
+#          - IML_DRILL_DIR=
+#          # The local path where we should output bazel objects (overrides $HOME/.cache/bazel).
+#          # - BAZEL_BUILD_DIR=
+
+#    ubuntu-devel-rlscope-rocm:
+#        - add_to_name: "devel-rlscope-gpu-rocm"
+#          dockerfile_exclusive_name: "devel-rlscope-gpu-rocm"
+#          partials:
 #          - ubuntu/version
-          - ubuntu/devel-nvidia-cuda-10-1
-          - ubuntu/python
-          - ubuntu/bazel
-          - ubuntu/nvidia_nccl
-          - ubuntu/nvidia_rtx_2070_env
-          - ubuntu/add_user
-          - ubuntu/pip_download_tf
-          - ubuntu/openmpi_from_src
-          - ubuntu/nodejs
-          - ubuntu/python36_from_src
-          - ubuntu/virtualenv
-          - ubuntu/pip_dependencies
-          - ubuntu/protobuf_from_src
-          - ubuntu/cmake_from_src
-          - rlscope/env
-          - rlscope/apt_install
-          - rlscope/pip_dependencies
-          - shell
-          - rlscope/user_custom
-          - ubuntu/cublas-workaround-cuda-10-1
-          - ubuntu/bazelisk
-          - ubuntu/entrypoint
-        test_runtime: nvidia
-        args:
-          # NOTE: must be provided at assembler.py command line
-          - CHECKOUT_TF_SRC=0
-          - USE_PYTHON_3_NOT_2=1
-        run_args:
-          # NOTE: To make it so we can run the same scripts inside/outside containers:
-          # - Outside containers: we define these environment variables in a source_me.sh
-          # - Inside containers: we require these to be defined when calling assembler.py (docker run)
-          #
-          # The root directory of a 'patched' TensorFlow checkout.
-          - TENSORFLOW_DIR=
-          # The root directory of the rlscope_profiler repo checkout.
-          - IML_DIR=
-          # The root directory of the rlscope_drill repo checkout.
-          - IML_DRILL_DIR=
-          # The local path where we should output bazel objects (overrides $HOME/.cache/bazel).
-          # - BAZEL_BUILD_DIR=
+#          - ubuntu/devel-rocm
+#          - ubuntu/python
+#          - ubuntu/bazel
+#          - ubuntu/amd_rocm_env
+#          - ubuntu/rocm_tf_dependencies
+#          - ubuntu/add_user
+#          - shell
+#          - ubuntu/virtualenv
+#          - ubuntu/pip_dependencies
+#          - ubuntu/rocm_path
+#          - ubuntu/rocm_hip_env
+#          test_runtime: rocm
+#          args:
+#          - CHECKOUT_TF_SRC=0
+#          - USE_PYTHON_3_NOT_2=1
+#          run_args:
+#          - TENSORFLOW_DIR=
+#          - IML_DIR=
+#          - IML_DRILL_DIR=
+#          # - BAZEL_BUILD_DIR=
 
-    ubuntu-devel-rlscope-rocm:
-        - add_to_name: "devel-rlscope-gpu-rocm"
-          dockerfile_exclusive_name: "devel-rlscope-gpu-rocm"
-          partials:
-          - ubuntu/version
-          - ubuntu/devel-rocm
-          - ubuntu/python
-          - ubuntu/bazel
-          - ubuntu/amd_rocm_env
-          - ubuntu/rocm_tf_dependencies
-          - ubuntu/add_user
-          - shell
-          - ubuntu/virtualenv
-          - ubuntu/pip_dependencies
-          - ubuntu/rocm_path
-          - ubuntu/rocm_hip_env
-          test_runtime: rocm
-          args:
-          - CHECKOUT_TF_SRC=0
-          - USE_PYTHON_3_NOT_2=1
-          run_args:
-          - TENSORFLOW_DIR=
-          - IML_DIR=
-          - IML_DRILL_DIR=
-          # - BAZEL_BUILD_DIR=
-
-    ubuntu-devel-rlscope-rocm-upstream:
-    - add_to_name: "devel-rlscope-gpu-rocm-upstream"
-      dockerfile_exclusive_name: "devel-rlscope-gpu-rocm-upstream"
-      partials:
-      - ubuntu/version
-      - ubuntu/devel-rocm
-      - ubuntu/python
-      - ubuntu/bazel
-      - ubuntu/amd_rocm_env
-      - ubuntu/rocm_tf_dependencies
-      - ubuntu/add_user
-      - shell
-      - ubuntu/virtualenv
-      - ubuntu/pip_dependencies
-      - ubuntu/rocm_path
-      - ubuntu/rocm_hip_env
-      test_runtime: rocm
-      args:
-      # Indicates this repo is a checkout from ROCm's repo:
-      # git clone -b r1.13-rocm https://github.com/ROCmSoftwarePlatform/tensorflow-upstream.git
-      # The repo includes a "build_rocm_python3" script we can run.
-      - ROCM_UPSTREAM_TF=1
-      - CHECKOUT_TF_SRC=0
-      - USE_PYTHON_3_NOT_2=1
-      run_args:
-      - TENSORFLOW_DIR=
-      - IML_DIR=
-      - IML_DRILL_DIR=
-      # - BAZEL_BUILD_DIR=
-
-    rocm:
-    - add_to_name: "rocm"
-      dockerfile_exclusive_name: "rocm"
-      partials:
-      - ubuntu/version
-      - ubuntu/devel-rocm
+#    ubuntu-devel-rlscope-rocm-upstream:
+#    - add_to_name: "devel-rlscope-gpu-rocm-upstream"
+#      dockerfile_exclusive_name: "devel-rlscope-gpu-rocm-upstream"
+#      partials:
+#      - ubuntu/version
+#      - ubuntu/devel-rocm
 #      - ubuntu/python
 #      - ubuntu/bazel
-      - ubuntu/amd_rocm_env
+#      - ubuntu/amd_rocm_env
+#      - ubuntu/rocm_tf_dependencies
 #      - ubuntu/add_user
-      - shell
+#      - shell
 #      - ubuntu/virtualenv
-      - ubuntu/rocm_path
-      test_runtime: rocm
-      args:
-      - CHECKOUT_TF_SRC=0
-      - USE_PYTHON_3_NOT_2=1
-      run_args:
-      - TENSORFLOW_DIR=
-      - IML_DIR=
-      - IML_DRILL_DIR=
-      # - BAZEL_BUILD_DIR=
+#      - ubuntu/pip_dependencies
+#      - ubuntu/rocm_path
+#      - ubuntu/rocm_hip_env
+#      test_runtime: rocm
+#      args:
+#      # Indicates this repo is a checkout from ROCm's repo:
+#      # git clone -b r1.13-rocm https://github.com/ROCmSoftwarePlatform/tensorflow-upstream.git
+#      # The repo includes a "build_rocm_python3" script we can run.
+#      - ROCM_UPSTREAM_TF=1
+#      - CHECKOUT_TF_SRC=0
+#      - USE_PYTHON_3_NOT_2=1
+#      run_args:
+#      - TENSORFLOW_DIR=
+#      - IML_DIR=
+#      - IML_DRILL_DIR=
+#      # - BAZEL_BUILD_DIR=
 
-    nightly:
-        - add_to_name: "nightly"
-          partials:
-              - ubuntu/version
-              - ubuntu/cpu
-              - ubuntu/python
-              - tensorflow
-              - shell
-          args:
-              - TF_PACKAGE=tf-nightly
-          tests:
-              - import.sh
-        - add_to_name: "nightly-gpu"
-          partials:
-              - ubuntu/version
-              - ubuntu/nvidia
-              - ubuntu/python
-              - tensorflow
-              - shell
-          test_runtime: nvidia
-          tests:
-              - import-gpu.sh
-          args:
-              - TF_PACKAGE=tf-nightly-gpu
+#    rocm:
+#    - add_to_name: "rocm"
+#      dockerfile_exclusive_name: "rocm"
+#      partials:
+#      - ubuntu/version
+#      - ubuntu/devel-rocm
+##      - ubuntu/python
+##      - ubuntu/bazel
+#      - ubuntu/amd_rocm_env
+##      - ubuntu/add_user
+#      - shell
+##      - ubuntu/virtualenv
+#      - ubuntu/rocm_path
+#      test_runtime: rocm
+#      args:
+#      - CHECKOUT_TF_SRC=0
+#      - USE_PYTHON_3_NOT_2=1
+#      run_args:
+#      - TENSORFLOW_DIR=
+#      - IML_DIR=
+#      - IML_DRILL_DIR=
+#      # - BAZEL_BUILD_DIR=
+
+#    nightly:
+#        - add_to_name: "nightly"
+#          partials:
+#              - ubuntu/version
+#              - ubuntu/cpu
+#              - ubuntu/python
+#              - tensorflow
+#              - shell
+#          args:
+#              - TF_PACKAGE=tf-nightly
+#          tests:
+#              - import.sh
+#        - add_to_name: "nightly-gpu"
+#          partials:
+#              - ubuntu/version
+#              - ubuntu/nvidia
+#              - ubuntu/python
+#              - tensorflow
+#              - shell
+#          test_runtime: nvidia
+#          tests:
+#              - import-gpu.sh
+#          args:
+#              - TF_PACKAGE=tf-nightly-gpu

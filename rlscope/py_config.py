@@ -7,7 +7,6 @@ RL-Scope configuration settings.
 from os.path import join as _j, abspath as _a, exists as _e, dirname as _d, basename as _b
 from os import environ as ENV
 import shutil
-import numpy as np
 import ctypes.util
 import sys
 import os
@@ -226,6 +225,7 @@ IS_UNIT_TEST = False
 # should probably add a check for that!
 
 if USE_NUMBA:
+  import numpy as np
   NUMPY_TIME_USEC_TYPE = np.int64
   NUMBA_TIME_USEC_TYPE = nb.int64
 

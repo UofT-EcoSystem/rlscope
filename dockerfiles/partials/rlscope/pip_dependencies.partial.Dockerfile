@@ -1,15 +1,12 @@
 #
 # Add repo src files to container.
 #
-#ENV IML_ROOT /home/${USER_NAME}/bin/iml
-#WORKDIR ${IML_ROOT}
-#RUN mkdir -p ${IML_ROOT}/dockerfiles/sh
+#ENV ADD_DIR /home/${USER_NAME}/bin/iml
+#WORKDIR ${ADD_DIR}
+#RUN mkdir -p ${ADD_DIR}/dockerfiles/sh
 
 # ADD's files with root as owner; make it $USER_NAME
-ADD requirements.txt ${IML_ROOT}/requirements.txt
-
-COPY bashrc /etc/bash.bashrc
-RUN chmod a+rwx /etc/bash.bashrc
+ADD requirements.txt ${ADD_DIR}/requirements.txt
 
 #RUN apt-get update && apt-get install -y --no-install-recommends
 #     llvm-8
@@ -18,7 +15,7 @@ RUN chmod a+rwx /etc/bash.bashrc
 #ENV LLVM_CONFIG=/usr/bin/llvm-config-8
 #RUN pip install "numba==0.46.0"
 
-RUN ls -l ${IML_ROOT}
-RUN pip install --no-cache-dir -r ${IML_ROOT}/requirements.txt
+RUN ls -l ${ADD_DIR}
+RUN pip install --no-cache-dir -r ${ADD_DIR}/requirements.txt
 
-#ENV PATH="${IML_ROOT}/dockerfiles/sh:${PATH}"
+#ENV PATH="${ADD_DIR}/dockerfiles/sh:${PATH}"

@@ -1,1 +1,1 @@
-ENV IML_ROOT /root/bin/iml
+ENV ADD_DIR ${HOME}/docker_install

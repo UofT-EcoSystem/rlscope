@@ -11,6 +11,8 @@ echo "> Using JOBS=$JOBS"
 
 # If BUILD_PIP=yes, then build a python wheel.
 BUILD_PIP=${BUILD_PIP:-no}
+# If EXPERIMENTS=yes, then clone all experiments needed in experiments.
+EXPERIMENTS=${EXPERIMENTS:-no}
 # If SKIP_CPACK=yes, then skip calling "make package" to create a cmake binary archive (*.tar.gz)
 # from rlscope binaries/libraries.
 SKIP_CPACK=${SKIP_CPACK:-no}
@@ -29,6 +31,9 @@ if [ "$DEBUG" = 'yes' ]; then
 fi
 
 ROOT="$(readlink -f $(dirname "$0"))"
+
+IML_DIR=${IML_DIR:-$ROOT}
+source $ROOT/dockerfiles/sh/exports.sh
 
 ## Only add "_cuda_10_1" suffix to rlscope build directory.
 #IML_BUILD_SUFFIX="$(_rlscope_build_suffix ${IML_CUDA_VERSION})"
@@ -123,6 +128,9 @@ _untar() {
 
 }
 
+GIT_PULL=no
+GIT_RECURSIVE=yes
+GIT_CLONE_OPTS=()
 _clone() {
     local path="$1"
     local name_slash_repo="$2"
@@ -134,7 +142,10 @@ _clone() {
         shift 1
     fi
     if [ ! -e "$path" ]; then
-        git clone --recursive $repo $path
+        if [ "$GIT_RECURSIVE" != "no" ]; then
+          GIT_CLONE_OPTS+=(--recursive)
+        fi
+        git clone "${GIT_CLONE_OPTS[@]}" $repo $path
         info "> Git clone:"
         info "  Repository: $repo"
         info "  Directory: $path"
@@ -142,6 +153,9 @@ _clone() {
     (
     cd $path
     git checkout $commit
+    if [ "$GIT_PULL" = "yes" ]; then
+      git pull
+    fi
     git submodule update --init
     )
 }
@@ -200,6 +214,109 @@ setup_json_cpp_library() {
 #    cd $JSON_CPP_LIB_DIR
 #    _configure_make_install
 }
+
+#
+# Repositories with RL-Scope annotations added for experiments needed to
+# generate figures in RL-Scope paper.
+#
+
+setup_clone_experiments() {
+  _do setup_experiment_baselines
+  _do setup_experiment_stable_baselines
+  _do setup_experiment_tf_agents
+  _do setup_experiment_reagent
+  _do setup_experiment_mlperf_training
+  # _do setup_experiment_minigo
+}
+
+setup_install_experiments() {
+  _do install_baselines.sh
+  _do install_stable_baselines.sh
+  _do install_reagent.sh
+  _do install_tf_agents.sh
+  _do install_minigo.sh
+}
+
+setup_experiment_baselines() {
+    if [ "$FORCE" != 'yes' ] && [ -e $BASELINES_DIR/setup.py ]; then
+        return
+    fi
+    local commit="iml"
+    (
+    GIT_PULL=yes
+    _clone "$BASELINES_DIR" \
+        jagleeso/baselines.git \
+        $commit
+    )
+}
+
+setup_experiment_mlperf_training() {
+    if [ "$FORCE" != 'yes' ] && [ -e $MLPERF_DIR/README.md ]; then
+        return
+    fi
+    local commit="iml"
+    (
+    GIT_PULL=yes
+    # "community" submodule fails to pull.
+    GIT_RECURSIVE=no
+    _clone "$MLPERF_DIR" \
+        jagleeso/mlperf_training.git \
+        $commit
+    )
+}
+
+setup_experiment_stable_baselines() {
+    if [ "$FORCE" != 'yes' ] && [ -e $STABLE_BASELINES_DIR/setup.py ]; then
+        return
+    fi
+    local commit="iml-td3"
+    (
+    GIT_PULL=yes
+    _clone "$STABLE_BASELINES_DIR" \
+        jagleeso/stable-baselines.git \
+        $commit
+    )
+}
+
+setup_experiment_tf_agents() {
+    if [ "$FORCE" != 'yes' ] && [ -e $TF_AGENTS_DIR/setup.py ]; then
+        return
+    fi
+    local commit="iml"
+    (
+    GIT_PULL=yes
+    _clone "$TF_AGENTS_DIR" \
+        jagleeso/agents.git \
+        $commit
+    )
+}
+
+setup_experiment_reagent() {
+    if [ "$FORCE" != 'yes' ] && [ -e $REAGENT_DIR/setup.py ]; then
+        return
+    fi
+    local commit="iml"
+    (
+    GIT_PULL=yes
+    _clone "$REAGENT_DIR" \
+        jagleeso/ReAgent.git \
+        $commit
+    )
+}
+
+#MINIGO_DIR="$ROOT/third_party/minigo"
+#setup_experiment_minigo() {
+#    if [ "$FORCE" != 'yes' ] && [ -e $MINIGO_DIR/setup.py ]; then
+#        return
+#    fi
+#    local commit="iml"
+#    (
+#    GIT_PULL=yes
+#    _clone "$MINIGO_DIR" \
+#        jagleeso/minigo.git \
+#        $commit
+#    )
+#}
 
 ABSEIL_CPP_LIB_DIR="$ROOT/third_party/abseil-cpp"
 setup_abseil_cpp_library() {
@@ -658,9 +775,21 @@ main() {
 
     if [ $# -gt 0 ]; then
         _do "$@"
+        echo "> Success!"
         return
     fi
 
+    if [ "$EXPERIMENTS" = 'yes' ]; then
+      _do setup_clone_experiments
+      _do setup_install_experiments
+      echo "> Success!"
+      return
+    fi
+
+
+    #
+    # Build RL-Scope from source (possibly a *.whl file also if BUILD_PIP=yes).
+    #
     _do setup_cmake
     _do setup_apt_packages
     _do setup_json_cpp_library
@@ -777,4 +906,5 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 else
     echo "> BASH: Sourcing ${BASH_SOURCE[0]}"
 fi 
+
 

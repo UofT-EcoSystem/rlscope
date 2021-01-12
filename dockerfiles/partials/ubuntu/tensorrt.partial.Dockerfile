@@ -4,18 +4,18 @@
 ## Ubuntu 16.04 uses python3.5
 #ARG PYTHON_BIN_BASENAME=python3
 ## https://pythonspeed.com/articles/activate-virtualenv-dockerfile/
-#ENV VIRTUAL_ENV=/root/venv
+#ENV VIRTUALENV=/root/venv
 ## NOTE: We use --system-site-packages since some python packages we need get installed through deb packages.
 ## e.g.
 ##  python3-libnvinfer:
 ##     # Allows us to use this package:
 ##     import tensorrt
 ##     # Sadly, cannot pip install this separately (unavailable in pip).
-#RUN python -m virtualenv -p /usr/bin/${PYTHON_BIN_BASENAME} $VIRTUAL_ENV --system-site-packages
+#RUN python -m virtualenv -p /usr/bin/${PYTHON_BIN_BASENAME} $VIRTUALENV --system-site-packages
 ## We can't do "actiate venv" from Dockerfile.
 ## So instead, just overwrite PATH so it finds /root/bin/python instead of
 ## /usr/bin/python.
-#ENV PATH="$VIRTUAL_ENV/bin:$PATH"
+#ENV PATH="$VIRTUALENV/bin:$PATH"
 
 ## TensorRT 6.0.1
 #ARG TENSOR_RT_VERSION=6.0.1-1+cuda10.1
@@ -82,25 +82,25 @@ RUN pip install /root/third_party/TensorRT-${TENSOR_RT_VERSION_THIRD_PARTY}/uff/
 # The "convert-to-uff" doesn't work with tensorflow v2.
 # Create a separate python virtual env with tensorflow v1 and so we can use convert-to-uff.
 # https://pythonspeed.com/articles/activate-virtualenv-dockerfile/
-ENV TF_V1_VIRTUAL_ENV=/root/venv_tf_v1
+ENV TF_V1_VIRTUALENV=/root/venv_tf_v1
 # NOTE: We use --system-site-packages since some python packages we need get installed through deb packages.
 # e.g.
 #  python3-libnvinfer:
 #     # Allows us to use this package:
 #     import tensorrt
 #     # Sadly, cannot pip install this separately (unavailable in pip).
-RUN python -m virtualenv -p /usr/bin/python3 $TF_V1_VIRTUAL_ENV --system-site-packages
+RUN python3 -m virtualenv -p /usr/bin/python3 $TF_V1_VIRTUALENV --system-site-packages
 # We can't do "activate venv" from Dockerfile.
 # So instead, just overwrite PATH so it finds /root/bin/python instead of
 # /usr/bin/python.
-#ENV PATH="$VIRTUAL_ENV/bin:$PATH"
-#RUN $TF_V1_VIRTUAL_ENV/bin/pip install 'tensorflow-gpu==1.14.0'
+#ENV PATH="$VIRTUALENV/bin:$PATH"
+#RUN $TF_V1_VIRTUALENV/bin/pip install 'tensorflow-gpu==1.14.0'
 
 # TensorRT 7.1.3
-RUN $TF_V1_VIRTUAL_ENV/bin/pip install "tensorflow-gpu==${TENSOR_RT_TF_VERSION}"
-RUN $TF_V1_VIRTUAL_ENV/bin/pip install /root/third_party/TensorRT-${TENSOR_RT_VERSION_THIRD_PARTY}/graphsurgeon/*.whl
-RUN $TF_V1_VIRTUAL_ENV/bin/pip install /root/third_party/TensorRT-${TENSOR_RT_VERSION_THIRD_PARTY}/python/tensorrt*-${CP_PYTHON_VERSION}-*.whl
-RUN $TF_V1_VIRTUAL_ENV/bin/pip install /root/third_party/TensorRT-${TENSOR_RT_VERSION_THIRD_PARTY}/uff/*.whl
+RUN $TF_V1_VIRTUALENV/bin/pip install "tensorflow-gpu==${TENSOR_RT_TF_VERSION}"
+RUN $TF_V1_VIRTUALENV/bin/pip install /root/third_party/TensorRT-${TENSOR_RT_VERSION_THIRD_PARTY}/graphsurgeon/*.whl
+RUN $TF_V1_VIRTUALENV/bin/pip install /root/third_party/TensorRT-${TENSOR_RT_VERSION_THIRD_PARTY}/python/tensorrt*-${CP_PYTHON_VERSION}-*.whl
+RUN $TF_V1_VIRTUALENV/bin/pip install /root/third_party/TensorRT-${TENSOR_RT_VERSION_THIRD_PARTY}/uff/*.whl
 
 RUN rm -rf /root/third_party/TensorRT-${TENSOR_RT_VERSION_THIRD_PARTY}
 

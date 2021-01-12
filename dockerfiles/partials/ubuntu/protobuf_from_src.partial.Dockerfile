@@ -7,6 +7,7 @@
 # when compiling things using cmake (strutil.h).
 ARG PROTOBUF_VERSION=3.9.1
 
+USER root
 WORKDIR /root/tar_files
 RUN wget --quiet https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOBUF_VERSION}/protobuf-all-${PROTOBUF_VERSION}.tar.gz
 WORKDIR /root/protobuf
@@ -16,3 +17,5 @@ RUN ./configure
 RUN make -j$(nproc)
 RUN make install
 RUN protoc --version
+WORKDIR ${HOME}
+USER ${IML_USER}

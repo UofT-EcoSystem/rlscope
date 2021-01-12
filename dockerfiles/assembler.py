@@ -56,7 +56,12 @@ from io import BytesIO
 from docker import APIClient
 from pathlib import Path
 
+# assembler.py is at $REPO_ROOT/dockerfiles
+REPO_ROOT = _d(_d(_a(__file__)))
+sys.path.append(REPO_ROOT)
+
 from rlscope import py_config
+from rlscope.profiler.rlscope_logging import logger
 
 NVIDIA_VISIBLE_DEVICES = [0]
 assert len(NVIDIA_VISIBLE_DEVICES) > 0
@@ -232,9 +237,6 @@ def validate_interpolate_arg(value, report_error=default_report_error):
                 var=varname,
                 args=textwrap.indent(pprint.pformat(ARG_VALUES), prefix="    ")))
 
-def eprint(*args, **kwargs):
-    print(*args, file=sys.stderr, flush=True, **kwargs)
-
 
 def aggregate_all_slice_combinations(spec, slice_set_names):
     """Figure out all of the possible slice groupings for a tag spec."""
@@ -344,7 +346,7 @@ def gather_tag_args(slices, cli_input_args, required_args=None, spec_field='args
     if required_args is not None:
         for arg in required_args:
             if arg not in args:
-                eprint(('> Error: {arg} is not a valid slice_set, and also isn\'t an arg '
+                logger.error(('> Error: {arg} is not a valid slice_set, and also isn\'t an arg '
                         'provided on the command line. If it is an arg, please specify '
                         'it with --{cmd_opt}. If not, check the slice_sets list.'.format(
                     arg=arg,
@@ -382,10 +384,19 @@ def assemble_tags(spec, cli_args, cli_run_args, enabled_release, all_partials):
     """
     tag_data = collections.defaultdict(list)
 
+    valid_names = set(spec['releases'].keys())
+    if enabled_release is not None and enabled_release not in valid_names:
+        raise DeployError("No such --release \"{release}\" found in spec.yml; valid choices for --release are: {choices}".format(
+            release=enabled_release,
+            choices=valid_names,
+        ))
+
     for name, release in spec['releases'].items():
         for tag_spec in release['tag_specs']:
             if enabled_release is not None and name != enabled_release:
-                eprint('> Skipping release {}'.format(name))
+                logger.info('> Skipping release {name}; (!= {enabled_release})'.format(
+                    name=name,
+                    enabled_release=enabled_release))
                 continue
 
             used_slice_sets, required_cli_args = get_slice_sets_and_required_args(
@@ -462,7 +473,7 @@ def gather_existing_partials(partial_path):
         for name in files:
             fullpath = os.path.join(path, name)
             if not re.search(r'\.partial\.Dockerfile$', _b(fullpath)):
-                eprint(('> Probably not a problem: skipping {}, which is not a '
+                logger.info(('> Probably not a problem: skipping {}, which is not a '
                         'partial.').format(fullpath))
                 continue
             # partial_dir/foo/bar.partial.Dockerfile -> foo/bar
@@ -476,15 +487,15 @@ def gather_existing_partials(partial_path):
 def check_null_byte(name, string):
     null_idx = string.find('\x00')
     if null_idx != -1:
-        eprint("Found null byte in {name}:".format(name=name))
-        eprint((
+        logger.info("Found null byte in {name}:".format(name=name))
+        logger.info((
             "> Before null byte:\n"
             "{str}"
         ).format(str=textwrap.indent(
             string[:null_idx],
             prefix='  ',
         )))
-        eprint((
+        logger.info((
             "> After null byte:\n"
             "{str}"
         ).format(str=textwrap.indent(
@@ -531,7 +542,7 @@ def get_docker_run_env(tag_def, env_list):
     #         return run_args[env_var]
     #     elif env_var in os.environ:
     #         return os.environ[env_var]
-    #     eprint("> You must provide {env}=[ {desc} ]".format(
+    #     logger.info("> You must provide {env}=[ {desc} ]".format(
     #         env=env_var,
     #         desc=desc))
     #     sys.exit(1)
@@ -543,7 +554,7 @@ def get_docker_run_env(tag_def, env_list):
 
     for var, value in env.items():
         if value == '':
-            eprint(("> ERROR: you must provide a value for --run_arg {var}=<VALUE> "
+            logger.error(("> ERROR: you must provide a value for --run_arg {var}=<VALUE> "
                     "(or define an environment variable); see {spec} for documentation.").format(
                 var=var,
                 spec="spec.yml"))
@@ -556,9 +567,9 @@ def get_docker_run_env(tag_def, env_list):
         assert var not in env
         env[var] = value
 
-    env['IML_USER'] = get_username()
-    env['IML_USER_ID'] = get_user_id()
-    env['IML_GROUP_ID'] = get_group_id()
+    # env['IML_USER'] = get_username()
+    # env['IML_UID'] = get_user_id()
+    # env['IML_GID'] = get_group_id()
     env['TENSORFLOW_VERSION'] = TENSORFLOW_VERSION
     env['IML_INSTALL_PREFIX'] = py_config.DOCKER_INSTALL_PREFIX
     env['IML_BUILD_PREFIX'] = py_config.DOCKER_BUILD_PREFIX
@@ -591,6 +602,7 @@ def get_docker_run_argv(argv):
     return argv[1:]
 
 def main():
+    logger.info("Test logger")
     parser = argparse.ArgumentParser(description=__doc__)
 
     # parser.add_argument('--hub_username',
@@ -701,11 +713,11 @@ def main():
         action='store_true',
         help=textwrap.dedent("""
             In the generated dockerfiles, print start/end markers for the partial files its composed of; for e.g.:
-                START: dockerfiles/partials/ubuntu/devel-nvidia.partial.Dockerfile
+                START: dockerfiles/partials/ubuntu/install_cuda_10_1.partial.Dockerfile
                 RUN ...
                 RUN ...
                 ...
-                END: dockerfiles/partials/ubuntu/devel-nvidia.partial.Dockerfile
+                END: dockerfiles/partials/ubuntu/install_cuda_10_1.partial.Dockerfile
             """))
 
     # parser.add_argument(
@@ -853,8 +865,15 @@ def main():
             "Provide either --deploy or --run.  "
             "Use --deploy to deploy the IML development environment (probably what you want)")
 
-    assembler = Assembler(parser, argv, args, extra_argv)
-    assembler.run()
+    try:
+        assembler = Assembler(parser, argv, args, extra_argv)
+        assembler.run()
+    except DeployError as e:
+        if args.debug:
+            raise e
+        print("ERROR: {e}".format(e=e), file=sys.stderr)
+        sys.exit(1)
+
 
 class Assembler:
     def __init__(self, parser, argv, args, extra_argv):
@@ -867,7 +886,7 @@ class Assembler:
         args = self.args
         # Read the full spec file, used for everything
         with open(args.spec_file, 'r') as spec_file:
-            tag_spec = yaml.load(spec_file)
+            tag_spec = yaml.load(spec_file, Loader=yaml.FullLoader)
 
         for arg in args.arg:
             key, value = parse_build_arg(arg)
@@ -881,12 +900,12 @@ class Assembler:
         partials = gather_existing_partials(args.partial_dir)
 
         # Abort if spec.yaml is invalid
-        schema = yaml.load(SCHEMA_TEXT)
+        schema = yaml.load(SCHEMA_TEXT, Loader=yaml.FullLoader)
         v = TfDockerTagValidator(schema, partials=partials)
         if not v.validate(tag_spec):
-            eprint('> Error: {} is an invalid spec! The errors are:'.format(
+            logger.error('> Error: {} is an invalid spec! The errors are:'.format(
                 args.spec_file))
-            eprint(yaml.dump(v.errors, indent=2))
+            logger.error(yaml.dump(v.errors, indent=2))
             exit(1)
         tag_spec = v.normalized(tag_spec)
 
@@ -970,7 +989,7 @@ class Assembler:
             ]
         docker_run_argv = extra_argv
         cmd = get_docker_cmdline('run', docker_run_argv, **run_kwargs)
-        eprint(get_cmd_string(cmd))
+        logger.info(get_cmd_string(cmd))
         subprocess.run(cmd, stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr)
         # Q: Save output?
 
@@ -1113,7 +1132,7 @@ class Assembler:
         cmd.extend(extra_argv)
         container_filter = "rlscope"
 
-        eprint(get_cmd_string(cmd))
+        logger.info(get_cmd_string(cmd))
         subprocess.check_call(cmd, stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr)
 
         if args.mps:
@@ -1176,18 +1195,18 @@ class Assembler:
             project=self.project_name(),
             IML_BASH_SERVICE_NAME=IML_BASH_SERVICE_NAME)
 
-        eprint(get_cmd_string(cmd))
+        logger.info(get_cmd_string(cmd))
         subprocess.check_call(cmd, stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr)
         rlscope_bash_container = self._wait_for_bash(container_filter)
 
         ps_cmd = ['docker', 'ps']
-        eprint(get_cmd_string(ps_cmd))
+        logger.info(get_cmd_string(ps_cmd))
         subprocess.check_call(ps_cmd, stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr)
         print("> Deployed IML development environment")
         print("> Attaching to /bin/bash in the dev environment:")
         # Login to existing container using a new /bin/bash shell so we are greeted with the _rlscope_banner
         exec_cmd = ['docker', 'exec', '-i', '-t', rlscope_bash_container.name, '/bin/bash']
-        eprint(get_cmd_string(exec_cmd))
+        logger.info(get_cmd_string(exec_cmd))
         subprocess.run(exec_cmd, stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr)
 
     def docker_pull(self, pull_img):
@@ -1195,7 +1214,7 @@ class Assembler:
         $ docker pull <pull_img>
         """
         cmd = ['docker', 'pull', pull_img]
-        eprint(get_cmd_string(cmd))
+        logger.info(get_cmd_string(cmd))
         subprocess.check_call(cmd, stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr)
         image = self.dock.images.get(pull_img)
         return image
@@ -1205,9 +1224,9 @@ class Assembler:
         args = self.args
         docker_run_env = get_docker_run_env(tag_def, args.env)
         if not tag_def['tests']:
-            eprint('>>> No tests to run.')
+            logger.info('>>> No tests to run.')
         for test in tag_def['tests']:
-            eprint('>> Testing {}...'.format(test))
+            logger.info('>> Testing {}...'.format(test))
 
             runtime = get_docker_runtime(tag_def)
 
@@ -1243,25 +1262,25 @@ class Assembler:
             err = container.logs(stdout=False, stderr=True)
             container.remove()
             if out:
-                eprint('>>> Output stdout:')
-                eprint(out.decode('utf-8'))
+                logger.info('>>> Output stdout:')
+                logger.info(out.decode('utf-8'))
             else:
-                eprint('>>> No test standard out.')
+                logger.info('>>> No test standard out.')
             if err:
-                eprint('>>> Output stderr:')
-                eprint(out.decode('utf-8'))
+                logger.info('>>> Output stderr:')
+                logger.info(out.decode('utf-8'))
             else:
-                eprint('>>> No test standard err.')
+                logger.info('>>> No test standard err.')
             if code != 0:
-                eprint('>> {} failed tests with status: "{}"'.format(
+                logger.error('>> {} failed tests with status: "{}"'.format(
                     repo_tag, code))
                 self.failed_tags.append(tag)
                 tag_failed = True
                 if args.stop_on_failure:
-                    eprint('>> ABORTING due to --stop_on_failure!')
+                    logger.error('>> ABORTING due to --stop_on_failure!')
                     exit(1)
             else:
-                eprint('>> Tests look good!')
+                logger.info('>> Tests look good!')
 
         return tag_failed
 
@@ -1275,7 +1294,7 @@ class Assembler:
 
         if not args.pull:
             if args.release not in RELEASE_TO_LOCAL_IMG_TAG:
-                eprint("ERROR: Not sure what image tag to use for --release={release}; please modify assembler.py by setting RELEASE_TO_LOCAL_IMG_TAG['{release}']".format(release=args.release))
+                logger.error("ERROR: Not sure what image tag to use for --release={release}; please modify assembler.py by setting RELEASE_TO_LOCAL_IMG_TAG['{release}']".format(release=args.release))
                 sys.exit(1)
 
         if args.pull:
@@ -1318,7 +1337,7 @@ class Assembler:
 
         # Empty Dockerfile directory if building new Dockerfiles
         if args.construct_dockerfiles:
-            eprint('> Emptying Dockerfile dir "{}"'.format(args.dockerfile_dir))
+            logger.info('> Emptying Dockerfile dir "{}"'.format(args.dockerfile_dir))
             shutil.rmtree(args.dockerfile_dir, ignore_errors=True)
             mkdir_p(args.dockerfile_dir)
 
@@ -1329,14 +1348,14 @@ class Assembler:
         # # Login to Docker if uploading images
         # if args.upload_to_hub:
         #     if not args.hub_username:
-        #         eprint('> Error: please set --hub_username when uploading to Dockerhub.')
+        #         logger.info('> Error: please set --hub_username when uploading to Dockerhub.')
         #         exit(1)
         #     if not args.hub_repository:
-        #         eprint(
+        #         logger.info(
         #                 '> Error: please set --hub_repository when uploading to Dockerhub.')
         #         exit(1)
         #     if not args.hub_password:
-        #         eprint('> Error: please set --hub_password when uploading to Dockerhub.')
+        #         logger.info('> Error: please set --hub_password when uploading to Dockerhub.')
         #         exit(1)
         #     dock.login(
         #             username=args.hub_username,
@@ -1348,15 +1367,15 @@ class Assembler:
         self.failed_tags = []
         for tag, tag_defs in all_tags.items():
             for tag_def in tag_defs:
-                eprint('> Working on {}'.format(tag))
+                logger.info('> Working on {}'.format(tag))
 
                 if args.exclude_tags_matching and re.match(args.exclude_tags_matching, tag):
-                    eprint('>> Excluded due to match against "{}".'.format(
+                    logger.info('>> Excluded due to match against "{}".'.format(
                         args.exclude_tags_matching))
                     continue
 
                 if args.only_tags_matching and not re.match(args.only_tags_matching, tag):
-                    eprint('>> Excluded due to failure to match against "{}".'.format(
+                    logger.info('>> Excluded due to failure to match against "{}".'.format(
                         args.only_tags_matching))
                     continue
 
@@ -1365,7 +1384,7 @@ class Assembler:
                     path = os.path.join(args.dockerfile_dir,
                                         tag_def['dockerfile_subdirectory'],
                                         tag + '.Dockerfile')
-                    eprint('>> Writing {}...'.format(path))
+                    logger.info('>> Writing {}...'.format(path))
                     if not args.dry_run:
                         mkdir_p(os.path.dirname(path))
                         with open(path, 'w') as f:
@@ -1382,12 +1401,12 @@ class Assembler:
                 if not args.dry_run:
                     with open(dockerfile, 'w') as f:
                         f.write(tag_def['dockerfile_contents'])
-                eprint('>> (Temporary) writing {}...'.format(dockerfile))
+                logger.info('>> (Temporary) writing {}...'.format(dockerfile))
 
                 repo_tag = '{}:{}'.format(args.repository, tag)
-                eprint('>> Building {} using build args:'.format(repo_tag))
+                logger.info('>> Building {} using build args:'.format(repo_tag))
                 for arg, value in tag_def['cli_args'].items():
-                    eprint('>>> {}={}'.format(arg, value))
+                    logger.info('>>> {}={}'.format(arg, value))
 
                 # Note that we are NOT using cache_from, which appears to limit
                 # available cache layers to those from explicitly specified layers. Many
@@ -1424,19 +1443,22 @@ class Assembler:
                         #     tag_failed = self.run_tests(image, repo_tag, tag, tag_def)
 
                     except docker.errors.BuildError as e:
-                        eprint('>> {} failed to build with message: "{}"'.format(
+                        logger.error('>> {} failed to build with message: "{}"'.format(
                             repo_tag, e.msg))
-                        eprint('>> Build logs follow:')
+                        logger.error('>> Build logs follow:')
                         log_lines = [l.get('stream', '') for l in e.build_log]
-                        eprint(''.join(log_lines))
+                        logger.error(''.join(log_lines))
                         self.failed_tags.append(tag)
                         tag_failed = True
                         if args.stop_on_failure:
-                            eprint('>> ABORTING due to --stop_on_failure!')
+                            logger.error('>> ABORTING due to --stop_on_failure!')
                             exit(1)
 
                     except DockerError as e:
-                        eprint(e.message)
+                        if hasattr(e, 'message'):
+                            logger.error(e.message)
+                        else:
+                            logger.error(e)
                         sys.exit(1)
 
                     # Clean temporary dockerfiles if they were created earlier
@@ -1451,7 +1473,7 @@ class Assembler:
                 #     if tag_failed:
                 #         continue
                 #
-                #     eprint('>> Uploading to {}:{}'.format(args.hub_repository, tag))
+                #     logger.info('>> Uploading to {}:{}'.format(args.hub_repository, tag))
                 #     if not args.dry_run:
                 #         p = multiprocessing.Process(
                 #                 target=upload_in_background,
@@ -1459,7 +1481,7 @@ class Assembler:
                 #         p.start()
 
         if self.failed_tags:
-            eprint(
+            logger.error(
                 '> Some tags failed to build or failed testing, check scrollback for '
                 'errors: {}'.format(','.join(self.failed_tags)))
             exit(1)
@@ -1542,10 +1564,19 @@ def get_implicit_build_args():
     # }
     build_args = dict()
     build_args['TENSORFLOW_VERSION'] = TENSORFLOW_VERSION
+
+    build_args['IML_USER'] = get_username()
+    build_args['IML_UID'] = get_user_id()
+    build_args['IML_GID'] = get_group_id()
+    build_args['IML_DIR'] = py_config.IML_DIR
+    # virtualenv directory within container.
+    build_args['VIRTUALENV'] = "/home/{user}/venv".format(user=build_args['IML_USER'])
+
     for k in build_args.keys():
         # Otherwise, when we do dock_cli.build we get:
         #     docker.errors.APIError: 400 Client Error: Bad Request ("error reading build args: json: cannot unmarshal number into Go value of type string")
         build_args[k] = str(build_args[k])
+
     return build_args
 
 def get_implicit_run_args():
@@ -1595,6 +1626,18 @@ def get_rlscope_volumes(args, run_args, extra_volumes):
     setup_volume_dir(host_bazel_dir)
 
     shutil.chown(host_bazel_dir, get_username(), get_username())
+
+    host_directories = set()
+    host_directories.update(extra_volumes)
+    host_directories.update(volumes.keys())
+    for host_path in host_directories:
+        if not os.path.exists(host_path):
+            os.makedirs(host_path, exist_ok=True)
+        subprocess.check_call("chown -R {user}:{user} {path}".format(
+            user=get_username(),
+            path=host_path,
+        ), shell=True)
+
     for i, direc in enumerate(extra_volumes):
         env_name = 'CMDLINE_VOLUME_{i}'.format(i=i)
         assert env_name not in volumes
@@ -1602,6 +1645,7 @@ def get_rlscope_volumes(args, run_args, extra_volumes):
         assert ':' not in direc
         # volumes[env_name] = direc
         volumes[direc] = direc
+
     return volumes
 
 def get_rlscope_ports(run_args, extra_ports):
@@ -1953,6 +1997,8 @@ class StackYMLGenerator:
         #
         image: {rlscope_image}
         
+        user: "{IML_USER}"
+        
         ports:
             # Expose port that the rlscope-drill web server runs on.
             - {rlscope_drill_port}:{DEFAULT_IML_DRILL_PORT}
@@ -1999,7 +2045,8 @@ class StackYMLGenerator:
         """).rstrip()
 
     def generate(self,
-                 assembler_cmd, env, volumes, ports,
+                 assembler_cmd, env,
+                 volumes, ports,
                  rlscope_drill_port=DEFAULT_IML_DRILL_PORT,
                  postgres_port=DEFAULT_POSTGRES_PORT,
                  postgres_pgdata_dir=DEFAULT_POSTGRES_PGDATA_DIR,
@@ -2018,6 +2065,10 @@ class StackYMLGenerator:
 
         return template.format(
             env_list=self.env_list(env, indent=bash_indent),
+            # build
+            #   args:
+            #     - ...
+            # yml_build_args_list=self.build_args_list(build_args, indent=bash_indent + 2),
             volume_list=self.volume_list(volumes, indent=bash_indent),
             port_list=self.port_list(ports, indent=bash_indent + 1),
             DEFAULT_POSTGRES_PORT=DEFAULT_POSTGRES_PORT,
@@ -2031,6 +2082,8 @@ class StackYMLGenerator:
             rlscope_image=rlscope_image,
             IML_MPS_DAEMON_CONTAINER_NAME=self._mps_daemon_container_name(),
             IML_BASH_SERVICE_NAME=IML_BASH_SERVICE_NAME,
+            IML_UID=get_user_id(),
+            IML_USER=get_username(),
             NVIDIA_VISIBLE_DEVICES=','.join([str(dev) for dev in NVIDIA_VISIBLE_DEVICES]),
         )
 
@@ -2062,6 +2115,9 @@ class StackYMLGenerator:
     def env_list(self, envs : dict, indent):
         return self._yml_dict_as_list(envs, sep='=', indent=indent)
 
+    def build_args_list(self, build_args : dict, indent):
+        return self._yml_dict_as_list(build_args, sep='=', indent=indent)
+
 def dict_as_env_list(values : dict, sep='='):
     envs = ["{var}{sep}{value}".format(var=var, value=values[var], sep=sep)
             for var in sorted(values.keys())]
@@ -2073,7 +2129,7 @@ def get_cmd_string(cmd):
         cmd=' '.join(cmd))
 
 def ind(string, indent=1):
-    textwrap.indent(string, prefix='  '*indent)
+    return textwrap.indent(string, prefix='  '*indent)
 
 def get_username():
     return pwd.getpwuid(os.getuid())[0]
@@ -2094,8 +2150,11 @@ def nvidia_set_compute_mode(compute_mode, device_ids):
         f"--compute-mode={compute_mode}",
         f"--id={device_id_str}",
     ]
-    eprint(get_cmd_string(cmd))
+    logger.info(get_cmd_string(cmd))
     subprocess.check_call(cmd, stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr)
+
+class DeployError(RuntimeError):
+    pass
 
 if __name__ == '__main__':
     main()

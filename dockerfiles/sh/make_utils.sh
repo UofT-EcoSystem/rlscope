@@ -110,6 +110,19 @@ _check_env() {
     # TODO: these should be optional (i.e. if TENSORFLOW_DIR isn't provided, install it from a fresh git repo checkout).
     #
 
+    _check_rlscope_dir
+
+    if ! which develop_rlscope.sh; then
+        export PATH="$IML_DIR/dockerfiles/sh:$PATH"
+        if ! which develop_rlscope.sh; then
+            echo "ERROR: failed trying to push $IML_DIR/dockerfiles/sh on \$PATH."
+            exit 1
+        fi
+    fi
+
+}
+
+_check_rlscope_dir() {
     # Sometimes apt will fail on fresh containers unless we do this first.
     sudo apt update
 
@@ -117,15 +130,6 @@ _check_env() {
         echo "ERROR: environment variable IML_DIR should be set to: The root directory of the rlscope repo checkout."
         exit 1
     fi
-
-    if ! which install_rlscope.sh; then
-        export PATH="$IML_DIR/dockerfiles/sh:$PATH"
-        if ! which install_rlscope.sh; then
-            echo "ERROR: failed trying to push $IML_DIR/dockerfiles/sh on \$PATH."
-            exit 1
-        fi
-    fi
-
 }
 
 check_tensorflow_build() {
@@ -169,7 +173,7 @@ _upgrade_pip() {
 
 _check_rlscope() {
     if ! py_module_installed "rlscope"; then
-        install_rlscope.sh
+        develop_rlscope.sh
         if ! py_module_installed "rlscope"; then
             echo "ERROR: tried to install rlscope but failed:"
             echo "> CMD:"

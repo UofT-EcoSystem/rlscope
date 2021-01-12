@@ -4,6 +4,7 @@
 #
 ARG PYTHON_VERSION=3.6.8
 
+USER root
 WORKDIR /root/tar_files
 RUN wget --quiet https://www.python.org/ftp/python/${PYTHON_VERSION}/Python-${PYTHON_VERSION}.tar.xz
 WORKDIR /root/python3.6
@@ -42,3 +43,5 @@ RUN make -j$(nproc)
 # Using altinstall will ensure that you don’t mess with the default system Python.
 RUN make altinstall
 RUN python3.6 --version
+WORKDIR ${HOME}
+USER ${IML_USER}
