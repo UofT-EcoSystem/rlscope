@@ -20,8 +20,22 @@ main() {
   # TODO: remove...
   export repetitions=2
 
+  # Compare different simulators to each other (using same RL algorithm: PPO in stable-baselines).
   export fig=simulator_choice;
   bash ./run_bench.sh all_run;
+  # Plots of simulator comparison
+  bash ./run_bench.sh plot_stable_baselines_fig_9_simulator_choice
+
+  local output_dir="$ARTIFACTS_DIR/experiment_simulator_choice"
+  mkdir -p "$output_dir"
+  _do cp $IML_DIR/output/stable_baselines/calibration.parallel_runs_yes/plots/stable_baselines_fig_9_simulator_choice/OverlapStackedBarPlot.overlap_type_CategoryOverlap.percent.pdf "$output_dir/fig_simulator_choice.pdf"
+  log_info
+  (
+  TXT_BOLD=yes
+  log_info "> Success!"
+  )
+  log_info "  Simulator comparison plots have been output @ $output_dir"
+
 }
 
 main "$@"

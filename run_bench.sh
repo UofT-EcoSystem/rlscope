@@ -185,7 +185,10 @@ _run_debug_ddpg_full_training() {
 
 fig_9_simulator_choice_environments() {
   # echo AirLearningEnv
-  # echo PongNoFrameskip-v4
+
+  # TODO: this was commented out; why?
+  echo PongNoFrameskip-v4
+
   echo AntBulletEnv-v0
   echo HalfCheetahBulletEnv-v0
   echo HopperBulletEnv-v0
@@ -232,7 +235,9 @@ stable_baselines_fig_10_algo_choice_algos() {
   echo sac
 }
 stable_baselines_fig_9_simulator_choice_algo() {
-  echo ddpg
+  # Q: Is there a reason I changed this to DDPG...? It doesn't have atari hyperparams.
+  # echo ddpg
+  echo ppo2
 }
 
 reagent_fig_11_rl_framework_choice_algos() {
@@ -659,9 +664,10 @@ all_run_reagent() {
 #    run_reagent
 #  done
 
-  if [ "$fig" = 'framework_choice' ] || [ "$fig" = 'all' ]; then
-    plot_reagent
-  fi
+# NOT useful just confusing.
+#  if [ "$fig" = 'framework_choice' ] || [ "$fig" = 'all' ]; then
+#    plot_reagent
+#  fi
 
 )
 }

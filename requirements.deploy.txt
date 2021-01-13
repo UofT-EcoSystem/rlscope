@@ -18,3 +18,4 @@ docker==4.0.1
 PyYAML==5.1
 # Coloured logging.
 colorlog>=4.2.1
+py-cpuinfo >= 4.0.0

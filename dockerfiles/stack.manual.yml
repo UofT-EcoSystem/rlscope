@@ -1,5 +1,5 @@
 # Manually constructed stack.yml file.
-# Useful for figuring out a "template" to use inside assembler.py.
+# Useful for figuring out a "template" to use inside run_docker.py.
 version: '3.1'
 
 services:

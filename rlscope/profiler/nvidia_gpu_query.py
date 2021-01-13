@@ -266,7 +266,7 @@ def run_cmd(cmd, **kwargs):
 # I expect nvidia-smi to take ~ 0.08 seconds.
 # I've seen it take ~ 2 seconds when it misbehaves.
 MAX_NVIDIA_SMI_TIME_SEC = 1
-def check_nvidia_smi(debug=False):
+def check_nvidia_smi(exit_if_fail=False, debug=False):
     """
     Make sure nvidia-smi runs fast enough to perform GPU utilization sampling.
     :return:
@@ -277,14 +277,14 @@ def check_nvidia_smi(debug=False):
     end_t = time.time()
     nvidia_smi_sec = end_t - start_t
     if nvidia_smi_sec > MAX_NVIDIA_SMI_TIME_SEC:
-        logger.warning(textwrap.dedent("""
+        # $ sudo service nvidia-persistenced start
+        errmsg = textwrap.dedent("""
         RL-Scope WARNING: nvidia-smi takes a long time to run on your system.
         In particular, it took {sec} sec to run nvidia-smi (we would prefer < {limit_sec}).
         This will interfere with sampling GPU utilization.
         You can fix this by running the following command:
         
         # Start systemd nvidia-persistenced service (if it's not already running).
-        $ sudo service nvidia-persistenced start
         $ sudo nvidia-persistenced --persistence-mode
         
         For more details see:
@@ -292,8 +292,12 @@ def check_nvidia_smi(debug=False):
         """).format(
             sec=nvidia_smi_sec,
             limit_sec=MAX_NVIDIA_SMI_TIME_SEC,
-        ))
-        # sys.exit(1)
+        )
+        if exit_if_fail:
+            logger.error(errmsg)
+            sys.exit(1)
+        else:
+            logger.warning(errmsg)
 
 
 def _parse_entity(cmd_opts, csv_fields, post_process_entity=None, debug=False):

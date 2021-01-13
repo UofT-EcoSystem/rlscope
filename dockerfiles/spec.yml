@@ -179,13 +179,13 @@ slice_sets:
             - ubuntu/entrypoint
           test_runtime: nvidia
           args:
-          # NOTE: must be provided at assembler.py command line
+          # NOTE: must be provided at run_docker.py command line
           - CHECKOUT_TF_SRC=0
           - USE_PYTHON_3_NOT_2=1
           run_args:
           # NOTE: To make it so we can run the same scripts inside/outside containers:
           # - Outside containers: we define these environment variables in a source_me.sh
-          # - Inside containers: we require these to be defined when calling assembler.py (docker run)
+          # - Inside containers: we require these to be defined when calling run_docker.py (docker run)
           #
           # The root directory of a 'patched' TensorFlow checkout.
           # - TENSORFLOW_DIR=
@@ -226,13 +226,13 @@ slice_sets:
           - ubuntu/entrypoint
         test_runtime: nvidia
         args:
-          # NOTE: must be provided at assembler.py command line
+          # NOTE: must be provided at run_docker.py command line
           - CHECKOUT_TF_SRC=0
           - USE_PYTHON_3_NOT_2=1
         run_args:
           # NOTE: To make it so we can run the same scripts inside/outside containers:
           # - Outside containers: we define these environment variables in a source_me.sh
-          # - Inside containers: we require these to be defined when calling assembler.py (docker run)
+          # - Inside containers: we require these to be defined when calling run_docker.py (docker run)
           #
           # The root directory of a 'patched' TensorFlow checkout.
           # - TENSORFLOW_DIR=
@@ -272,13 +272,13 @@ slice_sets:
 #          - ubuntu/entrypoint
 #        test_runtime: nvidia
 #        args:
-#          # NOTE: must be provided at assembler.py command line
+#          # NOTE: must be provided at run_docker.py command line
 #          - CHECKOUT_TF_SRC=0
 #          - USE_PYTHON_3_NOT_2=1
 #        run_args:
 #          # NOTE: To make it so we can run the same scripts inside/outside containers:
 #          # - Outside containers: we define these environment variables in a source_me.sh
-#          # - Inside containers: we require these to be defined when calling assembler.py (docker run)
+#          # - Inside containers: we require these to be defined when calling run_docker.py (docker run)
 #          #
 #          # The root directory of a 'patched' TensorFlow checkout.
 #          - TENSORFLOW_DIR=

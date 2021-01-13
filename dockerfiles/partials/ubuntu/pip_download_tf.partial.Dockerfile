@@ -11,6 +11,6 @@
 #    WORKDIR <dir>
 RUN mkdir -p /root/pip_whl && cd /root/pip_whl
 WORKDIR /root/pip_whl
-# Defined in assembler.py
+# Defined in run_docker.py
 ARG TENSORFLOW_VERSION
 RUN pip download tensorflow-gpu==${TENSORFLOW_VERSION}

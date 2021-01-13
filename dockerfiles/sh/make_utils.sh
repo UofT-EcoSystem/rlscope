@@ -6,12 +6,89 @@
 #set -e
 #set -x
 
+SH_DIR="$(readlink -f "$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )")"
+source $SH_DIR/exports.sh
+
 IML_DIR=${IML_DIR:-$HOME/clone/iml}
 REAGENT_DIR=${REAGENT_DIR:-$HOME/clone/ReAgent}
 
 _do() {
-    echo "> CMD: $@"
+    echo "> CMD:"
+    echo "  $ $@"
     "$@"
+}
+
+# $ man terminfo
+# Color       #define       Value       RGB
+# black     COLOR_BLACK       0     0, 0, 0
+# red       COLOR_RED         1     max,0,0
+# green     COLOR_GREEN       2     0,max,0
+# yellow    COLOR_YELLOW      3     max,max,0
+# blue      COLOR_BLUE        4     0,0,max
+# magenta   COLOR_MAGENTA     5     max,0,max
+# cyan      COLOR_CYAN        6     0,max,max
+# white     COLOR_WHITE       7     max,max,max
+
+# Text style:
+# tput bold    # Select bold mode
+# tput dim     # Select dim (half-bright) mode
+# tput smul    # Enable underline mode
+# tput rmul    # Disable underline mode
+# tput rev     # Turn on reverse video mode
+# tput smso    # Enter standout (bold) mode
+# tput rmso    # Exit standout mode
+
+# Other:
+# tput sgr0    # Reset text format to the terminal's default
+# tput bel     # Play a bell
+
+TXT_UNDERLINE=no
+TXT_BOLD=no
+TXT_COLOR=
+TXT_STYLE=
+TXT_CLEAR="$(tput sgr0)"
+set_TXT_STYLE() {
+  if [ "$TXT_UNDERLINE" = 'yes' ]; then
+    TXT_STYLE="${TXT_STYLE}$(tput smul)"
+  fi
+  if [ "$TXT_BOLD" = 'yes' ]; then
+    TXT_STYLE="${TXT_STYLE}$(tput bold)"
+  fi
+  if [ "$TXT_COLOR" != '' ]; then
+    TXT_STYLE="${TXT_STYLE}$(tput setaf $TXT_COLOR)"
+  fi
+}
+log_info() {
+  TXT_COLOR=2
+  set_TXT_STYLE
+  echo -e "${TXT_STYLE}$@${TXT_CLEAR}"
+}
+log_error() {
+  # red
+  TXT_COLOR=1
+  set_TXT_STYLE
+  echo -e "${TXT_STYLE}$@${TXT_CLEAR}"
+}
+log_warning() {
+  # yellow
+  TXT_COLOR=3
+  set_TXT_STYLE
+  echo -e "${TXT_STYLE}$@${TXT_CLEAR}"
+}
+
+_link() {
+  # _link $target $destination
+  #
+  # Create symlink at $destination that links to $target.
+  # Replace existing symlink if it exists (but only if it's also a symlink).
+  local target="$1"
+  local destination="$2"
+  shift 2
+
+  if [ -L "$destination" ]; then
+    rm "$destination"
+  fi
+  _do ln -s -T "$target" "$destination" "$@"
 }
 
 BAZEL_BUILD_FLAGS=()

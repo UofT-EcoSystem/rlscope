@@ -56,12 +56,16 @@ from io import BytesIO
 from docker import APIClient
 from pathlib import Path
 
-# assembler.py is at $REPO_ROOT/dockerfiles
-REPO_ROOT = _d(_d(_a(__file__)))
+# run_docker.py is at $REPO_ROOT/dockerfiles
+REPO_ROOT = _d(_a(__file__))
 sys.path.append(REPO_ROOT)
 
 from rlscope import py_config
 from rlscope.profiler.rlscope_logging import logger
+
+from rlscope.profiler import nvidia_gpu_query
+
+DOCKERFILES = _a(_j(REPO_ROOT, 'dockerfiles'))
 
 NVIDIA_VISIBLE_DEVICES = [0]
 assert len(NVIDIA_VISIBLE_DEVICES) > 0
@@ -597,12 +601,15 @@ def get_docker_run_argv(argv):
     - Define additional volume mounts (outside of required ones)
 
     :param argv:
-        argv = ["assembler.py" "extra_argument[0]", ...]
+        argv = ["run_docker.py" "extra_argument[0]", ...]
     :return:
     """
     return argv[1:]
 
 def main():
+    # Run all docker related commands from $ROOT/dockerfiles.
+    os.chdir(DOCKERFILES)
+
     logger.info("Test logger")
     parser = argparse.ArgumentParser(description=__doc__)
 
@@ -681,7 +688,7 @@ def main():
         Translates into docker --volume option. 
         We mount the path at the same path as it is in the host.
         i.e. 
-        # assembler.py option:
+        # run_docker.py option:
         --volume /one/two
         #
         # becomes
@@ -720,6 +727,13 @@ def main():
                 RUN ...
                 ...
                 END: dockerfiles/partials/ubuntu/install_cuda_10_1.partial.Dockerfile
+            """))
+
+    parser.add_argument(
+        '--pdb',
+        action='store_true',
+        help=textwrap.dedent("""
+            Debug: breakpoint on error.
             """))
 
     # parser.add_argument(
@@ -862,6 +876,15 @@ def main():
     argv = list(sys.argv)
     args, extra_argv = parser.parse_known_args()
 
+    # NOTE: If this fails, you need to enable nvidia-persistend daemon.
+    nvidia_gpu_query.check_nvidia_smi(exit_if_fail=True)
+
+    if not args.stop and not args.pull and not args.reload and not args.build_images and not args.run and not args.deploy:
+        # Default options:
+        args.construct_dockerfiles = True
+        args.build_images = True
+        args.deploy = True
+
     if args.deploy and args.run:
         parser.error(
             "Provide either --deploy or --run.  "
@@ -925,8 +948,9 @@ class Assembler:
         args = self.args
         build_kwargs = dict(
             timeout=args.hub_timeout,
-            path='.',
-            dockerfile=dockerfile,
+            path=DOCKERFILES,
+            # path='dockerfiles',
+            dockerfile=_a(dockerfile),
             buildargs=tag_def['cli_args'],
             tag=repo_tag,
         )
@@ -934,6 +958,10 @@ class Assembler:
             print("> dock.images.build")
             print(textwrap.indent(pprint.pformat(build_kwargs), prefix="    "))
 
+        build_cmd = get_docker_cmdline('build', **build_kwargs)
+        logger.info(get_cmd_string(build_cmd, show_cwd=True))
+        # if not _e(dockerfile):
+        # import ipdb; ipdb.set_trace()
         build_output_generator = self.dock_cli.build(decode=True, **build_kwargs)
         response = tee_docker(
             build_output_generator,
@@ -942,8 +970,6 @@ class Assembler:
         # I've seen "docker build" fail WITHOUT any error indication
         # (e.g. return code, raising dockers.errors.APIError),
         # so just grep for "error" in the response['message'].
-        build_cmd = get_docker_cmdline('build', **build_kwargs)
-        # logger.info(build_cmd)
         check_docker_response(response, dockerfile, repo_tag, cmd=build_cmd)
 
         image = self.dock.images.get(repo_tag)
@@ -1297,7 +1323,7 @@ class Assembler:
 
         if not args.pull:
             if args.release not in RELEASE_TO_LOCAL_IMG_TAG:
-                logger.error("ERROR: Not sure what image tag to use for --release={release}; please modify assembler.py by setting RELEASE_TO_LOCAL_IMG_TAG['{release}']".format(release=args.release))
+                logger.error("ERROR: Not sure what image tag to use for --release={release}; please modify run_docker.py by setting RELEASE_TO_LOCAL_IMG_TAG['{release}']".format(release=args.release))
                 sys.exit(1)
 
         if args.pull:
@@ -1326,15 +1352,16 @@ class Assembler:
         args = self.args
         extra_argv = self.extra_argv
 
-        if not _e('./spec.yml'):
-            print("ERROR: You must execute assembly.py from dockerfiles/assembler.py")
+        # Sanity check:
+        if not _e('spec.yml'):
+            print("ERROR: run_docker.py must run within {ROOT}/dockerfiles".format(ROOT=py_config.ROOT))
             sys.exit(1)
 
         # In order to copy $ROOT/requirements.txt into the container,
         # it can't be in an upper directory (i.e. ../.....).
         shutil.copy(
-            src=_j(py_config.ROOT, 'requirements.txt'),
-            dst='./requirements.txt')
+            src=_j(py_config.ROOT, 'dockerfiles/requirements.txt'),
+            dst='dockerfiles/requirements.txt')
 
         all_tags = self.read_spec_yml()
 
@@ -1843,7 +1870,7 @@ class StackYMLGenerator:
     def __init__(self, project_name):
         """
         :param cmd
-            assembler.py command.
+            run_docker.py command.
         """
         # Extra volumes added programmatically (e.g., tmpfs volume for nvidia mps IPC)
         self._extra_volumes = dict()
@@ -1883,7 +1910,7 @@ class StackYMLGenerator:
             mps_lines = ""
         template = textwrap.dedent("""\
         # DO NOT MODIFY!
-        # Automatically generated using assembler.py with the following command/working-directory:
+        # Automatically generated using run_docker.py with the following command/working-directory:
         #     > CMD: {assembler_cmd}
         #       PWD: {PWD}
 
@@ -2128,14 +2155,28 @@ def dict_as_env_list(values : dict, sep='='):
             for var in sorted(values.keys())]
     return envs
 
-def get_cmd_string(cmd):
+def get_cmd_string(cmd, show_cwd=False):
     if type(cmd) == list:
         cmd_str = ' '.join(cmd)
     else:
         cmd_str = cmd
-    return ("> CMD:\n"
-            "  $ {cmd}").format(
-        cmd=cmd_str)
+    if show_cwd:
+        return textwrap.dedent("""\
+        > CMD:
+          $ {cmd}
+          PWD={pwd}
+        """.format(
+            cmd=cmd_str,
+            pwd=os.getcwd())).rstrip()
+    else:
+        return textwrap.dedent("""\
+        > CMD:
+          $ {cmd}
+        """.format(
+            cmd=cmd_str)).rstrip()
+    # return ("> CMD:\n"
+    #         "  $ {cmd}").format(
+    #     cmd=cmd_str)
 
 def ind(string, indent=1):
     return textwrap.indent(string, prefix='  '*indent)
