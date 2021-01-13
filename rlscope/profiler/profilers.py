@@ -151,9 +151,9 @@ def setup(tfprof_enabled, pyprof_enabled, allow_skip=False, allow_missing_librls
         if not allow_missing_librlscope:
             # if tfprof_enabled:
             logger.error(textwrap.dedent("""\
-            To profile using RLScope, you must re-run your command-line as:
+            To profile using RL-Scope, you must re-run your command-line with the "rls-prof" prefix, i.e.:
               $ rls-prof {cmd}
-            If you want to run without RLScope, add --rlscope-disable to the above command.
+            If you want to run without RL-Scope, add --rlscope-disable to the above command.
             """).format(
                 cmd=' '.join(shlex.quote(opt) for opt in [sys.executable] + sys.argv),
             ).rstrip())
@@ -421,8 +421,8 @@ class Profiler:
             py_config.DEBUG = self.debug
         self.directory = get_argval('directory', directory, None, allow_none=False)
         self.disable = get_argval('disable', disable, False)
-        if 'IML_CONFIG' in os.environ:
-            self.rlscope_config = os.environ['IML_CONFIG']
+        if 'RLSCOPE_CONFIG' in os.environ:
+            self.rlscope_config = os.environ['RLSCOPE_CONFIG']
             if not self.calibration and self.rlscope_config == 'uninstrumented':
                 # WARNING: We do NOT do this for --rlscope-calibration runs, as it will cause a BUG!
                 # In order for calibration to work properly, we need to be able to enable each book-keeping feature in isolation!

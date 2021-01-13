@@ -26,7 +26,7 @@ from rlscope import py_config
 
 from rlscope.protobuf.pyprof_pb2 import CategoryEventsProto, MachineUtilization, DeviceUtilization, UtilizationSample
 
-from rlscope.profiler.util import log_cmd, print_cmd
+from rlscope.profiler.util import log_cmd, print_cmd, get_cpu_brand
 from rlscope.parser.common import *
 from rlscope.profiler import timer as rlscope_timer
 
@@ -449,7 +449,7 @@ class MachineProcessCPUInfo:
         self.process_tree = get_process_tree(pid)
         self.total_resident_memory_bytes = self._sample_cpu_total_resident_memory_bytes(self.process_tree)
         self.cpu_util = self._sample_cpu_util()
-        self.device_name = CPU_INFO['brand']
+        self.device_name = get_cpu_brand(CPU_INFO)
 
     def _sample_cpu_util(self):
         return psutil.cpu_percent()/100.

@@ -89,28 +89,28 @@ _add_PYTHONPATH() {
   echo "> INFO: Add to PYTHONPATH: $lib_dir"
   export PYTHONPATH="$lib_dir:$PYTHONPATH"
 }
-_add_pyenv() {
-  local pyenv_dir=$IML_INSTALL_PREFIX/pyenv
-  local bin_dir=$pyenv_dir/bin
-
-  if [ -e $bin_dir ]; then
-      export PYENV_ROOT="$pyenv_dir"
-      _add_PATH "$PYENV_ROOT/bin"
-      # export PATH="$PYENV_ROOT/bin:$PATH"
-
-      if [ -x "$(which pyenv)" ]; then
-          eval "$(pyenv init -)"
-      fi
-
-      # if [ -e $bin_dir/plugins/pyenv-virtualenv ]; then
-      #     # automatically active pyenv-virtualenv if .python-version file present in directory:
-      #     # https://github.com/pyenv/pyenv-virtualenv#activate-virtualenv
-      #     eval "$(pyenv virtualenv-init -)"
-      # fi
-  fi
-
-#  export PYENV_ROOT_DIR
-}
+#_add_pyenv() {
+#  local pyenv_dir=$IML_INSTALL_PREFIX/pyenv
+#  local bin_dir=$pyenv_dir/bin
+#
+#  if [ -e $bin_dir ]; then
+#      export PYENV_ROOT="$pyenv_dir"
+#      _add_PATH "$PYENV_ROOT/bin"
+#      # export PATH="$PYENV_ROOT/bin:$PATH"
+#
+#      if [ -x "$(which pyenv)" ]; then
+#          eval "$(pyenv init -)"
+#      fi
+#
+#      # if [ -e $bin_dir/plugins/pyenv-virtualenv ]; then
+#      #     # automatically active pyenv-virtualenv if .python-version file present in directory:
+#      #     # https://github.com/pyenv/pyenv-virtualenv#activate-virtualenv
+#      #     eval "$(pyenv virtualenv-init -)"
+#      # fi
+#  fi
+#
+##  export PYENV_ROOT_DIR
+#}
 
 (
 
@@ -136,7 +136,9 @@ echo "> INFO: Using CMAKE_INSTALL_PREFIX=$(_local_dir)"
 _add_LD_LIBRARY_PATH "$(_local_dir)/lib"
 _add_PATH "$(_local_dir)/bin"
 _add_PYTHONPATH "$(_local_dir)/lib/python3/dist-packages"
-_add_pyenv
+# I cannot remember why I used pyenv at all...I think it was for ReAgent but unfortunately
+# it leads to segfaults apparently, and we don't need/use it to run ReAgent.
+#_add_pyenv
 
 if [ "${IML_INSTALL_PREFIX:-}" = "" ]; then
   echo "> INFO: export IML_INSTALL_PREFIX=$(_local_dir)"
@@ -152,4 +154,4 @@ unset _add_PATH
 unset ROOT
 unset _local_dir
 unset _is_non_empty
-unset _add_pyenv
+#unset _add_pyenv

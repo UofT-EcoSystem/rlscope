@@ -267,7 +267,7 @@ def main():
     if args.config is None:
         args.config = DEFAULT_CONFIG
 
-    add_env['IML_CONFIG'] = args.config
+    add_env['RLSCOPE_CONFIG'] = args.config
     if args.config == 'interception':
         "rls-prof --debug --cuda-api-calls --cuda-api-events"
         _set_if_none('cuda_api_calls', True)

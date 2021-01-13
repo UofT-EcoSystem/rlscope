@@ -5,5 +5,6 @@
 export BASELINES_DIR="$IML_DIR/third_party/baselines"
 export MLPERF_DIR="$IML_DIR/third_party/mlperf_training"
 export STABLE_BASELINES_DIR="$IML_DIR/third_party/stable-baselines"
+export RL_BASELINES_ZOO_DIR="$IML_DIR/third_party/rl-baselines-zoo"
 export TF_AGENTS_DIR="$IML_DIR/third_party/agents"
 export REAGENT_DIR="$IML_DIR/third_party/ReAgent"

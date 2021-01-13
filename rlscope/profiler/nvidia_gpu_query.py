@@ -277,9 +277,8 @@ def check_nvidia_smi(debug=False):
     end_t = time.time()
     nvidia_smi_sec = end_t - start_t
     if nvidia_smi_sec > MAX_NVIDIA_SMI_TIME_SEC:
-        logger.info(textwrap.dedent("""
-        IML ERROR:
-        nvidia-smi takes a long time to run on your system.
+        logger.warning(textwrap.dedent("""
+        RL-Scope WARNING: nvidia-smi takes a long time to run on your system.
         In particular, it took {sec} sec to run nvidia-smi (we would prefer < {limit_sec}).
         This will interfere with sampling GPU utilization.
         You can fix this by running the following command:
@@ -294,7 +293,7 @@ def check_nvidia_smi(debug=False):
             sec=nvidia_smi_sec,
             limit_sec=MAX_NVIDIA_SMI_TIME_SEC,
         ))
-        sys.exit(1)
+        # sys.exit(1)
 
 
 def _parse_entity(cmd_opts, csv_fields, post_process_entity=None, debug=False):

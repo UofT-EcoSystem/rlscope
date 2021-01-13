@@ -19,7 +19,7 @@ USER root
 
 # Ubuntu 18.04 openmpi is new enough.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libopenmpi2 libopenmpi-dev
+    libopenmpi2 libopenmpi-dev openmpi-bin
 # OpenMPI really wants ssh to be installed.
 # Otherwise, ML scripts that import mpi4py will crash with an ugly error:
 # """

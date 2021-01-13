@@ -2414,7 +2414,7 @@ class GpuUtilExperiment:
         legend_ax = top_ax
 
         handles, labels = legend_ax.get_legend_handles_labels()
-        legend_ax.legend(handles, labels, loc='top right')
+        legend_ax.legend(handles, labels, loc='upper right')
         # import pdb; pdb.set_trace()
         # handles, labels = top_ax.legend()
 

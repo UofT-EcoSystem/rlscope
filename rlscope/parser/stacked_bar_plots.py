@@ -3046,7 +3046,7 @@ class DetailedStackedBarPlot:
         if single_legend:
             kwargs = dict(common_legend_kwargs)
             kwargs.update({
-                'loc':'top left',
+                'loc':'upper left',
                 'bbox_to_anchor':(1 + legend_spacer, 1 + legend_y_spacer),
             })
             if self.debug:
@@ -4032,9 +4032,13 @@ def xfields_from_xtick_expression(df, xtick_expression, debug=False):
 def get_capsize(ax):
     # num_bars = len(ax.patches)
     bar_width = ax.patches[0].get_width()
+
     # Sanity check.
-    assert all(patch.get_width() == bar_width for patch in ax.patches)
+    # NOTE: This can fail... I've seen 3 bars with widths:
+    #   0.26666666666666666, 0.26666666666666666, 0.2666666666666667
+    # assert all(patch.get_width() == bar_width for patch in ax.patches)
     # Make error bar width 25% of bar width.
+
     return bar_width/4
 
 def add_repetition(df):

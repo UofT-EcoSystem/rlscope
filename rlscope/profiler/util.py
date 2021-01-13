@@ -286,11 +286,21 @@ def get_available_cpus():
     if GET_AVAILABLE_CPUS_CPU_INFO is None:
         # Do this lazily to avoid long import times.
         GET_AVAILABLE_CPUS_CPU_INFO = cpuinfo.get_cpu_info()
-    device_name = GET_AVAILABLE_CPUS_CPU_INFO['brand']
+    device_name = get_cpu_brand(GET_AVAILABLE_CPUS_CPU_INFO)
     return {
         'device_name':device_name,
         'device_number':0,
     }
+
+def get_cpu_brand(cpu_info):
+    if 'brand' in cpu_info:
+        return cpu_info['brand']
+    elif 'brand_raw' in cpu_info:
+        return cpu_info['brand_raw']
+    raise RuntimeError((
+        "Cannot determine name of CPU from cpuinfo.get_cpu_info(); "
+        "tried 'brand' and 'brand_raw', choices are {choices}").format(
+        choices=cpu_info.keys()))
 
 def get_available_gpus():
     # $ tensorflow_cuda9 git:(opt-tfprof) ✗ nvidia-smi -L

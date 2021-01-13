@@ -128,6 +128,7 @@ _untar() {
 
 }
 
+GIT_USERNAME=
 GIT_PULL=no
 GIT_RECURSIVE=yes
 GIT_CLONE_OPTS=()
@@ -156,7 +157,9 @@ _clone() {
     if [ "$GIT_PULL" = "yes" ]; then
       git pull
     fi
-    git submodule update --init
+    if [ "$GIT_RECURSIVE" != "no" ]; then
+      git submodule update --init
+    fi
     )
 }
 
@@ -182,10 +185,12 @@ github_url() {
     local name_slash_repo="$1"
     shift 1
 
-    # Doesn't work inside docker container (no ssh key)
-    # echo "git@github.com:$name_slash_repo"
-
-    echo "https://github.com/$name_slash_repo"
+    if [ "$GIT_USERNAME" != "" ]; then
+      # Doesn't work inside docker container (no ssh key)
+      echo "git@github.com:$name_slash_repo"
+    else
+      echo "https://github.com/$name_slash_repo"
+    fi
 }
 
 CMAKE_VERSION=3.15.1
@@ -222,6 +227,7 @@ setup_json_cpp_library() {
 
 setup_clone_experiments() {
   _do setup_experiment_baselines
+  _do setup_experiment_rl_baselines_zoo
   _do setup_experiment_stable_baselines
   _do setup_experiment_tf_agents
   _do setup_experiment_reagent
@@ -274,6 +280,19 @@ setup_experiment_stable_baselines() {
     GIT_PULL=yes
     _clone "$STABLE_BASELINES_DIR" \
         jagleeso/stable-baselines.git \
+        $commit
+    )
+}
+
+setup_experiment_rl_baselines_zoo() {
+    if [ "$FORCE" != 'yes' ] && [ -e $RL_BASELINES_ZOO_DIR/setup.py ]; then
+        return
+    fi
+    local commit="iml-td3"
+    (
+    GIT_PULL=yes
+    _clone "$RL_BASELINES_ZOO_DIR" \
+        jagleeso/rl-baselines-zoo.git \
         $commit
     )
 }
@@ -805,14 +824,20 @@ main() {
     _do setup_ctpl_cpp_library
     # NOTE: IDEALLY we would install it do a SEPARATE directory... but I'm not 100% sure how to make that work nicely
     # and still have all the "installed" stuff in the same directory.
-    if [ "${IML_CUDA_VERSION}" = '10.1' ]; then
-      _do setup_project_cuda_10_1
-    elif [ "${IML_CUDA_VERSION}" = '10.2' ]; then
-      _do setup_project_cuda_10_2
-    else
-      echo "ERROR: Not sure how to build RLScope for IML_CUDA_VERSION=${IML_CUDA_VERSION}; try 10.1 or 10.2 instead." >2
-      exit 1
-    fi
+    (
+    cuda_version=${IML_CUDA_VERSION}
+    _do _setup_project_with_cuda
+    )
+
+#    if [ "${IML_CUDA_VERSION}" = '10.1' ]; then
+#      _do setup_project_cuda_10_1
+#    elif [ "${IML_CUDA_VERSION}" = '10.2' ]; then
+#      _do setup_project_cuda_10_2
+#    else
+#      echo "ERROR: Not sure how to build RL-Scope for IML_CUDA_VERSION=${IML_CUDA_VERSION}; try 10.1 or 10.2 instead." >2
+#      exit 1
+#    fi
+
     echo "> Success!"
 }
 

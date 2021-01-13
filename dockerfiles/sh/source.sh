@@ -16,20 +16,39 @@
 
 rlscope_help() {
   (
-  set -eux
+  set -eu
   echo "$ install_rlscope.sh"
   echo "  Build RL-Scope into a python wheel file (at $IML_DIR/dist/rlscope*.whl) and install it."
   echo
   echo "$ install_experiments.sh"
   echo "  Clone RL repos with RL-Scope annotations in them into $IML_DIR/third_party, and install them."
   echo
-  echo "$ develop_rlscope.sh"
-  echo "  Development mode: install RL-Scope from repo files at $IML_DIR."
+  echo "$ develop_rlscope"
+  echo "  Development mode: place compiled C++ binaries and python source files on PATH for easier development."
   echo
   echo "$ build_rlscope.sh"
-  echo "  Development mode: build C++ RL-Scope library."
+  echo "  Development mode: build C++ RL-Scope library (i.e., librlscope.so)."
   echo
   )
+}
+
+_rls_do() {
+    echo "> CMD [rlscope]:"
+    echo "  $@"
+    "$@"
+}
+
+develop_rlscope() {
+  local curdir="$PWD"
+  cd $IML_DIR
+  _rls_do source source_me.sh
+  _rls_do develop_rlscope.sh
+  echo
+  echo "> Success!"
+  echo "  You have entered development mode."
+  echo "  Compiled RL-Scope C++ binaries (e.g., rls-test, rls-analyze, librlscope.so) and python sources (e.g., rls-prof)"
+  echo "  from $IML_DIR will be used."
+  cd "$curdir"
 }
 
 _bash_rc() {

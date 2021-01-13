@@ -84,6 +84,7 @@ DEFAULT_REMOTE_IML_IMAGE_TAG = 'jagleeso/rlscope:1.0.0'
 RELEASE_TO_LOCAL_IMG_TAG = dict()
 RELEASE_TO_LOCAL_IMG_TAG['rlscope'] = 'tensorflow:devel-rlscope-gpu-cuda'
 RELEASE_TO_LOCAL_IMG_TAG['rlscope-cuda-10-1'] = 'tensorflow:devel-rlscope-gpu-cuda-10-1'
+RELEASE_TO_LOCAL_IMG_TAG['rlscope-cuda-11-0'] = 'tensorflow:devel-rlscope-gpu-cuda-11-0'
 
 # How long should we wait for /bin/bash (rlscope_bash)
 # to appear after running "docker stack deploy"?
@@ -675,6 +676,7 @@ def main():
     parser.add_argument(
         '--volume',
         action='append',
+        default=[],
         help=textwrap.dedent("""\
         Translates into docker --volume option. 
         We mount the path at the same path as it is in the host.
@@ -941,6 +943,7 @@ class Assembler:
         # (e.g. return code, raising dockers.errors.APIError),
         # so just grep for "error" in the response['message'].
         build_cmd = get_docker_cmdline('build', **build_kwargs)
+        # logger.info(build_cmd)
         check_docker_response(response, dockerfile, repo_tag, cmd=build_cmd)
 
         image = self.dock.images.get(repo_tag)
@@ -970,7 +973,7 @@ class Assembler:
             #     }
             # },
             remove=True,
-            cap_add=['SYS_PTRACE'],
+            cap_add=['SYS_ADMIN', 'SYS_PTRACE'],
             security_opt=['seccomp=unconfined'],
             runtime=runtime,
             name="rlscope",
@@ -1587,9 +1590,9 @@ def get_implicit_run_args():
 
 RUN_ARGS_REQUIRED = [
     'IML_DIR',
-    'IML_DRILL_DIR',
+    # 'IML_DRILL_DIR',
     # The root directory of a 'patched' TensorFlow checkout
-    'TENSORFLOW_DIR',
+    # 'TENSORFLOW_DIR',
     # The local path where we should output bazel objects (overrides $HOME/.cache/bazel)
     # 'BAZEL_BUILD_DIR',
 ]
@@ -1628,6 +1631,8 @@ def get_rlscope_volumes(args, run_args, extra_volumes):
     shutil.chown(host_bazel_dir, get_username(), get_username())
 
     host_directories = set()
+    if extra_volumes is None:
+        import ipdb; ipdb.set_trace()
     host_directories.update(extra_volumes)
     host_directories.update(volumes.keys())
     for host_path in host_directories:
@@ -2124,9 +2129,13 @@ def dict_as_env_list(values : dict, sep='='):
     return envs
 
 def get_cmd_string(cmd):
+    if type(cmd) == list:
+        cmd_str = ' '.join(cmd)
+    else:
+        cmd_str = cmd
     return ("> CMD:\n"
             "  $ {cmd}").format(
-        cmd=' '.join(cmd))
+        cmd=cmd_str)
 
 def ind(string, indent=1):
     return textwrap.indent(string, prefix='  '*indent)
