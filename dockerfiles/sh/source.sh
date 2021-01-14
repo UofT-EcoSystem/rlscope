@@ -38,11 +38,38 @@ _rls_do() {
     "$@"
 }
 
-develop_rlscope() {
+_source_rlscope() {
   local curdir="$PWD"
+  local ret=
   cd $IML_DIR
   _rls_do source source_me.sh
+  ret=$?
+  if [ "$ret" != "0" ]; then
+    cd "$curdir"
+    echo "ERROR: failed to source $IML_DIR/source_me.sh"
+    return $ret
+  fi
+  cd "$curdir"
+}
+
+develop_rlscope() {
+  local curdir="$PWD"
+  local ret=
+  cd $IML_DIR
+  _rls_do source source_me.sh
+  ret=$?
+  if [ "$ret" != "0" ]; then
+    cd "$curdir"
+    echo "ERROR: failed to source $IML_DIR/source_me.sh"
+    return $ret
+  fi
   _rls_do develop_rlscope.sh
+  ret=$?
+  if [ "$ret" != "0" ]; then
+    cd "$curdir"
+    echo "ERROR: failed to run \"python setup.py\" from $IML_DIR"
+    return $ret
+  fi
   echo
   echo "> Success!"
   echo "  You have entered development mode."
@@ -52,6 +79,8 @@ develop_rlscope() {
 }
 
 _bash_rc() {
+
+  local ret=
 
   # Make bash append to the history file after every command invocation.
   #
@@ -71,6 +100,34 @@ _bash_rc() {
   stty kill undef
   bind '"\C-u": undo'
 
+  # NOTE: Installing rlscope during login fails with "apt busy, resource not available" error.
+  # Just delay installation/building until they run "install_experiments.sh" or "experiment_...sh".
+  _source_rlscope
+
+}
+
+install_experiments() {
+  local ret=
+  if ! rlscope_installed; then
+    develop_rlscope
+    ret=$?
+    if [ "$ret" != "0" ]; then
+      return $ret
+    fi
+  fi
+(
+  set -eu
+  install_experiments.sh
+)
+}
+
+rlscope_installed() {
+(
+  set -eu
+  # DON'T run from rlscope repo directory otherwise it will show up in pip freeze.
+  cd $HOME
+  pip freeze | grep -q rlscope
+)
 }
 
 _bash_rc

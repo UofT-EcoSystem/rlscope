@@ -89,6 +89,7 @@ RELEASE_TO_LOCAL_IMG_TAG = dict()
 RELEASE_TO_LOCAL_IMG_TAG['rlscope'] = 'tensorflow:devel-rlscope-gpu-cuda'
 RELEASE_TO_LOCAL_IMG_TAG['rlscope-cuda-10-1'] = 'tensorflow:devel-rlscope-gpu-cuda-10-1'
 RELEASE_TO_LOCAL_IMG_TAG['rlscope-cuda-11-0'] = 'tensorflow:devel-rlscope-gpu-cuda-11-0'
+RELEASE_TO_LOCAL_IMG_TAG['test-cuda-10-1'] = 'tensorflow:test-cuda-10-1'
 
 # How long should we wait for /bin/bash (rlscope_bash)
 # to appear after running "docker stack deploy"?
@@ -610,8 +611,17 @@ def main():
     # Run all docker related commands from $ROOT/dockerfiles.
     os.chdir(DOCKERFILES)
 
-    logger.info("Test logger")
     parser = argparse.ArgumentParser(description=__doc__)
+
+    if shutil.which('docker-compose') is None:
+        logger.error("Didn't find docker-compose on PATH; you must install it.")
+        sys.exit(1)
+
+    # Copy requirements.txt into dockerfiles so it can be accessed by Dockerfile during its build.
+    shutil.copy(
+        _j(py_config.ROOT, "requirements.txt"),
+        _j(DOCKERFILES, "requirements.txt"),
+    )
 
     # parser.add_argument('--hub_username',
     #                                         help='Dockerhub username, only used with --upload_to_hub')
@@ -700,6 +710,7 @@ def main():
     parser.add_argument(
         '--publish',
         action='append',
+        default=[],
         help=textwrap.dedent("""\
         Translates into docker --publish option; e.g.
         --publish <HOST_PORT>:<CONTAINER_PORT> 
@@ -709,6 +720,7 @@ def main():
         '--env',
         '-e',
         action='append',
+        default=[],
         help=textwrap.dedent("""\
         Translates into docker --env option. 
         """).rstrip())

@@ -11,7 +11,7 @@
 #include <future>
 
 #include <ctpl.h>
-#include <Eigen/Dense>
+#include <eigen3/Eigen/Dense>
 
 #include "cuda_api_profiler/defines.h"
 
@@ -3717,7 +3717,12 @@ template <typename OStream>
 void PrintVector(OStream& os, const Eigen::Array<size_t, Eigen::Dynamic, 1>& value) {
   os << "[";
   size_t i = 0;
-  for (auto const& val : value) {
+  // NOTE: Eigen 3.3.9 doesn't support iterator for Eigen::Array for some reason; oh well.
+//  for (auto it = value.begin(); it != value.end(); it++) {
+//    auto val = *it;
+//  for (auto const& val : value) {
+  for (int i = 0; i < value.size(); i++) {
+    auto val = value(i);
     if (i > 0) {
       os << ", ";
     }

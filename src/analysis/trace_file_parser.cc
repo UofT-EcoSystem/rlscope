@@ -9,7 +9,7 @@
 
 #include <algorithm>
 
-#include <Eigen/Dense>
+#include <eigen3/Eigen/Dense>
 
 //#include <boost/compute/algorithm/reduce.hpp>
 

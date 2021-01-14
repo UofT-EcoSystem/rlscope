@@ -49,6 +49,12 @@ releases:
       tag_specs:
         - "{ubuntu-devel-rlscope-cuda-11-0}"
 
+    test-cuda-10-1:
+      is_dockerfiles: true
+      upload_images: false
+      tag_specs:
+        - "{test-cuda-10-1}"
+
 #    rlscope-cuda-10-1:
 #      is_dockerfiles: true
 #      upload_images: false
@@ -154,11 +160,12 @@ slice_sets:
           partials:
             - ubuntu/version
             - ubuntu/from_cuda_10_1
-            - rlscope/env
             - ubuntu/add_user
+            - rlscope/env
             - ubuntu/python
             - ubuntu/virtualenv
             - ubuntu/install_cuda_10_1
+            - ubuntu/test_host_configuration
             # - ubuntu/bazel
             - ubuntu/nvidia_nccl
             - ubuntu/nvidia_rtx_2070_env
@@ -170,6 +177,7 @@ slice_sets:
             # - ubuntu/bazelisk
             - ubuntu/bash
             # - ubuntu/tensorrt
+            - rlscope/apt_install_minimal
             - rlscope/apt_install
             - ubuntu/pip_install_tf
             - rlscope/pip_dependencies
@@ -201,11 +209,12 @@ slice_sets:
         partials:
           - ubuntu/version
           - ubuntu/from_cuda_11_0
-          - rlscope/env
           - ubuntu/add_user
+          - rlscope/env
           - ubuntu/python
           - ubuntu/virtualenv
           - ubuntu/install_cuda_11_0
+          - ubuntu/test_host_configuration
           # - ubuntu/bazel
           - ubuntu/nvidia_nccl
           - ubuntu/nvidia_rtx_2070_env
@@ -217,9 +226,61 @@ slice_sets:
           # - ubuntu/bazelisk
           - ubuntu/bash
           # - ubuntu/tensorrt
+          - rlscope/apt_install_minimal
           - rlscope/apt_install
           - ubuntu/pip_install_tf
           - rlscope/pip_dependencies
+          - rlscope/user_custom
+          - shell
+          - rlscope/source_sh
+          - ubuntu/entrypoint
+        test_runtime: nvidia
+        args:
+          # NOTE: must be provided at run_docker.py command line
+          - CHECKOUT_TF_SRC=0
+          - USE_PYTHON_3_NOT_2=1
+        run_args:
+          # NOTE: To make it so we can run the same scripts inside/outside containers:
+          # - Outside containers: we define these environment variables in a source_me.sh
+          # - Inside containers: we require these to be defined when calling run_docker.py (docker run)
+          #
+          # The root directory of a 'patched' TensorFlow checkout.
+          # - TENSORFLOW_DIR=
+          # The root directory of the rlscope_profiler repo checkout.
+          - IML_DIR=
+
+    test-cuda-10-1:
+      #
+      # Test CUPTI profiling API.
+      # Install minimal packages to bootstrap GPU container.
+      #
+      - add_to_name: "test-cuda-10-1"
+        dockerfile_exclusive_name: "test-cuda-10-1"
+        partials:
+          - ubuntu/version
+          - ubuntu/from_cuda_10_1
+          - ubuntu/add_user
+          - rlscope/env
+          - ubuntu/python
+          - ubuntu/virtualenv
+#          - ubuntu/install_cuda_10_1
+          - ubuntu/install_cuda_10_1_minimal
+          - ubuntu/test_host_configuration
+#          # - ubuntu/bazel
+#          - ubuntu/nvidia_nccl
+#          - ubuntu/nvidia_rtx_2070_env
+#          # - ubuntu/nodejs
+#          - ubuntu/pip_dependencies
+#          - ubuntu/protobuf_from_src
+#          - ubuntu/cmake_from_src
+#          - ubuntu/openmpi_from_src
+#          # - ubuntu/bazelisk
+#          - ubuntu/bash
+#          # - ubuntu/tensorrt
+          - rlscope/apt_install_minimal
+#          - rlscope/apt_install
+#          - ubuntu/pip_install_tf
+#          - rlscope/pip_dependencies
           - rlscope/user_custom
           - shell
           - rlscope/source_sh

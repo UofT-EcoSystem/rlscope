@@ -128,15 +128,14 @@ _untar() {
 
 }
 
-GIT_USERNAME=
+GIT_USERNAME=${GIT_USERNAME:-}
 GIT_PULL=no
 GIT_RECURSIVE=yes
 GIT_CLONE_OPTS=()
-_clone() {
+_git_clone() {
     local path="$1"
-    local name_slash_repo="$2"
+    local repo="$2"
     shift 2
-    local repo="$(github_url $name_slash_repo)"
     local commit=
     if [ $# -ge 1 ]; then
         commit="$1"
@@ -146,7 +145,7 @@ _clone() {
         if [ "$GIT_RECURSIVE" != "no" ]; then
           GIT_CLONE_OPTS+=(--recursive)
         fi
-        git clone "${GIT_CLONE_OPTS[@]}" $repo $path
+        _do git clone "${GIT_CLONE_OPTS[@]}" $repo $path
         info "> Git clone:"
         info "  Repository: $repo"
         info "  Directory: $path"
@@ -161,6 +160,14 @@ _clone() {
       git submodule update --init
     fi
     )
+}
+
+_github_clone() {
+    local path="$1"
+    local name_slash_repo="$2"
+    shift 2
+    local repo="$(github_url $name_slash_repo)"
+    _git_clone "$path" "$repo" "$@"
 }
 
 _hg_clone() {
@@ -212,7 +219,7 @@ setup_json_cpp_library() {
         return
     fi
     local commit="v3.4.0"
-    _clone "$JSON_CPP_LIB_DIR" \
+    _github_clone "$JSON_CPP_LIB_DIR" \
         nlohmann/json.git \
         $commit
     cmake_build "$JSON_CPP_LIB_DIR"
@@ -244,80 +251,80 @@ setup_install_experiments() {
 }
 
 setup_experiment_baselines() {
-    if [ "$FORCE" != 'yes' ] && [ -e $BASELINES_DIR/setup.py ]; then
-        return
-    fi
+#    if [ "$FORCE" != 'yes' ] && [ -e $BASELINES_DIR/setup.py ]; then
+#        return
+#    fi
     local commit="iml"
     (
     GIT_PULL=yes
-    _clone "$BASELINES_DIR" \
+    _github_clone "$BASELINES_DIR" \
         jagleeso/baselines.git \
         $commit
     )
 }
 
 setup_experiment_mlperf_training() {
-    if [ "$FORCE" != 'yes' ] && [ -e $MLPERF_DIR/README.md ]; then
-        return
-    fi
+#    if [ "$FORCE" != 'yes' ] && [ -e $MLPERF_DIR/README.md ]; then
+#        return
+#    fi
     local commit="iml"
     (
     GIT_PULL=yes
     # "community" submodule fails to pull.
     GIT_RECURSIVE=no
-    _clone "$MLPERF_DIR" \
+    _github_clone "$MLPERF_DIR" \
         jagleeso/mlperf_training.git \
         $commit
     )
 }
 
 setup_experiment_stable_baselines() {
-    if [ "$FORCE" != 'yes' ] && [ -e $STABLE_BASELINES_DIR/setup.py ]; then
-        return
-    fi
+#    if [ "$FORCE" != 'yes' ] && [ -e $STABLE_BASELINES_DIR/setup.py ]; then
+#        return
+#    fi
     local commit="iml-td3"
     (
     GIT_PULL=yes
-    _clone "$STABLE_BASELINES_DIR" \
+    _github_clone "$STABLE_BASELINES_DIR" \
         jagleeso/stable-baselines.git \
         $commit
     )
 }
 
 setup_experiment_rl_baselines_zoo() {
-    if [ "$FORCE" != 'yes' ] && [ -e $RL_BASELINES_ZOO_DIR/setup.py ]; then
-        return
-    fi
+#    if [ "$FORCE" != 'yes' ] && [ -e $RL_BASELINES_ZOO_DIR/train.py ]; then
+#        return
+#    fi
     local commit="iml-td3"
     (
     GIT_PULL=yes
-    _clone "$RL_BASELINES_ZOO_DIR" \
+    _github_clone "$RL_BASELINES_ZOO_DIR" \
         jagleeso/rl-baselines-zoo.git \
         $commit
     )
 }
 
 setup_experiment_tf_agents() {
-    if [ "$FORCE" != 'yes' ] && [ -e $TF_AGENTS_DIR/setup.py ]; then
-        return
-    fi
+#    if [ "$FORCE" != 'yes' ] && [ -e $TF_AGENTS_DIR/setup.py ]; then
+#        return
+#    fi
     local commit="iml"
     (
     GIT_PULL=yes
-    _clone "$TF_AGENTS_DIR" \
+    _github_clone "$TF_AGENTS_DIR" \
         jagleeso/agents.git \
         $commit
     )
 }
 
 setup_experiment_reagent() {
-    if [ "$FORCE" != 'yes' ] && [ -e $REAGENT_DIR/setup.py ]; then
-        return
-    fi
+#    if [ "$FORCE" != 'yes' ] && [ -e $REAGENT_DIR/setup.py ]; then
+#        return
+#    fi
     local commit="iml"
     (
     GIT_PULL=yes
-    _clone "$REAGENT_DIR" \
+    _github_clone "$REAGENT_DIR" \
         jagleeso/ReAgent.git \
         $commit
     )
@@ -331,7 +338,7 @@ setup_experiment_reagent() {
 #    local commit="iml"
 #    (
 #    GIT_PULL=yes
-#    _clone "$MINIGO_DIR" \
+#    _github_clone "$MINIGO_DIR" \
 #        jagleeso/minigo.git \
 #        $commit
 #    )
@@ -343,7 +350,7 @@ setup_abseil_cpp_library() {
         return
     fi
     local commit="20181200"
-    _clone "$ABSEIL_CPP_LIB_DIR" \
+    _github_clone "$ABSEIL_CPP_LIB_DIR" \
         abseil/abseil-cpp.git \
         $commit
 }
@@ -361,7 +368,7 @@ setup_gtest_cpp_library() {
         return
     fi
     local commit="release-1.8.1"
-    _clone "$GTEST_CPP_LIB_DIR" \
+    _github_clone "$GTEST_CPP_LIB_DIR" \
         google/googletest.git \
         $commit
     cmake_build "$GTEST_CPP_LIB_DIR"
@@ -373,7 +380,7 @@ setup_gflags_cpp_library() {
         return
     fi
     local commit="v2.2.2"
-    _clone "$GFLAGS_CPP_LIB_DIR" \
+    _github_clone "$GFLAGS_CPP_LIB_DIR" \
         gflags/gflags.git \
         $commit
     CMAKE_OPTS=(-DBUILD_SHARED_LIBS=ON -DBUILD_STATIC_LIBS=ON)
@@ -464,7 +471,7 @@ setup_nsync_cpp_library() {
         return
     fi
     local commit="1.21.0"
-    _clone "$NSYNC_CPP_LIB_DIR" \
+    _github_clone "$NSYNC_CPP_LIB_DIR" \
         google/nsync.git \
         $commit
 }
@@ -475,7 +482,7 @@ setup_backward_cpp_library() {
         return
     fi
     local commit="v1.4"
-    _clone "$BACKWARD_CPP_LIB_DIR" \
+    _github_clone "$BACKWARD_CPP_LIB_DIR" \
         bombela/backward-cpp.git \
         $commit
 }
@@ -486,7 +493,7 @@ setup_spdlog_cpp_library() {
         return
     fi
     local commit="v1.4.2"
-    _clone "$SPDLOG_CPP_LIB_DIR" \
+    _github_clone "$SPDLOG_CPP_LIB_DIR" \
         gabime/spdlog.git \
         $commit
     cmake_build "$SPDLOG_CPP_LIB_DIR"
@@ -498,7 +505,7 @@ setup_ctpl_cpp_library() {
         return
     fi
     local commit="v.0.0.2"
-    _clone "$CTPL_CPP_LIB_DIR" \
+    _github_clone "$CTPL_CPP_LIB_DIR" \
         vit-vit/CTPL.git \
         $commit
 }
@@ -542,9 +549,14 @@ setup_eigen_cpp_library() {
     if [ "$FORCE" != 'yes' ] && glob_any "$(third_party_install_prefix "$EIGEN_CPP_LIB_DIR")/include/eigen*"; then
         return
     fi
-    local commit="9f48e814419e"
-    _hg_clone "$EIGEN_CPP_LIB_DIR" \
-        https://bitbucket.org/eigen/eigen \
+    # mercurial repo on bitbucket no longer supported; they use gitlab now.
+#    local commit="9f48e814419e"
+#    _hg_clone "$EIGEN_CPP_LIB_DIR" \
+#        https://bitbucket.org/eigen/eigen \
+#        $commit
+    local commit="3.3.9"
+    _git_clone "$EIGEN_CPP_LIB_DIR" \
+        https://gitlab.com/libeigen/eigen.git \
         $commit
     cmake_build "$EIGEN_CPP_LIB_DIR"
 }
@@ -630,6 +642,12 @@ PROTOBUF_CPP_LIB_DIR="$ROOT/third_party/protobuf-${PROTOBUF_VERSION}"
 PROTOBUF_URL="https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOBUF_VERSION}/protobuf-all-${PROTOBUF_VERSION}.tar.gz"
 #PROTOBUF_URL="https://github.com/protocolbuffers/protobuf/archive/v${PROTOBUF_VERSION}.tar.gz"
 setup_protobuf_cpp_library() {
+    # NOTE: get errors when trying to use container built protobuf (-fPIC flag wasn't used)
+#    if [ "$FORCE" != 'yes' ] && (
+#      # protobuf is already installed during container build.
+#      ( which protoc > /dev/null 2>&1 ) ||
+#      ( glob_any "$(third_party_install_prefix "$PROTOBUF_CPP_LIB_DIR")/lib/libprotobuf*" )
+#    ); then
     if [ "$FORCE" != 'yes' ] && glob_any "$(third_party_install_prefix "$PROTOBUF_CPP_LIB_DIR")/lib/libprotobuf*"; then
         return
     fi
@@ -637,7 +655,8 @@ setup_protobuf_cpp_library() {
     (
     cd $PROTOBUF_CPP_LIB_DIR
     # NOTE: if --prefix changes, we need to run "make clean" first.
-    make clean
+    # NOTE: clean target may not exist.
+    make clean || true
     ./configure \
         "CFLAGS=-fPIC" "CXXFLAGS=-fPIC" \
         --prefix="$(third_party_install_prefix "$PROTOBUF_CPP_LIB_DIR")"
@@ -654,7 +673,7 @@ setup_cpp_libpqxx() {
         return
     fi
     local commit="$LIBPQXX_VERSION"
-    _clone "$LIBPQXX_CPP_LIB_DIR" \
+    _github_clone "$LIBPQXX_CPP_LIB_DIR" \
         jtv/libpqxx.git \
         $commit
 #    cd $LIBPQXX_CPP_LIB_DIR

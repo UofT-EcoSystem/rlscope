@@ -5,7 +5,7 @@
 #include <limits.h>
 #include <gtest/gtest.h>
 
-#include <Eigen/Dense>
+#include <eigen3/Eigen/Dense>
 #include <iostream>
 #include <bitset>
 

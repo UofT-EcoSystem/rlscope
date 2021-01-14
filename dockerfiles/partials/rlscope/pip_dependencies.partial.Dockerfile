@@ -7,6 +7,9 @@
 
 # ADD's files with root as owner; make it $USER_NAME
 ADD requirements.txt ${ADD_DIR}/requirements.txt
+USER root
+RUN chmod ugo+r ${ADD_DIR}/requirements.txt
+USER ${IML_USER}
 
 #RUN apt-get update && apt-get install -y --no-install-recommends
 #     llvm-8

@@ -15,4 +15,3 @@ RUN adduser ${IML_USER} --disabled-password --gecos "" --uid ${IML_UID} --gid ${
 RUN usermod -a -G sudo ${IML_USER}
 
 USER ${IML_USER}
-ENV HOME /home/${IML_USER}

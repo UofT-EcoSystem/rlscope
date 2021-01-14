@@ -13,7 +13,7 @@ RUN wget --quiet https://github.com/protocolbuffers/protobuf/releases/download/v
 WORKDIR /root/protobuf
 RUN tar -xf /root/tar_files/protobuf-all-${PROTOBUF_VERSION}.tar.gz
 WORKDIR /root/protobuf/protobuf-${PROTOBUF_VERSION}
-RUN ./configure
+RUN ./configure "CFLAGS=-fPIC" "CXXFLAGS=-fPIC"
 RUN make -j$(nproc)
 RUN make install
 RUN protoc --version
