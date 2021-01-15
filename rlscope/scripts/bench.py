@@ -21,8 +21,11 @@ import pprint
 import textwrap
 import multiprocessing
 import importlib
-# $ pip install 'gym >= 0.13.0'
-import gym
+try:
+    # $ pip install 'gym >= 0.13.0'
+    import gym
+except ImportError:
+    pass
 
 from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, basename as _b
 

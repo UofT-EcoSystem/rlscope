@@ -7,8 +7,11 @@ Define which RL algorithms and environments (simulators) to run for experiments.
 # Query available experiments to run
 # i.e. available (algo, env) combinatinos for stable-baselines
 import traceback
-# $ pip install 'gym >= 0.13.0'
-import gym
+try:
+    # $ pip install 'gym >= 0.13.0'
+    import gym
+except ImportError:
+    pass
 import re
 from rlscope.profiler.rlscope_logging import logger
 

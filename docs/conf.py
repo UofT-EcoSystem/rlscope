@@ -55,7 +55,14 @@ extensions = [
     'sphinx.ext.todo',
     # refer to setions using :ref:`Section Title`
     'sphinx.ext.autosectionlabel',
+    # https://www.sphinx-doc.org/en/master/usage/extensions/extlinks.html
+    'sphinx.ext.extlinks',
 ]
+
+# extlinks = {'github': ('https://github.com/sphinx-doc/sphinx/issues/%s',
+#                       'issue ')}
+extlinks = {'github': ('https://github.com/UofT-EcoSystem/rlscope/blob/master/%s',
+                       '')}
 
 html_logo = 'images/rlscope_logo_bordered.svg'
 

@@ -1,7 +1,7 @@
 Host Configuration
 ==================
 
-In order to run the docker development environment, you must perform a one-time configuration of your host system.
+In order to run the Docker development environment, you must perform a one-time configuration of your host system.
 In particular:
 
     | :ref:`1. Install docker-compose`: install docker and ``docker-compose``.
@@ -10,14 +10,7 @@ In particular:
 
 After you've configured your host system, you can launch the RL-Scope docker container:
 
-    | :ref:`4. Running the docker development environment`: build and run the container.
-
-.. comment
-    .. toctree::
-       :maxdepth: 1
-       :caption: Contents:
-
-       host_config
+    | :ref:`4. Running the Docker development environment`: build and run the container.
 
 1. Install docker-compose
 -------------------------
@@ -91,7 +84,7 @@ To do this, do the following:
 
         [host]$ sudo service docker start
 
-4. Running the docker development environment
+4. Running the Docker development environment
 ---------------------------------------------
 The ``run_docker.py`` python script is used for building and running the docker development environment.
 In order to run this script on the host, you need to install some minimal "deployment" ``pip`` dependencies (:file:`requirements.deploy.txt`).
