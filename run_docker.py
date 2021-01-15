@@ -858,6 +858,7 @@ def main():
 
     parser.add_argument(
         '--release', '-r',
+        default='rlscope',
         help='Set of releases to build and tag. Defaults to every release type.',
     )
 

@@ -53,7 +53,11 @@ extensions = [
     'sphinx.ext.napoleon',
     'sphinx.ext.viewcode',
     'sphinx.ext.todo',
+    # refer to setions using :ref:`Section Title`
+    'sphinx.ext.autosectionlabel',
 ]
+
+html_logo = 'images/rlscope_logo_bordered.svg'
 
 # If this is True, todo and todolist produce output, else they produce nothing.
 # The default is False.

@@ -8,25 +8,26 @@ RL-Scope Documentation
 
 RL-Scope is a cross-stack profiler for deep reinforcement learning workloads.
 
-.. COMMENT
-   :members:
+For a tutorial on reproducing the figures in the RL-Scope paper, see :doc:`artifacts`.
+
+For information on running the RL-Scope development docker container, see :doc:`host_config`.
 
 .. automodule:: rlscope
    :undoc-members:
 
 .. toctree::
-   :maxdepth: 2
    :caption: Contents:
 
+   artifacts
+   host_config
 
-
-Indices and tables
-==================
+Source documentation
+====================
 
 * :ref:`genindex`
 * :ref:`modindex`
 * :ref:`search`
 
-Documentation TODO list
-=======================
+Documentation TODOs
+===================
 .. todolist::

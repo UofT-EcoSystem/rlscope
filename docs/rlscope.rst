@@ -11,6 +11,7 @@ Subpackages
    rlscope.clib
    rlscope.cpp
    rlscope.examples
+   rlscope.experiment
    rlscope.parser
    rlscope.profiler
    rlscope.protobuf

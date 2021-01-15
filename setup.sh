@@ -643,14 +643,14 @@ PROTOBUF_URL="https://github.com/protocolbuffers/protobuf/releases/download/v${P
 #PROTOBUF_URL="https://github.com/protocolbuffers/protobuf/archive/v${PROTOBUF_VERSION}.tar.gz"
 setup_protobuf_cpp_library() {
     # NOTE: get errors when trying to use container built protobuf (-fPIC flag wasn't used)
-#    if [ "$FORCE" != 'yes' ] && (
-#      # protobuf is already installed during container build.
-#      ( which protoc > /dev/null 2>&1 ) ||
-#      ( glob_any "$(third_party_install_prefix "$PROTOBUF_CPP_LIB_DIR")/lib/libprotobuf*" )
-#    ); then
-    if [ "$FORCE" != 'yes' ] && glob_any "$(third_party_install_prefix "$PROTOBUF_CPP_LIB_DIR")/lib/libprotobuf*"; then
-        return
-    fi
+    if [ "$FORCE" != 'yes' ] && (
+      # protobuf is already installed during container build.
+      ( which protoc > /dev/null 2>&1 ) ||
+      ( glob_any "$(third_party_install_prefix "$PROTOBUF_CPP_LIB_DIR")/lib/libprotobuf*" )
+    ); then
+#    if [ "$FORCE" != 'yes' ] && glob_any "$(third_party_install_prefix "$PROTOBUF_CPP_LIB_DIR")/lib/libprotobuf*"; then
+#        return
+#    fi
     _wget_tar "$PROTOBUF_URL" "third_party"
     (
     cd $PROTOBUF_CPP_LIB_DIR
