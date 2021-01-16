@@ -7,10 +7,10 @@ fi
 
 main() {
   SH_DIR="$(readlink -f "$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )")"
-  source $SH_DIR/make_utils.sh
+  source $SH_DIR/docker_runtime_common.sh
 
   set -u
-  cd $IML_DIR
+  cd $RLSCOPE_DIR
   make -f Makefile.sphinx docs
 }
 

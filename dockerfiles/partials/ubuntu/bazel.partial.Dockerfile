@@ -11,7 +11,7 @@ RUN apt-get update && apt-get install -y \
 # Must be installed AFTER setting up virtualenv.
 # We use a virtualenv so that $USER can still modify the python enviroment.
 # We DON'T want to have to run as root.
-# But, we need to be able to install iml and iml-drill using "python setup.py devel"
+# But, we need to be able to install iml and rlscope-drill using "python setup.py devel"
 # from a mounted volumes AFTER the container starts.
 #RUN ${PIP} --no-cache-dir install \
 #    Pillow \

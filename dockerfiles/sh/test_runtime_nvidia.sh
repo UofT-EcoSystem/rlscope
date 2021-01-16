@@ -9,7 +9,7 @@ if [ "$DEBUG" == 'yes' ]; then
 fi
 
 SH_DIR="$(readlink -f "$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )")"
-source $SH_DIR/make_utils.sh
+source $SH_DIR/docker_build_common.sh
 
 main() {
   has_nvidia_smi=no
@@ -33,7 +33,7 @@ main() {
     (
       TXT_UNDERLINE=yes
       TXT_BOLD=yes
-      log_error "> RL-Scope docker host configuration error:"
+      log_error "> RL-Scope :: docker host configuration error:"
     )
     log_error "$errmsg"
     log_error "This likely means you have not properly configured the host docker to use --runtime=nvidia as the default docker runtime."
@@ -59,7 +59,7 @@ EOF
     log_error "      $ sudo service docker start"
     exit 1
   else
-      log_info "> RL-Scope docker host configuration looks correct."
+      log_info "> RL-Scope :: docker host configuration looks correct."
   fi
 
 }

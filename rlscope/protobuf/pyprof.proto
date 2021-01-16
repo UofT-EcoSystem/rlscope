@@ -104,7 +104,7 @@ message ProcessMetadata {
     //   # Training loop of ML script.
     //   for t in range(total_training_timesteps):
     //
-    //       # IML checks if --rlscope-trace-time-sec has expired.
+    //       # RL-Scope checks if --rlscope-trace-time-sec has expired.
     //       # If it has, then the NEXT call to rlscope.prof.report_progress will
     //       # terminate profiling.
     //       rlscope.prof.report_progress(t/total_training_timesteps)

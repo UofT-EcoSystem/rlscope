@@ -8,8 +8,9 @@ set -x
 SH_DIR="$(readlink -f "$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )")"
 cd "$SH_DIR"
 
-source $SH_DIR/make_utils.sh
+source $SH_DIR/docker_runtime_common.sh
 
+_check_apt
 _check_env
 _upgrade_pip
 
@@ -21,7 +22,7 @@ _bazel_build
 
 #export TF_PRINT_TIMESTAMP=yes
 
-#python3 $IML_DRILL/tests/rlscope_test.py --test-name pong_redo_01 --train-script ~/clone/baselines/baselines/deepq/experiments/run_atari.py --env PongNoFrameskip-v4 --rlscope-start-measuring-call 1 --checkpoint-path IML_DIRECTORY --rlscope-trace-time-sec 40
+#python3 $RLSCOPE_DRILL/tests/rlscope_test.py --test-name pong_redo_01 --train-script ~/clone/baselines/baselines/deepq/experiments/run_atari.py --env PongNoFrameskip-v4 --rlscope-start-measuring-call 1 --checkpoint-path RLSCOPE_DIRECTORY --rlscope-trace-time-sec 40
 
 # https://stackoverflow.com/questions/2524367/inline-comments-for-bash
 # echo abc `#put your comment here` \
@@ -37,4 +38,4 @@ rlscope-test \
     --rlscope-trace-time-sec 40 \
     `# test-script arguments ` \
     --env PongNoFrameskip-v4 \
-    --checkpoint-path IML_DIRECTORY \
+    --checkpoint-path RLSCOPE_DIRECTORY \

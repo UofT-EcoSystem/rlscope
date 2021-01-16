@@ -2,8 +2,8 @@
 // Created by jagle on 8/6/2019.
 //
 
-#ifndef IML_THREAD_POOL_WRAPPER_H
-#define IML_THREAD_POOL_WRAPPER_H
+#ifndef RLSCOPE_THREAD_POOL_WRAPPER_H
+#define RLSCOPE_THREAD_POOL_WRAPPER_H
 
 #include <string>
 #include <mutex>
@@ -33,4 +33,4 @@ private:
 
 }
 
-#endif //IML_THREAD_POOL_WRAPPER_H
+#endif //RLSCOPE_THREAD_POOL_WRAPPER_H

@@ -1,5 +1,5 @@
 header: |
-    # Copyright 2018 The IML Authors. All Rights Reserved.
+    # Copyright 2018 The RL-Scope Authors. All Rights Reserved.
     #
     # Licensed under the Apache License, Version 2.0 (the "License");
     # you may not use this file except in compliance with the License.
@@ -17,7 +17,7 @@ header: |
     # THIS IS A GENERATED DOCKERFILE.
     #
     # This file was assembled from multiple pieces, whose use is documented
-    # throughout. Please refer to the IML dockerfiles documentation
+    # throughout. Please refer to the RL-Scope dockerfiles documentation
     # for more information.
 
 # A combinatorial explosion of Docker images and Dockerfiles.
@@ -36,7 +36,7 @@ header: |
 #
 # Releases are all treated differently by TensorFlow's CI systems.
 releases:
-    # IML
+    # RL-Scope
     rlscope:
       is_dockerfiles: true
       upload_images: false
@@ -198,7 +198,7 @@ slice_sets:
           # The root directory of a 'patched' TensorFlow checkout.
           # - TENSORFLOW_DIR=
           # The root directory of the rlscope_profiler repo checkout.
-          - IML_DIR=
+          - RLSCOPE_DIR=
 
     ubuntu-devel-rlscope-cuda-11-0:
       #
@@ -247,7 +247,7 @@ slice_sets:
           # The root directory of a 'patched' TensorFlow checkout.
           # - TENSORFLOW_DIR=
           # The root directory of the rlscope_profiler repo checkout.
-          - IML_DIR=
+          - RLSCOPE_DIR=
 
     test-cuda-10-1:
       #
@@ -298,11 +298,11 @@ slice_sets:
           # The root directory of a 'patched' TensorFlow checkout.
           # - TENSORFLOW_DIR=
           # The root directory of the rlscope_profiler repo checkout.
-          - IML_DIR=
+          - RLSCOPE_DIR=
 
 #    ubuntu-devel-rlscope-cuda-10-1:
 #      #
-#      # IML profiler:
+#      # RL-Scope profiler:
 #      # Build "patched" tensorflow, then run end-to-end Pong training test.
 #      #
 #      - add_to_name: "devel-rlscope-gpu-cuda-10-1"
@@ -344,9 +344,9 @@ slice_sets:
 #          # The root directory of a 'patched' TensorFlow checkout.
 #          - TENSORFLOW_DIR=
 #          # The root directory of the rlscope_profiler repo checkout.
-#          - IML_DIR=
+#          - RLSCOPE_DIR=
 #          # The root directory of the rlscope_drill repo checkout.
-#          - IML_DRILL_DIR=
+#          - RLSCOPE_DRILL_DIR=
 #          # The local path where we should output bazel objects (overrides $HOME/.cache/bazel).
 #          # - BAZEL_BUILD_DIR=
 
@@ -372,8 +372,8 @@ slice_sets:
 #          - USE_PYTHON_3_NOT_2=1
 #          run_args:
 #          - TENSORFLOW_DIR=
-#          - IML_DIR=
-#          - IML_DRILL_DIR=
+#          - RLSCOPE_DIR=
+#          - RLSCOPE_DRILL_DIR=
 #          # - BAZEL_BUILD_DIR=
 
 #    ubuntu-devel-rlscope-rocm-upstream:
@@ -402,8 +402,8 @@ slice_sets:
 #      - USE_PYTHON_3_NOT_2=1
 #      run_args:
 #      - TENSORFLOW_DIR=
-#      - IML_DIR=
-#      - IML_DRILL_DIR=
+#      - RLSCOPE_DIR=
+#      - RLSCOPE_DRILL_DIR=
 #      # - BAZEL_BUILD_DIR=
 
 #    rocm:
@@ -425,8 +425,8 @@ slice_sets:
 #      - USE_PYTHON_3_NOT_2=1
 #      run_args:
 #      - TENSORFLOW_DIR=
-#      - IML_DIR=
-#      - IML_DRILL_DIR=
+#      - RLSCOPE_DIR=
+#      - RLSCOPE_DRILL_DIR=
 #      # - BAZEL_BUILD_DIR=
 
 #    nightly:

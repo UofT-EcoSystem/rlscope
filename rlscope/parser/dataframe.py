@@ -1443,11 +1443,11 @@ class RLScopeConfig:
         return self.rlscope_config[var]
 
 def is_rlscope_prof_env(var):
-    return re.search(r'^IML_', var)
+    return re.search(r'^RLSCOPE_', var)
 
 def rlscope_prof_varname(env_var):
     var = env_var
-    var = re.sub(r'^IML_', '', var)
+    var = re.sub(r'^RLSCOPE_', '', var)
     var = var.lower()
     return var
 
@@ -2176,7 +2176,7 @@ class TestVennAsOverlapDict:
         self.check_from_venn("test_venn_as_overlap_dict_03", V, expect_O)
 
     # def test_venn_as_overlap_dict_04(self):
-    #     # FROM : /mnt/data/james/clone/iml/output/rlscope_bench/all/config_instrumented_repetition_01/ppo2/Walker2DBulletEnv-v0/CategoryOverlap.machine_2420f5fc91b8.process_ppo2_Walker2DBulletEnv-v0.phase_ppo2_Walker2DBulletEnv-v0.ops_sample_action.resources_CPU_GPU.venn_js.json
+    #     # FROM : /mnt/data/james/clone/rlscope/output/rlscope_bench/all/config_instrumented_repetition_01/ppo2/Walker2DBulletEnv-v0/CategoryOverlap.machine_2420f5fc91b8.process_ppo2_Walker2DBulletEnv-v0.phase_ppo2_Walker2DBulletEnv-v0.ops_sample_action.resources_CPU_GPU.venn_js.json
     #     # Generated using old SQL code.
     #     # "venn": [
     #     #     {

@@ -18,8 +18,9 @@ fi
 SH_DIR="$(readlink -f "$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )")"
 cd "$SH_DIR"
 
-source $SH_DIR/make_utils.sh
+source $SH_DIR/docker_runtime_common.sh
 
+_check_apt
 _check_env
 _upgrade_pip
 
@@ -32,10 +33,10 @@ _check_rlscope
 # rl-baselines-zoo/docker/Dockerfile.gpu
 # commit/tag: v1.2
 
-source $IML_DIR/source_me.sh
+source $RLSCOPE_DIR/source_me.sh
 
 
-PYENV_ROOT_DIR=$IML_INSTALL_PREFIX/pyenv
+PYENV_ROOT_DIR=$RLSCOPE_INSTALL_PREFIX/pyenv
 setup_pyenv() {
     if [ "$FORCE" != 'yes' ] && [ -f $PYENV_ROOT_DIR/bin/pyenv ]; then
         return
@@ -94,7 +95,7 @@ setup_pyenv_virtualenv_plugin() {
 setup_reagent_pyenv() {
   _do setup_pyenv
   _do setup_pyenv_virtualenv_plugin
-  _do source $IML_DIR/source_me.sh
+  _do source $RLSCOPE_DIR/source_me.sh
   if ! pyenv help > /dev/null; then
       ret=$?
       echo "ERROR: setup_pyenv failed with retcode=$ret"

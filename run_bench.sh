@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -e
 
-# To avoid running everything more than once, we will stick ALL (algo, env_id) pairs inside of $IML_DIR/output/rlscope_bench/all.
+# To avoid running everything more than once, we will stick ALL (algo, env_id) pairs inside of $RLSCOPE_DIR/output/rlscope_bench/all.
 #
 # (1) On vs off policy:
 # Run Atari Pong on all environments that support it (that we have annotated):
@@ -19,23 +19,17 @@ set -e
 # (4) Compare all RL workloads:
 # Run ALL algorithms on ALL bullet environments
 
-ROOT="$(readlink -f $(dirname "$0"))"
+ROOT="$(readlink -f "$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )")"
+source $ROOT/dockerfiles/sh/docker_runtime_common.sh
 
 DRY_RUN=${DRY_RUN:-no}
 DEBUG=${DEBUG:-no}
-
-STABLE_BASELINES_DIR=${STABLE_BASELINES_DIR:-$HOME/clone/stable-baselines}
-IML_DIR=${IML_DIR:-$HOME/clone/iml}
-RL_BASELINES_ZOO_DIR=${RL_BASELINES_ZOO_DIR:-$HOME/clone/rl-baselines-zoo}
-TF_AGENTS_DIR=${TF_AGENTS_DIR:-$HOME/clone/agents}
-REAGENT_DIR=${REAGENT_DIR:-$HOME/clone/ReAgent}
-#ENJOY_TRT=${ENJOY_TRT:-${RL_BASELINES_ZOO_DIR}/enjoy_trt.py}
 
 if [ "$DEBUG" = 'yes' ]; then
     set -x
 fi
 
-CALIB_DIR=$IML_DIR/calibration/microbench
+CALIB_DIR=$RLSCOPE_DIR/calibration/microbench
 CALIB_OPTS=( \
     --cupti-overhead-json $CALIB_DIR/cupti_overhead.json \
     --LD-PRELOAD-overhead-json $CALIB_DIR/LD_PRELOAD_overhead.json \
@@ -45,7 +39,7 @@ CALIB_OPTS=( \
     )
 
 _run_bench() {
-    local all_dir=$IML_DIR/output/rlscope_bench/all
+    local all_dir=$RLSCOPE_DIR/output/rlscope_bench/all
 
     _do rls-bench --dir $all_dir "$@"
 }
@@ -63,7 +57,7 @@ rlscope_analyze() {
 run_total_training_time_plot() {
     _do rls-quick-expr --expr plot_fig --fig fig_13_overhead_correction \
         "${CALIB_OPTS[@]}" \
-        --root-dir $IML_DATA_DIR/iml/output/expr_total_training_time \
+        --root-dir $RLSCOPE_DATA_DIR/rlscope/output/expr_total_training_time \
         --debug-memoize "$@"
 }
 
@@ -314,8 +308,8 @@ run_calibration_all() {
 NUM_REPS=5
 run_subtraction_validation() {
     if [ $# -lt 2 ]; then
-        echo "ERROR: Saw $# arguments, but expect:"
-        echo "  run_subtraction_validation <algo> <environ>"
+        log_error "ERROR: Saw $# arguments, but expect:"
+        log_error "  run_subtraction_validation <algo> <environ>"
         return 1
     fi
     # Default in the past: (HalfCheetahBulletEnv-v0, ppo2)
@@ -349,8 +343,8 @@ run_pyprof_calibration_all() {
 
 run_subtraction_calibration() {
 #    if [ $# -lt 2 ]; then
-#        echo "ERROR: Saw $# arguments, but expect:"
-#        echo "  run_subtraction_calibration <algo> <environ>"
+#        log_error "ERROR: Saw $# arguments, but expect:"
+#        log_error "  run_subtraction_calibration <algo> <environ>"
 #        return 1
 #    fi
 #    # Default in the past: (HalfCheetahBulletEnv-v0, ppo2)
@@ -359,10 +353,10 @@ run_subtraction_calibration() {
 #    shift 2
 
     if [ $# -eq 0 ]; then
-        echo "ERROR: Saw $# arguments, but expected arguments that select specific (algo, env) combinations like:"
-        echo "  run_subtraction_calibration --algo ppo2 --env HalfCheetahBulletEnv-v0"
-        echo "  run_subtraction_calibration --algo ppo2 --env Walker2DBulletEnv-v0"
-        echo "  run_subtraction_calibration --algo-env-group environment_choice"
+        log_error "ERROR: Saw $# arguments, but expected arguments that select specific (algo, env) combinations like:"
+        log_error "  run_subtraction_calibration --algo ppo2 --env HalfCheetahBulletEnv-v0"
+        log_error "  run_subtraction_calibration --algo ppo2 --env Walker2DBulletEnv-v0"
+        log_error "  run_subtraction_calibration --algo-env-group environment_choice"
         return 1
     fi
 
@@ -446,11 +440,11 @@ run_all() {
 }
 
 run_perf_debug() {
-    _do rls-run --rlscope-directory $IML_DIR/output/perf_debug "${CALIB_OPTS[@]}"
+    _do rls-run --rlscope-directory $RLSCOPE_DIR/output/perf_debug "${CALIB_OPTS[@]}"
 }
 
 run_perf_debug_short() {
-    _do rls-run --rlscope-directory $IML_DIR/output/perf_debug_short "${CALIB_OPTS[@]}"
+    _do rls-run --rlscope-directory $RLSCOPE_DIR/output/perf_debug_short "${CALIB_OPTS[@]}"
 }
 
 _find_extension() {
@@ -1022,7 +1016,7 @@ test_run_expr() {
 (
   set -eu
 
-  test_dir=$IML_DIR/output/run_expr/debug
+  test_dir=$RLSCOPE_DIR/output/run_expr/debug
   run_expr_sh=${test_dir}/run_expr.sh
 #  n_launches=10
   n_launches=1
@@ -1036,7 +1030,7 @@ test_run_expr() {
 #  py_args=()
   for i in $(seq ${n_launches}); do
     rls-run-expr "${run_expr_args[@]}" --append \
-      python $IML_DIR/rlscope/scripts/madeup_cmd.py --rlscope-directory ${test_dir}/process_${i} "${py_args[@]}"
+      python $RLSCOPE_DIR/rlscope/scripts/madeup_cmd.py --rlscope-directory ${test_dir}/process_${i} "${py_args[@]}"
   done
   rls-run-expr "${run_expr_args[@]}" --run-sh
 )
@@ -1067,7 +1061,7 @@ run_tf_agents() {
 
   local py_script=$TF_AGENTS_DIR/tf_agents/agents/${algo}/examples/v2/train_eval.rlscope.py
   if [ ! -f ${py_script} ]; then
-    echo "ERROR: Couldn't find tf-agents training script @ ${py_script}"
+    log_error "ERROR: Couldn't find tf-agents training script @ ${py_script}"
     return 1
   fi
 
@@ -1164,7 +1158,7 @@ run_reagent() {
 
   local py_script=$REAGENT_DIR/reagent/workflow/cli.py
   if [ ! -f ${py_script} ]; then
-    echo "ERROR: Couldn't find ReAgent training script @ ${py_script}"
+    log_error "ERROR: Couldn't find ReAgent training script @ ${py_script}"
     return 1
   fi
 
@@ -1197,7 +1191,7 @@ run_reagent() {
     )
   fi
   if [ "${stable_baselines_hyperparams}" != 'yes' ]; then
-    echo "ERROR: Only stable_baselines_hyperparams=yes supported for ReAgent"
+    log_error "ERROR: Only stable_baselines_hyperparams=yes supported for ReAgent"
   fi
   args+=(
     python ${py_script}
@@ -1235,6 +1229,11 @@ stable_baselines_setup_display() {
         return
     fi
 
+    # if this fails, you forgot to run install_experiments.
+    if ! which Xvfb; then
+      log_error "ERROR: couldn't find command Xvfb; did you forget to run install_experiments?"
+      exit 1
+    fi
     # Taken from https://github.com/openai/gym/
     # Set up display; otherwise rendering will fail
     sudo Xvfb :1 -screen 0 1024x768x24 &
@@ -1276,7 +1275,7 @@ run_stable_baselines() {
 
   local py_script=$RL_BASELINES_ZOO_DIR/train.py
   if [ ! -f ${py_script} ]; then
-    echo "ERROR: Couldn't find tf-agents training script @ ${py_script}"
+    log_error "ERROR: Couldn't find tf-agents training script @ ${py_script}"
     return 1
   fi
 
@@ -1335,7 +1334,7 @@ run_stable_baselines() {
 }
 
 _tf_agents_root_direc() {
-  local rlscope_root_dir=$IML_DIR/output/tf_agents/calibration.parallel_runs_yes
+  local rlscope_root_dir=$RLSCOPE_DIR/output/tf_agents/calibration.parallel_runs_yes
   subdir=${subdir:-}
   if [ "${subdir}" != "" ]; then
     rlscope_root_dir="${rlscope_root_dir}/${subdir}"
@@ -1357,7 +1356,7 @@ tf_agents_plots_direc() {
 }
 
 _reagent_root_direc() {
-  local rlscope_root_dir=$IML_DIR/output/reagent/calibration.parallel_runs_yes
+  local rlscope_root_dir=$RLSCOPE_DIR/output/reagent/calibration.parallel_runs_yes
   subdir=${subdir:-}
   if [ "${subdir}" != "" ]; then
     rlscope_root_dir="${rlscope_root_dir}/${subdir}"
@@ -1381,14 +1380,14 @@ reagent_plots_direc() {
 framework_choice_plots_direc() {
 (
   set -eu
-  local rlscope_plots_dir=$IML_DIR/output/plots/framework_choice
+  local rlscope_plots_dir=$RLSCOPE_DIR/output/plots/framework_choice
   echo "${rlscope_plots_dir}"
 )
 }
 framework_choice_plots_uncorrected_direc() {
 (
   set -eu
-  local rlscope_plots_dir=$IML_DIR/output/plots/framework_choice/corrected_no
+  local rlscope_plots_dir=$RLSCOPE_DIR/output/plots/framework_choice/corrected_no
   echo "${rlscope_plots_dir}"
 )
 }
@@ -1396,7 +1395,7 @@ framework_choice_plots_uncorrected_direc() {
 framework_choice_metrics_direc() {
 (
   set -eu
-  local rlscope_plots_dir=$IML_DIR/output/plots/framework_choice.metrics
+  local rlscope_plots_dir=$RLSCOPE_DIR/output/plots/framework_choice.metrics
   echo "${rlscope_plots_dir}"
 )
 }
@@ -1404,14 +1403,14 @@ framework_choice_metrics_direc() {
 framework_choice_plots_ddpg_direc() {
 (
   set -eu
-  local rlscope_plots_dir=$IML_DIR/output/plots/framework_choice_ddpg
+  local rlscope_plots_dir=$RLSCOPE_DIR/output/plots/framework_choice_ddpg
   echo "${rlscope_plots_dir}"
 )
 }
 framework_choice_plots_ddpg_uncorrected_direc() {
 (
   set -eu
-  local rlscope_plots_dir=$IML_DIR/output/plots/framework_choice_ddpg/corrected_no
+  local rlscope_plots_dir=$RLSCOPE_DIR/output/plots/framework_choice_ddpg/corrected_no
   echo "${rlscope_plots_dir}"
 )
 }
@@ -1462,7 +1461,7 @@ reagent_rlscope_direc() {
 }
 
 _stable_baselines_root_direc() {
-  echo $IML_DIR/output/stable_baselines/calibration.parallel_runs_yes
+  echo $RLSCOPE_DIR/output/stable_baselines/calibration.parallel_runs_yes
 }
 stable_baselines_rlscope_direc() {
 (
@@ -1785,7 +1784,7 @@ EOF
 test_plot_simulator() {
 (
   set -eu
-  rlscope_direc=$IML_DIR/output/tf_agents/debug/simulation/calibrate.tf_py_function/algo_ddpg/env_HalfCheetahBulletEnv-v0
+  rlscope_direc=$RLSCOPE_DIR/output/tf_agents/debug/simulation/calibrate.tf_py_function/algo_ddpg/env_HalfCheetahBulletEnv-v0
 #  --plots time-breakdown
   args=(
     --re-plot
@@ -1806,7 +1805,7 @@ test_plot_stable_baselines() {
 
   repetitions=${repetitions:-3}
 
-  rlscope_direc=$IML_DIR/output/stable_baselines/calibration.parallel_runs_yes/algo_ddpg/env_Walker2DBulletEnv-v0
+  rlscope_direc=$RLSCOPE_DIR/output/stable_baselines/calibration.parallel_runs_yes/algo_ddpg/env_Walker2DBulletEnv-v0
 #  --plots time-breakdown
   args=(
     --re-plot
@@ -2336,7 +2335,7 @@ test_tf_agents() {
     )
   fi
 
-  rlscope_root_dir=$IML_DIR/output/tf_agents/examples/dqn/calibration.max_passes_${max_passes}
+  rlscope_root_dir=$RLSCOPE_DIR/output/tf_agents/examples/dqn/calibration.max_passes_${max_passes}
 
   if [ "${just_plot}" = "no" ]; then
     rlscope_direc=${rlscope_root_dir}/use_tf_functions

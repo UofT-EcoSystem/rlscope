@@ -913,7 +913,7 @@ class NvprofKernelHistogram:
         start_us,duration_us,name
 
         # Read (start, duration, api)
-        $ nvprof --print-gpu-trace -i /home/jgleeson/clone/iml/output/minigo/nvprof.debug/minigo_base_dir/nvprof --csv
+        $ nvprof --print-gpu-trace -i /home/jgleeson/clone/rlscope/output/minigo/nvprof.debug/minigo_base_dir/nvprof --csv
         ======== Profiling result:
         "Start","Duration","Grid X","Grid Y","Grid Z","Block X","Block Y","Block Z","Registers Per Thread","Static SMem","Dynamic SMem","Size","Throughput","SrcMemType","DstMemType","Device","Context","Stream","Name","Correlation_ID"
         us,us,,,,,,,,KB,KB,KB,GB/s,,,,,,,

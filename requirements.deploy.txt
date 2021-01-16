@@ -1,17 +1,14 @@
 #
 # Requirements needed to launch a docker container.
 #
-
-# pip requirements needed to run the deploy.sh script for deploying the RL-Scope docker dev
-# environment, described in the github wiki:
-#   https://github.com/UofT-EcoSystem/rlscope/wiki/Dockerized-development-environment#deploying-the-iml-dev-environment
 #
-# To setup a virtualenv with requirements, and run deploy.sh, run this:
+# To setup a virtualenv with requirements, and run the docker development container, run this:
 # $ cd ~/clone/rlscope
 # $ virtualenv --python=/usr/bin/python3 venv
 # $ source venv/bin/activate
 # $ pip install -r requirements.deploy.txt
-# $ ./deploy.sh
+# $ python run_docker.py
+
 absl-py==0.6.1
 Cerberus==1.3.1
 docker==4.0.1

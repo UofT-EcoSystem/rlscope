@@ -2,8 +2,8 @@
 // Created by jagle on 11/26/2019.
 //
 
-#ifndef IML_DEBUG_FLAGS_H
-#define IML_DEBUG_FLAGS_H
+#ifndef RLSCOPE_DEBUG_FLAGS_H
+#define RLSCOPE_DEBUG_FLAGS_H
 
 #include <bitset>
 #include <set>
@@ -112,4 +112,4 @@ void _dbg_breakpoint_with_stacktrace(const std::string& name, const char* file, 
 
 } // namespace rlscope
 
-#endif //IML_DEBUG_FLAGS_H
+#endif //RLSCOPE_DEBUG_FLAGS_H

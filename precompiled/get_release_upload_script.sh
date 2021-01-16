@@ -17,15 +17,15 @@ if [ ! -e github-release ]; then
 fi
 echo " > Extracted github-release executable to $PWD/github-release"
 echo "   You can use this to upload precompiled tensorflow wheel builds private github repos; "
-echo "   in particular, https://github.com/UofT-EcoSystem/iml/releases"
+echo "   in particular, https://github.com/UofT-EcoSystem/rlscope/releases"
 echo
 echo "   Example invocation:"
 echo
 echo "   # Upload wheel file for tag 1.0.0"
-echo "   # It will appear under https://github.com/UofT-EcoSystem/iml/releases/tag/1.0.0"
+echo "   # It will appear under https://github.com/UofT-EcoSystem/rlscope/releases/tag/1.0.0"
 echo "   $ GITHUB_TOKEN=\"...\" ./github-release upload \\"
 echo "       --user UofT-EcoSystem \\"
-echo "       --repo iml \\"
+echo "       --repo rlscope \\"
 echo "       --tag 1.0.0 \\"
 echo "       --name tensorflow-1.13.1-cp35-cp35m-linux_x86_64.whl \\"
 echo "       --file tensorflow-1.13.1-cp35-cp35m-linux_x86_64.whl \\"

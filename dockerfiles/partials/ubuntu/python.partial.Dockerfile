@@ -32,4 +32,4 @@ RUN ${PIP} install --no-cache-dir --upgrade setuptools
 
 # Some TF tools expect a "python" binary
 # RUN ln -s $(which ${PYTHON}) /usr/local/bin/python
-USER ${IML_USER}
+USER ${RLSCOPE_USER}

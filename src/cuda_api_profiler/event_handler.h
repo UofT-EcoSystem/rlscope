@@ -2,8 +2,8 @@
 // Created by jagle on 8/16/2019.
 //
 
-#ifndef IML_EVENT_HANDLER_H
-#define IML_EVENT_HANDLER_H
+#ifndef RLSCOPE_EVENT_HANDLER_H
+#define RLSCOPE_EVENT_HANDLER_H
 
 #include <list>
 #include <functional>
@@ -46,4 +46,4 @@ public:
 
 }
 
-#endif //IML_EVENT_HANDLER_H
+#endif //RLSCOPE_EVENT_HANDLER_H

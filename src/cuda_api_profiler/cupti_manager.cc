@@ -121,7 +121,7 @@ void CUPTIManager::RecordActivityCallback(CUPTIClient* client, const CUpti_Activ
   auto manager = absl::make_unique<CUPTIManager>();
 //    CUptiResult status = manager->cupti_wrapper_->ActivityRegisterCallbacks(
 //        BufferRequested, BufferCompleted);
-  if (!is_yes("IML_CUDA_ACTIVITIES", false)) {
+  if (!is_yes("RLSCOPE_CUDA_ACTIVITIES", false)) {
     VLOG(1) << "SKIP: activity callbacks using cuptiActivityRegisterCallbacks";
   } else {
     // NOTE: Even just calling cuptiActivityRegisterCallbacks without enabling any activities with cuptiActivityEnable
@@ -193,13 +193,13 @@ MyStatus CUPTIManager::EnableTrace(CUPTIClient *client) {
   // CUPTI_API_CALL_MAYBE_EXIT(cuptiActivityEnable(CUPTI_ACTIVITY_KIND_NAME));
   // CUPTI_API_CALL_MAYBE_EXIT(cuptiActivityEnable(CUPTI_ACTIVITY_KIND_MARKER));
   if (!is_yes("TF_CUPTI_SKIP_REGISTER_ACTIVITY", false)) {
-    if (is_yes("IML_PC_SAMPLING", false)) {
+    if (is_yes("RLSCOPE_PC_SAMPLING", false)) {
       _EnablePCSampling();
     }
   }
 
-  if (is_yes("IML_CUDA_ACTIVITIES", false)) {
-    VLOG(1) << "Enable GPU activities (IML_CUDA_ACTIVITIES=yes)";
+  if (is_yes("RLSCOPE_CUDA_ACTIVITIES", false)) {
+    VLOG(1) << "Enable GPU activities (RLSCOPE_CUDA_ACTIVITIES=yes)";
     CUPTI_API_CALL_MAYBE_EXIT(cuptiActivityEnable(CUPTI_ACTIVITY_KIND_DEVICE));
     CUPTI_API_CALL_MAYBE_EXIT(cuptiActivityEnable(CUPTI_ACTIVITY_KIND_KERNEL));
     CUPTI_API_CALL_MAYBE_EXIT(cuptiActivityEnable(CUPTI_ACTIVITY_KIND_MEMCPY));
@@ -214,7 +214,7 @@ MyStatus CUPTIManager::EnableTrace(CUPTIClient *client) {
 
 MyStatus CUPTIManager::DisableTrace() {
   // We turn off all tracing regardless.
-  if (is_yes("IML_PC_SAMPLING", false)) {
+  if (is_yes("RLSCOPE_PC_SAMPLING", false)) {
     _DisablePCSampling();
   }
   // VLOG(1) << "CUPTIManager." << __func__ << ": disable cupti activities";
@@ -244,7 +244,7 @@ MyStatus CUPTIManager::DisableTrace() {
 void CUPTIManager::InternalBufferRequested(uint8_t **buffer, size_t *size,
                                            size_t *maxNumRecords) {
   // VLOG(1) << "CUPTIManager." << __func__;
-  // IML TODO: does this callback's malloc call add large overhead?
+  // RLSCOPE TODO: does this callback's malloc call add large overhead?
   // What if we register for fewer ACTIVITY_KIND's (see EnableTrace)?
   bool use_arena = is_yes("TF_CUPTI_BUFFER_ARENA", false);
   if (use_arena) {

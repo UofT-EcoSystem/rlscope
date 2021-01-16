@@ -2,8 +2,8 @@
 // Created by jagle on 8/19/2019.
 //
 
-#ifndef IML_CUDA_LD_PRELOAD_H
-#define IML_CUDA_LD_PRELOAD_H
+#ifndef RLSCOPE_CUDA_LD_PRELOAD_H
+#define RLSCOPE_CUDA_LD_PRELOAD_H
 
 #include <memory>
 
@@ -213,4 +213,4 @@ extern __host__ cudaError_t cudaMalloc(void **devPtr, size_t size);
 extern __host__ cudaError_t cudaFree(void *devPtr);
 }
 
-#endif //IML_CUDA_LD_PRELOAD_H
+#endif //RLSCOPE_CUDA_LD_PRELOAD_H

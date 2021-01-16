@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # read -r -d '' BASH_SCRIPT << EOM
-# cd \$IML_DIR;
+# cd \$RLSCOPE_DIR;
 # source source_me.sh;
 # "$@";
 # EOM
@@ -31,7 +31,7 @@ def main():
     shell = ' '.join([shlex.quote(opt) for opt in argv])
     bash_script = textwrap.dedent("""
     set -e;
-    cd $IML_DIR;
+    cd $RLSCOPE_DIR;
     source source_me.sh;
     {shell};
     """).format(shell=shell)

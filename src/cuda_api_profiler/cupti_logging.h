@@ -2,8 +2,8 @@
 // Created by jagle on 8/16/2019.
 //
 
-#ifndef IML_CUPTI_LOGGING_H
-#define IML_CUPTI_LOGGING_H
+#ifndef RLSCOPE_CUPTI_LOGGING_H
+#define RLSCOPE_CUPTI_LOGGING_H
 
 
 #include <cupti_target.h>
@@ -57,4 +57,4 @@ void printActivity(const CUpti_Activity *record);
 
 }
 
-#endif //IML_CUPTI_LOGGING_H
+#endif //RLSCOPE_CUPTI_LOGGING_H

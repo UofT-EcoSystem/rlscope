@@ -2647,7 +2647,7 @@ class UtilizationPlot:
                 "phase", phase_name,
                 "EventOverlap.{numba_suffix}.compute_overlap.pickle".format(
                 # klass=self.__class__.__name__,
-                numba_suffix='.numba' if py_config.IML_USE_NUMBA else '',
+                numba_suffix='.numba' if py_config.RLSCOPE_USE_NUMBA else '',
                 # overlap_type=self.overlap_type,
             ))
 
@@ -2675,7 +2675,7 @@ class UtilizationPlot:
         overlap, overlap_metadata = compute_overlap()
         logger.info("Event overlap results: {msg}".format(msg=pprint_msg({
             'overlap_type': self.overlap_type,
-            'IML_USE_NUMBA': py_config.IML_USE_NUMBA,
+            'RLSCOPE_USE_NUMBA': py_config.RLSCOPE_USE_NUMBA,
             'overlap': overlap,
             'overlap_metadata': overlap_metadata,
         })))

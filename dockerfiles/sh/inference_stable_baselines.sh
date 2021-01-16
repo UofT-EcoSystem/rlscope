@@ -13,8 +13,9 @@ fi
 SH_DIR="$(readlink -f "$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )")"
 cd "$SH_DIR"
 
-source $SH_DIR/make_utils.sh
+source $SH_DIR/docker_runtime_common.sh
 
+_check_apt
 _check_env
 _upgrade_pip
 
@@ -85,13 +86,13 @@ cd $RL_BASELINES_ZOO_DIR
 #    --rlscope-trace-time-sec $((40))
 
 #if [ "$DEBUG" == 'yes' ]; then
-#    IML_TRACE_TIME_SEC=$((40))
+#    RLSCOPE_TRACE_TIME_SEC=$((40))
 #else
-#    IML_TRACE_TIME_SEC=$((2*60))
+#    RLSCOPE_TRACE_TIME_SEC=$((2*60))
 #fi
 
 # Debug simulator time...
-IML_TRACE_TIME_SEC=$((10))
+RLSCOPE_TRACE_TIME_SEC=$((10))
 
 #if [ "$DEBUG" == 'yes' ]; then
 #    PYTHON=(python -m ipdb)
@@ -105,6 +106,6 @@ _do "${PYTHON[@]}" $RL_BASELINES_ZOO_DIR/enjoy.py \
     --algo $ALGO \
     --env $ENV_ID \
     --rlscope-start-measuring-call 1 \
-    --rlscope-trace-time-sec $IML_TRACE_TIME_SEC \
+    --rlscope-trace-time-sec $RLSCOPE_TRACE_TIME_SEC \
     --no-render \
     "$@"

@@ -21,17 +21,17 @@
 
 namespace rlscope {
 
-float get_IML_SAMPLE_EVERY_SEC(boost::optional<float> user_value) {
-  return ParseEnvOrDefault("float", "IML_SAMPLE_EVERY_SEC", user_value, IML_SAMPLE_EVERY_SEC_DEFAULT);
+float get_RLSCOPE_SAMPLE_EVERY_SEC(boost::optional<float> user_value) {
+  return ParseEnvOrDefault("float", "RLSCOPE_SAMPLE_EVERY_SEC", user_value, RLSCOPE_SAMPLE_EVERY_SEC_DEFAULT);
 }
 
-int get_IML_GPU_HW_CONFIG_PASSES(boost::optional<int> user_value) {
-  return ParseEnvOrDefault("integer", "IML_GPU_HW_CONFIG_PASSES", user_value, IML_GPU_HW_CONFIG_PASSES_DEFAULT);
+int get_RLSCOPE_GPU_HW_CONFIG_PASSES(boost::optional<int> user_value) {
+  return ParseEnvOrDefault("integer", "RLSCOPE_GPU_HW_CONFIG_PASSES", user_value, RLSCOPE_GPU_HW_CONFIG_PASSES_DEFAULT);
 }
 
-std::vector<std::string> get_IML_GPU_HW_METRICS(boost::optional<std::string> user_value) {
+std::vector<std::string> get_RLSCOPE_GPU_HW_METRICS(boost::optional<std::string> user_value) {
   std::string dflt = rlscope::get_DEFAULT_METRICS_STR();
-  std::string env_name = "IML_GPU_HW_METRICS";
+  std::string env_name = "RLSCOPE_GPU_HW_METRICS";
   std::string value;
 
   MyStatus my_status = MyStatus::OK();

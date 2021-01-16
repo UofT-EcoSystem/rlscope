@@ -2,8 +2,8 @@
 // Created by jgleeson on 2020-01-21.
 //
 
-#ifndef IML_SAMPLE_PERIODS_H
-#define IML_SAMPLE_PERIODS_H
+#ifndef RLSCOPE_SAMPLE_PERIODS_H
+#define RLSCOPE_SAMPLE_PERIODS_H
 
 #include "analysis/trace_file_parser.h"
 
@@ -33,4 +33,4 @@ public:
 
 } // namespace rlscope
 
-#endif //IML_SAMPLE_PERIODS_H
+#endif //RLSCOPE_SAMPLE_PERIODS_H

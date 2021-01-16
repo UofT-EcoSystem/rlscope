@@ -3,79 +3,194 @@
 # Useful for adding custom commands, and adding stuff to the default
 # Ubuntu bashrc (see _bash_rc).
 
-#_setup_venv() {
-#  set +u
-#  source $VIRTUALENV/bin/activate
-#  set -u
-#}
-#
-#_rlscope_setup_shell() {
-#  _setup_venv
-#  set -eux
-#}
+# $ man terminfo
+# Color       #define       Value       RGB
+# black     COLOR_BLACK       0     0, 0, 0
+# red       COLOR_RED         1     max,0,0
+# green     COLOR_GREEN       2     0,max,0
+# yellow    COLOR_YELLOW      3     max,max,0
+# blue      COLOR_BLUE        4     0,0,max
+# magenta   COLOR_MAGENTA     5     max,0,max
+# cyan      COLOR_CYAN        6     0,max,max
+# white     COLOR_WHITE       7     max,max,max
 
-rlscope_help() {
-  (
-  set -eu
-  echo "$ install_rlscope.sh"
-  echo "  Build RL-Scope into a python wheel file (at $IML_DIR/dist/rlscope*.whl) and install it."
-  echo
-  echo "$ install_experiments.sh"
-  echo "  Clone RL repos with RL-Scope annotations in them into $IML_DIR/third_party, and install them."
-  echo
-  echo "$ develop_rlscope"
-  echo "  Development mode: place compiled C++ binaries and python source files on PATH for easier development."
-  echo
-  echo "$ build_rlscope.sh"
-  echo "  Development mode: build C++ RL-Scope library (i.e., librlscope.so)."
-  echo
-  )
+# Text style:
+# tput bold    # Select bold mode
+# tput dim     # Select dim (half-bright) mode
+# tput smul    # Enable underline mode
+# tput rmul    # Disable underline mode
+# tput rev     # Turn on reverse video mode
+# tput smso    # Enter standout (bold) mode
+# tput rmso    # Exit standout mode
+
+# Other:
+# tput sgr0    # Reset text format to the terminal's default
+# tput bel     # Play a bell
+
+TXT_UNDERLINE=no
+TXT_BOLD=no
+TXT_COLOR=
+TXT_STYLE=
+TXT_CLEAR="$(tput sgr0)"
+set_TXT_STYLE() {
+  if [ "$TXT_UNDERLINE" = 'yes' ]; then
+    TXT_STYLE="${TXT_STYLE}$(tput smul)"
+  fi
+  if [ "$TXT_BOLD" = 'yes' ]; then
+    TXT_STYLE="${TXT_STYLE}$(tput bold)"
+  fi
+  if [ "$TXT_COLOR" != '' ]; then
+    TXT_STYLE="${TXT_STYLE}$(tput setaf $TXT_COLOR)"
+  fi
+}
+log_info() {
+  TXT_COLOR=2
+  set_TXT_STYLE
+  echo -e "${TXT_STYLE}$@${TXT_CLEAR}"
+}
+log_error() {
+  # red
+  TXT_COLOR=1
+  set_TXT_STYLE
+  echo -e "${TXT_STYLE}$@${TXT_CLEAR}"
+}
+log_warning() {
+  # yellow
+  TXT_COLOR=3
+  set_TXT_STYLE
+  echo -e "${TXT_STYLE}$@${TXT_CLEAR}"
 }
 
+rlscope_help() {
+(
+  set -eu
+
+  (
+  TXT_BOLD=yes
+  log_info "$ build_rlscope"
+  )
+  log_info "  Build RL-Scope C++ components (i.e., librlscope.so, rls-analyze)."
+  log_info
+
+  (
+  TXT_BOLD=yes
+  log_info "$ install_experiments"
+  )
+  log_info "  Clone RL repos with RL-Scope annotations in them into $RLSCOPE_DIR/third_party, and install them."
+  log_info "  Only needed if reproducing figures from RL-Scope paper."
+  log_info
+
+  (
+  TXT_BOLD=yes
+  log_info "$ build_wheel"
+  )
+  log_info "  Build RL-Scope into a python wheel file at $RLSCOPE_DIR/dist/rlscope*.whl"
+  log_info "  Useful if you wish to run RL-Scope outside of this container."
+  log_info
+
+  (
+  TXT_BOLD=yes
+  log_info "$ build_docs"
+  )
+  log_info "  Build RL-Scope html documentation at $RLSCOPE_DIR/build.docs/index.html"
+  log_info
+
+  (
+  TXT_BOLD=yes
+  log_info "$ rls-unit-tests"
+  )
+  log_info "  Run RL-Scope unit tests."
+  log_info "  NOTE: you must run build_rlscope.sh first to do this."
+  log_info
+
+  (
+  TXT_BOLD=yes
+  log_info "$ develop_rlscope"
+  )
+  log_info "  Enter development mode: i.e., place compiled C++ binaries and python source files on PATH for easier development."
+  log_info "  NOTE: This happens automatically when you initially enter the container"
+  log_info "        If you install the wheel file produced by build_rlscope.sh, and"
+  log_info "        subsequently make source code changes you will need to run this to see their effect."
+  log_info
+
+)
+}
+
+RLSCOPE_QUIET=no
 _rls_do() {
-    echo "> CMD [rlscope]:"
-    echo "  $@"
-    "$@"
+    if [ "$RLSCOPE_QUIET" = 'yes' ]; then
+      "$@" > /dev/null
+    else
+      echo "> CMD [rlscope]:"
+      echo "  $ $@"
+      echo "  PWD=$PWD"
+      "$@"
+    fi
 }
 
 _source_rlscope() {
   local curdir="$PWD"
   local ret=
-  cd $IML_DIR
+  cd $RLSCOPE_DIR
+  RLSCOPE_QUIET=yes
   _rls_do source source_me.sh
   ret=$?
+  RLSCOPE_QUIET=no
   if [ "$ret" != "0" ]; then
     cd "$curdir"
-    echo "ERROR: failed to source $IML_DIR/source_me.sh"
+    log_error "ERROR: failed to source $RLSCOPE_DIR/source_me.sh"
     return $ret
   fi
   cd "$curdir"
 }
 
 develop_rlscope() {
+  local ret=
+  _source_rlscope
+  ret=$?
+  if [ "$ret" != "0" ]; then
+    return $ret
+  fi
+  log_info "> Setting up rlscope (python setup.py develop)..."
+  _develop_rlscope
+  ret=$?
+  if [ "$ret" != "0" ]; then
+    return $ret
+  fi
+  log_info "  Done"
+  log_info "> You have entered development mode."
+  log_info "  Compiled RL-Scope binaries and python sources"
+  log_info "  from $RLSCOPE_DIR are now on your PATH."
+}
+
+_develop_rlscope() {
   local curdir="$PWD"
   local ret=
-  cd $IML_DIR
-  _rls_do source source_me.sh
-  ret=$?
-  if [ "$ret" != "0" ]; then
-    cd "$curdir"
-    echo "ERROR: failed to source $IML_DIR/source_me.sh"
-    return $ret
-  fi
+  cd $RLSCOPE_DIR
+  RLSCOPE_QUIET=yes
   _rls_do develop_rlscope.sh
   ret=$?
+  RLSCOPE_QUIET=no
   if [ "$ret" != "0" ]; then
     cd "$curdir"
-    echo "ERROR: failed to run \"python setup.py\" from $IML_DIR"
+    log_error "ERROR: failed to run \"python setup.py\" from $RLSCOPE_DIR"
     return $ret
   fi
-  echo
-  echo "> Success!"
-  echo "  You have entered development mode."
-  echo "  Compiled RL-Scope C++ binaries (e.g., rls-test, rls-analyze, librlscope.so) and python sources (e.g., rls-prof)"
-  echo "  from $IML_DIR will be used."
   cd "$curdir"
+}
+
+# Aliases for consistency with other commands.
+build_rlscope() {
+  build_rlscope.sh
+}
+install_experiments() {
+  install_experiments.sh
+}
+build_wheel() {
+  build_wheel.sh
+}
+build_docs() {
+  build_docs.sh
 }
 
 _bash_rc() {
@@ -103,6 +218,10 @@ _bash_rc() {
   # NOTE: Installing rlscope during login fails with "apt busy, resource not available" error.
   # Just delay installation/building until they run "install_experiments.sh" or "experiment_...sh".
   _source_rlscope
+  if ! rlscope_installed; then
+    log_info "> Setting up rlscope (python setup.py develop)..."
+    _develop_rlscope && log_info "  Done"
+  fi
 
 }
 
@@ -129,5 +248,16 @@ rlscope_installed() {
   pip freeze | grep -q rlscope
 )
 }
+
+#_setup_venv() {
+#  set +u
+#  source $VIRTUALENV/bin/activate
+#  set -u
+#}
+#
+#_rlscope_setup_shell() {
+#  _setup_venv
+#  set -eux
+#}
 
 _bash_rc

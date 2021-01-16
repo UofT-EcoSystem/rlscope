@@ -1,7 +1,7 @@
 #
 # Add repo src files to container.
 #
-#ENV ADD_DIR /home/${USER_NAME}/bin/iml
+#ENV ADD_DIR /home/${USER_NAME}/bin/rlscope
 #WORKDIR ${ADD_DIR}
 #RUN mkdir -p ${ADD_DIR}/dockerfiles/sh
 
@@ -9,7 +9,7 @@
 ADD requirements.txt ${ADD_DIR}/requirements.txt
 USER root
 RUN chmod ugo+r ${ADD_DIR}/requirements.txt
-USER ${IML_USER}
+USER ${RLSCOPE_USER}
 
 #RUN apt-get update && apt-get install -y --no-install-recommends
 #     llvm-8

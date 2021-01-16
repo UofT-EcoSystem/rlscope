@@ -10,12 +10,12 @@ fi
 
 main() {
   SH_DIR="$(readlink -f "$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )")"
-  source $SH_DIR/make_utils.sh
+  source $SH_DIR/docker_runtime_common.sh
 
   _check_rlscope_dir
   _upgrade_pip
 
-  cd $IML_DIR
+  cd $RLSCOPE_DIR
 
   # TODO: remove...
   export repetitions=2
@@ -33,10 +33,10 @@ main() {
 
   local output_dir="$ARTIFACTS_DIR/experiment_RL_framework_comparison"
   mkdir -p "$output_dir"
-  _do cp $IML_DIR/output/plots/framework_choice_ddpg/OverlapStackedBarPlot.overlap_type_CategoryOverlap.operation_training_time.pdf "$output_dir/fig_ddpg_time_breakdown.pdf"
-  _do cp $IML_DIR/output/plots/framework_choice_ddpg/CategoryTransitionPlot.combined.pdf "$output_dir/fig_ddpg_transitions.pdf"
-  _do cp $IML_DIR/output/plots/framework_choice/OverlapStackedBarPlot.overlap_type_CategoryOverlap.operation_training_time.pdf "$output_dir/fig_td3_time_breakdown.pdf"
-  _do cp $IML_DIR/output/plots/framework_choice/CategoryTransitionPlot.combined.pdf "$output_dir/fig_td3_transitions.pdf"
+  _do cp $RLSCOPE_DIR/output/plots/framework_choice_ddpg/OverlapStackedBarPlot.overlap_type_CategoryOverlap.operation_training_time.pdf "$output_dir/fig_ddpg_time_breakdown.pdf"
+  _do cp $RLSCOPE_DIR/output/plots/framework_choice_ddpg/CategoryTransitionPlot.combined.pdf "$output_dir/fig_ddpg_transitions.pdf"
+  _do cp $RLSCOPE_DIR/output/plots/framework_choice/OverlapStackedBarPlot.overlap_type_CategoryOverlap.operation_training_time.pdf "$output_dir/fig_td3_time_breakdown.pdf"
+  _do cp $RLSCOPE_DIR/output/plots/framework_choice/CategoryTransitionPlot.combined.pdf "$output_dir/fig_td3_transitions.pdf"
   log_info
   (
   TXT_BOLD=yes

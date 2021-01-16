@@ -44,13 +44,13 @@ ssh_config*
 # setup.sh
 /cmake-*Linux*.sh
 # /dockerfiles/deploy.sh
-/dockerfiles/dockerfiles/devel-iml-gpu-cuda.Dockerfile
+/dockerfiles/dockerfiles/devel-rlscope-gpu-cuda.Dockerfile
 /dockerfiles/stack.yml
-/dockerfiles/tensorflow:devel-iml-gpu-cuda.build.log.txt
-/iml_profiler/protobuf/iml_prof_pb2.py
-/iml_profiler/protobuf/pyprof_pb2.py
-/iml_profiler/protobuf/unit_test_pb2.py
-/iml_profiler.egg-info
+/dockerfiles/tensorflow:devel-rlscope-gpu-cuda.build.log.txt
+/rlscope/protobuf/rlscope_prof_pb2.py
+/rlscope/protobuf/pyprof_pb2.py
+/rlscope/protobuf/unit_test_pb2.py
+/rlscope.egg-info
 
 # Protobuf
 *_pb2.py

@@ -34,7 +34,7 @@ CudaStreamMonitor::CudaStreamMonitor() :
                       CUPTI_RUNTIME_TRACE_CBID_cudaStreamDestroy_v5050
                   }),
     _sample_every_sec(SAMPLE_STREAM_EVERY_SEC),
-//    _sample_every_sec(get_IML_SAMPLE_EVERY_SEC(0)),
+//    _sample_every_sec(get_RLSCOPE_SAMPLE_EVERY_SEC(0)),
     _cupti_api(CuptiAPI::GetCuptiAPI())
 {
   _RegisterCUPTICallbacks();

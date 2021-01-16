@@ -6,12 +6,12 @@ RUN chmod 0440 /etc/sudoers.d/sudo-nopasswd
 RUN apt-get update && apt-get install -y --no-install-recommends \
         sudo
 
-ARG IML_USER
-ARG IML_UID
-ARG IML_GID
-RUN addgroup ${IML_USER} --gid ${IML_GID}
+ARG RLSCOPE_USER
+ARG RLSCOPE_UID
+ARG RLSCOPE_GID
+RUN addgroup ${RLSCOPE_USER} --gid ${RLSCOPE_GID}
 # Default for all the user entries: --gecos ""
-RUN adduser ${IML_USER} --disabled-password --gecos "" --uid ${IML_UID} --gid ${IML_GID}
-RUN usermod -a -G sudo ${IML_USER}
+RUN adduser ${RLSCOPE_USER} --disabled-password --gecos "" --uid ${RLSCOPE_UID} --gid ${RLSCOPE_GID}
+RUN usermod -a -G sudo ${RLSCOPE_USER}
 
-USER ${IML_USER}
+USER ${RLSCOPE_USER}

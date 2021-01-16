@@ -18,4 +18,4 @@ RUN make -j$(nproc)
 RUN make install
 RUN protoc --version
 WORKDIR ${HOME}
-USER ${IML_USER}
+USER ${RLSCOPE_USER}

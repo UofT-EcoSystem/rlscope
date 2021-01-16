@@ -44,10 +44,10 @@ def main():
     when launching the other scripts.
     """))
     # parser.add_argument('--rlscope-disable', action='store_true', help=textwrap.dedent("""
-    #     IML: Skip any profiling. Used for uninstrumented runs.
+    #     RL-Scope: Skip any profiling. Used for uninstrumented runs.
     #     Useful for ensuring minimal libcupti registration when we run --cuda-api-calls during config_uninstrumented.
     #
-    #     Effect: sets "export IML_DISABLE=1" for librlscope.so.
+    #     Effect: sets "export RLSCOPE_DISABLE=1" for librlscope.so.
     # """))
 
     add_bool_arg(parser, '--cuda-api-calls',
@@ -56,26 +56,26 @@ def main():
                         
                         i.e. total number of calls, and total time (usec) spent in a given API call.
                         
-                        Effect: sets "export IML_CUDA_API_CALLS=1" for librlscope.so.
+                        Effect: sets "export RLSCOPE_CUDA_API_CALLS=1" for librlscope.so.
                         """))
     add_bool_arg(parser, '--cuda-activities',
                         help=textwrap.dedent("""
                         Trace CUDA activities (i.e. GPU kernel runtimes, memcpy's).
                         
-                        Effect: sets "export IML_CUDA_ACTIVITIES=yes" for librlscope.so.
+                        Effect: sets "export RLSCOPE_CUDA_ACTIVITIES=yes" for librlscope.so.
                         """))
     add_bool_arg(parser, '--cuda-api-events',
                         help=textwrap.dedent("""
                         Trace all the start/end timestamps of CUDA API calls.
                         Needed during instrumented runs so we know when to subtract profiling overheads.
                         
-                        Effect: sets "export IML_CUDA_API_EVENTS=yes" for librlscope.so.
+                        Effect: sets "export RLSCOPE_CUDA_API_EVENTS=yes" for librlscope.so.
                         """))
     add_bool_arg(parser, '--gpu-hw',
                  help=textwrap.dedent("""
                         Collect GPU hardware counters.
                         
-                        Effect: sets "export IML_GPU_HW=yes" for librlscope.so.
+                        Effect: sets "export RLSCOPE_GPU_HW=yes" for librlscope.so.
                         """))
 
     parser.add_argument('--fuzz-cuda-api', action='store_true',
@@ -85,7 +85,7 @@ def main():
                         NOTE: this SHOULDN'T be used for finding profiling book-keeping "subtractions", since it 
                         adds a LOT of overhead to add start/end callbacks to all CUDA API functions.
                         
-                        Effect: sets "export IML_FUZZ_CUDA_API=yes" for librlscope.so.
+                        Effect: sets "export RLSCOPE_FUZZ_CUDA_API=yes" for librlscope.so.
                         """))
 
     parser.add_argument('--pc-sampling', action='store_true',
@@ -94,19 +94,19 @@ def main():
                         
                         Currently, we're just going to record GPUSamplingState.is_gpu_active.
                         
-                        Effect: sets "export IML_PC_SAMPLING=1" for librlscope.so.
+                        Effect: sets "export RLSCOPE_PC_SAMPLING=1" for librlscope.so.
                         """))
     parser.add_argument('--trace-at-start', action='store_true',
                         help=textwrap.dedent("""
                         Start tracing right at application startup.
                         
-                        Effect: sets "export IML_TRACE_AT_START=yes" for librlscope.so.
+                        Effect: sets "export RLSCOPE_TRACE_AT_START=yes" for librlscope.so.
                         """))
     parser.add_argument('--stream-sampling', action='store_true',
                         help=textwrap.dedent("""
                         Poll cudaStreamQuery() to see if the GPU is being used.
                         
-                        Effect: sets "export IML_STREAM_SAMPLING=yes" for librlscope.so.
+                        Effect: sets "export RLSCOPE_STREAM_SAMPLING=yes" for librlscope.so.
                         """))
     parser.add_argument('--calibrate', action='store_true',
                         help=textwrap.dedent("""
@@ -167,7 +167,7 @@ def main():
                                  'uninstrumented',
                                  ],
                         # Detect if user provides --config or not.
-                        # By default, run with full IML instrumentation.
+                        # By default, run with full RL-Scope instrumentation.
                         # default=DEFAULT_CONFIG,
                         help=textwrap.dedent("""
                         For measuring LD_PRELOAD CUDA API interception overhead:
@@ -199,7 +199,7 @@ def main():
                             # Disable any pyprof or old tfprof tracing code.
                             --rlscope-disable
                                 
-                        For collecting full IML traces for using with rls-run / rlscope-drill:
+                        For collecting full RL-Scope traces for using with rls-run / rlscope-drill:
                             full:
                                 Enable all of tfprof and pyprof collection.
                                 $ rls-prof --cuda-api-calls --cuda-api-events --cuda-activities --rlscope-disable
@@ -308,12 +308,12 @@ def main():
     if args.fuzz_cuda_api and args.cuda_api_calls:
         parser.error("Can only run rls-prof with --fuzz-cuda-api or --cuda-api-calls, not both")
 
-    if args.debug or args.rlscope_debug or is_env_true('IML_DEBUG'):
-        logger.info("Detected debug mode; enabling C++ logging statements (export IML_CPP_MIN_VLOG_LEVEL=1)")
-        add_env['IML_CPP_MIN_VLOG_LEVEL'] = 1
+    if args.debug or args.rlscope_debug or is_env_true('RLSCOPE_DEBUG'):
+        logger.info("Detected debug mode; enabling C++ logging statements (export RLSCOPE_CPP_MIN_VLOG_LEVEL=1)")
+        add_env['RLSCOPE_CPP_MIN_VLOG_LEVEL'] = 1
 
     # if args.rlscope_disable:
-    #     add_env['IML_DISABLE'] = 'yes'
+    #     add_env['RLSCOPE_DISABLE'] = 'yes'
 
     def set_yes_no(attr, env_var):
         if getattr(args, attr):
@@ -321,27 +321,27 @@ def main():
         else:
             add_env[env_var] = 'no'
 
-    set_yes_no('cuda_api_calls', 'IML_CUDA_API_CALLS')
+    set_yes_no('cuda_api_calls', 'RLSCOPE_CUDA_API_CALLS')
 
-    set_yes_no('cuda_activities', 'IML_CUDA_ACTIVITIES')
+    set_yes_no('cuda_activities', 'RLSCOPE_CUDA_ACTIVITIES')
 
-    set_yes_no('gpu_hw', 'IML_GPU_HW')
+    set_yes_no('gpu_hw', 'RLSCOPE_GPU_HW')
 
-    set_yes_no('pc_sampling', 'IML_PC_SAMPLING')
+    set_yes_no('pc_sampling', 'RLSCOPE_PC_SAMPLING')
 
-    set_yes_no('fuzz_cuda_api', 'IML_FUZZ_CUDA_API')
+    set_yes_no('fuzz_cuda_api', 'RLSCOPE_FUZZ_CUDA_API')
 
-    set_yes_no('cuda_api_events', 'IML_CUDA_API_EVENTS')
+    set_yes_no('cuda_api_events', 'RLSCOPE_CUDA_API_EVENTS')
 
-    set_yes_no('gpu_hw', 'IML_GPU_HW')
+    set_yes_no('gpu_hw', 'RLSCOPE_GPU_HW')
 
-    set_yes_no('trace_at_start', 'IML_TRACE_AT_START')
+    set_yes_no('trace_at_start', 'RLSCOPE_TRACE_AT_START')
 
-    set_yes_no('stream_sampling', 'IML_STREAM_SAMPLING')
+    set_yes_no('stream_sampling', 'RLSCOPE_STREAM_SAMPLING')
 
     exe_path = shutil.which(cmd_argv[0])
     if exe_path is None:
-        print("IML ERROR: couldn't locate {exe} on $PATH; try giving a full path to {exe} perhaps?".format(
+        print("RL-Scope ERROR: couldn't locate {exe} on $PATH; try giving a full path to {exe} perhaps?".format(
             exe=cmd_argv[0],
         ))
         sys.exit(1)

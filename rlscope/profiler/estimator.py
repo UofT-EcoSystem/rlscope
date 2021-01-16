@@ -126,7 +126,7 @@ if not SKIP_MODULE:
                               as_text=False,
                               checkpoint_path=None,
                               strip_default_attrs=False):
-            raise NotImplementedError("IML: Haven't bothered to wrap tf.estimator.Estimator.export_savedmodel with profiling set_operation/end_operation annotations.")
+            raise NotImplementedError("RL-Scope: Haven't bothered to wrap tf.estimator.Estimator.export_savedmodel with profiling set_operation/end_operation annotations.")
 
         def export_saved_model(self,
                                export_dir_base,
@@ -136,7 +136,7 @@ if not SKIP_MODULE:
                                checkpoint_path=None):
             # TensorFlow 2.0 I think;
             # export_savedmodel from 1.0 is deprecated.
-            raise NotImplementedError("IML: Haven't bothered to wrap tf.estimator.Estimator.export_saved_model with profiling set_operation/end_operation annotations.")
+            raise NotImplementedError("RL-Scope: Haven't bothered to wrap tf.estimator.Estimator.export_saved_model with profiling set_operation/end_operation annotations.")
 
     class ProfileEstimatorHook(tf.estimator.SessionRunHook):
         def __init__(self, operation, prof=None):

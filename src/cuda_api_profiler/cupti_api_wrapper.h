@@ -2,8 +2,8 @@
 // Created by jagle on 8/16/2019.
 //
 
-#ifndef IML_CUPTI_API_WRAPPER_H
-#define IML_CUPTI_API_WRAPPER_H
+#ifndef RLSCOPE_CUPTI_API_WRAPPER_H
+#define RLSCOPE_CUPTI_API_WRAPPER_H
 
 #include <cupti_target.h>
 #include <cupti.h>
@@ -84,4 +84,4 @@ public:
 
 }
 
-#endif //IML_CUPTI_API_WRAPPER_H
+#endif //RLSCOPE_CUPTI_API_WRAPPER_H

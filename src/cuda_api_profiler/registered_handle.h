@@ -2,8 +2,8 @@
 // Created by jagle on 8/21/2019.
 //
 
-#ifndef IML_REGISTERED_HANDLE_H
-#define IML_REGISTERED_HANDLE_H
+#ifndef RLSCOPE_REGISTERED_HANDLE_H
+#define RLSCOPE_REGISTERED_HANDLE_H
 
 #include "common_util.h"
 
@@ -71,4 +71,4 @@ struct RegisteredHandle : public RegisteredHandleInterface {
 
 }
 
-#endif //IML_REGISTERED_HANDLE_H
+#endif //RLSCOPE_REGISTERED_HANDLE_H

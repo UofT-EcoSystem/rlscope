@@ -10,7 +10,7 @@ fi
 SH_DIR="$(readlink -f "$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )")"
 cd "$SH_DIR"
 
-source $SH_DIR/make_utils.sh
+source $SH_DIR/docker_runtime_common.sh
 
 check_tensorflow_build
 

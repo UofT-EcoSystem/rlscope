@@ -1141,7 +1141,7 @@ class CSVInserter:
 
 class TraceFileInserter:
     def __init__(self,
-                 # IML trace file proto.
+                 # RL-Scope trace file proto.
                  path,
                  # CSVInserter fields.
                  db_path, table, block_size=50000, id_field=None, directory=None,
@@ -1150,7 +1150,7 @@ class TraceFileInserter:
                  password=None,
                  debug=False,
                  csv_path=None):
-        # IML trace file proto.
+        # RL-Scope trace file proto.
         self.path = path
         self.csv_inserter = CSVInserter(
             db_path, table,
@@ -2059,7 +2059,7 @@ class _ConnectionPoolManager:
         if key not in self.connection_pools and existing:
             raise RuntimeError(
                 textwrap.dedent("""\
-                IML ERROR: couldn't find an existing "with GetConnectionPool(...)" in the current stack-trace; did you forget to make one?
+                RL-Scope ERROR: couldn't find an existing "with GetConnectionPool(...)" in the current stack-trace; did you forget to make one?
                     Connection details:
                 {msg}
                 {pools}
@@ -4278,8 +4278,8 @@ def sql_compose_inequality(ineq_symbol, exprs, tautology_pairs=[], indents=None)
 
 def sql_get_conn_kwargs(db_path, host=None, user=None, password=None, debug=False):
     if host is None:
-        if 'IML_POSTGRES_HOST' in os.environ:
-            host = os.environ['IML_POSTGRES_HOST']
+        if 'RLSCOPE_POSTGRES_HOST' in os.environ:
+            host = os.environ['RLSCOPE_POSTGRES_HOST']
         elif 'PGHOST' in os.environ:
             host = os.environ['PGHOST']
         else:

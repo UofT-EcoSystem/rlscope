@@ -42,4 +42,4 @@ RUN mkdir -p /usr/local/cuda-${CUDA}/lib &&  \
 # source tree (e.g. third_party/gpus/cuda/include/cublas_v2.h).
 RUN ln -s -T /usr/local/cuda /usr/include/cuda
 
-USER ${IML_USER}
+USER ${RLSCOPE_USER}

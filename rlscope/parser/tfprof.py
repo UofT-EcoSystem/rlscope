@@ -140,7 +140,7 @@ class ComputeOverlap:
                  debug=False,
                  show_progress=False):
         self.timer = timer
-        self.debug = ( ComputeOverlap.DEBUG or py_config.IML_DEBUG_UNIT_TESTS ) and debug
+        self.debug = ( ComputeOverlap.DEBUG or py_config.RLSCOPE_DEBUG_UNIT_TESTS ) and debug
         self.check_key = check_key
         self.show_progress = show_progress
         self.overlaps_with = overlaps_with
@@ -795,15 +795,15 @@ if py_config.USE_NUMBA:
         # logger.info("eo_times: {msg}".format(msg=pprint_msg(eo_times)))
 
         # Call into Numba
-        use_numba = not py_config.IML_DISABLE_JIT
+        use_numba = not py_config.RLSCOPE_DISABLE_JIT
         # numba_overlap, numba_overlap_metadata = UniqueSplits(eo_times, use_numba=use_numba)
         numba_overlap, numba_overlap_metadata, outputs, output_categories = UniqueSplits(eo_times, use_numba=use_numba)
-        if py_config.IML_DEBUG_UNIQUE_SPLITS_BASE:
+        if py_config.RLSCOPE_DEBUG_UNIQUE_SPLITS_BASE:
             cat_idx_pairs = sorted([(cat, idx) for (cat, idx) in category_to_idx.items()], key=lambda cat_idx: cat_idx[1])
             categories = [cat for cat, idx in cat_idx_pairs]
             PlotOutput(outputs, output_categories, categories)
             ShowOrSave(
-                base=py_config.IML_DEBUG_UNIQUE_SPLITS_BASE,
+                base=py_config.RLSCOPE_DEBUG_UNIQUE_SPLITS_BASE,
                 interactive=False,
             )
 
@@ -3522,11 +3522,11 @@ def test_merge_adjacent_events():
 ##
 """
 Environment variables that effect unit-tests:
-    IML_DEBUG_UNIT_TESTS=[0/1]
+    RLSCOPE_DEBUG_UNIT_TESTS=[0/1]
         Default: 0
         Enable more verbose debugging information during unit-tests.
         
-    IML_USE_NUMBA=[0/1]
+    RLSCOPE_USE_NUMBA=[0/1]
         Default: 0
         Use numbafied event overlap computation.
         
@@ -3541,13 +3541,13 @@ Environment variables that effect unit-tests:
 Common usage:
 
     # cd to root directory of rlscope repo checkout.
-    $ cd ~/clone/iml
+    $ cd ~/clone/rlscope
 
     # To run numbaified code with JIT compilation enabled:
-    $ IML_USE_NUMBA=1 pytest -vv -s --pdb rlscope/parser/tfprof.py
+    $ RLSCOPE_USE_NUMBA=1 pytest -vv -s --pdb rlscope/parser/tfprof.py
 
     # To run numbaified code WITHOUT JIT enabled (e.g. if you segfault and don't know why):
-    $ IML_USE_NUMBA=1 NUMBA_DISABLE_JIT=1 pytest -vv -s --pdb rlscope/parser/tfprof.py
+    $ RLSCOPE_USE_NUMBA=1 NUMBA_DISABLE_JIT=1 pytest -vv -s --pdb rlscope/parser/tfprof.py
     
     # To run un-numbafied code:
     $ pytest -vv -s --pdb rlscope/parser/tfprof.py
@@ -3598,7 +3598,7 @@ if py_config.USE_NUMBA:
                     ],
                 ],
             }
-            compute_overlap = ComputeOverlap(flat(category_times), debug=py_config.IML_DEBUG_UNIT_TESTS)
+            compute_overlap = ComputeOverlap(flat(category_times), debug=py_config.RLSCOPE_DEBUG_UNIT_TESTS)
 
             compute_overlap.compute()
             got = compute_overlap.get_category_times()
@@ -3663,7 +3663,7 @@ if py_config.USE_NUMBA:
                     ],
                 ],
             }
-            compute_overlap = ComputeOverlap(flat(category_times), overlaps_with=['c1'], debug=py_config.IML_DEBUG_UNIT_TESTS)
+            compute_overlap = ComputeOverlap(flat(category_times), overlaps_with=['c1'], debug=py_config.RLSCOPE_DEBUG_UNIT_TESTS)
 
             compute_overlap.compute()
             got = compute_overlap.get_category_times()
@@ -3687,7 +3687,7 @@ if py_config.USE_NUMBA:
                     ],
                 ],
             }
-            compute_overlap = ComputeOverlap(flat(category_times), debug=py_config.IML_DEBUG_UNIT_TESTS)
+            compute_overlap = ComputeOverlap(flat(category_times), debug=py_config.RLSCOPE_DEBUG_UNIT_TESTS)
 
             compute_overlap.compute()
             got = compute_overlap.get_category_times()
@@ -3717,7 +3717,7 @@ if py_config.USE_NUMBA:
                     ],
                 ],
             }
-            compute_overlap = ComputeOverlap(flat(category_times), debug=py_config.IML_DEBUG_UNIT_TESTS)
+            compute_overlap = ComputeOverlap(flat(category_times), debug=py_config.RLSCOPE_DEBUG_UNIT_TESTS)
 
             compute_overlap.compute()
             got = compute_overlap.get_category_times()
@@ -3741,7 +3741,7 @@ if py_config.USE_NUMBA:
                     ],
                 ],
             }
-            compute_overlap = ComputeOverlap(flat(category_times), debug=py_config.IML_DEBUG_UNIT_TESTS)
+            compute_overlap = ComputeOverlap(flat(category_times), debug=py_config.RLSCOPE_DEBUG_UNIT_TESTS)
 
             compute_overlap.compute()
             got = compute_overlap.get_category_times()
@@ -3768,7 +3768,7 @@ if py_config.USE_NUMBA:
                     ],
                 ],
             }
-            compute_overlap = ComputeOverlap(flat(category_times), debug=py_config.IML_DEBUG_UNIT_TESTS)
+            compute_overlap = ComputeOverlap(flat(category_times), debug=py_config.RLSCOPE_DEBUG_UNIT_TESTS)
 
             compute_overlap.compute()
             got = compute_overlap.get_category_times()
@@ -3799,7 +3799,7 @@ if py_config.USE_NUMBA:
                     ],
                 ],
             }
-            compute_overlap = ComputeOverlap(flat(category_times), debug=py_config.IML_DEBUG_UNIT_TESTS)
+            compute_overlap = ComputeOverlap(flat(category_times), debug=py_config.RLSCOPE_DEBUG_UNIT_TESTS)
 
             compute_overlap.compute()
             got = compute_overlap.get_category_times()
@@ -3871,7 +3871,7 @@ if py_config.USE_NUMBA:
         #             ],
         #         ],
         #     }
-        #     compute_overlap = ComputeOverlap(flat(category_times), debug=py_config.IML_DEBUG_UNIT_TESTS)
+        #     compute_overlap = ComputeOverlap(flat(category_times), debug=py_config.RLSCOPE_DEBUG_UNIT_TESTS)
         #
         #     compute_overlap.compute()
         #     got = compute_overlap.get_category_times()

@@ -2,8 +2,8 @@
 // Created by jgleeson on 2020-09-21.
 //
 
-#ifndef IML_RLSCOPE_C_API_H
-#define IML_RLSCOPE_C_API_H
+#ifndef RLSCOPE_RLSCOPE_C_API_H
+#define RLSCOPE_RLSCOPE_C_API_H
 
 #include <cstdint>
 #include "rlscope_export.h"
@@ -80,4 +80,4 @@ int RLSCOPE_EXPORT rlscope_set_max_operations(const char* operation, int num_pus
 
 }
 
-#endif //IML_RLSCOPE_C_API_H
+#endif //RLSCOPE_RLSCOPE_C_API_H

@@ -768,8 +768,8 @@ void GPUKernelRunner::run_async_process(int thread_id) {
     auto env = boost::this_process::environment();
     std::stringstream process_name_ss;
     boost::process::environment child_env = env;
-    process_name_ss << env["IML_PROCESS_NAME"].to_string() << ".thread_" << thread_id;
-    child_env["IML_PROCESS_NAME"] = process_name_ss.str();
+    process_name_ss << env["RLSCOPE_PROCESS_NAME"].to_string() << ".thread_" << thread_id;
+    child_env["RLSCOPE_PROCESS_NAME"] = process_name_ss.str();
 
     *_async_process = ReinvokeProcess(child_args, child_env);
 }

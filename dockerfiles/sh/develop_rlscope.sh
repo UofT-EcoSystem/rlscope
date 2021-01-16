@@ -10,30 +10,33 @@ fi
 SH_DIR="$(readlink -f "$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )")"
 cd "$SH_DIR"
 
-source $SH_DIR/make_utils.sh
+source $SH_DIR/docker_runtime_common.sh
 
+# NOTE: we DON'T run "sudo apt update" since doing so at the start
+# of the container causes an "apt busy" error.
+# _check_apt
 _check_env
 _upgrade_pip
 
-IML_DRILL_DIR=${IML_DRILL_DIR:-}
+RLSCOPE_DRILL_DIR=${RLSCOPE_DRILL_DIR:-}
 
-if [ "${IML_DIR}" = "" ]; then
+if [ "${RLSCOPE_DIR}" = "" ]; then
     # Install directly from git repo.
     _do pip install git+https://github.com/UofT-EcoSystem/rlscope.git
 else
     # Install from local checkout of repo.
-    _do cd "${IML_DIR}"
+    _do cd "${RLSCOPE_DIR}"
     _do python setup.py develop
 fi
 
-if [ "${IML_DRILL_DIR}" = "" ]; then
+if [ "${RLSCOPE_DRILL_DIR}" = "" ]; then
     # SKIP
     true
     # Install directly from git repo.
     # _do pip install git+https://github.com/jagleeso/rlscope-drill.git
 else
     # Install from local checkout of repo.
-    _do cd "${IML_DRILL_DIR}"
+    _do cd "${RLSCOPE_DRILL_DIR}"
     _do python setup.py develop
 fi
 

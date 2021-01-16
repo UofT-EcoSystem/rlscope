@@ -41,25 +41,25 @@ if(CLION)
     message("Set CMAKE_INSTALL_PREFIX = ${CMAKE_INSTALL_PREFIX}")
 endif()
 
-if(DEFINED ENV{IML_INSTALL_PREFIX})
+if(DEFINED ENV{RLSCOPE_INSTALL_PREFIX})
     message("> Building for docker:")
-    set(IML_INSTALL_PREFIX $ENV{IML_INSTALL_PREFIX})
+    set(RLSCOPE_INSTALL_PREFIX $ENV{RLSCOPE_INSTALL_PREFIX})
 else()
     message("> Building for host")
-    set(IML_INSTALL_PREFIX "${CMAKE_SOURCE_DIR}/local.host")
+    set(RLSCOPE_INSTALL_PREFIX "${CMAKE_SOURCE_DIR}/local.host")
 endif()
-message("  IML_INSTALL_PREFIX=${IML_INSTALL_PREFIX}")
+message("  RLSCOPE_INSTALL_PREFIX=${RLSCOPE_INSTALL_PREFIX}")
 # Override system installation of libraries (e.g., gflags)
-message("    link_directories: ${IML_INSTALL_PREFIX}/lib")
-link_directories(BEFORE ${IML_INSTALL_PREFIX}/lib)
-message("    include_directories: ${IML_INSTALL_PREFIX}/include")
-include_directories(BEFORE ${IML_INSTALL_PREFIX}/include)
+message("    link_directories: ${RLSCOPE_INSTALL_PREFIX}/lib")
+link_directories(BEFORE ${RLSCOPE_INSTALL_PREFIX}/lib)
+message("    include_directories: ${RLSCOPE_INSTALL_PREFIX}/include")
+include_directories(BEFORE ${RLSCOPE_INSTALL_PREFIX}/include)
 
 
-list(PREPEND CMAKE_PROGRAM_PATH "${IML_INSTALL_PREFIX}/bin")
-list(PREPEND CMAKE_INCLUDE_PATH "${IML_INSTALL_PREFIX}/include")
-list(PREPEND CMAKE_INCLUDE_PATH "${IML_INSTALL_PREFIX}/bin")
-list(PREPEND CMAKE_LIBRARY_PATH "${IML_INSTALL_PREFIX}/lib")
+list(PREPEND CMAKE_PROGRAM_PATH "${RLSCOPE_INSTALL_PREFIX}/bin")
+list(PREPEND CMAKE_INCLUDE_PATH "${RLSCOPE_INSTALL_PREFIX}/include")
+list(PREPEND CMAKE_INCLUDE_PATH "${RLSCOPE_INSTALL_PREFIX}/bin")
+list(PREPEND CMAKE_LIBRARY_PATH "${RLSCOPE_INSTALL_PREFIX}/lib")
 
 # Use pkg-config to get hints about paths
 #libfind_pkg_check_modules(CUDAProfilingAPI_PKGCONF CUDAProfilingAPI)
@@ -262,9 +262,9 @@ set(ADD_WARNINGS_FLAGS "-Wuninitialized")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${ADD_WARNINGS_FLAGS} -Wall -Werror ${IGNORE_ERRORS} ")
 #-Wl,--unresolved-symbols=ignore-in-shared-libs
 #-Wl,--unresolved-symbols=report-all
-set(IML_LINKER_FLAGS "-demangle -Wl,--no-undefined")
-set(CMAKE_EXE_LINKER_FLAGS  "${CMAKE_EXE_LINKER_FLAGS} ${IML_LINKER_FLAGS}")
-set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} ${IML_LINKER_FLAGS}")
+set(RLSCOPE_LINKER_FLAGS "-demangle -Wl,--no-undefined")
+set(CMAKE_EXE_LINKER_FLAGS  "${CMAKE_EXE_LINKER_FLAGS} ${RLSCOPE_LINKER_FLAGS}")
+set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} ${RLSCOPE_LINKER_FLAGS}")
 
 # Address sanitizer doesn't appear to work on CUDA programs...
 #set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -fno-omit-frame-pointer -fsanitize=address")
@@ -393,8 +393,8 @@ if (DEBUG_CMAKE_VERBOSE)
     message("> ANALYSIS_SOURCES = ${ANALYSIS_SOURCES}")
     message("> COMMON_SOURCES = ${COMMON_SOURCES}")
     #message("> TEST_ANALYSIS_SOURCES = ${TEST_ANALYSIS_SOURCES}")
-    message("> IML_PROTO_SRCS = ${IML_PROTO_SRCS}")
-    message("> IML_PROTO_HDRS = ${IML_PROTO_HDRS}")
+    message("> RLSCOPE_PROTO_SRCS = ${RLSCOPE_PROTO_SRCS}")
+    message("> RLSCOPE_PROTO_HDRS = ${RLSCOPE_PROTO_HDRS}")
     message("> RLS_TEST_SRCS = ${RLS_TEST_SRCS}")
     message("> BACKWARD_ENABLE = ${BACKWARD_ENABLE}")
 endif()
@@ -409,11 +409,11 @@ endif()
 # HOWEVER; this no longer works in CMake 3.14.5 (Ubuntu 18.04)
 #       The directory structure for generated files becomes:
 #         rlscope/build/CMakeFiles/tensorflow/core/lib/core/error_codes.pb.h
-#       BUT, IML_PROTO_SRCS still matches this directory structure (non-existent files):
+#       BUT, RLSCOPE_PROTO_SRCS still matches this directory structure (non-existent files):
 #         rlscope/build/error_codes.pb.h
 # TLDR: Oh well, just generate cpp files in rlscope/build/*.pb.cpp
 # set(PROTOBUF_GENERATE_CPP_APPEND_PATH OFF)
-protobuf_generate_cpp(IML_PROTO_SRCS IML_PROTO_HDRS
+protobuf_generate_cpp(RLSCOPE_PROTO_SRCS RLSCOPE_PROTO_HDRS
         rlscope/protobuf/rlscope_prof.proto
         rlscope/protobuf/pyprof.proto
         )
@@ -427,7 +427,7 @@ set(SAMPLE_CUDA_API_SOURCES
         # NOTE: we should probably put "common" stuff between 'analysis' and libsample in the common directory,
         # instead of pulling in all of the analysis sources.
         ${COMMON_SOURCES}
-        ${IML_PROTO_SRCS} ${IML_PROTO_HDRS}
+        ${RLSCOPE_PROTO_SRCS} ${RLSCOPE_PROTO_HDRS}
         ${CUDA_PROF_SRCS}
         )
 if (NOT WITH_CUDA_LD_PRELOAD)
@@ -446,7 +446,7 @@ if (WITH_CXX_ANALYSIS)
             ${ANALYSIS_SOURCES}
             ${COMMON_SOURCES}
             ${BACKWARD_ENABLE}
-            ${IML_PROTO_SRCS} ${IML_PROTO_HDRS} src/analysis/lru_cache.cc src/analysis/sample_periods.cc src/analysis/sample_periods.h)
+            ${RLSCOPE_PROTO_SRCS} ${RLSCOPE_PROTO_HDRS} src/analysis/lru_cache.cc src/analysis/sample_periods.cc src/analysis/sample_periods.h)
     list(FILTER RLS_ANALYZE_SRCS EXCLUDE REGEX "/c_test_util.cc")
     if (DEBUG_CMAKE_VERBOSE)
         message("> RLS_ANALYZE_SRCS = ${RLS_ANALYZE_SRCS}")
@@ -574,8 +574,8 @@ function(AddTensorflowDependencies TARGET INCLUDE_CUDA)
     AddProtobufDeps(${TARGET})
 #    target_link_libraries(${TARGET} PRIVATE ${Protobuf_LIBRARIES})
 
-    #message("> IML_PROTO_SRCS = ${IML_PROTO_SRCS}")
-    #message("> IML_PROTO_HDRS = ${IML_PROTO_HDRS}")
+    #message("> RLSCOPE_PROTO_SRCS = ${RLSCOPE_PROTO_SRCS}")
+    #message("> RLSCOPE_PROTO_HDRS = ${RLSCOPE_PROTO_HDRS}")
     target_link_libraries(${TARGET} PRIVATE
             absl::base
             absl::strings
@@ -642,8 +642,8 @@ function(AddRLScopeTarget TARGET)
 #    target_link_libraries(${TARGET} PRIVATE ${Protobuf_LIBRARIES})
     AddProtobufDeps(${TARGET})
 
-    #message("> IML_PROTO_SRCS = ${IML_PROTO_SRCS}")
-    #message("> IML_PROTO_HDRS = ${IML_PROTO_HDRS}")
+    #message("> RLSCOPE_PROTO_SRCS = ${RLSCOPE_PROTO_SRCS}")
+    #message("> RLSCOPE_PROTO_HDRS = ${RLSCOPE_PROTO_HDRS}")
     #absl::synchronization
     target_link_libraries(${TARGET} PRIVATE
             absl::base
@@ -883,7 +883,7 @@ if (RLS_TEST_SRCS)
             ${ANALYSIS_SOURCES}
             ${RLS_TEST_SRCS}
             ${BACKWARD_ENABLE}
-            ${IML_PROTO_SRCS} ${IML_PROTO_HDRS})
+            ${RLSCOPE_PROTO_SRCS} ${RLSCOPE_PROTO_HDRS})
     list(FILTER TEST_ANALYSIS_SOURCES EXCLUDE REGEX "/c_test_util.cc")
     if (DEBUG_CMAKE_VERBOSE)
         message("> TEST_ANALYSIS_SOURCES = ${TEST_ANALYSIS_SOURCES}")

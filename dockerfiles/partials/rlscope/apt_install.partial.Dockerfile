@@ -18,4 +18,4 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN apt-get update && apt-get install -y --no-install-recommends \
     poppler-utils
 
-USER ${IML_USER}
+USER ${RLSCOPE_USER}

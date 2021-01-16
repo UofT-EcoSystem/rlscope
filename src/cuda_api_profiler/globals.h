@@ -2,8 +2,8 @@
 // Created by jagle on 8/19/2019.
 //
 
-#ifndef IML_GLOBALS_H
-#define IML_GLOBALS_H
+#ifndef RLSCOPE_GLOBALS_H
+#define RLSCOPE_GLOBALS_H
 
 #include <boost/process.hpp>
 
@@ -46,4 +46,4 @@ extern Globals globals;
 
 }
 
-#endif //IML_GLOBALS_H
+#endif //RLSCOPE_GLOBALS_H

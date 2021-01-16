@@ -1,7 +1,7 @@
 # NOTE: this will modify your PATH to include IML
 # dependencies that were built from source (e.g. protobuf v3).
-if [ "$IML_DIR" != "" ]; then
-    ROOT="$IML_DIR"
+if [ "$RLSCOPE_DIR" != "" ]; then
+    ROOT="$RLSCOPE_DIR"
 else
     # Fails in container...not sure why.
     ROOT="$(readlink -f "$(dirname "$0")")"
@@ -13,7 +13,7 @@ PYTHONPATH=${PYTHONPATH:-}
 _rlscope_build_suffix() {
   local cuda_version="$1"
   shift 1
-  # e.g. IML_BUILD_SUFFIX="_cuda_10_2"
+  # e.g. RLSCOPE_BUILD_SUFFIX="_cuda_10_2"
   echo "_cuda_${cuda_version}" | sed 's/[\.]/_/g'
 }
 cmake_build_dir() {
@@ -21,16 +21,16 @@ cmake_build_dir() {
     shift 1
 
     local build_prefix=
-    if _is_non_empty IML_BUILD_PREFIX; then
+    if _is_non_empty RLSCOPE_BUILD_PREFIX; then
       # Docker container environment.
-      build_prefix="$IML_BUILD_PREFIX"
+      build_prefix="$RLSCOPE_BUILD_PREFIX"
     else
       # Assume we're running in host environment.
       build_prefix="$ROOT/local.host"
     fi
     local build_dir="$build_prefix/$(basename "$third_party_dir")"
-    if _is_non_empty IML_BUILD_SUFFIX; then
-      local build_dir="${build_dir}${IML_BUILD_SUFFIX}"
+    if _is_non_empty RLSCOPE_BUILD_SUFFIX; then
+      local build_dir="${build_dir}${RLSCOPE_BUILD_SUFFIX}"
     fi
     echo "$build_dir"
 }
@@ -49,9 +49,9 @@ _is_non_empty() {
 _local_dir() {
     # When installing things with configure/make-install
     # $ configure --prefix="$(_local_dir)"
-    if _is_non_empty IML_INSTALL_PREFIX; then
+    if _is_non_empty RLSCOPE_INSTALL_PREFIX; then
       # Docker container environment.
-      echo "$IML_INSTALL_PREFIX"
+      echo "$RLSCOPE_INSTALL_PREFIX"
     else
       # Assume we're running in host environment.
       echo "$ROOT/local.host"
@@ -59,9 +59,9 @@ _local_dir() {
 }
 _build_dir() {
     local build_prefix=
-    if _is_non_empty IML_BUILD_PREFIX; then
+    if _is_non_empty RLSCOPE_BUILD_PREFIX; then
       # Docker container environment.
-      build_prefix="$IML_BUILD_PREFIX"
+      build_prefix="$RLSCOPE_BUILD_PREFIX"
     else
       # Assume we're running in host environment.
       build_prefix="$ROOT/local.host"
@@ -90,7 +90,7 @@ _add_PYTHONPATH() {
   export PYTHONPATH="$lib_dir:$PYTHONPATH"
 }
 #_add_pyenv() {
-#  local pyenv_dir=$IML_INSTALL_PREFIX/pyenv
+#  local pyenv_dir=$RLSCOPE_INSTALL_PREFIX/pyenv
 #  local bin_dir=$pyenv_dir/bin
 #
 #  if [ -e $bin_dir ]; then
@@ -114,23 +114,23 @@ _add_PYTHONPATH() {
 
 (
 
-IML_CUDA_VERSION=${IML_CUDA_VERSION:-10.1}
+RLSCOPE_CUDA_VERSION=${RLSCOPE_CUDA_VERSION:-10.1}
 # Only add "_cuda_10_1" suffix to rlscope build directory.
-IML_BUILD_SUFFIX="$(_rlscope_build_suffix ${IML_CUDA_VERSION})"
-IML_BUILD_DIR="$(cmake_build_dir "$ROOT")"
-unset IML_BUILD_SUFFIX
+RLSCOPE_BUILD_SUFFIX="$(_rlscope_build_suffix ${RLSCOPE_CUDA_VERSION})"
+RLSCOPE_BUILD_DIR="$(cmake_build_dir "$ROOT")"
+unset RLSCOPE_BUILD_SUFFIX
 
-IML_INSTALL_PREFIX_DEFINED=no
-if _is_non_empty IML_INSTALL_PREFIX; then
-  IML_INSTALL_PREFIX_DEFINED=yes
+RLSCOPE_INSTALL_PREFIX_DEFINED=no
+if _is_non_empty RLSCOPE_INSTALL_PREFIX; then
+  RLSCOPE_INSTALL_PREFIX_DEFINED=yes
 fi
-IML_BUILD_PREFIX_DEFINED=no
-if _is_non_empty IML_BUILD_PREFIX; then
-  IML_BUILD_PREFIX_DEFINED=yes
+RLSCOPE_BUILD_PREFIX_DEFINED=no
+if _is_non_empty RLSCOPE_BUILD_PREFIX; then
+  RLSCOPE_BUILD_PREFIX_DEFINED=yes
 fi
 set +u
-echo "> INFO: [defined=${IML_INSTALL_PREFIX_DEFINED}] IML_INSTALL_PREFIX=${IML_INSTALL_PREFIX}"
-echo "> INFO: [defined=${IML_BUILD_PREFIX_DEFINED}] IML_BUILD_PREFIX=${IML_BUILD_PREFIX}"
+echo "> INFO: [defined=${RLSCOPE_INSTALL_PREFIX_DEFINED}] RLSCOPE_INSTALL_PREFIX=${RLSCOPE_INSTALL_PREFIX}"
+echo "> INFO: [defined=${RLSCOPE_BUILD_PREFIX_DEFINED}] RLSCOPE_BUILD_PREFIX=${RLSCOPE_BUILD_PREFIX}"
 )
 echo "> INFO: Using CMAKE_INSTALL_PREFIX=$(_local_dir)"
 _add_LD_LIBRARY_PATH "$(_local_dir)/lib"
@@ -140,13 +140,13 @@ _add_PYTHONPATH "$(_local_dir)/lib/python3/dist-packages"
 # it leads to segfaults apparently, and we don't need/use it to run ReAgent.
 #_add_pyenv
 
-if [ "${IML_INSTALL_PREFIX:-}" = "" ]; then
-  echo "> INFO: export IML_INSTALL_PREFIX=$(_local_dir)"
-  export IML_INSTALL_PREFIX="$(_local_dir)"
+if [ "${RLSCOPE_INSTALL_PREFIX:-}" = "" ]; then
+  echo "> INFO: export RLSCOPE_INSTALL_PREFIX=$(_local_dir)"
+  export RLSCOPE_INSTALL_PREFIX="$(_local_dir)"
 fi
-if [ "${IML_BUILD_PREFIX:-}" = "" ]; then
-  echo "> INFO: export IML_BUILD_PREFIX=$(_build_dir)"
-  export IML_BUILD_PREFIX="$(_build_dir)"
+if [ "${RLSCOPE_BUILD_PREFIX:-}" = "" ]; then
+  echo "> INFO: export RLSCOPE_BUILD_PREFIX=$(_build_dir)"
+  export RLSCOPE_BUILD_PREFIX="$(_build_dir)"
 fi
 
 unset _add_LD_LIBRARY_PATH

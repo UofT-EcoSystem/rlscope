@@ -10,8 +10,9 @@ fi
 SH_DIR="$(readlink -f "$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )")"
 cd "$SH_DIR"
 
-source $SH_DIR/make_utils.sh
+source $SH_DIR/docker_runtime_common.sh
 
+_check_apt
 _check_env
 _upgrade_pip
 
@@ -44,7 +45,7 @@ if ! py_module_installed "atari_py"; then
 fi
 
 # NOTE: we DON'T install stable-baselines from pip;
-#   we want to use our custom stable-baselines repo with IML annotations added ($STABLE_BASELINES_DIR).
+#   we want to use our custom stable-baselines repo with RL-Scope annotations added ($STABLE_BASELINES_DIR).
 # box2d-py==2.3.5
 
 # HACK: optuna fails to install with pip >= 19.0

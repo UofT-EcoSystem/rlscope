@@ -1,7 +1,7 @@
 ARG CUDA=10.1
 #FROM nvidia/cuda:10.0-base-ubuntu${UBUNTU_VERSION} as base
 FROM nvidia/cuda:${CUDA}-base-ubuntu${UBUNTU_VERSION} as base
-ENV IML_CUDA_VERSION 10.1
+ENV RLSCOPE_CUDA_VERSION 10.1
 # ARCH and CUDA are specified again because the FROM directive resets ARGs
 # (but their default value is retained if set previously)
 ARG CUDA

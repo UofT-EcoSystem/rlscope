@@ -2,8 +2,8 @@
 // Created by jagle on 8/12/2019.
 //
 
-#ifndef IML_PC_SAMPLING_H
-#define IML_PC_SAMPLING_H
+#ifndef RLSCOPE_PC_SAMPLING_H
+#define RLSCOPE_PC_SAMPLING_H
 
 #include <list>
 #include <string>
@@ -148,7 +148,7 @@ public:
 };
 
 
-#define DEFAULT_IML_SAMPLE_EVERY_SEC (1.0)
+#define DEFAULT_RLSCOPE_SAMPLE_EVERY_SEC (1.0)
 class SampleAPI {
 public:
 
@@ -169,7 +169,7 @@ public:
   SampleAPI() :
       _next_gpu_id(0),
       _next_thread_id(0),
-      _sample_every_sec(get_IML_SAMPLE_EVERY_SEC(0)) {
+      _sample_every_sec(get_RLSCOPE_SAMPLE_EVERY_SEC(0)) {
   }
 
   void _RunMakeGPUInactive(GPUSampleState* gpu_sample_state);
@@ -198,4 +198,4 @@ extern SampleAPI sample_api;
 
 }
 
-#endif //IML_PC_SAMPLING_H
+#endif //RLSCOPE_PC_SAMPLING_H

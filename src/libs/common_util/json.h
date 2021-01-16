@@ -2,8 +2,8 @@
 // Created by jgleeson on 2020-01-23.
 //
 
-#ifndef IML_JSON_H
-#define IML_JSON_H
+#ifndef RLSCOPE_JSON_H
+#define RLSCOPE_JSON_H
 
 #include "my_status.h"
 
@@ -17,4 +17,4 @@ MyStatus WriteJson(std::string path, const nlohmann::json &j);
 
 } // namespace rlscope
 
-#endif //IML_JSON_H
+#endif //RLSCOPE_JSON_H

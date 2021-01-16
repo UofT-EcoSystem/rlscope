@@ -64,4 +64,4 @@ ENV PATH /usr/local/cuda/bin:$PATH
 #        && apt-get clean \
 #        && rm -rf /var/lib/apt/lists/*; }
 
-USER ${IML_USER}
+USER ${RLSCOPE_USER}

@@ -4,4 +4,4 @@ USER root
 RUN apt-get update && apt-get install -y --no-install-recommends \
     figlet
 
-USER ${IML_USER}
+USER ${RLSCOPE_USER}

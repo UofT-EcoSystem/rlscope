@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # read -r -d '' BASH_SCRIPT << EOM
-# cd \$IML_DIR;
+# cd \$RLSCOPE_DIR;
 # $@;
 # EOM
 #

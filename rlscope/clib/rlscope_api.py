@@ -83,7 +83,7 @@ def find_librlscope():
             the user's LD_LIBRARY_PATH so we can find it.
             """
             logger.error(textwrap.dedent("""\
-            IML ERROR: couldn't find RL-Scope library (lib{name}.so); to build it, do:
+            RL-Scope ERROR: couldn't find RL-Scope library (lib{name}.so); to build it, do:
               $ cd {root}
               $ bash ./setup.sh
               # To modify your LD_LIBRARY_PATH to include lib{name}.so, run:
@@ -100,9 +100,9 @@ def find_librlscope():
             if it isn't then this is a BUG.
             """
             logger.error(textwrap.dedent("""\
-            IML ERROR: couldn't find RL-Scope library (lib{name}.so) inside {lib_dir}.
+            RL-Scope ERROR: couldn't find RL-Scope library (lib{name}.so) inside {lib_dir}.
             This looks like a BUG in RL-Scope; please report it at:
-              https://github.com/UofT-EcoSystem/iml/issues
+              https://github.com/UofT-EcoSystem/rlscope/issues
             """.format(
                 lib_dir=py_config.CPP_LIB,
                 name=RLSCOPE_LIBNAME,

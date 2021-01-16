@@ -103,11 +103,11 @@ namespace rlscope {
     args.env_var = env[#env_var].to_string(); \
   }
 
-//  if (env.find("IML_PROCESS_NAME") != env.end()) {
-//    args.IML_PROCESS_NAME = env["IML_PROCESS_NAME"].to_string();
+//  if (env.find("RLSCOPE_PROCESS_NAME") != env.end()) {
+//    args.RLSCOPE_PROCESS_NAME = env["RLSCOPE_PROCESS_NAME"].to_string();
 //  }
 
-//  SET_ENV(IML_PROCESS_NAME);
+//  SET_ENV(RLSCOPE_PROCESS_NAME);
 
 //  args.FLAGS_debug = ::FLAGS_debug;
 

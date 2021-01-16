@@ -13,8 +13,9 @@ fi
 SH_DIR="$(readlink -f "$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )")"
 cd "$SH_DIR"
 
-source $SH_DIR/make_utils.sh
+source $SH_DIR/docker_runtime_common.sh
 
+_check_apt
 _check_env
 _upgrade_pip
 
@@ -78,7 +79,7 @@ echo "> Training ALGO = $ALGO, ENV_ID = $ENV_ID, OUTPUT_DIR = $OUTPUT_DIR"
 # so we must cd into $RL_BASELINES_ZOO_DIR
 cd $RL_BASELINES_ZOO_DIR
 
-IML_TRACE_TIME_SEC=$((40))
+RLSCOPE_TRACE_TIME_SEC=$((40))
 
 PYTHON=(python)
 
@@ -88,5 +89,5 @@ _do "${PYTHON[@]}" $RL_BASELINES_ZOO_DIR/train.py \
     --log-folder $OUTPUT_DIR \
     --log-interval 1 \
     --rlscope-start-measuring-call 1 \
-    --rlscope-trace-time-sec $IML_TRACE_TIME_SEC \
+    --rlscope-trace-time-sec $RLSCOPE_TRACE_TIME_SEC \
     "$@"

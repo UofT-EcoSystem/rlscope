@@ -17,7 +17,7 @@ EXPERIMENTS=${EXPERIMENTS:-no}
 # from rlscope binaries/libraries.
 SKIP_CPACK=${SKIP_CPACK:-no}
 
-IML_CUDA_VERSION=${IML_CUDA_VERSION:-10.1}
+RLSCOPE_CUDA_VERSION=${RLSCOPE_CUDA_VERSION:-10.1}
 
 # Force re-running setup
 FORCE=${FORCE:-no}
@@ -30,15 +30,13 @@ if [ "$DEBUG" = 'yes' ]; then
     set -x
 fi
 
-ROOT="$(readlink -f $(dirname "$0"))"
-
-IML_DIR=${IML_DIR:-$ROOT}
-source $ROOT/dockerfiles/sh/exports.sh
+ROOT="$(readlink -f "$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )")"
+source $ROOT/dockerfiles/sh/docker_runtime_common.sh
 
 ## Only add "_cuda_10_1" suffix to rlscope build directory.
-#IML_BUILD_SUFFIX="$(_rlscope_build_suffix ${IML_CUDA_VERSION})"
-#IML_BUILD_DIR="$(cmake_build_dir "$ROOT")"
-#unset IML_BUILD_SUFFIX
+#RLSCOPE_BUILD_SUFFIX="$(_rlscope_build_suffix ${RLSCOPE_CUDA_VERSION})"
+#RLSCOPE_BUILD_DIR="$(cmake_build_dir "$ROOT")"
+#unset RLSCOPE_BUILD_SUFFIX
 
 #NCPU=$(grep -c ^processor /proc/cpuinfo)
 
@@ -402,16 +400,16 @@ cmake_build_dir() {
     shift 1
 
     local build_prefix=
-    if _is_non_empty IML_BUILD_PREFIX; then
+    if _is_non_empty RLSCOPE_BUILD_PREFIX; then
       # Docker container environment.
-      build_prefix="$IML_BUILD_PREFIX"
+      build_prefix="$RLSCOPE_BUILD_PREFIX"
     else
       # Assume we're running in host environment.
       build_prefix="$ROOT/local.host"
     fi
     local build_dir="$build_prefix/$(basename "$third_party_dir")"
-    if _is_non_empty IML_BUILD_SUFFIX; then
-      local build_dir="${build_dir}${IML_BUILD_SUFFIX}"
+    if _is_non_empty RLSCOPE_BUILD_SUFFIX; then
+      local build_dir="${build_dir}${RLSCOPE_BUILD_SUFFIX}"
     fi
     echo "$build_dir"
 }
@@ -430,9 +428,9 @@ _is_non_empty() {
 _local_dir() {
     # When installing things with configure/make-install
     # $ configure --prefix="$(_local_dir)"
-    if _is_non_empty IML_INSTALL_PREFIX; then
+    if _is_non_empty RLSCOPE_INSTALL_PREFIX; then
       # Docker container environment.
-      echo "$IML_INSTALL_PREFIX"
+      echo "$RLSCOPE_INSTALL_PREFIX"
     else
       # Assume we're running in host environment.
       echo "$ROOT/local.host"
@@ -440,9 +438,9 @@ _local_dir() {
 }
 _build_dir() {
     local build_prefix=
-    if _is_non_empty IML_BUILD_PREFIX; then
+    if _is_non_empty RLSCOPE_BUILD_PREFIX; then
       # Docker container environment.
-      build_prefix="$IML_BUILD_PREFIX"
+      build_prefix="$RLSCOPE_BUILD_PREFIX"
     else
       # Assume we're running in host environment.
       build_prefix="$ROOT/local.host"
@@ -643,14 +641,14 @@ PROTOBUF_URL="https://github.com/protocolbuffers/protobuf/releases/download/v${P
 #PROTOBUF_URL="https://github.com/protocolbuffers/protobuf/archive/v${PROTOBUF_VERSION}.tar.gz"
 setup_protobuf_cpp_library() {
     # NOTE: get errors when trying to use container built protobuf (-fPIC flag wasn't used)
+#    if [ "$FORCE" != 'yes' ] && glob_any "$(third_party_install_prefix "$PROTOBUF_CPP_LIB_DIR")/lib/libprotobuf*"; then
     if [ "$FORCE" != 'yes' ] && (
       # protobuf is already installed during container build.
       ( which protoc > /dev/null 2>&1 ) ||
       ( glob_any "$(third_party_install_prefix "$PROTOBUF_CPP_LIB_DIR")/lib/libprotobuf*" )
     ); then
-#    if [ "$FORCE" != 'yes' ] && glob_any "$(third_party_install_prefix "$PROTOBUF_CPP_LIB_DIR")/lib/libprotobuf*"; then
-#        return
-#    fi
+        return
+    fi
     _wget_tar "$PROTOBUF_URL" "third_party"
     (
     cd $PROTOBUF_CPP_LIB_DIR
@@ -813,14 +811,18 @@ main() {
 
     if [ $# -gt 0 ]; then
         _do "$@"
-        echo "> Success!"
+        log_info "> Success!"
         return
     fi
 
     if [ "$EXPERIMENTS" = 'yes' ]; then
       _do setup_clone_experiments
       _do setup_install_experiments
-      echo "> Success!"
+      log_info "> Third-party RL repositories have been cloned in $RLSCOPE_DIR/third_party/* and installed in the current virtualenv $(which python)"
+      log_info "  You can now run experiments:"
+      log_info "    $ experiment_algorithm_choice.sh"
+      log_info "    $ experiment_RL_framework_comparison.sh"
+      log_info "    $ experiment_simulator_choice.sh"
       return
     fi
 
@@ -844,20 +846,12 @@ main() {
     # NOTE: IDEALLY we would install it do a SEPARATE directory... but I'm not 100% sure how to make that work nicely
     # and still have all the "installed" stuff in the same directory.
     (
-    cuda_version=${IML_CUDA_VERSION}
+    cuda_version=${RLSCOPE_CUDA_VERSION}
     _do _setup_project_with_cuda
     )
 
-#    if [ "${IML_CUDA_VERSION}" = '10.1' ]; then
-#      _do setup_project_cuda_10_1
-#    elif [ "${IML_CUDA_VERSION}" = '10.2' ]; then
-#      _do setup_project_cuda_10_2
-#    else
-#      echo "ERROR: Not sure how to build RL-Scope for IML_CUDA_VERSION=${IML_CUDA_VERSION}; try 10.1 or 10.2 instead." >2
-#      exit 1
-#    fi
-
-    echo "> Success!"
+    log_info "> RL-Scope C++ components have been built (i.e., librlscope.so, rls-analyze)."
+    log_info "  You can now use rls-prof to profile your RL training scripts."
 }
 
 setup_pip_package() {
@@ -867,7 +861,7 @@ setup_pip_package() {
     cmake_make "$ROOT" package
     local cpp_pkg=$(ls $build_dir/rlscope*.tar.gz)
     if [ "$cpp_pkg" = "" ]; then
-      echo "ERROR: setup_pip_package failed; couldn't find CPack archive at $build_dir/rlscope*.tar.gz"
+      log_error "ERROR: setup_pip_package failed; couldn't find CPack archive at $build_dir/rlscope*.tar.gz"
       return 1
     fi
     # Cleanup anything from previously built packages.
@@ -904,7 +898,7 @@ _setup_project() {
     _do setup_pip_package
   fi
 
-  echo "To re-build RL-Scope library when you change source files, do:"
+  echo "To re-build RL-Scope library faster when you change source files, do:"
   echo "  $ cd $(cmake_build_dir "$ROOT")"
   echo "  $ make -j\$(nproc) install"
 }
@@ -926,14 +920,14 @@ setup_project_cuda_10_1() {
 _rlscope_build_suffix() {
   local cuda_version="$1"
   shift 1
-  # e.g. IML_BUILD_SUFFIX="_cuda_10_2"
+  # e.g. RLSCOPE_BUILD_SUFFIX="_cuda_10_2"
   echo "_cuda_${cuda_version}" | sed 's/[\.]/_/g'
 }
 
 _setup_project_with_cuda() {
   (
   set -u
-  IML_BUILD_SUFFIX="$(_rlscope_build_suffix ${cuda_version})"
+  RLSCOPE_BUILD_SUFFIX="$(_rlscope_build_suffix ${cuda_version})"
   CUDA_TOOLKIT_ROOT_DIR=/usr/local/cuda-${cuda_version}
   CMAKE_OPTS=(-DCMAKE_BUILD_TYPE=Debug -DCUDA_TOOLKIT_ROOT_DIR=${CUDA_TOOLKIT_ROOT_DIR})
   CMAKE_VERBOSE=yes

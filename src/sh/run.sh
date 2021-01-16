@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 
 # Currently we're in ROOT/src/sh.
-_script_dir="$(realpath "$(dirname "$0")/../..")"
-ROOT=$_script_dir
+SH_DIR="$(readlink -f "$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )")"
+ROOT="$(realpath "$SH_DIR/../..")"
+source $ROOT/dockerfiles/sh/exports.sh
 cd $ROOT
 
 DEBUG=${DEBUG:-no}
@@ -16,20 +17,15 @@ DRY_RUN=${DRY_RUN:-no}
 SKIP_BUILD=${SKIP_BUILD:-no}
 
 CLONE=$HOME/clone
-MLPERF_DIR=$CLONE/mlperf_training
 MLPERF_MINIGO_DIR=$MLPERF_DIR/reinforcement/tensorflow/minigo
 IML=$HOME/clone/dnn_tensorflow_cpp
 CHECKPOINTS=$IML/checkpoints/
 SEED=1
 
-BASELINES_DIR=$CLONE/baselines
 BASELINES_CHECKPOINTS=$BASELINES_DIR/checkpoints
 
 GYM_DIR=$CLONE/gym
 
-STABLE_BASELINES_DIR=${STABLE_BASELINES_DIR:-$HOME/clone/stable-baselines}
-IML_DIR=${IML_DIR:-$HOME/clone/iml}
-RL_BASELINES_ZOO_DIR=${RL_BASELINES_ZOO_DIR:-$HOME/clone/rl-baselines-zoo}
 ENJOY_TRT=${ENJOY_TRT:-${RL_BASELINES_ZOO_DIR}/enjoy_trt.py}
 
 _activate_tensorflow() {
@@ -365,7 +361,7 @@ _multi_expr() {
     gpu_util_experiment \
     --mode run_kernels \
     --rlscope_directory ${rlscope_dir} \
-    --gpu_clock_freq_json $IML_DIR/calibration/gpu_clock_freq/gpu_clock_freq.json \
+    --gpu_clock_freq_json $RLSCOPE_DIR/calibration/gpu_clock_freq/gpu_clock_freq.json \
     --kernel compute_kernel_sched_info \
     --kern_arg_iterations ${iterations} \
     --kern_arg_threads_per_block ${thread_block_size} \
@@ -406,7 +402,7 @@ nvidia_smi_expr() {
     gpu_util_experiment \
     --mode run_kernels \
     --rlscope_directory ${rlscope_dir} \
-    --gpu_clock_freq_json $IML_DIR/calibration/gpu_clock_freq/gpu_clock_freq.json \
+    --gpu_clock_freq_json $RLSCOPE_DIR/calibration/gpu_clock_freq/gpu_clock_freq.json \
     --kernel compute_kernel_sched_info \
     --kern_arg_iterations ${iterations} \
     --kern_arg_threads_per_block ${thread_block_size} \
@@ -463,12 +459,12 @@ _tf_model_output_dir() {
   echo $(_trtexec_output_dir)/model
 }
 _trtexec_output_dir() {
-  echo $IML_DIR/output/trtexec7
+  echo $RLSCOPE_DIR/output/trtexec7
 }
 
 #_uff_model_path() {
 #  # echo $RL_BASELINES_ZOO_DIR/tf_model.uff
-#  echo $IML_DIR/output/trtexec7/model/tf_model.uff
+#  echo $RLSCOPE_DIR/output/trtexec7/model/tf_model.uff
 #}
 _engine_path() {
 (
@@ -478,7 +474,7 @@ _engine_path() {
 }
 
 _tf_inference_root_dir() {
-  echo $IML_DIR/output/tf_inference
+  echo $RLSCOPE_DIR/output/tf_inference
 }
 _tf_inference_output_dir() {
   (
@@ -491,14 +487,14 @@ microbench_simulator_expr() {
 (
   set -ue
   PYTHONPATH="${PYTHONPATH:-}"
-  export PYTHONPATH="$STABLE_BASELINES_DIR:$IML_DIR:$PYTHONPATH"
+  export PYTHONPATH="$STABLE_BASELINES_DIR:$RLSCOPE_DIR:$PYTHONPATH"
   export CUDA_VISIBLE_DEVICES=0
 
   env_id=${env_id:-BreakoutNoFrameskip-v4}
   iterations=5000
 
   cd $RL_BASELINES_ZOO_DIR
-  local out_dir=$IML_DIR/output/microbench_simulator/env_id_${env_id};
+  local out_dir=$RLSCOPE_DIR/output/microbench_simulator/env_id_${env_id};
   local expr_file=${out_dir}/mode_microbench_simulator.json
   if [ -e ${expr_file} ]; then
     echo "> SKIP microbench_simulator_expr; already exists @ ${expr_file}"
@@ -547,7 +543,7 @@ microbench_inference_multiprocess_expr() {
 (
   set -ue
   PYTHONPATH="${PYTHONPATH:-}"
-  export PYTHONPATH="$STABLE_BASELINES_DIR:$IML_DIR:$PYTHONPATH"
+  export PYTHONPATH="$STABLE_BASELINES_DIR:$RLSCOPE_DIR:$PYTHONPATH"
 
   algo=${algo:-a2c}
   env_id=${env_id:-BreakoutNoFrameskip-v4}
@@ -582,7 +578,7 @@ microbench_inference_multiprocess_expr() {
     export CUDA_VISIBLE_DEVICES=0
   fi
 
-  local out_dir="$IML_DIR/output/microbench_inference_multiprocess/${subdir}batch_size_${batch_size}.num_tasks_${num_tasks}.env_id_${env_id}$(_bool_attr mps $mps)$(_bool_attr cpu $cpu)"
+  local out_dir="$RLSCOPE_DIR/output/microbench_inference_multiprocess/${subdir}batch_size_${batch_size}.num_tasks_${num_tasks}.env_id_${env_id}$(_bool_attr mps $mps)$(_bool_attr cpu $cpu)"
 
   if [ "$mps" = 'yes' ]; then
     # Divide GPU's resource equally among the parallel inference tasks
@@ -763,7 +759,7 @@ tf_inference_expr() {
 (
   set -ue
   PYTHONPATH="${PYTHONPATH:-}"
-  export PYTHONPATH="$STABLE_BASELINES_DIR:$IML_DIR:$PYTHONPATH"
+  export PYTHONPATH="$STABLE_BASELINES_DIR:$RLSCOPE_DIR:$PYTHONPATH"
   export CUDA_VISIBLE_DEVICES=0
 
   batch_size=${batch_size:-1}
@@ -833,7 +829,7 @@ mk_trt_model() {
 (
   set -ue
   PYTHONPATH="${PYTHONPATH:-}"
-  export PYTHONPATH="$STABLE_BASELINES_DIR:$IML_DIR:$PYTHONPATH"
+  export PYTHONPATH="$STABLE_BASELINES_DIR:$RLSCOPE_DIR:$PYTHONPATH"
   export CUDA_VISIBLE_DEVICES=0
 #  cd $RL_BASELINES_ZOO_DIR
 
@@ -883,7 +879,7 @@ mk_uff_model() {
 (
   set -ue
   PYTHONPATH="${PYTHONPATH:-}"
-  export PYTHONPATH="$STABLE_BASELINES_DIR:$IML_DIR:$PYTHONPATH"
+  export PYTHONPATH="$STABLE_BASELINES_DIR:$RLSCOPE_DIR:$PYTHONPATH"
   export CUDA_VISIBLE_DEVICES=0
 #  cd $RL_BASELINES_ZOO_DIR
 
@@ -1054,7 +1050,7 @@ trtexec_expr() {
     $(_bool_opt hw-counters $hw_counters) \
     $(_bool_opt useCudaGraph $cuda_graph)
 
-  _do python $IML_DIR/src/libs/trtexec7/tracer.py ${rlscope_dir}/times.json
+  _do python $RLSCOPE_DIR/src/libs/trtexec7/tracer.py ${rlscope_dir}/times.json
 )
 }
 
@@ -1063,9 +1059,9 @@ cmake_build_dir() {
     shift 1
 
     local build_prefix=
-    if _is_non_empty IML_BUILD_PREFIX; then
+    if _is_non_empty RLSCOPE_BUILD_PREFIX; then
       # Docker container environment.
-      build_prefix="$IML_BUILD_PREFIX"
+      build_prefix="$RLSCOPE_BUILD_PREFIX"
     else
       # Assume we're running in host environment.
       build_prefix="$ROOT/local.host"
@@ -1087,9 +1083,9 @@ _is_non_empty() {
 _local_dir() {
     # When installing things with configure/make-install
     # $ configure --prefix="$(_local_dir)"
-    if _is_non_empty IML_INSTALL_PREFIX; then
+    if _is_non_empty RLSCOPE_INSTALL_PREFIX; then
       # Docker container environment.
-      echo "$IML_INSTALL_PREFIX"
+      echo "$RLSCOPE_INSTALL_PREFIX"
     else
       # Assume we're running in host environment.
       echo "$ROOT/local.host"

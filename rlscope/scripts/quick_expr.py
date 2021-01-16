@@ -214,7 +214,7 @@ def main():
     except Exception as e:
         if not args.pdb:
             raise
-        print("> IML: Detected exception:")
+        print("> RL-Scope: Detected exception:")
         print(e)
         print("> Entering pdb:")
         import pdb
@@ -329,7 +329,7 @@ class ExprTotalTrainingTimeConfig:
         self.expr = expr
         self.quick_expr = self.expr.quick_expr
         # $ rls-prof --config ${rlscope_prof_config}
-        # NOTE: we want to run with IML disabled; we just want to know the total training time WITHOUT IML.
+        # NOTE: we want to run with RL-Scope disabled; we just want to know the total training time WITHOUT IML.
         self.rlscope_prof_config = rlscope_prof_config
         # $ python train.py --rlscope-directory config_${config_suffix}
         self.config_suffix = self.rlscope_prof_config
@@ -385,7 +385,7 @@ class ExprTotalTrainingTimeConfig:
                ]
         if self.rlscope_prof_config == 'uninstrumented':
             cmd.extend([
-                # NOTE: we want to run with IML disabled; we just want to know the total training time WITHOUT IML.
+                # NOTE: we want to run with RL-Scope disabled; we just want to know the total training time WITHOUT IML.
                 '--rlscope-disable',
             ])
         cmd.extend(self.script_args)
@@ -432,7 +432,7 @@ class ExprMicrobenchmarkConfig:
         self.config = config
         self.quick_expr = self.expr.quick_expr
         # $ rls-prof --config ${rlscope_prof_config}
-        # NOTE: we want to run with IML disabled; we just want to know the total training time WITHOUT IML.
+        # NOTE: we want to run with RL-Scope disabled; we just want to know the total training time WITHOUT IML.
         self.rlscope_prof_config = rlscope_prof_config
         assert config_suffix is not None
         self.config_suffix = config_suffix
@@ -505,7 +505,7 @@ class ExprMicrobenchmarkConfig:
                ]
         # if self.config == 'uninstrumented':
         #     cmd.extend([
-        #         # NOTE: we want to run with IML disabled; we just want to know the total training time WITHOUT IML.
+        #         # NOTE: we want to run with RL-Scope disabled; we just want to know the total training time WITHOUT IML.
         #         '--rlscope-disable',
         #     ])
         cmd.extend(self.script_args)
@@ -1973,7 +1973,7 @@ class ExprSubtractionValidation:
 
         if self.args.calibration_mode == 'validation':
             # Evaluate: combined tfprof/pyprof overhead correction.
-            # (i.e. full IML trace-collection).
+            # (i.e. full RL-Scope trace-collection).
             config = ExprSubtractionValidationConfig(
                 expr=self,
                 algo=algo,

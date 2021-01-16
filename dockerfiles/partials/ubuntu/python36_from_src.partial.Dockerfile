@@ -44,4 +44,4 @@ RUN make -j$(nproc)
 RUN make altinstall
 RUN python3.6 --version
 WORKDIR ${HOME}
-USER ${IML_USER}
+USER ${RLSCOPE_USER}

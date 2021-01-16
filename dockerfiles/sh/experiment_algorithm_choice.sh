@@ -10,12 +10,12 @@ fi
 
 main() {
   SH_DIR="$(readlink -f "$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )")"
-  source $SH_DIR/make_utils.sh
+  source $SH_DIR/docker_runtime_common.sh
 
   _check_rlscope_dir
   _upgrade_pip
 
-  cd $IML_DIR
+  cd $RLSCOPE_DIR
 
   # TODO: remove...
   export repetitions=2
@@ -28,7 +28,7 @@ main() {
 
   local output_dir="$ARTIFACTS_DIR/experiment_algorithm_choice"
   mkdir -p "$output_dir"
-  _do cp $IML_DIR/output/stable_baselines/calibration.parallel_runs_yes/plots/stable_baselines_fig_10_algo_choice/OverlapStackedBarPlot.overlap_type_CategoryOverlap.percent.pdf "$output_dir/fig_algorithm_choice.pdf"
+  _do cp $RLSCOPE_DIR/output/stable_baselines/calibration.parallel_runs_yes/plots/stable_baselines_fig_10_algo_choice/OverlapStackedBarPlot.overlap_type_CategoryOverlap.percent.pdf "$output_dir/fig_algorithm_choice.pdf"
   log_info
   (
   TXT_BOLD=yes

@@ -40,8 +40,8 @@ from rlscope.profiler.util import args_to_cmdline
 
 from rlscope.parser.common import *
 
-# DEFAULT_IML_TRACE_TIME_SEC = 60*2
-# DEFAULT_DEBUG_IML_TRACE_TIME_SEC = 20
+# DEFAULT_RLSCOPE_TRACE_TIME_SEC = 60*2
+# DEFAULT_DEBUG_RLSCOPE_TRACE_TIME_SEC = 20
 
 MODES = [
     'train_stable_baselines.sh',
@@ -83,13 +83,13 @@ def add_config_options(pars):
         #     'uninstrumented_full'],
         help=textwrap.dedent("""
         instrumented:
-            Run the script with IML enabled for the entire duration of training (if --rlscope-trace-time-sec), 
+            Run the script with RL-Scope enabled for the entire duration of training (if --rlscope-trace-time-sec), 
             record start/end timestamps.
             $ train.py --rlscope-directory ...
             # NOTE: don't use --rlscope-trace-time-sec here, we want to collect traces for the whole run
             
         uninstrumented:
-            Run the script with IML disabled, record start/end timestamp at start/end of training script
+            Run the script with RL-Scope disabled, record start/end timestamp at start/end of training script
             $ train.py --rlscope-disable
             
         instrumented_full:
@@ -191,7 +191,7 @@ def main():
         help=textwrap.dedent("""
         Run train.py inside of rls-prof (for uninstrumented runs only)
           $ rls-prof python train.py
-        This is done by setting IML_PROF=<--rls-prof> inside the train_stable_baselines.sh training script.
+        This is done by setting RLSCOPE_PROF=<--rls-prof> inside the train_stable_baselines.sh training script.
         
         If for some reason you didn't want to run with rls-prof, you could set this to --rls-prof="".
         """))
@@ -258,7 +258,7 @@ def main():
         type=int,
         help=textwrap.dedent("""\
         e.g. for --repetition 1, --config instrumented
-        $IML_DIR/output/rlscope_bench/all/config_instrumented_repetition_01
+        $RLSCOPE_DIR/output/rlscope_bench/all/config_instrumented_repetition_01
         """.rstrip()))
 
     parser.add_argument('--algo-env-group',
@@ -404,7 +404,7 @@ class Experiment:
         args = self.args
 
         if env is None:
-            # Make sure rls-run get IML_POSTGRES_HOST
+            # Make sure rls-run get RLSCOPE_POSTGRES_HOST
             env = dict(os.environ)
 
         proc = None
@@ -470,7 +470,7 @@ class ExperimentGroup(Experiment):
 
     def stable_baselines(self, parser):
         """
-        To avoid running everything more than once, we will stick ALL (algo, env_id) pairs inside of $IML_DIR/output/rlscope_bench/all.
+        To avoid running everything more than once, we will stick ALL (algo, env_id) pairs inside of $RLSCOPE_DIR/output/rlscope_bench/all.
 
         (1) On vs off policy:
         Run Atari Pong on all environments that support it (that we have annotated):
@@ -1302,10 +1302,10 @@ class StableBaselines(Experiment):
         env['ALGO'] = algo
         if args.debug:
             env['DEBUG'] = 'yes'
-            env['IML_DEBUG'] = 'yes'
+            env['RLSCOPE_DEBUG'] = 'yes'
 
         if args.rlscope_prof:
-            env['IML_PROF'] = args.rlscope_prof
+            env['RLSCOPE_PROF'] = args.rlscope_prof
 
         return env
 
@@ -1352,7 +1352,7 @@ class StableBaselines(Experiment):
 
         if args.analyze and config_is_uninstrumented(args.config):
             logger.info(("Cannot run rls-run on --config={config}; config must be instrumented "
-                          "(e.g. --config instrumented), otherwise there are no IML traces to process.").format(
+                          "(e.g. --config instrumented), otherwise there are no RL-Scope traces to process.").format(
                 config=args.config,
             ))
             sys.exit(1)
@@ -1412,7 +1412,7 @@ class StableBaselines(Experiment):
 def get_root_rlscope_directory(config, direc, repetition):
     # if config == 'instrumented':
     #     # The default run --config.
-    #     # Run IML for 2 minutes and collect full traces.
+    #     # Run RL-Scope for 2 minutes and collect full traces.
     #     rlscope_directory = direc
     # else:
     #     # Either 'instrumented' or 'uninstrumented'.

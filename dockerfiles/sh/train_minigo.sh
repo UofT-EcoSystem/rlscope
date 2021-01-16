@@ -10,8 +10,9 @@ fi
 SH_DIR="$(readlink -f "$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )")"
 cd "$SH_DIR"
 
-source $SH_DIR/make_utils.sh
+source $SH_DIR/docker_runtime_common.sh
 
+_check_apt
 _check_env
 _upgrade_pip
 
@@ -46,8 +47,8 @@ SEED=1
 #export BASE_DIR=$OUTPUT_DIR
 #mkdir -p $BASE_DIR
 
-export IML_DIRECTORY=$OUTPUT_DIR
-mkdir -p $IML_DIRECTORY
+export RLSCOPE_DIRECTORY=$OUTPUT_DIR
+mkdir -p $RLSCOPE_DIRECTORY
 
 cd $MLPERF_DIR/reinforcement/tensorflow
 _do ./run_and_time.sh $SEED --rlscope-keep-traces

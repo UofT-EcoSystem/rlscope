@@ -17,4 +17,4 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     bash-completion \
     silversearcher-ag \
     vim
-USER ${IML_USER}
+USER ${RLSCOPE_USER}

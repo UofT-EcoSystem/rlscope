@@ -48,12 +48,12 @@ def get_util_sampler_parser(add_rlscope_root_pid=True, only_fwd_arguments=False)
     parser.add_argument('--rlscope-directory',
                         # required=True,
                         help=textwrap.dedent("""
-    IML: profiling output directory.
+    RL-Scope: profiling output directory.
     """))
     parser.add_argument('--rlscope-debug',
                         action='store_true',
                         help=textwrap.dedent("""
-    IML: debug profiler.
+    RL-Scope: debug profiler.
     """))
     if only_fwd_arguments:
         return parser
@@ -62,14 +62,14 @@ def get_util_sampler_parser(add_rlscope_root_pid=True, only_fwd_arguments=False)
                         type=float,
                         default=DEFAULT_UTIL_SAMPLE_FREQUENCY_SEC,
                         help=textwrap.dedent("""
-    IML: How frequently (in seconds) should we sample GPU/CPU utilization?
+    RL-Scope: How frequently (in seconds) should we sample GPU/CPU utilization?
     default: sample every 500 ms.
     """))
     if add_rlscope_root_pid:
         parser.add_argument('--rlscope-root-pid',
                             required=True, type=int,
                             help=textwrap.dedent("""
-        IML: (internal use)
+        RL-Scope: (internal use)
         The PID of the root training process on this machine.
         When sampling memory usage, we sample total memory usage of this 
         process and its entire process tree (i.e. to support multi-process training).
@@ -78,13 +78,13 @@ def get_util_sampler_parser(add_rlscope_root_pid=True, only_fwd_arguments=False)
                         type=float,
                         default=10.,
                         help=textwrap.dedent("""
-    IML: How frequently (in seconds) should we sample GPU/CPU utilization?
+    RL-Scope: How frequently (in seconds) should we sample GPU/CPU utilization?
     default: dump every 10 seconds.
     """))
     parser.add_argument('--rlscope-debug-single-thread',
                         action='store_true',
                         help=textwrap.dedent("""
-    IML: debug with single thread.
+    RL-Scope: debug with single thread.
     """))
 
     parser.add_argument('--measure-samples-per-sec',
@@ -777,7 +777,7 @@ def main():
     if len(cmd_argv) != 0:
         exe_path = shutil.which(cmd_argv[0])
         if exe_path is None:
-            print("IML ERROR: couldn't locate {exe} on $PATH; try giving a full path to {exe} perhaps?".format(
+            print("RL-Scope ERROR: couldn't locate {exe} on $PATH; try giving a full path to {exe} perhaps?".format(
                 exe=cmd_argv[0],
             ))
             sys.exit(1)
@@ -826,17 +826,17 @@ class UtilSamplerProcess:
             log_cmd(util_cmdline)
         self.proc = subprocess.Popen(util_cmdline)
         self.proc_pid = self.proc.pid
-        logger.info("IML: CPU/GPU utilization sampler running @ pid={pid}".format(pid=self.proc_pid))
+        logger.info("RL-Scope: CPU/GPU utilization sampler running @ pid={pid}".format(pid=self.proc_pid))
 
     def _terminate_utilization_sampler(self, warn_terminated=True):
         assert self.proc_pid is not None
-        logger.info("IML: terminating CPU/GPU utilization sampler @ pid={pid}".format(pid=self.proc_pid))
+        logger.info("RL-Scope: terminating CPU/GPU utilization sampler @ pid={pid}".format(pid=self.proc_pid))
 
         try:
             proc = psutil.Process(self.proc_pid)
         except psutil.NoSuchProcess as e:
             if warn_terminated:
-                logger.info("IML: Warning; tried to terminate utilization sampler @ pid={pid} but it wasn't running".format(pid=self.proc_pid))
+                logger.info("RL-Scope: Warning; tried to terminate utilization sampler @ pid={pid} but it wasn't running".format(pid=self.proc_pid))
             return
 
         proc.terminate()
@@ -867,7 +867,7 @@ def util_sampler(*args, **kwargs):
 
     NOTE:
     - This is meant to be used WITHOUT rlscope profiling active
-    - You should be running vanilla tensorflow (not IML modified tensorflow)
+    - You should be running vanilla tensorflow (not RL-Scope modified tensorflow)
 
     :param rlscope_directory:
         Where to store trace-files containing CPU/GPU utilization info.
@@ -880,7 +880,7 @@ def util_sampler(*args, **kwargs):
     # import rlscope.api
     # if rlscope.api.prof is not None:
     #     raise RuntimeError(textwrap.dedent("""\
-    #         IML ERROR:
+    #         RL-Scope ERROR:
     #         When using rlscope.util_sampler(...) to collect CPU/GPU utilization information,
     #         you should not be doing any other profiling with IML.
     #

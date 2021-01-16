@@ -13,4 +13,4 @@ RUN chmod a+rwx /etc/bash.bashrc
 WORKDIR ${HOME}
 RUN rm -rf /root/tar_files/*
 RUN rm -rf /root/pip_whl
-USER ${IML_USER}
+USER ${RLSCOPE_USER}

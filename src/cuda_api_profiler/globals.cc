@@ -72,9 +72,9 @@ Globals::Globals() {
 
 //  VLOG(1) << "SKIP creating device_tracer";
   device_tracer = rlscope::CreateDeviceTracer();
-  auto IML_TRACE_AT_START = getenv("IML_TRACE_AT_START");
-  VLOG(1) << "IML_TRACE_AT_START = " << IML_TRACE_AT_START;
-  if (device_tracer && env_is_on("IML_TRACE_AT_START", false, true)) {
+  auto RLSCOPE_TRACE_AT_START = getenv("RLSCOPE_TRACE_AT_START");
+  VLOG(1) << "RLSCOPE_TRACE_AT_START = " << RLSCOPE_TRACE_AT_START;
+  if (device_tracer && env_is_on("RLSCOPE_TRACE_AT_START", false, true)) {
     VLOG(1) << "TraceAtStart";
     this->TraceAtStart();
   }
@@ -203,7 +203,7 @@ bool Globals::env_is_no(const std::string& var) const {
 
 void Globals::StartUtilSampler() {
   auto cur_env = boost::this_process::environment();
-  if (cur_env.find("IML_UTIL_SAMPLER_PID") != cur_env.end()) {
+  if (cur_env.find("RLSCOPE_UTIL_SAMPLER_PID") != cur_env.end()) {
     // Utilization sampler is already running; don't start it again.
     return;
   }
@@ -222,7 +222,7 @@ void Globals::StartUtilSampler() {
       "--rlscope-root-pid", pid_str,
       "--rlscope-directory", _directory,
   };
-  if (env_is_yes("IML_DEBUG")) {
+  if (env_is_yes("RLSCOPE_DEBUG")) {
     cmd_list.push_back("--rlscope-debug");
   }
   auto cmd_str = boost::algorithm::join(cmd_list, " ");
@@ -237,7 +237,7 @@ void Globals::StartUtilSampler() {
   LOG(INFO) << "  $ " << cmd_str;
 
   auto util_sampler_pid = _util_sampler.id();
-  int ret = setenv("IML_UTIL_SAMPLER_PID", std::to_string(util_sampler_pid).c_str(), 1);
+  int ret = setenv("RLSCOPE_UTIL_SAMPLER_PID", std::to_string(util_sampler_pid).c_str(), 1);
   assert(ret == 0);
 
 //  std::string line;
@@ -259,35 +259,35 @@ void Globals::TraceAtStart() {
   // But that means the sub-process will also load the library, and launch a sub-process... etc
 //  PatchEnviron();
 
-  auto IML_DIRECTORY = getenv("IML_DIRECTORY");
-  if (IML_DIRECTORY == nullptr || strcmp("", IML_DIRECTORY) == 0) {
-    LOG(INFO) << "ERROR: env variable IML_DIRECTORY must be set to a directory for storing trace-files.";
+  auto RLSCOPE_DIRECTORY = getenv("RLSCOPE_DIRECTORY");
+  if (RLSCOPE_DIRECTORY == nullptr || strcmp("", RLSCOPE_DIRECTORY) == 0) {
+    LOG(INFO) << "ERROR: env variable RLSCOPE_DIRECTORY must be set to a directory for storing trace-files.";
     exit(EXIT_FAILURE);
   }
-  VLOG(1) << "Check: IML_DIRECTORY";
+  VLOG(1) << "Check: RLSCOPE_DIRECTORY";
 
-  auto IML_PROCESS_NAME = getenv("IML_PROCESS_NAME");
-  if (IML_PROCESS_NAME == nullptr || strcmp("", IML_PROCESS_NAME) == 0) {
-    LOG(INFO) << "ERROR: env variable IML_PROCESS_NAME must be set to the process name.";
+  auto RLSCOPE_PROCESS_NAME = getenv("RLSCOPE_PROCESS_NAME");
+  if (RLSCOPE_PROCESS_NAME == nullptr || strcmp("", RLSCOPE_PROCESS_NAME) == 0) {
+    LOG(INFO) << "ERROR: env variable RLSCOPE_PROCESS_NAME must be set to the process name.";
     exit(EXIT_FAILURE);
   }
-  LOG(INFO) << "Check: IML_PROCESS_NAME";
+  LOG(INFO) << "Check: RLSCOPE_PROCESS_NAME";
 
-  auto IML_PHASE_NAME = getenv("IML_PHASE_NAME");
-  if (IML_PHASE_NAME == nullptr || strcmp("", IML_PHASE_NAME) == 0) {
-    LOG(INFO) << "ERROR: env variable IML_PHASE_NAME must be set to the process name.";
+  auto RLSCOPE_PHASE_NAME = getenv("RLSCOPE_PHASE_NAME");
+  if (RLSCOPE_PHASE_NAME == nullptr || strcmp("", RLSCOPE_PHASE_NAME) == 0) {
+    LOG(INFO) << "ERROR: env variable RLSCOPE_PHASE_NAME must be set to the process name.";
     exit(EXIT_FAILURE);
   }
-  LOG(INFO) << "Check: IML_PHASE_NAME";
+  LOG(INFO) << "Check: RLSCOPE_PHASE_NAME";
 
   char hostname[256];
   int ret = gethostname(hostname, 256);
   assert(ret == 0);
 
-  _directory = IML_DIRECTORY;
-  _process_name = IML_PROCESS_NAME;
+  _directory = RLSCOPE_DIRECTORY;
+  _process_name = RLSCOPE_PROCESS_NAME;
   _machine_name = hostname;
-  _phase_name = IML_PHASE_NAME;
+  _phase_name = RLSCOPE_PHASE_NAME;
 
   CheckAvailGpus();
 
@@ -296,10 +296,10 @@ void Globals::TraceAtStart() {
 //  LOG(INFO) << "BLAH: hostname = " << hostname;
 
   status = device_tracer->SetMetadata(
-      /*directory*/IML_DIRECTORY,
-      /*process_name*/IML_PROCESS_NAME,
+      /*directory*/RLSCOPE_DIRECTORY,
+      /*process_name*/RLSCOPE_PROCESS_NAME,
       /*machine_name*/hostname,
-      /*phase_name*/IML_PHASE_NAME);
+      /*phase_name*/RLSCOPE_PHASE_NAME);
 //  MAYBE_RETURN_ERROR(status);
   MAYBE_LOG_ERROR(LOG(INFO), __func__, status);
   MAYBE_EXIT(status);
@@ -310,7 +310,7 @@ void Globals::TraceAtStart() {
 
   StartUtilSampler();
 
-  LOG(INFO) << "Starting tracing at program start (export IML_TRACE_AT_START=yes)";
+  LOG(INFO) << "Starting tracing at program start (export RLSCOPE_TRACE_AT_START=yes)";
   status = device_tracer->Start();
 //  MAYBE_RETURN_ERROR(status);
   MAYBE_LOG_ERROR(LOG(FATAL), __func__, status);
@@ -320,7 +320,7 @@ void Globals::TraceAtStart() {
 void Globals::CheckAvailGpus() const {
   auto report_error_and_exit = [] () {
     std::stringstream ss;
-    ss << "IML ERROR: you must set CUDA_VISIBLE_DEVICES to one of the available GPU's in the system; currently doesn't support multi-GPU use-cases; for example:\n";
+    ss << "RL-Scope ERROR: you must set CUDA_VISIBLE_DEVICES to one of the available GPU's in the system; currently doesn't support multi-GPU use-cases; for example:\n";
     ss << "  $ export CUDA_VISIBLE_DEVICES=\"0\"";
     LOG(INFO) << ss.str();
     exit(EXIT_FAILURE);
@@ -385,9 +385,9 @@ Globals::~Globals() {
     _util_sampler.wait();
   }
 
-  auto IML_TRACE_AT_START = getenv("IML_TRACE_AT_START");
-//  VLOG(1) << "IML_TRACE_AT_START = " << IML_TRACE_AT_START;
-  if (device_tracer && env_is_on("IML_TRACE_AT_START", false, true)) {
+  auto RLSCOPE_TRACE_AT_START = getenv("RLSCOPE_TRACE_AT_START");
+//  VLOG(1) << "RLSCOPE_TRACE_AT_START = " << RLSCOPE_TRACE_AT_START;
+  if (device_tracer && env_is_on("RLSCOPE_TRACE_AT_START", false, true)) {
     MyStatus status;
     status = device_tracer->Print();
     MAYBE_RETURN_ERROR(status);

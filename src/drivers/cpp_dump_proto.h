@@ -2,8 +2,8 @@
 // Created by jgleeson on 2020-04-13.
 //
 
-#ifndef IML_GPU_UTIL_EXPERIMENT_H
-#define IML_GPU_UTIL_EXPERIMENT_H
+#ifndef RLSCOPE_GPU_UTIL_EXPERIMENT_H
+#define RLSCOPE_GPU_UTIL_EXPERIMENT_H
 
 #include <boost/optional.hpp>
 #include <boost/process.hpp>
@@ -13,7 +13,7 @@ namespace rlscope {
 
 struct RLSAnalyzeArgs {
 //   Environment variables
-//  boost::optional<std::string> IML_PROCESS_NAME;
+//  boost::optional<std::string> RLSCOPE_PROCESS_NAME;
 
   // Flags
   boost::optional<bool> FLAGS_debug;
@@ -90,4 +90,4 @@ struct RLSAnalyzeArgs {
 
 }
 
-#endif //IML_GPU_UTIL_EXPERIMENT_H
+#endif //RLSCOPE_GPU_UTIL_EXPERIMENT_H

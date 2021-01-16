@@ -2,8 +2,8 @@
 // Created by jagle on 8/23/2019.
 //
 
-#ifndef IML_CUDA_ACTIVITY_PROFILER_H
-#define IML_CUDA_ACTIVITY_PROFILER_H
+#ifndef RLSCOPE_CUDA_ACTIVITY_PROFILER_H
+#define RLSCOPE_CUDA_ACTIVITY_PROFILER_H
 
 #include <stdlib.h>
 
@@ -287,4 +287,4 @@ public:
 
 }
 
-#endif //IML_CUDA_ACTIVITY_PROFILER_H
+#endif //RLSCOPE_CUDA_ACTIVITY_PROFILER_H

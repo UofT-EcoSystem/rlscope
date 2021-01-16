@@ -6,7 +6,8 @@
 set -e
 set -x
 
-IML_DIR="$(readlink -f "$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )")"
-cd "$IML_DIR"
+ROOT="$(readlink -f "$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )")"
+source $ROOT/dockerfiles/sh/exports.sh
+cd "$RLSCOPE_DIR"
 
 python setup.py develop

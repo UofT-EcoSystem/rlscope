@@ -70,20 +70,20 @@ DOCKERFILES = _a(_j(REPO_ROOT, 'dockerfiles'))
 NVIDIA_VISIBLE_DEVICES = [0]
 assert len(NVIDIA_VISIBLE_DEVICES) > 0
 PROJECT_NAME = 'rlscope'
-IML_BASH_SERVICE_NAME = 'bash'
+RLSCOPE_BASH_SERVICE_NAME = 'bash'
 
 # TENSORFLOW_VERSION = "1.15.0"
 TENSORFLOW_VERSION = "2.2.0"
 
 HOME = str(Path.home())
 DEFAULT_POSTGRES_PORT = 5432
-DEFAULT_IML_DRILL_PORT = 8129
+DEFAULT_RLSCOPE_DRILL_PORT = 8129
 # Default storage location for postgres database
 # (postgres is used for loading raw trace-data and analyzing it).
 DEFAULT_POSTGRES_PGDATA_DIR = _j(HOME, 'rlscope', 'pgdata')
-# The tag used for a locally built "bash" IML dev environment
-LOCAL_IML_IMAGE_TAG = 'tensorflow:devel-rlscope-gpu-cuda'
-DEFAULT_REMOTE_IML_IMAGE_TAG = 'jagleeso/rlscope:1.0.0'
+# The tag used for a locally built "bash" RL-Scope dev environment
+LOCAL_RLSCOPE_IMAGE_TAG = 'tensorflow:devel-rlscope-gpu-cuda'
+DEFAULT_REMOTE_RLSCOPE_IMAGE_TAG = 'jagleeso/rlscope:1.0.0'
 
 RELEASE_TO_LOCAL_IMG_TAG = dict()
 RELEASE_TO_LOCAL_IMG_TAG['rlscope'] = 'tensorflow:devel-rlscope-gpu-cuda'
@@ -517,7 +517,7 @@ If you use any of these in your --arg or in arg specifications in spec.yml,
 they will get replaced with corresponding ARG_VALUES dict values.
 """
 ARG_VALUES = {
-    'IML_DIR': py_config.IML_DIR,
+    'RLSCOPE_DIR': py_config.RLSCOPE_DIR,
 }
 def interpolate_arg(arg):
     # bracket_regex = re.compile(r'\{([^}]+)\}')
@@ -573,12 +573,12 @@ def get_docker_run_env(tag_def, env_list):
         assert var not in env
         env[var] = value
 
-    # env['IML_USER'] = get_username()
-    # env['IML_UID'] = get_user_id()
-    # env['IML_GID'] = get_group_id()
+    # env['RLSCOPE_USER'] = get_username()
+    # env['RLSCOPE_UID'] = get_user_id()
+    # env['RLSCOPE_GID'] = get_group_id()
     env['TENSORFLOW_VERSION'] = TENSORFLOW_VERSION
-    env['IML_INSTALL_PREFIX'] = py_config.DOCKER_INSTALL_PREFIX
-    env['IML_BUILD_PREFIX'] = py_config.DOCKER_BUILD_PREFIX
+    env['RLSCOPE_INSTALL_PREFIX'] = py_config.DOCKER_INSTALL_PREFIX
+    env['RLSCOPE_BUILD_PREFIX'] = py_config.DOCKER_BUILD_PREFIX
 
     return env
 
@@ -637,7 +637,7 @@ def main():
 
     parser.add_argument('--pull', action='store_true',
                         help=textwrap.dedent("""
-                        Pull pre-built IML dev environment image from DockerHub, 
+                        Pull pre-built RL-Scope dev environment image from DockerHub, 
                         instead of building locally.
                         
                         See --pull-image for specifying the image to pull.
@@ -662,14 +662,14 @@ def main():
                         This option will add mps related setup to the generated docker-compose file (stack.yml).
                         """))
 
-    parser.add_argument('--pull-image', default=DEFAULT_REMOTE_IML_IMAGE_TAG,
+    parser.add_argument('--pull-image', default=DEFAULT_REMOTE_RLSCOPE_IMAGE_TAG,
                         help=textwrap.dedent("""
-                        IML dev environment image to pull from DockerHub
+                        RL-Scope dev environment image to pull from DockerHub
                         using "docker pull <pull_img>"
                         """))
 
     parser.add_argument('--deploy-rlscope-drill-port',
-                        default=DEFAULT_IML_DRILL_PORT,
+                        default=DEFAULT_RLSCOPE_DRILL_PORT,
                         type=int,
                         help=('What port to run rlscope-drill web server on '
                               '(when running "docker stack deploy -c stack.yml rlscope")'))
@@ -774,7 +774,7 @@ def main():
         action='store_true',
         help=
         textwrap.dedent("""\
-        Deploy the IML development environment using 
+        Deploy the RL-Scope development environment using 
         "docker stack deploy -c stack.yml rlscope".
         
         In particular:
@@ -808,7 +808,7 @@ def main():
     parser.add_argument(
         '--run',
         action='store_true',
-        help='Run built images; use --deploy if you want to deploy the whole IML development environment')
+        help='Run built images; use --deploy if you want to deploy the whole RL-Scope development environment')
 
     # parser.add_argument(
     #     '--run_tests_path',
@@ -901,7 +901,7 @@ def main():
     if args.deploy and args.run:
         parser.error(
             "Provide either --deploy or --run.  "
-            "Use --deploy to deploy the IML development environment (probably what you want)")
+            "Use --deploy to deploy the RL-Scope development environment (probably what you want)")
 
     try:
         assembler = Assembler(parser, argv, args, extra_argv)
@@ -1126,9 +1126,9 @@ class Assembler:
         # This will make starting in mps/non-mps mode less annoying.
         services = self.dock.services.list(filters={'name': 'rlscope'})
         if len(services) == 0:
-            # IML dev environment not running yet.
+            # RL-Scope dev environment not running yet.
             return
-        print("> Detected old IML dev environment; removing it first")
+        print("> Detected old RL-Scope dev environment; removing it first")
         for srv in services:
             srv.remove()
         after = self.dock.services.list(filters={'name': 'rlscope'})
@@ -1233,9 +1233,9 @@ class Assembler:
         if reload:
             cmd.append('--force-recreate')
         cmd.extend(extra_argv)
-        container_filter = "{project}_{IML_BASH_SERVICE_NAME}".format(
+        container_filter = "{project}_{RLSCOPE_BASH_SERVICE_NAME}".format(
             project=self.project_name(),
-            IML_BASH_SERVICE_NAME=IML_BASH_SERVICE_NAME)
+            RLSCOPE_BASH_SERVICE_NAME=RLSCOPE_BASH_SERVICE_NAME)
 
         logger.info(get_cmd_string(cmd))
         subprocess.check_call(cmd, stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr)
@@ -1244,7 +1244,7 @@ class Assembler:
         ps_cmd = ['docker', 'ps']
         logger.info(get_cmd_string(ps_cmd))
         subprocess.check_call(ps_cmd, stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr)
-        print("> Deployed IML development environment")
+        print("> Deployed RL-Scope development environment")
         print("> Attaching to /bin/bash in the dev environment:")
         # Login to existing container using a new /bin/bash shell so we are greeted with the _rlscope_banner
         exec_cmd = ['docker', 'exec', '-i', '-t', rlscope_bash_container.name, '/bin/bash']
@@ -1274,7 +1274,7 @@ class Assembler:
 
             test_kwargs = dict(
                 image=image,
-                command=_j(docker_run_env['IML_TEST_SH'], test),
+                command=_j(docker_run_env['RLSCOPE_TEST_SH'], test),
                 # command='/tests/' + test,
                 working_dir='/',
                 log_config={'type': 'journald'},
@@ -1284,9 +1284,9 @@ class Assembler:
                 environment=docker_run_env,
                 volumes={
                     # args.run_tests_path: {
-                    docker_run_env['IML_TEST_SH']: {
+                    docker_run_env['RLSCOPE_TEST_SH']: {
                         # 'bind': '/tests',
-                        'bind': docker_run_env['IML_TEST_SH'],
+                        'bind': docker_run_env['RLSCOPE_TEST_SH'],
                         'mode': 'ro'
                     }
                 },
@@ -1608,12 +1608,12 @@ def get_implicit_build_args():
     build_args = dict()
     build_args['TENSORFLOW_VERSION'] = TENSORFLOW_VERSION
 
-    build_args['IML_USER'] = get_username()
-    build_args['IML_UID'] = get_user_id()
-    build_args['IML_GID'] = get_group_id()
-    build_args['IML_DIR'] = py_config.IML_DIR
+    build_args['RLSCOPE_USER'] = get_username()
+    build_args['RLSCOPE_UID'] = get_user_id()
+    build_args['RLSCOPE_GID'] = get_group_id()
+    build_args['RLSCOPE_DIR'] = py_config.RLSCOPE_DIR
     # virtualenv directory within container.
-    build_args['VIRTUALENV'] = "/home/{user}/venv".format(user=build_args['IML_USER'])
+    build_args['VIRTUALENV'] = "/home/{user}/venv".format(user=build_args['RLSCOPE_USER'])
 
     for k in build_args.keys():
         # Otherwise, when we do dock_cli.build we get:
@@ -1624,13 +1624,13 @@ def get_implicit_build_args():
 
 def get_implicit_run_args():
     run_args = {
-        "IML_DIR": py_config.IML_DIR,
+        "RLSCOPE_DIR": py_config.RLSCOPE_DIR,
     }
     return run_args
 
 RUN_ARGS_REQUIRED = [
-    'IML_DIR',
-    # 'IML_DRILL_DIR',
+    'RLSCOPE_DIR',
+    # 'RLSCOPE_DRILL_DIR',
     # The root directory of a 'patched' TensorFlow checkout
     # 'TENSORFLOW_DIR',
     # The local path where we should output bazel objects (overrides $HOME/.cache/bazel)
@@ -1661,8 +1661,8 @@ def get_rlscope_volumes(args, run_args, extra_volumes):
         direc = run_args[arg]
         volumes[direc] = direc
     # Store bazel compilation files in bazel folder in repo root directory:
-    #   $HOME/clone/iml/bazel -> $HOME/.cache/bazel
-    host_bazel_dir = _j(py_config.IML_DIR, 'bazel')
+    #   $HOME/clone/rlscope/bazel -> $HOME/.cache/bazel
+    host_bazel_dir = _j(py_config.RLSCOPE_DIR, 'bazel')
     cont_bazel_dir = _j('/home', get_username(), '.cache', 'bazel')
     assert host_bazel_dir not in volumes
     volumes[host_bazel_dir] = cont_bazel_dir
@@ -1916,7 +1916,7 @@ class StackYMLGenerator:
             # Eventually this feature will be upstreamed though (it's been accepted):
             # https://github.com/docker/compose/pull/7417
             # ipc: service:mps-daemon
-            ipc: container:{IML_MPS_DAEMON_CONTAINER_NAME}
+            ipc: container:{RLSCOPE_MPS_DAEMON_CONTAINER_NAME}
             """)
             self._extra_volumes['nvidia_mps'] = '/tmp/nvidia-mps'
         else:
@@ -1931,7 +1931,7 @@ class StackYMLGenerator:
 
         services:
 
-            {IML_BASH_SERVICE_NAME}:
+            {RLSCOPE_BASH_SERVICE_NAME}:
                 {bash_template}
                 {mps_lines}
                 
@@ -1984,7 +1984,7 @@ class StackYMLGenerator:
         # rlscope-mps-daemon:
         mps-daemon:
             image: nvidia/mps
-            container_name: {IML_MPS_DAEMON_CONTAINER_NAME}
+            container_name: {RLSCOPE_MPS_DAEMON_CONTAINER_NAME}
             restart: on-failure
             # The "depends_on" only guarantees an ordering for container *start*:
             # https://docs.docker.com/compose/startup-order/
@@ -2042,18 +2042,18 @@ class StackYMLGenerator:
         #
         image: {rlscope_image}
         
-        user: "{IML_USER}"
+        user: "{RLSCOPE_USER}"
         
         ports:
             # Expose port that the rlscope-drill web server runs on.
-            - {rlscope_drill_port}:{DEFAULT_IML_DRILL_PORT}
+            - {rlscope_drill_port}:{DEFAULT_RLSCOPE_DRILL_PORT}
             {port_list}
         
         volumes:
         {volume_list}
         
         environment:
-        - IML_POSTGRES_HOST=db
+        - RLSCOPE_POSTGRES_HOST=db
         {env_list}
         
         # docker run --cap-add=SYS_ADMIN
@@ -2092,10 +2092,10 @@ class StackYMLGenerator:
     def generate(self,
                  assembler_cmd, env,
                  volumes, ports,
-                 rlscope_drill_port=DEFAULT_IML_DRILL_PORT,
+                 rlscope_drill_port=DEFAULT_RLSCOPE_DRILL_PORT,
                  postgres_port=DEFAULT_POSTGRES_PORT,
                  postgres_pgdata_dir=DEFAULT_POSTGRES_PGDATA_DIR,
-                 rlscope_image=LOCAL_IML_IMAGE_TAG,
+                 rlscope_image=LOCAL_RLSCOPE_IMAGE_TAG,
                  use_mps=False):
 
         # +1 for "service: ..."
@@ -2122,13 +2122,13 @@ class StackYMLGenerator:
             USER=get_username(),
             assembler_cmd=' '.join(assembler_cmd),
             PWD=os.getcwd(),
-            DEFAULT_IML_DRILL_PORT=DEFAULT_IML_DRILL_PORT,
+            DEFAULT_RLSCOPE_DRILL_PORT=DEFAULT_RLSCOPE_DRILL_PORT,
             rlscope_drill_port=rlscope_drill_port,
             rlscope_image=rlscope_image,
-            IML_MPS_DAEMON_CONTAINER_NAME=self._mps_daemon_container_name(),
-            IML_BASH_SERVICE_NAME=IML_BASH_SERVICE_NAME,
-            IML_UID=get_user_id(),
-            IML_USER=get_username(),
+            RLSCOPE_MPS_DAEMON_CONTAINER_NAME=self._mps_daemon_container_name(),
+            RLSCOPE_BASH_SERVICE_NAME=RLSCOPE_BASH_SERVICE_NAME,
+            RLSCOPE_UID=get_user_id(),
+            RLSCOPE_USER=get_username(),
             NVIDIA_VISIBLE_DEVICES=','.join([str(dev) for dev in NVIDIA_VISIBLE_DEVICES]),
         )
 

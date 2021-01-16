@@ -18,23 +18,12 @@ seaborn >= 0.9.0
 tqdm >= 4.31.1
 py-cpuinfo >= 4.0.0
 
-# pip requirements needed to run the deploy.sh script for deploying the IML docker dev
-# environment, described in the github wiki:
-#   https://github.com/UofT-EcoSystem/iml/wiki/Dockerized-development-environment#deploying-the-iml-dev-environment
-#
-# To setup a virtualenv with requirements, and run deploy.sh, run this:
-# $ cd ~/clone/iml
-# $ virtualenv --python=/usr/bin/python3 ~/venv/iml
-# $ source ~/venv/iml
-# $ source ~/venv/iml/bin/activate
-# $ pip install -r requirements.deploy.txt
-# $ ./deploy.sh
 absl-py>=0.6.1
 Cerberus>=1.3.1
 docker>=4.0.1
 PyYAML>=5.1
 
-# iml-analyze
+# rls-analyze
 # psycopg2==2.7.7
 luigi>=2.8.6
 # Debugger used for development

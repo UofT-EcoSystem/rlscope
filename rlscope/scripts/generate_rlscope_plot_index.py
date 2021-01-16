@@ -311,7 +311,7 @@ def main():
     except Exception as e:
         if not args.pdb:
             raise
-        print("> IML: Detected exception:")
+        print("> RL-Scope: Detected exception:")
         print(e)
         print("> Entering pdb:")
         import pdb

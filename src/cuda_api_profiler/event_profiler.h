@@ -2,8 +2,8 @@
 // Created by jagle on 9/3/2019.
 //
 
-#ifndef IML_EVENT_PROFILER_H
-#define IML_EVENT_PROFILER_H
+#ifndef RLSCOPE_EVENT_PROFILER_H
+#define RLSCOPE_EVENT_PROFILER_H
 
 //#include "rlscope/protobuf/rlscope_prof.pb.h"
 //#include "rlscope/protobuf/pyprof.pb.h"
@@ -108,4 +108,4 @@ public:
 
 }
 
-#endif //IML_EVENT_PROFILER_H
+#endif //RLSCOPE_EVENT_PROFILER_H

@@ -61,7 +61,7 @@ def setup_logger(debug=False, colors=None, line_numbers=None):
 
     # Weird interaction with absl.logging package where log messages print twice...
     # I guess absl registers a stream handler; lets just NOT propagate our messages to the root logger then.
-    # NOTE: This might break another module from capturing our IML logs to file...oh well.
+    # NOTE: This might break another module from capturing our RL-Scope logs to file...oh well.
     # https://docs.python.org/3/library/logging.html#logging.Logger.propagate
     logger.propagate = False
 

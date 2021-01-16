@@ -1,4 +1,4 @@
-# IML NOTE: This is taken from TensorFlow
+# RLSCOPE NOTE: This is taken from TensorFlow
 
 We base our dockerfiles on [TensorFlow's dockerfiles](https://github.com/tensorflow/tensorflow/tree/v1.13.1/tensorflow/tools). 
 In particular, TensorFlow has 

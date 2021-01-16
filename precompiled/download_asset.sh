@@ -2,7 +2,7 @@
 # Script to download asset file from tag release using GitHub API v3.
 # See: http://stackoverflow.com/a/35688093/55075
 #
-# IML: To download pre-compiled tensorflow python wheel via command-line, run
+# RL-Scope: To download pre-compiled tensorflow python wheel via command-line, run
 # $ GITHUB_API_TOKEN="..." ./download_asset.sh UofT-EcoSystem iml 1.0.0 tensorflow-1.13.1-cp35-cp35m-linux_x86_64.whl.modifications
 #
 # NOTE: You need to setup a github API token by visiting https://github.com/settings/tokens

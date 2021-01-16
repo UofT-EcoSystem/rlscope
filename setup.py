@@ -209,7 +209,7 @@ def generate_proto(source, require=True, regenerate=False):
           not os.path.exists(output) or
           (os.path.exists(source) and
            os.path.getmtime(source) > os.path.getmtime(output))):
-      logger.info("Generating %s..." % output)
+      logger.debug("Generating %s..." % output)
 
       if not os.path.exists(source):
           sys.stderr.write("Can't find required file: %s\n" % source)
@@ -365,8 +365,8 @@ def main():
         version=_VERSION.replace('-', ''),
         description=DOCLINES[0],
         long_description=long_description,
-        url='https://github.com/UofT-EcoSystem/iml',
-        download_url='https://github.com/UofT-EcoSystem/iml/tags',
+        url='https://github.com/UofT-EcoSystem/rlscope',
+        download_url='https://github.com/UofT-EcoSystem/rlscope/tags',
         author='James Gleeson',
         author_email='jagleeso@gmail.com',
         # Contained modules and scripts.

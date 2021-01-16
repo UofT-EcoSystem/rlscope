@@ -1110,7 +1110,7 @@ class TrtexecExperiment:
         if self.args['mps_dir'] is None:
             return
         """
-        /home/jgleeson/clone/iml/output/microbench_inference_multiprocess/batch_size_128.num_tasks_1.env_id_BreakoutNoFrameskip-v4.num_sms_68.sms_allocated_68.CUDA_MPS_ACTIVE_THREAD_PERCENTAGE_100.0
+        /home/jgleeson/clone/rlscope/output/microbench_inference_multiprocess/batch_size_128.num_tasks_1.env_id_BreakoutNoFrameskip-v4.num_sms_68.sms_allocated_68.CUDA_MPS_ACTIVE_THREAD_PERCENTAGE_100.0
         
         
         """
@@ -1199,7 +1199,7 @@ class TrtexecExperiment:
         if self.args['simulator_dir'] is None:
             return
         """
-        /home/jgleeson/clone/iml/output/simulator/batch_size_8.xla_no/GPUHwCounterSampler.csv
+        /home/jgleeson/clone/rlscope/output/simulator/batch_size_8.xla_no/GPUHwCounterSampler.csv
         """
         simulator_dflt_attrs = {
         }
@@ -1343,7 +1343,7 @@ class TrtexecExperiment:
         if self.args['tf_inference_dir'] is None:
             return
         """
-        /home/jgleeson/clone/iml/output/tf_inference/batch_size_8.xla_no/GPUHwCounterSampler.csv
+        /home/jgleeson/clone/rlscope/output/tf_inference/batch_size_8.xla_no/GPUHwCounterSampler.csv
         """
         tf_inference_dflt_attrs = {
         }
@@ -1414,7 +1414,7 @@ class TrtexecExperiment:
         if self.args['trtexec_dir'] is None:
             return
         """
-        /home/jgleeson/clone/iml/output/trtexec7/batch_size_1.streams_1.threads_no.cuda_graph_no.hw_counters_yes
+        /home/jgleeson/clone/rlscope/output/trtexec7/batch_size_1.streams_1.threads_no.cuda_graph_no.hw_counters_yes
         """
         trtexec_dflt_attrs = {
         }

@@ -5,7 +5,7 @@
 #
 USER root
 
-ADD sh/make_utils.sh ${ADD_DIR}/sh/make_utils.sh
+ADD sh/docker_build_common.sh ${ADD_DIR}/sh/docker_build_common.sh
 ADD sh/exports.sh ${ADD_DIR}/sh/exports.sh
 
 # (1) Check that /etc/docker/daemon.json uses --runtime=nvidia by default
@@ -16,4 +16,4 @@ RUN bash ${ADD_DIR}/sh/test_runtime_nvidia.sh
 ADD sh/test_cupti_profiler_api.sh ${ADD_DIR}/sh/test_cupti_profiler_api.sh
 RUN bash ${ADD_DIR}/sh/test_cupti_profiler_api.sh
 
-USER ${IML_USER}
+USER ${RLSCOPE_USER}

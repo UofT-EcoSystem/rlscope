@@ -354,7 +354,7 @@ def register_torch():
             logger.debug("torch is NOT installed")
 
 def wrap_tensorflow_v1(category=constants.CATEGORY_TF_API, debug=False):
-    logger.info("> IML: Wrapping module=tensorflow call with category={category} annotations".format(
+    logger.info("> RL-Scope: Wrapping module=tensorflow call with category={category} annotations".format(
         category=category,
     ))
     success = wrap_util.wrap_lib(
@@ -366,7 +366,7 @@ def wrap_tensorflow_v1(category=constants.CATEGORY_TF_API, debug=False):
     assert success
 def unwrap_tensorflow_v1():
     if py_config.DEBUG_WRAP_CLIB:
-        logger.info("> IML: Unwrapping module=tensorflow")
+        logger.info("> RL-Scope: Unwrapping module=tensorflow")
     wrap_util.unwrap_lib(
         CFuncWrapper,
         import_libname='tensorflow',
@@ -378,7 +378,7 @@ def is_tensorflow_v2():
     return int(m.group('major')) >= 2
 
 def wrap_tensorflow_v2(category=constants.CATEGORY_TF_API, debug=False):
-    logger.info("> IML: Wrapping module=tensorflow.python.pywrap_tfe call with category={category} annotations".format(
+    logger.info("> RL-Scope: Wrapping module=tensorflow.python.pywrap_tfe call with category={category} annotations".format(
         category=category,
     ))
     success = wrap_util.wrap_lib(
@@ -400,7 +400,7 @@ def wrap_tensorflow_v2(category=constants.CATEGORY_TF_API, debug=False):
     assert success
 def unwrap_tensorflow_v2():
     if py_config.DEBUG_WRAP_CLIB:
-        logger.info("> IML: Unwrapping module=tensorflow.python.pywrap_tfe")
+        logger.info("> RL-Scope: Unwrapping module=tensorflow.python.pywrap_tfe")
     wrap_util.unwrap_lib(
         CFuncWrapper,
         import_libname='tensorflow.python.pywrap_tfe',
@@ -427,7 +427,7 @@ def unwrap_atari():
 
 def wrap_module(module, category, debug=False, **kwargs):
     if py_config.DEBUG_WRAP_CLIB:
-        logger.info("> IML: Wrapping module={mod} call with category={category} annotations".format(
+        logger.info("> RL-Scope: Wrapping module={mod} call with category={category} annotations".format(
             mod=module,
             category=category,
         ))
@@ -436,7 +436,7 @@ def wrap_module(module, category, debug=False, **kwargs):
         wrapper_args=(category, DEFAULT_PREFIX, debug), **kwargs)
 def unwrap_module(module):
     if py_config.DEBUG_WRAP_CLIB:
-        logger.info("> IML: Unwrapping module={mod}".format(
+        logger.info("> RL-Scope: Unwrapping module={mod}".format(
             mod=module))
     wrap_util.unwrap_module(
         CFuncWrapper,
@@ -503,7 +503,7 @@ class LibWrapper:
 
 def wrap_entire_module(import_libname, category, debug=False, **kwargs):
     if py_config.DEBUG_WRAP_CLIB:
-        logger.info("> IML: Wrapping module={mod} call with category={category} annotations".format(
+        logger.info("> RL-Scope: Wrapping module={mod} call with category={category} annotations".format(
             mod=import_libname,
             category=category,
         ))
@@ -520,7 +520,7 @@ def unwrap_entire_module(import_libname):
     if import_libname not in sys.modules:
         return
     if py_config.DEBUG_WRAP_CLIB:
-        logger.info("> IML: Unwrapping module={mod}".format(
+        logger.info("> RL-Scope: Unwrapping module={mod}".format(
             mod=import_libname))
     lib_wrapper = sys.modules[import_libname]
     sys.modules[import_libname] = lib_wrapper.lib
@@ -536,7 +536,7 @@ try:
     import pybullet_envs.minitaur.envs.bullet_client
     import pybullet_utils.bullet_client
 except ImportError as e:
-    # logger.warning("IML: Failed to import PyBullet ({error}), skip wrapping library".format(
+    # logger.warning("RL-Scope: Failed to import PyBullet ({error}), skip wrapping library".format(
     #     error=str(e)))
     pass
 
@@ -566,7 +566,7 @@ def unwrap_pybullet():
     unwrap_module(pybullet)
 
 #
-# IML: pybullet specific work-around!
+# RL-Scope: pybullet specific work-around!
 #
 # pybullet python library does some weird dynamic stuff when accessing shared-library functions.
 # Basically BulletClient class is checking whether a function that's getting fetched is a built-in.

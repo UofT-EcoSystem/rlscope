@@ -66,7 +66,7 @@ def patch_environ():
         return
 
     if platform.system() != 'Linux':
-        raise RuntimeError("IML: currently, IML only support Linux for handling LD_PRELOAD hackery (need to add support for Mac/Windows)")
+        raise RuntimeError("RL-Scope: currently, RL-Scope only support Linux for handling LD_PRELOAD hackery (need to add support for Mac/Windows)")
 
     # We need to compute this BEFORE we modify LD_PRELOAD.
     is_used = rlscope_api.is_used()
@@ -113,17 +113,17 @@ def handle_rlscope_args(parser, args, directory=None, reports_progress=False):
             rlscope_directory = args['rlscope_directory']
 
     # TODO: train.py apparently like to launch separate process all willy-nilly.
-    # I'm not sure what it's doing this for, but it's certainly true that python-side IML stuff will do it too.
+    # I'm not sure what it's doing this for, but it's certainly true that python-side RL-Scope stuff will do it too.
     # We do NOT want to wrap those separate processes with rls-prof.
     # We only want to wrap the "main" training script processes;
     # i.e. the processes we already explicitly handle via the python-api.
     #
-    # TLDR: remove librlscope.so from env['LD_PRELOAD'] if it's there, re-add it when we use python-IML to
+    # TLDR: remove librlscope.so from env['LD_PRELOAD'] if it's there, re-add it when we use python-RL-Scope to
     # launch new training scripts.
     patch_environ()
 
     if rlscope_directory is None:
-        raise RuntimeError("IML: you must provide a location to store trace files: --rlscope-directory <dir>")
+        raise RuntimeError("RL-Scope: you must provide a location to store trace files: --rlscope-directory <dir>")
 
     success = profilers.check_avail_gpus()
     if not success:

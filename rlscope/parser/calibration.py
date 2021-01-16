@@ -1099,7 +1099,7 @@ class Calibration:
 
         # if self.calibration_mode == 'validation':
         #     # Evaluate: combined tfprof/pyprof overhead correction.
-        #     # (i.e. full IML trace-collection).
+        #     # (i.e. full RL-Scope trace-collection).
         #     config = RLScopeRunConfig(
         #         expr=self,
         #         rlscope_prof_config='full',

@@ -28,11 +28,11 @@ class TrainingProgressParser:
     PSEUDOCODE:
     Read all the training_progress.trace_*.proto files across all configurations
     into a single data-frame.
-    IML profiling overhead:
+    RL-Scope profiling overhead:
       To compare profiling overhead, compare the last sample of iterations/second for a given configuration
       (that way we don't need the exact number of timesteps to match up between compared configurations).
       This also works if we want to compare TOTAL training time; just run training till the very end.
-    IML accuracy:
+    RL-Scope accuracy:
       total_training_time['instrumented'] - extrap_training_time['instrumented']
 
         df = []
@@ -138,7 +138,7 @@ class TrainingProgressParser:
         assert is_training_progress_file(path)
         rlscope_dir = _d(path)
         # Path looks like:
-        # '$HOME/clone/iml/output/rlscope_bench/all.debug/config_uninstrumented/a2c/PongNoFrameskip-v4/process/a2c_PongNoFrameskip-v4/phase/default_phase/training_progress.trace_3.proto'
+        # '$HOME/clone/rlscope/output/rlscope_bench/all.debug/config_uninstrumented/a2c/PongNoFrameskip-v4/process/a2c_PongNoFrameskip-v4/phase/default_phase/training_progress.trace_3.proto'
         #  - $HOME
         #  - clone
         #  - rlscope
@@ -463,7 +463,7 @@ class ProfilingOverheadPlot:
         # Hard-coded labels.
         #
         # Instrumented:
-        # 	- Includes all IML overhead:
+        # 	- Includes all RL-Scope overhead:
         # 		- Tfprof/pyorof trace collection
         # 		- Tfprof/pyprof trace dumping
         #

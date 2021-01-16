@@ -2,8 +2,8 @@
 // Created by jagle on 11/13/2019.
 //
 
-#ifndef IML_USEC_TIMER_H
-#define IML_USEC_TIMER_H
+#ifndef RLSCOPE_USEC_TIMER_H
+#define RLSCOPE_USEC_TIMER_H
 
 #include <cstdint>
 #include <time.h>
@@ -41,4 +41,4 @@ static uint64_t TimeNowSeconds() {
 
 }
 
-#endif //IML_USEC_TIMER_H
+#endif //RLSCOPE_USEC_TIMER_H

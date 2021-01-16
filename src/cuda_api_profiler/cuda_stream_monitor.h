@@ -2,8 +2,8 @@
 // Created by jagle on 8/16/2019.
 //
 
-#ifndef IML_CUDA_STREAM_MONITOR_H
-#define IML_CUDA_STREAM_MONITOR_H
+#ifndef RLSCOPE_CUDA_STREAM_MONITOR_H
+#define RLSCOPE_CUDA_STREAM_MONITOR_H
 
 #include <cuda.h>
 #include <cupti_target.h>
@@ -104,4 +104,4 @@ public:
 
 }
 
-#endif //IML_CUDA_STREAM_MONITOR_H
+#endif //RLSCOPE_CUDA_STREAM_MONITOR_H

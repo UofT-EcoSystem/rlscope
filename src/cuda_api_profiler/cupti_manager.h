@@ -2,8 +2,8 @@
 // Created by jagle on 8/23/2019.
 //
 
-#ifndef IML_CUPTI_MANAGER_H
-#define IML_CUPTI_MANAGER_H
+#ifndef RLSCOPE_CUPTI_MANAGER_H
+#define RLSCOPE_CUPTI_MANAGER_H
 
 #include "cuda_api_profiler/registered_handle.h"
 #include "cuda_api_profiler/cupti_manager.h"
@@ -107,4 +107,4 @@ private:
 
 }
 
-#endif //IML_CUPTI_MANAGER_H
+#endif //RLSCOPE_CUPTI_MANAGER_H

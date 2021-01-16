@@ -220,7 +220,7 @@ def expr_run_cmd(cmd, to_file,
         log_func = logger.error
 
     if env is None:
-        # Make sure rls-run get IML_POSTGRES_HOST
+        # Make sure rls-run get RLSCOPE_POSTGRES_HOST
         env = dict(os.environ)
 
     proc = None

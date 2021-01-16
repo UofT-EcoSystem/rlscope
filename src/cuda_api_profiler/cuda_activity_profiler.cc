@@ -276,7 +276,7 @@ void CUDAActivityProfiler::ActivityCallback(const CUpti_Activity &record) {
       break;
     }
 
-      // IML TODO: record contribution of libcupti overhead to profiling time.
+      // RLSCOPE TODO: record contribution of libcupti overhead to profiling time.
       // Overhead could be CUPTI, DRIVER, COMPILER, etc; documentation:
       //
       //   CUPTI_ACTIVITY_OVERHEAD_UNKNOWN = 0

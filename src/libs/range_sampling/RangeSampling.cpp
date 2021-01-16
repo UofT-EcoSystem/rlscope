@@ -143,7 +143,7 @@ std::vector<std::string> get_DEFAULT_METRICS() {
       "sm__cycles_elapsed.sum+"
 
 //    // FAILS:
-//    //   ERROR: Invalid argument: /home/jgleeson/clone/iml/src/libs/range_sampling/RangeSampling.cpp:384: error:
+//    //   ERROR: Invalid argument: /home/jgleeson/clone/rlscope/src/libs/range_sampling/RangeSampling.cpp:384: error:
 //    //   function NVPW_RawMetricsConfig_AddMetrics(&addMetricsParams) failed with error
 //    //   (1) NVPA_STATUS_ERROR: Generic error.
 //    // keepInstances = true

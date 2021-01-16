@@ -1,95 +1,12 @@
 #!/usr/bin/env bash
-# NOTE: This should run inside a docker container.
+# Shell script that is available at Docker RUN time (NOT at build time).
+# Modifying this file WILL NOT trigger container rebuilds (modifying docker_build_common.sh will).
 #
-# NOTE: It's up to you to call ./configure from inside the TENSORFLOW_DIR of the container!
-# This script is just meant for doing iterative rebuilds (i.e. "make")
-#set -e
-#set -x
+# NOTE: This should run inside a docker container.
 
 SH_DIR="$(readlink -f "$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )")"
 source $SH_DIR/exports.sh
-
-IML_DIR=${IML_DIR:-$HOME/clone/iml}
-REAGENT_DIR=${REAGENT_DIR:-$HOME/clone/ReAgent}
-
-_do() {
-    echo "> CMD:"
-    echo "  $ $@"
-    "$@"
-}
-
-# $ man terminfo
-# Color       #define       Value       RGB
-# black     COLOR_BLACK       0     0, 0, 0
-# red       COLOR_RED         1     max,0,0
-# green     COLOR_GREEN       2     0,max,0
-# yellow    COLOR_YELLOW      3     max,max,0
-# blue      COLOR_BLUE        4     0,0,max
-# magenta   COLOR_MAGENTA     5     max,0,max
-# cyan      COLOR_CYAN        6     0,max,max
-# white     COLOR_WHITE       7     max,max,max
-
-# Text style:
-# tput bold    # Select bold mode
-# tput dim     # Select dim (half-bright) mode
-# tput smul    # Enable underline mode
-# tput rmul    # Disable underline mode
-# tput rev     # Turn on reverse video mode
-# tput smso    # Enter standout (bold) mode
-# tput rmso    # Exit standout mode
-
-# Other:
-# tput sgr0    # Reset text format to the terminal's default
-# tput bel     # Play a bell
-
-TXT_UNDERLINE=no
-TXT_BOLD=no
-TXT_COLOR=
-TXT_STYLE=
-TXT_CLEAR="$(tput sgr0)"
-set_TXT_STYLE() {
-  if [ "$TXT_UNDERLINE" = 'yes' ]; then
-    TXT_STYLE="${TXT_STYLE}$(tput smul)"
-  fi
-  if [ "$TXT_BOLD" = 'yes' ]; then
-    TXT_STYLE="${TXT_STYLE}$(tput bold)"
-  fi
-  if [ "$TXT_COLOR" != '' ]; then
-    TXT_STYLE="${TXT_STYLE}$(tput setaf $TXT_COLOR)"
-  fi
-}
-log_info() {
-  TXT_COLOR=2
-  set_TXT_STYLE
-  echo -e "${TXT_STYLE}$@${TXT_CLEAR}"
-}
-log_error() {
-  # red
-  TXT_COLOR=1
-  set_TXT_STYLE
-  echo -e "${TXT_STYLE}$@${TXT_CLEAR}"
-}
-log_warning() {
-  # yellow
-  TXT_COLOR=3
-  set_TXT_STYLE
-  echo -e "${TXT_STYLE}$@${TXT_CLEAR}"
-}
-
-_link() {
-  # _link $target $destination
-  #
-  # Create symlink at $destination that links to $target.
-  # Replace existing symlink if it exists (but only if it's also a symlink).
-  local target="$1"
-  local destination="$2"
-  shift 2
-
-  if [ -L "$destination" ]; then
-    rm "$destination"
-  fi
-  _do ln -s -T "$target" "$destination" "$@"
-}
+source $SH_DIR/docker_build_common.sh
 
 BAZEL_BUILD_FLAGS=()
 BAZEL_BUILD_TARGET=
@@ -189,24 +106,26 @@ _check_env() {
 
     _check_rlscope_dir
 
-    if ! which develop_rlscope.sh; then
-        export PATH="$IML_DIR/dockerfiles/sh:$PATH"
-        if ! which develop_rlscope.sh; then
-            echo "ERROR: failed trying to push $IML_DIR/dockerfiles/sh on \$PATH."
-            exit 1
-        fi
-    fi
+#    if ! which develop_rlscope.sh; then
+#        export PATH="$RLSCOPE_DIR/dockerfiles/sh:$PATH"
+#        if ! which develop_rlscope.sh; then
+#            echo "ERROR: failed trying to push $RLSCOPE_DIR/dockerfiles/sh on \$PATH."
+#            exit 1
+#        fi
+#    fi
 
 }
 
 _check_rlscope_dir() {
-    # Sometimes apt will fail on fresh containers unless we do this first.
-    sudo apt update
-
-    if [ "$IML_DIR" = "" ] || [ ! -d "$IML_DIR" ]; then
-        echo "ERROR: environment variable IML_DIR should be set to: The root directory of the rlscope repo checkout."
+    if [ "$RLSCOPE_DIR" = "" ] || [ ! -d "$RLSCOPE_DIR" ]; then
+        echo "ERROR: environment variable RLSCOPE_DIR should be set to: The root directory of the rlscope repo checkout."
         exit 1
     fi
+}
+
+_check_apt() {
+    # Sometimes apt will fail on fresh containers unless we do this first.
+    sudo apt update
 }
 
 check_tensorflow_build() {
@@ -340,89 +259,3 @@ _clone() {
     git submodule update --init
     )
 }
-
-PY_MODULE_INSTALLED_SILENT=no
-py_module_installed() {
-    local py_module="$1"
-    shift 1
-    # Returns 1 if ImportError is thrown.
-    # Returns 0 if import succeeds.
-    if [ "$PY_MODULE_INSTALLED_SILENT" == 'yes' ]; then
-        python -c "import ${py_module}" > /dev/null 2>&1
-    else
-        echo "> Make sure we can import ${py_module}"
-        _do python -c "import ${py_module}"
-    fi
-}
-
-py_maybe_install() {
-    local py_module="$1"
-    local sh_install="$2"
-    shift 2
-
-    if ! py_module_installed $py_module; then
-        ${sh_install}
-        echo "> Installed python module $py_module: $sh_install"
-        if ! py_module_installed $py_module; then
-            echo "ERROR: $py_module still failed even after running $sh_install"
-            exit 1
-        fi
-        echo "> $py_module installed"
-    fi
-
-}
-
-_yes_or_no() {
-    if "$@" > /dev/null 2>&1; then
-        echo yes
-    else
-        echo no
-    fi
-}
-_has_sudo() {
-    if [ "$HAS_SUDO" = '' ]; then
-        HAS_SUDO="$(_yes_or_no /usr/bin/sudo -v)"
-    fi
-    echo $HAS_SUDO
-}
-_has_exec() {
-    _yes_or_no which "$@"
-}
-_has_lib() {
-    local lib="$1"
-    shift 1
-    on_ld_path() {
-        ldconfig -p \
-            | grep --quiet "$lib"
-    }
-    in_local_path() {
-        ls $INSTALL_DIR/lib \
-            | grep --quiet "$lib"
-    }
-    __has_lib() {
-        on_ld_path || in_local_path
-    }
-    _yes_or_no __has_lib
-}
-#_install_apt() {
-#    if [ "$(_has_sudo)" = 'no' ]; then
-#        return
-#    fi
-#    if [ "$HAS_APT_GET" = 'no' ]; then
-#        return
-#    fi
-#    sudo apt-get install -y "$@"
-#}
-#_install_pip() {
-#    if [ "$HAS_PIP" = 'no' ]; then
-#        return
-#    fi
-#    if [ "$(_has_sudo)" = 'no' ]; then
-#        pip install "$@"
-#    else
-#        sudo pip install "$@"
-#    fi
-#}
-
-#_check_container_env() {
-#}

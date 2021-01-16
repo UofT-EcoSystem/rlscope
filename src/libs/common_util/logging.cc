@@ -95,7 +95,7 @@ void LogMessage::GenerateLogMessage() {
 
 
   // TODO(jeff,sanjay): Replace this with something that logs through the env.
-  // IML: Add thread-id to log statement.
+  // RL-Scope: Add thread-id to log statement.
   pid_t tid = gettid();
   if (ShouldPrintStacktrace()) {
 
@@ -215,7 +215,7 @@ int64_t MinLogLevelFromEnv() {
 #ifdef FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION
   return rlscope::NUM_SEVERITIES;
 #else
-  const char* tf_env_var_val = getenv("IML_CPP_MIN_LOG_LEVEL");
+  const char* tf_env_var_val = getenv("RLSCOPE_CPP_MIN_LOG_LEVEL");
   return LogLevelStrToInt(tf_env_var_val);
 #endif
 }
@@ -230,7 +230,7 @@ int64_t MinVLogLevelFromEnv() {
 #ifdef FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION
   return 0;
 #else
-  const char* tf_env_var_val = getenv("IML_CPP_MIN_VLOG_LEVEL");
+  const char* tf_env_var_val = getenv("RLSCOPE_CPP_MIN_VLOG_LEVEL");
   return LogLevelStrToInt(tf_env_var_val);
 #endif
 }

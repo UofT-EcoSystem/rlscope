@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 export IML=$HOME/clone/dnn_tensorflow_cpp
-export IML_DRILL=$HOME/clone/iml-drill
+export RLSCOPE_DRILL=$HOME/clone/rlscope-drill
 
 _activate_virtualenv_cuda9() {
     # tensorflow_cuda9 github repo checkout

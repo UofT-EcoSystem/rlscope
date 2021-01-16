@@ -5,7 +5,7 @@ USER root
 ##
 ## We do this since otherwise, ML scripts that use mpi4py print warnings.
 ## For details, see:
-##   https://github.com/UofT-EcoSystem/iml/wiki/Issues-and-TODOs
+##   https://github.com/UofT-EcoSystem/rlscope/wiki/Issues-and-TODOs
 ##
 #ARG OPENMPI_VERSION=3.1.4
 #WORKDIR /root/tar_files
@@ -30,4 +30,4 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ssh
 WORKDIR ${HOME}
-USER ${IML_USER}
+USER ${RLSCOPE_USER}

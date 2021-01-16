@@ -60,12 +60,12 @@ PARSER_NAME_TO_KLASS = dict((ParserKlass.__name__, ParserKlass) \
 # List of runnable tasks for rls-run.
 # Used for generating command-line usage help.
 
-# IML_TASKS = ...
+# RLSCOPE_TASKS = ...
 # NOT_RUNNABLE_TASKS = ...
 def get_NOT_RUNNABLE_TASKS():
     return [IMLTask, IMLTaskDB, _UtilizationPlotTask]
 
-def get_IML_TASKS():
+def get_RLSCOPE_TASKS():
     global NOT_RUNNABLE_TASKS
     rlscope_tasks = set()
     for name, cls in globals().items():
@@ -270,7 +270,7 @@ class SQLParserTask(IMLTaskDB):
 
 class SQLOverheadEventsTask(IMLTaskDB):
     """
-    How IML handles subtracting CPU-overhead:
+    How RL-Scope handles subtracting CPU-overhead:
 
     High-level idea:
 
@@ -464,7 +464,7 @@ def _mk(kwargs, TaskKlass):
 
 # ASSUME: rls-analyze is on $PATH;
 # i.e. they have run:
-# $ cd $IML_DIR
+# $ cd $RLSCOPE_DIR
 # $ source source_me.sh
 CPP_ANALYZE_BIN = 'rls-analyze'
 class RLSAnalyze(IMLTask):
@@ -1107,8 +1107,8 @@ class GpuHwPlotTask(IMLTask):
         self.dumper.run()
 
 class CategoryTransitionPlotTask(luigi.Task):
-    time_breakdown_directories = luigi.ListParameter(description="IML directories containing uncorrected processed output of RLSAnalyze")
-    rlscope_directories = luigi.ListParameter(description="IML directories containing raw IML trace files")
+    time_breakdown_directories = luigi.ListParameter(description="RL-Scope directories containing uncorrected processed output of RLSAnalyze")
+    rlscope_directories = luigi.ListParameter(description="RL-Scope directories containing raw RL-Scope trace files")
     category = luigi.Parameter(description="Category", default=None)
     directory = luigi.Parameter(description="Output directory", default=".")
     hack_upper_right_legend_bbox_x = param_hack_upper_right_legend_bbox_x
@@ -1227,7 +1227,7 @@ def mk_SQL_tasks(task):
         for optval in overhead_opts:
             if optval is None:
                 raise RuntimeError(textwrap.dedent("""\
-                IML ERROR: If you provide the {optval} calibration file, you must provide all these calibration files:
+                RL-Scope ERROR: If you provide the {optval} calibration file, you must provide all these calibration files:
                 {files}
                 """).format(
                     files=textwrap.indent(pprint.pformat(CALIBRATION_OPTS), prefix='  '),
@@ -1283,12 +1283,12 @@ def main(argv=None, should_exit=True):
 
 class CallInterceptionOverheadTask(luigi.Task):
     # csv = luigi.Parameter(description="Path to overall_machine_util.raw.csv [output from UtilTask]")
-    interception_directory = luigi.ListParameter(description="IML directory that ran with 'rls-prof --config interception'")
-    uninstrumented_directory = luigi.ListParameter(description="IML directory that ran with 'rls-prof --config interception'")
+    interception_directory = luigi.ListParameter(description="RL-Scope directory that ran with 'rls-prof --config interception'")
+    uninstrumented_directory = luigi.ListParameter(description="RL-Scope directory that ran with 'rls-prof --config interception'")
     directory = luigi.Parameter(description="Output directory", default=".")
 
-    # interception_directories = luigi.ListParameter(description="IML directory that ran with 'rls-prof --config interception'", default=".")
-    # no_interception_directories = luigi.ListParameter(description="IML directory that ran with 'rls-prof --config interception'", default=".")
+    # interception_directories = luigi.ListParameter(description="RL-Scope directory that ran with 'rls-prof --config interception'", default=".")
+    # no_interception_directories = luigi.ListParameter(description="RL-Scope directory that ran with 'rls-prof --config interception'", default=".")
 
     # Plot attrs
     # rotation = luigi.FloatParameter(description="x-axis title rotation", default=45.)
@@ -1314,8 +1314,8 @@ class CallInterceptionOverheadTask(luigi.Task):
         self.dumper.run()
 
 class CUPTIOverheadTask(luigi.Task):
-    gpu_activities_directory = luigi.ListParameter(description="IML directory that ran with 'rls-prof --config gpu-activities'")
-    no_gpu_activities_directory = luigi.ListParameter(description="IML directory that ran with 'rls-prof --config no-gpu-activities'")
+    gpu_activities_directory = luigi.ListParameter(description="RL-Scope directory that ran with 'rls-prof --config gpu-activities'")
+    no_gpu_activities_directory = luigi.ListParameter(description="RL-Scope directory that ran with 'rls-prof --config no-gpu-activities'")
     directory = luigi.Parameter(description="Output directory", default=".")
 
     # Plot attrs
@@ -1342,8 +1342,8 @@ class CUPTIOverheadTask(luigi.Task):
         self.dumper.run()
 
 class CUPTIScalingOverheadTask(luigi.Task):
-    gpu_activities_api_time_directory = luigi.ListParameter(description="IML directory that ran with 'rls-prof --config gpu-activities-api-time'")
-    interception_directory = luigi.ListParameter(description="IML directory that ran with 'rls-prof --config interception'")
+    gpu_activities_api_time_directory = luigi.ListParameter(description="RL-Scope directory that ran with 'rls-prof --config gpu-activities-api-time'")
+    interception_directory = luigi.ListParameter(description="RL-Scope directory that ran with 'rls-prof --config interception'")
 
     directory = luigi.Parameter(description="Output directory", default=".")
 
@@ -1377,8 +1377,8 @@ class CorrectedTrainingTimeTask(luigi.Task):
     python_annotation_json = param_python_annotation_json
     python_clib_interception_tensorflow_json = param_python_clib_interception_tensorflow_json
     python_clib_interception_simulator_json = param_python_clib_interception_simulator_json
-    rlscope_directories = luigi.ListParameter(description="IML directory that ran with full tracing enabled")
-    uninstrumented_directories = luigi.ListParameter(description="IML directories for uninstrumented runs (rls-prof --config uninstrumented)")
+    rlscope_directories = luigi.ListParameter(description="RL-Scope directory that ran with full tracing enabled")
+    uninstrumented_directories = luigi.ListParameter(description="RL-Scope directories for uninstrumented runs (rls-prof --config uninstrumented)")
     directory = luigi.Parameter(description="Output directory", default=".")
     # rlscope_prof_config = luigi.ChoiceParameter(description=textwrap.dedent("""
     rlscope_prof_config = luigi.Parameter(description=textwrap.dedent("""
@@ -1426,12 +1426,12 @@ class CorrectedTrainingTimeTask(luigi.Task):
         self.dumper.run()
 
 class PyprofOverheadTask(luigi.Task):
-    uninstrumented_directory = luigi.ListParameter(description="IML directory that ran with 'rls-prof --config uninstrumented train.py --rlscope-disable --rlscope-training-progress'")
-    # pyprof_annotations_directory = luigi.ListParameter(description="IML directory that ran with 'rls-prof --config uninstrumented train.py --rlscope-disable-tfprof --rlscope-disable-pyprof-interceptions --rlscope-training-progress'")
-    # pyprof_interceptions_directory = luigi.ListParameter(description="IML directory that ran with 'rls-prof --config uninstrumented train.py --rlscope-disable-tfprof --rlscope-disable-pyprof-annotations --rlscope-training-progress'")
+    uninstrumented_directory = luigi.ListParameter(description="RL-Scope directory that ran with 'rls-prof --config uninstrumented train.py --rlscope-disable --rlscope-training-progress'")
+    # pyprof_annotations_directory = luigi.ListParameter(description="RL-Scope directory that ran with 'rls-prof --config uninstrumented train.py --rlscope-disable-tfprof --rlscope-disable-pyprof-interceptions --rlscope-training-progress'")
+    # pyprof_interceptions_directory = luigi.ListParameter(description="RL-Scope directory that ran with 'rls-prof --config uninstrumented train.py --rlscope-disable-tfprof --rlscope-disable-pyprof-annotations --rlscope-training-progress'")
 
-    pyprof_annotations_directory = luigi.ListParameter(description="IML directory that ran with 'rls-prof --config uninstrumented train.py --rlscope-disable-tfprof --rlscope-disable-pyprof-interceptions --rlscope-training-progress'", default=None)
-    pyprof_interceptions_directory = luigi.ListParameter(description="IML directory that ran with 'rls-prof --config uninstrumented train.py --rlscope-disable-tfprof --rlscope-disable-pyprof-annotations --rlscope-training-progress'", default=None)
+    pyprof_annotations_directory = luigi.ListParameter(description="RL-Scope directory that ran with 'rls-prof --config uninstrumented train.py --rlscope-disable-tfprof --rlscope-disable-pyprof-interceptions --rlscope-training-progress'", default=None)
+    pyprof_interceptions_directory = luigi.ListParameter(description="RL-Scope directory that ran with 'rls-prof --config uninstrumented train.py --rlscope-disable-tfprof --rlscope-disable-pyprof-annotations --rlscope-training-progress'", default=None)
 
     directory = luigi.Parameter(description="Output directory", default=".")
 
@@ -1459,7 +1459,7 @@ class PyprofOverheadTask(luigi.Task):
         self.dumper.run()
 
 class TotalTrainingTimeTask(luigi.Task):
-    uninstrumented_directory = luigi.ListParameter(description="IML directory that ran with 'rls-prof --config uninstrumented train.py --rlscope-disable --rlscope-training-progress'")
+    uninstrumented_directory = luigi.ListParameter(description="RL-Scope directory that ran with 'rls-prof --config uninstrumented train.py --rlscope-disable --rlscope-training-progress'")
     directory = luigi.Parameter(description="Output directory", default=".")
 
     # Plot attrs
@@ -1717,31 +1717,31 @@ class NvprofTracesTask(luigi.Task):
         dumper.run()
 
 NOT_RUNNABLE_TASKS = get_NOT_RUNNABLE_TASKS()
-IML_TASKS = get_IML_TASKS()
-IML_TASKS.add(TraceEventsTask)
-IML_TASKS.add(OverlapStackedBarTask)
-IML_TASKS.add(UtilTask)
-IML_TASKS.add(UtilPlotTask)
-IML_TASKS.add(TrainingProgressTask)
-IML_TASKS.add(ProfilingOverheadPlotTask)
-IML_TASKS.add(ExtrapolatedTrainingTimeTask)
-IML_TASKS.add(CallInterceptionOverheadTask)
-IML_TASKS.add(CUPTIOverheadTask)
-IML_TASKS.add(CorrectedTrainingTimeTask)
-IML_TASKS.add(PyprofOverheadTask)
-IML_TASKS.add(CUPTIScalingOverheadTask)
-IML_TASKS.add(TotalTrainingTimeTask)
-IML_TASKS.add(ConvertResourceOverlapToResourceSubplotTask)
-IML_TASKS.add(VennJsPlotTask)
-IML_TASKS.add(VennJsPlotOneTask)
-IML_TASKS.add(SlidingWindowUtilizationPlotTask)
-IML_TASKS.add(CUDAEventCSVTask)
-IML_TASKS.add(GPUUtilOverTimePlotTask)
-IML_TASKS.add(NvprofKernelHistogramTask)
-IML_TASKS.add(CrossProcessOverlapHistogramTask)
-IML_TASKS.add(CategoryTransitionPlotTask)
-IML_TASKS.add(NvprofTracesTask)
-IML_TASKS.add(TexMetricsTask)
+RLSCOPE_TASKS = get_RLSCOPE_TASKS()
+RLSCOPE_TASKS.add(TraceEventsTask)
+RLSCOPE_TASKS.add(OverlapStackedBarTask)
+RLSCOPE_TASKS.add(UtilTask)
+RLSCOPE_TASKS.add(UtilPlotTask)
+RLSCOPE_TASKS.add(TrainingProgressTask)
+RLSCOPE_TASKS.add(ProfilingOverheadPlotTask)
+RLSCOPE_TASKS.add(ExtrapolatedTrainingTimeTask)
+RLSCOPE_TASKS.add(CallInterceptionOverheadTask)
+RLSCOPE_TASKS.add(CUPTIOverheadTask)
+RLSCOPE_TASKS.add(CorrectedTrainingTimeTask)
+RLSCOPE_TASKS.add(PyprofOverheadTask)
+RLSCOPE_TASKS.add(CUPTIScalingOverheadTask)
+RLSCOPE_TASKS.add(TotalTrainingTimeTask)
+RLSCOPE_TASKS.add(ConvertResourceOverlapToResourceSubplotTask)
+RLSCOPE_TASKS.add(VennJsPlotTask)
+RLSCOPE_TASKS.add(VennJsPlotOneTask)
+RLSCOPE_TASKS.add(SlidingWindowUtilizationPlotTask)
+RLSCOPE_TASKS.add(CUDAEventCSVTask)
+RLSCOPE_TASKS.add(GPUUtilOverTimePlotTask)
+RLSCOPE_TASKS.add(NvprofKernelHistogramTask)
+RLSCOPE_TASKS.add(CrossProcessOverlapHistogramTask)
+RLSCOPE_TASKS.add(CategoryTransitionPlotTask)
+RLSCOPE_TASKS.add(NvprofTracesTask)
+RLSCOPE_TASKS.add(TexMetricsTask)
 
 if __name__ == "__main__":
     main()

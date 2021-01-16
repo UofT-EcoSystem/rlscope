@@ -28,9 +28,9 @@ if USE_NUMBA:
 
 ROOT = _d(_d(_a(__file__)))
 
-IML_DIR = ROOT
+RLSCOPE_DIR = ROOT
 
-IML_TEST_DIR = _j(IML_DIR, 'test_results')
+RLSCOPE_TEST_DIR = _j(RLSCOPE_DIR, 'test_results')
 
 DEBUG = False
 
@@ -48,7 +48,7 @@ GENERATE_INDEX_PY = _j(ROOT, "python/scripts", "generate_rlscope_plot_index.py")
 # If true, when you provide --rlscope-debug, log messages when:
 # - A session is created by calling tf.Session()
 # - A session is used by calling sess.run()
-# - IML trace-data belonging to a session is dumped
+# - RL-Scope trace-data belonging to a session is dumped
 DEBUG_TRACE_SESSION = False
 
 # Verbose debugging: Print calls to set_operation/end_operation
@@ -93,7 +93,7 @@ DEBUG_GPU_HW = False
 #   - This bug affects GPU memory/compute utilization sampling;
 #     if we're in a docker container just sample the entire memory usage of a GPU.
 IS_DOCKER = False
-if 'IML_LOGGED_IN' in ENV:
+if 'RLSCOPE_LOGGED_IN' in ENV:
   IS_DOCKER = True
 
 # Print the names of all the TensorFlow/Simulator function calls that get wrapped.
@@ -195,13 +195,13 @@ EnvVars = _EnvVars(env=ENV)
 
 NUMBA_DISABLE_JIT = EnvVars.get_bool('NUMBA_DISABLE_JIT', dflt=False)
 
-IML_DISABLE_JIT = EnvVars.get_bool('IML_DISABLE_JIT', dflt=False)
+RLSCOPE_DISABLE_JIT = EnvVars.get_bool('RLSCOPE_DISABLE_JIT', dflt=False)
 
 # Use numbafied implementation of event overlap computation.
-IML_USE_NUMBA = EnvVars.get_bool('IML_USE_NUMBA', dflt=False)
+RLSCOPE_USE_NUMBA = EnvVars.get_bool('RLSCOPE_USE_NUMBA', dflt=False)
 # More verbose debugging information during unit-tests.
-IML_DEBUG_UNIT_TESTS = EnvVars.get_bool('IML_DEBUG_UNIT_TESTS', dflt=False)
-IML_DEBUG_UNIQUE_SPLITS_BASE = EnvVars.get_string('IML_DEBUG_UNIQUE_SPLITS_BASE', dflt=None)
+RLSCOPE_DEBUG_UNIT_TESTS = EnvVars.get_bool('RLSCOPE_DEBUG_UNIT_TESTS', dflt=False)
+RLSCOPE_DEBUG_UNIQUE_SPLITS_BASE = EnvVars.get_string('RLSCOPE_DEBUG_UNIQUE_SPLITS_BASE', dflt=None)
 
 HOST_INSTALL_PREFIX = _j(ROOT, "local.host")
 DOCKER_INSTALL_PREFIX = _j(ROOT, "local.docker")

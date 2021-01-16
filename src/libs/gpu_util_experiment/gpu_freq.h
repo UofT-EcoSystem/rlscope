@@ -2,8 +2,8 @@
 // Created by jgleeson on 2020-01-23.
 //
 
-#ifndef IML_GPU_FREQ_H
-#define IML_GPU_FREQ_H
+#ifndef RLSCOPE_GPU_FREQ_H
+#define RLSCOPE_GPU_FREQ_H
 
 #include <pthread.h>
 
@@ -848,4 +848,4 @@ public:
 
 } // namespace rlscope
 
-#endif //IML_GPU_FREQ_H
+#endif //RLSCOPE_GPU_FREQ_H

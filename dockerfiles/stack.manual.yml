@@ -32,19 +32,19 @@ services:
   #     --runtime nvidia
   #     --workdir /
   #     --rm
-  #     --volume /mnt/data/james/clone/iml/test_results:/mnt/data/james/clone/iml/test_results
+  #     --volume /mnt/data/james/clone/rlscope/test_results:/mnt/data/james/clone/rlscope/test_results
   #     --volume /home/james/clone/tensorflow.patch:/home/james/clone/tensorflow.patch
   #     --volume /mnt/data/james/clone/bazel/tensorflow.patch:/mnt/data/james/clone/bazel/tensorflow.patch
   #     --volume /home/james/clone/baselines:/home/james/clone/baselines
-  #     --volume /home/james/clone/iml-drill:/home/james/clone/iml-drill
+  #     --volume /home/james/clone/rlscope-drill:/home/james/clone/rlscope-drill
   #     --volume /mnt/data/james/clone/benchmarks:/mnt/data/james/clone/benchmarks
-  #     --volume /mnt/data/james/clone/iml:/mnt/data/james/clone/iml
-  #     -e IML_DRILL_DIR=/home/james/clone/iml-drill
+  #     --volume /mnt/data/james/clone/rlscope:/mnt/data/james/clone/rlscope
+  #     -e RLSCOPE_DRILL_DIR=/home/james/clone/rlscope-drill
   #     -e TENSORFLOW_BENCHMARKS_DIR=/mnt/data/james/clone/benchmarks
-  #     -e IML_DIR=/mnt/data/james/clone/iml
+  #     -e RLSCOPE_DIR=/mnt/data/james/clone/rlscope
   #     -e TENSORFLOW_DIR=/home/james/clone/tensorflow.patch
   #     -e BAZEL_BUILD_DIR=/mnt/data/james/clone/bazel/tensorflow.patch
-  #     -e IML_TEST_DIR=/mnt/data/james/clone/iml/test_results
+  #     -e RLSCOPE_TEST_DIR=/mnt/data/james/clone/rlscope/test_results
   #     -e BASELINES_DIR=/home/james/clone/baselines
   #     --log-driver journald
   #     tensorflow:devel-rlscope-gpu-cuda
@@ -74,20 +74,20 @@ services:
     # }
 #    runtime: nvidia
     volumes:
-    - /mnt/data/james/clone/iml/test_results:/mnt/data/james/clone/iml/test_results
+    - /mnt/data/james/clone/rlscope/test_results:/mnt/data/james/clone/rlscope/test_results
     - /home/james/clone/tensorflow.patch:/home/james/clone/tensorflow.patch
     - /mnt/data/james/clone/bazel/tensorflow.patch:/mnt/data/james/clone/bazel/tensorflow.patch
     - /home/james/clone/baselines:/home/james/clone/baselines
-    - /home/james/clone/iml-drill:/home/james/clone/iml-drill
+    - /home/james/clone/rlscope-drill:/home/james/clone/rlscope-drill
     - /mnt/data/james/clone/benchmarks:/mnt/data/james/clone/benchmarks
-    - /mnt/data/james/clone/iml:/mnt/data/james/clone/iml
+    - /mnt/data/james/clone/rlscope:/mnt/data/james/clone/rlscope
     environment:
-    - IML_DRILL_DIR=/home/james/clone/iml-drill
+    - RLSCOPE_DRILL_DIR=/home/james/clone/rlscope-drill
     - TENSORFLOW_BENCHMARKS_DIR=/mnt/data/james/clone/benchmarks
-    - IML_DIR=/mnt/data/james/clone/iml
+    - RLSCOPE_DIR=/mnt/data/james/clone/rlscope
     - TENSORFLOW_DIR=/home/james/clone/tensorflow.patch
     - BAZEL_BUILD_DIR=/mnt/data/james/clone/bazel/tensorflow.patch
-    - IML_TEST_DIR=/mnt/data/james/clone/iml/test_results
+    - RLSCOPE_TEST_DIR=/mnt/data/james/clone/rlscope/test_results
     - BASELINES_DIR=/home/james/clone/baselines
     logging:
       driver: journald

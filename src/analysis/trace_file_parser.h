@@ -2,8 +2,8 @@
 // Created by jagle on 11/13/2019.
 //
 
-#ifndef IML_TRACE_FILE_PARSER_H
-#define IML_TRACE_FILE_PARSER_H
+#ifndef RLSCOPE_TRACE_FILE_PARSER_H
+#define RLSCOPE_TRACE_FILE_PARSER_H
 
 #include "rlscope_prof.pb.h"
 #include "pyprof.pb.h"
@@ -57,7 +57,7 @@
 //#define PSEC_IN_USEC (1000)
 //#define USEC_IN_SEC (1000000)
 
-#define IML_VERSION 1
+#define RLSCOPE_VERSION 1
 
 #define IS_BAD_STATUS(status) (status.code() != MyStatus::OK().code())
 
@@ -4539,7 +4539,7 @@ public:
       md["overlap_type"] = overlap_type;
 
       // Control for bugs in old data-formats.
-      md["version"] = IML_VERSION;
+      md["version"] = RLSCOPE_VERSION;
 
       auto const& meta = reducer.GetMetaForAll();
       md["start_time_usec"] = meta.start_time_usec;
@@ -5344,4 +5344,4 @@ inline nlohmann::json ValueAsJson(const OverlapResult& value) {
 
 } // namespace rlscope
 
-#endif //IML_TRACE_FILE_PARSER_H
+#endif //RLSCOPE_TRACE_FILE_PARSER_H

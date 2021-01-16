@@ -15,8 +15,9 @@ cd "$SH_DIR"
 
 # TODO: Make this runnable on Ubuntu 16.04/18.04 from outside of docker-env by removing dependency on env-variables being set.
 
-source $SH_DIR/make_utils.sh
+source $SH_DIR/docker_runtime_common.sh
 
+_check_apt
 _check_env
 _upgrade_pip
 
@@ -88,12 +89,12 @@ cd $RL_BASELINES_ZOO_DIR
 #    --rlscope-trace-time-sec $((40))
 
 #if [ "$DEBUG" == 'yes' ]; then
-##    IML_TRACE_TIME_SEC=$((40))
-#    IML_TRACE_TIME_SEC=$((20))
-#elif [ "$IML_TRACE_TIME_SEC" == "" ]; then
-#    IML_TRACE_TIME_SEC=$((2*60))
+##    RLSCOPE_TRACE_TIME_SEC=$((40))
+#    RLSCOPE_TRACE_TIME_SEC=$((20))
+#elif [ "$RLSCOPE_TRACE_TIME_SEC" == "" ]; then
+#    RLSCOPE_TRACE_TIME_SEC=$((2*60))
 #fi
-#    --rlscope-trace-time-sec $IML_TRACE_TIME_SEC \
+#    --rlscope-trace-time-sec $RLSCOPE_TRACE_TIME_SEC \
 
 if [ "$DEBUG" == 'yes' ]; then
     PYTHON=(python -m ipdb)
@@ -103,27 +104,27 @@ fi
 #PYTHON=(python)
 
 NVPROF=()
-#if [ "$IML_USE_NVPROF" == "yes" ]; then
+#if [ "$RLSCOPE_USE_NVPROF" == "yes" ]; then
 #    NVPROF=(nvprof --source-level-analysis)
 #fi
 
-IML_PROF="${IML_PROF:-rls-prof}"
+RLSCOPE_PROF="${RLSCOPE_PROF:-rls-prof}"
 
 
-#IML_PROF_ARGS=()
-#if [ "$IML_PROF" != "" ]; then
-#  IML_PROF_ARGS=(
-#    "$IML_PROF"
+#RLSCOPE_PROF_ARGS=()
+#if [ "$RLSCOPE_PROF" != "" ]; then
+#  RLSCOPE_PROF_ARGS=(
+#    "$RLSCOPE_PROF"
 #  )
 #fi
 
-# NOTE: IML_PROF, if defined, will be a command (rls-prof) that wraps the training script
+# NOTE: RLSCOPE_PROF, if defined, will be a command (rls-prof) that wraps the training script
 # using LD_PRELOAD=librlscope.so in order to sample CUDA API calls during
 # training.  This should be used for uninstrumented runs.
 # Instrumented runs should instead use the profiler built-in to tensorflow to avoid libcupti
 # callback registration conflicts.
 
-_do $VALGRIND $IML_PROF "${NVPROF[@]}" "${PYTHON[@]}" $RL_BASELINES_ZOO_DIR/train.py \
+_do $VALGRIND $RLSCOPE_PROF "${NVPROF[@]}" "${PYTHON[@]}" $RL_BASELINES_ZOO_DIR/train.py \
     --algo $ALGO \
     --env $ENV_ID \
     --log-folder $OUTPUT_DIR \

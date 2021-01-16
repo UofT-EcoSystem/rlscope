@@ -19,7 +19,7 @@ from rlscope.profiler.rlscope_logging import logger
 def main():
     parser = argparse.ArgumentParser(
         textwrap.dedent("""\
-        Process trace-files collected from running an ML script with the IML profiler.
+        Process trace-files collected from running an ML script with the RL-Scope profiler.
         
         For task-specific help, provided task-name and --help, e.g.:
         $ rls-run --task OverlapStackedBarTask --help
@@ -35,7 +35,7 @@ def main():
     parser.add_argument('--pdb', action='store_true',
                         help="Break into pdb when an exception occurs")
     parser.add_argument('--task',
-                        choices=[klass.__name__ for klass in tasks.IML_TASKS],
+                        choices=[klass.__name__ for klass in tasks.RLSCOPE_TASKS],
                         help="Name of a runnable IMLTask defined in rlscope.parser.tasks")
     parser.add_argument('--workers',
                         type=int,

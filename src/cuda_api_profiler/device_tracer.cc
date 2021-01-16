@@ -398,7 +398,7 @@ DeviceTracerImpl::DeviceTracerImpl(CUPTIManager *cupti_manager)
 //    }))
   }
   enabled_ = false;
-  if (is_yes("IML_STREAM_SAMPLING", false)) {
+  if (is_yes("RLSCOPE_STREAM_SAMPLING", false)) {
     // --stream-sampling
     VLOG(0) << "Enabling CUDA stream sampling";
     stream_monitor_ = CudaStreamMonitor::GetCudaStreamMonitor();
@@ -596,9 +596,9 @@ MyStatus DeviceTracerImpl::Start() {
       CUptiResult ret;
 //      ret = cupti_wrapper_->Subscribe(&subscriber_, static_cast<CUpti_CallbackFunc>(ApiCallback), this);
 
-// IML NOTE: disable CUDA API callbacks for giving labels to kernel execution times.
-// Not needed for IML metrics, and adds runtime overhead.
-//      if (!is_yes("IML_DISABLE", false)) {
+// RLSCOPE NOTE: disable CUDA API callbacks for giving labels to kernel execution times.
+// Not needed for RL-Scope metrics, and adds runtime overhead.
+//      if (!is_yes("RLSCOPE_DISABLE", false)) {
 //        VLOG(1) << "Register DeviceTracer CUDA API calls callback";
 //        _cupti_api_device_tracer_callback_id = _cupti_api->RegisterCallback(
 //            [this](CUpti_CallbackDomain domain, CUpti_CallbackId cbid, const void *cbdata) {
@@ -607,11 +607,11 @@ MyStatus DeviceTracerImpl::Start() {
 //      }
 
       DCHECK(!(
-          is_yes("IML_FUZZ_CUDA_API", false) &&
-          is_yes("IML_CUDA_API_CALLS", false) ))
+          is_yes("RLSCOPE_FUZZ_CUDA_API", false) &&
+          is_yes("RLSCOPE_CUDA_API_CALLS", false) ))
         << "Can only run rls-prof with --fuzz-cuda-api or --cuda-api-calls, not both";
 
-      if (is_yes("IML_CUDA_API_CALLS", false)) {
+      if (is_yes("RLSCOPE_CUDA_API_CALLS", false)) {
 #ifdef WITH_CUDA_LD_PRELOAD
         _Register_LD_PRELOAD_Callbacks();
 #else
@@ -620,16 +620,16 @@ MyStatus DeviceTracerImpl::Start() {
 #endif
       }
 
-      if (is_yes("IML_FUZZ_CUDA_API", false)) {
+      if (is_yes("RLSCOPE_FUZZ_CUDA_API", false)) {
         this->_api_profiler.EnableFuzzing();
         _RegisterCUDAAPICallbacks();
         _EnableAllCUDAAPICallbacks();
       }
 
-      if (is_yes("IML_CUDA_API_EVENTS", false)) {
+      if (is_yes("RLSCOPE_CUDA_API_EVENTS", false)) {
         // Record raw start/end timestamps of CUDA API calls.
         // Required during instrumented runs.
-        VLOG(1) << "CUDAAPIProfiler: enable event recording (IML_CUDA_API_EVENTS=yes)";
+        VLOG(1) << "CUDAAPIProfiler: enable event recording (RLSCOPE_CUDA_API_EVENTS=yes)";
         this->_api_profiler.EnableEventRecording();
       }
 
@@ -640,7 +640,7 @@ MyStatus DeviceTracerImpl::Start() {
 
   }
 
-  if (is_yes("IML_CUDA_ACTIVITIES", false)) {
+  if (is_yes("RLSCOPE_CUDA_ACTIVITIES", false)) {
     VLOG(1) << "Start CUDAActivityProfiler";
     _activity_profiler.Start();
   }
@@ -657,7 +657,7 @@ MyStatus DeviceTracerImpl::Print() {
   _op_stack.Print(info, 1);
   info << "\n";
   _api_profiler.Print(info, 1);
-  if (is_yes("IML_CUDA_ACTIVITIES", false)) {
+  if (is_yes("RLSCOPE_CUDA_ACTIVITIES", false)) {
     info << "\n";
     _activity_profiler.Print(info, 1);
   }
@@ -689,7 +689,7 @@ MyStatus DeviceTracerImpl::Stop() {
 
   api_printer_.Stop();
   timer.EndOperation("api_printer_.Stop");
-  if (is_yes("IML_CUDA_ACTIVITIES", false)) {
+  if (is_yes("RLSCOPE_CUDA_ACTIVITIES", false)) {
     // VLOG(1) << "DeviceTracerImpl." << __func__ << ": activity_profiler.Stop()";
     _activity_profiler.Stop();
     timer.EndOperation("_activity_profiler.Stop");
@@ -745,7 +745,7 @@ MyStatus DeviceTracerImpl::Stop() {
 // This functionality is used by TensorFlow to label each GPU activity record with a std::string-identifier
 // (an annotation in the TensorFlow source-code at the site of the cudaLaunch call).
 //
-// IML: since we create our own CUDA API wrappers separate from libcupti, we DON'T use this.
+// RL-Scope: since we create our own CUDA API wrappers separate from libcupti, we DON'T use this.
 //void DeviceTracerImpl::_ApiCallback(
 //    CUpti_CallbackDomain domain,
 //    CUpti_CallbackId cbid,
@@ -832,7 +832,7 @@ MyStatus DeviceTracerImpl::SetMetadata(const char* directory, const char* proces
   auto dump_path = DumpDirectory(directory, phase_name, process_name);
   _hw_profiler.SetDirectory(dump_path);
   _hw_profiler.SetDevice(_device);
-  if (!is_yes("IML_GPU_HW", false)) {
+  if (!is_yes("RLSCOPE_GPU_HW", false)) {
     _DisableGpuHW();
   }
   status = _hw_profiler.Init();
@@ -844,7 +844,7 @@ MyStatus DeviceTracerImpl::AsyncDump() {
   MyStatus status = MyStatus::OK();
   std::unique_lock<std::mutex> l(mu_);
   _op_stack.AsyncDump();
-  if (is_yes("IML_CUDA_ACTIVITIES", false)) {
+  if (is_yes("RLSCOPE_CUDA_ACTIVITIES", false)) {
     _activity_profiler.AsyncDump();
   }
   if (_hw_profiler.Enabled() && _hw_profiler.CanDump()) {
@@ -860,7 +860,7 @@ MyStatus DeviceTracerImpl::AwaitDump() {
   // Q: Do we need to grab this...?
   std::unique_lock<std::mutex> l(mu_);
   _op_stack.AwaitDump();
-  if (is_yes("IML_CUDA_ACTIVITIES", false)) {
+  if (is_yes("RLSCOPE_CUDA_ACTIVITIES", false)) {
     _activity_profiler.AwaitDump();
   }
   status = _hw_profiler.AwaitDump();
@@ -891,25 +891,25 @@ MyStatus DeviceTracerImpl::StartPass() {
   MyStatus status = MyStatus::OK();
   std::unique_lock<std::mutex> l(mu_);
 
-  if (_configure_pass_index < get_IML_GPU_HW_CONFIG_PASSES(boost::none)) {
+  if (_configure_pass_index < get_RLSCOPE_GPU_HW_CONFIG_PASSES(boost::none)) {
     if (_configure_pass_index == 0) {
 //      {
 //        std::stringstream ss;
-//        ss << "get_IML_GPU_HW_METRICS(boost::none) = ";
-//        PrintValue(ss, get_IML_GPU_HW_METRICS(boost::none));
+//        ss << "get_RLSCOPE_GPU_HW_METRICS(boost::none) = ";
+//        PrintValue(ss, get_RLSCOPE_GPU_HW_METRICS(boost::none));
 //        LOG(INFO) << ss.str();
 //      }
       if (SHOULD_DEBUG(FEATURE_GPU_HW)) {
         RLS_LOG("GPU_HW", "DEFAULT_METRICS_STR = {}", rlscope::get_DEFAULT_METRICS_STR());
       }
-      status = _hw_profiler.StartConfig(get_IML_GPU_HW_METRICS(boost::none));
+      status = _hw_profiler.StartConfig(get_RLSCOPE_GPU_HW_METRICS(boost::none));
       IF_BAD_STATUS_RETURN(status);
     }
     _configure_pass_index += 1;
   } else if (_hw_profiler.Mode() == GPUHwCounterSamplerMode::CONFIG) {
     std::stringstream ss;
-    ss << "call hw_profiler.StartProfiling: _configure_pass_index = " << _configure_pass_index << ", IML_GPU_HW_CONFIG_PASSES = ";
-    PrintValue(ss, get_IML_GPU_HW_METRICS(boost::none));
+    ss << "call hw_profiler.StartProfiling: _configure_pass_index = " << _configure_pass_index << ", RLSCOPE_GPU_HW_CONFIG_PASSES = ";
+    PrintValue(ss, get_RLSCOPE_GPU_HW_METRICS(boost::none));
     RLS_LOG("GPU_HW", "{}", ss.str());
     status = _hw_profiler.StartProfiling();
     IF_BAD_STATUS_RETURN(status);
@@ -930,7 +930,7 @@ MyStatus DeviceTracerImpl::EndPass() {
   status = _hw_profiler.EndPass();
   IF_BAD_STATUS_RETURN(status);
 
-  if (_hw_profiler.Mode() == GPUHwCounterSamplerMode::CONFIG && _configure_pass_index < get_IML_GPU_HW_CONFIG_PASSES(boost::none)) {
+  if (_hw_profiler.Mode() == GPUHwCounterSamplerMode::CONFIG && _configure_pass_index < get_RLSCOPE_GPU_HW_CONFIG_PASSES(boost::none)) {
     _configure_pass_index += 1;
   }
 

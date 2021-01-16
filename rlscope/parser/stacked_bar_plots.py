@@ -51,7 +51,7 @@ from rlscope.parser.constants import *
 
 class OverlapStackedBarPlot:
     """
-    Plot overlap data output by IML across SEVERAL runs where
+    Plot overlap data output by RL-Scope across SEVERAL runs where
     a run is an (algo, env_id) pair.
 
     Overlap data of the same "overlap_type" can be merged into a
