@@ -9,8 +9,9 @@ fi
 #   Source .gdbinit (may contain breakpoints).
 #   Then, run gdb on provided program (--args).
 
-ROOT="$(readlink -f "$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )")"
-source $ROOT/dockerfiles/sh/exports.sh
+SCRIPT_DIR="$(readlink -f "$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )")"
+ROOT="$(readlink -f "$SCRIPT_DIR/../..")"
+source $ROOT/dockerfiles/sh/docker_runtime_common.sh
 
 gdb \
     --eval-command "source ${RLSCOPE_DIR}/.gdbinit" \

@@ -135,6 +135,8 @@ echo "> INFO: [defined=${RLSCOPE_BUILD_PREFIX_DEFINED}] RLSCOPE_BUILD_PREFIX=${R
 echo "> INFO: Using CMAKE_INSTALL_PREFIX=$(_local_dir)"
 _add_LD_LIBRARY_PATH "$(_local_dir)/lib"
 _add_PATH "$(_local_dir)/bin"
+# NOTE: these scripts are out of date and probably don't work.
+#_add_PATH "$ROOT/dev/sh"
 _add_PYTHONPATH "$(_local_dir)/lib/python3/dist-packages"
 # I cannot remember why I used pyenv at all...I think it was for ReAgent but unfortunately
 # it leads to segfaults apparently, and we don't need/use it to run ReAgent.

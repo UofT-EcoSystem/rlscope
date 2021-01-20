@@ -20,6 +20,7 @@ import logging
 from rlscope.profiler import rlscope_logging
 
 from rlscope.parser.common import *
+from rlscope.profiler.util import cmd_debug_msg
 
 def main():
     rlscope_logging.setup_logging()
@@ -44,7 +45,7 @@ def main():
         getpass.getuser(),
         '-i',
         '-t',
-        'dockerfiles_bash_1',
+        'rlscope_bash_1',
         '/bin/bash',
         '-c',
         bash_script,
