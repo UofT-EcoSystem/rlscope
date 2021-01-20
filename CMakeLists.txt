@@ -165,8 +165,10 @@ set(THIRD_PARTY_LIB_DIRNAMES
         nsync
         backward-cpp
         eigen
-        protobuf-${PROTOBUF_VERSION}
-        # libpqxx
+        # NOTE: protobuf dependency is optional.
+        # If setup.sh installs it, we will use it.
+        # This allows us to build protobuf ahead of time during the container build.
+        # protobuf-${PROTOBUF_VERSION}
         boost_${BOOST_VERSION_UNDERSCORES}
         spdlog
         CTPL

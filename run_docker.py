@@ -617,6 +617,8 @@ def main():
         logger.error("Didn't find docker-compose on PATH; you must install it.")
         sys.exit(1)
 
+    os.makedirs(_j(py_config.ROOT, 'dockerfiles/dockerfiles'), exist_ok=True)
+
     # Copy requirements.txt into dockerfiles so it can be accessed by Dockerfile during its build.
     shutil.copy(
         _j(py_config.ROOT, "requirements.txt"),

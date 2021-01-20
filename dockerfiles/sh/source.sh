@@ -249,6 +249,13 @@ rlscope_installed() {
 )
 }
 
+rlscope_built() {
+(
+  set -eu
+  which rls-analyze > /dev/null
+)
+}
+
 #_setup_venv() {
 #  set +u
 #  source $VIRTUALENV/bin/activate

@@ -45,6 +45,8 @@ assert SQL_IMPL in {'psql', 'sqlite'}
 ANALYSIS_PY = _j(ROOT, "python/scripts", "analyze.py")
 GENERATE_INDEX_PY = _j(ROOT, "python/scripts", "generate_rlscope_plot_index.py")
 
+CPP_UNIT_TEST_CMD = 'rls-test'
+
 # If true, when you provide --rlscope-debug, log messages when:
 # - A session is created by calling tf.Session()
 # - A session is used by calling sess.run()

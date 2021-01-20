@@ -59,7 +59,7 @@ To build the C++ components, run the following:
 
 .. code-block:: console
 
-    [container]$ build_rlscope.sh
+    [container]$ build_rlscope
 
 4. Installing experiments
 -------------------------
@@ -68,7 +68,7 @@ In order to clone these repositories and install them using ``pip``, run the fol
 
 .. code-block:: console
 
-    [container]$ install_experiments.sh
+    [container]$ install_experiments
 
 5. Running experiments
 ----------------------
