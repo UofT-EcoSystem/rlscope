@@ -76,11 +76,8 @@ RLSCOPE_BASH_SERVICE_NAME = 'bash'
 TENSORFLOW_VERSION = "2.2.0"
 
 HOME = str(Path.home())
-DEFAULT_POSTGRES_PORT = 5432
 DEFAULT_RLSCOPE_DRILL_PORT = 8129
-# Default storage location for postgres database
-# (postgres is used for loading raw trace-data and analyzing it).
-DEFAULT_POSTGRES_PGDATA_DIR = _j(HOME, 'rlscope', 'pgdata')
+
 # The tag used for a locally built "bash" RL-Scope dev environment
 LOCAL_RLSCOPE_IMAGE_TAG = 'tensorflow:devel-rlscope-gpu-cuda'
 DEFAULT_REMOTE_RLSCOPE_IMAGE_TAG = 'jagleeso/rlscope:1.0.0'
@@ -617,6 +614,8 @@ def main():
         logger.error("Didn't find docker-compose on PATH; you must install it.")
         sys.exit(1)
 
+    os.makedirs(_j(py_config.ROOT, 'dockerfiles/dockerfiles'), exist_ok=True)
+
     # Copy requirements.txt into dockerfiles so it can be accessed by Dockerfile during its build.
     shutil.copy(
         _j(py_config.ROOT, "requirements.txt"),
@@ -673,17 +672,6 @@ def main():
                         type=int,
                         help=('What port to run rlscope-drill web server on '
                               '(when running "docker stack deploy -c stack.yml rlscope")'))
-
-    parser.add_argument('--deploy-postgres-port',
-                        default=DEFAULT_POSTGRES_PORT,
-                        type=int,
-                        help=('What port to run postgres on '
-                              '(when running "docker stack deploy -c stack.yml rlscope")'))
-
-    parser.add_argument('--deploy-postgres-pgdata-dir',
-                        default=DEFAULT_POSTGRES_PGDATA_DIR,
-                        help=('Default storage location for postgres database '
-                              '(postgres is used for loading raw trace-data and analyzing it).'))
 
     parser.add_argument(
         '--repository', default='tensorflow',
@@ -776,33 +764,6 @@ def main():
         textwrap.dedent("""\
         Deploy the RL-Scope development environment using 
         "docker stack deploy -c stack.yml rlscope".
-        
-        In particular:
-        - rlscope: 
-          The python library that collects profiling info.
-          
-        - tensorflow.patched: 
-          tensorflow patched with C++ modifications to support rlscope tracing.
-          
-        - rlscope-drill: 
-          The web server for visualizing collected data.
-          
-        - postgres: 
-          Used by rlscope for storing/analyzing trace-data.
-          
-        The development environment takes care of installing dependencies needed 
-        for building tensorflow.patched.
-        
-        Scripts are provided on your $PATH; some common ones:
-        - make_tflow.sh:
-          Build tensorflow.patched from source.
-          
-        - run_baselines.sh:
-          Run Atari pong benchmark from baselines repo.
-          
-        For more scripts:
-        - See <REPO>/dockerfiles/sh in the repo for all the scripts, OR
-        - See /home/{USER}/dockerfiles/sh in the deployed container
         """.format(USER=get_username())))
 
     parser.add_argument(
@@ -1350,8 +1311,6 @@ class Assembler:
             volumes=rlscope_volumes,
             ports=rlscope_ports,
             rlscope_drill_port=args.deploy_rlscope_drill_port,
-            postgres_pgdata_dir=args.deploy_postgres_pgdata_dir,
-            postgres_port=args.deploy_postgres_port,
             rlscope_image=rlscope_image,
             use_mps=args.mps,
         )
@@ -2053,7 +2012,6 @@ class StackYMLGenerator:
         {volume_list}
         
         environment:
-        - RLSCOPE_POSTGRES_HOST=db
         {env_list}
         
         # docker run --cap-add=SYS_ADMIN
@@ -2093,18 +2051,12 @@ class StackYMLGenerator:
                  assembler_cmd, env,
                  volumes, ports,
                  rlscope_drill_port=DEFAULT_RLSCOPE_DRILL_PORT,
-                 postgres_port=DEFAULT_POSTGRES_PORT,
-                 postgres_pgdata_dir=DEFAULT_POSTGRES_PGDATA_DIR,
                  rlscope_image=LOCAL_RLSCOPE_IMAGE_TAG,
                  use_mps=False):
 
         # +1 for "service: ..."
         # +1 for "bash: ..."
         bash_indent = 2
-
-        print("> Create postgres PGDATA directory @ {path} for storing databases".format(
-            path=postgres_pgdata_dir))
-        os.makedirs(postgres_pgdata_dir, exist_ok=True)
 
         template = self.get_template(use_mps=use_mps)
 
@@ -2116,9 +2068,6 @@ class StackYMLGenerator:
             # yml_build_args_list=self.build_args_list(build_args, indent=bash_indent + 2),
             volume_list=self.volume_list(volumes, indent=bash_indent),
             port_list=self.port_list(ports, indent=bash_indent + 1),
-            DEFAULT_POSTGRES_PORT=DEFAULT_POSTGRES_PORT,
-            postgres_port=postgres_port,
-            postgres_pgdata_dir=postgres_pgdata_dir,
             USER=get_username(),
             assembler_cmd=' '.join(assembler_cmd),
             PWD=os.getcwd(),

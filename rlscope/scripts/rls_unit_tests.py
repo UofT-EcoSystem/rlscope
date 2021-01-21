@@ -9,6 +9,7 @@ import sys
 import textwrap
 import os
 import contextlib
+import shutil
 
 from os.path import join as _j, abspath as _a, exists as _e, dirname as _d, basename as _b
 
@@ -80,7 +81,12 @@ class RLSUnitTests:
 
     def run_cpp(self):
         args = self.args
-        cmd = ['rls-test']
+        if shutil.which(py_config.CPP_UNIT_TEST_CMD) is None:
+            logger.error("Didn't find C++ test binary ({bin}) on PATH; have you run build_rlscope yet?".format(
+                bin=py_config.CPP_UNIT_TEST_CMD,
+            ))
+            sys.exit(1)
+        cmd = [py_config.CPP_UNIT_TEST_CMD]
         if args.debug:
             cmd = ['gdb', '--args'] + cmd
         print_cmd(cmd)

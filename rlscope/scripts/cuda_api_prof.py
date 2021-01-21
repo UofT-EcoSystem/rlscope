@@ -35,7 +35,7 @@ def main():
 
     rlscope_prof_argv, cmd_argv = gather_argv(sys.argv[1:])
 
-    parser = argparse.ArgumentParser("Sample time spent in CUDA API calls, and call counts.")
+    parser = argparse.ArgumentParser("RL-Scope cross-stack profiler for reinforcement learning workloads.")
     parser.add_argument('--debug', action='store_true')
     parser.add_argument('--rlscope-debug', action='store_true')
     parser.add_argument('--rlscope-rm-traces-from', help=textwrap.dedent("""
@@ -338,6 +338,11 @@ def main():
     set_yes_no('trace_at_start', 'RLSCOPE_TRACE_AT_START')
 
     set_yes_no('stream_sampling', 'RLSCOPE_STREAM_SAMPLING')
+
+    if len(cmd_argv) == 0:
+        parser.print_usage()
+        logger.error("You must provide a command to execute after \"rls-prof\"")
+        sys.exit(1)
 
     exe_path = shutil.which(cmd_argv[0])
     if exe_path is None:
