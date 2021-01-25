@@ -164,29 +164,44 @@ else:
 
 # pylint: disable=line-too-long
 CONSOLE_SCRIPTS = [
+    'rls-prof = rlscope.scripts.cuda_api_prof:main',
+    'rls-plot = rlscope.parser.calibration:main_plot',
     'rls-run = rlscope.scripts.analyze:main',
+
     'rls-util-sampler = rlscope.scripts.utilization_sampler:main',
     'rls-dump-proto = rlscope.scripts.dump_proto:main',
+    'rls-calibrate = rlscope.parser.calibration:main_run',
+
+    # Running various experiments for RL-Scope paper.
+    # Used by artifact evaluation.
+    'rls-run-expr = rlscope.scripts.run_expr:main',
     'rls-bench = rlscope.scripts.bench:main',
     'rls-quick-expr = rlscope.scripts.quick_expr:main',
-    'rls-prof = rlscope.scripts.cuda_api_prof:main',
-    'rls-calibrate = rlscope.parser.calibration:main_run',
-    'rls-run-expr = rlscope.scripts.run_expr:main',
-    'rls-plot = rlscope.parser.calibration:main_plot',
+
+    # Not yet ready for "prime time"...
     'rls-generate-plot-index = rlscope.scripts.generate_rlscope_plot_index:main',
-    'rls-unit-tests = rlscope.scripts.rls_unit_tests:main',
 ]
 # pylint: enable=line-too-long
 
-CPP_WRAPPER_SCRIPTS = [
-    'rls-analyze = rlscope.scripts.cpp.cpp_binary_wrapper:rls_analyze',
-    'rls-test = rlscope.scripts.cpp.cpp_binary_wrapper:rls_test',
+# Only install these inside the docker development environment
+# (or, when "python setup.py develop" is called).
+DEVELOPMENT_SCRIPTS = [
+    # NOTE: we don't install rls-analyze wrapper script; we instead depend on source_me.sh
+    # (develop_rlscope in container) to add rls-test to PATH.
+
+    # Python / C++ unit test runner.
+    'rls-unit-tests = rlscope.scripts.rls_unit_tests:main',
 ]
 
-# DEVELOPMENT_SCRIPTS = [
-# ]
-
+# NOTE: the presence of this on "PATH" tells us whether rlscope was installed using a wheel file,
+# or using "python setup.py develop" (i.e., don't install it, so it's not on PATH).
 PRODUCTION_SCRIPTS = [
+    'rls-analyze = rlscope.scripts.cpp.cpp_binary_wrapper:rls_analyze',
+
+    # Wrapper around C++ unit tests.
+    # Useful if we wish to run unit tests with the wheel file.
+    # 'rls-test = rlscope.scripts.cpp.cpp_binary_wrapper:rls_test',
+
     'rlscope-pip-installed = rlscope.scripts.cpp.cpp_binary_wrapper:rlscope_pip_installed',
 ]
 
@@ -352,10 +367,11 @@ def main():
     console_scripts = []
     console_scripts.extend(CONSOLE_SCRIPTS)
     if is_production_mode():
-        console_scripts.extend(CPP_WRAPPER_SCRIPTS)
         console_scripts.extend(PRODUCTION_SCRIPTS)
-    # else:
-    #     console_scripts.extend(DEVELOPMENT_SCRIPTS)
+    else:
+        console_scripts.extend(DEVELOPMENT_SCRIPTS)
+
+    # logger.info("entry_points: {msg}".format(msg=pprint_msg(console_scripts)))
 
     if args.help:
         # Print both argparse usage AND setuptools setup.py usage info.
@@ -398,8 +414,9 @@ def main():
             'Topic :: Software Development',
             'Topic :: Software Development :: Libraries',
             'Topic :: Software Development :: Libraries :: Python Modules',
+            'License :: OSI Approved :: Apache Software License',
         ],
-        # TODO: Add license!
+        license='Apache 2.0',
         keywords='rlscope ml profiling tensorflow machine learning reinforcement learning',
     )
 

@@ -33,6 +33,8 @@ from rlscope.parser.profiling_overhead import \
     MicrobenchmarkOverheadJSON, \
     CalibrationJSONs
 
+from rlscope.parser import check_host
+from rlscope.parser.exceptions import RLScopeConfigurationError
 
 # ( set -e; set -x; rls-quick-expr --expr total_training_time --repetitions 3 --bullet; )
 # ( set -e; set -x; rls-quick-expr --expr total_training_time --repetitions 3 --bullet --plot; )
@@ -122,6 +124,13 @@ class QuickExpr:
         func(self.extra_argv)
 
 def main():
+
+    try:
+        check_host.check_config()
+    except RLScopeConfigurationError as e:
+        logger.error(e)
+        sys.exit(1)
+
     parser = argparse.ArgumentParser(
         textwrap.dedent("""\
         Make-once run-once experiments; 

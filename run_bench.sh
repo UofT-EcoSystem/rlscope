@@ -19,7 +19,12 @@ set -e
 # (4) Compare all RL workloads:
 # Run ALL algorithms on ALL bullet environments
 
-ROOT="$(readlink -f "$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )")"
+IS_ZSH="$(ps -ef | grep $$ | grep -v --perl-regexp 'grep|ps ' | grep zsh --quiet && echo yes || echo no)"
+if [ "$IS_ZSH" = 'yes' ]; then
+  ROOT="$(readlink -f "$(dirname "${0:A}")")"
+else
+  ROOT="$(readlink -f "$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )")"
+fi
 source $ROOT/dockerfiles/sh/docker_runtime_common.sh
 
 DRY_RUN=${DRY_RUN:-no}

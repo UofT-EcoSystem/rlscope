@@ -1225,7 +1225,7 @@ void EachMerged(const std::vector<Iterable>& vec_of_xs
   while ((index < lengths).any()) {
     // Find the non-empty category with the next minimum start/end time.
     int min_i = -1;
-    Key min_key;
+    Key min_key{};
     for (int i = 0; i < index.size(); i++) {
       // Check we haven't exhausted the intervals in the category.
       if (index(i) < lengths(i)) {

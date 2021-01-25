@@ -4,12 +4,26 @@ if [ "$RLSCOPE_DIR" != "" ]; then
     ROOT="$RLSCOPE_DIR"
 else
     # Fails in container...not sure why.
-    ROOT="$(readlink -f "$(dirname "$0")")"
+    # ROOT="$(readlink -f "$(dirname "$0")")"
+
+    IS_ZSH="$(ps -ef | grep $$ | grep -v --perl-regexp 'grep|ps ' | grep zsh --quiet && echo yes || echo no)"
+    if [ "$IS_ZSH" = 'yes' ]; then
+      ROOT="$(readlink -f "$(dirname "${0:A}")")"
+    else
+      ROOT="$(readlink -f "$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )")"
+    fi
 fi
+source $ROOT/dockerfiles/sh/exports.sh
 
 PYTHONPATH=${PYTHONPATH:-}
 
-# From setup.sh
+# NOTE: put Debug paths (out of build_rlscope) on our PATH by default.
+# build_wheel will trigger Release builds.
+RLSCOPE_BUILD_TYPE=Debug
+
+##
+## BEGIN source_me.sh
+##
 _rlscope_build_suffix() {
   local cuda_version="$1"
   shift 1
@@ -23,10 +37,10 @@ cmake_build_dir() {
     local build_prefix=
     if _is_non_empty RLSCOPE_BUILD_PREFIX; then
       # Docker container environment.
-      build_prefix="$RLSCOPE_BUILD_PREFIX"
+      build_prefix="$RLSCOPE_BUILD_PREFIX/${RLSCOPE_BUILD_TYPE}"
     else
       # Assume we're running in host environment.
-      build_prefix="$ROOT/local.host"
+      build_prefix="$ROOT/local.host/${RLSCOPE_BUILD_TYPE}"
     fi
     local build_dir="$build_prefix/$(basename "$third_party_dir")"
     if _is_non_empty RLSCOPE_BUILD_SUFFIX; then
@@ -46,10 +60,11 @@ _is_non_empty() {
   [ "${value}" != "" ]
   )
 }
-_local_dir() {
+_rlscope_install_prefix() {
     # When installing things with configure/make-install
     # $ configure --prefix="$(_local_dir)"
-    if _is_non_empty RLSCOPE_INSTALL_PREFIX; then
+#    if _is_non_empty RLSCOPE_INSTALL_PREFIX; then
+    if _is_non_empty RLSCOPE_IS_DOCKER && [ "$RLSCOPE_IS_DOCKER" = 'yes' ]; then
       # Docker container environment.
       echo "$RLSCOPE_INSTALL_PREFIX"
     else
@@ -57,16 +72,23 @@ _local_dir() {
       echo "$ROOT/local.host"
     fi
 }
-_build_dir() {
+_rlscope_build_prefix() {
     local build_prefix=
-    if _is_non_empty RLSCOPE_BUILD_PREFIX; then
+#    if _is_non_empty RLSCOPE_BUILD_PREFIX; then
+    if _is_non_empty RLSCOPE_IS_DOCKER && [ "$RLSCOPE_IS_DOCKER" = 'yes' ]; then
       # Docker container environment.
       build_prefix="$RLSCOPE_BUILD_PREFIX"
     else
       # Assume we're running in host environment.
-      build_prefix="$ROOT/local.host"
+      build_prefix="$ROOT/build.host"
     fi
     echo "$build_prefix"
+}
+_local_dir() {
+    echo "$(_rlscope_install_prefix)/${RLSCOPE_BUILD_TYPE}"
+}
+_build_dir() {
+    echo "$(_rlscope_build_prefix)/${RLSCOPE_BUILD_TYPE}"
 }
 _add_PATH() {
     local direc="$1"
@@ -89,28 +111,9 @@ _add_PYTHONPATH() {
   echo "> INFO: Add to PYTHONPATH: $lib_dir"
   export PYTHONPATH="$lib_dir:$PYTHONPATH"
 }
-#_add_pyenv() {
-#  local pyenv_dir=$RLSCOPE_INSTALL_PREFIX/pyenv
-#  local bin_dir=$pyenv_dir/bin
-#
-#  if [ -e $bin_dir ]; then
-#      export PYENV_ROOT="$pyenv_dir"
-#      _add_PATH "$PYENV_ROOT/bin"
-#      # export PATH="$PYENV_ROOT/bin:$PATH"
-#
-#      if [ -x "$(which pyenv)" ]; then
-#          eval "$(pyenv init -)"
-#      fi
-#
-#      # if [ -e $bin_dir/plugins/pyenv-virtualenv ]; then
-#      #     # automatically active pyenv-virtualenv if .python-version file present in directory:
-#      #     # https://github.com/pyenv/pyenv-virtualenv#activate-virtualenv
-#      #     eval "$(pyenv virtualenv-init -)"
-#      # fi
-#  fi
-#
-##  export PYENV_ROOT_DIR
-#}
+##
+## END source_me.sh
+##
 
 (
 
@@ -135,20 +138,18 @@ echo "> INFO: [defined=${RLSCOPE_BUILD_PREFIX_DEFINED}] RLSCOPE_BUILD_PREFIX=${R
 echo "> INFO: Using CMAKE_INSTALL_PREFIX=$(_local_dir)"
 _add_LD_LIBRARY_PATH "$(_local_dir)/lib"
 _add_PATH "$(_local_dir)/bin"
+_add_PATH "${ROOT}/dockerfiles/sh"
 # NOTE: these scripts are out of date and probably don't work.
 #_add_PATH "$ROOT/dev/sh"
 _add_PYTHONPATH "$(_local_dir)/lib/python3/dist-packages"
-# I cannot remember why I used pyenv at all...I think it was for ReAgent but unfortunately
-# it leads to segfaults apparently, and we don't need/use it to run ReAgent.
-#_add_pyenv
 
 if [ "${RLSCOPE_INSTALL_PREFIX:-}" = "" ]; then
-  echo "> INFO: export RLSCOPE_INSTALL_PREFIX=$(_local_dir)"
-  export RLSCOPE_INSTALL_PREFIX="$(_local_dir)"
+  echo "> INFO: export RLSCOPE_INSTALL_PREFIX=$(_rlscope_install_prefix)"
+  export RLSCOPE_INSTALL_PREFIX="$(_rlscope_install_prefix)"
 fi
 if [ "${RLSCOPE_BUILD_PREFIX:-}" = "" ]; then
-  echo "> INFO: export RLSCOPE_BUILD_PREFIX=$(_build_dir)"
-  export RLSCOPE_BUILD_PREFIX="$(_build_dir)"
+  echo "> INFO: export RLSCOPE_BUILD_PREFIX=$(_rlscope_build_prefix)"
+  export RLSCOPE_BUILD_PREFIX="$(_rlscope_build_prefix)"
 fi
 
 unset _add_LD_LIBRARY_PATH
@@ -156,4 +157,4 @@ unset _add_PATH
 unset ROOT
 unset _local_dir
 unset _is_non_empty
-#unset _add_pyenv
+

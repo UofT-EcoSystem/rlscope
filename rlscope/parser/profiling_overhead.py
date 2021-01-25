@@ -2185,9 +2185,27 @@ def cupti_read_cuda_api_stats(config_directories_pairs,
             training_iterations = training_mapper.map_one(lambda reader: reader.training_iterations())
             training_duration_us = training_mapper.map_one(lambda reader: reader.training_duration_us())
 
-            per_api_stats = get_per_api_stats(directory, debug=debug, debug_single_thread=debug_single_thread)
+            per_api_stats = get_per_api_stats(directory,
+                                              # debug=debug,
+                                              debug=True,
+                                              debug_single_thread=debug_single_thread)
             per_api_stats = per_api_stats.reset_index()
-            logger.info("per_api_stats: " + pprint_msg(per_api_stats))
+            logger.debug("directory = {directory}".format(directory=directory))
+            logger.debug("per_api_stats: " + pprint_msg(per_api_stats))
+
+            if len(per_api_stats) == 0:
+                logger.error(
+                    textwrap.dedent("""\
+                    RL-Scope: the program you ran (--rlscope-directory={directory}) didn't contain any 
+                    CUDA API calls, making it impossible to perform calibration.  
+                    This can happen if TensorFlow cannot locate DNN shared libraries (e.g., libcudnn.so), 
+                    and (silently) falls back to CPU-only execution.
+                    If you are using TensorFlow, make sure it can use the GPU by querying available devices 
+                    by calling tf.config.list_physical_devices()
+                      See: https://www.tensorflow.org/api_docs/python/tf/config/list_physical_devices
+                    """))
+                sys.exit(1)
+
             for i, row in per_api_stats.iterrows():
                 total_api_time_us = row['total_time_us']
                 total_num_calls = row['num_calls']

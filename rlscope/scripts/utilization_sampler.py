@@ -30,6 +30,9 @@ from rlscope.profiler.util import log_cmd, print_cmd, get_cpu_brand
 from rlscope.parser.common import *
 from rlscope.profiler import timer as rlscope_timer
 
+from rlscope.parser import check_host
+from rlscope.parser.exceptions import RLScopeConfigurationError
+
 BYTES_IN_KB = 1 << 10
 BYTES_IN_MB = 1 << 20
 
@@ -713,6 +716,13 @@ def disable_test_sample_gpu_util():
 
 from rlscope.profiler.rlscope_logging import logger
 def main():
+
+    try:
+        check_host.check_config()
+    except RLScopeConfigurationError as e:
+        logger.error(e)
+        sys.exit(1)
+
     rlscope_util_argv, cmd_argv = split_argv_on(sys.argv[1:])
     parser = get_util_sampler_parser(add_rlscope_root_pid=len(cmd_argv) == 0)
     args = parser.parse_args(rlscope_util_argv)

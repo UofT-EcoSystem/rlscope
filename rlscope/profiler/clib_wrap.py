@@ -166,45 +166,47 @@ class CFuncWrapper:
         if py_config.DEBUG_WRAP_CLIB:
             logger.info("> call.name = {name}".format(name=name))
 
-        def call(*args, **kwargs):
-            # NOTE: for some reason, if we don't use a local variable here,
-            # it will return None!  Bug in python3...?
-            if self.debug:
-                logger.info("call: {name}".format(name=name))
-            ret = self.func(*args, **kwargs)
-            return ret
-
         #
-        # If we comment this out, then "call" returns the gpu_sleep time...
-        # Not sure WHY.
+        # NOTE: the rationale behind the code below was to allow creating a wrapper function around
+        # self.func without renaming it.  However:
+        # 1. We don't need to rename it (only mattered when using pyprof)
+        # 2. It's helpful for debugging anyways.
         #
 
-        # c = call.func_code
-        # Python3
-        c = call.__code__
-
-        # https://docs.python.org/3.0/whatsnew/3.0.html
+        # def call(*args, **kwargs):
+        #     # NOTE: for some reason, if we don't use a local variable here,
+        #     # it will return None!  Bug in python3...?
+        #     if self.debug:
+        #         logger.info("call: {name}".format(name=name))
+        #     ret = self.func(*args, **kwargs)
+        #     return ret
         #
-        # """
-        # The function attributes named func_X have been renamed to use the __X__ form,
-        # freeing up these names in the function attribute namespace for user-defined attributes.
-        # To wit, func_closure, func_code, func_defaults, func_dict, func_doc, func_globals,
-        # func_name were renamed to __closure__, __code__, __defaults__, __dict__, __doc__, __globals__,
-        # __name__, respectively.
-        # """
-
-        new_code = types.CodeType(
-            c.co_argcount, c.co_kwonlyargcount, c.co_nlocals, c.co_stacksize,
-            c.co_flags, c.co_code, c.co_consts,
-            c.co_names, c.co_varnames, c.co_filename,
-            name, c.co_firstlineno, c.co_lnotab,
-            c.co_freevars, c.co_cellvars
-        )
-        call = types.FunctionType(
-            new_code, call.__globals__, name, call.__defaults__,
-            call.__closure__)
-
-        super().__setattr__('call', call)
+        # # c = call.func_code
+        # # Python3
+        # c = call.__code__
+        #
+        # # https://docs.python.org/3.0/whatsnew/3.0.html
+        # #
+        # # """
+        # # The function attributes named func_X have been renamed to use the __X__ form,
+        # # freeing up these names in the function attribute namespace for user-defined attributes.
+        # # To wit, func_closure, func_code, func_defaults, func_dict, func_doc, func_globals,
+        # # func_name were renamed to __closure__, __code__, __defaults__, __dict__, __doc__, __globals__,
+        # # __name__, respectively.
+        # # """
+        #
+        # new_code = types.CodeType(
+        #     c.co_argcount, c.co_kwonlyargcount, c.co_nlocals, c.co_stacksize,
+        #     c.co_flags, c.co_code, c.co_consts,
+        #     c.co_names, c.co_varnames, c.co_filename,
+        #     name, c.co_firstlineno, c.co_lnotab,
+        #     c.co_freevars, c.co_cellvars
+        # )
+        # call = types.FunctionType(
+        #     new_code, call.__globals__, name, call.__defaults__,
+        #     call.__closure__)
+        #
+        # super().__setattr__('call', call)
 
     def wrapper_name(self, name):
         return "{prefix}{name}".format(
@@ -214,7 +216,7 @@ class CFuncWrapper:
     def __call__(self, *args, **kwargs):
         name = self.func.__name__
         with CallStack.frame(category=self.category, name=name):
-            ret = self.call(*args, **kwargs)
+            ret = self.func(*args, **kwargs)
             return ret
 
     def __setattr__(self, name, value):

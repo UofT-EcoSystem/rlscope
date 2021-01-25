@@ -31,13 +31,13 @@ set(CUDA_LINK_LIBRARIES_KEYWORD PRIVATE)
 include(LibFindMacros)
 
 if(CLION)
-    SET(ENV{LD_LIBRARY_PATH} "${CMAKE_SOURCE_DIR}/local.host/lib:$ENV{LD_LIBRARY_PATH}")
+    SET(ENV{LD_LIBRARY_PATH} "${CMAKE_SOURCE_DIR}/local.host/${CMAKE_BUILD_TYPE}/lib:$ENV{LD_LIBRARY_PATH}")
     message("Set LD_LIBRARY_PATH = $ENV{LD_LIBRARY_PATH}")
 
-    SET(ENV{PATH} "${CMAKE_SOURCE_DIR}/local.host/bin:$ENV{PATH}")
+    SET(ENV{PATH} "${CMAKE_SOURCE_DIR}/local.host/${CMAKE_BUILD_TYPE}/bin:$ENV{PATH}")
     message("Set PATH = $ENV{PATH}")
 
-    SET(CMAKE_INSTALL_PREFIX "${CMAKE_SOURCE_DIR}/local.host")
+    SET(CMAKE_INSTALL_PREFIX "${CMAKE_SOURCE_DIR}/local.host/${CMAKE_BUILD_TYPE}")
     message("Set CMAKE_INSTALL_PREFIX = ${CMAKE_INSTALL_PREFIX}")
 endif()
 
@@ -46,20 +46,20 @@ if(DEFINED ENV{RLSCOPE_INSTALL_PREFIX})
     set(RLSCOPE_INSTALL_PREFIX $ENV{RLSCOPE_INSTALL_PREFIX})
 else()
     message("> Building for host")
-    set(RLSCOPE_INSTALL_PREFIX "${CMAKE_SOURCE_DIR}/local.host")
+    set(RLSCOPE_INSTALL_PREFIX "${CMAKE_SOURCE_DIR}/local.host/${CMAKE_BUILD_TYPE}")
 endif()
 message("  RLSCOPE_INSTALL_PREFIX=${RLSCOPE_INSTALL_PREFIX}")
 # Override system installation of libraries (e.g., gflags)
-message("    link_directories: ${RLSCOPE_INSTALL_PREFIX}/lib")
-link_directories(BEFORE ${RLSCOPE_INSTALL_PREFIX}/lib)
-message("    include_directories: ${RLSCOPE_INSTALL_PREFIX}/include")
-include_directories(BEFORE ${RLSCOPE_INSTALL_PREFIX}/include)
+message("    link_directories: ${RLSCOPE_INSTALL_PREFIX}/${CMAKE_BUILD_TYPE}/lib")
+link_directories(BEFORE ${RLSCOPE_INSTALL_PREFIX}/${CMAKE_BUILD_TYPE}/lib)
+message("    include_directories: ${RLSCOPE_INSTALL_PREFIX}/${CMAKE_BUILD_TYPE}/include")
+include_directories(BEFORE ${RLSCOPE_INSTALL_PREFIX}/${CMAKE_BUILD_TYPE}/include)
 
 
-list(PREPEND CMAKE_PROGRAM_PATH "${RLSCOPE_INSTALL_PREFIX}/bin")
-list(PREPEND CMAKE_INCLUDE_PATH "${RLSCOPE_INSTALL_PREFIX}/include")
-list(PREPEND CMAKE_INCLUDE_PATH "${RLSCOPE_INSTALL_PREFIX}/bin")
-list(PREPEND CMAKE_LIBRARY_PATH "${RLSCOPE_INSTALL_PREFIX}/lib")
+list(PREPEND CMAKE_PROGRAM_PATH "${RLSCOPE_INSTALL_PREFIX}/${CMAKE_BUILD_TYPE}/bin")
+list(PREPEND CMAKE_INCLUDE_PATH "${RLSCOPE_INSTALL_PREFIX}/${CMAKE_BUILD_TYPE}/include")
+list(PREPEND CMAKE_INCLUDE_PATH "${RLSCOPE_INSTALL_PREFIX}/${CMAKE_BUILD_TYPE}/bin")
+list(PREPEND CMAKE_LIBRARY_PATH "${RLSCOPE_INSTALL_PREFIX}/${CMAKE_BUILD_TYPE}/lib")
 
 # Use pkg-config to get hints about paths
 #libfind_pkg_check_modules(CUDAProfilingAPI_PKGCONF CUDAProfilingAPI)
@@ -79,12 +79,16 @@ find_package(CUDAProfilingAPI REQUIRED)
 # NOTE: This isn't enough to keep BOOST_LIBRARYDIR in RUNPATH for some reason.
 # See CMAKE_INSTALL_RPATH related line below.
 
-# Keep CUDA/CUPTI paths in the RUNPATH of librlscope.so so other C/C++ projects can easily linked against it
-# without worrying about it's dependencies.
+# Keep CUDA/CUPTI paths in the RUNPATH of binaries and libraries (i.e., librlscope.so, rls-analyze).
+# This allows libcupti and libcuda to be located on typical Linux distributions, without the user
+# needing to modify LD_LIBRARY_PATH manually.
+# But of course, they can always override it by setting LD_LIBRARY_PATH if they so choose.
 #
 # This option is best described here:
+# https://gitlab.kitware.com/cmake/community/-/wikis/doc/cmake/RPATH-handling#what-is-rpath
+#   Describes the order of searching for libraries on UNIX (first LD_LIBRARY_PATH, then RUNPATH).
 # https://gitlab.kitware.com/cmake/community/-/wikis/doc/cmake/RPATH-handling#always-full-rpath
-# That link does a good job of describing how CMake handles library paths in general.
+#   Describes how CMake handles library paths in general.
 set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
 
 # We want to be able to do std::move() for lambda captures (c++11 doesn't have that).
@@ -233,6 +237,10 @@ add_subdirectory(third_party/abseil-cpp
 unset(BUILD_TESTING)
 
 # Third party: backward-cpp
+IF(CMAKE_BUILD_TYPE STREQUAL "Release")
+    message("> Disable C++ stacktraces for ${CMAKE_BUILD_TYPE}")
+    set(STACK_DETAILS_AUTO_DETECT FALSE)
+ENDIF()
 add_subdirectory(third_party/backward-cpp
         # DON'T include backward-cpp's install(...) files in CPack package (e.g., include/nsync*.h)
         EXCLUDE_FROM_ALL)
@@ -257,7 +265,7 @@ find_package(nlohmann_json REQUIRED)
 #   when compiling gpu_util_experiment.
 #   NOTE: attempts to set target specific compile options didn't work since
 #   nvcc ignored them... not sure why.
-set(IGNORE_ERRORS "-Wno-unused -Wno-unknown-pragmas -Wno-deprecated-declarations")
+set(IGNORE_ERRORS "-Wno-unused-result -Wno-unused -Wno-unknown-pragmas -Wno-deprecated-declarations")
 set(ADD_WARNINGS_FLAGS "-Wuninitialized")
 #set(CMAKE_CXX_STANDARD 11)
 #-std=c++11

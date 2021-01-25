@@ -2,12 +2,27 @@
 set -e
 set -u
 
+IS_ZSH="$(ps -ef | grep $$ | grep -v --perl-regexp 'grep|ps ' | grep zsh --quiet && echo yes || echo no)"
+if [ "$IS_ZSH" = 'yes' ]; then
+  echo "ERROR: please run setup.sh using bash (not zsh)"
+  exit 1
+fi
+
+
 # Need a checkout of tensorflow to build:
 # 1) Python pip package
 # 2) C-API
 #TENSORFLOW_SRC_ROOT=$HOME/clone/tensorflow
 JOBS=${JOBS:-$(nproc)}
 echo "> Using JOBS=$JOBS"
+
+# If no, clone using https://github.com/$user/$repo
+#   Works better in docker containers (no ssh key).
+# If yes, clone using git@github.com:$user/$repo
+#   Works better outside docker containers (ssh key and config present).
+GIT_USE_SSH=${GIT_USE_SSH:-no}
+
+LD_LIBRARY_PATH=${LD_LIBRARY_PATH:-}
 
 # If BUILD_PIP=yes, then build a python wheel.
 BUILD_PIP=${BUILD_PIP:-no}
@@ -16,6 +31,12 @@ EXPERIMENTS=${EXPERIMENTS:-no}
 # If SKIP_CPACK=yes, then skip calling "make package" to create a cmake binary archive (*.tar.gz)
 # from rlscope binaries/libraries.
 SKIP_CPACK=${SKIP_CPACK:-no}
+
+if [ "$BUILD_PIP" = 'yes' ]; then
+  RLSCOPE_BUILD_TYPE=Release
+else
+  RLSCOPE_BUILD_TYPE=Debug
+fi
 
 RLSCOPE_CUDA_VERSION=${RLSCOPE_CUDA_VERSION:-10.1}
 
@@ -30,7 +51,12 @@ if [ "$DEBUG" = 'yes' ]; then
     set -x
 fi
 
-ROOT="$(readlink -f "$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )")"
+IS_ZSH="$(ps -ef | grep $$ | grep -v --perl-regexp 'grep|ps ' | grep zsh --quiet && echo yes || echo no)"
+if [ "$IS_ZSH" = 'yes' ]; then
+  ROOT="$(readlink -f "$(dirname "${0:A}")")"
+else
+  ROOT="$(readlink -f "$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )")"
+fi
 source $ROOT/dockerfiles/sh/docker_runtime_common.sh
 
 ## Only add "_cuda_10_1" suffix to rlscope build directory.
@@ -126,7 +152,6 @@ _untar() {
 
 }
 
-GIT_USERNAME=${GIT_USERNAME:-}
 GIT_PULL=no
 GIT_RECURSIVE=yes
 GIT_CLONE_OPTS=()
@@ -160,10 +185,15 @@ _git_clone() {
     )
 }
 
+_GIT_HAS_WARNED=no
 _github_clone() {
     local path="$1"
     local name_slash_repo="$2"
     shift 2
+    if [ "$GIT_USE_SSH" = "no" ] && [ "$_GIT_HAS_WARNED" = "no" ]; then
+      log_warning "RL-Scope NOTE: set GIT_USE_SSH=yes if you have a github ssh key and want to clone repos using git@github.com:$name_slash_repo"
+      _GIT_HAS_WARNED=yes
+    fi
     local repo="$(github_url $name_slash_repo)"
     _git_clone "$path" "$repo" "$@"
 }
@@ -186,11 +216,12 @@ _hg_clone() {
    )
 }
 
+
 github_url() {
     local name_slash_repo="$1"
     shift 1
 
-    if [ "$GIT_USERNAME" != "" ]; then
+    if [ "$GIT_USE_SSH" = "yes" ]; then
       # Doesn't work inside docker container (no ssh key)
       echo "git@github.com:$name_slash_repo"
     else
@@ -231,7 +262,7 @@ setup_json_cpp_library() {
 #
 
 setup_clone_experiments() {
-  _do setup_experiment_baselines
+  # _do setup_experiment_baselines
   _do setup_experiment_rl_baselines_zoo
   _do setup_experiment_stable_baselines
   _do setup_experiment_tf_agents
@@ -241,7 +272,7 @@ setup_clone_experiments() {
 }
 
 setup_install_experiments() {
-  _do install_baselines.sh
+  # _do install_baselines.sh
   _do install_stable_baselines.sh
   _do install_reagent.sh
   _do install_tf_agents.sh
@@ -395,6 +426,16 @@ third_party_install_prefix() {
     # Install in $ROOT/local.$(hostname)
     _local_dir
 }
+
+##
+## BEGIN source_me.sh
+##
+_rlscope_build_suffix() {
+  local cuda_version="$1"
+  shift 1
+  # e.g. RLSCOPE_BUILD_SUFFIX="_cuda_10_2"
+  echo "_cuda_${cuda_version}" | sed 's/[\.]/_/g'
+}
 cmake_build_dir() {
     local third_party_dir="$1"
     shift 1
@@ -402,10 +443,10 @@ cmake_build_dir() {
     local build_prefix=
     if _is_non_empty RLSCOPE_BUILD_PREFIX; then
       # Docker container environment.
-      build_prefix="$RLSCOPE_BUILD_PREFIX"
+      build_prefix="$RLSCOPE_BUILD_PREFIX/${RLSCOPE_BUILD_TYPE}"
     else
       # Assume we're running in host environment.
-      build_prefix="$ROOT/local.host"
+      build_prefix="$ROOT/local.host/${RLSCOPE_BUILD_TYPE}"
     fi
     local build_dir="$build_prefix/$(basename "$third_party_dir")"
     if _is_non_empty RLSCOPE_BUILD_SUFFIX; then
@@ -425,10 +466,11 @@ _is_non_empty() {
   [ "${value}" != "" ]
   )
 }
-_local_dir() {
+_rlscope_install_prefix() {
     # When installing things with configure/make-install
     # $ configure --prefix="$(_local_dir)"
-    if _is_non_empty RLSCOPE_INSTALL_PREFIX; then
+#    if _is_non_empty RLSCOPE_INSTALL_PREFIX; then
+    if _is_non_empty RLSCOPE_IS_DOCKER && [ "$RLSCOPE_IS_DOCKER" = 'yes' ]; then
       # Docker container environment.
       echo "$RLSCOPE_INSTALL_PREFIX"
     else
@@ -436,16 +478,23 @@ _local_dir() {
       echo "$ROOT/local.host"
     fi
 }
-_build_dir() {
+_rlscope_build_prefix() {
     local build_prefix=
-    if _is_non_empty RLSCOPE_BUILD_PREFIX; then
+#    if _is_non_empty RLSCOPE_BUILD_PREFIX; then
+    if _is_non_empty RLSCOPE_IS_DOCKER && [ "$RLSCOPE_IS_DOCKER" = 'yes' ]; then
       # Docker container environment.
       build_prefix="$RLSCOPE_BUILD_PREFIX"
     else
       # Assume we're running in host environment.
-      build_prefix="$ROOT/local.host"
+      build_prefix="$ROOT/build.host"
     fi
     echo "$build_prefix"
+}
+_local_dir() {
+    echo "$(_rlscope_install_prefix)/${RLSCOPE_BUILD_TYPE}"
+}
+_build_dir() {
+    echo "$(_rlscope_build_prefix)/${RLSCOPE_BUILD_TYPE}"
 }
 _add_PATH() {
     local direc="$1"
@@ -454,7 +503,6 @@ _add_PATH() {
     echo "> INFO: Add to PATH: $direc"
     export PATH="$direc:$PATH"
 }
-
 _add_LD_LIBRARY_PATH() {
   local lib_dir="$1"
   shift 1
@@ -462,6 +510,16 @@ _add_LD_LIBRARY_PATH() {
   echo "> INFO: Add to LD_LIBRARY_PATH: $lib_dir"
   export LD_LIBRARY_PATH="$lib_dir:$LD_LIBRARY_PATH"
 }
+_add_PYTHONPATH() {
+  local lib_dir="$1"
+  shift 1
+
+  echo "> INFO: Add to PYTHONPATH: $lib_dir"
+  export PYTHONPATH="$lib_dir:$PYTHONPATH"
+}
+##
+## END source_me.sh
+##
 
 NSYNC_CPP_LIB_DIR="$ROOT/third_party/nsync"
 setup_nsync_cpp_library() {
@@ -479,7 +537,9 @@ setup_backward_cpp_library() {
     if [ "$FORCE" != 'yes' ] && [ -e $BACKWARD_CPP_LIB_DIR ]; then
         return
     fi
-    local commit="v1.4"
+    # local commit="v1.4"
+    # Compilation fix for Ubuntu 20.04 binutils update.
+    local commit="v1.5"
     _github_clone "$BACKWARD_CPP_LIB_DIR" \
         bombela/backward-cpp.git \
         $commit
@@ -595,8 +655,10 @@ cmake_prepare() {
     _dov cd "$(cmake_build_dir "$src_dir")"
     _dov cmake "$src_dir" -DCMAKE_INSTALL_PREFIX="$(third_party_install_prefix "$src_dir")" "${CMAKE_OPTS[@]}"
     )
-    CMAKE_OPTS=()
-    CMAKE_VERBOSE=
+    if [ "$CMAKE_NO_CLEAR_OPTS" != 'yes' ]; then
+      CMAKE_OPTS=()
+      CMAKE_VERBOSE=
+    fi
     DO_VERBOSE="$old_DO_VERBOSE"
 }
 cmake_make() {
@@ -611,8 +673,10 @@ cmake_make() {
     _dov make -j${JOBS} "$@"
     # _dov make install
     )
-    CMAKE_OPTS=()
-    CMAKE_VERBOSE=
+    if [ "$CMAKE_NO_CLEAR_OPTS" != 'yes' ]; then
+      CMAKE_OPTS=()
+      CMAKE_VERBOSE=
+    fi
     DO_VERBOSE="$old_DO_VERBOSE"
 }
 cmake_install() {
@@ -626,8 +690,10 @@ cmake_install() {
     _dov cd "$(cmake_build_dir "$src_dir")"
     _dov make install
     )
-    CMAKE_OPTS=()
-    CMAKE_VERBOSE=
+    if [ "$CMAKE_NO_CLEAR_OPTS" != 'yes' ]; then
+      CMAKE_OPTS=()
+      CMAKE_VERBOSE=
+    fi
     DO_VERBOSE="$old_DO_VERBOSE"
 }
 
@@ -764,6 +830,7 @@ _maybe() {
 _do() {
     echo "> CMD [setup.sh]:"
     echo "  $ $@"
+    echo "  PWD=$PWD"
     "$@"
 }
 DO_VERBOSE=
@@ -771,6 +838,7 @@ _dov() {
   if [ "$DO_VERBOSE" = 'yes' ]; then
     echo "> CMD [setup.sh]:"
     echo "  $ $@"
+    echo "  PWD=$PWD"
   fi
   "$@"
 }
@@ -825,7 +893,6 @@ main() {
       log_info "    $ experiment_simulator_choice.sh"
       return
     fi
-
 
     #
     # Build RL-Scope from source (possibly a *.whl file also if BUILD_PIP=yes).
@@ -927,11 +994,19 @@ _rlscope_build_suffix() {
 _setup_project_with_cuda() {
   (
   set -u
+
+  echo "> RL-Scope build environment variables:"
+  echo "  - LD_LIBRARY_PATH = ${LD_LIBRARY_PATH}"
+  echo "  - PATH = ${PATH}"
+  echo "  - cmake = $(which cmake), $(cmake --version | grep version)"
+  # echo "  - LD_LIBRARY_PATH = ${LD_LIBRARY_PATH}"
+
   RLSCOPE_BUILD_SUFFIX="$(_rlscope_build_suffix ${cuda_version})"
   CUDA_TOOLKIT_ROOT_DIR=/usr/local/cuda-${cuda_version}
-  CMAKE_OPTS=(-DCMAKE_BUILD_TYPE=Debug -DCUDA_TOOLKIT_ROOT_DIR=${CUDA_TOOLKIT_ROOT_DIR})
+  CMAKE_OPTS=(-DCMAKE_BUILD_TYPE=${RLSCOPE_BUILD_TYPE} -DCUDA_TOOLKIT_ROOT_DIR=${CUDA_TOOLKIT_ROOT_DIR})
   CMAKE_VERBOSE=yes
   CMAKE_NO_CLEAR_OPTS=yes
+  DO_VERBOSE=yes
   _setup_project
   )
 }

@@ -59,6 +59,8 @@ from rlscope.parser.profiling_overhead import \
     PyprofOverheadParser, \
     MicrobenchmarkOverheadJSON, \
     CalibrationJSONs
+from rlscope.parser import check_host
+from rlscope.parser.exceptions import RLScopeConfigurationError
 
 SENTINEL = object()
 
@@ -1352,6 +1354,13 @@ def main_run():
     return _main(['run'] + sys.argv[1:])
 
 def _main(argv):
+
+    try:
+        check_host.check_config()
+    except RLScopeConfigurationError as e:
+        logger.error(e)
+        sys.exit(1)
+
     parser = argparse.ArgumentParser(
         description="Run RLScope calibrated for profiling overhead, and create plots from multiple workloads",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)

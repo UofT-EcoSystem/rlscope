@@ -31,6 +31,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.gridspec
 
+import shutil
 import os
 import os.path
 from os.path import join as _j, abspath as _a, exists as _e, dirname as _d, basename as _b
@@ -43,6 +44,7 @@ from rlscope.parser.overlap_result import from_js, CategoryKey as CategoryKeyJS
 from rlscope.parser.dataframe import VennData, get_training_durations_df, read_rlscope_config_metadata, get_total_timesteps, get_end_num_timesteps, RLScopeConfig, extrap_total_training_time
 from rlscope.parser import dataframe as rlscope_dataframe
 from rlscope.parser.plot import LegendMaker, HATCH_STYLES, HATCH_STYLE_EMPTY, Y_LABEL_TRAINING_TIME_SEC
+from rlscope.parser.exceptions import RLScopeConfigurationError
 
 from rlscope.parser.common import *
 from rlscope.parser import constants
@@ -3930,6 +3932,12 @@ def crop_pdf(path, output=None):
         # output (in-place)
         output = path
     # pdfcrop comes from texlive-extra-utils apt package on ubuntu.
+    if not shutil.which('pdfcrop'):
+        raise RLScopeConfigurationError(
+            textwrap.dedent("""\
+            Couldn't find command 'pdfcrop' on PATH; to install on Ubuntu, run:
+              $ sudo apt install texlive-extra-utils
+            """))
     subprocess.check_call(["pdfcrop",
                            # input
                            path,

@@ -1,7 +1,12 @@
 #!/usr/bin/env bash
 
 # Currently we're in ROOT/src/sh.
-SH_DIR="$(readlink -f "$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )")"
+IS_ZSH="$(ps -ef | grep $$ | grep -v --perl-regexp 'grep|ps ' | grep zsh --quiet && echo yes || echo no)"
+if [ "$IS_ZSH" = 'yes' ]; then
+  SH_DIR="$(readlink -f "$(dirname "${0:A}")")"
+else
+  SH_DIR="$(readlink -f "$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )")"
+fi
 ROOT="$(realpath "$SH_DIR/../..")"
 source $ROOT/dockerfiles/sh/exports.sh
 cd $ROOT

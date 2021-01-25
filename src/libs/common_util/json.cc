@@ -29,7 +29,7 @@ MyStatus ReadJson(std::string path, json* j) {
   std::ifstream inp(path);
   try {
     inp >> *j;
-  } catch (nlohmann::detail::parse_error e) {
+  } catch (nlohmann::detail::parse_error& e) {
     std::stringstream ss;
     ss << "Failed to parse json file @ path=" << path << ":\n";
     ss << e.what();
@@ -52,7 +52,7 @@ MyStatus WriteJson(std::string path, const nlohmann::json& j) {
   try {
     // j.dump()
     out << std::setw(4) << j;
-  } catch (nlohmann::detail::parse_error e) {
+  } catch (nlohmann::detail::parse_error& e) {
     std::stringstream ss;
     ss << "Failed to write json file @ path=" << path << ":\n";
     ss << e.what();

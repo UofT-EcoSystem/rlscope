@@ -15,8 +15,17 @@ import textwrap
 import multiprocessing
 from rlscope.parser import tasks
 from rlscope.profiler.rlscope_logging import logger
+from rlscope.parser import check_host
+from rlscope.parser.exceptions import RLScopeConfigurationError
 
 def main():
+
+    try:
+        check_host.check_config()
+    except RLScopeConfigurationError as e:
+        logger.error(e)
+        sys.exit(1)
+
     parser = argparse.ArgumentParser(
         textwrap.dedent("""\
         Process trace-files collected from running an ML script with the RL-Scope profiler.

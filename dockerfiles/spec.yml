@@ -49,6 +49,12 @@ releases:
       tag_specs:
         - "{ubuntu-devel-rlscope-cuda-11-0}"
 
+#    rlscope-ubuntu-20-04-cuda-10-1:
+#      is_dockerfiles: true
+#      upload_images: false
+#      tag_specs:
+#        - "{ubuntu-20-04-devel-rlscope-cuda-10-1}"
+
     test-cuda-10-1:
       is_dockerfiles: true
       upload_images: false
@@ -105,7 +111,7 @@ slice_sets:
         - add_to_name: ""
           dockerfile_exclusive_name: "cpu"
           partials:
-              - ubuntu/version
+              - ubuntu/version_18_04
               - ubuntu/cpu
               - ubuntu/python
               - tensorflow
@@ -115,7 +121,7 @@ slice_sets:
           args:
               - TF_PACKAGE=tensorflow-gpu
           partials:
-              - ubuntu/version
+              - ubuntu/version_18_04
               - ubuntu/nvidia
               - ubuntu/python
               - tensorflow
@@ -128,7 +134,7 @@ slice_sets:
 #        - add_to_name: "devel"
 #          dockerfile_exclusive_name: "devel-cpu"
 #          partials:
-#              - ubuntu/version
+#              - ubuntu/version_18_04
 #              - ubuntu/devel-cpu
 #              - ubuntu/python
 #              - ubuntu/bazel
@@ -140,7 +146,7 @@ slice_sets:
 #        - add_to_name: "devel-gpu"
 #          dockerfile_exclusive_name: "devel-gpu"
 #          partials:
-#              - ubuntu/version
+#              - ubuntu/version_18_04
 #              - ubuntu/devel-nvidia
 #              - ubuntu/python
 #              - ubuntu/bazel
@@ -158,7 +164,7 @@ slice_sets:
         - add_to_name: "devel-rlscope-gpu-cuda"
           dockerfile_exclusive_name: "devel-rlscope-gpu-cuda"
           partials:
-            - ubuntu/version
+            - ubuntu/version_18_04
             - ubuntu/from_cuda_10_1
             - ubuntu/add_user
             - rlscope/env
@@ -200,6 +206,56 @@ slice_sets:
           # The root directory of the rlscope_profiler repo checkout.
           - RLSCOPE_DIR=
 
+#    ubuntu-20-04-devel-rlscope-cuda-10-1:
+#      #
+#      # Container environment for building RL-Scope and running experiments.
+#      #
+#      - add_to_name: "ubuntu-20-04-devel-rlscope-cuda-10-1"
+#        dockerfile_exclusive_name: "ubuntu-20-04-devel-rlscope-cuda-10-1"
+#        partials:
+#          - ubuntu/version_20_04
+##          - ubuntu/from_cuda_10_1
+#          - ubuntu/from_cuda_11_0
+#          - ubuntu/add_user
+#          - rlscope/env
+#          - ubuntu/python
+#          - ubuntu/virtualenv
+#          - ubuntu/install_cuda_10_1
+#          - ubuntu/test_host_configuration
+##          # - ubuntu/bazel
+##          - ubuntu/nvidia_nccl
+##          - ubuntu/nvidia_rtx_2070_env
+##          # - ubuntu/nodejs
+##          - ubuntu/pip_dependencies
+##          - ubuntu/protobuf_from_src
+##          - ubuntu/cmake_from_src
+##          - ubuntu/openmpi_from_src
+#          # - ubuntu/bazelisk
+#          - ubuntu/bash
+#          # - ubuntu/tensorrt
+#          - rlscope/apt_install_minimal
+##          - rlscope/apt_install
+##          - ubuntu/pip_install_tf
+##          - rlscope/pip_dependencies
+#          - rlscope/user_custom
+#          - shell
+#          - rlscope/source_sh
+#          - ubuntu/entrypoint
+#        test_runtime: nvidia
+#        args:
+#          # NOTE: must be provided at run_docker.py command line
+#          - CHECKOUT_TF_SRC=0
+#          - USE_PYTHON_3_NOT_2=1
+#        run_args:
+#          # NOTE: To make it so we can run the same scripts inside/outside containers:
+#          # - Outside containers: we define these environment variables in a source_me.sh
+#          # - Inside containers: we require these to be defined when calling run_docker.py (docker run)
+#          #
+#          # The root directory of a 'patched' TensorFlow checkout.
+#          # - TENSORFLOW_DIR=
+#          # The root directory of the rlscope_profiler repo checkout.
+#          - RLSCOPE_DIR=
+
     ubuntu-devel-rlscope-cuda-11-0:
       #
       # Container environment for building RL-Scope and running experiments.
@@ -207,7 +263,7 @@ slice_sets:
       - add_to_name: "devel-rlscope-gpu-cuda-11-0"
         dockerfile_exclusive_name: "devel-rlscope-gpu-cuda-11-0"
         partials:
-          - ubuntu/version
+          - ubuntu/version_20_04
           - ubuntu/from_cuda_11_0
           - ubuntu/add_user
           - rlscope/env
@@ -257,7 +313,7 @@ slice_sets:
       - add_to_name: "test-cuda-10-1"
         dockerfile_exclusive_name: "test-cuda-10-1"
         partials:
-          - ubuntu/version
+          - ubuntu/version_18_04
           - ubuntu/from_cuda_10_1
           - ubuntu/add_user
           - rlscope/env
@@ -308,7 +364,7 @@ slice_sets:
 #      - add_to_name: "devel-rlscope-gpu-cuda-10-1"
 #        dockerfile_exclusive_name: "devel-rlscope-gpu-cuda-10-1"
 #        partials:
-##          - ubuntu/version
+##          - ubuntu/version_18_04
 #          - ubuntu/devel-nvidia-cuda-10-1
 #          - ubuntu/python
 #          - ubuntu/bazel
@@ -354,7 +410,7 @@ slice_sets:
 #        - add_to_name: "devel-rlscope-gpu-rocm"
 #          dockerfile_exclusive_name: "devel-rlscope-gpu-rocm"
 #          partials:
-#          - ubuntu/version
+#          - ubuntu/version_18_04
 #          - ubuntu/devel-rocm
 #          - ubuntu/python
 #          - ubuntu/bazel
@@ -380,7 +436,7 @@ slice_sets:
 #    - add_to_name: "devel-rlscope-gpu-rocm-upstream"
 #      dockerfile_exclusive_name: "devel-rlscope-gpu-rocm-upstream"
 #      partials:
-#      - ubuntu/version
+#      - ubuntu/version_18_04
 #      - ubuntu/devel-rocm
 #      - ubuntu/python
 #      - ubuntu/bazel
@@ -410,7 +466,7 @@ slice_sets:
 #    - add_to_name: "rocm"
 #      dockerfile_exclusive_name: "rocm"
 #      partials:
-#      - ubuntu/version
+#      - ubuntu/version_18_04
 #      - ubuntu/devel-rocm
 ##      - ubuntu/python
 ##      - ubuntu/bazel
@@ -432,7 +488,7 @@ slice_sets:
 #    nightly:
 #        - add_to_name: "nightly"
 #          partials:
-#              - ubuntu/version
+#              - ubuntu/version_18_04
 #              - ubuntu/cpu
 #              - ubuntu/python
 #              - tensorflow
@@ -443,7 +499,7 @@ slice_sets:
 #              - import.sh
 #        - add_to_name: "nightly-gpu"
 #          partials:
-#              - ubuntu/version
+#              - ubuntu/version_18_04
 #              - ubuntu/nvidia
 #              - ubuntu/python
 #              - tensorflow

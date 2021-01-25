@@ -38,6 +38,9 @@ from rlscope.experiment.util import tee
 
 from rlscope.profiler.util import args_to_cmdline
 
+from rlscope.parser import check_host
+from rlscope.parser.exceptions import RLScopeConfigurationError
+
 from rlscope.parser.common import *
 
 # DEFAULT_RLSCOPE_TRACE_TIME_SEC = 60*2
@@ -122,6 +125,13 @@ def add_stable_baselines_options(pars):
         help='Limit environments to LunarLander environments (i.e. LunarLanderContinuous-v2, LunarLander-v2)')
 
 def main():
+
+    try:
+        check_host.check_config()
+    except RLScopeConfigurationError as e:
+        logger.error(e)
+        sys.exit(1)
+
     # TODO: remove hard dependency on pybullet_envs;
     # i.e. we need it for:
     #   $ rls-bench stable-baselines --mode [run|all]

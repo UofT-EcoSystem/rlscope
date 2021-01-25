@@ -51,11 +51,11 @@ def find_librlscope():
     # In "pip install rlscope" distribution mode, this will fail, since
     # librlscope.lib is packaged inside:
     #   rlscope/cpp/lib/librlscope.so
-    ENV['LIBRARY_PATH'] = ENV['LD_LIBRARY_PATH']
+    ENV['LIBRARY_PATH'] = ENV.get('LD_LIBRARY_PATH', '')
     RLSCOPE_CLIB = ctypes.util.find_library(RLSCOPE_LIBNAME)
 
     if RLSCOPE_CLIB is None:
-        orig_LD_LIBRARY_PATH = ENV['LD_LIBRARY_PATH']
+        orig_LD_LIBRARY_PATH = ENV.get('LD_LIBRARY_PATH', '')
         # Locations to search for librlscope.so
         # Currently, we just search for rlscope/cpp/lib/librlscope.so
         rlscope_lib_dirs = [py_config.CPP_LIB]
@@ -64,7 +64,7 @@ def find_librlscope():
                 continue
             ENV['LD_LIBRARY_PATH'] = "{LD_LIBRARY_PATH}:{path}".format(
                 path=path,
-                LD_LIBRARY_PATH=ENV['LD_LIBRARY_PATH'],
+                LD_LIBRARY_PATH=ENV.get('LD_LIBRARY_PATH', ''),
             )
             ENV['LIBRARY_PATH'] = ENV['LD_LIBRARY_PATH']
             RLSCOPE_CLIB = ctypes.util.find_library(RLSCOPE_LIBNAME)

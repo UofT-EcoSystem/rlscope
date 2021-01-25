@@ -9,7 +9,12 @@ fi
 #   Source .gdbinit (may contain breakpoints).
 #   Then, run gdb on provided program (--args).
 
-SCRIPT_DIR="$(readlink -f "$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )")"
+IS_ZSH="$(ps -ef | grep $$ | grep -v --perl-regexp 'grep|ps ' | grep zsh --quiet && echo yes || echo no)"
+if [ "$IS_ZSH" = 'yes' ]; then
+  SCRIPT_DIR="$(readlink -f "$(dirname "${0:A}")")"
+else
+  SCRIPT_DIR="$(readlink -f "$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )")"
+fi
 ROOT="$(readlink -f "$SCRIPT_DIR/../..")"
 source $ROOT/dockerfiles/sh/docker_runtime_common.sh
 

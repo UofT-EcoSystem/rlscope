@@ -20,6 +20,9 @@ from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, base
 
 from rlscope import py_config
 
+from rlscope.parser import check_host
+from rlscope.parser.exceptions import RLScopeConfigurationError
+
 from rlscope.parser.common import *
 
 class GeneratePlotIndex:
@@ -254,6 +257,13 @@ def mkds(dic, *keys):
 
 from rlscope.profiler.rlscope_logging import logger
 def main():
+
+    try:
+        check_host.check_config()
+    except RLScopeConfigurationError as e:
+        logger.error(e)
+        sys.exit(1)
+
     parser = argparse.ArgumentParser("Generate index of *.venn_js.json files.")
     parser.add_argument('--rlscope-directory',
                         required=True,

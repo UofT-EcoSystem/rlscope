@@ -38,6 +38,9 @@ from rlscope.profiler import rlscope_logging
 from rlscope.profiler.rlscope_logging import logger
 from rlscope.profiler.util import gather_argv, run_with_pdb, error, get_available_cpus, get_available_gpus
 from rlscope.experiment.util import expr_run_cmd, expr_already_ran
+from rlscope.parser import check_host
+from rlscope.parser.exceptions import RLScopeConfigurationError
+
 
 # This is slow.
 # from rlscope.parser.common import *
@@ -389,6 +392,13 @@ class RunCmd:
 
 
 def main():
+
+    try:
+        check_host.check_config()
+    except RLScopeConfigurationError as e:
+        logger.error(e)
+        sys.exit(1)
+
     parser = argparse.ArgumentParser(
         description=__doc__.splitlines()[0],
         # formatter_class=argparse.ArgumentDefaultsHelpFormatter)

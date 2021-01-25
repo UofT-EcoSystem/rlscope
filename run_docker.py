@@ -72,7 +72,7 @@ assert len(NVIDIA_VISIBLE_DEVICES) > 0
 PROJECT_NAME = 'rlscope'
 RLSCOPE_BASH_SERVICE_NAME = 'bash'
 
-# TENSORFLOW_VERSION = "1.15.0"
+# NOTE: keep in sync with dockerfiles/sh/exports.sh
 TENSORFLOW_VERSION = "2.2.0"
 
 HOME = str(Path.home())
@@ -87,6 +87,7 @@ RELEASE_TO_LOCAL_IMG_TAG['rlscope'] = 'tensorflow:devel-rlscope-gpu-cuda'
 RELEASE_TO_LOCAL_IMG_TAG['rlscope-cuda-10-1'] = 'tensorflow:devel-rlscope-gpu-cuda-10-1'
 RELEASE_TO_LOCAL_IMG_TAG['rlscope-cuda-11-0'] = 'tensorflow:devel-rlscope-gpu-cuda-11-0'
 RELEASE_TO_LOCAL_IMG_TAG['test-cuda-10-1'] = 'tensorflow:test-cuda-10-1'
+RELEASE_TO_LOCAL_IMG_TAG['rlscope-ubuntu-20-04-cuda-10-1'] = 'tensorflow:ubuntu-20-04-devel-rlscope-cuda-10-1'
 
 # How long should we wait for /bin/bash (rlscope_bash)
 # to appear after running "docker stack deploy"?
@@ -576,6 +577,7 @@ def get_docker_run_env(tag_def, env_list):
     env['TENSORFLOW_VERSION'] = TENSORFLOW_VERSION
     env['RLSCOPE_INSTALL_PREFIX'] = py_config.DOCKER_INSTALL_PREFIX
     env['RLSCOPE_BUILD_PREFIX'] = py_config.DOCKER_BUILD_PREFIX
+    env['RLSCOPE_IS_DOCKER'] = 'yes'
 
     return env
 

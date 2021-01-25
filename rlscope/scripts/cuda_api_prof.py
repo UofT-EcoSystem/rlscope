@@ -28,14 +28,24 @@ from rlscope.profiler.util import gather_argv, print_cmd
 
 from rlscope.clib import rlscope_api
 from rlscope.profiler.rlscope_logging import logger
+from rlscope.parser import check_host
+from rlscope.parser.exceptions import RLScopeConfigurationError
 
 DEFAULT_CONFIG = 'full'
 
 def main():
 
+    try:
+        check_host.check_config()
+    except RLScopeConfigurationError as e:
+        logger.error(e)
+        sys.exit(1)
+
     rlscope_prof_argv, cmd_argv = gather_argv(sys.argv[1:])
 
     parser = argparse.ArgumentParser("RL-Scope cross-stack profiler for reinforcement learning workloads.")
+    # NOTE: these arguments must precede the executable (python some/script.py), otherwise they will be sent
+    # to the training script, and not handled by this script (rls-prof).
     parser.add_argument('--debug', action='store_true')
     parser.add_argument('--rlscope-debug', action='store_true')
     parser.add_argument('--rlscope-rm-traces-from', help=textwrap.dedent("""

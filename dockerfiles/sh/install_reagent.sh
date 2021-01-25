@@ -7,7 +7,7 @@ set -eu
 FORCE={FORCE:-no}
 DEBUG=${DEBUG-no}
 # Python version to using in ReAgent virtual environment (using pyenv)
-PYTHON_VERSION=3.8.2
+#PYTHON_VERSION=3.8.2
 TORCH_VERSION=1.6.0
 TORCHVISION_VERSION=0.7.0
 # CUDA version of PyTorch install
@@ -15,7 +15,12 @@ CUDA_VERSION=${CUDA_VERSION:-10.1}
 if [ "$DEBUG" == 'yes' ]; then
     set -x
 fi
-SH_DIR="$(readlink -f "$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )")"
+IS_ZSH="$(ps -ef | grep $$ | grep -v --perl-regexp 'grep|ps ' | grep zsh --quiet && echo yes || echo no)"
+if [ "$IS_ZSH" = 'yes' ]; then
+  SH_DIR="$(readlink -f "$(dirname "${0:A}")")"
+else
+  SH_DIR="$(readlink -f "$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )")"
+fi
 cd "$SH_DIR"
 
 source $SH_DIR/docker_runtime_common.sh
@@ -92,26 +97,26 @@ setup_pyenv_virtualenv_plugin() {
         return $?
     fi
 }
-setup_reagent_pyenv() {
-  _do setup_pyenv
-  _do setup_pyenv_virtualenv_plugin
-  _do source $RLSCOPE_DIR/source_me.sh
-  if ! pyenv help > /dev/null; then
-      ret=$?
-      echo "ERROR: setup_pyenv failed with retcode=$ret"
-      return $ret
-  fi
-
-  _do cd $REAGENT_DIR
-  pyenv install ${PYTHON_VERSION} --skip-existing
-  local venv="reagent-pyenv-${PYTHON_VERSION}"
-  if pyenv virtualenvs | grep ${venv} --quiet; then
-    true # pass
-  else
-    _do pyenv virtualenv ${PYTHON_VERSION} reagent-pyenv-${PYTHON_VERSION}
-  fi
-  _do pyenv activate reagent-pyenv-${PYTHON_VERSION}
-}
+#setup_reagent_pyenv() {
+#  _do setup_pyenv
+#  _do setup_pyenv_virtualenv_plugin
+#  _do source $RLSCOPE_DIR/source_me.sh
+#  if ! pyenv help > /dev/null; then
+#      ret=$?
+#      echo "ERROR: setup_pyenv failed with retcode=$ret"
+#      return $ret
+#  fi
+#
+#  _do cd $REAGENT_DIR
+#  pyenv install ${PYTHON_VERSION} --skip-existing
+#  local venv="reagent-pyenv-${PYTHON_VERSION}"
+#  if pyenv virtualenvs | grep ${venv} --quiet; then
+#    true # pass
+#  else
+#    _do pyenv virtualenv ${PYTHON_VERSION} reagent-pyenv-${PYTHON_VERSION}
+#  fi
+#  _do pyenv activate reagent-pyenv-${PYTHON_VERSION}
+#}
 
 _py_version() {
   python --version | perl -lape 's/^Python\s*//'
