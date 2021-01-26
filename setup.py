@@ -125,7 +125,9 @@ DOCLINES = __doc__.split('\n')
 # This version string is semver compatible, but incompatible with pip.
 # For pip, we will remove all '-' characters from this string, and use the
 # result for pip.
-RLSCOPE_VERSION = '1.0.0'
+#
+# NOTE: We must change the RLSCOPE_VERSION every time we upload to pip.
+RLSCOPE_VERSION = '0.1.0'
 
 def get_cuda_version():
     """
