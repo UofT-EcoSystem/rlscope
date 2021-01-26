@@ -31,7 +31,7 @@ set -u
 
 #if [ "${STABLE_BASELINES_DIR}" = "" ]; then
 #    # Install directly from git repo.
-#    _do pip install git+https://github.com/jagleeso/stable-baselines.git@rlscope
+#    _do pip install git+https://github.com/UofT-EcoSystem/stable-baselines.git@rlscope
 #else
 # Install from local checkout of repo.
 _do cd "${TF_AGENTS_DIR}"

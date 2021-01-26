@@ -77,7 +77,7 @@ DEFAULT_RLSCOPE_DRILL_PORT = 8129
 
 # The tag used for a locally built "bash" RL-Scope dev environment
 LOCAL_RLSCOPE_IMAGE_TAG = 'tensorflow:devel-rlscope-gpu-cuda'
-DEFAULT_REMOTE_RLSCOPE_IMAGE_TAG = 'jagleeso/rlscope:1.0.0'
+DEFAULT_REMOTE_RLSCOPE_IMAGE_TAG = 'UofT-EcoSystem/rlscope:1.0.0'
 
 RELEASE_TO_LOCAL_IMG_TAG = dict()
 RELEASE_TO_LOCAL_IMG_TAG['rlscope'] = 'tensorflow:devel-rlscope-gpu-cuda'

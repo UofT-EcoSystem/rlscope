@@ -11,12 +11,12 @@ fi
 _ROOT_DIR="$(dirname "$(dirname "$_SH_DIR")")"
 
 export RLSCOPE_DIR=${RLSCOPE_DIR:-$_ROOT_DIR}
-export BASELINES_DIR="$RLSCOPE_DIR/third_party/baselines"
-export MLPERF_DIR="$RLSCOPE_DIR/third_party/mlperf_training"
-export STABLE_BASELINES_DIR="$RLSCOPE_DIR/third_party/stable-baselines"
-export RL_BASELINES_ZOO_DIR="$RLSCOPE_DIR/third_party/rl-baselines-zoo"
-export TF_AGENTS_DIR="$RLSCOPE_DIR/third_party/agents"
-export REAGENT_DIR="$RLSCOPE_DIR/third_party/ReAgent"
+#export BASELINES_DIR="$RLSCOPE_DIR/third_party/baselines"
+export MLPERF_DIR="$RLSCOPE_DIR/third_party/rlscope_mlperf_training"
+export STABLE_BASELINES_DIR="$RLSCOPE_DIR/third_party/rlscope_stable-baselines"
+export RL_BASELINES_ZOO_DIR="$RLSCOPE_DIR/third_party/rlscope_rl-baselines-zoo"
+export TF_AGENTS_DIR="$RLSCOPE_DIR/third_party/rlscope_agents"
+export REAGENT_DIR="$RLSCOPE_DIR/third_party/rlscope_ReAgent"
 export ARTIFACTS_DIR="$RLSCOPE_DIR/output/artifacts"
 
 # NOTE: keep in sync with run_docker.py

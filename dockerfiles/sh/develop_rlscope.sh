@@ -38,7 +38,7 @@ if [ "${RLSCOPE_DRILL_DIR}" = "" ]; then
     # SKIP
     true
     # Install directly from git repo.
-    # _do pip install git+https://github.com/jagleeso/rlscope-drill.git
+    # _do pip install git+https://github.com/UofT-EcoSystem/rlscope-drill.git
 else
     # Install from local checkout of repo.
     _do cd "${RLSCOPE_DRILL_DIR}"

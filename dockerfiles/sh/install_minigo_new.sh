@@ -106,7 +106,7 @@ export TF_NEED_TENSORRT=y
 
 #if [ "${MLPERF_DIR}" = "" ]; then
 #    # Install directly from git repo.
-#    pip install git+https://github.com/jagleeso/baselines.git
+#    pip install git+https://github.com/UofT-EcoSystem/baselines.git
 #else
 #    # Install from local checkout of repo.
 #    cd "${MLPERF_DIR}"

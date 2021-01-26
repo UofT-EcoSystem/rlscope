@@ -425,7 +425,7 @@ def main():
         url='https://github.com/UofT-EcoSystem/rlscope',
         download_url='https://github.com/UofT-EcoSystem/rlscope/tags',
         author='James Gleeson',
-        author_email='jagleeso@gmail.com',
+        author_email='jgleeson@cs.toronto.edu',
         # Contained modules and scripts.
         packages=PACKAGE_DIRS,
         entry_points={

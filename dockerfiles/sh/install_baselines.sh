@@ -37,7 +37,7 @@ pip install 'cymem==2.0.2' 'Cython==0.29.7'
 
 if [ "${BASELINES_DIR}" = "" ]; then
     # Install directly from git repo.
-    _do pip install git+https://github.com/jagleeso/baselines.git
+    _do pip install git+https://github.com/UofT-EcoSystem/baselines.git
 else
     # Install from local checkout of repo.
     _do cd "${BASELINES_DIR}"

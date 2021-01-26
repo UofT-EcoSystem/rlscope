@@ -293,7 +293,7 @@ setup_experiment_baselines() {
     (
     GIT_PULL=yes
     _github_clone "$BASELINES_DIR" \
-        jagleeso/baselines.git \
+        UofT-EcoSystem/baselines.git \
         $commit
     )
 }
@@ -308,7 +308,7 @@ setup_experiment_mlperf_training() {
     # "community" submodule fails to pull.
     GIT_RECURSIVE=no
     _github_clone "$MLPERF_DIR" \
-        jagleeso/mlperf_training.git \
+        UofT-EcoSystem/rlscope_mlperf_training.git \
         $commit
     )
 }
@@ -321,7 +321,7 @@ setup_experiment_stable_baselines() {
     (
     GIT_PULL=yes
     _github_clone "$STABLE_BASELINES_DIR" \
-        jagleeso/stable-baselines.git \
+        UofT-EcoSystem/rlscope_stable-baselines.git \
         $commit
     )
 }
@@ -334,7 +334,7 @@ setup_experiment_rl_baselines_zoo() {
     (
     GIT_PULL=yes
     _github_clone "$RL_BASELINES_ZOO_DIR" \
-        jagleeso/rl-baselines-zoo.git \
+        UofT-EcoSystem/rlscope_rl-baselines-zoo.git \
         $commit
     )
 }
@@ -347,7 +347,7 @@ setup_experiment_tf_agents() {
     (
     GIT_PULL=yes
     _github_clone "$TF_AGENTS_DIR" \
-        jagleeso/agents.git \
+        UofT-EcoSystem/rlscope_agents.git \
         $commit
     )
 }
@@ -360,7 +360,7 @@ setup_experiment_reagent() {
     (
     GIT_PULL=yes
     _github_clone "$REAGENT_DIR" \
-        jagleeso/ReAgent.git \
+        UofT-EcoSystem/rlscope_ReAgent.git \
         $commit
     )
 }
@@ -374,7 +374,7 @@ setup_experiment_reagent() {
 #    (
 #    GIT_PULL=yes
 #    _github_clone "$MINIGO_DIR" \
-#        jagleeso/minigo.git \
+#        UofT-EcoSystem/minigo.git \
 #        $commit
 #    )
 #}
