@@ -1,0 +1,6 @@
+# Coloured logging.
+colorlog>=4.2.1
+
+# Documentation:
+sphinx >= 3.2.1
+sphinx-rtd-theme >= 0.5.0

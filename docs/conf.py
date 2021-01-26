@@ -17,7 +17,9 @@ import textwrap
 import pprint
 
 # add ROOT of directory to PYTHONPATH
-sys.path.insert(0, os.path.abspath(os.path.join(__file__, '..')))
+ROOT = os.path.dirname(os.path.abspath(os.path.join(__file__, '..')))
+print("> Adding ROOT of RL-Scope repository to PYTHONPATH: {path}".format(path=ROOT))
+sys.path.insert(0, ROOT)
 
 from rlscope import py_config
 
