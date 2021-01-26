@@ -125,7 +125,48 @@ DOCLINES = __doc__.split('\n')
 # This version string is semver compatible, but incompatible with pip.
 # For pip, we will remove all '-' characters from this string, and use the
 # result for pip.
-_VERSION = '1.0.0'
+RLSCOPE_VERSION = '1.0.0'
+
+def get_cuda_version():
+    """
+    Determine the CUDA version we are building for.
+    NOTE: C++ components have a hard CUDA version dependency.
+
+    If CUDA environment variable is defined:
+      Use $CUDA
+    Elif /usr/local/cuda is a symlink to /usr/local/cuda-${CUDA_VERSION}:
+      Use $CUDA_VERSION
+    Else:
+      Use 10.1 (default)
+    """
+    if 'CUDA' in os.environ:
+        return os.environ['CUDA']
+    elif os.path.islink('/usr/local/cuda'):
+        cuda_path = os.path.realpath('/usr/local/cuda')
+        m = re.search(r'^cuda-(?P<cuda_version>.*)', os.path.basename(cuda_path))
+        cuda_version = m.group('cuda_version')
+        return cuda_version
+    # Default:
+    return '10.1'
+
+def get_pip_package_version():
+    """
+    Mimic how pytorch specifies cuda dependencies:
+    e.g.
+    torch==1.7.1+cu110
+    For CUDA 11.0
+    """
+    # Mimic how pytorch specifies cuda dependencies:
+    # e.g.
+    # torch==1.7.1+cu110
+    cuda_version = get_cuda_version()
+    cu_version = re.sub(r'\.', '', cuda_version)
+
+    pip_package_version = "{rlscope_version}+cu{cu_version}".format(
+        rlscope_version=RLSCOPE_VERSION,
+        cu_version=cu_version,
+    )
+    return pip_package_version
 
 REQUIREMENTS_TXT = _j(py_config.ROOT, "requirements.txt")
 
@@ -378,7 +419,7 @@ def main():
         parser.print_help()
     setup(
         name=project_name,
-        version=_VERSION.replace('-', ''),
+        version=get_pip_package_version(),
         description=DOCLINES[0],
         long_description=long_description,
         url='https://github.com/UofT-EcoSystem/rlscope',

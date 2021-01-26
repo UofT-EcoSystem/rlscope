@@ -10,20 +10,24 @@ rlscope.clib_wrap : uses wrap_util functions to wrap TensorFlow, PyTorch, and si
 import re
 import inspect
 import types
+import importlib
 
 from rlscope.profiler.rlscope_logging import logger
 
 from rlscope import py_config
 
 def wrap_lib(FuncWrapperKlass, import_libname, wrapper_args=tuple(), func_regex=None, wrap_libname=None):
+
+    if wrap_libname is not None:
+        assert import_libname == wrap_libname
+
     # wrapper_args = (category, prefix)
     if wrap_libname is None:
         wrap_libname = import_libname
     lib = None
     try:
 
-        exec("import {import_lib}".format(import_lib=import_libname))
-        lib = eval("{wrap_lib}".format(wrap_lib=wrap_libname))
+        lib = importlib.import_module(import_libname)
         assert lib is not None
 
         # import tensorflow.pywrap_tensorflow
@@ -38,13 +42,16 @@ def wrap_lib(FuncWrapperKlass, import_libname, wrapper_args=tuple(), func_regex=
     return True
 
 def unwrap_lib(FuncWrapperKlass, import_libname, wrap_libname):
+
+    if wrap_libname is not None:
+        assert import_libname == wrap_libname
+
     try:
         if py_config.DEBUG_WRAP_CLIB:
             logger.info('> lookup {libname}...'.format(libname=wrap_libname))
 
-        exec("import {import_lib}".format(import_lib=import_libname))
-        # May throw NameError
-        lib = eval("{wrap_lib}".format(wrap_lib=wrap_libname))
+        lib = importlib.import_module(import_libname)
+        assert lib is not None
 
         if py_config.DEBUG_WRAP_CLIB:
             logger.info('  ... success')

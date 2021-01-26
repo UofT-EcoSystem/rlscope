@@ -361,7 +361,7 @@ def wrap_tensorflow_v1(category=constants.CATEGORY_TF_API, debug=False):
     ))
     success = wrap_util.wrap_lib(
         CFuncWrapper,
-        import_libname='tensorflow',
+        import_libname='tensorflow.pywrap_tensorflow',
         wrap_libname='tensorflow.pywrap_tensorflow',
         wrapper_args=(category, DEFAULT_PREFIX, debug),
         func_regex='^TF_')
@@ -371,7 +371,7 @@ def unwrap_tensorflow_v1():
         logger.info("> RL-Scope: Unwrapping module=tensorflow")
     wrap_util.unwrap_lib(
         CFuncWrapper,
-        import_libname='tensorflow',
+        import_libname='tensorflow.pywrap_tensorflow',
         wrap_libname='tensorflow.pywrap_tensorflow')
 
 def is_tensorflow_v2():

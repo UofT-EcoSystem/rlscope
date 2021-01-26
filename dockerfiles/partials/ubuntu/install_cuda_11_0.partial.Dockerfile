@@ -54,6 +54,13 @@ RUN apt-get install -y \
 RUN apt-get install -y --no-install-recommends \
         libpng-dev
 
+# Set timezone to avoid interactive prompt during container build
+ARG TZ="America/New_York"
+RUN ln -fs /usr/share/zoneinfo/${TZ} /etc/localtime
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    tzdata
+RUN dpkg-reconfigure --frontend noninteractive tzdata
+
 RUN apt-get install -y --no-install-recommends \
         libcurl3-dev \
         libfreetype6-dev \

@@ -20,13 +20,17 @@ main() {
 
   cd $RLSCOPE_DIR
   BUILD_PIP=yes bash ./setup.sh
-  WHEEL_FILE="$(ls $RLSCOPE_DIR/dist/rlscope*.whl)"
+  WHEEL_FILE="$(_wheel_file)"
   log_info "> RL-Scope wheel file output to: "
   log_info "  ${WHEEL_FILE}"
   log_info
   log_info "  You can install it by running:"
   log_info "  $ pip install ${WHEEL_FILE}"
 
+}
+
+_wheel_file() {
+  ls -t $RLSCOPE_DIR/dist/rlscope*.whl | head -n 1
 }
 
 main "$@"

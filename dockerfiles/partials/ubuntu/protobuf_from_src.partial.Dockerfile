@@ -5,7 +5,8 @@
 
 # NOTE: Had to bump version to 3.9.1 since 3.6.1 had an include-file bug
 # when compiling things using cmake (strutil.h).
-ARG PROTOBUF_VERSION=3.9.1
+#ARG PROTOBUF_VERSION=3.9.1
+ARG PROTOBUF_VERSION=3.14.0
 
 USER root
 WORKDIR /root/tar_files

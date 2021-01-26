@@ -22,8 +22,8 @@ main() {
 
   cd $RLSCOPE_DIR
 
-  # TODO: remove...
-  export repetitions=2
+  # Use fewer repetitions to produce results quickly.
+  # export repetitions=2
 
   export fig=framework_choice
   # Run TD3 and DDPG across all the different RL frameworks:

@@ -38,6 +38,7 @@ else
   RLSCOPE_BUILD_TYPE=Debug
 fi
 
+# NOTE: This is set in the Dockerfile, but you can override it.
 RLSCOPE_CUDA_VERSION=${RLSCOPE_CUDA_VERSION:-10.1}
 
 # Force re-running setup
@@ -247,7 +248,12 @@ setup_json_cpp_library() {
     if [ "$FORCE" != 'yes' ] && glob_any "$(third_party_install_prefix "$JSON_CPP_LIB_DIR")/include/nlohmann/json.hpp"; then
         return
     fi
-    local commit="v3.4.0"
+
+    # Fails to build with gcc 9 on Ubuntu 20.04
+    # https://github.com/nlohmann/json/pull/1492
+    # local commit="v3.4.0"
+
+    local commit="v3.9.1"
     _github_clone "$JSON_CPP_LIB_DIR" \
         nlohmann/json.git \
         $commit
@@ -620,8 +626,8 @@ setup_eigen_cpp_library() {
 }
 
 CMAKE_OPTS=()
-CMAKE_VERBOSE=
-CMAKE_NO_CLEAR_OPTS=no
+CMAKE_VERBOSE=${CMAKE_VERBOSE:-}
+CMAKE_NO_CLEAR_OPTS=${CMAKE_NO_CLEAR_OPTS:-no}
 cmake_build() {
     local src_dir="$1"
     shift 1
@@ -700,7 +706,8 @@ cmake_install() {
 #PROTOBUF_VERSION='3.6.1.2'
 
 #PROTOBUF_VERSION='3.6.1'
-PROTOBUF_VERSION='3.9.1'
+#PROTOBUF_VERSION='3.9.1'
+PROTOBUF_VERSION='3.14.0'
 
 PROTOBUF_CPP_LIB_DIR="$ROOT/third_party/protobuf-${PROTOBUF_VERSION}"
 PROTOBUF_URL="https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOBUF_VERSION}/protobuf-all-${PROTOBUF_VERSION}.tar.gz"

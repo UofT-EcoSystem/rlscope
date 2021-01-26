@@ -22,8 +22,8 @@ main() {
 
   cd $RLSCOPE_DIR
 
-  # TODO: remove...
-  export repetitions=2
+  # Use fewer repetitions to produce results quickly.
+  # export repetitions=2
 
   _do experiment_algorithm_choice.sh
   _do experiment_simulator_choice.sh

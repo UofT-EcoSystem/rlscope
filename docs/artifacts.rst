@@ -122,3 +122,7 @@ To run the experiment and generate the figures, run:
     [container]$ experiment_simulator_choice.sh
 
 Figures will be output to :file:`output/artifacts/experiment_simulator_choice/*.pdf`.
+
+NOTE: Your reproduced graph will have a slightly different breakdown for Pong
+than seen above from the RL-Scope paper; in particular the simulation time will be closer to HalfCheetah.
+This is likely due to a difference in library version for the ``atari-py`` backend simulator used by Pong.

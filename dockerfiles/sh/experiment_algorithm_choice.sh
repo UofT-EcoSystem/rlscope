@@ -22,8 +22,8 @@ main() {
 
   cd $RLSCOPE_DIR
 
-  # TODO: remove...
-  export repetitions=2
+  # Use fewer repetitions to produce results quickly.
+  # export repetitions=2
 
   # Compare different algorithm implementations in stable-baselines to each other.
   export fig=algo_choice;

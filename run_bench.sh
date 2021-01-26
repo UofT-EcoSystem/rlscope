@@ -1931,6 +1931,17 @@ x_field = xfield_short(row)
 EOF
 }
 
+_stable_baselines_fig_9_simulator_choice_xtick_expression() {
+  cat <<EOF
+def xfield_short(row):
+  x_field = row['short_env']
+  return x_field
+
+x_field = xfield_short(row)
+
+EOF
+}
+
 plot_tf_agents_fig_10_algo_choice() {
 (
   set -eu
@@ -2097,12 +2108,8 @@ plot_stable_baselines_fig_9_simulator_choice() {
     --rlscope-directories "${rlscope_dirs[@]}"
     --output-directory $(stable_baselines_plots_direc)/stable_baselines_fig_9_simulator_choice
     --x-title "Simulator"
-    # --xtick-expression "$(_tf_agents_fig_9_simulator_choice_xtick_expression)"
-    # --OverlapStackedBarTask-y2-logscale
-    --OverlapStackedBarTask-width 12
-    --OverlapStackedBarTask-height 5
-    --GpuHwPlotTask-width 9
-    --GpuHwPlotTask-height 5
+    --xtick-expression "$(_stable_baselines_fig_9_simulator_choice_xtick_expression)"
+    --rotation 0
   )
   _plot_stable_baselines "${args[@]}"
 

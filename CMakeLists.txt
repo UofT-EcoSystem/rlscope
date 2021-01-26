@@ -136,7 +136,7 @@ set(BOOST_VERSION 1.73.0)
 set(BOOST_VERSION_UNDERSCORES 1_73_0)
 
 #set(PROTOBUF_VERSION 3.6.1)
-set(PROTOBUF_VERSION 3.9.1)
+#set(PROTOBUF_VERSION 3.9.1)
 
 
 #
@@ -265,7 +265,14 @@ find_package(nlohmann_json REQUIRED)
 #   when compiling gpu_util_experiment.
 #   NOTE: attempts to set target specific compile options didn't work since
 #   nvcc ignored them... not sure why.
-set(IGNORE_ERRORS "-Wno-unused-result -Wno-unused -Wno-unknown-pragmas -Wno-deprecated-declarations")
+set(IGNORE_ERRORS "-Wno-unused-result -Wno-unused -Wno-unknown-pragmas -Wno-deprecated-declarations -Wno-parentheses")
+
+# Ignore protobuf compiler warning until protobuf upstreams the fix for gcc 9 (ubuntu 20.04).
+# Pull request addressing issue (Sept , 2020)
+#   https://github.com/protocolbuffers/protobuf/pull/7913
+# https://github.com/protocolbuffers/protobuf/issues/7140
+#set(IGNORE_ERRORS "${IGNORE_ERRORS} -Wno-array-bounds")
+
 set(ADD_WARNINGS_FLAGS "-Wuninitialized")
 #set(CMAKE_CXX_STANDARD 11)
 #-std=c++11

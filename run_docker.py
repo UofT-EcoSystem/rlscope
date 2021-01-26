@@ -72,9 +72,6 @@ assert len(NVIDIA_VISIBLE_DEVICES) > 0
 PROJECT_NAME = 'rlscope'
 RLSCOPE_BASH_SERVICE_NAME = 'bash'
 
-# NOTE: keep in sync with dockerfiles/sh/exports.sh
-TENSORFLOW_VERSION = "2.2.0"
-
 HOME = str(Path.home())
 DEFAULT_RLSCOPE_DRILL_PORT = 8129
 
@@ -574,7 +571,6 @@ def get_docker_run_env(tag_def, env_list):
     # env['RLSCOPE_USER'] = get_username()
     # env['RLSCOPE_UID'] = get_user_id()
     # env['RLSCOPE_GID'] = get_group_id()
-    env['TENSORFLOW_VERSION'] = TENSORFLOW_VERSION
     env['RLSCOPE_INSTALL_PREFIX'] = py_config.DOCKER_INSTALL_PREFIX
     env['RLSCOPE_BUILD_PREFIX'] = py_config.DOCKER_BUILD_PREFIX
     env['RLSCOPE_IS_DOCKER'] = 'yes'
@@ -1567,7 +1563,6 @@ def get_implicit_build_args():
     #     "USER_NAME": get_username(),
     # }
     build_args = dict()
-    build_args['TENSORFLOW_VERSION'] = TENSORFLOW_VERSION
 
     build_args['RLSCOPE_USER'] = get_username()
     build_args['RLSCOPE_UID'] = get_user_id()

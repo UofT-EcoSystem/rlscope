@@ -22,8 +22,8 @@ main() {
 
   cd $RLSCOPE_DIR
 
-  # TODO: remove...
-  export repetitions=2
+  # Use fewer repetitions to produce results quickly.
+  # export repetitions=2
 
   # Compare different simulators to each other (using same RL algorithm: PPO in stable-baselines).
   export fig=simulator_choice;

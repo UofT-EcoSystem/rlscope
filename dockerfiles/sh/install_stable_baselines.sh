@@ -46,7 +46,9 @@ sudo apt-get -y install python-dev python3-dev \
 #
 # Work-around: install atari-py 0.2.0 straight from github using tag=0.2.0
 if ! py_module_installed "atari_py"; then
-  pip install git+https://github.com/openai/atari-py.git@0.2.0
+  # ATARI_PY_VERSION=0.2.0
+  ATARI_PY_VERSION=0.2.6
+  pip install git+https://github.com/openai/atari-py.git@${ATARI_PY_VERSION}
 fi
 
 # NOTE: we DON'T install stable-baselines from pip;
