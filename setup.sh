@@ -951,7 +951,21 @@ setup_pip_package() {
   #
   # This has been observed elsewhere also...
   # https://github.com/pypa/wheel/issues/147
-  _do python setup.py clean --all bdist_wheel
+  _do python setup.py \
+    clean --all \
+    bdist_wheel --plat-name "$(_pip_platform_name)" \
+    sdist
+}
+
+_pip_platform_name() {
+  local PY_SCRIPT=
+  read -r -d '' PY_SCRIPT << EOF || true
+import distutils.util
+platform = distutils.util.get_platform()
+platform = platform.replace('linux', 'manylinux1')
+print(platform)
+EOF
+  python -c "$PY_SCRIPT"
 }
 
 _setup_project() {

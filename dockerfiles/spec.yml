@@ -49,11 +49,11 @@ releases:
       tag_specs:
         - "{ubuntu-devel-rlscope-cuda-11-0}"
 
-    rlscope-ubuntu-20-04-cuda-10-1:
+    rlscope-ubuntu-20-04-cuda-11-0:
       is_dockerfiles: true
       upload_images: false
       tag_specs:
-        - "{ubuntu-20-04-devel-rlscope-cuda-10-1}"
+        - "{ubuntu-20-04-devel-rlscope-cuda-11-0}"
 
     test-cuda-10-1:
       is_dockerfiles: true
@@ -208,12 +208,12 @@ slice_sets:
           - RLSCOPE_DIR=
           - TENSORFLOW_VERSION=2.2.0
 
-    ubuntu-20-04-devel-rlscope-cuda-10-1:
+    ubuntu-20-04-devel-rlscope-cuda-11-0:
       #
       # Container environment for building RL-Scope and running experiments.
       #
-      - add_to_name: "ubuntu-20-04-devel-rlscope-cuda-10-1"
-        dockerfile_exclusive_name: "ubuntu-20-04-devel-rlscope-cuda-10-1"
+      - add_to_name: "ubuntu-20-04-devel-rlscope-cuda-11-0"
+        dockerfile_exclusive_name: "ubuntu-20-04-devel-rlscope-cuda-11-0"
         partials:
           - ubuntu/version_20_04
           - ubuntu/from_cuda_11_0

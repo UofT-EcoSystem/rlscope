@@ -81,10 +81,7 @@ DEFAULT_REMOTE_RLSCOPE_IMAGE_TAG = 'UofT-EcoSystem/rlscope:1.0.0'
 
 RELEASE_TO_LOCAL_IMG_TAG = dict()
 RELEASE_TO_LOCAL_IMG_TAG['rlscope'] = 'tensorflow:devel-rlscope-gpu-cuda'
-RELEASE_TO_LOCAL_IMG_TAG['rlscope-cuda-10-1'] = 'tensorflow:devel-rlscope-gpu-cuda-10-1'
-RELEASE_TO_LOCAL_IMG_TAG['rlscope-cuda-11-0'] = 'tensorflow:devel-rlscope-gpu-cuda-11-0'
-RELEASE_TO_LOCAL_IMG_TAG['test-cuda-10-1'] = 'tensorflow:test-cuda-10-1'
-RELEASE_TO_LOCAL_IMG_TAG['rlscope-ubuntu-20-04-cuda-10-1'] = 'tensorflow:ubuntu-20-04-devel-rlscope-cuda-10-1'
+RELEASE_TO_LOCAL_IMG_TAG['rlscope-ubuntu-20-04-cuda-11-0'] = 'tensorflow:ubuntu-20-04-devel-rlscope-cuda-11-0'
 
 # How long should we wait for /bin/bash (rlscope_bash)
 # to appear after running "docker stack deploy"?

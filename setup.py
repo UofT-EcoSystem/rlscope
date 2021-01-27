@@ -126,8 +126,8 @@ DOCLINES = __doc__.split('\n')
 # For pip, we will remove all '-' characters from this string, and use the
 # result for pip.
 #
-# NOTE: We must change the RLSCOPE_VERSION every time we upload to pip.
-RLSCOPE_VERSION = '0.1.0'
+# NOTE: We must change the RLSCOPE_VERSION every time we upload to pip./
+RLSCOPE_VERSION = '0.0.1'
 
 def get_cuda_version():
     """

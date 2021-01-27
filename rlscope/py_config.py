@@ -30,6 +30,8 @@ ROOT = _d(_d(_a(__file__)))
 
 RLSCOPE_DIR = ROOT
 
+GIT_REPO_URL = "https://github.com/UofT-EcoSystem/rlscope"
+
 RLSCOPE_TEST_DIR = _j(RLSCOPE_DIR, 'test_results')
 
 DEBUG = False
