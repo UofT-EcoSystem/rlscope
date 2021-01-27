@@ -289,7 +289,7 @@ setup_experiment_baselines() {
 #    if [ "$FORCE" != 'yes' ] && [ -e $BASELINES_DIR/setup.py ]; then
 #        return
 #    fi
-    local commit="iml"
+    local commit="rlscope"
     (
     GIT_PULL=yes
     _github_clone "$BASELINES_DIR" \
@@ -302,7 +302,7 @@ setup_experiment_mlperf_training() {
 #    if [ "$FORCE" != 'yes' ] && [ -e $MLPERF_DIR/README.md ]; then
 #        return
 #    fi
-    local commit="iml"
+    local commit="rlscope"
     (
     GIT_PULL=yes
     # "community" submodule fails to pull.
@@ -317,7 +317,7 @@ setup_experiment_stable_baselines() {
 #    if [ "$FORCE" != 'yes' ] && [ -e $STABLE_BASELINES_DIR/setup.py ]; then
 #        return
 #    fi
-    local commit="iml-td3"
+    local commit="rlscope"
     (
     GIT_PULL=yes
     _github_clone "$STABLE_BASELINES_DIR" \
@@ -330,7 +330,7 @@ setup_experiment_rl_baselines_zoo() {
 #    if [ "$FORCE" != 'yes' ] && [ -e $RL_BASELINES_ZOO_DIR/train.py ]; then
 #        return
 #    fi
-    local commit="iml-td3"
+    local commit="rlscope"
     (
     GIT_PULL=yes
     _github_clone "$RL_BASELINES_ZOO_DIR" \
@@ -343,7 +343,7 @@ setup_experiment_tf_agents() {
 #    if [ "$FORCE" != 'yes' ] && [ -e $TF_AGENTS_DIR/setup.py ]; then
 #        return
 #    fi
-    local commit="iml"
+    local commit="rlscope"
     (
     GIT_PULL=yes
     _github_clone "$TF_AGENTS_DIR" \
@@ -356,7 +356,7 @@ setup_experiment_reagent() {
 #    if [ "$FORCE" != 'yes' ] && [ -e $REAGENT_DIR/setup.py ]; then
 #        return
 #    fi
-    local commit="iml"
+    local commit="rlscope"
     (
     GIT_PULL=yes
     _github_clone "$REAGENT_DIR" \
@@ -370,7 +370,7 @@ setup_experiment_reagent() {
 #    if [ "$FORCE" != 'yes' ] && [ -e $MINIGO_DIR/setup.py ]; then
 #        return
 #    fi
-#    local commit="iml"
+#    local commit="rlscope"
 #    (
 #    GIT_PULL=yes
 #    _github_clone "$MINIGO_DIR" \
