@@ -1,5 +1,5 @@
-Host Configuration
-==================
+Docker development environment
+==============================
 
 In order to run the Docker development environment, you must perform a one-time configuration of your host system.
 In particular:

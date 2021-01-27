@@ -1,4 +1,4 @@
-RL-Scope Artifact Evaluation
+RL-Scope artifact evaluation
 ============================
 
 This is a tutorial for reproducing figures in the RL-Scope paper.
@@ -42,7 +42,7 @@ Regardless of the starting OS image you use, there is still some host setup that
 In order to run the Docker development environment,
 you must first perform a one-time configuration of your host system,
 then use ``run_docker.py`` to build/run the RL-Scope container.
-To do this, follow **all** the instructions at :doc:`Host Configuration <host_config>`.
+To do this, follow **all** the instructions at :doc:`Docker development environment <host_config>`.
 Afterwards, you should be running inside the RL-Scope container, which looks like this:
 
 .. image:: images/rlscope_banner.png
