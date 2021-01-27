@@ -52,6 +52,10 @@ To allow non-root user access, do the following:
 
         [host]$ sudo reboot now
 
+.. warning::
+    If you forget to do this, RL-Scope will fail during profiling with an ``CUPTI_ERROR_INSUFFICIENT_PRIVILEGES`` error
+    when attempting to read GPU hardware counters.
+
 3. Docker default runtime
 -------------------------
 By default, GPUs are inaccessible during image builds and within containers launched by :literal:`docker-compose`.
