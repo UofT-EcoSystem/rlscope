@@ -13,5 +13,10 @@ Here are some convenient links to common parts of the documentation:
 
 To cite RL-Scope, please cite our MLSys 2021 publication:
 ```
-TODO
+@inproceedings{gleeson2021rlscope,
+ author = {Gleeson, James and Krishnan, Srivatsan and Gabel, Moshe and Janapa Reddi, Vijay and de Lara, Eyal and Pekhimenko, Gennady},
+ booktitle = {Proceedings of Machine Learning and Systems},
+ title = {{RL-Scope:} Cross-Stack Profiling for Deep Reinforcement Learning Workloads},
+ year = {2021}
+}
 ```
