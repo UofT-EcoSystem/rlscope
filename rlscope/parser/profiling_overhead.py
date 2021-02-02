@@ -26,6 +26,7 @@ from rlscope.parser.dataframe import TrainingProgressDataframeReader, CUDAAPISta
 from rlscope.parser.readers import OpStackReader, CUDAAPIStatsReader
 from rlscope.parser.stacked_bar_plots import StackedBarPlot
 from rlscope.parser import stacked_bar_plots
+from rlscope.parser.plot_utils import is_pdf, pdf2png
 
 from rlscope.experiment import expr_config
 
@@ -619,6 +620,8 @@ class CorrectedTrainingTimeParser:
             ax.set_title("Breakdown of profiling overhead by CUDA API call")
             logger.info("Output plot @ {path}".format(path=self._per_api_png_path))
             fig.savefig(self._per_api_png_path, bbox_inches="tight", pad_inches=0)
+            if is_pdf(self._per_api_png_path):
+                pdf2png(self._per_api_png_path)
             plt.close(fig)
 
         def get_total_plot_data(total_df):
@@ -688,6 +691,8 @@ class CorrectedTrainingTimeParser:
             ax.set_title("Breakdown of profiling overhead")
             logger.info("Output plot @ {path}".format(path=self._total_png_path))
             fig.savefig(self._total_png_path, bbox_inches="tight", pad_inches=0)
+            if is_pdf(self._total_png_path):
+                pdf2png(self._total_png_path)
             plt.close(fig)
 
         # JAMES: uninstrumented training time
@@ -970,6 +975,8 @@ class CorrectedTrainingTimeParser:
                 logger.info("Output plot @ {path}".format(path=self._overhead_correction_png_path(plot_group)))
                 # fig.tight_layout()
                 fig.savefig(self._overhead_correction_png_path(plot_group), bbox_inches="tight", pad_inches=0)
+                if is_pdf(self._overhead_correction_png_path(plot_group)):
+                    pdf2png(self._overhead_correction_png_path(plot_group))
                 plt.close(fig)
 
         # unins_training_duration_us = get_training_durations(self.uninstrumented_directories, debug=self.debug)
@@ -1228,6 +1235,8 @@ class CallInterceptionOverheadParser:
         ax.set_xlabel(None)
         ax.set_title("Overhead from intercepting CUDA API calls using LD_PRELOAD")
         fig.savefig(self._png_path)
+        if is_pdf(self._png_path):
+            pdf2png(self._png_path)
         plt.close(fig)
 
         logger.info("Output plot @ {path}".format(path=self._png_path))
@@ -1963,6 +1972,8 @@ class TotalTrainingTimeParser:
 
             logger.info("Output plot @ {path}".format(path=self._png_path))
             g.savefig(self._png_path)
+            if is_pdf(self._png_path):
+                pdf2png(self._png_path)
 
         output_csv(df, self._csv_path, sort_by=['algo', 'env', 'training_duration_sec'])
         _plot()
@@ -2129,6 +2140,8 @@ class CUPTIScalingOverheadParser:
                 ax.set_xticklabels(ax.get_xticklabels(), rotation=15)
             logger.info("Output plot @ {path}".format(path=self._png_path))
             g.savefig(self._png_path)
+            if is_pdf(self._png_path):
+                pdf2png(self._png_path)
 
             g = sns.FacetGrid(data=per_iteration_df, col="training_iterations",
                               palette=sns.color_palette('muted'))
@@ -2143,6 +2156,8 @@ class CUPTIScalingOverheadParser:
                 ax.set_xticklabels(ax.get_xticklabels(), rotation=15)
             logger.info("Output plot @ {path}".format(path=self._training_loop_png_path))
             g.savefig(self._training_loop_png_path)
+            if is_pdf(self._training_loop_png_path):
+                pdf2png(self._training_loop_png_path)
 
         _plot()
 
@@ -2458,6 +2473,8 @@ class CUPTIOverheadParser:
         ax.set_title("CUPTI induced profiling overhead per CUDA API call")
         logger.info("Output plot @ {path}".format(path=self._png_path))
         fig.savefig(self._png_path)
+        if is_pdf(self._png_path):
+            pdf2png(self._png_path)
         plt.close(fig)
 
     @property
@@ -2818,6 +2835,8 @@ def sec_colname(us_colname):
 def save_plot(fig, ax, png_path):
     logger.info("Output plot @ {path}".format(path=png_path))
     fig.savefig(png_path)
+    if is_pdf(png_path):
+        pdf2png(png_path)
     plt.close(fig)
 
 def is_total_overhead_column(colname):

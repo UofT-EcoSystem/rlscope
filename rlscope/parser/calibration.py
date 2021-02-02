@@ -1007,7 +1007,7 @@ class Calibration:
                     **kwargs,
                 )
         self._pool.shutdown()
-        logger.info("Plots have been generated @ {direc}/**/*.pdf".format(
+        logger.info("Plots have been generated @ {direc}/*.{{pdf,png}}".format(
             direc=output_directory,
         ))
 

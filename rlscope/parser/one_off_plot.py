@@ -35,6 +35,7 @@ from rlscope.parser.dataframe import UtilDataframeReader, RLScopeConfig
 from rlscope import py_config
 from rlscope.parser.common import *
 from rlscope.parser import constants
+from rlscope.parser.plot_utils import is_pdf, pdf2png
 from rlscope.py_config import yes_as_bool
 
 from typing import *
@@ -2935,6 +2936,8 @@ def save_plot(df, plot_path, tee=True, crop_margin=True, savefig_kwargs=None):
             pad_inches=0, **savefig_kwargs)
     else:
         plt.savefig(plot_path, **savefig_kwargs)
+    if is_pdf(plot_path):
+        pdf2png(plot_path)
     plt.close()
 
 def rotate_xticks(ax, rotation):
