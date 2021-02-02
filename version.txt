@@ -1,0 +1,2 @@
+# RL-Scope package version without CUDA version suffix (e.g., "+cu101")
+0.0.1

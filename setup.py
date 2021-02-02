@@ -31,6 +31,8 @@ from rlscope.profiler.rlscope_logging import logger
 from rlscope.profiler import rlscope_logging
 from rlscope import py_config
 
+PROJECT_NAME = 'rlscope'
+
 def pprint_msg(dic, prefix='  '):
     """
     Give logger.info a string for neatly printing a dictionary.
@@ -122,12 +124,44 @@ DOCLINES = __doc__.split('\n')
 
 # https://the-hitchhikers-guide-to-packaging.readthedocs.io/en/latest/specification.html
 
+
+REQUIREMENTS_TXT = _j(py_config.ROOT, "requirements.txt")
+
+def read_requirements(requirements_txt):
+    requires = []
+    with open(requirements_txt) as f:
+        for line in f:
+            line = line.rstrip()
+            line = re.sub(r'#.*', '', line)
+            if re.search(r'^\s*$', line):
+                continue
+            requires.append(line)
+    return requires
+
+def read_version(version_txt):
+    with open(version_txt) as f:
+        version = f.read().rstrip()
+        return version
+
+#
+# NOTE: this is identical to requirements found in requirements.txt.
+# (please keep in sync)
+#
+REQUIRED_PACKAGES = read_requirements(REQUIREMENTS_TXT)
 # This version string is semver compatible, but incompatible with pip.
 # For pip, we will remove all '-' characters from this string, and use the
 # result for pip.
 #
 # NOTE: We must change the RLSCOPE_VERSION every time we upload to pip./
-RLSCOPE_VERSION = '0.0.1'
+RLSCOPE_VERSION = py_config.read_rlscope_version()
+
+# NOTE: dependencies for building docker images are defined in dockerfiles/requirements.txt
+# DOCKER_PACKAGES = [
+#     'PyYAML >= 5.1',
+#     'absl-py >= 0.1.6',
+#     'cerberus >= 1.3',
+#     'docker >= 3.7.2',
+# ]
 
 def get_cuda_version():
     """
@@ -169,35 +203,6 @@ def get_pip_package_version():
         cu_version=cu_version,
     )
     return pip_package_version
-
-REQUIREMENTS_TXT = _j(py_config.ROOT, "requirements.txt")
-
-def read_requirements(requirements_txt):
-    requires = []
-    with open(requirements_txt) as f:
-        for line in f:
-            line = line.rstrip()
-            line = re.sub(r'#.*', '', line)
-            if re.search(r'^\s*$', line):
-                continue
-            requires.append(line)
-    return requires
-
-#
-# NOTE: this is identical to requirements found in requirements.txt.
-# (please keep in sync)
-#
-REQUIRED_PACKAGES = read_requirements(REQUIREMENTS_TXT)
-
-# NOTE: dependencies for building docker images are defined in dockerfiles/requirements.txt
-# DOCKER_PACKAGES = [
-#     'PyYAML >= 5.1',
-#     'absl-py >= 0.1.6',
-#     'cerberus >= 1.3',
-#     'docker >= 3.7.2',
-# ]
-
-project_name = 'rlscope'
 
 # python3 requires wheel 0.26
 if sys.version_info.major == 3:
@@ -420,7 +425,7 @@ def main():
         # Print both argparse usage AND setuptools setup.py usage info.
         parser.print_help()
     setup(
-        name=project_name,
+        name=PROJECT_NAME,
         version=get_pip_package_version(),
         description=DOCLINES[0],
         long_description=long_description,

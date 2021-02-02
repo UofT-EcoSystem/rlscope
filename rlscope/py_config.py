@@ -7,6 +7,7 @@ RL-Scope configuration settings.
 from os.path import join as _j, abspath as _a, exists as _e, dirname as _d, basename as _b
 from os import environ as ENV
 import shutil
+import re
 import ctypes.util
 import sys
 import os
@@ -36,6 +37,7 @@ RLSCOPE_TEST_DIR = _j(RLSCOPE_DIR, 'test_results')
 
 DEBUG = False
 
+VERSION_TXT = _j(ROOT, "version.txt")
 
 CLONE = _j(ENV['HOME'], 'clone')
 BASELINES_ROOT = _j(CLONE, 'baselines')
@@ -252,6 +254,18 @@ def yes_as_bool(yes_or_no):
 
 def is_running_unit_tests():
   return yes_as_bool(os.environ.get('RLS_RUNNING_UNIT_TESTS', 'no'))
+
+def read_rlscope_version():
+  lines = []
+  with open(VERSION_TXT) as f:
+      for line in f:
+        line = line.rstrip()
+        if re.search(r'^\s*#.*', line):
+          continue
+        lines.append(line)
+  if len(lines) == 0:
+    return None
+  return ''.join(lines)
 
 if 'pytest' in sys.modules and 'RLS_RUNNING_UNIT_TESTS' not in os.environ:
   # Prevent users from running with "pytest" so we can detect in-code if we're running with pytest.
