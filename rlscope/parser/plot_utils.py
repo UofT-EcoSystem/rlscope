@@ -8,6 +8,17 @@ from os.path import join as _j, abspath as _a, exists as _e, dirname as _d, base
 from rlscope.parser.exceptions import RLScopeConfigurationError
 from rlscope.profiler.rlscope_logging import logger
 
+# NOTE: before using matplotlib you should do this:
+# from rlscope.parser.plot_utils import setup_matplotlib
+# setup_matplotlib()
+SETUP_DONE = False
+def setup_matplotlib():
+    global SETUP_DONE
+    if SETUP_DONE:
+        return
+    import matplotlib
+    matplotlib.use('agg')
+
 def is_pdf(path):
     return re.search(r'.pdf$', _b(path))
 

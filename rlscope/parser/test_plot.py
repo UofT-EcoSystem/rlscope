@@ -1,5 +1,7 @@
 # NOTE: Avoid importing profiler library stuff to avoid tensorflow import time
 import argparse
+from rlscope.parser.plot_utils import setup_matplotlib
+setup_matplotlib()
 import matplotlib.pyplot as plt
 
 # Avoid using None for no bench_name; doesn't play nice with pandas/numpy

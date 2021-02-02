@@ -15,6 +15,8 @@ import collections
 from collections import OrderedDict
 import itertools
 
+from rlscope.parser.plot_utils import setup_matplotlib
+setup_matplotlib()
 import matplotlib.patches as mpatches
 import matplotlib.patches as mpl_patches
 from matplotlib import ticker as mpl_ticker
@@ -22,7 +24,7 @@ import matplotlib
 # NOTE: If we don't do this, then with ForwardX11 enabled in ~/.ssh/config we get an error on python script exit:
 #   XIO:  fatal IO error 0 (Success) on X server "localhost:10.0"
 #         after 348 requests (348 known processed) with 1 events remaining.
-matplotlib.use('agg')
+# matplotlib.use('agg')
 
 import matplotlib as mpl
 import seaborn as sns

@@ -20,6 +20,8 @@ import json
 import codecs
 import pandas as pd
 
+from rlscope.parser.plot_utils import setup_matplotlib
+setup_matplotlib()
 import matplotlib
 import matplotlib.ticker
 # matplotlib.use('agg')

@@ -4,6 +4,8 @@ Plotting code for creating the CPU/GPU utilization "heat map" in the multi-proce
 import argparse
 import textwrap
 import re
+from rlscope.parser.plot_utils import setup_matplotlib
+setup_matplotlib()
 import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np

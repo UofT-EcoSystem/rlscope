@@ -15,8 +15,10 @@ from rlscope.parser import constants
 from rlscope.profiler import experiment
 from os.path import join as _j, abspath as _a, exists as _e, dirname as _d, basename as _b
 import pandas as pd
+from rlscope.parser.plot_utils import setup_matplotlib
+setup_matplotlib()
 import matplotlib
-matplotlib.use('agg')
+# matplotlib.use('agg')
 import seaborn as sns
 
 from matplotlib import pyplot as plt

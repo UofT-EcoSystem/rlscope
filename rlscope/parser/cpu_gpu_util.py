@@ -21,6 +21,8 @@ import seaborn as sns
 
 from rlscope.parser.dataframe import UtilDataframeReader
 
+from rlscope.parser.plot_utils import setup_matplotlib
+setup_matplotlib()
 from matplotlib import pyplot as plt
 import matplotlib.gridspec
 

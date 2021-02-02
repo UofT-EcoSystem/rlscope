@@ -11,6 +11,8 @@ import pprint
 from io import StringIO
 import json
 import codecs
+from rlscope.parser.plot_utils import setup_matplotlib
+setup_matplotlib()
 import matplotlib.pyplot as plt
 from os.path import join as _j, abspath as _a, dirname as _d, exists as _e, basename as _b
 
