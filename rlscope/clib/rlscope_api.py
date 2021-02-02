@@ -42,7 +42,7 @@ def find_librlscope():
         return
 
     # Older version of python (<=3.6) need 'LIBRARY_PATH' to be defined for find_library to work.
-    assert 'LIBRARY_PATH' not in ENV or ENV['LIBRARY_PATH'] == ENV['LD_LIBRARY_PATH']
+    # assert 'LIBRARY_PATH' not in ENV or ENV['LIBRARY_PATH'] == ENV['LD_LIBRARY_PATH']
 
     # First, try to find librlscope.so using our current LD_LIBRARY_PATH.
     #

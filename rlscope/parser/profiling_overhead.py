@@ -1444,11 +1444,35 @@ class PyprofOverheadParser:
         add_x_field(df)
         df[overhead_field] = df['training_duration_us'] - df['training_duration_us_unins']
         df[per_overhead_field] = df[overhead_field] / df[num_field]
+        per_overheads = []
+        for overhead, num_events in zip(df[overhead_field], df[num_field]):
+            if num_events == 0:
+                continue
+            per_overheads.append(overhead/num_events)
 
         json = dict()
-        json[mean_per_call_colname(name)] = np.mean(df[per_overhead_field])
-        json[std_per_call_colname(name)] = np.std(df[per_overhead_field])
-        json[num_per_call_colname(name)] = len(df[per_overhead_field])
+
+        if len(per_overheads) == 0:
+            logger.warning(textwrap.dedent("""
+            Saw 0 overhead events for {config} when processing:
+              instrumented_directory   = {ins}
+              uninstrumented_directory = {unins}
+            This could mean one of two things:
+            1. You aren't wrapping the simulator / DL library properly.
+            2. You're measuring something that doesn't make simulator / DL library calls.
+            We simply won't correct for {config} in this case.
+            """).format(
+                config=config,
+                ins=instrumented_directory,
+                unins=uninstrumented_directory,
+            ))
+            json[mean_per_call_colname(name)] = 0.
+            json[std_per_call_colname(name)] = 0.
+            json[num_per_call_colname(name)] = 0.
+        else:
+            json[mean_per_call_colname(name)] = np.mean(per_overheads)
+            json[std_per_call_colname(name)] = np.std(per_overheads)
+            json[num_per_call_colname(name)] = len(per_overheads)
 
         # mean_pyprof_interception_overhead_per_call_us
         # mean_pyprof_annotation_overhead_per_call_us

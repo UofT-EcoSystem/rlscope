@@ -434,7 +434,6 @@ class Experiment:
                 if not args.skip_error:
                     logger.info((
                                      "> Command failed: see {path}; exiting early "
-                                     "(use --skip-error to ignore individual experiment errors)"
                                  ).format(path=to_file))
                     ret = 1
                     if debug:
@@ -1263,7 +1262,8 @@ class StableBaselines(Experiment):
 
         if config_is_uninstrumented(args.config):
             # If we want to run uninstrumented, add --rlscope-disable, but still record training progress
-            opts.extend(['--rlscope-disable', '--rlscope-training-progress'])
+            opts.extend(['--rlscope-disable',
+                         ])
 
         if config_is_no_tfprof(args.config):
             opts.extend(['--rlscope-disable-tfprof'])

@@ -25,6 +25,8 @@ _upgrade_pip
 
 RLSCOPE_DRILL_DIR=${RLSCOPE_DRILL_DIR:-}
 
+_do bash -c "pip uninstall -y rlscope || true"
+
 if [ "${RLSCOPE_DIR}" = "" ]; then
     # Install directly from git repo.
     _do pip install git+https://github.com/UofT-EcoSystem/rlscope.git

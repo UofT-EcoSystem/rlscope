@@ -339,7 +339,7 @@ class RunExpr:
                             len=self.cmd_queue.qsize()
                         ))
                         sys.exit(1)
-                    logger.info("GPU workers have finished successfully".format(
+                    logger.debug("GPU workers have finished successfully".format(
                         len=self.cmd_queue.qsize()
                     ))
                     sys.exit(0)

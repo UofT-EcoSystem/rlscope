@@ -1507,6 +1507,8 @@ class GpuUtilExperiment:
 
     def _read_rlscope_df(self):
         self.rlscope_df = None
+        self.gpu_hw_df = None
+        self.op_gpu_hw_df = None
 
         overlap_plot = OverlapStackedBarPlot(
             rlscope_directories=self.arg('time_breakdown_dir'),
@@ -1546,6 +1548,9 @@ class GpuUtilExperiment:
                 #     path,
                 #     rlscope_attrs,
                 #     rlscope_dflt_attrs)
+                if is_empty_file(path):
+                    # NOTE: this happens if there are no GPUHwCounterSampleProto.proto files (is_gpu_hw_file)
+                    continue
                 df = pd.read_csv(path, comment='#')
                 df['algo'] = algo
                 df['env'] = env
@@ -1554,6 +1559,9 @@ class GpuUtilExperiment:
                 #     df[attr_name] = maybe_number(attr_value)
                 df['rlscope_directory'] = rlscope_dir
                 dfs.append(df)
+        if len(dfs) == 0:
+            logger.warning("There were no gpu-hw protobuf files to parse; skipping GPU hw analysis.")
+            return
         self.gpu_hw_df = pd.concat(dfs)
         add_repetition(self.gpu_hw_df)
         self.gpu_hw_df = self._add_x_field(self.gpu_hw_df)
@@ -3049,6 +3057,9 @@ class RangeNode:
         child = self.children[name]
         child._add_components(components[1:])
 
+
+def is_empty_file(path):
+    return os.stat(path).st_size == 0
 
 if __name__ == '__main__':
     main()

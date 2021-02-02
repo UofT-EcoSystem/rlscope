@@ -25,6 +25,7 @@ import multiprocessing
 from concurrent.futures.process import ProcessPoolExecutor
 
 from rlscope.profiler.concurrent import ForkedProcessPool
+from rlscope.parser.exceptions import RLScopeAPIError
 
 import rlscope
 
@@ -206,9 +207,15 @@ class ProtoDumper:
             f.write(self.proto.SerializeToString())
 
         if self.debug:
-            logger.info("{name}.dump done, path={path}".format(
+            #   Stacktrace:
+            # {stack}
+            logger.info(textwrap.dedent("""\
+            {name}.dump done, path={path}
+            """).format(
                 name=self.name,
-                path=self.proto_path))
+                path=self.proto_path,
+                # stack=get_stacktrace(indent=2),
+            ).rstrip())
 
 class ProcessMetadataDumper:
     def __init__(self,
@@ -314,7 +321,6 @@ class Profiler:
                  tfprof=True,
                  reports_progress=False,
                  just_sample_util=None,
-                 training_progress=None,
                  c_lib_func_pyprof_pattern=None,
                  # tfprof=True,
                  repetition_time_limit_sec=10.,
@@ -383,7 +389,7 @@ class Profiler:
 
             if not allow_none and default_arg is None:
                 self._failing = True
-                raise RuntimeError("RL-Scope: you must provide a value for --{arg}".format(
+                raise RLScopeAPIError("You must provide a value for --{arg}".format(
                     arg=re.sub('_', '-', rlscope_argname)))
 
             return default_arg
@@ -419,7 +425,6 @@ class Profiler:
         self.calibration = get_argval('calibration', calibration, False)
         if self.debug:
             py_config.DEBUG = self.debug
-        self.directory = get_argval('directory', directory, None, allow_none=False)
         self.disable = get_argval('disable', disable, False)
         if 'RLSCOPE_CONFIG' in os.environ:
             self.rlscope_config = os.environ['RLSCOPE_CONFIG']
@@ -440,6 +445,7 @@ class Profiler:
         self.disable_pyprof_trace = get_argval('disable_pyprof_trace', disable_pyprof_trace, False)
         self.disable_gpu_hw = get_argval('disable_gpu_hw', disable_gpu_hw, False)
         self.delay = get_argval('delay', delay, None)
+        self.directory = get_argval('directory', directory, None, allow_none=self.disable)
 
         self.delay_training_loop_iters = get_argval('delay_training_loop_iters', delay_training_loop_iters, None)
         self.max_training_loop_iters = get_argval('max_training_loop_iters', max_training_loop_iters, None)
@@ -448,19 +454,16 @@ class Profiler:
         self.max_passes = get_argval('max_passes', max_passes, None)
 
         self.just_sample_util = get_argval('just_sample_util', just_sample_util, False)
-        self.training_progress = get_argval('training_progress', training_progress, False)
         self._loaded_libcupti = False
 
         tfprof_enabled = not self.disable and not self.disable_tfprof
         # pyprof_enabled = Do we want to enable Python->C++ interception for collecting pyprof events?
-        pyprof_enabled = not self.disable and not self.disable_pyprof and not self.disable_pyprof_interceptions
+        pyprof_enabled = self._should_wrap_clib()
         modify_tensorflow(
             tfprof_enabled=tfprof_enabled,
             pyprof_enabled=pyprof_enabled,
             allow_missing_librlscope=self.disable,
         )
-        if self.disable:
-            logger.info("RL-Scope: note that profiling is disabled for this run")
         if ( self.disable or self.disable_gpu_hw ) and rlscope_api.is_used():
             logger.info("(--rlscope-disable-gpu-hw) Disable GPU HW sampling")
             rlscope_api.disable_gpu_hw()
@@ -474,7 +477,7 @@ class Profiler:
         global _prof_singleton
         if _prof_singleton is not None:
             self._failing = True
-            raise RuntimeError("RL-Scope: Only a single profiler.Profiler object can be created; use rlscope.handle_rlscope_args + rlscope.prof instead.")
+            raise RLScopeAPIError("Only a single profiler.Profiler object can be created; use rlscope.handle_rlscope_args + rlscope.prof instead.")
         _prof_singleton = self
 
         self.machine_name = get_machine_name()
@@ -484,8 +487,8 @@ class Profiler:
         self._hw_pass_running = False
         self._incremental_training_progress = dict()
         self._last_dumped_training_progress = None
-        self._start_percent_complete = 0.
-        self._start_num_timesteps = 0
+        self._start_percent_complete = None
+        self._start_num_timesteps = None
         # self._delayed_disable = False
         self.num_timesteps = None
         self.total_timesteps = None
@@ -616,7 +619,7 @@ class Profiler:
                     self.next_trace_id = max(self.next_trace_id, trace_id + 1)
 
     def init_trace_id(self):
-        if self.process_name is None or self.phase is None:
+        if self.process_name is None or self.phase is None or not rlscope_api.is_used():
             return
 
         assert self.next_trace_id is None
@@ -799,18 +802,20 @@ class Profiler:
                 ),
                 stack=get_stacktrace(), msg_type="ERROR"))
 
-    def _enable_tracing(self):
-        logger.info("RL-Scope: enable tracing")
+    def __enable_tracing(self):
+        if self._tracing_enabled:
+            return
 
         self._check_no_annotations(caller_name='rlscope.prof.enable_tracing()')
 
         self._init_trace_time()
 
         if not self.disable:
+            logger.info("RL-Scope: enable tracing")
             self._start_pyprof()
             self._start_tfprof()
 
-        if not self.disable or self.training_progress:
+        if not self.disable or rlscope_api.is_used():
             # Q: is setting --rlscope-training-progress going to result in us recording events during uninstrumented runs...?
             # A: No, the --config option we give to rls-prof ensures various events aren't recorded.
             # NOTE: We want to collect CUDA API call stats for uninstrumented runs also!
@@ -840,9 +845,9 @@ class Profiler:
                                num_passes =  {self.num_passes}
                                delay_passes =  {self.delay_passes}
                         """)))
-        if self._tracing_enabled:
+        if self._tracing_enabled and self._start_percent_complete is not None:
             return False
-        if not self._has_called_enable_tracing:
+        if self.reports_progress and not self._has_called_enable_tracing:
             return False
         if self.delay_training_loop_iters is not None:
             return self.num_training_loop_iters >= self.delay_training_loop_iters
@@ -856,15 +861,12 @@ class Profiler:
         #     )
         # )
 
-    def enable_tracing(self):
+    def _enable_tracing(self):
         """
-        Turn on RL-Scope tracing.
-
+        Enable tracing
+        Internal use: skips check for delay=True
         :return:
         """
-        if self.disable and not self.training_progress:
-            return
-
         if self.reports_progress:
             # Wait for rlscope.prof.report_progress() to get called until we enable tracing.
             # This ensures that we measure the delta in percent_complete'd over the
@@ -875,7 +877,39 @@ class Profiler:
         #     return
 
         if not self.reports_progress:
-            self._enable_tracing()
+            self.__enable_tracing()
+            if py_config.DEBUG:
+                logger.info("REPORT PROGRESS @ PERCENT=0%")
+            self._report_progress(
+                percent_complete=0.,
+                num_timesteps=0,
+                total_timesteps=1,
+                skip_finish=True)
+
+    def enable_tracing(self):
+        """
+        Turn on RL-Scope tracing.
+
+        :return:
+        """
+        if self.disable and not rlscope_api.is_used():
+            if py_config.DEBUG:
+                logger.info("SKIP enable_tracing()")
+            return
+
+        if not self.delay:
+            self._failing = True
+            raise RLScopeAPIError(
+                textwrap.dedent("""\
+                You called rlscope.prof.enable_tracing() but forgot to tell RL-Scope to delay trace collection.
+                To fix this, modify your script to call:
+                    rlscope.handle_rlscope_args(..., delay=True)
+                                                           ----
+                Then, re-run this script.
+                """))
+
+        self._enable_tracing()
+
 
     def _disable_tracing(self):
         logger.info("RL-Scope: disable tracing")
@@ -897,16 +931,34 @@ class Profiler:
     #     else:
     #         self._disable_tracing()
 
+    def _delayed_init(self):
+        # Delay registering simulator/framework APIs until we begin training
+        #
+        # torch:
+        #   Wrap AFTER @torch.jit.script runs to avoid messing up jit compiling
+        #   (I think wrapping torch.* messes up the type annotation information?)
+
+        # NOTE: we DON'T wrap C libraries under some calibration configurations:
+        # --
+        if self._should_wrap_clib():
+            clib_wrap.register_libs()
+
+    def _should_wrap_clib(self):
+        should_wrap_clib = not self.disable and not self.disable_pyprof and not self.disable_pyprof_interceptions
+        return should_wrap_clib
+
     def start(self, start_utilization_sampler=False, handle_utilization_sampler=False):
         PROFILERS.append(self)
+
+        if self.disable and not rlscope_api.is_used():
+            return
+
+        self._delayed_init()
 
         # Collect GPU utilization info, even for uninstrumented runs.
         self.handle_utilization_sampler = handle_utilization_sampler
         if not self.just_sample_util and ( start_utilization_sampler or handle_utilization_sampler ):
             self._launch_utilization_sampler()
-
-        if self.disable:
-            return
 
         self._start_us = rlscope_timer.now_us()
 
@@ -915,7 +967,7 @@ class Profiler:
 
         # If --rlscope-delay, delay collecting traces until they explicitly call rlscope.prof.enable().
         if not self.delay:
-            self.enable_tracing()
+            self._enable_tracing()
 
     def _maybe_end_operations(self):
         while len(self._op_stack) != 0:
@@ -932,9 +984,10 @@ class Profiler:
         # harder to forget than a call to stop() that's missing a parameter.
         self.maybe_terminate_utilization_sampler(warn_terminated=False)
 
-        if self.disable:
+        if self.disable and not rlscope_api.is_used():
             return
 
+        # Q: Should we call this when disabled?
         self._maybe_end_operations()
         self._maybe_finish(finish_now=True, should_exit=False)
 
@@ -1043,7 +1096,7 @@ class Profiler:
         started = self in PROFILERS
         if not started:
             self._failing = True
-            raise RuntimeError("RL-Scope: You need to call profiler.start() before profiling.")
+            raise RLScopeAPIError("You need to call profiler.start() before profiling.")
 
     def _push_operation(self, bench_name):
         # Currently we don't bother to support the following:
@@ -1240,7 +1293,7 @@ class Profiler:
 
         should_skip = self.disable or self.disable_pyprof or self.disable_pyprof_annotations or not self._pyprof_enabled
 
-        if not should_skip or ( should_skip and self.training_progress ):
+        if not should_skip or ( should_skip and rlscope_api.is_used() ):
             self._dump_training_progress(debug=self.debug)
 
         if not should_skip:
@@ -1354,7 +1407,7 @@ class Profiler:
         self._maybe_dump_rlscope_config()
 
     def _maybe_dump_rlscope_config(self):
-        if self.process_name is not None and self.phase is not None:
+        if self.process_name is not None and self.phase is not None and rlscope_api.is_used():
             self._dump_rlscope_config()
 
     def _is_term_opt_set(self):
@@ -1566,7 +1619,7 @@ class Profiler:
 
         if len(self._op_stack) != 0:
             self._failing = True
-            raise RuntimeError("RL-Scope: ERROR, you cannot change phases while operations are in-progress: ops = {ops}".format(
+            raise RLScopeAPIError("You cannot change phases while operations are in-progress: ops = {ops}".format(
                 ops=self._op_stack))
 
         # ProfileContextManager.recreate_sessions_profile_contexts(phase, self.machine_name)
@@ -1590,6 +1643,30 @@ class Profiler:
             return
         if should_exit:
             self._is_finishing = True
+
+        if self.delay and not self.tracing_enabled:
+            self._failing = True
+            raise RLScopeAPIError(
+                textwrap.dedent("""\
+                You forgot to call rlscope.prof.enable_tracing(), so trace files are missing!
+                To fix this, modify your script to call:
+                    rlscope.handle_rlscope_args(..., delay=False)
+                                                     -----------
+                OR, make a call to rlscope.prof.enable_tracing() in your training loop when you want trace collection 
+                to begin (e.g., after some warmup iterations).
+                Then, re-run this script.
+                """))
+
+        if not self.reports_progress:
+            if py_config.DEBUG:
+                logger.info("REPORT PROGRESS @ PERCENT=100%")
+            self._report_progress(
+                percent_complete=1.,
+                num_timesteps=1,
+                total_timesteps=1,
+                skip_finish=True)
+        # else:
+        #     logger.info("SKIP: REPORT PROGRESS @ PERCENT=100%")
 
         if self._hw_pass_running:
             # Q: Any way to "discard" an incomplete pass?
@@ -1852,6 +1929,14 @@ class Profiler:
             #     fields['can_dump'] = self._incremental_training_progress[self.phase].can_dump(self.reports_progress)
             # logger.info(pprint_msg(fields))
 
+            # if py_config.DEBUG:
+            #     sec = None
+            #     if self._last_dumped_training_progress is not None:
+            #         sec = now_sec - self._last_dumped_training_progress
+            #     logger.info("SKIP Dump training progress: now_sec - last_dump = {sec}".format(
+            #         sec=sec,
+            #     ))
+
             return
 
         training_progress = self._incremental_training_progress[self.phase].as_proto()
@@ -1898,10 +1983,10 @@ class Profiler:
         # Q: multiple processes reporting training progress...consider that an error?
         # if self.reports_progress and self.percent_complete is None:
         #     self._failing = True
-        #     raise RuntimeError("RL-Scope ERROR: profiler was created with rlscope.handle_rlscope_args(..., reports_progress=True), but process NEVER called rlscope.prof.report_progress(...)")
+        #     raise RLScopeAPIError("Profiler was created with rlscope.handle_rlscope_args(..., reports_progress=True), but process NEVER called rlscope.prof.report_progress(...)")
 
         # This should be prevented from self.report_progress(...)
-        assert not(not self.reports_progress and self.percent_complete is not None)
+        # assert not(not self.reports_progress and self.percent_complete is not None)
 
         if self.percent_complete is not None:
             process_metadata.training_progress.content_code = TP_HAS_PROGRESS
@@ -1917,7 +2002,7 @@ class Profiler:
                 ))
             process_metadata.training_progress.percent_complete = percent_complete
             # Q: Is this safe is self.num_timestamps is None? NO
-            if self.num_timesteps is not None:
+            if self.num_timesteps is not None and self._start_num_timesteps is not None:
                 num_timesteps = self.num_timesteps - self._start_num_timesteps
                 process_metadata.training_progress.num_timesteps = num_timesteps
             if self.total_timesteps is not None:
@@ -2171,6 +2256,21 @@ class Profiler:
             name=event_name)
 
     def report_progress(self, percent_complete, num_timesteps=None, total_timesteps=None):
+        if self.disable and not rlscope_api.is_used():
+            return
+
+        if not self.reports_progress:
+            self._failing = True
+            raise RLScopeAPIError(
+                textwrap.dedent("""\
+                Profiler was created with rlscope.handle_rlscope_args(..., reports_progress=False), but process made unexpected call to rlscope.prof.report_progress(...).
+                If you wish to have process_name={proc} record training progress, call rlscope.handle_rlscope_args(..., reports_progress=True), 
+                and make sure its the ONLY process that does so.
+                """).format(proc=self.process_name))
+
+        return self._report_progress(percent_complete=percent_complete, num_timesteps=num_timesteps, total_timesteps=total_timesteps)
+
+    def _report_progress(self, percent_complete=None, num_timesteps=None, total_timesteps=None, skip_finish=False):
         """
         Call at the start of each training loop iteration.
         This tells RL-Scope when the previous training loop ends, and the next training loop begins.
@@ -2190,7 +2290,10 @@ class Profiler:
         """
         # if not self.disable or ( self.disable and self.training_progress ):
 
-        if self.disable and not self.training_progress:
+        if percent_complete is None and num_timesteps is not None and total_timesteps is not None:
+            percent_complete = num_timesteps/float(total_timesteps)
+
+        if self.disable and not rlscope_api.is_used():
             return
 
         if py_config.DEBUG and py_config.DEBUG_REPORT_PROGRESS_ALL:
@@ -2204,35 +2307,41 @@ class Profiler:
                 stack=get_stacktrace(indent=1)
             ))
 
-        if not self.reports_progress:
+        if percent_complete is None or \
+                total_timesteps is None or \
+                num_timesteps is None or \
+                not ( 0. <= percent_complete <= 1. ) or \
+                not ( 0 <= num_timesteps <= total_timesteps ) or \
+                not ( 0 < total_timesteps ):
             self._failing = True
-            raise RuntimeError(
+            raise RLScopeAPIError(
                 textwrap.dedent("""\
-                RL-Scope ERROR: profiler was created with rlscope.handle_rlscope_args(..., reports_progress=False), but process made unexpected call to rlscope.prof.report_progress(...).
-                If you wish to have process_name={proc} record training progress, call rlscope.handle_rlscope_args(..., reports_progress=True), 
-                and make sure its the ONLY process that does so.
-                """).format(proc=self.process_name))
-
-        if not ( 0. <= percent_complete <= 1. ):
-            self._failing = True
-            raise RuntimeError(
-                textwrap.dedent("""\
-                RL-Scope ERROR: rlscope.prof.report_progress(percent_complete=...) expects:
+                rlscope.prof.report_progress(percent_complete=..., num_timesteps=..., total_timesteps=...) expects:
                   0 <= percent_complete <= 1
-                But saw percent_complete={perc}
+                  0 <= num_timesteps <= total_timesteps
+                  0 < total_timesteps
+                But saw:
+                  percent_complete={percent_complete}
+                  num_timesteps={num_timesteps}
+                  total_timesteps={total_timesteps}
                   
                 Typical usage looks like:
                 
                   # The training loop of your ML script:
                   for t in range(total_timesteps):
-                      rlscope.prof.report_progress(percent_complete=t/float(total_timesteps))
+                      rlscope.prof.report_progress(
+                          percent_complete=t/float(total_timesteps),
+                          num_timesteps=t,
+                          total_timesteps=total_timesteps)
                 """).format(
-                    perc=percent_complete,
+                    percent_complete=percent_complete,
+                    num_timesteps=num_timesteps,
+                    total_timesteps=total_timesteps,
                 ))
 
         if self._should_enable_tracing():
             self._check_no_annotations(caller_name='rlscope.prof.report_progress()')
-            self._enable_tracing()
+            self.__enable_tracing()
             # percent_complete when tracing begins.
             self._start_percent_complete = percent_complete
             self._start_num_timesteps = num_timesteps
@@ -2246,12 +2355,12 @@ class Profiler:
 
         if py_config.DEBUG and py_config.DEBUG_GPU_HW:
             logger.info(rls_log_msg('GPU_HW', f"tracing_enabled = {self._tracing_enabled}, percent_complete = {percent_complete}"))
-        if self._tracing_enabled and percent_complete > 0 and percent_complete < 1.:
+        if self._tracing_enabled and percent_complete >= 0 and percent_complete < 1.:
             self._start_pass()
 
         if self.max_timesteps is not None and num_timesteps is None:
             self._failing = True
-            raise RuntimeError("RL-Scope ERROR: if you use --rlscope-max-timesteps, you must call rlscope.prof.report_progress(num_timesteps=NUMBER)")
+            raise RLScopeAPIError("If you use --rlscope-max-timesteps, you must call rlscope.prof.report_progress(num_timesteps=NUMBER)")
 
         if num_timesteps is not None:
             self.num_timesteps = num_timesteps
@@ -2261,7 +2370,7 @@ class Profiler:
 
         if self.percent_complete is not None and percent_complete < self.percent_complete:
             self._failing = True
-            raise RuntimeError("RL-Scope ERROR: percent_complete should be monotonically increasing but saw {from_perc} -> {to_perc}".format(
+            raise RLScopeAPIError("percent_complete should be monotonically increasing but saw {from_perc} -> {to_perc}".format(
                 from_perc=self.percent_complete,
                 to_perc=percent_complete,
             ))
@@ -2279,11 +2388,12 @@ class Profiler:
             # Q: Should we allow this by making the phase basically 0 seconds...?
             if not self.tracing_enabled:
                 self._failing = True
-                raise RuntimeError("RL-Scope ERROR: profiler was created with rlscope.handle_rlscope_args(..., reports_progress=True), but process NEVER called rlscope.prof.report_progress(...)")
+                raise RLScopeAPIError("Profiler was created with rlscope.handle_rlscope_args(..., reports_progress=True), but process NEVER called rlscope.prof.report_progress(...)")
             # assert self.tracing_enabled
         self._dump_training_progress(debug=self.debug, dump_always=dump_always)
 
-        self._maybe_finish(debug=self.debug)
+        if not skip_finish:
+            self._maybe_finish(debug=self.debug)
 
         if self._has_called_enable_tracing:
             # They've called rlscope.prof.enable_tracing() since their algorithm has "warmed up";
@@ -2904,13 +3014,6 @@ def add_rlscope_arguments(parser):
     add_argument(rlscope_parser, '--rlscope-disable-gpu-hw', action='store_true', help=textwrap.dedent("""
         RL-Scope: Disable GPU HW sampling trace-collection.
     """))
-    add_argument(rlscope_parser, '--rlscope-delay', action='store_true', help=textwrap.dedent("""
-        RL-Scope: Delay trace collection until your training script has warmed up; 
-        you must signal this to RL-Scope by calling rlscope.prof.enable_tracing() when that happens 
-        (as is done in the annotated stable-baselines algorithm implementations e.g. DQN).
-        
-        If you DON'T provide this, then tracing begins immediately starting from "with rlscope.prof.profiler(...)".
-    """))
     add_argument(rlscope_parser, '--rlscope-just-sample-util', action='store_true', help=textwrap.dedent("""
         RL-Scope: collect machine utilization data and output it to --rlscope-directory.
         
@@ -3004,7 +3107,7 @@ def _rlscope_argv(prof : Profiler, keep_executable=False, keep_non_rlscope_args=
     args.rlscope_phase = prof.phase
     if prof.process_name is None:
         prof._failing = True
-        raise RuntimeError("RL-Scope: You must call rlscope.api.prof.set_process_name('some_name') before forking children!")
+        raise RLScopeAPIError("You must call rlscope.api.prof.set_process_name('some_name') before forking children!")
     args.rlscope_internal_parent_process_name = prof.process_name
     args.rlscope_util_sampler_pid = prof.util_sampler_pid
     argv = args_to_cmdline(parser, args, keep_executable=keep_executable, use_pdb=False)

@@ -93,11 +93,14 @@ def setup_logger(debug=False, colors=None, line_numbers=None):
         return logformat + " " + txt
 
     logformat = ""
+    # "INFO   |"
+    logformat = _append_logformat(logformat, "%(log_color)s%(levelname)-7s%(reset)s |")
     if line_numbers:
         # Show details about where in the source error happened (e.g., process/pid, file, line number, function name)
+        # "PID=130647/MainProcess @ do_plot, calibration.py:1008 2021-02-01 20:21:26,320"
         logformat = _append_logformat(logformat, "PID=%(process)s/%(processName)s @ %(funcName)s, %(filename)s:%(lineno)s %(asctime)s")
-
-    logformat = _append_logformat(logformat, "%(log_color)s%(levelname)-8s%(reset)s | %(log_color)s%(message)s%(reset)s")
+    # <Colour-coded message.>
+    logformat = _append_logformat(logformat, "%(log_color)s%(message)s%(reset)s")
 
     if not colors:
         logformat = _remove_colors(logformat)

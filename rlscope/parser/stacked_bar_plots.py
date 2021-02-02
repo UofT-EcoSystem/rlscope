@@ -4186,7 +4186,7 @@ class CategoryTransitionPlot:
             'category': [],
             'operation': [],
             'trans_count': [],
-            'max_passes': [],
+            # 'max_passes': [],
         }
         for key, value in category_trans_counts.items():
             assert len(key) == 2
@@ -4216,8 +4216,8 @@ class CategoryTransitionPlot:
             max_passes = rlscope_config.get_var('max_passes', dflt=None)
             if max_passes is None:
                 max_passes = rlscope_config.get_var('max_training_loop_iters', dflt=None)
-            assert max_passes is not None
-            max_passes = int(max_passes)
+            if max_passes is not None:
+                max_passes = int(max_passes)
 
             # From: [no has category] -> [has category]
             # All category where:
@@ -4262,7 +4262,10 @@ class CategoryTransitionPlot:
                 data['rlscope_directory'].append(rlscope_dir)
                 data['algo'].append(algo)
                 data['env'].append(env)
-                data['max_passes'].append(max_passes)
+                if max_passes is not None:
+                    if 'max_passes' not in data:
+                        data['max_passes'] = []
+                    data['max_passes'].append(max_passes)
 
         df = pd.DataFrame(data=data)
         # if self.debug:
@@ -4300,7 +4303,13 @@ class CategoryTransitionPlot:
 
     def plot(self):
         self.plot_df = copy.copy(self.df)
-        self.plot_df['trans_count_per_pass'] = self.plot_df['trans_count']/self.plot_df['max_passes']
+        if 'max_passes' in self.plot_df:
+            self.plot_df['trans_count_per_pass'] = self.plot_df['trans_count']/self.plot_df['max_passes']
+            y_field = 'trans_count_per_pass'
+            y_title = "Transitions per iteration"
+        else:
+            y_field = 'trans_count'
+            y_title = "Total transitions"
 
         if self.category is not None:
             if self.category not in self.plot_df['category'].unique():
@@ -4310,11 +4319,17 @@ class CategoryTransitionPlot:
                     cats=set(self.plot_df['category'].unique()),
                 ))
             category_df = self.plot_df[self.plot_df['category'] == self.category]
-            self.category_plot(category_df, self.category)
+            self.category_plot(category_df, self.category,
+                               y_field=y_field,
+                               y_title=y_title)
         else:
             for category, category_df in self.plot_df.groupby(['category']):
-                self.category_plot(category_df, category)
-            self.combined_plot(self.plot_df)
+                self.category_plot(category_df, category,
+                                   y_field=y_field,
+                                   y_title=y_title)
+            self.combined_plot(self.plot_df,
+                           y_field=y_field,
+                           y_title=y_title)
 
     def run(self):
         self.df = self.all_read_df()
@@ -4343,14 +4358,17 @@ class CategoryTransitionPlot:
             klass=self.__class__.__name__,
         ))
 
-    def _get_ylabel(self, category):
+    def _get_ylabel(self, category, y_title=None):
         if self.y_title is not None:
             return self.y_title
-        return "Transitions per iteration to:\n{category}".format(
+        if y_title is None:
+            y_title="Transitions per iteration"
+        return "{y_title} to:\n{category}".format(
+            y_title=y_title,
             category=short_category(category),
         )
 
-    def category_plot(self, df, category, **kwargs):
+    def category_plot(self, df, category, y_field, y_title=None, **kwargs):
         def ax_func(stacked_bar_plot):
             if self.rotation is not None:
                 stacked_bar_plot.ax.set_xticklabels(
@@ -4361,7 +4379,7 @@ class CategoryTransitionPlot:
             data=df,
             path=self.plot_path(category),
             x_field='x_field',
-            y_field='trans_count_per_pass',
+            y_field=y_field,
             x_group='operation',
 
             # y_lim_scale_factor=self.y_lim_scale_factor,
@@ -4378,7 +4396,7 @@ class CategoryTransitionPlot:
             width=self.width,
             height=self.height,
 
-            ylabel=self._get_ylabel(category),
+            ylabel=self._get_ylabel(category, y_title=y_title),
             title=self.plot_title(),
             func=ax_func,
             debug=self.debug,
@@ -4386,18 +4404,20 @@ class CategoryTransitionPlot:
         )
         stacked_bar_plot.plot()
 
-    def combined_plot(self, df, **kwargs):
+    def combined_plot(self, df, y_field, y_title=None, **kwargs):
         def ax_func(stacked_bar_plot):
             if self.rotation is not None:
                 stacked_bar_plot.ax.set_xticklabels(
                     stacked_bar_plot.ax.get_xticklabels(),
                     rotation=self.rotation)
         rls_paper_fontsizes()
+        if y_title is None:
+            y_title = "Transitions per iteration"
         stacked_bar_plot = DetailedStackedBarPlot(
             data=df,
             path=self.combined_plot_path(),
             x_field='x_field',
-            y_field='trans_count_per_pass',
+            y_field=y_field,
             x_group='operation',
 
             # y_lim_scale_factor=self.y_lim_scale_factor,
@@ -4414,7 +4434,7 @@ class CategoryTransitionPlot:
             width=self.width,
             height=self.height,
 
-            ylabel="Transitions per iteration",
+            ylabel=y_title,
             title=self.plot_title(),
             func=ax_func,
             debug=self.debug,

@@ -18,6 +18,7 @@ from rlscope.profiler.rlscope_logging import logger
 from rlscope.profiler import profilers
 from rlscope.profiler import nvidia_gpu_query
 from rlscope.clib import rlscope_api
+from rlscope.parser.exceptions import RLScopeAPIError, RLScopeConfigurationError
 
 from rlscope.parser.common import *
 
@@ -66,7 +67,7 @@ def patch_environ():
         return
 
     if platform.system() != 'Linux':
-        raise RuntimeError("RL-Scope: currently, RL-Scope only support Linux for handling LD_PRELOAD hackery (need to add support for Mac/Windows)")
+        raise RLScopeConfigurationError("Currently, RL-Scope only support Linux for handling LD_PRELOAD hackery (need to add support for Mac/Windows)")
 
     # We need to compute this BEFORE we modify LD_PRELOAD.
     is_used = rlscope_api.is_used()
@@ -84,7 +85,28 @@ def patch_environ():
         "  LD_PRELOAD={LD_PRELOAD}").format(
         LD_PRELOAD=os.environ['LD_PRELOAD']))
 
-def handle_rlscope_args(parser, args, directory=None, reports_progress=False):
+def _add_rlscope_args(args):
+    if not rlscope_api.is_used() and not get_arg(args, 'rlscope_disable'):
+        logger.warning(
+            textwrap.dedent("""\
+            Skipping RL-Scope profiling; to run with RL-Scope prefix your command with:
+              $ rls-prof ...
+                --------
+            """).rstrip())
+        set_arg(args, 'rlscope_disable', True)
+
+def get_arg(args, attr):
+    if hasattr(args, attr):
+        return getattr(args, attr)
+    return args[attr]
+
+def set_arg(args, attr, value):
+    if hasattr(args, attr):
+        setattr(args, attr, value)
+    else:
+        args[attr] = value
+
+def handle_rlscope_args(parser=None, args=None, directory=None, reports_progress=False, delay=False, delay_register_libs=False):
     """
     Initialize the RL-Scope profiler (:py:obj:`rlscope.api.prof`) using :py:obj:`sys.argv`.
 
@@ -104,13 +126,19 @@ def handle_rlscope_args(parser, args, directory=None, reports_progress=False):
     # else:
     #     rlscope_directory = directory
 
+    if args is None:
+        args = dict()
+
+    _add_rlscope_args(args)
+
     if directory is not None:
         rlscope_directory = directory
     else:
-        if hasattr(args, 'rlscope_directory'):
-            rlscope_directory = args.rlscope_directory
-        else:
-            rlscope_directory = args['rlscope_directory']
+        rlscope_directory = get_arg(args, 'rlscope_directory')
+
+    if delay_register_libs:
+        from rlscope.profiler import clib_wrap as rlscope_clib_wrap
+        rlscope_clib_wrap.delay_register_libs()
 
     # TODO: train.py apparently like to launch separate process all willy-nilly.
     # I'm not sure what it's doing this for, but it's certainly true that python-side RL-Scope stuff will do it too.
@@ -122,18 +150,21 @@ def handle_rlscope_args(parser, args, directory=None, reports_progress=False):
     # launch new training scripts.
     patch_environ()
 
-    if rlscope_directory is None:
-        raise RuntimeError("RL-Scope: you must provide a location to store trace files: --rlscope-directory <dir>")
+    rlscope_enabled = not get_arg(args, 'rlscope_disable')
+    if rlscope_directory is None and rlscope_enabled:
+        raise RLScopeAPIError("You must provide a location to store trace files: --rlscope-directory <dir>")
 
-    success = profilers.check_avail_gpus()
-    if not success:
-        sys.exit(1)
+    if rlscope_enabled:
+        success = profilers.check_avail_gpus()
+        if not success:
+            sys.exit(1)
 
-    nvidia_gpu_query.check_nvidia_smi()
+        nvidia_gpu_query.check_nvidia_smi()
 
     init_profiler(
         directory=rlscope_directory,
         reports_progress=reports_progress,
+        delay=delay,
         args=args,
     )
 

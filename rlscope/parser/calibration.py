@@ -44,7 +44,7 @@ import functools
 
 from os.path import join as _j, abspath as _a, exists as _e, dirname as _d, basename as _b
 
-from rlscope.profiler.util import print_cmd
+from rlscope.profiler.util import print_cmd, get_stacktrace, pprint_msg
 from rlscope.profiler.util import run_with_pdb, pprint_msg
 from rlscope.parser.common import *
 from rlscope.experiment.util import tee, expr_run_cmd, expr_already_ran
@@ -60,7 +60,7 @@ from rlscope.parser.profiling_overhead import \
     MicrobenchmarkOverheadJSON, \
     CalibrationJSONs
 from rlscope.parser import check_host
-from rlscope.parser.exceptions import RLScopeConfigurationError
+from rlscope.parser.exceptions import RLScopeConfigurationError, RLScopeRunError, RLScopeAnalysisError
 
 SENTINEL = object()
 
@@ -90,6 +90,7 @@ class Calibration:
                  max_workers=None,
                  parallel_runs=False,
                  plots=None,
+                 gpu_hw=False,
                  gpus=None,
                  debug=False,
                  debug_single_thread=False,
@@ -110,12 +111,14 @@ class Calibration:
         self.parallel_runs = parallel_runs
         self.gpus = gpus
         self.plots = plots
+        self.gpu_hw = gpu_hw
         self.debug = debug
         self.debug_single_thread = debug_single_thread
         self.pdb = pdb
         self._pool = ProcessPoolExecutorWrapper(name='{klass}.pool'.format(
             klass=self.__class__.__name__),
             max_workers=self.max_workers)
+        self._has_run_calibration = set()
 
     def __getstate__(self):
         state = self.__dict__.copy()
@@ -270,12 +273,13 @@ class Calibration:
         add_rlscope_analyze_flags(cmd, self)
 
         logfile = self.compute_category_transition_plot_logfile(output_directory)
-        expr_run_cmd(
+        _expr_run_cmd(
             cmd=cmd,
             to_file=logfile,
             dry_run=self.dry_run,
             skip_error=self.skip_error,
             debug=self.debug,
+            exception_class=RLScopeAnalysisError,
             only_show_env=self.only_show_env())
 
     def compute_gpu_hw_plot(self, directories, output_directory, extra_argv=None,
@@ -292,10 +296,11 @@ class Calibration:
         # repetitions = [1]
 
         for rlscope_directory in directories:
-            if self.dry_run and (
-                self.conf(rlscope_directory, 'gpu_hw', calibration=True, dflt=None) is None or
-                self.conf(rlscope_directory, 'time_breakdown', calibration=True, dflt=None) is None
-            ):
+            if self.conf(rlscope_directory, 'gpu_hw', calibration=True, dflt=None) is None or (
+                    self.dry_run and (
+                        self.conf(rlscope_directory, 'gpu_hw', calibration=True, dflt=None) is None or
+                        self.conf(rlscope_directory, 'time_breakdown', calibration=True, dflt=None) is None
+            )):
                 return
 
         rlscope_dirs = []
@@ -326,7 +331,7 @@ class Calibration:
         # cmd.extend(self.extra_argv)
 
         logfile = self.compute_gpu_hw_plot_logfile(output_directory)
-        expr_run_cmd(
+        _expr_run_cmd(
             cmd=cmd,
             to_file=logfile,
             # Always re-run plotting script?
@@ -334,6 +339,7 @@ class Calibration:
             dry_run=self.dry_run,
             skip_error=self.skip_error,
             debug=self.debug,
+            exception_class=RLScopeAnalysisError,
             only_show_env=self.only_show_env())
 
     def compute_time_breakdown_plot(self, directories, output_directory, correct_overhead, extra_argv,
@@ -426,7 +432,7 @@ class Calibration:
         # cmd.extend(self.extra_argv)
 
         logfile = self.compute_time_breakdown_plot_logfile(output_directory)
-        expr_run_cmd(
+        _expr_run_cmd(
             cmd=cmd,
             to_file=logfile,
             # Always re-run plotting script?
@@ -434,6 +440,7 @@ class Calibration:
             dry_run=self.dry_run,
             skip_error=self.skip_error,
             debug=self.debug,
+            exception_class=RLScopeAnalysisError,
             only_show_env=self.only_show_env())
 
     def _add_calibration_opts(self, output_directory, cmd):
@@ -550,7 +557,7 @@ class Calibration:
         add_rlscope_analyze_flags(cmd, self)
 
         logfile = self.rls_analyze_logfile(rlscope_directory, conf, rep, correct_overhead)
-        expr_run_cmd(
+        _expr_run_cmd(
             cmd=cmd,
             to_file=logfile,
             # Always re-run plotting script?
@@ -558,6 +565,7 @@ class Calibration:
             dry_run=self.dry_run,
             skip_error=self.skip_error,
             debug=self.debug,
+            exception_class=RLScopeAnalysisError,
             only_show_env=self.only_show_env())
 
     def only_show_env(self):
@@ -608,7 +616,7 @@ class Calibration:
         # cmd.extend(self.extra_argv)
 
         logfile = self.cupti_scaling_overhead_logfile(output_directory)
-        expr_run_cmd(
+        _expr_run_cmd(
             cmd=cmd,
             to_file=logfile,
             # Always re-run plotting script?
@@ -616,6 +624,7 @@ class Calibration:
             dry_run=self.dry_run,
             skip_error=self.skip_error,
             debug=self.debug,
+            exception_class=RLScopeAnalysisError,
             only_show_env=self.only_show_env())
 
     def compute_cupti_overhead(self, output_directory):
@@ -660,7 +669,7 @@ class Calibration:
         add_rlscope_analyze_flags(cmd, self)
 
         logfile = self.cupti_overhead_logfile(output_directory)
-        expr_run_cmd(
+        _expr_run_cmd(
             cmd=cmd,
             to_file=logfile,
             # Always re-run plotting script?
@@ -668,6 +677,7 @@ class Calibration:
             dry_run=self.dry_run,
             skip_error=self.skip_error,
             debug=self.debug,
+            exception_class=RLScopeAnalysisError,
             only_show_env=self.only_show_env())
 
     def compute_LD_PRELOAD_overhead(self, output_directory):
@@ -716,7 +726,7 @@ class Calibration:
         add_rlscope_analyze_flags(cmd, self)
 
         logfile = self.LD_PRELOAD_overhead_logfile(output_directory)
-        expr_run_cmd(
+        _expr_run_cmd(
             cmd=cmd,
             to_file=logfile,
             # Always re-run plotting script?
@@ -724,6 +734,7 @@ class Calibration:
             dry_run=self.dry_run,
             skip_error=self.skip_error,
             debug=self.debug,
+            exception_class=RLScopeAnalysisError,
             only_show_env=self.only_show_env())
 
     def compute_pyprof_overhead(self, output_directory):
@@ -777,7 +788,7 @@ class Calibration:
         add_rlscope_analyze_flags(cmd, self)
 
         logfile = self.pyprof_overhead_logfile(output_directory)
-        expr_run_cmd(
+        _expr_run_cmd(
             cmd=cmd,
             to_file=logfile,
             # Always re-run plotting script?
@@ -785,6 +796,7 @@ class Calibration:
             dry_run=self.dry_run,
             skip_error=self.skip_error,
             debug=self.debug,
+            exception_class=RLScopeAnalysisError,
             only_show_env=self.only_show_env())
 
     def each_config_repetition(self):
@@ -797,13 +809,16 @@ class Calibration:
             # Run configurations serially on which GPU(s) are visible.
             for rep, config in self.each_config_repetition():
                 config.run(rep, cmd, output_directory)
+            logger.info("Trace files have been recorded @ {direc}/*".format(
+                direc=output_directory,
+            ))
             return
 
         # Parallelize running configurations across GPUs on this machine (assume no CPU interference).
         # Record commands in run_expr.sh, and run:
         # $ rls-run-expr --run-sh --sh run_expr.sh
         run_expr_sh = self._run_expr_sh(output_directory)
-        logger.info(f"Writing configuration shell commands to {run_expr_sh}")
+        logger.info(f"Writing run configuration shell commands to {run_expr_sh}")
         os.makedirs(_d(run_expr_sh), exist_ok=True)
         with open(run_expr_sh, 'w') as f:
             for rep, config in self.each_config_repetition():
@@ -826,6 +841,9 @@ class Calibration:
         if retcode != 0:
             logger.error("Failed to run configurations in parallel; at least one configuration exited with non-zero exit status.")
             sys.exit(1)
+        logger.info("Trace files have been recorded @ {direc}/*".format(
+            direc=output_directory,
+        ))
 
 
     def _run_expr_sh(self, output_directory):
@@ -888,6 +906,9 @@ class Calibration:
 
 
     def do_calibration(self, output_directory, sync=True):
+        if output_directory in self._has_run_calibration:
+            logger.debug("SKIP re-running calibration for {path}".format(path=output_directory))
+            return
         logger.debug("Calibration...")
         self._pool.submit(
             get_func_name(self, 'compute_cupti_scaling_overhead'),
@@ -915,6 +936,12 @@ class Calibration:
         )
         if sync:
             self._pool.shutdown()
+        # logger.info("Calibration files have been generated @ {direc}/*_overhead:\n{stack}".format(
+        logger.info("Calibration files have been generated @ {direc}/*_overhead".format(
+            direc=output_directory,
+            # stack=get_stacktrace(),
+        ))
+        self._has_run_calibration.add(output_directory)
 
     def _get_plot_dir(self, output_directory, correct_overhead):
         if correct_overhead:
@@ -980,6 +1007,9 @@ class Calibration:
                     **kwargs,
                 )
         self._pool.shutdown()
+        logger.info("Plots have been generated @ {direc}/**/*.pdf".format(
+            direc=output_directory,
+        ))
 
     def each_repetition(self):
         return range(1, self.repetitions+1)
@@ -999,14 +1029,19 @@ class Calibration:
             suffix=config_suffix,
         )
 
-    def init_configs(self, directories):
+    def init_configs(self, directories, output_directory):
         self.configs = []
         self.config_map = dict()
         for directory in directories:
             self._add_configs(directory)
-        logger.info("Run configurations: {msg}".format(msg=pprint_msg({
-            'configs': self.configs,
-        })))
+        ss = StringIO()
+        ss.write("Run configurations:")
+        ss.write("\n")
+        for config in self.configs:
+            ss.write("  ")
+            ss.write(config.pretty_output_dir(output_directory))
+            ss.write("\n")
+        logger.info(ss.getvalue().rstrip())
 
 
     def _add_configs(self, output_dir):
@@ -1041,14 +1076,15 @@ class Calibration:
             rls_analyze_mode='overlap',
         )
 
-        add_calibration_config(
-            expr=self,
-            rlscope_prof_config='gpu-hw',
-            config_suffix='gpu_hw',
-            script_args=[],
-            calibration=False,
-            rls_analyze_mode='gpu_hw',
-        )
+        if self.gpu_hw:
+            add_calibration_config(
+                expr=self,
+                rlscope_prof_config='gpu-hw',
+                config_suffix='gpu_hw',
+                script_args=[],
+                calibration=False,
+                rls_analyze_mode='gpu_hw',
+            )
 
         # Entirely uninstrumented configuration; we use this in many of the overhead calculations to determine
         # how much training time is attributable to the enabled "feature" (e.g. CUPTI activities).
@@ -1164,15 +1200,12 @@ class Calibration:
             self.clean_plots(directory)
 
     def _mode_run(self, cmd, directory):
-        self.init_configs([directory])
+        self.init_configs([directory], output_directory=directory)
 
         self.maybe_clean(directory)
 
         self.do_run(cmd, directory)
         self.do_plot(directories=[directory], output_directory=directory)
-        logger.info("Success! Calibration files have been generated @ {direc}/*_overhead".format(
-            direc=directory,
-        ))
 
     def mode_run(self, *args, **kwargs):
         """
@@ -1207,11 +1240,17 @@ class Calibration:
         except Exception as e:
             # DON'T wait for pool... it may cause more exceptions.
             self._pool.shutdown(ignore_exceptions=True)
+            if isinstance(e, RLScopeRunError) or isinstance(e, RLScopeAnalysisError):
+                logger.error("RL-Scope saw one or more errors; look for \"ERROR\" lines above for details.")
+                sys.exit(1)
+            if self.debug:
+                logger.error("Unhandled exception in calibration.py")
             raise
+
         self._pool.shutdown()
 
     def _mode_plot(self, directories, output_directory, extra_argv=None, **kwargs):
-        self.init_configs(directories)
+        self.init_configs(directories, output_directory=output_directory)
 
         # Output directory just contains plots; no need to delete analysis files.
         self.maybe_clean(output_directory, skip_analysis=True)
@@ -1225,12 +1264,6 @@ class Calibration:
         logger.info("Success! Plots output @ {direc}".format(
             direc=output_directory,
         ))
-
-    # def run(self):
-    #     self.init_configs()
-    #
-    #     self.do_run()
-    #     self.do_plot()
 
 
 class RLScopeRunConfig:
@@ -1264,6 +1297,17 @@ class RLScopeRunConfig:
                 rep=rep_suffix(rep),
             ))
 
+    def pretty_output_dir(self, output_directory):
+        return self.out_dir(output_directory, rep='*')
+
+    def pretty_to_string(self, output_directory):
+        return ("{klass}("
+                "output={pretty_output_dir}"
+                ")").format(
+            klass=self.__class__.__name__,
+            pretty_output_dir=self.pretty_output_dir(output_directory)
+        )
+
     def to_string(self):
         return ("{klass}("
                 "rlscope_prof_config='{rlscope_prof_config}'"
@@ -1289,6 +1333,7 @@ class RLScopeRunConfig:
     def run_cmd(self, rep, cmd, output_directory):
         rlscope_prof_cmd = [
             'rls-prof',
+            '--no-calibrate',
             '--config', self.rlscope_prof_config,
         ]
         rlscope_prof_cmd.extend(cmd)
@@ -1298,8 +1343,6 @@ class RLScopeRunConfig:
             # in isolation!
             '--rlscope-calibration',
             '--rlscope-directory', _a(self.out_dir(output_directory, rep)),
-            '--rlscope-training-progress',
-            '--rlscope-delay',
         ])
 
         rlscope_prof_cmd.extend(self.script_args)
@@ -1309,7 +1352,7 @@ class RLScopeRunConfig:
 
     def run(self, rep, cmd, output_directory):
         run_cmd = self.run_cmd(rep, cmd, output_directory)
-        expr_run_cmd(
+        _expr_run_cmd(
             cmd=run_cmd.cmd,
             to_file=run_cmd.logfile,
             # cwd=ENV['RL_BASELINES_ZOO_DIR'],
@@ -1317,6 +1360,7 @@ class RLScopeRunConfig:
             dry_run=self.expr.dry_run,
             skip_error=self.expr.skip_error,
             debug=self.expr.debug,
+            exception_class=RLScopeRunError,
             only_show_env=self.expr.only_show_env())
 
     def already_ran(self, output_directory, rep, correct_overhead):
@@ -1430,6 +1474,11 @@ def _main(argv):
                             help=textwrap.dedent("""
                             Skip errors 
                             """))
+        parser.add_argument("--gpu-hw",
+                            action='store_true',
+                            help=textwrap.dedent("""
+                                Collect GPU hardware counters.
+                                """))
 
     run_parser = subparsers.add_parser('run', description="Run <cmd> with profiling overhead calibration")
     add_common_arguments(run_parser)
@@ -1447,11 +1496,21 @@ def _main(argv):
                         help=textwrap.dedent("""
                             GPUs to run with for --parallel-runs
                             """))
+
+    parallel_runs_help = textwrap.dedent("""
+                            Parallelize running configurations across GPUs on this machine (assume no CPU interference). 
+                            See --gpus.
+                            """)
     run_parser.add_argument("--parallel-runs",
-                        action='store_true',
-                        help=textwrap.dedent("""
-                            Parallelize running configurations across GPUs on this machine (assume no CPU interference). See --rlscope-gpus
-                            """))
+                            dest='parallel_runs',
+                            action='store_true',
+                            default=True,
+                            help=parallel_runs_help)
+    run_parser.add_argument("--no-parallel-runs",
+                            dest='parallel_runs',
+                            action='store_false',
+                            help=parallel_runs_help)
+
     run_parser.add_argument("--retry",
                             type=int,
                             help=textwrap.dedent("""
@@ -1559,7 +1618,12 @@ def _main(argv):
 
 def rep_suffix(rep):
     assert rep is not None
-    return "_repetition_{rep:02}".format(rep=rep)
+    try:
+        rep_int = int(rep)
+        rep_str = "{rep:02}".format(rep=rep)
+    except ValueError:
+        rep_str = rep
+    return "_repetition_{rep}".format(rep=rep_str)
 
 def corrected_suffix(correct_overhead, skip_dot=False):
     ss = StringIO()
@@ -1613,6 +1677,11 @@ class RunCmd:
         )
 
 
+def _expr_run_cmd(*args, **kwargs):
+    return expr_run_cmd(
+        *args,
+        raise_exception=True,
+        **kwargs)
 
 if __name__ == '__main__':
     main_run()

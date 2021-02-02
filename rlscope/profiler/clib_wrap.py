@@ -311,10 +311,19 @@ def setup(allow_skip=False):
         return
     assert not SETUP_DONE
 
-    register_detected_libs()
-    wrap_libs()
+    if not DELAY_REGISTER_LIBS:
+        register_detected_libs()
+        wrap_libs()
 
-    SETUP_DONE = True
+        SETUP_DONE = True
+
+DELAY_REGISTER_LIBS = False
+def delay_register_libs():
+    global DELAY_REGISTER_LIBS
+    DELAY_REGISTER_LIBS = True
+
+def register_libs():
+    setup(allow_skip=True)
 
 def register_detected_libs():
     try:
@@ -345,7 +354,7 @@ def register_detected_libs():
             logger.debug("PyBullet is NOT installed")
 
     # NOTE: we delay this to avoid messing up torch.jit.script until we support it better.
-    # register_torch()
+    register_torch()
 
 def register_torch():
     try:
@@ -356,9 +365,10 @@ def register_torch():
             logger.debug("torch is NOT installed")
 
 def wrap_tensorflow_v1(category=constants.CATEGORY_TF_API, debug=False):
-    logger.info("> RL-Scope: Wrapping module=tensorflow call with category={category} annotations".format(
-        category=category,
-    ))
+    if py_config.DEBUG_WRAP_CLIB:
+        logger.info("> RL-Scope: Wrapping module=tensorflow call with category={category} annotations".format(
+            category=category,
+        ))
     success = wrap_util.wrap_lib(
         CFuncWrapper,
         import_libname='tensorflow.pywrap_tensorflow',
@@ -380,9 +390,10 @@ def is_tensorflow_v2():
     return int(m.group('major')) >= 2
 
 def wrap_tensorflow_v2(category=constants.CATEGORY_TF_API, debug=False):
-    logger.info("> RL-Scope: Wrapping module=tensorflow.python.pywrap_tfe call with category={category} annotations".format(
-        category=category,
-    ))
+    if py_config.DEBUG_WRAP_CLIB:
+        logger.info("> RL-Scope: Wrapping module=tensorflow.python.pywrap_tfe call with category={category} annotations".format(
+            category=category,
+        ))
     success = wrap_util.wrap_lib(
         CFuncWrapper,
         import_libname='tensorflow.python.pywrap_tfe',
@@ -427,7 +438,7 @@ def unwrap_atari():
         CFuncWrapper,
         atari_py.ale_python_interface.ale_lib)
 
-def wrap_module(module, category, debug=False, **kwargs):
+def wrap_module(module, category, debug=False, print_summary=True, **kwargs):
     if py_config.DEBUG_WRAP_CLIB:
         logger.info("> RL-Scope: Wrapping module={mod} call with category={category} annotations".format(
             mod=module,
@@ -435,7 +446,9 @@ def wrap_module(module, category, debug=False, **kwargs):
         ))
     wrap_util.wrap_module(
         CFuncWrapper, module,
-        wrapper_args=(category, DEFAULT_PREFIX, debug), **kwargs)
+        wrapper_args=(category, DEFAULT_PREFIX, debug),
+        print_summary=print_summary,
+        **kwargs)
 def unwrap_module(module):
     if py_config.DEBUG_WRAP_CLIB:
         logger.info("> RL-Scope: Unwrapping module={mod}".format(

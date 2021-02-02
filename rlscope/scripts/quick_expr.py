@@ -295,14 +295,12 @@ class ExprSubtractionValidationConfig:
 
                '--rlscope-directory', _a(self.out_dir(rep, iters)),
                '--rlscope-max-timesteps', iters,
-               '--rlscope-training-progress',
 
                '--algo', self.algo,
                '--env', self.env,
 
                '--log-folder', _j(ENV['RL_BASELINES_ZOO_DIR'], 'output'),
                '--log-interval', '1',
-               '--rlscope-delay',
                ]
         cmd.extend(self.script_args)
         logfile = self.logfile(rep, iters)
@@ -383,14 +381,12 @@ class ExprTotalTrainingTimeConfig:
 
                '--rlscope-directory', _a(self.out_dir(rep)),
                # '--rlscope-max-timesteps', iters,
-               '--rlscope-training-progress',
 
                '--algo', self.algo,
                '--env', self.env,
 
                '--log-folder', _j(ENV['RL_BASELINES_ZOO_DIR'], 'output'),
                '--log-interval', '1',
-               '--rlscope-delay',
                ]
         if self.rlscope_prof_config == 'uninstrumented':
             cmd.extend([
@@ -497,8 +493,6 @@ class ExprMicrobenchmarkConfig:
                # '--rlscope-directory', _a(self.out_dir(rep)),
                '--rlscope-directory', _a(self.out_dir()),
                # '--rlscope-max-timesteps', iters,
-               '--rlscope-training-progress',
-               '--rlscope-delay',
 
                '--mode', self.mode,
 

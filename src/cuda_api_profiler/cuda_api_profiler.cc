@@ -418,10 +418,10 @@ void CUDAAPIProfilerPrinter::_Run() {
 }
 
 void CUDAAPIProfilerPrinter::_EverySec() {
-  if (VLOG_IS_ON(1)) {
-    DECLARE_LOG_INFO(info);
-    _profiler.Print(info, 0);
-  }
+//  if (VLOG_IS_ON(1)) {
+//    DECLARE_LOG_INFO(info);
+//    _profiler.Print(info, 0);
+//  }
 }
 
 void CUDAAPIProfilerPrinter::Start() {

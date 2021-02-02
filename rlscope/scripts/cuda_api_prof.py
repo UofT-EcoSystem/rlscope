@@ -118,11 +118,21 @@ def main():
                         
                         Effect: sets "export RLSCOPE_STREAM_SAMPLING=yes" for librlscope.so.
                         """))
-    parser.add_argument('--calibrate', action='store_true',
-                        help=textwrap.dedent("""
-                        Perform multiple runs in order to calibrate for profiling overhead 
-                        specific to the workload being run.
-                        """))
+
+    calibrate_help = textwrap.dedent("""\
+    Perform multiple runs in order to calibrate for profiling overhead 
+    specific to the workload being run.
+    """).rstrip()
+    parser.add_argument("--calibrate",
+                        dest='calibrate',
+                        action='store_true',
+                        default=True,
+                        help=calibrate_help)
+    parser.add_argument("--no-calibrate",
+                        dest='calibrate',
+                        action='store_false',
+                        help=calibrate_help)
+
     parser.add_argument("--re-calibrate",
                         action='store_true',
                         help=textwrap.dedent("""
@@ -133,11 +143,21 @@ def main():
                         help=textwrap.dedent("""
                             Remove existing plots and remake them (NOTE: doesn't recompute analysis; see --re-calibrate).
                             """))
+
+    parallel_runs_help = textwrap.dedent("""
+                            Parallelize running configurations across GPUs on this machine (assume no CPU interference). 
+                            See --gpus.
+                            """)
     parser.add_argument("--parallel-runs",
-                        action='store_true',
-                        help=textwrap.dedent("""
-                            Parallelize running configurations across GPUs on this machine (assume no CPU inteference). See --gpus
-                            """))
+                            dest='parallel_runs',
+                            action='store_true',
+                            default=True,
+                            help=parallel_runs_help)
+    parser.add_argument("--no-parallel-runs",
+                            dest='parallel_runs',
+                            action='store_false',
+                            help=parallel_runs_help)
+
     parser.add_argument("--retry",
                         type=int,
                         help=textwrap.dedent("""
@@ -199,9 +219,6 @@ def main():
                         Expect (for the above configurations):
                         You should run train.py with these arguments set
                         
-                            # We are comparing total training time across each configuration 
-                            --rlscope-training-progress
-                        
                             # Since we are comparing total training time, 
                             # run each configuration with the same number of training loop steps.
                             --rlscope-max-timesteps $N
@@ -243,15 +260,28 @@ def main():
         if getattr(args, attr) is None:
             setattr(args, attr, value)
 
+    def maybe_remove(xs, x):
+        if x in xs:
+            xs.remove(x)
+
     if args.calibrate:
         if args.config is not None:
             logger.error("Only --calibrate or --config should be provided for rls-prof.")
             parser.exit(1)
         # Run calibrate.py
         cmd = ['rls-calibrate', 'run']
+
+        if args.gpu_hw:
+            cmd.extend(['--gpu-hw'])
+            maybe_remove(rlscope_prof_argv, '--gpu-hw')
+
         if args.parallel_runs:
             cmd.extend(['--parallel-runs'])
-            rlscope_prof_argv.remove('--parallel-runs')
+            maybe_remove(rlscope_prof_argv, '--parallel-runs')
+        else:
+            cmd.extend(['--no-parallel-runs'])
+            maybe_remove(rlscope_prof_argv, '--no-parallel-runs')
+
         if args.retry is not None:
             cmd.extend(['--retry', str(args.retry)])
 
@@ -262,7 +292,7 @@ def main():
 
         # if args.gpus is not None:
         #     cmd.extend(['--gpus', args.gpus])
-        rlscope_prof_argv.remove('--calibrate')
+        maybe_remove(rlscope_prof_argv, '--calibrate')
         cmd.extend(rlscope_prof_argv)
         cmd.extend(cmd_argv)
         # cmd.remove('--calibrate')
