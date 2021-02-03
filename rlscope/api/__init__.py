@@ -69,6 +69,14 @@ __all__.extend([
   'unwrap_entire_module',
 ])
 
+from rlscope import \
+  __version__, \
+  version
+__all__.extend([
+  '__version__',
+  'version',
+])
+
 # from rlscope.scripts.utilization_sampler import \
 #   util_sampler
 # __all__.extend([

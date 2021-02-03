@@ -8,6 +8,8 @@ import time
 import argparse
 import textwrap
 import numpy as np
+from rlscope.parser.plot_utils import setup_matplotlib
+setup_matplotlib()
 import matplotlib.pyplot as plt
 import pprint
 

@@ -43,17 +43,19 @@ def main():
 
     rlscope_prof_argv, cmd_argv = gather_argv(sys.argv[1:])
 
-    parser = argparse.ArgumentParser("RL-Scope cross-stack profiler for reinforcement learning workloads.")
+    parser = argparse.ArgumentParser(
+        description="RL-Scope cross-stack profiler for reinforcement learning workloads.",
+        formatter_class=argparse.RawTextHelpFormatter)
     # NOTE: these arguments must precede the executable (python some/script.py), otherwise they will be sent
     # to the training script, and not handled by this script (rls-prof).
     parser.add_argument('--debug', action='store_true')
     parser.add_argument('--rlscope-debug', action='store_true')
-    parser.add_argument('--rlscope-rm-traces-from', help=textwrap.dedent("""
+    parser.add_argument('--rlscope-rm-traces-from', help=textwrap.dedent("""\
     Delete traces rooted at this --rlscope-directory. 
     Useful if your training script has multiple training scripts, and you need to use --rlscope-skip-rm-traces 
     when launching the other scripts.
     """))
-    # parser.add_argument('--rlscope-disable', action='store_true', help=textwrap.dedent("""
+    # parser.add_argument('--rlscope-disable', action='store_true', help=textwrap.dedent("""\
     #     RL-Scope: Skip any profiling. Used for uninstrumented runs.
     #     Useful for ensuring minimal libcupti registration when we run --cuda-api-calls during config_uninstrumented.
     #
@@ -61,7 +63,7 @@ def main():
     # """))
 
     add_bool_arg(parser, '--cuda-api-calls',
-                        help=textwrap.dedent("""
+                        help=textwrap.dedent("""\
                         Trace CUDA API runtime/driver calls.
                         
                         i.e. total number of calls, and total time (usec) spent in a given API call.
@@ -69,37 +71,37 @@ def main():
                         Effect: sets "export RLSCOPE_CUDA_API_CALLS=1" for librlscope.so.
                         """))
     add_bool_arg(parser, '--cuda-activities',
-                        help=textwrap.dedent("""
+                        help=textwrap.dedent("""\
                         Trace CUDA activities (i.e. GPU kernel runtimes, memcpy's).
                         
                         Effect: sets "export RLSCOPE_CUDA_ACTIVITIES=yes" for librlscope.so.
                         """))
     add_bool_arg(parser, '--cuda-api-events',
-                        help=textwrap.dedent("""
+                        help=textwrap.dedent("""\
                         Trace all the start/end timestamps of CUDA API calls.
                         Needed during instrumented runs so we know when to subtract profiling overheads.
                         
                         Effect: sets "export RLSCOPE_CUDA_API_EVENTS=yes" for librlscope.so.
                         """))
     add_bool_arg(parser, '--gpu-hw',
-                 help=textwrap.dedent("""
+                 help=textwrap.dedent("""\
                         Collect GPU hardware counters.
                         
                         Effect: sets "export RLSCOPE_GPU_HW=yes" for librlscope.so.
                         """))
 
-    parser.add_argument('--fuzz-cuda-api', action='store_true',
-                        help=textwrap.dedent("""
-                        Use libcupti to trace ALL CUDA runtime API calls (# of calls, and total time spent in them).
-                        This is useful for determining which CUDA API's we need to "calibrate subtractions" for.
-                        NOTE: this SHOULDN'T be used for finding profiling book-keeping "subtractions", since it 
-                        adds a LOT of overhead to add start/end callbacks to all CUDA API functions.
-                        
-                        Effect: sets "export RLSCOPE_FUZZ_CUDA_API=yes" for librlscope.so.
-                        """))
+    # parser.add_argument('--fuzz-cuda-api', action='store_true',
+    #                     help=textwrap.dedent("""\
+    #                     Use libcupti to trace ALL CUDA runtime API calls (# of calls, and total time spent in them).
+    #                     This is useful for determining which CUDA API's we need to "calibrate subtractions" for.
+    #                     NOTE: this SHOULDN'T be used for finding profiling book-keeping "subtractions", since it
+    #                     adds a LOT of overhead to add start/end callbacks to all CUDA API functions.
+    #
+    #                     Effect: sets "export RLSCOPE_FUZZ_CUDA_API=yes" for librlscope.so.
+    #                     """))
 
     parser.add_argument('--pc-sampling', action='store_true',
-                        help=textwrap.dedent("""
+                        help=textwrap.dedent("""\
                         Perform sample-profiling using CUDA's "PC Sampling" API.
                         
                         Currently, we're just going to record GPUSamplingState.is_gpu_active.
@@ -107,55 +109,75 @@ def main():
                         Effect: sets "export RLSCOPE_PC_SAMPLING=1" for librlscope.so.
                         """))
     parser.add_argument('--trace-at-start', action='store_true',
-                        help=textwrap.dedent("""
+                        help=textwrap.dedent("""\
                         Start tracing right at application startup.
                         
                         Effect: sets "export RLSCOPE_TRACE_AT_START=yes" for librlscope.so.
                         """))
-    parser.add_argument('--stream-sampling', action='store_true',
-                        help=textwrap.dedent("""
-                        Poll cudaStreamQuery() to see if the GPU is being used.
-                        
-                        Effect: sets "export RLSCOPE_STREAM_SAMPLING=yes" for librlscope.so.
-                        """))
-    parser.add_argument('--calibrate', action='store_true',
-                        help=textwrap.dedent("""
-                        Perform multiple runs in order to calibrate for profiling overhead 
-                        specific to the workload being run.
-                        """))
+    # parser.add_argument('--stream-sampling', action='store_true',
+    #                     help=textwrap.dedent("""\
+    #                     Poll cudaStreamQuery() to see if the GPU is being used.
+    #
+    #                     Effect: sets "export RLSCOPE_STREAM_SAMPLING=yes" for librlscope.so.
+    #                     """))
+
+    calibrate_help = textwrap.dedent("""\
+    Perform multiple runs in order to calibrate for profiling overhead 
+    specific to the workload being run.
+    """).rstrip()
+    parser.add_argument("--calibrate",
+                        dest='calibrate',
+                        action='store_true',
+                        default=True,
+                        help=calibrate_help)
+    parser.add_argument("--no-calibrate",
+                        dest='calibrate',
+                        action='store_false',
+                        help=calibrate_help)
+
     parser.add_argument("--re-calibrate",
                         action='store_true',
-                        help=textwrap.dedent("""
+                        help=textwrap.dedent("""\
                             Remove existing profiling overhead calibration files, and recompute them.
                             """))
     parser.add_argument("--re-plot",
                         action='store_true',
-                        help=textwrap.dedent("""
+                        help=textwrap.dedent("""\
                             Remove existing plots and remake them (NOTE: doesn't recompute analysis; see --re-calibrate).
                             """))
+
+    parallel_runs_help = textwrap.dedent("""\
+                            Parallelize running configurations across GPUs on this machine (assume no CPU interference). 
+                            See --gpus.
+                            """)
     parser.add_argument("--parallel-runs",
-                        action='store_true',
-                        help=textwrap.dedent("""
-                            Parallelize running configurations across GPUs on this machine (assume no CPU inteference). See --gpus
-                            """))
+                            dest='parallel_runs',
+                            action='store_true',
+                            default=True,
+                            help=parallel_runs_help)
+    parser.add_argument("--no-parallel-runs",
+                            dest='parallel_runs',
+                            action='store_false',
+                            help=parallel_runs_help)
+
     parser.add_argument("--retry",
                         type=int,
-                        help=textwrap.dedent("""
+                        help=textwrap.dedent("""\
                             If a command fails, retry it up to --retry times.
                             Default: don't retry.
                             """))
     parser.add_argument("--dry-run",
                         action='store_true',
-                        help=textwrap.dedent("""
+                        help=textwrap.dedent("""\
                             Dry run
                             """))
     # parser.add_argument("--gpus",
     #                     action='store_true',
-    #                     help=textwrap.dedent("""
+    #                     help=textwrap.dedent("""\
     #                         Parallelize running configurations across GPUs on this machine (assume no CPU inteference). See --rlscope-gpus
     #                         """))
     parser.add_argument("--gpus",
-                        help=textwrap.dedent("""
+                        help=textwrap.dedent("""\
                         # Run on the first GPU only
                         --gpus 0
                         # Run on the first 2 GPUs
@@ -179,7 +201,7 @@ def main():
                         # Detect if user provides --config or not.
                         # By default, run with full RL-Scope instrumentation.
                         # default=DEFAULT_CONFIG,
-                        help=textwrap.dedent("""
+                        help=textwrap.dedent("""\
                         For measuring LD_PRELOAD CUDA API interception overhead:
                             interception:
                                 Enable LD_PRELOAD CUDA API interception.
@@ -199,12 +221,9 @@ def main():
                         Expect (for the above configurations):
                         You should run train.py with these arguments set
                         
-                            # We are comparing total training time across each configuration 
-                            --rlscope-training-progress
-                        
                             # Since we are comparing total training time, 
                             # run each configuration with the same number of training loop steps.
-                            --rlscope-max-timesteps $N
+                            --rlscope-max-passes $N
                             
                             # Disable any pyprof or old tfprof tracing code.
                             --rlscope-disable
@@ -243,15 +262,28 @@ def main():
         if getattr(args, attr) is None:
             setattr(args, attr, value)
 
+    def maybe_remove(xs, x):
+        if x in xs:
+            xs.remove(x)
+
     if args.calibrate:
         if args.config is not None:
             logger.error("Only --calibrate or --config should be provided for rls-prof.")
             parser.exit(1)
         # Run calibrate.py
         cmd = ['rls-calibrate', 'run']
+
+        if args.gpu_hw:
+            cmd.extend(['--gpu-hw'])
+            maybe_remove(rlscope_prof_argv, '--gpu-hw')
+
         if args.parallel_runs:
             cmd.extend(['--parallel-runs'])
-            rlscope_prof_argv.remove('--parallel-runs')
+            maybe_remove(rlscope_prof_argv, '--parallel-runs')
+        else:
+            cmd.extend(['--no-parallel-runs'])
+            maybe_remove(rlscope_prof_argv, '--no-parallel-runs')
+
         if args.retry is not None:
             cmd.extend(['--retry', str(args.retry)])
 
@@ -262,7 +294,7 @@ def main():
 
         # if args.gpus is not None:
         #     cmd.extend(['--gpus', args.gpus])
-        rlscope_prof_argv.remove('--calibrate')
+        maybe_remove(rlscope_prof_argv, '--calibrate')
         cmd.extend(rlscope_prof_argv)
         cmd.extend(cmd_argv)
         # cmd.remove('--calibrate')
@@ -315,8 +347,8 @@ def main():
     else:
         raise NotImplementedError()
 
-    if args.fuzz_cuda_api and args.cuda_api_calls:
-        parser.error("Can only run rls-prof with --fuzz-cuda-api or --cuda-api-calls, not both")
+    # if args.fuzz_cuda_api and args.cuda_api_calls:
+    #     parser.error("Can only run rls-prof with --fuzz-cuda-api or --cuda-api-calls, not both")
 
     if args.debug or args.rlscope_debug or is_env_true('RLSCOPE_DEBUG'):
         logger.info("Detected debug mode; enabling C++ logging statements (export RLSCOPE_CPP_MIN_VLOG_LEVEL=1)")
@@ -339,7 +371,7 @@ def main():
 
     set_yes_no('pc_sampling', 'RLSCOPE_PC_SAMPLING')
 
-    set_yes_no('fuzz_cuda_api', 'RLSCOPE_FUZZ_CUDA_API')
+    # set_yes_no('fuzz_cuda_api', 'RLSCOPE_FUZZ_CUDA_API')
 
     set_yes_no('cuda_api_events', 'RLSCOPE_CUDA_API_EVENTS')
 
@@ -347,7 +379,7 @@ def main():
 
     set_yes_no('trace_at_start', 'RLSCOPE_TRACE_AT_START')
 
-    set_yes_no('stream_sampling', 'RLSCOPE_STREAM_SAMPLING')
+    # set_yes_no('stream_sampling', 'RLSCOPE_STREAM_SAMPLING')
 
     if len(cmd_argv) == 0:
         parser.print_usage()

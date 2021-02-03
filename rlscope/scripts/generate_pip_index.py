@@ -121,16 +121,18 @@ class PipIndexGenerator:
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__.rstrip())
+    parser = argparse.ArgumentParser(
+        description=textwrap.dedent(__doc__.lstrip().rstrip()),
+        formatter_class=argparse.RawTextHelpFormatter)
     parser.add_argument("--output",
                         # required=True,
                         default=_j(py_config.ROOT, 'whl', 'index.html'),
-                        help=textwrap.dedent("""
+                        help=textwrap.dedent("""\
                         HTML file to output
                         """))
     parser.add_argument("--debug",
                         action='store_true',
-                        help=textwrap.dedent("""
+                        help=textwrap.dedent("""\
                         Debug
                         """))
     args = parser.parse_args()

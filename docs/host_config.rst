@@ -91,7 +91,7 @@ To do this, do the following:
 4. Running the Docker development environment
 ---------------------------------------------
 The ``run_docker.py`` python script is used for building and running the docker development environment.
-In order to run this script on the host, you need to install some minimal "deployment" ``pip`` dependencies (:file:`requirements.deploy.txt`).
+In order to run this script on the host, you need to install some minimal "deployment" ``pip`` dependencies (:file:`requirements.docker.txt`).
 
 First, on the **host** run the following (replacing ``[rlscope-root]`` with the directory of your RL-Scope repository):
 
@@ -104,7 +104,7 @@ First, on the **host** run the following (replacing ``[rlscope-root]`` with the 
     [host]$ cd [rlscope-root]
     [host]$ python3 -m virtualenv -p /usr/bin/python3 ./venv
     [host]$ source ./venv/bin/activate
-    [host (venv)]$ pip install -r requirements.deploy.txt
+    [host (venv)]$ pip install -r requirements.docker.txt
 
     # Build and run RL-Scope the docker development environment
     [host (venv)]$ cd [rlscope-root]

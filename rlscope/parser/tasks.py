@@ -1270,15 +1270,12 @@ def main(argv=None, should_exit=True):
     retcode = 0
     if ret.status not in [luigi.LuigiStatusCode.SUCCESS, luigi.LuigiStatusCode.SUCCESS_WITH_RETRY]:
         retcode = 1
-        logger.error("luigi.run FAILED with {ret}".format(
-            ret=ret))
-        print(textwrap.dedent("""\
-        > Debug pro-tip:
-          - Look for the last "> CMD:" that was run, and re-run it manually 
-            but with the added "--pdb --debug" flag to break when it fails.
-        """))
-    # logger.info("Exiting with ret={ret}".format(
-    #     ret=retcode))
+        logger.error(textwrap.dedent("""\
+        RL-Scope analysis of trace files failed.
+          > Debugging recommendation:
+            Look for the last "> CMD:" that was run, and re-run it manually 
+            with "--pdb --debug" flags added to break when it fails.
+        """).rstrip())
     sys.exit(retcode)
 
 class CallInterceptionOverheadTask(luigi.Task):
@@ -1426,12 +1423,12 @@ class CorrectedTrainingTimeTask(luigi.Task):
         self.dumper.run()
 
 class PyprofOverheadTask(luigi.Task):
-    uninstrumented_directory = luigi.ListParameter(description="RL-Scope directory that ran with 'rls-prof --config uninstrumented train.py --rlscope-disable --rlscope-training-progress'")
+    uninstrumented_directory = luigi.ListParameter(description="RL-Scope directory that ran with 'rls-prof --config uninstrumented train.py --rlscope-disable'")
     # pyprof_annotations_directory = luigi.ListParameter(description="RL-Scope directory that ran with 'rls-prof --config uninstrumented train.py --rlscope-disable-tfprof --rlscope-disable-pyprof-interceptions --rlscope-training-progress'")
     # pyprof_interceptions_directory = luigi.ListParameter(description="RL-Scope directory that ran with 'rls-prof --config uninstrumented train.py --rlscope-disable-tfprof --rlscope-disable-pyprof-annotations --rlscope-training-progress'")
 
-    pyprof_annotations_directory = luigi.ListParameter(description="RL-Scope directory that ran with 'rls-prof --config uninstrumented train.py --rlscope-disable-tfprof --rlscope-disable-pyprof-interceptions --rlscope-training-progress'", default=None)
-    pyprof_interceptions_directory = luigi.ListParameter(description="RL-Scope directory that ran with 'rls-prof --config uninstrumented train.py --rlscope-disable-tfprof --rlscope-disable-pyprof-annotations --rlscope-training-progress'", default=None)
+    pyprof_annotations_directory = luigi.ListParameter(description="RL-Scope directory that ran with 'rls-prof --config uninstrumented train.py --rlscope-disable-tfprof --rlscope-disable-pyprof-interceptions'", default=None)
+    pyprof_interceptions_directory = luigi.ListParameter(description="RL-Scope directory that ran with 'rls-prof --config uninstrumented train.py --rlscope-disable-tfprof --rlscope-disable-pyprof-annotations'", default=None)
 
     directory = luigi.Parameter(description="Output directory", default=".")
 
@@ -1459,7 +1456,7 @@ class PyprofOverheadTask(luigi.Task):
         self.dumper.run()
 
 class TotalTrainingTimeTask(luigi.Task):
-    uninstrumented_directory = luigi.ListParameter(description="RL-Scope directory that ran with 'rls-prof --config uninstrumented train.py --rlscope-disable --rlscope-training-progress'")
+    uninstrumented_directory = luigi.ListParameter(description="RL-Scope directory that ran with 'rls-prof --config uninstrumented train.py --rlscope-disable'")
     directory = luigi.Parameter(description="Output directory", default=".")
 
     # Plot attrs

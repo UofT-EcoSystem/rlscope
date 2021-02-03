@@ -15,7 +15,6 @@ import sys
 import os
 import traceback
 import pandas as pd
-import ipdb
 import argparse
 import pprint
 import textwrap
@@ -84,7 +83,7 @@ def add_config_options(pars):
         #     'instrumented_full_no_tfprof_no_pyprof',
         #
         #     'uninstrumented_full'],
-        help=textwrap.dedent("""
+        help=textwrap.dedent("""\
         instrumented:
             Run the script with RL-Scope enabled for the entire duration of training (if --rlscope-trace-time-sec), 
             record start/end timestamps.
@@ -158,11 +157,8 @@ def main():
         sys.exit(1)
 
     parser = argparse.ArgumentParser(
-        textwrap.dedent("""\
-        Run a bunch of experiments for a paper.
-        """),
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-    )
+        description=textwrap.dedent(__doc__.lstrip().rstrip()),
+        formatter_class=argparse.RawTextHelpFormatter)
 
     # TODO:
     # - add sub-parser for each training script
@@ -192,13 +188,13 @@ def main():
     #     action='store_true')
     parser.add_argument('--debug-single-thread',
                         action='store_true',
-                        help=textwrap.dedent("""
+                        help=textwrap.dedent("""\
     Debug with single thread.
     """))
     parser.add_argument(
         '--rls-prof',
         default='rls-prof',
-        help=textwrap.dedent("""
+        help=textwrap.dedent("""\
         Run train.py inside of rls-prof (for uninstrumented runs only)
           $ rls-prof python train.py
         This is done by setting RLSCOPE_PROF=<--rls-prof> inside the train_stable_baselines.sh training script.
@@ -214,7 +210,7 @@ def main():
     parser.add_argument(
         '--skip-error',
         action='store_true',
-        help=textwrap.dedent("""
+        help=textwrap.dedent("""\
     If a script fails and there's more left to run, ignore it and continue.
     (NOTE: don't worry, stderr error will still get captured to a logfile).
     """))
@@ -273,7 +269,7 @@ def main():
 
     parser.add_argument('--algo-env-group',
                         choices=expr_config.ALGO_ENV_GROUP_CHOICES,
-                        help=textwrap.dedent("""
+                        help=textwrap.dedent("""\
         Only run a specific "experiment".
         i.e. only run (algo, env) combinations needed for a specific graph.
         
@@ -318,7 +314,7 @@ def main():
 
     parser_stable_baselines = subparsers.add_parser(
         'stable-baselines',
-        help=textwrap.dedent("""
+        help=textwrap.dedent("""\
         rls-bench group: 
         
         Run ALL the stable-baselines experiments.
@@ -332,7 +328,7 @@ def main():
         '--mode',
         choices=['plot', 'run', 'all'],
         default='all',
-        help=textwrap.dedent("""
+        help=textwrap.dedent("""\
         train_stable_baselines.sh
           Run stable-baselines experiments.
         """))
@@ -434,7 +430,6 @@ class Experiment:
                 if not args.skip_error:
                     logger.info((
                                      "> Command failed: see {path}; exiting early "
-                                     "(use --skip-error to ignore individual experiment errors)"
                                  ).format(path=to_file))
                     ret = 1
                     if debug:
@@ -947,7 +942,6 @@ class ExperimentGroup(Experiment):
             #         # #   - after gradients are computed, update the weights
             #         # inference_ops = set([('step',), ('sample_action',)])
             #         # other_ops = set([op for op in regions if op not in inference_ops])
-            #         # import ipdb; ipdb.set_trace()
             #         # new_df[('inference',)] = np.sum(df[inference_ops])
             #         # new_df[('other',)] = np.sum(df[other_ops])
             #         # """),
@@ -1263,22 +1257,14 @@ class StableBaselines(Experiment):
 
         if config_is_uninstrumented(args.config):
             # If we want to run uninstrumented, add --rlscope-disable, but still record training progress
-            opts.extend(['--rlscope-disable', '--rlscope-training-progress'])
+            opts.extend(['--rlscope-disable',
+                         ])
 
         if config_is_no_tfprof(args.config):
             opts.extend(['--rlscope-disable-tfprof'])
 
         if config_is_no_pyprof(args.config):
             opts.extend(['--rlscope-disable-pyprof'])
-
-        if config_is_no_pydump(args.config):
-            opts.extend(['--rlscope-disable-pyprof-dump'])
-
-        if config_is_no_pytrace(args.config):
-            opts.extend(['--rlscope-disable-pyprof-trace'])
-
-        if config_is_no_tfdump(args.config):
-            opts.extend(['--rlscope-disable-tfprof-dump'])
 
         return opts
 
@@ -1473,8 +1459,6 @@ class GatherAlgoEnv:
     def algo_env_pairs(self, has_machine_util=False, debug=False):
         args = self.args
         algo_env_pairs = []
-        # if debug:
-        #     import ipdb; ipdb.set_trace()
         algo_paths = glob(_j(self.root_rlscope_directory, '*'))
         for algo_path in algo_paths:
             if is_config_dir(algo_path):

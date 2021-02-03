@@ -15,8 +15,10 @@ from rlscope.parser import constants
 from rlscope.profiler import experiment
 from os.path import join as _j, abspath as _a, exists as _e, dirname as _d, basename as _b
 import pandas as pd
+from rlscope.parser.plot_utils import setup_matplotlib
+setup_matplotlib()
 import matplotlib
-matplotlib.use('agg')
+# matplotlib.use('agg')
 import seaborn as sns
 
 from matplotlib import pyplot as plt
@@ -26,6 +28,7 @@ from rlscope.parser.dataframe import TrainingProgressDataframeReader, CUDAAPISta
 from rlscope.parser.readers import OpStackReader, CUDAAPIStatsReader
 from rlscope.parser.stacked_bar_plots import StackedBarPlot
 from rlscope.parser import stacked_bar_plots
+from rlscope.parser.plot_utils import is_pdf, pdf2png
 
 from rlscope.experiment import expr_config
 
@@ -619,6 +622,8 @@ class CorrectedTrainingTimeParser:
             ax.set_title("Breakdown of profiling overhead by CUDA API call")
             logger.info("Output plot @ {path}".format(path=self._per_api_png_path))
             fig.savefig(self._per_api_png_path, bbox_inches="tight", pad_inches=0)
+            if is_pdf(self._per_api_png_path):
+                pdf2png(self._per_api_png_path)
             plt.close(fig)
 
         def get_total_plot_data(total_df):
@@ -688,6 +693,8 @@ class CorrectedTrainingTimeParser:
             ax.set_title("Breakdown of profiling overhead")
             logger.info("Output plot @ {path}".format(path=self._total_png_path))
             fig.savefig(self._total_png_path, bbox_inches="tight", pad_inches=0)
+            if is_pdf(self._total_png_path):
+                pdf2png(self._total_png_path)
             plt.close(fig)
 
         # JAMES: uninstrumented training time
@@ -908,7 +915,6 @@ class CorrectedTrainingTimeParser:
                 x_fields = df.sort_values(['duration_sec'])['x_field'].unique()
                 xfield_to_idx = as_order_map(x_fields)
                 idx_to_xfield = reverse_dict(xfield_to_idx)
-                # import ipdb; ipdb.set_trace()
                 return xfield_to_idx, idx_to_xfield
             for plot_group, low_bias_group_df in low_bias_df.groupby(['plot_group']):
                 figsize = get_figsize(plot_group)
@@ -970,6 +976,8 @@ class CorrectedTrainingTimeParser:
                 logger.info("Output plot @ {path}".format(path=self._overhead_correction_png_path(plot_group)))
                 # fig.tight_layout()
                 fig.savefig(self._overhead_correction_png_path(plot_group), bbox_inches="tight", pad_inches=0)
+                if is_pdf(self._overhead_correction_png_path(plot_group)):
+                    pdf2png(self._overhead_correction_png_path(plot_group))
                 plt.close(fig)
 
         # unins_training_duration_us = get_training_durations(self.uninstrumented_directories, debug=self.debug)
@@ -1228,6 +1236,8 @@ class CallInterceptionOverheadParser:
         ax.set_xlabel(None)
         ax.set_title("Overhead from intercepting CUDA API calls using LD_PRELOAD")
         fig.savefig(self._png_path)
+        if is_pdf(self._png_path):
+            pdf2png(self._png_path)
         plt.close(fig)
 
         logger.info("Output plot @ {path}".format(path=self._png_path))
@@ -1444,11 +1454,35 @@ class PyprofOverheadParser:
         add_x_field(df)
         df[overhead_field] = df['training_duration_us'] - df['training_duration_us_unins']
         df[per_overhead_field] = df[overhead_field] / df[num_field]
+        per_overheads = []
+        for overhead, num_events in zip(df[overhead_field], df[num_field]):
+            if num_events == 0:
+                continue
+            per_overheads.append(overhead/num_events)
 
         json = dict()
-        json[mean_per_call_colname(name)] = np.mean(df[per_overhead_field])
-        json[std_per_call_colname(name)] = np.std(df[per_overhead_field])
-        json[num_per_call_colname(name)] = len(df[per_overhead_field])
+
+        if len(per_overheads) == 0:
+            logger.warning(textwrap.dedent("""
+            Saw 0 overhead events for {config} when processing:
+              instrumented_directory   = {ins}
+              uninstrumented_directory = {unins}
+            This could mean one of two things:
+            1. You aren't wrapping the simulator / DL library properly.
+            2. You're measuring something that doesn't make simulator / DL library calls.
+            We simply won't correct for {config} in this case.
+            """).format(
+                config=config,
+                ins=instrumented_directory,
+                unins=uninstrumented_directory,
+            ))
+            json[mean_per_call_colname(name)] = 0.
+            json[std_per_call_colname(name)] = 0.
+            json[num_per_call_colname(name)] = 0.
+        else:
+            json[mean_per_call_colname(name)] = np.mean(per_overheads)
+            json[std_per_call_colname(name)] = np.std(per_overheads)
+            json[num_per_call_colname(name)] = len(per_overheads)
 
         # mean_pyprof_interception_overhead_per_call_us
         # mean_pyprof_annotation_overhead_per_call_us
@@ -1939,6 +1973,8 @@ class TotalTrainingTimeParser:
 
             logger.info("Output plot @ {path}".format(path=self._png_path))
             g.savefig(self._png_path)
+            if is_pdf(self._png_path):
+                pdf2png(self._png_path)
 
         output_csv(df, self._csv_path, sort_by=['algo', 'env', 'training_duration_sec'])
         _plot()
@@ -2105,6 +2141,8 @@ class CUPTIScalingOverheadParser:
                 ax.set_xticklabels(ax.get_xticklabels(), rotation=15)
             logger.info("Output plot @ {path}".format(path=self._png_path))
             g.savefig(self._png_path)
+            if is_pdf(self._png_path):
+                pdf2png(self._png_path)
 
             g = sns.FacetGrid(data=per_iteration_df, col="training_iterations",
                               palette=sns.color_palette('muted'))
@@ -2119,6 +2157,8 @@ class CUPTIScalingOverheadParser:
                 ax.set_xticklabels(ax.get_xticklabels(), rotation=15)
             logger.info("Output plot @ {path}".format(path=self._training_loop_png_path))
             g.savefig(self._training_loop_png_path)
+            if is_pdf(self._training_loop_png_path):
+                pdf2png(self._training_loop_png_path)
 
         _plot()
 
@@ -2434,6 +2474,8 @@ class CUPTIOverheadParser:
         ax.set_title("CUPTI induced profiling overhead per CUDA API call")
         logger.info("Output plot @ {path}".format(path=self._png_path))
         fig.savefig(self._png_path)
+        if is_pdf(self._png_path):
+            pdf2png(self._png_path)
         plt.close(fig)
 
     @property
@@ -2701,8 +2743,6 @@ def join_groups_row_by_row(df, join_cols, groupby_cols, get_suffix):
         replace_cols = set(group_df.columns).difference(groupby_cols).difference(join_cols)
         if all_df is None:
             all_df = dataframe_add_suffix(group_df, suffix, replace_cols)
-            # import ipdb; ipdb.set_trace()
-            # print("HI1")
         else:
             keep_cols = set(group_df.columns).difference(groupby_cols)
             new_df = join_row_by_row(
@@ -2710,8 +2750,6 @@ def join_groups_row_by_row(df, join_cols, groupby_cols, get_suffix):
                 dataframe_add_suffix(group_df[keep_cols], suffix, replace_cols),
                 on=join_cols,
             )
-            # import ipdb; ipdb.set_trace()
-            # print("HI2")
             all_df = new_df
 
     return all_df
@@ -2794,6 +2832,8 @@ def sec_colname(us_colname):
 def save_plot(fig, ax, png_path):
     logger.info("Output plot @ {path}".format(path=png_path))
     fig.savefig(png_path)
+    if is_pdf(png_path):
+        pdf2png(png_path)
     plt.close(fig)
 
 def is_total_overhead_column(colname):

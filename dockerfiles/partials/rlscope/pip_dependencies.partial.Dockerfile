@@ -7,8 +7,12 @@
 
 # ADD's files with root as owner; make it $USER_NAME
 ADD requirements.txt ${ADD_DIR}/requirements.txt
+ADD requirements.txt ${ADD_DIR}/requirements.docs.txt
+ADD requirements.txt ${ADD_DIR}/requirements.develop.txt
 USER root
 RUN chmod ugo+r ${ADD_DIR}/requirements.txt
+RUN chmod ugo+r ${ADD_DIR}/requirements.docs.txt
+RUN chmod ugo+r ${ADD_DIR}/requirements.develop.txt
 USER ${RLSCOPE_USER}
 
 #RUN apt-get update && apt-get install -y --no-install-recommends
@@ -20,5 +24,7 @@ USER ${RLSCOPE_USER}
 
 RUN ls -l ${ADD_DIR}
 RUN pip install --no-cache-dir -r ${ADD_DIR}/requirements.txt
+RUN pip install --no-cache-dir -r ${ADD_DIR}/requirements.docs.txt
+RUN pip install --no-cache-dir -r ${ADD_DIR}/requirements.develop.txt
 
 #ENV PATH="${ADD_DIR}/dockerfiles/sh:${PATH}"

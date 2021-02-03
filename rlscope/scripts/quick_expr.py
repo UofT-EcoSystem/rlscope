@@ -22,7 +22,6 @@ from rlscope.profiler.util import pprint_msg
 from rlscope.parser.common import *
 from rlscope.experiment.util import tee, expr_run_cmd, expr_already_ran
 from rlscope.profiler.concurrent import ForkedProcessPool
-from rlscope.scripts import bench
 from rlscope.experiment import expr_config
 from rlscope.parser.dataframe import RLScopeConfig
 from rlscope.parser.profiling_overhead import \
@@ -132,12 +131,8 @@ def main():
         sys.exit(1)
 
     parser = argparse.ArgumentParser(
-        textwrap.dedent("""\
-        Make-once run-once experiments; 
-        maintainability not a priority, just run a quick experiment!
-        """),
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-    )
+        description=textwrap.dedent(__doc__.lstrip().rstrip()),
+        formatter_class=argparse.RawTextHelpFormatter)
     parser.add_argument(
         '--debug',
         action='store_true')
@@ -150,7 +145,7 @@ def main():
             'microbenchmark',
         ],
         required=True,
-        help=textwrap.dedent("""
+        help=textwrap.dedent("""\
         --expr my_expr will run experiment QuickExpr.expr_my_expr().
         
         subtraction_validation:
@@ -169,12 +164,12 @@ def main():
         action='store_true')
     parser.add_argument('--debug-single-thread',
                         action='store_true',
-                        help=textwrap.dedent("""
+                        help=textwrap.dedent("""\
     Debug with single thread.
     """))
     parser.add_argument('--debug-memoize',
                         action='store_true',
-                        help=textwrap.dedent("""
+                        help=textwrap.dedent("""\
     Development: speedup runs my memoizing intermediate results; you need to delete the 
     *.pickle files it generates manually otherwise you may accidentally re-use 
     stale files when code changes.
@@ -188,7 +183,7 @@ def main():
     parser.add_argument(
         '--skip-error',
         action='store_true',
-        help=textwrap.dedent("""
+        help=textwrap.dedent("""\
     If a script fails and there's more left to run, ignore it and continue.
     (NOTE: don't worry, stderr error will still get captured to a logfile).
     """))
@@ -207,7 +202,7 @@ def main():
         """.rstrip()))
     parser.add_argument(
         '--subdir',
-        help=textwrap.dedent("""
+        help=textwrap.dedent("""\
         Store files root at:
             <--dir>/expr_<--expr>/<--subdir>
         """))
@@ -294,15 +289,13 @@ class ExprSubtractionValidationConfig:
                '--rlscope-calibration',
 
                '--rlscope-directory', _a(self.out_dir(rep, iters)),
-               '--rlscope-max-timesteps', iters,
-               '--rlscope-training-progress',
+               '--rlscope-max-passes', iters,
 
                '--algo', self.algo,
                '--env', self.env,
 
                '--log-folder', _j(ENV['RL_BASELINES_ZOO_DIR'], 'output'),
                '--log-interval', '1',
-               '--rlscope-delay',
                ]
         cmd.extend(self.script_args)
         logfile = self.logfile(rep, iters)
@@ -382,15 +375,12 @@ class ExprTotalTrainingTimeConfig:
                'python', 'train.py',
 
                '--rlscope-directory', _a(self.out_dir(rep)),
-               # '--rlscope-max-timesteps', iters,
-               '--rlscope-training-progress',
 
                '--algo', self.algo,
                '--env', self.env,
 
                '--log-folder', _j(ENV['RL_BASELINES_ZOO_DIR'], 'output'),
                '--log-interval', '1',
-               '--rlscope-delay',
                ]
         if self.rlscope_prof_config == 'uninstrumented':
             cmd.extend([
@@ -496,9 +486,6 @@ class ExprMicrobenchmarkConfig:
                '--rlscope-calibration',
                # '--rlscope-directory', _a(self.out_dir(rep)),
                '--rlscope-directory', _a(self.out_dir()),
-               # '--rlscope-max-timesteps', iters,
-               '--rlscope-training-progress',
-               '--rlscope-delay',
 
                '--mode', self.mode,
 
@@ -1744,7 +1731,6 @@ class ExprSubtractionValidation:
                     config=config.to_string(),
                     klass=self.__class__.__name__
                 ))
-                # import ipdb; ipdb.set_trace()
                 continue
 
             # rls-run

@@ -4,6 +4,7 @@ Utility functions for running commands at most once, and capturing their logs to
 import subprocess
 from rlscope.profiler.rlscope_logging import logger
 import contextlib
+import textwrap
 
 import shlex
 import pprint
@@ -202,6 +203,8 @@ def expr_run_cmd(cmd, to_file,
                  # extra_argv=[],
                  only_show_env=None,
                  debug=False,
+                 raise_exception=False,
+                 exception_class=None,
                  log_func=None):
     """
     Run an experiment, if it hasn't been run already.
@@ -249,10 +252,19 @@ def expr_run_cmd(cmd, to_file,
                     ))
                 failed = True
         except subprocess.CalledProcessError as e:
-            logger.error((
-                             "> Command failed: see {path}; exiting early "
-                             "(use --skip-error to ignore individual experiment errors)"
-                         ).format(path=to_file))
+
+            err_msg = textwrap.dedent("""\
+            > Command failed: see {path} for command and output.
+            """).format(
+                path=to_file,
+            ).rstrip()
+            # exiting early (use --skip-error to ignore individual experiment errors)
+
+            logger.error(err_msg)
+            if raise_exception:
+                if exception_class is None:
+                    raise
+                raise exception_class(err_msg)
             ret = 1
             if debug:
                 logger.error("Exiting with ret={ret}\n{stack}".format(

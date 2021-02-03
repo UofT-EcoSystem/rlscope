@@ -25,6 +25,7 @@ import multiprocessing
 from concurrent.futures.process import ProcessPoolExecutor
 
 from rlscope.profiler.concurrent import ForkedProcessPool
+from rlscope.parser.exceptions import RLScopeAPIError
 
 import rlscope
 
@@ -169,16 +170,6 @@ def setup(tfprof_enabled, pyprof_enabled, allow_skip=False, allow_missing_librls
 
     SETUP_DONE = True
 
-def get_tfprof_path(directory, bench_name, session_id, trace_id):
-    tfprof_path = _j(
-        directory,
-        "profile{bench}{trace}{sess}.proto".format(
-            bench=bench_suffix(bench_name),
-            trace=trace_suffix(trace_id),
-            sess=sess_suffix(session_id),
-        ))
-    return tfprof_path
-
 class ProtoDumper:
     def __init__(self,
                  name,
@@ -206,9 +197,15 @@ class ProtoDumper:
             f.write(self.proto.SerializeToString())
 
         if self.debug:
-            logger.info("{name}.dump done, path={path}".format(
+            #   Stacktrace:
+            # {stack}
+            logger.info(textwrap.dedent("""\
+            {name}.dump done, path={path}
+            """).format(
                 name=self.name,
-                path=self.proto_path))
+                path=self.proto_path,
+                # stack=get_stacktrace(indent=2),
+            ).rstrip())
 
 class ProcessMetadataDumper:
     def __init__(self,
@@ -248,80 +245,16 @@ _prof_singleton = None
 
 class Profiler:
     """
-    Generic profiler that uses BOTH CUDAProfiler and PythonProfiler.
-
-    Intended use case:
-
-    profiler = Profiler(...)
-
-    for epoch in range(epochs):
-        for i in range(steps_per_epoch):
-
-            #
-            # Only collect profiling information during inner training loop operations.
-            # Don't both collecting "noise" for one-time initialization.
-            #
-
-            profiler.enable_profiling()
-            # Some part of your inner-training loop.
-            # For e.g. if its MNIST, this will be both the Forward/Backward passes.
-            sess.run(train_op, ...)
-            profiler.disable_profiling()
-
-
-    Members:
-
-    self.profile_time_sec:
-        Total time spent profiling, in seconds.
-        i.e. the time spent in between enable/disable profiling calls:
-
-        self.enable_profiling()
-        ... # This time.
-        self.disable_profiling()
-
-        This time can be compared/validated against the total time reported
-        by the profiler (nvprof/pyprof).
-
-    :param reports_progress
-        Whether or not the current process will call:
-
-            rlscope.prof.report_progress(percent_complete)
-
-        If this is true, then if --rlscope-trace-time-sec expires, we will WAIT
-        until rlscope.prof.report_progress is called prior to exiting, and we will warn
-        if it hasn't been called.
-
-        Q: Can't we imply this from whether it ever calls report_progress?
-        A: No, since it may just take a really long time before report_progress ever
-           gets called.
-
-    :param just_sample_util
-        Just collect machine utilization samples;
-        don't collect any profiling information.
-        This can be run with vanilla tensorflow.
-
-    :param exit_early
-        if True, exit ML script immediately after benchmarking bench_name.
-        Othwerwise, continue executing ML script until it finishes.
+    RL-Scope profiler singleton class.
+    Constructor arguments correspond to --rlscope-* options from rls-prof defined below
+    in add_rlscope_arguments(...), where you can find their documentation.
     """
     def __init__(self, directory=None,
-                 bench_name=NO_BENCH_NAME,
-                 num_calls=None,
                  trace_time_sec=None,
-                 max_timesteps=None,
-                 num_traces=None,
                  keep_traces=None,
-                 tfprof=True,
                  reports_progress=False,
                  just_sample_util=None,
-                 training_progress=None,
-                 c_lib_func_pyprof_pattern=None,
-                 # tfprof=True,
-                 repetition_time_limit_sec=10.,
                  debug=None,
-                 exit_early=True,
-                 require_end_operation=False,
-                 python=None,
                  # WARNING: MAKE SURE to use None as the default for boolean flags!
                  # Otherwise, if you set this to False by default, get_argval will ALWAYS return
                  # False (even if --rlscope-calibration is set!)
@@ -331,17 +264,12 @@ class Profiler:
                  disable_pyprof_interceptions=None,
                  disable_pyprof=None,
                  disable_tfprof=None,
-                 disable_pyprof_trace=None,
                  disable_gpu_hw=None,
                  env=None,
                  algo=None,
                  delay=None,
-                 delay_training_loop_iters=None,
-                 max_training_loop_iters=None,
                  delay_passes=None,
                  max_passes=None,
-                 unit_test=None,
-                 unit_test_name=None,
                  skip_rm_traces=None,
                  args=None):
 
@@ -383,7 +311,7 @@ class Profiler:
 
             if not allow_none and default_arg is None:
                 self._failing = True
-                raise RuntimeError("RL-Scope: you must provide a value for --{arg}".format(
+                raise RLScopeAPIError("You must provide a value for --{arg}".format(
                     arg=re.sub('_', '-', rlscope_argname)))
 
             return default_arg
@@ -411,7 +339,6 @@ class Profiler:
 
         self._failing = False
         self._has_called_enable_tracing = False
-        self.num_training_loop_iters = 0
         self.num_passes = 0
         self.pass_idx = 0
         self.has_next_pass = False
@@ -419,7 +346,6 @@ class Profiler:
         self.calibration = get_argval('calibration', calibration, False)
         if self.debug:
             py_config.DEBUG = self.debug
-        self.directory = get_argval('directory', directory, None, allow_none=False)
         self.disable = get_argval('disable', disable, False)
         if 'RLSCOPE_CONFIG' in os.environ:
             self.rlscope_config = os.environ['RLSCOPE_CONFIG']
@@ -436,45 +362,31 @@ class Profiler:
         self.disable_pyprof = get_argval('disable_pyprof', disable_pyprof, False)
         # NOTE: currently has no effect since tfprof is entirely implemented in LD_PRELOAD librlscope.so library.
         self.disable_tfprof = get_argval('disable_tfprof', disable_tfprof, False)
-        # Disable OLD tfprof tracing code.  We now use rls-prof to trace stuff.
-        self.disable_pyprof_trace = get_argval('disable_pyprof_trace', disable_pyprof_trace, False)
         self.disable_gpu_hw = get_argval('disable_gpu_hw', disable_gpu_hw, False)
         self.delay = get_argval('delay', delay, None)
-
-        self.delay_training_loop_iters = get_argval('delay_training_loop_iters', delay_training_loop_iters, None)
-        self.max_training_loop_iters = get_argval('max_training_loop_iters', max_training_loop_iters, None)
+        self.directory = get_argval('directory', directory, None, allow_none=self.disable)
 
         self.delay_passes = get_argval('delay_passes', delay_passes, None)
         self.max_passes = get_argval('max_passes', max_passes, None)
 
         self.just_sample_util = get_argval('just_sample_util', just_sample_util, False)
-        self.training_progress = get_argval('training_progress', training_progress, False)
-        self._loaded_libcupti = False
 
         tfprof_enabled = not self.disable and not self.disable_tfprof
         # pyprof_enabled = Do we want to enable Python->C++ interception for collecting pyprof events?
-        pyprof_enabled = not self.disable and not self.disable_pyprof and not self.disable_pyprof_interceptions
+        pyprof_enabled = self._should_wrap_clib()
         modify_tensorflow(
             tfprof_enabled=tfprof_enabled,
             pyprof_enabled=pyprof_enabled,
             allow_missing_librlscope=self.disable,
         )
-        if self.disable:
-            logger.info("RL-Scope: note that profiling is disabled for this run")
         if ( self.disable or self.disable_gpu_hw ) and rlscope_api.is_used():
             logger.info("(--rlscope-disable-gpu-hw) Disable GPU HW sampling")
             rlscope_api.disable_gpu_hw()
 
-        # self.manager = multiprocessing.Manager()
-        # self.pyprof_dump_manager = clib_wrap.PyprofDumpManager(self.manager)
-
-        # if self.disable_pyprof_trace:
-        #     clib_wrap.disable_pyprof_trace()
-
         global _prof_singleton
         if _prof_singleton is not None:
             self._failing = True
-            raise RuntimeError("RL-Scope: Only a single profiler.Profiler object can be created; use rlscope.handle_rlscope_args + rlscope.prof instead.")
+            raise RLScopeAPIError("Only a single profiler.Profiler object can be created; use rlscope.handle_rlscope_args + rlscope.prof instead.")
         _prof_singleton = self
 
         self.machine_name = get_machine_name()
@@ -484,14 +396,11 @@ class Profiler:
         self._hw_pass_running = False
         self._incremental_training_progress = dict()
         self._last_dumped_training_progress = None
-        self._start_percent_complete = 0.
-        self._start_num_timesteps = 0
+        self._start_percent_complete = None
+        self._start_num_timesteps = None
         # self._delayed_disable = False
         self.num_timesteps = None
         self.total_timesteps = None
-        # self.bg_dumper = ForkedProcessPool(name="bg_dumper", debug=self.debug,
-        #                                    # cpu_affinity=dump_cpus,
-        #                                    )
 
         self._op_stack = []
         self._start_us = None
@@ -504,11 +413,6 @@ class Profiler:
                 debug=self.debug,
             )
 
-        """
-        If set, require the user to call prof.end_operation
-        (don't allow a call to prof.set_operation to also count as a call to prof.end_operation)
-        """
-        self.require_end_operation = require_end_operation
         self.start_call_us = dict()
         self.end_call_us = dict()
 
@@ -519,25 +423,14 @@ class Profiler:
         self._tfprof_enabled = False
         self._pyprof_enabled = False
         self._rlscope_prof_enabled = False
-        self.total_profile_time_sec = 0
 
-        self.python = get_argval('python', python, False)
         self.skip_rm_traces = get_argval('skip_rm_traces', skip_rm_traces, False)
-        self.exit_early = exit_early
-        self.tfprof = tfprof
         self.reports_progress = reports_progress
-        self.c_lib_func_pyprof_pattern = c_lib_func_pyprof_pattern
-        self.repetition_time_limit_sec = repetition_time_limit_sec
-        self.num_calls = get_argval('num_calls', num_calls, None)
         self.trace_time_sec = get_argval('trace_time_sec', trace_time_sec, None)
-        self.max_timesteps = get_argval('max_timesteps', max_timesteps, None)
         self._last_warned_trace_time_sec = None
         self._last_warned_report_progress_idx = None
         self._should_finish_idx = 0
-        self.start_trace_time_sec = None
-        self.num_traces = get_argval('num_traces', num_traces, None)
         self.keep_traces = get_argval('keep_traces', keep_traces, False)
-        self.bench_name = get_argval('bench_name', bench_name, None)
 
         self.util_sampler_pid = get_internal_argval('util_sampler_pid')
         self.handle_utilization_sampler = False
@@ -547,37 +440,8 @@ class Profiler:
 
         self.parent_process_name = get_internal_argval('parent_process_name')
 
-        self.unit_test = get_argval('unit_test', unit_test, False)
-        self.unit_test_name = get_argval('unit_test_name', unit_test_name, None)
-        if self.unit_test:
-            self.ut = unit_test_util.UnitTestDataDumper(debug=self.debug)
-
-        # if not self.tfprof:
-        #     self.cuda_profiler = CUDAProfiler()
-        self.start_t = dict()
-        self.end_t = dict()
-        self.time_sec = dict()
-        self.code_count = dict()
-        self.steps = 0
-        # clib_wrap.set_step(self._pyprof_step, ignore_disable=True)
-        self.average_time_per_call_sec = None
-        self.average_time_per_call_no_profile_sec = None
-
-        if self.python:
-            self.pyprof = PythonProfiler(self.directory)
-
         if self.debug:
             logger.info(pprint_msg({'Profiler.attrs': self.__dict__}))
-
-        # self.sess = None
-        # self.pctx = None
-
-        # Total times collected from running profiled operations.
-        # self.profile_sec = []
-        # Total times collected from running un-profiled operations.
-        # self.no_profile_sec = []
-
-        # clib_wrap.wrap_libs()
 
     def get_start_trace_time_sec(self):
         # NOTE: ML script may fork new python scripts before tracing with pyprof/tfprof even begins
@@ -616,7 +480,7 @@ class Profiler:
                     self.next_trace_id = max(self.next_trace_id, trace_id + 1)
 
     def init_trace_id(self):
-        if self.process_name is None or self.phase is None:
+        if self.process_name is None or self.phase is None or not rlscope_api.is_used():
             return
 
         assert self.next_trace_id is None
@@ -630,102 +494,6 @@ class Profiler:
 
         if py_config.DEBUG:
             logger.info("> Using next_trace_id = {id}".format(id=self.next_trace_id))
-
-    def _init_num_calls(self, bench_name, func, *args, **kwargs):
-        """
-        PSEUDOCODE:
-
-        We may want to run additional iterations because:
-
-        - We want (stdev / mean) to be below a percentage
-          NOTE: it may be the case that what we are measuring is highly variable,
-          and this threshold is never crossed!
-
-        - We only want to run the benchmark for a certain time limit (e.g. 1 minute).
-
-        - We need the # of iterations of what we are measuring to be large enough so that:
-            time(# of iterations) < clock_precision
-
-        Q: Is there something (statisically) wrong with running some functions MORE than others,
-        then combining their results to get a standard deviation result?
-
-          If something that's VERY short has high (relatively speaking) stdev, it will
-          contribute LITTLE when adding it to a LONG function.
-
-          This is fine, since we care about the function that dominates the runtime.
-
-
-        total_time_sec = None
-        iterations = 100
-        # Total time to run a single repetition
-        time_limit_sec = 1 minute
-        do:
-          start_t = time.time()
-          for i in iterations:
-            func(...)
-          end_t = time.time()
-          total_time_sec = end_t - start_t
-        while (stdev / mean) > 1% and total_time_sec < time_limit_sec:
-        """
-        if self.num_calls is not None:
-            return
-
-        # Dynamically calculate number of iterations to run for; start with 10 at least.
-        iterations = 10
-        # max_stdev_percent = 1.
-        # time_limit_sec = 60
-        # time_limit_sec = 10
-        # time_limit_sec = 100
-
-        min_guess_sec = 1.
-
-        def report_decision(total_time_sec, iterations):
-            logger.info("> Dynamic iterations for bench_name={b} decided on: {it} iterations".format(
-                it=iterations,
-                b=bench_name))
-            logger.info("  1 repetition takes ~ {sec} seconds".format(sec=total_time_sec))
-
-        # repetition_time_sec = np.zeros(self.repetitions, dtype=np.float32)
-        total_time_sec = None
-        while True:
-            # for r in range(self.repetitions):
-            start_t = time.time()
-            for i in range(iterations):
-                # self._iter(r=-1, i=-1)
-                func(*args, **kwargs)
-            end_t = time.time()
-            total_time_sec = end_t - start_t
-            # repetition_time_sec[r] = total_time_sec
-            if total_time_sec > self.repetition_time_limit_sec:
-                # Took longer than 1 minute to run a single repetition;
-                # just run it for that time and the stdev we get is what we get.
-                report_decision(total_time_sec, iterations)
-                # self.iterations = iterations
-                self.num_calls = iterations
-                # self.average_time_per_call_no_profile_sec = total_time_sec/float(iterations)
-                return
-
-            # stdev = np.std(repetition_time_sec)
-            # mean = np.mean(repetition_time_sec)
-            # if stdev/mean <= max_stdev_percent/100.:
-            #     # After 3 repetitions, the standard-deviation as a percentage of the mean was <= 1%;
-            #     # good enough!
-            #     break
-
-            if total_time_sec > min_guess_sec:
-                # Use current iteration time to guess the minimum number of iterations needed to be >= time_limit_sec.
-                #
-                # ( 2^p ) * total_time_sec >= time_limit_sec
-                # p >= log_2 [ time_limit_sec / total_time_sec ]
-                # p = ceil [ log_2 [ time_limit_sec / total_time_sec ] ]
-                next_iterations = iterations * 2**math.ceil(np.log2(self.repetition_time_limit_sec / total_time_sec))
-                assert iterations < next_iterations
-                iterations = next_iterations
-            else:
-                iterations *= 2
-
-        # report_decision(total_time_sec, iterations)
-        # self.iterations = iterations
 
     @property
     def out_dir(self):
@@ -749,68 +517,29 @@ class Profiler:
         os.makedirs(direc, exist_ok=True)
         return direc
 
-    def pyprof_proto_path(self, trace_id):
-        ret = _j(self.out_dir, "pyprof{bench}{trace}.proto".format(
-            bench=bench_suffix(self.bench_name),
-            trace=trace_suffix(trace_id),
-        ))
-        return ret
-
-    def pyprof_call_times_path(self, trace_id):
-        ret = _j(self.out_dir, "pyprof_call_times{bench}{trace}.pickle".format(
-            bench=bench_suffix(self.bench_name),
-            trace=trace_suffix(trace_id),
-        ))
-        return ret
-
-    # def unit_test_path(self, trace_id):
-    #     ret = _j(self.out_dir, "unit_test{bench}{trace}.pickle".format(
-    #         bench=bench_suffix(self.bench_name),
-    #         trace=trace_suffix(trace_id),
-    #     ))
-    #     return ret
-
-    def dump_event_proto_path(self, trace_id):
-        ret = _j(self.out_dir, "dump_event{bench}{trace}.proto".format(
-            bench=bench_suffix(self.bench_name),
-            trace=trace_suffix(trace_id),
-        ))
-        return ret
-
-    def config_path(self, trace_id):
-        config_path = _j(self.out_dir, "config{bench}{trace}.json".format(
-            bench=bench_suffix(self.bench_name),
-            trace=trace_suffix(trace_id),
-        ))
-        return config_path
-
-    def tfprof_path(self, session_id, trace_id):
-        return get_tfprof_path(self.out_dir, self.bench_name, session_id, trace_id)
-
-    def profile_time_sec(self, bench_name):
-        return self.time_sec[bench_name]
-
     def _check_no_annotations(self, caller_name):
         if len(self._op_stack) > 0:
             self._failing = True
-            raise RuntimeError(self._rlscope_err_msg(
+            raise RLScopeAPIError(self._rlscope_err_msg(
                 "You cannot call {caller} while annotations are active since you'll end up losing tfprof/pyprof event data.".format(
                     caller=caller_name,
                 ),
                 stack=get_stacktrace(), msg_type="ERROR"))
 
-    def _enable_tracing(self):
-        logger.info("RL-Scope: enable tracing")
+    def __enable_tracing(self):
+        if self._tracing_enabled:
+            return
 
         self._check_no_annotations(caller_name='rlscope.prof.enable_tracing()')
 
         self._init_trace_time()
 
         if not self.disable:
+            logger.info("RL-Scope: enable tracing")
             self._start_pyprof()
             self._start_tfprof()
 
-        if not self.disable or self.training_progress:
+        if not self.disable or rlscope_api.is_used():
             # Q: is setting --rlscope-training-progress going to result in us recording events during uninstrumented runs...?
             # A: No, the --config option we give to rls-prof ensures various events aren't recorded.
             # NOTE: We want to collect CUDA API call stats for uninstrumented runs also!
@@ -833,38 +562,24 @@ class Profiler:
                         textwrap.dedent(f"""\
                             tracing_enabled = {self._tracing_enabled}
                             has_called_enable_tracing = {self._has_called_enable_tracing}
-                            delay_training_loop_iters = {self.delay_training_loop_iters}
-                               num_training_loop_iters =  {self.num_training_loop_iters}
-                               delay_training_loop_iters =  {self.delay_training_loop_iters}
                             delay_passes = {self.delay_passes}
                                num_passes =  {self.num_passes}
                                delay_passes =  {self.delay_passes}
                         """)))
-        if self._tracing_enabled:
+        if self._tracing_enabled and self._start_percent_complete is not None:
             return False
-        if not self._has_called_enable_tracing:
+        if self.reports_progress and not self._has_called_enable_tracing:
             return False
-        if self.delay_training_loop_iters is not None:
-            return self.num_training_loop_iters >= self.delay_training_loop_iters
         if self.delay_passes is not None:
             return self.num_passes >= self.delay_passes
         return True
-        # return not self._tracing_enabled and self._has_called_enable_tracing and (
-        #     (
-        #         self.delay_training_loop_iters is None or
-        #         self.num_training_loop_iters >= self.delay_training_loop_iters
-        #     )
-        # )
 
-    def enable_tracing(self):
+    def _enable_tracing(self):
         """
-        Turn on RL-Scope tracing.
-
+        Enable tracing
+        Internal use: skips check for delay=True
         :return:
         """
-        if self.disable and not self.training_progress:
-            return
-
         if self.reports_progress:
             # Wait for rlscope.prof.report_progress() to get called until we enable tracing.
             # This ensures that we measure the delta in percent_complete'd over the
@@ -875,7 +590,39 @@ class Profiler:
         #     return
 
         if not self.reports_progress:
-            self._enable_tracing()
+            self.__enable_tracing()
+            if py_config.DEBUG:
+                logger.info("REPORT PROGRESS @ PERCENT=0%")
+            self._report_progress(
+                percent_complete=0.,
+                num_timesteps=0,
+                total_timesteps=1,
+                skip_finish=True)
+
+    def enable_tracing(self):
+        """
+        Turn on RL-Scope tracing.
+
+        :return:
+        """
+        if self.disable and not rlscope_api.is_used():
+            if py_config.DEBUG:
+                logger.info("SKIP enable_tracing()")
+            return
+
+        if not self.delay:
+            self._failing = True
+            raise RLScopeAPIError(
+                textwrap.dedent("""\
+                You called rlscope.prof.enable_tracing() but forgot to tell RL-Scope to delay trace collection.
+                To fix this, modify your script to call:
+                    rlscope.handle_rlscope_args(..., delay=True)
+                                                           ----
+                Then, re-run this script.
+                """))
+
+        self._enable_tracing()
+
 
     def _disable_tracing(self):
         logger.info("RL-Scope: disable tracing")
@@ -884,38 +631,40 @@ class Profiler:
         self._stop_rlscope_prof()
         self._tracing_enabled = False
 
-    # # Calling rlscope.prof.enable()/disable() repeatedly wouldn't currently support percent_complete tracking...
-    # # So let's just not allow disable() for now.
-    # def disable_tracing(self):
-    #     """
-    #     Turn off RL-Scope tracing.
-    #
-    #     :return:
-    #     """
-    #     if self.reports_progress:
-    #         self._delayed_disable = True
-    #     else:
-    #         self._disable_tracing()
+    def _delayed_init(self):
+        # Delay registering simulator/framework APIs until we begin training
+        #
+        # torch:
+        #   Wrap AFTER @torch.jit.script runs to avoid messing up jit compiling
+        #   (I think wrapping torch.* messes up the type annotation information?)
+
+        # NOTE: we DON'T wrap C libraries under some calibration configurations:
+        # --
+        if self._should_wrap_clib():
+            clib_wrap.register_libs()
+
+    def _should_wrap_clib(self):
+        should_wrap_clib = not self.disable and not self.disable_pyprof and not self.disable_pyprof_interceptions
+        return should_wrap_clib
 
     def start(self, start_utilization_sampler=False, handle_utilization_sampler=False):
         PROFILERS.append(self)
+
+        if self.disable and not rlscope_api.is_used():
+            return
+
+        self._delayed_init()
 
         # Collect GPU utilization info, even for uninstrumented runs.
         self.handle_utilization_sampler = handle_utilization_sampler
         if not self.just_sample_util and ( start_utilization_sampler or handle_utilization_sampler ):
             self._launch_utilization_sampler()
 
-        if self.disable:
-            return
-
         self._start_us = rlscope_timer.now_us()
-
-        if self.unit_test:
-            self.ut.start()
 
         # If --rlscope-delay, delay collecting traces until they explicitly call rlscope.prof.enable().
         if not self.delay:
-            self.enable_tracing()
+            self._enable_tracing()
 
     def _maybe_end_operations(self):
         while len(self._op_stack) != 0:
@@ -932,9 +681,10 @@ class Profiler:
         # harder to forget than a call to stop() that's missing a parameter.
         self.maybe_terminate_utilization_sampler(warn_terminated=False)
 
-        if self.disable:
+        if self.disable and not rlscope_api.is_used():
             return
 
+        # Q: Should we call this when disabled?
         self._maybe_end_operations()
         self._maybe_finish(finish_now=True, should_exit=False)
 
@@ -961,9 +711,6 @@ class Profiler:
 
         self._rlscope_prof_enabled = False
 
-    def _dump_rlscope_prof(self):
-        raise NotImplementedError("TODO: call C++ function that dumps CUDA API stats to protobuf file (rlscope_api.collect())")
-
     def _start_tfprof(self, skip_init_trace_time=False):
         """
         Meant to be called right before we start measuring individual operations.
@@ -976,7 +723,7 @@ class Profiler:
         """
         if self.process_name is None:
             self._failing = True
-            raise RuntimeError("You need to call profiler.set_process_name(...) before profiling.")
+            raise RLScopeAPIError("You need to call profiler.set_process_name(...) before profiling.")
         assert self.phase is not None
 
         if self._tfprof_enabled or self.disable_tfprof:
@@ -984,36 +731,10 @@ class Profiler:
                 logger.info("Skipping tfprof profiling (--rlscope-disable-tfprof)")
             return
 
-        # if self.step_start_tracing is None:
-        #     self.step_start_tracing = self.steps
-
         if not skip_init_trace_time:
             self._init_trace_time()
 
-        # sess = self._cur_session(allow_none=True)
-        # if sess is None:
-        #     if allow_skip:
-        #         # They called set_operation before calling set_session/sess.as_default().
-        #         # Delay preallocation of tracer until session is set.
-        #         return
-        #     raise RuntimeError(
-        #         "Couldn't find current session; you either need to call Profiler.set_session(sess), "
-        #         "or do \"with sess.as_default():\"")
-
-        # self._tfprof_enable_tracing()
-        # self.pctx.enable_tracing()
-
         self._tfprof_enabled = True
-
-    # def _tfprof_enable_tracing(self):
-    #     for session in rlscope.profiler.session.ACTIVE_SESSIONS:
-    #         pctx = ProfileContextManager.get_profile_context(session)
-    #         pctx.enable_tracing()
-
-    # def _tfprof_disable_tracing(self):
-    #     for session in rlscope.profiler.session.ACTIVE_SESSIONS:
-    #         pctx = ProfileContextManager.get_profile_context(session)
-    #         pctx.disable_tracing()
 
     def _stop_tfprof(self):
         """
@@ -1027,10 +748,6 @@ class Profiler:
 
         if not self._tfprof_enabled:
             return
-        # NOTE: this is when we collect the trace data... keep that in mind when we implement DUMP.
-
-        # self.pctx.disable_tracing()
-        # self._tfprof_disable_tracing()
 
         self._tfprof_enabled = False
 
@@ -1043,7 +760,7 @@ class Profiler:
         started = self in PROFILERS
         if not started:
             self._failing = True
-            raise RuntimeError("RL-Scope: You need to call profiler.start() before profiling.")
+            raise RLScopeAPIError("You need to call profiler.start() before profiling.")
 
     def _push_operation(self, bench_name):
         # Currently we don't bother to support the following:
@@ -1203,44 +920,23 @@ class Profiler:
         if self.debug:
             logger.info("Start pyprof\n{stack}".format(stack=get_stacktrace()))
         self._init_trace_time()
-        if self.python:
-            # Using cProfile python profiler to collect python events.
-            logger.info("RL-Scope: Enabling python cProfile profiler")
-            self.pyprof.enable()
-        else:
-            # Use custom function-wrappers around TensorFlow/Simulator C++ libraries to record
-            # events marking "Python" time and "TensorFlow C++" / "Simulator" time.
-            clib_wrap.enable_tracing()
-            # clib_wrap.set_step(self._pyprof_step, expect_traced=True)
-            # if (py_config.DEBUG or TF_PRINT_TIMESTAMP) and clib_wrap.is_recording():
-            #     logger.info("> RECORDING pyprof_step = {step}".format(step=self._pyprof_step))
+        # Use custom function-wrappers around TensorFlow/Simulator C++ libraries to record
+        # events marking "Python" time and "TensorFlow C++" / "Simulator" time.
+        clib_wrap.enable_tracing()
         self._pyprof_enabled = True
 
     def _stop_pyprof(self):
         if not self._pyprof_enabled:
             return
-        if self.python:
-            self.pyprof.disable()
-        else:
-            clib_wrap.disable_tracing()
+        clib_wrap.disable_tracing()
         self._pyprof_enabled = False
-
-    @property
-    def _pyprof_step(self):
-        """
-        Some operations just won't call session.run(...).
-        In that case, we cannot depend on using the tfprof step number since
-        it won't increment between next_step calls.
-        So, just use our internal next_step counter.
-        """
-        return self.steps
 
     def end_operation(self, bench_name, skip_finish=False):
         assert bench_name != NO_BENCH_NAME
 
         should_skip = self.disable or self.disable_pyprof or self.disable_pyprof_annotations or not self._pyprof_enabled
 
-        if not should_skip or ( should_skip and self.training_progress ):
+        if not should_skip or ( should_skip and rlscope_api.is_used() ):
             self._dump_training_progress(debug=self.debug)
 
         if not should_skip:
@@ -1253,15 +949,6 @@ class Profiler:
                     op=bench_name))
 
 
-            # if self.calls_traced > self.num_calls and len(self._op_stack) > 0 and self.calls_traced % WARN_EVERY_CALL_MODULO == 0:
-            #     logger.info("> RL-Scope: WARNING, use more fine grained operations so we can free memory by dumping traces more frequently")
-            #     logger.info("  - calls traced = {calls_traced}, number of calls per-trace = {num_calls}".format(
-            #         calls_traced=self.calls_traced,
-            #         num_calls=self.num_calls,
-            #     ))
-            #     logger.info("  - currently active operations: {ops} <-- make these more fine-grained!".format(
-            #         ops=self._op_stack))
-
             if self._cur_operation == NO_BENCH_NAME and bench_name != self._cur_operation:
                 """
                 start_operation was called, but was skipped since _should_measure_call 
@@ -1272,7 +959,7 @@ class Profiler:
 
             if self._cur_operation != bench_name:
                 self._failing = True
-                raise RuntimeError(textwrap.dedent("""
+                raise RLScopeAPIError(textwrap.dedent("""
                 Detected non stack-oriented nesting of profiling statements:
                     prof.set_operation({b1})
                     ...
@@ -1283,18 +970,12 @@ class Profiler:
                 )))
 
             self.end_call_us[bench_name] = rlscope_timer.now_us()
-            # self.disable_profiling(bench_name, num_calls=1)
 
             # Record the last amount of time in between returning
             # from a call to q_forward, and finishing benchmarking.
             # This will include time spent in the tensorflow python API
             if self._pyprof_enabled:
                 clib_wrap.record_python_event('Finish python benchmark', self.end_call_us[bench_name])
-            # time_sec = (self.end_call_us[bench_name] - self.start_call_us[bench_name])/constants.MICROSECONDS_IN_SECOND
-            # if clib_wrap.is_recording():
-            #     self.profile_sec.append(time_sec)
-            # else:
-            #     self.no_profile_sec.append(time_sec)
             op_start_us = self.start_call_us[bench_name]
             op_end_us = self.end_call_us[bench_name]
             rlscope_api.record_event(
@@ -1320,10 +1001,6 @@ class Profiler:
             # We terminate annotations if they're been going for too long.
             # if not self.reports_progress:
             #     self._maybe_warn_live_annotations()
-
-            if len(self._op_stack) == 0:
-                self.steps += 1
-                # self._disable_tracing()
 
         if self.reports_progress:
             self._maybe_warn_report_progress()
@@ -1354,19 +1031,16 @@ class Profiler:
         self._maybe_dump_rlscope_config()
 
     def _maybe_dump_rlscope_config(self):
-        if self.process_name is not None and self.phase is not None:
+        if self.process_name is not None and self.phase is not None and rlscope_api.is_used():
             self._dump_rlscope_config()
 
     def _is_term_opt_set(self):
-        return self.max_timesteps is not None or \
-               self.max_training_loop_iters is not None or \
-               self.max_passes is not None or \
-               self.trace_time_sec is not None
+        return \
+            self.max_passes is not None or \
+            self.trace_time_sec is not None
 
     def _term_opts(self):
         return dict(
-            max_timesteps=self.max_timesteps,
-            max_training_loop_iters=self.max_training_loop_iters,
             max_passes=self.max_passes,
             trace_time_sec=self.trace_time_sec,
         )
@@ -1376,7 +1050,7 @@ class Profiler:
         Only set self.opt if another termination opt isn't already set.
         """
         term_opts = self._term_opts()
-        # Should be one of --rlscope-trace-time-sec, --rlscope-max-timesteps, --rlscope-max-training-loop-iters
+        # Should be one of --rlscope-trace-time-sec, --rlscope-max-passes
         assert opt in term_opts
         if skip_if_set and self._is_term_opt_set():
             logger.info(("RL-Scope: SKIP {func}({opt}={value}) "
@@ -1415,31 +1089,39 @@ class Profiler:
         ))
         setattr(self, opt, value)
 
-    def set_max_training_loop_iters(self, max_training_loop_iters, skip_if_set):
+    def _check_tracing_disabled(self, setter):
+        if self._tracing_enabled or self._has_called_enable_tracing:
+            raise RLScopeAPIError(textwrap.dedent("""\
+            You need to configure rlscope.prof.{setter}(...) before trace collection begins. 
+            You can delay trace collection by calling: 
+              rlscope.handle_rlscope_args(..., delay=True)
+                                               ----------
+              ...
+              # Configure profiler
+              rlscope.prof.{setter}(...)
+              ...
+              # Start trace collection
+              rlscope.prof.enable_tracing()
+            """).format(
+                setter=setter,
+            ))
+
+    def set_max_passes(self, max_passes, skip_if_set):
         """
-        Set the maximum training loop iterations to collect traces for before exiting the training script early.
+        Set the maximum passes (calls to rlscope.prof.report_progress(...))
+        to collect traces for before exiting the training script early.
 
         :param: skip_if_set : bool
-            If True, then ONLY set max_training_loop_iters if the following trace-termination-options have not been
+            If True, then ONLY set max_passes if the following trace-termination-options have not been
             provided already via cmdline:
-                --rlscope-max-timesteps
-                --rlscope-max-training-loop-iters
-                --rlscope-trace-time-sec
+              --rlscope-max-passes ...
+              --rlscope-trace-time-sec ...
 
-            If False, set max_training_loop_iters (possibly overriding  --rlscope-max-training-loop-iters)
+            If False, set max_passes (possibly overriding  --rlscope-max-passes)
 
         :return:
         """
-        assert not self._tracing_enabled
-        assert not self._has_called_enable_tracing
-        self._set_term_opt('rlscope.prof.set_max_training_loop_iters',
-                           'max_training_loop_iters', max_training_loop_iters,
-                           skip_if_set)
-        self._maybe_dump_rlscope_config()
-
-    def set_max_passes(self, max_passes, skip_if_set):
-        assert not self._tracing_enabled
-        assert not self._has_called_enable_tracing
+        self._check_tracing_disabled('set_max_passes')
         self._set_term_opt('rlscope.prof.set_max_passes',
                            'max_passes', max_passes,
                            skip_if_set)
@@ -1448,43 +1130,22 @@ class Profiler:
     def set_delay_passes(self, delay_passes, skip_if_set):
         """
         Set the delay in "passes" (calls to rlscope.prof.report_progress) before trace collection begins.
+        Helpful to avoid trace collection during "warmup" iterations.
         """
-        assert not self._tracing_enabled
-        assert not self._has_called_enable_tracing
+        self._check_tracing_disabled('set_delay_passes')
         self._maybe_set_opt('delay_passes', delay_passes, 'rlscope.prof.set_delay_passes', skip_if_set)
         self._maybe_set_opt('delay', True, 'rlscope.prof.set_delay', skip_if_set)
         self._maybe_dump_rlscope_config()
 
-    def set_delay_training_loop_iters(self, delay_training_loop_iters, skip_if_set):
-        """
-        Set the delay in training loop iterations before trace collection begins.
-
-        :param: skip_if_set : bool
-            If True, then ONLY set delay_training_loop_iters if the following have not been
-            provided already via cmdline:
-                --rlscope-delay-training-loop-iters
-
-            If False, set delay_training_loop_iters (possibly overriding --rlscope-delay-training-loop-iters)
-
-        :return:
-        """
-        assert not self._tracing_enabled
-        assert not self._has_called_enable_tracing
-        self._maybe_set_opt('delay_training_loop_iters', delay_training_loop_iters, 'rlscope.prof.set_delay_training_loop_iters', skip_if_set)
-        self._maybe_dump_rlscope_config()
-
     def set_process_name(self, process_name):
         if process_name == '':
-            raise ValueError("RL-Scope ERROR: You cannot use an empty-string for process_name")
+            raise RLScopeAPIError("You cannot use an empty-string for process_name")
         self.process_name = process_name
         # clib_wrap.set_process_name(process_name)
         self.init_trace_id()
         # self._maybe_init_profile_context()
 
         self._maybe_set_metadata()
-
-        # if self.process_name is not None and self.phase is not None:
-        #     self._force_load_libcupti()
 
         self._maybe_dump_rlscope_config()
 
@@ -1553,20 +1214,14 @@ class Profiler:
 
         self._maybe_set_metadata()
 
-        # if self.process_name is not None and self.phase is not None:
-        #     self._force_load_libcupti()
-
         self._maybe_dump_rlscope_config()
 
         if self.disable:
             return
 
-        if self.unit_test:
-            self.ut.set_phase(phase)
-
         if len(self._op_stack) != 0:
             self._failing = True
-            raise RuntimeError("RL-Scope: ERROR, you cannot change phases while operations are in-progress: ops = {ops}".format(
+            raise RLScopeAPIError("You cannot change phases while operations are in-progress: ops = {ops}".format(
                 ops=self._op_stack))
 
         # ProfileContextManager.recreate_sessions_profile_contexts(phase, self.machine_name)
@@ -1591,6 +1246,30 @@ class Profiler:
         if should_exit:
             self._is_finishing = True
 
+        if self.delay and not self.tracing_enabled:
+            self._failing = True
+            raise RLScopeAPIError(
+                textwrap.dedent("""\
+                You forgot to call rlscope.prof.enable_tracing(), so trace files are missing!
+                To fix this, modify your script to call:
+                    rlscope.handle_rlscope_args(..., delay=False)
+                                                     -----------
+                OR, make a call to rlscope.prof.enable_tracing() in your training loop when you want trace collection 
+                to begin (e.g., after some warmup iterations).
+                Then, re-run this script.
+                """))
+
+        if not self.reports_progress:
+            if py_config.DEBUG:
+                logger.info("REPORT PROGRESS @ PERCENT=100%")
+            self._report_progress(
+                percent_complete=1.,
+                num_timesteps=1,
+                total_timesteps=1,
+                skip_finish=True)
+        # else:
+        #     logger.info("SKIP: REPORT PROGRESS @ PERCENT=100%")
+
         if self._hw_pass_running:
             # Q: Any way to "discard" an incomplete pass?
             self._end_pass()
@@ -1600,9 +1279,6 @@ class Profiler:
 
         if self.debug:
             logger.info("> RL-Scope: finishing profiling\n{stack}".format(stack=get_stacktrace(indent=1)))
-
-        if self.unit_test:
-            self.ut.stop()
 
         self.maybe_terminate_utilization_sampler(warn_terminated=False)
         timer.end_operation('maybe_terminate_utilization_sampler')
@@ -1621,45 +1297,10 @@ class Profiler:
         # NOTE: don't record any events past this point since they will be lost;
         # we will get an abort() error from C++ if that happens.
 
-        # For each active session, schedule its results to be dumped.
-        # for sess in ACTIVE_SESSIONS:
-        #   self.dump_tfprof(sess)
-        # logger.info("> RL-Scope: Schedule any remaining traces to be dumped.")
-        # for sess in rlscope.profiler.session.ACTIVE_SESSIONS:
-        #     self._dump_tfprof(sess, debug=self.debug)
-        # At the very least, make sure to dump the [PROC:<process_name>] we recorded above.
-        # Q: How frequently should we dump pyprof data?
-        # A: We'd like to keep it under a file-size limit...but computing exact proto-size isn't practical.
-        #    Instead, lets just roughly count the # of events, and use that as a proxy for proto file size.
-        # if clib_wrap.should_dump_pyprof():
-        #     self._dump_pyprof(debug=self.debug)
         self._dump_process_metadata(debug=self.debug)
         timer.end_operation('_dump_process_metadata')
         self._dump_training_progress(debug=self.debug, dump_always=not self._failing)
         timer.end_operation('_dump_training_progress')
-
-        if self.unit_test:
-            logger.info("> RL-Scope: _dump_unit_test")
-            self._dump_unit_test()
-            timer.end_operation('_dump_unit_test')
-            logger.info("> RL-Scope: _dump_unit_test done")
-            # Make sure ALL unit-test data has been recorded before we exit.
-            if not self.ut.is_empty:
-                self.ut.debug_empty()
-                assert self.ut.is_empty
-
-        # Wait on all dump-processes to finish executing.
-        # logger.info("> RL-Scope: Waiting for trace-dump background threads to complete.")
-        # self.bg_dumper.shutdown()
-        # timer.end_operation('bg_dumper.shutdown')
-
-        # Wait for any async tfprof trace file dumps in C++ to finish.
-        # logger.info("> RL-Scope: Wait for tfprof trace-file dumps in TensorFlow C++ to finish.")
-        # c_api_util.await_trace_data_dumps()
-
-        # TODO: rlscope_api.await_trace_dumps()
-
-        # logger.info("> RL-Scope: Done")
 
         # Prevent weird bugs from happening at exit, like exceptions thrown during __del__ functions.
         clib_wrap.unwrap_libs()
@@ -1674,142 +1315,6 @@ class Profiler:
             logger.info("> RL-Scope: Exiting training script early")
             sys.exit(0)
 
-    # def _dump_tfprof(self, session, debug=False):
-    #     """
-    #     Dump a tfprof proto file for a given session.
-    #     Should get called whenever the number of traces for this session exceeds a threshold.
-    #
-    #     :param session:
-    #     :param pctx:
-    #     :return:
-    #     """
-    #     should_skip_dump = False
-    #     if self.disable_tfprof_dump:
-    #         should_skip_dump = True
-    #
-    #     if hasattr(session, 'rlscope_skip_dump') and session.rlscope_skip_dump:
-    #         logger.info('session.rlscope_skip_dump was set; skipping dumping tfprof for session={s}'.format(
-    #             s=session,
-    #         ))
-    #         should_skip_dump = True
-    #
-    #     pctx = ProfileContextManager.get_profile_context(session)
-    #
-    #     trace_id = self.next_trace_id
-    #     self.next_trace_id += 1
-    #     tfprof_path = self.tfprof_path(session.session_id, trace_id)
-    #
-    #     if pctx.rlscope_traced_calls == 0:
-    #         # Silently skip dumping this pctx since it contains no trace-data (unless --rlscope-debug).
-    #         if pctx.phase is None and debug:
-    #             logger.info("Skip dumping tfprof @ {path}: your training script creates a tf.Session() object that never gets used so it has 0 traced-calls.".format(path=tfprof_path))
-    #         elif debug:
-    #             logger.info("Skip dumping tfprof @ {path}: since it has 0 traced-calls.".format(path=tfprof_path))
-    #         should_skip_dump = True
-    #
-    #     if not should_skip_dump:
-    #         tfprof_dumper = TfprofDumper(trace_id, session, self.process_name, tfprof_path, debug=debug)
-    #         tfprof_dumper.dump()
-    #
-    #     # self.bg_dumper.submit(
-    #     #     name='TfprofDumper.dump({path})'.format(path=tfprof_path),
-    #     #     fn=tfprof_dumper.dump)
-    #     # After process has forked for dumping trace-data, clear the current process' trace-data.
-    #
-    #     pctx.clear()
-
-    # def _old_dump_tfprof(self, session, debug=False):
-    #     """
-    #     Dump a tfprof proto file for a given session.
-    #     Should get called whenever the number of traces for this session exceeds a threshold.
-    #
-    #     :param session:
-    #     :param pctx:
-    #     :return:
-    #     """
-    #     pctx = ProfileContextManager.get_profile_context(session)
-    #     trace_id = self.next_trace_id
-    #     # tfprof_path = self.tfprof_path(ses)
-    #     tfprof_path = self.tfprof_path(session.session_id, trace_id)
-    #     tfprof_dumper = TfprofDumper(trace_id, session, self.process_name, tfprof_path, debug=debug)
-    #     self.bg_dumper.submit(
-    #         name='TfprofDumper.dump({path})'.format(path=tfprof_path),
-    #         fn=tfprof_dumper.dump)
-    #     # After process has forked for dumping trace-data, clear the current process' trace-data.
-    #     pctx.clear()
-    #     self.next_trace_id += 1
-    #
-    # # TODO: Don't set to True until we've made sure bg_dumper actually works!
-    # UNIT_TEST_ASYNC_DUMP = False
-    # def _dump_unit_test(self):
-    #     assert self.unit_test
-    #     assert self.unit_test_name is not None
-    #     trace_id = self.next_trace_id
-    #     self.next_trace_id += 1
-    #     dump_kwargs = {
-    #         'directory':self.out_dir,
-    #         'trace_id':trace_id,
-    #         'bench_name':self.bench_name,
-    #         'process_name':self.process_name,
-    #         'test_name':self.unit_test_name,
-    #     }
-    #     if Profiler.UNIT_TEST_ASYNC_DUMP:
-    #         self.bg_dumper.submit(
-    #             name='UnitTestDataDumper.dump(trace_id={trace_id})'.format(
-    #                 trace_id=trace_id),
-    #             fn=self.ut.dump,
-    #             **dump_kwargs)
-    #     else:
-    #         self.ut.dump(**dump_kwargs)
-    #     # We might be in the middle of a phase...
-    #     # i.e.
-    #     # - phase_start[cur_phase] is recorded, but NOT phase_end[cur_phase]
-    #     # - The dump we are performing right now WON'T include cur_phase; but a future dump will
-    #     # => clear should NOT forget what the current phase is.
-    #     self.ut.clear_dump()
-
-    # @property
-    # def _should_dump_pyprof(self):
-    #     return clib_wrap.should_dump_pyprof()
-
-    # TODO: decide where to call dump_tfprof / dump_pyprof from.
-    # def _old_dump_pyprof(self, config_kwargs=dict(), debug=False):
-    #     if self.disable_pyprof_dump:
-    #         return
-    #     start_sec = time.time()
-    #     pyprof_trace = clib_wrap.get_pyprof_trace()
-    #     trace_id = self.next_trace_id
-    #     pyprof_trace_key = self.pyprof_proto_path(trace_id)
-    #     self.pyprof_dump_manager.put(pyprof_trace_key, pyprof_trace)
-    #     pyprof_dumper = PyprofDumper(
-    #         trace_id=trace_id,
-    #         config_path=self.config_path(trace_id),
-    #         c_lib_func_pyprof_pattern=self.c_lib_func_pyprof_pattern,
-    #         num_calls=self.num_calls,
-    #         start_measuring_call=self.start_measuring_call,
-    #         average_time_per_call_sec=self.average_time_per_call_sec,
-    #         average_time_per_call_no_profile_sec=self.average_time_per_call_no_profile_sec,
-    #         config_kwargs=config_kwargs,
-    #         process_name=self.process_name,
-    #         phase=self.phase,
-    #         pyprof_proto_path=self.pyprof_proto_path(trace_id),
-    #         pyprof_call_times_path=self.pyprof_call_times_path(trace_id),
-    #         pyprof_step=self._pyprof_step,
-    #         pyprof_dump_manager=self.pyprof_dump_manager,
-    #         pyprof_trace_key=pyprof_trace_key,
-    #         debug=debug)
-    #     self.next_trace_id += 1
-    #     self.bg_dumper.submit(
-    #         name="PyprofDumper.dump({path})".format(
-    #             path=self.pyprof_proto_path(trace_id)),
-    #         fn=pyprof_dumper.dump,
-    #     )
-    #     end_sec = time.time()
-    #     time_sec = end_sec - start_sec
-    #     if py_config.DEBUG:
-    #         logger.info("Dump pyprof took {sec} seconds on the critical path".format(
-    #             sec=time_sec,
-    #         ))
 
     def _dump_training_progress(self, debug=False, sync=False, dump_always=False):
         """
@@ -1852,6 +1357,14 @@ class Profiler:
             #     fields['can_dump'] = self._incremental_training_progress[self.phase].can_dump(self.reports_progress)
             # logger.info(pprint_msg(fields))
 
+            # if py_config.DEBUG:
+            #     sec = None
+            #     if self._last_dumped_training_progress is not None:
+            #         sec = now_sec - self._last_dumped_training_progress
+            #     logger.info("SKIP Dump training progress: now_sec - last_dump = {sec}".format(
+            #         sec=sec,
+            #     ))
+
             return
 
         training_progress = self._incremental_training_progress[self.phase].as_proto()
@@ -1867,13 +1380,6 @@ class Profiler:
             debug=debug or py_config.DEBUG)
 
         self.next_trace_id += 1
-        # self.bg_dumper.submit(
-        #     name="{name}.dump({path})".format(
-        #         name=dumper.name,
-        #         path=training_progress_proto_path),
-        #     fn=dumper.dump,
-        #     sync=sync,
-        # )
         dumper.dump()
         end_sec = time.time()
         time_sec = end_sec - start_sec
@@ -1898,10 +1404,10 @@ class Profiler:
         # Q: multiple processes reporting training progress...consider that an error?
         # if self.reports_progress and self.percent_complete is None:
         #     self._failing = True
-        #     raise RuntimeError("RL-Scope ERROR: profiler was created with rlscope.handle_rlscope_args(..., reports_progress=True), but process NEVER called rlscope.prof.report_progress(...)")
+        #     raise RLScopeAPIError("Profiler was created with rlscope.handle_rlscope_args(..., reports_progress=True), but process NEVER called rlscope.prof.report_progress(...)")
 
         # This should be prevented from self.report_progress(...)
-        assert not(not self.reports_progress and self.percent_complete is not None)
+        # assert not(not self.reports_progress and self.percent_complete is not None)
 
         if self.percent_complete is not None:
             process_metadata.training_progress.content_code = TP_HAS_PROGRESS
@@ -1917,7 +1423,7 @@ class Profiler:
                 ))
             process_metadata.training_progress.percent_complete = percent_complete
             # Q: Is this safe is self.num_timestamps is None? NO
-            if self.num_timesteps is not None:
+            if self.num_timesteps is not None and self._start_num_timesteps is not None:
                 num_timesteps = self.num_timesteps - self._start_num_timesteps
                 process_metadata.training_progress.num_timesteps = num_timesteps
             if self.total_timesteps is not None:
@@ -1932,12 +1438,6 @@ class Profiler:
             process_metadata_proto_path=process_metadata_proto_path,
             debug=debug)
         self.next_trace_id += 1
-        # self.bg_dumper.submit(
-        #     name="ProcessMetadataDumper.dump({path})".format(
-        #         path=process_metadata_proto_path),
-        #     fn=dumper.dump,
-        #     sync=sync,
-        # )
         dumper.dump()
         end_sec = time.time()
         time_sec = end_sec - start_sec
@@ -1947,22 +1447,20 @@ class Profiler:
             ))
 
     def _process_metadata_proto_path(self, trace_id):
-        ret = _j(self.out_dir, "process_metadata{bench}{trace}.proto".format(
-            bench=bench_suffix(self.bench_name),
+        ret = _j(self.out_dir, "process_metadata{trace}.proto".format(
             trace=trace_suffix(trace_id),
         ))
         return ret
 
     def _training_progress_proto_path(self, trace_id):
-        ret = _j(self.out_dir, "training_progress{bench}{trace}.proto".format(
-            bench=bench_suffix(self.bench_name),
+        ret = _j(self.out_dir, "training_progress{trace}.proto".format(
             trace=trace_suffix(trace_id),
         ))
         return ret
 
     @property
     def _rlscope_config_path(self):
-        return get_rlscope_config_path(self.out_dir, self.bench_name)
+        return get_rlscope_config_path(self.out_dir)
 
     def _maybe_warn_live_annotations(self):
         """
@@ -2057,19 +1555,9 @@ class Profiler:
                 not rlscope_api.is_used() or self.disable_gpu_hw or not self.has_next_pass
             ) and (
                 (
-                    self.num_traces is not None and
-                    self.next_trace_id >= self.num_traces
-                ) or (
                     total_trace_time_sec is not None and
                     self.trace_time_sec is not None
                     and total_trace_time_sec >= self.trace_time_sec
-                ) or (
-                    self.max_timesteps is not None and
-                    self.num_timesteps is not None and
-                    self.num_timesteps >= self.max_timesteps
-                ) or (
-                    self.max_training_loop_iters is not None and
-                    self.num_training_loop_iters >= zero_if_none(self.delay_training_loop_iters) + self.max_training_loop_iters
                 ) or (
                     self.max_passes is not None and
                     self.num_passes >= zero_if_none(self.delay_passes) + self.max_passes
@@ -2092,15 +1580,6 @@ class Profiler:
                 - has_next_pass = {has_next_pass}""".format(
                     has_next_pass=self.has_next_pass,
                 )), prefix="  "))
-            if self.num_traces is not None:
-                logger.info(textwrap.indent(textwrap.dedent("""
-                - self.next_trace_id >= self.num_traces = {next_bool}
-                  - self.next_trace_id = {next_trace_id}
-                  - self.num_traces = {num_traces}""".format(
-                    num_traces=self.num_traces,
-                    next_bool=self.next_trace_id >= self.num_traces,
-                    next_trace_id=self.next_trace_id,
-                )), prefix="  "))
             if total_trace_time_sec is not None and self.trace_time_sec is not None:
                 logger.info(textwrap.indent(textwrap.dedent("""
                 - total_trace_time_sec >= self.trace_time_sec = {total_bool}
@@ -2110,29 +1589,9 @@ class Profiler:
                     total_trace_time_sec=total_trace_time_sec,
                     trace_time_sec=self.trace_time_sec,
                 )), prefix="  "))
-            if self.max_timesteps is not None and self.num_timesteps is not None:
-                logger.info(textwrap.indent(textwrap.dedent("""
-                - self.num_timesteps >= self.max_timesteps = {bool}
-                  - self.num_timesteps = {num_timesteps}
-                  - self.max_timesteps = {max_timesteps}""".format(
-                    bool=self.num_timesteps >= self.max_timesteps,
-                    num_timesteps=self.num_timesteps,
-                    max_timesteps=self.max_timesteps,
-                )), prefix="  "))
-            if self.max_training_loop_iters is not None:
-                logger.info(textwrap.indent(textwrap.dedent("""
-                - self.num_training_loop_iters >= self.delay_training_loop_iters + self.max_timesteps = {bool}
-                  - self.delay_training_loop_iters = {delay_training_loop_iters}
-                  - self.num_training_loop_iters = {num_training_loop_iters}
-                  - self.max_training_loop_iters = {max_training_loop_iters}""".format(
-                    bool=self.num_timesteps >= zero_if_none(self.delay_training_loop_iters) + self.max_training_loop_iters,
-                    num_training_loop_iters=self.num_training_loop_iters,
-                    delay_training_loop_iters=self.delay_training_loop_iters,
-                    max_training_loop_iters=self.max_training_loop_iters,
-                )), prefix="  "))
             if self.max_passes is not None:
                 logger.info(textwrap.indent(textwrap.dedent("""
-                - self.num_passes >= self.delay_passes + self.max_timesteps = {bool}
+                - self.num_passes >= self.delay_passes + self.delay_passes = {bool}
                   - self.delay_passes = {delay_passes}
                   - self.num_passes = {num_passes}
                   - self.max_passes = {max_passes}""".format(
@@ -2156,8 +1615,6 @@ class Profiler:
         assert self._start_us is not None
         assert self._stop_us is not None
         event_name = op_process_event_name(self.process_name)
-        # clib_wrap.set_step(self._pyprof_step,
-        #                    ignore_disable=True)
         # BUG TODO: Should we use our own constants.CATEGORY_PROCESS for process-events?
         # Otherwise, we may be unable to disambiguate from a constants.CATEGORY_OPERATION of the same name as the process.
         # Looks like we recorded it as [PROC:<process-name>] to prevent conflicts.
@@ -2171,6 +1628,21 @@ class Profiler:
             name=event_name)
 
     def report_progress(self, percent_complete, num_timesteps=None, total_timesteps=None):
+        if self.disable and not rlscope_api.is_used():
+            return
+
+        if not self.reports_progress:
+            self._failing = True
+            raise RLScopeAPIError(
+                textwrap.dedent("""\
+                Profiler was created with rlscope.handle_rlscope_args(..., reports_progress=False), but process made unexpected call to rlscope.prof.report_progress(...).
+                If you wish to have process_name={proc} record training progress, call rlscope.handle_rlscope_args(..., reports_progress=True), 
+                and make sure its the ONLY process that does so.
+                """).format(proc=self.process_name))
+
+        return self._report_progress(percent_complete=percent_complete, num_timesteps=num_timesteps, total_timesteps=total_timesteps)
+
+    def _report_progress(self, percent_complete=None, num_timesteps=None, total_timesteps=None, skip_finish=False):
         """
         Call at the start of each training loop iteration.
         This tells RL-Scope when the previous training loop ends, and the next training loop begins.
@@ -2190,7 +1662,10 @@ class Profiler:
         """
         # if not self.disable or ( self.disable and self.training_progress ):
 
-        if self.disable and not self.training_progress:
+        if percent_complete is None and num_timesteps is not None and total_timesteps is not None:
+            percent_complete = num_timesteps/float(total_timesteps)
+
+        if self.disable and not rlscope_api.is_used():
             return
 
         if py_config.DEBUG and py_config.DEBUG_REPORT_PROGRESS_ALL:
@@ -2204,35 +1679,41 @@ class Profiler:
                 stack=get_stacktrace(indent=1)
             ))
 
-        if not self.reports_progress:
+        if percent_complete is None or \
+                total_timesteps is None or \
+                num_timesteps is None or \
+                not ( 0. <= percent_complete <= 1. ) or \
+                not ( 0 <= num_timesteps <= total_timesteps ) or \
+                not ( 0 < total_timesteps ):
             self._failing = True
-            raise RuntimeError(
+            raise RLScopeAPIError(
                 textwrap.dedent("""\
-                RL-Scope ERROR: profiler was created with rlscope.handle_rlscope_args(..., reports_progress=False), but process made unexpected call to rlscope.prof.report_progress(...).
-                If you wish to have process_name={proc} record training progress, call rlscope.handle_rlscope_args(..., reports_progress=True), 
-                and make sure its the ONLY process that does so.
-                """).format(proc=self.process_name))
-
-        if not ( 0. <= percent_complete <= 1. ):
-            self._failing = True
-            raise RuntimeError(
-                textwrap.dedent("""\
-                RL-Scope ERROR: rlscope.prof.report_progress(percent_complete=...) expects:
+                rlscope.prof.report_progress(percent_complete=..., num_timesteps=..., total_timesteps=...) expects:
                   0 <= percent_complete <= 1
-                But saw percent_complete={perc}
+                  0 <= num_timesteps <= total_timesteps
+                  0 < total_timesteps
+                But saw:
+                  percent_complete={percent_complete}
+                  num_timesteps={num_timesteps}
+                  total_timesteps={total_timesteps}
                   
                 Typical usage looks like:
                 
                   # The training loop of your ML script:
                   for t in range(total_timesteps):
-                      rlscope.prof.report_progress(percent_complete=t/float(total_timesteps))
+                      rlscope.prof.report_progress(
+                          percent_complete=t/float(total_timesteps),
+                          num_timesteps=t,
+                          total_timesteps=total_timesteps)
                 """).format(
-                    perc=percent_complete,
+                    percent_complete=percent_complete,
+                    num_timesteps=num_timesteps,
+                    total_timesteps=total_timesteps,
                 ))
 
         if self._should_enable_tracing():
             self._check_no_annotations(caller_name='rlscope.prof.report_progress()')
-            self._enable_tracing()
+            self.__enable_tracing()
             # percent_complete when tracing begins.
             self._start_percent_complete = percent_complete
             self._start_num_timesteps = num_timesteps
@@ -2246,12 +1727,8 @@ class Profiler:
 
         if py_config.DEBUG and py_config.DEBUG_GPU_HW:
             logger.info(rls_log_msg('GPU_HW', f"tracing_enabled = {self._tracing_enabled}, percent_complete = {percent_complete}"))
-        if self._tracing_enabled and percent_complete > 0 and percent_complete < 1.:
+        if self._tracing_enabled and percent_complete >= 0 and percent_complete < 1.:
             self._start_pass()
-
-        if self.max_timesteps is not None and num_timesteps is None:
-            self._failing = True
-            raise RuntimeError("RL-Scope ERROR: if you use --rlscope-max-timesteps, you must call rlscope.prof.report_progress(num_timesteps=NUMBER)")
 
         if num_timesteps is not None:
             self.num_timesteps = num_timesteps
@@ -2261,7 +1738,7 @@ class Profiler:
 
         if self.percent_complete is not None and percent_complete < self.percent_complete:
             self._failing = True
-            raise RuntimeError("RL-Scope ERROR: percent_complete should be monotonically increasing but saw {from_perc} -> {to_perc}".format(
+            raise RLScopeAPIError("percent_complete should be monotonically increasing but saw {from_perc} -> {to_perc}".format(
                 from_perc=self.percent_complete,
                 to_perc=percent_complete,
             ))
@@ -2279,16 +1756,16 @@ class Profiler:
             # Q: Should we allow this by making the phase basically 0 seconds...?
             if not self.tracing_enabled:
                 self._failing = True
-                raise RuntimeError("RL-Scope ERROR: profiler was created with rlscope.handle_rlscope_args(..., reports_progress=True), but process NEVER called rlscope.prof.report_progress(...)")
+                raise RLScopeAPIError("Profiler was created with rlscope.handle_rlscope_args(..., reports_progress=True), but process NEVER called rlscope.prof.report_progress(...)")
             # assert self.tracing_enabled
         self._dump_training_progress(debug=self.debug, dump_always=dump_always)
 
-        self._maybe_finish(debug=self.debug)
+        if not skip_finish:
+            self._maybe_finish(debug=self.debug)
 
         if self._has_called_enable_tracing:
             # They've called rlscope.prof.enable_tracing() since their algorithm has "warmed up";
             # start counting training loop iterations.
-            self.num_training_loop_iters += 1
             self.num_passes += 1
 
     def _maybe_finish(self, finish_now=False, should_exit=True, debug=False):
@@ -2305,88 +1782,6 @@ class Profiler:
 
         self.finish(should_exit=should_exit)
 
-    @property
-    def total_calls_to_run(self):
-        if self.start_measuring_call is None:
-            return self.num_calls
-        return self.num_calls + self.start_measuring_call - 1
-
-    # def _force_load_libcupti(self):
-    #     """
-    #     TensorFlow calls dlopen("libcupti.so") lazily.
-    #     Instead of modifying tensorflow to load it eagerly, lets just trigger the code-path that loads it.
-    #     In particular, enable tfprof briefly for a very simple session.run() call.
-    #
-    #     libcupti takes about 0.001841 seconds to load with dlopen().
-    #
-    #     You can observe this by running like this:
-    #     $ export TF_DEBUG_LOAD_LIBRARY=yes
-    #     $ train.py ...
-    #     ...
-    #     2019-07-26 15:50:42.337735: I tensorflow/core/platform/posix/load_library.cc:64] > LoadLibrary library=libcupti.so.10.0 took 0.001841 sec
-    #
-    #     :return:
-    #     """
-    #     if self._loaded_libcupti:
-    #         return
-    #
-    #     logger.info("Forcing libcupti to load before tracing begins.")
-    #
-    #     import tensorflow as tf
-    #     config = tf.ConfigProto()
-    #     config.gpu_options.allow_growth = True
-    #     graph = tf.Graph()
-    #     sess = tf.Session(graph=graph, config=config)
-    #     # We don't want to keep any of the collected traces from this.
-    #     sess.rlscope_skip_dump = True
-    #
-    #     # NOTE: we aren't actually beginning tracing for the problem, hence skip_init_trace_time=True.
-    #     self._start_tfprof(skip_init_trace_time=True)
-    #
-    #     name = 'ForceLoadLibcupti'
-    #     N = 1000
-    #     zeros = np.zeros((N, N))
-    #     with sess, tf.name_scope(name):
-    #         a = tf.placeholder(float, name='a')
-    #         b = tf.placeholder(float, name='b')
-    #         c = a * b
-    #
-    #         feed_dict = {
-    #             a: zeros,
-    #             b: zeros,
-    #         }
-    #         c_result = sess.run(c, feed_dict=feed_dict)
-    #         assert np.equal(c_result, 0.).all()
-    #
-    #     self._stop_tfprof()
-    #
-    #     self._loaded_libcupti = True
-
-# class CUDAProfiler:
-#     def __init__(self):
-#         # NOTE: CUDA profiling output has already been specified when this script was launched.
-#         # self.profile_basename = profile_basename
-#         self.already_enabled = False
-#
-#     def start(self):
-#         # NOTE: we assume the CUDA
-#         self.already_enabled = cudaprofile.is_profiler_enabled()
-#         if not self.already_enabled:
-#             cudaprofile.start()
-#
-#     def stop(self):
-#         if not self.already_enabled:
-#             cudaprofile.stop()
-#
-#     def dump(self):
-#         # Dumping is performed externally by nvprof once the program terminates.
-#         pass
-#
-#     def __enter__(self):
-#         self.start()
-#
-#     def __exit__(self, exc_type, exc_val, exc_tb):
-#         self.stop()
 
 class Operation:
     def __init__(self, operation, prof, skip):
@@ -2761,21 +2156,22 @@ def add_rlscope_arguments(parser):
     :return:
     """
     if isinstance(parser, argparse.ArgumentParser):
-        rlscope_parser = parser.add_argument_group("IML")
+        rlscope_parser = parser.add_argument_group("RL-Scope")
     else:
         rlscope_parser = parser
-    add_argument(rlscope_parser, '--rlscope-nvprof-enabled', action='store_true', help=textwrap.dedent("""
-        RL-Scope: is nvprof running?
-        
-        Internal use only; 
-        used to determine whether this python script has been invoked using nvprof.
-        If it hasn't, the script will re-invoke itself with nvprof.
+    add_argument(rlscope_parser, '--rlscope-directory',
+                 help=textwrap.dedent("""
+    RL-Scope: profiling output directory.
     """))
-    # add_argument(rlscope_parser, '--rlscope-tfprof', action='store_true', help=textwrap.dedent("""
-    #     RL-Scope: use tfprof TensorFlow profiling utility INSTEAD of nvprof.
-    # """))
-    add_argument(rlscope_parser, '--rlscope-num-calls', type=int, default=1000,
-                        help="RL-Scope: how many calls should be measured in a single trace?")
+    add_argument(rlscope_parser, '--rlscope-max-passes', type=int,
+                 help=textwrap.dedent("""
+                            RL-Scope: how long should we profile for, in "passes" (i.e., calls to rlscope.prof.report_progress); 
+                            a single "pass" is one call to rlscope.prof.report_progress(...). 
+                            """))
+    add_argument(rlscope_parser, '--rlscope-delay-passes', type=int,
+                 help=textwrap.dedent("""
+                            RL-Scope: Delay trace collection for the first X "passes" (i.e., calls to rlscope.prof.report_progress).
+                            """))
     add_argument(rlscope_parser, '--rlscope-env',
                  help="RL-Scope: Name of environment")
     add_argument(rlscope_parser, '--rlscope-algo',
@@ -2785,36 +2181,9 @@ def add_rlscope_arguments(parser):
                              "tracing will stop when either "
                              "we've collected --rlscope-num-traces OR "
                              "--rlscope-trace-time-sec has been exceeded")
-    add_argument(rlscope_parser, '--rlscope-max-timesteps', type=int,
-                            help=textwrap.dedent("""
-                            RL-Scope: how long should we profile for, in timesteps; 
-                            timestep progress is reported by calling 
-                            rlscope.prof.report_progress(...)
-                            """))
-    add_argument(rlscope_parser, '--rlscope-max-training-loop-iters', type=int,
-                            help=textwrap.dedent("""
-                            RL-Scope: how long should we profile for, in "training loop iterations"; 
-                            a single "training loop iteration" is one call to rlscope.prof.report_progress. 
-                            NOTE: a training loop iteration is the same as a timestep, if every time an algorithm 
-                            call rlscope.prof.report_progress, it advances the timestep by one.
-                            - e.g. DDPG advances 100 timesteps (nb_rollout_steps) before calling rlscope.prof.report_progress
-                            - e.g. DQN advances 1 timestep before calling rlscope.prof.report_progress
-                            """))
-    add_argument(rlscope_parser, '--rlscope-delay-training-loop-iters', type=int,
-                            help=textwrap.dedent("""
-                            RL-Scope: Delay trace collection for the first X "training loop iterations"; 
-                            see --rlscope-max-training-loop-iters for a description of training loop iterations.
-                            """))
-
-    add_argument(rlscope_parser, '--rlscope-max-passes', type=int,
-                            help=textwrap.dedent("""
-                            RL-Scope: how long should we profile for, in "passes" (i.e., calls to rlscope.prof.report_progress); 
-                            a single "pass" is one call to rlscope.prof.report_progress. 
-                            """))
-    add_argument(rlscope_parser, '--rlscope-delay-passes', type=int,
-                            help=textwrap.dedent("""
-                            RL-Scope: Delay trace collection for the first X "passes" (i.e., calls to rlscope.prof.report_progress).
-                            """))
+    add_argument(rlscope_parser, '--rlscope-disable', action='store_true', help=textwrap.dedent("""
+        RL-Scope: Skip any profiling.
+    """))
 
     add_argument(rlscope_parser, '--rlscope-internal-start-trace-time-sec', type=float,
                         help=textwrap.dedent("""
@@ -2844,33 +2213,10 @@ def add_rlscope_arguments(parser):
         We need to keep this so we can terminate it once we are done.
     """))
 
-    add_argument(rlscope_parser, '--rlscope-num-traces', type=int,
-                        # default=10,
-                        help="RL-Scope: how many traces should be measured?")
     add_argument(rlscope_parser, '--rlscope-keep-traces', action='store_true', help=textwrap.dedent("""
         RL-Scope: DON'T delete any existing trace files; keep them and append to them.
         
         Useful if your ML script launches worker processes repeatedly.
-    """))
-    add_argument(rlscope_parser, '--rlscope-python', action='store_true', help=textwrap.dedent("""
-        RL-Scope: Collecting python profiler (pyprof) data for profiled operations.
-        
-        Python profiling data is grouped into per-operation summaries, instead of 
-        presenting profiling data process-wide.
-        
-        This prevent overwhelming the user with too much information.
-    """))
-    add_argument(rlscope_parser, '--rlscope-fuzz', action='store_true', help=textwrap.dedent("""
-        RL-Scope: \"Fuzz\" the script for calls to TensorFlow API's.
-        
-        Useful if you have no idea where the training-loop of an ML script is located. 
-        
-        Adds breakpoints / dumps stack traces when certain TensorFlow API's are called; 
-        for e.g. sesssion.run(...) for running the computational graph
-        (currently this is the only thing we trace).
-    """))
-    add_argument(rlscope_parser, '--rlscope-disable', action='store_true', help=textwrap.dedent("""
-        RL-Scope: Skip any profiling.
     """))
     add_argument(rlscope_parser, '--rlscope-calibration', action='store_true', help=textwrap.dedent("""
         RL-Scope: This is a calibration run. 
@@ -2892,64 +2238,20 @@ def add_rlscope_arguments(parser):
     add_argument(rlscope_parser, '--rlscope-disable-tfprof', action='store_true', help=textwrap.dedent("""
         RL-Scope: Skip any profiling (i.e. trace-collection, trace-dumping) related to GPU times.
     """))
-    add_argument(rlscope_parser, '--rlscope-disable-pyprof-dump', action='store_true', help=textwrap.dedent("""
-        RL-Scope: Skip pyprof trace-dumping, but NOT trace-collection.
-    """))
-    add_argument(rlscope_parser, '--rlscope-disable-tfprof-dump', action='store_true', help=textwrap.dedent("""
-        RL-Scope: Skip tfprof trace-dumping, but NOT trace-collection.
-    """))
-    add_argument(rlscope_parser, '--rlscope-disable-pyprof-trace', action='store_true', help=textwrap.dedent("""
-        RL-Scope: Disable most of pyprof trace-collection (but not entirely).
-    """))
     add_argument(rlscope_parser, '--rlscope-disable-gpu-hw', action='store_true', help=textwrap.dedent("""
         RL-Scope: Disable GPU HW sampling trace-collection.
-    """))
-    add_argument(rlscope_parser, '--rlscope-delay', action='store_true', help=textwrap.dedent("""
-        RL-Scope: Delay trace collection until your training script has warmed up; 
-        you must signal this to RL-Scope by calling rlscope.prof.enable_tracing() when that happens 
-        (as is done in the annotated stable-baselines algorithm implementations e.g. DQN).
-        
-        If you DON'T provide this, then tracing begins immediately starting from "with rlscope.prof.profiler(...)".
     """))
     add_argument(rlscope_parser, '--rlscope-just-sample-util', action='store_true', help=textwrap.dedent("""
         RL-Scope: collect machine utilization data and output it to --rlscope-directory.
         
         NOTE: this will NOT collect profiling information.
     """))
-    add_argument(rlscope_parser, '--rlscope-training-progress', action='store_true', help=textwrap.dedent("""
-        RL-Scope: collect training progress data and output it to --rlscope-directory.
-        
-        NOTE: This is ON by default, except if --rlscope-disable is given, in which case you must provide this.
-    """))
-    add_argument(rlscope_parser, '--rlscope-unit-test',
-                        action='store_true',
-                        help=textwrap.dedent("""
-    RL-Scope: (for unit-testing) Record "actual results" needed for doing basics unit-test checks.
-    """))
-    add_argument(rlscope_parser, '--rlscope-unit-test-name',
-                        help=textwrap.dedent("""
-    RL-Scope: (for unit-testing) name to store in IMLUnitTest.test_name.
-    """))
-    add_argument(rlscope_parser, '--rlscope-debug', action='store_true', help=textwrap.dedent("""
-        RL-Scope: debug profiler.
-    """))
-    add_argument(rlscope_parser, '--rlscope-start-measuring-call', default=1, type=int,
-                        help="RL-Scope: when should measuring begin?")
-    add_argument(rlscope_parser, '--rls-bench-name',
-                        default=NO_BENCH_NAME,
-                        help=textwrap.dedent("""
-    RL-Scope: which code block should we measure?
-    i.e. --rls-bench-name=some_bench
-        # Just measure "some_bench", nothing else.
-        profiler.profile('some_bench', do_some_bench)
-    """))
-    add_argument(rlscope_parser, '--rlscope-directory',
-                        help=textwrap.dedent("""
-    RL-Scope: profiling output directory.
-    """))
     add_argument(rlscope_parser, '--rlscope-skip-rm-traces', action='store_true', help=textwrap.dedent("""
     DON'T remove traces files from previous runs rooted at --rlscope-directory.
     Useful if your training script has multiple training scripts that need to be traced with IML.
+    """))
+    add_argument(rlscope_parser, '--rlscope-debug', action='store_true', help=textwrap.dedent("""
+        RL-Scope: debug profiler.
     """))
 
 # Match input/output to PythonProfilerParser
@@ -3004,7 +2306,7 @@ def _rlscope_argv(prof : Profiler, keep_executable=False, keep_non_rlscope_args=
     args.rlscope_phase = prof.phase
     if prof.process_name is None:
         prof._failing = True
-        raise RuntimeError("RL-Scope: You must call rlscope.api.prof.set_process_name('some_name') before forking children!")
+        raise RLScopeAPIError("You must call rlscope.api.prof.set_process_name('some_name') before forking children!")
     args.rlscope_internal_parent_process_name = prof.process_name
     args.rlscope_util_sampler_pid = prof.util_sampler_pid
     argv = args_to_cmdline(parser, args, keep_executable=keep_executable, use_pdb=False)
@@ -3061,66 +2363,6 @@ def check_avail_gpus():
         }, indent=2)
         return False
     return True
-
-# If you search for function names matching this pattern in pyprof output, they will match TensorFlow C++ API calls.
-CLIB_TENSORFLOW_REGEX = r'(?:built-in.*pywrap_tensorflow)'
-# We can manually wrap a c-library in order to record C API call times.  See test_call_c.py for how to do this.
-CLIB_WRAPPER_REGEX = r'CLIB__.*'
-def dump_config(path, **kwargs):
-    config = dict()
-
-    avail_gpus = get_available_gpus()
-    avail_cpus = get_available_cpus()
-    # We want to be CERTAIN about which device TensorFlow is using.
-    # If no GPUs are available, TF will use the CPU.
-    # If a GPU is available, make sure only 1 is available so we are certain it's using that one.
-    if not( (len(avail_gpus) == 1) or
-            (len(avail_gpus) == 0 and len(avail_cpus) == 1) ):
-        CUDA_VISIBLE_DEVICES = ENV.get('CUDA_VISIBLE_DEVICES', None)
-        pprint.pprint({
-            'avail_gpus':avail_gpus,
-            'avail_cpus':avail_cpus,
-            'CUDA_VISIBLE_DEVICES':CUDA_VISIBLE_DEVICES,
-        }, indent=2)
-        msg = textwrap.dedent("""
-        > RL-Scope ERROR: Multiple GPUs were found; RL-Scope benchmark requires only one GPU to be visible to TensorFlow via (for example) "export CUDA_VISIBLE_DEVICES=0".
-        Use one of the below available GPUs:
-        """)
-        raise RuntimeError(msg)
-    if len(avail_gpus) == 1:
-        device_dict = avail_gpus[0]
-    else:
-        device_dict = avail_cpus[0]
-
-    config.update(device_dict)
-
-    c_lib_func_pyprof_pattern = kwargs.get('c_lib_func_pyprof_pattern', CLIB_WRAPPER_REGEX)
-    defaults = {
-        'clock': "monotonic_clock",
-        'device_name': None,
-        'impl_name': None,
-        # For tensorflow: r'(?:built-in.*pywrap_tensorflow)'
-        'c_lib_func_pyprof_pattern':c_lib_func_pyprof_pattern,
-        # Discard the first nvprof sample since it's typically 700ms
-        # (not sure why, presumably some initialization time).
-        'discard_first_sample':True,
-
-        # 'bench_name_labels': {
-        #     ...
-        # },
-    }
-    config = dict(defaults)
-    config.update(kwargs)
-    assert 'num_calls' in config or (
-        'iterations' in config and \
-        'repetitions' in config
-    )
-    dump_json(config, path)
-
-def load_json(path):
-    with codecs.open(path, mode='r', encoding='utf-8') as f:
-        data = json.load(f)
-        return data
 
 def dump_json(data, path):
     os.makedirs(_d(path), exist_ok=True)

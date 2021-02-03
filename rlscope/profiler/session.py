@@ -220,8 +220,6 @@ def _wrapped_BaseSession_init(self, *args, **kwargs):
     _before_active_hooks(session=self)
     _make_active(session=self)
 
-    # import ipdb; ipdb.set_trace()
-
     if 'config' not in kwargs:
         # allow_soft_placement=True, log_device_placement=True
         kwargs['config'] = tf.compat.v1.ConfigProto()

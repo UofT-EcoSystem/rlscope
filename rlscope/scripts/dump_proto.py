@@ -67,15 +67,17 @@ def dump_csv(proto, stream):
 
 from rlscope.profiler.rlscope_logging import logger
 def main():
-    parser = argparse.ArgumentParser("Dump protobuf files to txt")
+    parser = argparse.ArgumentParser(
+        description=textwrap.dedent(__doc__.lstrip().rstrip()),
+        formatter_class=argparse.RawTextHelpFormatter)
     parser.add_argument("--proto",
                         required=True,
-                        help=textwrap.dedent("""
+                        help=textwrap.dedent("""\
                         Protofile.
                         """))
     parser.add_argument("--csv",
                         action='store_true',
-                        help=textwrap.dedent("""
+                        help=textwrap.dedent("""\
                         Output CSV (if supported).
                         """))
     args = parser.parse_args()

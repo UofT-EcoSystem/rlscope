@@ -1,0 +1,11 @@
+##
+## Useful dependencies for development, but not required by distributed RL-Scope package.
+##
+
+# Debugger used for development
+ipdb >= 0.12
+# Debugger used for pytest
+pdbpp >= 0.10.0
+# Unit tests (e.g., rls-unit-tests)
+pytest >= 4.4.1
+

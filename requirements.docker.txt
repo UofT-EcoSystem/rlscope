@@ -1,18 +1,19 @@
-#
-# Requirements needed to launch a docker container.
-#
-#
+##
+## RL-Scope requirements needed to launch the docker development container using "python run_docker.py".
+##
+
 # To setup a virtualenv with requirements, and run the docker development container, run this:
 # $ cd ~/clone/rlscope
 # $ virtualenv --python=/usr/bin/python3 venv
 # $ source venv/bin/activate
-# $ pip install -r requirements.deploy.txt
+# $ pip install -r requirements.docker.txt
 # $ python run_docker.py
 
-absl-py==0.6.1
-Cerberus==1.3.1
-docker==4.0.1
-PyYAML==5.1
+absl-py >= 0.6.1
+Cerberus >= 1.3.1
+docker >= 4.0.1
+PyYAML >= 5.1
 # Coloured logging.
-colorlog>=4.2.1
+colorlog >= 4.2.1
 py-cpuinfo >= 4.0.0
+

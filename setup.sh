@@ -946,6 +946,11 @@ setup_pip_package() {
     _do tar xf $cpp_pkg -C $ROOT/rlscope/cpp --strip-components=1
   fi
 
+  # Generate version information in rlscope/__init__.py and rlscope/version.py:
+  # - rlscope.__version__
+  # - rlscope.version.[rlscope|cuda|git_version]
+  _do python $ROOT/rlscope/scripts/generate_version.py
+
   # NOTE: I include "clean --all" since I've seen weird behaviour from setup.py where
   # if try to remove files from the wheel (e.g., with --debug-skip-cpp), they still get added.
   #
