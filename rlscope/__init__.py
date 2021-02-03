@@ -10,9 +10,7 @@ __version__ = "0.0.1"
 __all__ = []
 
 from rlscope import \
-  api, \
   version
 __all__.extend([
-  'api',
   'version',
 ])

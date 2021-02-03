@@ -168,7 +168,7 @@ def handle_rlscope_args(parser=None, args=None, directory=None, reports_progress
         args=args,
     )
 
-def handle_gflags_rlscope_args(FLAGS, directory=None, reports_progress=False):
+def handle_gflags_rlscope_args(FLAGS, directory=None, reports_progress=False, **kwargs):
     """
     Build an argument parser,
     :return:
@@ -178,9 +178,9 @@ def handle_gflags_rlscope_args(FLAGS, directory=None, reports_progress=False):
         If the user doesn't provide --rlscope-directory (i.e. a separate directory for storing profiling data),
         we fall back on this.
     """
-    return handle_rlscope_args(parser=None, args=FLAGS, directory=directory, reports_progress=reports_progress)
+    return handle_rlscope_args(parser=None, args=FLAGS, directory=directory, reports_progress=reports_progress, **kwargs)
 
-def handle_click_rlscope_args(rlscope_kwargs, directory=None, reports_progress=False):
+def handle_click_rlscope_args(rlscope_kwargs, directory=None, reports_progress=False, **kwargs):
     """
     Build an argument parser,
     :return:
@@ -190,4 +190,4 @@ def handle_click_rlscope_args(rlscope_kwargs, directory=None, reports_progress=F
         If the user doesn't provide --rlscope-directory (i.e. a separate directory for storing profiling data),
         we fall back on this.
     """
-    return handle_rlscope_args(parser=None, args=rlscope_kwargs, directory=directory, reports_progress=reports_progress)
+    return handle_rlscope_args(parser=None, args=rlscope_kwargs, directory=directory, reports_progress=reports_progress, **kwargs)

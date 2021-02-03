@@ -4160,6 +4160,7 @@ class CategoryTransitionPlot:
             # max_passes = rlscope_config.get_int('max_passes')
             max_passes = rlscope_config.get_var('max_passes', dflt=None)
             if max_passes is None:
+                # Deprecated; keep to read older trace files.
                 max_passes = rlscope_config.get_var('max_training_loop_iters', dflt=None)
             if max_passes is not None:
                 max_passes = int(max_passes)

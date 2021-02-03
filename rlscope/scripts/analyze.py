@@ -27,7 +27,7 @@ def main():
         sys.exit(1)
 
     parser = argparse.ArgumentParser(
-        textwrap.dedent("""\
+        description=textwrap.dedent("""\
         Process trace-files collected from running an ML script with the RL-Scope profiler.
         
         For task-specific help, provided task-name and --help, e.g.:
@@ -38,7 +38,7 @@ def main():
           It just forwards arguments to it.
         - Any unparsed args are forward to the luigi script.
         """),
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+        formatter_class=argparse.RawTextHelpFormatter,
         add_help=False,
     )
     parser.add_argument('--pdb', action='store_true',
@@ -61,7 +61,7 @@ def main():
 
     if args.help and not args.task:
         # Print available tasks.
-        parser.print_usage()
+        parser.print_help()
         sys.exit(0)
 
     if args.task is None and not args.help:

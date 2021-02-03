@@ -20,24 +20,23 @@ from rlscope import py_config
 
 def main():
     parser = argparse.ArgumentParser(
-        description=__doc__.splitlines()[0],
-        # formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+        description=textwrap.dedent(__doc__.lstrip().rstrip()),
         formatter_class=argparse.RawTextHelpFormatter)
     # TODO: add --pdb to break on failed python tests, and gdb on failed C++ tests.
     parser.add_argument("--debug",
                         action='store_true',
-                        help=textwrap.dedent("""
+                        help=textwrap.dedent("""\
                         Debug unit tests.
                         """))
     parser.add_argument("--Werror",
                         action='store_true',
-                        help=textwrap.dedent("""
+                        help=textwrap.dedent("""\
                         Treat warnings as errors (pytest)
                         """))
     parser.add_argument("--tests",
                         choices=['py', 'cpp', 'all'],
                         default='all',
-                        help=textwrap.dedent("""
+                        help=textwrap.dedent("""\
                         Which unit tests to run:
                         py:
                           Just python unit tests.

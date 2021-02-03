@@ -1250,11 +1250,10 @@ def get_unit_test_multiple_path(directory, trace_id, bench_name):
     ))
     return ret
 
-def get_rlscope_config_path(out_dir, bench_name=None):
+def get_rlscope_config_path(out_dir):
     def _path(prefix):
-        path = _j(out_dir, "{prefix}_config{bench}.json".format(
+        path = _j(out_dir, "{prefix}_config.json".format(
             prefix=prefix,
-            bench=bench_suffix(bench_name),
         ))
         return path
     rlscope_path = _path('rlscope')
@@ -1638,15 +1637,6 @@ def config_is_no_tfprof(config):
 
 def config_is_no_pyprof(config):
     return re.search(r'no_pyprof', config)
-
-def config_is_no_pytrace(config):
-    return re.search(r'no_pytrace', config)
-
-def config_is_no_pydump(config):
-    return re.search(r'no_pydump', config)
-
-def config_is_no_tfdump(config):
-    return re.search(r'no_tfdump', config)
 
 def config_is_instrumented(config):
     return not config_is_uninstrumented(config) and re.search(r'instrumented', config)

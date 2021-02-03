@@ -83,7 +83,7 @@ def add_config_options(pars):
         #     'instrumented_full_no_tfprof_no_pyprof',
         #
         #     'uninstrumented_full'],
-        help=textwrap.dedent("""
+        help=textwrap.dedent("""\
         instrumented:
             Run the script with RL-Scope enabled for the entire duration of training (if --rlscope-trace-time-sec), 
             record start/end timestamps.
@@ -157,11 +157,8 @@ def main():
         sys.exit(1)
 
     parser = argparse.ArgumentParser(
-        textwrap.dedent("""\
-        Run a bunch of experiments for a paper.
-        """),
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-    )
+        description=textwrap.dedent(__doc__.lstrip().rstrip()),
+        formatter_class=argparse.RawTextHelpFormatter)
 
     # TODO:
     # - add sub-parser for each training script
@@ -191,13 +188,13 @@ def main():
     #     action='store_true')
     parser.add_argument('--debug-single-thread',
                         action='store_true',
-                        help=textwrap.dedent("""
+                        help=textwrap.dedent("""\
     Debug with single thread.
     """))
     parser.add_argument(
         '--rls-prof',
         default='rls-prof',
-        help=textwrap.dedent("""
+        help=textwrap.dedent("""\
         Run train.py inside of rls-prof (for uninstrumented runs only)
           $ rls-prof python train.py
         This is done by setting RLSCOPE_PROF=<--rls-prof> inside the train_stable_baselines.sh training script.
@@ -213,7 +210,7 @@ def main():
     parser.add_argument(
         '--skip-error',
         action='store_true',
-        help=textwrap.dedent("""
+        help=textwrap.dedent("""\
     If a script fails and there's more left to run, ignore it and continue.
     (NOTE: don't worry, stderr error will still get captured to a logfile).
     """))
@@ -272,7 +269,7 @@ def main():
 
     parser.add_argument('--algo-env-group',
                         choices=expr_config.ALGO_ENV_GROUP_CHOICES,
-                        help=textwrap.dedent("""
+                        help=textwrap.dedent("""\
         Only run a specific "experiment".
         i.e. only run (algo, env) combinations needed for a specific graph.
         
@@ -317,7 +314,7 @@ def main():
 
     parser_stable_baselines = subparsers.add_parser(
         'stable-baselines',
-        help=textwrap.dedent("""
+        help=textwrap.dedent("""\
         rls-bench group: 
         
         Run ALL the stable-baselines experiments.
@@ -331,7 +328,7 @@ def main():
         '--mode',
         choices=['plot', 'run', 'all'],
         default='all',
-        help=textwrap.dedent("""
+        help=textwrap.dedent("""\
         train_stable_baselines.sh
           Run stable-baselines experiments.
         """))
@@ -1268,15 +1265,6 @@ class StableBaselines(Experiment):
 
         if config_is_no_pyprof(args.config):
             opts.extend(['--rlscope-disable-pyprof'])
-
-        if config_is_no_pydump(args.config):
-            opts.extend(['--rlscope-disable-pyprof-dump'])
-
-        if config_is_no_pytrace(args.config):
-            opts.extend(['--rlscope-disable-pyprof-trace'])
-
-        if config_is_no_tfdump(args.config):
-            opts.extend(['--rlscope-disable-tfprof-dump'])
 
         return opts
 

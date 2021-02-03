@@ -107,10 +107,8 @@ class VersionGenerator:
             __all__ = []
             
             from rlscope import \\
-              api, \\
               version
             __all__.extend([
-              'api',
               'version',
             ])
             """.format(
@@ -120,28 +118,30 @@ class VersionGenerator:
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__.rstrip())
+    parser = argparse.ArgumentParser(
+        description=textwrap.dedent(__doc__.lstrip().rstrip()),
+        formatter_class=argparse.RawTextHelpFormatter)
     parser.add_argument("--debug-version",
                         action='store_true',
-                        help=textwrap.dedent("""
+                        help=textwrap.dedent("""\
                         If set, mark this as a "debug" build by setting:
                           rlscope.version.debug = True
                         """))
     parser.add_argument("--cuda-version",
                         default=os.environ.get('RLSCOPE_CUDA_VERSION', None),
-                        help=textwrap.dedent("""
+                        help=textwrap.dedent("""\
                         rlscope.version.cuda = ...
                         NOTE: If unset, assume we're in a docker container and get it from RLSCOPE_CUDA_VERSION.
                         """))
     parser.add_argument("--git-version",
                         # default=os.environ.get('RLSCOPE_CUDA_VERSION', None),
-                        help=textwrap.dedent("""
+                        help=textwrap.dedent("""\
                         rlscope.version.git_version = <git-commit-hash>
                         NOTE: If unset, use "git rev-parse HEAD" to determine git hash.
                         """))
     parser.add_argument("--debug",
                         action='store_true',
-                        help=textwrap.dedent("""
+                        help=textwrap.dedent("""\
                         Debug
                         """))
     args = parser.parse_args()

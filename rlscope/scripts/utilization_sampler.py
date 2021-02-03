@@ -47,15 +47,17 @@ def get_util_sampler_parser(add_rlscope_root_pid=True, only_fwd_arguments=False)
         Only add arguments that should be forwarded to utilization_sampler.py from ML scripts.
     :return:
     """
-    parser = argparse.ArgumentParser("Sample GPU/CPU utilization over the course of training")
+    parser = argparse.ArgumentParser(
+        description=textwrap.dedent(__doc__.lstrip().rstrip()),
+        formatter_class=argparse.RawTextHelpFormatter)
     parser.add_argument('--rlscope-directory',
                         # required=True,
-                        help=textwrap.dedent("""
+                        help=textwrap.dedent("""\
     RL-Scope: profiling output directory.
     """))
     parser.add_argument('--rlscope-debug',
                         action='store_true',
-                        help=textwrap.dedent("""
+                        help=textwrap.dedent("""\
     RL-Scope: debug profiler.
     """))
     if only_fwd_arguments:
@@ -64,14 +66,14 @@ def get_util_sampler_parser(add_rlscope_root_pid=True, only_fwd_arguments=False)
     parser.add_argument('--rlscope-util-sample-frequency-sec',
                         type=float,
                         default=DEFAULT_UTIL_SAMPLE_FREQUENCY_SEC,
-                        help=textwrap.dedent("""
+                        help=textwrap.dedent("""\
     RL-Scope: How frequently (in seconds) should we sample GPU/CPU utilization?
     default: sample every 500 ms.
     """))
     if add_rlscope_root_pid:
         parser.add_argument('--rlscope-root-pid',
                             required=True, type=int,
-                            help=textwrap.dedent("""
+                            help=textwrap.dedent("""\
         RL-Scope: (internal use)
         The PID of the root training process on this machine.
         When sampling memory usage, we sample total memory usage of this 
@@ -80,35 +82,35 @@ def get_util_sampler_parser(add_rlscope_root_pid=True, only_fwd_arguments=False)
     parser.add_argument('--rlscope-util-dump-frequency-sec',
                         type=float,
                         default=10.,
-                        help=textwrap.dedent("""
+                        help=textwrap.dedent("""\
     RL-Scope: How frequently (in seconds) should we sample GPU/CPU utilization?
     default: dump every 10 seconds.
     """))
     parser.add_argument('--rlscope-debug-single-thread',
                         action='store_true',
-                        help=textwrap.dedent("""
+                        help=textwrap.dedent("""\
     RL-Scope: debug with single thread.
     """))
 
-    parser.add_argument('--measure-samples-per-sec',
-                        action='store_true',
-                        help=textwrap.dedent("""
-    Determines reasonable values for --rlscope-util-sample-frequency-sec.
-    
-    How fast can we call nvidia-smi (to sample GPU utilization)?  
-    How fast can we gather CPU utilization?
-    """))
+    # parser.add_argument('--measure-samples-per-sec',
+    #                     action='store_true',
+    #                     help=textwrap.dedent("""\
+    # Determines reasonable values for --rlscope-util-sample-frequency-sec.
+    #
+    # How fast can we call nvidia-smi (to sample GPU utilization)?
+    # How fast can we gather CPU utilization?
+    # """))
 
     parser.add_argument('--skip-smi-check',
                         action='store_true',
-                        help=textwrap.dedent("""
+                        help=textwrap.dedent("""\
     If NOT set, we will make sure nvidia-smi runs quickly (i.e. under 1 second); 
     this is needed for GPU sampling.
     """))
 
     parser.add_argument('--kill',
                         action='store_true',
-                        help=textwrap.dedent("""
+                        help=textwrap.dedent("""\
     Kill any existing instances of this script that are still running, then exit.
     """))
 
@@ -764,16 +766,9 @@ def main():
 
     os.makedirs(args.rlscope_directory, exist_ok=True)
 
-    # proc = psutil.Process(pid=os.getpid())
-    # dump_cpus = get_dump_cpus()
-    # proc.cpu_affinity(dump_cpus)
-    # logger.info("> Set CPU affinity of rls-util-sampler to: {cpus}".format(
-    #     cpus=dump_cpus,
-    # ))
-
-    if args.measure_samples_per_sec:
-        measure_samples_per_sec()
-        return
+    # if args.measure_samples_per_sec:
+    #     measure_samples_per_sec()
+    #     return
 
     if args.rlscope_util_sample_frequency_sec < MIN_UTIL_SAMPLE_FREQUENCY_SEC:
         parser.error("Need --rlscope-util-sample-frequency-sec={val} to be larger than minimum sample frequency ({min} sec)".format(

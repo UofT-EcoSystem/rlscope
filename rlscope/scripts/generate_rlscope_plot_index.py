@@ -264,42 +264,44 @@ def main():
         logger.error(e)
         sys.exit(1)
 
-    parser = argparse.ArgumentParser("Generate index of *.venn_js.json files.")
+    parser = argparse.ArgumentParser(
+        description=textwrap.dedent(__doc__.lstrip().rstrip()),
+        formatter_class=argparse.RawTextHelpFormatter)
     parser.add_argument('--rlscope-directory',
                         required=True,
-                        help=textwrap.dedent("""
+                        help=textwrap.dedent("""\
     Look for *.venn_js.json rooted at this directory.
     The output file will be <directory>/rlscope_plot_index_data.py.
     All the venn_js_path's in the index will be relative to --directory.
     """))
     parser.add_argument('--out-dir',
-                        help=textwrap.dedent("""
+                        help=textwrap.dedent("""\
     The output file will be <out-dir>/rlscope_plot_index_data.py.
     Default: --directory
     """))
     parser.add_argument('--debug',
                         action='store_true',
-                        help=textwrap.dedent("""
+                        help=textwrap.dedent("""\
     Debug
     """))
     parser.add_argument('--dry-run',
                         action='store_true',
-                        help=textwrap.dedent("""
+                        help=textwrap.dedent("""\
     Don't write file.
     """))
     parser.add_argument('--basename',
                         default='rlscope_plot_index_data.py',
-                        help=textwrap.dedent("""
+                        help=textwrap.dedent("""\
     Name of python file to generate.
     """))
     parser.add_argument('--replace',
                         action='store_true',
-                        help=textwrap.dedent("""
+                        help=textwrap.dedent("""\
     Replace if exists.
     """))
     parser.add_argument('--pdb',
                         action='store_true',
-                        help=textwrap.dedent("""
+                        help=textwrap.dedent("""\
     Python debugger on unhandled exception.
     """))
     args = parser.parse_args()

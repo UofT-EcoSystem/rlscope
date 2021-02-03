@@ -400,68 +400,67 @@ def main():
         sys.exit(1)
 
     parser = argparse.ArgumentParser(
-        description=__doc__.splitlines()[0],
-        # formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+        description=textwrap.dedent(__doc__.lstrip().rstrip()),
         formatter_class=argparse.RawTextHelpFormatter)
     parser.add_argument("--run",
                         action='store_true',
-                        help=textwrap.dedent("""
+                        help=textwrap.dedent("""\
                         Run the command as-is.
                         """))
     parser.add_argument("--append",
                         action='store_true',
-                        help=textwrap.dedent("""
+                        help=textwrap.dedent("""\
                         Append the command to --sh
                         """))
     parser.add_argument("--sh",
-                        help=textwrap.dedent("""
+                        help=textwrap.dedent("""\
                         Shell file to append commands to (see --append).
                         """))
     parser.add_argument('--run-sh',
                         action='store_true',
-                        help=textwrap.dedent("""
+                        help=textwrap.dedent("""\
                         Run all the commands in --sh on the available --gpus
                         """))
     parser.add_argument('--rlscope-directory',
-                        help=textwrap.dedent("""
+                        help=textwrap.dedent("""\
                         The output directory of the command being run.
                         This is where logfile.out will be output.
                         """))
     parser.add_argument('--debug',
                         action='store_true',
-                        help=textwrap.dedent("""
+                        help=textwrap.dedent("""\
                         Debug
                         """))
     parser.add_argument("--retry",
                         type=int,
-                        help=textwrap.dedent("""
+                        help=textwrap.dedent("""\
                             If a command fails, retry it up to --retry times.
                             Default: don't retry.
                             """))
     parser.add_argument("--tee",
                         action='store_true',
-                        help=textwrap.dedent("""
+                        help=textwrap.dedent("""\
                         (debug)
                         tee output of parallel processes to stdout (prefix output with worker name)
                         """))
     parser.add_argument("--pdb",
                         action='store_true',
-                        help=textwrap.dedent("""
+                        help=textwrap.dedent("""\
                         Debug
                         """))
     parser.add_argument('--dry-run',
                         action='store_true',
-                        help=textwrap.dedent("""
+                        help=textwrap.dedent("""\
                         Dry run
                         """))
     parser.add_argument('--skip-errors',
                         action='store_true',
-                        help=textwrap.dedent("""
+                        help=textwrap.dedent("""\
                         If a command fails, ignore the failure and continue running other commands.
                         """))
     parser.add_argument("--gpus",
                         default='all',
-                        help=textwrap.dedent("""
+                        help=textwrap.dedent("""\
                         # Run on the first GPU only
                         --gpus 0
                         # Run on the first 2 GPUs

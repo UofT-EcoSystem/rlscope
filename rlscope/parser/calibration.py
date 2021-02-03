@@ -1406,7 +1406,7 @@ def _main(argv):
 
     parser = argparse.ArgumentParser(
         description="Run RLScope calibrated for profiling overhead, and create plots from multiple workloads",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+        formatter_class=argparse.RawTextHelpFormatter)
     subparsers = parser.add_subparsers(
         title="Subcommands",
         description="Run RLScope in different modes (run configurations, plot results).",
@@ -1414,68 +1414,68 @@ def _main(argv):
     def add_common_arguments(parser):
         # parser.add_argument("--output-directory",
         #                     required=True,
-        #                     help=textwrap.dedent("""
+        #                     help=textwrap.dedent("""\
         #                     Root directory for output
         #                     """))
         parser.add_argument("--pdb",
                             action='store_true',
-                            help=textwrap.dedent("""
+                            help=textwrap.dedent("""\
                             Debug
                             """))
         parser.add_argument("--debug",
                             action='store_true',
-                            help=textwrap.dedent("""
+                            help=textwrap.dedent("""\
                             Debug
                             """))
         parser.add_argument("--max-workers",
                             default=multiprocessing.cpu_count(),
-                            help=textwrap.dedent("""
+                            help=textwrap.dedent("""\
                             Number of parallel rls-analysis jobs to run at one time.
                             Default: number of CPU cores.
                             """))
         parser.add_argument("--debug-single-thread",
                             action='store_true',
-                            help=textwrap.dedent("""
+                            help=textwrap.dedent("""\
                             Debug
                             """))
         # parser.add_argument("--sh",
-        #                     help=textwrap.dedent("""
+        #                     help=textwrap.dedent("""\
         #                     Shell file to append commands to (see --append).
         #                     """))
         parser.add_argument('--rlscope-repetitions',
                             type=int,
                             default=1,
-                            help=textwrap.dedent("""
+                            help=textwrap.dedent("""\
                             Repetitions
                             """))
         parser.add_argument("--replace",
                             action='store_true',
-                            help=textwrap.dedent("""
+                            help=textwrap.dedent("""\
                             Replace
                             """))
         parser.add_argument("--dry-run",
                             action='store_true',
-                            help=textwrap.dedent("""
+                            help=textwrap.dedent("""\
                             Dry run
                             """))
         parser.add_argument("--re-calibrate",
                             action='store_true',
-                            help=textwrap.dedent("""
+                            help=textwrap.dedent("""\
                             Remove existing profiling overhead calibration files, and recompute them.
                             """))
         parser.add_argument("--re-plot",
                             action='store_true',
-                            help=textwrap.dedent("""
+                            help=textwrap.dedent("""\
                             Remove existing plots and remake them (NOTE: doesn't recompute analysis; see --re-calibrate).
                             """))
         parser.add_argument("--skip-error",
                             action='store_true',
-                            help=textwrap.dedent("""
+                            help=textwrap.dedent("""\
                             Skip errors 
                             """))
         parser.add_argument("--gpu-hw",
                             action='store_true',
-                            help=textwrap.dedent("""
+                            help=textwrap.dedent("""\
                                 Collect GPU hardware counters.
                                 """))
 
@@ -1483,20 +1483,20 @@ def _main(argv):
     add_common_arguments(run_parser)
     run_parser.add_argument("--rlscope-directory",
                             required=True,
-                            help=textwrap.dedent("""
+                            help=textwrap.dedent("""\
                         Root directory for output
                         """))
     run_parser.add_argument("--rlscope-skip-plot",
                         action='store_true',
-                        help=textwrap.dedent("""
+                        help=textwrap.dedent("""\
                             After running configurations, DON'T run analysis to output plots for individual workload.
                             """))
     run_parser.add_argument("--gpus",
-                        help=textwrap.dedent("""
+                        help=textwrap.dedent("""\
                             GPUs to run with for --parallel-runs
                             """))
 
-    parallel_runs_help = textwrap.dedent("""
+    parallel_runs_help = textwrap.dedent("""\
                             Parallelize running configurations across GPUs on this machine (assume no CPU interference). 
                             See --gpus.
                             """)
@@ -1512,7 +1512,7 @@ def _main(argv):
 
     run_parser.add_argument("--retry",
                             type=int,
-                            help=textwrap.dedent("""
+                            help=textwrap.dedent("""\
                             If a command fails, retry it up to --retry times.
                             Default: don't retry.
                             """))
@@ -1524,18 +1524,18 @@ def _main(argv):
                             required=True,
                             nargs='+',
                             # default=[],
-                            help=textwrap.dedent("""
+                            help=textwrap.dedent("""\
                         Directories to plot results from.
                         """))
     plot_parser.add_argument("--output-directory",
                             required=True,
-                            help=textwrap.dedent("""
+                            help=textwrap.dedent("""\
                         Where to output plots.
                         """))
     plot_parser.add_argument("--plots",
                              choices=['gpu-hw', 'time-breakdown', 'all'],
                              default='all',
-                             help=textwrap.dedent("""
+                             help=textwrap.dedent("""\
                         Where to output plots.
                         """))
     plot_parser.set_defaults(**{'mode': 'plot'})
@@ -1543,7 +1543,7 @@ def _main(argv):
     # parser.add_argument("--mode",
     #                     choices=['run', 'plot'],
     #                     default=default_mode,
-    #                     help=textwrap.dedent("""
+    #                     help=textwrap.dedent("""\
     #                         Debug
     #                         """))
 
