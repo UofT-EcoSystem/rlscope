@@ -1,9 +1,11 @@
-# Coloured logging.
-colorlog>=4.2.1
+##
+## RL-Scope requires for building sphinx documentation using build_docs.sh
+##
 
-# Documentation:
+# Coloured logging.
+colorlog >= 4.2.1
+# Documentation
 sphinx >= 3.2.1
 sphinx-rtd-theme >= 0.5.0
-
 # generate_pip_index.py
 PyGithub >= 1.54.1

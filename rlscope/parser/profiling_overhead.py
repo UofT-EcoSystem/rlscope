@@ -915,7 +915,6 @@ class CorrectedTrainingTimeParser:
                 x_fields = df.sort_values(['duration_sec'])['x_field'].unique()
                 xfield_to_idx = as_order_map(x_fields)
                 idx_to_xfield = reverse_dict(xfield_to_idx)
-                # import ipdb; ipdb.set_trace()
                 return xfield_to_idx, idx_to_xfield
             for plot_group, low_bias_group_df in low_bias_df.groupby(['plot_group']):
                 figsize = get_figsize(plot_group)
@@ -2744,8 +2743,6 @@ def join_groups_row_by_row(df, join_cols, groupby_cols, get_suffix):
         replace_cols = set(group_df.columns).difference(groupby_cols).difference(join_cols)
         if all_df is None:
             all_df = dataframe_add_suffix(group_df, suffix, replace_cols)
-            # import ipdb; ipdb.set_trace()
-            # print("HI1")
         else:
             keep_cols = set(group_df.columns).difference(groupby_cols)
             new_df = join_row_by_row(
@@ -2753,8 +2750,6 @@ def join_groups_row_by_row(df, join_cols, groupby_cols, get_suffix):
                 dataframe_add_suffix(group_df[keep_cols], suffix, replace_cols),
                 on=join_cols,
             )
-            # import ipdb; ipdb.set_trace()
-            # print("HI2")
             all_df = new_df
 
     return all_df

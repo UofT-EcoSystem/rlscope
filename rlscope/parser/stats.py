@@ -276,7 +276,7 @@ class Stat:
         for call_idx in range(self.num_diff_calls):
             times_sec = self.times_sec(call_idx)
             if len(times_sec) != len(ret):
-                import ipdb; ipdb.set_trace()
+                import pdb; pdb.set_trace()
             ret += times_sec
 
         return ret
@@ -914,8 +914,6 @@ class Stats:
         #
         # PSEUDOCODE:
         # num_calls = the total number of times Forward was called.
-        # if self.debug:
-        #     import ipdb; ipdb.set_trace()
         if not skip_header:
             writer.writerow(SEPARATE_CALLS_HEADER)
         total_time = 0

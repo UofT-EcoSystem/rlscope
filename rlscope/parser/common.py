@@ -399,8 +399,8 @@ class ProfilerParserCommonMixin:
                 pass  # Cmd
                 return [_path(path) for path in os.listdir(direc)]
             except Exception as e:
-                import ipdb;
-                ipdb.set_trace()
+                import pdb
+                pdb.set_trace()
                 raise e
 
 

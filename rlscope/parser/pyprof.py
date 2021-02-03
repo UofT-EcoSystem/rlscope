@@ -539,8 +539,6 @@ class PythonProfileParser:
     #         times_sec = stat.iteration_times_sec(self.num_calls)
     #         if self.debug:
     #             logger.info("> stat.name = {name}".format(name=stat.name))
-    #             if stat.name == "/mnt/data/james/clone/dnn_tensorflow_cpp/python/test/py_interface.py:78(CLIB__run_cpp)":
-    #                 import ipdb; ipdb.set_trace()
     #         if is_cpp_func(stat.name):
     #             cpp_and_gpu_times += times_sec
     #         else:

@@ -23,27 +23,16 @@ source $SH_DIR/docker_runtime_common.sh
 _check_env
 _upgrade_pip
 
-RLSCOPE_DRILL_DIR=${RLSCOPE_DRILL_DIR:-}
-
 _do bash -c "pip uninstall -y rlscope || true"
 
-if [ "${RLSCOPE_DIR}" = "" ]; then
-    # Install directly from git repo.
-    _do pip install git+https://github.com/UofT-EcoSystem/rlscope.git
-else
-    # Install from local checkout of repo.
-    _do cd "${RLSCOPE_DIR}"
-    _do python setup.py develop
-fi
+# Install from local checkout of repo.
+_do cd "${RLSCOPE_DIR}"
+_do python setup.py develop
+_do pip install -r $RLSCOPE_DIR/requirements.txt
+_do pip install -r $RLSCOPE_DIR/requirements.docs.txt
+_do pip install -r $RLSCOPE_DIR/requirements.develop.txt
 
-if [ "${RLSCOPE_DRILL_DIR}" = "" ]; then
-    # SKIP
-    true
-    # Install directly from git repo.
-    # _do pip install git+https://github.com/UofT-EcoSystem/rlscope-drill.git
-else
-    # Install from local checkout of repo.
-    _do cd "${RLSCOPE_DRILL_DIR}"
-    _do python setup.py develop
-fi
-
+## Install from local checkout of repo.
+#RLSCOPE_DRILL_DIR=${RLSCOPE_DRILL_DIR:-}
+#_do cd "${RLSCOPE_DRILL_DIR}"
+#_do python setup.py develop

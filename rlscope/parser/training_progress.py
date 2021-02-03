@@ -235,7 +235,6 @@ class TrainingProgressParser:
         #     }))
         #     logger.info(pprint_msg(df_group))
         #
-        #     # import ipdb; ipdb.set_trace()
         #
         # new_df = pd.concat(dfs)
 
@@ -313,7 +312,6 @@ class TrainingProgressParser:
         # df_agg = new_df.groupby(groupby_cols).agg(['min', 'max', 'mean', 'std'])
         # flat_df_agg = self.flattened_agg_df(df_agg)
 
-        # import ipdb; ipdb.set_trace()
         # logger.info("Output min/max/std aggregated machine utilization data @ {path}".format(path=self._agg_csv_path))
         # flat_df_agg.to_csv(self._agg_csv_path, index=False)
 
@@ -912,7 +910,6 @@ class ProfilingOverheadPlot:
 
         if self.y2_field is not None:
             # TODO: we need to group rows and sum them based on matching df[group]...?
-            # import ipdb; ipdb.set_trace()
             # for i, group in enumerate(self.groups):
             y_color = self.colors[-1]
             bar_kwargs = {

@@ -189,9 +189,6 @@ class TraceEventsDumper:
             'tid': tid,
             'ts': ktime.start_time_usec,
         }
-        # if self.debug:
-        #     pprint.pprint(jtime)
-        #     import ipdb; ipdb.set_trace()
         self.js['traceEvents'].append(jtime)
 
     def _js_allocate_pid(self):

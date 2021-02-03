@@ -268,8 +268,6 @@ class UtilParser:
             }))
             logger.info(pprint_msg(df_group))
 
-            # import ipdb; ipdb.set_trace()
-
 
         new_df = pd.concat(dfs)
         def cpu_or_gpu(device_name):
@@ -296,7 +294,6 @@ class UtilParser:
         df_agg = new_df.groupby(groupby_cols).agg(['min', 'max', 'mean', 'std'])
         flat_df_agg = self.flattened_agg_df(df_agg)
 
-        # import ipdb; ipdb.set_trace()
         logger.info("Output min/max/std aggregated machine utilization data @ {path}".format(path=self._agg_csv_path))
         flat_df_agg.to_csv(self._agg_csv_path, index=False)
 
@@ -1131,9 +1128,6 @@ class GPUUtilOverTimePlot:
         num_delay_us = len(report_delay_us)
         mean_duration_us = event_df['duration_us'].mean()
         std_duration_us = event_df['duration_us'].std()
-
-        # if np.isnan(mean_delay_us):
-        #     import ipdb; ipdb.set_trace()
 
         data = {
             # 'util_df': util_df,

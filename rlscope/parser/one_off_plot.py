@@ -795,7 +795,6 @@ class TrtexecExperiment:
         if global_ymax:
             new_ymax = global_df[metric].max()
             ymin, ymax = g.ax.get_ylim()
-            # import ipdb; ipdb.set_trace()
             g.ax.set_ylim((ymin, max(ymax, new_ymax)))
 
 

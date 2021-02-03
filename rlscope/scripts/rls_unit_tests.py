@@ -46,6 +46,17 @@ def main():
                         all:
                           Both python and C++ unit tests.
                         """))
+
+    try:
+        import pytest
+    except ModuleNotFoundError as e:
+        logger.error(textwrap.dedent("""
+        To run rls-unit-tests, you must install pytest:
+          $ pip install "pytest >= 4.4.1"
+        """).rstrip())
+        sys.exit(1)
+        # raise
+
     args = parser.parse_args()
     unit_tests = RLSUnitTests(args)
     unit_tests.run()

@@ -230,8 +230,6 @@ class ComputeOverlap:
         merged_category_times = dict()
         for category in category_times.keys():
             times = category_times[category]
-            # if self.debug and category == 'c3':
-            #     import ipdb; ipdb.set_trace()
             merged_category_times[category] = self._merge_times(times)
         return merged_category_times
 
@@ -856,7 +854,6 @@ def compute_overlap_single_thread(
             cur_categories.remove(category)
         else:
             # # Q: Under what circumstances might this occur?  What information do we need to backtrack?
-            # import ipdb; ipdb.set_trace()
             pass
         if check_key:
             assert category in cur_events
@@ -2585,7 +2582,6 @@ class OverlapTypeInterface:
                 'reduce_to_category_key.keys': list(new_overlap.keys()),
                 'new_overlap_metadata': new_overlap_metadata,
             })
-            # import ipdb; ipdb.set_trace()
 
         return new_overlap, new_overlap_metadata
 
@@ -2852,7 +2848,6 @@ class ResourceOverlapType(OverlapTypeInterface):
                 'ResourceOverlapType.post_reduce_category_key.keys': list(new_overlap.keys()),
                 'new_overlap_metadata':new_overlap_metadata,
             })
-        # import ipdb; ipdb.set_trace()
 
         return new_overlap, new_overlap_metadata
 
@@ -3046,7 +3041,6 @@ class CategoryOverlapType(OverlapTypeInterface):
                     list(new_overlap.keys()),
                 'new_overlap_metadata':new_overlap_metadata,
             })
-            # import ipdb; ipdb.set_trace()
 
         return new_overlap, new_overlap_metadata
 

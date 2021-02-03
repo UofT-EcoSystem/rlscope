@@ -22,7 +22,6 @@ from rlscope.profiler.util import pprint_msg
 from rlscope.parser.common import *
 from rlscope.experiment.util import tee, expr_run_cmd, expr_already_ran
 from rlscope.profiler.concurrent import ForkedProcessPool
-from rlscope.scripts import bench
 from rlscope.experiment import expr_config
 from rlscope.parser.dataframe import RLScopeConfig
 from rlscope.parser.profiling_overhead import \
@@ -1738,7 +1737,6 @@ class ExprSubtractionValidation:
                     config=config.to_string(),
                     klass=self.__class__.__name__
                 ))
-                # import ipdb; ipdb.set_trace()
                 continue
 
             # rls-run

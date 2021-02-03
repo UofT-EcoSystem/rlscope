@@ -216,8 +216,6 @@ def run_with_pdb(args, func, handle_exception=True):
         if args.pdb:
             logger.debug("> Entering pdb:")
             # Fails sometimes, not sure why.
-            # import ipdb
-            # ipdb.post_mortem()
             import pdb
             pdb.post_mortem()
             # raise

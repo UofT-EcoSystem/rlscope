@@ -15,7 +15,6 @@ import sys
 import os
 import traceback
 import pandas as pd
-import ipdb
 import argparse
 import pprint
 import textwrap
@@ -946,7 +945,6 @@ class ExperimentGroup(Experiment):
             #         # #   - after gradients are computed, update the weights
             #         # inference_ops = set([('step',), ('sample_action',)])
             #         # other_ops = set([op for op in regions if op not in inference_ops])
-            #         # import ipdb; ipdb.set_trace()
             #         # new_df[('inference',)] = np.sum(df[inference_ops])
             #         # new_df[('other',)] = np.sum(df[other_ops])
             #         # """),
@@ -1473,8 +1471,6 @@ class GatherAlgoEnv:
     def algo_env_pairs(self, has_machine_util=False, debug=False):
         args = self.args
         algo_env_pairs = []
-        # if debug:
-        #     import ipdb; ipdb.set_trace()
         algo_paths = glob(_j(self.root_rlscope_directory, '*'))
         for algo_path in algo_paths:
             if is_config_dir(algo_path):

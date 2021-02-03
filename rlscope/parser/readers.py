@@ -91,7 +91,6 @@ class TFProfCategoryTimesReader:
         # PSEUDOCODE:
         # for step in steps:
         #
-        # import ipdb; ipdb.set_trace()
         # logger.info("HELLO PROTO 2")
 
         # for step in self.proto.steps:

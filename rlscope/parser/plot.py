@@ -1704,7 +1704,6 @@ class LegendMaker:
     #         art = plt.gca().add_artist(legend)
     #         # art = ax.add_artist(legend)
     #         # logger.info('HI')
-    #         # import ipdb; ipdb.set_trace()
     #     return legends
 
 
@@ -2622,11 +2621,6 @@ class UtilizationPlot:
             self.overlap_type,
             debug=self.debug,
         )
-
-        # training_progress = self.sql_reader.training_progress(machine_name=machine_name, process_name=process_name, phase_name=phase_name, allow_none=True)
-        # if training_progress is None and phase != constants.DEFAULT_PHASE:
-        #     logger.info('TrainingProgress was None for ')
-        #     import ipdb; ipdb.set_trace()
 
         overlap_computer = OverlapComputer(self.db_path,
                                            host=self.host, user=self.user, password=self.password,
@@ -3750,7 +3744,6 @@ def add_grouped_stacked_bars(
             assert (xs == all_xs).all()
             ys = means[group][y]
             std = stds[group][y]
-            # import ipdb; ipdb.set_trace()
             # plt.bar(x=xs, height=ys, yerr=std, bottom=bottom, ax=ax)
 
             # Order in which we call this determines order in which stacks appear.
@@ -3778,8 +3771,6 @@ def add_grouped_stacked_bars(
             for xtick, b in zip(xticks, barplot):
                 xtick_to_barplot[xtick] = b
             # # TODO: add rect labels... how?
-            # if xgroup_idx == 1:
-            #     import ipdb; ipdb.set_trace()
             if bar_label is not None:
                 bs = []
                 for xfield in data[x]:

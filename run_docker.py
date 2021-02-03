@@ -45,8 +45,6 @@ import shutil
 import sys
 import textwrap
 
-# from absl import app
-# from absl import flags
 import cerberus
 import docker
 from docker.models.images import Image
@@ -929,8 +927,6 @@ class Assembler:
 
         build_cmd = get_docker_cmdline('build', **build_kwargs)
         logger.info(get_cmd_string(build_cmd, show_cwd=True))
-        # if not _e(dockerfile):
-        # import ipdb; ipdb.set_trace()
         build_output_generator = self.dock_cli.build(decode=True, **build_kwargs)
         response = tee_docker(
             build_output_generator,
@@ -1625,7 +1621,7 @@ def get_rlscope_volumes(args, run_args, extra_volumes):
 
     host_directories = set()
     if extra_volumes is None:
-        import ipdb; ipdb.set_trace()
+        import pdb; pdb.set_trace()
     host_directories.update(extra_volumes)
     host_directories.update(volumes.keys())
     for host_path in host_directories:

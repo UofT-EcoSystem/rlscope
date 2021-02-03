@@ -1,4 +1,5 @@
-"""Irregular Machine Learning profiling toolkit.
+"""
+RL-Scope: Cross-Stack Profiling for Deep Reinforcement Learning Workloads
 """
 
 # NOTE: setup.py is based on the one from tensorflow.
@@ -120,7 +121,7 @@ else:
 
 PYTHON_SRC_DIR = "python"
 
-DOCLINES = __doc__.split('\n')
+DOCLINES = __doc__.lstrip().rstrip().split('\n')
 
 # https://the-hitchhikers-guide-to-packaging.readthedocs.io/en/latest/specification.html
 
