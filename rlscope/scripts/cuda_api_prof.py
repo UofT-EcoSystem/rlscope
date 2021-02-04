@@ -11,6 +11,7 @@ rlscope.parser.profiling_overhead : compute average book-keeping duration needed
 rlscope.parser.calibration : handles running multiple configurations, optionally in parallel across the GPUs on a machine.
 """
 from rlscope.profiler.rlscope_logging import logger
+from rlscope.profiler import rlscope_logging
 import shutil
 import subprocess
 import argparse
@@ -27,7 +28,6 @@ from rlscope.parser.common import *
 from rlscope.profiler.util import gather_argv, print_cmd
 
 from rlscope.clib import rlscope_api
-from rlscope.profiler.rlscope_logging import logger
 from rlscope.parser import check_host
 from rlscope.parser.exceptions import RLScopeConfigurationError
 
@@ -49,6 +49,24 @@ def main():
     # NOTE: these arguments must precede the executable (python some/script.py), otherwise they will be sent
     # to the training script, and not handled by this script (rls-prof).
     parser.add_argument('--debug', action='store_true')
+    parser.add_argument("--verbosity",
+                        choices=['progress', 'commands', 'output'],
+                        default='progress',
+                        help=textwrap.dedent("""\
+                            Output information about running commands.
+                            --verbosity progress (Default)
+                                Only show high-level progress bar information.
+                              
+                            --verbosity commands
+                                Show the command-line of commands that are being run.
+                                
+                            --verbosity output
+                                Show the output of each analysis (not configuration) command on sys.stdout.
+                                NOTE: This may cause interleaving of lines.
+                            """))
+    parser.add_argument('--line-numbers', action='store_true', help=textwrap.dedent("""\
+    Show line numbers and timestamps in RL-Scope logging messages.
+    """))
     parser.add_argument('--rlscope-debug', action='store_true')
     parser.add_argument('--rlscope-rm-traces-from', help=textwrap.dedent("""\
     Delete traces rooted at this --rlscope-directory. 
@@ -239,6 +257,12 @@ def main():
                         """))
     args = parser.parse_args(rlscope_prof_argv)
 
+    is_debug = args.debug or args.rlscope_debug or is_env_true('RLSCOPE_DEBUG')
+    rlscope_logging.setup_logger(
+        debug=is_debug,
+        line_numbers=is_debug or args.line_numbers or py_config.is_development_mode(),
+    )
+
     if args.rlscope_rm_traces_from is not None:
         logger.info("rls-prof: Delete trace-files rooted at --rlscope-directory = {dir}".format(
             dir=args.rlscope_rm_traces_from))
@@ -276,6 +300,8 @@ def main():
         if args.gpu_hw:
             cmd.extend(['--gpu-hw'])
             maybe_remove(rlscope_prof_argv, '--gpu-hw')
+
+        cmd.extend(['--verbosity', args.verbosity])
 
         if args.parallel_runs:
             cmd.extend(['--parallel-runs'])

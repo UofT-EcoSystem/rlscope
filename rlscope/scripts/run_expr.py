@@ -28,12 +28,14 @@ import textwrap
 import re
 import os
 import sys
-
 import multiprocessing
 import queue
 
 from os.path import join as _j, abspath as _a, exists as _e, dirname as _d, basename as _b
 
+import progressbar
+
+from rlscope import py_config
 from rlscope.profiler import rlscope_logging
 from rlscope.profiler.rlscope_logging import logger
 from rlscope.profiler.util import gather_argv, run_with_pdb, error, get_available_cpus, get_available_gpus
@@ -56,6 +58,9 @@ class RunExpr:
                  run_sh=False,
                  retry=None,
                  debug=False,
+                 line_numbers=False,
+                 verbosity='progress',
+                 skip_final_error_message=False,
                  dry_run=False,
                  skip_errors=False,
                  gpus=None):
@@ -68,6 +73,9 @@ class RunExpr:
         self.run_sh = run_sh
         self.retry = retry
         self.debug = debug
+        self.line_numbers = line_numbers
+        self.verbosity = verbosity
+        self.skip_final_error_message = skip_final_error_message
         self.dry_run = dry_run
         self.skip_errors = skip_errors
         self.gpus = gpus
@@ -141,7 +149,7 @@ class RunExpr:
             else:
                 retries = self.retry
             for attempt in range(1, retries+1):
-                proc = self.run_cmd(gpu, run_cmd, tee_output=self.tee, tee_prefix=f"GPU[{gpu}] :: ", attempt=attempt)
+                proc = self.run_cmd(gpu, run_cmd, tee_output=self.tee or self.should_show_output, tee_prefix=f"GPU[{gpu}] :: ", attempt=attempt)
                 if self.dry_run or proc is None or proc.returncode == 0:
                     break
 
@@ -160,7 +168,8 @@ class RunExpr:
         run_cmd = RunCmd(keep_cmd, output_directory, logfile)
         return run_cmd
 
-    def each_run_command(self):
+    def run_commands(self):
+        run_commands = []
         with open(self.sh, 'r') as f:
             for line in f:
                 line = line.rstrip()
@@ -172,7 +181,8 @@ class RunExpr:
                 # re.sub(r'#.*', line)
                 cmd = shlex.split(line)
                 run_cmd = self.as_run_cmd(cmd)
-                yield run_cmd
+                run_commands.append(run_cmd)
+        return run_commands
 
     @staticmethod
     def _run_cmd(self, *args, **kwargs):
@@ -249,6 +259,7 @@ class RunExpr:
         else:
             log_func = logger.error
             attempt_str = ""
+        tee_cmd = self.should_show_commands
         proc = expr_run_cmd(
             cmd=cmd,
             to_file=logfile,
@@ -258,7 +269,9 @@ class RunExpr:
             dry_run=self.dry_run,
             # Only output to logfile to avoid interleaved output from commands.
             tee_output=tee_output,
+            tee_cmd=tee_cmd,
             tee_prefix=tee_prefix,
+            log_errors=False,
             log_func=log_func,
             skip_error=True,
             debug=self.debug,
@@ -269,8 +282,9 @@ class RunExpr:
         if not self.dry_run and proc is not None and proc.returncode != 0:
             if not self.skip_errors:
                 log_func(
+                    # ; use --skip-errors to ignore failure and continue with other commands
                     textwrap.dedent("""\
-                    {attempt_str}Saw failed cmd in GPU[{gpu}] worker; use --skip-errors to ignore failure and continue with other commands.
+                    {attempt_str}Saw failed cmd in GPU[{gpu}] worker.
                     > CMD:
                       logfile={logfile}
                       $ {cmd}
@@ -298,20 +312,61 @@ class RunExpr:
                     ).rstrip())
         return proc
 
+    def _expr_run_cmd(self, *args, **kwargs):
+        tee_output = kwargs.get('tee_output', None)
+        if tee_output is None:
+            tee_output = (self.verbosity == 'output')
+        tee_cmd = (self.verbosity == 'commands')
+        return expr_run_cmd(
+            *args,
+            raise_exception=True,
+            tee_output=tee_output,
+            tee_cmd=tee_cmd,
+            log_errors=False,
+            **kwargs)
+
+    @property
+    def should_show_progress(self):
+        return self.verbosity == 'progress'
+
+    @property
+    def should_show_commands(self):
+        return self.verbosity == 'commands'
+
+    @property
+    def should_show_output(self):
+        return self.verbosity == 'output'
+
     def mode_run_sh(self):
         # Fill queue with commands to run.
-        for run_cmd in self.each_run_command():
+        run_commands = self.run_commands()
+        for run_cmd in run_commands:
             logger.debug(f"Put: {run_cmd}")
             self.cmd_queue.put(run_cmd)
 
         self.start_gpu_workers()
 
+        bar = None
+        if self.should_show_progress:
+            bar = progressbar.ProgressBar(max_value=len(run_commands))
+        last_completed = None
+
         # Wait for workers to terminate
         try:
             while True:
+                if self.should_show_progress:
+                    completed = len(run_commands) - self.cmd_queue.qsize()
+                    if last_completed is None or completed > last_completed:
+                        bar.update(completed)
+                    last_completed = completed
+
                 if self.worker_failed.is_set():
                     self.stop_workers()
-                    logger.error("At least one command failed with non-zero exit status; use --skip-errors to ignore failed commands.")
+                    # ; use --skip-errors to ignore failed commands.
+                    if not self.skip_final_error_message:
+                        logger.error("At least one command failed with non-zero exit status")
+                    if self.should_show_progress:
+                        bar.finish()
                     sys.exit(1)
 
                 alive_workers = 0
@@ -331,6 +386,8 @@ class RunExpr:
 
                 if failed_workers > 0:
                     self.stop_workers()
+                    if self.should_show_progress:
+                        bar.finish()
                     sys.exit(1)
 
                 if alive_workers == 0:
@@ -342,6 +399,8 @@ class RunExpr:
                     logger.debug("GPU workers have finished successfully".format(
                         len=self.cmd_queue.qsize()
                     ))
+                    if self.should_show_progress:
+                        bar.finish()
                     sys.exit(0)
 
                 time.sleep(2)
@@ -349,6 +408,8 @@ class RunExpr:
             logger.info("Saw Ctrl-C; waiting for workers to terminate")
             self.stop_workers()
             logger.warning("{len} remaining commands went unprocessed".format(len=self.cmd_queue.qsize()))
+            if self.should_show_progress:
+                bar.finish()
             sys.exit(1)
 
     def stop_workers(self):
@@ -426,10 +487,33 @@ def main():
                         The output directory of the command being run.
                         This is where logfile.out will be output.
                         """))
+    parser.add_argument("--verbosity",
+                        choices=['progress', 'commands', 'output'],
+                        default='progress',
+                        help=textwrap.dedent("""\
+                            Output information about running commands.
+                            --verbosity progress (Default)
+                                Only show high-level progress bar information.
+                              
+                            --verbosity commands
+                                Show the command-line of commands that are being run.
+                                
+                            --verbosity output
+                                Show the output of each analysis (not configuration) command on sys.stdout.
+                                NOTE: This may cause interleaving of lines.
+                            """))
+    parser.add_argument('--line-numbers', action='store_true', help=textwrap.dedent("""\
+    Show line numbers and timestamps in RL-Scope logging messages.
+    """))
     parser.add_argument('--debug',
                         action='store_true',
                         help=textwrap.dedent("""\
                         Debug
+                        """))
+    parser.add_argument('--skip-final-error-message',
+                        action='store_true',
+                        help=textwrap.dedent("""\
+                        Skip error message printed at the end if at least one command fails.
                         """))
     parser.add_argument("--retry",
                         type=int,
@@ -485,11 +569,10 @@ def main():
             'cmd': cmd,
         })
 
-    if args.debug:
-        rlscope_logging.enable_debug_logging()
-    else:
-        rlscope_logging.disable_debug_logging()
-
+    rlscope_logging.setup_logger(
+        debug=args.debug,
+        line_numbers=args.debug or args.line_numbers or py_config.is_development_mode(),
+    )
 
     if args.sh is None and ( args.run_sh or args.append ):
         error("--sh is required when either --run-sh or --append are given", parser=parser)

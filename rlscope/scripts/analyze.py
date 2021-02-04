@@ -5,6 +5,7 @@ produced from a training script.
 from rlscope.profiler.rlscope_logging import logger
 import subprocess
 import sys
+import warnings
 import os
 import traceback
 import pdb
@@ -102,7 +103,12 @@ def main():
     #     'sys.argv':sys.argv,
     # }), prefix='  ')))
 
-    tasks.main(argv=luigi_argv[1:], should_exit=False)
+    with warnings.catch_warnings():
+        # I don't really take much advantage of luigi's DFS scheduler and instead run things manually.
+        # Oh well.
+        warnings.filterwarnings('ignore', category=UserWarning, message=r'.*without outputs has no custom complete', module=r'luigi')
+        warnings.filterwarnings('ignore', category=UserWarning, message=r'Parameter.*with value "None" is not of type string', module=r'luigi')
+        tasks.main(argv=luigi_argv[1:], should_exit=False)
 
 def register_pdb_breakpoint():
 

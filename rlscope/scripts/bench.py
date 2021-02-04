@@ -429,7 +429,7 @@ class Experiment:
             except subprocess.CalledProcessError as e:
                 if not args.skip_error:
                     logger.info((
-                                     "> Command failed: see {path}; exiting early "
+                                     "Command failed: see {path}; exiting early "
                                  ).format(path=to_file))
                     ret = 1
                     if debug:
@@ -439,7 +439,7 @@ class Experiment:
                         ))
                     sys.exit(ret)
                 logger.info(
-                    "> Command failed; see {path}; continuing (--skip-error was set)".format(
+                    "Command failed; see {path}; continuing (--skip-error was set)".format(
                         path=to_file,
                     ))
                 failed = True

@@ -4,13 +4,14 @@ and have friendlier behaviour during exceptions in child processes.
 """
 from rlscope.profiler.rlscope_logging import logger
 import os
-from progressbar import progressbar
 import shutil
 import traceback
 import re
 import sys
 import time
 import multiprocessing
+
+import progressbar
 
 from concurrent.futures import ProcessPoolExecutor
 import concurrent.futures
@@ -48,15 +49,28 @@ class ProcessPoolExecutorWrapper:
         self.pending_results.append(fut)
         return fut
 
-    def _wait_for_workers(self, block=False):
+    def _wait_for_workers(self, block=False, show_progress=False):
         if block:
-            done, not_done = concurrent.futures.wait(self.pending_results, return_when=concurrent.futures.ALL_COMPLETED)
-            self.pending_results = list(not_done)
-            for result in done:
-                # Might re-raise exception.
-                result.result()
-                # if isinstance(result, Exception):
-                #     raise result
+
+            bar = None
+            num_results = len(self.pending_results)
+            if show_progress and num_results > 0:
+                bar = progressbar.ProgressBar(max_value=num_results)
+
+            num_done = 0
+            while len(self.pending_results) > 0:
+                done, not_done = concurrent.futures.wait(self.pending_results, return_when=concurrent.futures.FIRST_COMPLETED)
+                self.pending_results = list(not_done)
+                num_done += len(done)
+                if bar is not None:
+                    bar.update(num_done)
+                for result in done:
+                    # Might re-raise exception.
+                    result.result()
+                    # if isinstance(result, Exception):
+                    #     raise result
+            if bar is not None:
+                bar.finish()
             return
 
         i = 0
@@ -70,11 +84,11 @@ class ProcessPoolExecutorWrapper:
             i += 1
         self.pending_results = keep
 
-    def shutdown(self, ignore_exceptions=False):
+    def shutdown(self, ignore_exceptions=False, show_progress=False):
         if ignore_exceptions:
             self._pool.shutdown(wait=True)
         else:
-            self._wait_for_workers(block=True)
+            self._wait_for_workers(block=True, show_progress=show_progress)
 
     def __enter__(self):
         return self
@@ -262,7 +276,7 @@ class MyProcess(MP_CTX.Process):
 
 def map_pool(pool, func, kwargs_list, desc=None, show_progress=False, sync=False):
     if len(kwargs_list) == 1 or sync:
-        logger.info("Running map_pool synchronously")
+        # logger.info("Running map_pool synchronously")
         # Run it on the current thread.
         # Easier to debug with pdb.
         results = []
@@ -382,7 +396,7 @@ class TestForkedProcessPool:
     #     # debug = True
     #     debug = False
     #     pool = ForkedProcessPool(name=test_name, debug=debug)
-    #     for i in progressbar(range(soft_file_limit + 10), prefix=test_name):
+    #     for i in progressbar.progressbar(range(soft_file_limit + 10), prefix=test_name):
     #         pool.submit(_do_nothing.__name__, _do_nothing)
     #     pool.shutdown()
     #     # We reached here, test passed.

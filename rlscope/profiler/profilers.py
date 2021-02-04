@@ -35,6 +35,7 @@ from rlscope.profiler.util import args_to_cmdline, get_available_gpus, get_avail
 from rlscope.profiler.util import get_stacktrace
 
 from rlscope.profiler.rlscope_logging import logger
+from rlscope.profiler import rlscope_logging
 
 ORIG_EXCEPT_HOOK = sys.excepthook
 def cleanup_profiler_excepthook(exctype, value, traceback):
@@ -255,6 +256,7 @@ class Profiler:
                  reports_progress=False,
                  just_sample_util=None,
                  debug=None,
+                 line_numbers=None,
                  # WARNING: MAKE SURE to use None as the default for boolean flags!
                  # Otherwise, if you set this to False by default, get_argval will ALWAYS return
                  # False (even if --rlscope-calibration is set!)
@@ -343,6 +345,10 @@ class Profiler:
         self.pass_idx = 0
         self.has_next_pass = False
         self.debug = get_argval('debug', debug, False)
+        self.line_numbers = self.debug or get_argval('line_numbers', line_numbers, False)
+        rlscope_logging.setup_logger(
+            debug=self.debug,
+            line_numbers=self.line_numbers)
         self.calibration = get_argval('calibration', calibration, False)
         if self.debug:
             py_config.DEBUG = self.debug
@@ -2252,6 +2258,9 @@ def add_rlscope_arguments(parser):
     """))
     add_argument(rlscope_parser, '--rlscope-debug', action='store_true', help=textwrap.dedent("""
         RL-Scope: debug profiler.
+    """))
+    add_argument(rlscope_parser, '--rlscope-line-numbers', action='store_true', help=textwrap.dedent("""\
+        RL-Scope: show line numbers and timestamps in RL-Scope logging messages.
     """))
 
 # Match input/output to PythonProfilerParser

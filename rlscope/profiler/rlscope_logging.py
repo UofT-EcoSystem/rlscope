@@ -36,6 +36,7 @@ import logging
 import re
 
 import colorlog
+import progressbar
 
 # def setup_logging():
 #     format = 'PID={process}/{processName} @ {funcName}, {filename}:{lineno} :: {asctime} {levelname}: {message}'
@@ -56,6 +57,14 @@ _handler = None
 logger = get_logger()
 def setup_logger(debug=False, colors=None, line_numbers=None):
     global _handler, logger
+
+    # NOTE: cannot import at module level since py_config imports this module.
+    from rlscope import py_config
+
+    # If we installed with a wheel file (a.k.a., production mode), don't show line number information.
+    # If we installed with "python setup.py" (a.k.a., development mode), show line number information.
+    if line_numbers is None:
+        line_numbers = debug or py_config.is_development_mode()
 
     # logger = get_logger()
 
@@ -79,10 +88,6 @@ def setup_logger(debug=False, colors=None, line_numbers=None):
             # User is pipeing command to something.
             # Don't user colors.
             colors = False
-
-    if line_numbers is None:
-        if debug:
-            line_numbers = True
 
     # Setting up colored logs.
     # https://stackoverflow.com/a/23964880
@@ -121,8 +126,15 @@ def setup_logger(debug=False, colors=None, line_numbers=None):
     # Only ERROR and CRITICAL (hides ERROR)
     # loglevel = logging.ERROR
 
+    progressbar.streams.wrap_stderr()
+
     logging.root.setLevel(loglevel)
-    formatter = colorlog.ColoredFormatter(logformat)
+    formatter = colorlog.ColoredFormatter(
+        logformat,
+        # NOTE: ColoredFormatter will add a reset character even if it isn't needed...
+        # so lets just do it ourselves by adding "%(reset)s" to the end of our logformat above.
+        reset=False
+    )
     new_handler = logging.StreamHandler()
     new_handler.setLevel(loglevel)
     new_handler.setFormatter(formatter)
@@ -134,10 +146,10 @@ def setup_logger(debug=False, colors=None, line_numbers=None):
     _handler = new_handler
 
 # Default setup: debug mode with colors and line numbers
-setup_logger(debug=True, colors=True, line_numbers=True)
+setup_logger(debug=False, colors=True)
 
-def enable_debug_logging():
-    setup_logger(debug=True, colors=True, line_numbers=True)
+def enable_debug_logging(line_numbers=None):
+    setup_logger(debug=True, colors=True, line_numbers=line_numbers)
 
-def disable_debug_logging():
-    setup_logger(debug=False, colors=True, line_numbers=True)
+def disable_debug_logging(line_numbers=None):
+    setup_logger(debug=False, colors=True, line_numbers=line_numbers)

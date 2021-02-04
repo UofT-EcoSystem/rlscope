@@ -14,6 +14,7 @@ https://luigi.readthedocs.io/en/stable/index.html
 import luigi
 
 from rlscope.profiler.rlscope_logging import logger
+from rlscope.profiler import rlscope_logging
 import subprocess
 import multiprocessing
 import re
@@ -98,6 +99,7 @@ param_debug_perf = luigi.BoolParameter(description=textwrap.dedent("""
 param_debug_memoize = luigi.BoolParameter(description=textwrap.dedent("""
         Memoize reading/generation of files to accelerate develop/test code iteration.
         """))
+param_line_numbers = luigi.BoolParameter(description="Show line numbers and timestamps in RL-Scope logging messages")
 
 # Luigi's approach of discerning None from
 class NoValueType:
@@ -157,6 +159,7 @@ class IMLTask(luigi.Task):
     debug = param_debug
     debug_single_thread = param_debug_single_thread
     debug_perf = param_debug_perf
+    line_numbers = param_line_numbers
 
     skip_output = False
 
@@ -215,6 +218,7 @@ class IMLTask(luigi.Task):
         self.mark_done(start_t, end_t)
 
     def run(self):
+        setup_logging_from_self(self)
         self._run_with_timer()
 
 
@@ -238,6 +242,7 @@ class IMLTaskDB(IMLTask):
         return 1
 
     def run(self):
+        setup_logging_from_self(self)
         if self.maxconn > 0 and db.USE_CONNECTION_POOLING:
             # Create a postgres connection pool that allows at most maxconn connections
             # in the entire python process.
@@ -656,6 +661,7 @@ class TraceEventsTask(luigi.Task):
     debug = param_debug
     debug_single_thread = param_debug_single_thread
     debug_perf = param_debug_perf
+    line_numbers = param_line_numbers
 
     postgres_password = param_postgres_password
     postgres_user = param_postgres_user
@@ -687,6 +693,7 @@ class TraceEventsTask(luigi.Task):
         return []
 
     def run(self):
+        setup_logging_from_self(self)
         self.dumper = TraceEventsParser(
             directory=self.rlscope_directory,
             host=self.postgres_host,
@@ -772,6 +779,7 @@ class UtilTask(luigi.Task):
     debug = param_debug
     debug_single_thread = param_debug_single_thread
     debug_perf = param_debug_perf
+    line_numbers = param_line_numbers
     algo_env_from_dir = luigi.BoolParameter(description="Add algo/env columns based on directory structure of --rlscope-directories <algo>/<env>/rlscope_dir", default=True, parsing=luigi.BoolParameter.EXPLICIT_PARSING)
 
     # optional.
@@ -790,6 +798,7 @@ class UtilTask(luigi.Task):
         return []
 
     def run(self):
+        setup_logging_from_self(self)
         kwargs = kwargs_from_task(self)
         self.dumper = UtilParser(**kwargs)
         self.dumper.run()
@@ -816,6 +825,7 @@ class UtilPlotTask(luigi.Task):
     debug = param_debug
     debug_single_thread = param_debug_single_thread
     debug_perf = param_debug_perf
+    line_numbers = param_line_numbers
     # algo_env_from_dir = luigi.BoolParameter(description="Add algo/env columns based on directory structure of --rlscope-directories <algo>/<env>/rlscope_dir", default=True, parsing=luigi.BoolParameter.EXPLICIT_PARSING)
 
     skip_output = False
@@ -827,6 +837,7 @@ class UtilPlotTask(luigi.Task):
         return []
 
     def run(self):
+        setup_logging_from_self(self)
         kwargs = kwargs_from_task(self)
         self.dumper = UtilPlot(**kwargs)
         self.dumper.run()
@@ -838,6 +849,7 @@ class TrainingProgressTask(luigi.Task):
     debug = param_debug
     debug_single_thread = param_debug_single_thread
     debug_perf = param_debug_perf
+    line_numbers = param_line_numbers
     algo_env_from_dir = luigi.BoolParameter(description="Add algo/env columns based on directory structure of --rlscope-directories <algo>/<env>/rlscope_dir", default=True, parsing=luigi.BoolParameter.EXPLICIT_PARSING)
     baseline_config = luigi.Parameter(description="The baseline configuration to compare all others against; default: config_uninstrumented", default=None)
     ignore_phase = luigi.BoolParameter(description="Bug workaround: for training progress files that didn't record phase, just ignore it.", default=False, parsing=luigi.BoolParameter.EXPLICIT_PARSING)
@@ -851,6 +863,7 @@ class TrainingProgressTask(luigi.Task):
         return []
 
     def run(self):
+        setup_logging_from_self(self)
         kwargs = kwargs_from_task(self)
         self.dumper = TrainingProgressParser(**kwargs)
         self.dumper.run()
@@ -872,6 +885,7 @@ class ProfilingOverheadPlotTask(luigi.Task):
     debug = param_debug
     debug_single_thread = param_debug_single_thread
     debug_perf = param_debug_perf
+    line_numbers = param_line_numbers
     # algo_env_from_dir = luigi.BoolParameter(description="Add algo/env columns based on directory structure of --rlscope-directories <algo>/<env>/rlscope_dir", default=True, parsing=luigi.BoolParameter.EXPLICIT_PARSING)
 
     skip_output = False
@@ -883,6 +897,7 @@ class ProfilingOverheadPlotTask(luigi.Task):
         return []
 
     def run(self):
+        setup_logging_from_self(self)
         kwargs = kwargs_from_task(self)
         self.dumper = ProfilingOverheadPlot(**kwargs)
         self.dumper.run()
@@ -932,6 +947,7 @@ class GeneratePlotIndexTask(luigi.Task):
     debug = param_debug
     debug_single_thread = param_debug_single_thread
     debug_perf = param_debug_perf
+    line_numbers = param_line_numbers
 
     postgres_password = param_postgres_password
     postgres_user = param_postgres_user
@@ -960,6 +976,7 @@ class GeneratePlotIndexTask(luigi.Task):
         ]
 
     def run(self):
+        setup_logging_from_self(self)
         cmd = ['rls-generate-plot-index']
         cmd.extend(['--rlscope-directory', self.rlscope_directory])
         if self.debug:
@@ -1023,6 +1040,7 @@ class OverlapStackedBarTask(luigi.Task):
     debug = param_debug
     debug_single_thread = param_debug_single_thread
     debug_perf = param_debug_perf
+    line_numbers = param_line_numbers
     suffix = luigi.Parameter(description="Add suffix to output files: OverlapStackedBarPlot.overlap_type_*.{suffix}.{ext}", default=None)
 
     # Needed by mk_SQL_tasks (for GeneratePlotIndexTask)
@@ -1049,6 +1067,7 @@ class OverlapStackedBarTask(luigi.Task):
         return []
 
     def run(self):
+        setup_logging_from_self(self)
         kwargs = kwargs_from_task(self)
         self.dumper = OverlapStackedBarPlot(**kwargs)
         self.dumper.run()
@@ -1071,6 +1090,7 @@ class GpuHwPlotTask(IMLTask):
     debug = param_debug
     debug_single_thread = param_debug_single_thread
     debug_perf = param_debug_perf
+    line_numbers = param_line_numbers
 
     skip_output = False
 
@@ -1090,6 +1110,7 @@ class GpuHwPlotTask(IMLTask):
         return []
 
     def run(self):
+        setup_logging_from_self(self)
         kwargs = kwargs_from_task(self)
         obj_args = dict()
         obj_args['rlscope_dir'] = self.gpu_hw_directories
@@ -1126,6 +1147,7 @@ class CategoryTransitionPlotTask(luigi.Task):
 
     debug = param_debug
     debug_single_thread = param_debug_single_thread
+    line_numbers = param_line_numbers
 
     skip_output = False
 
@@ -1133,6 +1155,7 @@ class CategoryTransitionPlotTask(luigi.Task):
         return []
 
     def run(self):
+        setup_logging_from_self(self)
         kwargs = kwargs_from_task(self)
         self.dumper = CategoryTransitionPlot(**kwargs)
         self.dumper.run()
@@ -1159,6 +1182,7 @@ class TexMetricsTask(luigi.Task):
 
     debug = param_debug
     debug_single_thread = param_debug_single_thread
+    line_numbers = param_line_numbers
 
     skip_output = False
 
@@ -1166,6 +1190,7 @@ class TexMetricsTask(luigi.Task):
         return []
 
     def run(self):
+        setup_logging_from_self(self)
         kwargs = kwargs_from_task(self)
         self.dumper = TexMetrics(**kwargs)
         self.dumper.run()
@@ -1295,6 +1320,7 @@ class CallInterceptionOverheadTask(luigi.Task):
     debug = param_debug
     debug_single_thread = param_debug_single_thread
     debug_perf = param_debug_perf
+    line_numbers = param_line_numbers
     # algo_env_from_dir = luigi.BoolParameter(description="Add algo/env columns based on directory structure of --rlscope-directories <algo>/<env>/rlscope_dir", default=True, parsing=luigi.BoolParameter.EXPLICIT_PARSING)
 
     skip_output = False
@@ -1306,6 +1332,7 @@ class CallInterceptionOverheadTask(luigi.Task):
         return []
 
     def run(self):
+        setup_logging_from_self(self)
         kwargs = kwargs_from_task(self)
         self.dumper = CallInterceptionOverheadParser(**kwargs)
         self.dumper.run()
@@ -1323,6 +1350,7 @@ class CUPTIOverheadTask(luigi.Task):
     debug = param_debug
     debug_single_thread = param_debug_single_thread
     debug_perf = param_debug_perf
+    line_numbers = param_line_numbers
     # algo_env_from_dir = luigi.BoolParameter(description="Add algo/env columns based on directory structure of --rlscope-directories <algo>/<env>/rlscope_dir", default=True, parsing=luigi.BoolParameter.EXPLICIT_PARSING)
 
     skip_output = False
@@ -1334,6 +1362,7 @@ class CUPTIOverheadTask(luigi.Task):
         return []
 
     def run(self):
+        setup_logging_from_self(self)
         kwargs = kwargs_from_task(self)
         self.dumper = CUPTIOverheadParser(**kwargs)
         self.dumper.run()
@@ -1353,6 +1382,7 @@ class CUPTIScalingOverheadTask(luigi.Task):
     debug_memoize = param_debug_memoize
     debug_single_thread = param_debug_single_thread
     debug_perf = param_debug_perf
+    line_numbers = param_line_numbers
     # algo_env_from_dir = luigi.BoolParameter(description="Add algo/env columns based on directory structure of --rlscope-directories <algo>/<env>/rlscope_dir", default=True, parsing=luigi.BoolParameter.EXPLICIT_PARSING)
 
     skip_output = False
@@ -1364,6 +1394,7 @@ class CUPTIScalingOverheadTask(luigi.Task):
         return []
 
     def run(self):
+        setup_logging_from_self(self)
         kwargs = kwargs_from_task(self)
         self.dumper = CUPTIScalingOverheadParser(**kwargs)
         self.dumper.run()
@@ -1407,6 +1438,7 @@ class CorrectedTrainingTimeTask(luigi.Task):
     debug_memoize = param_debug_memoize
     debug_single_thread = param_debug_single_thread
     debug_perf = param_debug_perf
+    line_numbers = param_line_numbers
     # algo_env_from_dir = luigi.BoolParameter(description="Add algo/env columns based on directory structure of --rlscope-directories <algo>/<env>/rlscope_dir", default=True, parsing=luigi.BoolParameter.EXPLICIT_PARSING)
 
     skip_output = False
@@ -1418,6 +1450,7 @@ class CorrectedTrainingTimeTask(luigi.Task):
         return []
 
     def run(self):
+        setup_logging_from_self(self)
         kwargs = kwargs_from_task(self)
         self.dumper = CorrectedTrainingTimeParser(**kwargs)
         self.dumper.run()
@@ -1440,6 +1473,7 @@ class PyprofOverheadTask(luigi.Task):
     debug = param_debug
     debug_single_thread = param_debug_single_thread
     debug_perf = param_debug_perf
+    line_numbers = param_line_numbers
     # algo_env_from_dir = luigi.BoolParameter(description="Add algo/env columns based on directory structure of --rlscope-directories <algo>/<env>/rlscope_dir", default=True, parsing=luigi.BoolParameter.EXPLICIT_PARSING)
 
     skip_output = False
@@ -1451,6 +1485,7 @@ class PyprofOverheadTask(luigi.Task):
         return []
 
     def run(self):
+        setup_logging_from_self(self)
         kwargs = kwargs_from_task(self)
         self.dumper = PyprofOverheadParser(**kwargs)
         self.dumper.run()
@@ -1467,6 +1502,7 @@ class TotalTrainingTimeTask(luigi.Task):
     debug = param_debug
     debug_single_thread = param_debug_single_thread
     debug_perf = param_debug_perf
+    line_numbers = param_line_numbers
 
     skip_output = False
 
@@ -1477,6 +1513,7 @@ class TotalTrainingTimeTask(luigi.Task):
         return []
 
     def run(self):
+        setup_logging_from_self(self)
         kwargs = kwargs_from_task(self)
         self.dumper = TotalTrainingTimeParser(**kwargs)
         self.dumper.run()
@@ -1504,6 +1541,7 @@ class VennJsPlotTask(IMLTask):
     debug = param_debug
     debug_single_thread = param_debug_single_thread
     debug_perf = param_debug_perf
+    line_numbers = param_line_numbers
 
     skip_output = False
 
@@ -1545,6 +1583,7 @@ class VennJsPlotOneTask(luigi.Task):
     debug = param_debug
     debug_single_thread = param_debug_single_thread
     debug_perf = param_debug_perf
+    line_numbers = param_line_numbers
 
     skip_output = False
 
@@ -1555,7 +1594,7 @@ class VennJsPlotOneTask(luigi.Task):
         return []
 
     def run(self):
-        logger.info("HELLO")
+        setup_logging_from_self(self)
         kwargs = kwargs_from_task(self)
         plotter = VennJsPlotter(**kwargs)
         plotter.run()
@@ -1572,6 +1611,7 @@ class SlidingWindowUtilizationPlotTask(IMLTask):
     debug = param_debug
     debug_single_thread = param_debug_single_thread
     debug_perf = param_debug_perf
+    line_numbers = param_line_numbers
 
     skip_output = False
 
@@ -1593,6 +1633,7 @@ class CUDAEventCSVTask(IMLTask):
     debug = param_debug
     debug_single_thread = param_debug_single_thread
     debug_perf = param_debug_perf
+    line_numbers = param_line_numbers
 
     skip_output = False
 
@@ -1617,6 +1658,7 @@ class GPUUtilOverTimePlotTask(IMLTask):
     debug = param_debug
     debug_single_thread = param_debug_single_thread
     debug_perf = param_debug_perf
+    line_numbers = param_line_numbers
 
     rlscope_directories = luigi.ListParameter(description="Multiple --rlscope-directory entries for finding overlap_type files: *.venn_js.js")
     show_std = luigi.BoolParameter(description="If true, show stdev for kernel delay and duration", default=False, parsing=luigi.BoolParameter.EXPLICIT_PARSING)
@@ -1644,6 +1686,7 @@ class NvprofKernelHistogramTask(luigi.Task):
     debug = param_debug
     debug_single_thread = param_debug_single_thread
     debug_perf = param_debug_perf
+    line_numbers = param_line_numbers
 
     nvprof_file = luigi.Parameter(description="$ nvprof -o <nvprof_file.nvprof>")
 
@@ -1654,6 +1697,7 @@ class NvprofKernelHistogramTask(luigi.Task):
         return []
 
     def run(self):
+        setup_logging_from_self(self)
         kwargs = kwargs_from_task(self)
         dumper = NvprofKernelHistogram(**kwargs)
         dumper.run()
@@ -1666,6 +1710,7 @@ class CrossProcessOverlapHistogramTask(luigi.Task):
     debug = param_debug
     debug_single_thread = param_debug_single_thread
     debug_perf = param_debug_perf
+    line_numbers = param_line_numbers
 
     cross_process_overlap = luigi.Parameter(description="Output file from analysis: OverlapResult.cross_process.json")
 
@@ -1676,6 +1721,7 @@ class CrossProcessOverlapHistogramTask(luigi.Task):
         return []
 
     def run(self):
+        setup_logging_from_self(self)
         kwargs = kwargs_from_task(self)
         dumper = CrossProcessOverlapHistogram(**kwargs)
         dumper.run()
@@ -1690,6 +1736,7 @@ class NvprofTracesTask(luigi.Task):
     debug = param_debug
     debug_single_thread = param_debug_single_thread
     debug_perf = param_debug_perf
+    line_numbers = param_line_numbers
 
     rlscope_directory = luigi.Parameter(description="Location of trace-files")
 
@@ -1706,12 +1753,32 @@ class NvprofTracesTask(luigi.Task):
         return []
 
     def run(self):
+        setup_logging_from_self(self)
         kwargs = kwargs_from_task(self)
         assert 'directory' not in kwargs
         kwargs['directory'] = kwargs['rlscope_directory']
         del kwargs['rlscope_directory']
         dumper = NvprofTraces(**kwargs)
         dumper.run()
+
+
+def setup_logging_from_self(self):
+    setup_logging(
+        debug=getattr(self, 'debug', False),
+        line_numbers=getattr(self, 'line_numbers', None),
+    )
+def setup_logging_from_kwargs(kwargs):
+    setup_logging(
+        debug=kwargs.get('debug', False),
+        line_numbers=kwargs.get('line_numbers', None),
+    )
+def setup_logging(debug, line_numbers=None):
+    if debug:
+        line_numbers = True
+    rlscope_logging.setup_logger(
+        debug=debug,
+        line_numbers=line_numbers,
+    )
 
 NOT_RUNNABLE_TASKS = get_NOT_RUNNABLE_TASKS()
 RLSCOPE_TASKS = get_RLSCOPE_TASKS()

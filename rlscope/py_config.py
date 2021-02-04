@@ -13,7 +13,8 @@ import sys
 import os
 import textwrap
 
-from rlscope.profiler.rlscope_logging import logger
+# NOTE: Don't import logger here since rlscope_logging needs py_config.
+# from rlscope.profiler.rlscope_logging import logger
 import rlscope
 
 INSTALL_ROOT = _d(os.path.realpath(rlscope.__file__))
@@ -242,10 +243,10 @@ if USE_NUMBA:
   NUMBA_CATEGORY_KEY_TYPE = nb.int64
 
 def is_development_mode():
-  return not is_production_mode()
+  return shutil.which('rlscope-is-development-mode') is not None
 
 def is_production_mode():
-  return shutil.which('rlscope-pip-installed') is not None
+  return not is_development_mode()
 
 def yes_as_bool(yes_or_no):
   if yes_or_no.lower() in {'yes', 'y', 'on', '1'}:
@@ -270,7 +271,8 @@ def read_rlscope_version():
 if 'pytest' in sys.modules and 'RLS_RUNNING_UNIT_TESTS' not in os.environ:
   # Prevent users from running with "pytest" so we can detect in-code if we're running with pytest.
   # Useful for avoiding loading modules where optional imports may be used (e.g., "import tensorflow").
-  logger.error(textwrap.dedent("""\
+  # logger.error(textwrap.dedent("""
+  sys.stderr.write(textwrap.dedent("""\
   Don't run \"pytest\" directly; instead:
   
     # Run Python unit tests using pytest:

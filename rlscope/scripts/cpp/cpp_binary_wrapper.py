@@ -50,9 +50,18 @@ def rlscope_pip_installed():
     DON'T install this script on our PATH in development mode.
     """
     logger.info( textwrap.dedent("""\
-    NOTE: this is a 'dummy' executable that tells us whether RL-Scope was installed in 
-    development mode (i.e., "python setup.py develop")
-    or production mode (i.e., "pip install rlscope")
+    NOTE: this is a 'dummy' executable that tells us that RL-Scope was installed 
+    in production mode from a wheel file (i.e., "pip install rlscope==... -f ...").
+    """.rstrip()))
+
+def rlscope_is_development_mode():
+    """
+    Install this script on our PATH in production mode.
+    DON'T install this script on our PATH in development mode.
+    """
+    logger.info( textwrap.dedent("""\
+    NOTE: this is a 'dummy' executable that tells us that RL-Scope was installed in 
+    development mode (i.e., "python setup.py develop") instead of from a wheel file.
     """.rstrip()))
 
 # NOTE: This file should only be called from entrypoints registered via setup.py

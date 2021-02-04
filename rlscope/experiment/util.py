@@ -39,6 +39,7 @@ def tee(cmd, to_file,
         check=True,
         dry_run=False,
         tee_output=True,
+        tee_cmd=None,
         tee_prefix=None,
         only_show_env=None,
         **kwargs):
@@ -66,14 +67,22 @@ def tee(cmd, to_file,
     # In case there are int's or float's in cmd.
     cmd = [str(opt) for opt in cmd]
 
+    if tee_cmd is None:
+        tee_cmd = tee_output
+
     if dry_run:
-        with in_directory(cwd):
-            print_cmd(cmd, files=[sys.stdout], env=kwargs.get('env', None), dry_run=dry_run, only_show_env=only_show_env)
+        if tee_cmd:
+            with in_directory(cwd):
+                print_cmd(cmd, files=[sys.stdout], env=kwargs.get('env', None), dry_run=dry_run, only_show_env=only_show_env)
         return
 
     with ScopedLogFile(to_file, append=append, makedirs=makedirs) as f:
         with in_directory(cwd):
-            print_cmd(cmd, files=[sys.stdout, f], env=kwargs.get('env', None), only_show_env=only_show_env)
+            if tee_cmd:
+                files = [sys.stdout, f]
+            else:
+                files = [f]
+            print_cmd(cmd, files=files, env=kwargs.get('env', None), only_show_env=only_show_env)
 
             # NOTE: Regarding the bug mentioned below, using p.communicate() STILL hangs.
             #
@@ -199,12 +208,14 @@ def expr_run_cmd(cmd, to_file,
                  dry_run=False,
                  skip_error=False,
                  tee_output=True,
+                 tee_cmd=None,
                  tee_prefix=None,
                  # extra_argv=[],
                  only_show_env=None,
                  debug=False,
                  raise_exception=False,
                  exception_class=None,
+                 log_errors=True,
                  log_func=None):
     """
     Run an experiment, if it hasn't been run already.
@@ -241,26 +252,27 @@ def expr_run_cmd(cmd, to_file,
                 env=env,
                 dry_run=dry_run,
                 tee_output=tee_output,
+                tee_cmd=tee_cmd,
                 tee_prefix=tee_prefix,
                 only_show_env=only_show_env,
                 **tee_kwargs,
             )
             if not dry_run and skip_error and proc.returncode != 0:
-                log_func(
-                    "> Command failed; see {path}; continuing (--skip-error was set)".format(
-                        path=to_file,
-                    ))
+                if log_errors:
+                    log_func(
+                        "Command failed; see {path}; continuing".format(
+                            path=to_file,
+                        ))
                 failed = True
         except subprocess.CalledProcessError as e:
 
             err_msg = textwrap.dedent("""\
-            > Command failed: see {path} for command and output.
+            Command failed: see {path} for command and output.
             """).format(
                 path=to_file,
             ).rstrip()
-            # exiting early (use --skip-error to ignore individual experiment errors)
-
-            logger.error(err_msg)
+            if log_errors:
+                logger.error(err_msg)
             if raise_exception:
                 if exception_class is None:
                     raise

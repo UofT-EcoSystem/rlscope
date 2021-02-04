@@ -2848,11 +2848,15 @@ def plot_grouped_bar():
     _plot('./test_plot_grouped_bar.01.svg')
     _plot('./test_plot_grouped_bar.02.svg')
 
+from rlscope.profiler import rlscope_logging
 from rlscope.profiler.rlscope_logging import logger
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--test-plot-grouped-bar', action='store_true')
     parser.add_argument('--plot-type', choices=['gpu_util_experiment', 'trtexec'])
+    parser.add_argument('--line-numbers', action='store_true', help=textwrap.dedent("""\
+        Show line numbers and timestamps in RL-Scope logging messages.
+        """))
     parser.add_argument('--debug', action='store_true')
     # default=15,
     parser.add_argument('--rotation', type=int, help='x-axis xtick rotation')
@@ -2860,6 +2864,11 @@ def main():
     parser.add_argument('--output-directory', help="where to output plots")
     args, argv = parser.parse_known_args()
     logger.info(pprint_msg({'argv': argv}))
+
+    rlscope_logging.setup_logger(
+        debug=args.debug,
+        line_numbers=args.debug or args.line_numbers or py_config.is_development_mode(),
+    )
 
     all_args = copy.deepcopy(vars(args))
     def _main():

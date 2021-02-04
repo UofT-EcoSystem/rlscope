@@ -5,6 +5,7 @@ Also contains code for generating LaTeX macros for cited metrics in RL-Scope pap
 from rlscope.profiler.rlscope_logging import logger
 import argparse
 import subprocess
+import warnings
 import re
 import copy
 import importlib
@@ -2827,7 +2828,9 @@ class DetailedStackedBarPlot:
             x_groups = self.x_groups(self.data)
             patches = []
             for i, x_group in enumerate(x_groups):
-                patch = mpatches.Patch(edgecolor='white', color='white')
+                with warnings.catch_warnings():
+                    warnings.filterwarnings('ignore', category=UserWarning, message=r"Setting the 'color' property will override the edgecolor or facecolor properties.", module=r'rlscope')
+                    patch = mpatches.Patch(edgecolor='white', color='white')
                 # patch = mpl_patches.Rectangle((0, 0), 0, 0, fc="white", ec="white",
                 #                       lw=0, alpha=0)
 

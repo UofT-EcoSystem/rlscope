@@ -240,6 +240,7 @@ DEVELOPMENT_SCRIPTS = [
 
     # Python / C++ unit test runner.
     'rls-unit-tests = rlscope.scripts.rls_unit_tests:main',
+    'rlscope-is-development-mode = rlscope.scripts.cpp.cpp_binary_wrapper:rlscope_is_development_mode'
 ]
 
 # NOTE: the presence of this on "PATH" tells us whether rlscope was installed using a wheel file,
@@ -251,7 +252,7 @@ PRODUCTION_SCRIPTS = [
     # Useful if we wish to run unit tests with the wheel file.
     # 'rls-test = rlscope.scripts.cpp.cpp_binary_wrapper:rls_test',
 
-    'rlscope-pip-installed = rlscope.scripts.cpp.cpp_binary_wrapper:rlscope_pip_installed',
+    # 'rlscope-pip-installed = rlscope.scripts.cpp.cpp_binary_wrapper:rlscope_pip_installed',
 ]
 
 def find_files(pattern, root):

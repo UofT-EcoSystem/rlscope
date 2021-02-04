@@ -4,9 +4,11 @@ correct for RL-Scope profiling overhead.
 """
 from rlscope.profiler.rlscope_logging import logger
 import copy
+import warnings
 import numpy as np
 import itertools
 import argparse
+from contextlib import contextmanager
 from decimal import Decimal
 
 from rlscope.protobuf.pyprof_pb2 import CategoryEventsProto, MachineUtilization, DeviceUtilization, UtilizationSample
@@ -1944,7 +1946,8 @@ class TotalTrainingTimeParser:
 
             g = sns.FacetGrid(data=plot_data, col="algo",
                               palette=sns.color_palette('muted'))
-            g.map(sns.barplot, 'short_env', 'training_duration_sec', **sns_kwargs)
+            with ignore_seaborn_warnings():
+                g.map(sns.barplot, 'short_env', 'training_duration_sec', **sns_kwargs)
             g.add_legend()
             g.set_ylabels('Total training time (sec)')
             g.set_xlabels('Environment')
@@ -2130,7 +2133,8 @@ class CUPTIScalingOverheadParser:
 
             g = sns.FacetGrid(data=plot_data, col="training_iterations",
                               palette=sns.color_palette('muted'))
-            g.map(sns.barplot, 'api_name', 'us_per_call', 'pretty_config', **sns_kwargs)
+            with ignore_seaborn_warnings():
+                g.map(sns.barplot, 'api_name', 'us_per_call', 'pretty_config', **sns_kwargs)
             g.add_legend()
             g.set_ylabels('Time per call (us)')
             g.set_xlabels('CUDA API call')
@@ -2146,7 +2150,8 @@ class CUPTIScalingOverheadParser:
 
             g = sns.FacetGrid(data=per_iteration_df, col="training_iterations",
                               palette=sns.color_palette('muted'))
-            g.map(sns.barplot, 'x_field', 'per_iteration_sec', 'pretty_config', **sns_kwargs)
+            with ignore_seaborn_warnings():
+                g.map(sns.barplot, 'x_field', 'per_iteration_sec', 'pretty_config', **sns_kwargs)
             g.add_legend()
             g.set_ylabels('Time per iteration (us)')
             g.set_xlabels('(algo, env)')
@@ -2698,6 +2703,9 @@ def check_cols_eq(df1, df2, colnames):
 
 def join_row_by_row(df1, df2, on=None, **kwargs):
     # Q: how to account for left/right suffix?
+
+    df1 = df1.copy()
+    df2 = df2.copy()
 
     join_cols = None
     if on is None:
@@ -3633,3 +3641,9 @@ def check_calibration(js, field, path):
             value=js[field],
             path=path,
         ))
+
+@contextmanager
+def ignore_seaborn_warnings():
+    with warnings.catch_warnings():
+        warnings.filterwarnings('ignore', message=r'Using the barplot.*without.*order', category=UserWarning, module=r'seaborn')
+        yield
