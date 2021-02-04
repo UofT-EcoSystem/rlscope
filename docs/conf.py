@@ -63,8 +63,16 @@ extensions = [
 
 # extlinks = {'github': ('https://github.com/sphinx-doc/sphinx/issues/%s',
 #                       'issue ')}
-extlinks = {'github': ('https://github.com/UofT-EcoSystem/rlscope/blob/master/%s',
-                       '')}
+extlinks = {
+    # e.g. :github:`dockerfiles/sh/test_cupti_profiler_api.sh`
+    'github': ('https://github.com/UofT-EcoSystem/rlscope/blob/master/%s',
+               ''),
+    # https://colab.research.google.com/github/UofT-Ecosystem/rlscope/blob/tutorial/jupyter/01_rlscope_getting_started.ipynb
+    # e.g. :colab:`jupyter/01_rlscope_getting_started.ipynb`
+    'colab': (
+        'https://colab.research.google.com/github/UofT-Ecosystem/rlscope/blob/master/%s',
+        ''),
+}
 
 html_logo = 'images/rlscope_logo_bordered.svg'
 

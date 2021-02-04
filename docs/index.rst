@@ -12,6 +12,10 @@ For installation instructions, see :doc:`installation`.
 
 For a tutorial on reproducing figures in the RL-Scope paper, see :doc:`artifacts`.
 
+For an interactive tutorial of how to use the RL-Scope to profile your own code,
+try out our
+:colab:`Getting Started notebook on Google Colab <jupyter/01_rlscope_getting_started.ipynb>`
+
 For information on running the RL-Scope development docker container, see :doc:`host_config`.
 
 .. automodule:: rlscope
