@@ -14,4 +14,8 @@ Here are some convenient links to common parts of the documentation:
 
 To cite RL-Scope, please cite our MLSys 2021 publication:
 
+Testing out GitHub pages related errors...
 
+{% raw %}
+  In Handlebars, {{ this }} will be HTML-escaped, but will not.
+{% endraw %}
