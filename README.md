@@ -7,7 +7,7 @@ RL-Scope's complete documentation can be found here: <https://rl-scope.readthedo
 Here are some convenient links to common parts of the documentation:
 - [Installation](https://rl-scope.readthedocs.io/en/latest/installation.html)
 - [RL-Scope artifact evaluation](https://rl-scope.readthedocs.io/en/latest/artifacts.html)
-- [Interactive "Getting Started" notebook on Google Colab](https://colab.research.google.com/github/UofT-Ecosystem/rlscope/blob/tutorial/jupyter/01_rlscope_getting_started.ipynb)
+- [Interactive "Getting Started" notebook on Google Colab](https://colab.research.google.com/github/UofT-Ecosystem/rlscope/blob/master/jupyter/01_rlscope_getting_started.ipynb)
 - [Docker development environment](https://rl-scope.readthedocs.io/en/latest/host_config.html)
 
 # Citation
