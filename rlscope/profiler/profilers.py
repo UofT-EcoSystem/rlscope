@@ -2350,7 +2350,7 @@ def run_with_nvprof(directory, parser, args,
         argv_exec.extend(["--rls-bench-name", bench_name])
 
     print_cmd(argv_exec)
-    subprocess.run(argv_exec, stdout=sys.stdout, stderr=sys.stderr, check=True)
+    subprocess.run(argv_exec, check=True)
 
 def check_avail_gpus():
     avail_gpus = get_available_gpus()

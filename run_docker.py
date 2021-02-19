@@ -984,7 +984,7 @@ class Assembler:
         docker_run_argv = extra_argv
         cmd = get_docker_cmdline('run', docker_run_argv, **run_kwargs)
         logger.info(get_cmd_string(cmd))
-        subprocess.run(cmd, stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr)
+        subprocess.run(cmd)
         # Q: Save output?
 
     # def _is_rlscope_deployed(self):
@@ -1127,7 +1127,7 @@ class Assembler:
         container_filter = "rlscope"
 
         logger.info(get_cmd_string(cmd))
-        subprocess.check_call(cmd, stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr)
+        subprocess.check_call(cmd)
 
         if args.mps:
             # Reset the "compute mode" of the GPUs from "Exclsuive" back to "Default".
@@ -1190,18 +1190,18 @@ class Assembler:
             RLSCOPE_BASH_SERVICE_NAME=RLSCOPE_BASH_SERVICE_NAME)
 
         logger.info(get_cmd_string(cmd))
-        subprocess.check_call(cmd, stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr)
+        subprocess.check_call(cmd)
         rlscope_bash_container = self._wait_for_bash(container_filter)
 
         ps_cmd = ['docker', 'ps']
         logger.info(get_cmd_string(ps_cmd))
-        subprocess.check_call(ps_cmd, stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr)
+        subprocess.check_call(ps_cmd)
         print("> Deployed RL-Scope development environment")
         print("> Attaching to /bin/bash in the dev environment:")
         # Login to existing container using a new /bin/bash shell so we are greeted with the _rlscope_banner
         exec_cmd = ['docker', 'exec', '-i', '-t', rlscope_bash_container.name, '/bin/bash']
         logger.info(get_cmd_string(exec_cmd))
-        subprocess.run(exec_cmd, stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr)
+        subprocess.run(exec_cmd)
 
     def docker_pull(self, pull_img):
         """
@@ -1209,7 +1209,7 @@ class Assembler:
         """
         cmd = ['docker', 'pull', pull_img]
         logger.info(get_cmd_string(cmd))
-        subprocess.check_call(cmd, stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr)
+        subprocess.check_call(cmd)
         image = self.dock.images.get(pull_img)
         return image
 
@@ -2153,7 +2153,7 @@ def nvidia_set_compute_mode(compute_mode, device_ids):
         f"--id={device_id_str}",
     ]
     logger.info(get_cmd_string(cmd))
-    subprocess.check_call(cmd, stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr)
+    subprocess.check_call(cmd)
 
 class DeployError(RuntimeError):
     pass
