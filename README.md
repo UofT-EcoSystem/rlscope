@@ -10,9 +10,12 @@ Here are some convenient links to common parts of the documentation:
 - [Interactive "Getting Started" notebook on Google Colab](https://colab.research.google.com/github/UofT-Ecosystem/rlscope/blob/master/jupyter/01_rlscope_getting_started.ipynb)
 - [Docker development environment](https://rl-scope.readthedocs.io/en/latest/host_config.html)
 
-# Citation
+# Paper
 
-To cite RL-Scope, please cite our MLSys 2021 publication:
+For convenience, you can find our paper on arxiv:
+https://arxiv.org/abs/2102.04285
+
+When citing RL-Scope, please cite our MLSys 2021 publication:
 
 {% raw %}
 
