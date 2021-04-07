@@ -9,6 +9,8 @@ Here are some convenient links to common parts of the documentation:
 - [RL-Scope artifact evaluation](https://rl-scope.readthedocs.io/en/latest/artifacts.html)
 - [Interactive "Getting Started" notebook on Google Colab](https://colab.research.google.com/github/UofT-Ecosystem/rlscope/blob/master/jupyter/01_rlscope_getting_started.ipynb)
 - [Docker development environment](https://rl-scope.readthedocs.io/en/latest/host_config.html)
+- [YouTube: Lightning talk - 5 minutes](https://www.youtube.com/watch?v=i0i6RU4JwIA)
+- [YouTube: Full talk - 17 minutes](https://www.youtube.com/watch?v=ZxFiFuPdKoE)
 - [RL-Scope paper](https://arxiv.org/abs/2102.04285)
 
 # Paper
@@ -28,3 +30,9 @@ When citing RL-Scope, please cite our MLSys 2021 publication:
     }
     
 {% endraw %}
+
+# Videos
+
+YouTube videos recordings describing RL-Scope are available here:
+- [Lightning talk - 5 minutes](https://www.youtube.com/watch?v=i0i6RU4JwIA)
+- [Full talk - 17 minutes](https://www.youtube.com/watch?v=ZxFiFuPdKoE)
